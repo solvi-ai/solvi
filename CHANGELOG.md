@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.3.0 — 2026-09-27
+
+- New answer types: `Answer.ordinal` (ordered levels; a learned head answers with the median) and `Answer.multi` (a subset;
+  learned per option with fit / fit_fast, updated by teach). Options may carry descriptions (`{option: description}`).
+- Constraints between answers (`@cat.constraint`) with joint decoding: contradictory learned answers are replaced by the most
+  probable combination that satisfies every constraint; `Response.feasible` and `Response.violations` report the result.
+- Example 11: a content guard with multi-label and ordinal answers tied by constraints.
+
 ## 0.2.2 — 2026-09-27
 
 - Stronger `Trace.replay`: checks that the chain starts from the hash of the recorded input, flags inputs missing from the trace

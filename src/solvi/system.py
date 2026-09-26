@@ -18,6 +18,8 @@ class Response:
     trace: object
     values: dict
     ms: float
+    feasible: bool = True               # do the answers satisfy every applicable constraint?
+    violations: list = None             # names of the constraints still broken (fixed answers that conflict)
 
     def __getitem__(self, q):
         return self.results[q]
@@ -61,7 +63,8 @@ class System:
             if q.name in self.calib and r.status == "ok":
                 r.confidence = _platt(r.confidence, *self.calib[q.name])
             results[q.name] = r
-        resp = Response(results, flow, trace, vals, now_ms() - t0)
+        feasible, violations = self._joint(results)
+        resp = Response(results, flow, trace, vals, now_ms() - t0, feasible, violations)
         if self.journal:
             self._log(init_state, resp)
         return resp
@@ -109,13 +112,85 @@ class System:
         if lost:                                      # a head never guesses from facts that could not be computed
             return Result(None, 0.0, "head features not computed: " + ", ".join(lost), "abstain")
         p = head.predict(vals)
-        a = max(p, key=p.get)
+        if q.answer.kind == "multi":                  # p: option -> probability it applies
+            a = tuple(o for o in q.answer.options if p[o] >= 0.5)
+            base = min(max(v, 1 - v) for v in p.values())
+        elif q.answer.kind == "ordinal":              # median of the distribution over ordered levels
+            acc = 0.0
+            for a in q.answer.options:
+                acc += p[a]
+                if acc >= 0.5:
+                    break
+            base = p[a]
+        else:
+            a = max(p, key=p.get)
+            base = p[a]
         contrib = head.contributions(vals)
         why = ", ".join(f"{f} = {vals.get(f)!r} ({c:+.2f})" for f, c in sorted(contrib.items(), key=lambda t: -abs(t[1]))[:4])
         if soft_failed:
             why += "; failed checks: " + ", ".join(soft_failed)
-        conf = p[a] * path_confidence(self.catalog, trace, head.features)
+        conf = base * path_confidence(self.catalog, trace, head.features)
         return Result(a, conf, why, probs=p)
+
+    # --- constraints between answers: joint decoding
+    def _joint(self, results, max_combos=50_000):
+        import itertools
+        import math
+        cons = [c for c in self.catalog.constraints.values() if all(q in results for q in c.inputs)]
+        if not cons:
+            return True, []
+
+        def ok(assign, c):
+            if any(assign.get(q) is None for q in c.inputs):
+                return True                           # an abstained answer: nothing to check
+            try:
+                return bool(c.func(**{q: assign[q] for q in c.inputs}))
+            except Exception:  # noqa: BLE001
+                return False
+        current = {q: r.answer for q, r in results.items()}
+        if all(ok(current, c) for c in cons):
+            return True, []
+        # candidates: learned answers may change (their distribution), rule / forced / abstained answers are fixed
+        qs = sorted({q for c in cons for q in c.inputs})
+        cands = {}
+        for q in qs:
+            r, at = results[q], self.questions[q].answer
+            if r.status == "ok" and r.probs:
+                if at.kind == "multi":
+                    opts = []
+                    for bits in itertools.product([0, 1], repeat=len(at.options)):
+                        combo = tuple(o for o, b in zip(at.options, bits) if b)
+                        lp = sum(math.log(max(1e-9, r.probs[o] if b else 1 - r.probs[o])) for o, b in zip(at.options, bits))
+                        opts.append((combo, lp))
+                else:
+                    opts = [(o, math.log(max(1e-9, pr))) for o, pr in r.probs.items()]
+                cands[q] = sorted(opts, key=lambda t: -t[1])
+            else:
+                cands[q] = [(r.answer, 0.0)]
+        k = max(len(v) for v in cands.values())
+        while k > 1 and math.prod(min(len(v), k) for v in cands.values()) > max_combos:
+            k -= 1
+        best = None
+        for combo in itertools.product(*[cands[q][:k] for q in qs]):
+            assign = dict(current)
+            assign.update({q: a for q, (a, _) in zip(qs, combo)})
+            if all(ok(assign, c) for c in cons):
+                score = sum(lp for _, lp in combo)
+                if best is None or score > best[0]:
+                    best = (score, assign)
+        if best is None:
+            return False, [c.name for c in cons if not ok(current, c)]
+        for q in qs:
+            r = results[q]
+            if best[1][q] != r.answer:
+                was = r.answer
+                r.answer = best[1][q]
+                if r.probs:
+                    r.confidence = (math.exp(dict(cands[q])[r.answer]) if self.questions[q].answer.kind == "multi"
+                                    else r.probs.get(r.answer, r.confidence))
+                broken = [c.name for c in cons if q in c.inputs and not ok({**current}, c)]
+                r.why += f"; changed from {was!r} to satisfy {', '.join(broken)}"
+        return True, []
 
     # --- task-specific training
     def facts_for(self, init_state):
@@ -135,7 +210,11 @@ class System:
         ans = [q.answer.normalize(a) for _, a in examples]
         keys = set(examples[0][0].keys())
         cands = sorted(f for f in computable(self.catalog, keys) - keys)
-        self.heads[question] = Head(q.answer.options).fit(rows, ans, cands)
+        if q.answer.kind == "multi":
+            self.heads[question] = MultiHead(q.answer.options, lambda: Head(["yes", "no"]),
+                                             lambda h, ys: h.fit(rows, ys, cands)).fit(ans)
+        else:
+            self.heads[question] = Head(q.answer.options).fit(rows, ans, cands)
         return self.heads[question]
 
     def fit_fast(self, question, examples, features=None, lam=None):
@@ -150,7 +229,12 @@ class System:
         if features is None:
             keys = set(examples[0][0].keys())
             features = sorted(f for f in computable(self.catalog, keys) - keys)
-        head = FastHead(q.answer.options, lam=lam).fit(rows, [q.answer.normalize(a) for _, a in examples], list(features))
+        ans = [q.answer.normalize(a) for _, a in examples]
+        if q.answer.kind == "multi":
+            head = MultiHead(q.answer.options, lambda: FastHead(["yes", "no"], lam=lam),
+                             lambda h, ys: h.fit(rows, ys, list(features))).fit(ans)
+        else:
+            head = FastHead(q.answer.options, lam=lam).fit(rows, ans, list(features))
         head.fit_ms = (time.perf_counter() - t0) * 1000
         self.heads[question] = head
         return head
@@ -201,7 +285,7 @@ class System:
         from .fast import FastHead
         ms = None
         head = self.heads.get(question)
-        if isinstance(head, FastHead):
+        if isinstance(head, (FastHead, MultiHead)) and getattr(head, "online", True):
             ms = head.update(self.facts_for(init_state), self.questions[question].answer.normalize(correct))
         if self.journal:
             with open(self.journal, "a") as fh:
@@ -214,6 +298,40 @@ class System:
                                  "answers": {q: [r.answer, round(r.confidence, 4), r.status] for q, r in resp.results.items()},
                                  "flow": [s.part.name for s in resp.flow.steps],
                                  "records": [[r.step, r.name, r.hash] for r in resp.trace.records]}, ensure_ascii=False) + "\n")
+
+
+class MultiHead:
+    """A multi-label answer as one yes/no head per option (each learned with fit or fit_fast)."""
+
+    def __init__(self, options, make, train):
+        self.options, self.make, self.train = list(options), make, train
+        self.heads = {}
+
+    def fit(self, answers):
+        for o in self.options:
+            self.heads[o] = self.train(self.make(), ["yes" if o in a else "no" for a in answers])
+        h = next(iter(self.heads.values()))
+        self.features = sorted({f for hh in self.heads.values() for f in hh.features})
+        self.online = hasattr(h, "update")
+        self.loo_acc = getattr(h, "loo_acc", None)
+        return self
+
+    @property
+    def cv_acc(self):
+        return self.loo_acc
+
+    def predict(self, row):
+        return {o: h.predict(row)["yes"] for o, h in self.heads.items()}
+
+    def contributions(self, row):
+        out = {}
+        for h in self.heads.values():
+            for f, c in h.contributions(row).items():
+                out[f] = out.get(f, 0.0) + c
+        return out
+
+    def update(self, row, answer):
+        return sum(h.update(row, "yes" if o in answer else "no") for o, h in self.heads.items())
 
 
 def governs(part, question):

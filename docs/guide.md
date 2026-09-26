@@ -144,6 +144,30 @@ Question("route", "Which team?", Answer.choice(["a", "b"]), uses=["country", "to
 
 An answer outside the options is never returned: a rule that produces one makes the question abstain.
 
+
+### Ordinal and multi-label answers, option descriptions
+
+- `Answer.ordinal(["low", "medium", "high"])` — ordered levels, lowest first. A learned head answers with the median of its
+  distribution rather than the most likely level, so a split between "low" and "high" gives "medium", not a jump.
+  `answer_type.rank(v)` gives the position.
+- `Answer.multi(["pii", "abuse", "prompt_injection"])` — any subset, returned as a tuple in option order (empty tuple for none).
+  A rule may return a list or set. `fit` / `fit_fast` learn one yes/no head per option; `teach` updates all of them.
+- Any option list may be a dict `{option: description}`; descriptions are kept in `answer_type.descriptions`.
+
+### Constraints between answers
+
+```python
+@cat.constraint
+def unsafe_if_harm(verdict, harm):          # argument names are question names
+    return harm == "none" or verdict == "unsafe"
+```
+
+After all questions are answered, solvi checks every constraint whose questions were asked. If learned answers break one, it
+searches for the most probable combination of learned answers (from their distributions; multi-label answers per option) that
+satisfies every constraint, and appends "changed from … to satisfy …" to the reason. Answers from rules, hard checks and
+abstentions never change. `res.feasible` says whether the final answers satisfy every constraint; if fixed answers conflict,
+it is `False` and `res.violations` names the constraints.
+
 ## Asking: System and Response
 
 ```python
