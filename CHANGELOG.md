@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.2.2 — 2026-09-27
+
+- Stronger `Trace.replay`: checks that the chain starts from the hash of the recorded input, flags inputs missing from the trace
+  (a deleted step), re-runs steps recorded as failed (a faked error is caught), and with `replay(catalog, flow)` checks that every
+  planned step was recorded or skipped at run time. Documented limit: a trace rebuilt honestly from a different input is
+  consistent — compare `init_hash` with a receipt published elsewhere.
+- Arcade: minesweeper, 20 questions, Mafia detective, hack the trace, bot arena.
+
 ## 0.2.1 — 2026-09-26
 
 - A question's flow no longer depends on which other questions are asked (checks on computed facts are planned per question).

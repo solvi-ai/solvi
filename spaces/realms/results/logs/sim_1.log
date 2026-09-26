@@ -1,0 +1,10 @@
+seed 1 turn    500       15s  turn p50  31.23 ms p99   45.9  dec p50 0.508 p99 1.46 ms  alive 4 (min 3)  pop 137  state 225 KB  mem 44.9 MB  vetoes 2.14/100  replay 321/321  share 0.237
+seed 1 turn   1000       33s  turn p50  36.77 ms p99   58.8  dec p50 0.530 p99 1.56 ms  alive 4 (min 4)  pop 143  state 216 KB  mem 46.9 MB  vetoes 1.24/100  replay 402/402  share 0.247
+seed 1 turn   1500       55s  turn p50  42.70 ms p99   67.9  dec p50 0.555 p99 1.77 ms  alive 5 (min 4)  pop 164  state 224 KB  mem 46.6 MB  vetoes 1.18/100  replay 472/472  share 0.287
+seed 1 turn   2000       75s  turn p50  39.30 ms p99   61.9  dec p50 0.520 p99 1.61 ms  alive 5 (min 5)  pop 171  state 225 KB  mem 47.0 MB  vetoes 1.5/100  replay 471/471  share 0.278
+seed 1 turn   2500       96s  turn p50  38.82 ms p99   60.6  dec p50 0.538 p99 1.64 ms  alive 5 (min 5)  pop 168  state 232 KB  mem 47.4 MB  vetoes 1.18/100  replay 417/417  share 0.258
+seed 1 turn   3000      126s  turn p50  54.68 ms p99  100.6  dec p50 0.931 p99 2.46 ms  alive 5 (min 4)  pop 184  state 261 KB  mem 48.5 MB  vetoes 1.53/100  replay 463/463  share 0.222
+seed 1 turn   3500      163s  turn p50  70.73 ms p99  118.2  dec p50 1.040 p99 2.63 ms  alive 5 (min 5)  pop 182  state 279 KB  mem 48.6 MB  vetoes 1.2/100  replay 448/448  share 0.206
+seed 1 turn   4000      200s  turn p50  70.53 ms p99  116.9  dec p50 1.037 p99 2.62 ms  alive 5 (min 5)  pop 181  state 281 KB  mem 48.2 MB  vetoes 1.53/100  replay 467/467  share 0.171
+seed 1 turn   4500      240s  turn p50  81.86 ms p99  107.1  dec p50 1.048 p99 2.58 ms  alive 5 (min 5)  pop 193  state 309 KB  mem 48.7 MB  vetoes 1.67/100  replay 506/506  share 0.194
+seed 1 turn   5000      266s  turn p50  41.55 ms p99   95.1  dec p50 0.775 p99 2.30 ms  alive 5 (min 5)  pop 194  state 318 KB  mem 51.7 MB  vetoes 1.57/100  replay 500/500  share 0.191

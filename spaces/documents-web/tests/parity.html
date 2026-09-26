@@ -1,0 +1,108 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>solvi documents: parity test</title>
+<style>
+  :root { color-scheme: light dark; --fg: #1d2330; --muted: #5d6677; --bg: #fbfbfd; --line: #d9dde6; --ok: #11795a; --bad: #b42318; }
+  @media (prefers-color-scheme: dark) { :root { --fg: #e6e8ee; --muted: #9aa3b5; --bg: #11141b; --line: #2b3140; --ok: #4fd1a5; --bad: #ff8a80; } }
+  body { font: 14px/1.5 system-ui, sans-serif; color: var(--fg); background: var(--bg); margin: 0; padding: 20px 16px 60px; }
+  main { max-width: 1100px; margin: 0 auto; }
+  h1 { font-size: 20px; margin: 0 0 4px; }
+  p { color: var(--muted); margin: 4px 0 12px; }
+  table { border-collapse: collapse; width: 100%; font-size: 12.5px; }
+  th, td { border-bottom: 1px solid var(--line); padding: 4px 6px; text-align: left; vertical-align: top; }
+  td.v { font-family: ui-monospace, monospace; max-width: 360px; overflow-wrap: anywhere; }
+  .ok { color: var(--ok); font-weight: 600; } .bad { color: var(--bad); font-weight: 600; }
+  #summary { font-size: 15px; margin: 12px 0; padding: 10px 12px; border: 1px solid var(--line); border-radius: 8px; }
+  button, select { font: inherit; padding: 5px 10px; }
+  .wrap { overflow-x: auto; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Parity test: browser extractor vs PyTorch LongSpanExtractor</h1>
+  <p>Reference spans come from <code>tests/make_ref.py</code> (PyTorch, fp32, CPU). This page runs the same fields through the
+    ONNX model in your browser and compares start/end offsets and the present/absent decision. URL options:
+    <code>?set=quick|all|long</code>, <code>?backend=wasm</code>, <code>?repo=&lt;url prefix&gt;</code>, <code>?onnx=&lt;file&gt;</code>, <code>?auto=1</code>.</p>
+  <div>
+    <select id="set"><option value="quick">quick: 6 documents</option><option value="all">all sample documents</option><option value="long">10-page document only</option></select>
+    <button id="go">Run</button> <span id="status"></span>
+  </div>
+  <div id="summary">Not run yet.</div>
+  <div class="wrap"><table id="tbl"><thead><tr><th>doc</th><th>field</th><th>ref span</th><th>browser span</th><th>match</th><th>score ref / browser</th><th>ms</th><th>value (browser)</th></tr></thead><tbody></tbody></table></div>
+</main>
+<script type="module">
+const P = new URLSearchParams(location.search);
+const REPO = P.get("repo") || "https://huggingface.co/solvi-ai/extract-base/resolve/main/";
+const ONNX = P.get("onnx") || "onnx/model_fp16.onnx";
+const QUICK = ["receipt/0", "invoice/0", "contract/0", "nda/1", "dpa/0", "support/0"];
+const $ = (id) => document.getElementById(id);
+if (P.get("set")) $("set").value = P.get("set");
+const ref = await (await fetch("parity_ref.json")).json();
+const worker = new Worker(new URL("../extractor.worker.js", import.meta.url), { type: "module" });
+const waiters = [];
+worker.onmessage = (ev) => { const m = ev.data; for (const w of waiters.slice()) w(m); };
+const until = (pred) => new Promise((res) => { const f = (m) => { if (pred(m)) { waiters.splice(waiters.indexOf(f), 1); res(m); } }; waiters.push(f); });
+window.__parity = { state: "idle" };
+
+async function run() {
+  const set = $("set").value;
+  const items = ref.items.filter((it) => set === "all" ? it.text !== "long/0" : set === "long" ? it.text === "long/0" : QUICK.includes(it.text));
+  $("status").textContent = "loading the model...";
+  window.__parity = { state: "loading" };
+  const t0 = performance.now();
+  const prog = (m) => { if (m.type === "progress") $("status").textContent = `${m.phase} ${(m.loaded / 1e6).toFixed(0)} / ${(m.total / 1e6).toFixed(0)} MB`; return false; };
+  waiters.push(prog);
+  worker.postMessage({ type: "init", key: "t", repo: REPO, onnx: ONNX, backend: P.get("backend") || undefined });
+  const ready = await until((m) => m.type === "ready" || m.type === "error");
+  waiters.splice(waiters.indexOf(prog), 1);
+  if (ready.type === "error") { $("summary").textContent = "Model failed: " + ready.code + " " + ready.message; window.__parity = { state: "error", ready }; return; }
+  const loadMs = performance.now() - t0;
+  $("status").textContent = `ready on ${ready.backend} (${ready.fromCache ? "from cache" : "downloaded"})`;
+  const tbody = $("tbl").querySelector("tbody");
+  tbody.innerHTML = "";
+  const rows = [];
+  const byText = {};
+  for (const it of items) (byText[it.text] ||= []).push(it);
+  let id = 0;
+  for (const [tid, its] of Object.entries(byText)) {
+    const text = ref.texts[tid];
+    const jid = ++id;
+    const got = {};
+    const collect = (m) => { if (m.type === "field" && m.id === jid) got[m.name] = m; return false; };
+    waiters.push(collect);
+    worker.postMessage({ type: "extract", id: jid, key: "t", text, fields: its.map((x) => ({ name: x.field, desc: x.desc })) });
+    await until((m) => m.type === "done" && m.id === jid);
+    waiters.splice(waiters.indexOf(collect), 1);
+    for (const it of its) {
+      const g = got[it.field].result;
+      const same = g.start === it.start && g.end === it.end;
+      const samePresent = g.present === it.present;
+      const r = { text: tid, tokens: g.tokens, windows: g.windows, field: it.field, ref: [it.start, it.end], got: [g.start, g.end], same, samePresent,
+                  refScore: it.score, score: g.score, ms: got[it.field].ms, value: g.value, valueOk: g.value === it.value };
+      rows.push(r);
+      const tr = document.createElement("tr");
+      tr.innerHTML = `<td>${tid}</td><td>${it.field}</td><td>${it.start}:${it.end}${it.present ? "" : " (absent)"}</td><td>${g.start}:${g.end}${g.present ? "" : " (absent)"}</td>
+        <td class="${same && samePresent ? "ok" : "bad"}">${same ? "same span" : "DIFFERENT"}${samePresent ? "" : ", presence differs"}</td>
+        <td>${it.score.toFixed(3)} / ${g.score.toFixed(3)}</td><td>${got[it.field].ms.toFixed(0)}</td><td class="v"></td>`;
+      tr.lastElementChild.textContent = g.value.slice(0, 160);
+      tbody.appendChild(tr);
+    }
+  }
+  const n = rows.length, same = rows.filter((r) => r.same).length, pres = rows.filter((r) => r.samePresent).length;
+  const dmax = Math.max(...rows.map((r) => Math.abs(r.score - r.refScore)));
+  const dmean = rows.reduce((a, r) => a + Math.abs(r.score - r.refScore), 0) / n;
+  const msPer = rows.reduce((a, r) => a + r.ms, 0) / n;
+  const summary = { backend: ready.backend, file: ONNX, n, sameSpan: same, samePresence: pres, valuesIdentical: rows.filter((r) => r.valueOk).length,
+                    meanAbsScoreDiff: dmean, maxAbsScoreDiff: dmax, msPerField: msPer, loadMs, ready };
+  $("summary").innerHTML = `<b>${same}/${n}</b> identical spans, <b>${pres}/${n}</b> same present/absent decision, backend <b>${ready.backend}</b>
+    (${ONNX}); mean |score diff| ${dmean.toFixed(4)}, max ${dmax.toFixed(4)}; ${msPer.toFixed(0)} ms per field on average; model load ${(loadMs / 1000).toFixed(1)} s.`;
+  window.__parity = { state: "done", summary, rows };
+}
+$("go").onclick = run;
+if (P.get("auto")) run();
+</script>
+</body>
+</html>

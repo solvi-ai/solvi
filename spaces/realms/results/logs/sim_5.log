@@ -1,0 +1,4 @@
+seed 5 turn    500       42s  turn p50  79.83 ms p99  190.7  dec p50 1.721 p99 5.01 ms  alive 5 (min 4)  pop 100  state 209 KB  mem 3.9 MB  vetoes 2.34/100  replay 336/336  share 0.451
+seed 5 turn   1000      123s  turn p50 164.38 ms p99  227.9  dec p50 2.373 p99 5.58 ms  alive 5 (min 5)  pop 117  state 222 KB  mem 4.3 MB  vetoes 2.76/100  replay 443/443  share 0.377
+seed 5 turn   1500      211s  turn p50 175.61 ms p99  230.3  dec p50 2.400 p99 5.60 ms  alive 4 (min 4)  pop 128  state 236 KB  mem 4.5 MB  vetoes 2.66/100  replay 491/491  share 0.26
+seed 5 turn   2000      272s  turn p50 106.96 ms p99  247.7  dec p50 1.977 p99 5.18 ms  alive 5 (min 4)  pop 135  state 237 KB  mem 4.6 MB  vetoes 2.71/100  replay 480/480  share 0.328

@@ -1,0 +1,11 @@
+seed 3 turn    500       13s  turn p50  27.72 ms p99   48.0  dec p50 0.515 p99 1.48 ms  alive 4 (min 3)  pop 116  state 209 KB  mem 44.7 MB  vetoes 2.06/100  replay 337/337  share 0.195
+seed 3 turn   1000       35s  turn p50  39.61 ms p99   84.0  dec p50 0.564 p99 1.84 ms  alive 5 (min 3)  pop 133  state 245 KB  mem 46.8 MB  vetoes 1.95/100  replay 450/450  share 0.222
+seed 3 turn   1500       58s  turn p50  44.32 ms p99   82.9  dec p50 0.722 p99 2.08 ms  alive 5 (min 4)  pop 142  state 269 KB  mem 47.2 MB  vetoes 1.19/100  replay 485/485  share 0.212
+seed 3 turn   2000       78s  turn p50  39.09 ms p99   53.5  dec p50 0.511 p99 1.54 ms  alive 5 (min 5)  pop 149  state 285 KB  mem 47.8 MB  vetoes 1.78/100  replay 447/447  share 0.222
+seed 3 turn   2500      100s  turn p50  41.95 ms p99   59.8  dec p50 0.530 p99 1.69 ms  alive 5 (min 5)  pop 155  state 324 KB  mem 49.0 MB  vetoes 2.11/100  replay 514/514  share 0.19
+seed 3 turn   3000      123s  turn p50  44.32 ms p99   79.2  dec p50 0.607 p99 1.81 ms  alive 5 (min 5)  pop 156  state 304 KB  mem 49.5 MB  vetoes 2.51/100  replay 458/458  share 0.167
+seed 3 turn   3500      147s  turn p50  46.54 ms p99   82.7  dec p50 0.795 p99 1.94 ms  alive 5 (min 5)  pop 148  state 305 KB  mem 49.9 MB  vetoes 2.45/100  replay 507/507  share 0.193
+seed 3 turn   4000      172s  turn p50  46.27 ms p99   82.1  dec p50 0.706 p99 1.84 ms  alive 5 (min 5)  pop 157  state 306 KB  mem 49.9 MB  vetoes 2.32/100  replay 494/494  share 0.205
+seed 3 turn   4500      201s  turn p50  61.98 ms p99   88.9  dec p50 0.896 p99 2.34 ms  alive 5 (min 5)  pop 154  state 306 KB  mem 49.2 MB  vetoes 2.44/100  replay 527/527  share 0.208
+seed 3 turn   5000      243s  turn p50  74.44 ms p99   97.5  dec p50 0.977 p99 2.49 ms  alive 5 (min 5)  pop 149  state 308 KB  mem 52.4 MB  vetoes 2.57/100  replay 476/476  share 0.192
+seed 3 turn   5500      264s  turn p50  35.94 ms p99   91.4  dec p50 0.734 p99 1.93 ms  alive 5 (min 5)  pop 162  state 308 KB  mem 52.4 MB  vetoes 2.38/100  replay 547/547  share 0.179

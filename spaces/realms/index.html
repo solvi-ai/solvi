@@ -3,9 +3,9 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>solvi arcade</title>
-  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22%3E%3Ctext y=%22.9em%22 font-size=%2290%22%3E🕹️%3C/text%3E%3C/svg%3E" />
-  <meta name="description" content="Game agents built with solvi from small Python functions, rules and hard checks. They explain every move and run entirely in your browser." />
+  <title>solvi realms</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22%3E%3Ctext y=%22.9em%22 font-size=%2290%22%3E🏰%3C/text%3E%3C/svg%3E" />
+  <meta name="description" content="An endless turn-based strategy game whose AI factions are solvi decision systems, with a live health monitor. Runs entirely in your browser." />
   <script>
     // Package "time machine" for Gradio-Lite 5.45.0 (released 2025-09-10).
     // Its Python worker installs gradio 5.45 with micropip, whose resolver is greedy: gradio_client asks for
@@ -66,8 +66,8 @@
 <body>
   <div id="sv-loading" role="status">
     <div class="card">
-      <h1>🕹️ solvi arcade is starting in your browser</h1>
-      <p>The game agents are Python, and they run on your machine, not on a server. The first visit downloads a Python
+      <h1>🏰 solvi realms is starting in your browser</h1>
+      <p>The factions are Python decision systems, and they run on your machine, not on a server. The first visit downloads a Python
         runtime (Pyodide) with numpy, scipy, Gradio and <a href="https://github.com/solvi-ai/solvi">solvi</a>:
         about 20–30 MB, once. Later visits load it from the browser cache.</p>
       <p class="dim">This usually takes 20–60 seconds on the first visit.</p>
@@ -80,24 +80,13 @@
 solvi>=0.2.1
     </gradio-requirements>
     <gradio-file name="app.py" url="app.py" entrypoint></gradio-file>
-    <gradio-file name="games/__init__.py" url="games/__init__.py"></gradio-file>
-    <gradio-file name="games/_ttt_catalog.py" url="games/_ttt_catalog.py"></gradio-file>
-    <gradio-file name="games/tictactoe.py" url="games/tictactoe.py"></gradio-file>
-    <gradio-file name="games/explain.py" url="games/explain.py"></gradio-file>
-    <gradio-file name="games/maze.py" url="games/maze.py"></gradio-file>
-    <gradio-file name="games/fusion.py" url="games/fusion.py"></gradio-file>
-    <gradio-file name="games/sandbox.py" url="games/sandbox.py"></gradio-file>
-    <gradio-file name="games/minesweeper.py" url="games/minesweeper.py"></gradio-file>
-    <gradio-file name="games/tracehack.py" url="games/tracehack.py"></gradio-file>
-    <gradio-file name="games/akinator.py" url="games/akinator.py"></gradio-file>
-    <gradio-file name="games/mafia.py" url="games/mafia.py"></gradio-file>
-    <gradio-file name="games/arena.py" url="games/arena.py"></gradio-file>
-    <gradio-file name="tabs/__init__.py" url="tabs/__init__.py"></gradio-file>
-    <gradio-file name="tabs/minesweeper.py" url="tabs/minesweeper.py"></gradio-file>
-    <gradio-file name="tabs/tracehack.py" url="tabs/tracehack.py"></gradio-file>
-    <gradio-file name="tabs/akinator.py" url="tabs/akinator.py"></gradio-file>
-    <gradio-file name="tabs/mafia.py" url="tabs/mafia.py"></gradio-file>
-    <gradio-file name="tabs/arena.py" url="tabs/arena.py"></gradio-file>
+    <gradio-file name="realms/__init__.py" url="realms/__init__.py"></gradio-file>
+    <gradio-file name="realms/econ.py" url="realms/econ.py"></gradio-file>
+    <gradio-file name="realms/world.py" url="realms/world.py"></gradio-file>
+    <gradio-file name="realms/brains.py" url="realms/brains.py"></gradio-file>
+    <gradio-file name="realms/engine.py" url="realms/engine.py"></gradio-file>
+    <gradio-file name="realms/health.py" url="realms/health.py"></gradio-file>
+    <gradio-file name="realms/render.py" url="realms/render.py"></gradio-file>
   </gradio-lite>
 
   <script>

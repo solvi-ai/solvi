@@ -1,8 +1,8 @@
-"""Export a LongSpanExtractor (encoder + span head) to ONNX for browsers and CPUs: fp32, fp16 and int8 variants, plus an
+"""Export a LongSpanExtractor (encoder + span head) to ONNX for browsers and CPUs: fp32 and fp16 (identical spans on our tests; int8 with INT8=1 loses accuracy), plus an
 agreement check against the PyTorch model on your own texts.
 
 Usage:
-  uv run --extra model --with onnx --with onnxscript --with onnxruntime --with onnxconverter-common \
+  uv run --extra model --with onnx --with onnxscript --with onnxruntime \
       python tools/export_onnx.py <model dir or HF id> <out dir> [texts.jsonl with {"text", "desc"} lines for the check]
 
 Graph: inputs input_ids, attention_mask (int64, [batch, length]) -> logits (float, [batch, length, 2]): start and end scores.
@@ -37,15 +37,16 @@ def export(model, out):
                       dynamic_axes={"input_ids": {0: "batch", 1: "length"}, "attention_mask": {0: "batch", 1: "length"},
                                     "logits": {0: "batch", 1: "length"}}, opset_version=17, dynamo=False)
     import onnx
-    from onnxconverter_common import float16
-    from onnxruntime.quantization import QuantType, quantize_dynamic
-    m16 = float16.convert_float_to_float16(onnx.load(fp32), keep_io_types=True)
-    onnx.save(m16, f"{out}/model_fp16.onnx")
-    quantize_dynamic(fp32, f"{out}/model_int8.onnx", weight_type=QuantType.QInt8)
+    from onnxruntime.transformers.float16 import convert_float_to_float16
+    onnx.save(convert_float_to_float16(onnx.load(fp32), keep_io_types=True), f"{out}/model_fp16.onnx")
+    if os.environ.get("INT8"):                  # dynamic int8 loses a lot on this model (51% same spans) — off by default
+        from onnxruntime.quantization import QuantType, quantize_dynamic
+        quantize_dynamic(fp32, f"{out}/model_int8.onnx", weight_type=QuantType.QInt8)
     cfg = json.load(open(os.path.join(ex_dir(model), "solvi_extract.json")))
     json.dump(cfg, open(f"{out}/solvi_extract.json", "w"), indent=1)
     for f in ("model.onnx", "model_fp16.onnx", "model_int8.onnx"):
-        print(f, round(os.path.getsize(f"{out}/{f}") / 1e6), "MB")
+        if os.path.exists(f"{out}/{f}"):
+            print(f, round(os.path.getsize(f"{out}/{f}") / 1e6), "MB")
     return ex
 
 
@@ -84,7 +85,7 @@ def check(ex, out, items):
             with torch.no_grad():
                 return ex.head(ex.enc(input_ids=torch.tensor(ids), attention_mask=torch.tensor(att)).last_hidden_state).numpy()
         ref.append(spans_with(ex, torch_logits, t, d))
-    for f in ("model.onnx", "model_fp16.onnx", "model_int8.onnx"):
+    for f in [f for f in ("model.onnx", "model_fp16.onnx", "model_int8.onnx") if os.path.exists(f"{out}/{f}")]:
         sess = ort.InferenceSession(f"{out}/{f}", providers=["CPUExecutionProvider"])
         got = [spans_with(ex, lambda ids, att: sess.run(None, {"input_ids": ids, "attention_mask": att})[0], t, d) for t, d in items]
         same = np.mean([g[:2] == r[:2] for g, r in zip(got, ref)])

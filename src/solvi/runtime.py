@@ -72,11 +72,17 @@ class Trace:
                 return r.value
         return self.init.get(name, MISSING)
 
-    def replay(self, catalog):
-        """Independent replay: recompute every step from its recorded inputs, verify the value, the quote and the hash chain."""
+    def replay(self, catalog, flow=None):
+        """Independent replay: recompute every step from its recorded inputs, verify the value, the quote, the error and the
+        hash chain, and that the chain starts from the hash of the recorded input. With `flow` (res.flow) it also checks the
+        trace is complete: every planned step is either recorded or listed as skipped at run time.
+        Limits: a trace rebuilt honestly from a *different* input is internally consistent — compare `init_hash` with a
+        receipt you published elsewhere to catch that."""
         vals = dict(self.init)
         prev = self.init_hash
         bad = []
+        if vhash(self.init) != self.init_hash:
+            bad.append((0, "init", "init_hash does not match the recorded input"))
         for r in self.records:
             if r.prev != prev:
                 bad.append((r.step, r.name, "hash chain broken"))
@@ -85,27 +91,39 @@ class Trace:
             prev = r.hash
             part = catalog.rules[r.name[7:]] if r.kind == "rule" else catalog.parts[r.name]
             args = {x: vals.get(x, MISSING) for x in part.inputs}
-            if any(v is MISSING for v in args.values()):
+            lost = [x for x, v in args.items() if v is MISSING]
+            if lost:
+                if not (r.error or "").startswith("missing inputs") or r.value is not MISSING:
+                    bad.append((r.step, r.name, "input " + ", ".join(lost) + " missing from the trace"))
                 vals[r.name] = r.value
                 continue
             for x, v in args.items():
                 if r.inputs.get(x) != vhash(v):
                     bad.append((r.step, r.name, f"input {x} does not match the recorded one"))
-            if r.error is None:
-                try:
-                    v = part.func(**{x: (a.value if isinstance(a, Quote) else a) for x, a in args.items()})
-                except Exception as e:  # noqa: BLE001
+            try:
+                v = part.func(**{x: (a.value if isinstance(a, Quote) else a) for x, a in args.items()})
+            except Exception as e:  # noqa: BLE001
+                if r.error is None:
                     bad.append((r.step, r.name, f"recompute failed: {type(e).__name__}"))
-                    vals[r.name] = r.value
-                    continue
-                if isinstance(v, Quote):
-                    src = self.init.get(v.source, "")
-                    if not (isinstance(src, str) and 0 <= v.start <= v.end <= len(src)):
-                        bad.append((r.step, r.name, "quote outside the text"))
-                    v = v.value
-                if vhash(v) != vhash(r.value):
-                    bad.append((r.step, r.name, f"value {r.value!r} ≠ recomputed {v!r}"))
+                vals[r.name] = r.value
+                continue
+            if r.error is not None and not r.error.startswith("quote outside"):
+                bad.append((r.step, r.name, f"recorded error {r.error!r}, but the step recomputes fine"))
+                vals[r.name] = r.value
+                continue
+            if isinstance(v, Quote):
+                src = self.init.get(v.source, "")
+                if not (isinstance(src, str) and 0 <= v.start <= v.end <= len(src)):
+                    bad.append((r.step, r.name, "quote outside the text"))
+                v = v.value
+            if r.error is None and vhash(v) != vhash(r.value):
+                bad.append((r.step, r.name, f"value {r.value!r} ≠ recomputed {v!r}"))
             vals[r.name] = r.value
+        if flow is not None:
+            seen = {r.name for r in self.records} | {n for n, _ in self.skipped}
+            for st in flow.steps:
+                if st.part.name not in seen:
+                    bad.append((0, st.part.name, "planned step missing from the trace"))
         return {"ok": not bad, "steps": len(self.records), "mismatches": bad}
 
 

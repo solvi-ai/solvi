@@ -1,0 +1,188 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>solvi documents</title>
+  <meta name="description" content="Typed, cited answers from documents, computed entirely in your browser: a ModernBERT field extractor (ONNX, WebGPU) finds fields described in plain English, and solvi rules and hard checks decide, abstain or cite." />
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%234f46e5'/%3E%3Cpath d='M9 8h10l4 4v12H9z' fill='white'/%3E%3Cpath d='M12 16h8M12 20h5' stroke='%234f46e5' stroke-width='2'/%3E%3C/svg%3E" />
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <header class="top">
+    <div class="top-inner">
+      <div class="brand">
+        <span class="logo" aria-hidden="true"></span>
+        <div>
+          <h1>solvi documents</h1>
+          <p class="pitch">Ask typed questions of a document and get answers you can check. A ModernBERT extractor and the
+            <a href="https://github.com/solvi-ai/solvi" target="_blank" rel="noopener">solvi</a> decision engine run
+            <b>entirely in your browser</b>.</p>
+        </div>
+      </div>
+      <nav class="links" aria-label="Links">
+        <a href="https://github.com/solvi-ai/solvi" target="_blank" rel="noopener">GitHub</a>
+        <a href="https://pypi.org/project/solvi/" target="_blank" rel="noopener">PyPI</a>
+        <a href="https://huggingface.co/spaces/solvi-ai/playground" target="_blank" rel="noopener">Playground</a>
+        <a href="https://huggingface.co/spaces/solvi-ai/arcade" target="_blank" rel="noopener">Arcade</a>
+        <a href="https://huggingface.co/solvi-ai/extract-base" target="_blank" rel="noopener">Model</a>
+      </nav>
+    </div>
+    <ul class="principles" aria-label="How it works">
+      <li><b>Stays on your device.</b> Documents are read by a model running in this tab. Nothing is uploaded.</li>
+      <li><b>Fields by description.</b> Describe a field in plain English. No training, no labels.</li>
+      <li><b>Every answer cites.</b> Each value is quoted at exact character offsets in the document.</li>
+      <li><b>Rules decide.</b> Plain Python rules and hard checks turn fields into typed answers.</li>
+      <li><b>Abstains, never guesses.</b> Missing field, failed parse, answer outside the options: no answer.</li>
+      <li><b>Re-verified.</b> A hash-chained trace is replayed after every run.</li>
+    </ul>
+  </header>
+
+  <div class="engine" id="engine" role="status" aria-live="polite">
+    <div class="engine-inner">
+      <div class="eng-item" id="eng-model">
+        <span class="dot" id="model-dot"></span>
+        <div class="eng-text">
+          <div id="model-line">Extractor: not loaded</div>
+          <div class="sub" id="model-sub">790 MB, downloaded once and cached by your browser.</div>
+          <div class="bar" id="model-bar" hidden><div id="model-bar-fill"></div></div>
+        </div>
+        <button id="model-load" class="btn primary">Load the model</button>
+      </div>
+      <div class="eng-item" id="eng-py">
+        <span class="dot" id="py-dot"></span>
+        <div class="eng-text">
+          <div id="py-line">Python (Pyodide) + solvi: loading…</div>
+          <div class="sub" id="py-sub">Decision logic runs here, in WebAssembly.</div>
+        </div>
+      </div>
+    </div>
+    <div class="engine-note" id="engine-note" hidden></div>
+  </div>
+
+  <div class="layout">
+    <aside class="library" aria-label="Use-case library">
+      <div class="lib-head">
+        <h2>Use-case library</h2>
+        <input id="lib-filter" type="search" placeholder="Filter…" aria-label="Filter use cases" />
+      </div>
+      <ol id="lib-list"></ol>
+      <p class="lib-foot">Each use case is one small file: fields described in words, sample documents and Python rules.
+        <a href="#add-use-case">Add yours</a>.</p>
+    </aside>
+
+    <main id="main">
+      <section class="uc-head">
+        <div class="uc-title-row">
+          <h2 id="uc-title"></h2><span class="tag" id="uc-domain"></span>
+        </div>
+        <p id="uc-why" class="why"></p>
+        <div class="uc-controls">
+          <label class="ctl" id="model-choice-wrap" hidden>Extractor
+            <select id="model-choice"></select>
+          </label>
+          <label class="ctl">Today <input type="date" id="today" /></label>
+          <button class="btn" id="reset-uc" title="Discard your edits to this use case">Reset use case</button>
+        </div>
+      </section>
+
+      <section class="card doc-card" aria-labelledby="doc-h">
+        <div class="card-head">
+          <h3 id="doc-h">Document</h3>
+          <div class="doc-tabs" id="doc-tabs" role="tablist"></div>
+        </div>
+        <div id="own-box" class="own-box" hidden>
+          <p class="sub">Paste your own document (plain text). It is read here, in this tab, and never sent anywhere.</p>
+          <textarea id="own-text" spellcheck="false" placeholder="Paste a contract, an invoice, an e-mail…"></textarea>
+          <div class="row">
+            <button class="btn primary" id="own-use">Read this document</button>
+            <label class="btn file">Open a .txt file<input type="file" id="own-file" accept=".txt,.md,.csv,.json,.eml,.html,text/*" hidden /></label>
+            <span class="sub" id="own-count"></span>
+          </div>
+        </div>
+        <div class="legend" id="legend"></div>
+        <pre class="doc" id="doc" tabindex="0"></pre>
+        <div class="doc-foot sub" id="doc-foot"></div>
+      </section>
+
+      <div class="grid2">
+        <section class="card" aria-labelledby="fields-h">
+          <div class="card-head">
+            <h3 id="fields-h">Fields <span class="sub">(defined by description)</span></h3>
+            <button class="btn primary" id="run">Extract &amp; decide</button>
+          </div>
+          <table class="fields" id="fields">
+            <thead><tr><th></th><th>name</th><th>description</th><th>found</th><th></th></tr></thead>
+            <tbody></tbody>
+          </table>
+          <div class="row"><button class="btn" id="add-field">+ Add field</button>
+            <span class="sub">A new field is extracted as soon as you leave the description box.</span></div>
+          <div class="sub status-line" id="extract-status"></div>
+        </section>
+
+        <section class="card" aria-labelledby="answers-h">
+          <div class="card-head"><h3 id="answers-h">Answers</h3><span class="sub" id="answers-meta"></span></div>
+          <div id="answers" class="answers"><p class="empty">Answers appear here after the fields are extracted.</p></div>
+        </section>
+      </div>
+
+      <section class="card" aria-labelledby="rules-h">
+        <div class="card-head">
+          <h3 id="rules-h">Rules <span class="sub">(Python, runs in your browser)</span></h3>
+          <div class="row tight">
+            <button class="btn primary" id="run-rules">Run</button>
+            <button class="btn" id="reset-rules">Reset rules</button>
+          </div>
+        </div>
+        <p class="sub">Every field above is a fact with the same name (a string, <code>""</code> when absent).
+          <code>@cat.fn</code> computes a fact, <code>@cat.check(hard=True, then={...})</code> is a check that overrides the
+          answer when false, <code>@cat.rule("q")</code> answers question <code>q</code>. Helpers: <code>money</code>,
+          <code>number</code>, <code>parse_date</code>, <code>days</code>, <code>hours</code>, <code>found</code>,
+          <code>need</code>, <code>mentions</code>, <code>iban_ok</code>. <code>INPUTS</code> adds inputs; <code>today</code>
+          is always one.</p>
+        <textarea id="code" class="code" spellcheck="false" aria-label="Rule code"></textarea>
+        <div class="sub err" id="code-err"></div>
+      </section>
+
+      <section class="card" aria-labelledby="trace-h">
+        <div class="card-head">
+          <h3 id="trace-h">How the answer was reached</h3>
+          <div class="tabs" role="tablist" id="trace-tabs">
+            <button role="tab" data-tab="flow" aria-selected="true">Flow</button>
+            <button role="tab" data-tab="state">computed_state</button>
+            <button role="tab" data-tab="trace">Trace</button>
+          </div>
+        </div>
+        <div id="replay" class="replay"></div>
+        <div id="trace-body" class="trace-body"><p class="empty">Run a use case to see the strategist's flow, every computed fact and the hash-chained trace.</p></div>
+      </section>
+
+      <section class="card note" id="add-use-case">
+        <h3>An honest note on the model</h3>
+        <p><a href="https://huggingface.co/solvi-ai/extract-base" target="_blank" rel="noopener">solvi-ai/extract-base</a>
+          is a general starting point, trained on contracts, receipts and Wikipedia-style questions. Fields close to that
+          work well out of the box; fields far from it can be missed or cited at the wrong place, and you will see it in the
+          highlight. For production, label 25&ndash;100 of your documents and fine-tune (<code>LongSpanExtractor.fit</code>,
+          see the model card). The rules, checks, abstentions and the trace do not depend on the model being right: they are
+          what lets you see when it is not.</p>
+        <h3>Add a use case</h3>
+        <p>A use case is one file in <code>usecases/</code>: a title, fields as <code>[name, description]</code>, sample
+          documents and the rule code. Copy <code>usecases/receipt.js</code>, change it, list it in
+          <code>usecases/index.js</code> and open a pull request on
+          <a href="https://github.com/solvi-ai/solvi" target="_blank" rel="noopener">GitHub</a>.</p>
+        <h3>What leaves your browser</h3>
+        <p>Downloads only: the model and tokenizer from Hugging Face, Python (Pyodide) and onnxruntime-web from jsDelivr,
+          and the <code>solvi</code> package from PyPI. Documents, fields and rules stay in this tab (edits are kept in your
+          browser's local storage so they survive a reload).</p>
+      </section>
+    </main>
+  </div>
+
+  <footer class="foot">
+    solvi documents · Apache-2.0 · <a href="https://github.com/solvi-ai/solvi" target="_blank" rel="noopener">github.com/solvi-ai/solvi</a>
+    · <a href="tests/parity.html">parity test</a> · all sample documents are synthetic
+  </footer>
+
+  <script type="module" src="app.js"></script>
+</body>
+</html>
