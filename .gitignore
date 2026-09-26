@@ -9,3 +9,5 @@ build/
 data/
 *.pt
 *.safetensors
+spaces/realms/results/logs/
+spaces/realms/results/endless_*.json

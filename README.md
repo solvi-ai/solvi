@@ -31,6 +31,8 @@ script that computes everything, and 152 ms when an expired policy settles the c
   leases and more — the ModernBERT extractor (ONNX) and the decisions both run in your browser; add a field by describing it.
 - [solvi arcade](https://huggingface.co/spaces/solvi-ai/arcade): game agents that explain every move — tic-tac-toe, maze,
   minesweeper, 20 questions, Mafia detective, a bot arena, and "hack the trace".
+- [solvi realms](https://huggingface.co/spaces/solvi-ai/realms): an endless strategy game whose factions are solvi systems —
+  tested for 100 000 turns: flat decision time (~0.3–0.6 ms), bounded memory and state, every sampled trace replay OK.
 - All run **entirely in your browser** (Pyodide): no server, no GPU, nothing you type leaves the page.
 - Models: [solvi-ai/extract-base](https://huggingface.co/solvi-ai/extract-base) (fields by description) and
   [solvi-ai/extract-receipts](https://huggingface.co/solvi-ai/extract-receipts).
