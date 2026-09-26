@@ -1,0 +1,18 @@
+name: publish
+
+# PyPI trusted publishing: on a GitHub release, build and upload with a short-lived OIDC token (no API token stored anywhere).
+on:
+  release:
+    types: [published]
+
+jobs:
+  pypi:
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+      - run: uv build
+      - run: uv publish --trusted-publishing always

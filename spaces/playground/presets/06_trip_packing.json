@@ -1,0 +1,11 @@
+{
+  "forecast": [
+    {"high_c": 23, "low_c": 14, "rain_pct": 10},
+    {"high_c": 25, "low_c": 15, "rain_pct": 5},
+    {"high_c": 19, "low_c": 12, "rain_pct": 70},
+    {"high_c": 21, "low_c": 13, "rain_pct": 30},
+    {"high_c": 24, "low_c": 15, "rain_pct": 0}
+  ],
+  "activities": ["city walks", "beach"],
+  "laundry_available": false
+}

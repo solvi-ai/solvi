@@ -1,0 +1,10 @@
+{
+  "age": 29,
+  "monthly_income": 5200,
+  "monthly_debts": 650,
+  "loan_amount": 15000,
+  "annual_rate": 0.089,
+  "term_months": 48,
+  "credit_score": 712,
+  "months_employed": 30
+}

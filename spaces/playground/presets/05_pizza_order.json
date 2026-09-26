@@ -1,0 +1,12 @@
+{
+  "pizzas": ["margherita", "hawaiian", "pepperoni"],
+  "size": "large",
+  "extra_toppings": ["olives"],
+  "people": 5,
+  "budget": 60,
+  "delivery_fee": 3.5,
+  "distance_km": 4.2,
+  "orders_in_queue": 3,
+  "hour": 20,
+  "guest_from_naples": false
+}

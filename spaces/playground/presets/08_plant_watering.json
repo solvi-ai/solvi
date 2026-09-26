@@ -1,0 +1,9 @@
+{
+  "plant": "basil",
+  "soil_moisture_pct": 21,
+  "days_since_watered": 3,
+  "outdoors": true,
+  "rain_mm_24h": 1.5,
+  "temp_c": 29,
+  "drainage": true
+}

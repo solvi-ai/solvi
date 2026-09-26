@@ -1,0 +1,11 @@
+{
+  "indoor_c": 18.4,
+  "outdoor_c": 6.0,
+  "target_c": 21.0,
+  "comfort_band_c": 1.0,
+  "eco_offset_c": 3.0,
+  "occupied": true,
+  "window_open": false,
+  "humidity_pct": 44,
+  "co_ppm": 2
+}

@@ -1,0 +1,3 @@
+gradio>=6
+solvi[model]
+spaces
