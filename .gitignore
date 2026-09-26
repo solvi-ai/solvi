@@ -11,3 +11,7 @@ data/
 *.safetensors
 spaces/realms/results/logs/
 spaces/realms/results/endless_*.json
+spaces/realms/results/dev/
+spaces/realms/results/attempt1/
+spaces/realms/results/ablation/
+spaces/realms/results/baseline_fitfast/

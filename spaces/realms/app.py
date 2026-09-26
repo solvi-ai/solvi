@@ -58,12 +58,15 @@ def turn_md(ui):
 
 def learn_md(g):
     L = g.learner
-    h = g.systems["adaptive"][1].heads.get("build")
-    pts = [c for c in L.curve if c[1] is not None and c[2] is not None][-8:]
-    cur = " · ".join(f"t{t}: {a:+.1f} vs {o:+.1f}" for t, a, o, _, _ in pts) or "not enough judged decisions yet"
-    return (f"**Adaptive faction** (no build rule: a `fit_fast` head, taught with `System.teach` from its own outcomes): "
-            f"{L.teaches} decisions taught, {L.refits} refits, {L.explored} explorations, head trained on {h.n if h else 0} "
-            f"examples. Build reward (city value gain {12} turns later), adaptive vs others: {cur}")
+    hs = g.systems["adaptive"][1].heads
+    pts = [c for c in L.curve if c[1] is not None and c[2] is not None][-6:]
+    cur = " · ".join(f"t{t}: {a:+.3f} vs {o:+.3f}" for t, a, o, _, _ in pts) or "not enough judged decisions yet"
+    return (f"**Adaptive faction** (no rule for build, unit orders or war/peace: learned value heads, one ridge regression "
+            f"per answer, chosen by value + UCB bonus; hard checks still veto): {L.observed:,} decisions judged "
+            f"({L.own:,} its own, the rest observed from the other factions), {L.refits} refreshes, {L.explored} "
+            f"ε-explorations{' — FROZEN (ablation)' if L.frozen else ''}. Heads: "
+            + ", ".join(f"{q} {h.n:,}" for q, h in hs.items() if hasattr(h, "refresh")) +
+            f". Build reward (log-score gain 20 turns later), adaptive vs others: {cur}")
 
 
 def outputs(ui, refresh_choices=False):

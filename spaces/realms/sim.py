@@ -70,14 +70,15 @@ def saveload_check(game, turns=20):
     return twin.state_hash() == loaded.state_hash()
 
 
-def run(seed, turns, every, saveload_every, trace_mem, out):
+def run(seed, turns, every, saveload_every, trace_mem, out, learn=True):
     if trace_mem:
         tracemalloc.start()
     t_start = time.time()
-    game = Game(seed=seed)
+    game = Game(seed=seed, learn=learn)
     recs, exceptions, errors = [], 0, []
     alive_min, negative = 99, 0
     meta = {"seed": seed, "turns": turns, "every": every, "tracemalloc": trace_mem, "python": sys.version.split()[0],
+            "learn": learn,
             "memory": "tracemalloc current/peak" if trace_mem else "process RSS current/peak (/proc)"}
     while game.turn < turns:
         t0 = time.perf_counter()
@@ -125,7 +126,7 @@ PANELS = [("dec_ms_p99", "decision time p99 (ms)"), ("dec_ms_med", "decision tim
           ("mem_cur", "memory MB (tracemalloc, or RSS)"), ("alive", "factions alive (min over window: dots)"),
           ("pop", "total population"), ("gold", "gold / wood / stone (all factions)"),
           ("deposit_amt", "deposit richness (sum)"), ("vetoes_per_100", "hard-check vetoes per 100 decisions"),
-          ("adaptive_share", "adaptive faction score / mean of others"), ("spawned", "factions spawned (cumulative)")]
+          ("adaptive_share", "adaptive faction score / mean of others (log)"), ("spawned", "factions spawned (cumulative)")]
 
 
 def charts():
@@ -153,6 +154,8 @@ def charts():
                 y = [r[key] / 1024 for r in rs]
             elif key == "mem_cur":
                 y = [(r[key] or 0) / 1e6 for r in rs]
+            elif key == "adaptive_share":
+                y = [max(r[key], 0.05) for r in rs]
             else:
                 y = [r[key] for r in rs]
             ax.plot(x, y, color=c, lw=1.2, label=f"seed {seed}")
@@ -169,32 +172,100 @@ def charts():
             ax.axhline(2, color="#999", lw=0.8, ls="--")
         if key == "adaptive_share":
             ax.axhline(1, color="#999", lw=0.8, ls="--")
+            ax.set_yscale("log")
     axes.flat[0].legend(fontsize=8)
     fig.suptitle("solvi realms: endless-game health (one point per 500 turns)", fontsize=13)
     fig.tight_layout()
     for ext in ("png", "svg"):
         fig.savefig(os.path.join(RESULTS, f"health.{ext}"), dpi=90)
-    # learning curve of the adaptive faction
-    fig, axes = plt.subplots(1, 2, figsize=(13, 4))
+    # learning curve of the adaptive faction: its share, against the ablation (heads frozen after the bootstrap) and the
+    # earlier learner (fit_fast build head only), plus the learned heads' reward and the amount of judged decisions
+    def load(pattern):
+        out = {}
+        for f in sorted(glob.glob(os.path.join(RESULTS, pattern))):
+            with open(f) as fh:
+                d = json.load(fh)
+            out[d["meta"]["seed"]] = d
+        return out
+    frozen, old = load("ablation/frozen_*.json"), load("baseline_fitfast/endless_*.json")
+    fig, axes = plt.subplots(1, 3, figsize=(17, 4.4))
     for k, (seed, d) in enumerate(sorted(runs.items())):
         c = colors[k % len(colors)]
-        cv = [p for p in d["meta"]["learning_curve"] if p[1] is not None and p[2] is not None]
-        rs = d["records"]
-        axes[0].plot([r["turn"] for r in rs if r["adaptive_reward"] is not None],
-                     [r["adaptive_reward"] - r["others_reward"] for r in rs if r["adaptive_reward"] is not None
-                      and r["others_reward"] is not None], color=c, lw=1.2, label=f"seed {seed}")
-        axes[1].plot([r["turn"] for r in rs], [r["teaches"] for r in rs], color=c, lw=1.2, label=f"seed {seed}")
-        del cv
-    axes[0].axhline(0, color="#999", lw=0.8, ls="--")
-    axes[0].set_title("adaptive build reward minus others' (12-turn city value gain, rolling 250 turns)", fontsize=10)
-    axes[1].set_title("examples taught with System.teach (cumulative)", fontsize=10)
+        if seed not in (1, 2, 3, 4):                   # the pre-registered evaluation seeds only
+            continue
+        rs = [r for r in d["records"] if r["turn"] <= 20000]
+        axes[0].plot([r["turn"] for r in rs], [max(r["adaptive_share"], 0.05) for r in rs], color=c, lw=1.4,
+                     label=f"seed {seed}")
+        if seed in frozen:
+            fr = frozen[seed]["records"]
+            axes[0].plot([r["turn"] for r in fr], [max(r["adaptive_share"], 0.05) for r in fr], color=c, lw=1.0, ls="--")
+        if seed in old:
+            orr = [r for r in old[seed]["records"] if r["turn"] <= 20000]
+            axes[0].plot([r["turn"] for r in orr], [max(r["adaptive_share"], 0.05) for r in orr], color=c, lw=0.8, ls=":")
+        rr = [r for r in d["records"] if r["adaptive_reward"] is not None and r["others_reward"] is not None]
+        axes[1].plot([r["turn"] for r in rr], [r["adaptive_reward"] - r["others_reward"] for r in rr], color=c, lw=1.2,
+                     label=f"seed {seed}")
+        axes[2].plot([r["turn"] for r in d["records"]], [r["teaches"] for r in d["records"]], color=c, lw=1.2,
+                     label=f"seed {seed}")
+    axes[0].axhline(1, color="#999", lw=0.8, ls="--")
+    axes[0].set_yscale("log")
+    axes[0].set_title("adaptive share (log): solid learner, dashed frozen,\ndotted previous fit_fast learner", fontsize=9)
+    axes[1].axhline(0, color="#999", lw=0.8, ls="--")
+    axes[1].set_title("build reward, adaptive minus others\n(log-score gain 20 turns later, rolling 250 turns)", fontsize=9)
+    axes[2].set_title("decisions judged and learned from\n(cumulative, own + observed)", fontsize=9)
     for ax in axes:
         ax.grid(alpha=0.3)
-        ax.legend(fontsize=8)
+        ax.tick_params(labelsize=8)
+    axes[0].legend(fontsize=7)
     fig.tight_layout()
     for ext in ("png", "svg"):
         fig.savefig(os.path.join(RESULTS, f"learning.{ext}"), dpi=90)
     print("charts written to", RESULTS)
+
+
+def share_fl(rs, turns=20000):
+    """Adaptive share averaged over the first and the last 20% of the checkpoints up to `turns`."""
+    rs = [r for r in rs if r["turn"] <= turns]
+    k = max(1, len(rs) // 5)
+    return sum(r["adaptive_share"] for r in rs[:k]) / k, sum(r["adaptive_share"] for r in rs[-k:]) / k
+
+
+def criteria():
+    """The pre-registered criteria A1-A3 (realms/adaptive.py) from results/endless_<1..4>.json, plus the ablation."""
+    rows, a1, a2, a3 = [], 0, 0, 0
+    for seed in (1, 2, 3, 4):
+        f = os.path.join(RESULTS, f"endless_{seed}.json")
+        if not os.path.exists(f):
+            continue
+        with open(f) as fh:
+            d = json.load(fh)
+        rs = [r for r in d["records"] if r["turn"] <= 20000]
+        first, last = share_fl(rs)
+        inv = health.check(rs)
+        fails = [x[0] for x in inv if x[2] is False]
+        fz = os.path.join(RESULTS, "ablation", f"frozen_{seed}.json")
+        fzs = "—"
+        if os.path.exists(fz):
+            with open(fz) as fh:
+                ff, fl = share_fl(json.load(fh)["records"])
+            fzs = f"{ff:.2f} → {fl:.2f}"
+        old = os.path.join(RESULTS, "baseline_fitfast", f"endless_{seed}.json")
+        ols = "—"
+        if os.path.exists(old):
+            with open(old) as fh:
+                of, ol = share_fl(json.load(fh)["records"])
+            ols = f"{of:.2f} → {ol:.2f}"
+        a1 += last >= 1.0
+        a2 += last > first
+        a3 += not fails
+        rows.append(f"| {seed} | {first:.2f} | **{last:.2f}** | {'yes' if last >= 1 else 'no'} | {'yes' if last > first else 'no'} | "
+                    f"{', '.join(fails) or 'all 11 held'} | {fzs} | {ols} |")
+    print("| seed | share first 20% | share last 20% | A1 ≥ 1.0 | A2 last > first | A3 invariants | frozen after bootstrap "
+          "(first → last 20%) | previous fit_fast learner (first → last 20%) |")
+    print("|---|---|---|---|---|---|---|---|")
+    print("\n".join(rows))
+    print(f"\nA1: {a1}/4 seeds (need >= 3) -> {'PASS' if a1 >= 3 else 'FAIL'};  A2: {a2}/4 (need 4) -> "
+          f"{'PASS' if a2 == 4 else 'FAIL'};  A3: {a3}/4 runs with every invariant held -> {'PASS' if a3 == 4 else 'FAIL'}")
 
 
 def table():
@@ -228,11 +299,16 @@ if __name__ == "__main__":
     ap.add_argument("--no-tracemalloc", action="store_true")
     ap.add_argument("--charts", action="store_true")
     ap.add_argument("--table", action="store_true")
+    ap.add_argument("--frozen", action="store_true", help="ablation: the adaptive learner's heads stay at the bootstrap")
+    ap.add_argument("--out", default="", help="output JSON (default results/endless_<seed>.json)")
     a = ap.parse_args()
     os.makedirs(RESULTS, exist_ok=True)
     if a.charts:
         charts()
     elif a.table:
         table()
+        print()
+        criteria()
     else:
-        run(a.seed, a.turns, a.every, a.saveload, not a.no_tracemalloc, os.path.join(RESULTS, f"endless_{a.seed}.json"))
+        run(a.seed, a.turns, a.every, a.saveload, not a.no_tracemalloc,
+            a.out or os.path.join(RESULTS, f"endless_{a.seed}.json"), learn=not a.frozen)

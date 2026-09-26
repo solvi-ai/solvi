@@ -1,0 +1,20 @@
+{
+ "seed": 1,
+ "turns": 2000,
+ "stats": {
+  "build|forced": 2014,
+  "build|ok": 16580,
+  "build|veto_overrode_head": 1978,
+  "build|why_names_learned_contributions": 16580,
+  "order_military|forced": 532,
+  "order_military|ok": 34839,
+  "order_military|veto_overrode_head": 142,
+  "order_military|why_names_learned_contributions": 34839,
+  "stance|forced": 127,
+  "stance|ok": 958,
+  "stance|veto_overrode_head": 20,
+  "stance|why_names_learned_contributions": 958
+ },
+ "violations": 0,
+ "examples": []
+}

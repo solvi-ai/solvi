@@ -13,8 +13,8 @@ import time
 from collections import deque
 
 from . import econ
-from .brains import (FEATURES, HORIZON, PERSONALITIES, QUESTIONS, REFIT_EVERY, Learner, _rng_from, _rng_to, argmax,
-                     make_system)
+from .adaptive import Learner, score_of
+from .brains import PERSONALITIES, QUESTIONS, _rng_from, _rng_to, argmax, make_system
 from .world import (DEP_BONUS, DEP_MAX, DEPOSITS, FOREST, HILLS, IMPROVE, MOUNT, N, NEI8, RAD2, TERRAIN, W, WATER,
                     BASE_YIELD, DistCache, cheb, gen_map, passable)
 
@@ -63,7 +63,7 @@ class Metrics:
 
 
 class Game:
-    def __init__(self, seed=0, n_factions=4, adaptive=True, metrics=None, keep_last=True):
+    def __init__(self, seed=0, n_factions=4, adaptive=True, metrics=None, keep_last=True, learn=True):
         self.seed = seed
         self.turn = 0
         self.rng = random.Random(seed)
@@ -82,8 +82,6 @@ class Game:
         self.eliminated = 0
         self.counters = {"battles": 0, "captures": 0, "founded": 0, "rebellions": 0, "events": 0, "disbanded_broke": 0,
                          "bailouts": 0, "negative_treasury": 0, "teach": 0}
-        self.rewards = deque(maxlen=600)  # [turn, fid, adaptive?, reward]
-        self.pending = deque(maxlen=600)  # [turn, city id, fid, value before]
         self.history = deque(maxlen=300)  # [turn, factions alive, population, gold, decisions ms p50, vetoes/100, ...]
         self.human = None                # faction id the human controls (its builds and stances), or None
         self.human_orders = {}           # city id -> build chosen by the human
@@ -93,6 +91,7 @@ class Game:
         self._init_caches()
         self.learner = Learner(seed)
         self.learner.bootstrap(self.systems["adaptive"][1])
+        self.learner.frozen = not learn              # ablation: the bootstrap prior, never updated
         pers = ["adaptive", "builder", "expansionist", "warmonger", "trader"] if adaptive else \
             ["builder", "expansionist", "warmonger", "trader"]
         for k in range(n_factions):
@@ -358,6 +357,7 @@ class Game:
 
     def play_turn(self):
         self.turn += 1
+        self.learner.snapshot(self.turn, score_of(self))
         if self.turn - self._site_turn >= 25:
             self._refresh_sites()
         for fid in self.alive():
@@ -426,13 +426,15 @@ class Game:
             if c["build"] is None:
                 if not lazy:                                        # computed once per faction turn, only when needed
                     lazy["s"], lazy["t"] = self._settle_value(fid), len(self._trade_partners(fid))
+                    lazy["p"], lazy["w"] = self._power(fid, cities)
                 state = {"pop": c["pop"], "food_store": c["food"], "worked": wk, "buildings": sorted(c["buildings"]),
                          "gold": f["gold"], "wood": f["wood"], "stone": f["stone"], "income": income,
                          "upkeep": upkeep, "enemy_near": near, "garrison": gar, "is_capital": c["id"] == cap,
                          "n_cities": len(cities), "fleet": dict(fleet), "unit_cap": self.unit_cap(fid),
                          "settle_value": lazy["s"], "trade_partners": lazy["t"],
                          "at_war": at_war,
-                         "unimproved": self._unimproved(c)}
+                         "unimproved": self._unimproved(c), "power": lazy["p"], "weakest": lazy["w"],
+                         "unit_room": self.unit_cap(fid) - sum(fleet[k] for k in econ.CAPPED)}
                 choice = self._decide_build(fid, c, state)
                 if choice in econ.UNITS:
                     fleet[choice] += 1
@@ -499,6 +501,21 @@ class Game:
             if f[res] > cap_:
                 f[res] -= max(1, (f[res] - cap_) // 4)             # storage: a quarter of the surplus spoils each turn
 
+    def _power(self, fid, cities):
+        """(our strength / mean strength of the other factions, our strength / the weakest neighbour's in contact)."""
+        st = {}
+        for u in self.units.values():
+            if u["type"] in econ.MILITARY:
+                st[u["fid"]] = st.get(u["fid"], 0) + econ.STRENGTH[u["type"]]
+        for c in self.cities.values():
+            st[c["fid"]] = st.get(c["fid"], 0) + 1
+        mine = st.get(fid, 0)
+        others = [o for o in self.alive() if o != fid]
+        power = round(mine / max(0.5, sum(st.get(o, 0) for o in others) / max(1, len(others))), 3)
+        near = [o for o in others if any(cheb(a["pos"], b["pos"]) <= CONTACT for a in cities for b in self.fcities(o))]
+        weakest = round(mine / max(0.5, min(st.get(o, 0) for o in near)), 3) if near else power
+        return min(power, 10.0), min(weakest, 10.0)
+
     def _unimproved(self, c):
         _, tiles = self.worked(c)
         return sum(1 for i in tiles if not self.improved[i] and self.terrain[i] in IMPROVE)
@@ -537,10 +554,11 @@ class Game:
         r = res["build"]
         choice = r.answer
         aff = econ.affordable(f["gold"], f["wood"], f["stone"], c["pop"], state["fleet"], state["unit_cap"], c["buildings"])
-        if f["pers"] == "adaptive" and r.status == "ok":
-            if self.learner.rng.random() < self.learner.eps:
-                choice = self.learner.rng.choice(aff)
-                self.learner.explored += 1
+        adaptive = f["pers"] == "adaptive"
+        if adaptive and r.status == "ok":
+            ex = self.learner.explore(aff)                         # small ε: a random affordable option
+            if ex is not None:
+                choice = ex
             elif choice not in aff:
                 self.m.masked += 1
                 choice = max(aff, key=lambda o: (r.probs.get(o, 0.0), -econ.BUILD_OPTIONS.index(o)))
@@ -556,10 +574,8 @@ class Game:
         f["stone"] -= sw
         f["gold"] -= gw
         c["build"] = choice
-        if choice != "gold":
-            self.pending.append([self.turn, c["id"], fid, self.city_value(c)])
-            if f["pers"] == "adaptive" and r.status == "ok":
-                self.learner.pending.append([self.turn, c["id"], state, choice, self.city_value(c)])
+        if r.status == "ok" and self.human != fid:
+            self.learner.observe(self.systems["adaptive"][1], "build", self.turn, fid, adaptive, res.values, choice)
         return choice
 
     # ------------------------------------------------------------------------------------------------ units
@@ -622,6 +638,9 @@ class Game:
                  "income": f["income"], "upkeep": self.upkeep(fid)}
         res = self.ask(fid, "order_military", state, f"unit:{u['id']}", f"{u['type']} #{u['id']} ({f['name']})")
         a = res["order_military"].answer or "fortify"
+        if res["order_military"].status == "ok":
+            self.learner.observe(self.systems["adaptive"][1], "order_military", self.turn, fid, f["pers"] == "adaptive",
+                                 res.values, a)
         v = res.values
         tgt = None
         if a == "attack" and v.get("target_pick"):
@@ -889,6 +908,9 @@ class Game:
             ans = r.answer or "peace"
             if self.human == fid and str(o) in self.human_orders.get("stance", {}):
                 ans = self.human_orders["stance"][str(o)]
+            if r.status == "ok" and self.human != fid:
+                self.learner.observe(self.systems["adaptive"][1], "stance", self.turn, fid, f["pers"] == "adaptive",
+                                     res.values, ans)
             self.wants[f"{fid}>{o}"] = ans
             if ans == "war" and not war:
                 self.wars[key] = self.turn
@@ -941,10 +963,8 @@ class Game:
                 self._rebellion(force=True)
         elif len(alive) < MAX_FACTIONS and self.rng.random() < 0.02:
             self._rebellion()
-        # learning: judge build decisions HORIZON turns later
-        self._mature()
-        if self.turn % REFIT_EVERY == 0:
-            self._refit()
+        # learning: decisions judged HORIZON turns later, value heads re-solved every REFRESH turns
+        self.learner.mature(self.systems["adaptive"][1], t, self._score_share() if t % 50 == 0 else 0.0)
         # bounded UI memory: forget cards of entities that no longer exist
         if self.keep_last and t % 10 == 0:
             for k in list(self.last):
@@ -1015,33 +1035,6 @@ class Game:
         c = max(cand, key=lambda c: (cheb(c["pos"], cap["pos"]), c["id"]))
         self.spawn_faction(from_city=c)
 
-    def _mature(self):
-        t = self.turn
-        L = self.learner
-        while self.pending and self.pending[0][0] + HORIZON <= t:
-            turn, cid, fid, before = self.pending.popleft()
-            c = self.cities.get(cid)
-            reward = -25 if c is None or c["fid"] != fid else self.city_value(c) - before
-            self.rewards.append([t, fid, self.factions[fid]["pers"] == "adaptive", reward])
-        while L.pending and L.pending[0][0] + HORIZON <= t:
-            turn, cid, state, choice, before = L.pending.popleft()
-            fid_ok = cid in self.cities and self.factions[self.cities[cid]["fid"]]["pers"] == "adaptive"
-            reward = self.city_value(self.cities[cid]) - before if fid_ok else -25
-            thr = L.threshold()
-            L.rewards.append(reward)
-            if reward >= thr and reward > 0:
-                self.systems["adaptive"][1].teach("build", state, choice)
-                L.examples.append([state, choice])
-                L.teaches += 1
-                self.counters["teach"] += 1
-        if t % 50 == 0:
-            recent = [r for r in self.rewards if r[0] > t - 250]
-            ad = [r[3] for r in recent if r[2]]
-            ot = [r[3] for r in recent if not r[2]]
-            L.curve.append([t, round(sum(ad) / len(ad), 3) if ad else None, round(sum(ot) / len(ot), 3) if ot else None,
-                            L.teaches, round(self._score_share(), 3)])
-            L.eps = max(0.03, 0.12 * (1 - t / 20000))
-
     def _score_share(self):
         """Adaptive faction's score / mean score of the others (score = population + 3 × cities)."""
         sc = {}
@@ -1053,12 +1046,6 @@ class Game:
             return 0.0
         return (ad[0] if ad else 0) / (sum(ot) / len(ot))
 
-    def _refit(self):
-        ex = [(s, a) for s, a in self.learner.examples]
-        if len(ex) >= 40 and len({a for _, a in ex}) >= 2:
-            self.systems["adaptive"][1].fit_fast("build", ex, features=FEATURES)
-            self.learner.refits += 1
-
     def _sample_history(self):
         pops = sum(c["pop"] for c in self.cities.values())
         fs = self.alive()
@@ -1067,13 +1054,13 @@ class Game:
 
     # ------------------------------------------------------------------------------------------------ save / load
     def to_dict(self):
-        return {"version": 1, "seed": self.seed, "turn": self.turn, "rng": _rng_to(self.rng), "terrain": self.terrain,
+        return {"version": 2, "seed": self.seed, "turn": self.turn, "rng": _rng_to(self.rng), "terrain": self.terrain,
                 "dep": self.dep, "amt": self.amt, "improved": self.improved, "owner": self.owner, "worked_n": self.worked_n,
                 "cities": list(self.cities.values()), "units": list(self.units.values()),
                 "factions": list(self.factions.values()), "wars": self.wars, "wants": self.wants, "effects": self.effects,
                 "truce": self.truce,
                 "log": list(self.log), "next_id": self.next_id, "spawned": self.spawned, "eliminated": self.eliminated,
-                "counters": self.counters, "rewards": list(self.rewards), "pending": list(self.pending),
+                "counters": self.counters,
                 "history": list(self.history), "human": self.human, "site_turn": self._site_turn,
                 "site_rank": self.site_rank, "site_parts": self.site_parts,
                 "human_orders": {str(k): v for k, v in self.human_orders.items()},
@@ -1095,8 +1082,6 @@ class Game:
         g.wars, g.wants, g.effects, g.truce = d["wars"], d["wants"], d["effects"], d["truce"]
         g.log = deque(d["log"], maxlen=200)
         g.next_id, g.spawned, g.eliminated, g.counters = d["next_id"], d["spawned"], d["eliminated"], d["counters"]
-        g.rewards = deque(d["rewards"], maxlen=600)
-        g.pending = deque(d["pending"], maxlen=600)
         g.history = deque(d["history"], maxlen=300)
         g.human = d.get("human")
         ho = d.get("human_orders", {})

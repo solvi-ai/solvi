@@ -19,12 +19,13 @@ HARD checks (a failed one forces the answer, no rule or model can override it):
 Hard checks are planned first: when treasury_ok or not_under_siege fails, the whole economic plan of that city (yields, growth,
 affordable options, needs, scores) is skipped (res.trace.skipped).
 
-The adaptive faction has no rule for `build`: its answer head is learned in-game with System.fit_fast + teach (see Learner)."""
+The adaptive faction has no rule for build, order_military or stance: each is answered by a learned value head (realms/adaptive.py).
+For it, keeps_capital_defender and war_needs_strength look only at the state (the capital's last defender always stays; no
+war below 80% strength), so they veto whatever the head proposes rather than a rule's preference."""
 from __future__ import annotations
 
 import base64
 import random
-from collections import deque
 
 import numpy as np
 from solvi import Answer, Catalog, Question, System
@@ -102,9 +103,53 @@ def score_build(w, affordable, growth_need, infra_value, military_need, expand_v
     return s
 
 
-def make_catalog(pers: str, learned_build: bool = False) -> Catalog:
+# ---------------------------------------------------------------------------------------------------------------------
+# Derived scalar facts the adaptive faction's value heads read. Plain functions, so the learner can compute them from any
+# faction's decision (observational data) exactly as the adaptive catalog computes them for its own decisions.
+def d_target_is_city(target_pick):
+    return bool(target_pick and target_pick[3])
+
+
+def d_target_dist(target_pick):
+    return target_pick[1] if target_pick else 11
+
+
+def d_defend_need(defense_call):
+    if not defense_call or defense_call[1] <= 0:
+        return 0.0
+    return round(defense_call[2] / (1 + 0.1 * defense_call[1]), 3)
+
+
+def d_military_allowed(target_pick, defense_call, surplus_troops, net_income):
+    """Orders that make sense for this unit now (the learned head only ranks these): attack needs a target, defend a
+    threatened own city, disband surplus troops that the income cannot carry."""
+    out = ["fortify", "move"]
+    if target_pick:
+        out.insert(0, "attack")
+    if defense_call and defense_call[1] > 0:
+        out.insert(1 if target_pick else 0, "defend")
+    if surplus_troops > 0 and net_income < 0:
+        out.append("disband")
+    return out
+
+
+def d_infra_best(infra_value):
+    return max(infra_value.values())
+
+
+DERIVED = {"target_is_city": (d_target_is_city, ["target_pick"]), "target_dist": (d_target_dist, ["target_pick"]),
+           "defend_need": (d_defend_need, ["defense_call"]),
+           "military_allowed": (d_military_allowed, ["target_pick", "defense_call", "surplus_troops", "net_income"]),
+           "infra_best": (d_infra_best, ["infra_value"])}
+
+
+def make_catalog(pers: str, learned_build: bool = False, learned: tuple = ()) -> Catalog:
+    """learned: questions answered by a learned head instead of a rule (the adaptive faction: build, order_military,
+    stance). For those, the hard checks look only at the state, never at a rule's preference, so they veto whatever the
+    head proposes."""
     w = PERSONALITIES[pers]
     cat = Catalog()
+    learned = set(learned) | ({"build"} if learned_build else set())
 
     # ------------------------------------------------------------------ city: build
     @cat.fn
@@ -169,7 +214,7 @@ def make_catalog(pers: str, learned_build: bool = False) -> Catalog:
 
     @cat.fn
     def infra_best(infra_value):
-        return max(infra_value.values())
+        return d_infra_best(infra_value)
 
     @cat.fn
     def military_need(threat_ratio, at_war, garrison, is_capital):
@@ -197,7 +242,7 @@ def make_catalog(pers: str, learned_build: bool = False) -> Catalog:
         "personality-weighted value of each affordable option"
         return score_build(w, affordable, growth_need, infra_value, military_need, expand_value, trade_value, gold_need)
 
-    if not learned_build:
+    if "build" not in learned:
         @cat.rule("build")
         def build(build_scores):
             return argmax(build_scores, econ.BUILD_OPTIONS) or "gold"
@@ -248,14 +293,40 @@ def make_catalog(pers: str, learned_build: bool = False) -> Catalog:
             s["disband"] = 0.9
         return {k: round(v, 3) for k, v in s.items()}
 
-    @cat.check(hard=True, then={"order_military": "fortify"})
-    def keeps_capital_defender(last_capital_defender, military_scores):
-        "HARD: the capital's last defender never leaves it"
-        return not last_capital_defender or argmax(military_scores, MIL_OPTS) in ("fortify", "defend")
+    @cat.fn
+    def target_is_city(target_pick):
+        "the picked target is an enemy city"
+        return d_target_is_city(target_pick)
 
-    @cat.rule("order_military")
-    def order_military(military_scores):
-        return argmax(military_scores, MIL_OPTS)
+    @cat.fn
+    def target_dist(target_pick):
+        "distance to the picked target (11: none)"
+        return d_target_dist(target_pick)
+
+    @cat.fn
+    def defend_need(defense_call):
+        "threat ratio of the most threatened own city nearby, discounted by distance (0: none)"
+        return d_defend_need(defense_call)
+
+    @cat.fn
+    def military_allowed(target_pick, defense_call, surplus_troops, net_income):
+        "orders that make sense now: attack needs a target, defend a threatened city, disband surplus troops when broke"
+        return d_military_allowed(target_pick, defense_call, surplus_troops, net_income)
+
+    if "order_military" in learned:
+        @cat.check(hard=True, then={"order_military": "fortify"})
+        def keeps_capital_defender(last_capital_defender):
+            "HARD: the capital's last defender never leaves it (whatever the learned head prefers)"
+            return not last_capital_defender
+    else:
+        @cat.check(hard=True, then={"order_military": "fortify"})
+        def keeps_capital_defender(last_capital_defender, military_scores):
+            "HARD: the capital's last defender never leaves it"
+            return not last_capital_defender or argmax(military_scores, MIL_OPTS) in ("fortify", "defend")
+
+        @cat.rule("order_military")
+        def order_military(military_scores):
+            return argmax(military_scores, MIL_OPTS)
 
     # ------------------------------------------------------------------ settlers
     @cat.fn
@@ -356,31 +427,30 @@ def make_catalog(pers: str, learned_build: bool = False) -> Catalog:
         peace = 1.2 + 0.2 * w["trade"]
         return {"war": round(war, 3), "peace": round(peace, 3)}
 
-    @cat.check(hard=True, then={"stance": "peace"})
-    def war_needs_strength(stance_scores, strength_ratio):
-        "HARD: never declare or keep a war below 80% of the enemy's strength"
-        return argmax(stance_scores, STANCE_OPTS) != "war" or strength_ratio >= econ.WAR_MIN_RATIO
+    if "stance" in learned:
+        @cat.check(hard=True, then={"stance": "peace"})
+        def war_needs_strength(strength_ratio):
+            "HARD: never declare or keep a war below 80% of the enemy's strength (whatever the learned head prefers)"
+            return strength_ratio >= econ.WAR_MIN_RATIO
+    else:
+        @cat.check(hard=True, then={"stance": "peace"})
+        def war_needs_strength(stance_scores, strength_ratio):
+            "HARD: never declare or keep a war below 80% of the enemy's strength"
+            return argmax(stance_scores, STANCE_OPTS) != "war" or strength_ratio >= econ.WAR_MIN_RATIO
 
-    @cat.rule("stance")
-    def stance(stance_scores):
-        return argmax(stance_scores, STANCE_OPTS)
+        @cat.rule("stance")
+        def stance(stance_scores):
+            return argmax(stance_scores, STANCE_OPTS)
 
     return cat
 
 
+LEARNED_QUESTIONS = ("build", "order_military", "stance")
+
+
 def make_system(pers: str) -> tuple[Catalog, System]:
-    cat = make_catalog(pers, learned_build=(pers == "adaptive"))
+    cat = make_catalog(pers, learned=LEARNED_QUESTIONS if pers == "adaptive" else ())
     return cat, System(cat, QUESTIONS)
-
-
-# ======================================================================================================================
-# The adaptive faction's learner: fit_fast + teach from the outcomes of its own build decisions
-# ======================================================================================================================
-
-FEATURES = ["growth_need", "infra_best", "military_need", "expand_value", "trade_value", "gold_need", "threat_ratio",
-            "food_surplus"]
-HORIZON = 12          # a build decision is judged by how its city did HORIZON turns later
-REFIT_EVERY = 1000    # periodic refit from the bounded example buffer (forgetting + no numerical drift)
 
 
 def random_city_state(rng: random.Random) -> dict:
@@ -397,61 +467,6 @@ def random_city_state(rng: random.Random) -> dict:
             "garrison": rng.choice([0, 2, 2, 3, 5]), "is_capital": rng.random() < 0.3, "n_cities": rng.randint(1, 8),
             "fleet": fleet, "unit_cap": rng.choice([6, 8, 12]), "settle_value": rng.choice([0.0, 8.0, 12.0, 16.0]),
             "trade_partners": rng.randint(0, 4), "at_war": rng.random() < 0.3, "unimproved": rng.randint(0, 5)}
-
-
-class Learner:
-    """Reward-weighted self-imitation for the adaptive faction's `build` question.
-
-    Every build decision is kept (bounded ring) with its city's value; HORIZON turns later its reward is
-    value_after - value_before (a lost city is -25). Decisions whose reward reaches the rolling 60th percentile are taught
-    to the head with System.teach (a rank-one update, ~0.2 ms). With probability eps the faction explores a random
-    affordable option. Every REFIT_EVERY turns the head is refitted with fit_fast on the last 400 good examples."""
-
-    def __init__(self, seed: int):
-        self.rng = random.Random(f"learner-{seed}")
-        self.examples = deque(maxlen=400)       # [state, answer] taught so far (bounded)
-        self.pending = deque(maxlen=400)        # [turn, city id, state, answer, value before]
-        self.rewards = deque(maxlen=300)        # recent rewards (for the percentile threshold)
-        self.curve = deque(maxlen=400)          # [turn, mean reward of the adaptive faction's decisions, others, taught]
-        self.teaches = 0
-        self.refits = 0
-        self.explored = 0
-        self.eps = 0.12
-        self.head_state = None
-
-    def bootstrap(self, system: System):
-        rng = random.Random(1234)
-        cat = system.catalog
-        ex = []
-        for _ in range(80):
-            st = random_city_state(rng)
-            v = system.facts_for(st)
-            s = score_build(BALANCED, v["affordable"], v["growth_need"], v["infra_value"], v["military_need"],
-                            v["expand_value"], v["trade_value"], v["gold_need"])
-            ex.append((st, argmax(s, econ.BUILD_OPTIONS) or "gold"))
-        del cat
-        self.examples.extend([list(e) for e in ex])
-        system.fit_fast("build", ex, features=FEATURES)
-
-    def threshold(self):
-        if len(self.rewards) < 20:
-            return 0.5
-        return float(np.percentile(list(self.rewards), 60))
-
-    def to_dict(self, system):
-        return {"rng": _rng_to(self.rng), "examples": list(self.examples), "pending": list(self.pending),
-                "rewards": list(self.rewards), "curve": list(self.curve), "teaches": self.teaches, "refits": self.refits,
-                "explored": self.explored, "eps": self.eps, "head": head_to_dict(system.heads.get("build"))}
-
-    def load(self, d, system):
-        self.rng = _rng_from(d["rng"])
-        self.examples = deque(d["examples"], maxlen=400)
-        self.pending = deque(d["pending"], maxlen=400)
-        self.rewards = deque(d["rewards"], maxlen=300)
-        self.curve = deque(d["curve"], maxlen=400)
-        self.teaches, self.refits, self.explored, self.eps = d["teaches"], d["refits"], d["explored"], d["eps"]
-        if d.get("head"):
-            system.heads["build"] = head_from_dict(d["head"])
 
 
 def _rng_to(r):

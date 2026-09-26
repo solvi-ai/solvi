@@ -178,7 +178,7 @@ def card_html(g, key):
            f"<div class='sv-why'>why: {esc(r.why)}</div></div>"]
     if r.probs:
         top = sorted(r.probs.items(), key=lambda t: -t[1])[:5]
-        out.append("<div class='sv-dim'>learned head (fit_fast + teach) probabilities: " +
+        out.append("<div class='sv-dim'>learned value head (value + UCB, softmax) probabilities: " +
                    ", ".join(f"{esc(k)} {v:.2f}" for k, v in top) + "</div>")
     hc = []
     for rec in res.trace.records:
