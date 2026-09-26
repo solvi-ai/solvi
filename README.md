@@ -27,8 +27,11 @@ script that computes everything, and 152 ms when an expired policy settles the c
 
 - [solvi playground](https://huggingface.co/spaces/solvi-ai/playground): write a decision task in Python and run it, watch the
   strategist's plan, tamper with a trace and see the replay catch it, learn rules from examples.
-- [solvi arcade](https://huggingface.co/spaces/solvi-ai/arcade): game agents built from small functions that explain every move.
-- Both run **entirely in your browser** (Pyodide): no server, no GPU, nothing you type leaves the page.
+- [solvi documents](https://huggingface.co/spaces/solvi-ai/documents): cited, typed answers from contracts, invoices, receipts,
+  leases and more — the ModernBERT extractor (ONNX) and the decisions both run in your browser; add a field by describing it.
+- [solvi arcade](https://huggingface.co/spaces/solvi-ai/arcade): game agents that explain every move — tic-tac-toe, maze,
+  minesweeper, 20 questions, Mafia detective, a bot arena, and "hack the trace".
+- All run **entirely in your browser** (Pyodide): no server, no GPU, nothing you type leaves the page.
 - Models: [solvi-ai/extract-base](https://huggingface.co/solvi-ai/extract-base) (fields by description) and
   [solvi-ai/extract-receipts](https://huggingface.co/solvi-ai/extract-receipts).
 

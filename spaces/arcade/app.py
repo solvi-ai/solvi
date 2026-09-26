@@ -477,7 +477,7 @@ with gr.Blocks(title="solvi arcade", theme=THEME, css=CSS) as demo:
     gr.Markdown(INTRO, elem_id="hero")
     with gr.Tabs():
         # ---------------------------------------------------------------------------------------------------- TTT
-        with gr.Tab("❌⭕ Tic-tac-toe"):
+        with gr.Tab("❌⭕ XO"):
             gr.Markdown("Play against a solvi agent whose whole brain is seven small functions (win, block, fork, forcing move ...) "
                         f"and one rule, from `{tictactoe.SOURCE}`. It answers every move with its reason. "
                         "It has never lost.")
@@ -511,7 +511,7 @@ with gr.Blocks(title="solvi arcade", theme=THEME, css=CSS) as demo:
             demo.load(ttt_new, [ttt_side, ttt_stats, ttt_explain_cb], ttt_outs)
 
         # ---------------------------------------------------------------------------------------------------- maze
-        with gr.Tab("👻 Ghost maze"):
+        with gr.Tab("👻 Maze"):
             gr.Markdown(
                 "Pac is a solvi catalog: `legal_moves`, BFS `dot_dist` and `ghost_dist` per move, `ghost_reach`, `danger`, "
                 "`safe_moves`, one scoring function `greedy_move`, and a **hard check** `greedy_is_safe`: *never step onto a "
@@ -555,7 +555,7 @@ with gr.Blocks(title="solvi arcade", theme=THEME, css=CSS) as demo:
                 bench_run, mz_bench_size, mz_bench)
 
         # ---------------------------------------------------------------------------------------------------- fusion
-        with gr.Tab("🃏 Card fusion lab"):
+        with gr.Tab("🃏 Fusion"):
             gr.Markdown(
                 "Fuse two weapon cards. The fused card then goes through a solvi balance catalog: it computes the power "
                 "(dps × targets × effects), **hard checks** slow ≤ 0.5, lifesteal ≤ 0.4, cooldown ≥ 0.3 s (a violation is "
@@ -584,17 +584,17 @@ with gr.Blocks(title="solvi arcade", theme=THEME, css=CSS) as demo:
             demo.load(do_fuse, [fx_a, fx_b, fx_law], [fx_cards, fx_report])
 
         # ---------------------------------------------------------------------------------------------------- bot
-        with gr.Tab("💣 Minesweeper"):
+        with gr.Tab("💣 Mines"):
             tab_ms.build()
-        with gr.Tab("🔮 20 questions"):
+        with gr.Tab("🔮 20 Q"):
             tab_ak.build()
-        with gr.Tab("🎭 Mafia detective"):
+        with gr.Tab("🎭 Mafia"):
             tab_mf.build()
-        with gr.Tab("🕵️ Hack the trace"):
+        with gr.Tab("🕵️ Hack"):
             tab_th.build()
-        with gr.Tab("🏟️ Bot arena"):
+        with gr.Tab("🏟️ Arena"):
             tab_ar.build()
-        with gr.Tab("🛠️ Build your own bot"):
+        with gr.Tab("🛠️ Your bot"):
             gr.Markdown(
                 "This is the maze agent's scoring function — the one piece of Pac's catalog you can rewrite. Change the "
                 f"weights or the logic, then run {sandbox.N_GAMES} seeded games against the default bot. solvi plans the flow "
