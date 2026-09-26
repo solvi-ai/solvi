@@ -1,11 +1,15 @@
-"""solvi arcade — game agents built from small Python functions, rules and hard checks, explaining every move.
+"""solvi arcade (browser edition) — game agents built from small Python functions, rules and hard checks, explaining
+every move. Runs in the visitor's browser with Gradio-Lite (Pyodide): index.html mounts this file and games/*.py.
 
-Local run (from solvi/spaces/arcade):  PYTHONPATH=../../src python app.py"""
+No threads and no subprocesses in Pyodide: the benchmark runs on a button click, and "Build your own bot" runs the code
+in-process under a sys.settrace guard (games/sandbox.py).
+
+Local run with a normal Python (from solvi/spaces/arcade-lite):  PYTHONPATH=../../src python app.py"""
 from __future__ import annotations
 
+import asyncio
 import html
 import random
-import threading
 import time
 
 import gradio as gr
@@ -13,6 +17,7 @@ from games import fusion, maze, sandbox, tictactoe
 from games.explain import why_html
 
 REPO = "https://github.com/solvi-ai/solvi"
+PLAYGROUND = "https://huggingface.co/spaces/solvi-ai/playground"
 
 # ====================================================================================================================
 # Tic-tac-toe
@@ -20,17 +25,12 @@ REPO = "https://github.com/solvi-ai/solvi"
 
 CELL_NAMES = ["top-left", "top", "top-right", "left", "center", "right", "bottom-left", "bottom", "bottom-right"]
 EMPTY = " "
-_TTT_GLOBAL = {"games": 0, "agent_losses": 0, "agent_wins": 0, "draws": 0}
-_TTT_LOCK = threading.Lock()
 
 
 def _ttt_counter(stats):
-    with _TTT_LOCK:
-        g = dict(_TTT_GLOBAL)
     return (f"### You can't beat it\n"
-            f"**You:** {stats['games']} games · agent won {stats['agent_wins']} · draws {stats['draws']} · "
-            f"**agent lost {stats['agent_losses']}**  \n"
-            f"**Everyone since this Space started:** {g['games']} games · agent lost **{g['agent_losses']}**")
+            f"**You, in this tab:** {stats['games']} games · agent won {stats['agent_wins']} · draws {stats['draws']} · "
+            f"**agent lost {stats['agent_losses']}**")
 
 
 def _ttt_cells(game):
@@ -80,9 +80,6 @@ def _ttt_count(game, stats):
     key = {"agent": "agent_wins", "human": "agent_losses", "draw": "draws"}[game.result]
     stats["games"] += 1
     stats[key] += 1
-    with _TTT_LOCK:
-        _TTT_GLOBAL["games"] += 1
-        _TTT_GLOBAL[key] += 1
 
 
 def _ttt_outputs(game, resp, stats, explain, status=None):
@@ -116,40 +113,53 @@ def ttt_explain(game, explain):
 CAT_ON, SYS_ON = maze.build_system(True)
 CAT_OFF, SYS_OFF = maze.build_system(False)
 PAC_ANGLE = {"UP": 0, "RIGHT": 90, "DOWN": 180, "LEFT": 270, None: 90}
-_BENCH: dict = {}
+NATIVE_BENCH = {"with_check": {"win_rate": 0.59, "avg_score": 764, "avg_dots_pct": 0.94, "avg_deaths": 1.95},
+                "without_check": {"win_rate": 0.04, "avg_score": 531, "avg_dots_pct": 0.76, "avg_deaths": 2.96}}
+BENCH_SIZES = {"20 games (about 8 s)": 20, "100 games (about 20 s)": 100}
 
 
-def _run_benchmark():
-    t0 = time.time()
-    _BENCH["result"] = maze.benchmark(100)
-    _BENCH["seconds"] = time.time() - t0
-
-
-_BENCH_THREAD = threading.Thread(target=_run_benchmark, daemon=True)
-_BENCH_THREAD.start()
-
-
-def bench_markdown():
-    _BENCH_THREAD.join()
-    b = _BENCH["result"]
+def _bench_rows(b, vetoes=True):
     rows = []
     for key, label in (("with_check", "hard safety check **ON**"), ("without_check", "hard safety check OFF")):
         s = b[key]
         rows.append(f"| {label} | **{s['win_rate'] * 100:.0f}%** | {s['avg_score']:.0f} | {s['avg_dots_pct'] * 100:.0f}% | "
-                    f"{s['avg_deaths']:.2f} | {s['avg_forced']:.1f} |")
+                    f"{s['avg_deaths']:.2f} |" + (f" {s['avg_forced']:.1f} |" if vetoes else ""))
+    return "\n".join(rows)
+
+
+def bench_native_markdown():
     return ("#### Benchmark: 100 seeded games, same scoring rule, same ghosts\n"
+            "| agent | games cleared | avg score | dots eaten | lives lost (of 3) |\n|---|---|---|---|---|\n" +
+            _bench_rows(NATIVE_BENCH, vetoes=False) +
+            "\n\n<span class='sv-dim'>Measured with native Python (about 7 s on one CPU core). "
+            f"A game is cleared when Pac eats all {maze.TOTAL_DOTS} dots before losing 3 lives (limit {maze.MAX_TICKS} ticks). "
+            "The only difference between the rows is one hard check. Press the button to recompute it here, in your "
+            "browser.</span>")
+
+
+def bench_run(size):
+    n = BENCH_SIZES.get(size, 20)
+    t0 = time.time()
+    b = maze.benchmark(n)
+    dt = time.time() - t0
+    return (f"#### Benchmark: {n} seeded games, computed in your browser in {dt:.1f} s\n"
             "| agent | games cleared | avg score | dots eaten | lives lost (of 3) | vetoes per game |\n"
-            "|---|---|---|---|---|---|\n" + "\n".join(rows) +
-            f"\n\n<span class='sv-dim'>Computed when this Space started ({_BENCH['seconds']:.1f} s on this CPU). "
-            f"A game is cleared when Pac eats all {maze.TOTAL_DOTS} dots before losing 3 lives "
-            f"(limit {maze.MAX_TICKS} ticks). The only difference between the rows is one hard check.</span>")
+            "|---|---|---|---|---|---|\n" + _bench_rows(b) +
+            "\n\n<span class='sv-dim'>Seeds 0 to " + str(n - 1) + ", the same as the native run. "
+            "The native numbers over 100 games: check ON 59% cleared, avg score 764; check OFF 4%, avg score 531.</span>")
 
 
 def board_html(game, resp=None, show_danger=False):
     ghosts = {}
     for gh in game.ghosts:
         ghosts.setdefault(gh.pos, gh)
-    danger = set(map(tuple, resp.values.get("ghost_reach", []))) if (resp is not None and show_danger) else set()
+    danger = set()
+    if show_danger and not game.over:
+        # the agent's ghost_reach fact; computed here too, because with the check OFF the flow does not need it
+        reach = resp.values.get("ghost_reach") if resp is not None else None
+        if reach is None:
+            reach = {n for gh in game.ghosts for _, n in maze.open_neighbors(gh.pos)} | {gh.pos for gh in game.ghosts}
+        danger = set(map(tuple, reach))
     cells = []
     for r in range(maze.H):
         for c in range(maze.W):
@@ -221,14 +231,14 @@ def maze_step(game, safety, show_danger):
     return _maze_outputs(game, resp, mv, note, safety, show_danger)
 
 
-def maze_play(game, safety, show_danger):
+async def maze_play(game, safety, show_danger):
     resp = mv = note = None
     for _ in range(50):
         if game.over:
             break
         mv, resp, note = _agent_tick(game, safety)
         yield _maze_outputs(game, resp, mv, note, safety, show_danger)
-        time.sleep(0.07)
+        await asyncio.sleep(0.07)       # time.sleep would block the browser's Python worker
     yield _maze_outputs(game, resp, mv, note, safety, show_danger)
 
 
@@ -352,10 +362,10 @@ def run_user_bot(code, safety):
     t0 = time.time()
     res = sandbox.run_bot(code, safety=safety)
     dt = time.time() - t0
-    base = _default_run(safety)
     if not res["ok"]:
         return (f"<div class='sv-err'><b>Your bot did not run ({html.escape(res['kind'])}).</b>"
                 f"<pre>{html.escape(res['error'])}</pre></div>", "")
+    base = _default_run(safety)
     you = res["summary"]
 
     def row(name, s):
@@ -370,7 +380,8 @@ def run_user_bot(code, safety):
                 f"(solvi abstained and Pac took the first legal move). First problem:"
                 f"<pre>{html.escape(str(res.get('first_error')))}</pre></div>")
     md = (f"### {verdict}\n"
-          f"{sandbox.N_GAMES} seeded games, hard safety check {'ON' if safety else 'OFF'}, ran in {dt:.1f} s (limit 5 s)\n\n"
+          f"{sandbox.N_GAMES} seeded games, hard safety check {'ON' if safety else 'OFF'}, ran in your browser in {dt:.1f} s "
+          f"(limit {sandbox.DEADLINE_S:.0f} s)\n\n"
           "| bot | games cleared | avg score | dots eaten | lives lost | vetoes per game |\n|---|---|---|---|---|---|\n"
           f"{row('your bot', you)}\n{row('default bot', base)}\n\n"
           "Per game (seed: score, ✓ = cleared): " +
@@ -436,8 +447,9 @@ CSS = """
 .fx-bar div {height: 100%; background: #fff; border-radius: 4px;}
 .fx-v {text-align: right; font-variant-numeric: tabular-nums;}
 .fx-chips {display: flex; flex-wrap: wrap; gap: 4px; margin-top: 6px;}
-.fx-chip {background: #00000038; border-radius: 999px; padding: 1px 7px; font-size: 0.72rem;}
-.fx-mark {background: #fff; color: #b00020; border-radius: 6px; padding: 0 4px; font-weight: 700; text-shadow: none; font-size: 0.68rem;}
+.fx-chip {background: #00000038; border-radius: 999px; padding: 1px 7px; font-size: 0.72rem; color: #fff;}
+.fx-card span, .fx-card div {color: inherit;}
+.fx-card .fx-mark {background: #fff; color: #b00020; border-radius: 6px; padding: 0 4px; font-weight: 700; text-shadow: none; font-size: 0.68rem;}
 .fx-power {margin-top: 7px; font-weight: 800;}
 .fx-sig {font-size: 0.7rem; margin-top: 5px; opacity: 0.9;}
 .fx-changes {margin: 0 0 4px 18px;}
@@ -447,11 +459,17 @@ CSS = """
 INTRO = f"""
 # 🕹️ solvi arcade
 **Game agents made of small Python functions, a few rules and hard checks — strong, and every move is explained.**
-No neural network, no GPU: each agent is a [solvi]({REPO}) catalog. For every move it shows the rule's inputs,
-the facts it computed this turn and which hard check fired.
+No neural network, no GPU, **no server: the agents run right here, in your browser** (Python compiled to WebAssembly).
+Each agent is a [solvi]({REPO}) catalog. For every move it shows the rule's inputs, the facts it computed this turn and
+which hard check fired. Write your own decision task in the [solvi playground]({PLAYGROUND}).
 """
 
-with gr.Blocks(title="solvi arcade") as demo:
+# Soft's default fonts are served from the Gradio server's /static folder, which Gradio-Lite does not have: use Google Fonts.
+THEME = gr.themes.Soft(primary_hue="violet", secondary_hue="amber",
+                       font=[gr.themes.GoogleFont("Montserrat"), "ui-sans-serif", "system-ui", "sans-serif"],
+                       font_mono=[gr.themes.GoogleFont("IBM Plex Mono"), "ui-monospace", "Consolas", "monospace"])
+
+with gr.Blocks(title="solvi arcade", theme=THEME, css=CSS) as demo:
     gr.Markdown(INTRO, elem_id="hero")
     with gr.Tabs():
         # ---------------------------------------------------------------------------------------------------- TTT
@@ -517,7 +535,10 @@ with gr.Blocks(title="solvi arcade") as demo:
                 with gr.Column(scale=6):
                     mz_log = gr.Textbox(label="tick log (newest first)", lines=9, max_lines=9, interactive=False)
                     mz_why = gr.HTML()
-            mz_bench = gr.Markdown("#### Benchmark: running 100 seeded games with and without the check …")
+            with gr.Row(equal_height=True):
+                mz_bench_size = gr.Radio(list(BENCH_SIZES), value=next(iter(BENCH_SIZES)), label="benchmark size", scale=3)
+                mz_bench_btn = gr.Button("📊 Run the benchmark in your browser", scale=2)
+            mz_bench = gr.Markdown(bench_native_markdown())
             mz_outs = [mz_board, mz_stats, mz_log, mz_why, mz_game]
             mz_step.click(maze_step, [mz_game, mz_safety, mz_danger], mz_outs)
             mz_play.click(maze_play, [mz_game, mz_safety, mz_danger], mz_outs)
@@ -526,7 +547,8 @@ with gr.Blocks(title="solvi arcade") as demo:
                 btn.click(lambda g, s, d, mv=mv: maze_human(mv, g, s, d), [mz_game, mz_safety, mz_danger], mz_outs)
             mz_danger.change(maze_redraw, [mz_game, mz_safety, mz_danger], mz_board)
             demo.load(maze_reset, [mz_seed, mz_safety, mz_danger], mz_outs)
-            demo.load(bench_markdown, None, mz_bench)
+            mz_bench_btn.click(lambda: "#### Benchmark: running in your browser …", None, mz_bench).then(
+                bench_run, mz_bench_size, mz_bench)
 
         # ---------------------------------------------------------------------------------------------------- fusion
         with gr.Tab("🃏 Card fusion lab"):
@@ -566,26 +588,27 @@ with gr.Blocks(title="solvi arcade") as demo:
                 "Ideas: set `W_GHOST = 0` and turn the safety check off; use `danger` or `safe_moves` yourself; prefer moves "
                 "that keep more `legal_moves` open.")
             with gr.Row():
-                with gr.Column(scale=7):
+                with gr.Column(scale=6):
                     bot_code = gr.Code(value=maze.DEFAULT_BOT_CODE, language="python", lines=26, max_lines=40,
                                        label="greedy_move (Python)", interactive=True)
-                with gr.Column(scale=5):
+                with gr.Column(scale=6):
                     bot_safety = gr.Checkbox(value=True, label="keep the hard safety check greedy_is_safe")
                     with gr.Row():
                         bot_run = gr.Button(f"▶ Run {sandbox.N_GAMES} games", variant="primary")
                         bot_reset = gr.Button("Reset code")
                     bot_err = gr.HTML()
                     bot_out = gr.Markdown()
-                    gr.Markdown("<span class='sv-dim'>Your code runs in a separate process with a 5 s timeout, CPU, memory, "
-                                "file-size and process limits, in a temporary directory and without environment variables. "
-                                "It is resource-limited, not a hardened security sandbox.</span>")
+                    gr.Markdown("<span class='sv-dim'>Your code runs **in your own browser**, in this page's Python, so "
+                                "nothing is sent to a server. A guard stops it when one call runs more than "
+                                f"{sandbox.MAX_LINES_PER_CALL:,} lines (an infinite loop) or the whole run takes more than "
+                                f"{sandbox.DEADLINE_S:.0f} s. A loop inside C code (e.g. `sum(itertools.count())`) "
+                                "cannot be interrupted: then reload the page.</span>")
             bot_run.click(run_user_bot, [bot_code, bot_safety], [bot_err, bot_out])
             bot_reset.click(lambda: maze.DEFAULT_BOT_CODE, None, bot_code)
 
-    gr.Markdown(f"<span class='sv-dim'>Built with [solvi]({REPO}) — decision systems from a catalog of Python functions and "
-                "checks. CPU only, no models. Every answer here is a solvi `Response`: `r[q].answer / .why / .status`, "
-                "the planned `flow` and a hash-chained `trace`.</span>")
+    gr.Markdown(f"<span class='sv-dim'>Built with [solvi]({REPO}) (`pip install solvi`) — decision systems from a catalog "
+                "of Python functions and checks. No models, no server: this page runs Python in your browser with "
+                "Gradio-Lite and Pyodide. Every answer here is a solvi `Response`: `r[q].answer / .why / .status`, "
+                f"the planned `flow` and a hash-chained `trace`. More: the [solvi playground]({PLAYGROUND}).</span>")
 
-
-if __name__ == "__main__":
-    demo.launch(theme=gr.themes.Soft(primary_hue="violet", secondary_hue="amber"), css=CSS)
+demo.launch()

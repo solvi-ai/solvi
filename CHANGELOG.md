@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.2.0 — 2026-09-26
+
+- `System.fit_fast`: a closed-form ridge answer head trained in milliseconds (ridge strength by exact leave-one-out accuracy,
+  pairwise features when there are few), and `System.teach` now updates it instantly (rank-one update, ~0.2 ms).
+- `LongSpanExtractor.embed` / `embedder()`: a document embedding usable as a `fit_fast` feature.
+- A learned head abstains when its features could not be computed.
+- `tools/export_onnx.py`: export an extractor to ONNX (fp32 / fp16 / int8) with an agreement check.
+- Spaces now run entirely in the browser (Gradio-Lite + Pyodide): playground and arcade.
+- Examples 09 (strategy at scale) and 10 (learning in milliseconds); benchmarks `strategist_scale.py`, `fast_head.py`.
+
 ## 0.1.1 — 2026-09-26
 
 - Runs in the browser (Pyodide): parallel execution falls back to one-by-one where threads are unavailable.

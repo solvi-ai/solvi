@@ -1,0 +1,106 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>solvi arcade</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22%3E%3Ctext y=%22.9em%22 font-size=%2290%22%3E🕹️%3C/text%3E%3C/svg%3E" />
+  <meta name="description" content="Game agents built with solvi from small Python functions, rules and hard checks. They explain every move and run entirely in your browser." />
+  <script>
+    // Package "time machine" for Gradio-Lite 5.45.0 (released 2025-09-10).
+    // Its Python worker installs gradio 5.45 with micropip, whose resolver is greedy: gradio_client asks for
+    // huggingface-hub>=0.19.3 and gets 1.x/2.x, and then gradio's huggingface-hub<1.0 pin (and anyio<5, ...) fails.
+    // Fix: inside the worker, PyPI's simple index is filtered to files uploaded before the Gradio-Lite release, so every
+    // package resolves to what existed when that release was built. solvi is exempt (it needs the current version).
+    (() => {
+      const prelude = `(() => {
+        const CUTOFF = Date.parse("2025-09-10T17:00:00Z");
+        const EXEMPT = new Set(["solvi"]);
+        const realFetch = self.fetch.bind(self);
+        self.fetch = async (input, init) => {
+          const url = typeof input === "string" ? input : (input && input.url) || String(input);
+          const m = /^https:\\/\\/pypi\\.org\\/simple\\/([^/?#]+)\\/?$/.exec(url);
+          const resp = await realFetch(input, init);
+          if (!m || EXEMPT.has(m[1].toLowerCase()) || !resp.ok) return resp;
+          try {
+            const data = await resp.clone().json();
+            if (!Array.isArray(data.files)) return resp;
+            const kept = data.files.filter(f => !f["upload-time"] || Date.parse(f["upload-time"]) <= CUTOFF);
+            if (!kept.length) return resp;
+            data.files = kept;
+            return new Response(JSON.stringify(data), { status: 200, headers: {
+              "Content-Type": resp.headers.get("Content-Type") || "application/vnd.pypi.simple.v1+json" } });
+          } catch (e) { return resp; }
+        };
+      })();`;
+      const RealWorker = window.Worker;
+      window.Worker = function (url, opts) {
+        const boot = new Blob([prelude, "\nimportScripts(" + JSON.stringify(new URL(String(url), location.href).href) + ");"], { type: "text/javascript" });
+        return new RealWorker(URL.createObjectURL(boot), opts);
+      };
+      window.Worker.prototype = RealWorker.prototype;
+    })();
+  </script>
+  <script type="module" crossorigin src="https://cdn.jsdelivr.net/npm/@gradio/lite@5.45.0/dist/lite.js"></script>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@gradio/lite@5.45.0/dist/lite.css" />
+  <style>
+    :root { --sv-bg: #ffffff; --sv-fg: #1f2937; --sv-dim: #6b7280; --sv-card: #f6f3ff; --sv-border: #ddd6fe; --sv-accent: #7c3aed; }
+    @media (prefers-color-scheme: dark) {
+      :root:not([data-theme="light"]) { --sv-bg: #0b0f19; --sv-fg: #e5e7eb; --sv-dim: #9ca3af; --sv-card: #1a1530; --sv-border: #3b2f6b; --sv-accent: #a78bfa; }
+    }
+    :root[data-theme="dark"] { --sv-bg: #0b0f19; --sv-fg: #e5e7eb; --sv-dim: #9ca3af; --sv-card: #1a1530; --sv-border: #3b2f6b; --sv-accent: #a78bfa; }
+    html, body { margin: 0; background: var(--sv-bg); }
+    #sv-loading { max-width: 720px; margin: 24px auto 0; padding: 0 16px; box-sizing: border-box;
+      font-family: system-ui, -apple-system, "Segoe UI", sans-serif; color: var(--sv-fg); }
+    #sv-loading .card { background: var(--sv-card); border: 1px solid var(--sv-border); border-radius: 14px; padding: 16px 18px; }
+    #sv-loading h1 { font-size: 1.35rem; margin: 0 0 6px; }
+    #sv-loading p { margin: 6px 0; line-height: 1.45; font-size: 0.95rem; }
+    #sv-loading .dim { color: var(--sv-dim); font-size: 0.85rem; }
+    #sv-loading a { color: var(--sv-accent); }
+    #sv-loading .bar { height: 4px; border-radius: 2px; background: var(--sv-border); overflow: hidden; margin-top: 12px; }
+    #sv-loading .bar div { width: 30%; height: 100%; background: var(--sv-accent); border-radius: 2px; animation: sv-slide 1.4s ease-in-out infinite; }
+    @keyframes sv-slide { 0% { margin-left: -30%; } 100% { margin-left: 100%; } }
+    #sv-loading.gone { display: none; }
+  </style>
+</head>
+<body>
+  <div id="sv-loading" role="status">
+    <div class="card">
+      <h1>🕹️ solvi arcade is starting in your browser</h1>
+      <p>The game agents are Python, and they run on your machine, not on a server. The first visit downloads a Python
+        runtime (Pyodide) with numpy, scipy, Gradio and <a href="https://github.com/solvi-ai/solvi">solvi</a>:
+        about 20–30 MB, once. Later visits load it from the browser cache.</p>
+      <p class="dim">This usually takes 20–60 seconds on the first visit.</p>
+      <div class="bar"><div></div></div>
+    </div>
+  </div>
+
+  <gradio-lite>
+    <gradio-requirements>
+solvi>=0.1.1
+    </gradio-requirements>
+    <gradio-file name="app.py" url="app.py" entrypoint></gradio-file>
+    <gradio-file name="games/__init__.py" url="games/__init__.py"></gradio-file>
+    <gradio-file name="games/_ttt_catalog.py" url="games/_ttt_catalog.py"></gradio-file>
+    <gradio-file name="games/tictactoe.py" url="games/tictactoe.py"></gradio-file>
+    <gradio-file name="games/explain.py" url="games/explain.py"></gradio-file>
+    <gradio-file name="games/maze.py" url="games/maze.py"></gradio-file>
+    <gradio-file name="games/fusion.py" url="games/fusion.py"></gradio-file>
+    <gradio-file name="games/sandbox.py" url="games/sandbox.py"></gradio-file>
+  </gradio-lite>
+
+  <script>
+    // Gradio-Lite fetches file URLs from its web worker, where a relative URL would not resolve against this page.
+    // This classic script runs before the deferred lite.js module, so the URLs are absolute when it reads them.
+    for (const el of document.querySelectorAll("gradio-file[url]")) {
+      el.setAttribute("url", new URL(el.getAttribute("url"), document.baseURI).href);
+    }
+    // Hide the loading note once the app has rendered its header.
+    const note = document.getElementById("sv-loading");
+    const obs = new MutationObserver(() => {
+      if (document.getElementById("hero")) { note.classList.add("gone"); obs.disconnect(); }
+    });
+    obs.observe(document.body, { childList: true, subtree: true });
+  </script>
+</body>
+</html>

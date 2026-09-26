@@ -1,32 +1,34 @@
-"""solvi playground: a Hugging Face Space (Gradio 6) for the solvi library.
+"""solvi playground, browser edition: a static Hugging Face Space on Gradio-Lite (Gradio 5 in Pyodide).
 
-Local run from a clone:   cd spaces/playground && PYTHONPATH=../../src python app.py
-On Spaces solvi comes from requirements.txt (`pip install solvi`)."""
+Everything, including the visitor's catalog code, runs inside the visitor's browser; there is no server.
+Local run: serve this folder (python -m http.server 8000) and open http://localhost:8000/index.html.
+It also runs as a normal Gradio 5 app: pip install "gradio>=5,<6" solvi && python app.py"""
 from __future__ import annotations
 
 import json
-import os
 import re
 import sys
 import time
 from datetime import date
 from pathlib import Path
 
-HERE = Path(__file__).resolve().parent
-sys.path.insert(0, str(HERE))
 try:
-    import solvi  # noqa: F401
-except ImportError:                                   # running from a clone without PYTHONPATH
-    sys.path.insert(0, str(HERE.parent.parent / "src"))
+    HERE = Path(__file__).resolve().parent
+except NameError:                                     # Gradio-Lite may run the entrypoint without __file__
+    HERE = Path.cwd()
+if str(HERE) not in sys.path:
+    sys.path.insert(0, str(HERE))
 
 import gradio as gr
 import pandas as pd
 
 import demos
 import strategy_demo as sd
-from runner import LIMITS_NOTE, run_sandboxed, serialize
+from sandbox import LIMITS_NOTE, run_job, serialize
 from solvi import System
 from solvi.strategist import plan
+
+IN_BROWSER = sys.platform == "emscripten"
 
 # ====================================================================== presets
 PRESET_DIR = HERE / "presets"
@@ -118,7 +120,7 @@ def summary_md(out, roundtrip_ms=None):
     abst = sum(a["status"] == "abstain" for a in out["answers"])
     t = f"**{n} question{'s' if n != 1 else ''}** answered in **{out['ms']:.2f} ms** (solvi decision time)"
     if roundtrip_ms is not None:
-        t += f", sandbox round trip {roundtrip_ms:.0f} ms"
+        t += f", {roundtrip_ms:.0f} ms in total with the replay"
     extra = []
     if forced:
         extra.append(f"{forced} forced by a hard check")
@@ -165,10 +167,10 @@ def _job(code, state_json, selected, known, tamper=None):
 
 
 def run_playground(code, state_json, selected, known):
-    """Run button: execute the catalog in the sandbox and render everything."""
+    """Run button: execute the catalog in-process (in the visitor's browser) and render everything."""
     job, err = _job(code, state_json, selected, known)
     t0 = time.perf_counter()
-    out = run_sandboxed(job) if job else {"ok": False, "error": err}
+    out = run_job(job) if job else {"ok": False, "error": err}
     rt = (time.perf_counter() - t0) * 1000
     if not out.get("ok"):
         msg = f"**Could not run.** {out.get('error', 'unknown error')}"
@@ -189,7 +191,7 @@ def tamper_playground(code, state_json, selected, known, step, value, rehash):
     if step is None:
         return "Run the system first, then pick a step to tamper with."
     job, err = _job(code, state_json, selected, known, {"step": int(step), "value": value or "", "rehash": bool(rehash)})
-    out = run_sandboxed(job) if job else {"ok": False, "error": err}
+    out = run_job(job) if job else {"ok": False, "error": err}
     if not out.get("ok"):
         return f"**Could not run.** {out.get('error')}"
     t = out["tamper"]
@@ -369,9 +371,12 @@ def run_strategy(asked, *fields):
     qs = [q for q in sd.QUESTIONS if q.name in names]
     system = System(sd.cat, sd.QUESTIONS)
     flow, t_plan = _timed(lambda: plan(sd.cat, qs, state.keys()))
-    _, t_seq = _timed(lambda: system.ask(state, names, workers=1))
-    res, t_par = _timed(lambda: system.ask(state, names, workers=8))
+    sd.reset_simulated()
+    res, t_seq = _timed(lambda: system.ask(state, names, workers=1))
+    sim_seq = sd.SIMULATED_MS[0]
+    sd.reset_simulated()
     _, t_all = _timed(lambda: sd.run_everything(state))
+    sim_all = sd.SIMULATED_MS[0]
     out = serialize(res, sd.cat, state, sd.QUESTIONS)
     total = len(sd.cat.parts) + len(sd.cat.rules)
     slow_run = [r.name for r in res.trace.records if r.name in sd.SLOW]
@@ -384,11 +389,25 @@ def run_strategy(asked, *fields):
           + f"Slow parts run: {', '.join(slow_run) or 'none'}"
           + (f"; avoided: {', '.join(slow_skip)}." if slow_skip else ".")
           + f"\n\n{replay_line(out)}")
-    bars = timing_html([("Plain script, computes everything", t_all, "#94a3b8"),
-                        ("solvi, one step at a time", t_seq, "#818cf8"),
-                        ("solvi, parallel (workers=8)", t_par, "#4f46e5")])
-    bars += (f'<div class="note">Measured live on this machine. solvi runs only the planned parts; with workers=8 independent '
-             f"slow parts overlap. Parallel is {t_all / max(t_par, 1e-6):.1f}x faster than the plain script.</div>")
+    if sd.REAL_SLEEP:
+        rows = [("Plain script, computes everything", t_all, "#94a3b8"), ("solvi, one step at a time", t_seq, "#818cf8")]
+        how = ("Measured live in your browser; the slow parts really wait (<code>time.sleep</code> works here).")
+    else:
+        rows = [("Plain script, computes everything", t_all + sim_all, "#94a3b8"),
+                ("solvi, one step at a time", t_seq + sim_seq, "#818cf8")]
+        how = (f"<code>time.sleep</code> does not wait in this browser runtime, so the slow parts are simulated: each bar is "
+               f"the compute time measured live plus the <b>simulated service time</b> of the slow parts that actually ran "
+               f"(plain script {t_all:.1f} ms + {sim_all:,.0f} ms simulated; solvi {t_seq:.1f} ms + {sim_seq:,.0f} ms "
+               "simulated).")
+    bars = timing_html(rows)
+    fast = rows[0][1] / max(rows[1][1], 1e-6)
+    bars += (f'<div class="note">{how} solvi runs only the planned parts: {fast:.1f}x faster than the plain script for '
+             "these questions.</div>")
+    bars += ('<div class="note" style="margin-top:10px"><b>Parallel (workers=8) is not available here:</b> Pyodide has no '
+             "threads, so solvi runs one step at a time in the browser. Native Python, all five questions "
+             "(solvi README, “Speed”):</div>"
+             + timing_html([("Plain script (native)", 1122, "#cbd5e1"), ("solvi, one by one (native)", 1025, "#c7d2fe"),
+                            ("solvi, workers=8 (native)", 463, "#6366f1")]))
     return (md, strategy_svg(sd.cat, flow, res.trace, sd.SLOW), flow_df(out), skipped_df(out), bars,
             answers_df(out))
 
@@ -400,7 +419,7 @@ def run_scale():
     for n in (100, 1000, 10000):
         cat, qs, state = sd.make_catalog(n)
         system = System(cat, qs)
-        reps = 5 if n <= 1000 else 2
+        reps = 3 if n <= 1000 else 1
         t_plan = statistics.median(_timed(lambda: plan(cat, qs, state.keys()))[1] for _ in range(reps))
         t_ask = statistics.median(_timed(lambda: system.ask(state))[1] for _ in range(reps))
         steps = len(system.ask(state).flow.steps)
@@ -572,14 +591,23 @@ Questions without a rule can be learned from ~100 labeled examples: a small answ
 Benchmarks (from the README): SROIE receipts **97.8%** vs 92.6% baseline; CORD receipts **98.5%**, with 99.7% of questions answered at >= 99% precision; CUAD contracts **94.8%** vs 77.5%.
 Calibrated confidence (ECE 0.008 to 0.027); 100% of document answers backed by a quote or abstained; ~**0.4 ms** per decision without a model.
 Install: `pip install solvi` (core, numpy/scipy only) or `pip install "solvi[model]"` for ModernBERT document extractors.
-Code, docs and examples: [github.com/solvi-ai/solvi](https://github.com/solvi-ai/solvi) (Apache-2.0).
-More Spaces: [mxkuzn/solvi-arcade](https://huggingface.co/spaces/mxkuzn/solvi-arcade) · [mxkuzn/solvi-documents](https://huggingface.co/spaces/mxkuzn/solvi-documents).
+
+**This Space runs entirely in your browser.** It is a static page: [Gradio-Lite](https://www.gradio.app/guides/gradio-lite) loads Python (Pyodide) into the tab and installs solvi from PyPI there, so every decision, including the code you type in the Playground, is computed on your machine and nothing is sent to a server. solvi is pure Python on numpy/scipy, which is why this works. In the browser there are no threads (solvi then runs steps one by one), and Python is roughly 1.5 to 3 times slower than native.
+
+Code, docs and examples: [github.com/solvi-ai/solvi](https://github.com/solvi-ai/solvi) (Apache-2.0) · [PyPI: solvi](https://pypi.org/project/solvi/).
+Another Space: [solvi arcade](https://huggingface.co/spaces/solvi-ai/arcade).
 """
 
+# Soft's default fonts are served from the Gradio server's /static folder, which does not exist in Gradio-Lite: use Google Fonts.
+THEME = gr.themes.Soft(primary_hue="indigo", neutral_hue="slate",
+                       font=[gr.themes.GoogleFont("Montserrat"), "ui-sans-serif", "system-ui", "sans-serif"],
+                       font_mono=[gr.themes.GoogleFont("IBM Plex Mono"), "ui-monospace", "Consolas", "monospace"])
 ANS_W = ["17%", "14%", "11%", "14%", "44%"]
 
-with gr.Blocks(title="solvi playground") as demo:
-    gr.Markdown(f"# solvi playground\n{PITCH}", elem_id="header")
+with gr.Blocks(title="solvi playground", theme=THEME, css=CSS) as demo:
+    gr.Markdown(f"# solvi playground\n{PITCH}\n\n" + (
+        "**Runs entirely in your browser** (Python via Pyodide): no server, nothing you type leaves this tab." if IN_BROWSER
+        else "Running as a normal Gradio server app."), elem_id="header")
 
     with gr.Tab("Playground"):
         known = gr.State(question_names(PRESETS[FIRST][0]))
@@ -625,7 +653,8 @@ with gr.Blocks(title="solvi playground") as demo:
                     "(examples/09_strategy_at_scale.py); six parts are slow on purpose, like real API calls "
                     f"({', '.join(f'{k} {int(v * 1000)} ms' for k, v in sd.SLOW.items())}). For each set of questions the "
                     "strategist writes a different plan: only what those questions need. Hard checks run first; when one "
-                    "fails, the expensive rest is skipped. Independent steps run in parallel.", elem_classes="note")
+                    "fails, the expensive rest is skipped. (Natively, independent steps can also run in parallel threads; "
+                    "the browser has no threads, see the note under Timing.)", elem_classes="note")
         with gr.Row():
             with gr.Column(scale=4):
                 s_scen = gr.Radio(list(CLAIM_SCENARIOS), value="Normal claim", label="Scenario")
@@ -673,7 +702,8 @@ with gr.Blocks(title="solvi playground") as demo:
             s_skip = gr.Dataframe(label="Not taken, and why", wrap=True, interactive=False, scale=2)
         with gr.Accordion("Scale: the strategist on catalogs of 100 / 1 000 / 10 000 parts", open=False):
             gr.Markdown("Random layered catalogs (benchmarks/strategist_scale.py): functions over 1-3 earlier facts, checks, "
-                        "5 questions answered by rules over deep facts. Takes a few seconds.", elem_classes="note")
+                        "5 questions answered by rules over deep facts. Takes several seconds in the browser (building the "
+                        "10 000-part catalog alone runs 10 000 small `exec` calls).", elem_classes="note")
             s_scale_btn = gr.Button("Run the scale test")
             s_scale = gr.Dataframe(interactive=False, show_label=False)
             gr.Markdown("Parts here are one-line arithmetic, so computing everything is cheap; the point is that planning "
@@ -790,8 +820,4 @@ with gr.Blocks(title="solvi playground") as demo:
     demo.load(run_leave, l_in, l_out)
     demo.load(run_invoice, i_in, i_out)
 
-demo.queue(default_concurrency_limit=4)
-
-if __name__ == "__main__":
-    demo.launch(theme=gr.themes.Soft(primary_hue="indigo", neutral_hue="slate"), css=CSS,
-                server_name=os.environ.get("GRADIO_SERVER_NAME", "0.0.0.0"))
+demo.launch()

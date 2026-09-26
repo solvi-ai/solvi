@@ -11,6 +11,7 @@ Each file is a self-contained script. Run from the repository root with `uv run 
 | [05_tic_tac_toe.py](05_tic_tac_toe.py) | games | an agent from small functions over the board; never loses (checked exhaustively) | core |
 | [06_learned_rules.py](06_learned_rules.py) | logistics | `learn_rule`: a readable if-then list learned from labeled addresses | core |
 | [09_strategy_at_scale.py](09_strategy_at_scale.py) | insurance | a different generated plan per question set on a big catalog, early exit on hard checks, parallel slow services; timed | core |
+| [10_learn_in_milliseconds.py](10_learn_in_milliseconds.py) | any | `fit_fast`: learn a question in milliseconds and absorb each correction instantly with `teach` | core |
 | [07_receipts_model.py](07_receipts_model.py) | expenses | a receipts-tuned ModernBERT extractor cites each field; rules decide | `solvi[model]` |
 | [08_contracts_by_description.py](08_contracts_by_description.py) | legal | fields defined only by description, read from a whole contract, cited or "absent" | `solvi[model]` |
 

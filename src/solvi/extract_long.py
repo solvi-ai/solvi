@@ -213,6 +213,37 @@ class LongSpanExtractor:
         ex.thr_default, ex.thr = cfg["thr_default"], cfg.get("thr", {})
         return ex
 
+    def embed(self, text, bs=8):
+        """Document embedding: the encoder's token states averaged over every window of the text (no field description)."""
+        torch = self.torch
+        key = ("__embed__", hash(text))
+        if key in self._cache:
+            return self._cache[key]
+        enc = self._windows("", text)
+        tot, cnt = None, 0
+        with torch.no_grad():
+            for b in range(0, len(enc["input_ids"]), bs):
+                L = max(sum(a) for a in enc["attention_mask"][b:b + bs])
+                ids = torch.tensor([x[:L] for x in enc["input_ids"][b:b + bs]], device=self.device)
+                att = torch.tensor([x[:L] for x in enc["attention_mask"][b:b + bs]], device=self.device)
+                with torch.autocast(self.device, dtype=torch.bfloat16, enabled=self.device == "cuda"):
+                    h = self.enc(input_ids=ids, attention_mask=att).last_hidden_state.float()
+                m = att.unsqueeze(-1).float()
+                s = (h * m).sum((0, 1))
+                tot = s if tot is None else tot + s
+                cnt += int(m.sum())
+        v = (tot / max(1, cnt)).cpu().numpy()
+        self._cache[key] = v
+        return v
+
+    def embedder(self, name="doc_embedding"):
+        """A catalog part: doc → embedding vector, usable as a feature of System.fit_fast."""
+        def f(doc):
+            return self.embed(doc)
+        f.__name__ = name
+        f.__doc__ = "document embedding"
+        return f
+
     def field(self, name, desc):
         def f(doc):
             s, e, sc, _ = self.predict(doc, desc)

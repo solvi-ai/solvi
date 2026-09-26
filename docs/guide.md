@@ -245,6 +245,28 @@ print(head.features, head.cv_acc)          # selected facts and their cross-vali
   **The selected facts become the question's flow**, so later requests compute only what the head uses.
 - The answer's `why` lists the largest feature contributions, `probs` gives all class probabilities.
 
+### fit_fast: learn in milliseconds, correct instantly
+
+`system.fit_fast(question, examples, features=None)` fits a closed-form ridge head: one matrix decomposition, so it takes
+milliseconds instead of seconds, and the ridge strength is chosen by exact leave-one-out accuracy (`head.loo_acc`). Features are
+the given facts (numbers, booleans, categories, and numeric vectors such as a document embedding from
+`LongSpanExtractor.embedder()`), by default every computed fact; when there are few of them, their pairwise products are added
+so middle classes and interactions can be expressed.
+
+Its main property is online learning: `system.teach(question, init_state, correct)` updates a fast head immediately with a
+rank-one Sherman–Morrison step (about 0.1–0.2 ms) and returns the time in ms. Nothing is retrained, other questions, rules and
+hard checks do not change, and the example still goes to the journal.
+
+```python
+head = system.fit_fast("suspicious", history[:10])     # start small
+for state, label in reviewer_corrections:
+    system.teach("suspicious", state, label)            # each one is absorbed at once
+```
+
+On the example tasks (`benchmarks/fast_head.py`) `fit_fast` trains 15–70× faster than `fit` and is 1–4 points less accurate at
+200 examples; learning online from 10 to 200 corrections ends within a few points of fitting on all 200 at once. Use `fit` when accuracy on a fixed
+dataset matters most, `fit_fast` when labels arrive one by one or you need to retrain on every request.
+
 ### learn_rule: a readable rule list
 
 ```python

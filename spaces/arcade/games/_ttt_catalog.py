@@ -1,5 +1,4 @@
-"""Vendored copy of solvi/examples/05_tic_tac_toe.py (catalog part only), used when the Space runs without the solvi repo.
-The app prefers the original file (../../examples/05_tic_tac_toe.py) when it exists."""
+"""Vendored copy of solvi/examples/05_tic_tac_toe.py (catalog part only), so the browser app needs nothing but solvi."""
 from __future__ import annotations
 
 from solvi import Answer, Catalog, Question

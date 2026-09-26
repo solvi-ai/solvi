@@ -23,6 +23,15 @@ calls, model inference) run in parallel. On an insurance-claim desk with slow se
 ([examples/09_strategy_at_scale.py](examples/09_strategy_at_scale.py)) a full decision takes 463 ms instead of 1 122 ms for a
 script that computes everything, and 152 ms when an expired policy settles the claim first.
 
+## Try it
+
+- [solvi playground](https://huggingface.co/spaces/solvi-ai/playground): write a decision task in Python and run it, watch the
+  strategist's plan, tamper with a trace and see the replay catch it, learn rules from examples.
+- [solvi arcade](https://huggingface.co/spaces/solvi-ai/arcade): game agents built from small functions that explain every move.
+- Both run **entirely in your browser** (Pyodide): no server, no GPU, nothing you type leaves the page.
+- Models: [solvi-ai/extract-base](https://huggingface.co/solvi-ai/extract-base) (fields by description) and
+  [solvi-ai/extract-receipts](https://huggingface.co/solvi-ai/extract-receipts).
+
 ## Install
 
 ```bash
@@ -193,6 +202,7 @@ receipt with the one-pass extractor on an A100).
 | [examples/05_tic_tac_toe.py](examples/05_tic_tac_toe.py) | Tic-tac-toe agent: each move is an answer with its reason (win, block, fork, ...); a hard check rejects invalid boards |
 | [examples/06_learned_rules.py](examples/06_learned_rules.py) | `learn_rule`: route parcels to delivery zones from free-form addresses with a readable if-then list learned from labels |
 | [examples/09_strategy_at_scale.py](examples/09_strategy_at_scale.py) | Insurance claim desk: the strategist generates a different plan per question set, hard checks first with early exit, slow services in parallel; timed |
+| [examples/10_learn_in_milliseconds.py](examples/10_learn_in_milliseconds.py) | `fit_fast`: a new question learned in milliseconds, then corrected one example at a time (each correction ~0.2 ms, nothing retrained) |
 | [examples/07_receipts_model.py](examples/07_receipts_model.py) | Expense check on a scanned receipt: a receipts-tuned extractor cites each field, rules and a hard check decide (needs `solvi[model]`) |
 | [examples/08_contracts_by_description.py](examples/08_contracts_by_description.py) | Contract review with fields defined only in words: the general extractor reads the whole contract, cites clauses or says "absent" (needs `solvi[model]`) |
 

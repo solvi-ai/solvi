@@ -1,8 +1,12 @@
-"""Catalogs for the "Strategy" tab, vendored so the Space is self-contained (Spaces upload only this folder):
+"""Catalogs for the "Strategy" tab, vendored so the Space is self-contained:
 
 - the insurance claim desk of solvi/examples/09_strategy_at_scale.py (21 parts + 5 rules, six simulated slow parts, hard checks);
 - make_catalog() of solvi/benchmarks/strategist_scale.py (random layered catalogs of N parts).
-Keep in sync with those files."""
+Keep in sync with those files.
+
+Browser (Pyodide) note: the slow parts stand for API calls. At import we check whether time.sleep really waits here. If it does,
+the parts sleep as in the example. If it returns at once, each slow part adds its declared latency to SIMULATED_MS instead, and
+the UI reports that "simulated service time" separately from the measured compute time."""
 from __future__ import annotations
 
 import random
@@ -22,8 +26,27 @@ def slow(seconds):
     return wrap
 
 
+def _probe_sleep(seconds=0.05):
+    t0 = time.perf_counter()
+    time.sleep(seconds)
+    return time.perf_counter() - t0
+
+
+SLEEP_PROBE_S = _probe_sleep()
+REAL_SLEEP = SLEEP_PROBE_S >= 0.04                        # does time.sleep(0.05) actually wait in this runtime?
+SIMULATED_MS = [0.0]                                       # declared latency of slow parts run since the last reset
+
+
+def reset_simulated():
+    SIMULATED_MS[0] = 0.0
+
+
 def _wait(name):
-    time.sleep(SLOW.get(name, 0))
+    s = SLOW.get(name, 0)
+    if REAL_SLEEP:
+        time.sleep(s)
+    else:
+        SIMULATED_MS[0] += s * 1000
 
 
 # ---------- policy

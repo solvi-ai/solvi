@@ -109,7 +109,7 @@ def greedy_move(legal_moves, dot_dist, ghost_dist, last_move):
 def load_bot(code: str = DEFAULT_BOT_CODE):
     """exec bot code and return its greedy_move function (raises on errors)."""
     ns: dict = {}
-    exec(compile(code, "<bot>", "exec"), ns)  # noqa: S102 - only the trusted default runs in-process; user code runs in a subprocess
+    exec(compile(code, "<bot>", "exec"), ns)  # noqa: S102 - user code runs in the visitor's own browser, under games/sandbox.py's guard
     f = ns.get("greedy_move")
     if not callable(f):
         raise ValueError("the code must define a function named greedy_move")

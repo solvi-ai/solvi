@@ -1,0 +1,151 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>solvi playground</title>
+  <meta name="description" content="solvi decision systems running entirely in your browser (Gradio-Lite + Pyodide): write a decision task in Python, get verifiable answers." />
+  <script>
+    // Workaround for dependency drift on PyPI (like `uv --exclude-newer`). Gradio-Lite installs its bundled gradio 5.45 wheel
+    // with micropip, which takes the newest version of every dependency and does not backtrack. In 2026 that breaks the start:
+    // gradio_client asks for any huggingface-hub, micropip takes 2.x and gradio's own "huggingface-hub<1.0" then fails;
+    // filelock 4.x does not import under Pyodide; starlette 1.x is outside gradio's range. So we wrap the Pyodide web worker
+    // and let its fetch() of the PyPI simple index show only wheels uploaded before CUTOFF (gradio 5.45 is from 2025-09-10),
+    // plus explicit version caps. Packages in KEEP_NEW (solvi itself) are not filtered. Nothing else is touched.
+    (function () {
+      var CFG = {
+        CUTOFF: "2025-10-15T00:00:00Z",
+        KEEP_NEW: ["solvi"],
+        CAPS: { "huggingface-hub": "1.0", "starlette": "1.0", "filelock": "4.0" }
+      };
+      var prelude = "(" + function (CFG) {
+        function parts(v) { return (String(v).match(/^\d+(\.\d+)*/) || ["0"])[0].split(".").map(Number); }
+        function below(v, cap) {
+          var a = parts(v), b = parts(cap);
+          for (var i = 0; i < Math.max(a.length, b.length); i++) {
+            var x = a[i] || 0, y = b[i] || 0;
+            if (x !== y) return x < y;
+          }
+          return false;
+        }
+        var realFetch = self.fetch.bind(self);
+        self.fetch = async function (input, init) {
+          var url = typeof input === "string" ? input : (input && input.url) || String(input);
+          var m = url.match(/^https:\/\/pypi\.org\/simple\/([^\/?#]+)\/?(?:[?#].*)?$/);
+          var resp = await realFetch(input, init);
+          if (!m || !resp.ok) return resp;
+          var name = m[1].toLowerCase().replace(/[._]+/g, "-");
+          if (CFG.KEEP_NEW.indexOf(name) >= 0) return resp;
+          var ct = resp.headers.get("content-type") || "";
+          if (ct.indexOf("json") < 0) return resp;
+          var cap = CFG.CAPS[name];
+          var data = JSON.parse(await resp.text());
+          var files = data.files || [];
+          var kept = files.filter(function (f) {
+            if (!/\.whl$/.test(f.filename)) return true;
+            if (cap && !below(f.filename.split("-")[1], cap)) return false;
+            return !f["upload-time"] || f["upload-time"] < CFG.CUTOFF;
+          });
+          if (kept.some(function (f) { return /\.whl$/.test(f.filename); })) data.files = kept;   // never leave a package empty
+          if (cap && data.versions) data.versions = data.versions.filter(function (v) { return below(v, cap); });
+          return new Response(JSON.stringify(data), { status: resp.status, statusText: resp.statusText,
+                                                      headers: { "content-type": ct } });
+        };
+      } + ")(" + JSON.stringify(CFG) + ");\n";
+      var RealWorker = window.Worker;
+      function PatchedWorker(url, opts) {
+        if (opts && opts.type === "module") return new RealWorker(url, opts);
+        var src = prelude + "importScripts(" + JSON.stringify(new URL(String(url), location.href).href) + ");";
+        return new RealWorker(URL.createObjectURL(new Blob([src], { type: "text/javascript" })), opts);
+      }
+      PatchedWorker.prototype = RealWorker.prototype;
+      window.Worker = PatchedWorker;
+    })();
+  </script>
+  <script type="module" crossorigin src="https://cdn.jsdelivr.net/npm/@gradio/lite@5.45.0/dist/lite.js"></script>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@gradio/lite@5.45.0/dist/lite.css" />
+  <style>
+    body { margin: 0; font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif; }
+    #loading-note {
+      max-width: 720px; margin: 24px auto 0; padding: 14px 18px; border-radius: 10px;
+      background: #eef2ff; color: #312e81; border: 1px solid #c7d2fe; font-size: 14.5px; line-height: 1.5;
+    }
+    #loading-note b { color: #1e1b4b; }
+    #loading-note .elapsed { opacity: .7; font-variant-numeric: tabular-nums; }
+    @media (prefers-color-scheme: dark) {
+      body { background: #0b0f19; }
+      #loading-note { background: #1e1b4b; color: #e0e7ff; border-color: #3730a3; }
+      #loading-note b { color: #fff; }
+    }
+    @media (max-width: 760px) { #loading-note { margin: 16px 16px 0; } }
+  </style>
+</head>
+<body>
+  <div id="loading-note" role="status">
+    <b>solvi playground runs entirely in your browser.</b>
+    The first visit downloads Python (Pyodide, Gradio, pandas and numpy/scipy, about 35&ndash;40&nbsp;MB) once and installs
+    <code>solvi</code> from PyPI into this tab; later visits load from the browser cache. This takes about 30&ndash;60 seconds
+    the first time. Nothing you type is sent to a server.
+    <span class="elapsed" id="loading-elapsed"></span>
+  </div>
+  <noscript>This page needs JavaScript: it runs Python (Pyodide) in your browser.</noscript>
+
+  <gradio-lite>
+    <gradio-requirements>
+solvi>=0.1.1
+    </gradio-requirements>
+
+    <gradio-file name="app.py" url="app.py" entrypoint></gradio-file>
+    <gradio-file name="sandbox.py" url="sandbox.py"></gradio-file>
+    <gradio-file name="demos.py" url="demos.py"></gradio-file>
+    <gradio-file name="strategy_demo.py" url="strategy_demo.py"></gradio-file>
+    <gradio-file name="presets/01_leave_request.py" url="presets/01_leave_request.py"></gradio-file>
+    <gradio-file name="presets/01_leave_request.json" url="presets/01_leave_request.json"></gradio-file>
+    <gradio-file name="presets/02_refund_email.py" url="presets/02_refund_email.py"></gradio-file>
+    <gradio-file name="presets/02_refund_email.json" url="presets/02_refund_email.json"></gradio-file>
+    <gradio-file name="presets/03_tic_tac_toe.py" url="presets/03_tic_tac_toe.py"></gradio-file>
+    <gradio-file name="presets/03_tic_tac_toe.json" url="presets/03_tic_tac_toe.json"></gradio-file>
+    <gradio-file name="presets/04_loan_preapproval.py" url="presets/04_loan_preapproval.py"></gradio-file>
+    <gradio-file name="presets/04_loan_preapproval.json" url="presets/04_loan_preapproval.json"></gradio-file>
+    <gradio-file name="presets/05_pizza_order.py" url="presets/05_pizza_order.py"></gradio-file>
+    <gradio-file name="presets/05_pizza_order.json" url="presets/05_pizza_order.json"></gradio-file>
+    <gradio-file name="presets/06_trip_packing.py" url="presets/06_trip_packing.py"></gradio-file>
+    <gradio-file name="presets/06_trip_packing.json" url="presets/06_trip_packing.json"></gradio-file>
+    <gradio-file name="presets/07_smart_thermostat.py" url="presets/07_smart_thermostat.py"></gradio-file>
+    <gradio-file name="presets/07_smart_thermostat.json" url="presets/07_smart_thermostat.json"></gradio-file>
+    <gradio-file name="presets/08_plant_watering.py" url="presets/08_plant_watering.py"></gradio-file>
+    <gradio-file name="presets/08_plant_watering.json" url="presets/08_plant_watering.json"></gradio-file>
+    <gradio-file name="presets/09_blank_template.py" url="presets/09_blank_template.py"></gradio-file>
+    <gradio-file name="presets/09_blank_template.json" url="presets/09_blank_template.json"></gradio-file>
+  </gradio-lite>
+
+  <script>
+    // Gradio-Lite fetches url="..." files from inside its web worker, where a relative URL would resolve against the worker
+    // script on the CDN. Make them absolute against this page before lite.js (a deferred module) reads the tags. The ?v=
+    // stamp keeps the browser from running a stale cached copy after the Space is updated (these files are small; the large
+    // downloads, Pyodide and the wheels, stay cached).
+    const stamp = Date.now().toString(36);
+    for (const el of document.querySelectorAll("gradio-file[url]")) {
+      const u = new URL(el.getAttribute("url"), document.baseURI);
+      u.searchParams.set("v", stamp);
+      el.setAttribute("url", u.href);
+    }
+    // Hide the loading note once the app has rendered, and log how long the load took.
+    (function () {
+      const t0 = performance.now();
+      const note = document.getElementById("loading-note");
+      const elapsed = document.getElementById("loading-elapsed");
+      const tick = setInterval(function () {
+        const s = (performance.now() - t0) / 1000;
+        if (document.querySelector("gradio-lite #header")) {
+          clearInterval(tick);
+          note.style.display = "none";
+          console.info("[solvi playground] app ready after " + s.toFixed(1) + " s");
+        } else {
+          elapsed.textContent = " Loading… " + Math.round(s) + " s";
+        }
+      }, 250);
+    })();
+  </script>
+</body>
+</html>

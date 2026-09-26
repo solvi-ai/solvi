@@ -1,28 +1,16 @@
-"""Tic-tac-toe vs solvi. The catalog is the one from solvi/examples/05_tic_tac_toe.py (imported from the repo when present,
-else a vendored copy). We add one more rule to it, "reason", which names why the move was chosen (win, block, fork ...),
-so every agent move comes with a readable label on top of the rule inputs."""
+"""Tic-tac-toe vs solvi. The catalog is a vendored copy of solvi/examples/05_tic_tac_toe.py (games/_ttt_catalog.py).
+We add one more rule to it, "reason", which names why the move was chosen (win, block, fork ...), so every agent move
+comes with a readable label on top of the rule inputs."""
 from __future__ import annotations
 
-import importlib.util
 import random
 from dataclasses import dataclass, field
-from pathlib import Path
 
 from solvi import Answer, Question, System
 
+from . import _ttt_catalog as _mod
 
-def _load_catalog_module():
-    ex = Path(__file__).resolve().parents[3] / "examples" / "05_tic_tac_toe.py"
-    if ex.exists():
-        spec = importlib.util.spec_from_file_location("solvi_example_tic_tac_toe", ex)
-        mod = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(mod)
-        return mod, "solvi/examples/05_tic_tac_toe.py"
-    from . import _ttt_catalog as mod
-    return mod, "a vendored copy of solvi/examples/05_tic_tac_toe.py"
-
-
-_mod, SOURCE = _load_catalog_module()
+SOURCE = "solvi/examples/05_tic_tac_toe.py"
 cat = _mod.cat
 LINES = _mod.LINES
 winner_of = _mod._winner

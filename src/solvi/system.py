@@ -129,6 +129,23 @@ class System:
         self.heads[question] = Head(q.answer.options).fit(rows, ans, cands)
         return self.heads[question]
 
+    def fit_fast(self, question, examples, features=None, lam=None):
+        """Fast answer head (closed-form ridge, milliseconds): examples — [(init_state, answer)]. Features: the given facts
+        (numbers, booleans, categories or vectors such as a document embedding), by default every computed fact. Unlike fit it
+        keeps all features and learns online: every `teach` for this question updates it instantly."""
+        from .fast import FastHead
+        import time
+        q = self.questions[question]
+        t0 = time.perf_counter()
+        rows = [self.facts_for(s) for s, _ in examples]
+        if features is None:
+            keys = set(examples[0][0].keys())
+            features = sorted(f for f in computable(self.catalog, keys) - keys)
+        head = FastHead(q.answer.options, lam=lam).fit(rows, [q.answer.normalize(a) for _, a in examples], list(features))
+        head.fit_ms = (time.perf_counter() - t0) * 1000
+        self.heads[question] = head
+        return head
+
     def learn_rule(self, question, examples, facts, **kw):
         """An answer rule learned from examples (solvi.rules.RuleList): a readable "if feature then answer" list, installed in the
         catalog as a regular rule (deterministic, replayable)."""
@@ -170,10 +187,17 @@ class System:
         return self.calib[question]
 
     def teach(self, question, init_state, correct):
-        """Human correction: appends the example to the journal (for the next fit)."""
+        """Human correction. A fast head (fit_fast) absorbs it at once; any head gets it in the journal for the next fit.
+        Returns the update time in ms for a fast head, else None."""
+        from .fast import FastHead
+        ms = None
+        head = self.heads.get(question)
+        if isinstance(head, FastHead):
+            ms = head.update(self.facts_for(init_state), self.questions[question].answer.normalize(correct))
         if self.journal:
             with open(self.journal, "a") as fh:
                 fh.write(json.dumps({"teach": question, "init": _jsonable(init_state), "answer": correct}, ensure_ascii=False) + "\n")
+        return ms
 
     def _log(self, init_state, resp):
         with open(self.journal, "a") as fh:
