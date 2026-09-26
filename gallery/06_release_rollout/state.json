@@ -1,0 +1,37 @@
+{
+  "service": "checkout-api",
+  "release": "v2.14.0",
+  "canary_traffic_pct": 5,
+  "baseline": {
+    "requests": 182400,
+    "errors": 237,
+    "latency_buckets": {
+      "50": 32832,
+      "100": 94848,
+      "200": 164160,
+      "300": 177840,
+      "500": 181488,
+      "1000": 182400,
+      "+Inf": 182400
+    }
+  },
+  "canary": {
+    "requests": 9800,
+    "errors": 14,
+    "latency_buckets": {
+      "50": 1764,
+      "100": 5096,
+      "200": 8820,
+      "300": 9555,
+      "500": 9751,
+      "1000": 9800,
+      "+Inf": 9800
+    }
+  },
+  "slo": {
+    "availability_pct": 99.5,
+    "p95_ms": 400
+  },
+  "max_error_pct": 2.0,
+  "min_canary_requests": 2000
+}

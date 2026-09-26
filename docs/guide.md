@@ -86,12 +86,17 @@ def ship_rule(big_order):
 
 - A **soft check** is a boolean fact. Rules can use it, answer heads can learn from it, and failed soft checks are listed
   in the reason of a learned answer.
-- A **hard check** decides the answer whenever it is in the question's flow and evaluates to `False`:
+- A **hard check** decides the answers it governs whenever it is in the question's flow and evaluates to `False`:
   - if `then` names the question, the answer is set to that value with `status="forced"` and confidence 1.0;
-  - if `then` does not name the question, the question abstains.
+  - if the question lists the check in its `checkpoints` (or the check has no `then` at all) but `then` does not name it,
+    the question abstains;
+  - otherwise — the check has a `then` for other questions and only reads this question's facts — it is an ordinary failed
+    check for this question and is listed in the reason.
 
   No rule and no model confidence can override a failed hard check. To make sure a hard check is always in a question's
-  flow, list it in the question's `checkpoints`.
+  flow, list it in the question's `checkpoints`. When several hard checks fail, the first one declared in the catalog decides:
+  declare the most important first. A question's flow and answer do not depend on which other questions are asked in the
+  same request.
 
 ### Extractors and Quote
 

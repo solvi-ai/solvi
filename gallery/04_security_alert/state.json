@@ -1,0 +1,44 @@
+{
+  "user": "k.adams",
+  "is_admin": true,
+  "event": {
+    "time": "2026-09-26T03:10:00Z",
+    "ip": "203.0.113.45",
+    "city": "Lagos",
+    "lat": 6.524,
+    "lon": 3.379,
+    "device_id": "win-unknown-91",
+    "mfa_passed": false
+  },
+  "history": [
+    {
+      "time": "2026-09-25T18:40:00Z",
+      "ip": "192.0.2.10",
+      "city": "Berlin",
+      "lat": 52.52,
+      "lon": 13.405,
+      "device_id": "laptop-7f3a",
+      "result": "success"
+    },
+    {
+      "time": "2026-09-26T00:55:00Z",
+      "ip": "192.0.2.10",
+      "city": "Berlin",
+      "lat": 52.52,
+      "lon": 13.405,
+      "device_id": "phone-22c1",
+      "result": "success"
+    },
+    {
+      "time": "2026-09-26T01:30:00Z",
+      "ip": "203.0.113.45",
+      "city": "Lagos",
+      "lat": 6.524,
+      "lon": 3.379,
+      "device_id": "win-unknown-91",
+      "result": "fail"
+    }
+  ],
+  "failed_last_hour": 3,
+  "failed_hourly_avg_30d": 0.4
+}

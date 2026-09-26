@@ -1,0 +1,39 @@
+
+healthy canary
+  decision          expected promote         solvi promote          laya roll_back (0.42) ✗
+  page_oncall       expected no              solvi no               laya yes (0.72) ✗
+
+errors tripled, significant
+  decision          expected roll_back       solvi roll_back        laya roll_back (0.43)
+  page_oncall       expected no              solvi no               laya yes (0.73) ✗
+
+error rate above the ceiling
+  decision          expected roll_back       solvi roll_back        laya roll_back (0.43)
+  page_oncall       expected yes             solvi yes              laya yes (0.76)
+
+too little canary traffic
+  decision          expected hold            solvi hold             laya hold (0.37)
+  page_oncall       expected no              solvi no               laya yes (0.80) ✗
+
+latency over the SLO
+  decision          expected roll_back       solvi roll_back        laya roll_back (0.41)
+  page_oncall       expected no              solvi no               laya yes (0.77) ✗
+
+latency up 27%, within SLO
+  decision          expected hold            solvi hold             laya roll_back (0.41) ✗
+  page_oncall       expected no              solvi no               laya yes (0.79) ✗
+
+small error bump, not significant
+  decision          expected hold            solvi hold             laya roll_back (0.44) ✗
+  page_oncall       expected no              solvi no               laya yes (0.75) ✗
+
+burning the budget fast
+  decision          expected roll_back       solvi roll_back        laya roll_back (0.44)
+  page_oncall       expected yes             solvi yes              laya yes (0.72)
+
+latency histogram missing
+  decision          expected abstain         solvi abstain          laya promote (0.37) ✗
+  page_oncall       expected no              solvi no               laya yes (0.85) ✗
+
+correct answers: solvi 18/18, laya 7/18
+median time per decision: solvi 0.93 ms (CPU), laya 64.4 ms (GPU NVIDIA GeForce RTX 3060 Laptop GPU)

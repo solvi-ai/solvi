@@ -1,0 +1,46 @@
+{
+  "today": "2026-09-20",
+  "customer": {
+    "name": "Jonas Weber",
+    "dob": "1979-01-23",
+    "residence": "DE",
+    "occupation": "plumber",
+    "expected_monthly_volume": 5000,
+    "pep_declared": false,
+    "account_id": "ACC-48480"
+  },
+  "transactions": [
+    {"date": "2026-06-28", "type": "wire_in", "amount": 3900, "country": "DE", "counterparty": "Weber Haustechnik GmbH"},
+    {"date": "2026-07-28", "type": "wire_in", "amount": 3900, "country": "DE", "counterparty": "Weber Haustechnik GmbH"},
+    {"date": "2026-08-27", "type": "wire_in", "amount": 3900, "country": "DE", "counterparty": "Weber Haustechnik GmbH"},
+    {"date": "2026-09-17", "type": "card", "amount": 450.0, "country": "PT"},
+    {"date": "2026-09-10", "type": "card", "amount": 450.0, "country": "PT"},
+    {"date": "2026-09-03", "type": "card", "amount": 450.0, "country": "PT"},
+    {"date": "2026-08-27", "type": "card", "amount": 450.0, "country": "PT"},
+    {"date": "2026-08-20", "type": "card", "amount": 450.0, "country": "PT"},
+    {"date": "2026-08-13", "type": "card", "amount": 450.0, "country": "PT"},
+    {"date": "2026-08-06", "type": "card", "amount": 450.0, "country": "PT"},
+    {"date": "2026-07-30", "type": "card", "amount": 450.0, "country": "PT"},
+    {"date": "2026-07-23", "type": "card", "amount": 450.0, "country": "PT"},
+    {"date": "2026-07-16", "type": "card", "amount": 450.0, "country": "PT"},
+    {"date": "2026-07-09", "type": "card", "amount": 450.0, "country": "PT"},
+    {"date": "2026-07-02", "type": "card", "amount": 450.0, "country": "PT"},
+    {"date": "2026-06-25", "type": "card", "amount": 450.0, "country": "PT"},
+    {"date": "2026-09-11", "type": "cash_deposit", "amount": 9400.0, "country": "DE"},
+    {"date": "2026-09-13", "type": "cash_deposit", "amount": 9850.0, "country": "DE"},
+    {"date": "2026-09-14", "type": "cash_deposit", "amount": 9700.0, "country": "DE"},
+    {"date": "2026-09-16", "type": "cash_deposit", "amount": 9950.0, "country": "DE"}
+  ],
+  "sanctions_list": [
+    {"name": "Dmitri Volkanov", "dob": "1968-03-14"},
+    {"name": "Karim Al-Rashidi", "dob": "1975-11-02"},
+    {"name": "Petra Lindqvist-Haas", "dob": "1981-07-30"},
+    {"name": "Orion Maritime Holdings Ltd", "dob": null},
+    {"name": "Northwind Metals Trading FZE", "dob": null}
+  ],
+  "pep_list": ["Elena Marchetti", "Tomas Varga", "Adaeze Okonkwo"],
+  "news_archive": {
+    "marco bellandi": ["2025-11-04 Regional daily: Bellandi questioned in customs fraud probe"],
+    "tomas varga": ["2024-02-19 Business weekly: ministry tender awarded to Varga's brother-in-law"]
+  }
+}

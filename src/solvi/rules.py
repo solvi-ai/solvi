@@ -44,7 +44,7 @@ class RuleList:
                 for lit in L[i]:
                     cnt[lit][answers[i]] += 1
             best = None
-            for lit, c in cnt.items():
+            for lit, c in sorted(cnt.items()):          # sorted: ties break the same way on every run
                 a, k = c.most_common(1)[0]
                 n = sum(c.values())
                 if k < self.min_support:

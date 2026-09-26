@@ -1,0 +1,39 @@
+
+admin, Berlin -> Lagos in 2 h
+  suspicious        expected yes             solvi yes              laya yes (0.58)
+  action            expected lock_account    solvi lock_account     laya allow (0.39) ✗
+
+same login, regular user
+  suspicious        expected yes             solvi yes              laya yes (0.61)
+  action            expected lock_account    solvi lock_account     laya allow (0.41) ✗
+
+impossible travel, known laptop (VPN)
+  suspicious        expected yes             solvi yes              laya yes (0.73)
+  action            expected require_mfa     solvi require_mfa      laya allow (0.46) ✗
+
+Berlin -> Munich, new phone, MFA passed
+  suspicious        expected no              solvi no               laya yes (0.75) ✗
+  action            expected allow           solvi allow            laya allow (0.43)
+
+fast but possible (Amsterdam)
+  suspicious        expected no              solvi no               laya yes (0.69) ✗
+  action            expected allow           solvi allow            laya allow (0.45)
+
+failed-login spike + new device
+  suspicious        expected yes             solvi yes              laya yes (0.73)
+  action            expected require_mfa     solvi require_mfa      laya allow (0.42) ✗
+
+spike, but known device + MFA
+  suspicious        expected no              solvi no               laya yes (0.67) ✗
+  action            expected allow           solvi allow            laya allow (0.40)
+
+denylisted IP
+  suspicious        expected yes             solvi yes              laya yes (0.81)
+  action            expected lock_account    solvi lock_account     laya allow (0.46) ✗
+
+location unknown
+  suspicious        expected abstain         solvi abstain          laya yes (0.72) ✗
+  action            expected abstain         solvi abstain          laya allow (0.44) ✗
+
+correct answers: solvi 18/18, laya 8/18
+median time per login: solvi 1.05 ms (CPU), laya 77.8 ms (GPU NVIDIA GeForce RTX 3060 Laptop GPU)

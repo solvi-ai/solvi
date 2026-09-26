@@ -1,0 +1,482 @@
+[
+  {
+    "name": "admin, Berlin -> Lagos in 2 h",
+    "state": {
+      "user": "k.adams",
+      "is_admin": true,
+      "event": {
+        "time": "2026-09-26T03:10:00Z",
+        "ip": "203.0.113.45",
+        "city": "Lagos",
+        "lat": 6.524,
+        "lon": 3.379,
+        "device_id": "win-unknown-91",
+        "mfa_passed": false
+      },
+      "history": [
+        {
+          "time": "2026-09-25T18:40:00Z",
+          "ip": "192.0.2.10",
+          "city": "Berlin",
+          "lat": 52.52,
+          "lon": 13.405,
+          "device_id": "laptop-7f3a",
+          "result": "success"
+        },
+        {
+          "time": "2026-09-26T00:55:00Z",
+          "ip": "192.0.2.10",
+          "city": "Berlin",
+          "lat": 52.52,
+          "lon": 13.405,
+          "device_id": "phone-22c1",
+          "result": "success"
+        },
+        {
+          "time": "2026-09-26T01:30:00Z",
+          "ip": "203.0.113.45",
+          "city": "Lagos",
+          "lat": 6.524,
+          "lon": 3.379,
+          "device_id": "win-unknown-91",
+          "result": "fail"
+        }
+      ],
+      "failed_last_hour": 3,
+      "failed_hourly_avg_30d": 0.4
+    },
+    "expected": {
+      "suspicious": "yes",
+      "action": "lock_account"
+    },
+    "status": {
+      "suspicious": "forced",
+      "action": "forced"
+    },
+    "note": "the default state: impossible travel on an admin account is a hard check; spike and device checks are skipped"
+  },
+  {
+    "name": "same login, regular user",
+    "state": {
+      "user": "k.adams",
+      "is_admin": false,
+      "event": {
+        "time": "2026-09-26T03:10:00Z",
+        "ip": "203.0.113.45",
+        "city": "Lagos",
+        "lat": 6.524,
+        "lon": 3.379,
+        "device_id": "win-unknown-91",
+        "mfa_passed": false
+      },
+      "history": [
+        {
+          "time": "2026-09-25T18:40:00Z",
+          "ip": "192.0.2.10",
+          "city": "Berlin",
+          "lat": 52.52,
+          "lon": 13.405,
+          "device_id": "laptop-7f3a",
+          "result": "success"
+        },
+        {
+          "time": "2026-09-26T00:55:00Z",
+          "ip": "192.0.2.10",
+          "city": "Berlin",
+          "lat": 52.52,
+          "lon": 13.405,
+          "device_id": "phone-22c1",
+          "result": "success"
+        },
+        {
+          "time": "2026-09-26T01:30:00Z",
+          "ip": "203.0.113.45",
+          "city": "Lagos",
+          "lat": 6.524,
+          "lon": 3.379,
+          "device_id": "win-unknown-91",
+          "result": "fail"
+        }
+      ],
+      "failed_last_hour": 3,
+      "failed_hourly_avg_30d": 0.4
+    },
+    "expected": {
+      "suspicious": "yes",
+      "action": "lock_account"
+    },
+    "note": "no hard check fires; the rule locks because the travel is impossible and the device is new"
+  },
+  {
+    "name": "impossible travel, known laptop (VPN)",
+    "state": {
+      "user": "k.adams",
+      "is_admin": false,
+      "event": {
+        "time": "2026-09-26T02:10:00Z",
+        "ip": "192.0.2.201",
+        "city": "Singapore",
+        "lat": 1.352,
+        "lon": 103.82,
+        "device_id": "laptop-7f3a",
+        "mfa_passed": false
+      },
+      "history": [
+        {
+          "time": "2026-09-25T18:40:00Z",
+          "ip": "192.0.2.10",
+          "city": "Berlin",
+          "lat": 52.52,
+          "lon": 13.405,
+          "device_id": "laptop-7f3a",
+          "result": "success"
+        },
+        {
+          "time": "2026-09-26T00:55:00Z",
+          "ip": "192.0.2.10",
+          "city": "Berlin",
+          "lat": 52.52,
+          "lon": 13.405,
+          "device_id": "phone-22c1",
+          "result": "success"
+        },
+        {
+          "time": "2026-09-26T01:30:00Z",
+          "ip": "203.0.113.45",
+          "city": "Lagos",
+          "lat": 6.524,
+          "lon": 3.379,
+          "device_id": "win-unknown-91",
+          "result": "fail"
+        }
+      ],
+      "failed_last_hour": 3,
+      "failed_hourly_avg_30d": 0.4
+    },
+    "expected": {
+      "suspicious": "yes",
+      "action": "require_mfa"
+    },
+    "note": "the same laptop through a VPN exit: suspicious, but step-up MFA instead of a lock"
+  },
+  {
+    "name": "Berlin -> Munich, new phone, MFA passed",
+    "state": {
+      "user": "k.adams",
+      "is_admin": false,
+      "event": {
+        "time": "2026-09-26T07:05:00Z",
+        "ip": "192.0.2.77",
+        "city": "Munich",
+        "lat": 48.137,
+        "lon": 11.575,
+        "device_id": "phone-9d01",
+        "mfa_passed": true
+      },
+      "history": [
+        {
+          "time": "2026-09-25T18:40:00Z",
+          "ip": "192.0.2.10",
+          "city": "Berlin",
+          "lat": 52.52,
+          "lon": 13.405,
+          "device_id": "laptop-7f3a",
+          "result": "success"
+        },
+        {
+          "time": "2026-09-26T00:55:00Z",
+          "ip": "192.0.2.10",
+          "city": "Berlin",
+          "lat": 52.52,
+          "lon": 13.405,
+          "device_id": "phone-22c1",
+          "result": "success"
+        },
+        {
+          "time": "2026-09-26T01:30:00Z",
+          "ip": "203.0.113.45",
+          "city": "Lagos",
+          "lat": 6.524,
+          "lon": 3.379,
+          "device_id": "win-unknown-91",
+          "result": "fail"
+        }
+      ],
+      "failed_last_hour": 0,
+      "failed_hourly_avg_30d": 0.5
+    },
+    "expected": {
+      "suspicious": "no",
+      "action": "allow"
+    },
+    "note": "504 km in about 6 h: plausible"
+  },
+  {
+    "name": "fast but possible (Amsterdam)",
+    "state": {
+      "user": "k.adams",
+      "is_admin": false,
+      "event": {
+        "time": "2026-09-26T02:25:00Z",
+        "ip": "192.0.2.88",
+        "city": "Amsterdam",
+        "lat": 52.37,
+        "lon": 4.895,
+        "device_id": "laptop-7f3a",
+        "mfa_passed": true
+      },
+      "history": [
+        {
+          "time": "2026-09-25T18:40:00Z",
+          "ip": "192.0.2.10",
+          "city": "Berlin",
+          "lat": 52.52,
+          "lon": 13.405,
+          "device_id": "laptop-7f3a",
+          "result": "success"
+        },
+        {
+          "time": "2026-09-26T00:55:00Z",
+          "ip": "192.0.2.10",
+          "city": "Berlin",
+          "lat": 52.52,
+          "lon": 13.405,
+          "device_id": "phone-22c1",
+          "result": "success"
+        },
+        {
+          "time": "2026-09-26T01:30:00Z",
+          "ip": "203.0.113.45",
+          "city": "Lagos",
+          "lat": 6.524,
+          "lon": 3.379,
+          "device_id": "win-unknown-91",
+          "result": "fail"
+        }
+      ],
+      "failed_last_hour": 1,
+      "failed_hourly_avg_30d": 0.5
+    },
+    "expected": {
+      "suspicious": "no",
+      "action": "allow"
+    },
+    "note": "577 km in 1.5 h is about 385 km/h: under the 900 km/h line"
+  },
+  {
+    "name": "failed-login spike + new device",
+    "state": {
+      "user": "k.adams",
+      "is_admin": false,
+      "event": {
+        "time": "2026-09-26T02:00:00Z",
+        "ip": "192.0.2.10",
+        "city": "Berlin",
+        "lat": 52.52,
+        "lon": 13.405,
+        "device_id": "linux-a0b7",
+        "mfa_passed": false
+      },
+      "history": [
+        {
+          "time": "2026-09-25T18:40:00Z",
+          "ip": "192.0.2.10",
+          "city": "Berlin",
+          "lat": 52.52,
+          "lon": 13.405,
+          "device_id": "laptop-7f3a",
+          "result": "success"
+        },
+        {
+          "time": "2026-09-26T00:55:00Z",
+          "ip": "192.0.2.10",
+          "city": "Berlin",
+          "lat": 52.52,
+          "lon": 13.405,
+          "device_id": "phone-22c1",
+          "result": "success"
+        },
+        {
+          "time": "2026-09-26T01:30:00Z",
+          "ip": "203.0.113.45",
+          "city": "Lagos",
+          "lat": 6.524,
+          "lon": 3.379,
+          "device_id": "win-unknown-91",
+          "result": "fail"
+        }
+      ],
+      "failed_last_hour": 184,
+      "failed_hourly_avg_30d": 40
+    },
+    "expected": {
+      "suspicious": "yes",
+      "action": "require_mfa"
+    },
+    "note": "184 failed logins against an average of 40 per hour: +360%"
+  },
+  {
+    "name": "spike, but known device + MFA",
+    "state": {
+      "user": "k.adams",
+      "is_admin": false,
+      "event": {
+        "time": "2026-09-26T02:00:00Z",
+        "ip": "192.0.2.10",
+        "city": "Berlin",
+        "lat": 52.52,
+        "lon": 13.405,
+        "device_id": "phone-22c1",
+        "mfa_passed": true
+      },
+      "history": [
+        {
+          "time": "2026-09-25T18:40:00Z",
+          "ip": "192.0.2.10",
+          "city": "Berlin",
+          "lat": 52.52,
+          "lon": 13.405,
+          "device_id": "laptop-7f3a",
+          "result": "success"
+        },
+        {
+          "time": "2026-09-26T00:55:00Z",
+          "ip": "192.0.2.10",
+          "city": "Berlin",
+          "lat": 52.52,
+          "lon": 13.405,
+          "device_id": "phone-22c1",
+          "result": "success"
+        },
+        {
+          "time": "2026-09-26T01:30:00Z",
+          "ip": "203.0.113.45",
+          "city": "Lagos",
+          "lat": 6.524,
+          "lon": 3.379,
+          "device_id": "win-unknown-91",
+          "result": "fail"
+        }
+      ],
+      "failed_last_hour": 184,
+      "failed_hourly_avg_30d": 40
+    },
+    "expected": {
+      "suspicious": "no",
+      "action": "allow"
+    },
+    "note": "the spike alone does not make this login suspicious"
+  },
+  {
+    "name": "denylisted IP",
+    "state": {
+      "user": "k.adams",
+      "is_admin": false,
+      "event": {
+        "time": "2026-09-26T02:00:00Z",
+        "ip": "198.51.100.23",
+        "city": "Berlin",
+        "lat": 52.52,
+        "lon": 13.405,
+        "device_id": "laptop-7f3a",
+        "mfa_passed": true
+      },
+      "history": [
+        {
+          "time": "2026-09-25T18:40:00Z",
+          "ip": "192.0.2.10",
+          "city": "Berlin",
+          "lat": 52.52,
+          "lon": 13.405,
+          "device_id": "laptop-7f3a",
+          "result": "success"
+        },
+        {
+          "time": "2026-09-26T00:55:00Z",
+          "ip": "192.0.2.10",
+          "city": "Berlin",
+          "lat": 52.52,
+          "lon": 13.405,
+          "device_id": "phone-22c1",
+          "result": "success"
+        },
+        {
+          "time": "2026-09-26T01:30:00Z",
+          "ip": "203.0.113.45",
+          "city": "Lagos",
+          "lat": 6.524,
+          "lon": 3.379,
+          "device_id": "win-unknown-91",
+          "result": "fail"
+        }
+      ],
+      "failed_last_hour": 0,
+      "failed_hourly_avg_30d": 0.4
+    },
+    "expected": {
+      "suspicious": "yes",
+      "action": "lock_account"
+    },
+    "status": {
+      "suspicious": "forced",
+      "action": "forced"
+    },
+    "note": "hard check: a threat-intel hit locks the account even from a known device with MFA"
+  },
+  {
+    "name": "location unknown",
+    "state": {
+      "user": "k.adams",
+      "is_admin": false,
+      "event": {
+        "time": "2026-09-26T02:00:00Z",
+        "ip": "192.0.2.150",
+        "city": null,
+        "lat": null,
+        "lon": null,
+        "device_id": "tablet-5e2c",
+        "mfa_passed": false
+      },
+      "history": [
+        {
+          "time": "2026-09-25T18:40:00Z",
+          "ip": "192.0.2.10",
+          "city": "Berlin",
+          "lat": 52.52,
+          "lon": 13.405,
+          "device_id": "laptop-7f3a",
+          "result": "success"
+        },
+        {
+          "time": "2026-09-26T00:55:00Z",
+          "ip": "192.0.2.10",
+          "city": "Berlin",
+          "lat": 52.52,
+          "lon": 13.405,
+          "device_id": "phone-22c1",
+          "result": "success"
+        },
+        {
+          "time": "2026-09-26T01:30:00Z",
+          "ip": "203.0.113.45",
+          "city": "Lagos",
+          "lat": 6.524,
+          "lon": 3.379,
+          "device_id": "win-unknown-91",
+          "result": "fail"
+        }
+      ],
+      "failed_last_hour": 2,
+      "failed_hourly_avg_30d": 0.4
+    },
+    "expected": {
+      "suspicious": null,
+      "action": null
+    },
+    "status": {
+      "suspicious": "abstain",
+      "action": "abstain"
+    },
+    "note": "no coordinates: distance cannot be computed, both answers abstain and say why"
+  }
+]

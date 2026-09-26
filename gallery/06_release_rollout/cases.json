@@ -1,0 +1,408 @@
+[
+  {
+    "name": "healthy canary",
+    "state": {
+      "service": "checkout-api",
+      "release": "v2.14.0",
+      "canary_traffic_pct": 5,
+      "baseline": {
+        "requests": 182400,
+        "errors": 237,
+        "latency_buckets": {
+          "50": 32832,
+          "100": 94848,
+          "200": 164160,
+          "300": 177840,
+          "500": 181488,
+          "1000": 182400,
+          "+Inf": 182400
+        }
+      },
+      "canary": {
+        "requests": 9800,
+        "errors": 14,
+        "latency_buckets": {
+          "50": 1764,
+          "100": 5096,
+          "200": 8820,
+          "300": 9555,
+          "500": 9751,
+          "1000": 9800,
+          "+Inf": 9800
+        }
+      },
+      "slo": {
+        "availability_pct": 99.5,
+        "p95_ms": 400
+      },
+      "max_error_pct": 2.0,
+      "min_canary_requests": 2000
+    },
+    "expected": {
+      "decision": "promote",
+      "page_oncall": "no"
+    },
+    "note": "the default state: +10% errors is noise (z 0.3), latency unchanged"
+  },
+  {
+    "name": "errors tripled, significant",
+    "state": {
+      "service": "checkout-api",
+      "release": "v2.14.0",
+      "canary_traffic_pct": 5,
+      "baseline": {
+        "requests": 182400,
+        "errors": 237,
+        "latency_buckets": {
+          "50": 32832,
+          "100": 94848,
+          "200": 164160,
+          "300": 177840,
+          "500": 181488,
+          "1000": 182400,
+          "+Inf": 182400
+        }
+      },
+      "canary": {
+        "requests": 9800,
+        "errors": 41,
+        "latency_buckets": {
+          "50": 1764,
+          "100": 5096,
+          "200": 8820,
+          "300": 9555,
+          "500": 9751,
+          "1000": 9800,
+          "+Inf": 9800
+        }
+      },
+      "slo": {
+        "availability_pct": 99.5,
+        "p95_ms": 400
+      },
+      "max_error_pct": 2.0,
+      "min_canary_requests": 2000
+    },
+    "expected": {
+      "decision": "roll_back",
+      "page_oncall": "no"
+    },
+    "note": "+222% errors with z > 3: roll back; still under the SLO budget, so no page"
+  },
+  {
+    "name": "error rate above the ceiling",
+    "state": {
+      "service": "checkout-api",
+      "release": "v2.14.0",
+      "canary_traffic_pct": 5,
+      "baseline": {
+        "requests": 182400,
+        "errors": 237,
+        "latency_buckets": {
+          "50": 32832,
+          "100": 94848,
+          "200": 164160,
+          "300": 177840,
+          "500": 181488,
+          "1000": 182400,
+          "+Inf": 182400
+        }
+      },
+      "canary": {
+        "requests": 9800,
+        "errors": 310,
+        "latency_buckets": {
+          "50": 1764,
+          "100": 5096,
+          "200": 8820,
+          "300": 9555,
+          "500": 9751,
+          "1000": 9800,
+          "+Inf": 9800
+        }
+      },
+      "slo": {
+        "availability_pct": 99.5,
+        "p95_ms": 400
+      },
+      "max_error_pct": 2.0,
+      "min_canary_requests": 2000
+    },
+    "expected": {
+      "decision": "roll_back",
+      "page_oncall": "yes"
+    },
+    "status": {
+      "decision": "forced",
+      "page_oncall": "forced"
+    },
+    "note": "3.2% errors > 2% ceiling: hard check; latency and z-test are skipped (early exit)"
+  },
+  {
+    "name": "too little canary traffic",
+    "state": {
+      "service": "checkout-api",
+      "release": "v2.14.0",
+      "canary_traffic_pct": 1,
+      "baseline": {
+        "requests": 182400,
+        "errors": 237,
+        "latency_buckets": {
+          "50": 32832,
+          "100": 94848,
+          "200": 164160,
+          "300": 177840,
+          "500": 181488,
+          "1000": 182400,
+          "+Inf": 182400
+        }
+      },
+      "canary": {
+        "requests": 800,
+        "errors": 1,
+        "latency_buckets": {
+          "50": 144,
+          "100": 416,
+          "200": 720,
+          "300": 780,
+          "500": 796,
+          "1000": 800,
+          "+Inf": 800
+        }
+      },
+      "slo": {
+        "availability_pct": 99.5,
+        "p95_ms": 400
+      },
+      "max_error_pct": 2.0,
+      "min_canary_requests": 2000
+    },
+    "expected": {
+      "decision": "hold",
+      "page_oncall": "no"
+    },
+    "status": {
+      "decision": "forced"
+    },
+    "note": "800 requests < 2000 minimum: hold, whatever the numbers say"
+  },
+  {
+    "name": "latency over the SLO",
+    "state": {
+      "service": "checkout-api",
+      "release": "v2.14.0",
+      "canary_traffic_pct": 5,
+      "baseline": {
+        "requests": 182400,
+        "errors": 237,
+        "latency_buckets": {
+          "50": 32832,
+          "100": 94848,
+          "200": 164160,
+          "300": 177840,
+          "500": 181488,
+          "1000": 182400,
+          "+Inf": 182400
+        }
+      },
+      "canary": {
+        "requests": 9800,
+        "errors": 13,
+        "latency_buckets": {
+          "50": 980,
+          "100": 3430,
+          "200": 7840,
+          "300": 8820,
+          "500": 9604,
+          "1000": 9780,
+          "+Inf": 9800
+        }
+      },
+      "slo": {
+        "availability_pct": 99.5,
+        "p95_ms": 400
+      },
+      "max_error_pct": 2.0,
+      "min_canary_requests": 2000
+    },
+    "expected": {
+      "decision": "roll_back",
+      "page_oncall": "no"
+    },
+    "note": "errors fine, p95 425 ms > 400 ms SLO"
+  },
+  {
+    "name": "latency up 27%, within SLO",
+    "state": {
+      "service": "checkout-api",
+      "release": "v2.14.0",
+      "canary_traffic_pct": 5,
+      "baseline": {
+        "requests": 182400,
+        "errors": 237,
+        "latency_buckets": {
+          "50": 32832,
+          "100": 94848,
+          "200": 164160,
+          "300": 177840,
+          "500": 181488,
+          "1000": 182400,
+          "+Inf": 182400
+        }
+      },
+      "canary": {
+        "requests": 9800,
+        "errors": 12,
+        "latency_buckets": {
+          "50": 1470,
+          "100": 4410,
+          "200": 8036,
+          "300": 9212,
+          "500": 9702,
+          "1000": 9800,
+          "+Inf": 9800
+        }
+      },
+      "slo": {
+        "availability_pct": 99.5,
+        "p95_ms": 400
+      },
+      "max_error_pct": 2.0,
+      "min_canary_requests": 2000
+    },
+    "expected": {
+      "decision": "hold",
+      "page_oncall": "no"
+    },
+    "note": "p95 340 ms is inside the SLO but 27% slower than baseline: hold and look"
+  },
+  {
+    "name": "small error bump, not significant",
+    "state": {
+      "service": "checkout-api",
+      "release": "v2.14.0",
+      "canary_traffic_pct": 5,
+      "baseline": {
+        "requests": 182400,
+        "errors": 237,
+        "latency_buckets": {
+          "50": 32832,
+          "100": 94848,
+          "200": 164160,
+          "300": 177840,
+          "500": 181488,
+          "1000": 182400,
+          "+Inf": 182400
+        }
+      },
+      "canary": {
+        "requests": 9800,
+        "errors": 18,
+        "latency_buckets": {
+          "50": 1764,
+          "100": 5096,
+          "200": 8820,
+          "300": 9555,
+          "500": 9751,
+          "1000": 9800,
+          "+Inf": 9800
+        }
+      },
+      "slo": {
+        "availability_pct": 99.5,
+        "p95_ms": 400
+      },
+      "max_error_pct": 2.0,
+      "min_canary_requests": 2000
+    },
+    "expected": {
+      "decision": "hold",
+      "page_oncall": "no"
+    },
+    "note": "+42% relative, but z 1.3: not proven, not ignorable: hold"
+  },
+  {
+    "name": "burning the budget fast",
+    "state": {
+      "service": "checkout-api",
+      "release": "v2.14.0",
+      "canary_traffic_pct": 5,
+      "baseline": {
+        "requests": 182400,
+        "errors": 237,
+        "latency_buckets": {
+          "50": 32832,
+          "100": 94848,
+          "200": 164160,
+          "300": 177840,
+          "500": 181488,
+          "1000": 182400,
+          "+Inf": 182400
+        }
+      },
+      "canary": {
+        "requests": 9800,
+        "errors": 165,
+        "latency_buckets": {
+          "50": 1764,
+          "100": 5096,
+          "200": 8820,
+          "300": 9555,
+          "500": 9751,
+          "1000": 9800,
+          "+Inf": 9800
+        }
+      },
+      "slo": {
+        "availability_pct": 99.5,
+        "p95_ms": 400
+      },
+      "max_error_pct": 2.0,
+      "min_canary_requests": 2000
+    },
+    "expected": {
+      "decision": "roll_back",
+      "page_oncall": "yes"
+    },
+    "note": "1.7% errors: under the 2% ceiling, but 3.4x SLO burn: rule rolls back and pages"
+  },
+  {
+    "name": "latency histogram missing",
+    "state": {
+      "service": "checkout-api",
+      "release": "v2.14.0",
+      "canary_traffic_pct": 5,
+      "baseline": {
+        "requests": 182400,
+        "errors": 237,
+        "latency_buckets": {
+          "50": 32832,
+          "100": 94848,
+          "200": 164160,
+          "300": 177840,
+          "500": 181488,
+          "1000": 182400,
+          "+Inf": 182400
+        }
+      },
+      "canary": {
+        "requests": 9800,
+        "errors": 14
+      },
+      "slo": {
+        "availability_pct": 99.5,
+        "p95_ms": 400
+      },
+      "max_error_pct": 2.0,
+      "min_canary_requests": 2000
+    },
+    "expected": {
+      "decision": null,
+      "page_oncall": "no"
+    },
+    "status": {
+      "decision": "abstain"
+    },
+    "note": "metrics pipeline delay: decision abstains; the page decision needs only errors and still answers"
+  }
+]

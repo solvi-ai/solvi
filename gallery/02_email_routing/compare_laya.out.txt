@@ -1,0 +1,39 @@
+
+vendor invoice past due   (laya is_phishing 0.04)
+  team              expected billing         solvi billing          laya billing (1.00)
+  needs_human       expected no              solvi no               laya no (0.87)
+
+SSO outage   (laya is_phishing 0.00)
+  team              expected technical       solvi technical        laya technical (0.70)
+  needs_human       expected no              solvi no               laya no (0.55)
+
+pricing for 250 seats   (laya is_phishing 0.11)
+  team              expected sales           solvi sales            laya sales (0.89)
+  needs_human       expected no              solvi no               laya no (0.85)
+
+parental leave (internal)   (laya is_phishing 0.11)
+  team              expected hr              solvi hr               laya other (0.39) ✗
+  needs_human       expected no              solvi no               laya no (0.61)
+
+phishing victim   (laya is_phishing 0.39)
+  team              expected security        solvi security         laya security (0.99)
+  needs_human       expected no              solvi no               laya yes (0.65) ✗
+
+payment page error (split vote)   (laya is_phishing 0.15)
+  team              expected abstain         solvi abstain          laya billing (0.73) ✗
+  needs_human       expected yes             solvi yes              laya no (0.58) ✗
+
+nothing to go on   (laya is_phishing 0.11)
+  team              expected abstain         solvi abstain          laya other (0.84)
+  needs_human       expected yes             solvi yes              laya no (0.80) ✗
+
+lookalike CEO wire request   (laya is_phishing 0.10)
+  team              expected security        solvi security         laya billing (1.00) ✗
+  needs_human       expected yes             solvi yes              laya no (0.70) ✗
+
+payroll bank change from Gmail   (laya is_phishing 0.12)
+  team              expected hr              solvi hr               laya hr (0.63)
+  needs_human       expected yes             solvi yes              laya yes (0.66)
+
+correct answers: solvi 18/18, laya 11/18
+median time per email: solvi 0.65 ms (CPU), laya 42.0 ms (GPU NVIDIA GeForce RTX 3060 Laptop GPU)

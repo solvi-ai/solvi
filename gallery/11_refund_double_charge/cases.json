@@ -1,0 +1,397 @@
+[
+  {
+    "name": "genuine_double_charge",
+    "state": {
+      "customer_id": "C-30417",
+      "ticket": "Hi, I was charged twice for my StreamFlix subscription yesterday, 54.99 each time. Please refund the extra one. Dana",
+      "ledger": [
+        {
+          "id": "tx-9001",
+          "ts": "2026-09-02T08:12:44",
+          "type": "charge",
+          "amount": 3.8,
+          "merchant": "Bean There Coffee",
+          "status": "settled"
+        },
+        {
+          "id": "tx-9002",
+          "ts": "2026-09-05T19:40:10",
+          "type": "charge",
+          "amount": 61.25,
+          "merchant": "GreenLeaf Market",
+          "status": "settled"
+        },
+        {
+          "id": "tx-9003",
+          "ts": "2026-09-11T12:03:55",
+          "type": "charge",
+          "amount": 14.0,
+          "merchant": "CityPark Garages",
+          "status": "settled"
+        },
+        {"id": "tx-9101", "ts": "2026-09-18T20:14:03", "type": "charge", "amount": 54.99, "merchant": "StreamFlix", "status": "settled"},
+        {"id": "tx-9102", "ts": "2026-09-18T20:16:21", "type": "charge", "amount": 54.99, "merchant": "StreamFlix", "status": "settled"}
+      ],
+      "payout_account": {"balance": 18450.0, "reserved": 3200.0}
+    },
+    "expected": {"customer_claims_double": "yes", "is_double_charge": "yes", "refund": "auto", "reply": "confirm refund"},
+    "note": "two settled 54.99 charges 2.3 minutes apart: refund 54.99 automatically"
+  },
+  {
+    "name": "claim_not_confirmed_by_ledger",
+    "state": {
+      "customer_id": "C-30417",
+      "ticket": "You double charged me!! I see two payments of $54.99 to StreamFlix on my banking app. Fix this now.",
+      "ledger": [
+        {
+          "id": "tx-9001",
+          "ts": "2026-09-02T08:12:44",
+          "type": "charge",
+          "amount": 3.8,
+          "merchant": "Bean There Coffee",
+          "status": "settled"
+        },
+        {
+          "id": "tx-9002",
+          "ts": "2026-09-05T19:40:10",
+          "type": "charge",
+          "amount": 61.25,
+          "merchant": "GreenLeaf Market",
+          "status": "settled"
+        },
+        {
+          "id": "tx-9003",
+          "ts": "2026-09-11T12:03:55",
+          "type": "charge",
+          "amount": 14.0,
+          "merchant": "CityPark Garages",
+          "status": "settled"
+        },
+        {
+          "id": "auth-771",
+          "ts": "2026-09-18T20:14:03",
+          "type": "authorization",
+          "amount": 54.99,
+          "merchant": "StreamFlix",
+          "status": "released"
+        },
+        {"id": "tx-9102", "ts": "2026-09-18T20:15:12", "type": "charge", "amount": 54.99, "merchant": "StreamFlix", "status": "settled"}
+      ],
+      "payout_account": {"balance": 18450.0, "reserved": 3200.0}
+    },
+    "expected": {"customer_claims_double": "yes", "is_double_charge": "no", "refund": "none", "reply": "no duplicate found"},
+    "note": "the customer is sure, but the first line is a card authorisation that was released: one charge, nothing to refund"
+  },
+  {
+    "name": "monthly_renewal_not_duplicate",
+    "state": {
+      "customer_id": "C-30417",
+      "ticket": "I have been billed twice for CloudBox Pro, 12.99 and again 12.99. Why??",
+      "ledger": [
+        {
+          "id": "tx-9001",
+          "ts": "2026-09-02T08:12:44",
+          "type": "charge",
+          "amount": 3.8,
+          "merchant": "Bean There Coffee",
+          "status": "settled"
+        },
+        {
+          "id": "tx-9002",
+          "ts": "2026-09-05T19:40:10",
+          "type": "charge",
+          "amount": 61.25,
+          "merchant": "GreenLeaf Market",
+          "status": "settled"
+        },
+        {
+          "id": "tx-9003",
+          "ts": "2026-09-11T12:03:55",
+          "type": "charge",
+          "amount": 14.0,
+          "merchant": "CityPark Garages",
+          "status": "settled"
+        },
+        {"id": "tx-8811", "ts": "2026-08-19T06:00:02", "type": "charge", "amount": 12.99, "merchant": "CloudBox", "status": "settled"},
+        {"id": "tx-9150", "ts": "2026-09-19T06:00:04", "type": "charge", "amount": 12.99, "merchant": "CloudBox", "status": "settled"}
+      ],
+      "payout_account": {"balance": 18450.0, "reserved": 3200.0}
+    },
+    "expected": {"customer_claims_double": "yes", "is_double_charge": "no", "refund": "none", "reply": "no duplicate found"},
+    "note": "same amount, same merchant, but 31 days apart: a renewal, not a double charge"
+  },
+  {
+    "name": "claimed_amount_differs",
+    "state": {
+      "customer_id": "C-30417",
+      "ticket": "Hello, your app charged me twice for my order, 49.99 each. Order R-5521. Thanks, Mo",
+      "ledger": [
+        {
+          "id": "tx-9001",
+          "ts": "2026-09-02T08:12:44",
+          "type": "charge",
+          "amount": 3.8,
+          "merchant": "Bean There Coffee",
+          "status": "settled"
+        },
+        {
+          "id": "tx-9002",
+          "ts": "2026-09-05T19:40:10",
+          "type": "charge",
+          "amount": 61.25,
+          "merchant": "GreenLeaf Market",
+          "status": "settled"
+        },
+        {
+          "id": "tx-9003",
+          "ts": "2026-09-11T12:03:55",
+          "type": "charge",
+          "amount": 14.0,
+          "merchant": "CityPark Garages",
+          "status": "settled"
+        },
+        {
+          "id": "tx-9201",
+          "ts": "2026-09-20T11:30:40",
+          "type": "charge",
+          "amount": 54.99,
+          "merchant": "ShopRight Online",
+          "status": "settled"
+        },
+        {
+          "id": "tx-9202",
+          "ts": "2026-09-20T11:31:02",
+          "type": "charge",
+          "amount": 54.99,
+          "merchant": "ShopRight Online",
+          "status": "settled"
+        }
+      ],
+      "payout_account": {"balance": 18450.0, "reserved": 3200.0}
+    },
+    "expected": {"customer_claims_double": "yes", "is_double_charge": "yes", "refund": "auto", "reply": "confirm refund"},
+    "note": "the customer quotes 49.99; the ledger has 54.99 (with tax) twice: the refund is the ledger's 54.99"
+  },
+  {
+    "name": "over_auto_refund_limit",
+    "state": {
+      "customer_id": "C-30417",
+      "ticket": "I was charged twice for flight NA 2231, 1,240.00 twice on my card.",
+      "ledger": [
+        {
+          "id": "tx-9001",
+          "ts": "2026-09-02T08:12:44",
+          "type": "charge",
+          "amount": 3.8,
+          "merchant": "Bean There Coffee",
+          "status": "settled"
+        },
+        {
+          "id": "tx-9002",
+          "ts": "2026-09-05T19:40:10",
+          "type": "charge",
+          "amount": 61.25,
+          "merchant": "GreenLeaf Market",
+          "status": "settled"
+        },
+        {
+          "id": "tx-9003",
+          "ts": "2026-09-11T12:03:55",
+          "type": "charge",
+          "amount": 14.0,
+          "merchant": "CityPark Garages",
+          "status": "settled"
+        },
+        {"id": "tx-9301", "ts": "2026-09-17T09:02:11", "type": "charge", "amount": 1240.0, "merchant": "Nordic Air", "status": "settled"},
+        {"id": "tx-9302", "ts": "2026-09-17T09:02:49", "type": "charge", "amount": 1240.0, "merchant": "Nordic Air", "status": "settled"}
+      ],
+      "payout_account": {"balance": 18450.0, "reserved": 3200.0}
+    },
+    "expected": {"customer_claims_double": "yes", "is_double_charge": "yes", "refund": "manual", "reply": "under review"},
+    "note": "a real double charge of 1 240.00: above the 500 auto-refund limit, a person approves"
+  },
+  {
+    "name": "free_balance_too_low",
+    "state": {
+      "customer_id": "C-30417",
+      "ticket": "Duplicate charge on my card - 420.00 twice from Alpine Rentals. Please return one.",
+      "ledger": [
+        {
+          "id": "tx-9001",
+          "ts": "2026-09-02T08:12:44",
+          "type": "charge",
+          "amount": 3.8,
+          "merchant": "Bean There Coffee",
+          "status": "settled"
+        },
+        {
+          "id": "tx-9002",
+          "ts": "2026-09-05T19:40:10",
+          "type": "charge",
+          "amount": 61.25,
+          "merchant": "GreenLeaf Market",
+          "status": "settled"
+        },
+        {
+          "id": "tx-9003",
+          "ts": "2026-09-11T12:03:55",
+          "type": "charge",
+          "amount": 14.0,
+          "merchant": "CityPark Garages",
+          "status": "settled"
+        },
+        {"id": "tx-9401", "ts": "2026-09-19T15:20:00", "type": "charge", "amount": 420.0, "merchant": "Alpine Rentals", "status": "settled"},
+        {"id": "tx-9402", "ts": "2026-09-19T15:21:30", "type": "charge", "amount": 420.0, "merchant": "Alpine Rentals", "status": "settled"}
+      ],
+      "payout_account": {"balance": 900.0, "reserved": 600.0}
+    },
+    "expected": {"customer_claims_double": "yes", "is_double_charge": "yes", "refund": "manual", "reply": "under review"},
+    "note": "420.00 is under the limit, but the payout account has 900 - 600 reserved = 300 free"
+  },
+  {
+    "name": "chargeback_already_open",
+    "state": {
+      "customer_id": "C-30417",
+      "ticket": "I was charged twice by GymNation (39.00). I also called my bank.",
+      "ledger": [
+        {
+          "id": "tx-9001",
+          "ts": "2026-09-02T08:12:44",
+          "type": "charge",
+          "amount": 3.8,
+          "merchant": "Bean There Coffee",
+          "status": "settled"
+        },
+        {
+          "id": "tx-9002",
+          "ts": "2026-09-05T19:40:10",
+          "type": "charge",
+          "amount": 61.25,
+          "merchant": "GreenLeaf Market",
+          "status": "settled"
+        },
+        {
+          "id": "tx-9003",
+          "ts": "2026-09-11T12:03:55",
+          "type": "charge",
+          "amount": 14.0,
+          "merchant": "CityPark Garages",
+          "status": "settled"
+        },
+        {"id": "tx-9501", "ts": "2026-09-15T07:45:10", "type": "charge", "amount": 39.0, "merchant": "GymNation", "status": "settled"},
+        {"id": "tx-9502", "ts": "2026-09-15T07:46:02", "type": "charge", "amount": 39.0, "merchant": "GymNation", "status": "settled"},
+        {
+          "id": "cb-311",
+          "ts": "2026-09-19T10:00:00",
+          "type": "chargeback",
+          "amount": 39.0,
+          "merchant": "GymNation",
+          "status": "open",
+          "disputes": "tx-9502"
+        }
+      ],
+      "payout_account": {"balance": 18450.0, "reserved": 3200.0}
+    },
+    "expected": {"customer_claims_double": "yes", "is_double_charge": "yes", "refund": "none", "reply": "chargeback in progress"},
+    "note": "a real double charge, but the bank's chargeback is open: the hard check forbids a second refund"
+  },
+  {
+    "name": "silent_double_charge",
+    "state": {
+      "customer_id": "C-30417",
+      "ticket": "Where is my parcel? Order R-6634 was supposed to arrive on Friday.",
+      "ledger": [
+        {
+          "id": "tx-9001",
+          "ts": "2026-09-02T08:12:44",
+          "type": "charge",
+          "amount": 3.8,
+          "merchant": "Bean There Coffee",
+          "status": "settled"
+        },
+        {
+          "id": "tx-9002",
+          "ts": "2026-09-05T19:40:10",
+          "type": "charge",
+          "amount": 61.25,
+          "merchant": "GreenLeaf Market",
+          "status": "settled"
+        },
+        {
+          "id": "tx-9003",
+          "ts": "2026-09-11T12:03:55",
+          "type": "charge",
+          "amount": 14.0,
+          "merchant": "CityPark Garages",
+          "status": "settled"
+        },
+        {
+          "id": "tx-9601",
+          "ts": "2026-09-16T18:05:31",
+          "type": "charge",
+          "amount": 23.4,
+          "merchant": "ShopRight Online",
+          "status": "settled"
+        },
+        {
+          "id": "tx-9602",
+          "ts": "2026-09-16T18:08:12",
+          "type": "charge",
+          "amount": 23.4,
+          "merchant": "ShopRight Online",
+          "status": "settled"
+        }
+      ],
+      "payout_account": {"balance": 18450.0, "reserved": 3200.0}
+    },
+    "expected": {"customer_claims_double": "no", "is_double_charge": "yes", "refund": "auto", "reply": "confirm refund"},
+    "note": "the customer does not mention it, but the ledger shows it: refund 23.40 proactively"
+  },
+  {
+    "name": "already_refunded",
+    "state": {
+      "customer_id": "C-30417",
+      "ticket": "I got charged twice for the concert tickets (86.50). Can you refund?",
+      "ledger": [
+        {
+          "id": "tx-9001",
+          "ts": "2026-09-02T08:12:44",
+          "type": "charge",
+          "amount": 3.8,
+          "merchant": "Bean There Coffee",
+          "status": "settled"
+        },
+        {
+          "id": "tx-9002",
+          "ts": "2026-09-05T19:40:10",
+          "type": "charge",
+          "amount": 61.25,
+          "merchant": "GreenLeaf Market",
+          "status": "settled"
+        },
+        {
+          "id": "tx-9003",
+          "ts": "2026-09-11T12:03:55",
+          "type": "charge",
+          "amount": 14.0,
+          "merchant": "CityPark Garages",
+          "status": "settled"
+        },
+        {"id": "tx-9701", "ts": "2026-09-10T21:00:05", "type": "charge", "amount": 86.5, "merchant": "TicketHall", "status": "settled"},
+        {"id": "tx-9702", "ts": "2026-09-10T21:00:44", "type": "charge", "amount": 86.5, "merchant": "TicketHall", "status": "settled"},
+        {
+          "id": "rf-9702",
+          "ts": "2026-09-12T09:30:00",
+          "type": "refund",
+          "amount": 86.5,
+          "merchant": "TicketHall",
+          "status": "settled",
+          "refund_of": "tx-9702"
+        }
+      ],
+      "payout_account": {"balance": 18450.0, "reserved": 3200.0}
+    },
+    "expected": {"customer_claims_double": "yes", "is_double_charge": "no", "refund": "none", "reply": "already refunded"},
+    "note": "true, but the duplicate was refunded on 12 September; nothing is left to refund"
+  }
+]

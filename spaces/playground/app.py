@@ -42,6 +42,18 @@ PRESET_TITLES = {
     "07_smart_thermostat": "Smart thermostat",
     "08_plant_watering": "Plant watering",
     "09_blank_template": "Blank template (start here)",
+    "g01_support_triage": 'Gallery · 01 · Support triage',
+    "g02_email_routing": 'Gallery · 02 · Email routing',
+    "g03_content_guard": 'Gallery · 03 · Content guard',
+    "g04_security_alert": 'Gallery · 04 · Security alert',
+    "g05_agent_trace_audit": 'Gallery · 05 · AI-agent trace audit',
+    "g06_release_rollout": 'Gallery · 06 · Release rollout',
+    "g07_kyc_aml": 'Gallery · 07 · KYC / AML screening',
+    "g08_clinical_screening": 'Gallery · 08 · Clinical screening: NEWS2, qSOFA, escalation',
+    "g09_credit_adverse_action": 'Gallery · 09 · Credit decision with adverse-action reasons',
+    "g10_procurement_3way_match": 'Gallery · 10 · Procurement: 3-way match',
+    "g11_refund_double_charge": 'Gallery · 11 · "I was charged twice": refund from the ledger, not from the ticket',
+    "g12_predictive_maintenance": 'Gallery · 12 · Predictive maintenance',
 }
 PRESETS = {}
 for stem, title in PRESET_TITLES.items():

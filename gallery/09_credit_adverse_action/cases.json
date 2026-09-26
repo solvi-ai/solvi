@@ -1,0 +1,222 @@
+[
+  {
+    "name": "dti_knockout",
+    "state": {
+      "application_id": "LN-24102",
+      "age": 38,
+      "residency_status": "citizen",
+      "annual_income": 54000,
+      "monthly_debt_payments": 1900,
+      "requested_amount": 25000,
+      "term_months": 60,
+      "annual_rate": 0.119,
+      "credit_history_months": 110,
+      "credit_score": 731,
+      "delinquencies_24m": 0,
+      "utilization": 0.22,
+      "inquiries_6m": 1,
+      "employment_months": 70,
+      "self_employed": false
+    },
+    "expected": {"decision": "decline", "principal_reason": "Excessive obligations in relation to income"},
+    "note": "good score and history, but debt-to-income after the loan is above 50%: knock-out"
+  },
+  {
+    "name": "thin_file_refer",
+    "state": {
+      "application_id": "LN-24103",
+      "age": 23,
+      "residency_status": "citizen",
+      "annual_income": 42000,
+      "monthly_debt_payments": 250,
+      "requested_amount": 9000,
+      "term_months": 36,
+      "annual_rate": 0.109,
+      "credit_history_months": 10,
+      "credit_score": 690,
+      "delinquencies_24m": 0,
+      "utilization": 0.45,
+      "inquiries_6m": 2,
+      "employment_months": 14,
+      "self_employed": false
+    },
+    "expected": {"decision": "refer", "principal_reason": "Limited credit experience"},
+    "note": "no bad marks, just 10 months of credit history: refer, and the reason list says why it was not approved"
+  },
+  {
+    "name": "decline_four_reasons",
+    "state": {
+      "application_id": "LN-24104",
+      "age": 47,
+      "residency_status": "citizen",
+      "annual_income": 66000,
+      "monthly_debt_payments": 900,
+      "requested_amount": 16000,
+      "term_months": 48,
+      "annual_rate": 0.139,
+      "credit_history_months": 60,
+      "credit_score": 612,
+      "delinquencies_24m": 2,
+      "utilization": 0.88,
+      "inquiries_6m": 6,
+      "employment_months": 40,
+      "self_employed": false
+    },
+    "expected": {"decision": "decline", "principal_reason": "Credit score insufficient"},
+    "note": "44 points: the notice lists the four factors that lost the most points"
+  },
+  {
+    "name": "dti_just_under_36",
+    "state": {
+      "application_id": "LN-24105",
+      "age": 33,
+      "residency_status": "citizen",
+      "annual_income": 60000,
+      "monthly_debt_payments": 1426,
+      "requested_amount": 15000,
+      "term_months": 48,
+      "annual_rate": 0.089,
+      "credit_history_months": 50,
+      "credit_score": 705,
+      "delinquencies_24m": 0,
+      "utilization": 0.6,
+      "inquiries_6m": 2,
+      "employment_months": 30,
+      "self_employed": false
+    },
+    "expected": {"decision": "approve", "principal_reason": "none"},
+    "note": "DTI 0.3597 keeps 15 of 20 points: 75 points, approve"
+  },
+  {
+    "name": "dti_just_over_36",
+    "state": {
+      "application_id": "LN-24106",
+      "age": 33,
+      "residency_status": "citizen",
+      "annual_income": 60000,
+      "monthly_debt_payments": 1428,
+      "requested_amount": 15000,
+      "term_months": 48,
+      "annual_rate": 0.089,
+      "credit_history_months": 50,
+      "credit_score": 705,
+      "delinquencies_24m": 0,
+      "utilization": 0.6,
+      "inquiries_6m": 2,
+      "employment_months": 30,
+      "self_employed": false
+    },
+    "expected": {"decision": "refer", "principal_reason": "Excessive obligations in relation to income"},
+    "note": "the same file with $2 more monthly debt: DTI 0.3601 scores 9, 69 points, refer"
+  },
+  {
+    "name": "underage",
+    "state": {
+      "application_id": "LN-24107",
+      "age": 17,
+      "residency_status": "citizen",
+      "annual_income": 21000,
+      "monthly_debt_payments": 0,
+      "requested_amount": 4000,
+      "term_months": 24,
+      "annual_rate": 0.149,
+      "credit_history_months": 6,
+      "credit_score": 650,
+      "delinquencies_24m": 0,
+      "utilization": 0.25,
+      "inquiries_6m": 1,
+      "employment_months": 8,
+      "self_employed": false
+    },
+    "expected": {"decision": "decline", "principal_reason": "Applicant under the legal age to contract", "refer_to_underwriter": "no"},
+    "note": "hard check: no score can approve a 17-year-old"
+  },
+  {
+    "name": "temporary_residence",
+    "state": {
+      "application_id": "LN-24108",
+      "age": 29,
+      "residency_status": "temporary_visa",
+      "annual_income": 88000,
+      "monthly_debt_payments": 300,
+      "requested_amount": 12000,
+      "term_months": 48,
+      "annual_rate": 0.089,
+      "credit_history_months": 40,
+      "credit_score": 755,
+      "delinquencies_24m": 0,
+      "utilization": 0.25,
+      "inquiries_6m": 1,
+      "employment_months": 26,
+      "self_employed": false
+    },
+    "expected": {"decision": "decline", "principal_reason": "Temporary residence", "refer_to_underwriter": "no"},
+    "note": "a strong file that fails the residency eligibility check"
+  },
+  {
+    "name": "score_knockout_high_income",
+    "state": {
+      "application_id": "LN-24109",
+      "age": 52,
+      "residency_status": "citizen",
+      "annual_income": 140000,
+      "monthly_debt_payments": 800,
+      "requested_amount": 20000,
+      "term_months": 60,
+      "annual_rate": 0.159,
+      "credit_history_months": 200,
+      "credit_score": 561,
+      "delinquencies_24m": 1,
+      "utilization": 0.35,
+      "inquiries_6m": 1,
+      "employment_months": 180,
+      "self_employed": false
+    },
+    "expected": {"decision": "decline", "principal_reason": "Credit score insufficient"},
+    "note": "conflicting signals: high income and low DTI, but a score below 580 is a knock-out"
+  },
+  {
+    "name": "self_employed_thin_file",
+    "state": {
+      "application_id": "LN-24110",
+      "age": 31,
+      "residency_status": "citizen",
+      "annual_income": 78000,
+      "monthly_debt_payments": 400,
+      "requested_amount": 14000,
+      "term_months": 48,
+      "annual_rate": 0.099,
+      "credit_history_months": 22,
+      "credit_score": 742,
+      "delinquencies_24m": 0,
+      "utilization": 0.2,
+      "inquiries_6m": 1,
+      "employment_months": 60,
+      "self_employed": true
+    },
+    "expected": {"decision": "approve", "principal_reason": "none", "refer_to_underwriter": "yes"},
+    "note": "the scorecard approves (91 points), but the learned habit sends self-employed files with under 3 years of history to a senior"
+  },
+  {
+    "name": "large_loan_clean_file",
+    "state": {
+      "application_id": "LN-24111",
+      "age": 45,
+      "residency_status": "citizen",
+      "annual_income": 160000,
+      "monthly_debt_payments": 900,
+      "requested_amount": 48000,
+      "term_months": 60,
+      "annual_rate": 0.074,
+      "credit_history_months": 180,
+      "credit_score": 781,
+      "delinquencies_24m": 0,
+      "utilization": 0.12,
+      "inquiries_6m": 1,
+      "employment_months": 150,
+      "self_employed": false
+    },
+    "expected": {"decision": "approve", "principal_reason": "none", "refer_to_underwriter": "yes"},
+    "note": "auto-approved by the scorecard, but underwriters have always looked at loans of 45 000 and above"
+  }
+]

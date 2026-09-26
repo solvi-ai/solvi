@@ -1,0 +1,19 @@
+{
+  "customer_id": "C-30417",
+  "ticket": "You double charged me!! I see two payments of $54.99 to StreamFlix on my banking app. Fix this now.",
+  "ledger": [
+    {"id": "tx-9001", "ts": "2026-09-02T08:12:44", "type": "charge", "amount": 3.8, "merchant": "Bean There Coffee", "status": "settled"},
+    {"id": "tx-9002", "ts": "2026-09-05T19:40:10", "type": "charge", "amount": 61.25, "merchant": "GreenLeaf Market", "status": "settled"},
+    {"id": "tx-9003", "ts": "2026-09-11T12:03:55", "type": "charge", "amount": 14.0, "merchant": "CityPark Garages", "status": "settled"},
+    {
+      "id": "auth-771",
+      "ts": "2026-09-18T20:14:03",
+      "type": "authorization",
+      "amount": 54.99,
+      "merchant": "StreamFlix",
+      "status": "released"
+    },
+    {"id": "tx-9102", "ts": "2026-09-18T20:15:12", "type": "charge", "amount": 54.99, "merchant": "StreamFlix", "status": "settled"}
+  ],
+  "payout_account": {"balance": 18450.0, "reserved": 3200.0}
+}

@@ -68,11 +68,16 @@ class System:
 
     def _answer(self, q, flow, trace, vals, by):
         facts = flow.per_question.get(q.name, [])
-        # hard checks: a false hard check in the question's flow decides the answer (the model cannot override it)
-        for f in facts:
+        # hard checks: a false hard check in the question's flow decides the answer (the model cannot override it).
+        # A hard check with `then` governs only the questions listed there (and those that name it as a checkpoint);
+        # for other questions it is an ordinary failed check.
+        in_flow = set(facts)
+        for f in [n for n in self.catalog.parts if n in in_flow]:        # several failed: the first declared in the catalog decides
             part = self.catalog.parts.get(f)
             r = by.get(f)
             if part is not None and part.kind == "check" and part.hard and r is not None and r.value is False:
+                if not governs(part, q):
+                    continue
                 if q.name in part.then:
                     return Result(q.answer.normalize(part.then[q.name]), 1.0, f"hard check {f} is false", "forced")
                 return Result(None, 0.0, f"hard check {f} is false and no answer is set for it", "abstain")
@@ -80,8 +85,12 @@ class System:
         if flow.unresolved.get(q.name):
             return Result(None, 0.0, "cannot compute: " + ", ".join(flow.unresolved[q.name]), "abstain")
         rule = self.catalog.rules.get(q.name)
-        soft_failed = [f for f in facts if self.catalog.parts.get(f) is not None and self.catalog.parts[f].kind == "check"
-                       and not self.catalog.parts[f].hard and by.get(f) is not None and by[f].value is False]
+        soft_failed = []
+        for f in facts:
+            part = self.catalog.parts.get(f)
+            if part is not None and part.kind == "check" and by.get(f) is not None and by[f].value is False:
+                if not part.hard or not governs(part, q):
+                    soft_failed.append(f)
         if rule is not None:
             r = by.get(rule.name)
             if r is None or r.value is MISSING:
@@ -205,6 +214,12 @@ class System:
                                  "answers": {q: [r.answer, round(r.confidence, 4), r.status] for q, r in resp.results.items()},
                                  "flow": [s.part.name for s in resp.flow.steps],
                                  "records": [[r.step, r.name, r.hash] for r in resp.trace.records]}, ensure_ascii=False) + "\n")
+
+
+def governs(part, question):
+    """Does a failed hard check decide this question? Yes if the question is in its `then`, names it as a checkpoint, or the
+    check has no `then` at all."""
+    return not part.then or question.name in part.then or part.name in question.checkpoints
 
 
 def _platt(c, a, b):

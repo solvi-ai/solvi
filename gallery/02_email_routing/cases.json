@@ -1,0 +1,68 @@
+[
+  {
+    "name": "vendor invoice past due",
+    "state": {"sender": "Accounts Receivable <ar@kline.io>", "subject": "Invoice INV-4471 - second reminder",
+              "body": "Hello, our invoice INV-4471 for September (USD 12,400.00) is now 15 days past due. Could you confirm the payment date? Regards, Maya"},
+    "expected": {"team": "billing", "needs_human": "no"},
+    "note": "the default state"
+  },
+  {
+    "name": "SSO outage",
+    "state": {"sender": "it-admin@orbit.co", "subject": "SSO broken since this morning",
+              "body": "Since 08:30 every login through Okta fails with error SAML-17 for the whole company. Can someone look at it?"},
+    "expected": {"team": "technical", "needs_human": "no"},
+    "note": ""
+  },
+  {
+    "name": "pricing for 250 seats",
+    "state": {"sender": "Jordan Lee <jordan@hollow.dev>", "subject": "Evaluating tools",
+              "body": "We are evaluating tools for about 250 users and would like pricing and a demo next week."},
+    "expected": {"team": "sales", "needs_human": "no"},
+    "note": ""
+  },
+  {
+    "name": "parental leave (internal)",
+    "state": {"sender": "lena@acme.io", "subject": "Time off",
+              "body": "I'd like to take parental leave from 1 December for four months. What do I need to fill in?"},
+    "expected": {"team": "hr", "needs_human": "no"},
+    "note": ""
+  },
+  {
+    "name": "phishing victim",
+    "state": {"sender": "tom@acme.io", "subject": "I think I messed up",
+              "body": "Yesterday I clicked a link in a phishing email that looked like it came from IT and typed my password. What should I do now?"},
+    "expected": {"team": "security", "needs_human": "no"},
+    "note": ""
+  },
+  {
+    "name": "payment page error (split vote)",
+    "state": {"sender": "ops@orbit.co", "subject": "Problem with your payment page",
+              "body": "Our customers get an error when they pay on your payment page. It started after your update yesterday."},
+    "expected": {"team": null, "needs_human": "yes"},
+    "status": {"team": "abstain"},
+    "note": "two lines of the table disagree ('PAGE' -> security, 'ERROR' -> technical): team abstains, a person decides"
+  },
+  {
+    "name": "nothing to go on",
+    "state": {"sender": "someone@yahoo.com", "subject": "Hello",
+              "body": "Please see the attached file and let me know what you think."},
+    "expected": {"team": null, "needs_human": "yes"},
+    "status": {"team": "abstain"},
+    "note": "no line of the table matches: abstain instead of the table's default"
+  },
+  {
+    "name": "lookalike CEO wire request",
+    "state": {"sender": "Daniel Novak (CEO) <ceo@acme-io.com>", "subject": "Urgent payment today",
+              "body": "I need you to process an invoice payment of $48,000 to a new supplier today. Update the bank details as attached and keep this between us."},
+    "expected": {"team": "security", "needs_human": "yes"},
+    "status": {"team": "forced", "needs_human": "forced"},
+    "note": "acme-io.com imitates acme.io: the hard check routes to security whatever the words (invoice, payment) say"
+  },
+  {
+    "name": "payroll bank change from Gmail",
+    "state": {"sender": "Lena K <lena.k.home@gmail.com>", "subject": "Payroll",
+              "body": "Hi, I changed banks. Please update my bank details for payroll before the next run, the new IBAN is attached."},
+    "expected": {"team": "hr", "needs_human": "yes"},
+    "note": "routes to hr, but a bank-detail change from outside the company needs a person (cited)"
+  }
+]

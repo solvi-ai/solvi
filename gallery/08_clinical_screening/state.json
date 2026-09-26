@@ -1,0 +1,12 @@
+{
+  "patient_id": "W5-02",
+  "resp_rate": 20,
+  "spo2": 83,
+  "spo2_scale": 2,
+  "on_oxygen": true,
+  "systolic_bp": 132,
+  "pulse": 95,
+  "consciousness": "A",
+  "temperature": 37.0,
+  "lactate": 1.2
+}

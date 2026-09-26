@@ -1,0 +1,505 @@
+[
+  {
+    "name": "clean_match_eur",
+    "state": {
+      "po": {
+        "po_number": "PO-77120",
+        "supplier_id": "SUP-104",
+        "currency": "EUR",
+        "lines": [
+          {"line": 1, "sku": "M8-40-A2", "description": "hex bolt M8x40 A2 stainless", "qty": 4000, "unit_price": 0.62},
+          {"line": 2, "sku": "W8-A2", "description": "washer M8 A2", "qty": 4000, "unit_price": 0.07},
+          {"line": 3, "sku": "N8-A2", "description": "lock nut M8 A2", "qty": 4000, "unit_price": 0.21}
+        ]
+      },
+      "receipt": {
+        "grn_number": "GRN-77120",
+        "po_number": "PO-77120",
+        "lines": [
+          {"line": 1, "sku": "M8-40-A2", "qty_received": 4000},
+          {"line": 2, "sku": "W8-A2", "qty_received": 4000},
+          {"line": 3, "sku": "N8-A2", "qty_received": 4000}
+        ]
+      },
+      "invoice": {
+        "invoice_number": "RF-2026-0932",
+        "supplier_id": "SUP-104",
+        "po_number": "PO-77120",
+        "currency": "EUR",
+        "date": "2026-09-21",
+        "lines": [
+          {"line": 1, "sku": "M8-40-A2", "qty": 4000, "unit_price": 0.62},
+          {"line": 2, "sku": "W8-A2", "qty": 4000, "unit_price": 0.07},
+          {"line": 3, "sku": "N8-A2", "qty": 4000, "unit_price": 0.21}
+        ],
+        "total": 3600.0
+      },
+      "fx_rates": {"USD": 1.0, "EUR": 1.08, "GBP": 1.27, "CHF": 1.13},
+      "suppliers": {
+        "SUP-104": {"name": "Rheinmetall Fasteners GmbH", "status": "active"},
+        "SUP-221": {"name": "Northbridge Packaging Ltd", "status": "active"},
+        "SUP-318": {"name": "Kanto Precision KK", "status": "active"},
+        "SUP-407": {"name": "Delta Office Supply Inc", "status": "on_hold"}
+      },
+      "paid_invoices": [
+        {"supplier_id": "SUP-104", "invoice_number": "RF-2026-0871", "amount": 3120.0, "currency": "EUR", "date": "2026-08-14"},
+        {"supplier_id": "SUP-221", "invoice_number": "inv 1187", "amount": 4380.0, "currency": "GBP", "date": "2026-09-02"},
+        {"supplier_id": "SUP-221", "invoice_number": "INV-1150", "amount": 2210.0, "currency": "GBP", "date": "2026-08-05"}
+      ],
+      "approver": {"name": "J. Okafor", "role": "clerk"},
+      "approval_limits": {"clerk": 10000, "manager": 50000, "director": 250000}
+    },
+    "expected": {"payment": "pay", "duplicate": "no", "escalate_approval": "no"},
+    "note": "three lines match PO and receipt; 3 600 EUR = 3 888 USD, within the clerk's 10 000"
+  },
+  {
+    "name": "price_within_tolerance",
+    "state": {
+      "po": {
+        "po_number": "PO-77120",
+        "supplier_id": "SUP-221",
+        "currency": "GBP",
+        "lines": [
+          {"line": 1, "sku": "BX-4020", "description": "shipping box 40x30x20, 5-ply", "qty": 2500, "unit_price": 1.84},
+          {"line": 2, "sku": "TP-48", "description": "packing tape 48 mm, 66 m", "qty": 600, "unit_price": 2.15}
+        ]
+      },
+      "receipt": {
+        "grn_number": "GRN-77120",
+        "po_number": "PO-77120",
+        "lines": [
+          {"line": 1, "sku": "BX-4020", "qty_received": 2500},
+          {"line": 2, "sku": "TP-48", "qty_received": 600}
+        ]
+      },
+      "invoice": {
+        "invoice_number": "INV-1204",
+        "supplier_id": "SUP-221",
+        "po_number": "PO-77120",
+        "currency": "GBP",
+        "date": "2026-09-21",
+        "lines": [
+          {"line": 1, "sku": "BX-4020", "qty": 2500, "unit_price": 1.875},
+          {"line": 2, "sku": "TP-48", "qty": 600, "unit_price": 2.15}
+        ],
+        "total": 5977.5
+      },
+      "fx_rates": {"USD": 1.0, "EUR": 1.08, "GBP": 1.27, "CHF": 1.13},
+      "suppliers": {
+        "SUP-104": {"name": "Rheinmetall Fasteners GmbH", "status": "active"},
+        "SUP-221": {"name": "Northbridge Packaging Ltd", "status": "active"},
+        "SUP-318": {"name": "Kanto Precision KK", "status": "active"},
+        "SUP-407": {"name": "Delta Office Supply Inc", "status": "on_hold"}
+      },
+      "paid_invoices": [
+        {"supplier_id": "SUP-104", "invoice_number": "RF-2026-0871", "amount": 3120.0, "currency": "EUR", "date": "2026-08-14"},
+        {"supplier_id": "SUP-221", "invoice_number": "inv 1187", "amount": 4380.0, "currency": "GBP", "date": "2026-09-02"},
+        {"supplier_id": "SUP-221", "invoice_number": "INV-1150", "amount": 2210.0, "currency": "GBP", "date": "2026-08-05"}
+      ],
+      "approver": {"name": "J. Okafor", "role": "clerk"},
+      "approval_limits": {"clerk": 10000, "manager": 50000, "director": 250000}
+    },
+    "expected": {"payment": "pay", "duplicate": "no", "escalate_approval": "no"},
+    "note": "boxes invoiced at 1.875 instead of 1.84: +1.90%, inside the ±2% tolerance"
+  },
+  {
+    "name": "price_over_tolerance",
+    "state": {
+      "po": {
+        "po_number": "PO-77120",
+        "supplier_id": "SUP-221",
+        "currency": "GBP",
+        "lines": [
+          {"line": 1, "sku": "BX-4020", "description": "shipping box 40x30x20, 5-ply", "qty": 2500, "unit_price": 1.84},
+          {"line": 2, "sku": "TP-48", "description": "packing tape 48 mm, 66 m", "qty": 600, "unit_price": 2.15}
+        ]
+      },
+      "receipt": {
+        "grn_number": "GRN-77120",
+        "po_number": "PO-77120",
+        "lines": [
+          {"line": 1, "sku": "BX-4020", "qty_received": 2500},
+          {"line": 2, "sku": "TP-48", "qty_received": 600}
+        ]
+      },
+      "invoice": {
+        "invoice_number": "INV-1205",
+        "supplier_id": "SUP-221",
+        "po_number": "PO-77120",
+        "currency": "GBP",
+        "date": "2026-09-21",
+        "lines": [
+          {"line": 1, "sku": "BX-4020", "qty": 2500, "unit_price": 1.885},
+          {"line": 2, "sku": "TP-48", "qty": 600, "unit_price": 2.15}
+        ],
+        "total": 6002.5
+      },
+      "fx_rates": {"USD": 1.0, "EUR": 1.08, "GBP": 1.27, "CHF": 1.13},
+      "suppliers": {
+        "SUP-104": {"name": "Rheinmetall Fasteners GmbH", "status": "active"},
+        "SUP-221": {"name": "Northbridge Packaging Ltd", "status": "active"},
+        "SUP-318": {"name": "Kanto Precision KK", "status": "active"},
+        "SUP-407": {"name": "Delta Office Supply Inc", "status": "on_hold"}
+      },
+      "paid_invoices": [
+        {"supplier_id": "SUP-104", "invoice_number": "RF-2026-0871", "amount": 3120.0, "currency": "EUR", "date": "2026-08-14"},
+        {"supplier_id": "SUP-221", "invoice_number": "inv 1187", "amount": 4380.0, "currency": "GBP", "date": "2026-09-02"},
+        {"supplier_id": "SUP-221", "invoice_number": "INV-1150", "amount": 2210.0, "currency": "GBP", "date": "2026-08-05"}
+      ],
+      "approver": {"name": "J. Okafor", "role": "clerk"},
+      "approval_limits": {"clerk": 10000, "manager": 50000, "director": 250000}
+    },
+    "expected": {"payment": "hold", "duplicate": "no", "escalate_approval": "no"},
+    "note": "one penny more per box: +2.45%, outside the tolerance -> hold that line"
+  },
+  {
+    "name": "billed_more_than_received",
+    "state": {
+      "po": {
+        "po_number": "PO-77120",
+        "supplier_id": "SUP-104",
+        "currency": "EUR",
+        "lines": [
+          {"line": 1, "sku": "M8-40-A2", "description": "hex bolt M8x40 A2 stainless", "qty": 4000, "unit_price": 0.62},
+          {"line": 2, "sku": "W8-A2", "description": "washer M8 A2", "qty": 4000, "unit_price": 0.07},
+          {"line": 3, "sku": "N8-A2", "description": "lock nut M8 A2", "qty": 4000, "unit_price": 0.21}
+        ]
+      },
+      "receipt": {
+        "grn_number": "GRN-77120",
+        "po_number": "PO-77120",
+        "lines": [
+          {"line": 1, "sku": "M8-40-A2", "qty_received": 3840},
+          {"line": 2, "sku": "W8-A2", "qty_received": 4000},
+          {"line": 3, "sku": "N8-A2", "qty_received": 4000}
+        ]
+      },
+      "invoice": {
+        "invoice_number": "RF-2026-0935",
+        "supplier_id": "SUP-104",
+        "po_number": "PO-77120",
+        "currency": "EUR",
+        "date": "2026-09-21",
+        "lines": [
+          {"line": 1, "sku": "M8-40-A2", "qty": 4000, "unit_price": 0.62},
+          {"line": 2, "sku": "W8-A2", "qty": 4000, "unit_price": 0.07},
+          {"line": 3, "sku": "N8-A2", "qty": 4000, "unit_price": 0.21}
+        ],
+        "total": 3600.0
+      },
+      "fx_rates": {"USD": 1.0, "EUR": 1.08, "GBP": 1.27, "CHF": 1.13},
+      "suppliers": {
+        "SUP-104": {"name": "Rheinmetall Fasteners GmbH", "status": "active"},
+        "SUP-221": {"name": "Northbridge Packaging Ltd", "status": "active"},
+        "SUP-318": {"name": "Kanto Precision KK", "status": "active"},
+        "SUP-407": {"name": "Delta Office Supply Inc", "status": "on_hold"}
+      },
+      "paid_invoices": [
+        {"supplier_id": "SUP-104", "invoice_number": "RF-2026-0871", "amount": 3120.0, "currency": "EUR", "date": "2026-08-14"},
+        {"supplier_id": "SUP-221", "invoice_number": "inv 1187", "amount": 4380.0, "currency": "GBP", "date": "2026-09-02"},
+        {"supplier_id": "SUP-221", "invoice_number": "INV-1150", "amount": 2210.0, "currency": "GBP", "date": "2026-08-05"}
+      ],
+      "approver": {"name": "J. Okafor", "role": "clerk"},
+      "approval_limits": {"clerk": 10000, "manager": 50000, "director": 250000}
+    },
+    "expected": {"payment": "hold", "duplicate": "no", "escalate_approval": "no"},
+    "note": "4 000 bolts invoiced, 3 840 received (a short delivery billed in full)"
+  },
+  {
+    "name": "fx_pushes_over_limit",
+    "state": {
+      "po": {
+        "po_number": "PO-77120",
+        "supplier_id": "SUP-221",
+        "currency": "GBP",
+        "lines": [
+          {"line": 1, "sku": "PL-1200", "description": "euro pallet, heat treated", "qty": 400, "unit_price": 20.5}
+        ]
+      },
+      "receipt": {
+        "grn_number": "GRN-77120",
+        "po_number": "PO-77120",
+        "lines": [
+          {"line": 1, "sku": "PL-1200", "qty_received": 400}
+        ]
+      },
+      "invoice": {
+        "invoice_number": "INV-1210",
+        "supplier_id": "SUP-221",
+        "po_number": "PO-77120",
+        "currency": "GBP",
+        "date": "2026-09-21",
+        "lines": [
+          {"line": 1, "sku": "PL-1200", "qty": 400, "unit_price": 20.5}
+        ],
+        "total": 8200.0
+      },
+      "fx_rates": {"USD": 1.0, "EUR": 1.08, "GBP": 1.27, "CHF": 1.13},
+      "suppliers": {
+        "SUP-104": {"name": "Rheinmetall Fasteners GmbH", "status": "active"},
+        "SUP-221": {"name": "Northbridge Packaging Ltd", "status": "active"},
+        "SUP-318": {"name": "Kanto Precision KK", "status": "active"},
+        "SUP-407": {"name": "Delta Office Supply Inc", "status": "on_hold"}
+      },
+      "paid_invoices": [
+        {"supplier_id": "SUP-104", "invoice_number": "RF-2026-0871", "amount": 3120.0, "currency": "EUR", "date": "2026-08-14"},
+        {"supplier_id": "SUP-221", "invoice_number": "inv 1187", "amount": 4380.0, "currency": "GBP", "date": "2026-09-02"},
+        {"supplier_id": "SUP-221", "invoice_number": "INV-1150", "amount": 2210.0, "currency": "GBP", "date": "2026-08-05"}
+      ],
+      "approver": {"name": "J. Okafor", "role": "clerk"},
+      "approval_limits": {"clerk": 10000, "manager": 50000, "director": 250000}
+    },
+    "expected": {"payment": "hold", "duplicate": "no", "escalate_approval": "yes"},
+    "note": "8 200 GBP looks under the 10 000 limit, but at 1.27 it is 10 414 USD: a manager must approve"
+  },
+  {
+    "name": "po_eur_invoice_usd",
+    "state": {
+      "po": {
+        "po_number": "PO-77120",
+        "supplier_id": "SUP-318",
+        "currency": "EUR",
+        "lines": [
+          {"line": 1, "sku": "BRG-6205", "description": "deep groove ball bearing 6205-2RS", "qty": 1200, "unit_price": 4.1},
+          {"line": 2, "sku": "BRG-6305", "description": "deep groove ball bearing 6305-2RS", "qty": 400, "unit_price": 7.35}
+        ]
+      },
+      "receipt": {
+        "grn_number": "GRN-77120",
+        "po_number": "PO-77120",
+        "lines": [
+          {"line": 1, "sku": "BRG-6205", "qty_received": 1200},
+          {"line": 2, "sku": "BRG-6305", "qty_received": 400}
+        ]
+      },
+      "invoice": {
+        "invoice_number": "KP-88213",
+        "supplier_id": "SUP-318",
+        "po_number": "PO-77120",
+        "currency": "USD",
+        "date": "2026-09-21",
+        "lines": [
+          {"line": 1, "sku": "BRG-6205", "qty": 1200, "unit_price": 4.46},
+          {"line": 2, "sku": "BRG-6305", "qty": 400, "unit_price": 7.95}
+        ],
+        "total": 8532.0
+      },
+      "fx_rates": {"USD": 1.0, "EUR": 1.08, "GBP": 1.27, "CHF": 1.13},
+      "suppliers": {
+        "SUP-104": {"name": "Rheinmetall Fasteners GmbH", "status": "active"},
+        "SUP-221": {"name": "Northbridge Packaging Ltd", "status": "active"},
+        "SUP-318": {"name": "Kanto Precision KK", "status": "active"},
+        "SUP-407": {"name": "Delta Office Supply Inc", "status": "on_hold"}
+      },
+      "paid_invoices": [
+        {"supplier_id": "SUP-104", "invoice_number": "RF-2026-0871", "amount": 3120.0, "currency": "EUR", "date": "2026-08-14"},
+        {"supplier_id": "SUP-221", "invoice_number": "inv 1187", "amount": 4380.0, "currency": "GBP", "date": "2026-09-02"},
+        {"supplier_id": "SUP-221", "invoice_number": "INV-1150", "amount": 2210.0, "currency": "GBP", "date": "2026-08-05"}
+      ],
+      "approver": {"name": "J. Okafor", "role": "clerk"},
+      "approval_limits": {"clerk": 10000, "manager": 50000, "director": 250000}
+    },
+    "expected": {"payment": "pay", "duplicate": "no", "escalate_approval": "no"},
+    "note": "PO in EUR, invoice in USD: 4.46 USD vs 4.10 EUR x 1.08 = 4.428 USD is +0.72%; 7.95 vs 7.938 is +0.15%"
+  },
+  {
+    "name": "duplicate_reformatted_number",
+    "state": {
+      "po": {
+        "po_number": "PO-77120",
+        "supplier_id": "SUP-221",
+        "currency": "GBP",
+        "lines": [
+          {"line": 1, "sku": "BX-4020", "description": "shipping box 40x30x20, 5-ply", "qty": 2500, "unit_price": 1.84},
+          {"line": 2, "sku": "TP-48", "description": "packing tape 48 mm, 66 m", "qty": 600, "unit_price": 2.15}
+        ]
+      },
+      "receipt": {
+        "grn_number": "GRN-77120",
+        "po_number": "PO-77120",
+        "lines": [
+          {"line": 1, "sku": "BX-4020", "qty_received": 2500},
+          {"line": 2, "sku": "TP-48", "qty_received": 600}
+        ]
+      },
+      "invoice": {
+        "invoice_number": "INV-001187",
+        "supplier_id": "SUP-221",
+        "po_number": "PO-77120",
+        "currency": "GBP",
+        "date": "2026-09-21",
+        "lines": [
+          {"line": 1, "sku": "BX-4020", "qty": 2500, "unit_price": 1.84},
+          {"line": 2, "sku": "TP-48", "qty": 600, "unit_price": 2.15}
+        ],
+        "total": 5890.0
+      },
+      "fx_rates": {"USD": 1.0, "EUR": 1.08, "GBP": 1.27, "CHF": 1.13},
+      "suppliers": {
+        "SUP-104": {"name": "Rheinmetall Fasteners GmbH", "status": "active"},
+        "SUP-221": {"name": "Northbridge Packaging Ltd", "status": "active"},
+        "SUP-318": {"name": "Kanto Precision KK", "status": "active"},
+        "SUP-407": {"name": "Delta Office Supply Inc", "status": "on_hold"}
+      },
+      "paid_invoices": [
+        {"supplier_id": "SUP-104", "invoice_number": "RF-2026-0871", "amount": 3120.0, "currency": "EUR", "date": "2026-08-14"},
+        {"supplier_id": "SUP-221", "invoice_number": "inv 1187", "amount": 4380.0, "currency": "GBP", "date": "2026-09-02"},
+        {"supplier_id": "SUP-221", "invoice_number": "INV-1150", "amount": 2210.0, "currency": "GBP", "date": "2026-08-05"}
+      ],
+      "approver": {"name": "J. Okafor", "role": "clerk"},
+      "approval_limits": {"clerk": 10000, "manager": 50000, "director": 250000}
+    },
+    "expected": {"payment": "reject", "duplicate": "yes", "escalate_approval": "no"},
+    "note": "'INV-001187' is 'inv 1187', paid on 2026-09-02: reject; the line match is skipped"
+  },
+  {
+    "name": "supplier_on_hold",
+    "state": {
+      "po": {
+        "po_number": "PO-77120",
+        "supplier_id": "SUP-407",
+        "currency": "USD",
+        "lines": [
+          {"line": 1, "sku": "PPR-A4", "description": "copy paper A4 80 g, box of 5 reams", "qty": 120, "unit_price": 24.9}
+        ]
+      },
+      "receipt": {
+        "grn_number": "GRN-77120",
+        "po_number": "PO-77120",
+        "lines": [
+          {"line": 1, "sku": "PPR-A4", "qty_received": 120}
+        ]
+      },
+      "invoice": {
+        "invoice_number": "D-55102",
+        "supplier_id": "SUP-407",
+        "po_number": "PO-77120",
+        "currency": "USD",
+        "date": "2026-09-21",
+        "lines": [
+          {"line": 1, "sku": "PPR-A4", "qty": 120, "unit_price": 24.9}
+        ],
+        "total": 2988.0
+      },
+      "fx_rates": {"USD": 1.0, "EUR": 1.08, "GBP": 1.27, "CHF": 1.13},
+      "suppliers": {
+        "SUP-104": {"name": "Rheinmetall Fasteners GmbH", "status": "active"},
+        "SUP-221": {"name": "Northbridge Packaging Ltd", "status": "active"},
+        "SUP-318": {"name": "Kanto Precision KK", "status": "active"},
+        "SUP-407": {"name": "Delta Office Supply Inc", "status": "on_hold"}
+      },
+      "paid_invoices": [
+        {"supplier_id": "SUP-104", "invoice_number": "RF-2026-0871", "amount": 3120.0, "currency": "EUR", "date": "2026-08-14"},
+        {"supplier_id": "SUP-221", "invoice_number": "inv 1187", "amount": 4380.0, "currency": "GBP", "date": "2026-09-02"},
+        {"supplier_id": "SUP-221", "invoice_number": "INV-1150", "amount": 2210.0, "currency": "GBP", "date": "2026-08-05"}
+      ],
+      "approver": {"name": "J. Okafor", "role": "clerk"},
+      "approval_limits": {"clerk": 10000, "manager": 50000, "director": 250000}
+    },
+    "expected": {"payment": "reject", "duplicate": "no", "escalate_approval": "no"},
+    "note": "the supplier is on hold (open compliance case): reject whatever the match"
+  },
+  {
+    "name": "missing_fx_rate",
+    "state": {
+      "po": {
+        "po_number": "PO-77120",
+        "supplier_id": "SUP-318",
+        "currency": "EUR",
+        "lines": [
+          {"line": 1, "sku": "BRG-6205", "description": "deep groove ball bearing 6205-2RS", "qty": 1200, "unit_price": 4.1},
+          {"line": 2, "sku": "BRG-6305", "description": "deep groove ball bearing 6305-2RS", "qty": 400, "unit_price": 7.35}
+        ]
+      },
+      "receipt": {
+        "grn_number": "GRN-77120",
+        "po_number": "PO-77120",
+        "lines": [
+          {"line": 1, "sku": "BRG-6205", "qty_received": 1200},
+          {"line": 2, "sku": "BRG-6305", "qty_received": 400}
+        ]
+      },
+      "invoice": {
+        "invoice_number": "KP-88240",
+        "supplier_id": "SUP-318",
+        "po_number": "PO-77120",
+        "currency": "JPY",
+        "date": "2026-09-21",
+        "lines": [
+          {"line": 1, "sku": "BRG-6205", "qty": 1200, "unit_price": 712.0},
+          {"line": 2, "sku": "BRG-6305", "qty": 400, "unit_price": 1268.0}
+        ],
+        "total": 1361600.0
+      },
+      "fx_rates": {"USD": 1.0, "EUR": 1.08, "GBP": 1.27, "CHF": 1.13},
+      "suppliers": {
+        "SUP-104": {"name": "Rheinmetall Fasteners GmbH", "status": "active"},
+        "SUP-221": {"name": "Northbridge Packaging Ltd", "status": "active"},
+        "SUP-318": {"name": "Kanto Precision KK", "status": "active"},
+        "SUP-407": {"name": "Delta Office Supply Inc", "status": "on_hold"}
+      },
+      "paid_invoices": [
+        {"supplier_id": "SUP-104", "invoice_number": "RF-2026-0871", "amount": 3120.0, "currency": "EUR", "date": "2026-08-14"},
+        {"supplier_id": "SUP-221", "invoice_number": "inv 1187", "amount": 4380.0, "currency": "GBP", "date": "2026-09-02"},
+        {"supplier_id": "SUP-221", "invoice_number": "INV-1150", "amount": 2210.0, "currency": "GBP", "date": "2026-08-05"}
+      ],
+      "approver": {"name": "J. Okafor", "role": "clerk"},
+      "approval_limits": {"clerk": 10000, "manager": 50000, "director": 250000}
+    },
+    "expected": {"payment": "abstain", "duplicate": "no", "escalate_approval": "abstain"},
+    "note": "invoiced in JPY and there is no JPY rate: amounts cannot be compared or limited, so no guess; duplicate is still answered"
+  },
+  {
+    "name": "total_does_not_add_up",
+    "state": {
+      "po": {
+        "po_number": "PO-77120",
+        "supplier_id": "SUP-104",
+        "currency": "EUR",
+        "lines": [
+          {"line": 1, "sku": "M8-40-A2", "description": "hex bolt M8x40 A2 stainless", "qty": 4000, "unit_price": 0.62},
+          {"line": 2, "sku": "W8-A2", "description": "washer M8 A2", "qty": 4000, "unit_price": 0.07},
+          {"line": 3, "sku": "N8-A2", "description": "lock nut M8 A2", "qty": 4000, "unit_price": 0.21}
+        ]
+      },
+      "receipt": {
+        "grn_number": "GRN-77120",
+        "po_number": "PO-77120",
+        "lines": [
+          {"line": 1, "sku": "M8-40-A2", "qty_received": 4000},
+          {"line": 2, "sku": "W8-A2", "qty_received": 4000},
+          {"line": 3, "sku": "N8-A2", "qty_received": 4000}
+        ]
+      },
+      "invoice": {
+        "invoice_number": "RF-2026-0940",
+        "supplier_id": "SUP-104",
+        "po_number": "PO-77120",
+        "currency": "EUR",
+        "date": "2026-09-21",
+        "lines": [
+          {"line": 1, "sku": "M8-40-A2", "qty": 4000, "unit_price": 0.62},
+          {"line": 2, "sku": "W8-A2", "qty": 4000, "unit_price": 0.07},
+          {"line": 3, "sku": "N8-A2", "qty": 4000, "unit_price": 0.21}
+        ],
+        "total": 3960.0
+      },
+      "fx_rates": {"USD": 1.0, "EUR": 1.08, "GBP": 1.27, "CHF": 1.13},
+      "suppliers": {
+        "SUP-104": {"name": "Rheinmetall Fasteners GmbH", "status": "active"},
+        "SUP-221": {"name": "Northbridge Packaging Ltd", "status": "active"},
+        "SUP-318": {"name": "Kanto Precision KK", "status": "active"},
+        "SUP-407": {"name": "Delta Office Supply Inc", "status": "on_hold"}
+      },
+      "paid_invoices": [
+        {"supplier_id": "SUP-104", "invoice_number": "RF-2026-0871", "amount": 3120.0, "currency": "EUR", "date": "2026-08-14"},
+        {"supplier_id": "SUP-221", "invoice_number": "inv 1187", "amount": 4380.0, "currency": "GBP", "date": "2026-09-02"},
+        {"supplier_id": "SUP-221", "invoice_number": "INV-1150", "amount": 2210.0, "currency": "GBP", "date": "2026-08-05"}
+      ],
+      "approver": {"name": "J. Okafor", "role": "clerk"},
+      "approval_limits": {"clerk": 10000, "manager": 50000, "director": 250000}
+    },
+    "expected": {"payment": "hold", "duplicate": "no", "escalate_approval": "no"},
+    "note": "every line matches, but the header total is 360 EUR more than the lines"
+  }
+]

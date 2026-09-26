@@ -18,6 +18,9 @@ jobs:
           python-version: ${{ matrix.python }}
       - run: uv sync --group dev
       - run: uv run pytest -q
+      - name: run the gallery
+        run: |
+          for f in gallery/*/run.py; do echo "== $f"; uv run python "$f" > /dev/null; done
       - name: run core examples
         run: |
           for f in examples/0[1-69]_*.py examples/10_*.py; do echo "== $f"; uv run python "$f" > /dev/null; done

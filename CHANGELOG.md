@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.2.1 — 2026-09-26
+
+- A question's flow no longer depends on which other questions are asked (checks on computed facts are planned per question).
+- A hard check with `then` governs only the questions listed there (and those naming it as a checkpoint); for others it is an
+  ordinary failed check. Early exit follows the same rule. When several hard checks fail, the first declared in the catalog decides.
+- Learned rule lists are deterministic (ties broken in sorted order).
+- Gallery: twelve decision tasks with scenarios, runners and comparisons; synced into the browser playground (`tools/sync_gallery.py`).
+
 ## 0.2.0 — 2026-09-26
 
 - `System.fit_fast`: a closed-form ridge answer head trained in milliseconds (ridge strength by exact leave-one-out accuracy,

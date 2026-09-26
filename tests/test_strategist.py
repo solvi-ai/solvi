@@ -83,3 +83,39 @@ def test_fitted_head_narrows_flow():
     init, _ = I.make(random.Random(5), 5)
     flow = plan(I.cat, I.QUESTIONS, init.keys(), s.heads)
     assert not {st.part.name for st in flow.steps} & DISTRACT
+
+
+def test_answers_do_not_depend_on_which_other_questions_are_asked():
+    cat = Catalog()
+
+    @cat.fn
+    def level(x):
+        return x * 2
+
+    @cat.check(hard=True, then={"state": "stop"})
+    def below_trip(level):
+        return level < 10
+
+    @cat.rule("state")
+    def state(level):
+        return "run"
+
+    @cat.rule("cause")
+    def cause(level):
+        return "high" if level > 6 else "normal"
+
+    qs = [Question("state", "", Answer.choice(["run", "stop"]), checkpoints=["below_trip"]),
+          Question("cause", "", Answer.choice(["high", "normal"]))]
+    s = System(cat, qs)
+    together = s.ask({"x": 7})
+    alone = s.ask({"x": 7}, ["cause"])
+    assert together["state"].answer == "stop" and together["state"].status == "forced"
+    assert together["cause"].answer == alone["cause"].answer == "high"       # the hard check governs only "state"
+    assert "below_trip" in together["cause"].why or together["cause"].status == "ok"
+
+
+def test_learned_rules_are_deterministic():
+    from solvi.rules import RuleList
+    rows = [{"a": f"W{i % 3} X{i % 2}"} for i in range(60)]
+    ys = ["p" if i % 3 == 0 else "q" for i in range(60)]
+    assert str(RuleList(["a"]).fit(rows, ys)) == str(RuleList(["a"]).fit(list(rows), list(ys)))

@@ -94,18 +94,21 @@ def plan(catalog, questions, init_keys, heads=None):
             need(c, f"checkpoint {q.name}", q.name)
         if rule is not None:
             per_q.setdefault(q.name, set())
-    # checks on computed facts
-    computed = {f for f in chosen if f not in init_keys}
+    # checks on computed facts — decided per question, so a question's flow does not depend on which other questions are asked
     for p in catalog.parts.values():
-        if p.kind != "check" or p.name in chosen:
+        if p.kind != "check" or p.name not in reach:
             continue
-        if p.name in reach and all(x in chosen or x in init_keys for x in p.inputs) and any(x in computed for x in p.inputs):
-            touched = [x for x in p.inputs if x in computed]
-            st = chosen.setdefault(p.name, Step(p))
-            st.reasons.append("check on computed: " + ", ".join(touched))
-            for q, fs in per_q.items():
-                if any(x in fs for x in touched):
-                    fs.add(p.name)
+        for q, fs in per_q.items():
+            if p.name in fs:
+                continue
+            have = fs | init_keys
+            touched = [x for x in p.inputs if x in fs and x not in init_keys]
+            if touched and all(x in have for x in p.inputs):
+                st = chosen.setdefault(p.name, Step(p))
+                why = "check on computed: " + ", ".join(touched)
+                if why not in st.reasons:
+                    st.reasons.append(why)
+                fs.add(p.name)
     # execution order is topological
     order, seen = [], set()
 

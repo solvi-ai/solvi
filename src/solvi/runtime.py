@@ -181,7 +181,10 @@ def execute(catalog, flow, init_state, workers=1, early_exit=True):
         run(sorted(first))
         for i in hard:
             if done[i][0] is False:
-                for q in [q for q in live if names[i] in flow.per_question.get(q, ())]:
+                part = steps[i].part
+                checkpoint_of = {r.split(" ", 1)[1] for r in steps[i].reasons if r.startswith("checkpoint ")}
+                for q in [q for q in live if names[i] in flow.per_question.get(q, ())
+                          and (not part.then or q in part.then or q in checkpoint_of)]:
                     live.discard(q)
                     settled_by[q] = names[i]
 

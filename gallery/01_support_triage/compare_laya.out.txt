@@ -1,0 +1,73 @@
+
+double charge, VIP, deadline
+  intent            expected refund          solvi refund           laya refund (0.99)
+  urgent            expected yes             solvi yes              laya no (0.72) ✗
+  refund_requested  expected yes             solvi yes              laya yes (0.88)
+  priority          expected high            solvi high             laya high (0.35)
+  route             expected billing         solvi billing          laya billing (0.92)
+
+negated refund
+  intent            expected technical_help  solvi technical_help   laya refund (0.45) ✗
+  urgent            expected no              solvi no               laya no (0.72)
+  refund_requested  expected no              solvi no               laya no (0.76)
+  priority          expected normal          solvi normal           laya normal (0.59)
+  route             expected tech_support    solvi tech_support     laya tech_support (0.71)
+
+refund policy question
+  intent            expected information     solvi information      laya other (0.69) ✗
+  urgent            expected no              solvi no               laya no (0.84)
+  refund_requested  expected no              solvi no               laya no (0.91)
+  priority          expected low             solvi low              laya normal (0.43) ✗
+  route             expected general         solvi general          laya tech_support (0.50) ✗
+
+legal threat
+  intent            expected refund          solvi refund           laya refund (0.95)
+  urgent            expected no              solvi no               laya no (0.82)
+  refund_requested  expected yes             solvi yes              laya yes (0.95)
+  priority          expected high            solvi high             laya normal (0.49) ✗
+  route             expected legal           solvi legal            laya billing (0.94) ✗
+
+negated legal threat
+  intent            expected billing_question solvi billing_question  laya other (0.50) ✗
+  urgent            expected no              solvi no               laya no (0.72)
+  refund_requested  expected no              solvi no               laya no (0.88)
+  priority          expected normal          solvi normal           laya normal (0.59)
+  route             expected billing         solvi billing          laya billing (0.66)
+
+chargeback threat
+  intent            expected cancellation    solvi cancellation     laya cancellation (1.00)
+  urgent            expected no              solvi no               laya yes (0.66) ✗
+  refund_requested  expected no              solvi no               laya yes (0.91) ✗
+  priority          expected high            solvi high             laya high (0.50)
+  route             expected retention       solvi retention        laya billing (0.94) ✗
+
+VIP past the SLA
+  intent            expected information     solvi information      laya other (0.72) ✗
+  urgent            expected no              solvi no               laya no (0.52)
+  refund_requested  expected no              solvi no               laya no (1.00)
+  priority          expected high            solvi high             laya normal (0.46) ✗
+  route             expected general         solvi general          laya tech_support (0.36) ✗
+
+outage
+  intent            expected technical_help  solvi technical_help   laya technical_help (0.96)
+  urgent            expected yes             solvi yes              laya yes (0.75)
+  refund_requested  expected no              solvi no               laya no (0.88)
+  priority          expected high            solvi high             laya low (0.36) ✗
+  route             expected tech_support    solvi tech_support     laya billing (0.68) ✗
+
+cancel and refund
+  intent            expected cancellation    solvi cancellation     laya cancellation (1.00)
+  urgent            expected no              solvi no               laya no (0.85)
+  refund_requested  expected yes             solvi yes              laya yes (0.82)
+  priority          expected normal          solvi normal           laya normal (0.46)
+  route             expected retention       solvi retention        laya retention (0.74)
+
+missing customer record
+  intent            expected cancellation    solvi cancellation     laya cancellation (0.78)
+  urgent            expected no              solvi no               laya no (0.88)
+  refund_requested  expected no              solvi no               laya no (0.89)
+  priority          expected abstain         solvi abstain          laya normal (0.65) ✗
+  route             expected retention       solvi retention        laya retention (0.35)
+
+correct answers: solvi 50/50, laya 33/50
+median time per ticket: solvi 1.02 ms (CPU), laya 63.1 ms (GPU NVIDIA GeForce RTX 3060 Laptop GPU)

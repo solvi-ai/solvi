@@ -32,6 +32,12 @@ script that computes everything, and 152 ms when an expired policy settles the c
 - Models: [solvi-ai/extract-base](https://huggingface.co/solvi-ai/extract-base) (fields by description) and
   [solvi-ai/extract-receipts](https://huggingface.co/solvi-ai/extract-receipts).
 
+## Gallery
+
+[gallery/](gallery) — twelve decision tasks across directions (support triage, email routing, content guard, security alerts,
+AI-agent audit, release rollout, KYC/AML, clinical screening, credit with adverse-action reasons, procurement 3-way match,
+double-charge refunds, predictive maintenance), each with scenarios, a runner and a side-by-side against an answer-only model.
+
 ## Install
 
 ```bash

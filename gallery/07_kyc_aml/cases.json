@@ -1,0 +1,418 @@
+[
+  {
+    "name": "salary_customer_clean",
+    "state": {
+      "today": "2026-09-20",
+      "customer": {
+        "name": "Laura Mendes",
+        "dob": "1985-06-02",
+        "residence": "PT",
+        "occupation": "dental hygienist",
+        "expected_monthly_volume": 4500,
+        "pep_declared": false,
+        "account_id": "ACC-52069"
+      },
+      "transactions": [
+        {"date": "2026-06-28", "type": "wire_in", "amount": 3200, "country": "PT", "counterparty": "Clinica Sorriso Lda"},
+        {"date": "2026-07-28", "type": "wire_in", "amount": 3200, "country": "PT", "counterparty": "Clinica Sorriso Lda"},
+        {"date": "2026-08-27", "type": "wire_in", "amount": 3200, "country": "PT", "counterparty": "Clinica Sorriso Lda"},
+        {"date": "2026-09-17", "type": "card", "amount": 400.0, "country": "PT"},
+        {"date": "2026-09-10", "type": "card", "amount": 400.0, "country": "PT"},
+        {"date": "2026-09-03", "type": "card", "amount": 400.0, "country": "PT"},
+        {"date": "2026-08-27", "type": "card", "amount": 400.0, "country": "PT"},
+        {"date": "2026-08-20", "type": "card", "amount": 400.0, "country": "PT"},
+        {"date": "2026-08-13", "type": "card", "amount": 400.0, "country": "PT"},
+        {"date": "2026-08-06", "type": "card", "amount": 400.0, "country": "PT"},
+        {"date": "2026-07-30", "type": "card", "amount": 400.0, "country": "PT"},
+        {"date": "2026-07-23", "type": "card", "amount": 400.0, "country": "PT"},
+        {"date": "2026-07-16", "type": "card", "amount": 400.0, "country": "PT"},
+        {"date": "2026-07-09", "type": "card", "amount": 400.0, "country": "PT"},
+        {"date": "2026-07-02", "type": "card", "amount": 400.0, "country": "PT"},
+        {"date": "2026-06-25", "type": "card", "amount": 400.0, "country": "PT"}
+      ],
+      "sanctions_list": [
+        {"name": "Dmitri Volkanov", "dob": "1968-03-14"},
+        {"name": "Karim Al-Rashidi", "dob": "1975-11-02"},
+        {"name": "Petra Lindqvist-Haas", "dob": "1981-07-30"},
+        {"name": "Orion Maritime Holdings Ltd", "dob": null},
+        {"name": "Northwind Metals Trading FZE", "dob": null}
+      ],
+      "pep_list": ["Elena Marchetti", "Tomas Varga", "Adaeze Okonkwo"],
+      "news_archive": {
+        "marco bellandi": ["2025-11-04 Regional daily: Bellandi questioned in customs fraud probe"],
+        "tomas varga": ["2024-02-19 Business weekly: ministry tender awarded to Varga's brother-in-law"]
+      }
+    },
+    "expected": {"risk": "low", "file_sar": "no", "freeze": "no"},
+    "note": "salary in, card spending out, volume inside the declared profile"
+  },
+  {
+    "name": "structuring_under_threshold",
+    "state": {
+      "today": "2026-09-20",
+      "customer": {
+        "name": "Jonas Weber",
+        "dob": "1979-01-23",
+        "residence": "DE",
+        "occupation": "plumber",
+        "expected_monthly_volume": 5000,
+        "pep_declared": false,
+        "account_id": "ACC-48480"
+      },
+      "transactions": [
+        {"date": "2026-06-28", "type": "wire_in", "amount": 3900, "country": "DE", "counterparty": "Weber Haustechnik GmbH"},
+        {"date": "2026-07-28", "type": "wire_in", "amount": 3900, "country": "DE", "counterparty": "Weber Haustechnik GmbH"},
+        {"date": "2026-08-27", "type": "wire_in", "amount": 3900, "country": "DE", "counterparty": "Weber Haustechnik GmbH"},
+        {"date": "2026-09-17", "type": "card", "amount": 450.0, "country": "PT"},
+        {"date": "2026-09-10", "type": "card", "amount": 450.0, "country": "PT"},
+        {"date": "2026-09-03", "type": "card", "amount": 450.0, "country": "PT"},
+        {"date": "2026-08-27", "type": "card", "amount": 450.0, "country": "PT"},
+        {"date": "2026-08-20", "type": "card", "amount": 450.0, "country": "PT"},
+        {"date": "2026-08-13", "type": "card", "amount": 450.0, "country": "PT"},
+        {"date": "2026-08-06", "type": "card", "amount": 450.0, "country": "PT"},
+        {"date": "2026-07-30", "type": "card", "amount": 450.0, "country": "PT"},
+        {"date": "2026-07-23", "type": "card", "amount": 450.0, "country": "PT"},
+        {"date": "2026-07-16", "type": "card", "amount": 450.0, "country": "PT"},
+        {"date": "2026-07-09", "type": "card", "amount": 450.0, "country": "PT"},
+        {"date": "2026-07-02", "type": "card", "amount": 450.0, "country": "PT"},
+        {"date": "2026-06-25", "type": "card", "amount": 450.0, "country": "PT"},
+        {"date": "2026-09-11", "type": "cash_deposit", "amount": 9400.0, "country": "DE"},
+        {"date": "2026-09-13", "type": "cash_deposit", "amount": 9850.0, "country": "DE"},
+        {"date": "2026-09-14", "type": "cash_deposit", "amount": 9700.0, "country": "DE"},
+        {"date": "2026-09-16", "type": "cash_deposit", "amount": 9950.0, "country": "DE"}
+      ],
+      "sanctions_list": [
+        {"name": "Dmitri Volkanov", "dob": "1968-03-14"},
+        {"name": "Karim Al-Rashidi", "dob": "1975-11-02"},
+        {"name": "Petra Lindqvist-Haas", "dob": "1981-07-30"},
+        {"name": "Orion Maritime Holdings Ltd", "dob": null},
+        {"name": "Northwind Metals Trading FZE", "dob": null}
+      ],
+      "pep_list": ["Elena Marchetti", "Tomas Varga", "Adaeze Okonkwo"],
+      "news_archive": {
+        "marco bellandi": ["2025-11-04 Regional daily: Bellandi questioned in customs fraud probe"],
+        "tomas varga": ["2024-02-19 Business weekly: ministry tender awarded to Varga's brother-in-law"]
+      }
+    },
+    "expected": {"risk": "high", "file_sar": "yes", "freeze": "no"},
+    "note": "four cash deposits of 9 400-9 950 in 6 days: none reaches 10 000, together 38 900; SAR yes, no freeze (no tipping off)"
+  },
+  {
+    "name": "sanctions_hit_transliterated",
+    "state": {
+      "today": "2026-09-20",
+      "customer": {
+        "name": "Dmitriy Volkanov",
+        "dob": "1968-03-14",
+        "residence": "CY",
+        "occupation": "consultant",
+        "expected_monthly_volume": 20000,
+        "pep_declared": false,
+        "account_id": "ACC-69866"
+      },
+      "transactions": [
+        {"date": "2026-06-28", "type": "wire_in", "amount": 15000, "country": "CY", "counterparty": "Aegean Advisory Ltd"},
+        {"date": "2026-07-28", "type": "wire_in", "amount": 15000, "country": "CY", "counterparty": "Aegean Advisory Ltd"},
+        {"date": "2026-08-27", "type": "wire_in", "amount": 15000, "country": "CY", "counterparty": "Aegean Advisory Ltd"},
+        {"date": "2026-09-17", "type": "card", "amount": 1500.0, "country": "PT"},
+        {"date": "2026-09-10", "type": "card", "amount": 1500.0, "country": "PT"},
+        {"date": "2026-09-03", "type": "card", "amount": 1500.0, "country": "PT"},
+        {"date": "2026-08-27", "type": "card", "amount": 1500.0, "country": "PT"},
+        {"date": "2026-08-20", "type": "card", "amount": 1500.0, "country": "PT"},
+        {"date": "2026-08-13", "type": "card", "amount": 1500.0, "country": "PT"},
+        {"date": "2026-08-06", "type": "card", "amount": 1500.0, "country": "PT"},
+        {"date": "2026-07-30", "type": "card", "amount": 1500.0, "country": "PT"},
+        {"date": "2026-07-23", "type": "card", "amount": 1500.0, "country": "PT"},
+        {"date": "2026-07-16", "type": "card", "amount": 1500.0, "country": "PT"},
+        {"date": "2026-07-09", "type": "card", "amount": 1500.0, "country": "PT"},
+        {"date": "2026-07-02", "type": "card", "amount": 1500.0, "country": "PT"},
+        {"date": "2026-06-25", "type": "card", "amount": 1500.0, "country": "PT"}
+      ],
+      "sanctions_list": [
+        {"name": "Dmitri Volkanov", "dob": "1968-03-14"},
+        {"name": "Karim Al-Rashidi", "dob": "1975-11-02"},
+        {"name": "Petra Lindqvist-Haas", "dob": "1981-07-30"},
+        {"name": "Orion Maritime Holdings Ltd", "dob": null},
+        {"name": "Northwind Metals Trading FZE", "dob": null}
+      ],
+      "pep_list": ["Elena Marchetti", "Tomas Varga", "Adaeze Okonkwo"],
+      "news_archive": {
+        "marco bellandi": ["2025-11-04 Regional daily: Bellandi questioned in customs fraud probe"],
+        "tomas varga": ["2024-02-19 Business weekly: ministry tender awarded to Varga's brother-in-law"]
+      }
+    },
+    "expected": {"risk": "high", "file_sar": "yes", "freeze": "yes"},
+    "note": "'Dmitriy' vs listed 'Dmitri', same birth date: hard check forces all three answers, the paid lookups are skipped"
+  },
+  {
+    "name": "namesake_other_birth_date",
+    "state": {
+      "today": "2026-09-20",
+      "customer": {
+        "name": "Dmitry Volkanov",
+        "dob": "1991-09-05",
+        "residence": "PT",
+        "occupation": "software tester",
+        "expected_monthly_volume": 4000,
+        "pep_declared": false,
+        "account_id": "ACC-65981"
+      },
+      "transactions": [
+        {"date": "2026-06-28", "type": "wire_in", "amount": 2900, "country": "PT", "counterparty": "Lisbon Code Works"},
+        {"date": "2026-07-28", "type": "wire_in", "amount": 2900, "country": "PT", "counterparty": "Lisbon Code Works"},
+        {"date": "2026-08-27", "type": "wire_in", "amount": 2900, "country": "PT", "counterparty": "Lisbon Code Works"},
+        {"date": "2026-09-17", "type": "card", "amount": 375.0, "country": "PT"},
+        {"date": "2026-09-10", "type": "card", "amount": 375.0, "country": "PT"},
+        {"date": "2026-09-03", "type": "card", "amount": 375.0, "country": "PT"},
+        {"date": "2026-08-27", "type": "card", "amount": 375.0, "country": "PT"},
+        {"date": "2026-08-20", "type": "card", "amount": 375.0, "country": "PT"},
+        {"date": "2026-08-13", "type": "card", "amount": 375.0, "country": "PT"},
+        {"date": "2026-08-06", "type": "card", "amount": 375.0, "country": "PT"},
+        {"date": "2026-07-30", "type": "card", "amount": 375.0, "country": "PT"},
+        {"date": "2026-07-23", "type": "card", "amount": 375.0, "country": "PT"},
+        {"date": "2026-07-16", "type": "card", "amount": 375.0, "country": "PT"},
+        {"date": "2026-07-09", "type": "card", "amount": 375.0, "country": "PT"},
+        {"date": "2026-07-02", "type": "card", "amount": 375.0, "country": "PT"},
+        {"date": "2026-06-25", "type": "card", "amount": 375.0, "country": "PT"}
+      ],
+      "sanctions_list": [
+        {"name": "Dmitri Volkanov", "dob": "1968-03-14"},
+        {"name": "Karim Al-Rashidi", "dob": "1975-11-02"},
+        {"name": "Petra Lindqvist-Haas", "dob": "1981-07-30"},
+        {"name": "Orion Maritime Holdings Ltd", "dob": null},
+        {"name": "Northwind Metals Trading FZE", "dob": null}
+      ],
+      "pep_list": ["Elena Marchetti", "Tomas Varga", "Adaeze Okonkwo"],
+      "news_archive": {
+        "marco bellandi": ["2025-11-04 Regional daily: Bellandi questioned in customs fraud probe"],
+        "tomas varga": ["2024-02-19 Business weekly: ministry tender awarded to Varga's brother-in-law"]
+      }
+    },
+    "expected": {"risk": "low", "file_sar": "no", "freeze": "no"},
+    "note": "name scores 0.93 against the list, but the listed person was born in 1968: not a hit, normal review"
+  },
+  {
+    "name": "pep_with_high_risk_flows",
+    "state": {
+      "today": "2026-09-20",
+      "customer": {
+        "name": "Elena Marchetti",
+        "dob": "1966-04-11",
+        "residence": "IT",
+        "occupation": "deputy minister",
+        "expected_monthly_volume": 9000,
+        "pep_declared": false,
+        "account_id": "ACC-63502"
+      },
+      "transactions": [
+        {"date": "2026-06-28", "type": "wire_in", "amount": 6100, "country": "IT", "counterparty": "Ministero dello Sviluppo"},
+        {"date": "2026-07-28", "type": "wire_in", "amount": 6100, "country": "IT", "counterparty": "Ministero dello Sviluppo"},
+        {"date": "2026-08-27", "type": "wire_in", "amount": 6100, "country": "IT", "counterparty": "Ministero dello Sviluppo"},
+        {"date": "2026-09-17", "type": "card", "amount": 750.0, "country": "PT"},
+        {"date": "2026-09-10", "type": "card", "amount": 750.0, "country": "PT"},
+        {"date": "2026-09-03", "type": "card", "amount": 750.0, "country": "PT"},
+        {"date": "2026-08-27", "type": "card", "amount": 750.0, "country": "PT"},
+        {"date": "2026-08-20", "type": "card", "amount": 750.0, "country": "PT"},
+        {"date": "2026-08-13", "type": "card", "amount": 750.0, "country": "PT"},
+        {"date": "2026-08-06", "type": "card", "amount": 750.0, "country": "PT"},
+        {"date": "2026-07-30", "type": "card", "amount": 750.0, "country": "PT"},
+        {"date": "2026-07-23", "type": "card", "amount": 750.0, "country": "PT"},
+        {"date": "2026-07-16", "type": "card", "amount": 750.0, "country": "PT"},
+        {"date": "2026-07-09", "type": "card", "amount": 750.0, "country": "PT"},
+        {"date": "2026-07-02", "type": "card", "amount": 750.0, "country": "PT"},
+        {"date": "2026-06-25", "type": "card", "amount": 750.0, "country": "PT"},
+        {"date": "2026-09-05", "type": "wire_in", "amount": 20000.0, "country": "IR", "counterparty": "Pars Trade Consulting"}
+      ],
+      "sanctions_list": [
+        {"name": "Dmitri Volkanov", "dob": "1968-03-14"},
+        {"name": "Karim Al-Rashidi", "dob": "1975-11-02"},
+        {"name": "Petra Lindqvist-Haas", "dob": "1981-07-30"},
+        {"name": "Orion Maritime Holdings Ltd", "dob": null},
+        {"name": "Northwind Metals Trading FZE", "dob": null}
+      ],
+      "pep_list": ["Elena Marchetti", "Tomas Varga", "Adaeze Okonkwo"],
+      "news_archive": {
+        "marco bellandi": ["2025-11-04 Regional daily: Bellandi questioned in customs fraud probe"],
+        "tomas varga": ["2024-02-19 Business weekly: ministry tender awarded to Varga's brother-in-law"]
+      }
+    },
+    "expected": {"risk": "high", "file_sar": "no", "freeze": "no"},
+    "note": "conflicting signals: PEP plus a large wire from a high-risk jurisdiction -> high risk (enhanced due diligence), but no ground for a SAR"
+  },
+  {
+    "name": "cash_business_spread_deposits",
+    "state": {
+      "today": "2026-09-20",
+      "customer": {
+        "name": "Rui Carvalho",
+        "dob": "1972-12-01",
+        "residence": "PT",
+        "occupation": "cafe owner",
+        "expected_monthly_volume": 26000,
+        "pep_declared": false,
+        "account_id": "ACC-52624"
+      },
+      "transactions": [
+        {"date": "2026-09-15", "type": "card", "amount": 2100.0, "country": "PT"},
+        {"date": "2026-09-05", "type": "card", "amount": 2100.0, "country": "PT"},
+        {"date": "2026-08-26", "type": "card", "amount": 2100.0, "country": "PT"},
+        {"date": "2026-08-16", "type": "card", "amount": 2100.0, "country": "PT"},
+        {"date": "2026-08-06", "type": "card", "amount": 2100.0, "country": "PT"},
+        {"date": "2026-07-27", "type": "card", "amount": 2100.0, "country": "PT"},
+        {"date": "2026-07-17", "type": "card", "amount": 2100.0, "country": "PT"},
+        {"date": "2026-07-07", "type": "card", "amount": 2100.0, "country": "PT"},
+        {"date": "2026-06-27", "type": "card", "amount": 2100.0, "country": "PT"},
+        {"date": "2026-08-25", "type": "cash_deposit", "amount": 9500.0, "country": "PT"},
+        {"date": "2026-09-01", "type": "cash_deposit", "amount": 9500.0, "country": "PT"},
+        {"date": "2026-09-06", "type": "cash_deposit", "amount": 9500.0, "country": "PT"},
+        {"date": "2026-09-17", "type": "cash_deposit", "amount": 10000.0, "country": "PT"}
+      ],
+      "sanctions_list": [
+        {"name": "Dmitri Volkanov", "dob": "1968-03-14"},
+        {"name": "Karim Al-Rashidi", "dob": "1975-11-02"},
+        {"name": "Petra Lindqvist-Haas", "dob": "1981-07-30"},
+        {"name": "Orion Maritime Holdings Ltd", "dob": null},
+        {"name": "Northwind Metals Trading FZE", "dob": null}
+      ],
+      "pep_list": ["Elena Marchetti", "Tomas Varga", "Adaeze Okonkwo"],
+      "news_archive": {
+        "marco bellandi": ["2025-11-04 Regional daily: Bellandi questioned in customs fraud probe"],
+        "tomas varga": ["2024-02-19 Business weekly: ministry tender awarded to Varga's brother-in-law"]
+      }
+    },
+    "expected": {"risk": "low", "file_sar": "no", "freeze": "no"},
+    "note": "three deposits of 9 500 but 5-7 days apart (at most 2 in any 7-day window) and one of exactly 10 000 (reported, not avoided)"
+  },
+  {
+    "name": "money_mule_pass_through",
+    "state": {
+      "today": "2026-09-20",
+      "customer": {
+        "name": "Sofia Nunes",
+        "dob": "2004-02-17",
+        "residence": "PT",
+        "occupation": "student",
+        "expected_monthly_volume": 1200,
+        "pep_declared": false,
+        "account_id": "ACC-48887"
+      },
+      "transactions": [
+        {"date": "2026-09-18", "type": "card", "amount": 90.0, "country": "PT"},
+        {"date": "2026-09-12", "type": "card", "amount": 90.0, "country": "PT"},
+        {"date": "2026-09-06", "type": "card", "amount": 90.0, "country": "PT"},
+        {"date": "2026-08-31", "type": "card", "amount": 90.0, "country": "PT"},
+        {"date": "2026-08-25", "type": "card", "amount": 90.0, "country": "PT"},
+        {"date": "2026-08-19", "type": "card", "amount": 90.0, "country": "PT"},
+        {"date": "2026-08-13", "type": "card", "amount": 90.0, "country": "PT"},
+        {"date": "2026-08-07", "type": "card", "amount": 90.0, "country": "PT"},
+        {"date": "2026-08-01", "type": "card", "amount": 90.0, "country": "PT"},
+        {"date": "2026-07-26", "type": "card", "amount": 90.0, "country": "PT"},
+        {"date": "2026-07-20", "type": "card", "amount": 90.0, "country": "PT"},
+        {"date": "2026-07-14", "type": "card", "amount": 90.0, "country": "PT"},
+        {"date": "2026-07-08", "type": "card", "amount": 90.0, "country": "PT"},
+        {"date": "2026-07-02", "type": "card", "amount": 90.0, "country": "PT"},
+        {"date": "2026-06-26", "type": "card", "amount": 90.0, "country": "PT"},
+        {"date": "2026-08-31", "type": "wire_in", "amount": 14800.0, "country": "GB", "counterparty": "Kestrel Imports Ltd"},
+        {"date": "2026-09-01", "type": "wire_out", "amount": 14500.0, "country": "LV", "counterparty": "Baltic Star OU"},
+        {"date": "2026-09-12", "type": "wire_in", "amount": 12200.0, "country": "GB", "counterparty": "Kestrel Imports Ltd"},
+        {"date": "2026-09-14", "type": "wire_out", "amount": 11950.0, "country": "LV", "counterparty": "Baltic Star OU"}
+      ],
+      "sanctions_list": [
+        {"name": "Dmitri Volkanov", "dob": "1968-03-14"},
+        {"name": "Karim Al-Rashidi", "dob": "1975-11-02"},
+        {"name": "Petra Lindqvist-Haas", "dob": "1981-07-30"},
+        {"name": "Orion Maritime Holdings Ltd", "dob": null},
+        {"name": "Northwind Metals Trading FZE", "dob": null}
+      ],
+      "pep_list": ["Elena Marchetti", "Tomas Varga", "Adaeze Okonkwo"],
+      "news_archive": {
+        "marco bellandi": ["2025-11-04 Regional daily: Bellandi questioned in customs fraud probe"],
+        "tomas varga": ["2024-02-19 Business weekly: ministry tender awarded to Varga's brother-in-law"]
+      }
+    },
+    "expected": {"risk": "high", "file_sar": "yes", "freeze": "no"},
+    "note": "a student account receives business wires and sends 98% on within 1-2 days"
+  },
+  {
+    "name": "sanctioned_counterparty",
+    "state": {
+      "today": "2026-09-20",
+      "customer": {
+        "name": "Hendrik Bos",
+        "dob": "1970-08-08",
+        "residence": "NL",
+        "occupation": "freight broker",
+        "expected_monthly_volume": 60000,
+        "pep_declared": false,
+        "account_id": "ACC-48221"
+      },
+      "transactions": [
+        {"date": "2026-06-28", "type": "wire_in", "amount": 52000, "country": "NL", "counterparty": "Atlantic Freight Partners"},
+        {"date": "2026-07-28", "type": "wire_in", "amount": 52000, "country": "NL", "counterparty": "Atlantic Freight Partners"},
+        {"date": "2026-08-27", "type": "wire_in", "amount": 52000, "country": "NL", "counterparty": "Atlantic Freight Partners"},
+        {"date": "2026-08-18", "type": "wire_out", "amount": 18400.0, "country": "PA", "counterparty": "Orion Maritime Holdings Limited"},
+        {"date": "2026-09-08", "type": "wire_out", "amount": 7300.0, "country": "NL", "counterparty": "Rotterdam Port Services BV"}
+      ],
+      "sanctions_list": [
+        {"name": "Dmitri Volkanov", "dob": "1968-03-14"},
+        {"name": "Karim Al-Rashidi", "dob": "1975-11-02"},
+        {"name": "Petra Lindqvist-Haas", "dob": "1981-07-30"},
+        {"name": "Orion Maritime Holdings Ltd", "dob": null},
+        {"name": "Northwind Metals Trading FZE", "dob": null}
+      ],
+      "pep_list": ["Elena Marchetti", "Tomas Varga", "Adaeze Okonkwo"],
+      "news_archive": {
+        "marco bellandi": ["2025-11-04 Regional daily: Bellandi questioned in customs fraud probe"],
+        "tomas varga": ["2024-02-19 Business weekly: ministry tender awarded to Varga's brother-in-law"]
+      }
+    },
+    "expected": {"risk": "high", "file_sar": "yes", "freeze": "yes"},
+    "note": "the customer is clean but paid 'Orion Maritime Holdings Limited' (listed as '... Ltd'): freeze and report"
+  },
+  {
+    "name": "no_declared_profile",
+    "state": {
+      "today": "2026-09-20",
+      "customer": {
+        "name": "Amira Haddad",
+        "dob": "1993-05-29",
+        "residence": "PT",
+        "occupation": "architect",
+        "pep_declared": false,
+        "account_id": "ACC-50256"
+      },
+      "transactions": [
+        {"date": "2026-06-28", "type": "wire_in", "amount": 3400, "country": "PT", "counterparty": "Estudio Tejo"},
+        {"date": "2026-07-28", "type": "wire_in", "amount": 3400, "country": "PT", "counterparty": "Estudio Tejo"},
+        {"date": "2026-08-27", "type": "wire_in", "amount": 3400, "country": "PT", "counterparty": "Estudio Tejo"},
+        {"date": "2026-09-17", "type": "card", "amount": 425.0, "country": "PT"},
+        {"date": "2026-09-10", "type": "card", "amount": 425.0, "country": "PT"},
+        {"date": "2026-09-03", "type": "card", "amount": 425.0, "country": "PT"},
+        {"date": "2026-08-27", "type": "card", "amount": 425.0, "country": "PT"},
+        {"date": "2026-08-20", "type": "card", "amount": 425.0, "country": "PT"},
+        {"date": "2026-08-13", "type": "card", "amount": 425.0, "country": "PT"},
+        {"date": "2026-08-06", "type": "card", "amount": 425.0, "country": "PT"},
+        {"date": "2026-07-30", "type": "card", "amount": 425.0, "country": "PT"},
+        {"date": "2026-07-23", "type": "card", "amount": 425.0, "country": "PT"},
+        {"date": "2026-07-16", "type": "card", "amount": 425.0, "country": "PT"},
+        {"date": "2026-07-09", "type": "card", "amount": 425.0, "country": "PT"},
+        {"date": "2026-07-02", "type": "card", "amount": 425.0, "country": "PT"},
+        {"date": "2026-06-25", "type": "card", "amount": 425.0, "country": "PT"}
+      ],
+      "sanctions_list": [
+        {"name": "Dmitri Volkanov", "dob": "1968-03-14"},
+        {"name": "Karim Al-Rashidi", "dob": "1975-11-02"},
+        {"name": "Petra Lindqvist-Haas", "dob": "1981-07-30"},
+        {"name": "Orion Maritime Holdings Ltd", "dob": null},
+        {"name": "Northwind Metals Trading FZE", "dob": null}
+      ],
+      "pep_list": ["Elena Marchetti", "Tomas Varga", "Adaeze Okonkwo"],
+      "news_archive": {
+        "marco bellandi": ["2025-11-04 Regional daily: Bellandi questioned in customs fraud probe"],
+        "tomas varga": ["2024-02-19 Business weekly: ministry tender awarded to Varga's brother-in-law"]
+      }
+    },
+    "expected": {"risk": "abstain", "file_sar": "no", "freeze": "no"},
+    "note": "the onboarding profile has no expected monthly volume: velocity cannot be computed, so risk abstains; SAR and freeze do not need it"
+  }
+]

@@ -1,0 +1,17 @@
+{
+  "application_id": "LN-24103",
+  "age": 23,
+  "residency_status": "citizen",
+  "annual_income": 42000,
+  "monthly_debt_payments": 250,
+  "requested_amount": 9000,
+  "term_months": 36,
+  "annual_rate": 0.109,
+  "credit_history_months": 10,
+  "credit_score": 690,
+  "delinquencies_24m": 0,
+  "utilization": 0.45,
+  "inquiries_6m": 2,
+  "employment_months": 14,
+  "self_employed": false
+}

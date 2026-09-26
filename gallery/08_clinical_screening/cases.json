@@ -1,0 +1,172 @@
+[
+  {
+    "name": "stable_post_op",
+    "state": {
+      "patient_id": "W3-12",
+      "resp_rate": 16,
+      "spo2": 97,
+      "spo2_scale": 1,
+      "on_oxygen": false,
+      "systolic_bp": 128,
+      "pulse": 76,
+      "consciousness": "A",
+      "temperature": 36.8,
+      "lactate": 1.1
+    },
+    "expected": {"escalation": "routine", "news2_band": "low", "sepsis_screen": "no"},
+    "note": "every parameter in the 0-point band"
+  },
+  {
+    "name": "single_red_parameter",
+    "state": {
+      "patient_id": "W3-04",
+      "resp_rate": 26,
+      "spo2": 96,
+      "spo2_scale": 1,
+      "on_oxygen": false,
+      "systolic_bp": 124,
+      "pulse": 88,
+      "consciousness": "A",
+      "temperature": 37.2,
+      "lactate": 1.4
+    },
+    "expected": {"escalation": "urgent review", "news2_band": "low-medium", "sepsis_screen": "no"},
+    "note": "total only 3, but respiration 26 scores 3 on its own: low-medium, urgent review"
+  },
+  {
+    "name": "copd_scale_2_on_air",
+    "state": {
+      "patient_id": "W5-21",
+      "resp_rate": 18,
+      "spo2": 89,
+      "spo2_scale": 2,
+      "on_oxygen": false,
+      "systolic_bp": 136,
+      "pulse": 84,
+      "consciousness": "A",
+      "temperature": 36.9,
+      "lactate": 0.9
+    },
+    "expected": {"escalation": "routine", "news2_band": "low", "sepsis_screen": "no"},
+    "note": "SpO2 89% scores 0 on scale 2 (target 88-92%); on scale 1 the same reading would score 3"
+  },
+  {
+    "name": "four_points_routine",
+    "state": {
+      "patient_id": "W2-07",
+      "resp_rate": 21,
+      "spo2": 95,
+      "spo2_scale": 1,
+      "on_oxygen": false,
+      "systolic_bp": 111,
+      "pulse": 91,
+      "consciousness": "A",
+      "temperature": 38.0,
+      "lactate": 1.3
+    },
+    "expected": {"escalation": "routine", "news2_band": "low", "sepsis_screen": "no"},
+    "note": "on four band edges: RR 21 -> 2, SpO2 95 -> 1, pulse 91 -> 1, SBP 111 -> 0, temp 38.0 -> 0; total 4"
+  },
+  {
+    "name": "five_points_urgent",
+    "state": {
+      "patient_id": "W2-07",
+      "resp_rate": 21,
+      "spo2": 95,
+      "spo2_scale": 1,
+      "on_oxygen": false,
+      "systolic_bp": 111,
+      "pulse": 91,
+      "consciousness": "A",
+      "temperature": 38.1,
+      "lactate": 1.3
+    },
+    "expected": {"escalation": "urgent review", "news2_band": "medium", "sepsis_screen": "no"},
+    "note": "the same patient 0.1 °C warmer: temperature 38.1 scores 1, total 5 = medium"
+  },
+  {
+    "name": "septic_high",
+    "state": {
+      "patient_id": "AMU-3",
+      "resp_rate": 28,
+      "spo2": 92,
+      "spo2_scale": 1,
+      "on_oxygen": true,
+      "systolic_bp": 96,
+      "pulse": 118,
+      "consciousness": "C",
+      "temperature": 39.4,
+      "lactate": 4.1
+    },
+    "expected": {"escalation": "emergency", "news2_band": "high", "sepsis_screen": "yes"},
+    "note": "NEWS2 16, qSOFA 3, lactate 4.1"
+  },
+  {
+    "name": "hypoxic_hard_check",
+    "state": {
+      "patient_id": "W5-02",
+      "resp_rate": 20,
+      "spo2": 83,
+      "spo2_scale": 2,
+      "on_oxygen": true,
+      "systolic_bp": 132,
+      "pulse": 95,
+      "consciousness": "A",
+      "temperature": 37.0,
+      "lactate": 1.2
+    },
+    "expected": {"escalation": "emergency", "news2_band": "medium", "sepsis_screen": "no"},
+    "note": "NEWS2 6 (medium) would mean urgent review; SpO2 83% trips the hard check and forces emergency"
+  },
+  {
+    "name": "shock_spo2_missing",
+    "state": {
+      "patient_id": "ED-9",
+      "resp_rate": 24,
+      "spo2": null,
+      "spo2_scale": 1,
+      "on_oxygen": false,
+      "systolic_bp": 84,
+      "pulse": 124,
+      "consciousness": "V",
+      "temperature": 38.6,
+      "lactate": 4.2
+    },
+    "expected": {"escalation": "emergency", "news2_band": "abstain", "sepsis_screen": "yes"},
+    "note": "no SpO2 (probe off): NEWS2 abstains, but SBP 84 with a V response is an emergency anyway"
+  },
+  {
+    "name": "resp_rate_missing",
+    "state": {
+      "patient_id": "W1-15",
+      "resp_rate": null,
+      "spo2": 97,
+      "spo2_scale": 1,
+      "on_oxygen": false,
+      "systolic_bp": 122,
+      "pulse": 80,
+      "consciousness": "A",
+      "temperature": 37.1,
+      "lactate": 1.0
+    },
+    "expected": {"escalation": "abstain", "news2_band": "abstain", "sepsis_screen": "abstain"},
+    "note": "respiration rate not recorded: nothing is guessed, every answer that needs it abstains"
+  },
+  {
+    "name": "qsofa_despite_low_news2",
+    "state": {
+      "patient_id": "W4-10",
+      "resp_rate": 22,
+      "spo2": 96,
+      "spo2_scale": 1,
+      "on_oxygen": false,
+      "systolic_bp": 100,
+      "pulse": 88,
+      "consciousness": "A",
+      "temperature": 37.9,
+      "lactate": 1.6
+    },
+    "expected": {"escalation": "urgent review", "news2_band": "low", "sepsis_screen": "yes"},
+    "note": "conflicting scores: NEWS2 4 (low) but qSOFA 2 (RR 22, SBP 100) -> sepsis screen positive, urgent review"
+  }
+]
