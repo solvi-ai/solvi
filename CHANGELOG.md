@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.1.1 — 2026-09-26
+
+- Runs in the browser (Pyodide): parallel execution falls back to one-by-one where threads are unavailable.
+- Example 07 uses the published receipts model's strong fields (date, total, cash, change) and checks the change.
+
 ## 0.1.0 — 2026-09-26
 
 First public version.

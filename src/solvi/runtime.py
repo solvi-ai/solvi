@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import hashlib
+import sys
 import json
 import time
 from dataclasses import dataclass, field
@@ -108,6 +109,9 @@ class Trace:
         return {"ok": not bad, "steps": len(self.records), "mismatches": bad}
 
 
+_THREADS = sys.platform != "emscripten"         # no threads in the browser (Pyodide): steps then run one by one
+
+
 def _run_step(p, vals, init_state):
     """Evaluate one part on the current facts → (value, quote, confidence, error, input hashes)."""
     args = {x: vals.get(x, MISSING) for x in p.inputs}
@@ -139,7 +143,7 @@ def execute(catalog, flow, init_state, workers=1, early_exit=True):
     settled_by = {}
 
     def run(idxs):
-        if workers <= 1 or len(idxs) <= 1:
+        if workers <= 1 or len(idxs) <= 1 or not _THREADS:
             for i in idxs:                                  # idxs are in topological (flow) order
                 done[i] = _run_step(steps[i].part, vals, init_state)
                 if done[i][0] is not MISSING:

@@ -1,5 +1,5 @@
-"""Documents with a model: expense check on a scanned receipt. A ModernBERT extractor fine-tuned on receipts finds the fields
-(each answer cites the exact place in the OCR text); plain Python rules decide. Needs `pip install "solvi[model]"`.
+"""Documents with a model: expense check on a scanned receipt. A ModernBERT extractor fine-tuned on receipts finds the date and
+the amounts (each cited at its exact place in the OCR text); plain Python rules decide, including a computed check of the change. Needs `pip install "solvi[model]"`.
 
 Run:  uv run --extra model python examples/07_receipts_model.py
 Model: SOLVI_MODEL (a Hugging Face id or a local directory), default solvi-ai/extract-receipts.
@@ -37,9 +37,10 @@ CHANGE 1.70
 Date : 21/03/2018 Time: 14:53
 """
 
-FIELDS = {"company": "the name of the company that issued the receipt",
-          "receipt_date": "the date of the purchase",
-          "total": "the total amount paid"}
+FIELDS = {"receipt_date": "the date of the purchase",
+          "total": "the total amount to pay",
+          "cash": "the cash amount given by the customer",
+          "change": "the change returned to the customer"}
 
 extractor = LongSpanExtractor.load(os.environ.get("SOLVI_MODEL", "solvi-ai/extract-receipts"))
 cat = Catalog()
@@ -47,9 +48,13 @@ for name, description in FIELDS.items():
     cat.extract(extractor.field(name, description))
 
 
+def money(text):
+    return float(re.findall(r"\d+(?:\.\d+)?", text.replace(",", ""))[-1])
+
+
 @cat.fn
 def amount(total):
-    return float(re.findall(r"\d+(?:\.\d+)?", total.replace(",", ""))[-1])
+    return money(total)
 
 
 @cat.fn
@@ -69,12 +74,18 @@ def reimburse(amount):
     return amount <= 200
 
 
+@cat.rule("change_correct")
+def change_correct(amount, cash, change):
+    return abs(money(cash) - amount - money(change)) < 0.01
+
+
 @cat.rule("weekend")
 def weekend(purchase_date):
     return purchase_date.weekday() >= 5
 
 
 QUESTIONS = [Question("reimburse", "Reimburse this receipt?", Answer.yes_no(), checkpoints=["not_too_old"]),
+             Question("change_correct", "Is the change right (cash - total)?", Answer.yes_no()),
              Question("weekend", "Bought on a weekend?", Answer.yes_no())]
 
 if __name__ == "__main__":

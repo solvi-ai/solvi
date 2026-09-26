@@ -573,7 +573,7 @@ Benchmarks (from the README): SROIE receipts **97.8%** vs 92.6% baseline; CORD r
 Calibrated confidence (ECE 0.008 to 0.027); 100% of document answers backed by a quote or abstained; ~**0.4 ms** per decision without a model.
 Install: `pip install solvi` (core, numpy/scipy only) or `pip install "solvi[model]"` for ModernBERT document extractors.
 Code, docs and examples: [github.com/solvi-ai/solvi](https://github.com/solvi-ai/solvi) (Apache-2.0).
-More Spaces: [solvi-ai/arcade](https://huggingface.co/spaces/solvi-ai/arcade) · [solvi-ai/documents](https://huggingface.co/spaces/solvi-ai/documents).
+More Spaces: [mxkuzn/solvi-arcade](https://huggingface.co/spaces/mxkuzn/solvi-arcade) · [mxkuzn/solvi-documents](https://huggingface.co/spaces/mxkuzn/solvi-documents).
 """
 
 ANS_W = ["17%", "14%", "11%", "14%", "44%"]
