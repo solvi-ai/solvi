@@ -8,13 +8,13 @@ Contents:
 2. [Installation](#installation)
 3. [The catalog](#the-catalog)
 4. [Questions and answer types](#questions-and-answer-types)
-5. [Asking: System and Response](#asking-system-and-response)
-6. [How the strategist plans a flow](#how-the-strategist-plans-a-flow)
-7. [Questions without a rule: fit, learn_rule, teach](#questions-without-a-rule-fit-learn_rule-teach)
-8. [Confidence, calibration and abstention](#confidence-calibration-and-abstention)
-9. [The trace and verification](#the-trace-and-verification)
-10. [Grounded decisions: provenance, audit and safeguards](#grounded-decisions-provenance-audit-and-safeguards)
-11. [Decisions with a model](#decisions-with-a-model)
+5. [Types, questions and model decisions](#types-questions-and-model-decisions)
+6. [Asking: System and Response](#asking-system-and-response)
+7. [How the strategist plans a flow](#how-the-strategist-plans-a-flow)
+8. [Questions without a rule: fit, learn_rule, teach](#questions-without-a-rule-fit-learn_rule-teach)
+9. [Confidence, calibration and abstention](#confidence-calibration-and-abstention)
+10. [The trace and verification](#the-trace-and-verification)
+11. [Grounded decisions: provenance, audit and safeguards](#grounded-decisions-provenance-audit-and-safeguards)
 12. [Printing results: solvi.show](#printing-results-solvishow)
 13. [Extracting fields from documents](#extracting-fields-from-documents)
 14. [Guarantees and limitations](#guarantees-and-limitations)
@@ -24,7 +24,8 @@ Contents:
 A solvi task has two ingredients:
 
 - a **catalog** of Python functions: computations, checks, extractors and answer rules;
-- a list of **questions** with typed answers: yes/no, or a choice from a fixed list.
+- a list of **questions** with typed answers: yes/no, a choice from a fixed list, several options, an ordered score, and
+  the answer primitives ("not stated", a span of the text, a ranking, a number range, evidence quotes).
 
 A request is a plain dict called `init_state` (for example `{"doc": text, "today": date(...)}`). Each key and each catalog
 function's output is a **fact**. For every request, the **strategist** picks from the catalog only the parts needed for
@@ -35,7 +36,7 @@ status.
 ## Installation
 
 ```bash
-pip install solvi              # core: numpy, scipy
+pip install solvi              # core: numpy, scipy, pydantic (imported only for typed parts and serialization)
 pip install "solvi[model]"     # + torch, transformers, for the ModernBERT extractors (solvi.extract_*) and the decider
 pip install "solvi[onnx]"      # + onnxruntime, tokenizers: the decider (solvi.decide) on CPU without torch
 ```
@@ -117,7 +118,10 @@ def amount(doc):
     return Quote(float(m.group(1).replace(",", "")), m.start(1), m.end(1))
 ```
 
-- `doc[start:end]` is the supporting quote. `source` names the `init_state` key holding the text (default `"doc"`).
+- `doc[start:end]` is the supporting quote. `source` names the `init_state` key holding the text. When the Quote does not
+  name it, it is the extractor's text: `"doc"` if the function reads `doc`, else its only argument
+  (`def refund_word(message)` quotes `message`), else its only `str`-typed argument; if that is ambiguous, registration
+  raises and asks for `@cat.extract(source="...")`. A Quote that names another source keeps it.
 - A quote whose offsets fall outside the source text is rejected: the fact is missing (dependent answers abstain) and the
   error is recorded. A quote from a model-backed part must also be literally the text at its offsets — see
   [Grounded decisions](#grounded-decisions-provenance-audit-and-safeguards). Hand-written code may return a value derived
@@ -178,15 +182,18 @@ Question("risk", "Risk level", Answer.choice(["low", "medium", "high"]))
 Question("route", "Which team?", Answer.choice(["a", "b"]), uses=["country", "total"])
 ```
 
-`Question(name, text, answer, checkpoints=[], uses=None, min_confidence=None)`:
+`Question(name, text, answer=None, checkpoints=[], uses=None, min_confidence=None, require_evidence=False)`:
 
 - `name`: the key used for rules, `fit`, and `res[name]`;
 - `text`: human-readable wording;
-- `answer`: `Answer.yes_no()` (options `["yes", "no"]`) or `Answer.choice(options)`;
+- `answer`: `Answer.yes_no()` (options `["yes", "no"]`) or `Answer.choice(options)` (and the types below); leave it out
+  when the question's rule has a return type — the answer type then comes from it (see [Types](#types-questions-and-model-decisions));
 - `checkpoints`: parts that must be in this question's flow in every request (a missing name raises
   `solvi.strategist.PlanError`);
 - `uses`: a hint for the strategist, the facts that matter when the question has neither a rule nor a trained head;
-- `min_confidence`: an answer below this confidence abstains (status `abstain`, the reason says what it would have answered).
+- `min_confidence`: an answer below this confidence abstains (status `abstain`, the reason says what it would have answered);
+- `require_evidence`: an answer without a supporting quote abstains (safeguard "evidence missing"; see
+  [Answer primitives](#answer-primitives-not-stated-evidence-spans-rankings-estimates)).
 
 An answer outside the options is never returned: a rule that produces one makes the question abstain
 (safeguard `outside_options`). A rule may also return `None` on purpose to abstain (safeguard `rule_abstained`).
@@ -215,6 +222,409 @@ satisfies every constraint, and appends "changed from … to satisfy …" to the
 abstentions never change. `res.feasible` says whether the final answers satisfy every constraint; if fixed answers conflict,
 it is `False` and `res.violations` names the constraints.
 
+## Types, questions and model decisions
+
+One story runs through this section: **types declare questions; the model proposes; checks decide.** Type hints make the
+facts and answers typed (validated, coerced, checked between parts); the same types declare the questions a model can
+decide (a `Literal` is a choice, `bool` a yes/no, `Scale[...]` an ordinal score, `list[Literal[...]]` a multi-label
+question); the model proposes an answer with probabilities, a calibrated confidence and an act / escalate signal; and the
+deterministic layer — closed sets, types, hard checks, constraints, rules, thresholds — decides what is answered, what is
+repaired and what goes to a person. Everything is in the trace.
+
+### Typed facts
+
+Type hints on catalog functions are optional. When present, they are the **types of the facts**: an argument's annotation
+is the type the part reads, the return annotation is the type of the fact it sets.
+
+```python
+from typing import Literal
+
+@cat.fn
+def risk_points(flags: list[str]) -> dict[str, float]:
+    return {f: WEIGHTS.get(f, 1.0) for f in flags}
+
+@cat.fn
+def risk_score(risk_points: dict[str, float]) -> float:
+    return sum(risk_points.values())
+
+@cat.rule("band")
+def band(risk_score: float) -> Literal["low", "high"]:
+    return "high" if risk_score > 2 else "low"
+
+Question("band", "Risk band")                  # no Answer needed: choice(["low", "high"]) from the rule's return type
+```
+
+**At registration.** The catalog records each fact's type (`cat.types`: fact → its producer's return type;
+`cat.readers`: fact → the typed parts that read it, with the type each expects; `res.flow.types` for the facts of a flow)
+and checks every producer against every consumer, whichever is registered first. A definite mismatch raises
+`solvi.typed.FactTypeError` naming both functions, and nothing is registered:
+
+```
+FactTypeError: fact 'risk_score': risk_score returns float, but label reads risk_score: str
+```
+
+The check is conservative: it reports only types no value can satisfy. `int` → `float`, `list` ↔ `tuple`, a `dict` into a
+pydantic model / dataclass / TypedDict, and `str` into `date`, `datetime`, `Decimal`, `UUID` or an `Enum` pass (pydantic
+converts them); `str | None` into `str` passes too — the overlap is decided at run time. `Any`, `object` and missing
+annotations are never checked. When a `System` is built, a typed rule's return type is checked against its question's
+options (`Literal["a", "b"]` must be a subset, `bool` needs a yes/no question).
+
+**At run time**, a typed part's arguments are validated and coerced with pydantic before the call (given facts and computed
+ones alike: `"3"` → `3` for an `int`, `"2026-09-01"` → a `date`), and its output after it — for an `extract` part, the
+Quote's value (annotate the value type, `-> float`, not `-> Quote`). Coerced values are what downstream parts receive and
+what the trace records. A value that fails is **rejected**, like an ungrounded quote:
+
+- the fact is missing: the next alternative producer runs (a fallback), else the answers that need it abstain;
+- the step's error says why (`type rejected: returned '12 kg', not float (Input should be a valid number, …)`), the audit
+  shows it and `system.stats["type_rejected"]` counts it (safeguard `type_rejected`);
+- a Literal or Enum return type is a closed set: a value outside it is rejected as "outside the options" (safeguard
+  `outside_options`), exactly like a model decision outside its options. An Enum answer is returned as its value.
+
+A producer's `validate` gets the coerced value. Replay re-runs the same validation, so typed steps replay like any other.
+Untyped parts are not touched: no validation, no pydantic import, and the same hashes as before.
+
+### Types declare questions
+
+`Answer.from_type(t, ordinal=False)` turns a Python type into an answer type, and a question without `answer=` uses it for
+its rule's return type:
+
+| Type | Answer type | As a model decision (`kind`) |
+|---|---|---|
+| `bool`, `Literal["yes", "no"]` | `yes_no` | `noul`: yes or no |
+| `Literal["a", "b", ...]`, an `Enum` | `choice` | `choice`: one option (softmax); an option "other" / "none" can be an abstain threshold |
+| `Scale[Literal["low", "medium", "high"]]` (2–10 levels, lowest first) | `ordinal` | `score`: ordered levels; the value is the median, the expected level is recorded |
+| `list[Literal[...]]` (or `set`, `tuple`, of an Enum) | `multi` | `multi`: every option that applies (a sigmoid each) |
+
+| `Maybe[T]` (`T \| NotStated`) | `T`'s, and "not stated" (`solvi.Unknown`) is an answer | "not stated" competes with the options |
+| `Span[float]`, `Span[str, "notes"]` | `span`: an exact piece of a given text, coerced to the type | `span`: a pointer over the input |
+| `Rank[Literal[...], k]` | `rank`: the top k options in order, a score each | `rank`: scores over the options |
+| `Estimate[0, 7, 14]`, `Annotated[float, Bins(edges, coverage=, unit=)]` | `estimate`: a number over bins, with an interval | `number`: the bins as ordered options |
+
+`X | None` is `X` (the rule may return `None` to abstain). `solvi.Scale[...]` is
+`Annotated[Literal[...], Ordinal()]`; it also takes levels directly (`Scale[1, 2, 3, 4, 5]`) or an Enum (`Scale[Urgency]`),
+and `Answer.from_type(t, ordinal=True)` makes any closed set ordinal. `solvi.typed.question_kind(t)` gives the decision kind.
+
+### Answer primitives: not stated, evidence, spans, rankings, estimates
+
+Every answer is **a value and a confidence**, whether a plain rule, a learned head or a model decision gives it. Besides
+yes/no, choice, ordinal and multi-label answers, the types declare five primitives — each verified by the deterministic
+layer before it is an answer:
+
+| Type | Answer kind | Value (`result.answer`) | Confidence means | How it is verified |
+|---|---|---|---|---|
+| `bool`, `Literal[...]`, `Enum`, `Scale[...]`, `list[Literal]` | `yes_no`, `choice`, `ordinal`, `multi` | an option (a tuple of options) | p(answer); multi: the least certain option's max(p, 1 − p) | the closed set; a typed rule's return type |
+| `Maybe[T]` | `T`'s kind, `unknown` | `solvi.Unknown` — "the text does not state it" | p(not stated) | allowed only when declared (else "outside the options") |
+| any, with `Claim(value, evidence=[...])` / a decision's `evidence` | any | the value; `result.evidence` = `[Quote(text, start, end, source)]` | the value's | every quote literally in its (given) text at its offsets, when the part runs ("grounding rejected"); `require_evidence=True` |
+| `Span[T]` | `span` | the quoted text coerced to `T` (pydantic); `result.span` the Quote | p(this span); a rule: 1 | literally in the text ("grounding"), parses as `T` ("type rejected") |
+| `Rank[Literal[...], k]` | `rank` | a tuple: the top k options, best first; `result.scores` | Plackett–Luce p(this top k in this order); a rule: 1 | only the options, distinct, at least k ("outside the options") |
+| `Estimate[edges]` | `estimate` | a number: the middle of the median bin; `result.interval` | p(value in the interval) = the mass of its bins; a plain number: 1 | a distribution over the declared bins ("outside the options") |
+
+Every kind's confidence is **the probability that the answer, as returned, is right** — for a rule answer at most the
+confidence of the facts it rests on (quotes, decisions), as always — and the response's overall confidence is their product
+over the answered questions (`res.overall["by_kind"]` breaks it down per kind). "Not stated" counts as answered.
+
+**"Not stated" is not "no" and not an abstention.** A `Maybe[...]` question may be answered `solvi.Unknown`: the evidence
+says the text does not state the value — a real answer with a confidence, `status == "ok"`, `result.not_stated`, listed in
+`res.not_stated` and `res.overall["not_stated"]`, shown as `not stated` in the audit. An abstention (`None`, status
+`abstain`) means solvi refuses to answer. Constraints receive `Unknown` (falsy; test it with `x is Unknown`), and joint
+decoding can choose it when it is in a model's probabilities. A question without `Maybe` that gets `Unknown` abstains
+("outside the options"); a typed `-> bool` rule returning it is "type rejected".
+
+```python
+from solvi import Claim, Estimate, Maybe, Quote, Rank, Span, Unknown
+
+@cat.rule("signed")
+def signed(doc: str) -> Maybe[bool]:
+    if "not signed" in doc: return False
+    return True if "signed" in doc else Unknown             # the claim does not say
+
+@cat.rule("damaged")
+def damaged(doc: str) -> bool:                              # Question("damaged", ..., require_evidence=True)
+    m = re.search(r"cracked|broken", doc)
+    return Claim(bool(m), evidence=[m.group(0)] if m else [])   # strings are located in the text; Quotes are checked
+
+@cat.rule("amount")
+def amount(doc: str) -> Span[float]:
+    m = re.search(r"amount: (\S+)", doc)
+    return Quote(m.group(1), m.start(1), m.end(1)) if m else None   # or the text alone: it is located
+
+@cat.rule("contact")
+def contact(doc: str) -> Rank[Literal["email", "phone", "letter"], 2]:
+    return {c: preference(doc, c) for c in ("email", "phone", "letter")}   # a key function's scores, or an ordered list
+
+@cat.rule("repair_days")
+def repair_days(doc: str) -> Estimate[0, 3, 7, 14]:
+    return 5 if "5 days" in doc else {"0–2": 0.2, "3–6": 0.5, "7–13": 0.3}   # a number, or a distribution over the bins
+```
+
+- **Evidence.** Any part may return `Claim(value, evidence=[...], confidence=1.0, source=None)`; a model decision carries
+  `Decision(..., evidence=[...])`. An item is a `Quote(text, start, end, source)` — checked to be literally that text at those
+  offsets — or a string, located at its first occurrence in `source` (default: the part's only given text input, else
+  `doc`). Evidence must point into **given** text facts. An output whose evidence is not in its text is **rejected** like an
+  ungrounded quote (not downgraded): the fact is missing, the next producer runs (a fallback), else the answer abstains —
+  safeguard **grounding rejected**. Accepted evidence is recorded in the trace (`record.extra["evidence"]`, hashed and
+  replayed), returned as `result.evidence`, shown in the audit (`evidence  doc[37:44] 'cracked'  verified`) and counted in
+  the support (`quoted` for plain code, `quoted_by_model` for a model). `Question(require_evidence=True)`: an answer without
+  a supporting quote abstains — safeguard **evidence missing** (`guard="evidence_missing"`, `system.stats`); a span is its
+  own evidence, and "not stated" needs none.
+- **Span** (`Span[T]`, `Answer.span(source="doc", type=None)`): the rule returns a `Quote` (its text must be literally at its
+  offsets, whatever the part) or the text (located in `source`). The answer is the text coerced to `T` with pydantic
+  (`"149.90"` → 149.9; `"twenty"` or `"1,250.50"` for a float → abstain, **type rejected**); `result.span` is the Quote.
+- **Rank** (`Rank[...]`, `Answer.rank(options, k=None)`): a rule returns `{option: score}` (sorted best first, ties in option
+  order) or an ordered list; a model its probabilities. `result.scores` holds the scores; constraints see the tuple, and a
+  model's ranking is repaired by joint decoding over the top-k orders (by Plackett–Luce probability).
+- **Estimate** (`Estimate[edges]`, `Answer.estimate(bins, coverage=0.8, unit=None, integer=None)`, or `lo=, hi=, step=`):
+  edges e0 < … < e_last cut len(edges) + 1 bins, the first and last open, labelled like the decider's (`less than 0`,
+  `0–2`, `3–6`, `7–13`, `14 or more`). A rule returns a plain number (interval `[x, x]`, confidence 1) or a distribution
+  (`{label or bin index: p}` or a list); the value is the middle of the median bin (an open bin: its edge), `result.interval`
+  the bins from the (1 − c)/2 to the (1 + c)/2 cumulative probability (`None` for an open end), the confidence their mass.
+  Estimates, spans and rule rankings are not changed by joint decoding.
+
+`Answer.maybe(t)`, `Answer.span`, `Answer.rank` and `Answer.estimate` build the same answer types without type hints. Learned
+heads (`fit`, `fit_fast`) answer the four classic kinds only (examples answered `Unknown` are left out). All of it
+round-trips through JSON (`result.not_stated`, `evidence`, `extra`) and replays. From a decider — `model.decision(name,
+task, fact, Maybe[...] / Span[T] / Rank[...] / Estimate[...], evidence=True)` — these need an L14g checkpoint (its "not
+stated" output and its pointer; see [decide_format.md §9](decide_format.md#9-answer-primitives-l14g-typed-v2-proposed-solvi_decide-v3)).
+[examples/16_primitives.py](../examples/16_primitives.py) answers all five from rules and from a decider.
+
+### Typed input state and serialization
+
+`system.ask(model_instance)` accepts a pydantic `BaseModel`: its fields (nested models included, as they are) are the given
+facts. `System(cat, questions, inputs=Request)` validates every dict passed to `ask` against `Request`: its fields, with
+defaults, become the given facts (other keys pass through), and a field that fails is left out — the fact is missing, the
+answers that need it abstain, and a `type_rejected` event names the field (`res.trace.rejected`). Values that already
+passed a type in this run (a validated input, a typed producer's output) are not validated again by parts that read them
+with the same type.
+
+Results, records, traces, questions, answer types and responses have a pydantic-backed form:
+
+```python
+res.model_dump()                   # Python data (dates, enums, models as they are)
+res.model_dump("json") / res.to_json()
+Response.from_json(text, catalog=system)     # typed values restored from the facts' types; the trace still replays
+Response.model_json_schema()       # the JSON schema of any response
+system.response_schema()           # ... with each question's answer as its closed set of options
+Question.from_json(q.to_json()) == q
+```
+
+JSON has no dates or enums: the dump marks values that are not plain JSON, and on load `catalog=` (a Catalog, or the
+System, which also knows `inputs=`) restores them from the producer's return type, the type the fact's readers expect, or the
+input model — so the restored trace hashes and replays exactly. Untyped non-JSON values come back as strings (their steps
+then no longer replay). The classes stay plain dataclasses; the pydantic models are in `solvi.schema`.
+
+Notes: types are resolved with `typing.get_type_hints`; a name that cannot be resolved (a class defined inside a function
+under `from __future__ import annotations`) is skipped with a warning. A pydantic model in a module loaded without an entry
+in `sys.modules` cannot resolve postponed annotations — drop `from __future__ import annotations` there.
+[examples/14_typed_catalog.py](../examples/14_typed_catalog.py) and [gallery/10](../gallery/10_procurement_3way_match) are
+typed end to end.
+
+### The model proposes: decisions with a decider
+
+A **decider** answers typed questions about a text or a state: "which team handles this email?", "how urgent is it?", "is
+the customer angry?", "which topics does it mention?". solvi's decider (solvi-decide, a ModernBERT cross-encoder) reads
+`[mode] task [opt] option 1 [opt] option 2 … [SEP] input` and scores every option in one pass. In solvi it is a catalog part
+like any other, so everything in [Grounded decisions](#grounded-decisions-provenance-audit-and-safeguards) applies
+unchanged: the closed set, `min_confidence`, constraints with joint decoding, hard checks, the audit, the stats.
+
+```python
+from typing import Literal
+from pydantic import BaseModel, Field
+from solvi import Scale
+from solvi.decide import DecideModel
+
+model = DecideModel.load("~/models/decide-base")          # a checkpoint folder or a Hugging Face id
+
+class Triage(BaseModel):                                  # one field = one question: its type is the kind, its description the task
+    team: Literal["billing", "technical", "shipping"] = Field(description="Which team should handle this ticket?")
+    urgency: Scale[Literal["low", "medium", "high", "critical"]] = Field(description="How urgent is it?")
+    angry: bool = Field(description="Is the customer angry?")
+    topics: list[Literal["refund", "delay", "bug"]] = Field(description="What does the ticket mention?")
+
+questions = model.questions(cat, Triage, text_fact="ticket")   # registers each as its question's rule → [Question]
+```
+
+One question at a time:
+
+```python
+team = model.decision("team", "Which team should handle this email?", text_fact="email",
+                      options={"billing": "payments, invoices, refunds", "technical": "bugs, errors, crashes",
+                               "shipping": "delivery, tracking, parcels", "other": "none of the above"})
+urgency = model.decision("urgency", "How urgent is it?", "email", Scale[Literal["low", "medium", "high"]])
+angry = model.decision("angry", "Is the customer angry?", "email", bool)          # value True / False
+
+cat.fn(team)                              # a fact other parts read (returns Decision(value, probs); they get the value)
+q = urgency.question(cat, min_confidence=0.6)             # or: the answer of a question (registers cat.rule("urgency")(urgency))
+```
+
+`model.decision(name, task, text_fact="doc", options=..., descriptions=None, multi=False, other=None, *, kind=None,
+type=None, escalate_below=None, act_threshold=None, use_act=None, target_error=None, score_value="median")` returns a
+callable catalog function named `name` that returns `Decision(value, probs)`. The question is given by `options` (a list, or
+`{option: description}`) and `kind` (`"choice"`, `"multi"`, `"score"`, `"noul"`), or by a type (`type=`, or in place of the
+options; a dict of options is then read as descriptions). `model.decisions(Schema, text_fact)` gives one part per field of a
+pydantic model; a field's `json_schema_extra` may carry `"options"` (descriptions), `"escalate_below"`, `"act_threshold"`,
+`"target_error"`, `"use_act"`, `"other"`.
+
+- the value is one of the options **by construction** — the network only scores the options it is given — and the options
+  are the part's closed set (`part.options`: for a bool question `[True, False]`), so the safeguard would reject anything
+  else;
+- the provenance is `decided`; the trace records `{"type": "DecisionPart", "id": model_id, "fp": ...}`, where the
+  fingerprint covers the checkpoint and **this decision's** adaptation and thresholds (teaching one decision does not mark
+  the others as changed); `record.probs` has the probabilities and `record.extra` the act probability, a score's expected
+  level and the shared pass;
+- `Question(min_confidence=...)` abstains on unsure answers; as a question's answer the decision keeps its probabilities, so
+  constraints can repair it by joint decoding, and a failed hard check still forces the answer without asking the model.
+
+Per kind: `choice` — softmax over the options, confidence = the top probability; `multi` — a tuple of the options at
+probability ≥ the checkpoint's `multi_threshold` (0.5), confidence = the least certain option's `max(p, 1 − p)`; `score` —
+softmax over the levels, the value is the **median** (`score_value="mode"` / `"expected"` to change it), confidence = the
+probability of that level, and `decision.extra` has `expected` (in level units for numeric levels, else the rank 0…K−1) and
+`median`; `noul` — `probs` over `"yes"` / `"no"`, the value `True` / `False` for a `bool` type (typed and untyped readers
+get a real bool), `"yes"` / `"no"` for `Literal["yes", "no"]`; as a question's answer it is `yes_no`.
+
+### The input: a text or a state
+
+A decision reads `text_fact` — a fact name, or a list of them. A text (or a `Quote`) is read as it is; several texts are
+joined by new lines. A **state** — a dict, a list, a pydantic model, a dataclass — is first made JSON data
+(`solvi.decide.jsonable`: a model's `model_dump()`, dates in ISO 8601, an Enum as its value) and then serialized with
+`solvi.decide.state_text(obj, fmt="paths")`, one line per leaf with its full key path:
+
+```
+subject: Charged twice
+body: I was charged twice for order 5521 and want a refund.
+customer.name: Anna
+customer.tier: enterprise
+items[0].sku: A-17
+```
+
+Several facts with a state among them are serialized as `{fact: value}`. A scalar (a number, a date) is read as its text. The
+serialization is the one the L14f decider is trained on (keys in their order; `["key"]` for keys outside `[A-Za-z0-9_-]`;
+strings without quotes, a new line becomes a space; `null` / `true` / `false`; floats to 6 decimals), and the checkpoint
+says which of `"paths"`, `"tree"` (YAML-like) or `"json"` it reads — see [decide_format.md](decide_format.md). A pydantic
+model and the equal dict give the same text.
+
+### The output: probabilities, calibrated confidence, act or escalate
+
+Each decision has probabilities over its options, a calibrated confidence (the checkpoint's temperature per question kind,
+then this question's adaptation) and — for a checkpoint with an **act head** — `decision.extra["act"]`, the probability that
+the answer is right (the head's logit, through the checkpoint's act calibrator when it ships one). A decision the model does
+not act on **escalates**: it is rejected like an unsure one — the fact is missing, the answer abstains with the reason, and
+a fallback producer (a rule, a human queue) runs if there is one:
+
+- the model's own signal: act probability below the threshold → `abstain`, `guard="escalated"`, why `"model escalated: act
+  0.12 < 0.50; would have answered 'billing'"`; the audit and `system.stats["model_escalated"]` count it (safeguard
+  **model escalated**). The threshold is the checkpoint's; `act_threshold=` overrides it, `target_error=0.1` takes the
+  checkpoint's threshold for that error rate (`model.act_threshold_for(0.1)`), `use_act=False` ignores the signal;
+- without an act head (or besides it): `escalate_below=0.8` — a calibrated confidence below it escalates as **low
+  confidence** (`"confidence 0.62 < 0.80 (escalate_below); would have answered 'billing'"`);
+- `part.calibrate_for(examples, error=0.05)` picks the threshold for a target error rate on labelled examples
+  `[(input, correct)]`: the lowest threshold at which the decisions it lets through are wrong at most 5% of the time (the act
+  probability when the model has an act head, else the confidence) → `{"signal", "threshold", "coverage", "error", ...}`.
+
+The provenance stays `decided` and the model's fingerprint is in the trace either way; `Decision.act` is `False` for an
+escalated decision.
+
+### Several questions in one pass
+
+When the checkpoint declares `multi_question` (see [decide_format.md](decide_format.md)), the strategist groups the decision
+parts of a flow that read the same facts with the same model (`res.flow.batches`) and the executor scores each group in
+**one forward pass** — `model.passes` counts the passes. In the checkpoint's `block` layout (L14f), the input is encoded once
+and each question sees the input and itself only, so an answer does not depend on which other questions share its pass;
+solvi then scores every question of that model in the block layout, alone or together, so fit / teach and the runtime see
+the same logits. The results have the same structure as one question per pass; each record's `extra["pass"]` names the
+steps it shared the pass with, and replay re-scores the pass. If the questions do not fit together, they go one per pass;
+an ONNX export without the block inputs falls back to one question per sequence (`extra["pass"]["shared"]` is then false).
+`model.decide_pass(input, parts)` does the same outside a catalog. Catalogs without decisions do none of this work.
+
+### Loading a checkpoint
+
+`DecideModel.load(path_or_hf_id, device=None, backend="auto")` reads a folder with `solvi_decide.json`, `config.json`,
+`tokenizer.json` and the weights (`model.safetensors` and/or `onnx/model_fp16.onnx`), or downloads a Hugging Face id once.
+`backend="onnx"` needs `solvi[onnx]` (onnxruntime + tokenizers, no torch; ~50 ms per decision on a CPU); `backend="torch"`
+needs `solvi[model]` (CUDA when available); `"auto"` takes ONNX when the file and onnxruntime are there. Both give the same
+probabilities to about three decimals. `solvi_decide.json` declares what the checkpoint can do — its format, the question
+kinds it was trained on, the head columns, the state serialization, the act head, several questions per pass, temperatures
+and thresholds: **[docs/decide_format.md](decide_format.md)** is the contract. L14b–L14e checkpoints (`l14b_decider v1`)
+load and behave exactly as before: choose-one and multi-label natively, a score or yes/no asked as a choice among the levels
+or "yes" / "no", no act head (escalate by `escalate_below`), one question per pass. `load(..., multi_question=..., act=...)`
+overrides the declaration for experiments.
+
+Published deciders are on [huggingface.co/solvi-ai](https://huggingface.co/solvi-ai) (`DecideModel.load("solvi-ai/decide-base")`).
+Their model cards state what each was measured on and where it is weak; they are previews, so fit and calibrate on 30–60
+labelled examples of your task (below) before trusting the confidences.
+
+`model.model_id` is the path or id it was loaded from; `model.fingerprint()` hashes the checkpoint files (names, sizes and
+sampled bytes), the backend, the default calibration, the declared capabilities and every adaptation; `model.metadata()`
+lists them; `model.caps` has the parsed capabilities. Any object with `logits(items)` (one array of logits per
+`solvi.decide.Item`, or `{"logits": ..., "act": logit}`; optionally `logits_pass(passes)` for several questions per
+`solvi.decide.Pass`) can stand in for the network: `DecideModel(scorer, meta)`.
+
+```python
+model.score(input, task, options, descriptions=None, multi=False, kind=None)   # → {option: probability}; a list → a list
+model.decide(input, task, options, ..., kind=None, escalate_below=None)       # → Decision(value, probs)
+model.logits(input, task, options)                                             # raw logits
+```
+
+Inputs are batched (sorted by length, 16 per pass) and raw logits are cached per (input, question), so a decision used both
+as a fact and as an answer, or replayed, runs the network once. Only the input is truncated (to `max_len`).
+
+### Adapting a decision: adapt, fit, teach
+
+```python
+team.adapt(unlabelled_emails)            # label-bias correction without labels
+team.fit(labelled)                       # [(input, correct)], e.g. 16–64 examples
+system.teach("team", {"email": text}, "billing")   # one correction, absorbed at once
+```
+
+A decider likes some labels whatever the text. `adapt` estimates that preference on unlabelled inputs of your domain: for
+each option, the mean logit over the inputs (centered over the options) is subtracted before the softmax / sigmoid. No
+labels are needed; in research (L14b) this gave +7 points on unseen domains.
+
+`fit` learns a shift and one shared scale on the (bias-corrected) logits by L-BFGS (`(a·z + b) / temperature`, regularized
+towards the model's defaults), then fits the temperature on out-of-fold predictions (4 folds), so confidences are calibrated
+(ECE 0.055 at 32 examples in research). The shift depends on the kind: a free shift per option for `choice` and `multi`; for
+a `score`, a **tilt** towards higher / lower levels and a **spread** towards the middle / the ends (ordinal-aware: a few
+examples cannot reorder the levels); for `noul`, **one yes−no bias**. `teach(input, correct)` adds one example and refits the
+shift and scale from the kept examples, warm-started (~1 ms, plus the forward pass if the input was not scored before); the
+temperature and the "other" threshold stay until the next `fit`. `System.teach(question, ...)` routes to it when the
+question's answer is a decision part (or a rule that only passes a decided fact on), mapping the answer to the decision's
+label (`True` → "yes"), and returns the time in ms.
+
+Adaptations are stored per question (task, options, descriptions, kind) in `model.adaptations` and are part of the
+fingerprint, so a replay of a decision made before them reports "model changed since this decision".
+`model.save_adaptations(path)` / `model.load_adaptations(path)` keep them with the checkpoint's fingerprint (loading onto a
+different checkpoint is refused unless `strict=False`); `part.reset()` forgets one.
+
+### "Other" as an abstain threshold
+
+If a choice's options include `"other"` or `"none"` (also "none of the above", "none of these"; or name it with
+`other="misc"`; `other=False` turns this off), that option is **not scored** by the network. It is chosen when the best real
+option's calibrated probability `m` is below a threshold: fitted by `fit` on out-of-fold predictions when the examples
+include at least three labelled "other" (and three others), else `other_threshold` from the checkpoint's metadata (0.5). Its
+confidence is `1 − m`; in `probs` it gets `π = g / (1 + g)` with `g = thr·(1 − m)/(1 − thr)` and the real options share
+`1 − π`, so it is the most probable option exactly when `m < thr` (joint decoding sees consistent probabilities). For
+multi-label, "none" is chosen when no option reaches the threshold. Checkpoints trained with "other" as an ordinary option
+(L14d) recommend `other=False`.
+
+### Calibration utilities
+
+`solvi.calibration` works for any model or question:
+
+```python
+from solvi.calibration import coverage_at, ece, evaluate, reliability, threshold_for
+
+coverage_at(conf, correct, 0.9)       # share of cases answerable automatically at ≥ 90% accuracy
+threshold_for(conf, correct, 0.9)     # the confidence threshold that gives it (e.g. for Question(min_confidence=...))
+ece(conf, correct)                    # expected calibration error; reliability(conf, correct, bins) for the diagram
+evaluate(system, "team", examples)    # ask on [(init_state, answer)] → accuracy, ece, coverage_at, answered, ...
+```
+
+[examples/13_decide_model.py](../examples/13_decide_model.py) routes support emails with a decision part: bias correction on
+60 unlabelled emails, S on 16 labelled ones, abstention, a constraint with a rule-based question, a hard check, the audit,
+`System.teach`, `calibrate_for` and a JSON ticket. [examples/15_typed_decisions.py](../examples/15_typed_decisions.py) is the
+whole story: a pydantic ticket, the questions as the fields of a pydantic model, four answers from one forward pass, a hard
+check, a constraint and a rule over the model, an escalation, the audit. Both run the real decider when
+`SOLVI_DECIDE_MODEL` points to a checkpoint and a keyword stand-in otherwise.
+
 ## Asking: System and Response
 
 ```python
@@ -225,8 +635,9 @@ res = system.ask(init_state)                   # all questions
 res = system.ask(init_state, ["ship"])         # a subset
 ```
 
-`System(catalog, questions, journal=None)`. If `journal` is a file path, every `ask` appends one JSON line with the hash
-of `init_state`, the answers, the flow and the hash of every trace record.
+`System(catalog, questions, journal=None, inputs=None)`. If `journal` is a file path, every `ask` appends one JSON line with
+the hash of `init_state`, the answers, the flow and the hash of every trace record. `inputs`: a pydantic model of
+`init_state` (see [Types](#types-questions-and-model-decisions)); `ask` also takes a `BaseModel` instance.
 
 ### Response
 
@@ -244,18 +655,26 @@ of `init_state`, the answers, the flow and the hash of every trace record.
 | `res.audit(q=None)` | what each answer rests on and which safeguards fired (see [Grounded decisions](#grounded-decisions-provenance-audit-and-safeguards)) |
 | `res.safeguards` | the safeguard events of this response |
 | `res.ms` | decision time in milliseconds |
+| `res.confidence` | overall confidence: the probability that every answered question is right (product of the answers' confidences, errors taken as independent — conservative when constraints tie answers together); abstained questions are left out |
+| `res.complete`, `res.weakest` | did every question get an answer; `(question, confidence)` of the least confident answer |
+| `res.overall` | all of it as data: `{confidence, weakest, answered, abstained, complete, feasible, not_stated, by_kind}` (`by_kind`: per answer kind the answered count and the product of their confidences); also in `to_json()` and the first line of `print(res.audit())` |
+| `res.not_stated` | the questions answered "not stated" (`solvi.Unknown`) |
+| `res.model_dump()`, `res.to_json()` | the response as data / JSON; `Response.from_json(text, catalog=...)` loads it back (see [Types](#types-questions-and-model-decisions)) |
 
 ### Result
 
 | Field | Content |
 |---|---|
-| `.answer` | one of the options, or `None` when abstaining |
+| `.answer` | one of the options (a tuple for multi-label and rank, a number for an estimate, the coerced text for a span, `solvi.Unknown` for "not stated"), or `None` when abstaining |
 | `.confidence` | float in [0, 1] |
 | `.why` | the reason: rule inputs and their values, or the top feature contributions of a learned head, or why it abstained or was forced |
 | `.status` | `"ok"`, `"forced"` (a hard check decided) or `"abstain"` |
 | `.probs` | class probabilities for answers from a learned head or a model decision (empty for plain rules) |
 | `.provenance`, `.source` | where the answer came from: `computed` (a rule, a hard check), `learned` (a head, a learned rule), `decided` (a model-backed rule); and which rule / check / head |
-| `.guard`, `.repaired` | the safeguard that settled it (`hard_check`, `outside_options`, `low_confidence`), and `(previous answer, constraints)` if joint decoding changed it |
+| `.guard`, `.repaired` | the safeguard that settled it (`hard_check`, `outside_options`, `low_confidence`, `grounding`, `type_rejected`, `evidence_missing`, ...), and `(previous answer, constraints)` if joint decoding changed it |
+| `.kind` | the answer type's kind (`yes_no`, `choice`, `ordinal`, `multi`, `span`, `rank`, `estimate`) |
+| `.evidence`, `.span` | the supporting quotes `[Quote(text, start, end, source)]`; a span answer's Quote |
+| `.not_stated`, `.interval`, `.scores`, `.extra` | the answer is `solvi.Unknown`; an estimate's interval; a ranking's scores; the details as data |
 
 A question abstains when:
 
@@ -286,6 +705,15 @@ last; hard checks and the facts they read are ordered first. Catalog parts that 
 
 The flow depends only on which keys `init_state` has, the catalog, the questions and the trained heads. It is the same for
 every request with the same keys.
+
+### Other strategists: dead ends and costs
+
+`System(..., strategist=...)` takes another planner. `solvi.strategy.ModelStrategist()` builds the same plan with producers
+whose inputs are never given dropped (the deterministic strategist needs the inputs of every producer of a fact);
+`ModelStrategist(producers="equivalent")` treats the producers of a fact as interchangeable and picks the cheapest verified
+plan by declared `cost=`, keeping every hard check that governs a question. Both are code only. A segment model and name
+matching (`solvi.aliases`) are experimental. Details, the trace record of a plan and what was measured:
+[docs/strategist.md](strategist.md).
 
 ### Early exit and parallel execution
 
@@ -417,7 +845,8 @@ Note that non-JSON values in `init_state` (dates, custom objects) are stored as 
 
 ## Confidence, calibration and abstention
 
-How confidence is computed:
+How confidence is computed (what it means for each answer kind: the table in
+[Answer primitives](#answer-primitives-not-stated-evidence-spans-rankings-estimates)):
 
 - **Rule answers**: the minimum confidence among all extracted values and model decisions the rule's inputs depend on
   (and the rule's own, for a model-backed rule). A rule over dict inputs and computations only has confidence 1.0.
@@ -461,6 +890,8 @@ Answers from a learned head are records too (`kind="head"`, after the flow's ste
 head's fingerprint.
 
 `res.trace.init` keeps `init_state` and `res.trace.init_hash` its hash. `res.trace.value(name)` returns a recorded value.
+`res.trace.to_json()` / `Trace.from_json(text, catalog=cat)` store and load a trace (typed values are restored, see
+[Types](#types-questions-and-model-decisions)); the loaded trace replays like the original.
 
 `res.trace.replay(catalog)` independently re-executes every step from the recorded `init_state`, and checks:
 
@@ -563,13 +994,16 @@ Hashes: a record hashes its provenance only when it differs from the default (`q
 
 | Safeguard | Fires when | Effect |
 |---|---|---|
-| grounding | a quote lies outside its text, or a model's quote is not literally `doc[start:end]` (strings up to whitespace, numbers as written, e.g. `1250.0` ↔ `"1,250.00"`) | the output is rejected: the fact is missing, the claim stays in the error; the next alternative producer runs, else dependent answers abstain |
+| grounding | a quote lies outside its text, or a model's quote is not literally `doc[start:end]` (strings up to whitespace, numbers as written, e.g. `1250.0` ↔ `"1,250.00"`); an evidence quote or a span is not literally in its text | the output is rejected: the fact is missing, the claim stays in the error; the next alternative producer runs, else dependent answers abstain |
 | closed set | a `Decision` (or a value of a part with `options=`) is not one of the options; a rule's answer is not one of the question's options | rejected / the question abstains |
-| low confidence | a `Quote` / `Decision` is below the part's `min_confidence`; an answer is below the question's `min_confidence` | rejected / the question abstains, saying what it would have answered |
+| low confidence | a `Quote` / `Decision` is below the part's `min_confidence` or a decision's `escalate_below`; an answer is below the question's `min_confidence` | rejected / the question abstains, saying what it would have answered |
+| model escalated | a decider's act / escalate signal is below its threshold (see [the output](#the-output-probabilities-calibrated-confidence-act-or-escalate)) | rejected: the fact is missing, next producer, else the question abstains, saying what it would have answered |
 | validate | a producer's `validate(value, ...)` returns false | rejected, next producer |
+| type rejected | a typed part's argument or output fails its type annotation, or a field fails `System(inputs=...)` | rejected: the fact is missing, next producer, else dependent answers abstain |
 | hard check | a hard check governing the question is false | the answer is forced by `then`, or the question abstains |
 | constraint repair | learned or model answers break a constraint between answers | the most probable consistent combination is chosen |
 | fallback | an alternative producer was rejected and a later one was used | recorded in `tried` |
+| evidence missing | a question with `require_evidence=True` got an answer without a supporting quote | the question abstains, saying what it would have answered |
 
 Hand-written extractors (no model) may return a value derived from the quoted text; the audit then shows the value next to
 the text it was derived from. Numbers, dates and other non-string values from a model are checked when they can be compared
@@ -607,133 +1041,12 @@ approve = 'yes'  [ok]  confidence 0.60  ← computed by approve
 ### Lifetime stats
 
 `system.stats` counts, over the system's lifetime: `asks`, `answers`, `abstained`, `model_outputs` (outputs of model-backed
-parts, answer heads and learned rules), `grounding_rejected`, `outside_options`, `low_confidence`, `validator_rejected`,
-`forced_by_hard_check`, `constraint_repairs` and `fallbacks`. `system.safeguard_report()` prints them. Counting costs about
+parts, answer heads and learned rules), `grounding_rejected`, `type_rejected`, `outside_options`, `rule_abstained`,
+`low_confidence`, `validator_rejected`,
+`forced_by_hard_check`, `constraint_repairs`, `fallbacks`, `model_escalated` and `evidence_missing`.
+`system.safeguard_report()` prints them (`evidence missing` once it has fired). Counting costs about
 1% of a decision. [examples/12_grounded_audit.py](../examples/12_grounded_audit.py) runs one catalog with and without models,
 with a hallucinating extractor and a classifier answering outside its options.
-
-## Decisions with a model
-
-A **decider** picks among options described in words: "which team handles this email?", "which clauses apply?". solvi's
-decider (solvi-decide, a ModernBERT cross-encoder) reads `[mode] task [opt] option 1 [opt] option 2 … [SEP] text` and scores
-every option in one pass: a softmax over the options for a single choice, a sigmoid per option for multi-label. In solvi it is
-a catalog part like any other, so everything in [Grounded decisions](#grounded-decisions-provenance-audit-and-safeguards)
-applies unchanged: the closed set, `min_confidence`, constraints with joint decoding, hard checks, the audit, the stats.
-
-```python
-from solvi.decide import DecideModel
-
-model = DecideModel.load("~/models/decide-base")          # a checkpoint folder or a Hugging Face id
-team = model.decision("team", "Which team should handle this support email?", text_fact="email",
-                      options={"billing": "payments, invoices, refunds", "technical": "bugs, errors, crashes",
-                               "shipping": "delivery, tracking, parcels", "other": "none of the above"})
-
-cat.fn(team)                              # a fact other parts read (returns Decision(value, probs); they get the value)
-q = team.question(cat, "team", min_confidence=0.6)        # or: the answer of a question (registers cat.rule("team")(team))
-```
-
-### Loading
-
-`DecideModel.load(path_or_hf_id, device=None, backend="auto")` reads a folder with `solvi_decide.json`, `config.json`,
-`tokenizer.json` and the weights (`model.safetensors` and/or `onnx/model_fp16.onnx`), or downloads a Hugging Face id once.
-`backend="onnx"` needs `solvi[onnx]` (onnxruntime + tokenizers, no torch; ~50 ms per decision on a CPU); `backend="torch"`
-needs `solvi[model]` (CUDA when available); `"auto"` takes ONNX when the file and onnxruntime are there. Both give the same
-probabilities to about three decimals. Any retrained checkpoint in the same folder format loads the same way; its
-`solvi_decide.json` may set `temperature` (the default is the value fitted on the training pool, 1.45 for
-`l14b_decider v1`), `temperature_multi`, `other_threshold` and `multi_threshold`.
-
-`model.model_id` is the path or id it was loaded from; `model.fingerprint()` hashes the checkpoint files (names, sizes and
-sampled bytes), the backend, the default calibration and every adaptation; `model.metadata()` lists them. Any object with
-`logits(items)` (one array of logits per `solvi.decide.Item`) can stand in for the network: `DecideModel(scorer, meta)`.
-
-### Scoring
-
-```python
-model.score(text, task, options, descriptions=None, multi=False)   # → {option: probability}; a list of texts → a list
-model.decide(text, task, options, ...)                             # → Decision(value, probs)
-model.logits(text, task, options)                                  # raw logits
-```
-
-Texts are batched (sorted by length, 16 per pass) and raw logits are cached per (text, task, options), so a decision used
-both as a fact and as an answer, or replayed, runs the network once. Only the text is truncated (to `max_len`, 512 tokens).
-
-### The decision part
-
-`model.decision(name, task, text_fact="doc", options=..., descriptions=None, multi=False, other=None)` returns a callable
-catalog function named `name` that reads `text_fact` (a fact name, or a list of them joined by new lines; a `Quote` is read
-as its value) and returns `Decision(value, probs)`:
-
-- the value is one of the options **by construction** — the network only scores the options it is given — and the options are
-  the part's closed set (`part.options`), so the safeguard would reject anything else;
-- the provenance is `decided`; the trace records `{"type": "DecisionPart", "id": model_id, "fp": ...}`, where the fingerprint
-  covers the checkpoint and **this decision's** adaptation (teaching one decision does not mark the others as changed);
-- `cat.fn(min_confidence=0.7)(part)` rejects unsure decisions (the fact is missing, dependent answers abstain);
-  `Question(min_confidence=...)` abstains on unsure answers;
-- as a question's answer (`part.question(cat, name, text=None, min_confidence=None, checkpoints=None)` or
-  `cat.rule("q")(part)`), the answer keeps the probabilities, so constraints can repair it by joint decoding, and a failed hard
-  check still forces the answer without asking the model.
-
-`multi=True`: the value is a tuple of the options at probability ≥ 0.5, in option order; confidence is the least certain
-option's `max(p, 1 − p)`.
-
-### Label-bias correction without labels
-
-A decider likes some labels whatever the text. Estimate that preference on unlabelled texts of your domain and subtract it:
-
-```python
-team.adapt(unlabelled_emails)            # or model.adapt(texts, task, options)
-```
-
-For each option, the mean logit over the texts (centered over the options) is subtracted before the softmax / sigmoid.
-No labels are needed; in research (L14b) this gave +7 points on unseen domains. The correction is stored per
-(task, options, descriptions, mode) in `model.adaptations` and is part of the fingerprint, so a replay of a decision made
-before it reports "model changed since this decision".
-
-### Few-shot adaptation ("S") and teach
-
-```python
-team.fit(labelled)                       # [(text, correct)], e.g. 16–64 examples
-system.teach("team", {"email": text}, "billing")   # one correction, absorbed at once
-```
-
-`fit` learns a shift per option and one shared scale on the (bias-corrected) logits by L-BFGS
-(`(a·z + b) / temperature`, regularized towards the model's defaults), then fits the temperature on out-of-fold
-predictions (4 folds), so confidences are calibrated (ECE 0.055 at 32 examples in research; the accuracy gain over the bias
-correction alone is small — S mostly calibrates). `teach(text, correct)` adds one example and refits the shift and scale from
-the kept examples, warm-started (K + 1 parameters: ~1 ms, plus the forward pass if the text was not scored before); the
-temperature and the threshold stay until the next `fit`. `System.teach(question, ...)` routes to it when the question's
-answer is a decision part (or a rule that only passes a decided fact on), and returns the time in ms.
-
-`model.save_adaptations(path)` / `model.load_adaptations(path)` keep adaptations with the checkpoint's fingerprint (loading
-onto a different checkpoint is refused unless `strict=False`); `part.reset()` forgets one.
-
-### "Other" as an abstain threshold
-
-If the options include `"other"` or `"none"` (also "none of the above", "none of these"; or name it with `other="misc"`;
-`other=False` turns this off), that option is **not scored** by the network. It is chosen when the best real option's
-calibrated probability `m` is below a threshold: fitted by `fit` on out-of-fold predictions when the examples include at
-least three labelled "other" (and three others), else `other_threshold` from the checkpoint's metadata (0.5). Its confidence
-is `1 − m`; in `probs` it gets `π = g / (1 + g)` with `g = thr·(1 − m)/(1 − thr)` and the real options share `1 − π`, so it is
-the most probable option exactly when `m < thr` (joint decoding sees consistent probabilities). For multi-label, "none" is
-chosen when no option reaches 0.5.
-
-### Calibration utilities
-
-`solvi.calibration` works for any model or question:
-
-```python
-from solvi.calibration import coverage_at, ece, evaluate, reliability, threshold_for
-
-coverage_at(conf, correct, 0.9)       # share of cases answerable automatically at ≥ 90% accuracy
-threshold_for(conf, correct, 0.9)     # the confidence threshold that gives it (e.g. for Question(min_confidence=...))
-ece(conf, correct)                    # expected calibration error; reliability(conf, correct, bins) for the diagram
-evaluate(system, "team", examples)    # ask on [(init_state, answer)] → accuracy, ece, coverage_at, answered, ...
-```
-
-[examples/13_decide_model.py](../examples/13_decide_model.py) routes support emails with a decision part: bias correction on
-60 unlabelled emails, S on 16 labelled ones, abstention through `min_confidence`, a constraint with a rule-based question, a
-hard check, the audit and `System.teach`. It runs the real decider when `SOLVI_DECIDE_MODEL` points to a checkpoint and a
-keyword stand-in otherwise.
 
 ## Printing results: solvi.show
 
@@ -865,6 +1178,8 @@ What solvi guarantees:
 - A model's quote that is not literally the text at its offsets, or a model decision outside its options, is rejected
   and counted; it never becomes an answer.
 - A failed hard check always decides the answer, above any model confidence.
+- A value that fails the type annotation of a typed part (argument or output) never reaches a consumer: it is rejected and
+  counted, the fact is missing.
 - When a needed fact cannot be computed, a part fails, or a rule returns an invalid option, the question abstains
   instead of guessing.
 - `replay` recomputes the trace and names the step where anything was changed, including changes with recomputed hashes.

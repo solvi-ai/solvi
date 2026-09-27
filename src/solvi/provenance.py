@@ -26,14 +26,21 @@ QUOTE_OUTSIDE = "quote outside the text"
 NOT_GROUNDED = "not grounded"
 OUTSIDE_OPTIONS = "outside the options"
 VALIDATE = "rejected by validate"
+TYPE_REJECTED = "type rejected"               # a typed fact failed its type (solvi.typed)
+ESCALATED = "model escalated"                 # a decider's own act / escalate signal said "hand it to a person" (solvi.decide)
 
 
 def classify(reason):
-    """A rejection reason → the safeguard that fired (grounding, outside_options, low_confidence, validator) or None."""
+    """A rejection reason → the safeguard that fired (grounding, type_rejected, outside_options, low_confidence, escalated,
+    validator) or None."""
     if not reason:
         return None
+    if reason.startswith(ESCALATED):
+        return "escalated"
     if reason.startswith((QUOTE_OUTSIDE, NOT_GROUNDED)):
         return "grounding"
+    if reason.startswith(TYPE_REJECTED):
+        return "type_rejected"
     if OUTSIDE_OPTIONS in reason:
         return "outside_options"
     if reason.startswith("confidence ") and "<" in reason:

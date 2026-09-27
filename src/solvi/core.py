@@ -3,22 +3,119 @@
 A part's contract comes from its signature: argument names are the facts it reads, the function name is the fact it sets.
 Part kinds: extract (pull a value from text, with a quote), fn (computation), check (test → bool), rule (answer to a question).
 A part may be backed by a model (`model=`): its outputs are fuzzy, so they are grounded (a quote must be literally at its
-offsets, a decision must be among its options) and the model's identity is recorded in the trace (see solvi.provenance)."""
+offsets, a decision must be among its options) and the model's identity is recorded in the trace (see solvi.provenance).
+Type hints are the facts' types (see solvi.typed): checked between producers and consumers when a part is registered,
+validated / coerced with pydantic at run time; untyped parts cost nothing."""
 from __future__ import annotations
 
 import inspect
+import json
 from dataclasses import dataclass, field
+from enum import Enum
 from typing import Any, Callable
+
+
+class Serial:
+    """pydantic-backed export of solvi's data classes (see solvi.schema; pydantic is imported on first use):
+    `x.model_dump(mode="python"|"json")`, `x.to_json()`, `Cls.model_validate(d)`, `Cls.from_json(s)`, `Cls.model_json_schema()`.
+    Traces and responses take `catalog=` on load to restore typed values (dates, enums, models) from the facts' types."""
+
+    def model_dump(self, mode="python"):
+        from .schema import dump
+        return dump(self, mode)
+
+    def to_json(self, indent=None):
+        return json.dumps(self.model_dump("json"), ensure_ascii=False, indent=indent)
+
+    @classmethod
+    def model_validate(cls, data, catalog=None):
+        from .schema import load
+        return load(cls, data, catalog)
+
+    @classmethod
+    def from_json(cls, s, catalog=None):
+        return cls.model_validate(json.loads(s), catalog)
+
+    @classmethod
+    def model_json_schema(cls):
+        from .schema import json_schema
+        return json_schema(cls)
+
+
+NOT_STATED_KEY = "<not stated>"          # how solvi.Unknown is written as a key (probabilities) and in JSON
+
+
+class NotStated:
+    """The type of `solvi.Unknown`: the answer "the text does not state it". It is a real answer — the evidence says the
+    input does not state the value, with a confidence — unlike an abstention (None: solvi refuses to answer). Declare it
+    with `Maybe[T]` (or `T | NotStated`); constraints see it as `solvi.Unknown` (falsy; `x is Unknown`)."""
+    _it = None
+
+    def __new__(cls):
+        if cls._it is None:
+            cls._it = super().__new__(cls)
+        return cls._it
+
+    def __repr__(self):
+        return "Unknown"
+
+    def __str__(self):
+        return NOT_STATED_KEY
+
+    def __bool__(self):
+        return False
+
+    def __reduce__(self):
+        return (NotStated, ())
+
+    def __copy__(self):
+        return self
+
+    def __deepcopy__(self, memo):
+        return self
+
+    @classmethod
+    def __get_pydantic_core_schema__(cls, source, handler):
+        from pydantic_core import core_schema
+
+        def check(v):
+            if v is Unknown or v == NOT_STATED_KEY:
+                return Unknown
+            raise ValueError("not solvi.Unknown")
+        return core_schema.no_info_plain_validator_function(
+            check, serialization=core_schema.plain_serializer_function_ser_schema(lambda v: NOT_STATED_KEY))
+
+
+Unknown = NotStated()
+
+
+def unknown_key(k):
+    """A probability key read back from JSON: "<not stated>" → Unknown."""
+    return Unknown if k == NOT_STATED_KEY else k
 
 
 @dataclass
 class Quote:
-    """A value extracted from text, with its location (doc[start:end] is the supporting quote)."""
+    """A value extracted from text, with its location (doc[start:end] is the supporting quote). As evidence (Claim,
+    Decision, Result.evidence) the value is the quoted text itself."""
     value: Any
     start: int
     end: int
     source: str = "doc"
     confidence: float = 1.0
+
+
+@dataclass
+class Claim:
+    """A value with the quotes that support it — what a plain rule (or any part) returns to attach evidence and / or a
+    confidence to its answer: `return Claim("billing", evidence=["charged twice"])`. Evidence items are Quotes (their
+    offsets are checked: the text must be literally there) or strings (located in `source`: by default the part's only text
+    input, or "doc"); an item not in its text rejects the output (safeguard "grounding rejected"). The provenance stays
+    the part's own (a hand-written rule: computed)."""
+    value: Any
+    evidence: list = field(default_factory=list)
+    confidence: float = 1.0
+    source: str | None = None
 
 
 @dataclass
@@ -29,6 +126,14 @@ class Decision:
     value: Any
     probs: dict = field(default_factory=dict)
     confidence: float | None = None       # default: probs[value] (1.0 without probabilities)
+    escalate: str | None = None           # the model hands this one to a person: why (the output is rejected, see ground)
+    extra: dict = field(default_factory=dict)   # details recorded in the trace: act probability, expected level, shared pass
+    evidence: list = field(default_factory=list)   # supporting quotes (Quote / str, as for Claim), checked like a Claim's
+
+    @property
+    def act(self):
+        """Does the model act on this decision (False: it escalates)?"""
+        return self.escalate is None
 
     @property
     def conf(self):
@@ -45,19 +150,104 @@ def unwrap(v):
     if isinstance(v, Quote):
         return v.value, (v.start, v.end, v.source), v.confidence, None
     if isinstance(v, Decision):
+        if isinstance(v.value, Quote):            # a model's span: the quoted text, at its offsets
+            q = v.value
+            return q.value, (q.start, q.end, q.source), v.conf, dict(v.probs)
         return v.value, None, v.conf, dict(v.probs)
+    if isinstance(v, Claim):
+        if isinstance(v.value, Quote):
+            q = v.value
+            return q.value, (q.start, q.end, q.source), min(float(v.confidence), q.confidence), None
+        return v.value, None, float(v.confidence), None
     return v, None, 1.0, None
 
 
+def has_evidence(v):
+    return isinstance(v, (Claim, Decision)) and bool(v.evidence)
+
+
+def locate(part, v, init_state):
+    """A Claim's / Decision's evidence with every item as a Quote: a string is located (its first literal occurrence) in
+    the output's source text — Claim.source, else the part's `source`, else "doc" if the part reads it, else its only
+    given text input, else "doc"; a string that is not there becomes Quote(text, -1, -1, source), which ground rejects.
+    Outputs without evidence are returned as they are (no work)."""
+    if not has_evidence(v) or init_state is None:
+        return v
+    import dataclasses
+    src = getattr(v, "source", None) or part.source
+    if src is None:
+        texts = [x for x in part.inputs if isinstance(init_state.get(x), str)]
+        src = "doc" if ("doc" in texts or len(texts) != 1) else texts[0]
+    out = []
+    for e in v.evidence:
+        if isinstance(e, Quote):
+            if e.value is None:
+                t = init_state.get(e.source)
+                e = dataclasses.replace(e, value=t[e.start:e.end] if isinstance(t, str) and 0 <= e.start <= e.end <= len(t)
+                                        else "")
+            out.append(e)
+            continue
+        text = str(e)
+        t = init_state.get(src)
+        i = t.find(text) if isinstance(t, str) and text else -1
+        out.append(Quote(text, i, i + len(text) if i >= 0 else -1, src))
+    return dataclasses.replace(v, evidence=out)
+
+
+def evidence_rows(v):
+    """Located evidence → [[start, end, source, text]] (what the trace records in `extra["evidence"]`)."""
+    return [[int(e.start), int(e.end), e.source, e.value] for e in v.evidence]
+
+
+def check_evidence(evidence, init_state):
+    """Every evidence Quote must lie in its (given) source text and be literally the text at its offsets → None or the
+    rejection reason (a grounding reason: "quote outside the text" / "not grounded")."""
+    from .provenance import NOT_GROUNDED, QUOTE_OUTSIDE, matches
+    for e in evidence:
+        src = init_state.get(e.source, "") if init_state is not None else ""
+        if e.start < 0:
+            return f"{NOT_GROUNDED}: evidence {_short(e.value)!r} is not in {e.source}"
+        if not (isinstance(src, str) and 0 <= e.start <= e.end <= len(src)):
+            return f"{QUOTE_OUTSIDE}: evidence [{e.start}:{e.end}] of {e.source}"
+        if matches(str(e.value), src[e.start:e.end]) is False:
+            return (f"{NOT_GROUNDED}: evidence {_short(e.value)!r} is not the text at {e.source}[{e.start}:{e.end}] "
+                    f"({_short(src[e.start:e.end])!r})")
+    return None
+
+
+PRIMITIVES = ("span", "rank", "estimate")         # answer kinds resolved by solvi.primitives (with their value's details)
+
+
 @dataclass
-class AnswerType:
-    kind: str                       # yes_no | choice | ordinal | multi
+class AnswerType(Serial):
+    kind: str                       # yes_no | choice | ordinal | multi | span | rank | estimate
     options: list
     descriptions: dict = field(default_factory=dict)   # option -> what it means (for people and for zero-shot scoring)
+    unknown: bool = False           # "not stated" (solvi.Unknown) is a valid answer (Maybe[T])
+    k: int | None = None            # rank: how many options the ranking returns (None: all)
+    bins: list | None = None        # estimate: bin edges, ascending (the options are their labels); None: a plain number
+    coverage: float | None = None   # estimate: the probability mass of the reported interval (default 0.8)
+    unit: str | None = None         # estimate: the value's unit, for display
+    source: str | None = None       # span: the given text fact the span lies in (default "doc")
+    type: Any = None                # span: the value's type (the quoted text is coerced to it; None: str)
+
+    @property
+    def primitive(self):
+        """Is this answer resolved with details (a span, a ranking, an estimate, or one that may be "not stated")?"""
+        return self.unknown or self.kind in PRIMITIVES
 
     def normalize(self, v):
+        if v is Unknown:
+            if self.unknown:
+                return v
+            raise ValueError(f"answer Unknown (not stated) is not allowed: declare Maybe[...] for {self.kind}")
+        if self.kind in PRIMITIVES:
+            from .primitives import normalize
+            return normalize(self, v)
+        if isinstance(v, Enum):                        # an Enum answer (typed rule) → its value
+            v = v.value
         if self.kind == "multi":
-            vals = [v] if isinstance(v, str) else list(v or [])
+            vals = [v] if isinstance(v, str) else [x.value if isinstance(x, Enum) else x for x in (v or [])]
             bad = [x for x in vals if x not in self.options]
             if bad:
                 raise ValueError(f"answer {bad!r} not among {self.options}")
@@ -79,10 +269,79 @@ def _opts(options):
     return list(options), {}
 
 
+def _num(x):
+    return str(int(x)) if float(x).is_integer() else repr(round(float(x), 6)).rstrip("0").rstrip(".")
+
+
+def bin_labels(edges, integer=True, unit=None):
+    """Bin edges e0 < … < e_last → the labels of their len(edges) + 1 bins (−∞, e0), [e0, e1), …, [e_last, ∞) — exactly the
+    L14g decider's labels (exps_v2/experiments/l14g_format.py `bin_labels`): "less than e0", then "a" (a one-wide integer
+    bin), "a–(b−1)" (integers) or "a to b", then "e_last or more"; the unit after a space."""
+    u = f" {unit}" if unit else ""
+    out = [f"less than {_num(edges[0])}{u}"]
+    for a, b in zip(edges[:-1], edges[1:]):
+        if integer:
+            out.append(f"{_num(a)}{u}" if b - a == 1 else f"{_num(a)}–{_num(b - 1)}{u}")
+        else:
+            out.append(f"{_num(a)} to {_num(b)}{u}")
+    out.append(f"{_num(edges[-1])} or more{u}")
+    return out
+
+
 class Answer:
     @staticmethod
     def yes_no() -> AnswerType:
         return AnswerType("yes_no", ["yes", "no"])
+
+    @staticmethod
+    def maybe(answer_type) -> AnswerType:
+        """The same answer type, with "not stated" (solvi.Unknown) as a valid answer — distinct from "no" and from an
+        abstention. `Maybe[T]` in a type hint does the same."""
+        import dataclasses
+        return dataclasses.replace(answer_type, unknown=True)
+
+    @staticmethod
+    def span(source="doc", type=None) -> AnswerType:
+        """An exact substring of a given text fact (`source`), with its offsets: always grounded (the text must be literally
+        at the offsets), then coerced to `type` with pydantic (e.g. float: "12.50" → 12.5; a failure is "type rejected").
+        The answer is the value; `result.span` is the Quote (text, start, end, source). `Span[float]` in a type hint."""
+        return AnswerType("span", [], source=source, type=type)
+
+    @staticmethod
+    def rank(options, k=None) -> AnswerType:
+        """An ordering of the options, best first: the top k (all by default) as a tuple, with a score per option
+        (`result.scores`). A rule returns {option: score} (e.g. from a key function) or an ordered list; a model its
+        probabilities (Plackett–Luce). `Rank[Literal[...], k]` in a type hint."""
+        opts, desc = _opts(options)
+        if k is not None and not 1 <= int(k) <= len(opts):
+            raise ValueError(f"k must be between 1 and {len(opts)}")
+        return AnswerType("rank", opts, desc, k=None if k is None else int(k))
+
+    @staticmethod
+    def estimate(bins=None, *, lo=None, hi=None, step=None, coverage=0.8, unit=None, integer=None) -> AnswerType:
+        """A number with its uncertainty: a distribution over bins cut at the edges `bins` (ascending; or lo, hi, step) —
+        len(bins) + 1 bins, the first and last open: (−∞, e0), [e0, e1), …, [e_last, ∞) — whose labels are the options
+        ("less than 0", "0–6", "7–13", "14 or more" for integer edges; `integer=` overrides). The value is the middle of the
+        median bin (an open bin: its edge), `result.interval` the bins holding the central `coverage` of the probability
+        ((1 − c)/2 to (1 + c)/2 of the cumulative; None for an open end), and the confidence their probability mass. A rule
+        returns a plain number (interval [x, x], confidence 1) or a distribution ({bin label or index: p}, or a list of p per
+        bin); a model its probabilities over the bins as ordered options. Without bins the estimate is a plain number (rules
+        only). `Estimate[0, 7, 14]` in a type hint."""
+        if bins is None and step is not None:
+            if lo is None or hi is None:
+                raise ValueError("estimate with step= needs lo= and hi=")
+            n = int(round((hi - lo) / step))
+            bins = [lo + i * step for i in range(n + 1)]
+        if bins is not None:
+            bins = [b if isinstance(b, int) and not isinstance(b, bool) else float(b) for b in bins]
+            if len(bins) < 1 or any(b >= c for b, c in zip(bins, bins[1:])):
+                raise ValueError("estimate bins are ascending edges")
+        if not 0 < float(coverage) < 1:
+            raise ValueError("coverage is a probability between 0 and 1")
+        if integer is None:
+            integer = bins is not None and all(float(b).is_integer() for b in bins)
+        labels = [] if bins is None else bin_labels(bins, integer, unit)
+        return AnswerType("estimate", labels, bins=bins, coverage=float(coverage), unit=unit)
 
     @staticmethod
     def choice(options) -> AnswerType:
@@ -100,15 +359,23 @@ class Answer:
         """Any subset of the options (possibly empty), returned as a tuple in option order. A rule may return a list or set."""
         return AnswerType("multi", *_opts(options))
 
+    @staticmethod
+    def from_type(t, ordinal=False) -> AnswerType:
+        """From a Python type: bool → yes_no; Literal[...] / an Enum → choice (`ordinal=True`: ordinal, in declaration
+        order); list[Literal[...]] (or set, tuple, of an Enum) → multi. `X | None` is X (None = abstain)."""
+        from .typed import answer_type_of
+        return answer_type_of(t, ordinal)
+
 
 @dataclass
-class Question:
+class Question(Serial):
     name: str
     text: str
-    answer: AnswerType
+    answer: AnswerType | None = None                  # None: from the return type of the question's rule (Answer.from_type)
     checkpoints: list = field(default_factory=list)   # parts required in every flow for this question
     uses: list | None = None                          # hint to the strategist: which facts matter (when there is no rule or fit)
     min_confidence: float | None = None               # an answer below this confidence abstains (a low-confidence safeguard)
+    require_evidence: bool = False                    # an answer without supporting quotes abstains ("evidence missing")
 
 
 @dataclass
@@ -131,6 +398,11 @@ class Part:
     provenance: str | None = None        # declared provenance kind (default: from the output and the model)
     options: list | None = None          # a model's closed set of outputs: anything else is rejected
     exact: bool | None = None            # a Quote's value must be literally the text at its offsets (default: if model-backed)
+    source: str | None = None            # extract only: the given fact its quotes point into, when it is not "doc"
+    types: dict | None = None            # typed arguments: {argument: type} (see solvi.typed); None — untyped
+    returns: Any = None                  # the return type (the fact's type; for a Quote / Decision, of its value); None — untyped
+    tin: dict | None = field(default=None, repr=False, compare=False)   # compiled validators of the typed arguments
+    tout: Any = field(default=None, repr=False, compare=False)          # ... and of the return type
 
     def strict(self):
         """Must a Quote from this part be literally at its offsets? Yes for model-backed parts (unless exact=False)."""
@@ -144,17 +416,56 @@ def _group_func(group):
     def run(**args):
         why = []
         for alt in group.alternatives:
+            a = {x: args[x] for x in alt.inputs}
+            if alt.tin is not None:
+                from .typed import typed_in
+                a, reason = typed_in(alt, a)
+                if reason:
+                    why.append(f"{alt.name}: {reason}")
+                    continue
             try:
-                v = alt.func(**{x: args[x] for x in alt.inputs})
+                v = alt.func(**a)
             except Exception as e:  # noqa: BLE001
                 why.append(f"{alt.name}: {type(e).__name__}")
                 continue
-            ok, reason = accepts(alt, v, args)
+            ok, reason = accepts(alt, v, {**args, **a} if alt.tin else args)
             if ok:
                 return v
             why.append(f"{alt.name}: {reason}")
         raise ValueError("no producer accepted: " + "; ".join(why))
     run.__name__ = group.name
+    return run
+
+
+def _quote_source(f, sig, source):
+    """The text an extract part's quotes point into (see Catalog.extract)."""
+    if source is not None:
+        if not isinstance(source, str) or not source:
+            raise ValueError(f"extract {f.__name__}: source must be the name of a given fact (a text)")
+        return source
+    params = list(sig.parameters)
+    if not params or "doc" in params:
+        return "doc"
+    if len(params) == 1:
+        return params[0]
+    texts = [x for x in params if sig.parameters[x].annotation in (str, "str")]
+    if len(texts) == 1:
+        return texts[0]
+    raise ValueError(f"extract {f.__name__}({', '.join(params)}): cannot tell which argument is the text its quotes point "
+                     f"into — pass it, e.g. @cat.extract(source={params[0]!r}), or annotate that one argument as str")
+
+
+def _sourced(f, source):
+    """f, with a returned Quote that kept the default source ("doc") pointed into `source` instead."""
+    import dataclasses
+    import functools
+
+    @functools.wraps(f)
+    def run(*args, **kw):
+        v = f(*args, **kw)
+        if isinstance(v, Quote) and v.source == "doc":
+            return dataclasses.replace(v, source=source)
+        return v
     return run
 
 
@@ -164,8 +475,20 @@ def ground(part, v, init_state=None):
     written); a Decision (or any value of a part with `options`) must be among the options; min_confidence is enforced."""
     from .provenance import NOT_GROUNDED, OUTSIDE_OPTIONS, QUOTE_OUTSIDE, matches
     conf = 1.0
+    if has_evidence(v) and init_state is not None:
+        why = check_evidence(v.evidence, init_state)
+        if why:
+            return why
+    if isinstance(v, Claim):                  # a value with evidence: checked as the value itself
+        conf = float(v.confidence)
+        v = v.value
+    elif isinstance(v, Decision) and isinstance(v.value, Quote):    # a model's span: escalation, then the quote
+        if v.escalate:
+            return v.escalate
+        conf = v.conf
+        v = v.value
     if isinstance(v, Quote):
-        conf = v.confidence
+        conf = min(conf, v.confidence)
         if init_state is not None:
             src = init_state.get(v.source, "")
             if not (isinstance(src, str) and 0 <= v.start <= v.end <= len(src)):
@@ -175,10 +498,14 @@ def ground(part, v, init_state=None):
     elif isinstance(v, Decision) or part.options is not None:
         value = v.value if isinstance(v, Decision) else v
         opts = part.options if part.options is not None else list(v.probs)
+        if part.options is None and isinstance(v, Decision) and "interval" in v.extra:
+            opts = None                       # a number: its value summarizes the distribution over the bins (checked as the answer)
         vals = list(value) if isinstance(value, (list, tuple, set)) else [value]
         if opts and any(x not in opts for x in vals):
             return f"decision {_short(value)!r} is {OUTSIDE_OPTIONS} {list(opts)}"
         if isinstance(v, Decision):
+            if v.escalate:                    # the model (or its calibrated threshold) escalates: rejected, like min_confidence
+                return v.escalate
             conf = v.conf
     if part.min_confidence is not None and conf < part.min_confidence:
         return f"confidence {conf:.2f} < {part.min_confidence}"
@@ -203,14 +530,27 @@ def validated(part, value, args):
     return None if ok else VALIDATE
 
 
+def accept(alt, v, args, init_state=None):
+    """Does an alternative producer's output pass its checks? → (ok, reason, plain value — coerced to its return type). None
+    means "not found"; otherwise the output must be grounded (see ground: a quote in the text — literally, for a model — a
+    decision among the options, min_confidence), pass its return type (typed parts) and `validate`, which gets the plain value
+    plus any of the producer's inputs it names."""
+    if v is None or (isinstance(v, (Quote, Decision, Claim)) and v.value is None):
+        return False, "no value", None
+    v = locate(alt, v, init_state)
+    why = ground(alt, v, init_state)
+    value = unwrap(v)[0]
+    if not why and alt.tout is not None:
+        from .typed import typed_out
+        value, why = typed_out(alt, value)
+    why = why or validated(alt, value, args)
+    return (False, why, value) if why else (True, "accepted", value)
+
+
 def accepts(alt, v, args, init_state=None):
-    """Does an alternative producer's output pass its checks? → (ok, reason). None means "not found"; otherwise the output
-    must be grounded (see ground: a quote in the text — literally, for a model — a decision among the options,
-    min_confidence) and pass `validate`, which gets the plain value plus any of the producer's inputs it names."""
-    if v is None or (isinstance(v, (Quote, Decision)) and v.value is None):
-        return False, "no value"
-    why = ground(alt, v, init_state) or validated(alt, unwrap(v)[0], args)
-    return (False, why) if why else (True, "accepted")
+    """accept() without the value → (ok, reason)."""
+    ok, why, _ = accept(alt, v, args, init_state)
+    return ok, why
 
 
 class Catalog:
@@ -220,6 +560,9 @@ class Catalog:
         self.parts: dict[str, Part] = {}
         self.rules: dict[str, Part] = {}
         self.constraints: dict[str, Part] = {}     # rules between answers of different questions
+        self.types: dict = {}                      # fact → type (its producer's return type; see solvi.typed)
+        self.readers: dict = {}                    # fact → {typed part that reads it: the type it reads}
+        self.decisions = 0                         # decision parts registered (solvi.decide): 0 — no batching work at all
 
     def _add(self, kind, f, **kw):
         sig = inspect.signature(f)
@@ -230,16 +573,35 @@ class Catalog:
             kw["provenance"] = f.__solvi_provenance__
         if kind in ("fn", "rule") and kw.get("options") is None and getattr(f, "__solvi_options__", None) is not None:
             kw["options"] = list(f.__solvi_options__)          # a decision part brings its closed set of options
+        if getattr(f, "__solvi_decision__", None) is not None:
+            self.decisions += 1                                # the strategist groups decisions that can share a pass
         if kw.get("provenance") is not None:
             from .provenance import GIVEN, KINDS
             if kw["provenance"] not in KINDS or kw["provenance"] == GIVEN:
                 raise ValueError(f"provenance must be one of {[k for k in KINDS if k != GIVEN]}")
+        if kind == "extract":
+            src = _quote_source(f, sig, kw.get("source"))
+            kw["source"] = None if src == "doc" else src
         kw = {k: v for k, v in kw.items() if v is not None or k in ("then",)}
         p = Part(kind=kind, name=f.__name__, inputs=list(sig.parameters), func=f, doc=(f.__doc__ or "").strip(), **kw)
+        if p.source is not None:                       # a Quote without its own source points into this text
+            p.func = _sourced(f, p.source)
+        commit = None
+        if getattr(f, "__annotations__", None) and kind != "constraint":      # typed facts (untyped parts skip all this)
+            from .typed import compile_part, hints, register
+            p.types, p.returns = hints(f, kind)
+            if p.types or p.returns is not None:
+                compile_part(p)
+                commit = register(self, p)                 # checks now (FactTypeError), records once the part is in
         if p.provides is not None:
-            return self._add_alternative(p)
+            self._add_alternative(p)
+            commit and commit()
+            return f
         if kind == "rule":
             p.name = "answer:" + p.question
+            if self.readers and commit is None:
+                from .typed import forget_rule
+                forget_rule(self, p.question)
             self.rules[p.question] = p
         elif kind == "constraint":
             self.constraints[p.name] = p
@@ -247,6 +609,7 @@ class Catalog:
             if p.name in self.parts:
                 raise ValueError(f"part {p.name} is already in the catalog")
             self.parts[p.name] = p
+        commit and commit()
         return f
 
     def _add_alternative(self, p):
@@ -266,8 +629,8 @@ class Catalog:
                 raise ValueError(f"{fact} is a {g.kind}; only fn and extract parts can have alternatives")
             first = Part(kind=g.kind, name=g.func.__name__ + "__declared", inputs=g.inputs, func=g.func, doc=g.doc,
                          cost=g.cost, provides=fact, validate=g.validate, min_confidence=g.min_confidence, model=g.model,
-                         provenance=g.provenance, options=g.options, exact=g.exact)   # a plain producer declared first
-                                                                                        # becomes the first alternative
+                         provenance=g.provenance, options=g.options, exact=g.exact, types=g.types, returns=g.returns,
+                         tin=g.tin, tout=g.tout, source=g.source)   # a plain producer declared first becomes the first alternative
             g = Part(kind=g.kind, name=fact, inputs=list(g.inputs), func=None, doc=f"alternative producers of {fact}",
                      alternatives=[first])
             g.func = _group_func(g)
@@ -288,14 +651,17 @@ class Catalog:
         return self._add(kind, f, **kw)
 
     def extract(self, f=None, *, provides=None, cost=None, validate=None, min_confidence=None, model=None, provenance=None,
-                exact=None):
+                exact=None, source=None):
         """Extract a value from text (returns a Quote). With `provides="fact"` the function is one of several alternative
         producers of that fact: its output is used only if it passes `validate` / `min_confidence`, otherwise the next
         alternative runs. `cost` (ms) is a prior for scheduling until run times are measured.
         `model`: the model behind it (recorded in the trace with its fingerprint); a model's Quote must be literally the text
-        at its offsets or it is rejected (`exact=False` turns that off, `exact=True` turns it on for hand-written code)."""
+        at its offsets or it is rejected (`exact=False` turns that off, `exact=True` turns it on for hand-written code).
+        `source`: the given fact (text) its quotes point into. By default: "doc" if the function reads doc, else its only
+        argument, else its only str-typed argument; if that is ambiguous, registration raises and asks for source=. A
+        returned Quote that names another source (Quote(..., source="notes")) keeps it."""
         return self._deco("extract", f, provides=provides, cost=cost, validate=validate, min_confidence=min_confidence,
-                          model=model, provenance=provenance, exact=exact)
+                          model=model, provenance=provenance, exact=exact, source=source)
 
     def fn(self, f=None, *, provides=None, cost=None, validate=None, model=None, provenance=None, options=None,
            min_confidence=None):

@@ -1,0 +1,11 @@
+{
+  "label": "Parcel 88-1204\nWeight: 12 kg\nFragile",
+  "items": [
+    {"description": "headphones", "hs_code": "8518.30", "value_eur": "129.90"},
+    {"description": "cough syrup", "hs_code": "3004.90", "value_eur": 12.5}
+  ],
+  "declared_weight_kg": "12.5",
+  "destination": "DE",
+  "shipped": "2026-09-14",
+  "today": "2026-09-28"
+}

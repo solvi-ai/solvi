@@ -6,7 +6,11 @@ Targets for each question:
   • otherwise → the `uses` hint; otherwise everything computable from init_state (marked "flow not narrowed").
 Then it walks back through signatures down to what init_state provides; the question's checkpoints are always added.
 Checks: besides those the targets need, the strategist takes every catalog check whose inputs are all already in the flow and
-that touches at least one COMPUTED (non-input) fact — a check on computed facts. Nothing else from the catalog is executed."""
+that touches at least one COMPUTED (non-input) fact — a check on computed facts. Nothing else from the catalog is executed.
+Typed facts: the flow records the type of each fact it uses (`flow.types`: a producer's return type, or for a given fact the
+type its typed readers expect); producer / consumer types were already checked when the parts were registered.
+Decisions with a model: decision parts that read the same facts with the same model, when the model can answer several
+questions in one forward pass, are grouped (`flow.batches`); the executor scores each group in one pass."""
 from __future__ import annotations
 
 from dataclasses import dataclass, field
@@ -28,6 +32,8 @@ class Flow:
     per_question: dict              # question → names of the parts in its flow
     skipped: dict                   # catalog part → why it was not taken
     unresolved: dict                # question → facts nothing can compute
+    types: dict = field(default_factory=dict)   # fact → type, for the typed facts of the flow (see solvi.typed)
+    batches: list = field(default_factory=list)  # [[step name]]: decision parts scored together in one forward pass
 
     def __str__(self):
         lines = []
@@ -57,6 +63,7 @@ def plan(catalog, questions, init_keys, heads=None):
     init_keys = set(init_keys)
     reach = computable(catalog, init_keys)
     chosen: dict[str, Step] = {}
+    done: dict = {}                 # (fact, question) → walked: resolvable?
     per_q, unresolved = {}, {}
 
     def need(fact, why, q, trail=()):
@@ -68,11 +75,17 @@ def plan(catalog, questions, init_keys, heads=None):
             return False
         if fact in trail:
             raise PlanError(f"cycle in catalog: {' → '.join(trail + (fact,))}")
+        if (fact, q) in done:                       # already walked for this question: same result (a fact reachable by
+            st = chosen[fact]                       # several routes is walked once — without this, exponential time)
+            if why not in st.reasons:
+                st.reasons.append(why)
+            return done[(fact, q)]
         ok = all(need(x, f"input for {fact}", q, trail + (fact,)) for x in p.inputs)
         st = chosen.setdefault(fact, Step(p))
         if why not in st.reasons:
             st.reasons.append(why)
         per_q.setdefault(q, set()).add(fact)
+        done[(fact, q)] = ok
         return ok
 
     for q in questions:
@@ -131,4 +144,18 @@ def plan(catalog, questions, init_keys, heads=None):
     for name, p in catalog.parts.items():
         if name not in chosen:
             skipped[name] = "no inputs" if name not in reach else "not needed for questions"
-    return Flow(order, {q: sorted(v) for q, v in per_q.items()}, skipped, {q: sorted(v) for q, v in unresolved.items()})
+    types = {}
+    if catalog.readers or catalog.types:            # typed catalogs only: the type of each fact in the flow
+        for st in order:
+            f = st.part.name
+            if f in catalog.types:
+                types[f] = catalog.types[f]
+            for x in st.part.inputs:
+                if x in init_keys and x not in types and catalog.readers.get(x):
+                    types[x] = next(iter(catalog.readers[x].values()))
+    batches = []
+    if getattr(catalog, "decisions", 0):             # catalogs without decision parts do no work here
+        from .decide import plan_batches
+        batches = plan_batches(order)
+    return Flow(order, {q: sorted(v) for q, v in per_q.items()}, skipped, {q: sorted(v) for q, v in unresolved.items()},
+                types, batches)

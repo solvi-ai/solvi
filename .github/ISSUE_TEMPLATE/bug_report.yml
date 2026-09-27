@@ -1,0 +1,36 @@
+name: Bug report
+description: Something answers wrong, crashes, or a trace does not verify
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting. Security problems (a tampered trace that still verifies, an ungrounded quote that is accepted):
+        please use SECURITY.md instead of a public issue.
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: The answer, the error (with traceback) or the replay mismatch you got, and what you expected.
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Minimal catalog and init_state to reproduce
+      description: The smallest catalog, questions and request that show it. `print(res.audit())` output helps a lot.
+      render: python
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Versions
+      description: solvi version (`python -c "import solvi; print(solvi.__version__)"`), Python version, OS, extras (model / onnx).
+    validations:
+      required: true
+  - type: input
+    id: model
+    attributes:
+      label: Model checkpoint (if any)
+      description: e.g. solvi-ai/decide-base, a local folder, a stand-in; backend torch or onnx.

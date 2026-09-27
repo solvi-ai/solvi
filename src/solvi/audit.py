@@ -1,6 +1,7 @@
 """Audit of a response: for each answer, what it rests on — given inputs, computed facts, quotes (with offsets and the quoted
 text), model decisions (model id, probabilities), learned parts, checks and constraints — and which safeguards fired
-(grounding rejections, answers outside the options, low-confidence abstentions, hard checks, constraint repairs, fallbacks).
+(grounding rejections, typed facts that failed their type, answers outside the options, low-confidence abstentions, hard
+checks, constraint repairs, fallbacks).
 Also a summary: how much of the answer's support is deterministic and how much comes from models."""
 from __future__ import annotations
 
@@ -8,16 +9,20 @@ from dataclasses import dataclass, field
 
 from .provenance import FUZZY, classify, matches, snippet
 
-STAT_KEYS = {"grounding": "grounding_rejected", "outside_options": "outside_options", "rule_abstained": "rule_abstained",
+STAT_KEYS = {"grounding": "grounding_rejected", "type_rejected": "type_rejected", "outside_options": "outside_options",
+             "rule_abstained": "rule_abstained",
              "low_confidence": "low_confidence",
              "validator": "validator_rejected", "hard_check": "forced_by_hard_check",
-             "constraint_repair": "constraint_repairs", "fallback": "fallbacks"}
+             "constraint_repair": "constraint_repairs", "fallback": "fallbacks", "escalated": "model_escalated",
+             "evidence_missing": "evidence_missing"}
+QUIET = {"evidence_missing"}                  # listed in safeguard_report only once they fire
 STATS = ["asks", "answers", "abstained", "model_outputs"] + list(STAT_KEYS.values())
 
-LABEL = {"grounding": "grounding rejected", "outside_options": "outside the options", "rule_abstained": "rule abstained",
+LABEL = {"grounding": "grounding rejected", "type_rejected": "type rejected", "outside_options": "outside the options",
+         "rule_abstained": "rule abstained",
          "low_confidence": "low confidence",
          "validator": "rejected by validate", "hard_check": "hard check decided", "constraint_repair": "constraint repair",
-         "fallback": "fallback producer"}
+         "fallback": "fallback producer", "escalated": "model escalated", "evidence_missing": "evidence missing"}
 
 
 def _missing(v):
@@ -60,14 +65,37 @@ def collect(res, catalog=None):
             k = classify(r.error)
             if k:
                 events.append({"kind": k, "fact": r.name, "detail": r.error, "questions": where})
+    for fact, why in getattr(res.trace, "rejected", None) or ():     # given facts that failed System(inputs=...)
+        down = _downstream(catalog, fact)
+        events.append({"kind": "type_rejected", "fact": fact, "detail": why,
+                       "questions": sorted(q for q, fs in res.flow.unresolved.items() if set(fs) & down and q in asked)})
     for q, a in res.results.items():
-        if a.guard in ("hard_check", "outside_options", "rule_abstained", "low_confidence"):
+        if a.guard in ("low_confidence", "escalated") and any(e["fact"] == "answer:" + q and e["kind"] == a.guard
+                                                             for e in events):
+            pass                                      # the answer step itself was rejected: already counted once
+        elif a.guard in ("hard_check", "outside_options", "rule_abstained", "low_confidence", "escalated", "grounding",
+                         "type_rejected", "evidence_missing"):
             events.append({"kind": a.guard, "fact": "answer:" + q, "detail": a.why, "questions": [q]})
         if a.repaired:
             was, cons = a.repaired
             events.append({"kind": "constraint_repair", "fact": "answer:" + q, "questions": [q],
                            "detail": f"changed from {was!r} to satisfy {', '.join(cons)}"})
     return events, n_model
+
+
+def _downstream(catalog, fact):
+    """The fact and every fact computed from it (through the catalog's signatures)."""
+    out = {fact}
+    if catalog is None:
+        return out
+    grew = True
+    while grew:
+        grew = False
+        for p in catalog.parts.values():
+            if p.name not in out and any(x in out for x in p.inputs):
+                out.add(p.name)
+                grew = True
+    return out
 
 
 def _alt(catalog, fact, name):
@@ -86,6 +114,22 @@ def _short(v, n=48):
 
 def _model(m):
     return f"{m['type']} {m['id']} #{m['fp'][:8]}" if m else ""
+
+
+def _extra_line(x):
+    """A decision's recorded details: the act probability, an ordinal's expected level, the shared forward pass."""
+    if not x:
+        return ""
+    out = []
+    if x.get("act") is not None:
+        out.append(f"act {x['act']:.2f}")
+    if x.get("expected") is not None:
+        out.append(f"expected {x['expected']:.2f}")
+    ps = x.get("pass")
+    if isinstance(ps, dict):
+        out.append(f"one pass with {', '.join(n for n in ps.get('with', []) if n)}" if ps.get("shared", True)
+                   else "own pass (shared pass fell back)")
+    return ("  " + "; ".join(out)) if out else ""
 
 
 @dataclass
@@ -108,6 +152,9 @@ class AnswerAudit:
     safeguards: list = field(default_factory=list)   # events (see collect)
     not_run: list = field(default_factory=list)      # [(part, why)] parts of the flow skipped at run time
     counts: dict = field(default_factory=dict)       # support by provenance: given, computed, quoted, quoted_by_model, ...
+    kind: str | None = None                          # the answer type's kind
+    evidence: list = field(default_factory=list)     # [{"text", "start", "end", "source", "verified", "by_model"}] (a span first)
+    extra: dict | None = None                        # an estimate's interval, a ranking's scores
 
     @property
     def deterministic(self):
@@ -139,8 +186,10 @@ class AnswerAudit:
         return ", ".join(f"{LABEL[k]} ×{v}" for k, v in n.items())
 
     def __str__(self):
+        from .primitives import fmt
         a = "—" if self.answer is None else self.answer
-        lines = [f"{self.question} = {a!r}  [{self.status}]  confidence {self.confidence:.2f}"
+        shown = repr(a) if self.answer is None else fmt(a, self.kind, self.extra)
+        lines = [f"{self.question} = {shown}  [{self.status}]  confidence {self.confidence:.2f}"
                  + (f"  ← {self.provenance}" if self.provenance else "") + (f" by {self.source}" if self.source else "")]
         if self.given:
             lines.append("  given       " + "; ".join(f"{g['name']} = {_short(g['value'], 32)}" for g in self.given))
@@ -156,11 +205,12 @@ class AnswerAudit:
                          + (f"  [{q['model']}]" if q.get("model") else ""))
         for d in self.decided:
             if d.get("error"):
-                lines.append(f"  decided     {d['name']}: REJECTED — {d['error']}" + (f"  [{d['model']}]" if d.get("model") else ""))
+                lines.append(f"  decided     {d['name']}: REJECTED — {d['error']}" + (f"  [{d['model']}]" if d.get("model") else "")
+                             + _extra_line(d.get("extra")))
                 continue
             p = ", ".join(f"{k} {v:.2f}" for k, v in sorted((d["probs"] or {}).items(), key=lambda t: -t[1])[:4])
             lines.append(f"  decided     {d['name']} = {_short(d['value'])}" + (f"  ({p})" if p else "")
-                         + (f"  [{d['model']}]" if d.get("model") else ""))
+                         + (f"  [{d['model']}]" if d.get("model") else "") + _extra_line(d.get("extra")))
         for l_ in self.learned:
             p = ", ".join(f"{k} {v:.2f}" for k, v in sorted((l_.get("probs") or {}).items(), key=lambda t: -t[1])[:4])
             lines.append(f"  learned     {l_['name']} = " + (f"— {l_['error']}" if l_.get("error") else _short(l_["value"]))
@@ -175,8 +225,14 @@ class AnswerAudit:
                          + (f" — {c['error']}" if c.get("error") else ""))
         if self.rule:
             lines.append(f"  rule        {self.rule['name']} ({self.rule['provenance']})"
-                         + (f"  [{self.rule['model']}]" if self.rule.get("model") else "")
+                         + (f"  [{self.rule['model']}]" if self.rule.get("model") else "") + _extra_line(self.rule.get("extra"))
                          + (f" — not computed: {self.rule['error']}" if self.rule.get("error") else ""))
+        for e in self.evidence:
+            lines.append(f"  {'span' if e.get('span') else 'evidence':11s} {e['source']}[{e['start']}:{e['end']}] {e['text']!r}"
+                         + ("  verified" if e["verified"] else "  NOT IN THE TEXT") + ("  [model]" if e["by_model"] else ""))
+        sc = (self.extra or {}).get("scores")
+        if sc:
+            lines.append("  scores      " + ", ".join(f"{k} {v:.2f}" for k, v in list(sc.items())[:6]))
         for c in self.constraints:
             lines.append(f"  constraint  {c['name']}: " + ("satisfied" if c["satisfied"] else "BROKEN"))
         if self.not_run:
@@ -185,7 +241,7 @@ class AnswerAudit:
                 groups.setdefault(w, []).append(n)
             for w, ns in groups.items():
                 lines.append(f"  not run     {', '.join(ns)} ({w})")
-        lines.append(f"  → answer    {a!r} — {self.why}")
+        lines.append(f"  → answer    {shown} — {self.why}")
         lines.append(f"  support     {self.support_line()}")
         lines.append(f"  safeguards  {self.safeguard_line()}")
         for e in self.safeguards:
@@ -204,6 +260,7 @@ class Audit:
     answers: dict                   # question → AnswerAudit
     safeguards: list                # every event in the response
     model_outputs: int
+    overall: dict = None            # Response.overall: confidence, weakest answer, answered / abstained, complete, feasible
 
     def __getitem__(self, q):
         return self.answers[q]
@@ -211,7 +268,15 @@ class Audit:
     def __str__(self):
         head = (f"audit: {len(self.answers)} answer(s), {self.model_outputs} model output(s), "
                 f"{len(self.safeguards)} safeguard event(s)")
-        return "\n".join([head] + [str(a) for a in self.answers.values()])
+        lines = [head]
+        o = self.overall
+        if o:
+            w = f", weakest {o['weakest'][0]} {o['weakest'][1]:.2f}" if o["weakest"] else ""
+            ab = f", abstained: {', '.join(o['abstained'])}" if o["abstained"] else ""
+            ns = f", not stated: {', '.join(o['not_stated'])}" if o.get("not_stated") else ""
+            lines.append(f"overall: confidence {o['confidence']:.2f}{w}; {o['answered']}/{o['answered'] + len(o['abstained'])} "
+                         f"answered{ab}{ns}" + ("" if o["feasible"] else "; constraints violated"))
+        return "\n".join(lines + [str(a) for a in self.answers.values()])
 
     def compact(self):
         """One line per answer: support shares and safeguards (what solvi.show prints)."""
@@ -219,7 +284,7 @@ class Audit:
 
     def to_dict(self):
         return {"answers": {q: a.to_dict() for q, a in self.answers.items()}, "safeguards": self.safeguards,
-                "model_outputs": self.model_outputs}
+                "model_outputs": self.model_outputs, "overall": self.overall}
 
 
 def build(res, question=None, catalog=None):
@@ -230,7 +295,7 @@ def build(res, question=None, catalog=None):
     else:
         n_model = res.model_outputs
     qs = [question] if isinstance(question, str) else list(question or res.results)
-    return Audit({q: _one(res, q, events, catalog) for q in qs}, events, n_model)
+    return Audit({q: _one(res, q, events, catalog) for q in qs}, events, n_model, getattr(res, "overall", None))
 
 
 def _one(res, q, events, catalog):
@@ -286,7 +351,7 @@ def _one(res, q, events, catalog):
             count("quoted_by_model" if r.model is not None else "quoted")
         elif origin == "decided":
             au.decided.append({"name": f, "value": None if _missing(r.value) else r.value, "probs": r.probs, "model": m,
-                               "error": err})
+                               "error": err, "extra": getattr(r, "extra", None)})
             count("decided")
         elif origin in ("learned", "proposed"):
             au.learned.append({"name": f, "value": None if _missing(r.value) else r.value, "model": m, "error": err,
@@ -298,7 +363,7 @@ def _one(res, q, events, catalog):
     rr = by.get("answer:" + q)
     if rr is not None:
         au.rule = {"name": rule_part.func.__name__ if rule_part is not None else rr.name, "provenance": rr.origin,
-                   "model": _model(rr.model), "probs": rr.probs, "error": rr.error}
+                   "model": _model(rr.model), "probs": rr.probs, "error": rr.error, "extra": getattr(rr, "extra", None)}
         count(rr.origin if rr.origin in FUZZY else "computed")
     if head is not None:
         entry = {"name": f"answer head ({head.model['type'] if head.model else 'head'})", "value": head.value,
@@ -318,6 +383,15 @@ def _one(res, q, events, catalog):
                 except Exception:  # noqa: BLE001
                     ok = False
                 au.constraints.append({"name": c.name, "satisfied": ok})
+    if a.evidence or a.kind is not None:
+        au.kind, au.extra = a.kind, a.extra
+        by_model = rr is not None and (rr.model is not None or rr.origin in FUZZY)
+        for i, e in enumerate(a.evidence):
+            text = init.get(e.source)
+            ok = isinstance(text, str) and 0 <= e.start <= e.end <= len(text) and matches(str(e.value), text[e.start:e.end]) is not False
+            au.evidence.append({"text": e.value, "start": e.start, "end": e.end, "source": e.source, "verified": bool(ok),
+                                "by_model": by_model, "span": a.kind == "span" and i == 0})
+            count("quoted_by_model" if by_model else "quoted")
     au.safeguards = [e for e in events if q in e["questions"]]
     au.counts = counts
     return au

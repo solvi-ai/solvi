@@ -1,0 +1,23 @@
+name: Feature or use case
+description: A decision task you want to solve with solvi, or something missing
+labels: [enhancement]
+body:
+  - type: textarea
+    id: task
+    attributes:
+      label: The decision you want to automate
+      description: Inputs (documents, records), the questions and their answer types, which rules are non-negotiable.
+    validations:
+      required: true
+  - type: textarea
+    id: missing
+    attributes:
+      label: What is missing today
+      description: What you tried, and where solvi stops you.
+    validations:
+      required: true
+  - type: textarea
+    id: else
+    attributes:
+      label: Anything else
+      description: Data you could share, how many labelled examples you have, latency or deployment constraints (CPU, browser).

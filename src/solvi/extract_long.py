@@ -214,7 +214,7 @@ class LongSpanExtractor:
         cfg = json.load(open(f"{path}/solvi_extract.json"))
         ex = cls(path, max_len=cfg["max_len"], stride=cfg["stride"], max_span=cfg["max_span"], device=device)
         ex.enc.to(ex.torch.float32)
-        ex.head.load_state_dict(ex.torch.load(f"{path}/span_head.pt", map_location=ex.device))
+        ex.head.load_state_dict(ex.torch.load(f"{path}/span_head.pt", map_location=ex.device, weights_only=True))
         ex.thr_default, ex.thr = cfg["thr_default"], cfg.get("thr", {})
         ex.model_id = path_or_id
         return ex

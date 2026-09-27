@@ -5,7 +5,7 @@ import json
 from dataclasses import dataclass
 from pathlib import Path
 
-from .core import Catalog
+from .core import Catalog, Serial
 from .heads import Head
 from .provenance import model_info
 from .runtime import MISSING, Record, Result, execute, now_ms, path_confidence, vhash
@@ -13,7 +13,7 @@ from .strategist import computable, plan
 
 
 @dataclass
-class Response:
+class Response(Serial):
     results: dict
     flow: object
     trace: object
@@ -27,6 +27,51 @@ class Response:
 
     def __getitem__(self, q):
         return self.results[q]
+
+    @property
+    def confidence(self):
+        """Overall confidence: the probability that every answered question is right — the product of the answers'
+        confidences (errors taken as independent, so it is conservative when answers agree through constraints). Abstained
+        questions are left out; see `complete`. 1.0 when nothing was answered by a model or a learned part."""
+        import math
+        return math.prod(r.confidence for r in self.results.values() if r.status != "abstain")
+
+    @property
+    def complete(self):
+        """Did every question get an answer (none abstained)?"""
+        return all(r.status != "abstain" for r in self.results.values())
+
+    @property
+    def weakest(self):
+        """(question, confidence) of the least confident answer, or None when every question abstained."""
+        got = [(q, r.confidence) for q, r in self.results.items() if r.status != "abstain"]
+        return min(got, key=lambda t: t[1]) if got else None
+
+    @property
+    def not_stated(self):
+        """Questions answered "not stated" (solvi.Unknown): answered — they count in `confidence` and `complete` — but
+        the text does not state the value."""
+        from .core import Unknown
+        return [q for q, r in self.results.items() if r.answer is Unknown and r.status != "abstain"]
+
+    @property
+    def overall(self):
+        """The whole response in one line of data: confidence, weakest answer, answered / abstained, complete, feasible;
+        the questions answered "not stated"; and per answer kind the answered count and the product of their confidences."""
+        ab = [q for q, r in self.results.items() if r.status == "abstain"]
+        kinds = {}
+        for r in self.results.values():
+            if r.status != "abstain":
+                k = kinds.setdefault(r.kind or "?", [0, 1.0])
+                k[0] += 1
+                k[1] *= r.confidence
+        return {"confidence": self.confidence, "weakest": self.weakest, "answered": len(self.results) - len(ab),
+                "abstained": ab, "complete": not ab, "feasible": self.feasible, "not_stated": self.not_stated,
+                "by_kind": {k: {"answered": n, "confidence": c} for k, (n, c) in sorted(kinds.items())}}
+
+    def to_dict(self):
+        """model_dump(mode="json"): answers, flow, trace, values, safeguards as JSON-ready data (see Serial)."""
+        return self.model_dump("json")
 
     @property
     def computed_state(self):
@@ -63,14 +108,21 @@ class Response:
 
 class System:
     def __init__(self, catalog: Catalog, questions, journal: str | None = None, workers: int = 1, order: str = "default",
-                 producers: str = "declared", learn: bool | None = None):
+                 producers: str = "declared", learn: bool | None = None, inputs=None, strategist=None):
         """order: "default" (hard checks and their inputs first, all together) or "learned" (hard checks one at a time, most
         expected saving first — see learn_order). producers: "declared" (alternative producers of a fact are tried in
         declaration order) or "learned" (a policy picks the order per input and learns from outcomes). learn: after every
-        ask, update part costs and the order / producer models from what happened (milliseconds)."""
+        ask, update part costs and the order / producer models from what happened (milliseconds).
+        inputs: a pydantic model of init_state (optional): a dict passed to ask is validated against it — its fields (with
+        defaults) are the given facts, a field that fails is left out and reported (safeguard type_rejected). ask also takes
+        a BaseModel instance directly, with or without `inputs`.
+        strategist: an object with plan(catalog, questions, init_keys, heads) → Flow used by ask instead of the deterministic
+        strategist (experimental: solvi.strategy.ModelStrategist; its plan is recorded in the trace, see docs/strategist.md)."""
         from .learned import CostBook, OrderModel, ProducerPolicy
         self.catalog = catalog
-        self.questions = {q.name: q for q in questions}
+        self.inputs = inputs
+        self.strategist = strategist              # None: the deterministic strategist (solvi.strategist.plan)
+        self.questions = {q.name: self._typed_question(q) for q in questions}
         self.heads: dict[str, Head] = {}
         self.journal = Path(journal) if journal else None
         self.workers = workers                    # >1: independent steps run in parallel threads
@@ -91,18 +143,62 @@ class System:
         from .audit import STATS
         self.stats = {k: 0 for k in STATS}        # lifetime counts: model outputs and the safeguards that caught them
 
+    def _typed_question(self, q):
+        """A question without an answer type takes it from its rule's return type; a typed rule must fit its question."""
+        rule = self.catalog.rules.get(q.name)
+        rt = rule.returns if rule is not None else None
+        if q.answer is None:
+            if rt is None:
+                raise ValueError(f"question {q.name!r} has no answer type: pass answer=, or give its rule a return type "
+                                 "(bool, Literal[...], an Enum, list[Literal[...]])")
+            from dataclasses import replace
+            from .core import Answer
+            return replace(q, answer=Answer.from_type(rt))
+        if rt is not None:
+            from .typed import check_answer
+            check_answer(rule, q)
+        return q
+
+    def _state(self, init_state):
+        """init_state → (dict of given facts, [(fact, why)] rejected by `inputs`)."""
+        if self.inputs is None and type(init_state) is dict:
+            return init_state, None
+        from .typed import state_of
+        return state_of(init_state, self.inputs)
+
+    def response_schema(self):
+        """The JSON schema of this system's responses, with each question's answer as its closed set of options."""
+        from .schema import response_schema
+        return response_schema(self)
+
     # --- answers
     def ask(self, init_state, names=None, workers=None, order=None):
-        """order: override the system's order for this ask — "default", "learned", or an object with p_fail(check, row) and
-        row(vals, init_keys) (e.g. an oracle for experiments)."""
+        """init_state: a dict of given facts, or a pydantic BaseModel instance (its fields). order: override the system's
+        order for this ask — "default", "learned", or an object with p_fail(check, row) and row(vals, init_keys) (e.g. an
+        oracle for experiments)."""
         t0 = now_ms()
+        known = None
+        if self.inputs is not None or type(init_state) is not dict:
+            from .typed import field_types, is_model
+            model = type(init_state) if is_model(init_state) else self.inputs
+            init_state, rejected = self._state(init_state)
+            if model is not None:                     # validated fields: typed parts reading them skip re-validation
+                ft = field_types(model)
+                known = {k: t for k, t in ft.items() if k in init_state}   # rejected fields are not in init_state
+        else:
+            rejected = None
         qs = [self.questions[n] for n in (names or self.questions)]
-        flow = plan(self.catalog, qs, init_state.keys(), self.heads)
+        flow = (plan if self.strategist is None else self.strategist.plan)(self.catalog, qs, init_state.keys(), self.heads)
         mode = self.order if order is None else order
         om = None if mode == "default" else (self.order_model if mode == "learned" else mode)
         policy = self.producer_policy if self.producers == "learned" else None
         trace, vals = execute(self.catalog, flow, init_state, workers=workers or self.workers, order=om, costs=self.costs,
-                              policy=policy)
+                              policy=policy, known=known)
+        if rejected:
+            trace.rejected = rejected
+        if getattr(flow, "strategy", None) is not None and getattr(self.strategist, "record", True):
+            from .strategy import plan_record         # the strategist's plan, hashed into the trace (solvi.strategy)
+            _append(trace, plan_record(flow), len(flow.steps))
         for name, ms in trace.timings.items():         # cost tracking is cheap: always on
             self.costs.observe(name, ms)
         if self.learn:
@@ -111,6 +207,7 @@ class System:
         results = {}
         for q in qs:
             r = self._answer(q, flow, trace, vals, by)
+            r.kind = q.answer.kind
             if q.name in self.calib and r.status == "ok":
                 r.confidence = _platt(r.confidence, *self.calib[q.name])
             results[q.name] = r
@@ -120,7 +217,7 @@ class System:
             if q.min_confidence is not None and r.status == "ok" and r.confidence < q.min_confidence:
                 results[q.name] = Result(None, r.confidence, f"low confidence {r.confidence:.2f} < {q.min_confidence}; "
                                          f"would have answered {r.answer!r} ({r.why})", "abstain", r.probs, r.provenance,
-                                         r.source, "low_confidence", r.repaired)
+                                         r.source, "low_confidence", r.repaired, r.kind, r.evidence, r.extra)
         resp = Response(results, flow, trace, vals, now_ms() - t0, feasible, violations, self.catalog)
         resp._heads = self.heads                      # for the audit: which features a learned head could not use
         self._count(resp)
@@ -148,9 +245,11 @@ class System:
         """The lifetime stats as text: how many model outputs, and how many were caught by each safeguard."""
         from .audit import LABEL, STAT_KEYS
         st = self.stats
+        from .audit import QUIET
         lines = [f"asks {st['asks']}, answers {st['answers']}, abstained {st['abstained']}, model outputs {st['model_outputs']}"]
         for k, key in STAT_KEYS.items():
-            lines.append(f"  {LABEL[k]:22s} {st[key]}")
+            if k not in QUIET or st[key]:             # "evidence missing" is listed once it fires
+                lines.append(f"  {LABEL[k]:22s} {st[key]}")
         return "\n".join(lines)
 
     def _answer(self, q, flow, trace, vals, by):
@@ -182,15 +281,24 @@ class System:
                     soft_failed.append(f)
         if rule is not None:
             r = by.get(rule.name)
+            if r is not None and r.value is MISSING and r.error and r.probs is not None:
+                from .provenance import classify
+                g = classify(r.error)
+                if g in ("escalated", "low_confidence"):  # the model's own answer step escalated / was unsure: abstain
+                    return Result(None, r.confidence, r.error, "abstain", dict(r.probs), r.origin,
+                                  rule.func.__name__ if rule.func is not None else rule.name, g)
             if r is None or r.value is MISSING:
                 return Result(None, 0.0, "rule not computed: " + (r.error if r else "no step") +
                               (f"; missing {', '.join(missing)}" if missing else ""), "abstain")
-            conf = min(path_confidence(self.catalog, trace, rule.inputs), r.confidence)
+            pc = path_confidence(self.catalog, trace, rule.inputs)
+            conf = min(pc, r.confidence)
             why = "; ".join(f"{x} = {vals.get(x)!r}" for x in rule.inputs)
             src = rule.func.__name__ if rule.func is not None else rule.name
             if r.value is None:                       # the rule itself declined to answer (e.g. a split vote): a deliberate abstention
                 return Result(None, 0.0, f"the rule abstained (returned None); {why}", "abstain", provenance=r.origin,
                               source=src, guard="rule_abstained")
+            if q.answer.primitive or q.require_evidence or (r.extra is not None and "evidence" in r.extra):
+                return _resolved(q, r, pc, why, src, trace.init)
             try:
                 return Result(q.answer.normalize(r.value), conf, why, probs=dict(r.probs or {}), provenance=r.origin,
                               source=src)
@@ -294,7 +402,13 @@ class System:
         cands = {}
         for q in qs:
             r, at = results[q], self.questions[q].answer
-            if r.status == "ok" and r.probs:
+            rc = None
+            if at.kind == "rank" and r.status == "ok" and r.probs:
+                from .primitives import rank_candidates
+                rc = rank_candidates(at, r.probs)
+            if rc is not None:
+                cands[q] = rc
+            elif r.status == "ok" and r.probs and at.kind not in ("span", "estimate", "rank"):
                 if at.kind == "multi":
                     opts = []
                     for bits in itertools.product([0, 1], repeat=len(at.options)):
@@ -325,7 +439,7 @@ class System:
                 was = r.answer
                 r.answer = best[1][q]
                 if r.probs:
-                    r.confidence = (math.exp(dict(cands[q])[r.answer]) if self.questions[q].answer.kind == "multi"
+                    r.confidence = (math.exp(dict(cands[q])[r.answer]) if self.questions[q].answer.kind in ("multi", "rank")
                                     else r.probs.get(r.answer, r.confidence))
                 broken = [c.name for c in cons if q in c.inputs and not ok({**current}, c)]
                 r.why += f"; changed from {was!r} to satisfy {', '.join(broken)}"
@@ -337,6 +451,7 @@ class System:
         """All computable facts (for head training): a "compute everything" flow without rules."""
         from .core import Question
         from .strategist import plan as _plan
+        init_state = self._state(init_state)[0]
         q = Question("__all__", "", None)
         flow = _plan(self.catalog, [q], init_state.keys())
         flow.steps = [s for s in flow.steps if s.part.kind != "rule"]
@@ -346,9 +461,10 @@ class System:
     def fit(self, question, examples):
         """examples: [(init_state, answer)] → the answer head and its features (and hence the question's flow)."""
         q = self.questions[question]
+        examples = _learnable(q, examples)
         rows = [self.facts_for(s) for s, _ in examples]
         ans = [q.answer.normalize(a) for _, a in examples]
-        keys = set(examples[0][0].keys())
+        keys = set(self._state(examples[0][0])[0].keys())
         cands = sorted(f for f in computable(self.catalog, keys) - keys)
         if q.answer.kind == "multi":
             self.heads[question] = MultiHead(q.answer.options, lambda: Head(["yes", "no"]),
@@ -364,10 +480,11 @@ class System:
         from .fast import FastHead
         import time
         q = self.questions[question]
+        examples = _learnable(q, examples)
         t0 = time.perf_counter()
         rows = [self.facts_for(s) for s, _ in examples]
         if features is None:
-            keys = set(examples[0][0].keys())
+            keys = set(self._state(examples[0][0])[0].keys())
             features = sorted(f for f in computable(self.catalog, keys) - keys)
         ans = [q.answer.normalize(a) for _, a in examples]
         if q.answer.kind == "multi":
@@ -432,15 +549,20 @@ class System:
         from .decide import decision_of
         from .fast import FastHead
         ms = None
+        init_state = self._state(init_state)[0]
         head = self.heads.get(question)
         dec = decision_of(self.catalog, question)
         if isinstance(head, (FastHead, MultiHead)) and getattr(head, "online", True):
             ms = head.update(self.facts_for(init_state), self.questions[question].answer.normalize(correct))
         if dec is not None:
             ans = self.questions[question].answer.normalize(correct)
-            if all(x in dec.options for x in (ans if isinstance(ans, tuple) else [ans])):
+            try:
+                label = dec.spec.label(ans)               # the decision's own label (a bool decision: "yes" / "no")
+            except ValueError:
+                label = None                              # an answer the decision cannot give (e.g. set by a hard check)
+            if label is not None:
                 vals = init_state if all(f in init_state for f in dec.facts) else self.facts_for(init_state)
-                ms = dec.teach(dec.text_of(vals), ans)
+                ms = dec.teach(dec.text_of(vals), label)
         if self.journal:
             with open(self.journal, "a") as fh:
                 fh.write(json.dumps({"teach": question, "init": _jsonable(init_state), "answer": correct}, ensure_ascii=False) + "\n")
@@ -499,10 +621,40 @@ def _append(trace, rec, n_steps):
     trace.records.append(rec)
 
 
+def _resolved(q, r, pc, why, src, init):
+    """An answer primitive (not stated, span, rank, estimate) or an answer with evidence, from the rule's record (see
+    solvi.primitives)."""
+    from .core import Unknown
+    from .primitives import Rejected, fmt, resolve
+    try:
+        out = resolve(q.answer, r, init)
+    except Rejected as e:
+        return Result(None, 0.0, f"{e.why}; {why}", "abstain", dict(r.probs or {}), r.origin, src, e.guard)
+    a, ev = out["answer"], out["evidence"]
+    if q.require_evidence and a is not Unknown and not ev:
+        return Result(None, 0.0, f"no supporting quote (require_evidence); would have answered "
+                                 f"{fmt(a, q.answer.kind, out['extra'])}; {why}", "abstain", out["probs"], r.origin, src,
+                      "evidence_missing", extra=out["extra"])
+    if a is Unknown:
+        why = f"not stated; {why}"
+    return Result(a, min(pc, out["confidence"]), why, probs=out["probs"], provenance=r.origin, source=src, evidence=ev,
+                  extra=out["extra"])
+
+
 def governs(part, question):
     """Does a failed hard check decide this question? Yes if the question is in its `then`, names it as a checkpoint, or the
     check has no `then` at all."""
     return not part.then or question.name in part.then or part.name in question.checkpoints
+
+
+def _learnable(q, examples):
+    """Examples a learned head can learn from: its kinds are yes/no, choice, ordinal and multi-label, and it does not
+    answer "not stated" (examples answered Unknown are left out)."""
+    from .core import PRIMITIVES, Unknown
+    if q.answer.kind in PRIMITIVES:
+        raise ValueError(f"question {q.name!r} is a {q.answer.kind}: answer it with a rule or a model decision (a learned "
+                         "head answers yes/no, choice, ordinal and multi-label questions)")
+    return [(s, a) for s, a in examples if a is not Unknown] if q.answer.unknown else examples
 
 
 def _platt(c, a, b):

@@ -93,6 +93,27 @@ def _plain(v, n=240):
     return _short(v, n)
 
 
+def _is_unknown(v):
+    try:
+        from solvi import Unknown
+    except ImportError:                                  # solvi < 0.5
+        return False
+    return v is Unknown
+
+
+def _answer(v):
+    """An answer for the UI: "not stated" for solvi.Unknown, tuples as lists (multi-label, rankings)."""
+    if _is_unknown(v):
+        return "not stated"
+    if isinstance(v, tuple):
+        return [_answer(x) for x in v]
+    return v if v is None or isinstance(v, (bool, int, float, str)) else _plain(v)
+
+
+def _key(k):
+    return "<not stated>" if _is_unknown(k) else str(k)
+
+
 def audit_dict(res, state, context=48):
     """res.audit().to_dict() made JSON-able for the UI: given values as short reprs, and every quote with the text around it
     (before / quoted / after) so the panel can highlight the span in its document."""
@@ -109,7 +130,7 @@ def audit_dict(res, state, context=48):
                 x["context"] = [("…" if s > context else "") + doc[max(0, s - context):s], doc[s:e],
                                 doc[e:e + context] + ("…" if e + context < len(doc) else "")]
             x["value"] = None if x.get("value") is None else _short(x["value"], 120)
-        d["answer"] = list(d["answer"]) if isinstance(d["answer"], tuple) else d["answer"]
+        d["answer"] = _answer(d["answer"])
         d["not_run"] = [list(t) for t in d["not_run"]]
     return _plain(a, 400)
 
@@ -120,11 +141,17 @@ def serialize(res, cat, state, questions, show_text="", system=None):
     from solvi.runtime import MISSING
     rep = res.trace.replay(system if system is not None else cat)
     out = {"ok": True, "ms": res.ms, "show": show_text, "question_text": {q.name: q.text for q in questions}}
-    out["answers"] = [{"question": q, "answer": list(r.answer) if isinstance(r.answer, tuple) else r.answer,
+    out["answers"] = [{"question": q, "answer": _answer(r.answer),
                        "confidence": round(float(r.confidence), 4), "status": r.status, "why": r.why,
-                       "probs": {k: round(float(v), 4) for k, v in (r.probs or {}).items()},
-                       "provenance": getattr(r, "provenance", None), "guard": getattr(r, "guard", None)}
+                       "probs": {_key(k): round(float(v), 4) for k, v in (r.probs or {}).items()},
+                       "provenance": getattr(r, "provenance", None), "guard": getattr(r, "guard", None),
+                       "kind": getattr(r, "kind", None),
+                       "evidence": [{"value": e.value, "start": e.start, "end": e.end, "source": e.source}
+                                    for e in (getattr(r, "evidence", None) or [])],
+                       "extra": _plain(getattr(r, "extra", None))}
                       for q, r in res.results.items()]
+    ov = getattr(res, "overall", None)
+    out["overall"] = _plain({k: v for k, v in ov.items() if k != "weakest"}) if isinstance(ov, dict) else None
     out["flow"] = [{"step": i, "kind": s.part.kind, "name": s.part.name, "inputs": list(s.part.inputs),
                     "reasons": list(s.reasons), "hard": bool(getattr(s.part, "hard", False)), "doc": s.part.doc}
                    for i, s in enumerate(res.flow.steps, 1)]

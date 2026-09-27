@@ -11,7 +11,11 @@ that sends legal threats to a person whatever the model says. Then:
   3. few-shot "S" from 16 labelled emails: a per-team shift and scale plus a temperature, so confidence is calibrated
      (ECE and coverage at 90% accuracy from solvi.calibration);
   4. abstention: the question's min_confidence; "other" is not a label the model scores but a threshold;
-  5. an audit, a constraint repair, a hard check, and a correction absorbed at once by System.teach.
+  5. an audit, a constraint repair, a hard check, and a correction absorbed at once by System.teach;
+  6. escalation for a target error rate (calibrate_for), and a JSON ticket instead of a text (read as key paths).
+
+The typed version of this desk — the questions as the fields of a pydantic model, several decided in one forward pass, the
+model's own act / escalate signal — is examples/15_typed_decisions.py.
 
 The real model runs when SOLVI_DECIDE_MODEL is set to a checkpoint folder or a Hugging Face id (needs `solvi[onnx]` or
 `solvi[model]`); otherwise a small keyword stand-in with a built-in label bias plays its part, so the example runs anywhere.
@@ -204,6 +208,22 @@ if __name__ == "__main__":
           f"{team.score(x)[y]:.2f}; examples kept {team.adaptation.n_labelled}; fingerprint {before[:8]} → {team.fingerprint()[:8]}")
     rep = res.trace.replay(cat)
     print(f"  replay of the audited decision: ok={rep['ok']}; {rep['mismatches'][0][2] if rep['mismatches'] else ''}")
+
+    print("\n=== 9. escalation for a target error rate ===")
+    held_out = dataset(4, 40)
+    info = team.calibrate_for(held_out, error=0.1)
+    print(f"  calibrate_for(error=0.1) on 40 labelled emails: escalate below confidence {info['threshold']:.2f} "
+          f"({info['signal']}); there it answers {info['coverage']:.0%} with {info['error']:.0%} errors")
+    esc = [x for x, _ in test if system.ask({"email": x}, ["team"])["team"].status == "abstain"]
+    print(f"  {len(esc)} of {len(test)} test emails now go to a person; e.g. {system.ask({'email': esc[0]})['team'].why[:90]}"
+          if esc else "  no test email escalates")
+
+    print("\n=== 10. a JSON ticket instead of a text: the decider reads it as key paths ===")
+    ticket = {"subject": "Double charge", "body": "My card was charged twice for order 5521, please refund one payment.",
+              "customer": {"tier": "pro", "since": "2023-04-01"}}
+    print("  " + team.text_of({"email": ticket}).replace("\n", "\n  "))
+    r = system.ask({"email": ticket}, ["team"])["team"]
+    print(f"  team = {r.answer!r} [{r.status}] confidence {r.confidence:.2f}")
 
     print("\n=== lifetime safeguard stats ===")
     print(system.safeguard_report())

@@ -23,6 +23,13 @@ paid (duplicate)?** and **needs a higher approver?**
   The record of `fx_rate` says which producer was used and why the ones before it were rejected
   (`tried fx_rate_table (no value), fx_rate_feed (accepted)`); the audit shows it as a fallback, and replay re-checks both.
   The PO rate stays table-only.
+- **Typed (solvi 0.5).** The PO, the receipt, the invoice, the feed and the supplier table are pydantic models, and every
+  function says what it reads and returns (`line_match(po: PurchaseOrder, …, fx_rate: float) -> list[dict[str, Any]]`,
+  `payment(...) -> Literal["pay", "hold"]`). The catalog checks producer against consumer types when the functions are
+  registered; `run.py` builds `System(cat, QUESTIONS, inputs=Request)`, so each request is validated once. A malformed
+  document — a line quantity `"many"` — is rejected with the field named (`lines.0.qty: Input should be a valid integer`),
+  the answers that need it abstain, and the audit counts a `type rejected` safeguard, instead of a `KeyError` deep in the
+  line match. The answers are the same as the untyped version's.
 - **No rate, no guess.** A missing rate is "not found", never 1.0: when neither producer is accepted, the answers that need
   amounts abstain, and the duplicate check, which does not need them, still answers.
 
@@ -33,7 +40,7 @@ uv run python gallery/10_procurement_3way_match/run.py
 ```
 
 `task.py` with `state.json` loads as a playground preset (plain Python + numpy, no threads or network); `task.py`
-and `run.py` were also run unchanged under Pyodide 0.27.2 (every case passed).
+and `run.py` were also run unchanged under Pyodide 0.27.2 (every case passed; that was the untyped solvi 0.4 version — the typed one needs solvi 0.5 and pydantic, which Pyodide ships).
 
 `cases.json` has 12 invoices: a clean EUR match, prices at +1.90 % (pay) and +2.45 % (hold, one penny apart), a short
 delivery billed in full, GBP converted over the clerk's limit, a PO in EUR invoiced in USD, a duplicate with a

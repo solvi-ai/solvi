@@ -1,12 +1,17 @@
 # solvi
 
+[![PyPI](https://img.shields.io/pypi/v/solvi.svg)](https://pypi.org/project/solvi/)
+[![CI](https://github.com/solvi-ai/solvi/actions/workflows/ci.yml/badge.svg)](https://github.com/solvi-ai/solvi/actions/workflows/ci.yml)
+[![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
+[![Hugging Face](https://img.shields.io/badge/%F0%9F%A4%97%20Hugging%20Face-solvi--ai-yellow)](https://huggingface.co/solvi-ai)
+
 Build decision systems from a catalog of Python functions and checks plus typed questions, and get answers you can verify.
 
 ## Why
 
 You describe a task with plain Python functions (computations, checks, answer rules) and questions with typed answers
-(yes/no, or a choice from a list). For each request, a strategist plans which functions and checks to run for the asked
-questions. Every answer comes with:
+(yes/no, a choice, a score, "not stated", a span of the text, a ranking, a number range). For each request, a strategist
+plans which functions and checks to run for the asked questions. Every answer comes with:
 
 - a **confidence** (calibratable per question);
 - a **reason you can check**: the rule inputs, a formula over computed facts, or a quote with character offsets in the
@@ -42,8 +47,10 @@ script that computes everything, and 152 ms when an expired policy settles the c
 - [solvi realms](https://huggingface.co/spaces/solvi-ai/realms): an endless strategy game whose factions are solvi systems —
   tested for 100 000 turns: flat decision time (~0.3–0.6 ms), bounded memory and state, every sampled trace replay OK.
 - All run **entirely in your browser** (Pyodide): no server, no GPU, nothing you type leaves the page.
-- Models: [solvi-ai/extract-base](https://huggingface.co/solvi-ai/extract-base) (fields by description) and
-  [solvi-ai/extract-receipts](https://huggingface.co/solvi-ai/extract-receipts).
+- Models: [solvi-ai/decide-base](https://huggingface.co/solvi-ai/decide-base) (typed decisions, preview),
+  [solvi-ai/extract-base](https://huggingface.co/solvi-ai/extract-base) (fields by description) and
+  [solvi-ai/extract-receipts](https://huggingface.co/solvi-ai/extract-receipts). Each model card states what the model was
+  measured on, how well it does, and its limits; all models are listed at [huggingface.co/solvi-ai](https://huggingface.co/solvi-ai).
 
 ## Gallery
 
@@ -54,7 +61,7 @@ double-charge refunds, predictive maintenance), each with scenarios, a runner an
 ## Install
 
 ```bash
-pip install solvi              # core: rules, checks, learned answer heads (numpy, scipy)
+pip install solvi              # core: rules, checks, learned answer heads (numpy, scipy, pydantic)
 pip install "solvi[model]"     # + torch, transformers: ModernBERT field extractors for documents and the decider
 pip install "solvi[onnx]"      # + onnxruntime, tokenizers: the decider (solvi.decide) on CPU without torch
 ```
@@ -107,7 +114,7 @@ days_requested           = 5
 remaining_after          = 9
 enough_balance           = True
 enough_notice            = True
-{'ok': True, 'steps': 5, 'mismatches': []}
+{'ok': True, 'steps': 5, 'mismatches': [], 'models': []}
 ```
 
 With `"balance": 3` the hard check fails and the answer is `reject` with `status == "forced"`, whatever the rule says.
@@ -117,7 +124,10 @@ With `"balance": 3` the hard check fails and the answer is `reject` with `status
 
 - **Catalog.** `@cat.fn` (computation), `@cat.check` (bool), `@cat.extract` (value from text, returned as a `Quote` with
   offsets) and `@cat.rule(question)` (answer rule). A part's contract is its signature: argument names are the facts it
-  reads, the function name is the fact it sets.
+  reads, the function name is the fact it sets. Type hints are optional and become the facts' types
+  (`def risk_score(risk_points: dict[str, float]) -> float`): producer and consumer types are checked when a part is
+  registered, values are validated / coerced with pydantic at run time, and a value that fails is rejected like an
+  ungrounded quote (safeguard `type_rejected`). Untyped parts cost nothing.
 - **Questions.** `Question(name, text, Answer.yes_no() | Answer.choice([...]), checkpoints=[...])`. Questions without a
   rule get a small answer head trained from labeled examples (`system.fit`) or a readable learned rule list
   (`system.learn_rule`).
@@ -132,6 +142,70 @@ With `"balance": 3` the hard check fails and the answer is `reject` with `status
 - **Answers and trace.** `res[q].answer / .confidence / .why / .status` (`ok`, `forced`, `abstain`), plus
   `res.trace.replay(catalog)`, which recomputes every step from recorded inputs and reports mismatches, broken hash links
   and quotes outside the text.
+
+## Typed decisions with a model
+
+Types declare questions; the model proposes; checks decide. The fields of a pydantic model are the questions, their types
+the kinds (one option, several, an ordered score, yes/no); a decider (`solvi.decide`, `solvi[onnx]` or `solvi[model]`)
+answers them about a text or a JSON / pydantic state — several in one forward pass when the checkpoint can — with
+probabilities, a calibrated confidence and act / escalate. Hard checks, constraints and rules still decide.
+
+```python
+from typing import Literal
+from pydantic import BaseModel, Field
+from solvi import Catalog, Scale, System
+from solvi.decide import DecideModel
+
+class Triage(BaseModel):
+    team: Literal["billing", "technical", "shipping"] = Field(description="Which team should handle this ticket?")
+    urgency: Scale[Literal["low", "medium", "high", "critical"]] = Field(description="How urgent is it?")
+    angry: bool = Field(description="Is the customer angry?")
+    topics: list[Literal["refund", "delay", "bug"]] = Field(description="What does the ticket mention?")
+
+model = DecideModel.load("solvi-ai/decide-base")         # or a local folder; solvi_decide.json says what it can do
+cat = Catalog()
+questions = model.questions(cat, Triage, text_fact="ticket", escalate_below=0.6)
+
+@cat.check(hard=True, then={"urgency": "critical"})         # a legal threat is critical, whatever the model says
+def no_legal_threat(ticket) -> bool:
+    return "lawyer" not in str(ticket).lower()
+questions[1].checkpoints.append("no_legal_threat")
+
+res = System(cat, questions).ask({"ticket": {"subject": "Charged twice", "body": "Refund my double payment!",
+                                             "customer": {"tier": "pro"}}})
+print({q: (r.answer, r.status) for q, r in res.results.items()})
+print(res.audit("team"))           # probabilities, the model's fingerprint, the shared pass, what escalated and why
+```
+
+A state is read as key paths (`customer.tier: pro`), the format the decider is trained on; an unsure or escalated answer
+abstains with the reason (`system.stats["model_escalated"]`, `["low_confidence"]`). The checkpoint contract is in
+[docs/decide_format.md](docs/decide_format.md); [examples/15_typed_decisions.py](examples/15_typed_decisions.py) runs the
+whole story with a stand-in model. Published deciders are previews: read the model card before relying on one, and fit
+it on 30–60 labelled examples of your task (`part.fit`, `part.calibrate_for`) — checks, constraints and escalation are what
+make the answers safe to act on, not the model alone.
+
+Every answer is a value and a confidence, and the types also declare answer primitives: `Maybe[T]` ("not stated" —
+`solvi.Unknown` — is a real answer, unlike an abstention), `Span[float]` (an exact piece of the text, parsed), `Rank[...]`
+(the top k, in order), `Estimate[0, 7, 14]` (a number with an interval), and evidence quotes on any answer
+(`Claim(value, evidence=[...])`, `Question(require_evidence=True)`) — each checked in the text, from rules or a model
+([guide](docs/guide.md#answer-primitives-not-stated-evidence-spans-rankings-estimates),
+[examples/16_primitives.py](examples/16_primitives.py)).
+
+## Planning around dead ends and costs (code strategist)
+
+The default strategist needs the inputs of every producer of a fact. `solvi.strategy.ModelStrategist()` plans around
+producers whose inputs are never given, and with `producers="equivalent"` picks the cheapest verified plan by declared
+`cost=` (an exact 0/1 program; hard checks that govern a question always stay in the plan). No model is involved; the plan
+is one hashed record in the trace and replay re-verifies it.
+
+```python
+from solvi.strategy import ModelStrategist
+system = System(cat, questions, strategist=ModelStrategist(producers="equivalent"))
+```
+
+A segment model that proposes producers when costs are not declared, and `solvi.aliases` (wiring parameter names that match
+no fact), ship as **experimental**; their weights are not published. See [docs/strategist.md](docs/strategist.md) and
+[examples/17_model_strategist.py](examples/17_model_strategist.py).
 
 ## Extract from documents
 
@@ -204,7 +278,8 @@ receipt with the one-pass extractor on an A100).
 
 ## When not to use it
 
-- Open-ended free-text questions or generated answers. solvi answers yes/no and choice questions only.
+- Open-ended free-text questions or generated answers. solvi answers typed questions only: yes/no, choices, scores,
+  multi-label, "not stated", exact spans of the text, rankings and number ranges.
 - New fields with no labeled examples. Extracting a field from its description alone does not work yet (14% and 66% on
   two held-out fields); a universal extractor is coming.
 - No labels at all. Plan on roughly 100 labeled documents (field positions) per task.
@@ -225,7 +300,11 @@ receipt with the one-pass extractor on an A100).
 | [examples/10_learn_in_milliseconds.py](examples/10_learn_in_milliseconds.py) | `fit_fast`: a new question learned in milliseconds, then corrected one example at a time (each correction ~0.2 ms, nothing retrained) |
 | [examples/11_answer_types_and_constraints.py](examples/11_answer_types_and_constraints.py) | Multi-label and ordinal answers tied by constraints between answers; contradictions in learned answers are repaired by joint decoding |
 | [examples/12_grounded_audit.py](examples/12_grounded_audit.py) | One catalog with and without models: provenance, `res.audit()`, a hallucinated quote caught by grounding, a decision outside its options, a model changed since the decision, lifetime safeguard stats |
-| [examples/13_decide_model.py](examples/13_decide_model.py) | Support-email routing by a decider model as a catalog part: bias correction on unlabelled emails, 16 labelled examples, abstention, a constraint with a rule-based question, a hard check, the audit, `teach` (the real model with `SOLVI_DECIDE_MODEL`, a stand-in otherwise) |
+| [examples/13_decide_model.py](examples/13_decide_model.py) | Support-email routing by a decider model as a catalog part: bias correction on unlabelled emails, 16 labelled examples, abstention, a constraint with a rule-based question, a hard check, the audit, `teach`, escalation for a target error rate, a JSON ticket (the real model with `SOLVI_DECIDE_MODEL`, a stand-in otherwise) |
+| [examples/14_typed_catalog.py](examples/14_typed_catalog.py) | Typed facts: a pydantic request, type hints as fact types, answer types from the rules' return types (Enum, Literal, bool), a mismatch caught at registration, rejected values → fallback / abstention, a response as JSON that loads back and replays |
+| [examples/15_typed_decisions.py](examples/15_typed_decisions.py) | Typed decisions: a pydantic ticket, the questions as a pydantic model's fields (choice, ordinal score, yes/no, multi-label), four answers from one forward pass, a hard check, a constraint and a rule over the model, an escalation in the audit and stats (the real model with `SOLVI_DECIDE_MODEL`, a stand-in otherwise) |
+| [examples/16_primitives.py](examples/16_primitives.py) | Answer primitives: "not stated" vs abstain, spans parsed into numbers, evidence quotes checked in the text (`require_evidence`), a ranking with scores, an estimate with an interval — from rules and from a decider with the L14g contract; confidence per kind, JSON round trip, replay |
+| [examples/17_model_strategist.py](examples/17_model_strategist.py) | The code strategist: dead ends dropped, the cheapest verified plan by declared costs, a model's proposal checked and rejected; aliases for names that match no fact (experimental; stand-ins without weights) |
 | [examples/07_receipts_model.py](examples/07_receipts_model.py) | Expense check on a scanned receipt: a receipts-tuned extractor cites each field, rules and a hard check decide (needs `solvi[model]`) |
 | [examples/08_contracts_by_description.py](examples/08_contracts_by_description.py) | Contract review with fields defined only in words: the general extractor reads the whole contract, cites clauses or says "absent" (needs `solvi[model]`) |
 
@@ -234,6 +313,9 @@ Run them from a clone: `python examples/01_leave_request.py`.
 ## More
 
 - [docs/guide.md](docs/guide.md): full API walkthrough.
+- [docs/decide_format.md](docs/decide_format.md): the decider checkpoint contract (for training your own).
+- [docs/strategist.md](docs/strategist.md): the code strategist and the experimental model strategist and name matching.
+- [CHANGELOG.md](CHANGELOG.md), [CONTRIBUTING.md](CONTRIBUTING.md), [SECURITY.md](SECURITY.md).
 - [docs/benchmarks.md](docs/benchmarks.md): setups, per-question numbers, caveats.
 - [benchmarks/](benchmarks/): dataset loaders and benchmark scripts (SROIE, CORD, CUAD, Kleister-NDA).
 - Tests: `pytest`.

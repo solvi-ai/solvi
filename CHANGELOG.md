@@ -1,5 +1,170 @@
 # Changelog
 
+## 0.5.0 — 2026-09-28 — typed facts, typed decisions, answer primitives
+
+Type hints on catalog functions are the types of the facts (pydantic v2); untyped catalogs behave and hash exactly as
+before. The same types declare the questions a decider model answers: types declare questions, the model proposes, checks
+decide.
+
+Models: the decider checkpoints published with this release are previews; each model card on
+[huggingface.co/solvi-ai](https://huggingface.co/solvi-ai) has its measured numbers and limits. The strategist's model
+weights are not published.
+
+### Typing
+
+- Typed facts (`solvi.typed`): `def risk_score(risk_points: dict[str, float]) -> float` — the catalog records each fact's
+  type (`cat.types`, `cat.readers`, `flow.types`) and checks every producer's return type against every consumer's argument
+  type when a part is registered; a definite mismatch raises `FactTypeError` naming both functions (conservative: `int` →
+  `float`, `str` → `date`, `dict` → model, `X | None` → `X` pass). A typed rule's return type is checked against its
+  question's options when the `System` is built.
+- Run time: a typed part's arguments (given or computed) and its output (a Quote's / Decision's value) are validated and
+  coerced with pydantic `TypeAdapter`s (cached per type; exact-type fast path; values that already passed the same type in
+  the run are not re-validated). A failure is rejected like an ungrounded quote — the fact is missing, the next producer
+  runs or dependent answers abstain — and is a new safeguard, `type_rejected` ("type rejected"): in the step's error, the
+  audit, `res.safeguards` and `System.stats`. A Literal / Enum return type is a closed set (outside it: `outside_options`);
+  an Enum answer is returned as its value. `validate` gets the coerced value; replay re-runs the validation.
+- Answer types from Python types: `Answer.from_type(bool | Literal[...] | Enum | list[Literal[...]], ordinal=False)`;
+  `Question(name, text)` without `answer=` takes it from its rule's return type.
+- Typed input state: `system.ask(model_instance)` (a pydantic `BaseModel`: its fields are the given facts);
+  `System(..., inputs=Model)` validates dict requests — fields with defaults become given facts, a field that fails is left
+  out and reported (`res.trace.rejected`, safeguard `type_rejected`).
+- Serialization (`solvi.schema`, pydantic models): `model_dump(mode)`, `to_json()`, `model_validate(data, catalog=)`,
+  `from_json(text, catalog=)`, `model_json_schema()` on `Response`, `Result`, `Trace`, `Record`, `Question`, `AnswerType`;
+  `system.response_schema()` has each answer as its closed set. With `catalog=` (or the System), typed values that JSON
+  cannot carry (dates, enums, models) are restored from the facts' types, so a loaded trace replays with the same hashes.
+- pydantic (`>=2`) is a core dependency; it is imported only for typed parts, BaseModel inputs and serialization
+  (`import solvi` does not load it; pydantic ships with Pyodide, so the browser playground can use it).
+- Faster asks: a value read by several steps is hashed once per run (gallery runners up to 14% faster).
+- Example 14 (typed customs desk); gallery 10 (procurement) retrofitted with pydantic documents and typed functions (same
+  answers; the audit shows the given documents as models).
+- Trace note: records of typed parts hash their coerced values; untyped traces are unchanged.
+- Hand-written extractors: a Quote without its own `source` points into the extractor's text — `doc` if the function
+  reads it, else its only argument, else its only `str`-typed argument; an ambiguous signature raises at registration and
+  asks for the new `@cat.extract(source="...")`.
+
+### Typed decisions
+
+- The decider (`solvi.decide`) answers typed questions; L14b–L14e checkpoints (`l14b_decider v1`) load, score and hash
+  exactly as before.
+  - Question kinds from types: `choice` (`Literal[...]`, an Enum; with "other" as an abstain threshold), `multi`
+    (`list[Literal[...]]`), `score` (`solvi.typed.Scale[Literal[...]]`, 2–10 ordered levels → an ordinal answer; the value
+    is the median, the expected level is recorded), `noul` (`bool` → the value True / False, answered yes / no).
+    `model.decision(name, task, fact, Scale[...])` (or `type=`, `kind=`), `model.decisions(PydanticModel, fact)` (one part
+    per field: its type the kind, its description the task), `model.questions(cat, PydanticModel, fact)`;
+    `Answer.from_type(Scale[...])` is ordinal; `solvi.typed.question_kind`, `Scale`, `Ordinal`.
+  - Input: a text, or a state — a dict, list, pydantic model or dataclass — serialized by `solvi.decide.state_text` as key
+    paths (`customer.tier: pro`), exactly the L14f training serialization ("paths"; also "tree" and "json", as the checkpoint
+    declares). A decision reading several facts serializes `{fact: value}`.
+  - Output per question: probabilities, a calibrated confidence (a temperature per kind) and act / escalate. The model's act
+    signal (an act head, optionally through a shipped act calibrator) below its threshold rejects the decision as the new
+    safeguard **model escalated** (`guard="escalated"`, `system.stats["model_escalated"]`, the audit); without one,
+    `escalate_below=` escalates by calibrated confidence as **low confidence**. `act_threshold=`, `target_error=` (the
+    checkpoint's threshold for an error rate), `use_act=False`; `part.calibrate_for(examples, error=0.05)` picks the
+    threshold for a target error rate. An escalated decision's answer abstains saying what it would have answered; a
+    fallback producer runs if there is one. Provenance stays `decided`; `record.extra` has the act probability.
+  - Several questions per forward pass: when the checkpoint declares `multi_question`, the strategist groups decision
+    parts reading the same facts with the same model (`flow.batches`) and the executor scores each group in one pass
+    (`model.passes` counts them; the block layout of L14f — input encoded once, questions do not see each other — with a
+    fallback to one question per pass); records name their shared pass (`extra["pass"]`) and replay re-scores it.
+    `model.decide_pass(input, parts)`. Catalogs without decisions do no extra work.
+  - `adapt` / `fit` / `teach` per kind: a free shift per option (choice, multi), an ordinal-aware tilt and spread over the
+    levels (score), one yes−no bias (noul); `System.teach` maps answers to the decision's labels (`True` → yes).
+  - Checkpoint capabilities in `solvi_decide.json` (formats `l14b_decider v1`, `l14f typed v1`, `solvi_decide v2`): modes,
+    markers, head columns, noul labels, state serialization, multi-question layout, temperatures per kind, thresholds, act
+    head (column, temperature, calibrator, thresholds per target error) — the contract is
+    [docs/decide_format.md](docs/decide_format.md). `DecideModel.load(..., multi_question=, act=)` overrides them for
+    experiments; `model.caps`.
+  - Records, flows and their JSON carry the new `extra` / `batches` (records without them hash as before).
+
+### Answer primitives
+
+- Answer primitives — every answer is a value and a confidence, declared by types, from plain rules, learned parts and
+  model decisions alike (`solvi.primitives`; guide: "Answer primitives"; [examples/16_primitives.py](examples/16_primitives.py)):
+  - **"Not stated"**: `solvi.Unknown` (type `NotStated`; `Maybe[T]` = `T | NotStated`; `Answer.maybe(t)`) is a real answer —
+    the text does not state it — with a confidence, distinct from "no" and from an abstention (`None`). `result.not_stated`,
+    `res.not_stated`, `res.overall["not_stated"]`; constraints see `Unknown` and joint decoding can choose it; it
+    round-trips through JSON (`"not_stated": true`, probability key `"<not stated>"`).
+  - **Evidence**: `Claim(value, evidence=[Quote | str], confidence=, source=)` from any part, `Decision(..., evidence=)` from
+    a model; strings are located in the text, every quote must be literally in its given text at its offsets — else the
+    output is **rejected** (safeguard "grounding rejected": the fact is missing, the next producer runs, else the answer
+    abstains). Recorded in `record.extra["evidence"]` (hashed, replayed, tampering caught), `result.evidence`, shown in the
+    audit and counted in the support (`quoted` / `quoted_by_model`). `Question(require_evidence=True)`: an answer without a
+    quote abstains — the new safeguard **evidence missing** (`guard="evidence_missing"`, `system.stats["evidence_missing"]`,
+    listed by `safeguard_report()` once it fires).
+  - **Span**: `Span[T]` / `Answer.span(source=, type=)` — an exact substring of a given text (a Quote, or a text that is
+    located), always grounded, coerced to `T` with pydantic (a failure: "type rejected"); `result.span`.
+  - **Rank**: `Rank[Literal[...], k]` / `Answer.rank(options, k=)` — a tuple of the top k with `result.scores`; from a rule's
+    `{option: score}` (a key function) or an ordered list, or a model's probabilities (confidence: Plackett–Luce);
+    constraints see the tuple and joint decoding repairs a model's ranking.
+  - **Estimate**: `Estimate[edges]` / `Answer.estimate(bins | lo, hi, step, coverage=0.8, unit=, integer=)` — open-ended
+    bins labelled like the L14g decider's; a rule returns a number (confidence 1) or a distribution; the value is the middle
+    of the median bin, `result.interval` the bins holding the central coverage, the confidence their mass.
+  - **Confidence as a primitive**: for every kind the probability that the answer, as returned, is right (the guide's
+    table); `res.overall["by_kind"]` gives per kind the answered count and the product of their confidences. `Result`
+    gains `kind`, `evidence`, `extra` (JSON too); `Question` gains `require_evidence`; `AnswerType` gains `unknown`, `k`,
+    `bins`, `coverage`, `unit`, `source`, `type` (dumped only when set).
+  - The decider (`solvi.decide`) requests them from a checkpoint that declares them — the L14g contract
+    (`"subformat": "l14g typed v2"`, docs/decide_format.md §9, aligned with `exps_v2/experiments/l14g_format.py`): modes
+    `rank`, `number`, `span`; the "not stated" logit (joint softmax with the options; sigmoid for multi; the null span for
+    spans); a pointer (start / end columns over the input's tokens, full layout only) for span answers and evidence quotes
+    (`evidence=True`); `model.decision(..., Maybe[...] | Span[T] | Rank[...] | Estimate[...])`, `model.has_unknown`,
+    `model.has_pointer`, `solvi.decide.decode_pointer`. Pointer questions are scored one per sequence and never batched.
+    Older checkpoints parse, score and hash exactly as before (rank / number are asked as a choice / a score there; a span,
+    evidence or "not stated" raise when the decision is made).
+
+### Overall confidence
+
+- Overall confidence of a response: `res.confidence` (the probability that every answered question is right: the
+  product of the answers' confidences), `res.complete`, `res.weakest`, and `res.overall` as data; shown in the first lines of
+  `print(res.audit())` and included in `to_json()`.
+
+### Code strategist
+
+- `System(..., strategist=...)`: a pluggable strategist; the default is still `solvi.strategist.plan`
+  ([docs/strategist.md](docs/strategist.md), [examples/17_model_strategist.py](examples/17_model_strategist.py)).
+- `solvi.strategy.ModelStrategist()` (no model) — the deterministic plan with dead ends dropped: a producer whose inputs
+  cannot be computed no longer makes its fact unreachable (the deterministic strategist needs the inputs of every producer).
+- `producers="equivalent"`: interchangeable producers, the cheapest verified plan by declared `cost=` (an exact 0/1 program,
+  scipy's HiGHS), with the hard checks that govern a question kept as mandatory milestones. The plan is one hashed trace
+  record (kind `plan`); `trace.replay` re-verifies it.
+- The deterministic strategist memoizes each fact once per question (it was exponential on catalogs where a fact is
+  reachable by several routes); flows and answers are unchanged.
+
+### Experimental
+
+- `ModelStrategist.load(path)`: a segment model (the L3–L6 typed decomposer, compressed to 34.5M parameters; torch or ONNX,
+  format `solvi_strategist v1`) proposes producers where declared costs do not settle the choice; every proposal and the
+  whole plan are verified by code, a rejected one falls back to code's plan; provenance `proposed` with the model's
+  fingerprint when the model chose. What it learned is roughly the cost hints in docstrings — declare `cost=` instead.
+  **Its weights are not published**; load your own checkpoint.
+- `solvi.aliases`: a name matcher (MiniLM + character CNN) proposes aliases for parameter names that match no fact;
+  `accept` decides by labelled examples, probes and targeted questions (active mode); `apply` rewires the catalog. Accepted
+  aliases are a suggestion to review, not proof. Weights not published.
+- `DecideModel(..., multi_question=, act=)` overrides and the block layout (several questions in one pass) — the answers of
+  one question can differ between the block layout and one question per pass; ONNX exports without block inputs fall back
+  to one question per pass.
+
+### Fixes and tooling
+
+- The pointer applies the checkpoint's `temperature.span` to the start / end scores and the null span (as the L14g
+  calibration fitted it), for spans and evidence.
+- A typed span (`Span[float]`) whose best span does not parse ('149.90 EUR') takes the best span's part that does ('149.90'),
+  with the probability mass of the spans between them; never a span outside the best one (then "type rejected" as before).
+- An l14g act calibrator scores plain yes / no and choice questions too (its `p_unknown` / `kind=` features were missing
+  when a question did not allow "not stated": the decision failed with `KeyError`).
+- `solvi.__version__`; `tools/smoke_decide.py` runs a decider checkpoint end to end through solvi on torch and ONNX (every
+  kind, the pointer's tokenizer offsets, several questions per pass, replay, JSON, backend agreement, latency).
+- CI runs examples 01–06 and 09–17 (13, 15, 16 and 17 with their stand-ins).
+
+### Examples and docs
+
+- Example 16 (answer primitives from rules and from a decider). Example 15 (typed decisions: a pydantic ticket, four typed
+  questions in one pass, checks over the model, an escalation);
+  example 13 adds escalation for a target error rate and a JSON ticket. The guide's "Types" and "Decisions with a model"
+  sections are one section now, "Types, questions and model decisions".
+- Example 17 (the code strategist, a model's proposal checked, aliases). New docs: [docs/decide_format.md](docs/decide_format.md)
+  (the decider contract), [docs/strategist.md](docs/strategist.md). SECURITY.md, CODE_OF_CONDUCT.md, issue templates.
+
 ## 0.4.1 — 2026-09-27 — clearer audits
 
 - The audit of a learned part now lists what the head reads (`reads …`) and which requested features it ignored and why

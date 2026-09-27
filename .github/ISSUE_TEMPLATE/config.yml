@@ -1,0 +1,8 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Questions and ideas
+    url: https://github.com/solvi-ai/solvi/discussions
+    about: Ask how to model a task, share what you built, discuss the roadmap.
+  - name: Security vulnerability
+    url: https://github.com/solvi-ai/solvi/security/advisories/new
+    about: Report privately, please (see SECURITY.md).

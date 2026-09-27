@@ -34,6 +34,8 @@ IN_BROWSER = sys.platform == "emscripten"
 # ====================================================================== presets
 PRESET_DIR = HERE / "presets"
 PRESET_TITLES = {
+    "14_answer_primitives": "New in 0.5 · Answer primitives: not stated, span, evidence, ranking, estimate",
+    "13_typed_catalog": "New in 0.5 · Typed facts: pydantic checks every value (customs desk)",
     "10_model_lies": "New in 0.4 · A model lies: grounding catches it",
     "11_rules_between_answers": "New in 0.4 · Rules between answers (content guard)",
     "12_multilabel_ordinal": "New in 0.4 · Multi-label + ordinal (ticket tags + priority)",
@@ -75,8 +77,22 @@ def fmt_status(s):
     return {"ok": "ok", "forced": "forced (hard check)", "abstain": "abstain"}.get(s, s)
 
 
+def fmt_answer_full(a):
+    """The answer with what 0.5 primitives add: an estimate's interval, a ranking's scores, the quotes it rests on."""
+    s = fmt_answer(a["answer"])
+    ex = a.get("extra") or {}
+    if a["answer"] is not None and ex.get("interval"):
+        lo, hi = ex["interval"][0], ex["interval"][-1]
+        s += f" ({int(round(100 * float(ex.get('coverage', 0.8))))}% interval {lo}–{hi})" if lo != hi else ""
+    if a["answer"] is not None and ex.get("scores"):
+        s += " · scores " + ", ".join(f"{k} {float(v):.2f}" for k, v in ex["scores"].items())
+    if a["answer"] is not None and a.get("evidence"):
+        s += " · " + "; ".join(f"“{e['value']}” [{e['start']}:{e['end']}]" for e in a["evidence"][:2])
+    return s
+
+
 def answers_df(out):
-    rows = [[a["question"], fmt_answer(a["answer"]), f"{a['confidence']:.2f}",
+    rows = [[a["question"], fmt_answer_full(a), f"{a['confidence']:.2f}",
              fmt_status(a["status"]) + (f" · {a['provenance']}" if a.get("provenance") else ""), a["why"]]
             for a in out.get("answers", [])]
     return pd.DataFrame(rows, columns=["question", "answer", "confidence", "status", "why"])

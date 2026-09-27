@@ -17,7 +17,7 @@ from a catalog of Python functions, checks and rules, with a strategist that pla
 hash-chained trace that can be replayed.
 
 This is a **static Space**: [Gradio-Lite](https://www.gradio.app/guides/gradio-lite) (`@gradio/lite` 5.45.0) loads Python
-(Pyodide) into the visitor's browser and installs `solvi>=0.4.0` from PyPI there. There is no server: every decision, including
+(Pyodide) into the visitor's browser and installs `solvi>=0.5.0` from PyPI there. There is no server: every decision, including
 code typed in the Playground, runs on the visitor's machine. The first visit downloads about 35-40 MB (Pyodide, Gradio, pandas,
 numpy/scipy) once; later visits come from the browser cache.
 
@@ -27,8 +27,10 @@ Tabs:
   `init_state`, run it, and see the answers, the **audit** (`res.audit()`: given → computed → quoted → decided → learned →
   checks / rule / constraints → answer, the safeguards that fired, the deterministic vs model share, `res.feasible` and
   `System.stats`), the planned flow (and what was not taken), `computed_state` with provenance, the trace replay, and what
-  happens when you tamper with the trace or replace a model after the decision. Presets: three for solvi 0.4 (a lying model
-  caught by grounding, rules between answers, multi-label + ordinal), nine small tasks and the twelve gallery tasks. The
+  happens when you tamper with the trace or replace a model after the decision. Presets: two for solvi 0.5 (typed facts
+  checked by pydantic; answer primitives — "not stated", a span, evidence quotes, a ranking, an estimate), three for 0.4 (a
+  lying model caught by grounding, rules between answers, multi-label + ordinal), nine small tasks and the twelve gallery
+  tasks. The
   System is kept while the code is unchanged, so `setup` (e.g. `fit_fast`) runs once and the stats accumulate. The code runs in-process (`sandbox.py`: `exec` in a fresh
   module) with a 5 s time guard (`sys.settrace` on the visitor's own frames), so an infinite loop is stopped.
 - **Strategy**: an insurance claim desk with 21 parts and 5 rules, six of them slow on purpose. The generated plan as a graph,
