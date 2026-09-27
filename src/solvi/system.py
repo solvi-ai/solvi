@@ -122,6 +122,7 @@ class System:
                                          f"would have answered {r.answer!r} ({r.why})", "abstain", r.probs, r.provenance,
                                          r.source, "low_confidence", r.repaired)
         resp = Response(results, flow, trace, vals, now_ms() - t0, feasible, violations, self.catalog)
+        resp._heads = self.heads                      # for the audit: which features a learned head could not use
         self._count(resp)
         if self.journal:
             self._log(init_state, resp)
@@ -187,6 +188,9 @@ class System:
             conf = min(path_confidence(self.catalog, trace, rule.inputs), r.confidence)
             why = "; ".join(f"{x} = {vals.get(x)!r}" for x in rule.inputs)
             src = rule.func.__name__ if rule.func is not None else rule.name
+            if r.value is None:                       # the rule itself declined to answer (e.g. a split vote): a deliberate abstention
+                return Result(None, 0.0, f"the rule abstained (returned None); {why}", "abstain", provenance=r.origin,
+                              source=src, guard="rule_abstained")
             try:
                 return Result(q.answer.normalize(r.value), conf, why, probs=dict(r.probs or {}), provenance=r.origin,
                               source=src)
@@ -372,6 +376,11 @@ class System:
         else:
             head = FastHead(q.answer.options, lam=lam).fit(rows, ans, list(features))
         head.fit_ms = (time.perf_counter() - t0) * 1000
+        dropped = getattr(head, "dropped", None) or {}
+        if dropped and features is not None:           # features the caller asked for explicitly must not vanish silently
+            import warnings
+            warnings.warn(f"fit_fast({question!r}): features not used — " +
+                          "; ".join(f"{f}: {why}" for f, why in dropped.items()), stacklevel=2)
         self.heads[question] = head
         return head
 

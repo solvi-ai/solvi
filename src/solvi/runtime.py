@@ -85,7 +85,7 @@ class Result:
     probs: dict = field(default_factory=dict)
     provenance: str | None = None  # of the answer: computed (rule, hard check), learned (head, learned rule), decided (model rule)
     source: str | None = None      # what produced it: the rule, the hard check, or the head type
-    guard: str | None = None       # the safeguard that settled it: hard_check, outside_options, low_confidence, missing_facts
+    guard: str | None = None       # the safeguard that settled it: hard_check, outside_options, rule_abstained, low_confidence, missing_facts
     repaired: tuple | None = None  # (previous answer, [constraints]) when joint decoding changed it
 
 

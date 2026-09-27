@@ -188,7 +188,8 @@ Question("route", "Which team?", Answer.choice(["a", "b"]), uses=["country", "to
 - `uses`: a hint for the strategist, the facts that matter when the question has neither a rule nor a trained head;
 - `min_confidence`: an answer below this confidence abstains (status `abstain`, the reason says what it would have answered).
 
-An answer outside the options is never returned: a rule that produces one makes the question abstain.
+An answer outside the options is never returned: a rule that produces one makes the question abstain
+(safeguard `outside_options`). A rule may also return `None` on purpose to abstain (safeguard `rule_abstained`).
 
 
 ### Ordinal and multi-label answers, option descriptions
@@ -260,7 +261,7 @@ A question abstains when:
 
 - a fact it needs cannot be computed from `init_state` (nothing in the catalog produces it);
 - a part it depends on raised an exception (the error is kept in the trace);
-- its rule returned a value outside the options;
+- its rule returned a value outside the options, or returned `None` to abstain;
 - a hard check failed and has no `then` entry for it;
 - it has no rule and no trained head.
 

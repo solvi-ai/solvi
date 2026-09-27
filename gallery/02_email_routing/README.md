@@ -26,15 +26,15 @@ uv run python gallery/02_email_routing/run.py        # learns the table, runs 9 
 
 `run.py` asserts the audit's invariants on every email (see [`_audit.py`](../_audit.py)). `team_votes` is registered with
 `model=ROUTING`, so the learned table shows up as **learned** with its fingerprint: 9/9 emails, 174 support items, 91%
-deterministic, hard check decided ×2. A split vote makes the team rule return `None`, which the audit reports as the closed-set
-safeguard (outside the options ×2) — the abstention is visible, not silent. From `res.audit("team")` on the split vote:
+deterministic, hard check decided ×2. A split vote makes the team rule return `None` — a deliberate abstention, which the audit reports
+as its own safeguard (rule abstained ×2), separate from an answer outside the options — visible, not silent. From `res.audit("team")` on the split vote:
 
 ```
 team = '—'  [abstain]  confidence 0.00  ← computed by team
   quoted      sender_domain = 'orbit.co'  sender[4:12] literal 'orbit.co'
   learned     team_votes = {'security': 6, 'technical': 4}  [RuleList RuleList #a66dde49]
   support     9 items (3 given, 4 computed, 1 quoted, 1 learned): 89% deterministic, 1 from models
-  safeguards  outside the options ×1
+  safeguards  rule abstained ×1
 ```
 
 ## Sample output (real run)

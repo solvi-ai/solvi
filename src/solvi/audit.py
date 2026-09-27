@@ -8,12 +8,14 @@ from dataclasses import dataclass, field
 
 from .provenance import FUZZY, classify, matches, snippet
 
-STAT_KEYS = {"grounding": "grounding_rejected", "outside_options": "outside_options", "low_confidence": "low_confidence",
+STAT_KEYS = {"grounding": "grounding_rejected", "outside_options": "outside_options", "rule_abstained": "rule_abstained",
+             "low_confidence": "low_confidence",
              "validator": "validator_rejected", "hard_check": "forced_by_hard_check",
              "constraint_repair": "constraint_repairs", "fallback": "fallbacks"}
 STATS = ["asks", "answers", "abstained", "model_outputs"] + list(STAT_KEYS.values())
 
-LABEL = {"grounding": "grounding rejected", "outside_options": "outside the options", "low_confidence": "low confidence",
+LABEL = {"grounding": "grounding rejected", "outside_options": "outside the options", "rule_abstained": "rule abstained",
+         "low_confidence": "low confidence",
          "validator": "rejected by validate", "hard_check": "hard check decided", "constraint_repair": "constraint repair",
          "fallback": "fallback producer"}
 
@@ -59,7 +61,7 @@ def collect(res, catalog=None):
             if k:
                 events.append({"kind": k, "fact": r.name, "detail": r.error, "questions": where})
     for q, a in res.results.items():
-        if a.guard in ("hard_check", "outside_options", "low_confidence"):
+        if a.guard in ("hard_check", "outside_options", "rule_abstained", "low_confidence"):
             events.append({"kind": a.guard, "fact": "answer:" + q, "detail": a.why, "questions": [q]})
         if a.repaired:
             was, cons = a.repaired
@@ -163,6 +165,10 @@ class AnswerAudit:
             p = ", ".join(f"{k} {v:.2f}" for k, v in sorted((l_.get("probs") or {}).items(), key=lambda t: -t[1])[:4])
             lines.append(f"  learned     {l_['name']} = " + (f"— {l_['error']}" if l_.get("error") else _short(l_["value"]))
                          + (f"  ({p})" if p else "") + (f"  [{l_['model']}]" if l_.get("model") else ""))
+            if l_.get("reads"):
+                lines.append(f"              reads {', '.join(l_['reads'])}")
+            if l_.get("ignored"):
+                lines.append("              ignored " + "; ".join(f"{f} ({why})" for f, why in l_["ignored"].items()))
         for c in self.checks:
             tag = "hard" if c["hard"] else "soft"
             lines.append(f"  check       {c['name']} = {c['value']!r} ({tag}" + (", decides the answer" if c["decides"] else "") + ")"
@@ -295,8 +301,13 @@ def _one(res, q, events, catalog):
                    "model": _model(rr.model), "probs": rr.probs, "error": rr.error}
         count(rr.origin if rr.origin in FUZZY else "computed")
     if head is not None:
-        au.learned.append({"name": f"answer head ({head.model['type'] if head.model else 'head'})", "value": head.value,
-                           "model": _model(head.model), "probs": head.probs, "provenance": "learned"})
+        entry = {"name": f"answer head ({head.model['type'] if head.model else 'head'})", "value": head.value,
+                 "model": _model(head.model), "probs": head.probs, "provenance": "learned",
+                 "reads": sorted(head.inputs)}
+        hobj = getattr(res, "_heads", {}).get(q)
+        if hobj is not None and getattr(hobj, "dropped", None):
+            entry["ignored"] = dict(hobj.dropped)
+        au.learned.append(entry)
         count("learned")
     if catalog is not None:
         for c in catalog.constraints.values():

@@ -102,21 +102,24 @@ if __name__ == "__main__":
     # constraint and says so. What no constraint covers stays the head's own answer (a constraint is not the whole policy).
     weak = load_task()
     del weak.cat.rules["verdict"]
-    learned = System(weak.cat, weak.QUESTIONS)
-    learned.fit_fast("verdict", LABELLED, features=["risk_points", "surface"])
-    print("\na learned verdict (fit_fast on 6 labelled texts) instead of the rule:")
-    repaired, demo_tally = None, Tally()
-    for case in cases:
-        r = learned.ask(prepared(weak, case["state"]))
-        demo_tally.add(check(r, learned))
-        v = r["verdict"]
-        mark = "  <- repaired by a constraint" if v.repaired else ""
-        print(f"    {case['name']:36s} verdict={fmt(v)!s:15s} (rule: {case['expected']['verdict']})  harm={list(r['harm'].answer)}{mark}")
-        if v.repaired and repaired is None:
-            repaired = r
-    print(demo_tally)
-    if repaired is None:
-        bad.append(("learned verdict", "verdict", None, None, "a constraint repair", None))
-    else:
-        print("\n" + str(repaired.audit("verdict")))
+    for label, feats, must_repair in (("a weak head that sees only the surface", ["surface"], True),
+                                      ("a head that also reads the risk score", ["risk_score", "surface"], False)):
+        learned = System(weak.cat, weak.QUESTIONS)
+        learned.fit_fast("verdict", LABELLED, features=feats)
+        print(f"\na learned verdict (fit_fast on 6 labelled texts) instead of the rule — {label}:")
+        repaired, demo_tally, agree = None, Tally(), 0
+        for case in cases:
+            r = learned.ask(prepared(weak, case["state"]))
+            demo_tally.add(check(r, learned))
+            v = r["verdict"]
+            agree += v.answer == case["expected"]["verdict"]
+            mark = "  <- repaired by a constraint" if v.repaired else ""
+            print(f"    {case['name']:36s} verdict={fmt(v)!s:15s} (rule: {case['expected']['verdict']})  harm={list(r['harm'].answer)}{mark}")
+            if v.repaired and repaired is None:
+                repaired = r
+        print(demo_tally, f"· agrees with the rule on {agree}/{len(cases)}")
+        if must_repair and repaired is None:
+            bad.append(("learned verdict", "verdict", None, None, "a constraint repair", None))
+        elif repaired is not None:
+            print("\n" + str(repaired.audit("verdict")))
     sys.exit(1 if bad else 0)

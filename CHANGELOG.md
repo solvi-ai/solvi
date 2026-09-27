@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.4.1 — 2026-09-27 — clearer audits
+
+- The audit of a learned part now lists what the head reads (`reads …`) and which requested features it ignored and why
+  (`ignored …`, e.g. a dict-valued fact); `fit_fast` warns when it drops an explicitly requested feature.
+- A rule that returns `None` on purpose is reported as its own safeguard, `rule_abstained` ("rule abstained"), instead of
+  "outside the options"; `System.stats` counts it separately.
+- Gallery: 03 shows a surface-only head (constraints repair it, 8/10) next to one reading a computed risk score (10/10);
+  the gallery audit summary no longer double-counts safeguard events.
+
 ## 0.4.0 — 2026-09-27 — grounded decisions
 
 Fuzzy proposes, deterministic decides, everything is in the trace. Every fact now carries its provenance (given, computed,

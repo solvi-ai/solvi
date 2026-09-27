@@ -48,9 +48,11 @@ verdict = 'block'  [forced]  confidence 1.00  ← computed by no_card_number
   support     12 items (2 given, 3 computed, 7 quoted): 100% deterministic
 ```
 
-With the verdict rule replaced by a head learned from 6 labelled texts, the constraint repairs the IBAN case (constraint repair
-×1 in 10 texts); what no constraint covers stays the head's own, wrong answer (a mention and a public-post contact detail come
-out `allow`):
+With the verdict rule replaced by a head learned from 6 labelled texts, two runs: a weak head that sees only the surface — the
+constraint repairs the IBAN case (constraint repair ×1 in 10 texts), and what no constraint covers stays the head's own, wrong
+answer (a mention and a public-post contact detail come out `allow`); and a head that also reads the soft signals' total
+(`risk_score`), which agrees with the rule on 10/10 and needs no repair. The audit lists what the head read and what it
+ignored (solvi warns when a requested feature cannot be used, e.g. a dict):
 
 ```
 verdict = 'review'  [ok]  confidence 0.33  ← learned by FastHead

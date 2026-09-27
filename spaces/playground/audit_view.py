@@ -10,7 +10,7 @@ LABEL = {"grounding": "grounding rejected", "outside_options": "outside the opti
          "validator": "rejected by validate", "hard_check": "hard check decided", "constraint_repair": "constraint repair",
          "fallback": "fallback producer"}
 STAT_ROWS = [("asks", "asks"), ("answers", "answers"), ("abstained", "abstained"), ("model_outputs", "model outputs"),
-             ("grounding_rejected", "grounding rejected"), ("outside_options", "outside the options"),
+             ("grounding_rejected", "grounding rejected"), ("outside_options", "outside the options"), ("rule_abstained", "rule abstained"),
              ("low_confidence", "low confidence"), ("validator_rejected", "rejected by validate"),
              ("forced_by_hard_check", "hard check decided"), ("constraint_repairs", "constraint repair"),
              ("fallbacks", "fallback producer")]

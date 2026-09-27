@@ -40,6 +40,7 @@ def check(res, system):
     init = res.trace.init
     records = {r.name: r for r in res.trace.records if r.kind != "head"}
     kinds = Counter()
+    seen = set()                                      # an event on a fact shared by several answers counts once
     items = det = 0
     for q, au in audit.answers.items():
         where = f"{q}: "
@@ -69,7 +70,11 @@ def check(res, system):
         listed = (len(au.given) + len(au.computed) + len(au.quoted) + len(au.decided) + len(au.learned) + len(au.checks)
                   + (au.rule is not None))
         assert sum(au.counts.values()) == listed, where + f"support counts {au.counts} ≠ {listed} items listed"
-        kinds.update(mine)
+        for e in au.safeguards:
+            key = (e["kind"], e.get("fact"), e.get("detail"))
+            if key not in seen:
+                seen.add(key)
+                kinds[e["kind"]] += 1
         items += sum(au.counts.values())
         det += au.deterministic
     if not _uses_models(cat, system):

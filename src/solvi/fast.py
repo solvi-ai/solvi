@@ -18,6 +18,15 @@ def _numeric_vector(v):
     return isinstance(v, (list, tuple)) and len(v) > 0 and all(isinstance(x, (int, float)) and not isinstance(x, bool) for x in v)
 
 
+def _why_dropped(rows, f):
+    vs = [r.get(f) for r in rows]
+    if all(v is None for v in vs):
+        return "never computed in the examples"
+    kinds = sorted({type(v).__name__ for v in vs if v is not None})
+    missing = sum(v is None for v in vs)
+    return f"mixed or unsupported values ({', '.join(kinds)}{f', {missing} missing' if missing else ''})"
+
+
 class VecFeaturizer(Featurizer):
     """Featurizer plus fixed-length numeric vectors (lists / arrays), standardized per dimension."""
 
@@ -106,6 +115,7 @@ class FastHead:
     def fit(self, rows, answers, features):
         self.fz = VecFeaturizer().fit(rows, features)
         self.features = [f for f in features if f in self.fz.spec]
+        self.dropped = {f: _why_dropped(rows, f) for f in features if f not in self.fz.spec}   # asked for, but unusable
         if self.pairs is None:
             self.pairs = len(self.fz.compact(rows[0], self.features)) <= 40
         X = np.array([self._x(r) for r in rows])
