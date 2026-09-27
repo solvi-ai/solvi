@@ -513,7 +513,10 @@ a fallback producer (a rule, a human queue) runs if there is one:
 - the model's own signal: act probability below the threshold → `abstain`, `guard="escalated"`, why `"model escalated: act
   0.12 < 0.50; would have answered 'billing'"`; the audit and `system.stats["model_escalated"]` count it (safeguard
   **model escalated**). The threshold is the checkpoint's; `act_threshold=` overrides it, `target_error=0.1` takes the
-  checkpoint's threshold for that error rate (`model.act_threshold_for(0.1)`), `use_act=False` ignores the signal;
+  checkpoint's threshold for that error rate (`model.act_threshold_for(0.1)`), `use_act=False` ignores the signal.
+  **The checkpoint's thresholds were fitted on the model's own validation data and do not hold on a new domain** (measured:
+  a "10% error" threshold gave 38–52% error on unseen tasks). For a real error target, calibrate on your own labelled
+  stream with `part.calibrate_for(examples, error=...)`;
 - without an act head (or besides it): `escalate_below=0.8` — a calibrated confidence below it escalates as **low
   confidence** (`"confidence 0.62 < 0.80 (escalate_below); would have answered 'billing'"`);
 - `part.calibrate_for(examples, error=0.05)` picks the threshold for a target error rate on labelled examples
