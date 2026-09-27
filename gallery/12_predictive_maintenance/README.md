@@ -3,7 +3,7 @@
 Forty-eight hours of sensor readings from a pump go in: bearing temperature, vibration RMS and motor current. Out come
 **health** (ok / watch / service / stop) and the **likely fault** (none / bearing / imbalance / electrical / cooling).
 
-`hard checks` `trace replay` `readable learned rules` `abstains` `runs in browser`
+`hard checks` `trace replay` `readable learned rules` `abstains` `audited` `runs in browser`
 
 ## How it decides
 
@@ -32,6 +32,20 @@ and `run.py` were also run unchanged under Pyodide 0.27.2 (every case passed).
 `cases.json` has 10 machines: healthy, bearing wear (service), the same wear early (watch, 78 h to the alert), an
 imbalance step, a vibration trip, a cooling failure, an electrical overload, a current sensor offline (abstain), a trip
 while that sensor is offline, and a temperature trip. `state.json` is the bearing-wear pump.
+
+## What the audit shows
+
+`run.py` asserts the audit's invariants on every machine (see [`_audit.py`](../_audit.py)): 10/10 machines, 380 support items,
+97% deterministic — the learned fault rule list is the one learned item, with its fingerprint — hard check decided ×3. From
+`res.audit("fault")` on bearing wear:
+
+```
+fault = 'bearing'  [ok]  confidence 1.00  ← learned by learned_fault
+  computed    vib_z = 8.37
+  computed    vib_trend = 'rising'
+  rule        learned_fault (learned)  [RuleList RuleList #905a05a5]
+  support     21 items (5 given, 15 computed, 1 learned): 95% deterministic, 1 from models
+```
 
 ## Sample output (real run)
 

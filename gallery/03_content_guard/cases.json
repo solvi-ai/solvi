@@ -8,13 +8,17 @@
     "expected": {
       "verdict": "block",
       "sensitive_data": "yes",
+      "harm": [
+        "personal_data",
+        "card_data"
+      ],
       "prompt_injection": "no"
     },
     "status": {
       "verdict": "forced",
       "sensitive_data": "forced"
     },
-    "note": "the default state: the card number passes Luhn, the hard check blocks and cites it"
+    "note": "the default state: the card number passes Luhn, the hard check blocks and cites it; harm lists the phone number too (personal_data), and the constraint block_if_card_or_secret holds"
   },
   {
     "name": "16-digit order number",
@@ -25,6 +29,7 @@
     "expected": {
       "verdict": "allow",
       "sensitive_data": "no",
+      "harm": [],
       "prompt_injection": "no"
     },
     "note": "looks like a card, fails the Luhn checksum: not a card"
@@ -38,6 +43,9 @@
     "expected": {
       "verdict": "block",
       "sensitive_data": "no",
+      "harm": [
+        "prompt_injection"
+      ],
       "prompt_injection": "yes"
     },
     "status": {
@@ -54,6 +62,7 @@
     "expected": {
       "verdict": "review",
       "sensitive_data": "no",
+      "harm": [],
       "prompt_injection": "no"
     },
     "note": "the phrase is inside quotes in a question about it: a mention, not an attack; review, not block"
@@ -67,6 +76,9 @@
     "expected": {
       "verdict": "block",
       "sensitive_data": "yes",
+      "harm": [
+        "secret"
+      ],
       "prompt_injection": "no"
     },
     "status": {
@@ -84,6 +96,9 @@
     "expected": {
       "verdict": "review",
       "sensitive_data": "yes",
+      "harm": [
+        "personal_data"
+      ],
       "prompt_injection": "no"
     },
     "note": "e-mail and phone on a public page: 4 risk points -> review"
@@ -97,6 +112,9 @@
     "expected": {
       "verdict": "allow",
       "sensitive_data": "yes",
+      "harm": [
+        "personal_data"
+      ],
       "prompt_injection": "no"
     },
     "note": "personal data is present, but sharing your own e-mail with support is expected: allow"
@@ -110,6 +128,9 @@
     "expected": {
       "verdict": "review",
       "sensitive_data": "yes",
+      "harm": [
+        "bank_details"
+      ],
       "prompt_injection": "no"
     },
     "note": "a valid IBAN (mod-97): payment details go to a person"
@@ -123,6 +144,9 @@
     "expected": {
       "verdict": "block",
       "sensitive_data": "no",
+      "harm": [
+        "prompt_injection"
+      ],
       "prompt_injection": "yes"
     },
     "status": {
@@ -138,6 +162,9 @@
     "expected": {
       "verdict": null,
       "sensitive_data": "yes",
+      "harm": [
+        "personal_data"
+      ],
       "prompt_injection": "no"
     },
     "status": {

@@ -3,28 +3,28 @@
     "name": "double charge, VIP, deadline",
     "state": {"message": "Hi, you charged my card twice for the Team plan in October. Please reverse the second payment of $149, I need this sorted today because our finance close is tomorrow.",
               "tier": "vip", "received_at": "2026-09-26T08:05:00", "now": "2026-09-26T09:10:00"},
-    "expected": {"intent": "refund", "urgent": "yes", "refund_requested": "yes", "priority": "high", "route": "billing"},
+    "expected": {"intent": "refund", "tags": ["refund_request", "urgent"], "urgent": "yes", "refund_requested": "yes", "priority": "high", "route": "billing"},
     "note": "the default state: every signal points the same way"
   },
   {
     "name": "negated refund",
     "state": {"message": "I don't want a refund, I want the Slack integration working again. It has been broken since the update on Tuesday. No rush, whenever you get a chance.",
               "tier": "standard", "received_at": "2026-09-26T07:00:00", "now": "2026-09-26T09:10:00"},
-    "expected": {"intent": "technical_help", "urgent": "no", "refund_requested": "no", "priority": "normal", "route": "tech_support"},
+    "expected": {"intent": "technical_help", "tags": [], "urgent": "no", "refund_requested": "no", "priority": "normal", "route": "tech_support"},
     "note": "'refund' is in the text but negated; refund_requested cites \"don't want a refund\" as evidence for no"
   },
   {
     "name": "refund policy question",
     "state": {"message": "Before we upgrade 40 seats to Business: what is your refund policy if the SSO setup doesn't work for us?",
               "tier": "business", "received_at": "2026-09-26T09:00:00", "now": "2026-09-26T09:10:00"},
-    "expected": {"intent": "information", "urgent": "no", "refund_requested": "no", "priority": "low", "route": "general"},
+    "expected": {"intent": "information", "tags": [], "urgent": "no", "refund_requested": "no", "priority": "low", "route": "general"},
     "note": "a question about the refund policy is not a refund request"
   },
   {
     "name": "legal threat",
     "state": {"message": "This is the third time I'm writing. You keep billing us after we cancelled in July. Give me my money back or my lawyer takes this to small claims court.",
               "tier": "standard", "received_at": "2026-09-26T08:30:00", "now": "2026-09-26T09:10:00"},
-    "expected": {"intent": "refund", "urgent": "no", "refund_requested": "yes", "priority": "high", "route": "legal"},
+    "expected": {"intent": "refund", "tags": ["refund_request", "legal_threat", "angry"], "urgent": "no", "refund_requested": "yes", "priority": "high", "route": "legal"},
     "status": {"priority": "forced", "route": "forced"},
     "note": "hard check no_legal_threat forces priority=high and route=legal"
   },
@@ -32,14 +32,14 @@
     "name": "negated legal threat",
     "state": {"message": "I'm not going to sue anyone, relax :) I just need a VAT invoice for March with our new company name on it.",
               "tier": "standard", "received_at": "2026-09-26T08:30:00", "now": "2026-09-26T09:10:00"},
-    "expected": {"intent": "billing_question", "urgent": "no", "refund_requested": "no", "priority": "normal", "route": "billing"},
+    "expected": {"intent": "billing_question", "tags": [], "urgent": "no", "refund_requested": "no", "priority": "normal", "route": "billing"},
     "note": "'sue' in a negated clause: no forced escalation"
   },
   {
     "name": "chargeback threat",
     "state": {"message": "Cancel my subscription and stop charging me. If I see one more charge on my statement I will dispute it with my bank.",
               "tier": "standard", "received_at": "2026-09-26T09:00:00", "now": "2026-09-26T09:10:00"},
-    "expected": {"intent": "cancellation", "urgent": "no", "refund_requested": "no", "priority": "high", "route": "retention"},
+    "expected": {"intent": "cancellation", "tags": ["chargeback_threat"], "urgent": "no", "refund_requested": "no", "priority": "high", "route": "retention"},
     "status": {"priority": "forced"},
     "note": "hard check no_chargeback_threat forces priority=high; route still follows the intent"
   },
@@ -47,7 +47,7 @@
     "name": "VIP past the SLA",
     "state": {"message": "Hello, how do I invite teammates to our workspace? Thanks.",
               "tier": "vip", "received_at": "2026-09-26T02:40:00", "now": "2026-09-26T09:10:00"},
-    "expected": {"intent": "information", "urgent": "no", "refund_requested": "no", "priority": "high", "route": "general"},
+    "expected": {"intent": "information", "tags": [], "urgent": "no", "refund_requested": "no", "priority": "high", "route": "general"},
     "status": {"priority": "forced"},
     "note": "the rule alone would say normal; waiting 6.5 h > 4 h VIP SLA forces high"
   },
@@ -55,20 +55,20 @@
     "name": "outage",
     "state": {"message": "Checkout is down for all our customers since 09:10 and we are losing sales. Every payment attempt shows error 502.",
               "tier": "business", "received_at": "2026-09-26T09:12:00", "now": "2026-09-26T09:15:00"},
-    "expected": {"intent": "technical_help", "urgent": "yes", "refund_requested": "no", "priority": "high", "route": "tech_support"},
+    "expected": {"intent": "technical_help", "tags": ["urgent"], "urgent": "yes", "refund_requested": "no", "priority": "high", "route": "tech_support"},
     "note": "urgent without the word 'urgent'"
   },
   {
     "name": "cancel and refund",
     "state": {"message": "Please cancel my plan and refund the unused months, we are closing the company at the end of the year.",
               "tier": "standard", "received_at": "2026-09-26T09:00:00", "now": "2026-09-26T09:10:00"},
-    "expected": {"intent": "cancellation", "urgent": "no", "refund_requested": "yes", "priority": "normal", "route": "retention"},
+    "expected": {"intent": "cancellation", "tags": ["refund_request"], "urgent": "no", "refund_requested": "yes", "priority": "normal", "route": "retention"},
     "note": "mixed intent: the intent is cancellation, the refund ask is still captured by its own question"
   },
   {
     "name": "missing customer record",
     "state": {"message": "Please turn off auto-renewal, we are switching to another tool at the end of the month."},
-    "expected": {"intent": "cancellation", "urgent": "no", "refund_requested": "no", "priority": null, "route": "retention"},
+    "expected": {"intent": "cancellation", "tags": [], "urgent": "no", "refund_requested": "no", "priority": null, "route": "retention"},
     "status": {"priority": "abstain"},
     "note": "no tier / timestamps: priority abstains (cannot check the VIP SLA) instead of guessing; the other answers stand"
   }

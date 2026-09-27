@@ -4,7 +4,7 @@ The log of an AI agent's tool calls goes in: the task, and each step's tool, arg
 per-step cap, the tool allowlist and the available backups. Out come a **verdict** (approve / roll_back / escalate) and
 **rotate_secrets?**.
 
-`hard checks` `strategist plan` `early exit` `trace replay` `abstains` `runs in browser`
+`hard checks` `strategist plan` `early exit` `trace replay` `abstains` `audited` `runs in browser`
 
 ```bash
 uv run python gallery/05_agent_trace_audit/run.py        # 10 scenarios + the audit record and a tampering attempt
@@ -25,6 +25,20 @@ uv run python gallery/05_agent_trace_audit/run.py        # 10 scenarios + the au
   otherwise approve.
 - **The audit is itself auditable.** solvi's hash-chained trace of the audit is the record you store. Replay re-derives every
   finding from the raw log.
+
+## What the audit shows
+
+`run.py` asserts the audit's invariants on every agent log (see [`_audit.py`](../_audit.py)): 10/10 logs, 187 support items, 100%
+deterministic, hard check decided ×5. From `res.audit("verdict")` on the dropped table:
+
+```
+verdict = 'roll_back'  [forced]  confidence 1.00  ← computed by nothing_destroyed
+  computed    destructive_steps = [(4, 'DROP', 'build_artifacts')]
+  computed    rollback_plan = [(4, 'restore table build_artifacts from pg-sna…
+  check       nothing_destroyed = False (hard, decides the answer)
+  not run     costly_steps, failed_steps, off_allowlist, partial_change, total_cost (not needed: hard check nothing_destroyed failed)
+  support     10 items (3 given, 7 computed): 100% deterministic
+```
 
 ## Sample output (real run)
 

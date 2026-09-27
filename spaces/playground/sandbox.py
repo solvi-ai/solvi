@@ -5,11 +5,15 @@ protect, so the visitor's catalog code is executed in-process with `exec` in a f
 (`sys.settrace`, only on frames of the visitor's code) stops a runaway loop after TIME_LIMIT_S seconds, so a mistake does not
 hang the Python worker forever. It cannot interrupt a single long-running C call (e.g. `sum(range(10**12))`), and there is no
 memory limit: the browser tab is the limit.
+
+The catalog module and its System are kept while the code is unchanged (see _load), so System.stats counts over the
+System's lifetime and an optional setup(system) hook runs once.
 """
 from __future__ import annotations
 
 import ast
 import copy
+import hashlib
 import io
 import json
 import sys
@@ -74,13 +78,52 @@ def _short(v, n=240):
     return s if len(s) <= n else s[: n - 1] + "…"
 
 
-def serialize(res, cat, state, questions, show_text=""):
-    """Everything the UI shows about one System.ask() response."""
+def _plain(v, n=240):
+    """Anything → JSON-able: containers recursively, strings cut to n characters, other objects as a short repr."""
+    if v is None or isinstance(v, (bool, int)):
+        return v
+    if isinstance(v, float):
+        return round(v, 6)
+    if isinstance(v, str):
+        return v if len(v) <= n else v[: n - 1] + "…"
+    if isinstance(v, dict):
+        return {str(k): _plain(x, n) for k, x in v.items()}
+    if isinstance(v, (list, tuple, set)):
+        return [_plain(x, n) for x in v]
+    return _short(v, n)
+
+
+def audit_dict(res, state, context=48):
+    """res.audit().to_dict() made JSON-able for the UI: given values as short reprs, and every quote with the text around it
+    (before / quoted / after) so the panel can highlight the span in its document."""
+    a = res.audit().to_dict()
+    for q, d in a["answers"].items():
+        for g in d["given"]:
+            g["value"] = _short(g["value"], 80)
+        for c in d["computed"] + d["decided"] + d["learned"]:
+            c["value"] = None if c.get("value") is None else _short(c["value"], 120)
+        for x in d["quoted"]:
+            doc = state.get(x.get("source"))
+            if isinstance(doc, str) and x.get("error") is None:
+                s, e = x["start"], x["end"]
+                x["context"] = [("…" if s > context else "") + doc[max(0, s - context):s], doc[s:e],
+                                doc[e:e + context] + ("…" if e + context < len(doc) else "")]
+            x["value"] = None if x.get("value") is None else _short(x["value"], 120)
+        d["answer"] = list(d["answer"]) if isinstance(d["answer"], tuple) else d["answer"]
+        d["not_run"] = [list(t) for t in d["not_run"]]
+    return _plain(a, 400)
+
+
+def serialize(res, cat, state, questions, show_text="", system=None):
+    """Everything the UI shows about one System.ask() response. Pass the System to replay answer heads too and to include
+    its lifetime safeguard stats."""
     from solvi.runtime import MISSING
-    rep = res.trace.replay(cat)
+    rep = res.trace.replay(system if system is not None else cat)
     out = {"ok": True, "ms": res.ms, "show": show_text, "question_text": {q.name: q.text for q in questions}}
-    out["answers"] = [{"question": q, "answer": r.answer, "confidence": round(float(r.confidence), 4), "status": r.status,
-                       "why": r.why, "probs": {k: round(float(v), 4) for k, v in (r.probs or {}).items()}}
+    out["answers"] = [{"question": q, "answer": list(r.answer) if isinstance(r.answer, tuple) else r.answer,
+                       "confidence": round(float(r.confidence), 4), "status": r.status, "why": r.why,
+                       "probs": {k: round(float(v), 4) for k, v in (r.probs or {}).items()},
+                       "provenance": getattr(r, "provenance", None), "guard": getattr(r, "guard", None)}
                       for q, r in res.results.items()]
     out["flow"] = [{"step": i, "kind": s.part.kind, "name": s.part.name, "inputs": list(s.part.inputs),
                     "reasons": list(s.reasons), "hard": bool(getattr(s.part, "hard", False)), "doc": s.part.doc}
@@ -98,14 +141,62 @@ def serialize(res, cat, state, questions, show_text=""):
             doc = state.get(src)
             if isinstance(doc, str):
                 quote_text = doc[s:e]
+        m = getattr(r, "model", None)
         recs.append({"step": r.step, "kind": r.kind, "name": r.name, "value": "—" if r.value is MISSING else _short(r.value),
                      "quote": list(r.quote) if r.quote else None, "quote_text": quote_text,
                      "confidence": round(float(r.confidence), 4), "error": r.error, "inputs": dict(r.inputs),
-                     "prev": r.prev, "hash": r.hash})
+                     "prev": r.prev, "hash": r.hash, "origin": getattr(r, "origin", None),
+                     "model": f"{m['type']} {m['id']} #{m['fp'][:8]}" if m else None,
+                     "producer": getattr(r, "producer", None)})
     out["records"] = recs
     out["init_hash"] = res.trace.init_hash
-    out["replay"] = {"ok": rep["ok"], "steps": rep["steps"], "mismatches": [list(m) for m in rep["mismatches"]]}
+    out["replay"] = {"ok": rep["ok"], "steps": rep["steps"], "mismatches": [list(m) for m in rep["mismatches"]],
+                     "models": [list(m) for m in rep.get("models", [])]}
+    out["feasible"] = bool(getattr(res, "feasible", True))
+    out["violations"] = list(getattr(res, "violations", None) or [])
+    out["audit"] = audit_dict(res, state)
+    if system is not None:
+        out["stats"] = dict(system.stats)
     return out
+
+
+# ------------------------------------------------------------------ "the model was replaced after the decision"
+class _Replaced:
+    """Stands for a retrained or swapped model: the same object, with a different fingerprint. Replay compares the fingerprint
+    recorded in the trace with the catalog's current model and must report "model changed since this decision"."""
+
+    def __init__(self, model):
+        self._model = model
+
+    def fingerprint(self):
+        from solvi.provenance import digest, fingerprint
+        return digest("replaced after the decision", fingerprint(self._model))
+
+    def __getattr__(self, k):
+        return getattr(self._model, k)
+
+
+def replace_models(cat, system):
+    """Swap every model behind a catalog part (alternative producers and model-backed rules included) and every answer head of
+    the system for a _Replaced stand-in. → (names, undo)."""
+    swapped, seen, names = [], set(), []
+    for p in list(cat.parts.values()) + list(cat.rules.values()):
+        for x in [p] + list(getattr(p, "alternatives", None) or []):
+            if id(x) not in seen and getattr(x, "model", None) is not None:
+                seen.add(id(x))
+                swapped.append((x, x.model))
+                x.model = _Replaced(x.model)
+                names.append(x.name)
+    heads = dict(system.heads)
+    for q, h in heads.items():
+        system.heads[q] = _Replaced(h)
+        names.append(f"answer head of {q}")
+
+    def undo():
+        for x, m in swapped:
+            x.model = m
+        system.heads.update(heads)
+    return names, undo
 
 
 def _parse_value(text, original):
@@ -126,29 +217,52 @@ def _parse_value(text, original):
 
 
 # ------------------------------------------------------------------ one job
+_LOADED = {}     # sha256 of the catalog code -> (module, cat, questions, System): the last successfully loaded catalog
+
+
+def _load(code):
+    """Exec the visitor's catalog module and build its System, once per code version: while the code is unchanged the same
+    System answers every run, so System.stats counts over its lifetime (and an optional setup(system), e.g. fit_fast, runs
+    only once). Called inside the time guard."""
+    from solvi import System
+    key = hashlib.sha256(code.encode()).hexdigest()
+    if key in _LOADED:
+        mod = _LOADED[key][0]
+        sys.modules["catalog"] = mod
+        return _LOADED[key]
+    mod = types.ModuleType("catalog")                    # a fresh namespace for every new version of the code
+    mod.__file__ = USER_FILE
+    sys.modules["catalog"] = mod
+    exec(compile(code, USER_FILE, "exec"), mod.__dict__)
+    cat = getattr(mod, "cat", None)
+    questions = getattr(mod, "QUESTIONS", None)
+    if cat is None or questions is None:
+        raise NameError("the catalog code must define `cat = Catalog()` and `QUESTIONS = [...]`")
+    system = System(cat, questions)
+    if callable(getattr(mod, "setup", None)):
+        mod.setup(system)
+    _LOADED.clear()
+    _LOADED[key] = (mod, cat, questions, system)
+    return _LOADED[key]
+
+
 def run_job(job: dict) -> dict:
     """Run one Playground job in-process and return the same result dict the server Space's sandbox returned:
 
         {"code": "<catalog module>", "state": {...}, "selected": [...], "known": [...],
-         "tamper": {"step": 3, "value": "42", "rehash": false} | None}
-    """
+         "tamper": {"step": 3, "value": "42", "rehash": false} | {"mode": "model"} | None}
+
+    The module must define `cat` and `QUESTIONS`; optional `prepare(state)` converts init_state before each ask, optional
+    `setup(system)` runs once after the System is built (fit a head, learn a rule)."""
     captured = io.StringIO()
     stage = "loading your catalog code"
     guard = TimeGuard()
     try:
-        from solvi import System
         from solvi.runtime import MISSING, vhash
         from solvi.show import show
 
         with redirect_stdout(captured), guard:
-            mod = types.ModuleType("catalog")            # a fresh namespace for every run
-            mod.__file__ = USER_FILE
-            sys.modules["catalog"] = mod
-            exec(compile(job["code"], USER_FILE, "exec"), mod.__dict__)
-            cat = getattr(mod, "cat", None)
-            questions = getattr(mod, "QUESTIONS", None)
-            if cat is None or questions is None:
-                raise NameError("the catalog code must define `cat = Catalog()` and `QUESTIONS = [...]`")
+            mod, cat, questions, system = _load(job["code"])
             names = [q.name for q in questions]
             known, selected = set(job.get("known") or []), set(job.get("selected") or [])
             ask = [n for n in names if n in selected or n not in known] or names
@@ -161,7 +275,6 @@ def run_job(job: dict) -> dict:
                 state = mod.prepare(dict(state))
 
             stage = "asking the questions"
-            system = System(cat, questions)
             t0 = time.perf_counter()
             res = system.ask(state, ask)
             wall_ms = (time.perf_counter() - t0) * 1000
@@ -172,11 +285,21 @@ def run_job(job: dict) -> dict:
             buf = io.StringIO()
             with redirect_stdout(buf):
                 show(res, cat)
-            out = serialize(res, cat, state, questions, show_text=buf.getvalue())
+            out = serialize(res, cat, state, questions, show_text=buf.getvalue(), system=system)
             out.update({"questions": names, "asked": ask, "wall_ms": wall_ms})
 
             tamper = job.get("tamper")
-            if tamper:
+            if tamper and tamper.get("mode") == "model":
+                stage = "replacing the models"
+                replaced, undo = replace_models(cat, system)
+                try:
+                    trep = res.trace.replay(system)
+                finally:
+                    undo()
+                out["tamper"] = {"mode": "model", "replaced": replaced, "ok": trep["ok"],
+                                 "mismatches": [list(m) for m in trep["mismatches"]],
+                                 "models": [list(m) for m in trep.get("models", [])]}
+            elif tamper:
                 stage = "tampering with the trace"
                 t = copy.deepcopy(res.trace)
                 step = int(tamper["step"])
@@ -191,9 +314,10 @@ def run_job(job: dict) -> dict:
                         x.prev = prev
                         x.hash = vhash(x.body())
                         prev = x.hash
-                trep = t.replay(cat)
-                out["tamper"] = {"step": step, "name": rec.name, "old": "—" if old is MISSING else _short(old),
-                                 "new": _short(rec.value), "rehash": bool(tamper.get("rehash")), "ok": trep["ok"],
+                trep = t.replay(system)
+                out["tamper"] = {"mode": "value", "step": step, "name": rec.name,
+                                 "old": "—" if old is MISSING else _short(old), "new": _short(rec.value),
+                                 "rehash": bool(tamper.get("rehash")), "ok": trep["ok"],
                                  "mismatches": [list(m) for m in trep["mismatches"]]}
             if guard.fired:
                 raise TimeLimit(f"stopped after {guard.seconds:g} s")

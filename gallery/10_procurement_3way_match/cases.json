@@ -35,6 +35,7 @@
         "total": 3600.0
       },
       "fx_rates": {"USD": 1.0, "EUR": 1.08, "GBP": 1.27, "CHF": 1.13},
+      "fx_feed": {"source": "daily reference feed (demo)", "as_of": "2026-09-21", "rates": {"USD": 1.0, "EUR": 1.081, "GBP": 1.268, "CHF": 1.131}},
       "suppliers": {
         "SUP-104": {"name": "Rheinmetall Fasteners GmbH", "status": "active"},
         "SUP-221": {"name": "Northbridge Packaging Ltd", "status": "active"},
@@ -85,6 +86,7 @@
         "total": 5977.5
       },
       "fx_rates": {"USD": 1.0, "EUR": 1.08, "GBP": 1.27, "CHF": 1.13},
+      "fx_feed": {"source": "daily reference feed (demo)", "as_of": "2026-09-21", "rates": {"USD": 1.0, "EUR": 1.081, "GBP": 1.268, "CHF": 1.131}},
       "suppliers": {
         "SUP-104": {"name": "Rheinmetall Fasteners GmbH", "status": "active"},
         "SUP-221": {"name": "Northbridge Packaging Ltd", "status": "active"},
@@ -135,6 +137,7 @@
         "total": 6002.5
       },
       "fx_rates": {"USD": 1.0, "EUR": 1.08, "GBP": 1.27, "CHF": 1.13},
+      "fx_feed": {"source": "daily reference feed (demo)", "as_of": "2026-09-21", "rates": {"USD": 1.0, "EUR": 1.081, "GBP": 1.268, "CHF": 1.131}},
       "suppliers": {
         "SUP-104": {"name": "Rheinmetall Fasteners GmbH", "status": "active"},
         "SUP-221": {"name": "Northbridge Packaging Ltd", "status": "active"},
@@ -188,6 +191,7 @@
         "total": 3600.0
       },
       "fx_rates": {"USD": 1.0, "EUR": 1.08, "GBP": 1.27, "CHF": 1.13},
+      "fx_feed": {"source": "daily reference feed (demo)", "as_of": "2026-09-21", "rates": {"USD": 1.0, "EUR": 1.081, "GBP": 1.268, "CHF": 1.131}},
       "suppliers": {
         "SUP-104": {"name": "Rheinmetall Fasteners GmbH", "status": "active"},
         "SUP-221": {"name": "Northbridge Packaging Ltd", "status": "active"},
@@ -235,6 +239,7 @@
         "total": 8200.0
       },
       "fx_rates": {"USD": 1.0, "EUR": 1.08, "GBP": 1.27, "CHF": 1.13},
+      "fx_feed": {"source": "daily reference feed (demo)", "as_of": "2026-09-21", "rates": {"USD": 1.0, "EUR": 1.081, "GBP": 1.268, "CHF": 1.131}},
       "suppliers": {
         "SUP-104": {"name": "Rheinmetall Fasteners GmbH", "status": "active"},
         "SUP-221": {"name": "Northbridge Packaging Ltd", "status": "active"},
@@ -285,6 +290,7 @@
         "total": 8532.0
       },
       "fx_rates": {"USD": 1.0, "EUR": 1.08, "GBP": 1.27, "CHF": 1.13},
+      "fx_feed": {"source": "daily reference feed (demo)", "as_of": "2026-09-21", "rates": {"USD": 1.0, "EUR": 1.081, "GBP": 1.268, "CHF": 1.131}},
       "suppliers": {
         "SUP-104": {"name": "Rheinmetall Fasteners GmbH", "status": "active"},
         "SUP-221": {"name": "Northbridge Packaging Ltd", "status": "active"},
@@ -335,6 +341,7 @@
         "total": 5890.0
       },
       "fx_rates": {"USD": 1.0, "EUR": 1.08, "GBP": 1.27, "CHF": 1.13},
+      "fx_feed": {"source": "daily reference feed (demo)", "as_of": "2026-09-21", "rates": {"USD": 1.0, "EUR": 1.081, "GBP": 1.268, "CHF": 1.131}},
       "suppliers": {
         "SUP-104": {"name": "Rheinmetall Fasteners GmbH", "status": "active"},
         "SUP-221": {"name": "Northbridge Packaging Ltd", "status": "active"},
@@ -382,6 +389,7 @@
         "total": 2988.0
       },
       "fx_rates": {"USD": 1.0, "EUR": 1.08, "GBP": 1.27, "CHF": 1.13},
+      "fx_feed": {"source": "daily reference feed (demo)", "as_of": "2026-09-21", "rates": {"USD": 1.0, "EUR": 1.081, "GBP": 1.268, "CHF": 1.131}},
       "suppliers": {
         "SUP-104": {"name": "Rheinmetall Fasteners GmbH", "status": "active"},
         "SUP-221": {"name": "Northbridge Packaging Ltd", "status": "active"},
@@ -432,6 +440,7 @@
         "total": 1361600.0
       },
       "fx_rates": {"USD": 1.0, "EUR": 1.08, "GBP": 1.27, "CHF": 1.13},
+      "fx_feed": {"source": "daily reference feed (demo)", "as_of": "2026-09-21", "rates": {"USD": 1.0, "EUR": 1.081, "GBP": 1.268, "CHF": 1.131}},
       "suppliers": {
         "SUP-104": {"name": "Rheinmetall Fasteners GmbH", "status": "active"},
         "SUP-221": {"name": "Northbridge Packaging Ltd", "status": "active"},
@@ -485,6 +494,7 @@
         "total": 3960.0
       },
       "fx_rates": {"USD": 1.0, "EUR": 1.08, "GBP": 1.27, "CHF": 1.13},
+      "fx_feed": {"source": "daily reference feed (demo)", "as_of": "2026-09-21", "rates": {"USD": 1.0, "EUR": 1.081, "GBP": 1.268, "CHF": 1.131}},
       "suppliers": {
         "SUP-104": {"name": "Rheinmetall Fasteners GmbH", "status": "active"},
         "SUP-221": {"name": "Northbridge Packaging Ltd", "status": "active"},
@@ -501,5 +511,107 @@
     },
     "expected": {"payment": "hold", "duplicate": "no", "escalate_approval": "no"},
     "note": "every line matches, but the header total is 360 EUR more than the lines"
+  },
+  {
+    "name": "rate_from_fallback_feed",
+    "state": {
+      "po": {
+        "po_number": "PO-77120",
+        "supplier_id": "SUP-318",
+        "currency": "EUR",
+        "lines": [
+          {"line": 1, "sku": "BRG-6205", "description": "deep groove ball bearing 6205-2RS", "qty": 1200, "unit_price": 4.1},
+          {"line": 2, "sku": "BRG-6305", "description": "deep groove ball bearing 6305-2RS", "qty": 400, "unit_price": 7.35}
+        ]
+      },
+      "receipt": {
+        "grn_number": "GRN-77120",
+        "po_number": "PO-77120",
+        "lines": [
+          {"line": 1, "sku": "BRG-6205", "qty_received": 1200},
+          {"line": 2, "sku": "BRG-6305", "qty_received": 400}
+        ]
+      },
+      "invoice": {
+        "invoice_number": "KP-88240",
+        "supplier_id": "SUP-318",
+        "po_number": "PO-77120",
+        "currency": "JPY",
+        "date": "2026-09-21",
+        "lines": [
+          {"line": 1, "sku": "BRG-6205", "qty": 1200, "unit_price": 712.0},
+          {"line": 2, "sku": "BRG-6305", "qty": 400, "unit_price": 1268.0}
+        ],
+        "total": 1361600.0
+      },
+      "fx_rates": {"USD": 1.0, "EUR": 1.08, "GBP": 1.27, "CHF": 1.13},
+      "fx_feed": {"source": "daily reference feed (demo)", "as_of": "2026-09-21", "rates": {"USD": 1.0, "EUR": 1.081, "GBP": 1.268, "CHF": 1.131, "JPY": 0.00622}},
+      "suppliers": {
+        "SUP-104": {"name": "Rheinmetall Fasteners GmbH", "status": "active"},
+        "SUP-221": {"name": "Northbridge Packaging Ltd", "status": "active"},
+        "SUP-318": {"name": "Kanto Precision KK", "status": "active"},
+        "SUP-407": {"name": "Delta Office Supply Inc", "status": "on_hold"}
+      },
+      "paid_invoices": [
+        {"supplier_id": "SUP-104", "invoice_number": "RF-2026-0871", "amount": 3120.0, "currency": "EUR", "date": "2026-08-14"},
+        {"supplier_id": "SUP-221", "invoice_number": "inv 1187", "amount": 4380.0, "currency": "GBP", "date": "2026-09-02"},
+        {"supplier_id": "SUP-221", "invoice_number": "INV-1150", "amount": 2210.0, "currency": "GBP", "date": "2026-08-05"}
+      ],
+      "approver": {"name": "J. Okafor", "role": "clerk"},
+      "approval_limits": {"clerk": 10000, "manager": 50000, "director": 250000}
+    },
+    "expected": {"payment": "pay", "duplicate": "no", "escalate_approval": "no"},
+    "note": "no JPY in the rate table; the daily feed has JPY for the invoice date (0.00622): 1 361 600 JPY = 8 469.15 USD, lines +0.01% and -0.64%, pay"
+  },
+  {
+    "name": "stale_feed_rate_rejected",
+    "state": {
+      "po": {
+        "po_number": "PO-77120",
+        "supplier_id": "SUP-318",
+        "currency": "EUR",
+        "lines": [
+          {"line": 1, "sku": "BRG-6205", "description": "deep groove ball bearing 6205-2RS", "qty": 1200, "unit_price": 4.1},
+          {"line": 2, "sku": "BRG-6305", "description": "deep groove ball bearing 6305-2RS", "qty": 400, "unit_price": 7.35}
+        ]
+      },
+      "receipt": {
+        "grn_number": "GRN-77120",
+        "po_number": "PO-77120",
+        "lines": [
+          {"line": 1, "sku": "BRG-6205", "qty_received": 1200},
+          {"line": 2, "sku": "BRG-6305", "qty_received": 400}
+        ]
+      },
+      "invoice": {
+        "invoice_number": "KP-88240",
+        "supplier_id": "SUP-318",
+        "po_number": "PO-77120",
+        "currency": "JPY",
+        "date": "2026-09-21",
+        "lines": [
+          {"line": 1, "sku": "BRG-6205", "qty": 1200, "unit_price": 712.0},
+          {"line": 2, "sku": "BRG-6305", "qty": 400, "unit_price": 1268.0}
+        ],
+        "total": 1361600.0
+      },
+      "fx_rates": {"USD": 1.0, "EUR": 1.08, "GBP": 1.27, "CHF": 1.13},
+      "fx_feed": {"source": "daily reference feed (demo)", "as_of": "2026-09-12", "rates": {"USD": 1.0, "EUR": 1.081, "GBP": 1.268, "CHF": 1.131, "JPY": 0.00641}},
+      "suppliers": {
+        "SUP-104": {"name": "Rheinmetall Fasteners GmbH", "status": "active"},
+        "SUP-221": {"name": "Northbridge Packaging Ltd", "status": "active"},
+        "SUP-318": {"name": "Kanto Precision KK", "status": "active"},
+        "SUP-407": {"name": "Delta Office Supply Inc", "status": "on_hold"}
+      },
+      "paid_invoices": [
+        {"supplier_id": "SUP-104", "invoice_number": "RF-2026-0871", "amount": 3120.0, "currency": "EUR", "date": "2026-08-14"},
+        {"supplier_id": "SUP-221", "invoice_number": "inv 1187", "amount": 4380.0, "currency": "GBP", "date": "2026-09-02"},
+        {"supplier_id": "SUP-221", "invoice_number": "INV-1150", "amount": 2210.0, "currency": "GBP", "date": "2026-08-05"}
+      ],
+      "approver": {"name": "J. Okafor", "role": "clerk"},
+      "approval_limits": {"clerk": 10000, "manager": 50000, "director": 250000}
+    },
+    "expected": {"payment": "abstain", "duplicate": "no", "escalate_approval": "abstain"},
+    "note": "no JPY in the table, and the feed's JPY rate is from 2026-09-12, not the invoice date: validate rejects it, so no guess"
   }
 ]

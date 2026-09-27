@@ -11,6 +11,9 @@ from pathlib import Path
 
 from solvi import System
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))   # gallery/_audit.py: the audit check shared by the runners
+from _audit import Tally, check, line as audit_line  # noqa: E402
+
 HERE = Path(__file__).resolve().parent
 _spec = importlib.util.spec_from_file_location("p2p_task", HERE / "task.py")
 task = importlib.util.module_from_spec(_spec)
@@ -32,6 +35,7 @@ def short(s, n=140):
 if __name__ == "__main__":
     system = System(task.cat, task.QUESTIONS)
     cases = json.loads((HERE / "cases.json").read_text())
+    tally = Tally()
     failures, times = [], []
     for i, case in enumerate(cases, 1):
         state = state_of(case["state"])
@@ -47,11 +51,16 @@ if __name__ == "__main__":
         else:
             amount += " -> no rate to the base currency"
         print(f"    amount {amount}")
+        fx = next((r for r in res.trace.records if r.name == "fx_rate"), None)
+        if fx is not None and fx.tried:
+            print(f"    fx_rate {fx.value if fx.producer else '—'}: used {fx.producer or 'none'}; tried "
+                  + ", ".join(f"{n} ({w})" for n, w in fx.tried))
         if "line_match" in v:
             print("    lines: " + "; ".join(f"{m['line']} {m['sku']} qty {m.get('qty_invoiced', '?')}/{m.get('qty_received', '?')} "
                                              f"price {m.get('price_var_pct', 0):+.2f}%" + (" ✗" if "problem" in m else " ✓")
                                              for m in v["line_match"]))
         skipped = [n for n, _ in res.trace.skipped]
+        print("    " + audit_line(tally.add(check(res, system))))      # asserts the audit's invariants
         rep = res.trace.replay(task.cat)
         bad = [f"{q}: expected {want}, got {got(res[q])}" for q, want in case["expected"].items() if got(res[q]) != want]
         failures += [f"{case['name']}: {b}" for b in bad] + ([] if rep["ok"] else [f"{case['name']}: replay {rep['mismatches']}"])
@@ -61,6 +70,9 @@ if __name__ == "__main__":
 
     print("── the strategist's plan for these keys (hard checks and what they read come first)")
     print("\n".join("   " + line for line in str(system.ask(state_of(cases[0]["state"])).flow).splitlines()))
+    print(tally)
+    res = system.ask(state_of(cases[10]["state"]))
+    print(f"\nthe audit of '{cases[10]['name']}' (res.audit('payment')):\n" + str(res.audit('payment')) + "\n")
     times.sort()
     print(f"\n{len(cases) - len({f.split(':')[0] for f in failures})}/{len(cases)} cases as expected; "
           f"decision time median {times[len(times) // 2]:.2f} ms, max {times[-1]:.2f} ms")

@@ -11,6 +11,9 @@ from pathlib import Path
 
 from solvi import System
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))   # gallery/_audit.py: the audit check shared by the runners
+from _audit import Tally, check, line as audit_line  # noqa: E402
+
 HERE = Path(__file__).resolve().parent
 _spec = importlib.util.spec_from_file_location("refund_task", HERE / "task.py")
 task = importlib.util.module_from_spec(_spec)
@@ -36,6 +39,7 @@ def cited(res, name):
 if __name__ == "__main__":
     system = System(task.cat, task.QUESTIONS)
     cases = json.loads((HERE / "cases.json").read_text())
+    tally = Tally()
     failures, times, claim_vs_ledger = [], [], 0
     for i, case in enumerate(cases, 1):
         res = system.ask(state_of(case["state"]))
@@ -51,6 +55,7 @@ if __name__ == "__main__":
         for q, r in res.results.items():
             print(f"    {q:22s} {got(r)!s:22s} {r.status:7s} {r.confidence:.2f}" + ("  " + r.why if r.status != "ok" else ""))
         claim_vs_ledger += res["customer_claims_double"].answer != res["is_double_charge"].answer
+        print("    " + audit_line(tally.add(check(res, system))))      # asserts the audit's invariants
         rep = res.trace.replay(task.cat)
         bad = [f"{q}: expected {want}, got {got(res[q])}" for q, want in case["expected"].items() if got(res[q]) != want]
         failures += [f"{case['name']}: {b}" for b in bad] + ([] if rep["ok"] else [f"{case['name']}: replay {rep['mismatches']}"])
@@ -58,6 +63,9 @@ if __name__ == "__main__":
               f"{res.ms:.2f} ms · " + ("expected ✓" if not bad else "MISMATCH: " + "; ".join(bad)) + "\n")
 
     print(f"the ticket and the ledger disagree in {claim_vs_ledger} of {len(cases)} cases; every refund decision followed the ledger")
+    print(tally)
+    res = system.ask(state_of(cases[1]["state"]))
+    print(f"\nthe audit of '{cases[1]['name']}' (the claim and the ledger):\n" + str(res.audit(['customer_claims_double', 'is_double_charge'])) + "\n")
     times.sort()
     print(f"{len(cases) - len({f.split(':')[0] for f in failures})}/{len(cases)} cases as expected; "
           f"decision time median {times[len(times) // 2]:.2f} ms, max {times[-1]:.2f} ms")

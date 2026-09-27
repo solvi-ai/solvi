@@ -1,0 +1,6 @@
+{
+  "extractor": "hallucinates",
+  "classifier": "rogue",
+  "doc": "Expense claim #2291\nVendor: City Taxi Ltd\nTaxi from the airport to the client office, 14 km.\nTotal: 48.60 EUR\n",
+  "limit": 100
+}

@@ -3,7 +3,7 @@
 A customer profile and 90 days of transactions go in; three decisions come out: the customer's **risk level**
 (low / medium / high), whether to **file a suspicious activity report** (SAR), and whether to **freeze the account**.
 
-`hard checks` `strategist plan` `early exit` `trace replay` `abstains` `runs in browser`
+`hard checks` `strategist plan` `early exit` `trace replay` `abstains` `audited` `runs in browser`
 
 ## How it decides
 
@@ -34,6 +34,19 @@ Nine cases in `cases.json`: a clean salary account, structuring under the thresh
 namesake with another birth date, a PEP with high-risk flows (high risk but no SAR), a cash business whose deposits are
 spread out (no structuring), a money-mule pass-through, a sanctioned counterparty, and a profile without a declared
 volume (risk abstains). `state.json` is the structuring case, for the playground.
+
+## What the audit shows
+
+`run.py` asserts the audit's invariants on every case (see [`_audit.py`](../_audit.py)): 9/9 customers, 316 support items, 100%
+deterministic, hard check decided ×3. From `res.audit("file_sar")` on the structuring case — the grounds are a computed fact:
+
+```
+file_sar = 'yes'  [ok]  confidence 1.00  ← computed by file_sar
+  computed    structuring = {'count': 4, 'total': 38900.0, 'from': '2026-09…
+  computed    sar_grounds = ['structuring: 4 cash deposits just under 10000…
+  check       customer_not_sanctioned = True (hard)
+  support     13 items (4 given, 9 computed): 100% deterministic
+```
 
 ## Sample output (real run)
 

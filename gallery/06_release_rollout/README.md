@@ -3,7 +3,7 @@
 Canary metrics against the baseline go in: request and error counts, latency histograms, the SLO and the rollout
 thresholds. Out come a **decision** (promote / hold / roll_back) and **page_oncall?**.
 
-`hard checks` `strategist plan` `early exit` `trace replay` `abstains` `runs in browser`
+`hard checks` `strategist plan` `early exit` `trace replay` `abstains` `audited` `runs in browser`
 
 ```bash
 uv run python gallery/06_release_rollout/run.py        # 9 scenarios, a narrower plan, early-exit timing
@@ -23,6 +23,20 @@ uv run python gallery/06_release_rollout/run.py        # 9 scenarios, a narrower
 - **Plan per question set.** Asking only `page_oncall` plans 4 steps instead of 12, with no histograms and no z-test.
 - **Abstains.** A missing latency histogram (a delayed metrics pipeline) makes the decision abstain. The page decision needs
   only error counts, so it still answers.
+
+## What the audit shows
+
+`run.py` asserts the audit's invariants on every snapshot (see [`_audit.py`](../_audit.py)): 9/9 snapshots, 187 support items,
+100% deterministic, hard check decided ×3. From `res.audit("decision")` on the error ceiling — one computed number and a hard
+check, seven steps not run:
+
+```
+decision = 'roll_back'  [forced]  confidence 1.00  ← computed by canary_errors_under_ceiling
+  computed    canary_error_pct = 3.163
+  check       canary_errors_under_ceiling = False (hard, decides the answer)
+  not run     baseline_error_pct, baseline_p95_ms, canary_p95_ms, error_increase_pct, error_z, latency_increase_pct, slo_burn_rate (not needed: hard check canary_errors_under_ceiling failed)
+  support     7 items (4 given, 3 computed): 100% deterministic
+```
 
 ## Sample output (real run)
 

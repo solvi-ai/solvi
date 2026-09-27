@@ -1,10 +1,11 @@
 # 01 · Support triage
 
-A customer message (plus the customer's tier and when the ticket arrived) goes in. Out come five answers: **intent** (refund,
-technical_help, billing_question, information, cancellation, other), **urgent?**, **refund requested?**, **priority** (low / normal /
-high) and **route** (billing, tech_support, retention, legal, general).
+A customer message (plus the customer's tier and when the ticket arrived) goes in. Out come six answers: **intent** (refund,
+technical_help, billing_question, information, cancellation, other), **tags** (every signal found: refund_request, urgent,
+legal_threat, chargeback_threat, angry — a multi-label answer), **urgent?**, **refund requested?**, **priority** (an ordinal
+answer: low < normal < high) and **route** (billing, tech_support, retention, legal, general).
 
-`cited` `hard checks` `strategist plan` `early exit` `trace replay` `learns in ms` `readable learned rules` `abstains` `runs in browser`
+`cited` `hard checks` `strategist plan` `early exit` `trace replay` `learns in ms` `readable learned rules` `abstains` `multi-label` `ordinal` `constraints` `audited` `runs in browser`
 
 ```bash
 uv run python gallery/01_support_triage/run.py        # 10 scenarios, exits non-zero on a mismatch
@@ -20,34 +21,64 @@ uv run python gallery/01_support_triage/run.py        # 10 scenarios, exits non-
   intent answer names the line of the list that fired: `intent_rule_line = "if cue_words has 'CHARG' -> refund (7/7)"`.
 - **Hard checks.** `no_legal_threat` forces priority=high and route=legal. `no_chargeback_threat` and `vip_sla_ok` (a VIP waiting
   4 h or more) force priority=high. No rule output can change a forced answer.
-- **Abstains.** Without a tier and timestamps, the VIP SLA cannot be checked, so priority abstains. The other four answers stand.
+- **Answer types and a constraint (solvi 0.4).** `tags` is `Answer.multi` — one answer holding every signal, returned as a
+  tuple in option order (`('refund_request', 'legal_threat', 'angry')`); `priority` is `Answer.ordinal(["low", "normal", "high"])`.
+  The constraint `threat_means_high(priority, tags)` ties them: a legal or chargeback threat among the tags is never below high
+  priority. The hard checks already guarantee it, so here it is a cross-check between two separately written rules; every
+  response is `feasible` and the audit lists the constraint as satisfied.
+- **The learned part is labelled as learned.** `intent_class` and `intent_rule_line` are registered with `model=INTENT_RULES`, so
+  their provenance is `learned` and the trace records the rule list's fingerprint (retrain it and replay says the model changed).
+- **Abstains.** Without a tier and timestamps, the VIP SLA cannot be checked, so priority abstains. The other five answers stand.
+
+## What the audit shows
+
+`run.py` asserts the audit's invariants on every ticket (see [`_audit.py`](../_audit.py)) and prints one line per ticket. The
+intent parts are registered with `model=INTENT_RULES`, so the audit counts them as **learned** (the rule list's fingerprint is in
+the trace) instead of passing them off as plain code: 10/10 tickets, 401 support items, 90% deterministic, 20 learned outputs,
+hard check decided ×4. The forced priority on the legal threat, from `res.audit("priority")`:
+
+```
+priority = 'high'  [forced]  confidence 1.00  ← computed by no_legal_threat
+  quoted      legal_threat = True  message[112:118] converted from 'lawyer'
+  learned     intent_class = 'refund'  [RuleList RuleList #1555c164]
+  check       no_legal_threat = False (hard, decides the answer)
+  constraint  threat_means_high: satisfied
+  support     14 items (4 given, 5 computed, 4 quoted, 1 learned): 93% deterministic, 1 from models
+  safeguards  hard check decided ×1
+```
 
 ## Sample output (real run)
 
 ```
-intent rules learned from 200 labeled tickets: 30 lines in 147 ms with System.learn_rule (21 ms fitting RuleList on cue_words alone, as task.py does); accuracy on 500 fresh synthetic tickets 0.906
+intent rules learned from 200 labeled tickets: 30 lines in 162 ms with System.learn_rule (10 ms fitting RuleList on cue_words alone, as task.py does); accuracy on 500 fresh synthetic tickets 0.906
  1. if cue_words has 'INVOICE' → billing_question   (16/16)
  2. if cue_words has 'FEEDBACK' → other   (10/10)
  ...
-[2] negated refund                             1.69 ms   replay ok
-    intent=technical_help  urgent=no  refund_requested=no  priority=normal  route=tech_support
+[2] negated refund                             1.25 ms   replay ok
+    intent=technical_help  tags=()  urgent=no  refund_requested=no  priority=normal  route=tech_support
+    audit: 41 support items, 90% deterministic, 2 model outputs; safeguards: none fired
     cited: refund_ask=False «don't want a refund» [2:21]
-[4] legal threat                               1.31 ms   replay ok
-    intent=refund  urgent=no  refund_requested=yes  priority=high (forced)  route=legal (forced)
+[4] legal threat                               1.17 ms   replay ok
+    intent=refund  tags=('refund_request', 'legal_threat', 'angry')  urgent=no  refund_requested=yes  priority=high (forced)  route=legal (forced)
+    audit: 39 support items, 90% deterministic, 2 model outputs; safeguards: hard check decided ×2
     cited: legal_threat=True «lawyer» [112:118]
+    cited: anger=True «third time» [12:22]
     cited: refund_ask=True «money back» [95:105]
     priority forced: hard check no_legal_threat is false
     route forced: hard check no_legal_threat is false
-[7] VIP past the SLA                           1.06 ms   replay ok
-    intent=information  urgent=no  refund_requested=no  priority=high (forced)  route=general
+[7] VIP past the SLA                           1.08 ms   replay ok
+    intent=information  tags=()  urgent=no  refund_requested=no  priority=high (forced)  route=general
+    audit: 40 support items, 90% deterministic, 2 model outputs; safeguards: hard check decided ×1
     priority forced: hard check vip_sla_ok is false
-[10] missing customer record                    0.97 ms   replay ok
-    intent=cancellation  urgent=no  refund_requested=no  priority=— (abstain)  route=retention
+[10] missing customer record                    1.09 ms   replay ok
+    intent=cancellation  tags=()  urgent=no  refund_requested=no  priority=— (abstain)  route=retention
+    audit: 36 support items, 89% deterministic, 2 model outputs; safeguards: none fired
     priority abstain: cannot compute: tier, vip_sla_ok
 
-10/10 cases match, replay ok on 10/10 traces, median decision 1.45 ms
+10/10 cases match, replay ok on 10/10 traces, median decision 1.17 ms
+audit invariants hold on 10/10 responses: 401 support items, 90% deterministic, 20 model outputs; safeguards fired: hard check decided ×4
 
-early exit on 'legal threat': anger (not needed: hard check no_legal_threat failed), answer:priority (...), answer:route (...)
+early exit on 'legal threat': answer:priority (not needed: hard check no_legal_threat failed), answer:route (...)
 ```
 
 ## vs an answer-only model
@@ -68,7 +99,8 @@ chargeback threat, a VIP customer who has waited 4 hours or more…"), and pass 
 | evidence for an answer | quote with offsets, or the rule line that fired | none |
 | median time per ticket | 1.0 ms, CPU | 63 ms, GPU |
 
-Full per-case output of the run above: [compare_laya.out.txt](compare_laya.out.txt).
+Full per-case output of the run above: [compare_laya.out.txt](compare_laya.out.txt). The run predates the `tags` answer (solvi
+0.4), which Laya's preset has no counterpart for; `compare_laya.py` scores the five answers both were asked.
 
 What this shows for triage:
 

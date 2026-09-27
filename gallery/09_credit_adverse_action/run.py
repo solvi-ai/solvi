@@ -14,6 +14,9 @@ from pathlib import Path
 
 from solvi import System
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))   # gallery/_audit.py: the audit check shared by the runners
+from _audit import Tally, check, line as audit_line  # noqa: E402
+
 HERE = Path(__file__).resolve().parent
 _spec = importlib.util.spec_from_file_location("credit_task", HERE / "task.py")
 task = importlib.util.module_from_spec(_spec)
@@ -73,6 +76,7 @@ if __name__ == "__main__":
           f"(exact leave-one-out {head.loo_acc:.3f}); accuracy on {len(test)} new files {acc0:.3f}\n")
 
     cases = json.loads((HERE / "cases.json").read_text())
+    tally = Tally()
     failures, times, before = [], [], {}
     for i, case in enumerate(cases, 1):
         res = system.ask(state_of(case["state"]))
@@ -89,6 +93,7 @@ if __name__ == "__main__":
         else:
             print(f"    {res['decision'].why}; scoring skipped ({len(res.trace.skipped)} steps not run)")
         print(f"    underwriter head: {short(res[Q].why, 120)}")
+        print("    " + audit_line(tally.add(check(res, system))))      # asserts the audit's invariants
         rep = res.trace.replay(task.cat)
         bad = [f"{q}: expected {want}, got {got(res[q])}" for q, want in case["expected"].items() if got(res[q]) != want]
         failures += [f"{case['name']}: {b}" for b in bad] + ([] if rep["ok"] else [f"{case['name']}: replay {rep['mismatches']}"])
@@ -115,6 +120,9 @@ if __name__ == "__main__":
                                                                         for q, m in moved.items()))
     print("   (the learned answer may move; decisions and reasons come from rules and hard checks, which teach does not touch)\n")
 
+    print(tally)
+    res = system.ask(state_of(cases[8]["state"]))
+    print(f"\nthe audit of '{cases[8]['name']}' (res.audit('refer_to_underwriter')):\n" + str(res.audit('refer_to_underwriter')) + "\n")
     times.sort()
     print(f"{len(cases) - len({f.split(':')[0] for f in failures})}/{len(cases)} cases as expected; "
           f"decision time median {times[len(times) // 2]:.2f} ms, max {times[-1]:.2f} ms")

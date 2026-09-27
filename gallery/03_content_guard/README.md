@@ -1,9 +1,10 @@
 # 03 · Content guard
 
 User text on its way into your app (an LLM prompt, a support chat, a public post) goes in. Out come a **verdict** (allow /
-review / block), **sensitive_data?** and **prompt_injection?**. Each finding cites the exact span that triggered it.
+review / block), **sensitive_data?**, **harm** (every kind found: personal_data, bank_details, card_data, secret,
+prompt_injection, abuse — a multi-label answer) and **prompt_injection?**. Each finding cites the exact span that triggered it.
 
-`cited` `hard checks` `strategist plan` `early exit` `trace replay` `abstains` `runs in browser`
+`cited` `hard checks` `strategist plan` `early exit` `trace replay` `abstains` `multi-label` `constraints` `audited` `runs in browser`
 
 ```bash
 uv run python gallery/03_content_guard/run.py        # 10 scenarios, exits non-zero on a mismatch
@@ -20,43 +21,81 @@ uv run python gallery/03_content_guard/run.py        # 10 scenarios, exits non-z
 - **Hard checks no score can override.** A card number or a secret anywhere, or a direct injection into an LLM prompt, forces
   verdict=block (and sensitive_data=yes for the first two). In every forced case the soft risk points would have allowed the
   text. `run.py` prints both.
+- **Harm types and constraints (solvi 0.4).** `harm` is `Answer.multi`: one answer with every kind of harm, e.g.
+  `('personal_data', 'card_data')`. Three constraints tie it to the other answers, each computed by its own rule:
+  `block_if_card_or_secret` (a card or a secret among the harms is a block), `never_allow_serious_harm` (bank details, a direct
+  injection or abuse are never simply allowed) and `sensitive_iff_data_harm` (sensitive_data is yes exactly when a data harm was
+  found). With the rules here every response is feasible; `run.py` then swaps the verdict rule for a head learned from 6
+  labelled texts and shows a constraint repairing its answer (below).
 - **Surface-aware soft rules.** The same e-mail address is fine in a support chat and costs 2 risk points in a public post.
   2+ points gives review, 5+ gives block. Without a `surface`, the verdict abstains; a card or a secret is still blocked.
+
+## What the audit shows
+
+`run.py` asserts the audit's invariants on every text (see [`_audit.py`](../_audit.py)). `email_address`, `phone_number` and
+`insult` are `exact=True` extracts, so their values must be literally the quoted text; the card, IBAN, secret and injection
+findings return a label *derived from* the span, and the audit says so. 10/10 texts, 393 support items, 100% deterministic, hard
+check decided ×6, every constraint satisfied. From `res.audit("verdict")` on the card number:
+
+```
+verdict = 'block'  [forced]  confidence 1.00  ← computed by no_card_number
+  quoted      card_number = 'card ending 6467'  text[50:69] derived from '4539 1488 0343 6467'
+  quoted      phone_number = '+1 415 555 0132'  text[122:137] literal '+1 415 555 0132'
+  check       no_card_number = False (hard, decides the answer)
+  constraint  block_if_card_or_secret: satisfied
+  constraint  never_allow_serious_harm: satisfied
+  not run     link_count, risk_points (not needed: hard check no_card_number failed)
+  support     12 items (2 given, 3 computed, 7 quoted): 100% deterministic
+```
+
+With the verdict rule replaced by a head learned from 6 labelled texts, the constraint repairs the IBAN case (constraint repair
+×1 in 10 texts); what no constraint covers stays the head's own, wrong answer (a mention and a public-post contact detail come
+out `allow`):
+
+```
+verdict = 'review'  [ok]  confidence 0.33  ← learned by FastHead
+  learned     answer head (FastHead) = 'allow'  (allow 0.67, review 0.33, block 0.00)  [FastHead FastHead #5ec33ca1]
+  → answer    'review' — surface = 'support_chat' (+0.13); changed from 'allow' to satisfy never_allow_serious_harm
+  safeguards  constraint repair ×1
+```
 
 ## Sample output (real run)
 
 ```
-[1] card number in an LLM prompt               2.39 ms   replay ok
-    verdict=block (forced)  sensitive_data=yes (forced)  prompt_injection=no
+[1] card number in an LLM prompt               2.19 ms   replay ok
+    verdict=block (forced)  sensitive_data=yes (forced)  harm=('personal_data', 'card_data')  prompt_injection=no
+    audit: 38 support items, 100% deterministic, 0 model outputs; safeguards: hard check decided ×2
     cited: card_number=card ending 6467 «4539 1488 0343 6467» [50:69]
+    cited: phone_number=+1 415 555 0132 «+1 415 555 0132» [122:137]
     verdict forced: hard check no_card_number is false
     sensitive_data forced: hard check no_card_number is false
     the score alone would say: allow (risk_points = {})
-[2] 16-digit order number                      0.86 ms   replay ok
-    verdict=allow  sensitive_data=no  prompt_injection=no
+[2] 16-digit order number                      0.80 ms   replay ok
+    verdict=allow  sensitive_data=no  harm=()  prompt_injection=no
     verdict ok: risk_points = {}
-[4] injection phrase only mentioned            0.77 ms   replay ok
-    verdict=review  sensitive_data=no  prompt_injection=no
+[4] injection phrase only mentioned            0.76 ms   replay ok
+    verdict=review  sensitive_data=no  harm=()  prompt_injection=no
     cited: injection=quoted «ignore previous instructions» [41:69]
     verdict ok: risk_points = {'injection phrase mentioned': 2}
-[6] contact details in a public post           0.87 ms   replay ok
-    verdict=review  sensitive_data=yes  prompt_injection=no
+[6] contact details in a public post           0.88 ms   replay ok
+    verdict=review  sensitive_data=yes  harm=('personal_data',)  prompt_injection=no
     cited: email_address=marta.k@gmail.com «marta.k@gmail.com» [44:61]
     cited: phone_number=0176 555 01234 «0176 555 01234» [70:84]
     verdict ok: risk_points = {'e-mail in a public post': 2, 'phone in a public post': 2}
-[9] role-play jailbreak                        0.42 ms   replay ok
-    verdict=block (forced)  sensitive_data=no  prompt_injection=yes
+[9] role-play jailbreak                        0.67 ms   replay ok
+    verdict=block (forced)  sensitive_data=no  harm=('prompt_injection',)  prompt_injection=yes
     cited: injection=direct «an AI with no rules» [39:58]
     verdict forced: hard check no_direct_injection is false
     the score alone would say: allow (risk_points = {})
-[10] destination unknown                        0.37 ms   replay ok
-    verdict=— (abstain)  sensitive_data=yes  prompt_injection=no
+[10] destination unknown                        0.60 ms   replay ok
+    verdict=— (abstain)  sensitive_data=yes  harm=('personal_data',)  prompt_injection=no
     cited: phone_number=+44 20 7946 0958 «+44 20 7946 0958» [20:36]
     verdict abstain: cannot compute: no_direct_injection, risk_points
 
-10/10 cases match, replay ok on 10/10 traces, median decision 0.86 ms
+10/10 cases match, replay ok on 10/10 traces, median decision 0.80 ms
+audit invariants hold on 10/10 responses: 393 support items, 100% deterministic, 0 model outputs; safeguards fired: hard check decided ×6
 
-early exit on 'card number in an LLM prompt': email_address (not needed: hard check no_card_number failed), iban (...), insult (...), link_count (...), phone_number (...), risk_points (...), ...
+early exit on 'card number in an LLM prompt': link_count (not needed: hard check no_card_number failed), risk_points (...), answer:verdict (...), answer:sensitive_data (...)
 ```
 
 In the playground, change the recorded value of step 2 (`no_card_number`) from False to True and recompute every hash after
@@ -78,7 +117,8 @@ preset (sensitive_data, prompt_injection, jailbreak), plus a verdict question wi
 | where the finding is | span offsets for each finding | not given |
 | median time per text | 0.76 ms, CPU | 56 ms, GPU |
 
-Full per-case output of the run above: [compare_laya.out.txt](compare_laya.out.txt).
+Full per-case output of the run above: [compare_laya.out.txt](compare_laya.out.txt). The run predates the `harm` answer (solvi
+0.4), which Laya has no counterpart for; `compare_laya.py` scores the three answers both were asked.
 
 - **Detection is not the gap. The guarantee is.** Laya's own detector caught both direct injections at probability 1.00.
   Asked for a verdict under a written policy, it still answered allow on the direct injection and the role-play jailbreak,

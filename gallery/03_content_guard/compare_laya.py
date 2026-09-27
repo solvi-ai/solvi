@@ -56,6 +56,8 @@ for c in cases:
     lt.append((time.perf_counter() - t0) * 1000)
     print(f"\n{c['name']}   (laya jailbreak {la['jailbreak']['noul']:.2f})")
     for q, want in c["expected"].items():
+        if q not in la:                  # harm: a solvi 0.4 multi-label answer with no Laya counterpart, not scored
+            continue
         r = res[q]
         sv = "abstain" if r.status == "abstain" else r.answer
         lv, lp = laya_answer(la[q])

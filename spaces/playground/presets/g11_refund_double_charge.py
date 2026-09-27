@@ -38,7 +38,7 @@ def claims_double_charge(ticket):
     return Quote(True, m.start(), m.end(), "ticket") if m else Quote(False, 0, 0, "ticket")
 
 
-@cat.extract
+@cat.extract(exact=True)                  # the amount must be the number written at its offsets (the audit checks it)
 def claimed_amount(ticket):
     """the first amount of money in the ticket"""
     m = MONEY.search(ticket)

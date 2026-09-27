@@ -7,7 +7,10 @@ can be invoiced in USD). The invoice total is converted at the day's rate before
 is applied: 8 200 GBP looks under a 10 000 limit but is 10 414 USD. Duplicates are found by a normalised invoice number
 ("INV-001187" = "inv 1187") from the same supplier. Supplier on hold, an invoice for another PO, or a duplicate: hard checks
 that reject, and the line-by-line match is then skipped.
-Try: set the supplier's status to "on_hold", change a unit price by 3%, or the invoice currency to "JPY" (no rate -> abstain)."""
+The invoice rate comes from the rate table, or else from the daily feed (`fx_feed`) if the feed is dated the invoice day:
+two producers of one fact, each with its own `validate`.
+Try: set the supplier's status to "on_hold", change a unit price by 3%, or the invoice currency to "JPY" (no rate in the
+table or the feed -> abstain; add "JPY": 0.0062 to the feed's rates -> the feed is used)."""
 from __future__ import annotations
 
 import re
@@ -62,10 +65,19 @@ def not_duplicate(duplicate_of):
 
 
 # ---------- currency
-@cat.fn
-def fx_rate(invoice, fx_rates):
-    """rate from the invoice currency to the base currency (a missing rate is an error, not 1.0)"""
-    return fx_rates[invoice["currency"]]
+# the invoice rate has two producers, tried in order: the company's rate table, then the daily reference feed. A producer's
+# output is used only if it passes its own validate; a missing rate is "not found" (None), never 1.0. The record of fx_rate
+# says which producer was used and what happened to the ones tried before it; the audit shows it as a fallback.
+@cat.fn(provides="fx_rate", cost=0.01, validate=lambda rate: rate > 0)
+def fx_rate_table(invoice, fx_rates):
+    """rate from the invoice currency to the base currency, from the company's rate table"""
+    return fx_rates.get(invoice["currency"])
+
+
+@cat.fn(provides="fx_rate", cost=5.0, validate=lambda rate, invoice, fx_feed: rate > 0 and fx_feed["as_of"] == invoice["date"])
+def fx_rate_feed(invoice, fx_feed):
+    """fallback: the daily reference feed, accepted only when its rates are from the invoice date (a stale rate is rejected)"""
+    return fx_feed["rates"].get(invoice["currency"])
 
 
 @cat.fn

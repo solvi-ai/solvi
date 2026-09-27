@@ -4,9 +4,10 @@
 > tool, has not been validated, and must not be used to guide the care of anyone.
 
 Vital signs (and a lactate result) go in. Three answers come out: the **NEWS2 clinical risk band** (low / low-medium /
-medium / high), a **sepsis screen** (yes / no) and an **escalation level** (routine / urgent review / emergency).
+medium / high), a **sepsis screen** (yes / no) and an **escalation level** (routine / urgent review / emergency). The band and
+the escalation are ordinal answers: ordered levels, lowest first.
 
-`hard checks` `trace replay` `abstains` `runs in browser`
+`hard checks` `trace replay` `abstains` `ordinal` `constraints` `audited` `runs in browser`
 
 ## How it decides
 
@@ -18,6 +19,10 @@ medium / high), a **sepsis screen** (yes / no) and an **escalation level** (rout
   qSOFA 1 with lactate ≥ 2 mmol/L.
 - **Two hard checks** are checkpoints of `escalation`: SpO2 < 85 %, and SBP < 90 with altered consciousness. If either
   fails, the answer is forced to emergency, whatever the score.
+- **Ordered levels and a constraint (solvi 0.4).** `escalation` and `news2_band` are `Answer.ordinal`, and the constraint
+  `escalation_covers_band(escalation, news2_band)` says the escalation never falls below what the band requires (high →
+  emergency, medium or low-medium → at least urgent review). The escalation rule already follows it, so on these patients it is
+  a cross-check between two rules, satisfied everywhere; a hard check may only raise the escalation, never lower it.
 - **A missing vital is never guessed.** `prepare` drops fields sent as `null`, the strategist marks the facts that
   depend on them as impossible to compute, and those answers abstain. A hard check that *can* still be evaluated still
   decides.
@@ -34,6 +39,21 @@ and `run.py` were also run unchanged under Pyodide 0.27.2 (every case passed).
 `cases.json` has 10 patients: stable, a single red parameter, a COPD patient on scale 2, two patients 0.1 °C apart on
 either side of the 4/5 boundary, septic, hypoxic (hard check), shocked with no SpO2 reading, no respiration rate, and a
 patient with low NEWS2 but positive qSOFA. `state.json` is the hypoxic patient.
+
+## What the audit shows
+
+`run.py` asserts the audit's invariants on every patient (see [`_audit.py`](../_audit.py)): 10/10 patients, 374 support items,
+100% deterministic, hard check decided ×2, the band constraint satisfied everywhere. From `res.audit("escalation")` on the
+hypoxic patient — every NEWS2 point is its own computed fact:
+
+```
+escalation = 'emergency'  [forced]  confidence 1.00  ← computed by spo2_not_critical
+  computed    spo2_score = 3
+  computed    news2 = {'total': 6, 'red': ['spo2'], 'by_parameter': {…
+  check       spo2_not_critical = False (hard, decides the answer)
+  constraint  escalation_covers_band: satisfied
+  support     19 items (8 given, 11 computed): 100% deterministic
+```
 
 ## Sample output (real run)
 
@@ -56,19 +76,23 @@ patient with low NEWS2 but positive qSOFA. `state.json` is the hypoxic patient.
     escalation    abstain       abstain  0.00  cannot compute: news2, qsofa
 
 ── answer-only baseline (ridge on the 8 raw vitals, trained on 4 000 synthetic patients, tested on 2 000)
-   fitted in 628 ms; escalation accuracy 0.763 (solvi's table + rules: 2000/2000 by construction)
-   emergencies missed: 144 of 501; hard-rule emergencies (SpO2 < 85 or shock) missed: 6 of 273
-   routine patients sent to emergency: 4
+   solvi's table + rules: 2000/2000 by construction
+   as ordinal: fitted in 302 ms; accuracy 0.795; emergencies missed 156 of 501; hard-rule emergencies (SpO2 < 85 or shock) missed 6 of 273; routine sent to emergency 2
+   as choice : fitted in 302 ms; accuracy 0.763; emergencies missed 144 of 501; hard-rule emergencies (SpO2 < 85 or shock) missed 6 of 273; routine sent to emergency 4
 
-10/10 cases as expected; decision time median 1.02 ms, max 1.23 ms
+audit invariants hold on 10/10 responses: 374 support items, 100% deterministic, 0 model outputs; safeguards fired: hard check decided ×2
+10/10 cases as expected; decision time median 0.54 ms, max 0.61 ms
 ```
 
 ## vs an answer-only model
 
 - **NEWS2 is an exact table, and a learned answerer only approximates it.** We measured this: a ridge answerer
   (solvi's `fit_fast` on the eight raw vitals, with pairwise terms, but no table and no rules) was trained on 4 000
-  synthetic patients labelled by the exact rules. On 2 000 new patients it gets 76.3 % of escalations right, misses 144
-  of 501 emergencies, and sends 4 routine patients to emergency. The table and rules match the ground truth by
+  synthetic patients labelled by the exact rules. On 2 000 new patients it gets 79.5 % of escalations right as an ordinal
+  head (it answers with the median level), misses 156 of 501 emergencies and sends 2 routine patients to emergency. As a
+  plain choice head (the most likely level) it gets 76.3 % right, misses 144 emergencies and sends 4 routine patients to
+  emergency: the median pulls answers toward the middle level, which is more accurate overall but trades missed emergencies
+  for fewer false alarms — the wrong trade here, and one reason the safety rules must not be learned. The table and rules match the ground truth by
   construction. Band edges explain the gap: 38.0 °C scores 0 and 38.1 °C scores 1; SpO2 89 % scores 0 on scale 2 and 3
   on scale 1. A smooth model blurs exactly these steps. A larger model would narrow the gap, but it would still be an
   approximation of a table that can simply be computed.

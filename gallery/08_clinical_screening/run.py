@@ -14,6 +14,9 @@ from pathlib import Path
 
 from solvi import Answer, Catalog, Question, System
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))   # gallery/_audit.py: the audit check shared by the runners
+from _audit import Tally, check, line  # noqa: E402
+
 HERE = Path(__file__).resolve().parent
 _spec = importlib.util.spec_from_file_location("clinical_task", HERE / "task.py")
 task = importlib.util.module_from_spec(_spec)
@@ -55,7 +58,7 @@ def hard_emergency(s):
 if __name__ == "__main__":
     system = System(task.cat, task.QUESTIONS)
     cases = json.loads((HERE / "cases.json").read_text())
-    failures, times = [], []
+    failures, times, tally = [], [], Tally()
     for i, case in enumerate(cases, 1):
         state = state_of(case["state"])
         res = system.ask(state)
@@ -63,6 +66,7 @@ if __name__ == "__main__":
         print(f"[{i}/{len(cases)}] {case['name']}  ({case['note']})")
         for q, r in res.results.items():
             print(f"    {q:13s} {got(r)!s:13s} {r.status:8s} {r.confidence:.2f}  {short(r.why)}")
+        print("    " + line(tally.add(check(res, system))))            # asserts the audit's invariants
         n2 = res.values.get("news2")
         missing = sorted(set(RAW) - set(state))
         print(f"    NEWS2 {n2['total']} points {n2['by_parameter']}" if n2 else "    NEWS2 not computed", end="")
@@ -78,20 +82,27 @@ if __name__ == "__main__":
     pool = [patient(rng) for _ in range(6000)]
     data = [(s, system.ask(dict(s), ["escalation"])["escalation"].answer) for s in pool]     # the exact rules = ground truth
     train, test = data[:4000], data[4000:]
-    q = Question("escalation", "Escalation level", Answer.choice(["routine", "urgent review", "emergency"]))
-    base = System(Catalog(), [q])
-    head = base.fit_fast("escalation", train, features=RAW)
-    pred = [base.ask(dict(s), ["escalation"])["escalation"].answer for s, _ in test]
-    acc = sum(p == y for p, (_, y) in zip(pred, test)) / len(test)
-    emerg = [(p, s) for p, (s, y) in zip(pred, test) if y == "emergency"]
-    hard = [(p, s) for p, (s, y) in zip(pred, test) if hard_emergency(s)]
     exact = sum(system.ask(dict(s), ["escalation"])["escalation"].answer == y for s, y in test)
     print("── answer-only baseline (ridge on the 8 raw vitals, trained on 4 000 synthetic patients, tested on 2 000)")
-    print(f"   fitted in {head.fit_ms:.0f} ms; escalation accuracy {acc:.3f} (solvi's table + rules: {exact}/{len(test)} by construction)")
-    print(f"   emergencies missed: {sum(p != 'emergency' for p, _ in emerg)} of {len(emerg)}; "
-          f"hard-rule emergencies (SpO2 < 85 or shock) missed: {sum(p != 'emergency' for p, _ in hard)} of {len(hard)}")
-    print(f"   routine patients sent to emergency: {sum(p == 'emergency' and y == 'routine' for p, (_, y) in zip(pred, test))}\n")
+    print(f"   solvi's table + rules: {exact}/{len(test)} by construction")
+    hard = [s for s, _ in test if hard_emergency(s)]
+    for kind in ("ordinal", "choice"):      # the ordinal head answers with the median level; a choice head with the most likely
+        q = Question("escalation", "Escalation level", getattr(Answer, kind)(task.ESCALATION))
+        base = System(Catalog(), [q])
+        head = base.fit_fast("escalation", train, features=RAW)
+        pred = [base.ask(dict(s), ["escalation"])["escalation"].answer for s, _ in test]
+        acc = sum(p == y for p, (_, y) in zip(pred, test)) / len(test)
+        emerg = [p for p, (_, y) in zip(pred, test) if y == "emergency"]
+        hard_missed = sum(p != "emergency" for p, (s, _) in zip(pred, test) if hard_emergency(s))
+        print(f"   as {kind:7s}: fitted in {head.fit_ms:.0f} ms; accuracy {acc:.3f}; emergencies missed "
+              f"{sum(p != 'emergency' for p in emerg)} of {len(emerg)}; hard-rule emergencies (SpO2 < 85 or shock) missed "
+              f"{hard_missed} of {len(hard)}; routine sent to emergency "
+              f"{sum(p == 'emergency' and y == 'routine' for p, (_, y) in zip(pred, test))}")
+    print()
 
+    print(tally)
+    hyp = next(c for c in cases if c["name"] == "hypoxic_hard_check")
+    print(f"\nthe audit of '{hyp['name']}' (res.audit('escalation')):\n" + str(system.ask(state_of(hyp["state"])).audit("escalation")) + "\n")
     times.sort()
     print(f"{len(cases) - len({f.split(':')[0] for f in failures})}/{len(cases)} cases as expected; "
           f"decision time median {times[len(times) // 2]:.2f} ms, max {times[-1]:.2f} ms")

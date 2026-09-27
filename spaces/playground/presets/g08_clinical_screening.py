@@ -5,7 +5,8 @@ scale for patients with hypercapnic respiratory failure, and the aggregate plus 
 clinical risk band. Each parameter is its own function here, so every point in the total can be checked. qSOFA (Sepsis-3)
 counts respiratory rate >= 22, altered mentation and systolic BP <= 100. Two hard checks force an emergency whatever the
 score: SpO2 below 85%, or systolic BP below 90 with altered consciousness. A missing vital sign is not guessed: the answers
-that need it abstain (unless a hard check already decides).
+that need it abstain (unless a hard check already decides). Escalation and the band are ordinal answers (ordered levels), and a
+constraint ties them: the escalation never falls below what the band requires.
 This is a software demonstration on synthetic patients; it is not a clinical tool and must not guide care.
 Try: spo2 83, or delete "resp_rate", or set consciousness to "C" (new confusion)."""
 from __future__ import annotations
@@ -149,9 +150,18 @@ def sepsis_screen(qsofa, lactate_high):
     return qsofa >= 2 or (qsofa == 1 and lactate_high)
 
 
+# ---------- a rule between answers: the escalation never falls below what the NEWS2 band requires
+@cat.constraint
+def escalation_covers_band(escalation, news2_band):
+    """RCP response: a high band needs an emergency response, a medium or low-medium band at least an urgent review"""
+    need = {"low": 0, "low-medium": 1, "medium": 1, "high": 2}[news2_band]
+    return ESCALATION.index(escalation) >= need
+
+
+ESCALATION = ["routine", "urgent review", "emergency"]          # ordered levels, lowest first
 QUESTIONS = [
-    Question("escalation", "Escalation level", Answer.choice(["routine", "urgent review", "emergency"]),
+    Question("escalation", "Escalation level", Answer.ordinal(ESCALATION),
              checkpoints=["spo2_not_critical", "not_shocked"]),
-    Question("news2_band", "NEWS2 clinical risk band", Answer.choice(["low", "low-medium", "medium", "high"])),
+    Question("news2_band", "NEWS2 clinical risk band", Answer.ordinal(["low", "low-medium", "medium", "high"])),
     Question("sepsis_screen", "Sepsis screen positive?", Answer.yes_no()),
 ]

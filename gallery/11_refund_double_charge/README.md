@@ -4,7 +4,7 @@ A support ticket and the customer's ledger go in. Out come four answers: **does 
 twice?** (cited from the ticket), **does the ledger show a double charge still to refund?**, **refund: auto / manual /
 none**, and **which reply to send**.
 
-`cited` `hard checks` `early exit` `trace replay` `runs in browser`
+`cited` `hard checks` `early exit` `trace replay` `audited` `runs in browser`
 
 ## How it decides
 
@@ -32,6 +32,22 @@ and `run.py` were also run unchanged under Pyodide 0.27.2 (every case passed).
 monthly renewal, a claimed amount that differs from the ledger, a charge over the auto-refund limit, a free balance that
 is too low, an open chargeback, a double charge the customer never mentioned, and one already refunded. `state.json` is
 the unconfirmed claim.
+
+## What the audit shows
+
+`run.py` asserts the audit's invariants on every ticket (see [`_audit.py`](../_audit.py)). `claimed_amount` is an `exact=True`
+extract, so the audit checks the number is literally what the customer wrote: 9/9 tickets, 258 support items, 100%
+deterministic, hard check decided ×2. The claim and the ledger side by side (`res.audit([...])` on a claim the ledger does not
+confirm):
+
+```
+customer_claims_double = 'yes'  [ok]  confidence 1.00  ← computed by customer_claims_double
+  quoted      claimed_amount = 54.99  ticket[47:52] literal '54.99'
+  quoted      claims_double_charge = True  ticket[4:18] converted from 'double charged'
+is_double_charge = 'no'  [ok]  confidence 1.00  ← computed by is_double_charge
+  computed    duplicate_pairs = []
+  support     4 items (1 given, 3 computed): 100% deterministic
+```
 
 ## Sample output (real run)
 

@@ -3,7 +3,7 @@
 A login event plus the account's recent login history goes in. Out come **suspicious?** and **action** (allow /
 require_mfa / lock_account).
 
-`hard checks` `strategist plan` `early exit` `trace replay` `abstains` `runs in browser`
+`hard checks` `strategist plan` `early exit` `trace replay` `abstains` `audited` `runs in browser`
 
 ```bash
 uv run python gallery/04_security_alert/run.py        # 9 scenarios + a tampered trace, exits non-zero on a mismatch
@@ -22,6 +22,21 @@ uv run python gallery/04_security_alert/run.py        # 9 scenarios + a tampered
 - **Abstains.** Without coordinates, the distance cannot be computed, so both answers abstain and name the missing facts.
 - **The trace is the incident record.** Replay recomputes the whole trace. If someone edits the stored speed and recomputes
   every hash, replay still names the altered step.
+
+## What the audit shows
+
+`run.py` asserts the audit's invariants on every login (see [`_audit.py`](../_audit.py)): 9/9 logins, 268 support items, 100%
+deterministic, hard check decided ×4. From `res.audit("action")` on the admin in Lagos — the numbers the lock rests on, and what
+the early exit did not run:
+
+```
+action = 'lock_account'  [forced]  confidence 1.00  ← computed by admin_travel_plausible
+  computed    distance_km = 5195.8
+  computed    travel_kmh = 2309.2
+  check       admin_travel_plausible = False (hard, decides the answer)
+  not run     failed_spike_pct, new_device (not needed: hard check admin_travel_plausible failed)
+  support     11 items (3 given, 8 computed): 100% deterministic
+```
 
 ## Sample output (real run)
 

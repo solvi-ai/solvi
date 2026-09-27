@@ -26,6 +26,7 @@
     "total": 8200.0
   },
   "fx_rates": {"USD": 1.0, "EUR": 1.08, "GBP": 1.27, "CHF": 1.13},
+  "fx_feed": {"source": "daily reference feed (demo)", "as_of": "2026-09-21", "rates": {"USD": 1.0, "EUR": 1.081, "GBP": 1.268, "CHF": 1.131}},
   "suppliers": {
     "SUP-104": {"name": "Rheinmetall Fasteners GmbH", "status": "active"},
     "SUP-221": {"name": "Northbridge Packaging Ltd", "status": "active"},

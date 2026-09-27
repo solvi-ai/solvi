@@ -1,9 +1,11 @@
-"""Support triage: a customer message -> intent, urgent?, refund requested?, priority, route.
+"""Support triage: a customer message -> intent, tags, urgent?, refund requested?, priority, route.
 
 Evidence phrases are found with patterns and kept as Quotes (character offsets in the message); a phrase in a negated clause
 ("I don't want a refund", "not urgent") counts as evidence for "no". Intent is a readable rule list learned in milliseconds from
 200 synthetic labeled tickets (at import, so it also happens in the browser). Hard checks: a legal threat, a chargeback threat
-or a VIP past the 4-hour SLA force priority "high" whatever the rule computes.
+or a VIP past the 4-hour SLA force priority "high" whatever the rule computes. Priority is ordinal (low < normal < high),
+the signals found come back as one multi-label answer (tags), and a constraint ties the two: a threat among the tags is never
+below high priority.
 Try: add "or I will dispute the charge with my bank" to the message, or set "tier" to "vip"."""
 import random
 import re
@@ -117,12 +119,10 @@ def cue_words(message):
     return " ".join(dict.fromkeys(out))
 
 
-@cat.fn
-def intent_class(cue_words):
+def intent_class(cue_words):            # registered at the end with model=INTENT_RULES: its provenance is "learned"
     return INTENT_RULES.predict({"cue_words": cue_words})[0]
 
 
-@cat.fn
 def intent_rule_line(cue_words):
     """which line of the learned list fired"""
     _, r = INTENT_RULES.predict({"cue_words": cue_words})
@@ -167,6 +167,14 @@ def refund_requested(refund_ask):
     return refund_ask
 
 
+@cat.rule("tags")
+def tags(refund_ask, urgency, legal_threat, chargeback_threat, anger):
+    """every signal found in the message (a multi-label answer: any subset, in option order)"""
+    found = {"refund_request": refund_ask, "urgent": urgency, "legal_threat": legal_threat,
+             "chargeback_threat": chargeback_threat, "angry": anger}
+    return [k for k, v in found.items() if v]
+
+
 @cat.rule("priority")
 def priority(intent_class, urgency, anger, tier):
     base = {"cancellation": 2, "information": 0, "other": 0}.get(intent_class, 1)
@@ -180,11 +188,22 @@ def route(intent_class):
             "cancellation": "retention"}.get(intent_class, "general")
 
 
+# ---------- a rule between answers: checked after every answer is in (res.feasible, the audit lists it)
+@cat.constraint
+def threat_means_high(priority, tags):
+    """a legal or chargeback threat among the tags is never below high priority"""
+    return not ({"legal_threat", "chargeback_threat"} & set(tags)) or priority == "high"
+
+
+TAGS = {"refund_request": "asks for money back", "urgent": "time pressure or a blocked business",
+        "legal_threat": "lawyers, a lawsuit or a regulator", "chargeback_threat": "a chargeback or bank dispute",
+        "angry": "strong frustration"}
 QUESTIONS = [
     Question("intent", "What does the customer want?", Answer.choice(INTENTS)),
+    Question("tags", "Which signals does the message carry?", Answer.multi(TAGS)),
     Question("urgent", "Is there time pressure?", Answer.yes_no()),
     Question("refund_requested", "Does the customer ask for money back?", Answer.yes_no()),
-    Question("priority", "Priority", Answer.choice(["low", "normal", "high"]),
+    Question("priority", "Priority", Answer.ordinal(["low", "normal", "high"]),
              checkpoints=["no_legal_threat", "no_chargeback_threat", "vip_sla_ok"]),
     Question("route", "Which queue?", Answer.choice(["billing", "tech_support", "retention", "legal", "general"]),
              checkpoints=["no_legal_threat"]),
@@ -238,3 +257,6 @@ TRAIN = make_tickets(200, seed=7)
 # (learn_rule first computes every fact of every example, which is slower in the browser)
 INTENT_RULES = RuleList(["cue_words"], min_support=3, min_precision=0.8).fit(
     [{"cue_words": cue_words(s["message"])} for s, _ in TRAIN], [y for _, y in TRAIN])
+# the intent parts are backed by the learned list: the trace records it (type, fingerprint) and the audit counts them as learned
+cat.fn(intent_class, model=INTENT_RULES)
+cat.fn(intent_rule_line, model=INTENT_RULES)

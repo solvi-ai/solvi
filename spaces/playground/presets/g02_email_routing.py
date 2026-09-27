@@ -78,8 +78,7 @@ def credential_ask(body):
     return Quote(True, m.start(), m.end(), source="body") if m else Quote(False, 0, 0, source="body")
 
 
-@cat.fn
-def team_votes(words):
+def team_votes(words):                  # registered at the end with model=ROUTING: its provenance is "learned"
     """every line of the learned table that matches votes for its team with its support"""
     lits = literals({"words": words}, ROUTING.facts)
     votes = {}
@@ -176,3 +175,5 @@ TRAIN = make_emails(200, seed=3)
 # the table System(cat, QUESTIONS).learn_rule("team", TRAIN, ["words"]) would learn, fitted on the one fact it reads
 ROUTING = RuleList(["words"], min_support=3, min_precision=0.8).fit([{"words": words(s["subject"], s["body"])} for s, _ in TRAIN],
                                                                      [t for _, t in TRAIN])
+# team_votes reads the learned table: the trace records it (type, fingerprint) and the audit counts it as learned
+cat.fn(team_votes, model=ROUTING)

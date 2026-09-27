@@ -4,7 +4,7 @@ A consumer loan application goes in. Out come a **decision** (approve / decline 
 adverse-action reason** together with the full list of up to four reasons that a decline notice must state (ECOA /
 Regulation B, FCRA style), and **"refer to a senior underwriter?"**, a question learned from past files.
 
-`hard checks` `early exit` `trace replay` `learns in ms` `abstains` `runs in browser`
+`hard checks` `early exit` `trace replay` `learns in ms` `abstains` `audited` `runs in browser`
 
 ## How it decides
 
@@ -33,6 +33,20 @@ and `run.py` were also run unchanged under Pyodide 0.27.2 (every case passed).
 on either side of the DTI 0.36 band edge, an underage applicant, one with temporary residence, a score knock-out despite
 a high income, and two approved files that the learned habit still sends to a senior.
 `state.json` is the thin file.
+
+## What the audit shows
+
+`run.py` asserts the audit's invariants on every application (see [`_audit.py`](../_audit.py)): 10/10 files, 520 support items,
+98% deterministic — the only non-deterministic item is the learned underwriter head — hard check decided ×6. From
+`res.audit("refer_to_underwriter")` on the self-employed thin file (the head's fingerprint changes with every `teach`):
+
+```
+refer_to_underwriter = 'no'  [ok]  confidence 0.53  ← learned by FastHead
+  computed    dti = 0.1161
+  learned     answer head (FastHead) = 'no'  (no 0.53, yes 0.47)  [FastHead FastHead #0604ac27]
+  check       adult = True (hard)
+  support     17 items (11 given, 5 computed, 1 learned): 94% deterministic, 1 from models
+```
 
 ## Sample output (real run)
 

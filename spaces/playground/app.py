@@ -24,6 +24,7 @@ import pandas as pd
 
 import demos
 import strategy_demo as sd
+from audit_view import audit_html, fmt_answer
 from sandbox import LIMITS_NOTE, run_job, serialize
 from solvi import System
 from solvi.strategist import plan
@@ -33,6 +34,9 @@ IN_BROWSER = sys.platform == "emscripten"
 # ====================================================================== presets
 PRESET_DIR = HERE / "presets"
 PRESET_TITLES = {
+    "10_model_lies": "New in 0.4 · A model lies: grounding catches it",
+    "11_rules_between_answers": "New in 0.4 · Rules between answers (content guard)",
+    "12_multilabel_ordinal": "New in 0.4 · Multi-label + ordinal (ticket tags + priority)",
     "01_leave_request": "Leave request (HR)",
     "02_refund_email": "Refund e-mail with a hard 30-day check",
     "03_tic_tac_toe": "Tic-tac-toe move",
@@ -72,8 +76,9 @@ def fmt_status(s):
 
 
 def answers_df(out):
-    rows = [[a["question"], "—" if a["answer"] is None else a["answer"], f"{a['confidence']:.2f}", fmt_status(a["status"]),
-             a["why"]] for a in out.get("answers", [])]
+    rows = [[a["question"], fmt_answer(a["answer"]), f"{a['confidence']:.2f}",
+             fmt_status(a["status"]) + (f" · {a['provenance']}" if a.get("provenance") else ""), a["why"]]
+            for a in out.get("answers", [])]
     return pd.DataFrame(rows, columns=["question", "answer", "confidence", "status", "why"])
 
 
@@ -98,13 +103,17 @@ def skipped_df(out):
 
 
 def provenance(r):
-    if r["kind"] == "extract" and r["quote"]:
+    by = f"  · model {r['model']}" if r.get("model") else ""
+    via = f"  · producer {r['producer']}" if r.get("producer") else ""
+    if r["quote"]:
         s, e, src = r["quote"]
         txt = r["quote_text"]
-        p = f'quote {src}[{s}:{e}]' + (f' "{txt if len(txt) < 60 else txt[:57] + "…"}"' if txt else "")
-        return p + (f"  (confidence {r['confidence']:.2f})" if r["confidence"] < 1 else "")
+        p = f'quoted {src}[{s}:{e}]' + (f' "{txt if len(txt) < 60 else txt[:57] + "…"}"' if txt else "")
+        return p + (f"  (confidence {r['confidence']:.2f})" if r["confidence"] < 1 else "") + via + by
+    if r.get("origin") in ("decided", "learned", "proposed"):
+        return f"{r['origin']}" + (f" (confidence {r['confidence']:.2f})" if r["confidence"] < 1 else "") + via + by
     if r["inputs"]:
-        return "computed from " + ", ".join(r["inputs"])
+        return "computed from " + ", ".join(r["inputs"]) + via + by
     return "—"
 
 
@@ -120,8 +129,10 @@ def replay_line(out):
         return ""
     if rep["ok"]:
         n = rep["steps"]
+        models = rep.get("models") or []
+        extra = (f" Model-backed steps: " + ", ".join(f"`{m[1]}` {m[2]}" for m in models) + ".") if models else ""
         return (f"**Trace replay: OK.** {'The only step was' if n == 1 else f'All {n} steps were'} recomputed from "
-                "init_state; values, quotes and the hash chain match.")
+                "init_state; values, quotes and the hash chain match." + extra)
     bad = "; ".join(f"step {s} `{n}`: {why}" for s, n, why in rep["mismatches"][:5])
     return f"**Trace replay: {len(rep['mismatches'])} mismatch(es).** {bad}"
 
@@ -139,6 +150,11 @@ def summary_md(out, roundtrip_ms=None):
     if abst:
         extra.append(f"{abst} abstained")
     t += (" · " + ", ".join(extra) if extra else "") + f" · {len(out.get('flow', []))} steps in the flow"
+    a = out.get("audit") or {}
+    n_sg = len(a.get("safeguards") or [])
+    t += (f" · `res.feasible` = **{out.get('feasible', True)}**"
+          + (f" (violated: {', '.join(out['violations'])})" if out.get("violations") else "")
+          + f" · {a.get('model_outputs', 0)} model output(s), {n_sg} safeguard event(s)")
     return t + "\n\n" + replay_line(out)
 
 
@@ -187,14 +203,14 @@ def run_playground(code, state_json, selected, known):
     if not out.get("ok"):
         msg = f"**Could not run.** {out.get('error', 'unknown error')}"
         tb = out.get("traceback") or ""
-        return (msg, gr.update(value=tb, visible=bool(tb)), EMPTY_DF["answers"], EMPTY_DF["flow"], EMPTY_DF["skipped"],
+        return (msg, gr.update(value=tb, visible=bool(tb)), EMPTY_DF["answers"], "", EMPTY_DF["flow"], EMPTY_DF["skipped"],
                 EMPTY_DF["state"], "", gr.update(), known, gr.update(choices=[], value=None), "")
     names = out["questions"]
     ch, default = tamper_choices(out)
     stdout = out.get("stdout") or ""
     raw = out["show"] + (f"\n── your code printed ──\n{stdout}" if stdout.strip() else "")
-    return (summary_md(out, rt), gr.update(value="", visible=False), answers_df(out), flow_df(out), skipped_df(out),
-            state_df(out), raw, gr.update(choices=names, value=out["asked"]), names,
+    return (summary_md(out, rt), gr.update(value="", visible=False), answers_df(out), audit_html(out), flow_df(out),
+            skipped_df(out), state_df(out), raw, gr.update(choices=names, value=out["asked"]), names,
             gr.update(choices=ch, value=default), chain_text(out))
 
 
@@ -219,6 +235,29 @@ def tamper_playground(code, state_json, selected, known, step, value, rehash):
     return (f"{head}\n\n**Caught.** Replay reports {len(t['mismatches'])} mismatch(es); the first one is at "
             f"step {first[0]} `{first[1]}`, {where}. Later steps are flagged because their recorded inputs no longer match."
             f"\n\n{lines}{more}")
+
+
+def replace_model_playground(code, state_json, selected, known):
+    """Decide with the current models, then swap every model (catalog parts with model=, answer heads) for a retrained one
+    with a different fingerprint and replay the trace of that decision."""
+    job, err = _job(code, state_json, selected, known, {"mode": "model"})
+    out = run_job(job) if job else {"ok": False, "error": err}
+    if not out.get("ok"):
+        return f"**Could not run.** {out.get('error')}"
+    t = out["tamper"]
+    if not t["replaced"]:
+        return ("**This catalog has no model**: every fact is given, computed or quoted by plain code, so there is nothing to "
+                "replace, and replay simply re-runs the code. Pick a preset with a model (\"New in 0.4 · A model lies\", "
+                "\"Rules between answers\" or \"Multi-label + ordinal\") and try again.")
+    head = (f"Decided, then replaced **{len(t['replaced'])}** model(s) after the decision ({', '.join(t['replaced'])}): "
+            "the same code, but a retrained model with a new fingerprint. Then replayed the recorded trace.")
+    if t["ok"]:
+        return head + "\n\n**Replay found nothing**: no model-backed step was recorded in this trace."
+    lines = "\n".join(f"- step {s} `{n}`: {why}" for s, n, why in t["mismatches"][:12])
+    verdicts = ", ".join(f"`{n}` {v}" for _, n, v in t["models"])
+    return (f"{head}\n\n**Caught.** Replay reports {len(t['mismatches'])} mismatch(es): *model changed since this "
+            f"decision*. The trace records each model's id and fingerprint, so a decision cannot silently be re-attributed "
+            f"to a different model.\n\n{lines}\n\nVerdict per model step: {verdicts}.")
 
 
 # ====================================================================== tab: strategy (insurance claim desk, example 09)
@@ -375,11 +414,11 @@ def _timed(f):
 def run_strategy(asked, *fields):
     names = [n for n in Q_NAMES if n in (asked or [])]
     if not names:
-        return ("Pick at least one question.", "", pd.DataFrame(), pd.DataFrame(), "", pd.DataFrame())
+        return ("Pick at least one question.", "", pd.DataFrame(), pd.DataFrame(), "", pd.DataFrame(), "")
     try:
         state = _claim_state(*fields)
     except (ValueError, TypeError) as e:
-        return (f"**Check the inputs.** {e}", "", pd.DataFrame(), pd.DataFrame(), "", pd.DataFrame())
+        return (f"**Check the inputs.** {e}", "", pd.DataFrame(), pd.DataFrame(), "", pd.DataFrame(), "")
     qs = [q for q in sd.QUESTIONS if q.name in names]
     system = System(sd.cat, sd.QUESTIONS)
     flow, t_plan = _timed(lambda: plan(sd.cat, qs, state.keys()))
@@ -389,7 +428,7 @@ def run_strategy(asked, *fields):
     sd.reset_simulated()
     _, t_all = _timed(lambda: sd.run_everything(state))
     sim_all = sd.SIMULATED_MS[0]
-    out = serialize(res, sd.cat, state, sd.QUESTIONS)
+    out = serialize(res, sd.cat, state, sd.QUESTIONS, system=system)
     total = len(sd.cat.parts) + len(sd.cat.rules)
     slow_run = [r.name for r in res.trace.records if r.name in sd.SLOW]
     slow_skip = [n for n in sd.SLOW if n not in slow_run]
@@ -421,7 +460,7 @@ def run_strategy(asked, *fields):
              + timing_html([("Plain script (native)", 1122, "#cbd5e1"), ("solvi, one by one (native)", 1025, "#c7d2fe"),
                             ("solvi, workers=8 (native)", 463, "#6366f1")]))
     return (md, strategy_svg(sd.cat, flow, res.trace, sd.SLOW), flow_df(out), skipped_df(out), bars,
-            answers_df(out))
+            answers_df(out), audit_html(out, with_stats=False))
 
 
 def run_scale():
@@ -466,11 +505,11 @@ def _rows(df):
 
 
 def _business_outputs(out):
-    return summary_md(out), answers_df(out), flow_df(out), skipped_df(out), state_df(out)
+    return summary_md(out), answers_df(out), flow_df(out), skipped_df(out), state_df(out), audit_html(out)
 
 
 def _business_error(e):
-    return (f"**Check the inputs.** {e}", pd.DataFrame(), pd.DataFrame(), pd.DataFrame(), pd.DataFrame())
+    return (f"**Check the inputs.** {e}", pd.DataFrame(), pd.DataFrame(), pd.DataFrame(), pd.DataFrame(), "")
 
 
 def run_leave(employee, start, end, today, balance, team_size, leaves):
@@ -481,7 +520,7 @@ def run_leave(employee, start, end, today, balance, team_size, leaves):
                                  for r in _rows(leaves)],
                  "blackout": demos.LEAVE_BLACKOUT}
         res = demos.LEAVE_SYSTEM.ask(state)
-        return _business_outputs(serialize(res, demos.LEAVE.cat, state, demos.LEAVE.QUESTIONS))
+        return _business_outputs(serialize(res, demos.LEAVE.cat, state, demos.LEAVE.QUESTIONS, system=demos.LEAVE_SYSTEM))
     except (ValueError, TypeError, IndexError) as e:
         return _business_error(e)
 
@@ -512,7 +551,7 @@ def run_invoice(text, vendors, prior_ids, payments, today):
                  "prior_invoice_ids": [v.strip() for v in re.split(r"[,\s]+", prior_ids or "") if v.strip()],
                  "payments_db": pays}
         res = demos.INV_SYSTEM.ask(state)
-        out = serialize(res, demos.inv, state, demos.INV_QUESTIONS)
+        out = serialize(res, demos.inv, state, demos.INV_QUESTIONS, system=demos.INV_SYSTEM)
         return (*_business_outputs(out), highlight(state["doc"], out))
     except (ValueError, TypeError, IndexError) as e:
         return (*_business_error(e), [])
@@ -557,16 +596,16 @@ def learn(df, min_support, min_precision):
 
 def try_address(addr, learned, df, min_support, min_precision):
     if not (addr or "").strip():
-        return "Type an address.", pd.DataFrame(), pd.DataFrame(), ""
+        return "Type an address.", pd.DataFrame(), pd.DataFrame(), "", ""
     if not learned:                                   # not learned yet: learn from the current table first
         ex, _ = _examples(df)
         if len(ex) < 5:
-            return "Add labeled rows and press **Learn rules** first.", pd.DataFrame(), pd.DataFrame(), ""
+            return "Add labeled rows and press **Learn rules** first.", pd.DataFrame(), pd.DataFrame(), "", ""
         learned = {"examples": ex, "min_support": min_support, "min_precision": min_precision}
     cat, system, rules = _learned(learned["examples"], learned["min_support"], learned["min_precision"])
     state = {"address": addr.strip()}
     res = system.ask(state)
-    out = serialize(res, cat, state, list(system.questions.values()))
+    out = serialize(res, cat, state, list(system.questions.values()), system=system)
     answer, fired = rules.predict(state)
     r = res["zone"]
     rule_txt = (f"rule {rules.rules.index(fired) + 1}: **if {fired['if']} → {fired['then']}** "
@@ -575,7 +614,7 @@ def try_address(addr, learned, df, min_support, min_precision):
     md = (f"### {answer}\n\nFired: {rule_txt}.\n\nThe learned rule list is installed in the catalog as the ordinary rule "
           f"`answer:zone` (a `{r.status}` answer, confidence {r.confidence:.2f}); below is the flow the strategist planned "
           "for it, like for any hand-written rule.\n\n" + replay_line(out))
-    return md, flow_df(out), skipped_df(out), out["show"]
+    return md, flow_df(out), skipped_df(out), out["show"], audit_html(out, with_stats=False)
 
 
 # ====================================================================== UI
@@ -591,10 +630,64 @@ CSS = """
 .dag { overflow-x: auto; }
 .dag svg { min-width: 860px; }
 .bar-ms { text-align: right; font-variant-numeric: tabular-nums; font-family: ui-monospace, monospace; }
+/* audit panel (audit_view.py) */
+.aud { display: flex; flex-direction: column; gap: 10px; font-size: 13.5px; line-height: 1.45; }
+.aud code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12.5px; background: rgba(100,116,139,.12); padding: 0 3px; border-radius: 3px; word-break: break-word; }
+.aud-top { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.aud-legend { font-size: 12px; opacity: .7; flex-basis: 100%; }
+.aud-chip { display: inline-block; font-size: 12px; padding: 1px 8px; border-radius: 999px; border: 1px solid var(--border-color-primary, #cbd5e1); margin-right: 4px; }
+.aud-chip.ok { background: rgba(22,163,74,.14); border-color: rgba(22,163,74,.5); }
+.aud-chip.bad { background: rgba(220,38,38,.14); border-color: rgba(220,38,38,.55); }
+.aud-chip.warn, .aud-guards .aud-chip { background: rgba(234,88,12,.14); border-color: rgba(234,88,12,.55); }
+.aud-card { border: 1px solid var(--border-color-primary, #e2e8f0); border-radius: 10px; padding: 8px 12px; background: var(--block-background-fill, transparent); }
+.aud-card summary { cursor: pointer; font-size: 14px; }
+.aud-q { font-weight: 700; font-family: ui-monospace, monospace; }
+.aud-ans { font-weight: 700; }
+.aud-st { font-size: 11.5px; padding: 1px 7px; border-radius: 999px; margin-left: 4px; }
+.st-ok { background: rgba(22,163,74,.16); } .st-forced { background: rgba(220,38,38,.16); } .st-abstain { background: rgba(234,88,12,.18); }
+.aud-conf { font-size: 12.5px; opacity: .75; margin-left: 6px; }
+.aud-share { display: flex; align-items: center; gap: 8px; margin: 6px 0 4px; flex-wrap: wrap; }
+.aud-sbar { display: flex; width: 140px; height: 9px; border-radius: 5px; overflow: hidden; background: rgba(100,116,139,.2); flex: none; }
+.aud-det { background: #16a34a; } .aud-fuz { background: #f97316; }
+.aud-stxt { font-size: 12px; opacity: .85; }
+.aud-chain { list-style: none; margin: 4px 0; padding: 0 0 0 4px; border-left: 2px solid rgba(100,116,139,.25); }
+.aud-row { display: flex; gap: 8px; padding: 2px 0 2px 8px; align-items: baseline; }
+.aud-tag { flex: none; width: 108px; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .03em; padding: 1px 6px; border-radius: 4px; text-align: center; }
+.aud-body { flex: 1; min-width: 0; word-break: break-word; }
+.k-given .aud-tag { background: rgba(100,116,139,.18); } .k-computed .aud-tag { background: rgba(37,99,235,.16); }
+.k-quoted .aud-tag { background: rgba(22,163,74,.18); } .k-decided .aud-tag { background: rgba(234,88,12,.18); }
+.k-learned .aud-tag { background: rgba(147,51,234,.18); } .k-check .aud-tag { background: rgba(217,119,6,.18); }
+.k-rule .aud-tag { background: rgba(79,70,229,.18); } .k-constraint .aud-tag { background: rgba(13,148,136,.18); }
+.k-notrun .aud-tag { background: rgba(100,116,139,.1); } .k-rejected .aud-tag { background: rgba(220,38,38,.2); }
+.k-answer .aud-tag { background: rgba(79,70,229,.3); }
+.aud-snip { margin-top: 3px; font-family: ui-monospace, monospace; font-size: 12px; white-space: pre-wrap; opacity: .9; padding: 3px 6px; border-radius: 4px; background: rgba(100,116,139,.08); }
+.aud-snip mark { background: rgba(250,204,21,.55); color: inherit; padding: 0 1px; border-radius: 2px; }
+.aud-off { font-family: ui-monospace, monospace; font-size: 12px; opacity: .8; }
+.aud-ok { color: #15803d; } .aud-bad { color: #dc2626; font-weight: 700; }
+.dark .aud-ok { color: #4ade80; } .dark .aud-bad { color: #f87171; }
+.aud-model { font-size: 11.5px; padding: 0 6px; border-radius: 4px; border: 1px dashed rgba(234,88,12,.6); display: inline-block; max-width: 100%; overflow-wrap: anywhere; }
+.aud-probs { display: inline-flex; flex-wrap: wrap; gap: 8px; vertical-align: middle; }
+.aud-p { font-size: 12px; display: inline-flex; align-items: center; gap: 3px; }
+.aud-pbar { display: inline-block; height: 7px; border-radius: 3px; background: #f97316; }
+.k-learned .aud-pbar { background: #9333ea; }
+.aud-guards { margin-top: 4px; font-size: 12.5px; }
+.aud-guards ul { margin: 3px 0 0 18px; padding: 0; }
+.aud-glabel { font-weight: 700; margin-right: 6px; }
+.aud-none { opacity: .7; }
+.aud-stats { border: 1px solid var(--border-color-primary, #e2e8f0); border-radius: 10px; padding: 8px 12px; }
+.aud-stitle { font-size: 12.5px; opacity: .8; margin-bottom: 6px; }
+.aud-sgrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(118px, 1fr)); gap: 6px; }
+.aud-stat { display: flex; flex-direction: column; padding: 4px 8px; border-radius: 6px; background: rgba(100,116,139,.08); }
+.aud-stat b { font-size: 16px; font-variant-numeric: tabular-nums; } .aud-stat span { font-size: 11.5px; opacity: .8; }
+.aud-stat.hot { background: rgba(234,88,12,.16); }
+@media (max-width: 640px) { .aud-row { flex-direction: column; gap: 2px; } .aud-tag { width: auto; } }
 """
 PITCH = ("Write a decision task as small Python functions, checks and rules; ask typed questions. The strategist plans only the "
          "steps those questions need and answers in about a millisecond, with reasons and a hash-chained trace you can re-check.")
 ABOUT = """
+**New in 0.4: grounded decisions.** Fuzzy proposes, deterministic decides, everything is in the trace: a model may quote, pick a category or learn an answer, but plain code checks its output (grounding, closed options, confidence, hard checks, constraints between answers) before anything uses it.
+`res.audit()` shows what every answer rests on and which safeguards fired, and replay reports "model changed since this decision" when a model is swapped; try the three "New in 0.4" presets and the Audit panel.
+
 **solvi** builds decision systems from a catalog of plain Python functions, checks and rules plus typed questions (yes/no or a choice).
 For each request a **strategist** plans which parts to run; everything else in the catalog is skipped, and the flow says why.
 Every answer has a **confidence**, a **reason you can check** (rule inputs, a formula, or a quote with character offsets), and a **hash-chained trace** that `trace.replay(catalog)` re-executes to confirm the answer or pinpoint an altered step.
@@ -637,6 +730,8 @@ with gr.Blocks(title="solvi playground", theme=THEME, css=CSS) as demo:
                 summary = gr.Markdown("Press **Run**.")
                 err_box = gr.Code(language=None, label="Traceback (last lines)", visible=False, elem_classes="mono")
                 ans = gr.Dataframe(label="Answers", wrap=True, interactive=False, column_widths=ANS_W)
+                with gr.Accordion("Audit: what each answer rests on, safeguards, System.stats", open=True):
+                    aud = gr.HTML()
                 flow = gr.Dataframe(label="Flow chosen by the strategist (execution order)", wrap=True, interactive=False)
                 skipped = gr.Dataframe(label="Parts NOT taken, and why", wrap=True, interactive=False)
                 cstate = gr.Dataframe(label="computed_state with provenance", wrap=True, interactive=False)
@@ -645,20 +740,24 @@ with gr.Blocks(title="solvi playground", theme=THEME, css=CSS) as demo:
                 with gr.Accordion("Tamper with the trace", open=False):
                     gr.Markdown("Every step is hashed and chained to the previous one. Change one recorded value in a copy of "
                                 "the trace and replay it: replay recomputes each step from init_state and names the step "
-                                "that no longer matches, even if the attacker also recomputes all hashes.",
-                                elem_classes="note")
+                                "that no longer matches, even if the attacker also recomputes all hashes. Model-backed steps "
+                                "also record the model's id and fingerprint: replace the model after the decision and replay "
+                                "says so.", elem_classes="note")
                     chain = gr.Code(language=None, interactive=False, elem_classes="mono", lines=8, label="Hash chain")
                     with gr.Row():
                         t_step = gr.Dropdown([], label="Step to change", scale=3)
                         t_val = gr.Textbox("999", label="Replacement value (Python literal)", scale=2)
                     t_rehash = gr.Checkbox(False, label="Attacker also recomputes the hashes of the chain")
-                    t_btn = gr.Button("Tamper and replay")
+                    with gr.Row():
+                        t_btn = gr.Button("Tamper and replay")
+                        t_model = gr.Button("Replace the model after the decision, then replay")
                     t_out = gr.Markdown()
 
         preset.change(load_preset, preset, [code, init_json, qs, known])
-        play_outputs = [summary, err_box, ans, flow, skipped, cstate, raw, qs, known, t_step, chain]
+        play_outputs = [summary, err_box, ans, aud, flow, skipped, cstate, raw, qs, known, t_step, chain]
         run_btn.click(run_playground, [code, init_json, qs, known], play_outputs)
         t_btn.click(tamper_playground, [code, init_json, qs, known, t_step, t_val, t_rehash], t_out)
+        t_model.click(replace_model_playground, [code, init_json, qs, known], t_out)
 
     with gr.Tab("Strategy"):
         gr.Markdown(f"An insurance claim desk with **{len(sd.cat.parts)} parts and {len(sd.cat.rules)} rules** "
@@ -701,6 +800,8 @@ with gr.Blocks(title="solvi playground", theme=THEME, css=CSS) as demo:
             with gr.Column(scale=7):
                 s_md = gr.Markdown("Press **Plan and run**.")
                 s_ans = gr.Dataframe(label="Answers", wrap=True, interactive=False, column_widths=ANS_W)
+                with gr.Accordion("Audit of these answers", open=False):
+                    s_aud = gr.HTML()
                 gr.Markdown("### Timing")
                 s_bars = gr.HTML()
         gr.Markdown("### The generated strategy")
@@ -723,7 +824,7 @@ with gr.Blocks(title="solvi playground", theme=THEME, css=CSS) as demo:
                         "parts (APIs, models) the share not run is time saved.", elem_classes="note")
         s_fields = [s_pol, s_type, s_cid, s_name, s_ps, s_pe, s_inc, s_rep, s_peril, s_perils, s_amt, s_ded, s_lim, s_codes,
                     s_lines, s_days]
-        s_out = [s_md, s_graph, s_plan, s_skip, s_bars, s_ans]
+        s_out = [s_md, s_graph, s_plan, s_skip, s_bars, s_ans, s_aud]
         s_scen.change(claim_fields, s_scen, s_fields).then(run_strategy, [s_qs, *s_fields], s_out)
         s_run.click(run_strategy, [s_qs, *s_fields], s_out)
         s_qs.change(run_strategy, [s_qs, *s_fields], s_out)
@@ -753,11 +854,13 @@ with gr.Blocks(title="solvi playground", theme=THEME, css=CSS) as demo:
                 with gr.Column(scale=6):
                     l_sum = gr.Markdown()
                     l_ans = gr.Dataframe(label="Answers", wrap=True, interactive=False, column_widths=ANS_W)
+                    with gr.Accordion("Audit", open=False):
+                        l_aud = gr.HTML()
                     l_flow = gr.Dataframe(label="Flow", wrap=True, interactive=False)
                     l_skip = gr.Dataframe(label="Not taken", wrap=True, interactive=False)
                     l_state = gr.Dataframe(label="computed_state", wrap=True, interactive=False)
             l_in = [l_emp, l_start, l_end, l_today, l_bal, l_team, l_leaves]
-            l_out = [l_sum, l_ans, l_flow, l_skip, l_state]
+            l_out = [l_sum, l_ans, l_flow, l_skip, l_state, l_aud]
             for c in l_in:
                 c.change(run_leave, l_in, l_out)
 
@@ -781,11 +884,13 @@ with gr.Blocks(title="solvi playground", theme=THEME, css=CSS) as demo:
                     i_hl = gr.HighlightedText(label="Extracted quotes in the text", show_legend=False,
                                               show_inline_category=True, elem_classes="mono")
                     i_ans = gr.Dataframe(label="Answers", wrap=True, interactive=False, column_widths=ANS_W)
+                    with gr.Accordion("Audit (the risk answer is learned: see its head and probabilities)", open=False):
+                        i_aud = gr.HTML()
                     i_flow = gr.Dataframe(label="Flow", wrap=True, interactive=False)
                     i_skip = gr.Dataframe(label="Not taken", wrap=True, interactive=False)
                     i_state = gr.Dataframe(label="computed_state", wrap=True, interactive=False)
             i_in = [i_text, i_vendors, i_prior, i_pay, i_today]
-            i_out = [i_sum, i_ans, i_flow, i_skip, i_state, i_hl]
+            i_out = [i_sum, i_ans, i_flow, i_skip, i_state, i_aud, i_hl]
             for c in i_in:
                 c.change(run_invoice, i_in, i_out)
 
@@ -815,14 +920,16 @@ with gr.Blocks(title="solvi playground", theme=THEME, css=CSS) as demo:
                 z_out = gr.Markdown()
                 z_flow = gr.Dataframe(label="Flow: the learned rule is an ordinary rule step", wrap=True, interactive=False)
                 z_skip = gr.Dataframe(label="Not taken", wrap=True, interactive=False)
+                with gr.Accordion("Audit", open=False):
+                    z_aud = gr.HTML()
                 with gr.Accordion("Raw output of solvi.show", open=False):
                     z_raw = gr.Code(language=None, interactive=False, elem_classes="mono", lines=10)
         z_learn.click(learn, [z_df, z_sup, z_prec], [z_md, z_rules, learned]).then(
-            try_address, [z_addr, learned, z_df, z_sup, z_prec], [z_out, z_flow, z_skip, z_raw])
+            try_address, [z_addr, learned, z_df, z_sup, z_prec], [z_out, z_flow, z_skip, z_raw, z_aud])
         z_reset.click(lambda: (seed_df(), None, "Press **Learn rules**.", ""), None, [z_df, learned, z_md, z_rules])
         try_in = [z_addr, learned, z_df, z_sup, z_prec]
-        z_try.click(try_address, try_in, [z_out, z_flow, z_skip, z_raw])
-        z_addr.submit(try_address, try_in, [z_out, z_flow, z_skip, z_raw])
+        z_try.click(try_address, try_in, [z_out, z_flow, z_skip, z_raw, z_aud])
+        z_addr.submit(try_address, try_in, [z_out, z_flow, z_skip, z_raw, z_aud])
 
     with gr.Tab("About"):
         gr.Markdown(ABOUT)

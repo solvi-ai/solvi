@@ -10,6 +10,9 @@ import types
 from pathlib import Path
 
 from solvi import System
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))   # gallery/_audit.py: the audit check shared by the runners
+from _audit import Tally, check, line as audit_line  # noqa: E402
 from solvi.rules import RuleList
 
 HERE = Path(__file__).resolve().parent
@@ -24,6 +27,10 @@ def load_task():
 def prepared(task, raw):
     s = copy.deepcopy(raw)
     return task.prepare(s) if callable(getattr(task, "prepare", None)) else s
+
+
+def plain(a):
+    return list(a) if isinstance(a, tuple) else a        # a multi-label answer is a tuple; cases.json has lists
 
 
 def fmt(r):
@@ -41,7 +48,7 @@ def cited(res, state):
 
 def run_cases(task, cases):
     system = System(task.cat, task.QUESTIONS)
-    bad, times, replay_ok = [], [], 0
+    bad, times, replay_ok, tally = [], [], 0, Tally()
     for i, case in enumerate(cases, 1):
         state = prepared(task, case["state"])
         res = system.ask(state)
@@ -50,6 +57,7 @@ def run_cases(task, cases):
         times.append(res.ms)
         print(f"[{i}] {case['name']:40s} {res.ms:6.2f} ms   replay {'ok' if rep['ok'] else 'FAILED'}")
         print("    " + "  ".join(f"{q}={fmt(r)}" for q, r in res.results.items()))
+        print("    " + audit_line(tally.add(check(res, system))))            # asserts the audit's invariants
         for line in cited(res, state):
             print("    cited: " + line)
         for q, r in res.results.items():
@@ -58,12 +66,13 @@ def run_cases(task, cases):
         for q, want in case["expected"].items():
             r = res[q]
             want_status = case.get("status", {}).get(q)
-            if r.answer != want or (want_status and r.status != want_status):
+            if plain(r.answer) != want or (want_status and r.status != want_status):
                 bad.append((case["name"], q, r.answer, r.status, want, want_status))
                 print(f"    MISMATCH {q}: got {r.answer} [{r.status}], expected {want} [{want_status or 'any'}]")
     times.sort()
     print(f"\n{len(cases) - len({b[0] for b in bad})}/{len(cases)} cases match, replay ok on {replay_ok}/{len(cases)} traces, "
           f"median decision {times[len(times) // 2]:.2f} ms")
+    print(tally)
     return bad
 
 
@@ -95,4 +104,6 @@ if __name__ == "__main__":
     print("\nthe strategist's flow for state.json:\n" + str(res.flow))
     res = System(task.cat, task.QUESTIONS).ask(prepared(task, cases[3]["state"]))
     print(f"\nearly exit on '{cases[3]['name']}': " + (", ".join(f"{n} ({w})" for n, w in res.trace.skipped) or "nothing skipped"))
+    res = System(task.cat, task.QUESTIONS).ask(prepared(task, cases[3]["state"]))
+    print(f"\nthe audit of '{cases[3]['name']}' (res.audit('priority')):\n" + str(res.audit('priority')))
     sys.exit(1 if bad else 0)

@@ -1,10 +1,12 @@
-"""Content guard: user text for an app -> allow / review / block, plus "sensitive data?" and "prompt injection?".
+"""Content guard: user text for an app -> allow / review / block, harm types, "sensitive data?" and "prompt injection?".
 
 Every finding is an extract with a Quote, so the verdict cites the offending span: e-mail addresses, phone numbers, card numbers
 (only if the Luhn checksum holds, so a 16-digit order number is not a card), IBANs (only if the mod-97 checksum holds), API keys
 and private keys, and prompt-injection phrases (a phrase inside quotes is a mention, not an attack). A card number, a secret or
 a direct injection into an LLM prompt are hard checks: the verdict is "block" whatever the risk points add up to.
-`surface` says where the text goes: llm_prompt, support_chat or public_post (the same e-mail address is fine in a support chat
+The kinds of harm found come back as one multi-label answer (harm), and constraints tie it to the verdict and to
+sensitive_data: a card or a secret among the harms is always a block, bank details, a direct injection or abuse are never
+simply allowed. `surface` says where the text goes: llm_prompt, support_chat or public_post (the same e-mail address is fine in a support chat
 and a privacy risk in a public post). Try: change one digit of the card number, or put the injection phrase in quotes."""
 import re
 
@@ -35,13 +37,13 @@ def _quoted(text, start):
 
 
 # ---------- findings, each with its quote
-@cat.extract
+@cat.extract(exact=True)                  # the value is the matched text itself: the audit checks it is literal
 def email_address(text):
     m = re.search(r"[\w.+-]+@[\w-]+(?:\.[\w-]+)*\.[a-z]{2,}", text, re.I)
     return Quote(m.group(), m.start(), m.end(), source="text") if m else NONE
 
 
-@cat.extract
+@cat.extract(exact=True)
 def phone_number(text):
     "9-12 digits with separators, or an international +CC number (longer runs are card candidates)"
     for m in re.finditer(r"(?<![\w+])\+?\(?\d[\d ().-]{7,17}\d(?!\w)", text):
@@ -95,7 +97,7 @@ def injection(text):
     return NONE
 
 
-@cat.extract
+@cat.extract(exact=True)
 def insult(text):
     m = re.search(r"\b(?:idiot|moron|stupid|shut up|pathetic|loser)s?\b", text, re.I)
     return Quote(m.group(), m.start(), m.end(), source="text") if m else NONE
@@ -149,15 +151,47 @@ def sensitive_data(email_address, phone_number, iban):
     return email_address is not None or phone_number is not None or iban is not None
 
 
+@cat.rule("harm")
+def harm(email_address, phone_number, iban, card_number, secret_token, injection, insult):
+    """every kind of harm found (a multi-label answer: any subset, in option order)"""
+    found = {"personal_data": email_address is not None or phone_number is not None, "bank_details": iban is not None,
+             "card_data": card_number is not None, "secret": secret_token is not None,
+             "prompt_injection": injection == "direct", "abuse": insult is not None}
+    return [k for k, v in found.items() if v]
+
+
 @cat.rule("prompt_injection")
 def prompt_injection(injection):
     return injection == "direct"
 
 
+# ---------- rules between answers: the verdict, sensitive_data and harm come from separate rules; these tie them together
+@cat.constraint
+def block_if_card_or_secret(verdict, harm):
+    """a card number or a secret among the harms is always a block"""
+    return not ({"card_data", "secret"} & set(harm)) or verdict == "block"
+
+
+@cat.constraint
+def never_allow_serious_harm(verdict, harm):
+    """bank details, a direct injection or abuse are never simply allowed"""
+    return not ({"bank_details", "prompt_injection", "abuse"} & set(harm)) or verdict != "allow"
+
+
+@cat.constraint
+def sensitive_iff_data_harm(sensitive_data, harm):
+    """sensitive_data is yes exactly when a data harm (personal, bank, card, secret) was found"""
+    return (sensitive_data == "yes") == bool({"personal_data", "bank_details", "card_data", "secret"} & set(harm))
+
+
+HARMS = {"personal_data": "an e-mail address or a phone number", "bank_details": "a valid IBAN",
+         "card_data": "a Luhn-valid card number", "secret": "an API key, token or private key",
+         "prompt_injection": "instructions aimed at the model (not a quoted mention)", "abuse": "an insult"}
 QUESTIONS = [
     Question("verdict", "Allow, send to review, or block?", Answer.choice(["allow", "review", "block"]),
              checkpoints=["no_card_number", "no_secret", "no_direct_injection"]),
     Question("sensitive_data", "Does the text carry personal data, payment data or secrets?", Answer.yes_no(),
              checkpoints=["no_card_number", "no_secret"]),
+    Question("harm", "Which kinds of harm does the text carry?", Answer.multi(HARMS)),
     Question("prompt_injection", "Does the text try to give the model instructions?", Answer.yes_no()),
 ]

@@ -14,6 +14,9 @@ from pathlib import Path
 
 from solvi import System
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))   # gallery/_audit.py: the audit check shared by the runners
+from _audit import Tally, check, line as audit_line  # noqa: E402
+
 HERE = Path(__file__).resolve().parent
 _spec = importlib.util.spec_from_file_location("pdm_task", HERE / "task.py")
 task = importlib.util.module_from_spec(_spec)
@@ -72,6 +75,7 @@ if __name__ == "__main__":
     print(f"accuracy on {len(test)} new incidents (true fault): {acc:.3f}\n")
 
     cases = json.loads((HERE / "cases.json").read_text())
+    tally = Tally()
     failures, times = [], []
     for i, case in enumerate(cases, 1):
         state = state_of(case["state"])
@@ -90,12 +94,16 @@ if __name__ == "__main__":
         print("    " + " · ".join(x for x in facts if x) + (f" · offline: {', '.join(missing)}" if missing else ""))
         if fired:
             print(f"    fault rule fired: if {fired['if']} -> {fired['then']}")
+        print("    " + audit_line(tally.add(check(res, system))))      # asserts the audit's invariants
         rep = res.trace.replay(task.cat)
         bad = [f"{q}: expected {want}, got {got(res[q])}" for q, want in case["expected"].items() if got(res[q]) != want]
         failures += [f"{case['name']}: {b}" for b in bad] + ([] if rep["ok"] else [f"{case['name']}: replay {rep['mismatches']}"])
         print(f"    replay {'ok' if rep['ok'] else 'FAILED'} ({rep['steps']} records) · {res.ms:.2f} ms · "
               + ("expected ✓" if not bad else "MISMATCH: " + "; ".join(bad)) + "\n")
 
+    print(tally)
+    res = system.ask(state_of(cases[1]["state"]))
+    print(f"\nthe audit of '{cases[1]['name']}' (res.audit('fault')):\n" + str(res.audit('fault')) + "\n")
     times.sort()
     print(f"{len(cases) - len({f.split(':')[0] for f in failures})}/{len(cases)} cases as expected; "
           f"decision time median {times[len(times) // 2]:.2f} ms, max {times[-1]:.2f} ms")

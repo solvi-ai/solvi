@@ -10,8 +10,17 @@ from pathlib import Path
 
 from solvi import System
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))   # gallery/_audit.py: the audit check shared by the runners
+from _audit import Tally, check, line as audit_line  # noqa: E402
+
 HERE = Path(__file__).resolve().parent
-SHOW_WHY = ["verdict"]                                     # print the reason for these answers even when they are plain "ok"
+SHOW_WHY = ["verdict"]
+LABELLED = [({"surface": "support_chat", "text": "My order never arrived, can you check?"}, "allow"),
+            ({"surface": "public_post", "text": "Great ride today, 80 km along the coast."}, "allow"),
+            ({"surface": "public_post", "text": "Call me on 0176 555 01234 or mail ann@web.de"}, "review"),
+            ({"surface": "support_chat", "text": "you idiot, shut up and fix it"}, "review"),
+            ({"surface": "llm_prompt", "text": "Summarize: the meeting moved to Friday."}, "allow"),
+            ({"surface": "support_chat", "text": "Where do I change my password?"}, "allow")]                                     # print the reason for these answers even when they are plain "ok"
 
 
 def load_task():
@@ -23,6 +32,10 @@ def load_task():
 def prepared(task, raw):
     s = copy.deepcopy(raw)
     return task.prepare(s) if callable(getattr(task, "prepare", None)) else s
+
+
+def plain(a):
+    return list(a) if isinstance(a, tuple) else a        # a multi-label answer is a tuple; cases.json has lists
 
 
 def fmt(r):
@@ -40,7 +53,7 @@ def cited(res, state):
 
 def run_cases(task, cases):
     system = System(task.cat, task.QUESTIONS)
-    bad, times, replay_ok = [], [], 0
+    bad, times, replay_ok, tally = [], [], 0, Tally()
     for i, case in enumerate(cases, 1):
         state = prepared(task, case["state"])
         res = system.ask(state)
@@ -49,6 +62,7 @@ def run_cases(task, cases):
         times.append(res.ms)
         print(f"[{i}] {case['name']:40s} {res.ms:6.2f} ms   replay {'ok' if rep['ok'] else 'FAILED'}")
         print("    " + "  ".join(f"{q}={fmt(r)}" for q, r in res.results.items()))
+        print("    " + audit_line(tally.add(check(res, system))))            # asserts the audit's invariants
         for line in cited(res, state):
             print("    cited: " + line)
         for q, r in res.results.items():
@@ -60,12 +74,13 @@ def run_cases(task, cases):
         for q, want in case["expected"].items():
             r = res[q]
             want_status = case.get("status", {}).get(q)
-            if r.answer != want or (want_status and r.status != want_status):
+            if plain(r.answer) != want or (want_status and r.status != want_status):
                 bad.append((case["name"], q, r.answer, r.status, want, want_status))
                 print(f"    MISMATCH {q}: got {r.answer} [{r.status}], expected {want} [{want_status or 'any'}]")
     times.sort()
     print(f"\n{len(cases) - len({b[0] for b in bad})}/{len(cases)} cases match, replay ok on {replay_ok}/{len(cases)} traces, "
           f"median decision {times[len(times) // 2]:.2f} ms")
+    print(tally)
     return bad
 
 
@@ -79,4 +94,29 @@ if __name__ == "__main__":
     print("\nthe strategist's flow for state.json:\n" + str(res.flow))
     res = System(task.cat, task.QUESTIONS).ask(prepared(task, cases[0]["state"]))
     print(f"\nearly exit on '{cases[0]['name']}': " + (", ".join(f"{n} ({w})" for n, w in res.trace.skipped) or "nothing skipped"))
+    res = System(task.cat, task.QUESTIONS).ask(prepared(task, cases[0]["state"]))
+    print(f"\nthe audit of '{cases[0]['name']}' (res.audit('verdict')):\n" + str(res.audit('verdict')))
+
+    # the constraints at work: replace the verdict rule by a head learned from 6 labelled texts (fit_fast). Hard checks still
+    # force "block"; where the head contradicts the harm answer, solvi picks the most probable verdict that satisfies every
+    # constraint and says so. What no constraint covers stays the head's own answer (a constraint is not the whole policy).
+    weak = load_task()
+    del weak.cat.rules["verdict"]
+    learned = System(weak.cat, weak.QUESTIONS)
+    learned.fit_fast("verdict", LABELLED, features=["risk_points", "surface"])
+    print("\na learned verdict (fit_fast on 6 labelled texts) instead of the rule:")
+    repaired, demo_tally = None, Tally()
+    for case in cases:
+        r = learned.ask(prepared(weak, case["state"]))
+        demo_tally.add(check(r, learned))
+        v = r["verdict"]
+        mark = "  <- repaired by a constraint" if v.repaired else ""
+        print(f"    {case['name']:36s} verdict={fmt(v)!s:15s} (rule: {case['expected']['verdict']})  harm={list(r['harm'].answer)}{mark}")
+        if v.repaired and repaired is None:
+            repaired = r
+    print(demo_tally)
+    if repaired is None:
+        bad.append(("learned verdict", "verdict", None, None, "a constraint repair", None))
+    else:
+        print("\n" + str(repaired.audit("verdict")))
     sys.exit(1 if bad else 0)

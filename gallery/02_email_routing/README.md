@@ -3,7 +3,7 @@
 An inbound email (sender, subject, body) goes in. Out come **team** (billing, technical, sales, security, hr) and
 **needs_human**, which says whether a person should look before the email is routed.
 
-`cited` `hard checks` `strategist plan` `early exit` `trace replay` `learns in ms` `readable learned rules` `abstains` `runs in browser`
+`cited` `hard checks` `strategist plan` `early exit` `trace replay` `learns in ms` `readable learned rules` `abstains` `audited` `runs in browser`
 
 ```bash
 uv run python gallery/02_email_routing/run.py        # learns the table, runs 9 scenarios, exits non-zero on a mismatch
@@ -21,6 +21,21 @@ uv run python gallery/02_email_routing/run.py        # learns the table, runs 9 
   team=security and needs_human=yes. It runs first; when it fails, the rest of the flow is skipped (early exit).
 - **Cited risk signals.** `payment_change_ask` ("update my bank details") and `credential_ask` ("verify your password") come
   with quotes. A bank-detail change from outside the company needs a human even when the team is clear.
+
+## What the audit shows
+
+`run.py` asserts the audit's invariants on every email (see [`_audit.py`](../_audit.py)). `team_votes` is registered with
+`model=ROUTING`, so the learned table shows up as **learned** with its fingerprint: 9/9 emails, 174 support items, 91%
+deterministic, hard check decided ×2. A split vote makes the team rule return `None`, which the audit reports as the closed-set
+safeguard (outside the options ×2) — the abstention is visible, not silent. From `res.audit("team")` on the split vote:
+
+```
+team = '—'  [abstain]  confidence 0.00  ← computed by team
+  quoted      sender_domain = 'orbit.co'  sender[4:12] literal 'orbit.co'
+  learned     team_votes = {'security': 6, 'technical': 4}  [RuleList RuleList #a66dde49]
+  support     9 items (3 given, 4 computed, 1 quoted, 1 learned): 89% deterministic, 1 from models
+  safeguards  outside the options ×1
+```
 
 ## Sample output (real run)
 
