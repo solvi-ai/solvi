@@ -28,8 +28,10 @@ class LongSpanExtractor:
         self.thr = {}
         self.thr_default = 0.0                   # threshold for fields without their own examples (new field by description)
         self.model_name = model_name
+        self.model_id = model_name               # recorded in the trace (load() sets the id or path it was loaded from)
         self._cache = {}
         self._tok_key, self._tok_val = None, None
+        self._fp_weights = None
 
     def _windows(self, desc, text):
         """Windows "[CLS] description [SEP] text chunk [SEP]" overlapping by stride; split manually (the ModernBERT tokenizer's
@@ -126,6 +128,7 @@ class LongSpanExtractor:
             log(f"[extractL] epoch {ep + 1}/{epochs}: loss {tot / max(1, math.ceil(len(ex) / bs)):.4f}, windows {len(ex)}, {time.time() - t0:.0f} s")
         self.enc.eval()
         self._cache = {}
+        self._fp_weights = None
         return self
 
     def predict(self, text, desc, bs=8):
@@ -193,6 +196,7 @@ class LongSpanExtractor:
         Path(path).mkdir(parents=True, exist_ok=True)
         self.enc.to(self.torch.bfloat16).save_pretrained(path)
         self.enc.to(self.torch.float32)
+        self._fp_weights = None                  # the weights in memory are now bf16-rounded
         self.tok.save_pretrained(path)
         self.torch.save(self.head.state_dict(), f"{path}/span_head.pt")
         json.dump({"max_len": self.max_len, "stride": self.stride, "max_span": self.max_span, "thr_default": self.thr_default,
@@ -203,6 +207,7 @@ class LongSpanExtractor:
         """From a directory written by save(), or a Hugging Face model id (downloaded once and cached)."""
         import json
         import os
+        path_or_id = path
         if not os.path.isdir(path):
             from huggingface_hub import snapshot_download
             path = snapshot_download(path)
@@ -211,6 +216,7 @@ class LongSpanExtractor:
         ex.enc.to(ex.torch.float32)
         ex.head.load_state_dict(ex.torch.load(f"{path}/span_head.pt", map_location=ex.device))
         ex.thr_default, ex.thr = cfg["thr_default"], cfg.get("thr", {})
+        ex.model_id = path_or_id
         return ex
 
     def embed(self, text, bs=8):
@@ -242,7 +248,20 @@ class LongSpanExtractor:
             return self.embed(doc)
         f.__name__ = name
         f.__doc__ = "document embedding"
+        f.__solvi_model__ = self
+        f.__solvi_provenance__ = "learned"
         return f
+
+    def fingerprint(self):
+        """A stable hash of this extractor: settings, thresholds, the span head, sampled encoder weights and the weight files
+        it was loaded from (recorded in the trace; replay compares it with the catalog's current model)."""
+        from .provenance import digest, torch_fingerprint
+        if self._fp_weights is None:
+            import os
+            files = self.model_name if os.path.isdir(str(self.model_name)) else None
+            self._fp_weights = torch_fingerprint([self.enc, self.head], files)
+        return digest("LongSpanExtractor", self.max_len, self.stride, self.max_span, self.thr_default, self.thr,
+                      self._fp_weights)
 
     def field(self, name, desc):
         def f(doc):
@@ -252,4 +271,6 @@ class LongSpanExtractor:
             return Quote(doc[s:e], s, e, confidence=sc)
         f.__name__ = name
         f.__doc__ = desc
+        f.__solvi_model__ = self                 # cat.extract records this model (and its fingerprint) in the trace
+        f.__solvi_provenance__ = "quoted"
         return f

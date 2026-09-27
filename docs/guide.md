@@ -13,9 +13,11 @@ Contents:
 7. [Questions without a rule: fit, learn_rule, teach](#questions-without-a-rule-fit-learn_rule-teach)
 8. [Confidence, calibration and abstention](#confidence-calibration-and-abstention)
 9. [The trace and verification](#the-trace-and-verification)
-10. [Printing results: solvi.show](#printing-results-solvishow)
-11. [Extracting fields from documents](#extracting-fields-from-documents)
-12. [Guarantees and limitations](#guarantees-and-limitations)
+10. [Grounded decisions: provenance, audit and safeguards](#grounded-decisions-provenance-audit-and-safeguards)
+11. [Decisions with a model](#decisions-with-a-model)
+12. [Printing results: solvi.show](#printing-results-solvishow)
+13. [Extracting fields from documents](#extracting-fields-from-documents)
+14. [Guarantees and limitations](#guarantees-and-limitations)
 
 ## Concepts
 
@@ -34,7 +36,8 @@ status.
 
 ```bash
 pip install solvi              # core: numpy, scipy
-pip install "solvi[model]"     # + torch, transformers, for the ModernBERT extractors (solvi.extract_*)
+pip install "solvi[model]"     # + torch, transformers, for the ModernBERT extractors (solvi.extract_*) and the decider
+pip install "solvi[onnx]"      # + onnxruntime, tokenizers: the decider (solvi.decide) on CPU without torch
 ```
 
 For development, from a clone: `uv sync`, then `uv run pytest`.
@@ -115,13 +118,55 @@ def amount(doc):
 ```
 
 - `doc[start:end]` is the supporting quote. `source` names the `init_state` key holding the text (default `"doc"`).
-- A quote whose offsets fall outside the source text is recorded as an error.
+- A quote whose offsets fall outside the source text is rejected: the fact is missing (dependent answers abstain) and the
+  error is recorded. A quote from a model-backed part must also be literally the text at its offsets — see
+  [Grounded decisions](#grounded-decisions-provenance-audit-and-safeguards). Hand-written code may return a value derived
+  from the quoted text (a label, a parsed number, a date); `@cat.extract(exact=True)` makes it literal too.
 - `confidence` (default 1.0) is propagated to every answer that depends on this value (see
   [Confidence](#confidence-calibration-and-abstention)).
 - Downstream parts receive the plain `value`, not the `Quote`.
 
 You can write extractors by hand (regular expressions, parsers) or get them from a trained model
 ([Extracting fields from documents](#extracting-fields-from-documents)).
+
+### Several producers of one fact (fallback chain)
+
+A fact can have alternative producers — a cheap regular expression and a slower model, say. Give each its own function name
+and say which fact it `provides`:
+
+```python
+@cat.fn(provides="total", cost=0.1, validate=lambda v: v > 0)
+def total_regex(doc):
+    m = re.search(r"TOTAL\s*:?\s*(\d+\.\d\d)", doc)
+    return None if m is None else float(m.group(1))           # None = "not found": rejected, the next producer runs
+
+@cat.extract(provides="total", cost=50, min_confidence=0.8)
+def total_model(doc):
+    return extractor.field("total", "the total amount paid")(doc)
+
+@cat.features("total")                                      # optional: cheap features for the producer policy
+def total_features(doc):
+    return {"lines": doc.count("\n"), "has_total": "TOTAL" in doc.upper()}
+```
+
+- The producers form a group in the catalog under the fact's name; the strategist plans it like one part (its inputs are
+  the union of the producers' inputs). Catalogs without `provides` behave exactly as before.
+- A producer's output is **accepted** only if it is not `None`, a `Quote` lies inside its text (literally, for a model-backed
+  producer), a `Decision` is among its options, it reaches `min_confidence`,
+  and `validate(value, [any of the producer's inputs by name])` returns true. An exception counts as a rejection. The
+  first accepted output is used; if none is accepted the fact is missing and dependent answers abstain.
+- Order: declaration order by default. `System(cat, questions, producers="learned")` lets a policy choose the order per
+  input: producers predicted to agree with the reference producer (the last declared, normally the most trusted) at least
+  `system.producer_policy.quality` of the time (0.9) go first, cheapest expected cost first (cost ÷ P(accepted)). The policy
+  learns from every run: acceptance of each producer that ran, and — when two producers ran on the same input — whether the
+  cheaper one agreed with the reference. With probability `producer_policy.explore` (0.1) the remaining producers also run
+  as a *shadow* (never used, only compared) so the policy keeps getting agreement labels. The policy only orders; acceptance is
+  always the producer's own deterministic check.
+- The record of the fact says which producer was used (`record.producer`) and every producer that ran with its outcome
+  (`record.tried`, e.g. `[["total_regex", "no value"], ["total_model", "accepted"]]`). Both are hashed into the chain.
+  `replay` recomputes the value with the producer that was used, checks it still passes its validator, and checks that the
+  producers tried before it are still rejected (shadow runs are not re-checked).
+- `cost=` (ms) is a prior; measured run times replace it (`system.costs`).
 
 ## Questions and answer types
 
@@ -133,14 +178,15 @@ Question("risk", "Risk level", Answer.choice(["low", "medium", "high"]))
 Question("route", "Which team?", Answer.choice(["a", "b"]), uses=["country", "total"])
 ```
 
-`Question(name, text, answer, checkpoints=[], uses=None)`:
+`Question(name, text, answer, checkpoints=[], uses=None, min_confidence=None)`:
 
 - `name`: the key used for rules, `fit`, and `res[name]`;
 - `text`: human-readable wording;
 - `answer`: `Answer.yes_no()` (options `["yes", "no"]`) or `Answer.choice(options)`;
 - `checkpoints`: parts that must be in this question's flow in every request (a missing name raises
   `solvi.strategist.PlanError`);
-- `uses`: a hint for the strategist, the facts that matter when the question has neither a rule nor a trained head.
+- `uses`: a hint for the strategist, the facts that matter when the question has neither a rule nor a trained head;
+- `min_confidence`: an answer below this confidence abstains (status `abstain`, the reason says what it would have answered).
 
 An answer outside the options is never returned: a rule that produces one makes the question abstain.
 
@@ -194,6 +240,8 @@ of `init_state`, the answers, the flow and the hash of every trace record.
 | `res.computed_state` | a printable listing: each computed fact, its value, quote offsets, extraction confidence, errors |
 | `res.values` | dict of all fact values (inputs and computed) |
 | `res.trace` | the hash-chained trace (see [The trace](#the-trace-and-verification)) |
+| `res.audit(q=None)` | what each answer rests on and which safeguards fired (see [Grounded decisions](#grounded-decisions-provenance-audit-and-safeguards)) |
+| `res.safeguards` | the safeguard events of this response |
 | `res.ms` | decision time in milliseconds |
 
 ### Result
@@ -204,7 +252,9 @@ of `init_state`, the answers, the flow and the hash of every trace record.
 | `.confidence` | float in [0, 1] |
 | `.why` | the reason: rule inputs and their values, or the top feature contributions of a learned head, or why it abstained or was forced |
 | `.status` | `"ok"`, `"forced"` (a hard check decided) or `"abstain"` |
-| `.probs` | class probabilities for answers from a learned head (empty for rules) |
+| `.probs` | class probabilities for answers from a learned head or a model decision (empty for plain rules) |
+| `.provenance`, `.source` | where the answer came from: `computed` (a rule, a hard check), `learned` (a head, a learned rule), `decided` (a model-backed rule); and which rule / check / head |
+| `.guard`, `.repaired` | the safeguard that settled it (`hard_check`, `outside_options`, `low_confidence`), and `(previous answer, constraints)` if joint decoding changed it |
 
 A question abstains when:
 
@@ -253,6 +303,41 @@ system = System(cat, QUESTIONS, workers=8)
 res = system.ask(claim)
 print(res.trace.skipped)      # e.g. [("fraud_score", "not needed: hard check policy_in_force failed"), ...]
 ```
+
+### Learned order of hard checks
+
+Every `ask` measures the run time of each part: `system.costs` keeps a moving average (ms) per part (`cost=` on a decorator
+is the prior until a part has run). It also records which hard checks failed on which input.
+
+`System(cat, questions, order="learned")` — or `system.learn_order(examples)` on a list of `init_state`s, which runs only the
+hard checks and what they read and then switches the order — makes the executor evaluate hard checks **one at a time**, the
+one with the highest expected saving first:
+
+    score = P(check fails | cheap facts) × cost of the steps its failure would skip ÷ cost of evaluating it
+
+and stop as soon as the failed checks settle every question they govern. P(fail) comes from a small online model per hard
+check (`system.order_model`: Laplace counts, then a FastHead refitted every 50 rows and updated in between) on the scalar
+values of `init_state` (and one level of dicts, e.g. `invoice.currency`). `learn_order(features=[...])` adds cheap computed
+facts; they are computed before the hard checks.
+
+Answers are identical to the default order. When several hard checks fail, the first one declared in the catalog decides;
+so a question is settled by a failed check only after every hard check that governs it and is declared earlier has been
+evaluated. Those earlier checks are scheduled next, since evaluating them settles the question whatever they return. Records
+stay in flow order. What changes is only which steps run: `res.trace.skipped` lists the rest, and
+`res.trace.explain_order()` (also printed by `show`) says why each hard check ran when it did:
+
+```
+1. policy_in_force: P(fail) 0.09 × saves 222.6 ms ÷ costs 0.0 ms = 712 → passed
+2. fraud_ok: P(fail) 0.81 × saves 64.0 ms ÷ costs 170.2 ms = 0.305 → failed
+3. no_litigation: ... [unblocks decision (already decided by a failed check)] → passed; settles decision, fast_track
+```
+
+`ask(state, order=...)` overrides the order for one request: `"default"`, `"learned"`, or any object with
+`p_fail(check, row)` and `row(vals, init_keys)` (e.g. an oracle for experiments).
+
+The learned order saves time only when hard checks fail often enough and their failure skips expensive work; when nothing
+fails every hard check still runs. With `workers > 1` the default order runs all hard checks at once, while the learned order
+runs them one after another (their inputs still run in parallel) — measure before choosing it for parallel execution.
 
 ## Questions without a rule: fit, learn_rule, teach
 
@@ -333,8 +418,8 @@ Note that non-JSON values in `init_state` (dates, custom objects) are stored as 
 
 How confidence is computed:
 
-- **Rule answers**: the minimum extraction confidence among all extracted values the rule's inputs depend on. A rule
-  over dict inputs and computations only has confidence 1.0.
+- **Rule answers**: the minimum confidence among all extracted values and model decisions the rule's inputs depend on
+  (and the rule's own, for a model-backed rule). A rule over dict inputs and computations only has confidence 1.0.
 - **Learned heads**: the head's probability of the chosen answer, multiplied by the same extraction confidence.
 - **Forced answers** (failed hard checks): 1.0.
 
@@ -368,6 +453,11 @@ Every step of the flow is a `Record` in `res.trace.records`:
 | `quote` | `(start, end, source)` for extracted values |
 | `confidence`, `error` | extraction confidence; error text if the part failed or had missing inputs |
 | `prev`, `hash` | hash of the previous record (or of `init_state` for the first) and of this record |
+| `producer`, `tried` | for a fact with several producers: the one used, and every producer that ran with its outcome |
+| `provenance`, `model`, `probs` | the value's provenance kind (`record.origin` gives the default when not stored), the model that produced it (`{"type", "id", "fp"}`), a decision's probabilities |
+
+Answers from a learned head are records too (`kind="head"`, after the flow's steps): the answer, its probabilities and the
+head's fingerprint.
 
 `res.trace.init` keeps `init_state` and `res.trace.init_hash` its hash. `res.trace.value(name)` returns a recorded value.
 
@@ -375,10 +465,11 @@ Every step of the flow is a `Record` in `res.trace.records`:
 
 - that each record still hashes to its stored hash and links to the previous one;
 - that each step's inputs match the recorded input hashes;
-- that recomputing the part gives the recorded value;
-- that quotes lie within the source text.
+- that recomputing the part gives the recorded value (and the same quote offsets);
+- that quotes lie within the source text (and, for model-backed parts, are literally the quoted text);
+- for model-backed steps, that the recorded model fingerprint matches the catalog's current model (see below).
 
-It returns `{"ok": bool, "steps": int, "mismatches": [(step, name, reason), ...]}`.
+It returns `{"ok": bool, "steps": int, "mismatches": [(step, name, reason), ...], "models": [(step, name, verdict), ...]}`.
 
 Continuing the README quickstart:
 
@@ -397,13 +488,260 @@ were caught, with the exact step identified every time, and there were no false 
 Replay needs the same catalog code. Parts that call external systems (databases, APIs) must return the same values on
 replay, or their steps will be reported as mismatches.
 
+## Grounded decisions: provenance, audit and safeguards
+
+The principle: **fuzzy proposes, deterministic decides, everything is in the trace.** A model may extract a value, pick a
+category or learn an answer, but its output is checked by deterministic code before anything uses it, and every step records
+where its value came from. A model's hallucination is either caught or visible in the audit — never silently an answer.
+A decision without any model and one with models are the same system; they differ only in the provenance of the facts.
+
+### Provenance
+
+Every fact and answer has a provenance kind (`record.origin`, `result.provenance`, `solvi.provenance.KINDS`):
+
+| Kind | Where the value comes from | How it is kept honest |
+|---|---|---|
+| `given` | a key of `init_state` | hashed into `init_hash`; the chain starts from it |
+| `computed` | a plain function: `fn`, `check`, a hand-written rule | replay re-runs it and compares |
+| `quoted` | an `extract` part returning a `Quote` | the offsets must lie in the source text; for a model, `doc[start:end]` must be the value |
+| `decided` | a model's choice among declared options, with probabilities (`Decision`) | the value must be one of the options; probabilities recorded |
+| `learned` | a `fit` / `fit_fast` head, a `learn_rule` list, another trained function | the head type and a fingerprint of its parameters are recorded |
+| `proposed` | reserved for a strategist model | the deterministic layer verifies what it proposes |
+
+The default comes from what a part returns (a `Quote` → `quoted`, a `Decision` → `decided`) and whether a model is behind
+it. Declare it explicitly with `provenance=` on any decorator. A part is model-backed when you pass `model=`:
+
+```python
+cat.extract(extractor.field("total", "the total amount paid"))    # field() functions bring their model along
+
+@cat.extract(model=span_extractor)                                  # any function that calls a model
+def vendor(doc): ...
+
+@cat.fn(model=classifier, options=["travel", "meals", "equipment"])
+def category(doc):
+    p = classifier.predict(doc)                                    # {option: probability}
+    return Decision(max(p, key=p.get), p)                           # downstream parts get the plain value
+
+@cat.rule("risk", model=risk_model)                                 # a model answers the question directly
+def risk(amount, country): ...
+```
+
+`LongSpanExtractor.field`, `MultiSpanExtractor.field` and `LongSpanExtractor.embedder` mark their functions (the attributes
+`__solvi_model__` and `__solvi_provenance__`), so registering them is enough. For `SpanExtractor`, or any other model,
+pass `model=`.
+
+### Model identity in the trace
+
+A model-backed record stores `record.model = {"type", "id", "fp"}`: the class, the model id (the Hugging Face id or path it
+was loaded from, `model.model_id`), and a fingerprint (`solvi.provenance.fingerprint`):
+
+- extractors: settings, thresholds / temperatures, the span head, evenly sampled encoder weights, and the names and sizes of
+  the weight files — about 10 ms once, then cached until `fit` / `save`;
+- `Head`, `FastHead` (fit, fit_fast): a hash of their parameters — it changes with every `teach`;
+- `RuleList` (learn_rule): a hash of its rules;
+- any other object: its own `fingerprint()` method, or a `version` attribute, or `"unversioned:<type>"` (then a changed model
+  cannot be detected — give your models a version).
+
+`res.trace.replay(catalog)` handles model-backed steps as follows:
+
+- the fingerprint differs from the catalog's current model → a mismatch, *"model changed since this decision"*; the recorded
+  output is still checked for grounding;
+- same model, deterministic (the default; set `model.deterministic = False` otherwise) → the step is re-run and compared;
+- `replay(catalog, trust_models=True)`, or the model is not available (no model on the part, `model.available = False`) →
+  the model is not re-run; the recorded output is verified instead: the quote is literally at its offsets in the recorded
+  input, the decision is among the options.
+
+Pass the `System` instead of the catalog (`res.trace.replay(system)`) to verify answer-head records too: their fingerprint,
+and (unless trusted) their probabilities recomputed from the recorded facts. `rep["models"]` lists every model-backed step
+with its verdict: `recomputed`, `trusted`, `unavailable` or `changed`.
+
+Hashes: a record hashes its provenance only when it differs from the default (`quoted` for a record with a quote, else
+`computed`), and its model and probabilities only when present — so traces of catalogs without models hash exactly as before.
+
+### Safeguards
+
+| Safeguard | Fires when | Effect |
+|---|---|---|
+| grounding | a quote lies outside its text, or a model's quote is not literally `doc[start:end]` (strings up to whitespace, numbers as written, e.g. `1250.0` ↔ `"1,250.00"`) | the output is rejected: the fact is missing, the claim stays in the error; the next alternative producer runs, else dependent answers abstain |
+| closed set | a `Decision` (or a value of a part with `options=`) is not one of the options; a rule's answer is not one of the question's options | rejected / the question abstains |
+| low confidence | a `Quote` / `Decision` is below the part's `min_confidence`; an answer is below the question's `min_confidence` | rejected / the question abstains, saying what it would have answered |
+| validate | a producer's `validate(value, ...)` returns false | rejected, next producer |
+| hard check | a hard check governing the question is false | the answer is forced by `then`, or the question abstains |
+| constraint repair | learned or model answers break a constraint between answers | the most probable consistent combination is chosen |
+| fallback | an alternative producer was rejected and a later one was used | recorded in `tried` |
+
+Hand-written extractors (no model) may return a value derived from the quoted text; the audit then shows the value next to
+the text it was derived from. Numbers, dates and other non-string values from a model are checked when they can be compared
+(numbers) and shown next to the quoted text otherwise.
+
+### The audit
+
+```python
+print(res.audit())            # every answer
+a = res.audit("approve")      # one answer: an AnswerAudit
+a.to_dict()                   # the same as data
+```
+
+For each answer: the given inputs → computed facts → quotes (offsets, the quoted text, whether the value is literally that
+text, the model) → model decisions (the model, probabilities) → learned parts (head type and fingerprint) → checks (hard or
+soft, which one decided) → the rule → constraints → the answer; the parts skipped at run time; the safeguards that fired;
+and a summary of the support: how many items are deterministic (given, computed, quoted by plain code) and how many come
+from models (`a.share_deterministic`, `a.counts`).
+
+```
+approve = 'yes'  [ok]  confidence 0.60  ← computed by approve
+  given       doc = 'Expense claim #2291\nVendor: C…; limit = {'travel': 100, 'meals': 60, 'e…
+  computed    amount = 48.6
+  quoted      total = '48.60'  doc[100:105] literal '48.60'
+  decided     category = 'travel'  (travel 0.60, meals 0.20, equipment 0.20)  [StandInClassifier demo/expense-category #bb3352d4]
+  check       amount_positive = True (hard)
+  rule        approve (computed)
+  → answer    'yes' — amount = 48.6; category = 'travel'; limit = {...}
+  support     7 items (2 given, 3 computed, 1 quoted, 1 decided): 86% deterministic, 1 from models
+  safeguards  grounding rejected ×1, fallback producer ×1
+              · grounding rejected: total — total_model: not grounded: '488.60' is not the text at [100:105] ('48.60')
+              · fallback producer: total — total_regex used after total_model rejected
+```
+
+### Lifetime stats
+
+`system.stats` counts, over the system's lifetime: `asks`, `answers`, `abstained`, `model_outputs` (outputs of model-backed
+parts, answer heads and learned rules), `grounding_rejected`, `outside_options`, `low_confidence`, `validator_rejected`,
+`forced_by_hard_check`, `constraint_repairs` and `fallbacks`. `system.safeguard_report()` prints them. Counting costs about
+1% of a decision. [examples/12_grounded_audit.py](../examples/12_grounded_audit.py) runs one catalog with and without models,
+with a hallucinating extractor and a classifier answering outside its options.
+
+## Decisions with a model
+
+A **decider** picks among options described in words: "which team handles this email?", "which clauses apply?". solvi's
+decider (solvi-decide, a ModernBERT cross-encoder) reads `[mode] task [opt] option 1 [opt] option 2 … [SEP] text` and scores
+every option in one pass: a softmax over the options for a single choice, a sigmoid per option for multi-label. In solvi it is
+a catalog part like any other, so everything in [Grounded decisions](#grounded-decisions-provenance-audit-and-safeguards)
+applies unchanged: the closed set, `min_confidence`, constraints with joint decoding, hard checks, the audit, the stats.
+
+```python
+from solvi.decide import DecideModel
+
+model = DecideModel.load("~/models/decide-base")          # a checkpoint folder or a Hugging Face id
+team = model.decision("team", "Which team should handle this support email?", text_fact="email",
+                      options={"billing": "payments, invoices, refunds", "technical": "bugs, errors, crashes",
+                               "shipping": "delivery, tracking, parcels", "other": "none of the above"})
+
+cat.fn(team)                              # a fact other parts read (returns Decision(value, probs); they get the value)
+q = team.question(cat, "team", min_confidence=0.6)        # or: the answer of a question (registers cat.rule("team")(team))
+```
+
+### Loading
+
+`DecideModel.load(path_or_hf_id, device=None, backend="auto")` reads a folder with `solvi_decide.json`, `config.json`,
+`tokenizer.json` and the weights (`model.safetensors` and/or `onnx/model_fp16.onnx`), or downloads a Hugging Face id once.
+`backend="onnx"` needs `solvi[onnx]` (onnxruntime + tokenizers, no torch; ~50 ms per decision on a CPU); `backend="torch"`
+needs `solvi[model]` (CUDA when available); `"auto"` takes ONNX when the file and onnxruntime are there. Both give the same
+probabilities to about three decimals. Any retrained checkpoint in the same folder format loads the same way; its
+`solvi_decide.json` may set `temperature` (the default is the value fitted on the training pool, 1.45 for
+`l14b_decider v1`), `temperature_multi`, `other_threshold` and `multi_threshold`.
+
+`model.model_id` is the path or id it was loaded from; `model.fingerprint()` hashes the checkpoint files (names, sizes and
+sampled bytes), the backend, the default calibration and every adaptation; `model.metadata()` lists them. Any object with
+`logits(items)` (one array of logits per `solvi.decide.Item`) can stand in for the network: `DecideModel(scorer, meta)`.
+
+### Scoring
+
+```python
+model.score(text, task, options, descriptions=None, multi=False)   # → {option: probability}; a list of texts → a list
+model.decide(text, task, options, ...)                             # → Decision(value, probs)
+model.logits(text, task, options)                                  # raw logits
+```
+
+Texts are batched (sorted by length, 16 per pass) and raw logits are cached per (text, task, options), so a decision used
+both as a fact and as an answer, or replayed, runs the network once. Only the text is truncated (to `max_len`, 512 tokens).
+
+### The decision part
+
+`model.decision(name, task, text_fact="doc", options=..., descriptions=None, multi=False, other=None)` returns a callable
+catalog function named `name` that reads `text_fact` (a fact name, or a list of them joined by new lines; a `Quote` is read
+as its value) and returns `Decision(value, probs)`:
+
+- the value is one of the options **by construction** — the network only scores the options it is given — and the options are
+  the part's closed set (`part.options`), so the safeguard would reject anything else;
+- the provenance is `decided`; the trace records `{"type": "DecisionPart", "id": model_id, "fp": ...}`, where the fingerprint
+  covers the checkpoint and **this decision's** adaptation (teaching one decision does not mark the others as changed);
+- `cat.fn(min_confidence=0.7)(part)` rejects unsure decisions (the fact is missing, dependent answers abstain);
+  `Question(min_confidence=...)` abstains on unsure answers;
+- as a question's answer (`part.question(cat, name, text=None, min_confidence=None, checkpoints=None)` or
+  `cat.rule("q")(part)`), the answer keeps the probabilities, so constraints can repair it by joint decoding, and a failed hard
+  check still forces the answer without asking the model.
+
+`multi=True`: the value is a tuple of the options at probability ≥ 0.5, in option order; confidence is the least certain
+option's `max(p, 1 − p)`.
+
+### Label-bias correction without labels
+
+A decider likes some labels whatever the text. Estimate that preference on unlabelled texts of your domain and subtract it:
+
+```python
+team.adapt(unlabelled_emails)            # or model.adapt(texts, task, options)
+```
+
+For each option, the mean logit over the texts (centered over the options) is subtracted before the softmax / sigmoid.
+No labels are needed; in research (L14b) this gave +7 points on unseen domains. The correction is stored per
+(task, options, descriptions, mode) in `model.adaptations` and is part of the fingerprint, so a replay of a decision made
+before it reports "model changed since this decision".
+
+### Few-shot adaptation ("S") and teach
+
+```python
+team.fit(labelled)                       # [(text, correct)], e.g. 16–64 examples
+system.teach("team", {"email": text}, "billing")   # one correction, absorbed at once
+```
+
+`fit` learns a shift per option and one shared scale on the (bias-corrected) logits by L-BFGS
+(`(a·z + b) / temperature`, regularized towards the model's defaults), then fits the temperature on out-of-fold
+predictions (4 folds), so confidences are calibrated (ECE 0.055 at 32 examples in research; the accuracy gain over the bias
+correction alone is small — S mostly calibrates). `teach(text, correct)` adds one example and refits the shift and scale from
+the kept examples, warm-started (K + 1 parameters: ~1 ms, plus the forward pass if the text was not scored before); the
+temperature and the threshold stay until the next `fit`. `System.teach(question, ...)` routes to it when the question's
+answer is a decision part (or a rule that only passes a decided fact on), and returns the time in ms.
+
+`model.save_adaptations(path)` / `model.load_adaptations(path)` keep adaptations with the checkpoint's fingerprint (loading
+onto a different checkpoint is refused unless `strict=False`); `part.reset()` forgets one.
+
+### "Other" as an abstain threshold
+
+If the options include `"other"` or `"none"` (also "none of the above", "none of these"; or name it with `other="misc"`;
+`other=False` turns this off), that option is **not scored** by the network. It is chosen when the best real option's
+calibrated probability `m` is below a threshold: fitted by `fit` on out-of-fold predictions when the examples include at
+least three labelled "other" (and three others), else `other_threshold` from the checkpoint's metadata (0.5). Its confidence
+is `1 − m`; in `probs` it gets `π = g / (1 + g)` with `g = thr·(1 − m)/(1 − thr)` and the real options share `1 − π`, so it is
+the most probable option exactly when `m < thr` (joint decoding sees consistent probabilities). For multi-label, "none" is
+chosen when no option reaches 0.5.
+
+### Calibration utilities
+
+`solvi.calibration` works for any model or question:
+
+```python
+from solvi.calibration import coverage_at, ece, evaluate, reliability, threshold_for
+
+coverage_at(conf, correct, 0.9)       # share of cases answerable automatically at ≥ 90% accuracy
+threshold_for(conf, correct, 0.9)     # the confidence threshold that gives it (e.g. for Question(min_confidence=...))
+ece(conf, correct)                    # expected calibration error; reliability(conf, correct, bins) for the diagram
+evaluate(system, "team", examples)    # ask on [(init_state, answer)] → accuracy, ece, coverage_at, answered, ...
+```
+
+[examples/13_decide_model.py](../examples/13_decide_model.py) routes support emails with a decision part: bias correction on
+60 unlabelled emails, S on 16 labelled ones, abstention through `min_confidence`, a constraint with a rule-based question, a
+hard check, the audit and `System.teach`. It runs the real decider when `SOLVI_DECIDE_MODEL` points to a checkpoint and a
+keyword stand-in otherwise.
+
 ## Printing results: solvi.show
 
 ```python
 from solvi.show import show
 
-show(res, cat)                              # answers, flow, computed_state, replay result, time
-show(res, cat, flow=False, state=False)     # answers, replay, time only
+show(res, cat)                              # answers, flow, computed_state, audit summary, replay result, time
+show(res, cat, flow=False, state=False)     # answers, audit summary, replay, time
+show(res, cat, audit=False)                 # without the audit summary
 show(res)                                   # without the catalog: no replay
 ```
 
@@ -493,7 +831,8 @@ def governing_state(governing_law):
 
 `solvi.extract_model.SpanExtractor` is the simplest variant: description plus text in, one span out, one forward pass
 per field. `fit([(text, description, (s, e) or None), ...])` trains it (examples without a span are skipped), and
-`predict([(text, description), ...])` returns `[(start, end, confidence)]`. It has no `field()` helper; wrap it yourself:
+`predict([(text, description), ...])` returns `[(start, end, confidence)]`. It has no `field()` helper; wrap it yourself and
+pass `model=` so the trace records the model:
 
 ```python
 from solvi.extract_model import SpanExtractor
@@ -501,7 +840,7 @@ from solvi.extract_model import SpanExtractor
 sx = SpanExtractor()
 sx.fit(train_items, epochs=4)
 
-@cat.extract
+@cat.extract(model=sx)
 def total(doc):
     "the total amount paid"
     s, e, c = sx.predict([(doc, total.__doc__)])[0]
@@ -520,11 +859,17 @@ It is about 3.6x slower than `MultiSpanExtractor` for four fields with similar a
 
 What solvi guarantees:
 
-- Every value in `computed_state` was produced by your code; every extracted value carries its quote and offsets.
+- Every value in `computed_state` was produced by your code; every extracted value carries its quote and offsets, and
+  its provenance (and the model's identity, for a model-backed part).
+- A model's quote that is not literally the text at its offsets, or a model decision outside its options, is rejected
+  and counted; it never becomes an answer.
 - A failed hard check always decides the answer, above any model confidence.
 - When a needed fact cannot be computed, a part fails, or a rule returns an invalid option, the question abstains
   instead of guessing.
 - `replay` recomputes the trace and names the step where anything was changed, including changes with recomputed hashes.
+- Scheduling never changes answers: the learned order of hard checks gives the same answers as the default order, and a
+  learned producer policy only chooses which producer to try first — every output is still accepted by its own check and
+  the producer used is recorded and replayed.
 
 What it does not guarantee:
 

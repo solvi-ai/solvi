@@ -34,6 +34,9 @@ QUESTION_OF = {"warrior": "order_military", "archer": "order_military", "settler
                "worker": "order_worker", "caravan": "order_caravan"}
 
 
+_WAR_KEY = {}                   # (a, b) -> "min-max": the key of self.wars (memoized, the hot path of at_war)
+
+
 def city_name(cid):
     return SYL_A[(cid * 7) % len(SYL_A)] + SYL_B[(cid * 11 + cid // len(SYL_A)) % len(SYL_B)]
 
@@ -55,6 +58,8 @@ class Metrics:
 
     def reset(self):
         self.dec_ms, self.turn_ms = [], []
+        self.la_ms = []                  # adaptive key decisions with the lookahead planner: total ms incl. rollouts
+        self.la = None                   # lookahead planner window counters (realms/lookahead.py)
         self.n = self.forced = self.abstain = self.early = self.part_errors = 0
         self.replay_n = self.replay_ok = self.masked = self.fallback = 0
         self.by_q = {}
@@ -63,7 +68,7 @@ class Metrics:
 
 
 class Game:
-    def __init__(self, seed=0, n_factions=4, adaptive=True, metrics=None, keep_last=True, learn=True):
+    def __init__(self, seed=0, n_factions=4, adaptive=True, metrics=None, keep_last=True, learn=True, variant="value"):
         self.seed = seed
         self.turn = 0
         self.rng = random.Random(seed)
@@ -92,6 +97,11 @@ class Game:
         self.learner = Learner(seed)
         self.learner.bootstrap(self.systems["adaptive"][1])
         self.learner.frozen = not learn              # ablation: the bootstrap prior, never updated
+        self.planner = None
+        if variant == "lookahead":                   # proposer + hard checks + verified lookahead (realms/lookahead.py)
+            from .lookahead import Planner
+            self.learner.frozen = True               # the outcome learner is off: the proposer learns from the lookahead
+            self.planner = Planner(self)
         pers = ["adaptive", "builder", "expansionist", "warmonger", "trader"] if adaptive else \
             ["builder", "expansionist", "warmonger", "trader"]
         for k in range(n_factions):
@@ -171,7 +181,10 @@ class Game:
         return sorted(f for f, d in self.factions.items() if d["alive"])
 
     def at_war(self, a, b):
-        return f"{min(a, b)}-{max(a, b)}" in self.wars
+        k = _WAR_KEY.get((a, b))
+        if k is None:
+            k = _WAR_KEY[(a, b)] = f"{min(a, b)}-{max(a, b)}"
+        return k in self.wars
 
     def units_at(self, i):
         return [u for u in self.units.values() if u["pos"] == i]
@@ -360,7 +373,8 @@ class Game:
         self.learner.snapshot(self.turn, score_of(self))
         if self.turn - self._site_turn >= 25:
             self._refresh_sites()
-        for fid in self.alive():
+        self._order = self.alive()
+        for fid in self._order:
             if self.factions[fid]["alive"]:
                 self._faction_turn(fid)
         self._world_turn()
@@ -562,6 +576,8 @@ class Game:
             elif choice not in aff:
                 self.m.masked += 1
                 choice = max(aff, key=lambda o: (r.probs.get(o, 0.0), -econ.BUILD_OPTIONS.index(o)))
+        if self.planner is not None and adaptive and r.status == "ok" and self.human != fid and aff:
+            choice = self.planner.decide(self, "build", fid, c["id"], res, aff)
         if self.human == fid and c["id"] in self.human_orders:
             h = self.human_orders.pop(c["id"])
             if h in aff and r.status != "forced":
@@ -569,14 +585,18 @@ class Game:
         if choice is None or choice not in aff:
             self.m.fallback += 1                                   # forced archer unaffordable, or an abstention
             choice = "warrior" if (r.answer == "archer" and "warrior" in aff) else "gold"
-        pw, ww, sw, gw = econ.COST[choice]
+        self._start_build(f, c, choice)
+        if r.status == "ok" and self.human != fid:
+            self.learner.observe(self.systems["adaptive"][1], "build", self.turn, fid, adaptive, res.values, choice)
+        return choice
+
+    @staticmethod
+    def _start_build(f, c, choice):
+        _, ww, sw, gw = econ.COST[choice]
         f["wood"] -= ww
         f["stone"] -= sw
         f["gold"] -= gw
         c["build"] = choice
-        if r.status == "ok" and self.human != fid:
-            self.learner.observe(self.systems["adaptive"][1], "build", self.turn, fid, adaptive, res.values, choice)
-        return choice
 
     # ------------------------------------------------------------------------------------------------ units
     def _unit_turn(self, fid, u):
@@ -638,10 +658,15 @@ class Game:
                  "income": f["income"], "upkeep": self.upkeep(fid)}
         res = self.ask(fid, "order_military", state, f"unit:{u['id']}", f"{u['type']} #{u['id']} ({f['name']})")
         a = res["order_military"].answer or "fortify"
+        if self.planner is not None and f["pers"] == "adaptive" and res["order_military"].status == "ok":
+            a = self.planner.decide(self, "order_military", fid, u["id"], res, None)
         if res["order_military"].status == "ok":
             self.learner.observe(self.systems["adaptive"][1], "order_military", self.turn, fid, f["pers"] == "adaptive",
                                  res.values, a)
-        v = res.values
+        self._set_military_goal(fid, u, a, res.values)
+
+    def _set_military_goal(self, fid, u, a, v):
+        pos = u["pos"]
         tgt = None
         if a == "attack" and v.get("target_pick"):
             tgt = v["target_pick"][0]
@@ -784,7 +809,18 @@ class Game:
         o = self.owner[i]
         if o != -1 and (o not in self.cities or self.cities[o]["fid"] != fid):
             return False
-        return all(cheb(i, c["pos"]) >= 3 for c in self.cities.values())
+        return i not in self._near_cities()
+
+    def _near_cities(self):
+        """Tiles within 2 of any city (no city may be founded there). Cities are never removed, only added or transferred,
+        so the number of cities versions this memo."""
+        memo = getattr(self, "_near_memo", None)
+        if memo is None or memo[0] != len(self.cities):
+            near = set()
+            for c in self.cities.values():
+                near.update(RAD2[c["pos"]])
+            memo = self._near_memo = (len(self.cities), near)
+        return memo[1]
 
     def _act_settler(self, fid, u):
         a, tgt = u["goal"]
@@ -908,22 +944,30 @@ class Game:
             ans = r.answer or "peace"
             if self.human == fid and str(o) in self.human_orders.get("stance", {}):
                 ans = self.human_orders["stance"][str(o)]
+            elif self.planner is not None and f["pers"] == "adaptive" and r.status == "ok":
+                ans = self.planner.decide(self, "stance", fid, o, res, None)
             if r.status == "ok" and self.human != fid:
                 self.learner.observe(self.systems["adaptive"][1], "stance", self.turn, fid, f["pers"] == "adaptive",
                                      res.values, ans)
-            self.wants[f"{fid}>{o}"] = ans
-            if ans == "war" and not war:
-                self.wars[key] = self.turn
-                why = r.why
-                self.note("war", f"{f['name']} declare war on {of['name']} (strength ratio "
-                                 f"{res.values.get('strength_ratio')}, tension {res.values.get('tension')}) — {why[:80]}")
-            elif ans == "peace" and war and self.wants.get(f"{o}>{fid}") == "peace" and self.turn - self.wars[key] >= 8:
-                del self.wars[key]
-                self.truce[key] = self.turn + econ.TRUCE
-                self.note("peace", f"{f['name']} and {of['name']} make peace (truce for {econ.TRUCE} turns)")
-            if r.status == "forced" and war:
-                self.note("veto", f"{f['name']}: hard check war_needs_strength vetoes continuing the war on {of['name']} "
-                                  f"(strength ratio {res.values.get('strength_ratio')} < {econ.WAR_MIN_RATIO})")
+            self._apply_stance(fid, o, ans, r, res)
+
+    def _apply_stance(self, fid, o, ans, r, res):
+        f, of = self.factions[fid], self.factions[o]
+        key = f"{min(fid, o)}-{max(fid, o)}"
+        war = key in self.wars
+        self.wants[f"{fid}>{o}"] = ans
+        if ans == "war" and not war:
+            self.wars[key] = self.turn
+            why = r.why
+            self.note("war", f"{f['name']} declare war on {of['name']} (strength ratio "
+                             f"{res.values.get('strength_ratio')}, tension {res.values.get('tension')}) — {why[:80]}")
+        elif ans == "peace" and war and self.wants.get(f"{o}>{fid}") == "peace" and self.turn - self.wars[key] >= 8:
+            del self.wars[key]
+            self.truce[key] = self.turn + econ.TRUCE
+            self.note("peace", f"{f['name']} and {of['name']} make peace (truce for {econ.TRUCE} turns)")
+        if r.status == "forced" and war:
+            self.note("veto", f"{f['name']}: hard check war_needs_strength vetoes continuing the war on {of['name']} "
+                              f"(strength ratio {res.values.get('strength_ratio')} < {econ.WAR_MIN_RATIO})")
 
     # ------------------------------------------------------------------------------------------------ world
     def _world_turn(self):
@@ -965,6 +1009,8 @@ class Game:
             self._rebellion()
         # learning: decisions judged HORIZON turns later, value heads re-solved every REFRESH turns
         self.learner.mature(self.systems["adaptive"][1], t, self._score_share() if t % 50 == 0 else 0.0)
+        if self.planner is not None:
+            self.planner.tick(self)
         # bounded UI memory: forget cards of entities that no longer exist
         if self.keep_last and t % 10 == 0:
             for k in list(self.last):
@@ -1064,7 +1110,8 @@ class Game:
                 "history": list(self.history), "human": self.human, "site_turn": self._site_turn,
                 "site_rank": self.site_rank, "site_parts": self.site_parts,
                 "human_orders": {str(k): v for k, v in self.human_orders.items()},
-                "learner": self.learner.to_dict(self.systems["adaptive"][1])}
+                "learner": self.learner.to_dict(self.systems["adaptive"][1]),
+                **({"planner": self.planner.to_dict(self)} if self.planner is not None else {})}
 
     def to_json(self):
         return json.dumps(self.to_dict(), separators=(",", ":"))
@@ -1095,6 +1142,10 @@ class Game:
         g.site_parts = [tuple(x) if x is not None else None for x in d["site_parts"]]
         g.learner = Learner(g.seed)
         g.learner.load(d["learner"], g.systems["adaptive"][1])
+        g.planner = None
+        if "planner" in d:
+            from .lookahead import Planner
+            g.planner = Planner.from_dict(g, d["planner"])
         return g
 
     @classmethod

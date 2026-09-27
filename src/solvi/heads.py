@@ -100,8 +100,18 @@ class Head:
         self.T = 1.0
         self.fz = None
         self.loo_acc = None
+        self._fp = None
+
+    def fingerprint(self):
+        """A stable hash of the head's parameters (recorded with every answer it gives)."""
+        if getattr(self, "_fp", None) is None:
+            from .provenance import digest
+            self._fp = digest("Head", self.options, self.features, self.W, self.T, getattr(self, "prior", None),
+                              None if self.fz is None else self.fz.spec)
+        return self._fp
 
     def fit(self, rows, answers, candidates, min_gain=0.01):
+        self._fp = None
         y = np.array([self.options.index(a) for a in answers])
         k = len(self.options)
         self.fz = Featurizer().fit(rows, candidates)

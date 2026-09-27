@@ -82,6 +82,15 @@ class FastHead:
         self.W = None
         self.n = 0
         self.loo_acc = None
+        self._fp = None
+
+    def fingerprint(self):
+        """A stable hash of the head's parameters (recorded with every answer it gives; changes with fit and each update)."""
+        if getattr(self, "_fp", None) is None:
+            from .provenance import digest
+            self._fp = digest("FastHead", self.options, self.features, self.W, self.lam, self.pairs,
+                              None if self.fz is None else self.fz.spec)
+        return self._fp
 
     @property
     def cv_acc(self):                     # same name as Head, for code that prints it
@@ -118,6 +127,7 @@ class FastHead:
         self.W = self.Ainv @ B
         self.B = B
         self.n = len(rows)
+        self._fp = None
         return self
 
     def update(self, row, answer):
@@ -131,6 +141,7 @@ class FastHead:
         self.B += np.outer(x, y)
         self.W = self.Ainv @ self.B
         self.n += 1
+        self._fp = None
         return (time.perf_counter() - t0) * 1000
 
     def scores(self, row):

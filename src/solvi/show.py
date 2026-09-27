@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 
-def show(res, catalog=None, flow=True, state=True):
+def show(res, catalog=None, flow=True, state=True, audit=True):
     print("── answers " + "─" * 60)
     for q, r in res.results.items():
         a = "—" if r.answer is None else r.answer
@@ -15,12 +15,25 @@ def show(res, catalog=None, flow=True, state=True):
             print("  " + line)
     if flow and getattr(res.trace, "skipped", None):
         print("  skipped at run time: " + ", ".join(f"{n} ({why})" for n, why in res.trace.skipped))
+    if flow and getattr(res.trace, "schedule", None):
+        print("  hard checks in learned order:")
+        for line in res.trace.explain_order().splitlines():
+            print("    " + line)
     if state:
         print("── computed_state " + "─" * 52)
         for line in res.computed_state.splitlines():
+            print("  " + line)
+        for r in res.trace.records:
+            if r.tried:
+                print(f"  {r.name}: used {r.producer or '—'}; tried " + ", ".join(f"{n} ({w})" for n, w in r.tried))
+    if audit and hasattr(res, "audit"):
+        print("── audit (support of each answer, safeguards) " + "─" * 24)
+        for line in res.audit().compact().splitlines():
             print("  " + line)
     if catalog is not None:
         rep = res.trace.replay(catalog)
         print("── trace replay " + "─" * 54)
         print(f"  steps {rep['steps']}, mismatches {len(rep['mismatches'])}" + ("" if rep["ok"] else f": {rep['mismatches'][:3]}"))
+        if rep.get("models"):
+            print("  model steps: " + ", ".join(f"{n} {v}" for _, n, v in rep["models"]))
     print(f"── time {res.ms:.2f} ms")

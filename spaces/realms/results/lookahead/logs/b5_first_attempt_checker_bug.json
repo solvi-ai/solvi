@@ -1,0 +1,81 @@
+{
+ "seed": 1,
+ "turns": 2000,
+ "stats": {
+  "example|build|lookahead": "proposer: mine +0.03, archer +0.02, farm +0.02, gold +0.02; laws removed: none; not allowed: lumber_mill, walls, market; lookahead (unsure: margin 0.01 < width 3.08, 2×10 turns): mine +13.21, archer +12.45, farm +14.07 → farm | head: expand_value = 6.632 (-0.02), infra_best = 1.0 (-0.02), food_surplus = 4 (+0.01), growth_need = 0.3 (+0.01)",
+  "example|order_military|lookahead": "proposer: fortify +0.04, attack +0.01, move +0.00; laws removed: none; not allowed: defend, disband; lookahead (unsure: margin 0.03 < width 1.51, 2×10 turns): fortify +31.15, attack +31.64, move +31.64 → attack | head: defend_need = 0.0 (+0.01), fortified = True (+0.00), attack_odds = 0.645 (-0.00), target_is_city = True (-0.00)",
+  "example|order_military|no lookahead": "proposer: fortify +0.03, move +0.01; laws removed: none; not allowed: attack, defend, disband; single candidate → fortify | head: defend_need = 0.0 (+0.01), fortified = False (-0.00), surplus_troops = 0 (+0.00), target_dist = 11 (-0.00); failed checks: good_odds",
+  "example|stance|lookahead": "proposer: peace +0.05, war +0.00; laws removed: none; lookahead (unsure: margin 0.05 < width 1.40, 2×10 turns): peace +13.20, war +12.79 → peace | head: at_war = False (+0.00), war_len = 0 (-0.00), grievance = 0 (+0.00), their_cities = 1 (-0.00)",
+  "build|decided": 21428,
+  "build|forced": 364,
+  "build|hard_check_fired": 364,
+  "build|lookahead": 320,
+  "build|ok": 21428,
+  "build|why_ok": 21208,
+  "order_military|decided": 16336,
+  "order_military|forced": 400,
+  "order_military|hard_check_fired": 400,
+  "order_military|lookahead": 488,
+  "order_military|ok": 16336,
+  "order_military|why_ok": 13072,
+  "stance|decided": 1184,
+  "stance|forced": 31,
+  "stance|hard_check_fired": 31,
+  "stance|lookahead": 205,
+  "stance|ok": 1184,
+  "stance|why_ok": 1078
+ },
+ "violations": 3590,
+ "examples": [
+  [
+   "why incomplete",
+   "order_military",
+   "proposer: fortify +0.16, attack +0.14, move -0.07; laws removed: none; not allowed: defend, disband; unsure but rollout budget spent → proposer's fortify | head: fortified = False (-0.68), attack_odds"
+  ],
+  [
+   "why incomplete",
+   "order_military",
+   "proposer: attack +0.35, fortify +0.08, move -0.15; laws removed: none; not allowed: defend, disband; unsure but rollout budget spent → proposer's attack | head: fortified = False (+0.53), at_capital ="
+  ],
+  [
+   "why incomplete",
+   "order_military",
+   "proposer: fortify +0.68, move -0.16, attack -0.50; laws removed: none; not allowed: defend, disband; unsure but rollout budget spent → proposer's fortify | head: fortified = True (+0.53), target_is_ci"
+  ],
+  [
+   "why incomplete",
+   "order_military",
+   "proposer: move +0.29, attack +0.11, fortify -0.31; laws removed: none; not allowed: defend, disband; unsure but rollout budget spent → proposer's move | head: target_is_city = True (+0.21), attack_odd"
+  ],
+  [
+   "why incomplete",
+   "order_military",
+   "proposer: fortify +0.82, defend +0.07, move -0.42, attack -0.57; laws removed: none; not allowed: disband; unsure but rollout budget spent → proposer's fortify | head: fortified = True (+0.40), attack"
+  ],
+  [
+   "why incomplete",
+   "order_military",
+   "proposer: fortify +0.12, defend +0.05, attack -0.05, move -0.15; laws removed: none; not allowed: disband; unsure but rollout budget spent → proposer's fortify | head: fortified = True (+0.40), target"
+  ],
+  [
+   "why incomplete",
+   "order_military",
+   "proposer: fortify +0.74, defend +0.05, attack -0.37, move -0.45; laws removed: none; not allowed: disband; unsure but rollout budget spent → proposer's fortify | head: fortified = True (+0.40), attack"
+  ],
+  [
+   "why incomplete",
+   "order_military",
+   "proposer: fortify +0.61, defend +0.04, attack -0.18, move -0.48; laws removed: none; not allowed: disband; unsure but rollout budget spent → proposer's fortify | head: fortified = True (+0.40), attack"
+  ],
+  [
+   "why incomplete",
+   "order_military",
+   "proposer: fortify +0.71, defend +0.03, attack -0.23, move -0.54; laws removed: none; not allowed: disband; unsure but rollout budget spent → proposer's fortify | head: fortified = True (+0.40), attack"
+  ],
+  [
+   "why incomplete",
+   "order_military",
+   "proposer: fortify +0.32, move -0.10, attack -0.25; laws removed: none; not allowed: defend, disband; unsure but rollout budget spent → proposer's fortify | head: fortified = True (+0.46), target_is_ci"
+  ]
+ ]
+}

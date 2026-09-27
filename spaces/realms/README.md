@@ -84,6 +84,28 @@ defence need, capital, war; stance: strength ratio, tension, war length, other w
 - **Bootstrap**: 200 synthetic states per question labelled by the balanced rule (its choice worth +0.05). The
   ablation "frozen after bootstrap" keeps exactly this prior for the whole game.
 
+**Variant 2: the network proposes, the law verifies** (`realms/lookahead.py`, `sim.py --variant lookahead`; the value-head
+faction above stays as the baseline arm). The same three questions, the same `System.ask` and hard checks, but:
+
+- **Proposer**: a value head of the same form per question, trained on the lookahead's scores (distillation) instead of
+  the faction's score 20 turns later. It ranks the options; the top 3 are the candidates.
+- **Laws** remove candidates: the mask (affordable builds; attack needs a target, defend a threatened city), `upkeep_ok`
+  (no build whose upkeep would push next turn's treasury below 0) and `war_min_length` (a war cannot end before 8 turns,
+  so "peace" in a young war is the same as "war"). A failed hard check still forces the answer before any of this.
+- **Verified lookahead**: when the proposer is unsure (the margin between its two best candidates is below the posterior
+  width of that margin) or the decision is drawn for a 4% random audit, each surviving candidate is played out: 2
+  rollouts × 10 turns on a copy of the game (every faction plays its normal policy, the adaptive one its proposer; the
+  same RNG seeds for every candidate), scored by a fixed objective: own score − 0.5 × the others' mean score + territory,
+  material, settlers on the road, stock, − danger to the capital. The best mean wins. Rollouts run on a cheap copy of the
+  state with a trace-free replica of `System.ask` (checked equal to `System.ask` on 18 733 decisions) and are paid from
+  a budget refilled every turn, scaled by the world's size, so the time per turn is bounded.
+- **Distillation**: every evaluated candidate's score becomes a training target for the proposer; as its uncertainty
+  shrinks, the gate asks for fewer rollouts.
+- The `why` of every such decision names the candidates with their predicted values, the laws that removed candidates,
+  and the lookahead scores, e.g. `proposer: attack +0.50, fortify +0.24, move -0.27; laws removed: none; not allowed:
+  defend, disband; lookahead (unsure: margin 0.27 < width 0.53, 2×10 turns): attack +4.42, fortify +4.42, move +4.42 →
+  attack`.
+
 ## In the browser
 
 - The map is SVG. Click a city or unit to see its last solvi decision: the answer, `why`, the strategist's plan (steps
@@ -179,6 +201,81 @@ Raw checkpoints: `results/endless_<seed>.json` (evaluation and 100 000-turn run)
 (frozen ablation), `results/baseline_fitfast/` (the previous learner's runs), `results/attempt1/`. Charts:
 `results/health.{png,svg}`, `results/learning.{png,svg}` (solid: learner, dashed: frozen, dotted: previous learner).
 
+### Variant 2: proposer + laws + verified lookahead (pre-registered test)
+
+The criteria B1–B5 were written at the top of `realms/lookahead.py` before any run of this variant and were not edited
+afterwards. Development used seeds 5–12 (3 000 turns); the evaluation ran once on seeds 1–4 × 20 000 turns with the
+default `sim.py` settings (tracemalloc, save/load every 5 000 turns). The baseline arm is the value-head variant's
+evaluation above (same seeds and turns; the engine change that added the planner hook was checked to leave that game
+bit-for-bit unchanged: same state hash after 1 500 turns).
+
+| id | criterion | result |
+|---|---|---|
+| B1 | share over the last 20% ≥ 1.0 in at least 3 of seeds 1–4 | **FAIL** — 1 of 4 (21.00, 0.88, 0.29, 0.23) |
+| B2 | share over the last 20% above the value-head variant's on at least 3 of 4 seeds | **PASS** — 4 of 4 (21.00 vs 0.21, 0.88 vs 0.48, 0.29 vs 0.26, 0.23 vs 0.12; seeds 3 and 4 only barely) |
+| B3 | audit agreement higher in the last 20% than the first (pooled), and rollouts per eligible decision down ≥ 30% (pooled and in ≥ 3 seeds) | **FAIL** — agreement 89.4% → 78.7%; rollouts per decision 0.382 → 0.388 (+2%); down ≥ 30% in 2 of 4 seeds |
+| B4 | all 11 invariants on every run; key-decision time with lookahead and turn time flat within 2×; state < 1 MB | **FAIL** — seed 4 fails I2 (decision p99 3.9 → 42 ms); seeds 1–3 hold all 11. Key-decision p99 with the lookahead: seed 2 1 139 → 1 112 ms, seed 4 590 → 1 071 ms; on seeds 1 and 3 it drops below 1 ms (fewer than 1% of decisions use the lookahead late), so that part holds trivially |
+| B5 | every planner decision's `why` names candidates, predicted values, laws and lookahead scores; hard checks still force | **PASS** — 2 000 turns of seed 1: 38 948 decisions (1 013 with the lookahead, 795 forced by a hard check, the planner never consulted on those), 0 violations (`results/lookahead/b5_check_seed1.json`) |
+
+| seed | wall time | share first → last 20% | value-head variant last 20% | rollouts per eligible decision, first → last 20% | audit agreement, first → last 20% | lookaheads (eligible decisions) | invariants |
+|---|---|---|---|---|---|---|---|
+| 1 | 72 min | 12.35 → **21.00** | 0.21 | 0.38 → 0.18 (−53%) | 425/477 → 115/123 | 2 229 (35 728) | all 11 held |
+| 2 | 178 min | 3.07 → **0.88** | 0.48 | 0.28 → 0.34 (+23%) | 687/745 → 110/155 | 5 588 (107 474) | all 11 held |
+| 3 | 76 min | 0.39 → **0.29** | 0.26 | 0.63 → 0.17 (−73%) | 250/312 → 124/154 | 1 605 (23 066) | all 11 held |
+| 4 | 162 min | 6.43 → **0.23** | 0.12 | 0.52 → 0.75 (+43%) | 266/288 → 50/75 | 6 019 (161 559) | I2 failed |
+
+![lookahead](results/lookahead/lookahead.png)
+
+What the numbers say, plainly:
+
+- **Stronger than the value heads, not reliably stronger than the rules.** On every evaluation seed the lookahead
+  faction ends above the value-head faction, and for long stretches it dominates: seed 1 the whole run (share 8–24),
+  seed 4 from turn 2 500 to 13 500 (share 7–19), seed 2 for 17 000 turns (share 1.3–5). But seeds 2 and 4 lost it late
+  (seed 4 from 19 to 0.3 within 1 000 turns, then eliminated and replaced by a one-city newcomer; seed 2 eliminated at
+  turn 18 000), and seed 3 never got going (0.3 throughout). With the last 20% as the yardstick, only seed 1 counts.
+  On the development seeds (5–12, 3 000 turns, four configurations) the final share was ≥ 1 in 16 of 30 runs, against
+  6 of 16 for the value heads (seeds 5–12, two runs each).
+- **Distillation works early, then the world moves on.** On all four seeds rollouts per eligible decision fall from
+  about 2 at turn 500 to about 0.3 by turn 2 500, and the audited agreement of the proposer with the lookahead climbs to
+  90–100%. The criterion compares the first and last 20% (4 000 turns each), so most of that drop sits inside the first
+  window. Where the faction later collapsed (seeds 2 and 4), the respawned faction is in situations the proposer has not
+  seen: agreement falls to 67–71% and rollouts per decision rise again.
+- **The I2 failure is not the planner's**: while these runs were going, the solvi library in the same repository gained
+  an online learner inside `System.ask` (a check-order model refitted as asks accumulate). A replica of seed 4 with that
+  learner switched off (`system.learn = False`, now set in `realms/brains.py`) played the identical game — same share,
+  population and decision counts at every checkpoint up to turn 12 500 — with decision p99 flat at 3–5 ms instead of
+  40–95 ms (`results/lookahead/learnoff/`). The replica also showed the real risk: turn time grows with the size of a
+  dominating empire (turn p99 first/last 10% ×2.03 at turn 12 500, just over the limit).
+- **Health otherwise**: 0 exceptions, 4 061 278 decisions, every sampled trace replay OK (80 997 of 80 997), every
+  save/load round trip identical, saved state ≤ 188 KB, never fewer than 3 factions alive.
+- **A limitation found while optimising**: a unit next to an enemy re-plans on its next turn, and in the rollout the
+  candidate order is applied but the unit does not act before that re-plan, so its candidate orders roll out to the
+  same game (the lookahead now detects such identical rollouts and skips them — 13% of rollouts). Letting the unit act
+  on the candidate order at once in the rollout would fix it, but changes decisions: a future variant, not run here.
+
+**Speed** (same decisions, verified: identical state hash and planner counters after 1 000 turns of seed 6): 79.5 s →
+53.2 s per 1 000 turns (×1.5): solvi's ask-time learner switched off for the realms systems, a precomputed distance
+table, memoised war keys, a memo of the tiles next to cities, the rollout replica of `System.ask` compiled into one
+function per flow, and rollouts of the candidates run in lockstep, where a rollout whose whole game state equals another
+candidate's (same seed) is dropped and takes its value (exact, as the game is deterministic).
+
+**Resumable runs**: `sim.py --checkpoint PATH` writes the whole run (game with learner and planner, the metrics' replay
+RNG, the records) every `--checkpoint-every` turns; `--resume PATH` continues bit-for-bit (seed 7: 1 000 turns straight
+vs 500 + resume + 500 → identical state hash and all 48 deterministic fields of every record); `--max-wall S` pauses at
+the next checkpoint (exit 3). The 100 000-turn health run of this variant runs on Colab in ~45-minute segments this way
+(`results/lookahead/colab/driver.sh`).
+
+**100 000-turn health run (lookahead variant, seed 5, Colab CPU, 9 segments, 6.3 h): all eleven invariants held.** 0 exceptions;
+decision time p50 1.6 ms / p99 3.5 ms at the end (flat); state 177 KB; memory 48 MB; 5 factions alive; every sampled trace replay
+OK. The lookahead faction dominated by the end: share 19.7× the mean of the others. One world only — on the four 20 000-turn
+seeds it held the lead to the end on one of four (B1), so read it as "longer games favour it", not as a general win. With the
+solvi online-learning default fixed (off unless a learned policy uses it), B4's only earlier failure (seed 4, I2) is explained
+and does not recur.
+
+Raw data: `results/lookahead/endless_<seed>.json`, `results/lookahead/logs/`, `results/lookahead/b5_check.py`,
+`results/lookahead/learnoff/` (the replica), `results/dev_la/` (development runs), `results/lookahead/dev/` (speed and
+resume checks). Charts: `results/lookahead/lookahead.{png,svg}`, `results/lookahead/health.{png,svg}`.
+
 ## Layout
 
 - `index.html`: loads `@gradio/lite@5.45.0` from jsDelivr, requires `solvi>=0.2.1`, and mounts `app.py` and `realms/*.py`.
@@ -186,7 +283,8 @@ Raw checkpoints: `results/endless_<seed>.json` (evaluation and 100 000-turn run)
   solvi exempt), without which micropip cannot resolve gradio 5.45.
 - `app.py`: the Gradio 5 UI.
 - `realms/world.py` (map, distance fields), `realms/econ.py` (rules), `realms/brains.py` (catalogs, questions, hard
-  checks), `realms/adaptive.py` (the adaptive faction's value heads, pre-registered criteria), `realms/engine.py` (turn loop, combat, events, spawning, save/load), `realms/health.py` (invariants,
+  checks), `realms/adaptive.py` (the adaptive faction's value heads, pre-registered criteria A1–A4), `realms/lookahead.py`
+  (variant 2: proposer, laws, verified lookahead, pre-registered criteria B1–B5), `realms/engine.py` (turn loop, combat, events, spawning, save/load), `realms/health.py` (invariants,
   checkpoints), `realms/render.py` (SVG map, cards, sparklines).
 - `sim.py`: the headless long-run test and the charts.
 
@@ -198,7 +296,11 @@ python -m http.server 8080                 # the browser app: open http://localh
 # headless (from the solvi repo, which has solvi installed):
 OPENBLAS_NUM_THREADS=1 uv run python spaces/realms/sim.py --seed 1 --turns 100000 --no-tracemalloc
 uv run --with matplotlib python spaces/realms/sim.py --charts
-uv run python spaces/realms/sim.py --table          # health table + criteria A1-A3 + ablation
+uv run python spaces/realms/sim.py --table          # health table + criteria A1-A3 + ablation + criteria B1-B4
+# variant 2 (proposer + laws + lookahead), resumable:
+OPENBLAS_NUM_THREADS=1 uv run python spaces/realms/sim.py --variant lookahead --seed 1 --turns 20000 --checkpoint ck_1.json
+OPENBLAS_NUM_THREADS=1 uv run python spaces/realms/sim.py --resume ck_1.json --turns 20000 --out spaces/realms/results/lookahead/endless_1.json
+uv run python spaces/realms/results/lookahead/b5_check.py 1 2000   # B5 audit
 # ablation: the adaptive heads frozen after the bootstrap
 uv run python spaces/realms/sim.py --seed 1 --turns 20000 --frozen --out spaces/realms/results/ablation/frozen_1.json
 ```

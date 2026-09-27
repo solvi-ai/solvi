@@ -25,6 +25,8 @@ class MultiSpanExtractor:
         self.max_len = max_len
         self._cache = {}
         self.temp = {f: 1.0 for f in self.fields}
+        self.model_name = self.model_id = model_name
+        self._fp_weights = None
 
     def _enc(self, texts):
         return self.tok(texts, truncation=True, max_length=self.max_len, padding=True, return_offsets_mapping=True, return_tensors="pt")
@@ -94,6 +96,7 @@ class MultiSpanExtractor:
             log(f"[extract1] epoch {ep + 1}/{epochs}: loss {tot / max(1, math.ceil(len(idx) / bs)):.4f}, {time.time() - t0:.0f} s")
         self.enc.eval()
         self._cache = {}
+        self._fp_weights = None
         return self
 
     def predict_doc(self, text, max_span=64):
@@ -127,11 +130,22 @@ class MultiSpanExtractor:
         self._cache[key] = out
         return out
 
+    def fingerprint(self):
+        """A stable hash of this extractor: fields, settings, temperatures, sampled weights (see LongSpanExtractor)."""
+        from .provenance import digest, torch_fingerprint
+        if self._fp_weights is None:
+            import os
+            files = self.model_name if os.path.isdir(str(self.model_name)) else None
+            self._fp_weights = torch_fingerprint([self.enc, self.head], files)
+        return digest("MultiSpanExtractor", self.fields, self.max_len, self.temp, self._fp_weights)
+
     def field(self, name):
         def f(doc):
             s, e, c = self.predict_doc(doc)[name]
             return Quote(doc[s:e], s, e, confidence=c)
         f.__name__ = name
+        f.__solvi_model__ = self                 # cat.extract records this model (and its fingerprint) in the trace
+        f.__solvi_provenance__ = "quoted"
         return f
 
     def fit_temperature(self, docs, gold_ok, grid=(0.5, 0.75, 1.0, 1.5, 2.0, 3.0, 5.0)):

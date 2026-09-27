@@ -1,0 +1,5 @@
+seed 5: resumed at turn 98500 from /content/r/out/ckpt_5.json
+seed 5 turn  99000    22434s  turn p50  73.32 ms p99 1019.0  dec p50 1.594 p99 3.23 ms  alive 5 (min 5)  pop 252  state 177 KB  mem 45.9 MB  vetoes 0.35/100  replay 513/513  share 20.0  la 30/785 roll 132 audit 22/30 la_ms p99 0
+seed 5 turn  99500    22497s  turn p50  75.53 ms p99  923.1  dec p50 1.601 p99 3.39 ms  alive 5 (min 5)  pop 250  state 177 KB  mem 46.3 MB  vetoes 0.37/100  replay 496/496  share 19.86  la 33/837 roll 158 audit 27/33 la_ms p99 0
+seed 5 turn 100000    22562s  turn p50  74.69 ms p99  855.8  dec p50 1.608 p99 3.47 ms  alive 5 (min 5)  pop 253  state 177 KB  mem 47.6 MB  vetoes 0.35/100  replay 489/489  share 19.655  la 20/686 roll 92 audit 17/20 la_ms p99 0
+seed 5: 100000 turns in 22562 s; invariants failed: none

@@ -1,6 +1,6 @@
 [project]
 name = "solvi"
-version = "0.3.0"
+version = "0.4.0"
 description = "Decision systems from a catalog of Python functions and checks: a strategist plans the flow, every answer comes with a quote or formula and a verifiable trace"
 readme = "README.md"
 license = "Apache-2.0"
@@ -21,7 +21,8 @@ requires-python = ">=3.10"
 dependencies = ["numpy", "scipy"]
 
 [project.optional-dependencies]
-model = ["torch", "transformers"]   # model-based extraction from text (solvi.extract_*)
+model = ["torch", "transformers"]   # model-based extraction from text (solvi.extract_*) and the decider (solvi.decide, torch backend)
+onnx = ["onnxruntime", "tokenizers", "huggingface_hub"]   # the decider without torch (solvi.decide, backend="onnx")
 
 [project.urls]
 Homepage = "https://github.com/solvi-ai/solvi"

@@ -1,0 +1,9 @@
+seed 5: resumed at turn 74000 from /content/r/out/ckpt_5.json
+seed 5 turn  74500    17117s  turn p50 177.91 ms p99 2334.7  dec p50 1.148 p99 3.60 ms  alive 5 (min 5)  pop 206  state 181 KB  mem 47.2 MB  vetoes 7.62/100  replay 696/696  share 3.973  la 243/5867 roll 1346 audit 12/19 la_ms p99 1305
+seed 5 turn  75000    17553s  turn p50 214.70 ms p99 2600.5  dec p50 1.216 p99 4.00 ms  alive 5 (min 5)  pop 222  state 182 KB  mem 50.0 MB  vetoes 6.25/100  replay 688/688  share 7.135  la 241/7095 roll 1360 audit 11/20 la_ms p99 1375
+seed 5 turn  75500    17919s  turn p50 684.95 ms p99 2338.0  dec p50 1.224 p99 3.78 ms  alive 5 (min 5)  pop 216  state 182 KB  mem 48.4 MB  vetoes 5.8/100  replay 654/654  share 5.543  la 261/6758 roll 1428 audit 7/12 la_ms p99 1072
+seed 5 turn  76000    18296s  turn p50 496.30 ms p99 2403.3  dec p50 1.195 p99 3.75 ms  alive 5 (min 5)  pop 222  state 180 KB  mem 48.4 MB  vetoes 6.67/100  replay 646/646  share 12.48  la 253/6709 roll 1410 audit 17/28 la_ms p99 1224
+seed 5 turn  76500    18665s  turn p50 197.78 ms p99 2432.0  dec p50 1.204 p99 3.97 ms  alive 5 (min 5)  pop 207  state 182 KB  mem 48.4 MB  vetoes 6.52/100  replay 772/772  share 5.882  la 245/6682 roll 1406 audit 12/18 la_ms p99 1184
+seed 5 turn  77000    19000s  turn p50 513.30 ms p99 2317.4  dec p50 1.226 p99 3.78 ms  alive 5 (min 5)  pop 205  state 180 KB  mem 48.4 MB  vetoes 5.28/100  replay 633/633  share 9.124  la 254/5567 roll 1448 audit 14/22 la_ms p99 999
+seed 5 turn  77500    19308s  turn p50 544.54 ms p99 1716.2  dec p50 1.323 p99 4.13 ms  alive 5 (min 5)  pop 227  state 179 KB  mem 48.4 MB  vetoes 3.56/100  replay 599/599  share 20.627  la 268/4817 roll 1548 audit 14/27 la_ms p99 930
+seed 5: paused at turn 78000 (wall limit 2700.0 s); checkpoint /content/r/out/ckpt_5.json

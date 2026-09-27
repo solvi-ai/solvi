@@ -24,8 +24,12 @@ def idx(x, y):
     return y * W + x
 
 
+# Chebyshev distance between tiles, precomputed (N × N table; CHEB[i][j] is the hot-path form)
+CHEB = [bytes(max(abs(i % W - j % W), abs(i // W - j // W)) for j in range(N)) for i in range(N)]
+
+
 def cheb(i, j):
-    return max(abs(i % W - j % W), abs(i // W - j // W))
+    return CHEB[i][j]
 
 
 NEI8 = []

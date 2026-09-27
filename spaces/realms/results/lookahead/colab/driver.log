@@ -1,0 +1,706 @@
+2026-09-27 02:21:25 driver start: session realms_100k, seed 5, 100000 turns, 2700 s per segment; local checkpoint turn -1
+2026-09-27 02:21:25 segment 1: new VM CPU
+
+[colab] A new version of Colab CLI is available: 0.7.4 (current: 0.7.2)
+[colab] Run 'colab update' to update.
+[colab] To silence this check, set "enable_update_check": false in ~/.config/colab-cli/settings.json
+
+[colab] Creating session 'realms_100k'...
+[colab] Session READY.
+realms_100k: токен обновлён, истекает через 3600 с
+realms_100k: токен обновлён, истекает через 3600 с
+realms_100k: токен обновлён, истекает через 3600 с
+realms_100k: токен обновлён, истекает через 3600 с
+2026-09-27 02:28:06 checkpoint turn 1500
+realms_100k: токен обновлён, истекает через 3600 с
+realms_100k: токен обновлён, истекает через 3600 с
+2026-09-27 02:32:18 no answer from VM (1)
+realms_100k: токен обновлён, истекает через 3600 с
+2026-09-27 02:34:25 checkpoint turn 3000
+realms_100k: токен обновлён, истекает через 3600 с
+realms_100k: токен обновлён, истекает через 3600 с
+realms_100k: токен обновлён, истекает через 3600 с
+2026-09-27 02:41:02 checkpoint turn 4000
+realms_100k: токен обновлён, истекает через 3600 с
+realms_100k: токен обновлён, истекает через 3600 с
+realms_100k: токен обновлён, истекает через 3600 с
+2026-09-27 02:47:39 checkpoint turn 5500
+realms_100k: токен обновлён, истекает через 3600 с
+realms_100k: токен обновлён, истекает через 3600 с
+realms_100k: токен обновлён, истекает через 3600 с
+2026-09-27 02:53:56 checkpoint turn 6500
+realms_100k: токен обновлён, истекает через 3600 с
+2026-09-27 02:58:57 no answer from VM (1)
+realms_100k: токен обновлён, истекает через 3600 с
+realms_100k: токен обновлён, истекает через 3600 с
+2026-09-27 03:03:11 checkpoint turn 8000
+realms_100k: токен обновлён, истекает через 3600 с
+realms_100k: токен обновлён, истекает через 3600 с
+2026-09-27 03:07:32 no answer from VM (1)
+realms_100k: токен обновлён, истекает через 3600 с
+2026-09-27 03:09:39 checkpoint turn 9000
+2026-09-27 03:09:39 segment 1 ended: exit 3 | [vm] EXIT=3 | seed 5: paused at turn 9000 (wall limit 2700.0 s); checkpoint /content/r/out/ckpt_5.json
+2026-09-27 03:09:42 checkpoint turn 9000
+
+[colab] A new version of Colab CLI is available: 0.7.4 (current: 0.7.2)
+[colab] Run 'colab update' to update.
+[colab] To silence this check, set "enable_update_check": false in ~/.config/colab-cli/settings.json
+
+[colab] Stopping session 'realms_100k'...
+[colab] Session terminated.
+2026-09-27 03:09:47 segment 2: new VM CPU
+
+[colab] A new version of Colab CLI is available: 0.7.4 (current: 0.7.2)
+[colab] Run 'colab update' to update.
+[colab] To silence this check, set "enable_update_check": false in ~/.config/colab-cli/settings.json
+
+[colab] Creating session 'realms_100k'...
+[colab] Session READY.
+realms_100k: токен обновлён, истекает через 3600 с
+realms_100k: токен обновлён, истекает через 3600 с
+realms_100k: токен обновлён, истекает через 3600 с
+realms_100k: токен обновлён, истекает через 3600 с
+2026-09-27 03:16:35 checkpoint turn 9500
+realms_100k: токен обновлён, истекает через 3600 с
+Traceback (most recent call last):
+  File "/home/exactor/.local/share/uv/tools/google-colab-cli/lib/python3.13/site-packages/urllib3/connectionpool.py", line 793, in urlopen
+    response = self._make_request(
+        conn,
+    ...<10 lines>...
+        **response_kw,
+    )
+  File "/home/exactor/.local/share/uv/tools/google-colab-cli/lib/python3.13/site-packages/urllib3/connectionpool.py", line 494, in _make_request
+    raise new_e
+  File "/home/exactor/.local/share/uv/tools/google-colab-cli/lib/python3.13/site-packages/urllib3/connectionpool.py", line 470, in _make_request
+    self._validate_conn(conn)
+    ~~~~~~~~~~~~~~~~~~~^^^^^^
+  File "/home/exactor/.local/share/uv/tools/google-colab-cli/lib/python3.13/site-packages/urllib3/connectionpool.py", line 1125, in _validate_conn
+    conn.connect()
+    ~~~~~~~~~~~~^^
+  File "/home/exactor/.local/share/uv/tools/google-colab-cli/lib/python3.13/site-packages/urllib3/connection.py", line 878, in connect
+    wrapped_socket, is_verified = _ssl_wrap_socket_and_match_hostname(
+                                  ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^
+        sock=sock,
+        ^^^^^^^^^^
+    ...<14 lines>...
+        assert_fingerprint=self.assert_fingerprint,
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "/home/exactor/.local/share/uv/tools/google-colab-cli/lib/python3.13/site-packages/urllib3/connection.py", line 1080, in _ssl_wrap_socket_and_match_hostname
+    ssl_sock = ssl_wrap_socket(
+        sock=sock,
+    ...<8 lines>...
+        tls_in_tls=tls_in_tls,
+    )
+  File "/home/exactor/.local/share/uv/tools/google-colab-cli/lib/python3.13/site-packages/urllib3/util/ssl_.py", line 437, in ssl_wrap_socket
+    ssl_sock = _ssl_wrap_socket_impl(sock, context, tls_in_tls, server_hostname)
+  File "/home/exactor/.local/share/uv/tools/google-colab-cli/lib/python3.13/site-packages/urllib3/util/ssl_.py", line 481, in _ssl_wrap_socket_impl
+    return ssl_context.wrap_socket(sock, server_hostname=server_hostname)
+           ~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/exactor/.local/share/uv/python/cpython-3.13.11-linux-x86_64-gnu/lib/python3.13/ssl.py", line 455, in wrap_socket
+    return self.sslsocket_class._create(
+           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~^
+        sock=sock,
+        ^^^^^^^^^^
+    ...<5 lines>...
+        session=session
+        ^^^^^^^^^^^^^^^
+    )
+    ^
+  File "/home/exactor/.local/share/uv/python/cpython-3.13.11-linux-x86_64-gnu/lib/python3.13/ssl.py", line 1076, in _create
+    self.do_handshake()
+    ~~~~~~~~~~~~~~~~~^^
+  File "/home/exactor/.local/share/uv/python/cpython-3.13.11-linux-x86_64-gnu/lib/python3.13/ssl.py", line 1372, in do_handshake
+    self._sslobj.do_handshake()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~^^
+ConnectionResetError: [Errno 104] Connection reset by peer
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "/home/exactor/.local/share/uv/tools/google-colab-cli/lib/python3.13/site-packages/requests/adapters.py", line 696, in send
+    resp = conn.urlopen(
+        method=request.method,
+    ...<9 lines>...
+        chunked=chunked,
+    )
+  File "/home/exactor/.local/share/uv/tools/google-colab-cli/lib/python3.13/site-packages/urllib3/connectionpool.py", line 847, in urlopen
+    retries = retries.increment(
+        method, url, error=new_e, _pool=self, _stacktrace=sys.exc_info()[2]
+    )
+  File "/home/exactor/.local/share/uv/tools/google-colab-cli/lib/python3.13/site-packages/urllib3/util/retry.py", line 510, in increment
+    raise reraise(type(error), error, _stacktrace)
+          ~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/exactor/.local/share/uv/tools/google-colab-cli/lib/python3.13/site-packages/urllib3/util/util.py", line 38, in reraise
+    raise value.with_traceback(tb)
+  File "/home/exactor/.local/share/uv/tools/google-colab-cli/lib/python3.13/site-packages/urllib3/connectionpool.py", line 793, in urlopen
+    response = self._make_request(
+        conn,
+    ...<10 lines>...
+        **response_kw,
+    )
+  File "/home/exactor/.local/share/uv/tools/google-colab-cli/lib/python3.13/site-packages/urllib3/connectionpool.py", line 494, in _make_request
+    raise new_e
+  File "/home/exactor/.local/share/uv/tools/google-colab-cli/lib/python3.13/site-packages/urllib3/connectionpool.py", line 470, in _make_request
+    self._validate_conn(conn)
+    ~~~~~~~~~~~~~~~~~~~^^^^^^
+  File "/home/exactor/.local/share/uv/tools/google-colab-cli/lib/python3.13/site-packages/urllib3/connectionpool.py", line 1125, in _validate_conn
+    conn.connect()
+    ~~~~~~~~~~~~^^
+  File "/home/exactor/.local/share/uv/tools/google-colab-cli/lib/python3.13/site-packages/urllib3/connection.py", line 878, in connect
+    wrapped_socket, is_verified = _ssl_wrap_socket_and_match_hostname(
+                                  ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^
+        sock=sock,
+        ^^^^^^^^^^
+    ...<14 lines>...
+        assert_fingerprint=self.assert_fingerprint,
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "/home/exactor/.local/share/uv/tools/google-colab-cli/lib/python3.13/site-packages/urllib3/connection.py", line 1080, in _ssl_wrap_socket_and_match_hostname
+    ssl_sock = ssl_wrap_socket(
+        sock=sock,
+    ...<8 lines>...
+        tls_in_tls=tls_in_tls,
+    )
+  File "/home/exactor/.local/share/uv/tools/google-colab-cli/lib/python3.13/site-packages/urllib3/util/ssl_.py", line 437, in ssl_wrap_socket
+    ssl_sock = _ssl_wrap_socket_impl(sock, context, tls_in_tls, server_hostname)
+  File "/home/exactor/.local/share/uv/tools/google-colab-cli/lib/python3.13/site-packages/urllib3/util/ssl_.py", line 481, in _ssl_wrap_socket_impl
+    return ssl_context.wrap_socket(sock, server_hostname=server_hostname)
+           ~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/exactor/.local/share/uv/python/cpython-3.13.11-linux-x86_64-gnu/lib/python3.13/ssl.py", line 455, in wrap_socket
+    return self.sslsocket_class._create(
+           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~^
+        sock=sock,
+        ^^^^^^^^^^
+    ...<5 lines>...
+        session=session
+        ^^^^^^^^^^^^^^^
+    )
+    ^
+  File "/home/exactor/.local/share/uv/python/cpython-3.13.11-linux-x86_64-gnu/lib/python3.13/ssl.py", line 1076, in _create
+    self.do_handshake()
+    ~~~~~~~~~~~~~~~~~^^
+  File "/home/exactor/.local/share/uv/python/cpython-3.13.11-linux-x86_64-gnu/lib/python3.13/ssl.py", line 1372, in do_handshake
+    self._sslobj.do_handshake()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~^^
+urllib3.exceptions.ProtocolError: ('Connection aborted.', ConnectionResetError(104, 'Connection reset by peer'))
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "/home/exactor/Projects/Prototypes/new_kelly/exps_v2/colab/refresh_session.py", line 24, in <module>
+    for a in state.client.list_assignments():
+             ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "/home/exactor/.local/share/uv/tools/google-colab-cli/lib/python3.13/site-packages/colab_cli/client.py", line 257, in list_assignments
+    assignments = self._issue_request(url, schema=ListedAssignments)
+  File "/home/exactor/.local/share/uv/tools/google-colab-cli/lib/python3.13/site-packages/colab_cli/client.py", line 223, in _issue_request
+    response = self.session.request(
+        method, endpoint, headers=request_headers, params=params, **kwargs
+    )
+  File "/home/exactor/.local/share/uv/tools/google-colab-cli/lib/python3.13/site-packages/google/auth/transport/requests.py", line 629, in request
+    response = super(AuthorizedSession, self).request(
+        method,
+    ...<4 lines>...
+        **kwargs
+    )
+  File "/home/exactor/.local/share/uv/tools/google-colab-cli/lib/python3.13/site-packages/requests/sessions.py", line 651, in request
+    resp = self.send(prep, **send_kwargs)
+  File "/home/exactor/.local/share/uv/tools/google-colab-cli/lib/python3.13/site-packages/requests/sessions.py", line 784, in send
+    r = adapter.send(request, **kwargs)
+  File "/home/exactor/.local/share/uv/tools/google-colab-cli/lib/python3.13/site-packages/requests/adapters.py", line 711, in send
+    raise ConnectionError(err, request=request)
+requests.exceptions.ConnectionError: ('Connection aborted.', ConnectionResetError(104, 'Connection reset by peer'))
+realms_100k: токен обновлён, истекает через 3600 с
+2026-09-27 03:25:48 no answer from VM (1)
+realms_100k: токен обновлён, истекает через 3600 с
+realms_100k: токен обновлён, истекает через 3600 с
+realms_100k: токен обновлён, истекает через 3600 с
+2026-09-27 03:32:15 checkpoint turn 11000
+realms_100k: токен обновлён, истекает через 3600 с
+realms_100k: токен обновлён, истекает через 3600 с
+realms_100k: токен обновлён, истекает через 3600 с
+2026-09-27 03:38:23 checkpoint turn 12500
+realms_100k: токен обновлён, истекает через 3600 с
+realms_100k: токен обновлён, истекает через 3600 с
+realms_100k: токен обновлён, истекает через 3600 с
+2026-09-27 03:44:42 checkpoint turn 14500
+realms_100k: токен обновлён, истекает через 3600 с
+realms_100k: токен обновлён, истекает через 3600 с
+realms_100k: токен обновлён, истекает через 3600 с
+2026-09-27 03:51:00 checkpoint turn 17000
+realms_100k: токен обновлён, истекает через 3600 с
+realms_100k: токен обновлён, истекает через 3600 с
+realms_100k: токен обновлён, истекает через 3600 с
+2026-09-27 03:57:11 checkpoint turn 18000
+2026-09-27 03:57:11 segment 2 ended: exit 3 | [vm] EXIT=3 | seed 5: paused at turn 18000 (wall limit 2700.0 s); checkpoint /content/r/out/ckpt_5.json
+2026-09-27 03:57:12 checkpoint turn 18000
+
+[colab] A new version of Colab CLI is available: 0.7.4 (current: 0.7.2)
+[colab] Run 'colab update' to update.
+[colab] To silence this check, set "enable_update_check": false in ~/.config/colab-cli/settings.json
+
+[colab] Stopping session 'realms_100k'...
+[colab] Session terminated.
+2026-09-27 03:57:16 segment 3: new VM CPU
+
+[colab] A new version of Colab CLI is available: 0.7.4 (current: 0.7.2)
+[colab] Run 'colab update' to update.
+[colab] To silence this check, set "enable_update_check": false in ~/.config/colab-cli/settings.json
+
+[colab] Creating session 'realms_100k'...
+[colab] Session READY.
+realms_100k: токен обновлён, истекает через 3600 с
+realms_100k: токен обновлён, истекает через 3600 с
+realms_100k: токен обновлён, истекает через 3600 с
+realms_100k: токен обновлён, истекает через 3600 с
+2026-09-27 04:04:09 checkpoint turn 19000
+realms_100k: токен обновлён, истекает через 3600 с
+realms_100k: токен обновлён, истекает через 3600 с
+realms_100k: токен обновлён, истекает через 3600 с
+2026-09-27 04:10:21 checkpoint turn 20500
+realms_100k: токен обновлён, истекает через 3600 с
+realms_100k: токен обновлён, истекает через 3600 с
+realms_100k: токен обновлён, истекает через 3600 с
+2026-09-27 04:16:43 checkpoint turn 22000
+realms_100k: токен обновлён, истекает через 3600 с
+realms_100k: токен обновлён, истекает через 3600 с
+realms_100k: токен обновлён, истекает через 3600 с
+2026-09-27 04:23:15 checkpoint turn 23500
+realms_100k: токен обновлён, истекает через 3600 с
+realms_100k: токен обновлён, истекает через 3600 с
+realms_100k: токен обновлён, истекает через 3600 с
+2026-09-27 04:29:40 checkpoint turn 25500
+realms_100k: токен обновлён, истекает через 3600 с
+realms_100k: токен обновлён, истекает через 3600 с
+realms_100k: токен обновлён, истекает через 3600 с
+2026-09-27 04:35:52 checkpoint turn 27500
+realms_100k: токен обновлён, истекает через 3600 с
+realms_100k: токен обновлён, истекает через 3600 с
+realms_100k: токен обновлён, истекает через 3600 с
+2026-09-27 04:42:05 checkpoint turn 30000
+realms_100k: токен обновлён, истекает через 3600 с
+realms_100k: токен обновлён, истекает через 3600 с
+2026-09-27 04:46:12 segment 3 ended: exit 3 | [vm] EXIT=3 | seed 5: paused at turn 30500 (wall limit 2700.0 s); checkpoint /content/r/out/ckpt_5.json
+2026-09-27 04:46:13 checkpoint turn 30500
+
+[colab] A new version of Colab CLI is available: 0.7.4 (current: 0.7.2)
+[colab] Run 'colab update' to update.
+[colab] To silence this check, set "enable_update_check": false in ~/.config/colab-cli/settings.json
+
+[colab] Stopping session 'realms_100k'...
+[colab] Session terminated.
+2026-09-27 04:46:17 segment 4: new VM CPU
+
+[colab] A new version of Colab CLI is available: 0.7.4 (current: 0.7.2)
+[colab] Run 'colab update' to update.
+[colab] To silence this check, set "enable_update_check": false in ~/.config/colab-cli/settings.json
+
+[colab] Creating session 'realms_100k'...
+[colab] Session READY.
+realms_100k: токен обновлён, истекает через 3600 с
+realms_100k: токен обновлён, истекает через 3600 с
+realms_100k: токен обновлён, истекает через 3600 с
+realms_100k: токен обновлён, истекает через 3600 с
+2026-09-27 04:52:51 checkpoint turn 32000
+realms_100k: токен обновлён, истекает через 3600 с
+realms_100k: токен обновлён, истекает через 3600 с
+realms_100k: токен обновлён, истекает через 3600 с
+2026-09-27 04:59:23 checkpoint turn 33500
+realms_100k: токен обновлён, истекает через 3600 с
+realms_100k: токен обновлён, истекает через 3600 с
+realms_100k: токен обновлён, истекает через 3600 с
+2026-09-27 05:05:35 checkpoint turn 36000
+realms_100k: токен обновлён, истекает через 3600 с
+realms_100k: токен обновлён, истекает через 3600 с
+realms_100k: токен обновлён, истекает через 3600 с
+2026-09-27 05:11:56 checkpoint turn 38000
+realms_100k: токен обновлён, истекает через 3600 с
+realms_100k: токен обновлён, истекает через 3600 с
+realms_100k: токен обновлён, истекает через 3600 с
+2026-09-27 05:18:06 checkpoint turn 40000
+realms_100k: токен обновлён, истекает через 3600 с
+realms_100k: токен обновлён, истекает через 3600 с
+realms_100k: токен обновлён, истекает через 3600 с
+2026-09-27 05:24:17 checkpoint turn 41000
+realms_100k: токен обновлён, истекает через 3600 с
+realms_100k: токен обновлён, истекает через 3600 с
+realms_100k: токен обновлён, истекает через 3600 с
+2026-09-27 05:30:38 checkpoint turn 43000
+realms_100k: токен обновлён, истекает через 3600 с
+realms_100k: токен обновлён, истекает через 3600 с
+2026-09-27 05:34:44 segment 4 ended: exit 3 | [vm] EXIT=3 | seed 5: paused at turn 44000 (wall limit 2700.0 s); checkpoint /content/r/out/ckpt_5.json
+2026-09-27 05:34:46 checkpoint turn 44000
+
+[colab] A new version of Colab CLI is available: 0.7.4 (current: 0.7.2)
+[colab] Run 'colab update' to update.
+[colab] To silence this check, set "enable_update_check": false in ~/.config/colab-cli/settings.json
+
+[colab] Stopping session 'realms_100k'...
+[colab] Session terminated.
+2026-09-27 05:34:50 segment 5: new VM CPU
+
+[colab] A new version of Colab CLI is available: 0.7.4 (current: 0.7.2)
+[colab] Run 'colab update' to update.
+[colab] To silence this check, set "enable_update_check": false in ~/.config/colab-cli/settings.json
+
+[colab] Creating session 'realms_100k'...
+[colab] Session READY.
+realms_100k: токен обновлён, истекает через 3600 с
+realms_100k: токен обновлён, истекает через 3600 с
+realms_100k: токен обновлён, истекает через 3600 с
+realms_100k: токен обновлён, истекает через 3600 с
+2026-09-27 05:41:36 checkpoint turn 45500
+realms_100k: токен обновлён, истекает через 3600 с
+realms_100k: токен обновлён, истекает через 3600 с
+realms_100k: токен обновлён, истекает через 3600 с
+2026-09-27 05:47:58 checkpoint turn 47500
+realms_100k: токен обновлён, истекает через 3600 с
+realms_100k: токен обновлён, истекает через 3600 с
+realms_100k: токен обновлён, истекает через 3600 с
+2026-09-27 05:54:18 checkpoint turn 50000
+realms_100k: токен обновлён, истекает через 3600 с
+realms_100k: токен обновлён, истекает через 3600 с
+realms_100k: токен обновлён, истекает через 3600 с
+2026-09-27 06:00:41 checkpoint turn 52500
+realms_100k: токен обновлён, истекает через 3600 с
+realms_100k: токен обновлён, истекает через 3600 с
+realms_100k: токен обновлён, истекает через 3600 с
+2026-09-27 06:07:20 checkpoint turn 55000
+realms_100k: токен обновлён, истекает через 3600 с
+realms_100k: токен обновлён, истекает через 3600 с
+realms_100k: токен обновлён, истекает через 3600 с
+2026-09-27 06:13:40 checkpoint turn 57000
+realms_100k: токен обновлён, истекает через 3600 с
+realms_100k: токен обновлён, истекает через 3600 с
+realms_100k: токен обновлён, истекает через 3600 с
+2026-09-27 06:19:59 checkpoint turn 59500
+realms_100k: токен обновлён, истекает через 3600 с
+2026-09-27 06:22:06 segment 5 ended: exit 3 | [vm] EXIT=3 | seed 5: paused at turn 60000 (wall limit 2700.0 s); checkpoint /content/r/out/ckpt_5.json
+2026-09-27 06:22:07 checkpoint turn 60000
+
+[colab] A new version of Colab CLI is available: 0.7.4 (current: 0.7.2)
+[colab] Run 'colab update' to update.
+[colab] To silence this check, set "enable_update_check": false in ~/.config/colab-cli/settings.json
+
+[colab] Stopping session 'realms_100k'...
+[colab] Session terminated.
+2026-09-27 06:22:14 segment 6: new VM CPU
+
+[colab] A new version of Colab CLI is available: 0.7.4 (current: 0.7.2)
+[colab] Run 'colab update' to update.
+[colab] To silence this check, set "enable_update_check": false in ~/.config/colab-cli/settings.json
+
+[colab] Creating session 'realms_100k'...
+[colab] Session READY.
+realms_100k: токен обновлён, истекает через 3600 с
+realms_100k: токен обновлён, истекает через 3600 с
+realms_100k: токен обновлён, истекает через 3600 с
+realms_100k: токен обновлён, истекает через 3600 с
+2026-09-27 06:28:43 checkpoint turn 63000
+realms_100k: токен обновлён, истекает через 3600 с
+realms_100k: токен обновлён, истекает через 3600 с
+realms_100k: токен обновлён, истекает через 3600 с
+2026-09-27 06:34:54 checkpoint turn 66500
+realms_100k: токен обновлён, истекает через 3600 с
+realms_100k: токен обновлён, истекает через 3600 с
+realms_100k: токен обновлён, истекает через 3600 с
+2026-09-27 06:41:14 checkpoint turn 70000
+realms_100k: токен обновлён, истекает через 3600 с
+realms_100k: токен обновлён, истекает через 3600 с
+realms_100k: токен обновлён, истекает через 3600 с
+2026-09-27 06:47:28 checkpoint turn 71000
+realms_100k: токен обновлён, истекает через 3600 с
+realms_100k: токен обновлён, истекает через 3600 с
+realms_100k: токен обновлён, истекает через 3600 с
+2026-09-27 06:53:50 checkpoint turn 72000
+realms_100k: токен обновлён, истекает через 3600 с
+realms_100k: токен обновлён, истекает через 3600 с
+realms_100k: токен обновлён, истекает через 3600 с
+2026-09-27 07:00:02 checkpoint turn 72500
+realms_100k: токен обновлён, истекает через 3600 с
+realms_100k: токен обновлён, истекает через 3600 с
+realms_100k: токен обновлён, истекает через 3600 с
+2026-09-27 07:06:24 checkpoint turn 73500
+realms_100k: токен обновлён, истекает через 3600 с
+realms_100k: токен обновлён, истекает через 3600 с
+realms_100k: токен обновлён, истекает через 3600 с
+2026-09-27 07:12:38 checkpoint turn 74000
+2026-09-27 07:12:38 segment 6 ended: exit 3 | [vm] EXIT=3 | seed 5: paused at turn 74000 (wall limit 2700.0 s); checkpoint /content/r/out/ckpt_5.json
+2026-09-27 07:12:39 checkpoint turn 74000
+
+[colab] A new version of Colab CLI is available: 0.7.4 (current: 0.7.2)
+[colab] Run 'colab update' to update.
+[colab] To silence this check, set "enable_update_check": false in ~/.config/colab-cli/settings.json
+
+[colab] Stopping session 'realms_100k'...
+[colab] Session terminated.
+2026-09-27 07:12:44 segment 7: new VM CPU
+
+[colab] A new version of Colab CLI is available: 0.7.4 (current: 0.7.2)
+[colab] Run 'colab update' to update.
+[colab] To silence this check, set "enable_update_check": false in ~/.config/colab-cli/settings.json
+
+[colab] Creating session 'realms_100k'...
+[colab] Session READY.
+realms_100k: токен обновлён, истекает через 3600 с
+realms_100k: токен обновлён, истекает через 3600 с
+realms_100k: токен обновлён, истекает через 3600 с
+realms_100k: токен обновлён, истекает через 3600 с
+2026-09-27 07:19:28 checkpoint turn 74500
+realms_100k: токен обновлён, истекает через 3600 с
+realms_100k: токен обновлён, истекает через 3600 с
+realms_100k: токен обновлён, истекает через 3600 с
+2026-09-27 07:25:57 checkpoint turn 74500
+realms_100k: токен обновлён, истекает через 3600 с
+realms_100k: токен обновлён, истекает через 3600 с
+realms_100k: токен обновлён, истекает через 3600 с
+2026-09-27 07:32:11 no answer from VM (1)
+realms_100k: токен обновлён, истекает через 3600 с
+realms_100k: токен обновлён, истекает через 3600 с
+realms_100k: токен обновлён, истекает через 3600 с
+2026-09-27 07:38:28 no answer from VM (1)
+realms_100k: токен обновлён, истекает через 3600 с
+realms_100k: токен обновлён, истекает через 3600 с
+realms_100k: токен обновлён, истекает через 3600 с
+2026-09-27 07:44:44 checkpoint turn 76000
+realms_100k: токен обновлён, истекает через 3600 с
+realms_100k: токен обновлён, истекает через 3600 с
+realms_100k: токен обновлён, истекает через 3600 с
+2026-09-27 07:51:00 checkpoint turn 77000
+realms_100k: токен обновлён, истекает через 3600 с
+realms_100k: токен обновлён, истекает через 3600 с
+realms_100k: токен обновлён, истекает через 3600 с
+2026-09-27 07:57:13 checkpoint turn 77500
+realms_100k: токен обновлён, истекает через 3600 с
+realms_100k: токен обновлён, истекает через 3600 с
+2026-09-27 08:01:21 segment 7 ended: exit 3 | [vm] EXIT=3 | seed 5: paused at turn 78000 (wall limit 2700.0 s); checkpoint /content/r/out/ckpt_5.json
+2026-09-27 08:01:23 checkpoint turn 78000
+
+[colab] A new version of Colab CLI is available: 0.7.4 (current: 0.7.2)
+[colab] Run 'colab update' to update.
+[colab] To silence this check, set "enable_update_check": false in ~/.config/colab-cli/settings.json
+
+[colab] Stopping session 'realms_100k'...
+[colab] Session terminated.
+2026-09-27 08:01:28 segment 8: new VM CPU
+
+[colab] A new version of Colab CLI is available: 0.7.4 (current: 0.7.2)
+[colab] Run 'colab update' to update.
+[colab] To silence this check, set "enable_update_check": false in ~/.config/colab-cli/settings.json
+
+[colab] Creating session 'realms_100k'...
+[colab] Session READY.
+realms_100k: токен обновлён, истекает через 3600 с
+realms_100k: токен обновлён, истекает через 3600 с
+realms_100k: токен обновлён, истекает через 3600 с
+realms_100k: токен обновлён, истекает через 3600 с
+2026-09-27 08:08:50 checkpoint turn 78500
+realms_100k: токен обновлён, истекает через 3600 с
+realms_100k: токен обновлён, истекает через 3600 с
+realms_100k: токен обновлён, истекает через 3600 с
+2026-09-27 08:15:03 checkpoint turn 80500
+realms_100k: токен обновлён, истекает через 3600 с
+realms_100k: токен обновлён, истекает через 3600 с
+realms_100k: токен обновлён, истекает через 3600 с
+2026-09-27 08:21:25 checkpoint turn 84500
+realms_100k: токен обновлён, истекает через 3600 с
+realms_100k: токен обновлён, истекает через 3600 с
+realms_100k: токен обновлён, истекает через 3600 с
+2026-09-27 08:27:39 checkpoint turn 87500
+realms_100k: токен обновлён, истекает через 3600 с
+realms_100k: токен обновлён, истекает через 3600 с
+realms_100k: токен обновлён, истекает через 3600 с
+2026-09-27 08:34:05 checkpoint turn 91000
+realms_100k: токен обновлён, истекает через 3600 с
+realms_100k: токен обновлён, истекает через 3600 с
+realms_100k: токен обновлён, истекает через 3600 с
+2026-09-27 08:40:20 checkpoint turn 94000
+realms_100k: токен обновлён, истекает через 3600 с
+realms_100k: токен обновлён, истекает через 3600 с
+realms_100k: токен обновлён, истекает через 3600 с
+2026-09-27 08:46:33 checkpoint turn 97500
+realms_100k: токен обновлён, истекает через 3600 с
+2026-09-27 08:51:34 no answer from VM (1)
+realms_100k: токен обновлён, истекает через 3600 с
+2026-09-27 08:53:38 segment 8 ended: exit 3 | [vm] EXIT=3 | seed 5: paused at turn 98500 (wall limit 2700.0 s); checkpoint /content/r/out/ckpt_5.json
+2026-09-27 08:53:39 checkpoint turn 98500
+
+[colab] A new version of Colab CLI is available: 0.7.4 (current: 0.7.2)
+[colab] Run 'colab update' to update.
+[colab] To silence this check, set "enable_update_check": false in ~/.config/colab-cli/settings.json
+
+[colab] Stopping session 'realms_100k'...
+[colab] Session terminated.
+2026-09-27 08:53:43 segment 9: new VM CPU
+
+[colab] A new version of Colab CLI is available: 0.7.4 (current: 0.7.2)
+[colab] Run 'colab update' to update.
+[colab] To silence this check, set "enable_update_check": false in ~/.config/colab-cli/settings.json
+
+[colab] Creating session 'realms_100k'...
+[colab] Session READY.
+realms_100k: токен обновлён, истекает через 3600 с
+realms_100k: токен обновлён, истекает через 3600 с
+Traceback (most recent call last):
+  File "/home/exactor/.local/share/uv/tools/google-colab-cli/lib/python3.13/site-packages/urllib3/connectionpool.py", line 793, in urlopen
+    response = self._make_request(
+        conn,
+    ...<10 lines>...
+        **response_kw,
+    )
+  File "/home/exactor/.local/share/uv/tools/google-colab-cli/lib/python3.13/site-packages/urllib3/connectionpool.py", line 494, in _make_request
+    raise new_e
+  File "/home/exactor/.local/share/uv/tools/google-colab-cli/lib/python3.13/site-packages/urllib3/connectionpool.py", line 470, in _make_request
+    self._validate_conn(conn)
+    ~~~~~~~~~~~~~~~~~~~^^^^^^
+  File "/home/exactor/.local/share/uv/tools/google-colab-cli/lib/python3.13/site-packages/urllib3/connectionpool.py", line 1125, in _validate_conn
+    conn.connect()
+    ~~~~~~~~~~~~^^
+  File "/home/exactor/.local/share/uv/tools/google-colab-cli/lib/python3.13/site-packages/urllib3/connection.py", line 878, in connect
+    wrapped_socket, is_verified = _ssl_wrap_socket_and_match_hostname(
+                                  ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^
+        sock=sock,
+        ^^^^^^^^^^
+    ...<14 lines>...
+        assert_fingerprint=self.assert_fingerprint,
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "/home/exactor/.local/share/uv/tools/google-colab-cli/lib/python3.13/site-packages/urllib3/connection.py", line 1080, in _ssl_wrap_socket_and_match_hostname
+    ssl_sock = ssl_wrap_socket(
+        sock=sock,
+    ...<8 lines>...
+        tls_in_tls=tls_in_tls,
+    )
+  File "/home/exactor/.local/share/uv/tools/google-colab-cli/lib/python3.13/site-packages/urllib3/util/ssl_.py", line 437, in ssl_wrap_socket
+    ssl_sock = _ssl_wrap_socket_impl(sock, context, tls_in_tls, server_hostname)
+  File "/home/exactor/.local/share/uv/tools/google-colab-cli/lib/python3.13/site-packages/urllib3/util/ssl_.py", line 481, in _ssl_wrap_socket_impl
+    return ssl_context.wrap_socket(sock, server_hostname=server_hostname)
+           ~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/exactor/.local/share/uv/python/cpython-3.13.11-linux-x86_64-gnu/lib/python3.13/ssl.py", line 455, in wrap_socket
+    return self.sslsocket_class._create(
+           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~^
+        sock=sock,
+        ^^^^^^^^^^
+    ...<5 lines>...
+        session=session
+        ^^^^^^^^^^^^^^^
+    )
+    ^
+  File "/home/exactor/.local/share/uv/python/cpython-3.13.11-linux-x86_64-gnu/lib/python3.13/ssl.py", line 1076, in _create
+    self.do_handshake()
+    ~~~~~~~~~~~~~~~~~^^
+  File "/home/exactor/.local/share/uv/python/cpython-3.13.11-linux-x86_64-gnu/lib/python3.13/ssl.py", line 1372, in do_handshake
+    self._sslobj.do_handshake()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~^^
+ConnectionResetError: [Errno 104] Connection reset by peer
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "/home/exactor/.local/share/uv/tools/google-colab-cli/lib/python3.13/site-packages/requests/adapters.py", line 696, in send
+    resp = conn.urlopen(
+        method=request.method,
+    ...<9 lines>...
+        chunked=chunked,
+    )
+  File "/home/exactor/.local/share/uv/tools/google-colab-cli/lib/python3.13/site-packages/urllib3/connectionpool.py", line 847, in urlopen
+    retries = retries.increment(
+        method, url, error=new_e, _pool=self, _stacktrace=sys.exc_info()[2]
+    )
+  File "/home/exactor/.local/share/uv/tools/google-colab-cli/lib/python3.13/site-packages/urllib3/util/retry.py", line 510, in increment
+    raise reraise(type(error), error, _stacktrace)
+          ~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/exactor/.local/share/uv/tools/google-colab-cli/lib/python3.13/site-packages/urllib3/util/util.py", line 38, in reraise
+    raise value.with_traceback(tb)
+  File "/home/exactor/.local/share/uv/tools/google-colab-cli/lib/python3.13/site-packages/urllib3/connectionpool.py", line 793, in urlopen
+    response = self._make_request(
+        conn,
+    ...<10 lines>...
+        **response_kw,
+    )
+  File "/home/exactor/.local/share/uv/tools/google-colab-cli/lib/python3.13/site-packages/urllib3/connectionpool.py", line 494, in _make_request
+    raise new_e
+  File "/home/exactor/.local/share/uv/tools/google-colab-cli/lib/python3.13/site-packages/urllib3/connectionpool.py", line 470, in _make_request
+    self._validate_conn(conn)
+    ~~~~~~~~~~~~~~~~~~~^^^^^^
+  File "/home/exactor/.local/share/uv/tools/google-colab-cli/lib/python3.13/site-packages/urllib3/connectionpool.py", line 1125, in _validate_conn
+    conn.connect()
+    ~~~~~~~~~~~~^^
+  File "/home/exactor/.local/share/uv/tools/google-colab-cli/lib/python3.13/site-packages/urllib3/connection.py", line 878, in connect
+    wrapped_socket, is_verified = _ssl_wrap_socket_and_match_hostname(
+                                  ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^
+        sock=sock,
+        ^^^^^^^^^^
+    ...<14 lines>...
+        assert_fingerprint=self.assert_fingerprint,
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "/home/exactor/.local/share/uv/tools/google-colab-cli/lib/python3.13/site-packages/urllib3/connection.py", line 1080, in _ssl_wrap_socket_and_match_hostname
+    ssl_sock = ssl_wrap_socket(
+        sock=sock,
+    ...<8 lines>...
+        tls_in_tls=tls_in_tls,
+    )
+  File "/home/exactor/.local/share/uv/tools/google-colab-cli/lib/python3.13/site-packages/urllib3/util/ssl_.py", line 437, in ssl_wrap_socket
+    ssl_sock = _ssl_wrap_socket_impl(sock, context, tls_in_tls, server_hostname)
+  File "/home/exactor/.local/share/uv/tools/google-colab-cli/lib/python3.13/site-packages/urllib3/util/ssl_.py", line 481, in _ssl_wrap_socket_impl
+    return ssl_context.wrap_socket(sock, server_hostname=server_hostname)
+           ~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/exactor/.local/share/uv/python/cpython-3.13.11-linux-x86_64-gnu/lib/python3.13/ssl.py", line 455, in wrap_socket
+    return self.sslsocket_class._create(
+           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~^
+        sock=sock,
+        ^^^^^^^^^^
+    ...<5 lines>...
+        session=session
+        ^^^^^^^^^^^^^^^
+    )
+    ^
+  File "/home/exactor/.local/share/uv/python/cpython-3.13.11-linux-x86_64-gnu/lib/python3.13/ssl.py", line 1076, in _create
+    self.do_handshake()
+    ~~~~~~~~~~~~~~~~~^^
+  File "/home/exactor/.local/share/uv/python/cpython-3.13.11-linux-x86_64-gnu/lib/python3.13/ssl.py", line 1372, in do_handshake
+    self._sslobj.do_handshake()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~^^
+urllib3.exceptions.ProtocolError: ('Connection aborted.', ConnectionResetError(104, 'Connection reset by peer'))
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "/home/exactor/Projects/Prototypes/new_kelly/exps_v2/colab/refresh_session.py", line 24, in <module>
+    for a in state.client.list_assignments():
+             ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "/home/exactor/.local/share/uv/tools/google-colab-cli/lib/python3.13/site-packages/colab_cli/client.py", line 257, in list_assignments
+    assignments = self._issue_request(url, schema=ListedAssignments)
+  File "/home/exactor/.local/share/uv/tools/google-colab-cli/lib/python3.13/site-packages/colab_cli/client.py", line 223, in _issue_request
+    response = self.session.request(
+        method, endpoint, headers=request_headers, params=params, **kwargs
+    )
+  File "/home/exactor/.local/share/uv/tools/google-colab-cli/lib/python3.13/site-packages/google/auth/transport/requests.py", line 629, in request
+    response = super(AuthorizedSession, self).request(
+        method,
+    ...<4 lines>...
+        **kwargs
+    )
+  File "/home/exactor/.local/share/uv/tools/google-colab-cli/lib/python3.13/site-packages/requests/sessions.py", line 651, in request
+    resp = self.send(prep, **send_kwargs)
+  File "/home/exactor/.local/share/uv/tools/google-colab-cli/lib/python3.13/site-packages/requests/sessions.py", line 784, in send
+    r = adapter.send(request, **kwargs)
+  File "/home/exactor/.local/share/uv/tools/google-colab-cli/lib/python3.13/site-packages/requests/adapters.py", line 711, in send
+    raise ConnectionError(err, request=request)
+requests.exceptions.ConnectionError: ('Connection aborted.', ConnectionResetError(104, 'Connection reset by peer'))
+2026-09-27 08:58:14 segment 9 ended: exit 0 | [vm] EXIT=0 | seed 5: 100000 turns in 22562 s; invariants failed: none
+2026-09-27 08:58:15 checkpoint turn 100000
+
+[colab] A new version of Colab CLI is available: 0.7.4 (current: 0.7.2)
+[colab] Run 'colab update' to update.
+[colab] To silence this check, set "enable_update_check": false in ~/.config/colab-cli/settings.json
+
+[colab] Stopping session 'realms_100k'...
+[colab] Session terminated.
+2026-09-27 08:58:19 run complete at turn 100000
+2026-09-27 08:58:19 driver end (finished: yes)

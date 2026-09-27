@@ -450,7 +450,9 @@ LEARNED_QUESTIONS = ("build", "order_military", "stance")
 
 def make_system(pers: str) -> tuple[Catalog, System]:
     cat = make_catalog(pers, learned=LEARNED_QUESTIONS if pers == "adaptive" else ())
-    return cat, System(cat, QUESTIONS)
+    system = System(cat, QUESTIONS)
+    system.learn = False        # solvi >= 0.3.x learns a check order / costs after every ask; realms does not use them,
+    return cat, system          # and that refit made rare asks slow (decision p99 3 → 40-90 ms in long runs)
 
 
 def random_city_state(rng: random.Random) -> dict:

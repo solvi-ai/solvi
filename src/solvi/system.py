@@ -7,7 +7,8 @@ from pathlib import Path
 
 from .core import Catalog
 from .heads import Head
-from .runtime import MISSING, Result, execute, now_ms, path_confidence
+from .provenance import model_info
+from .runtime import MISSING, Record, Result, execute, now_ms, path_confidence, vhash
 from .strategist import computable, plan
 
 
@@ -20,28 +21,54 @@ class Response:
     ms: float
     feasible: bool = True               # do the answers satisfy every applicable constraint?
     violations: list = None             # names of the constraints still broken (fixed answers that conflict)
+    catalog: object = None              # the catalog that answered (for the audit)
+    safeguards: list = None             # safeguard events of this response (see solvi.audit.collect)
+    model_outputs: int = 0              # outputs produced by models in this response
 
     def __getitem__(self, q):
         return self.results[q]
 
     @property
     def computed_state(self):
+        """Each computed fact with its value; a quote's offsets; for anything not computed by plain code, its provenance
+        (quoted by a model, decided, learned) and the model; errors, including rejected (ungrounded) model outputs."""
         lines = []
         for r in self.trace.records:
-            if r.kind == "rule":
+            if r.kind in ("rule", "head"):
                 continue
             v = "—" if r.value is MISSING else repr(r.value)
             extra = f"   quote [{r.quote[0]}:{r.quote[1]}]" if r.quote else ""
-            if r.kind == "extract" and r.confidence < 1:
+            if r.confidence < 1:
                 extra += f" confidence {r.confidence:.2f}"
+            if r.origin not in ("computed", "quoted"):
+                extra += f"   {r.origin}"
+                if r.probs:
+                    extra += " (" + ", ".join(f"{k} {float(p):.2f}" for k, p in sorted(r.probs.items(), key=lambda t: -t[1])[:3]) + ")"
+            if r.model is not None:
+                extra += f"   model {r.model['type']} {r.model['id']} #{r.model['fp'][:8]}"
             if r.error:
                 extra += f"   ERROR: {r.error}"
             lines.append(f"{r.name:24s} = {v}{extra}")
         return "\n".join(lines)
 
+    def audit(self, question=None):
+        """What each answer rests on and which safeguards fired: given inputs → computed facts → quotes (offsets and quoted
+        text) → model decisions (model, probabilities) → learned parts → checks, rule, constraints → answer; plus the share
+        of the support that is deterministic. `print(res.audit())`, or `res.audit("q").to_dict()` for data.
+        → an Audit of every answer, or the AnswerAudit of one question when `question` is given."""
+        from .audit import build
+        a = build(self, question)
+        return a[question] if isinstance(question, str) else a
+
 
 class System:
-    def __init__(self, catalog: Catalog, questions, journal: str | None = None, workers: int = 1):
+    def __init__(self, catalog: Catalog, questions, journal: str | None = None, workers: int = 1, order: str = "default",
+                 producers: str = "declared", learn: bool | None = None):
+        """order: "default" (hard checks and their inputs first, all together) or "learned" (hard checks one at a time, most
+        expected saving first — see learn_order). producers: "declared" (alternative producers of a fact are tried in
+        declaration order) or "learned" (a policy picks the order per input and learns from outcomes). learn: after every
+        ask, update part costs and the order / producer models from what happened (milliseconds)."""
+        from .learned import CostBook, OrderModel, ProducerPolicy
         self.catalog = catalog
         self.questions = {q.name: q for q in questions}
         self.heads: dict[str, Head] = {}
@@ -49,13 +76,37 @@ class System:
         self.workers = workers                    # >1: independent steps run in parallel threads
         self.calib: dict[str, tuple] = {}         # question → (a, b): confidence' = σ(a·logit(confidence) + b)
         self.learned_rules = {}                   # question → RuleList (readable rules learned from examples)
+        if order not in ("default", "learned"):
+            raise ValueError('order must be "default" or "learned"')
+        if producers not in ("declared", "learned"):
+            raise ValueError('producers must be "declared" or "learned"')
+        # online learning of order / producer choice costs time inside ask (periodic refits), so it is on only when a learned
+        # policy will use it (or when asked explicitly); plain systems keep flat, predictable decision times
+        if learn is None:
+            learn = order != "default" or producers == "learned"
+        self.order, self.producers, self.learn = order, producers, learn
+        self.costs = CostBook()                   # moving average of each part's run time, ms
+        self.order_model = OrderModel()           # P(hard check fails | cheap facts)
+        self.producer_policy = ProducerPolicy()   # which producer of a fact to try first
+        from .audit import STATS
+        self.stats = {k: 0 for k in STATS}        # lifetime counts: model outputs and the safeguards that caught them
 
     # --- answers
-    def ask(self, init_state, names=None, workers=None):
+    def ask(self, init_state, names=None, workers=None, order=None):
+        """order: override the system's order for this ask — "default", "learned", or an object with p_fail(check, row) and
+        row(vals, init_keys) (e.g. an oracle for experiments)."""
         t0 = now_ms()
         qs = [self.questions[n] for n in (names or self.questions)]
         flow = plan(self.catalog, qs, init_state.keys(), self.heads)
-        trace, vals = execute(self.catalog, flow, init_state, workers=workers or self.workers)
+        mode = self.order if order is None else order
+        om = None if mode == "default" else (self.order_model if mode == "learned" else mode)
+        policy = self.producer_policy if self.producers == "learned" else None
+        trace, vals = execute(self.catalog, flow, init_state, workers=workers or self.workers, order=om, costs=self.costs,
+                              policy=policy)
+        for name, ms in trace.timings.items():         # cost tracking is cheap: always on
+            self.costs.observe(name, ms)
+        if self.learn:
+            self._observe(trace, init_state, vals, policy)
         by = {r.name: r for r in trace.records}
         results = {}
         for q in qs:
@@ -64,10 +115,42 @@ class System:
                 r.confidence = _platt(r.confidence, *self.calib[q.name])
             results[q.name] = r
         feasible, violations = self._joint(results)
-        resp = Response(results, flow, trace, vals, now_ms() - t0, feasible, violations)
+        for q in qs:                                  # low-confidence safeguard: abstain rather than answer unsure
+            r = results[q.name]
+            if q.min_confidence is not None and r.status == "ok" and r.confidence < q.min_confidence:
+                results[q.name] = Result(None, r.confidence, f"low confidence {r.confidence:.2f} < {q.min_confidence}; "
+                                         f"would have answered {r.answer!r} ({r.why})", "abstain", r.probs, r.provenance,
+                                         r.source, "low_confidence", r.repaired)
+        resp = Response(results, flow, trace, vals, now_ms() - t0, feasible, violations, self.catalog)
+        self._count(resp)
         if self.journal:
             self._log(init_state, resp)
         return resp
+
+    def _count(self, resp):
+        from .audit import STAT_KEYS, collect
+        events, n_model = collect(resp, self.catalog)
+        resp.safeguards, resp.model_outputs = events, n_model
+        st = self.stats
+        st["asks"] += 1
+        st["model_outputs"] += n_model
+        for r in resp.results.values():
+            st["abstained" if r.status == "abstain" else "answers"] += 1
+        seen = set()
+        for e in events:                              # a rejected fact shared by several questions counts once
+            key = (e["kind"], e["fact"], e["detail"])
+            if key not in seen:
+                seen.add(key)
+                st[STAT_KEYS[e["kind"]]] += 1
+
+    def safeguard_report(self):
+        """The lifetime stats as text: how many model outputs, and how many were caught by each safeguard."""
+        from .audit import LABEL, STAT_KEYS
+        st = self.stats
+        lines = [f"asks {st['asks']}, answers {st['answers']}, abstained {st['abstained']}, model outputs {st['model_outputs']}"]
+        for k, key in STAT_KEYS.items():
+            lines.append(f"  {LABEL[k]:22s} {st[key]}")
+        return "\n".join(lines)
 
     def _answer(self, q, flow, trace, vals, by):
         facts = flow.per_question.get(q.name, [])
@@ -82,8 +165,10 @@ class System:
                 if not governs(part, q):
                     continue
                 if q.name in part.then:
-                    return Result(q.answer.normalize(part.then[q.name]), 1.0, f"hard check {f} is false", "forced")
-                return Result(None, 0.0, f"hard check {f} is false and no answer is set for it", "abstain")
+                    return Result(q.answer.normalize(part.then[q.name]), 1.0, f"hard check {f} is false", "forced",
+                                  provenance=r.origin, source=f, guard="hard_check")
+                return Result(None, 0.0, f"hard check {f} is false and no answer is set for it", "abstain", source=f,
+                              guard="hard_check")
         missing = [f for f in facts if f in by and by[f].value is MISSING]
         if flow.unresolved.get(q.name):
             return Result(None, 0.0, "cannot compute: " + ", ".join(flow.unresolved[q.name]), "abstain")
@@ -99,12 +184,15 @@ class System:
             if r is None or r.value is MISSING:
                 return Result(None, 0.0, "rule not computed: " + (r.error if r else "no step") +
                               (f"; missing {', '.join(missing)}" if missing else ""), "abstain")
-            conf = path_confidence(self.catalog, trace, rule.inputs)
+            conf = min(path_confidence(self.catalog, trace, rule.inputs), r.confidence)
             why = "; ".join(f"{x} = {vals.get(x)!r}" for x in rule.inputs)
+            src = rule.func.__name__ if rule.func is not None else rule.name
             try:
-                return Result(q.answer.normalize(r.value), conf, why)
+                return Result(q.answer.normalize(r.value), conf, why, probs=dict(r.probs or {}), provenance=r.origin,
+                              source=src)
             except ValueError:
-                return Result(None, 0.0, f"rule returned {r.value!r}, not one of the answer options; {why}", "abstain")
+                return Result(None, 0.0, f"rule returned {r.value!r}, not one of the answer options; {why}", "abstain",
+                              provenance=r.origin, source=src, guard="outside_options")
         head = self.heads.get(q.name)
         if head is None:
             return Result(None, 0.0, "no rule and the answer head is not fitted (fit)", "abstain")
@@ -130,7 +218,54 @@ class System:
         if soft_failed:
             why += "; failed checks: " + ", ".join(soft_failed)
         conf = base * path_confidence(self.catalog, trace, head.features)
-        return Result(a, conf, why, probs=p)
+        _append(trace, Record(step=0, kind="head", name="answer:" + q.name, inputs={f: vhash(vals[f]) for f in head.features},
+                              value=a, confidence=base, provenance="learned", model=model_info(head), probs=dict(p)),
+                len(flow.steps))
+        return Result(a, conf, why, probs=p, provenance="learned", source=type(head).__name__)
+
+    # --- the learned strategist
+    def _observe(self, trace, init_state, vals, policy):
+        row = None
+        for r in trace.records:
+            part = self.catalog.parts.get(r.name)
+            if part is not None and part.kind == "check" and part.hard and isinstance(r.value, bool):
+                if row is None:
+                    row = self.order_model.row(vals, list(init_state))
+                self.order_model.observe(r.name, row, r.value is False)
+        if policy is not None:
+            for fact, o in getattr(trace, "_outs", {}).items():
+                if o.row is not None:
+                    policy.observe(self.catalog.parts[fact], o.row, o.outcomes)
+
+    def learn_order(self, examples=None, features=None):
+        """Learn which hard checks tend to fail on which inputs, and switch this system to the learned order.
+        examples: [init_state] — each runs only its hard checks and what they read (no early exit), which also measures their
+        costs. Without examples, the models learned from past asks are used as they are (every ask feeds them).
+        features: computed facts to use besides init_state (cheap ones: they are computed before the hard checks)."""
+        import copy
+        if features is not None:
+            self.order_model.features = list(features)
+        for st in examples or ():
+            flow = plan(self.catalog, list(self.questions.values()), st.keys(), self.heads)
+            names = {s.part.name: s for s in flow.steps}
+            keep = set()
+
+            def up(n):
+                if n in names and n not in keep:
+                    keep.add(n)
+                    for x in names[n].part.inputs:
+                        up(x)
+            for s in flow.steps:
+                if s.part.kind == "check" and s.part.hard:
+                    up(s.part.name)
+            for f in self.order_model.features:
+                up(f)
+            sub = copy.copy(flow)
+            sub.steps = [s for s in flow.steps if s.part.name in keep]
+            trace, vals = execute(self.catalog, sub, st, early_exit=False, costs=self.costs)
+            self._observe(trace, st, vals, None)
+        self.order = "learned"
+        return self.order_model
 
     # --- constraints between answers: joint decoding
     def _joint(self, results, max_combos=50_000):
@@ -190,6 +325,7 @@ class System:
                                     else r.probs.get(r.answer, r.confidence))
                 broken = [c.name for c in cons if q in c.inputs and not ok({**current}, c)]
                 r.why += f"; changed from {was!r} to satisfy {', '.join(broken)}"
+                r.repaired = (was, broken)
         return True, []
 
     # --- task-specific training
@@ -252,7 +388,7 @@ class System:
             return rl.predict(args)[0]
         learned.__name__ = f"learned_{question}"
         self.catalog.rules[question] = Part(kind="rule", name="answer:" + question, inputs=list(facts), func=learned,
-                                            doc=str(rl), question=question)
+                                            doc=str(rl), question=question, model=rl, provenance="learned")
         self.learned_rules[question] = rl
         return rl
 
@@ -280,13 +416,22 @@ class System:
         return self.calib[question]
 
     def teach(self, question, init_state, correct):
-        """Human correction. A fast head (fit_fast) absorbs it at once; any head gets it in the journal for the next fit.
-        Returns the update time in ms for a fast head, else None."""
+        """Human correction. A fast head (fit_fast) absorbs it at once; so does a model decision that answers the question
+        (a solvi.decide decision part as the question's rule, or a rule passing a decided fact on): its per-option shift is
+        updated. Any correction goes to the journal for the next fit. Returns the update time in ms when something learned
+        at once, else None."""
+        from .decide import decision_of
         from .fast import FastHead
         ms = None
         head = self.heads.get(question)
+        dec = decision_of(self.catalog, question)
         if isinstance(head, (FastHead, MultiHead)) and getattr(head, "online", True):
             ms = head.update(self.facts_for(init_state), self.questions[question].answer.normalize(correct))
+        if dec is not None:
+            ans = self.questions[question].answer.normalize(correct)
+            if all(x in dec.options for x in (ans if isinstance(ans, tuple) else [ans])):
+                vals = init_state if all(f in init_state for f in dec.facts) else self.facts_for(init_state)
+                ms = dec.teach(dec.text_of(vals), ans)
         if self.journal:
             with open(self.journal, "a") as fh:
                 fh.write(json.dumps({"teach": question, "init": _jsonable(init_state), "answer": correct}, ensure_ascii=False) + "\n")
@@ -297,6 +442,8 @@ class System:
             fh.write(json.dumps({"init_hash": resp.trace.init_hash,
                                  "answers": {q: [r.answer, round(r.confidence, 4), r.status] for q, r in resp.results.items()},
                                  "flow": [s.part.name for s in resp.flow.steps],
+                                 **({"producers": {r.name: r.producer for r in resp.trace.records if r.tried is not None}}
+                                    if any(r.tried is not None for r in resp.trace.records) else {}),
                                  "records": [[r.step, r.name, r.hash] for r in resp.trace.records]}, ensure_ascii=False) + "\n")
 
 
@@ -332,6 +479,15 @@ class MultiHead:
 
     def update(self, row, answer):
         return sum(h.update(row, "yes" if o in answer else "no") for o, h in self.heads.items())
+
+
+def _append(trace, rec, n_steps):
+    """Add a record after the flow's steps (an answer head's decision), chained to the last one."""
+    last = trace.records[-1] if trace.records else None
+    rec.step = max(n_steps, last.step if last else 0) + 1
+    rec.prev = last.hash if last else trace.init_hash
+    rec.hash = vhash(rec.body())
+    trace.records.append(rec)
 
 
 def governs(part, question):

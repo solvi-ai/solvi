@@ -21,6 +21,8 @@ class SpanExtractor:
         self.enc = AutoModel.from_pretrained(model_name).to(self.device)
         self.head = torch.nn.Linear(self.enc.config.hidden_size, 2).to(self.device)
         self.max_len = max_len
+        self.model_name = self.model_id = model_name
+        self._fp_weights = None
 
     def _batch(self, items):
         """items: [(text, description, (start, end) | None)] → tensors and target positions in tokens."""
@@ -81,7 +83,18 @@ class SpanExtractor:
                 tot += loss.item()
             log(f"[extract] epoch {ep + 1}/{epochs}: loss {tot / max(1, math.ceil(len(ex) / bs)):.4f}, {time.time() - t0:.0f} s")
         self.enc.eval()
+        self._fp_weights = None
         return self
+
+    def fingerprint(self):
+        """A stable hash of this extractor (settings and sampled weights). Register a part that uses it with
+        `@cat.extract(model=extractor)` so the trace records it."""
+        from .provenance import digest, torch_fingerprint
+        if self._fp_weights is None:
+            import os
+            files = self.model_name if os.path.isdir(str(self.model_name)) else None
+            self._fp_weights = torch_fingerprint([self.enc, self.head], files)
+        return digest("SpanExtractor", self.max_len, self._fp_weights)
 
     def predict(self, items, bs=16, max_span=64):
         """items: [(text, description)] → [(start, end, confidence)] in text characters."""

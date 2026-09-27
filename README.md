@@ -17,6 +17,14 @@ questions. Every answer comes with:
 When something cannot be computed, a function fails, or a rule returns an answer outside the allowed options, solvi
 abstains instead of guessing. A failed hard check always overrides any model confidence.
 
+**Grounded decisions.** Fuzzy proposes, deterministic decides, everything is in the trace. Each fact and answer records its
+provenance — `given`, `computed`, `quoted`, `decided` (a model's choice among options, with probabilities) or `learned` —
+and model-backed steps record the model's id and fingerprint, so a replay can tell when the model changed since a decision.
+A model's quote that is not literally the text at its offsets, or a choice outside its options, is rejected and counted
+(`system.stats`); a fallback producer runs or the question abstains. `print(res.audit())` shows what each answer rests on,
+which safeguards fired, and how much of its support is deterministic. A decision without models and one with models are the
+same system ([examples/12_grounded_audit.py](examples/12_grounded_audit.py)).
+
 And it is fast. The strategist plans a flow over a 10 000-part catalog in about 6 ms and runs only the parts the questions
 need (2.4% of that catalog). Hard checks run first, so a failing one skips the expensive rest; independent slow parts (API
 calls, model inference) run in parallel. On an insurance-claim desk with slow services
@@ -47,7 +55,8 @@ double-charge refunds, predictive maintenance), each with scenarios, a runner an
 
 ```bash
 pip install solvi              # core: rules, checks, learned answer heads (numpy, scipy)
-pip install "solvi[model]"     # + torch, transformers: ModernBERT field extractors for documents
+pip install "solvi[model]"     # + torch, transformers: ModernBERT field extractors for documents and the decider
+pip install "solvi[onnx]"      # + onnxruntime, tokenizers: the decider (solvi.decide) on CPU without torch
 ```
 
 Requires Python 3.10+.
@@ -215,6 +224,8 @@ receipt with the one-pass extractor on an A100).
 | [examples/09_strategy_at_scale.py](examples/09_strategy_at_scale.py) | Insurance claim desk: the strategist generates a different plan per question set, hard checks first with early exit, slow services in parallel; timed |
 | [examples/10_learn_in_milliseconds.py](examples/10_learn_in_milliseconds.py) | `fit_fast`: a new question learned in milliseconds, then corrected one example at a time (each correction ~0.2 ms, nothing retrained) |
 | [examples/11_answer_types_and_constraints.py](examples/11_answer_types_and_constraints.py) | Multi-label and ordinal answers tied by constraints between answers; contradictions in learned answers are repaired by joint decoding |
+| [examples/12_grounded_audit.py](examples/12_grounded_audit.py) | One catalog with and without models: provenance, `res.audit()`, a hallucinated quote caught by grounding, a decision outside its options, a model changed since the decision, lifetime safeguard stats |
+| [examples/13_decide_model.py](examples/13_decide_model.py) | Support-email routing by a decider model as a catalog part: bias correction on unlabelled emails, 16 labelled examples, abstention, a constraint with a rule-based question, a hard check, the audit, `teach` (the real model with `SOLVI_DECIDE_MODEL`, a stand-in otherwise) |
 | [examples/07_receipts_model.py](examples/07_receipts_model.py) | Expense check on a scanned receipt: a receipts-tuned extractor cites each field, rules and a hard check decide (needs `solvi[model]`) |
 | [examples/08_contracts_by_description.py](examples/08_contracts_by_description.py) | Contract review with fields defined only in words: the general extractor reads the whole contract, cites clauses or says "absent" (needs `solvi[model]`) |
 
