@@ -122,6 +122,12 @@ def risk_points(email_address, phone_number, iban, injection, insult, link_count
     return {k: v for k, v in pts.items() if v}
 
 
+@cat.fn
+def risk_score(risk_points):
+    """the soft signals' total weight (a number a learned head can read)"""
+    return sum(risk_points.values())
+
+
 # ---------- hard checks: False forces "block"
 @cat.check(hard=True, then={"verdict": "block", "sensitive_data": "yes"})
 def no_card_number(card_number):
