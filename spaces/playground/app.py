@@ -700,6 +700,14 @@ CSS = """
 """
 PITCH = ("Write a decision task as small Python functions, checks and rules; ask typed questions. The strategist plans only the "
          "steps those questions need and answers in about a millisecond, with reasons and a hash-chained trace you can re-check.")
+def solvi_version():
+    try:
+        from importlib.metadata import version
+        return version("solvi")
+    except Exception:  # noqa: BLE001
+        return "?"
+
+
 ABOUT = """
 **New in 0.4: grounded decisions.** Fuzzy proposes, deterministic decides, everything is in the trace: a model may quote, pick a category or learn an answer, but plain code checks its output (grounding, closed options, confidence, hard checks, constraints between answers) before anything uses it.
 `res.audit()` shows what every answer rests on and which safeguards fired, and replay reports "model changed since this decision" when a model is swapped; try the three "New in 0.4" presets and the Audit panel.
@@ -949,6 +957,7 @@ with gr.Blocks(title="solvi playground", theme=THEME, css=CSS) as demo:
 
     with gr.Tab("About"):
         gr.Markdown(ABOUT)
+        gr.Markdown(f"Running solvi **{solvi_version()}** in this browser tab.")
 
     demo.load(run_playground, [code, init_json, qs, known], play_outputs)
     demo.load(run_strategy, [s_qs, *s_fields], s_out)
