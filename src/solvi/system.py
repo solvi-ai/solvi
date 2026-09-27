@@ -269,7 +269,13 @@ class System:
                                   provenance=r.origin, source=f, guard="hard_check")
                 return Result(None, 0.0, f"hard check {f} is false and no answer is set for it", "abstain", source=f,
                               guard="hard_check")
-        missing = [f for f in facts if f in by and by[f].value is MISSING]
+        for f in [n for n in self.catalog.parts if n in in_flow]:        # a governing hard check that could not be evaluated:
+            part, r = self.catalog.parts.get(f), by.get(f)                # the answer is unknown, never "passed"
+            if part is not None and part.kind == "check" and part.hard and r is not None and r.value is MISSING \
+                    and governs(part, q):
+                return Result(None, 0.0, f"hard check {f} could not be evaluated: {r.error or 'no value'}", "abstain",
+                              source=f, guard="hard_check")
+        missing =[f for f in facts if f in by and by[f].value is MISSING]
         if flow.unresolved.get(q.name):
             return Result(None, 0.0, "cannot compute: " + ", ".join(flow.unresolved[q.name]), "abstain")
         rule = self.catalog.rules.get(q.name)

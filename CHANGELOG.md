@@ -146,6 +146,8 @@ weights are not published.
 
 ### Fixes and tooling
 
+- A hard check that raises while it runs now makes the questions it governs abstain ("hard check … could not be
+  evaluated"); before, the question was answered as if the check had passed (also in 0.4.x).
 - The pointer applies the checkpoint's `temperature.span` to the start / end scores and the null span (as the L14g
   calibration fitted it), for spans and evidence.
 - A typed span (`Span[float]`) whose best span does not parse ('149.90 EUR') takes the best span's part that does ('149.90'),
