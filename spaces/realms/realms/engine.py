@@ -102,6 +102,10 @@ class Game:
             from .lookahead import Planner
             self.learner.frozen = True               # the outcome learner is off: the proposer learns from the lookahead
             self.planner = Planner(self)
+        elif variant in ("l17", "l17_la"):              # policy net + laws + answer check (realms/l17.py); l17_la: + lookahead
+            from .l17 import L17Planner
+            self.learner.frozen = True
+            self.planner = L17Planner.create(self, variant)
         pers = ["adaptive", "builder", "expansionist", "warmonger", "trader"] if adaptive else \
             ["builder", "expansionist", "warmonger", "trader"]
         for k in range(n_factions):
@@ -1143,7 +1147,10 @@ class Game:
         g.learner = Learner(g.seed)
         g.learner.load(d["learner"], g.systems["adaptive"][1])
         g.planner = None
-        if "planner" in d:
+        if "planner" in d and d["planner"].get("kind") == "l17":
+            from .l17 import L17Planner
+            g.planner = L17Planner.from_dict(g, d["planner"])
+        elif "planner" in d:
             from .lookahead import Planner
             g.planner = Planner.from_dict(g, d["planner"])
         return g

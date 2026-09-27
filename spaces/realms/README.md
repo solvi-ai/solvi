@@ -113,6 +113,8 @@ faction above stays as the baseline arm). The same three questions, the same `Sy
   the `init_state` the engine passed in, and a live trace replay.
 - Controls: next turn, play 10 or 100, **▶ Endless** (a `gr.Timer` that plays 1, 5 or 20 turns per tick), pause, new
   world by seed.
+- Adaptive faction for a new world: the learning value heads (variant 1, default) or the **L17 policy net + laws** (variant 3,
+  below), optionally with its verified lookahead on a small budget (slower).
 - **Health panel**: the same invariants as the headless test (below), checked live every 25 turns, with sparklines for
   decision time, turn time, factions alive, population, vetoes, state size and the adaptive faction's score.
 - The event log records wars and peace with their reasons, captures, rebellions, new factions, events and vetoes.
@@ -276,6 +278,76 @@ Raw data: `results/lookahead/endless_<seed>.json`, `results/lookahead/logs/`, `r
 `results/lookahead/learnoff/` (the replica), `results/dev_la/` (development runs), `results/lookahead/dev/` (speed and
 resume checks). Charts: `results/lookahead/lookahead.{png,svg}`, `results/lookahead/health.{png,svg}`.
 
+### Variant 3 (L17): a small policy net proposes, laws and a check decide (pre-registered test)
+
+`realms/l17.py` + `realms/l17_net.json`, `sim.py --variant l17` (and `l17_la`); selectable in the app ("adaptive faction",
+applies to a new world). The same three questions and the same `System.ask` with its hard checks, but the answer comes from a
+**small learned policy**: one MLP per question (input → 64 → 64 → one score per option, about 23 000 weights in all, pure
+numpy: no torch, no onnxruntime in the browser). Its inputs are the question's facts, the balanced rule's score per option
+and 27 global features of the faction's position (score and share, strength, capital threat, wars, stock, fleet, a warmonger
+in contact).
+
+- **Laws before the net** remove options: the mask, `upkeep_ok`, `war_min_length`, and two new ones — `capital_guard` (when
+  the capital is threatened — enemy strength within 3 tiles at least its defence — the capital builds archer / warrior /
+  walls if it can, its defenders within 1 tile only fortify or defend, no new war) and `no_starve` (a city with a negative
+  food surplus builds a farm when it can).
+- **A check after the net** (`audit`, separate code) re-verifies every final answer against those laws; violations are
+  counted and shown in the app. A failed hard check still forces the answer before the net is consulted.
+- **`why`** of every such decision: the options with the net's scores, the laws that removed options, the check and the
+  pick, e.g. `L17 policy net: settler +0.15, warrior +0.05, gold +0.03, caravan -0.17; laws removed: none; not allowed:
+  archer, farm, lumber_mill, walls, market; check: ok → settler`.
+- **Training (offline, not in the Space)**: approximate policy iteration with rollout labels. For sampled decisions every
+  allowed option (up to 6) was played out 3 × 30 turns on a copy of the game (common random numbers, scored by
+  `lookahead.value()`); the net learns to rank them; then the games are replayed with the net and it is trained again.
+  Two iterations, 278 000 labels, map seeds 100–399, about 5 machine-hours on Colab CPUs. The net was chosen on seeds
+  500–523 before the evaluation below, which ran once.
+- **`l17_la`** (optional, "L17 + verified lookahead" in the app): when the net is unsure (margin < 0.15) or on a 4% random
+  audit, its top 3 options are played out 2 × 15 turns and the best one wins, paid from a rollout budget (30 per turn
+  headless, 10 in the browser). It is off by default: with the browser budget a turn takes ~2.5× longer (CPython, first
+  150 turns of seed 3: 36 vs 14 ms) and a verified decision pauses up to ~0.3 s (more in Pyodide).
+
+**Held-out maps: seeds 1001–1032 × 5 000 turns** (share over the second half; "leads" = the adaptive faction has the top
+score at most of those checkpoints; 95% Wilson intervals):
+
+| adaptive faction | median share | share ≥ 1 | leads | capital lost / 10k turns | turn p50 |
+|---|---|---|---|---|---|
+| value heads (variant 1) | 0.69 | 10/32 [0.18, 0.49] | 3/32 | 22.1 | 45 ms |
+| balanced rules (solvi learned check order) | 0.48 | 13/32 [0.26, 0.58] | 6/32 | 6.8 | 35 ms |
+| balanced rules + the L17 laws | 0.57 | 14/32 [0.28, 0.61] | 7/32 | 4.1 | 35 ms |
+| proposer + lookahead (variant 2) | 5.39 | 24/32 [0.58, 0.87] | 21/32 | 3.5 | 54 ms |
+| **L17 net + laws** | **13.39** | **26/32 [0.65, 0.91]** | **23/32** | 5.9 | 60 ms |
+| L17 net + laws + lookahead | 14.56 | 30/32 [0.80, 0.98] | 29/32 | 4.4 | 85 ms |
+
+- Pairwise over the 32 maps (mean difference of log share, bootstrap 95%): L17 vs value heads +2.25 [1.60, 2.88], vs the
+  balanced rules +2.30 [1.70, 2.92], vs variant 2 **+0.46 [−0.17, 1.07]** — better on 22 of 32 maps but *not
+  significant*. L17 + lookahead vs variant 2: +0.99 [0.53, 1.49].
+- The laws alone add little (rules + laws vs rules: +0.17); the gain is the net's.
+- **0 check violations** in 9 358 304 net decisions (all L17 runs); treasury never negative, trace replays, save/load exact.
+- **Decision time**: the net's decision (laws + rule scores + forward pass) 0.11 ms median, 0.27 ms p99 in CPython on one
+  core; the forward pass alone 7.5 µs. Not measured in a browser (Pyodide is typically 2–5× slower: still well under 2 ms).
+  The lookahead mode's decisions take up to ~0.9 s when it runs.
+- Honest caveats: the L17 faction loses its capital more often than variant 2 (5.9 vs 3.5 per 10k turns — `capital_guard`
+  does not make combat deterministic), its big cities starve a little more often than the others' (10.0 vs 7.5 per 1 000
+  city-turns: they grow to the limit), and turn time grows with its empire (I3 failed on 6 of the 32 5 000-turn maps).
+
+**Long horizon: seeds 1–4 × 20 000 turns** (share over the last 20%, the A1/B1 yardstick; same maps as above):
+
+| seed | L17 net + laws | value heads | variant 2 | rules + laws |
+|---|---|---|---|---|
+| 1 | **19.75** | 0.21 | 21.00 | 0.17 |
+| 2 | **5.59** | 0.48 | 0.88 | 0.81 |
+| 3 | 0.31 | 0.26 | 0.29 | 0.12 |
+| 4 | **19.02** | 0.12 | 0.23 | 0.14 |
+
+Share ≥ 1 on 3 of 4 seeds (variant 2: 1 of 4) and all eleven health invariants held on all four runs. Seed 3 is the known
+failure mode: the L17 faction led until turn ~8 000, then its core was conquered and the respawned one-city factions were
+eliminated 51 times; every arm fails on that map. Of the seven pre-registered criteria (exps_v2 L17) five passed; the two that
+failed are "significantly better than variant 2" and "never eliminated after turn 1 000 in the long runs".
+
+`Game(variant="l17")` reproduces the evaluation games bit for bit: on seeds 1001 and 1002 × 1 500 turns the game state is
+identical to the L17 evaluation arm's at every 50th turn (only the event log's `why` text gains "; check: ok"), and share and
+population equal the evaluation's at every checkpoint; 0 violations, save/load exact.
+
 ## Layout
 
 - `index.html`: loads `@gradio/lite@5.45.0` from jsDelivr, requires `solvi>=0.2.1`, and mounts `app.py` and `realms/*.py`.
@@ -284,7 +356,8 @@ resume checks). Charts: `results/lookahead/lookahead.{png,svg}`, `results/lookah
 - `app.py`: the Gradio 5 UI.
 - `realms/world.py` (map, distance fields), `realms/econ.py` (rules), `realms/brains.py` (catalogs, questions, hard
   checks), `realms/adaptive.py` (the adaptive faction's value heads, pre-registered criteria A1–A4), `realms/lookahead.py`
-  (variant 2: proposer, laws, verified lookahead, pre-registered criteria B1–B5), `realms/engine.py` (turn loop, combat, events, spawning, save/load), `realms/health.py` (invariants,
+  (variant 2: proposer, laws, verified lookahead, pre-registered criteria B1–B5), `realms/l17.py` + `realms/l17_net.json`
+  (variant 3: the L17 policy net, laws and answer check; optional budgeted lookahead), `realms/engine.py` (turn loop, combat, events, spawning, save/load), `realms/health.py` (invariants,
   checkpoints), `realms/render.py` (SVG map, cards, sparklines).
 - `sim.py`: the headless long-run test and the charts.
 
@@ -301,6 +374,9 @@ uv run python spaces/realms/sim.py --table          # health table + criteria A1
 OPENBLAS_NUM_THREADS=1 uv run python spaces/realms/sim.py --variant lookahead --seed 1 --turns 20000 --checkpoint ck_1.json
 OPENBLAS_NUM_THREADS=1 uv run python spaces/realms/sim.py --resume ck_1.json --turns 20000 --out spaces/realms/results/lookahead/endless_1.json
 uv run python spaces/realms/results/lookahead/b5_check.py 1 2000   # B5 audit
+# variant 3 (L17 policy net + laws), and with the budgeted lookahead:
+OPENBLAS_NUM_THREADS=1 uv run python spaces/realms/sim.py --variant l17 --seed 1001 --turns 5000 --every 250 --no-tracemalloc
+OPENBLAS_NUM_THREADS=1 uv run python spaces/realms/sim.py --variant l17_la --seed 1001 --turns 5000 --every 250 --no-tracemalloc
 # ablation: the adaptive heads frozen after the bootstrap
 uv run python spaces/realms/sim.py --seed 1 --turns 20000 --frozen --out spaces/realms/results/ablation/frozen_1.json
 ```

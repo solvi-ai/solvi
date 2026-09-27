@@ -490,8 +490,9 @@ if __name__ == "__main__":
     ap.add_argument("--checkpoint-every", type=int, default=500)
     ap.add_argument("--resume", default="", help="continue bit-for-bit from a checkpoint written by --checkpoint")
     ap.add_argument("--max-wall", type=float, default=0, help="pause (exit 3) at the first checkpoint after this many s")
-    ap.add_argument("--variant", default="value", choices=["value", "lookahead"],
-                    help="adaptive faction: value heads (realms/adaptive.py) or proposer + laws + lookahead (realms/lookahead.py)")
+    ap.add_argument("--variant", default="value", choices=["value", "lookahead", "l17", "l17_la"],
+                    help="adaptive faction: value heads (realms/adaptive.py), proposer + laws + lookahead (realms/lookahead.py), "
+                         "or the L17 policy net + laws + answer check (realms/l17.py; l17_la: + budgeted lookahead)")
     a = ap.parse_args()
     os.makedirs(RESULTS, exist_ok=True)
     if a.charts:
@@ -504,7 +505,7 @@ if __name__ == "__main__":
         criteria_b()
     else:
         recs = run(a.seed, a.turns, a.every, a.saveload, not a.no_tracemalloc,
-                   a.out or os.path.join(RESULTS, *(["lookahead"] if a.variant == "lookahead" else []),
+                   a.out or os.path.join(RESULTS, *([a.variant] if a.variant != "value" else []),
                                          f"endless_{a.seed}.json"),
                    learn=not a.frozen, variant=a.variant, checkpoint=a.checkpoint or a.resume or None,
                    checkpoint_every=a.checkpoint_every, resume=a.resume or None, max_wall=a.max_wall or None)

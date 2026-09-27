@@ -20,11 +20,25 @@ REPO = "https://github.com/solvi-ai/solvi"
 RECORD_EVERY = 25          # turns per health checkpoint in the browser
 MAX_RECS = 240             # ring buffer of checkpoints shown in the health panel
 SPEEDS = {"1 turn / tick": 1, "5 turns / tick": 5, "20 turns / tick": 20}
+VARIANTS = {"learning value heads": "value", "L17 policy net + laws": "l17"}
+LA_RATE_BROWSER = 10       # L17 + verified lookahead in the browser: a third of the headless budget (rollout-turns per turn)
 
 
-def new_ui(seed):
-    g = Game(seed=int(seed or 0))
+def variant_of(label, la):
+    v = VARIANTS.get(label, "value")
+    return "l17_la" if v == "l17" and la else v
+
+
+def new_ui(seed, label="learning value heads", la=False):
+    v = variant_of(label, la)
+    g = Game(seed=int(seed or 0), variant=v)
+    if v == "l17_la":
+        g.planner.la_rate = LA_RATE_BROWSER         # smaller lookahead budget than headless (saved with the game)
     return {"g": g, "recs": [], "alive_min": 99, "sel": None, "perf": "", "since": 0, "t_turns": [], "neg": 0}
+
+
+def is_l17(p):
+    return p is not None and getattr(p, "tot", None) is not None and "violations" in p.tot    # realms/l17.py
 
 
 def play(ui, n):
@@ -38,6 +52,8 @@ def play(ui, n):
         if ui["since"] >= RECORD_EVERY:
             ui["recs"].append(health.record(g, ui["alive_min"], negative_treasury=ui["neg"]))
             ui["recs"] = ui["recs"][-MAX_RECS:]
+            if is_l17(g.planner):
+                ui["l17w"] = g.planner.stats(g)     # closes the planner's timing window (keeps it bounded)
             ui["alive_min"], ui["since"], ui["neg"] = 99, 0, 0
             g.m.reset()
     dt = (time.perf_counter() - t0) * 1000
@@ -56,7 +72,25 @@ def turn_md(ui):
             f"{sum(c['pop'] for c in g.cities.values())} population · {len(g.units)} units · {len(g.wars)} wars · seed {g.seed}")
 
 
-def learn_md(g):
+def learn_md(g, ui=None):
+    p = g.planner
+    if is_l17(p):
+        t = p.tot
+        laws = ", ".join(f"{k} {v:,}" for k, v in sorted(t["law_removed"].items())) or "none yet"
+        w = (ui or {}).get("l17w")
+        xs = sorted(p.ms)
+        if w and w["l17_n"]:
+            ms = f"{w['l17_ms_med']:.2f} ms median, {w['l17_ms_p99']:.2f} ms p99 (last {RECORD_EVERY} turns)"
+        else:
+            ms = f"{xs[len(xs) // 2]:.2f} ms median, {xs[int(0.99 * (len(xs) - 1))]:.2f} ms p99" if xs else "—"
+        la = (f" Verified lookahead (small budget, {p.la_rate} rollout-turns per turn): {t['lookaheads']:,} so far."
+              if p.mode == "net_la" else "")
+        return (f"**Adaptive faction = L17 policy net** (a small MLP per question, trained offline by policy iteration on "
+                f"rollouts; the model proposes, deterministic code decides): laws filter the options before the net "
+                f"(capital_guard, no_starve, upkeep_ok, war_min_length), an independent check re-verifies every answer "
+                f"after it, hard checks still force. {t['decisions']:,} decisions, **{t['violations']} check violations**; "
+                f"options removed by a law: {laws}. Decision time in this window: {ms}.{la} Click a unit or city of the "
+                f"adaptive faction: its `why` lists the options with the net's scores, the laws and the check.")
     L = g.learner
     hs = g.systems["adaptive"][1].heads
     pts = [c for c in L.curve if c[1] is not None and c[2] is not None][-6:]
@@ -74,7 +108,7 @@ def outputs(ui, refresh_choices=False):
     checks = health.check(ui["recs"])
     perf = ui["perf"] or "press a button to play"
     res = [ui, map_svg(g, ui["sel"]), turn_md(ui), factions_html(g), log_html(g),
-           health_html(ui["recs"], checks, perf), card_html(g, ui["sel"]), learn_md(g)]
+           health_html(ui["recs"], checks, perf), card_html(g, ui["sel"]), learn_md(g, ui)]
     if refresh_choices:
         res.append(gr.update(choices=faction_choices(g), value=human_label(g)))
         res.append(gr.update(choices=other_choices(g)))
@@ -98,8 +132,8 @@ def other_choices(g):
     return [g.factions[f]["name"] for f in g.alive() if f != g.human]
 
 
-def on_new(seed):
-    return outputs(new_ui(seed), refresh_choices=True)
+def on_new(seed, label="learning value heads", la=False):
+    return outputs(new_ui(seed, label, la), refresh_choices=True)
 
 
 def on_play(ui, n):
@@ -255,6 +289,10 @@ with gr.Blocks(title="solvi realms", theme=THEME, css=CSS) as demo:
                 speed = gr.Radio(list(SPEEDS), value="5 turns / tick", label="endless speed", scale=3)
                 seed = gr.Number(value=1, precision=0, label="seed", minimum=0, maximum=10**6, scale=1)
                 btn_new = gr.Button("New world", scale=1)
+            with gr.Row():
+                variant = gr.Radio(list(VARIANTS), value="learning value heads", label="adaptive faction (applies to a new world)",
+                                   scale=3)
+                la_box = gr.Checkbox(False, label="L17 + verified lookahead (small budget, slower)", scale=2)
             factions = gr.HTML()
             learn = gr.Markdown()
         with gr.Column(scale=5, min_width=360):
@@ -283,7 +321,7 @@ with gr.Blocks(title="solvi realms", theme=THEME, css=CSS) as demo:
 
     OUTS = [ui_state, map_html, turn_line, factions, log, health_panel, card, learn, human, other]
     demo.load(on_new, seed, OUTS)
-    btn_new.click(on_new, seed, OUTS)
+    btn_new.click(on_new, [seed, variant, la_box], OUTS)
     btn_next.click(lambda u: on_play(u, 1), ui_state, OUTS)
     btn_10.click(lambda u: on_play(u, 10), ui_state, OUTS)
     btn_100.click(lambda u: on_play(u, 100), ui_state, OUTS)
