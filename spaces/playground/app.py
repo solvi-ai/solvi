@@ -36,6 +36,8 @@ PRESET_DIR = HERE / "presets"
 PRESET_TITLES = {
     "14_answer_primitives": "New in 0.5 · Answer primitives: not stated, span, evidence, ranking, estimate",
     "13_typed_catalog": "New in 0.5 · Typed facts: pydantic checks every value (customs desk)",
+    "15_typed_decisions": "New in 0.5 · Typed decisions: a pydantic schema answered by a stand-in decider (no model runs here)",
+    "16_agent_tool": "New in 0.5 · Agent tool: a scripted stand-in LLM proposes, solvi checks and decides",
     "10_model_lies": "New in 0.4 · A model lies: grounding catches it",
     "11_rules_between_answers": "New in 0.4 · Rules between answers (content guard)",
     "12_multilabel_ordinal": "New in 0.4 · Multi-label + ordinal (ticket tags + priority)",
