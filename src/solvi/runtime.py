@@ -235,6 +235,8 @@ def _pass_siblings(catalog, r):
 def _recompute(part, r, args, init, catalog=None):
     """Re-run a part on its recorded inputs and compare its output (value, quote, grounding / type / validation outcome).
     A decision made in a shared forward pass is re-scored in the same pass."""
+    if r.error is not None and r.value is not MISSING:           # a failed step never carries a value
+        return [(r.step, r.name, f"recorded error {r.error!r}, but the record carries the value {r.value!r}")]
     plain = _plain_args(args, part.inputs)
     why = None
     if part.tin is not None:

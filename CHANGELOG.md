@@ -146,6 +146,8 @@ weights are not published.
 
 ### Fixes and tooling
 
+- Replay catches a value written into a step that failed (a record with an error must carry no value), also when the
+  attacker re-hashes the chain; before, such an edit replayed as ok.
 - A hard check that raises while it runs now makes the questions it governs abstain ("hard check … could not be
   evaluated"); before, the question was answered as if the check had passed (also in 0.4.x).
 - The pointer applies the checkpoint's `temperature.span` to the start / end scores and the null span (as the L14g

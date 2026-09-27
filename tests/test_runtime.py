@@ -78,3 +78,29 @@ def test_replay_catches_deleted_step_changed_input_and_fake_error():
     t = _copy.deepcopy(r.trace)                               # claim a step failed
     t.records[0].error, t.records[0].value = "ValueError: fake", None
     assert not t.replay(I.cat)["ok"]
+
+
+def test_rehashed_value_on_a_failed_step_is_caught():
+    from solvi import Answer, Catalog, Question
+
+    cat = Catalog()
+
+    @cat.fn
+    def ratio(a, b):
+        return a / b                          # fails on b = 0
+
+    @cat.rule("ok")
+    def ok(ratio):
+        return ratio < 1
+
+    t = System(cat, [Question("ok", "OK?", Answer.yes_no())]).ask({"a": 1, "b": 0}).trace
+    r = next(x for x in t.records if x.name == "ratio")
+    assert r.error is not None
+    r.value = 0.5                             # the attacker fills in the failed step and re-hashes the chain
+    prev = r.prev
+    for x in t.records[r.step - 1:]:
+        x.prev = prev
+        x.hash = vhash(x.body())
+        prev = x.hash
+    rep = t.replay(cat)
+    assert not rep["ok"] and rep["mismatches"][0][0] == r.step
