@@ -46,7 +46,7 @@ Status: `planned` · `in progress` · `research` (may not ship) · `done (versio
 
 | Item | What it gives | Status |
 |---|---|---|
-| **L17 strategist in realms** | A tiny learned policy behind hard laws; leads 23 of 32 new maps over 5,000 turns with zero law violations. | in progress |
+| **L17 strategist in realms** | A tiny learned policy behind hard laws; leads 23 of 32 new maps over 5,000 turns with zero law violations. | done (0.5.0) |
 | **Lookahead + policy mode** | Stronger (leads 29/32) but up to 0.9 s per decision; needs a faster search to fit the browser. | research |
 
 ## Docs
