@@ -543,7 +543,9 @@ class DeciderExtractor:
 @dataclass
 class FieldRead:
     """One field as read from the text. status: read | not_stated | unparsed (a quote that does not parse as the type) |
-    unsure (below min_field_confidence) | unsupported (a type no parser reads) | given (passed by the caller to update)."""
+    unsure (below min_field_confidence) | unsupported (a type no parser reads) | given (passed by the caller to update) |
+    conflict (update: a turn restates a field already read but the new quote does not parse — the old value is in `was`,
+    not in the state)."""
     name: str
     status: str
     value: Any = None
@@ -591,8 +593,9 @@ class TextRead:
 
     @property
     def missing(self):
-        """Required fields the text does not give (not stated, unparsed, unsure, unsupported)."""
-        return [f for f, r in self.fields.items() if r.required and not r.ok]
+        """Required fields the text does not give (not stated, unparsed, unsure, unsupported), and any field in conflict
+        (a dialogue turn restated it in a form that does not read)."""
+        return [f for f, r in self.fields.items() if not r.ok and (r.required or r.status == "conflict")]
 
     @property
     def escalated(self):
@@ -619,6 +622,9 @@ class TextRead:
         for f in self.missing:
             r = self.fields[f]
             what = f.replace("_", " ")
+            if r.status == "conflict":
+                parts.append(f"{what} (it was {r.was!r}, then I read {r.quote.value!r} and cannot read it)")
+                continue
             parts.append(what + (f" (I read {r.quote.value!r} but {r.why})" if r.status in ("unparsed", "unsure")
                                  and r.quote is not None else ""))
         return "Please tell me the " + ", ".join(parts[:-1]) + (" and the " if len(parts) > 1 else "") + parts[-1] + "."
@@ -807,8 +813,9 @@ class TextIn:
         """A dialogue turn: `prev` (a TextRead, or a state dict with question=) and the next message → a new TextRead over
         the whole dialogue (the turns joined by a new line; quotes point into it) whose `changes` list the fields the turn
         states anew — old value, new value, quote. Fields the turn does not state keep their value and quote; a turn that
-        repeats the old value next to a new one ("not A-10457 but A-10475") changes it to the new one. The entry point stays
-        the one already chosen (an escalated read is routed again on the whole dialogue)."""
+        repeats the old value next to a new one ("not A-10457 but A-10475") changes it to the new one; a turn that restates
+        a field in a form that does not parse makes it a `conflict` (in `missing`, asked by clarify(); the old value is
+        not kept as if confirmed). The entry point stays the one already chosen (an escalated read is routed again on the whole dialogue)."""
         if isinstance(prev, TextRead):
             base, old_fields, q = prev.text, dict(prev.fields), question or prev.question
             rt = prev.route if q == prev.question else None
@@ -840,6 +847,11 @@ class TextIn:
                 elif old is None or not old.ok:
                     changes.append(Change(f, None, r.value, r.quote))
                 fields[f] = r
+            elif r.status == "unparsed" and r.quote is not None and old is not None and old.ok:
+                # the turn restates the field but it does not read: the old value is not kept as if confirmed
+                fields[f] = dataclasses.replace(r, status="conflict", was=old.value,
+                                                why=f"this turn restates it as {r.quote.value!r}, which does not read "
+                                                    f"({r.why}); the earlier {old.value!r} is not kept")
             else:
                 fields[f] = old if old is not None and (old.ok or r.status == "not_stated") else r
         return TextRead(text, q, fields, rt, self.source, changes, sorted(self.entry_points),

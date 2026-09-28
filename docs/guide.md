@@ -1698,7 +1698,8 @@ Even `CueExtractor`, which is plain code, is recorded this way: which number is 
 **A dialogue.** `tin.update(read, next_message)` reads the next turn over the whole dialogue (turns joined by a new line;
 every quote points into it) and lists `changes` — field, old value, new value, quote. A turn that names the old value next
 to a new one ("the order is not A-10457 but A-10475") changes it to the new one; fields the turn does not state keep their
-value and quote; the entry point stays the one chosen (an escalated read is routed again on the whole dialogue).
+value and quote; a field the turn restates in a form that does not parse becomes a `conflict` (in `missing`, asked by
+`clarify()`), and its old value is not kept as if confirmed; the entry point stays the one chosen (an escalated read is routed again on the whole dialogue).
 `tin.update({"order_id": "A-1"}, text, question=...)` starts from a state you already have: those fields stay `given`.
 `system.ask_text(updated)` answers on the whole dialogue, in one trace.
 

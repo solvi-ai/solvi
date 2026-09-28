@@ -397,3 +397,19 @@ def test_replay_rebuilds_the_typed_value_from_the_quote():
     d = next(r for r in res.trace.records if r.name == "textin:purchase_date")
     assert replay_record(dataclasses.replace(d, value=dt.date(2026, 9, 21)),
                          dict(res.trace.init, purchase_date=dt.date(2026, 9, 21)))
+
+
+def test_dialogue_correction_that_does_not_parse_is_a_conflict():
+    _, s = shop()
+    tin = TextIn(s, decider(), patterns={"order_id": r"[A-Z]-\d+"})          # no today=: "12 October" does not read
+    r1 = tin.read("refund A-7: 500 EUR paid 2026-09-20")
+    assert r1.ok
+    r2 = tin.update(r1, "sorry, it was paid on 12 October")
+    f = r2.fields["purchase_date"]
+    assert f.status == "conflict" and f.quote.value == "12 October" and f.was == dt.date(2026, 9, 20)
+    assert "purchase_date" not in r2.state and "purchase_date" in r2.missing and not r2.ok
+    assert "12 October" in r2.clarify() and "purchase date" in r2.clarify()
+    res = s.ask_text(r2)
+    assert res["request_refund"].status == "abstain" and "purchase_date" not in res.trace.init
+    assert res.trace.replay(s)["ok"]
+    assert [c.field for c in r2.changes] == []               # nothing changed to a value: it is asked instead
