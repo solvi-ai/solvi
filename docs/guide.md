@@ -1454,7 +1454,7 @@ corrections in the same chain (`store.corrections()`).
 | `iter()`, `query(question=, answer=, status=, safeguard=, model=, since=, until=)` | `Stored` records (`.id`, `.time`, `.answers`, `.response()`) in stored order; `since <= time < until` |
 | `head()` | `{"count", "hash"}` of the chain |
 | `verify(anchor=None, signature=None, candidates=None)` | `{"ok", "count", "head", "legacy", "problems": [(seq, id, reason)]}` (+ `"signature"`) |
-| `signature()` | 32 numbers that later name the one changed record (see below) |
+| `signature(alg="syndrome")` | 64 bytes that later name the one changed record (see below) |
 | `replay_all(system)` | the stored decisions whose trace no longer replays, with the mismatches |
 | `quarantine(fact, value=...)` | the stored decisions whose answers rest on this fact (with this value), and the path from the fact to each answer |
 | `forget(fact, value=...)` | a report: decisions resting on a given fact, and records that only hold it; nothing is deleted |
@@ -1470,10 +1470,10 @@ a stored trace with every hash recomputed.
 
 **Which record changed: a signature.** The chain and the anchor tell that a store was rewritten, not where: an edited
 record with every hash after it and the stored head recomputed shows up only as "the record at the anchor differs".
-Keep a signature next to the head, and `verify` names the edited record and restores its content hash:
+Keep a signature next to the head (preview), and `verify` names the edited record and restores its content hash:
 
 ```python
-sig = store.signature()                  # {"alg", "count", "root": 32 numbers}: plain JSON, keep it with the head
+sig = store.signature()                  # {"alg": "syndrome", "count", "root": 2 numbers}: 64 bytes of plain JSON
 ...
 v = store.verify(signature=sig, candidates=backup_records)
 v["problems"]                            # [(1, "3f9a…", "the record differs from the signed one (its original …")]
@@ -1488,23 +1488,32 @@ solvi verify decisions.db --signature sig.json     # later: names the changed re
 `solvi.signature` works on anything: `sign(res)` / `res.signature()` for one response's trace (position 0 is the input,
 position i the record i−1), `sign(items)` for a list, `locate(obj, sig)` → the position or `None`, `repair(obj, sig,
 candidates=...)` → `{"index", "digest", "match"}` (for a trace record a candidate may be a plain value), `extend(sig,
-new_items)` after appending. How: each record's content hash (without `prev`, `hash`, `id`, so a recomputed chain does not
-move the other records) is written into 4 octonions and multiplied by an element of its position; the signature is the
-ordered product. Octonions have no zero divisors, so any one change moves the product, and they are alternative, so the
-changed record can be divided back out; it decodes to a valid content hash at the changed position only.
+new_items)` after appending. Each record is reduced to its content hash h_i (without `prev`, `hash`, `id`, so a recomputed
+chain does not move the other records). The default code, `alg="syndrome"`, keeps S0 = Σ h_i and S1 = Σ (i+1)·h_i mod
+a 256-bit prime: one change at k by d moves them by d and (k+1)·d, which gives k and the whole original hash.
 
-| Change | Result (stores of 2–500 records, `benchmarks/trace_signature.py`) |
+`alg="octonion"` is a second code: each hash written into 4 octonions, times an element of its position, multiplied in
+order — 32 floats. It locates exactly as the syndrome code on a store, larger and slower; it is kept for future signatures
+of tree-shaped objects (derivations), where its non-associativity sees a change of brackets that sums cannot. Not
+recommended for stores. A signature carries its `"alg"`, and check / locate / repair / `solvi verify --signature` read it.
+
+| Change | Result (stores of 2–500 records, `benchmarks/trace_signature.py`; both codes) |
 |---|---|
 | one record edited, the chain and the head recomputed | located and its content hash restored: 2000 of 2000, 0 wrong |
 | two or three records edited | detected 1500 of 1500, located 0 (`NotLocatable`), never a wrong record |
 | two records swapped, one deleted or inserted in the middle | detected, not located |
-| records cut off the end / appended after signing | "signed items missing" / not covered: sign again, as with the head |
+| records cut off the end / appended after signing | "signed items missing" / not covered: sign again or `extend` |
 
-Time: sign / locate 14 / 16 ms for 1000 records, 0.19 / 0.16 s for 10 000 (numpy). The signature restores the record's
-content hash, not the record: to get the record back, pass `candidates` (a backup, a replica). It is an error-locating
-code, not a MAC — anyone who can rewrite the signature can forge it, so keep it where you keep the head. And on a flat store
-a classical syndrome code (two sums mod a prime, 64 bytes) does the same job about 60 times faster; this API is a
-preview and may switch its code.
+| Records | syndrome (default): sign / locate | octonion: sign / locate |
+|---|---|---|
+| 1 000 | 1.3 / 1.4 ms | 13 / 16 ms |
+| 10 000 | 13 / 14 ms | 175 / 149 ms |
+| 50 000 | 66 / 67 ms | 0.80 / 0.76 s |
+| size | 64 bytes | 256 bytes |
+
+The signature restores the record's content hash, not the record: to get the record back, pass `candidates` (a backup,
+a replica). It is an error-locating code, not a MAC — anyone who can rewrite the signature can forge it, so keep it where
+you keep the head.
 
 **Provenance over the store.** `store.quarantine("fx_rate", 1.37)` lists the stored decisions whose answer depends on that
 value of that fact — through the recorded inputs of each step, from the answer back to the fact (a hard check that decided
