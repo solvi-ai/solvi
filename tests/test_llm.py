@@ -287,3 +287,35 @@ def test_an_llm_spec_names_a_decider(monkeypatch):
     assert m.scorer._key == KEY and KEY not in m.fingerprint()
     with pytest.raises(ModelError, match="llm:URL#model"):
         resolve("llm:http://127.0.0.1:8080/v1")
+
+
+def test_text_in_with_an_llm_routes_and_points_at_each_field():
+    import datetime as dt
+
+    from test_textin import REFUND, shop
+
+    from solvi.textin import TextIn
+
+    def reply(body):
+        c = body["messages"][1]["content"]
+        props = body["response_format"]["json_schema"]["schema"]["properties"]
+        text = _text(body)
+        if "enum" in props["answer"]:
+            return json.dumps({"answer": "request_refund", "confidence": 0.9, "quote": "please refund"})
+        want = {"order": r"A-\d+", "amount": r"1\.5 million", "currency": r"rubles", "purchase": r"12 September"}
+        for k, rx in want.items():
+            if k in c.split("\n")[0].lower():
+                m = re.search(rx, text)
+                return json.dumps({"answer": m.group(0) if m else None, "confidence": 0.9, "quote": ""})
+        return json.dumps({"answer": None, "confidence": 0.9, "quote": ""})
+    _, s = shop()
+    m = model(FakeLLM(reply=reply), ask="confidence")
+    tin = TextIn(s, m, today=dt.date(2026, 9, 28), synonyms={"currency": {"RUB": ["rubles"]}})
+    read = tin.read(REFUND)
+    assert read.question == "request_refund" and read.missing == []
+    assert read.state["amount"] == 1500000.0 and read.state["purchase_date"] == dt.date(2026, 9, 12)
+    q = read.fields["order_id"].quote
+    assert REFUND[q.start:q.end] == "A-10457"
+    res = s.ask_text(read)
+    assert res["request_refund"].answer == "review"
+    assert res.trace.replay(s.catalog)["ok"]

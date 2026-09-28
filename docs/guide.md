@@ -1421,6 +1421,7 @@ solvi serve myapp.decisions:system --decider solvi-ai/solvi-base   # + POST /v1/
 |---|---|
 | `POST /ask` | `{"state": {...}, "questions": [...] (default: all), "store": true}` → `Response.to_dict()` plus `stored_id` and `trace_hash` |
 | `POST /ask/{question}` | the input state itself as the body → the same response, for that question |
+| `POST /ask_text` | `{"text": "...", "question": null, "store": true, "today": null}` → a free text through [`ask_text`](#text-in-from-a-message-to-a-question): the response as for `/ask` plus `read` — the question it asks, each field with its status, value and quote `[text, start, end]`, `missing`, `clarify` (a question asking for what is missing) and `escalated` |
 | `GET /questions` | each question: its text, answer type and the JSON schema of the input state it reads |
 | `GET /health` | solvi's version, the questions, the catalog's fingerprint, the store, the decider |
 | `POST /v1/systemone` | the System One API answered by a solvi decider (`--decider`) |
@@ -1437,9 +1438,21 @@ updates its measured costs and stats in place. A System with `async def` (or `bl
 [`aask`](#async-execution-aask) instead: its endpoints are async and asks run concurrently on the server's event loop
 (the MCP server too).
 
+**Text in.** `POST /ask_text` reads a message with `solvi.textin.TextIn(system, decider)` — `--decider` picks the entry
+point (any decider: a checkpoint, `systemone:URL#model`, `llm:URL#model`), and its span pointer reads the fields when it
+has one (an LLM does), else the deterministic `CueExtractor`; `create_app(..., textin=TextIn(...))` or
+`Service(..., textin=...)` sets synonyms, patterns and cues. Without a decider a text can only go to a named `question`
+(or to the one question of a System with one), else the request is a 422. Dates without a year and relative dates are
+read against `today` — the request's, else the server's date — which the trace records. A text that does not say which
+question it asks is not an error: `read.question` is null, `read.escalated` says why, the likely questions abstain, and
+`read.clarify` asks which one is meant; a required field the text does not give is listed in `read.missing` and the
+question abstains for lack of it — nothing is guessed.
+
 **MCP.** With `--mcp`, each question is a tool: its input schema is the question's input state schema, and a call returns
 the question's result — answer, confidence, status, why, guard, evidence, the safeguards that fired — with `stored_id`
-and `trace_hash`, as JSON text and as structured content. An abstention is a result, not an error; an exception is a tool
+and `trace_hash`, as JSON text and as structured content. One more tool, `ask_text` (`solvi_ask_text` if a question has
+that name), takes `{"text", "question"?}` and returns what `POST /ask_text` does, so an agent can pass a user's message
+as it is. An abstention is a result, not an error; an exception is a tool
 error (`isError`). The official `mcp` SDK (2.x, `solvi[mcp]`) serves it when installed; otherwise solvi's built-in stdio
 JSON-RPC server answers `initialize`, `ping`, `tools/list` and `tools/call` (`--mcp-impl sdk|builtin` chooses). For an
 MCP client:

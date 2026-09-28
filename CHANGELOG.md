@@ -22,6 +22,15 @@
   that reason; a transient failure is not cached. `Item.unknown` tells a scorer that "not stated" is an answer; a
   scorer may return an already decoded pointer (`{"null", "spans"}`).
 
+### solvi serve: POST /ask_text and the ask_text tool
+
+- `POST /ask_text` (`{"text", "question"?, "store", "today"?}`) and the MCP tool `ask_text`: a free text through
+  `System.ask_text` with the served decider (`--decider`, which now also takes `systemone:URL#model` and
+  `llm:URL#model`, with `--api-key`) → the response as for `/ask` plus `read`: the question it asks, each field with its
+  status, value and quote, the missing fields, a clarifying question and why routing escalated. `Service.ask_text` /
+  `aask_text`; `create_app(..., textin=)` / `Service(..., textin=)` for a configured `TextIn`; `today` defaults to the
+  server's date and is recorded. `--mcp` now loads `--decider` too (it routes the texts).
+
 ### A vote across model families
 
 - `examples/20_vote_across_families.py`: two stand-in System One servers of different "families" started in-process

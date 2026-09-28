@@ -9,6 +9,9 @@ HTTP (`solvi[serve]`: fastapi, uvicorn):
   POST /ask              {"state": {...}, "questions": [names] (default: all), "store": true} → Response.to_dict() plus
                          "stored_id" (its id in the store, or null) and "trace_hash" (the hash at the end of its trace)
   POST /ask/{question}   the state itself as the body → the same response, for that question only
+  POST /ask_text         {"text": "...", "question": null, "store": true, "today": null} → a free text through
+                         System.ask_text: the question it asks (routed by the decider), the fields read with their quotes,
+                         the missing ones and a clarifying question ("read"), and the answers as for /ask
   GET  /questions        each question: its text, answer type and the JSON schema of the input state it reads
   GET  /health           solvi's version, the catalog's fingerprint, the store, the decider
   POST /v1/systemone     the System One API, answered by a solvi decider (`--decider`): a drop-in for a Jev / Kev client
@@ -22,7 +25,8 @@ abstain, and the trace and the audit say why (safeguard type_rejected). With `--
 whole trace in a TraceStorage (hash-chained), and `solvi verify` / `replay` / `diff` work on that store.
 
 MCP (`--mcp`): each question is a tool whose input schema is the question's input state schema; a call answers that
-question and returns its result (answer, confidence, status, why, safeguards) with the stored id and trace hash. It uses
+question and returns its result (answer, confidence, status, why, safeguards) with the stored id and trace hash; the tool
+`ask_text` takes a free text (as POST /ask_text). It uses
 the official `mcp` SDK (2.x, `solvi[mcp]`) when it is installed, else a built-in stdio JSON-RPC server with the subset of
 the protocol that tools need (initialize, ping, tools/list, tools/call)."""
 import json
@@ -132,10 +136,11 @@ class Service:
     in place; a System with async parts is asked with System.aask, concurrently on the server's event loop), answers
     System One requests with a decider."""
 
-    def __init__(self, system=None, decider=None, storage=None, model_name=None):
+    def __init__(self, system=None, decider=None, storage=None, model_name=None, textin=None):
         if system is None and decider is None:
             raise ValueError("solvi serve needs a System, a decider (--decider), or both")
         self.system, self.decider = system, decider
+        self._textin = textin                         # a solvi.textin.TextIn (synonyms, patterns, ...), else made on use
         if system is not None and storage is not None:
             from .storage import open_storage
             system.storage = open_storage(storage, system)
@@ -198,6 +203,61 @@ class Service:
     async def atool(self, name, state):
         """tool, for an async System (System.aask)."""
         return self._tool_result(name, await self._aask(state, [name], True))
+
+    # --- a free text (System.ask_text)
+    def textin(self, today=None):
+        """The TextIn that reads texts for this server: the one given, else TextIn(system, decider) — made once; `today`
+        (a date or ISO string; default: the server's date at the request, recorded in the trace) on a copy per request."""
+        import copy
+        import datetime as dt
+
+        from .textin import TextIn
+        if self.system is None:
+            raise LookupError("this server has no System (only POST /v1/systemone)")
+        if self._textin is None:
+            self._textin = TextIn(self.system, self.decider)
+        tin = copy.copy(self._textin)
+        if today is not None:
+            tin.today = dt.date.fromisoformat(today) if isinstance(today, str) else today
+        elif tin.today is None:
+            tin.today = dt.date.today()
+        return tin
+
+    def _read(self, text, question, today):
+        if not isinstance(text, str) or not text.strip():
+            raise TypeError("the text is a non-empty string")
+        tin = self.textin(today)
+        if question is not None and question not in tin.entry_points:
+            raise KeyError(f"no such entry point: {question}")
+        if question is None and len(tin.entry_points) > 1 and tin.decider is None:
+            raise ValueError("choosing the question a text asks needs a decider: start the server with --decider "
+                             "(or pass question=)")
+        return tin.read(text, question=question)
+
+    @staticmethod
+    def _text_result(resp):
+        d = resp.to_dict()
+        read = resp.textin
+        d["read"] = {**read.to_dict(), "clarify": read.clarify(), "escalated": read.escalated}
+        d["stored_id"], d["trace_hash"] = resp.stored_id, trace_hash(resp)
+        return d
+
+    def ask_text(self, text, question=None, store=True, today=None):
+        """A free text → Response.to_dict() of System.ask_text plus "read" (the question it asks, the fields read with
+        their quotes, the missing ones, a clarifying question), "stored_id" and "trace_hash"."""
+        read = self._read(text, question, today)
+        with self._lock:
+            if self.is_async:
+                from .runtime import run_sync
+                resp = run_sync(self.system.aask_text(read, store=store))
+            else:
+                resp = self.system.ask_text(read, store=store)
+        return self._text_result(resp)
+
+    async def aask_text(self, text, question=None, store=True, today=None):
+        """ask_text, for an async System (System.aask_text)."""
+        read = self._read(text, question, today)
+        return self._text_result(await self.system.aask_text(read, store=store))
 
     @staticmethod
     def _tool_result(name, resp):
@@ -312,15 +372,23 @@ class AskRequest(BaseModel):
     store: bool = Field(True, description="save the response to the server's store (if it has one)")
 
 
-def create_app(system=None, decider=None, storage=None, model_name=None, title=None):
-    """The FastAPI app (see the module docs). `system`: a System; `decider`: a DecideModel for POST /v1/systemone;
-    `storage`: a TraceStorage or a path (every ask is stored); `model_name`: the model name System One answers carry."""
+class AskTextRequest(BaseModel):
+    text: str = Field(description="a free text: a message, an e-mail, a chat turn")
+    question: Optional[str] = Field(None, description="the question it asks (default: the decider picks the entry point)")
+    store: bool = Field(True, description="save the response to the server's store (if it has one)")
+    today: Optional[str] = Field(None, description="ISO date for year-less and relative dates (default: the server's date)")
+
+
+def create_app(system=None, decider=None, storage=None, model_name=None, title=None, textin=None):
+    """The FastAPI app (see the module docs). `system`: a System; `decider`: a DecideModel for POST /v1/systemone and for
+    routing texts (POST /ask_text); `storage`: a TraceStorage or a path (every ask is stored); `model_name`: the model name
+    System One answers carry; `textin`: a solvi.textin.TextIn for POST /ask_text (default: TextIn(system, decider))."""
     from fastapi import Body, FastAPI, HTTPException, Request
     from fastapi.openapi.utils import get_openapi
     from fastapi.responses import JSONResponse
 
     from . import __version__
-    svc = Service(system, decider, storage, model_name)
+    svc = Service(system, decider, storage, model_name, textin)
     app = FastAPI(title=title or "solvi", version=__version__,
                   description="Decisions from a solvi catalog: the model proposes, code decides, everything is in the trace.")
     app.state.service = svc
@@ -366,6 +434,17 @@ def create_app(system=None, decider=None, storage=None, model_name=None, title=N
             def ask(body: AskRequest):
                 return call(svc.ask, body.state, body.questions, body.store)
         documented["/ask"] = (None, with_ids(response_model(system), "AskResponse"))
+
+        if run_async:
+            @app.post("/ask_text", tags=["questions"], response_model=None,
+                      summary="A free text: the question it asks, its fields read with quotes, the answers")
+            async def ask_text(body: AskTextRequest):
+                return await acall(svc.aask_text, body.text, body.question, body.store, body.today)
+        else:
+            @app.post("/ask_text", tags=["questions"], response_model=None,
+                      summary="A free text: the question it asks, its fields read with quotes, the answers")
+            def ask_text(body: AskTextRequest):
+                return call(svc.ask_text, body.text, body.question, body.store, body.today)
 
         def route(name):
             if run_async:
@@ -425,7 +504,22 @@ def mcp_tools(svc):
         desc = (f"{q.text} — answers {at.kind}{opts}. solvi decides with the catalog's code and checks; the result says "
                 "how (why, safeguards) and may abstain.")
         tools.append({"name": tool_name(q.name), "description": desc, "inputSchema": input_schema(svc.system, q.name)})
+    names = sorted(svc.system.questions)
+    tools.append({"name": text_tool_name(svc), "description":
+                  "A free text (a customer's message): solvi picks the question it asks among " + ", ".join(names) +
+                  ", reads that question's input fields from the text with quotes, and answers — or says which fields "
+                  "are missing and asks a clarifying question ('read.clarify'). Fields are never guessed.",
+                  "inputSchema": {"type": "object", "properties": {
+                      "text": {"type": "string", "description": "the text"},
+                      "question": {"type": "string", "enum": names,
+                                   "description": "the question it asks, when known (skips routing)"}},
+                      "required": ["text"]}})
     return tools
+
+
+def text_tool_name(svc):
+    """The MCP tool that takes a free text: "ask_text" (or "solvi_ask_text" when a question is named ask_text)."""
+    return "solvi_ask_text" if "ask_text" in {tool_name(q) for q in svc.system.questions} else "ask_text"
 
 
 def tool_name(q):
@@ -436,6 +530,12 @@ def tool_name(q):
 def call_tool(svc, name, arguments):
     """tools/call → (result dict, is_error)."""
     names = {tool_name(q): q for q in svc.system.questions}
+    if name == text_tool_name(svc):
+        a = dict(arguments or {})
+        try:
+            return svc.ask_text(a.get("text"), a.get("question")), False
+        except Exception as e:  # noqa: BLE001
+            return {"error": f"{type(e).__name__}: {e}"}, True
     if name not in names:
         raise KeyError(name)
     try:
@@ -448,12 +548,15 @@ async def acall_tool(svc, name, arguments):
     """tools/call on an event loop → (result dict, is_error): an async System is asked with aask, a sync one in a worker
     thread (its lock serializes the asks)."""
     names = {tool_name(q): q for q in svc.system.questions}
-    if name not in names:
+    if name not in names and name != text_tool_name(svc):
         raise KeyError(name)
     if not svc.is_async:
         import asyncio
         return await asyncio.to_thread(call_tool, svc, name, arguments)
     try:
+        if name == text_tool_name(svc):
+            a = dict(arguments or {})
+            return await svc.aask_text(a.get("text"), a.get("question")), False
         return await svc.atool(names[name], dict(arguments or {})), False
     except Exception as e:  # noqa: BLE001
         return {"error": f"{type(e).__name__}: {e}"}, True
@@ -567,8 +670,12 @@ def cmd_serve(a):
     system = load_system(a.system) if a.system else None
     decider = None
     if a.decider:
-        from .decide import DecideModel
-        decider = DecideModel.load(a.decider, backend=a.backend)
+        if a.decider.startswith(("systemone:", "llm:")):           # a service: solvi.models reads the spec
+            from .models import load
+            decider = load(a.decider, api_key=getattr(a, "api_key", None))
+        else:
+            from .decide import DecideModel
+            decider = DecideModel.load(a.decider, backend=a.backend)
     if system is None and decider is None:
         _fail("serve: name a System (module:attr or file.py:attr) and / or a decider (--decider)")
     if a.store and system is None:
@@ -578,7 +685,7 @@ def cmd_serve(a):
             _fail("serve --mcp: needs a System (its questions are the tools)")
         if a.mcp_impl == "sdk" and not sdk_available():
             _fail("serve --mcp-impl sdk: the MCP SDK (mcp>=2) is not installed: pip install 'solvi[mcp]'")
-        svc = Service(system, None, a.store)
+        svc = Service(system, decider, a.store)          # the decider routes texts for the ask_text tool
         run_mcp(svc, a.mcp_impl)
         return 0
     try:
@@ -595,7 +702,10 @@ def add_parser(sub):
     s = sub.add_parser("serve", help="serve a System's questions over HTTP (FastAPI) or MCP, and a decider as System One")
     s.add_argument("system", nargs="?", help="module:attr or file.py:attr — a System or a function returning one")
     s.add_argument("--store", help="save every answer to this TraceStorage (.db / .sqlite: SQLite, else JSON lines)")
-    s.add_argument("--decider", help="a decider checkpoint (folder or Hugging Face id) behind POST /v1/systemone")
+    s.add_argument("--decider", help="a decider (a checkpoint folder, a Hugging Face id, systemone:URL#model or "
+                   "llm:URL#model) behind POST /v1/systemone and routing POST /ask_text")
+    s.add_argument("--api-key", help="for a systemone: / llm: decider (default $SOLVI_SYSTEMONE_API_KEY / "
+                   "$SOLVI_LLM_API_KEY)")
     s.add_argument("--backend", default="auto", choices=["auto", "onnx", "torch"], help="the decider's backend")
     s.add_argument("--model-name", help="the model name System One answers carry (default: the decider's id)")
     s.add_argument("--host", default="127.0.0.1")
