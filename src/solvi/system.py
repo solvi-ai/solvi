@@ -550,7 +550,7 @@ class System:
             if r is not None and r.value is MISSING and r.error and r.probs is not None:
                 from .provenance import classify
                 g = classify(r.error)
-                if g in ("escalated", "low_confidence", "instruction"):  # the model's answer step escalated: abstain
+                if g in ("escalated", "low_confidence", "instruction", "memory"):  # the model's answer step escalated: abstain
                     return Result(None, r.confidence, r.error, "abstain", dict(r.probs), r.origin,
                                   rule.func.__name__ if rule.func is not None else rule.name, g)
             if r is None or r.value is MISSING:

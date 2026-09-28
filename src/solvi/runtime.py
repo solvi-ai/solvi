@@ -309,7 +309,7 @@ def _recompute(part, r, args, init, catalog=None):
             return [] if r.error is not None else [(r.step, r.name, f"recompute failed: {type(e).__name__}")]
         if isinstance(v, Decision) and isinstance(r.extra, dict):     # several models (solvi.multi): every proposal;
             from .multi import RECORD_KEYS                            # a long text: the sections read (solvi.longdoc)
-            for k in RECORD_KEYS + ("long",):
+            for k in RECORD_KEYS + ("long", "memory"):
                 if (k in r.extra or k in v.extra) and vhash(r.extra.get(k)) != vhash(v.extra.get(k)):
                     return [(r.step, r.name, f"recorded {k} differ from the recomputed ones")]
         v = locate(part, v, init)
