@@ -1,6 +1,52 @@
 # Changelog
 
-## Unreleased
+## 0.5.1 — unreleased — escalation with a guarantee, any System One model, a release gate, stored decisions
+
+### Escalation with a guarantee
+
+Measured on the 0.5.0 deciders: the shipped act threshold for "10% error" let through answers that were wrong 32–39% of
+the time on typed-decisions and Taskmaster-2 (it holds on ContractNLI and JSON questions). The thresholds below keep their
+promise on inputs like your calibration examples.
+
+- `part.act_guard(examples, risk=0.10)`: conformal risk control on a few hundred labelled examples of your stream —
+  P(answered alone and wrong) ≤ risk, as a share of all questions. Measured on solvi-large with 300 examples: the risk stays
+  at 9.6–10.0% on every data set (typed-decisions answers 32% alone, ContractNLI 97%, JSON questions 99.6%). The result
+  also says how much must escalate at least when the model is often wrong (`must_escalate_at_least`).
+- `part.calibrate_for(examples, error=..., method="ltt")`: learn-then-test — the error among the answers given alone ≤
+  error with probability ≥ 1 − delta; stricter, it often lets nothing through. `method="empirical"` is the 0.5.0 behaviour.
+- `part.conformal(examples, coverage=0.9)`: every decision carries `extra["candidates"]`, the answers that cannot be
+  ruled out; an escalation's message lists them for the person who takes over.
+- Every decision records what its threshold promises; the audit shows a `guarantee` line per answer, or says that there
+  is none because the thresholds were not calibrated on your data.
+- `solvi.calibration`: `crc_threshold`, `ltt_threshold`, `conformal_quantile`, `set_scores`.
+
+### Safeguards
+
+- `option_order="canonical"` or `"average"` (over rotations of the list) on choice and multi-label decisions: how a caller
+  lists the options cannot change the answer.
+- `min_margin=0.1`: escalate a near tie between the two most probable answers (where a misleading text flips a choice).
+- An answer head with a NaN or infinite feature abstains instead of answering with confidence NaN (found by fuzzing).
+- Quotes proposed by a model are shown in the audit as "in the text; support not checked" (the text match is checked;
+  whether the quote supports the answer is not).
+
+### Any System One model as a decider
+
+- `solvi.systemone.systemone(base_url, model, api_key=None)`: a decider over `POST /v1/systemone` — Jev and open servers
+  (Kev, Von, Laya-serve, Intern-Decision, …). Questions about one input go in one request; everything built on a decider
+  works: act_guard, conformal, fit / teach, audit, trace (which records the endpoint and model name).
+
+### Release gate and decision tests
+
+- Honesty suite (`solvi.honesty`, `solvi honesty SET --baseline B`): abstaining, "not stated", act vs escalate and traps on
+  a labelled set; three numbers — confident errors, coverage at 10% risk, share of quotes that back the answer (a proxy) —
+  and a non-zero exit when any gets worse. Run in CI and before publishing a model (docs/honesty.md).
+- `solvi test PATH` and a pytest plugin: decision regression tests from `cases.json` (the gallery format) — expected
+  answers, statuses and safeguards per case, trace replay, `--fuzz N` input mutations (docs/testing.md).
+
+### Models
+
+- The deciders are now `solvi-ai/solvi-large` and `solvi-ai/solvi-base` (the old `decide-large` / `decide-base` ids
+  redirect).
 
 ### Storage
 
