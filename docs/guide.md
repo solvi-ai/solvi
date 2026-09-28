@@ -432,7 +432,7 @@ from pydantic import BaseModel, Field
 from solvi import Scale
 from solvi.decide import DecideModel
 
-model = DecideModel.load("~/models/decide-base")          # a checkpoint folder or a Hugging Face id
+model = DecideModel.load("~/models/solvi-base")          # a checkpoint folder or a Hugging Face id
 
 class Triage(BaseModel):                                  # one field = one question: its type is the kind, its description the task
     team: Literal["billing", "technical", "shipping"] = Field(description="Which team should handle this ticket?")
@@ -551,7 +551,7 @@ load and behave exactly as before: choose-one and multi-label natively, a score 
 or "yes" / "no", no act head (escalate by `escalate_below`), one question per pass. `load(..., multi_question=..., act=...)`
 overrides the declaration for experiments.
 
-Published deciders are on [huggingface.co/solvi-ai](https://huggingface.co/solvi-ai) (`DecideModel.load("solvi-ai/decide-base")`).
+Published deciders are on [huggingface.co/solvi-ai](https://huggingface.co/solvi-ai) (`DecideModel.load("solvi-ai/solvi-base")`).
 Their model cards state what each was measured on and where it is weak; they are previews, so fit and calibrate on 30–60
 labelled examples of your task (below) before trusting the confidences.
 
@@ -945,7 +945,7 @@ res = system.ask(init_state)                   # saved; res.stored_id is its id
 store.get(res.stored_id)                        # the Response, loaded back (typed values restored)
 store.query(question="refund", answer="no", since="2026-09-01")
 store.query(safeguard="grounding")              # every decision where a model's quote was rejected
-store.query(model="decide-base")                # ... a step was produced by this model (id, type or fingerprint)
+store.query(model="solvi-base")                # ... a step was produced by this model (id, type or fingerprint)
 store.replay_all(system)                        # [] when every stored trace replays against the current catalog
 store.verify()                                  # the chain across stored records
 ```

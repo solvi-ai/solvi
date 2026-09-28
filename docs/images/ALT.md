@@ -1,6 +1,6 @@
 # Alt text for the solvi 0.5.0 launch images
 
-Numbers come from the model cards (solvi-ai/decide-large, solvi-ai/decide-base) and exps_v2/RESULTS/experiments/L19.md.
+Numbers come from the model cards (solvi-ai/solvi-large, solvi-ai/solvi-base) and exps_v2/RESULTS/experiments/L19.md.
 
 ## cover_1600x900.png, cover_linkedin_1200x627.png
 
@@ -24,28 +24,28 @@ Numbers come from the model cards (solvi-ai/decide-large, solvi-ai/decide-base) 
 ## results_typed.png / results_typed_ru.png
 
 - EN: Bar chart, typed-decisions test (2000 questions), zero-shot accuracy: Laya base 36.0%, GLiNER2.5-Decide 50.3%,
-  decide-base 54.5%, decide-large 54.5%; decide-large fitted per process on 300 examples 64.9%. Gold labels come from a
+  solvi-base 54.5%, solvi-large 54.5%; solvi-large fitted per process on 300 examples 64.9%. Gold labels come from a
   ~4B teacher, so accuracy means agreement with that teacher.
 - RU: Столбчатая диаграмма, тест typed-decisions (2000 вопросов), точность без примеров: Laya base 36.0%,
-  GLiNER2.5-Decide 50.3%, decide-base 54.5%, decide-large 54.5%; decide-large после подгонки под процесс на 300 примерах
+  GLiNER2.5-Decide 50.3%, solvi-base 54.5%, solvi-large 54.5%; solvi-large после подгонки под процесс на 300 примерах
   64.9%. Эталон — метки учителя (~4B), точность означает согласие с ним.
 
 ## results_fd.png / results_fd_ru.png
 
 - EN: Bar chart, Fast Decisions public dev split, our harness. GLiNER2.5-Decide 62.9% zero-shot (with 64 examples not
-  measured); decide-large 59.4% zero-shot, 63.0% with 64 labelled examples; decide-base 56.3% zero-shot, 60.4% with 64;
-  Laya 48.9% zero-shot. GLiNER is ahead zero-shot; decide-large is level after 64 examples. Official test-split numbers are
+  measured); solvi-large 59.4% zero-shot, 63.0% with 64 labelled examples; solvi-base 56.3% zero-shot, 60.4% with 64;
+  Laya 48.9% zero-shot. GLiNER is ahead zero-shot; solvi-large is level after 64 examples. Official test-split numbers are
   not comparable.
 - RU: Столбчатая диаграмма, Fast Decisions, публичная dev-часть, наша обвязка. GLiNER2.5-Decide 62.9% без примеров (с 64
-  примерами не измеряли); decide-large 59.4% без примеров и 63.0% с 64 размеченными; decide-base 56.3% и 60.4%; Laya
-  48.9%. Без примеров впереди GLiNER, decide-large вровень после 64 примеров. Официальные числа на test-части несравнимы.
+  примерами не измеряли); solvi-large 59.4% без примеров и 63.0% с 64 размеченными; solvi-base 56.3% и 60.4%; Laya
+  48.9%. Без примеров впереди GLiNER, solvi-large вровень после 64 примеров. Официальные числа на test-части несравнимы.
 
 ## evidence.png / evidence_ru.png
 
-- EN: Bar chart, ContractNLI test: share of evidence quotes that support the answer. Previous base (L14g) 23%, decide-base
-  46%, decide-large 62%. In-distribution: the ContractNLI train split was used for training.
+- EN: Bar chart, ContractNLI test: share of evidence quotes that support the answer. Previous base (L14g) 23%, solvi-base
+  46%, solvi-large 62%. In-distribution: the ContractNLI train split was used for training.
 - RU: Столбчатая диаграмма, ContractNLI test: доля цитат-доводов, поддерживающих ответ. Прежний base (L14g) 23%,
-  decide-base 46%, decide-large 62%. Тест в распределении: train-часть ContractNLI была в обучении.
+  solvi-base 46%, solvi-large 62%. Тест в распределении: train-часть ContractNLI была в обучении.
 
 ## playground_audit.png
 

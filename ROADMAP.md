@@ -30,8 +30,8 @@ Status: `planned` · `in progress` · `research` (may not ship) · `done (versio
 
 | Item | What it gives | Status |
 |---|---|---|
-| **decide-large** and a distilled **decide-base** | Typed decisions with evidence quotes, not stated, spans, rankings and numbers; ahead of GLiNER2.5-Decide and Laya on typed questions over JSON states, behind GLiNER2.5-Decide on zero-shot choice questions (level with it after `fit` on ~64 examples). | done (0.5.0, preview) |
-| **Decider v3** | New layers around the same pretrained encoder: text encoded once and questions as independent queries (many questions per pass that match one-by-one exactly), cached option vectors (hundreds of options), answers computed only from 1–3 selected evidence passages, several heads whose disagreement is the uncertainty, early exit on CPU, adapters per question kind. Each block ships only if it beats decide-large on the same data. | research |
+| **solvi-large** and a distilled **solvi-base** | Typed decisions with evidence quotes, not stated, spans, rankings and numbers; ahead of GLiNER2.5-Decide and Laya on typed questions over JSON states, behind GLiNER2.5-Decide on zero-shot choice questions (level with it after `fit` on ~64 examples). | done (0.5.0, preview) |
+| **Decider v3** | New layers around the same pretrained encoder: text encoded once and questions as independent queries (many questions per pass that match one-by-one exactly), cached option vectors (hundreds of options), answers computed only from 1–3 selected evidence passages, several heads whose disagreement is the uncertainty, early exit on CPU, adapters per question kind. Each block ships only if it beats solvi-large on the same data. | research |
 | **Long documents** | Use the encoder's full 8k context (today the deciders are trained on up to 1k tokens) and, beyond it, find the relevant sections first and decide on them. | research |
 | **Better evidence quotes** | Quotes that actually support the answer on long legal and business texts (today ~23% on ContractNLI). | research |
 | **Business-judgement questions** | Better zero-shot answers on operational judgements (typed-decisions style); today use `fit` on 30–60 labeled examples. | research |
@@ -69,7 +69,7 @@ Status: `planned` · `in progress` · `research` (may not ship) · `done (versio
 
 | Item | Version |
 |---|---|
-| decide-large / decide-base (preview); L17 strategist in realms | 0.5.0 |
+| solvi-large / solvi-base (preview); L17 strategist in realms | 0.5.0 |
 | Typed facts (pydantic), questions declared by types, answer primitives (not stated, evidence, span, rank, estimate), overall confidence, typed decider API with act/escalate, code strategist (dead ends, exact cost optimum, memoized planning) | 0.5.0 |
 | Audit shows what a learned head reads and ignores; `rule_abstained` safeguard | 0.4.1 |
 | Provenance, audit and safeguards; decisions with a model | 0.4.0 |

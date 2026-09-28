@@ -47,8 +47,8 @@ script that computes everything, and 152 ms when an expired policy settles the c
 - [solvi realms](https://huggingface.co/spaces/solvi-ai/realms): an endless strategy game whose factions are solvi systems —
   tested for 100 000 turns: flat decision time (~0.3–0.6 ms), bounded memory and state, every sampled trace replay OK.
 - All run **entirely in your browser** (Pyodide): no server, no GPU, nothing you type leaves the page.
-- Models: [solvi-ai/decide-large](https://huggingface.co/solvi-ai/decide-large) (typed decisions, 396M, preview),
-  [solvi-ai/decide-base](https://huggingface.co/solvi-ai/decide-base) (the same answers on a CPU / in ONNX, 150M, preview),
+- Models: [solvi-ai/solvi-large](https://huggingface.co/solvi-ai/solvi-large) (typed decisions, 396M, preview),
+  [solvi-ai/solvi-base](https://huggingface.co/solvi-ai/solvi-base) (the same answers on a CPU / in ONNX, 150M, preview),
   [solvi-ai/extract-base](https://huggingface.co/solvi-ai/extract-base) (fields by description) and
   [solvi-ai/extract-receipts](https://huggingface.co/solvi-ai/extract-receipts). Each model card states what the model was
   measured on, how well it does, and its limits; all models are listed at [huggingface.co/solvi-ai](https://huggingface.co/solvi-ai).
@@ -163,7 +163,7 @@ class Triage(BaseModel):
     angry: bool = Field(description="Is the customer angry?")
     topics: list[Literal["refund", "delay", "bug"]] = Field(description="What does the ticket mention?")
 
-model = DecideModel.load("solvi-ai/decide-base")         # or a local folder; solvi_decide.json says what it can do
+model = DecideModel.load("solvi-ai/solvi-base")         # or a local folder; solvi_decide.json says what it can do
 cat = Catalog()
 questions = model.questions(cat, Triage, text_fact="ticket", escalate_below=0.6)
 

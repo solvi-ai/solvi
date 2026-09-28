@@ -33,4 +33,4 @@ body:
     id: model
     attributes:
       label: Model checkpoint (if any)
-      description: e.g. solvi-ai/decide-base, a local folder, a stand-in; backend torch or onnx.
+      description: e.g. solvi-ai/solvi-base, a local folder, a stand-in; backend torch or onnx.
