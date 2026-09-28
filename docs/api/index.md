@@ -11,6 +11,7 @@ this reference lists what each module exports and the signatures.
 | [`solvi.systemone`](systemone.md) | a model behind the System One HTTP API as a decider |
 | [`solvi.multi`](multi.md) | cascade, vote and route over several models |
 | [`solvi.serve`](serve.md) | `solvi serve`: HTTP, MCP and the System One API |
+| [`solvi.agents`](agents.md) | guarding an agent's tool calls: `Guard`, the MCP proxy (adapters for PydanticAI, LangGraph, the OpenAI Agents SDK) |
 | [`solvi.storage`](storage.md) | TraceStorage: JSONL and SQLite stores, queries, replay |
 | [`solvi.diff`](diff.md) | `solvi diff` and shadow mode |
 | [`solvi.testing`](testing.md) | decision regression tests from `cases.json` |

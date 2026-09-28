@@ -2,6 +2,39 @@
 
 ## Unreleased (0.7)
 
+### Guarding an agent's tool calls
+
+- `solvi.agents.Guard`: an agent proposes a tool call (`{"name", "arguments"}` — data, never code; OpenAI, LangChain,
+  Anthropic and MCP shapes are read by `ToolCall.parse`) and solvi checks it as a proposal: the tool is in the catalog
+  (`@guard.tool` on typed functions, `guard.declare(name, schema=...)` for a pydantic model or a JSON schema), the
+  arguments validate against its types (unknown arguments are errors), the `ground=` arguments are quoted from the
+  conversation (strings literally, numbers as number tokens, lists item by item; `ground_from=` the roles allowed — never
+  the assistant's own words), not only from a tool output that carries instruction-like text (solvi.perturb's rules;
+  `injections="any"`: any such tool output escalates the call), your policies (`@guard.policy(tools, on_fail="deny" |
+  "escalate")`: ordinary solvi hard checks over the arguments and the facts your app gives; `@guard.fn` for computations
+  they read) and, optionally, an authorizer — a decider's yes / no "does the conversation authorize this call?"
+  (`guard.make_authorizer(decider)`, perturb=2, `guard.calibrate_authorizer(examples, risk=0.10)` = act_guard).
+- The outcome: `allow` (solvi runs the registered function: `d.result`, or `d.error` when it raised), `deny` or
+  `escalate`, with the reasons in words (`d.reasons`, `d.message()` for the model), the candidate call and the evidence
+  (where each grounded argument is quoted). A failed deny check wins over a failed escalate check; an abstention (a fact
+  not given, an unsure authorizer) is an escalation. `guard.resolve(d, approve, reviewer)` records a person's answer and
+  makes an approved call. `guard.session(context, facts)` follows a conversation and feeds tool outputs back into it.
+- Each tool is a solvi System with one question, `verdict`: every decision is a full response — trace, audit, stored with
+  `meta["guard"]` (outcome, reasons, executed, the result's hash or the error) in a TraceStorage; `guard.replay(id)`,
+  `guard.replay_all()`; the same call in the same conversation gives the same trace. `guard.check` / `acheck` decide
+  without running anything; `acall` awaits async tools and policies.
+- Adapters (each imports its framework only when used): `solvi.agents.pydantic_ai.GuardedToolset` (a WrapperToolset:
+  deny → ModelRetry, escalate → ApprovalRequired and deferred approval), `solvi.agents.langgraph.guarded_tool_node` (a
+  ToolNode with wrap_tool_call: deny → an error ToolMessage, escalate → interrupt / Command(resume=...)),
+  `solvi.agents.openai_agents.guard_tools` (a tool input guardrail + needs_approval: deny → reject_content, escalate →
+  an interruption to approve). Tested with pydantic-ai 2.51, langgraph 1.2.12 and openai-agents 0.22.3 and their
+  scripted models (dependency group `agents`; the tests skip without them).
+- `solvi serve --guard catalog.py:guard --upstream CMD [--facts JSON] [--escalate elicit|deny] [--store]`: an MCP proxy
+  in front of an MCP server — `tools/list` shows the declared tools (their schemas adopted from the server), every
+  `tools/call` passes the guard; an escalation asks the user through MCP elicitation when the client supports it.
+- `solvi check` lints a Guard (every tool's checks). [examples/19_agent_guard.py](examples/19_agent_guard.py): an
+  accounts-payable agent, scripted, through every case.
+
 ### Documentation site
 
 - `mkdocs.yml` (Material theme): the README, the guide, the format specs (decider checkpoint, model strategist, regression

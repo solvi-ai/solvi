@@ -69,6 +69,9 @@ pip install "solvi[serve]"     # + fastapi, uvicorn: `solvi serve app.py:system`
 pip install "solvi[otel]"      # + opentelemetry: decisions as OpenTelemetry spans (solvi.otel)
 ```
 
+`solvi.agents` (guarding an agent's tool calls) needs only the core; its adapters use the PydanticAI, LangGraph or OpenAI
+Agents SDK you already have.
+
 Requires Python 3.10+.
 
 ## Quickstart (core only, no model)
@@ -212,6 +215,14 @@ Every answer is a value and a confidence, and the types also declare answer prim
   `solvi report decisions.db --html out.html` give an auditor one page per decision or per period, and `solvi.otel.export(res)` puts every step in
   your OpenTelemetry traces. `res.counterfactual("approve")` says what would have changed the answer ("approve if
   amount ≤ 1000 (now 1200)"), re-running only the code with the models' recorded proposals held.
+- **Guarding an agent's tool calls.** The agent proposes `{"name": tool, "arguments": {...}}`; `solvi.agents.Guard` checks
+  it — the tool is in the catalog, the arguments validate against its types, the values that must come from the
+  conversation are quoted there (and not only from a tool output that says "ignore previous instructions"), your policies
+  (limits, roles, allow-lists) are ordinary hard checks, and an optional decider asks "did the user ask for this?" under
+  `act_guard` and `perturb` — then allows it (solvi runs the function), denies it with the reasons, or escalates it to a
+  person. Every decision is a stored, replayable trace. Adapters for PydanticAI, LangGraph and the OpenAI Agents SDK, and
+  `solvi serve --guard catalog.py:guard --upstream CMD` in front of an MCP server
+  ([guide](docs/guide.md#guarding-an-agents-tool-calls), [examples/19_agent_guard.py](examples/19_agent_guard.py)).
 - **Text in.** `system.ask_text("please refund order A-10457, 1.5 million rubles, paid 12 September", decider)`: the
   decider picks which question the message asks (or escalates when unsure), each input field is read with a quote and a
   deterministic parser (numbers, dates, enums, yes / no), missing required fields are listed for a clarifying question,
@@ -335,6 +346,7 @@ receipt with the one-pass extractor on an A100).
 | [examples/16_primitives.py](examples/16_primitives.py) | Answer primitives: "not stated" vs abstain, spans parsed into numbers, evidence quotes checked in the text (`require_evidence`), a ranking with scores, an estimate with an interval — from rules and from a decider with the L14g contract; confidence per kind, JSON round trip, replay |
 | [examples/17_model_strategist.py](examples/17_model_strategist.py) | The code strategist: dead ends dropped, the cheapest verified plan by declared costs, a model's proposal checked and rejected; aliases for names that match no fact (experimental; stand-ins without weights) |
 | [examples/18_several_models.py](examples/18_several_models.py) | Several models, one decision: a cascade small → large, a vote of two model families, a route by code — each under one `act_guard` guarantee, with cost per question; every stage in the audit and the trace |
+| [examples/19_agent_guard.py](examples/19_agent_guard.py) | An accounts-payable agent's tool calls through a `Guard`: grounded arguments, an invented IBAN denied, a budget escalation approved by a person, an instruction hidden in an invoice, an authorizer with `act_guard` and `perturb`; every decision stored and replayed (a scripted agent, no API keys) |
 | [examples/07_receipts_model.py](examples/07_receipts_model.py) | Expense check on a scanned receipt: a receipts-tuned extractor cites each field, rules and a hard check decide (needs `solvi[model]`) |
 | [examples/08_contracts_by_description.py](examples/08_contracts_by_description.py) | Contract review with fields defined only in words: the general extractor reads the whole contract, cites clauses or says "absent" (needs `solvi[model]`) |
 
