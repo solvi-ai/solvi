@@ -1576,7 +1576,9 @@ MCP client:
 MCP proxy that checks every tool call an agent makes to another MCP server — see
 [Guarding an agent's tool calls](#an-mcp-proxy).
 
-**System One.** With `--decider` (a checkpoint folder or a Hugging Face id; `--backend onnx|torch`), the same server
+**System One.** With `--decider` (a checkpoint folder, a Hugging Face id already in the local cache — `solvi serve`
+never downloads one unless you add `--pull`, as `solvi models pull` would —, `systemone:URL#model` or `module:attr`;
+`--backend onnx|torch`), the same server
 answers `POST /v1/systemone` — the protocol `solvi.systemone` speaks as a client — so solvi can stand where a Jev or Kev
 client points:
 
@@ -1598,6 +1600,33 @@ and the answers carry no act / escalate signal: thresholds (`act_guard` and the 
 `systemone(url, model)` turns the probabilities back into a decider. `solvi serve --decider X` without a System serves
 only this endpoint. Without FastAPI, `solvi.serve.Service(system, decider)` answers the same requests in-process
 (`.ask(state)`, `.systemone(body)`, `.tool(question, state)`).
+
+**Security.** The defaults are for a service on your own machine (`127.0.0.1`); before you expose it:
+
+- **Authentication.** `SOLVI_SERVE_TOKEN=... solvi serve ...` (or `--token`, which other local users can see in the
+  process list) makes every HTTP request — the docs and `/health` included — carry `Authorization: Bearer <token>`; the
+  token is compared in constant time. Without a token the server warns when it listens beyond the loopback address. For
+  anything more (users, rate limits, TLS) put it behind a reverse proxy. MCP runs over stdio: the client that starts
+  the process is the one that can call it.
+- **Limits.** A request body (an MCP message) is at most `--max-body` bytes (default 1 000 000: 413 above it), its JSON
+  at most `--max-depth` levels deep (default 32: 400), and a request takes at most `--timeout` seconds (default 60:
+  504; an MCP tool error). A sync System cannot be interrupted: the ask finishes in a worker thread and the next asks
+  wait for it. An async System's parts get 80% of the timeout as `aask`'s timeout (unless `System(timeout=)` or the
+  part sets one), so a slow part makes its questions abstain (safeguard `timeout`) and the request still answers.
+- **Errors.** A refused request says what was refused. Any other failure is logged on the server with its traceback
+  (logger `solvi.serve`); the client gets a 500 with an incident id to look it up — never an exception text, a traceback
+  or a path. An exception inside a catalog part is not a server error: it is part of the decision, and its message is in
+  the trace (`why`, the step's `error`), as it is for `System.ask`. `/health` names the store by its file name only.
+- **Every entry point.** `POST /ask_text` and the MCP `ask_text` tool go through the same token, limits, timeout and
+  error hiding as the questions. The MCP proxy (`--guard --upstream`) bounds each client message by `--max-body` /
+  `--max-depth` and answers a failure of its own with an incident id; an upstream server's own errors are passed on.
+- **CORS** is off: no `Access-Control-Allow-*` headers, so browsers on other origins cannot read the answers. `--cors
+  https://app.example` (repeatable) allows one origin.
+- **Nothing is loaded from request data.** The System and the decider are named on the command line only; a request's
+  `model` field is a name echoed back, and states are data.
+- **JSON.** Responses are strict JSON: a non-finite float (an escalation threshold no calibration could meet is `inf`) is
+  written as `{"$float": "inf"}` (`"-inf"`, `"nan"`), as in stored records and calibration files; `Response.from_json`
+  reads it back as the float.
 
 ## Text in: from a message to a question
 

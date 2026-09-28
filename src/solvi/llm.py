@@ -418,6 +418,8 @@ class LLMScorer:
         if ask not in ("probabilities", "confidence"):
             raise ValueError('ask must be "probabilities" or "confidence"')
         sp = urllib.parse.urlsplit(base_url)
+        if sp.scheme.lower() not in ("http", "https"):
+            raise ValueError(f"an LLM endpoint is an http(s):// URL, not {str(base_url)[:40]!r}")   # no file: / ftp:
         path = sp.path.rstrip("/")
         path = path if path.endswith("/chat/completions") else path + "/chat/completions"
         self.url = urllib.parse.urlunsplit((sp.scheme, sp.netloc, path, sp.query, ""))
@@ -468,7 +470,7 @@ class LLMScorer:
         headers = {"content-type": "application/json", **self._headers}
         if self._key:
             headers["authorization"] = f"Bearer {self._key}"
-        req = urllib.request.Request(self.url, data=data, method="POST", headers=headers)
+        req = urllib.request.Request(self.url, data=data, method="POST", headers=headers)  # noqa: S310 — http(s) only
         with self.opener(req, timeout=self.timeout) as r:
             return json.loads(r.read().decode())
 

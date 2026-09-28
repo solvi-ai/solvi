@@ -263,7 +263,8 @@ def test_declared_tools_and_json_schemas():
         "limit": {"anyOf": [{"type": "integer"}, {"type": "null"}]}}, "required": ["path"]}
     M = model_from_json_schema("read", schema)
     assert M.model_validate({"path": "a", "lines": ["1"]}).lines == [1]
-    with pytest.raises(Exception):
+    from pydantic import ValidationError
+    with pytest.raises(ValidationError):
         M.model_validate({"path": "a", "mode": "x"})
     g = Guard()
     t = g.declare("read", ground=["path"])

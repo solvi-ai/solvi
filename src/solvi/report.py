@@ -193,7 +193,8 @@ def decision(res, question=None, system=None, replay="trusted"):
 
 
 def _plain(v):
-    return json.loads(json.dumps(v, ensure_ascii=False, default=repr))
+    from .schema import dumps
+    return json.loads(dumps(v, ensure_ascii=False, default=repr))
 
 
 def _when(t):

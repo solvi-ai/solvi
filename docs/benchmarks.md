@@ -111,6 +111,31 @@ Synthetic invoice approval and refund tasks (1000 documents each, regex extracto
   the altered step identified in every case;
 - 0.38 ms per decision (95th percentile 0.51 ms); training a head took 0.5-2.5 s.
 
+## Overhead per ask
+
+`benchmarks/ask_overhead.py` times `ask` without a real model: the twelve gallery entries with their own cases (catalog
+code only) and the project `solvi init --template support --with-model` writes (a decision answered by a keyword
+stand-in decider, so what is timed is solvi's own work around a model call). Each setting runs on the same states, in
+turn, 10 passes; medians of the per-ask wall time, on a shared 20-core Linux machine under load (differences under about
+10% are noise there):
+
+| Setting | gallery, ms | decider, ms |
+|---|---|---|
+| 0.5.0-style: no trace fingerprint, options in the caller's order, no store | 1.15 | 0.57 |
+| 0.7 defaults: `trace.fingerprint`, canonical option order | 1.17 | 0.59 |
+| + a calibrated guarantee on the decision (`act_guard`) | — | 0.61 |
+| + every response stored, JSON lines | 2.40 | 1.24 |
+| + every response stored, SQLite | 2.45 | 1.42 |
+
+The 0.7 features cost a few percent each (the fingerprint about 3%, 40-100 µs; the guarantee record about 4%); no
+setting is more than 10% slower than the 0.5.0-style one. Storing a response with its whole trace doubles the time of a
+small ask (serializing the trace to JSON and appending a hash-chained record: about 1 ms). The released 0.5.0 (PyPI) on
+the 0.5.0 gallery: 1.09-1.14 ms per ask; this version on the same gallery: 0.99-1.22 ms.
+
+```
+uv run python benchmarks/ask_overhead.py [--quick] [--only gallery|decider] [--json out.json]
+```
+
 ## Known negative results
 
 - **New field from its description only.** An extractor trained on seven fields of two datasets, then asked for a field

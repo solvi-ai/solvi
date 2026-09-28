@@ -27,7 +27,7 @@ import zlib
 
 import numpy as np
 
-from solvi import Answer, Catalog, Question, System
+from solvi import Catalog, System
 from solvi.decide import DecideModel
 from solvi.multi import Cascade, Route, Vote
 

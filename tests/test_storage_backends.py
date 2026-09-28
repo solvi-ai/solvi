@@ -122,7 +122,7 @@ def test_a_full_rewrite_is_caught_by_the_anchor_and_an_index_edit_by_verify(stor
 def test_a_failed_append_leaves_the_chain_as_it_was(store):
     filled(store)
     head = store.head()
-    with pytest.raises(Exception):
+    with pytest.raises((TypeError, ValueError)):
         store._append({"v": 1, "kind": "teach", "teach": "q", "init": {}, "answer": object()})   # not JSON
     assert store.head() == head and store.verify()["ok"]
 

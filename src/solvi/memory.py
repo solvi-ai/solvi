@@ -236,7 +236,7 @@ class CorrectionMemory:
         label = json.loads(top)
         p = Proposal(label, float(strength), float(agreement), near)
         if agreement < self.min_agreement:
-            p.abstain = (f"similar cases disagree: " + ", ".join(f"{json.loads(k)!r} {v:.2f}" for k, v in ranked[:3])
+            p.abstain = ("similar cases disagree: " + ", ".join(f"{json.loads(k)!r} {v:.2f}" for k, v in ranked[:3])
                          + f" (agreement {agreement:.2f} < {self.min_agreement:g})")
         elif strength < self.min_strength:
             p.abstain = f"too little support: strength {strength:.2f} < {self.min_strength:g}"
@@ -311,13 +311,15 @@ class CorrectionMemory:
         return self
 
     def save(self, path):
+        from .schema import tag_floats
         with open(path, "w") as fh:
-            json.dump(self.to_dict(), fh, ensure_ascii=False, indent=1)
+            json.dump(tag_floats(self.to_dict()), fh, ensure_ascii=False, indent=1, allow_nan=False)
         return path
 
     def load(self, path, strict=True):
         with open(path) as fh:
-            return self.load_dict(json.load(fh), strict)
+            from .schema import untag_floats
+            return self.load_dict(untag_floats(json.load(fh)), strict)
 
     def __repr__(self):
         return f"CorrectionMemory({self.part.__name__!r}, {len(self.cases)} case(s), mode={self.mode!r})"

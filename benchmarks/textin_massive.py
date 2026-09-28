@@ -120,7 +120,7 @@ SLOT = re.compile(r"\[(\w+) : ([^\]]*)\]")
 
 def spans(annot):
     """annot_utt → (text, {slot: [(start, end)]})."""
-    out, got, pos = [], defaultdict(list), 0
+    got, pos = defaultdict(list), 0
     text = ""
     for m in SLOT.finditer(annot):
         text += annot[pos:m.start()]

@@ -30,6 +30,8 @@ class SystemOneScorer:
     tag = "systemone"
 
     def __init__(self, base_url, model, api_key=None, timeout=30.0, opener=None):
+        if not str(base_url).lower().startswith(("http://", "https://")):
+            raise ValueError(f"a System One service is an http(s):// URL, not {str(base_url)[:40]!r}")  # no file: / ftp:
         self.url = base_url.rstrip("/") + "/v1/systemone"
         self.model = model
         self.api_key = api_key
@@ -54,7 +56,7 @@ class SystemOneScorer:
         return {"type": "choice", "instructions": it.task, "criteria": {o: (d or None) for o, d in zip(it.options, desc)}}
 
     def _post(self, body):
-        req = urllib.request.Request(self.url, data=json.dumps(body).encode(), method="POST",
+        req = urllib.request.Request(self.url, data=json.dumps(body).encode(), method="POST",  # noqa: S310 — http(s) only
                                      headers={"content-type": "application/json",
                                               **({"authorization": f"Bearer {self.api_key}"} if self.api_key else {})})
         with self.opener(req, timeout=self.timeout) as r:

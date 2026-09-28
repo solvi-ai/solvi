@@ -2,6 +2,84 @@
 
 ## Unreleased (0.7)
 
+### `solvi serve`: security
+
+- **Bearer token**: `--token` / `$SOLVI_SERVE_TOKEN` (`create_app(token=...)`) — every HTTP request needs
+  `Authorization: Bearer <token>` (401 otherwise; `hmac.compare_digest`). Listening beyond the loopback address without a
+  token prints a warning.
+- **Limits** (`solvi.serve.Limits`, `--max-body`, `--max-depth`, `--timeout`): a request body / MCP message is at most
+  1 000 000 bytes (413; checked on `Content-Length` and on the bytes received, before FastAPI parses), its JSON at most
+  32 levels deep (400; hostile nesting no longer reaches a `RecursionError`), and a request takes at most 60 s (504; an
+  MCP tool error). Sync Systems are asked in a worker thread under the timeout; async Systems pass 80% of it to
+  `System.aask(timeout=)` (unless `System(timeout=)` is set), so a slow part makes its questions abstain with safeguard
+  `timeout` and the request still answers. The built-in MCP server bounds each line it reads and runs `tools/call` in a
+  worker thread under the timeout; the SDK server checks the size and depth of a call's arguments.
+- **Errors never leak**: a refused request (`solvi.serve.RequestError`: `NotFound` 404, `BadRequest` 422, 413, 504)
+  says what was refused; anything else is logged with its traceback (logger `solvi.serve`) and answered with a 500 /
+  a tool error that carries only an incident id — before, a tool error returned the exception's type and text, and a
+  `TypeError` / `ValueError` from anywhere became a 422 with its message. `/health` names the store by its file name,
+  not its path.
+- **CORS** stays off by default (no `Access-Control-Allow-*` headers); `--cors ORIGIN` (repeatable) allows one.
+- The same holds for `POST /ask_text` and the MCP `ask_text` tool (text-reading errors are `RequestError`s: an empty
+  text, an unknown entry point, a bad `today` → 4xx), and for the MCP proxy (`--guard --upstream`): client messages
+  bounded by `--max-body` / `--max-depth`, the proxy's own failures answered with an incident id. The LLM decider
+  (`solvi.llm`), like the System One client, accepts `http(s)://` endpoints only.
+- Nothing is imported or loaded from request data (the System One `model` field is a name echoed back) — now tested.
+- `--decider` is read like `solvi ask --decider` (`solvi.models.load`: a folder, a cached Hugging Face id,
+  `systemone:URL#model`, `module:attr`) and **never downloads**: a Hugging Face id that is not cached is a usage error
+  (exit 2) unless `--pull` is given. Before, `serve --decider ID` downloaded the model implicitly.
+- Uvicorn runs without the `server` header. A Security section in the guide's Serving chapter; SECURITY.md lists
+  `solvi serve` bypasses as in scope.
+
+### Static checks
+
+- **ruff** (`[tool.ruff]` in pyproject.toml): pyflakes, pycodestyle, bugbear, blind excepts and bandit's security rules
+  over the repository (the Hugging Face Space apps excepted); line length and formatting are not enforced. What it found
+  and what changed: unused imports and variables (`solvi.check`, `solvi.extract_multi`, tests, an example), a duplicate
+  stop word, SHA-1 used for cache keys now marked `usedforsecurity=False`, and — a real one — the System One client
+  (`solvi.systemone`) passed its base URL to `urlopen` unchecked, so `file://` and other schemes were opened: it now
+  accepts `http://` and `https://` only (`ValueError` otherwise). Deliberate cases are marked inline (`exec` of a task
+  file, SQL built from fixed clauses with bound values).
+- **pyright** (`[tool.pyright]`, basic mode, `src/solvi`): 268 errors on first run, reviewed; they come from the code
+  base's dynamic style (`x: T = None` defaults, `object`-typed fields, attributes set on instances, mixed-value dicts)
+  and none was a bug. Annotations that were wrong are fixed (`Response.violations` / `safeguards`, `Audit.overall`,
+  `Part.func`, `textin.Change.quote` are optional; `Response._system` / `_heads` are declared); the families that
+  report the style are warnings, the optional-access ones off, and everything else in basic mode is an error.
+- CI: a `lint` job runs both (pinned: ruff 0.16.9, pyright 1.1.414).
+
+### Performance
+
+- `benchmarks/ask_overhead.py`: `ask` latency on the gallery and on a keyword-stand-in decider project, 0.5.0-style
+  settings against the 0.7 defaults (trace fingerprint, canonical option order, a calibrated guarantee, storage off /
+  JSONL / SQLite), and against an older release (`--gallery` with its exported gallery). No regression above 10% was
+  found (numbers in docs/benchmarks.md: the fingerprint costs about 3%, the guarantee record about 4%, storing a
+  response about 1 ms).
+- `Response.to_dict()` and stored records: the walk that sorts sets now also tags non-finite floats and dispatches on
+  the exact type first — measured faster than 0.6.1's on the gallery's responses, which pays for the strict-JSON
+  tagging.
+
+### Fixes
+
+- A model-backed rule whose quote is rejected for not being in the text (`quote outside the text` / `not grounded`)
+  now abstains with `Result.guard == "grounding"` (it was `None`); the safeguard event is still recorded once (the audit
+  does not count it twice).
+- **Strict JSON for non-finite floats.** An infinite escalation threshold (a calibration no threshold could meet) was
+  written into traces, stored records and `--json` output as `Infinity` — not JSON, and a 500 in `solvi serve` (its
+  responses are strict). Non-finite floats are now written as `{"$float": "inf"}` (`"-inf"`, `"nan"`) — the tag
+  calibration files already used — by `Response.to_dict()` / `to_json()` / `model_dump("json")`, TraceStorage records
+  (JSONL and SQLite), the report data, the CLI's `--json` output and the MCP servers, and read back as the float by
+  `model_validate` / `from_json` / `store.get`. Every one of these writes with `allow_nan=False` now
+  (`solvi.schema.dumps`, `tag_floats`, `untag_floats`). **Hashes:** a trace's record hashes are unchanged (they are
+  taken over the in-memory values, so a stored trace with an inf threshold replays as before); a new stored record's
+  chain hash is taken over the tagged form, and records written before 0.7 with a bare `Infinity` still verify and
+  load. `part.save_calibration` wrote a bare `Infinity` for an infinite top-level threshold; it writes the tag now (both
+  load).
+- `tests/test_fast.py::test_teach_updates_instantly_like_refitting` bounds the median of 20 `teach` times (< 50 ms)
+  instead of every one, so one slow update on a loaded machine no longer fails it.
+- `Response` keeps a strong reference to its System, now documented as deliberate: `System(cat, qs).ask(s).report()`
+  must work, and a weak reference would lose the temporary System before the report runs. Drop it with
+  `res._system = None` (and pass `system=`) for responses kept for long.
+
 ### Memory of corrections
 
 - `part.memory(k=7, radius=0.15, min_strength=1.0, min_agreement=0.8, text=False, mode="check")` →

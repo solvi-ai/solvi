@@ -25,7 +25,7 @@ _WORD = re.compile(r"\w+", re.U)
 _TOK = re.compile(r"\w+|[^\w\s]", re.U)
 _STOP = {"a", "an", "the", "of", "to", "in", "on", "for", "and", "or", "is", "are", "be", "by", "with", "as", "at", "this",
          "that", "it", "its", "from", "what", "which", "who", "how", "does", "do", "any", "there", "if", "not", "no", "yes",
-         "will", "shall", "can", "may", "was", "were", "has", "have", "any"}
+         "will", "shall", "can", "may", "was", "were", "has", "have"}
 HEADING = re.compile(
     r"^[ \t]{0,3}(?:#{1,6}[ \t]+\S.*|(?:(?:article|section|clause|schedule|annex|appendix|part|chapter)\s+[\dIVXLC]+[.:)]?|§\s*\d+|"
     r"\d{1,2}(?:\.\d{1,2})*\.?|[IVXLC]{1,5}\.)[ \t]+\S.{0,100}|[A-Z][A-Z0-9 ,&'/()\-]{3,80})[ \t]*$", re.I | re.M)

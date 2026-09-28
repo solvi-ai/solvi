@@ -59,7 +59,8 @@ ANY = _Any()                                  # a query / provenance argument th
 
 
 def _cj(obj):
-    """Canonical JSON: sorted keys, no spaces — what the record hash is taken over."""
+    """Canonical JSON: sorted keys, no spaces — what the record hash is taken over. New records hold no inf / nan (they are
+    tagged, see entry); records written before 0.7 may, and still hash as they were written (Infinity / NaN)."""
     return json.dumps(obj, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
 
 
@@ -81,7 +82,8 @@ def plain(v):
 
 def akey(v):
     """An answer as an index key (canonical JSON of its stored form): answer=("a", "b") finds a stored ["a", "b"]."""
-    return _cj(plain(v))
+    from .schema import tag_floats
+    return _cj(tag_floats(plain(v)))
 
 
 def _when(t):
@@ -123,7 +125,9 @@ def entry(resp, meta=None):
         e["catalog"] = fp["catalog"]                  # the catalog that decided (System.fingerprint)
     if meta is not None:
         e["meta"] = plain(meta)
-    e["response"] = d
+    from .schema import tag_floats
+    e = tag_floats(e)                                 # strict JSON: an inf threshold is {"$float": "inf"}
+    e["response"] = d                                 # to_dict() has tagged it already
     return e
 
 
@@ -140,7 +144,8 @@ class Stored:
     @property
     def answers(self):
         """question → the stored answer (JSON form: tuples as lists, "not stated" as "<not stated>")."""
-        return {q: a[0] for q, a in (self.data.get("answers") or {}).items()}
+        from .schema import untag_floats
+        return {q: untag_floats(a[0]) for q, a in (self.data.get("answers") or {}).items()}
 
     @property
     def meta(self):
@@ -502,7 +507,7 @@ class JSONLStorage(TraceStorage):
             rec = dict(body, seq=self._count, time=float(self.clock()), prev=self._last)
             rec["hash"] = record_hash(rec)
             rec["id"] = rec["hash"][:16]
-            line = (json.dumps(rec, ensure_ascii=False, sort_keys=True) + "\n").encode()
+            line = (json.dumps(rec, ensure_ascii=False, sort_keys=True, allow_nan=False) + "\n").encode()
             with open(self.path, "ab") as fh:
                 off = fh.tell()
                 fh.write(line)
@@ -690,7 +695,8 @@ class _SQLStorage(TraceStorage):
         self._x("INSERT INTO {p}records (seq, \"id\", kind, \"time\", init_hash, \"catalog\", prev, hash, body) "
                 "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (s, rec["id"], rec.get("kind", "ask"), rec["time"], rec.get("init_hash"), rec.get("catalog"),
-                 rec["prev"], rec["hash"], json.dumps(rec, ensure_ascii=False, sort_keys=True)))
+                 rec["prev"], rec["hash"], json.dumps(rec, ensure_ascii=False, sort_keys=True,
+                                                        allow_nan=False)))
         ans, sg, ms = _index_rows(rec)
         for a in ans:
             self._x("INSERT INTO {p}answers (seq, question, answer, status, guard) VALUES (?, ?, ?, ?, ?)", (s, *a))
@@ -744,14 +750,14 @@ class _SQLStorage(TraceStorage):
             if status is not None:
                 sub.append("a.status = ?")
                 args.append(status)
-            where.append(f"EXISTS (SELECT 1 FROM {{p}}answers a WHERE {' AND '.join(sub)})")
+            where.append(f"EXISTS (SELECT 1 FROM {{p}}answers a WHERE {' AND '.join(sub)})")  # noqa: S608 — fixed clauses, values bound
         if safeguard is not None:
             sub = ["s.seq = r.seq", "s.kind = ?"]
             args.append(safeguard)
             if question is not None:
                 sub.append("s.question = ?")
                 args.append(question)
-            where.append(f"EXISTS (SELECT 1 FROM {{p}}safeguards s WHERE {' AND '.join(sub)})")
+            where.append(f"EXISTS (SELECT 1 FROM {{p}}safeguards s WHERE {' AND '.join(sub)})")  # noqa: S608
         if model is not None:
             where.append("EXISTS (SELECT 1 FROM {p}models m WHERE m.seq = r.seq AND (m.fp = ? OR m.\"id\" = ? OR "
                          "m.\"type\" = ?))")
@@ -762,7 +768,7 @@ class _SQLStorage(TraceStorage):
         if until is not None:
             where.append("r.\"time\" < ?")
             args.append(until)
-        sql = f"SELECT r.seq, r.body FROM {{p}}records r WHERE {' AND '.join(where)} ORDER BY r.seq"
+        sql = f"SELECT r.seq, r.body FROM {{p}}records r WHERE {' AND '.join(where)} ORDER BY r.seq"  # noqa: S608
         return [_stored(d, self.catalog) for _, d in self._rows(sql, args) if d is not None]
 
     def _backend_problems(self, rows):

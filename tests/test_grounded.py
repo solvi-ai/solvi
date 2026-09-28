@@ -403,3 +403,24 @@ def test_example_12_runs():
     assert "not grounded: '488.60'" in text and "total_regex used after total_model rejected" in text
     assert "outside the options" in text and "model changed since this decision" in text
     assert "100% deterministic" in text and "low confidence 0.40 < 0.5" in text
+
+
+def test_a_model_rule_whose_quote_is_not_in_the_text_abstains_with_guard_grounding():
+    class M:
+        model_id, version = "demo/m", "1"
+    cat = Catalog()
+
+    @cat.rule("team", model=M())
+    def team(doc):
+        return Decision("billing", {"billing": 0.9, "shipping": 0.1}, evidence=[Quote("charged twice", 500, 513, "doc")])
+
+    @cat.rule("where", model=M())
+    def where(doc):
+        return Quote("nothing here", 0, 12, "doc")
+    s = System(cat, [Question("team", "Team?", Answer.choice(["billing", "shipping"])),
+                     Question("where", "Where?", Answer.span(source="doc"))])
+    r = s.ask({"doc": "I was charged twice"})
+    for q in ("team", "where"):
+        assert r[q].status == "abstain" and r[q].guard == "grounding" and r[q].answer is None
+    assert [e["kind"] for e in r.safeguards] == ["grounding", "grounding"]     # one event per answer, not two
+    assert s.stats["grounding_rejected"] == 2

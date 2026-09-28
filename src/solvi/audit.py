@@ -74,7 +74,7 @@ def collect(res, catalog=None):
         events.append({"kind": "type_rejected", "fact": fact, "detail": why,
                        "questions": sorted(q for q, fs in res.flow.unresolved.items() if set(fs) & down and q in asked)})
     for q, a in res.results.items():
-        if a.guard in ("low_confidence", "escalated", "instruction", "memory") and any(
+        if a.guard in ("low_confidence", "escalated", "instruction", "grounding", "memory") and any(
                 e["fact"] in ("answer:" + q, "textin") and q in e["questions"] and e["kind"] == a.guard for e in events):
             pass                                      # the answer step itself was rejected: already counted once
         elif a.guard in ("hard_check", "outside_options", "rule_abstained", "low_confidence", "escalated", "grounding",
@@ -396,7 +396,7 @@ class Audit:
     answers: dict                   # question → AnswerAudit
     safeguards: list                # every event in the response
     model_outputs: int
-    overall: dict = None            # Response.overall: confidence, weakest answer, answered / abstained, complete, feasible
+    overall: dict | None = None     # Response.overall: confidence, weakest answer, answered / abstained, complete, feasible
 
     def __getitem__(self, q):
         return self.answers[q]

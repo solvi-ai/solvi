@@ -51,8 +51,9 @@ class Upstream:
 
     def __init__(self, command, env=None):
         args = shlex.split(command) if isinstance(command, str) else list(command)
-        self.proc = subprocess.Popen(args, stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True, encoding="utf-8",
-                                     bufsize=1, env=env)
+        # the command line the operator gave (--upstream), never request data
+        self.proc = subprocess.Popen(  # noqa: S603
+            args, stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True, encoding="utf-8", bufsize=1, env=env)
         self._id = 0
         self.info = None
 
@@ -180,14 +181,29 @@ def _meta(d):
     return {"outcome": d.outcome, "stored_id": d.stored_id, "trace_hash": d.trace_hash}
 
 
-def run_proxy(guard, upstream, facts=None, escalate="elicit", stdin=None, stdout=None):
-    """The proxy over stdio (see the module docs). upstream: a command line (or an Upstream)."""
+def run_proxy(guard, upstream, facts=None, escalate="elicit", stdin=None, stdout=None, limits=None):
+    """The proxy over stdio (see the module docs). upstream: a command line (or an Upstream). limits: a
+    solvi.serve.Limits — a client message is at most max_body characters and max_depth levels of JSON; a failure of the
+    proxy itself is logged (logger solvi.serve) and answered with an incident id, never the exception's text."""
     from .. import __version__
+    from ..schema import dumps
+    from ..serve import Limits, RequestError, _readline, internal_error, parse_json
     stdin, stdout = stdin or sys.stdin, stdout or sys.stdout
+    lim = limits or Limits()
     px = Proxy(guard, upstream, facts, escalate)
 
+    def lines():
+        while True:
+            line, too_long = _readline(stdin, lim.max_body)
+            if too_long:
+                error(None, -32600, f"invalid request: a message is at most {lim.max_body} characters")
+                continue
+            if not line:
+                return
+            yield line
+
     def send(msg):
-        stdout.write(json.dumps(msg, ensure_ascii=False, default=repr) + "\n")
+        stdout.write(dumps(msg, ensure_ascii=False, default=repr) + "\n")
         stdout.flush()
 
     def error(id_, code, msg):
@@ -204,10 +220,10 @@ def run_proxy(guard, upstream, facts=None, escalate="elicit", stdin=None, stdout
                        "It needs your approval: " + "; ".join(d.reasons),
             "requestedSchema": {"type": "object", "properties": {"approve": {"type": "boolean", "title": "Approve"}},
                                 "required": ["approve"]}}})
-        for line in stdin:
+        for line in lines():
             try:
-                msg = json.loads(line)
-            except ValueError:
+                msg = parse_json(line, lim)
+            except RequestError:
                 continue
             if isinstance(msg, dict) and msg.get("id") == rid and "method" not in msg:
                 r = msg.get("result") or {}
@@ -217,14 +233,15 @@ def run_proxy(guard, upstream, facts=None, escalate="elicit", stdin=None, stdout
         return None
 
     try:
-        for line in stdin:
+        for line in lines():
             line = line.strip()
             if not line:
                 continue
             try:
-                msg = json.loads(line)
-            except ValueError:
-                error(None, -32700, "parse error")
+                msg = parse_json(line, lim)
+            except RequestError as e:
+                bad_json = str(e) == "the request is not JSON"
+                error(None, -32700 if bad_json else -32600, "parse error" if bad_json else f"invalid request: {e}")
                 continue
             if not isinstance(msg, dict) or "method" not in msg:
                 continue
@@ -249,9 +266,11 @@ def run_proxy(guard, upstream, facts=None, escalate="elicit", stdin=None, stdout
                 elif method == "tools/call":
                     send({"jsonrpc": "2.0", "id": id_, "result": px.call(params, ask)})
                 else:
-                    error(id_, -32601, f"method not found: {method}")
+                    error(id_, -32601, f"method not found: {str(method)[:64]}")
             except UpstreamError as e:
                 error(id_, -32603, f"upstream: {e}")
+            except Exception:  # noqa: BLE001 — the proxy keeps serving; the details stay in the server log
+                error(id_, -32603, internal_error(f"proxy {method}"))
     finally:
         px.upstream.close()
     return px

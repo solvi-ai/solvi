@@ -601,7 +601,7 @@ class Guard:
         """Declare a tool that solvi does not run (the framework or an MCP server does): its name, the arguments' schema
         (a pydantic model or a JSON schema; None — given later by `adopt`, as the MCP proxy does from tools/list) and
         the options of `tool` (ground, ground_from, injections, authorize). → the Tool."""
-        self.tool(name=name, schema=schema, description=description, **kw)(None)
+        self.tool(name=name, schema=schema, description=description, **kw)(None)  # pyright: ignore[reportOptionalCall]
         return self.tools[name]
 
     def adopt(self, name, json_schema, description=""):
@@ -683,7 +683,7 @@ class Guard:
         if t is not None and t.model is not None and isinstance(args, dict):
             try:
                 args = _call_arguments(t.model, "")(args)
-            except Exception:  # noqa: BLE001 — an invalid call: the authorizer reads it as proposed
+            except Exception:  # noqa: BLE001, S110 — an invalid call: the authorizer reads it as proposed
                 pass
         return Facts(conversation=text, user_request=request, proposal=proposal(c.name, args))
 

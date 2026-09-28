@@ -33,6 +33,18 @@ jobs:
         run: |
           uv sync --group dev --group agents
           uv run pytest -q tests/test_agents_frameworks.py
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: "3.12"
+      - run: uv sync --group dev
+      - name: ruff (pyproject.toml [tool.ruff])
+        run: uvx ruff@0.16.9 check
+      - name: pyright, basic mode, on src/solvi (pyproject.toml [tool.pyright])
+        run: uvx pyright@1.1.414 --pythonpath .venv/bin/python
   build:
     runs-on: ubuntu-latest
     steps:

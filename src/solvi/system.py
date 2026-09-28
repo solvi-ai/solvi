@@ -27,18 +27,27 @@ class _Prepared:
 
 @dataclass
 class Response(Serial):
+    """The answers of one ask, with the flow, the trace, every fact's value and the safeguards.
+
+    A response keeps a strong reference to the System that answered it (for `report()` and `counterfactual()`: the
+    questions, the answer heads, the replay). Deliberately not a weak one: `System(cat, qs).ask(state).report()` is common
+    and the temporary System would be gone before the report runs. A response you keep for long keeps its System (and its
+    models) alive; keep `res.to_dict()` or the stored record instead, or drop the reference with `res._system = None`
+    (then pass `system=` to report / counterfactual)."""
     results: dict
     flow: object
     trace: object
     values: dict
     ms: float
     feasible: bool = True               # do the answers satisfy every applicable constraint?
-    violations: list = None             # names of the constraints still broken (fixed answers that conflict)
+    violations: list | None = None      # names of the constraints still broken (fixed answers that conflict)
     catalog: object = None              # the catalog that answered (for the audit)
-    safeguards: list = None             # safeguard events of this response (see solvi.audit.collect)
+    safeguards: list | None = None      # safeguard events of this response (see solvi.audit.collect)
     model_outputs: int = 0              # outputs produced by models in this response
     stored_id = None                    # its id in a TraceStorage once saved (System(storage=...) saves every ask)
     textin = None                       # ask_text: the solvi.textin.TextRead the question and state were read from
+    _system = None                      # the System that answered (reports, counterfactuals; see the class docs)
+    _heads = None                       # its answer heads (the audit)
 
     def __getitem__(self, q):
         return self.results[q]
@@ -557,9 +566,11 @@ class System:
                 from .provenance import TIMED_OUT       # a call that did not finish in time (aask): safeguard "timeout"
                 late = any(TIMED_OUT in (by[f].error or "") for f in list(facts) + [rule.name]
                            if f in by and by[f].value is MISSING)
+                from .provenance import classify
+                grounding = r is not None and classify(r.error) == "grounding"     # a model rule's quote not in the text
                 return Result(None, 0.0, "rule not computed: " + (r.error if r else "no step") +
                               (f"; missing {', '.join(missing)}" if missing else ""), "abstain",
-                              guard="timeout" if late else None)
+                              guard="timeout" if late else "grounding" if grounding else None)
             pc = path_confidence(self.catalog, trace, rule.inputs)
             conf = min(pc, r.confidence)
             why = "; ".join(f"{x} = {srepr(vals.get(x))}" for x in rule.inputs)
