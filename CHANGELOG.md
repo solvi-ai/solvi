@@ -1,5 +1,30 @@
 # Changelog
 
+## Unreleased
+
+### Storage
+
+- `TraceStorage` (`solvi.storage`): stored responses with their whole traces — `save`, `get(id)`, `query(question=,
+  answer=, status=, safeguard=, model=, since=, until=)`, `iter`, `corrections`, `replay_all(system)`. Backends
+  `JSONLStorage` (append-only, one record per line) and `SQLiteStorage` (stdlib sqlite3, indexed; several writers). A hash
+  chain across stored records: `verify()` catches an edited, deleted, inserted or reordered record and a cut-off tail
+  (the stored head; `verify(anchor=head)` against a head kept elsewhere). `quarantine(fact, value)` lists the stored
+  decisions whose answers rest on a fact; `forget(fact, value)` reports what removing a given fact would touch (nothing is
+  deleted).
+- `System(..., storage=...)` saves every ask (`res.stored_id`) and every `teach`; `ask(..., store=False)` skips one.
+  `journal="file.jsonl"` is now a `JSONLStorage`: the 0.5 line keys are kept (plus the whole response and the chain
+  fields), 0.5 lines already in the file are kept and reported as `legacy`; `teach` lines store dates as ISO strings.
+- Catalog fingerprint: `System.fingerprint()` and `trace.fingerprint` (the catalog's, the questions' and every flow
+  part's fingerprint: declarations, declared types and the code's syntax tree with the constants and same-module helpers
+  it reads; `solvi.provenance.catalog_fingerprint`). `Trace.replay` says whether the catalog changed since the trace was
+  recorded and which parts; `TraceStorage.query(catalog=fp)`.
+- `solvi.diff.diff(store, system)`: re-run stored decisions with a new catalog or model and list the answers, statuses,
+  safeguards and confidences that change, each with the first step that differs and why. `Shadow(current, candidate,
+  storage=...)`: answer with the current system, store the candidate's response and the differences.
+- A `solvi` command (also `python -m solvi`): `solvi verify`, `solvi replay`, `solvi diff` over a store.
+- `Result.why` shows set-valued facts in a fixed order (it depended on `PYTHONHASHSEED`), so stored responses hash the same
+  in every process.
+
 ## 0.5.0 — 2026-09-28 — typed facts, typed decisions, answer primitives
 
 Type hints on catalog functions are the types of the facts (pydantic v2); untyped catalogs behave and hash exactly as

@@ -100,6 +100,7 @@ class TraceModel(BaseModel):
     timings: dict[str, float] = {}
     rejected: list[tuple[str, str]] = []
     typed_init: list[str] = []          # given facts whose values are not plain JSON: restored on load
+    fingerprint: dict[str, Any] = {}    # the catalog's, questions' and models' fingerprints (System.fingerprint)
 
 
 class StepModel(BaseModel):
@@ -229,7 +230,8 @@ def _trace(t):
     return {"init_hash": t.init_hash, "init": dict(t.init), "records": [_record(r) for r in t.records],
             "skipped": [list(s) for s in t.skipped], "schedule": list(t.schedule), "timings": dict(t.timings),
             "rejected": [list(x) for x in getattr(t, "rejected", None) or ()],
-            "typed_init": [k for k, v in t.init.items() if not native(v)]}
+            "typed_init": [k for k, v in t.init.items() if not native(v)],
+            "fingerprint": dict(getattr(t, "fingerprint", None) or {})}
 
 
 def _result(r):
@@ -368,7 +370,7 @@ def _load_trace(m, catalog, system):
                            None if r.tried is None else [list(t) for t in r.tried], r.provenance, r.model,
                            None if r.probs is None else _probs(r.probs), r.extra))
     return Trace(m.init_hash, recs, init, [tuple(s) for s in m.skipped], list(m.schedule), dict(m.timings),
-                 [tuple(x) for x in m.rejected])
+                 [tuple(x) for x in m.rejected], dict(m.fingerprint))
 
 
 def _stub(name, kind, inputs):

@@ -638,8 +638,11 @@ res = system.ask(init_state)                   # all questions
 res = system.ask(init_state, ["ship"])         # a subset
 ```
 
-`System(catalog, questions, journal=None, inputs=None)`. If `journal` is a file path, every `ask` appends one JSON line with
-the hash of `init_state`, the answers, the flow and the hash of every trace record. `inputs`: a pydantic model of
+`System(catalog, questions, journal=None, inputs=None, storage=None)`. `storage` (a `TraceStorage` or a path) saves every
+response with its whole trace, hash-chained across responses (see [Storing decisions](#storing-decisions-tracestorage)).
+`journal="file.jsonl"` is the same as `storage=JSONLStorage("file.jsonl")`: every `ask` appends one JSON line with the hash
+of `init_state`, the answers, the flow and the hash of every trace record (the keys of 0.5's journal line), plus the whole
+response and the chain fields. `ask(..., store=False)` skips saving one response. `inputs`: a pydantic model of
 `init_state` (see [Types](#types-questions-and-model-decisions)); `ask` also takes a `BaseModel` instance.
 
 ### Response
@@ -842,9 +845,10 @@ system = System(cat, questions, journal="decisions.jsonl")
 system.teach("risk", init_state, "high")
 ```
 
-`teach` appends the correction to the journal (it does nothing without a journal). It does not retrain by itself: read
-the `{"teach": ..., "init": ..., "answer": ...}` lines back and include them in the next `fit` or `learn_rule` call.
-Note that non-JSON values in `init_state` (dates, custom objects) are stored as their `repr`.
+`teach` appends the correction to the journal or storage (it does nothing without one). It does not retrain by itself:
+read the corrections back (`system.storage.corrections()`, or the `{"teach": ..., "init": ..., "answer": ...}` lines) and
+include them in the next `fit` or `learn_rule` call. Non-JSON values in `init_state` are stored as JSON (dates as ISO
+strings; 0.5 wrote their `repr`), other objects as their `repr`.
 
 ## Confidence, calibration and abstention
 
@@ -892,6 +896,10 @@ Every step of the flow is a `Record` in `res.trace.records`:
 Answers from a learned head are records too (`kind="head"`, after the flow's steps): the answer, its probabilities and the
 head's fingerprint.
 
+`res.trace.fingerprint` records what decided: the catalog's fingerprint, the questions' and the fingerprint of every part
+in the flow (see [Catalog fingerprint, solvi diff and shadow mode](#catalog-fingerprint-solvi-diff-and-shadow-mode)); it is
+not part of the hash chain (a stored response is covered by the store's chain).
+
 `res.trace.init` keeps `init_state` and `res.trace.init_hash` its hash. `res.trace.value(name)` returns a recorded value.
 `res.trace.to_json()` / `Trace.from_json(text, catalog=cat)` store and load a trace (typed values are restored, see
 [Types](#types-questions-and-model-decisions)); the loaded trace replays like the original.
@@ -904,7 +912,9 @@ head's fingerprint.
 - that quotes lie within the source text (and, for model-backed parts, are literally the quoted text);
 - for model-backed steps, that the recorded model fingerprint matches the catalog's current model (see below).
 
-It returns `{"ok": bool, "steps": int, "mismatches": [(step, name, reason), ...], "models": [(step, name, verdict), ...]}`.
+It returns `{"ok": bool, "steps": int, "mismatches": [(step, name, reason), ...], "models": [(step, name, verdict), ...],
+"catalog": "same" | "changed" | "unrecorded"}` (with `"changed_parts"` when the catalog changed since the trace was
+recorded — for information: a changed part that still re-computes the recorded value is not a mismatch).
 
 Continuing the README quickstart:
 
@@ -922,6 +932,109 @@ were caught, with the exact step identified every time, and there were no false 
 
 Replay needs the same catalog code. Parts that call external systems (databases, APIs) must return the same values on
 replay, or their steps will be reported as mismatches.
+
+### Storing decisions: TraceStorage
+
+```python
+from solvi import SQLiteStorage, System
+
+store = SQLiteStorage("decisions.db")          # or JSONLStorage("decisions.jsonl"); storage="decisions.db" also works
+system = System(cat, questions, storage=store)
+res = system.ask(init_state)                   # saved; res.stored_id is its id
+
+store.get(res.stored_id)                        # the Response, loaded back (typed values restored)
+store.query(question="refund", answer="no", since="2026-09-01")
+store.query(safeguard="grounding")              # every decision where a model's quote was rejected
+store.query(model="decide-base")                # ... a step was produced by this model (id, type or fingerprint)
+store.replay_all(system)                        # [] when every stored trace replays against the current catalog
+store.verify()                                  # the chain across stored records
+```
+
+Two backends ship, both without dependencies: `JSONLStorage` (an append-only file, one record per line; one writing
+process) and `SQLiteStorage` (stdlib `sqlite3`; index tables by question, answer, status, safeguard kind, model and time;
+several processes may write to one file). A stored record holds the answers, the safeguards, the models, the whole
+response (`res.to_dict()`), the time and your own `meta` (`store.save(res, meta={"ticket": 42})`). `teach` stores its
+corrections in the same chain (`store.corrections()`).
+
+| Method | Returns |
+|---|---|
+| `save(res, meta=None)` | the id of the stored record (`System(storage=...)` calls it on every ask) |
+| `get(id)`, `record(id)` | the stored `Response`; the stored record as a dict |
+| `iter()`, `query(question=, answer=, status=, safeguard=, model=, since=, until=)` | `Stored` records (`.id`, `.time`, `.answers`, `.response()`) in stored order; `since <= time < until` |
+| `head()` | `{"count", "hash"}` of the chain |
+| `verify(anchor=None)` | `{"ok", "count", "head", "legacy", "problems": [(seq, id, reason)]}` |
+| `replay_all(system)` | the stored decisions whose trace no longer replays, with the mismatches |
+| `quarantine(fact, value=...)` | the stored decisions whose answers rest on this fact (with this value), and the path from the fact to each answer |
+| `forget(fact, value=...)` | a report: decisions resting on a given fact, and records that only hold it; nothing is deleted |
+
+**The chain across records.** Each record stores the hash of the record before it, and its own hash covers its content and
+that link. Editing a stored decision, deleting one, inserting one or changing their order breaks the chain at that point,
+and `verify()` names the record. Cutting records off the end leaves a shorter chain that is still consistent, so the store
+keeps its head (count and last hash) next to the log (`decisions.jsonl.head`, or a table in SQLite) and `verify()` checks
+it. Someone who can rewrite the whole store and its head can rebuild a consistent chain: publish `store.head()` somewhere
+else from time to time (a ticket, a log you do not control, a signed message) and check with `store.verify(anchor=head)`.
+`verify()` needs no catalog; `replay_all(system)` re-computes every stored step, which also catches a value changed inside
+a stored trace with every hash recomputed.
+
+**Provenance over the store.** `store.quarantine("fx_rate", 1.37)` lists the stored decisions whose answer depends on that
+value of that fact — through the recorded inputs of each step, from the answer back to the fact (a hard check that decided
+an answer counts), with the path — so you can re-decide or review them. `store.forget("email", "a@b.c")` answers "what
+would removing this input touch": the decisions resting on it and the records that merely hold it. Neither changes the
+store: deleting a record would break the chain by design.
+
+**Existing journals.** A 0.5 journal file keeps working: its old lines stay at the start of the file, are skipped by
+`get` / `query` / `iter` and counted by `verify()` as `legacy`; new lines are chained after them.
+
+### Catalog fingerprint, solvi diff and shadow mode
+
+`system.fingerprint()` → `{"catalog", "questions", "parts", "models"}`. A part's fingerprint covers its declarations (kind,
+inputs, `hard` / `then`, options, `validate`, `min_confidence`, declared types — a pydantic model by its fields, an Enum by
+its members — and the type of its model) and its code: the function's syntax tree without decorators, docstring, comments
+or formatting, the simple values it closes over or reads as module constants, and the module's own functions it calls. A
+model's weights are not in the catalog's fingerprint: they are the model's own fingerprint, recorded with every step it
+produced. Every trace records the catalog's and the questions' fingerprints and those of its flow's parts;
+`store.query(catalog=fp)` finds the decisions made by one catalog. Limits: a module constant rebound after the first ask,
+or a part edited in place, is not noticed within the process; code the fingerprint does not reach (another module's
+functions, a database) changes nothing in it.
+
+**solvi diff.** "We changed a rule — which decisions change?"
+
+```python
+from solvi.diff import diff
+
+rep = diff(store, new_system)              # re-runs every stored decision (or diff(store, s, question="refund", since=...))
+print(rep)                                 # per question: how many changed and how (yes → no: 12); per decision the first
+rep.changed                                # step whose output differs and why: its code changed, its model changed, its
+rep.ok                                     # inputs changed, or none of these (a non-deterministic or external source)
+```
+
+Each stored decision's recorded input is asked again for the same questions (`store=False`: the new system's own storage
+is not written) and compared with the stored response: answer, status, the guard that settled it, the safeguard events
+concerning it, and a confidence change above `confidence=0.01` (`None` ignores confidence). The same from the shell:
+
+```
+solvi diff decisions.db --system myapp.decisions_v2:system        # exit status 1 when something changes
+solvi replay decisions.db --system myapp.decisions:system         # every stored trace against the current system
+solvi verify decisions.db --anchor 1204:3f9a...                  # the chain, against a head kept elsewhere
+```
+
+`--system` is `module:attribute` or `file.py:attribute` (a System, or a function returning one); `python -m solvi ...`
+works too.
+
+**Shadow mode.** Run a new version next to the current one before switching:
+
+```python
+from solvi import Shadow, SQLiteStorage
+
+shadow = Shadow(current, candidate, storage=SQLiteStorage("shadow.db"))
+res = shadow.ask(state)                    # the current system's response, exactly as current.ask(state)
+print(shadow.report())                     # candidate agrees on 981, differs on 19; refund: 'no' → 'yes' ×12, ...
+```
+
+The candidate runs on the same input after the current system; its response is stored in the shadow store with `meta`
+`{"shadow_of": the current response's stored id, "current_catalog", "diff"}`, never in its own storage, and a failing
+candidate is counted (`shadow.stats["errors"]`), never raised. The candidate runs in the same thread: it adds its own
+time to each ask.
 
 ## Grounded decisions: provenance, audit and safeguards
 
