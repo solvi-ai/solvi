@@ -18,6 +18,8 @@ jobs:
           python-version: ${{ matrix.python }}
       - run: uv sync --group dev
       - run: uv run pytest -q
+      - name: honesty gate (docs/honesty.md)
+        run: uv run python -m solvi.honesty tests/honesty/core_v1.json --baseline tests/honesty/core_v1.baseline.json
       - name: run the gallery
         run: |
           for f in gallery/*/run.py; do echo "== $f"; uv run python "$f" > /dev/null; done

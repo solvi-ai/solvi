@@ -39,3 +39,4 @@ dev = ["pytest>=8"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+markers = ["model: needs a real model checkpoint and its runtime (skipped when they are missing)"]

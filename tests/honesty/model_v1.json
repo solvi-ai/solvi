@@ -1,0 +1,32 @@
+{
+ "name": "model",
+ "version": "1",
+ "task": "model_task.py",
+ "description": "The honesty suite's model-backed subset (the solvi-decide checkpoint): run before publishing a decider. gold: the right answer; \"other\" when no team fits (the decider's threshold), null where a person should decide (two teams at once). Only the numbers are gated; single answers are not pinned, a model may move them.",
+ "cases": [
+  {"name": "double charge", "state": {"doc": "My card was charged twice for the same order, please refund one payment."},
+   "gold": {"team": "billing", "refund": "yes"}},
+  {"name": "invoice copy", "state": {"doc": "Could you send me a copy of the March invoice with our VAT number on it?"},
+   "gold": {"team": "billing", "refund": "no"}},
+  {"name": "crash", "state": {"doc": "The app crashes every time I open the settings page since the last update."},
+   "gold": {"team": "technical", "refund": "no"}},
+  {"name": "error 502", "state": {"doc": "Checkout shows error 502 for all our customers, nobody can pay."},
+   "gold": {"team": "technical", "refund": "no"}},
+  {"name": "lost parcel", "state": {"doc": "My parcel was marked as delivered but it never arrived. The tracking number is 1Z999."},
+   "gold": {"team": "shipping", "refund": "no"}},
+  {"name": "late courier", "state": {"doc": "The courier is two weeks late and the tracking page has not updated since Monday."},
+   "gold": {"team": "shipping", "refund": "no"}},
+  {"name": "negated refund", "state": {"doc": "I don't want a refund, I just want the login page to work again."},
+   "gold": {"team": "technical", "refund": "no"}},
+  {"name": "refund policy question", "state": {"doc": "Before we buy 40 seats: what is your refund policy if SSO does not work for us?"},
+   "gold": {"team": "billing", "refund": "no"}},
+  {"name": "no request", "state": {"doc": "Hi! Just wanted to say you guys are great. Have a nice weekend."},
+   "gold": {"team": "other", "refund": "no"}},
+  {"name": "football sponsorship", "state": {"doc": "Do you sponsor local football clubs? We are looking for partners for next season."},
+   "gold": {"team": "other", "refund": "no"}},
+  {"name": "two teams at once", "state": {"doc": "The app crashed during payment, I was charged anyway and the parcel never shipped."},
+   "gold": {"team": null}},
+  {"name": "cancelled plan", "state": {"doc": "We cancelled the annual plan within 14 days, please refund the full amount to our card."},
+   "gold": {"team": "billing", "refund": "yes"}}
+ ]
+}
