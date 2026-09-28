@@ -8,6 +8,7 @@
     solvi replay decisions.db --system myapp.decisions:system
     solvi diff   decisions.db --system myapp.decisions_v2:build_system [--question Q] [--since ISO] [--limit N] [--json]
     solvi serve  myapp.decisions:system [--store decisions.db] [--decider ID] [--port 8000] [--mcp]   (solvi.serve)
+    solvi serve  --guard catalog.py:guard --upstream "MCP SERVER COMMAND" [--store calls.db]         (solvi.agents.mcp)
     solvi check  myapp.decisions:system [--strict] [--json]                                          (solvi.check)
     solvi report decisions.db [--since ISO] [--until ISO] [--question Q] [--id ID] [--html out.html] [--md out.md] [--json]
                                                                                                      (solvi.report)
@@ -286,7 +287,7 @@ def ask_parser(sub):
     s.add_argument("--question", action="append", help="ask only these questions (repeat, or comma-separated); with "
                                                        "--text: the question, without routing")
     s.add_argument("--decider", help="with --text: the model that picks the question (a folder, a cached Hugging Face id, "
-                                     "systemone:URL#model or module:attr; see solvi models)")
+                                     "systemone:URL#model, llm:URL#model or module:attr; see solvi models)")
     s.add_argument("--backend", default="auto", choices=["auto", "onnx", "torch"], help="the decider's backend")
     s.add_argument("--audit", action="store_true", help="also print what each answer rests on (res.audit())")
     s.add_argument("--report", choices=["md", "html"], help="print the decision's report instead (res.report)")

@@ -156,7 +156,7 @@ class _Leaf:
     def state(self, src, pre=None):
         p = self.part
         text = self.text(src)
-        ctx = p._ctx(text, src.vals, src.raw)
+        ctx = dict(p._ctx(text, src.vals, src.raw), combined=True)    # a memory of corrections only checks here
         z, a = pre if pre is not None else p._raw([text])[0]
         d0 = p.model._decision(p.spec, z)
         hard = p._finish(_copy(d0), a, threshold=-math.inf, ctx=ctx)     # every safeguard but the threshold
@@ -185,9 +185,12 @@ class _Leaf:
 
     def entry(self, d, st):
         name, s = self.part._signal(d)
-        return {"part": self.name, "model": self.model_id, "value": _jv(d.value),
-                "confidence": round(float(d.conf), 6), "signal": name, "score": round(s, 6), "escalate": d.escalate,
-                "probs": _probs(d.probs)}
+        e = {"part": self.name, "model": self.model_id, "value": _jv(d.value),
+             "confidence": round(float(d.conf), 6), "signal": name, "score": round(s, 6), "escalate": d.escalate,
+             "probs": _probs(d.probs)}
+        if "memory" in d.extra:                       # a memory of corrections consulted by this part (solvi.memory)
+            e["memory"] = d.extra["memory"]
+        return e
 
     def check(self, e):
         opts = self.part.options

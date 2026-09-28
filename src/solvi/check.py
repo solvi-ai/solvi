@@ -100,6 +100,15 @@ def lint(obj, strict=False, max_combos=100_000):
     """A System (or a Catalog) → Report. `max_combos`: the largest number of answer combinations tried per group of
     constraints that share questions."""
     from .strategist import given_facts
+    if hasattr(obj, "tools") and hasattr(obj, "system") and not hasattr(obj, "questions"):   # a solvi.agents.Guard
+        rep = Report(strict=strict)
+        for name, t in obj.tools.items():
+            if t.model is None:
+                rep.add("note", "no_schema", f"{name}", "the tool has no argument schema yet (adopted from an MCP server)")
+                continue
+            for f in lint(obj.system(name), strict, max_combos).findings:
+                rep.findings.append(replace(f, where=f"{name}: {f.where}"))
+        return rep
     system = obj if hasattr(obj, "catalog") and hasattr(obj, "questions") else None
     cat = system.catalog if system is not None else obj
     questions = dict(system.questions) if system is not None else {}
@@ -436,7 +445,7 @@ def cmd_check(a):
     obj = load_object(a.target)
     if not (hasattr(obj, "parts") and hasattr(obj, "rules")) and not hasattr(obj, "catalog"):
         from .cli import _fail
-        _fail(f"check {a.target}: not a solvi System or Catalog")
+        _fail(f"check {a.target}: not a solvi System, Catalog or Guard")
     rep = lint(obj, strict=a.strict, max_combos=a.max_combos)
     if a.json:
         from .schema import dumps
@@ -449,7 +458,8 @@ def cmd_check(a):
 def add_parser(sub):
     c = sub.add_parser("check", help="lint a catalog: hard checks outside their question's flow, unused parts, cycles, "
                                      "type conflicts, constraints that cannot hold, silent defaults")
-    c.add_argument("target", help="module:attr or file.py:attr — a System (or a function returning one), or a Catalog")
+    c.add_argument("target", help="module:attr or file.py:attr — a System (or a function returning one), a Catalog, or a "
+                                  "solvi.agents.Guard (each tool's checks)")
     c.add_argument("--strict", action="store_true", help="warnings fail too (exit status 1)")
     c.add_argument("--max-combos", type=int, default=100_000,
                    help="the most answer combinations tried per group of constraints (default 100000)")

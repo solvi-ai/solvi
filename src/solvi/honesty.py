@@ -148,10 +148,11 @@ def _plain(v):
     return v
 
 
-def run(system, cases, prepare=None):
+def run(system, cases, prepare=None, store=True):
     """Ask the system every case → one row per (case, gold question): {"case", "question", "gold", "answer", "status",
     "guard", "confidence", "acted", "correct", "safeguards", "quotes"} (JSON-ready); with an injection trap also
-    "injected" (the answer the embedded instruction pushes for) and "followed" (acted with exactly that answer)."""
+    "injected" (the answer the embedded instruction pushes for) and "followed" (acted with exactly that answer).
+    store=False: nothing is written to the system's storage (as System.ask(..., store=False))."""
     rows = []
     for case in cases:
         state = copy.deepcopy(case["state"])
@@ -159,7 +160,7 @@ def run(system, cases, prepare=None):
             state = prepare(state)
         gold = case["gold"]
         names = list(case.get("ask") or gold)
-        res = system.ask(state, names)
+        res = system.ask(state, names, store=store)
         for q, g in gold.items():
             r = res[q]
             want = gold_of(system.questions[q].answer, g)

@@ -205,3 +205,52 @@ def test_the_system_one_client_speaks_http_only():
         with pytest.raises(ValueError, match="http"):
             systemone(bad, "m")
     assert systemone("https://solvi.example", "m").model_id == "systemone:m"
+    from solvi.llm import llm
+    for bad in ("file:///etc/passwd", "ftp://x/v1"):
+        with pytest.raises(ValueError, match="http"):
+            llm(bad, "m")
+
+
+# --- POST /ask_text and the ask_text tool go through the same guard
+def test_ask_text_goes_through_the_token_limits_and_error_hiding(monkeypatch, caplog):
+    from test_serve import _shop
+    s, tin = _shop()
+    c = client(system=s, textin=tin, token="t", limits=Limits(max_body=500))
+    auth = {"Authorization": "Bearer t"}
+    body = {"text": "cancel A-5, it is urgent", "question": "cancel_order", "store": False}
+    assert c.post("/ask_text", json=body).status_code == 401
+    assert c.post("/ask_text", json=body, headers=auth).json()["results"]["cancel_order"]["answer"] == "cancelled"
+    assert c.post("/ask_text", json={**body, "text": "x" * 600}, headers=auth).status_code == 413
+    bad_day = c.post("/ask_text", json={**body, "today": "yesterday"}, headers=auth)
+    assert bad_day.status_code == 422 and "ISO date" in bad_day.json()["detail"]
+
+    def broken(*a, **k):
+        raise RuntimeError(f"cannot open {SECRET}")
+    monkeypatch.setattr(s, "ask_text", broken)
+    with caplog.at_level(logging.ERROR, logger="solvi.serve"):
+        r = c.post("/ask_text", json=body, headers=auth)
+        tool = _builtin(Service(s, textin=tin), json.dumps({"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": {
+            "name": "ask_text", "arguments": {"text": "cancel A-5", "question": "cancel_order"}}}))[0]["result"]
+    assert r.status_code == 500 and SECRET not in r.text and "incident" in r.json()["detail"]
+    assert tool["isError"] and SECRET not in json.dumps(tool) and "incident" in tool["structuredContent"]["error"]
+    empty = _builtin(Service(s, textin=tin), json.dumps({"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": {
+        "name": "ask_text", "arguments": {"text": ""}}}))[0]["result"]
+    assert empty["isError"] and "non-empty" in empty["structuredContent"]["error"]
+
+
+def test_the_mcp_proxy_bounds_messages_and_hides_its_own_errors(tmp_path, monkeypatch):
+    from test_agents_mcp import guard, rpc, run
+
+    from solvi.agents.mcp import Proxy
+    g = guard(tmp_path)
+    init = rpc(1, "initialize", {"protocolVersion": "2025-06-18", "capabilities": {}})
+    big = rpc(2, "tools/call", {"name": "read_file", "arguments": {"path": "/work/" + "x" * 500}})
+
+    def broken(self, params, ask=None):
+        raise RuntimeError(f"cannot open {SECRET}")
+    monkeypatch.setattr(Proxy, "call", broken)
+    out, raw = run(g, [init, big, rpc(3, "tools/call", {"name": "read_file", "arguments": {"path": "/work/a"}}),
+                       rpc(4, "ping")], limits=Limits(max_body=300))
+    assert "at most 300" in raw
+    assert out[3]["error"]["code"] == -32603 and "incident" in out[3]["error"]["message"] and SECRET not in raw
+    assert out[4]["result"] == {}                                           # the proxy kept serving

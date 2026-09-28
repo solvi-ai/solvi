@@ -20,6 +20,10 @@
   `TypeError` / `ValueError` from anywhere became a 422 with its message. `/health` names the store by its file name,
   not its path.
 - **CORS** stays off by default (no `Access-Control-Allow-*` headers); `--cors ORIGIN` (repeatable) allows one.
+- The same holds for `POST /ask_text` and the MCP `ask_text` tool (text-reading errors are `RequestError`s: an empty
+  text, an unknown entry point, a bad `today` → 4xx), and for the MCP proxy (`--guard --upstream`): client messages
+  bounded by `--max-body` / `--max-depth`, the proxy's own failures answered with an incident id. The LLM decider
+  (`solvi.llm`), like the System One client, accepts `http(s)://` endpoints only.
 - Nothing is imported or loaded from request data (the System One `model` field is a name echoed back) — now tested.
 - `--decider` is read like `solvi ask --decider` (`solvi.models.load`: a folder, a cached Hugging Face id,
   `systemone:URL#model`, `module:attr`) and **never downloads**: a Hugging Face id that is not cached is a usage error
@@ -76,6 +80,82 @@
   must work, and a weak reference would lose the temporary System before the report runs. Drop it with
   `res._system = None` (and pass `system=`) for responses kept for long.
 
+### Memory of corrections
+
+- `part.memory(k=7, radius=0.15, min_strength=1.0, min_agreement=0.8, text=False, mode="check")` →
+  `solvi.memory.CorrectionMemory`: corrected cases of a decision part (the decider's probabilities from raw logits, before
+  any adaptation; optional hashed words; the label; `source`, `by`, `time`, `stored_id`) and their nearest neighbours at
+  decision time, with an abstain threshold. Only `source="human"`, `"outcome"` or `"rule"` are accepted
+  (`UntrustedLabel` otherwise); `learn_from(store)` reads a TraceStorage's corrections, never its stored decisions.
+  `calibrate(risk)` picks the abstain threshold by conformal risk control, leave-one-out.
+- `mode="check"` escalates when similar corrected cases say another answer (new safeguard `memory`, counted as
+  `memory_disagreements`); `mode="answer"` may also answer where the part escalated by its own threshold, and says so.
+  Inside a Cascade / Vote / Route a memory only checks.
+- `extra["memory"]` on every decision: the proposal, the action, the cases it rests on, the memory's fingerprint (also part
+  of the part's fingerprint; replay compares the record); `res.audit(q).memory` and the audit's lines, in English and
+  Russian. `mem.save` / `load` refuse another checkpoint.
+
+### Learning from corrections (experimental)
+
+- `System.learning(storage, parts=, ladder=, gates=, changelog=, holdout=0.3, calibration=0.2, gate_teach=True,
+  harvest_rules=False)` → `solvi.learning.Learning`; off until called (warns `ExperimentalWarning`). `loop.run()` reads
+  trusted corrections only (the stored decisions are never labels), splits them by a hash of their id into train /
+  calibration / holdout, proposes an update by the ladder (fit under 50 labels per question, fit + a memory of corrections
+  under 1000, an adapter hook beyond), runs the gates — consistency with earlier corrections, held-out gain, honesty
+  numbers (held-out labels and an optional honesty set), `act_guard` recalibration, a shadow run with a limit on the share
+  of stored decisions an update may change — and promotes it only if all pass. Every proposed update is recorded (kind
+  `"update"`, hash-chained) with its gates; a promoted one with its state, so `loop.rollback(version)` restores any
+  version, also from another process. While attached, `System.teach` only stores the correction.
+- Corrections carry provenance: `System.teach(..., source="human" | "outcome" | "rule", by=, of=)` and
+  `TraceStorage.save_correction(...)` store it, `corrections()` returns it; any other source raises `UntrustedLabel`.
+- `solvi.honesty.run(..., store=False)`.
+
+### Storage backends: PostgreSQL and DuckDB
+
+- `PostgresStorage(conninfo, prefix="solvi_")` (`solvi[postgres]`, psycopg 3): the SQLite tables in PostgreSQL; each
+  append locks the head table for its transaction, so several services writing cannot fork the chain.
+- `DuckDBStorage(path)` (`solvi[duckdb]`): the same tables in a DuckDB file, for analytics.
+- Both implement the whole TraceStorage interface — queries, the hash chain, `verify` (edits, deletions, a cut tail, a
+  rewrite against an anchor, index tables) and `replay_all`; `open_storage` / `storage=` take `.duckdb` paths and
+  `postgresql://` URLs. The SQL backends share one implementation (SQLiteStorage unchanged in behaviour).
+
+### Any LLM as a decider: solvi.llm
+
+- `solvi.llm.llm(base_url, model, api_key=None, ...)`: any OpenAI-compatible chat-completions server (OpenAI,
+  OpenRouter, vLLM, llama.cpp, Ollama, LM Studio) as a decider — a DecideModel, so it works as a decision part, as the
+  last stage of a `Cascade`, in a `Vote` / `Route`, with `act_guard` / `conformal` / `fit`. One question per request at
+  temperature 0 with a JSON schema for the reply (answer among the options, a probability per option or a confidence, a
+  supporting quote); `response_format` json_schema → json_object → prompt only, as the server accepts; probabilities
+  from the answer's token log-probabilities when the server returns them. Every reply is validated (answer among the
+  options, probabilities consistent with it, quote literally in the text): an invalid, cut-off or refused reply, or a
+  server that does not answer after `retries`, escalates ("model escalated: invalid LLM output — ...") and is never
+  guessed; 401 / 403 / 404 raise `LLMError`. Yes/no, scores, multi-label, spans, "not stated" and evidence quotes.
+- The trace: the model id `llm:<model>@<endpoint>` (no credentials, no query), a fingerprint over the endpoint, model
+  name, prompt-template hash and settings, and `extra["llm"]` per decision (format, probability source, the model that
+  answered, quote, tokens). The API key is never recorded. An LLM decision is not re-run by `replay` (the part's
+  `deterministic` follows its model): the recorded output is checked instead.
+- `llm:URL#model` wherever a MODEL spec is taken (`solvi ask --decider`, `solvi models check`; `$SOLVI_LLM_API_KEY`).
+- Decider scorers may return `escalate` (and `transient`, `info`) with a question's logits: the decision escalates with
+  that reason; a transient failure is not cached. `Item.unknown` tells a scorer that "not stated" is an answer; a
+  scorer may return an already decoded pointer (`{"null", "spans"}`).
+
+### solvi serve: POST /ask_text and the ask_text tool
+
+- `POST /ask_text` (`{"text", "question"?, "store", "today"?}`) and the MCP tool `ask_text`: a free text through
+  `System.ask_text` with the served decider (`--decider`, which now also takes `systemone:URL#model` and
+  `llm:URL#model`, with `--api-key`) → the response as for `/ask` plus `read`: the question it asks, each field with its
+  status, value and quote, the missing fields, a clarifying question and why routing escalated. `Service.ask_text` /
+  `aask_text`; `create_app(..., textin=)` / `Service(..., textin=)` for a configured `TextIn`; `today` defaults to the
+  server's date and is recorded. `--mcp` now loads `--decider` too (it routes the texts).
+
+### A vote across model families
+
+- `examples/20_vote_across_families.py`: two stand-in System One servers of different "families" started in-process
+  (no network), each alone and their `Vote` under one guarantee (`act_guard`, risk 10%), a hard check, the audit and
+  the replay; a sure mistake of one family makes the vote escalate. The guide cites the measured result: on
+  typed-decisions a vote of solvi-large and Julia 1 answered 50% alone against 31% / 40% for each alone at the same
+  10% risk (Julia in-distribution there).
+
 ### Command line: init, ask, calibrate, models
 
 - `solvi init [DIR] [--template support|refunds|minimal] [--with-model] [--force]`: a new project — `catalog.py` (a
@@ -108,6 +188,39 @@
   refuses a file made for another question, checkpoint or adaptation (`strict=False` accepts it) and restores the part's
   fingerprint exactly, so stored decisions replay. A catalog loads its calibration when it starts; while `solvi
   calibrate` loads a catalog, calibration files are not applied (the part is calibrated afresh).
+
+### Guarding an agent's tool calls
+
+- `solvi.agents.Guard`: an agent proposes a tool call (`{"name", "arguments"}` — data, never code; OpenAI, LangChain,
+  Anthropic and MCP shapes are read by `ToolCall.parse`) and solvi checks it as a proposal: the tool is in the catalog
+  (`@guard.tool` on typed functions, `guard.declare(name, schema=...)` for a pydantic model or a JSON schema), the
+  arguments validate against its types (unknown arguments are errors), the `ground=` arguments are quoted from the
+  conversation (strings literally, numbers as number tokens, lists item by item; `ground_from=` the roles allowed — never
+  the assistant's own words), not only from a tool output that carries instruction-like text (solvi.perturb's rules;
+  `injections="any"`: any such tool output escalates the call), your policies (`@guard.policy(tools, on_fail="deny" |
+  "escalate")`: ordinary solvi hard checks over the arguments and the facts your app gives; `@guard.fn` for computations
+  they read) and, optionally, an authorizer — a decider's yes / no "does the conversation authorize this call?"
+  (`guard.make_authorizer(decider)`, perturb=2, `guard.calibrate_authorizer(examples, risk=0.10)` = act_guard).
+- The outcome: `allow` (solvi runs the registered function: `d.result`, or `d.error` when it raised), `deny` or
+  `escalate`, with the reasons in words (`d.reasons`, `d.message()` for the model), the candidate call and the evidence
+  (where each grounded argument is quoted). A failed deny check wins over a failed escalate check; an abstention (a fact
+  not given, an unsure authorizer) is an escalation. `guard.resolve(d, approve, reviewer)` records a person's answer and
+  makes an approved call. `guard.session(context, facts)` follows a conversation and feeds tool outputs back into it.
+- Each tool is a solvi System with one question, `verdict`: every decision is a full response — trace, audit, stored with
+  `meta["guard"]` (outcome, reasons, executed, the result's hash or the error) in a TraceStorage; `guard.replay(id)`,
+  `guard.replay_all()`; the same call in the same conversation gives the same trace. `guard.check` / `acheck` decide
+  without running anything; `acall` awaits async tools and policies.
+- Adapters (each imports its framework only when used): `solvi.agents.pydantic_ai.GuardedToolset` (a WrapperToolset:
+  deny → ModelRetry, escalate → ApprovalRequired and deferred approval), `solvi.agents.langgraph.guarded_tool_node` (a
+  ToolNode with wrap_tool_call: deny → an error ToolMessage, escalate → interrupt / Command(resume=...)),
+  `solvi.agents.openai_agents.guard_tools` (a tool input guardrail + needs_approval: deny → reject_content, escalate →
+  an interruption to approve). Tested with pydantic-ai 2.51, langgraph 1.2.12 and openai-agents 0.22.3 and their
+  scripted models (dependency group `agents`; the tests skip without them).
+- `solvi serve --guard catalog.py:guard --upstream CMD [--facts JSON] [--escalate elicit|deny] [--store]`: an MCP proxy
+  in front of an MCP server — `tools/list` shows the declared tools (their schemas adopted from the server), every
+  `tools/call` passes the guard; an escalation asks the user through MCP elicitation when the client supports it.
+- `solvi check` lints a Guard (every tool's checks). [examples/19_agent_guard.py](examples/19_agent_guard.py): an
+  accounts-payable agent, scripted, through every case.
 
 ### Documentation site
 

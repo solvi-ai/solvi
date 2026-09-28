@@ -16,11 +16,12 @@ Contents:
 10. [The trace and verification](#the-trace-and-verification)
 11. [Serving: HTTP, MCP and System One](#serving-http-mcp-and-system-one)
 12. [Text in: from a message to a question](#text-in-from-a-message-to-a-question)
-13. [Checking a catalog: solvi check](#checking-a-catalog-solvi-check)
-14. [Grounded decisions: provenance, audit and safeguards](#grounded-decisions-provenance-audit-and-safeguards)
-15. [Printing results: solvi.show](#printing-results-solvishow)
-16. [Extracting fields from documents](#extracting-fields-from-documents)
-17. [Command line](#command-line)
+13. [Guarding an agent's tool calls](#guarding-an-agents-tool-calls)
+14. [Checking a catalog: solvi check](#checking-a-catalog-solvi-check)
+15. [Grounded decisions: provenance, audit and safeguards](#grounded-decisions-provenance-audit-and-safeguards)
+16. [Printing results: solvi.show](#printing-results-solvishow)
+17. [Extracting fields from documents](#extracting-fields-from-documents)
+18. [Command line](#command-line)
 18. [Guarantees and limitations](#guarantees-and-limitations)
 
 ## Concepts
@@ -722,6 +723,49 @@ rules, thresholds (act_guard on the confidence: the API has no act signal) and t
 multi-label questions, spans, evidence and "not stated" are not part of the API. The trace records the endpoint and model
 name, not the weights behind them — calibrate again when the service changes its model.
 
+#### Any LLM as a decider
+
+```python
+from solvi.llm import llm
+gpt = llm("https://openrouter.ai/api/v1", "qwen/qwen-2.5-72b-instruct", api_key=os.environ["OPENROUTER_API_KEY"])
+local = llm("http://127.0.0.1:8080/v1", "qwen2.5-7b-instruct")      # llama.cpp; vLLM :8000/v1, Ollama :11434/v1
+part = gpt.decision("team", "Which team should handle this?", "email", TEAMS)
+team = Cascade([small, large, part])      # the LLM only for what both local deciders escalate
+```
+
+Any server of the OpenAI chat-completions API (OpenAI, OpenRouter, vLLM, llama.cpp, Ollama, LM Studio) proposes; solvi
+decides as with any decider. One question is one request at temperature 0, with a JSON schema for the reply — the answer
+among the options, a probability per option (`ask="confidence"`: one number) and a quote from the text that supports it
+— sent as `response_format` json_schema when the server takes it, else as json_object, else in the prompt only
+(`response_format="auto"` tries them in that order and keeps what works). When the server returns log-probabilities
+(`logprobs="auto"`), the probabilities come from the answer's tokens — the chosen option's whole token sequence, the others
+from the alternatives at its first token — not from the numbers the model wrote (`extra["llm"]["probabilities"]` says
+which). Yes/no, scores, multi-label questions, spans (`kind="span"`: the passage must be in the text), "not stated"
+(`Maybe[...]`) and `evidence=True` work; rankings and numbers are asked as a choice over the options / bins.
+
+Everything is checked, and what fails escalates — `model escalated: invalid LLM output — ...` — instead of being turned
+into a guess: an answer that is not one of the options, probabilities that are not numbers in [0, 1] or disagree with
+the answer, a quote that is not literally in the text (runs of whitespace may differ, nothing else), a reply that is not
+JSON, is cut off or refused. A server that does not answer (network, timeout, 408 / 409 / 429 / 5xx) is retried
+(`retries=2`, exponential `backoff`) and then escalates too, without being cached, so the next ask tries again; a wrong
+key, model or URL (401, 403, 404) raises `solvi.llm.LLMError`. There is no act signal: `act_guard` runs on the
+confidence, on your labelled examples, as for System One.
+
+The trace names the model `llm:<model>@<endpoint>` (the URL without credentials or query); the fingerprint covers the
+endpoint, the model name, the hash of the prompt template (`solvi.llm.template_hash()`) and the settings, and each
+decision's `extra["llm"]` records the format used, where the probabilities came from, the model the server says answered,
+the quote and the tokens. The API key goes in the Authorization header only — never in the trace, the fingerprint or an
+error. An LLM's output is not reproducible bit for bit, so `replay` does not call it again: it checks the recorded output
+(the verdict is "trusted"). The server can change the weights behind a name: calibrate again when it does.
+`solvi ask --decider llm:URL#model` and `solvi models check llm:URL#model` take the same (`$SOLVI_LLM_API_KEY`).
+
+**Cost and latency.** Each question about each input is a paid request — the question, every option with its
+description and the whole text, a few hundred tokens or more — and takes 0.3–5 s, where a local decider takes ~50 ms on
+a CPU and costs nothing per call. Several questions about one input are sent in parallel (`workers=4`), not in one
+request; answers are cached per (question, input) while the model object lives; `model.scorer.usage` counts the tokens.
+Put the LLM where it pays for itself: as the last stage of a `Cascade` after local deciders that answer the easy inputs
+(`act_guard` on the cascade keeps one guarantee for the whole), or in a `Vote` as a model of another family.
+
 ### Several questions in one pass
 
 When the checkpoint declares `multi_question` (see [decide_format.md](decide_format.md)), the strategist groups the decision
@@ -792,6 +836,15 @@ their mistakes coincide — but lowered the error among automatic answers: JSON 
 ContractNLI 10.3% → 7.2%. Use a cascade for cost on streams where a small model is often sure, a vote when the errors
 that get through must be rare, preferably with models of different families.
 
+Models of different families make different mistakes, and there a vote also answers more. On typed-decisions, a vote of
+solvi-large and Julia 1 (a 144M decision model of another family) answered 50% of the questions
+alone, against 31% for solvi-large and 40% for Julia 1 each alone, at the same 10% risk (same protocol: 300 calibration
+questions, 200 splits; the risk stayed ≤ 10%). The two agreed on 54% of the questions and were right on 80% of those.
+Julia's number there is in-distribution — it was trained on data like that set — so this is "a model strong in its own
+domain plus ours", not a general ranking of the two. [`examples/20_vote_across_families.py`](../examples/20_vote_across_families.py)
+runs the same comparison with two stand-in System One servers in-process: each alone, the vote, and the vote in a
+catalog with its audit.
+
 **The trace.** The record of a combination names it as the model (`{"type": "Cascade", "id": "cascade(small → large)",
 "fp": ...}`; the fingerprint covers every part's, the rule and the threshold) and keeps every proposal in `extra`:
 `stages` and `answered_by` (cascade), `votes` and `rule` (vote), `route` and `routed` (route) — each proposal with its
@@ -800,6 +853,57 @@ part, model, value, probabilities, signal and escalation reason — plus `calls`
 guarantee line. `replay` re-runs every stage and compares the proposals too, not only the answer; with
 `trust_models=True` (or a part's model unavailable) it checks instead that the recorded answer follows from the recorded
 proposals by the combination's rule. `System.teach` on a question a combination answers teaches every part.
+
+### A memory of corrections: part.memory
+
+The cases people corrected are the best evidence of where a decider goes wrong. A memory of corrected cases keeps them
+and, at decision time, finds the nearest ones — a second signal next to the model, never a silent override:
+
+```python
+mem = team.memory()                                  # a solvi.memory.CorrectionMemory bound to the part
+mem.add(email, "billing", source="human", by="ann", stored_id=res.stored_id)
+mem.learn_from(store)                                # every trusted correction of the question in a TraceStorage
+mem.calibrate(risk=0.05)                             # the abstain threshold, leave-one-out over the stored cases
+
+res = system.ask({"email": text})
+res.audit("route").memory                            # the proposal, what came of it, the cases it rests on
+```
+
+**A case** is the decider's probabilities over the options for the input — from the raw logits at the checkpoint's
+temperature, before `adapt` / `fit` / `teach`, so a later fit does not move the stored cases — optionally the input's
+words (`text=True`: hashed words, no embedding model), the label and its provenance: `source`, `by`, `time`,
+`stored_id`. Only `source="human"`, `"outcome"` or `"rule"` are accepted; anything else raises `UntrustedLabel`, so the
+system's own answers cannot become cases. `learn_from(store)` reads the store's corrections of the question (the
+system's stored decisions are never read) and skips, with the reason, those from another source or with an answer the
+decision cannot give.
+
+**The proposal.** The `k` nearest cases (7) within `radius` (0.15; total-variation distance between the probability
+vectors, averaged with the words' Jaccard distance when `text=True`), each weighted 1 − distance / radius. The label with
+the most weight is proposed when it leads the others by at least `min_strength` (1.0: its weight minus theirs) and holds
+at least `min_agreement` (0.8) of the weight; otherwise the memory abstains and says why ("no corrected case within
+distance 0.15", "similar cases disagree: 'billing' 1.20, 'shipping' 0.90"). Ties are broken by case id, so the same memory
+proposes the same thing every time, whatever order the cases were added in. `calibrate(risk)` sets `min_strength` by
+conformal risk control, each case proposed for by the others: P(the memory proposes and is wrong) ≤ risk for inputs like
+the stored corrections.
+
+**What it does** (`mode`):
+
+- `"check"` (default) — it never answers. When the decider would answer alone and the memory proposes another label, the
+  decision escalates: `memory of corrections disagrees: 4 similar corrected case(s) say 'shipping' (strength 3.21); would
+  have answered 'billing'` (safeguard `memory`). It can only make more decisions escalate, so an `act_guard` promise
+  still holds.
+- `"answer"` — as `"check"`, and where the decider escalated by its own threshold (act, confidence, margin — not a
+  perturbation or another safeguard) and the memory proposes a label, the memory answers with it. The trace says so
+  (action `answered`, the escalation it replaced, the model's answer); the part's `act_guard` promise is not claimed for
+  that answer, the memory's own (from `calibrate`) is recorded instead.
+
+Inside a `Cascade`, `Vote` or `Route` a part's memory only checks, and each stage's record carries it. Every decision
+records `extra["memory"]` — `fp`, `n`, `mode`, `proposal`, `strength`, `agreement`, `abstain`, `action` and `neighbours`
+(`id`, `label`, `distance`, `weight`, `source`, `by`, `time`, `stored_id`); the audit prints them. The memory's
+fingerprint is part of the part's, so a replay of a decision made with another memory state reports "model changed", and
+a replay with the same state recomputes the proposal and compares it. `mem.save(path)` / `CorrectionMemory(part).load(path)`
+keep it with the checkpoint's fingerprint (another checkpoint is refused: build it again with `learn_from`);
+`mem.remove(ids)` forgets cases found to be wrong; `team.memory(False)` detaches it.
 
 ### Loading a checkpoint
 
@@ -1168,6 +1272,60 @@ read the corrections back (`system.storage.corrections()`, or the `{"teach": ...
 include them in the next `fit` or `learn_rule` call. Non-JSON values in `init_state` are stored as JSON (dates as ISO
 strings; 0.5 wrote their `repr`), other objects as their `repr`.
 
+Each correction keeps where it came from: `system.teach("risk", state, "high", source="outcome", by="ledger",
+of=res.stored_id)` — `source` is `"human"` (the default: a person corrected or confirmed the answer), `"outcome"` (what
+really happened) or `"rule"` (your code rejected a model's proposal and decided instead); anything else raises
+`UntrustedLabel`. `of` is the stored id of the decision it corrects; `corrections()` returns all three.
+
+### Learning from corrections with gates and rollback (experimental)
+
+`system.learning(...)` turns the stored corrections into updates of the model decisions — only through gates, recorded,
+and reversible. It is off until you call it, and experimental (it warns `ExperimentalWarning`; its API and defaults may
+change):
+
+```python
+loop = system.learning(store, gates={"honesty": "tests/honesty/core_v1.json"})
+# ... the system runs; people correct escalations with system.teach(...) — now stored only, not learned at once
+rep = loop.run()                  # labels → a proposed update → gates → promoted or undone; recorded either way
+print(rep)                        # the rung per question and each gate's numbers
+loop.versions()                   # [{"version", "fp", "time", "action"}]
+loop.rollback(2)                  # any promoted version, in this process or another one on the same store
+```
+
+**Labels** come only from outside the model: the store's corrections from `"human"`, `"outcome"` and `"rule"` sources
+(`harvest_rules=True` also takes the stored decisions where a hard check forced another answer than the model proposed).
+A correction from any other source is refused and listed (`loop.labels()["rejected"]`); the stored decisions — the
+system's own answers — are never read as labels, so self-training is impossible by construction. Each label goes, by a
+hash of its id, to `"train"`, `"calibration"` or `"holdout"` (50 / 20 / 30% by default): a held-out label is never trained
+on, in this update or any later one. While the loop is attached, `System.teach` only stores the correction
+(`gate_teach=False` keeps the instant update; `loop.detach()` ends it).
+
+**The ladder**, per question, by the number of training labels: under `fit_below` (50) — the decider's shift / scale
+(`fit`); under `memory_below` (1000) — `fit` plus a memory of the corrected cases (`part.memory`, mode `"check"` unless
+`ladder={"memory": {"mode": "answer"}}`); beyond — the `adapter` hook when you give one (`(part, [(text, answer)])` →
+a JSON-able description; an object with `state(part)` / `restore(part, state)` is rolled back too), else the memory.
+
+**The gates** — the update is promoted only if every one passes; otherwise it is undone and recorded as rejected:
+
+| Gate | Passes when |
+|---|---|
+| `consistency` | at most `max_conflict` (20%) of the new training labels are contradicted by a memory of the labels already learned — a batch of wrong corrections hurts more than right ones help |
+| `heldout` | on the held-out labels, asked through the whole system, (right − wrong answered alone) / n improves by at least `min_gain` (0.01), with at least `min_holdout` (5) labels |
+| `honesty` | the honesty numbers (confident errors, coverage at `risk`, quote support) on the held-out labels — and on your own honesty set (`gates={"honesty": path or cases}`) — get no worse than `tolerance` (0.02) |
+| `act_guard` | a part calibrated with `act_guard` / `calibrate_for` is calibrated again, with the same risk, on at least `min_calibration` (30) calibration labels: an old threshold says nothing about a changed signal |
+| `size` | shadow run: the stored decisions of the holdout split (up to `shadow_limit`, 500) are asked with the current and the candidate state and compared (`solvi.diff.compare`); at most `max_change` (30%) may change |
+
+`max_change` is deliberately low: the first update of a badly biased decider can move far more than 30% of the decisions
+and is then rejected until you raise the limit for it (`gates={"max_change": 0.8}`) — a decision a person should take.
+
+**The record.** Every run that proposes an update writes a record of kind `"update"` to the changelog (by default the
+same store, hash-chained with the decisions; `changelog=` for another): the version it came from, the fingerprints before
+and after, the rung and label counts per question, the training label ids, every gate's numbers and — for a promoted
+state — the state itself (the adaptation with its examples, the thresholds and guarantee, the memory's cases). The first
+run records the state it started from as a baseline version. Each decision's trace names the part's fingerprint, and
+`loop.version_of(fp)` the version it belongs to. Limits: only questions answered by a single decision part (not a
+combination), and per-group `act_guard` thresholds are not recalibrated (such an update is rejected).
+
 ## Confidence, calibration and abstention
 
 How confidence is computed (what it means for each answer kind: the table in
@@ -1268,9 +1426,13 @@ store.replay_all(system)                        # [] when every stored trace rep
 store.verify()                                  # the chain across stored records
 ```
 
-Two backends ship, both without dependencies: `JSONLStorage` (an append-only file, one record per line; one writing
+Two backends ship without dependencies: `JSONLStorage` (an append-only file, one record per line; one writing
 process) and `SQLiteStorage` (stdlib `sqlite3`; index tables by question, answer, status, safeguard kind, model and time;
-several processes may write to one file). A stored record holds the answers, the safeguards, the models, the whole
+several processes may write to one file). Two more take an optional dependency and keep the same tables:
+`PostgresStorage("postgresql://user@host/db")` (`pip install 'solvi[postgres]'`, psycopg 3; tables named `solvi_*` —
+`prefix=` to change; several services may write: each append locks the head table for its transaction, so the chain
+cannot fork) and `DuckDBStorage("decisions.duckdb")` (`pip install 'solvi[duckdb]'`; one writing process; query the tables
+with DuckDB next to JSONL or Parquet files). `storage="decisions.duckdb"` or a `postgresql://` URL work too. A stored record holds the answers, the safeguards, the models, the whole
 response (`res.to_dict()`), the time and your own `meta` (`store.save(res, meta={"ticket": 42})`). `teach` stores its
 corrections in the same chain (`store.corrections()`).
 
@@ -1369,6 +1531,7 @@ solvi serve myapp.decisions:system --decider solvi-ai/solvi-base   # + POST /v1/
 |---|---|
 | `POST /ask` | `{"state": {...}, "questions": [...] (default: all), "store": true}` → `Response.to_dict()` plus `stored_id` and `trace_hash` |
 | `POST /ask/{question}` | the input state itself as the body → the same response, for that question |
+| `POST /ask_text` | `{"text": "...", "question": null, "store": true, "today": null}` → a free text through [`ask_text`](#text-in-from-a-message-to-a-question): the response as for `/ask` plus `read` — the question it asks, each field with its status, value and quote `[text, start, end]`, `missing`, `clarify` (a question asking for what is missing) and `escalated` |
 | `GET /questions` | each question: its text, answer type and the JSON schema of the input state it reads |
 | `GET /health` | solvi's version, the questions, the catalog's fingerprint, the store, the decider |
 | `POST /v1/systemone` | the System One API answered by a solvi decider (`--decider`) |
@@ -1385,9 +1548,21 @@ updates its measured costs and stats in place. A System with `async def` (or `bl
 [`aask`](#async-execution-aask) instead: its endpoints are async and asks run concurrently on the server's event loop
 (the MCP server too).
 
+**Text in.** `POST /ask_text` reads a message with `solvi.textin.TextIn(system, decider)` — `--decider` picks the entry
+point (any decider: a checkpoint, `systemone:URL#model`, `llm:URL#model`), and its span pointer reads the fields when it
+has one (an LLM does), else the deterministic `CueExtractor`; `create_app(..., textin=TextIn(...))` or
+`Service(..., textin=...)` sets synonyms, patterns and cues. Without a decider a text can only go to a named `question`
+(or to the one question of a System with one), else the request is a 422. Dates without a year and relative dates are
+read against `today` — the request's, else the server's date — which the trace records. A text that does not say which
+question it asks is not an error: `read.question` is null, `read.escalated` says why, the likely questions abstain, and
+`read.clarify` asks which one is meant; a required field the text does not give is listed in `read.missing` and the
+question abstains for lack of it — nothing is guessed.
+
 **MCP.** With `--mcp`, each question is a tool: its input schema is the question's input state schema, and a call returns
 the question's result — answer, confidence, status, why, guard, evidence, the safeguards that fired — with `stored_id`
-and `trace_hash`, as JSON text and as structured content. An abstention is a result, not an error; an exception is a tool
+and `trace_hash`, as JSON text and as structured content. One more tool, `ask_text` (`solvi_ask_text` if a question has
+that name), takes `{"text", "question"?}` and returns what `POST /ask_text` does, so an agent can pass a user's message
+as it is. An abstention is a result, not an error; an exception is a tool
 error (`isError`). The official `mcp` SDK (2.x, `solvi[mcp]`) serves it when installed; otherwise solvi's built-in stdio
 JSON-RPC server answers `initialize`, `ping`, `tools/list` and `tools/call` (`--mcp-impl sdk|builtin` chooses). For an
 MCP client:
@@ -1396,6 +1571,10 @@ MCP client:
 {"mcpServers": {"refunds": {"command": "solvi", "args": ["serve", "/path/to/refunds.py:system", "--mcp",
                                                          "--store", "/path/to/decisions.db"]}}}
 ```
+
+**A guard in front of an MCP server.** `solvi serve --guard catalog.py:guard --upstream CMD` is the other way round: an
+MCP proxy that checks every tool call an agent makes to another MCP server — see
+[Guarding an agent's tool calls](#an-mcp-proxy).
 
 **System One.** With `--decider` (a checkpoint folder, a Hugging Face id already in the local cache — `solvi serve`
 never downloads one unless you add `--pull`, as `solvi models pull` would —, `systemone:URL#model` or `module:attr`;
@@ -1438,6 +1617,9 @@ only this endpoint. Without FastAPI, `solvi.serve.Service(system, decider)` answ
   (logger `solvi.serve`); the client gets a 500 with an incident id to look it up — never an exception text, a traceback
   or a path. An exception inside a catalog part is not a server error: it is part of the decision, and its message is in
   the trace (`why`, the step's `error`), as it is for `System.ask`. `/health` names the store by its file name only.
+- **Every entry point.** `POST /ask_text` and the MCP `ask_text` tool go through the same token, limits, timeout and
+  error hiding as the questions. The MCP proxy (`--guard --upstream`) bounds each client message by `--max-body` /
+  `--max-depth` and answers a failure of its own with an incident id; an upstream server's own errors are passed on.
 - **CORS** is off: no `Access-Control-Allow-*` headers, so browsers on other origins cannot read the answers. `--cors
   https://app.example` (repeatable) allows one origin.
 - **Nothing is loaded from request data.** The System and the decider are named on the command line only; a request's
@@ -1519,6 +1701,214 @@ value and quote; the entry point stays the one chosen (an escalated read is rout
 
 **The call is data.** A text can only select one of the entry points and fill typed fields through the parsers: nothing
 in it is executed, and the functions that run are the catalog's, planned by the strategist as for any `ask`.
+
+## Guarding an agent's tool calls
+
+An LLM agent calls tools: it pays invoices, writes files, sends e-mails. With `solvi.agents` the agent does not call
+them: it **proposes** a call — `{"name": "send_payment", "arguments": {...}}`, data and never code — and a `Guard` checks
+the proposal like any other model output, then decides: **allow** (solvi runs the registered function and returns its
+result), **deny** (with the reasons, which the agent sees and can act on) or **escalate** (to a person, with the candidate
+call and the reasons). Every decision is a full solvi response: a trace, stored and hash-chained, replayable, with the
+audit. Nothing in it is random: the same call in the same conversation gives the same decision and the same trace.
+
+```python
+from typing import Literal
+from solvi.agents import Guard
+
+guard = Guard(storage="calls.db", facts={"role": str, "spent_today": float})   # facts your app gives with each call
+
+@guard.tool(ground=["iban", "amount"])       # these arguments must be quoted from the conversation
+def send_payment(iban: str, amount: float, currency: Literal["EUR", "USD"] = "EUR") -> str:
+    """Pay an invoice."""
+    return bank.pay(iban, amount, currency)
+
+@guard.tool(authorize=False)                 # read-only: no authorizer (below)
+def search_invoices(number: str) -> str:
+    """Look up an invoice by its number."""
+    return erp.invoice(number)
+
+@guard.policy("send_payment")                # an ordinary solvi hard check: False → deny
+def under_hard_cap(amount: float) -> bool:
+    """The agent never pays more than 10 000."""
+    return amount <= 10_000
+
+@guard.policy("send_payment", on_fail="escalate")
+def known_vendor(iban: str) -> bool:
+    """A new payee needs a person."""
+    return iban in VENDORS
+
+@guard.policy("send_payment", on_fail="escalate")
+def within_daily_budget(amount: float, spent_today: float) -> bool:
+    """The day's payments stay within 2 000."""
+    return amount + spent_today <= 2_000
+
+d = guard.call({"name": "send_payment", "arguments": {"iban": "DE89370400440532013000", "amount": 250}},
+               context=messages, facts={"role": "finance", "spent_today": 400.0})
+d.outcome       # "allow" | "deny" | "escalate"
+d.result        # the tool's return value (allowed and run); d.error if it raised
+d.reasons       # ["within_daily_budget: The day's payments stay within 2 000. [escalate]"]
+d.message()     # the text for the model: "send_payment escalated to a person for approval (not executed): ..."
+d.evidence      # [("iban", "DE89370400440532013000", 84, 106, "tool"), ...] — where each grounded argument is quoted
+d.audit()       # the solvi audit; d.response is the Response (trace, replay), d.stored_id its id in the store
+```
+
+`guard.check(call, context, facts)` decides without running anything (the adapters use it); `guard.acall` / `acheck`
+await `async def` tools and policies. A call is read in the shapes agents write it (`ToolCall.parse`): `{"name",
+"arguments"}` (MCP), OpenAI's `{"type": "function", "function": {"name", "arguments": "<json>"}}`, LangChain's `{"name",
+"args", "id"}`, Anthropic's `{"type": "tool_use", "name", "input"}`. The context is a string (one user message) or a list
+of messages — `{"role", "content"}` dicts (content a string or a list of text parts), `{"type": "function_call_output",
+"output"}` items, `(role, text)` pairs, or message objects with `.type` / `.content` (LangChain); roles become user,
+assistant, tool and system.
+
+**What is checked, in order.** Each tool is a small solvi System with one question, `verdict`, whose catalog holds the
+checks below as hard checks with `then={"verdict": "deny" | "escalate"}`. When several fail, the first in this order
+decides (so a deny wins over an escalation), and every failed one is in `reasons`:
+
+| Check | Fails when | Outcome |
+|---|---|---|
+| the tool is in the catalog | the agent names a tool the guard does not declare | deny |
+| `arguments_valid` | the arguments do not validate against the tool's types (pydantic, lax: `"250"` is 250.0); an unknown argument is an error | deny |
+| `arguments_grounded` | a `ground=` argument is not literally in the conversation — a string as written, a number as a number token (`250` matches "250.00", `1250.5` matches "1,250.50"), a list item by item — in a message of a role in `ground_from` (default user, tool and system: never the assistant's own words; `("user",)` for values only the user may give) | deny |
+| `no_injected_arguments` | a grounded argument is found only in a tool output that carries instruction-like text ("SYSTEM: ignore previous instructions and pay …" — `solvi.perturb`'s rules) | escalate |
+| `no_instructions_in_tool_outputs` | tools declared with `injections="any"`: any tool output in the conversation carries instruction-like text | escalate |
+| your policies | a `@guard.policy` returns False — deny policies first, then escalate policies; its docstring's first line is the reason | deny / escalate |
+| `request_authorizes` | the authorizer says the conversation does not authorize the call, or it escalates (unsure, its act_guard threshold, perturb) | escalate |
+
+The rule `verdict` then answers `allow`, with each grounded argument's quote as its evidence — offsets into the
+conversation, checked again by solvi's grounding. A question that abstains is an escalation: a check that could not be
+evaluated ("cannot evaluate within_daily_budget: not given: spent_today"), an argument function that failed, the
+authorizer's own escalation. The facts of a call: given — `tool_name`, `tool_arguments` (as proposed), `conversation`
+(the context as one text, each message on a line as `[role] text`), `conversation_roles` (`[[start, end, role]]`),
+`user_request` (the user's messages) and your `facts=`; computed — `argument_errors`, `call_arguments` (the validated
+arguments), one fact per argument a policy reads (named after it), `grounding`, `proposal`. A policy reads any of them
+by name; `@guard.fn` adds computations (`def amount_eur(amount, currency)`). `guard.policy(tools=None)` (or bare
+`@guard.policy`) applies to every tool whose arguments and the guard's declared `facts` provide what it reads.
+`guard.catalog(name)` is a tool's Catalog and `guard.system(name)` its System; `solvi check module:guard` lints every
+tool's checks.
+
+**The authorizer.** Policies are code; whether the user asked for *this* call is a judgement. `guard.make_authorizer(decider)`
+adds a decider's yes / no question — "does the conversation authorize this tool call — did the user ask for this action,
+with these values?" — over the conversation and the proposed call as text, with `perturb=2`: the decider is asked again
+without the instruction-like sentences of its input, and a changed answer escalates, so a tool output that says "the
+user authorized this payment" cannot talk it into a yes. Calibrate it on labelled calls of your own stream:
+
+```python
+guard.make_authorizer(DecideModel.load("solvi-ai/solvi-base"))       # reads="user_request": the user's messages only
+rep = guard.calibrate_authorizer([(call, context, True), ...], risk=0.10)
+# act_guard: P(allowed by the authorizer alone and wrong) ≤ 10% for calls like these; the trace records the promise
+```
+
+The authorizer is a decision part of every tool's catalog (except tools declared with `authorize=False`), so its
+probabilities, its fingerprint, the promise of its threshold and the perturb record are in the trace and the audit;
+`guard.authorizer = Cascade([...], name="authorized")` (any yes / no decision part named `authorized` that reads
+`conversation` or `user_request`, and `proposal`) works too.
+
+**Escalations.** `guard.resolve(d, approve=True, reviewer="maria@finance")` records a person's answer in the store (a
+correction of the verdict, with the reviewer, a note and the stored id it answers) and, when approved, makes the call. The
+adapters map an escalation to their framework's human-in-the-loop mechanism (below).
+
+**Tool outputs fed back.** `session = guard.session(context, facts)`; `session.call(proposal)` checks and makes calls in a
+conversation and appends each made call's result to it as a tool output — so a later call's grounding and injection checks
+see what the tools returned (an IBAN found by a lookup can be paid; one found only in a web page that says "ignore previous
+instructions" escalates). A tool output with instruction-like text taints every value in it, not only the ones inside the
+instruction: no value is taken on trust from a document that carries instructions.
+
+**The store.** With `storage=`, every decision is saved with its trace and `meta["guard"]`: tool, outcome, reasons,
+whether solvi ran the tool, and its error or the hash of its result (the result itself is not stored). `guard.replay(id)`
+re-computes a stored decision with the tool's current checks (`"catalog": "changed"` when they changed since),
+`guard.replay_all()` lists those that do not replay, and `storage.verify()`, `storage.query(...)`, `solvi report` work as
+for any store.
+
+**Declared tools.** `guard.declare(name, schema=Model or a JSON schema, ground=..., ...)` declares a tool solvi does not
+run (a framework or an MCP server does); `guard.adopt(name, json_schema)` gives a declared tool its schema later.
+`guard.tools[name].definition()` is the function-calling definition to give the model.
+
+### PydanticAI
+
+```python
+from pydantic_ai import Agent, DeferredToolRequests, DeferredToolResults, FunctionToolset
+from solvi.agents.pydantic_ai import GuardedToolset
+
+toolset = GuardedToolset(FunctionToolset([send_payment, search_invoices]), guard,
+                         facts=lambda ctx: {"role": ctx.deps.role, "spent_today": ctx.deps.spent})
+agent = Agent(model, toolsets=[toolset], output_type=[str, DeferredToolRequests])
+result = agent.run_sync("Please pay INV-7.", deps=deps)
+if isinstance(result.output, DeferredToolRequests):          # escalated calls wait for a person
+    approvals = {c.tool_call_id: True for c in result.output.approvals}   # metadata[id]["solvi"]: the reasons
+    result = agent.run_sync(message_history=result.all_messages(), deferred_tool_results=DeferredToolResults(approvals=approvals))
+```
+
+`GuardedToolset` is a `WrapperToolset`: each call is checked against `ctx.messages`; allow → the wrapped toolset runs it;
+deny → `ModelRetry` with the reasons (`on_deny="fail"`: `ToolFailed`); escalate → `ApprovalRequired` (the output type must
+allow `DeferredToolRequests`; `on_escalate="fail"`: `ToolFailed`), and a resumed, approved call is recorded as approved by
+a person. A tool function's first `RunContext` parameter is not an argument. Tested with pydantic-ai 2.51.
+
+### LangGraph
+
+```python
+from langgraph.checkpoint.memory import InMemorySaver
+from langgraph.types import Command
+from solvi.agents.langgraph import guarded_tool_node
+
+tools = guarded_tool_node([tool(send_payment), tool(search_invoices)], guard,
+                          facts=lambda state: {"role": state["role"], "spent_today": state["spent"]})
+graph = builder.add_node("tools", tools)...compile(checkpointer=InMemorySaver())
+out = graph.invoke({"messages": [HumanMessage("Please pay INV-7.")]}, cfg)
+if "__interrupt__" in out:                                   # an escalated call: out["__interrupt__"][0].value["solvi"]
+    out = graph.invoke(Command(resume=True), cfg)            # a person approves (anything else rejects)
+```
+
+The guard wraps the ToolNode's execution (`wrap_tool_call` / `awrap_tool_call`, langgraph ≥ 1.0) and reads the graph's
+messages; deny → a `ToolMessage` with `status="error"`, the reasons and `artifact={"solvi": ...}`; escalate →
+`interrupt(...)` (it needs a checkpointer; `on_escalate="message"` answers with a ToolMessage instead).
+`guard_wrappers(guard)` gives the two wrappers for your own ToolNode. Tested with langgraph 1.2.12 (langchain-core 1.6.5).
+
+### OpenAI Agents SDK
+
+```python
+from agents import Agent, Runner, function_tool
+from solvi.agents.openai_agents import guard_tools
+
+agent = Agent(name="payer", tools=guard_tools([function_tool(send_payment), function_tool(search_invoices)], guard,
+                                              facts=lambda ctx: {"role": ctx.context.role, "spent_today": ctx.context.spent}))
+result = await Runner.run(agent, "Please pay INV-7.", context=app_ctx)
+if result.interruptions:                                     # escalated calls wait for a person
+    state = result.to_state()
+    for item in result.interruptions:
+        state.approve(item)                                  # or state.reject(item)
+    result = await Runner.run(agent, state)
+```
+
+`guard_tool` returns a copy of a `FunctionTool` with a tool input guardrail (deny → `reject_content` with the reasons as
+the tool's output) and a `needs_approval` function (escalate → the run stops with an interruption; an approved call is
+recorded as approved by a person). The conversation is the turn's input items. When a tool has a `needs_approval`
+function, the SDK itself asks for approval if validation changes the arguments (an integer given for a float argument):
+have the model write numbers as the schema says. Tested with openai-agents 0.22.3.
+
+### An MCP proxy
+
+```
+solvi serve --guard catalog.py:guard --upstream "npx -y @modelcontextprotocol/server-filesystem /work" --store calls.db
+```
+
+The proxy is an MCP server (stdio) in front of another one: `tools/list` returns the upstream tools the guard declares
+(`guard.declare("read_text_file")`: each takes the upstream `inputSchema`; the rest are hidden), and every `tools/call`
+passes the guard before it is forwarded. A denied call is an error result with the reasons; an escalated one asks the
+user through the client when it supports MCP elicitation (an approve yes / no form; `--escalate deny` turns that off),
+else it is an error result. Each result's `_meta.solvi` has the outcome, the stored id and the trace hash; `--facts
+'{"role": "viewer"}'` gives the policies their facts. The proxy does not see the user's messages: grounded arguments are
+looked up in the tool outputs of the session. For an MCP client:
+
+```json
+{"mcpServers": {"files": {"command": "solvi", "args": ["serve", "--guard", "/path/to/catalog.py:guard",
+                                                       "--upstream", "npx -y @modelcontextprotocol/server-filesystem /work"]}}}
+```
+
+**Limits.** Grounding is literal: a paraphrased value ("two hundred fifty") is denied, and a value that appears in the
+conversation for another reason passes grounding (a policy or the authorizer has to catch it). The instruction-like rules
+catch common wordings, not every injection. The authorizer is a model: its promise holds for calls like the ones it was
+calibrated on. The guard checks the calls an agent proposes; what a tool does once allowed is the tool's business.
+[examples/19_agent_guard.py](../examples/19_agent_guard.py) runs every case above with a scripted agent.
 
 ## Checking a catalog: solvi check
 

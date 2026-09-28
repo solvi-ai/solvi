@@ -559,7 +559,7 @@ class System:
             if r is not None and r.value is MISSING and r.error and r.probs is not None:
                 from .provenance import classify
                 g = classify(r.error)
-                if g in ("escalated", "low_confidence", "instruction"):  # the model's answer step escalated: abstain
+                if g in ("escalated", "low_confidence", "instruction", "memory"):  # the model's answer step escalated: abstain
                     return Result(None, r.confidence, r.error, "abstain", dict(r.probs), r.origin,
                                   rule.func.__name__ if rule.func is not None else rule.name, g)
             if r is None or r.value is MISSING:
@@ -827,15 +827,37 @@ class System:
         self.calib[question] = (float(a), float(b))
         return self.calib[question]
 
-    def teach(self, question, init_state, correct):
+    def learning(self, storage=None, parts=None, ladder=None, gates=None, **options):
+        """Learning from corrections with gates and rollback — experimental, off until you call this (see
+        solvi.learning): → a Learning loop over `storage` (default: this system's) for the questions answered by the
+        decision parts in `parts` (default: all of them). Labels come only from human corrections, outcomes and rule
+        rejections; loop.run() proposes an update by the ladder (ladder=: fit_below, memory_below, adapter, memory), runs
+        the gates (gates=: min_gain, min_holdout, tolerance, risk, max_change, shadow_limit, max_conflict,
+        min_calibration, honesty) and promotes it only when all pass; loop.rollback(version) restores any promoted
+        version. options: changelog= (another TraceStorage for the update records), holdout=0.3, calibration=0.2,
+        gate_teach=True (teach only stores corrections while the loop is attached), harvest_rules=False."""
+        from .learning import Learning
+        return Learning(self, storage, parts, ladder, gates, **options)
+
+    def teach(self, question, init_state, correct, *, source="human", by=None, of=None):
         """Human correction. A fast head (fit_fast) absorbs it at once; so does a model decision that answers the question
         (a solvi.decide decision part as the question's rule, or a rule passing a decided fact on): its per-option shift is
         updated. Any correction goes to the storage (journal) for the next fit. Returns the update time in ms when something learned
-        at once, else None."""
+        at once, else None. source ("human", "outcome", "rule"), by (who) and of (the stored id of the decision it corrects)
+        are stored with it (TraceStorage.save_correction). With a learning loop (System.learning(..., gate_teach=True))
+        nothing learns at once: the correction is only stored, and the loop's gates decide whether it is learned."""
         from .decide import decision_of
         from .fast import FastHead
+        from .storage import check_source
+        check_source(source)
         ms = None
         init_state = self._state(init_state)[0]
+        loop = getattr(self, "_learning", None)
+        if loop is not None and loop.gate_teach:
+            if self.storage is None:
+                raise ValueError("a learning loop reads corrections from the storage: System(storage=...)")
+            self.storage.save_correction(question, init_state, correct, source=source, by=by, of=of)
+            return None
         head = self.heads.get(question)
         dec = decision_of(self.catalog, question)
         if isinstance(head, (FastHead, MultiHead)) and getattr(head, "online", True):
@@ -850,7 +872,7 @@ class System:
                 vals = init_state if all(f in init_state for f in dec.facts) else self.facts_for(init_state)
                 ms = dec.teach(dec.text_of(vals), label)
         if self.storage is not None:
-            self.storage.save_correction(question, init_state, correct)
+            self.storage.save_correction(question, init_state, correct, source=source, by=by, of=of)
         return ms
 
 

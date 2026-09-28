@@ -57,8 +57,12 @@ nav:
       - solvi.decide: api/decide.md
       - solvi.calibration: api/calibration.md
       - solvi.systemone: api/systemone.md
+      - solvi.llm: api/llm.md
       - solvi.multi: api/multi.md
+      - solvi.memory: api/memory.md
+      - solvi.learning: api/learning.md
       - solvi.serve: api/serve.md
+      - solvi.agents: api/agents.md
       - solvi.storage: api/storage.md
       - solvi.diff: api/diff.md
       - solvi.testing: api/testing.md

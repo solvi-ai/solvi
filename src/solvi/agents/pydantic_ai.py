@@ -1,0 +1,86 @@
+"""PydanticAI: every tool call of an agent passes a solvi Guard (a toolset wrapper).
+
+    from pydantic_ai import Agent, DeferredToolRequests, FunctionToolset
+    from solvi.agents import Guard
+    from solvi.agents.pydantic_ai import GuardedToolset
+
+    guard = Guard(storage="calls.db")
+    guard.tool(send_payment, ground=["iban"])             # the same typed functions the agent gets
+    ...policies...
+    tools = GuardedToolset(FunctionToolset([send_payment]), guard, facts=lambda ctx: {"spent_today": ctx.deps.spent})
+    agent = Agent(model, toolsets=[tools], output_type=[str, DeferredToolRequests])
+
+For each call PydanticAI makes (its arguments already validated by the tool's schema), the guard checks the proposal
+against the conversation so far (`ctx.messages`: system prompts, user prompts, tool returns, the model's text) and:
+
+  allow     the wrapped toolset runs the tool (PydanticAI runs it — with its RunContext — not solvi)
+  deny      on_deny="retry" (default): ModelRetry with the reasons, so the model can fix the call; "fail": ToolFailed
+  escalate  on_escalate="approval" (default): ApprovalRequired — the run ends with DeferredToolRequests (the output type
+            must allow it); resume with DeferredToolResults(approvals={id: True}) and the call is made, recorded as
+            approved by a person (guard.resolve); "fail": ToolFailed with the reasons
+
+A tool the guard does not know is denied; with declare=True it is declared from its JSON schema on first use (the
+guard then checks its types, and any policies that name it). The first parameter of a tool function typed as RunContext
+is not an argument (Guard.tool skips it)."""
+from __future__ import annotations
+
+import dataclasses
+from typing import Any, Callable
+
+from pydantic_ai import ApprovalRequired, ModelRetry, ToolFailed
+from pydantic_ai.toolsets import WrapperToolset
+
+from .guard import Guard, _text
+
+
+def context_of(messages) -> list:
+    """PydanticAI's message history → [(role, text)] for the guard (by each part's part_kind)."""
+    out = []
+    for m in messages or ():
+        for p in getattr(m, "parts", ()) or ():
+            kind = getattr(p, "part_kind", None)
+            if kind == "system-prompt":
+                out.append(("system", _text(p.content)))
+            elif kind == "user-prompt":
+                out.append(("user", _text(p.content)))
+            elif kind == "tool-return":
+                out.append(("tool", p.model_response_str() if hasattr(p, "model_response_str") else _text(p.content)))
+            elif kind == "text":
+                out.append(("assistant", _text(p.content)))
+    return [(r, t) for r, t in out if t]
+
+
+@dataclasses.dataclass
+class GuardedToolset(WrapperToolset):
+    """A toolset whose every call passes `guard` (see the module docs). facts: a dict, or a function of the RunContext
+    returning one — the facts your policies read (a user's role, a budget left)."""
+    guard: Guard = None
+    facts: Callable | dict | None = None
+    on_deny: str = "retry"
+    on_escalate: str = "approval"
+    declare: bool = False
+    decisions: list = dataclasses.field(default_factory=list, repr=False)   # every GuardDecision, in order
+
+    def __post_init__(self):
+        if not isinstance(self.guard, Guard):
+            raise TypeError("GuardedToolset(toolset, guard): guard is a solvi.agents.Guard")
+        if self.on_deny not in ("retry", "fail") or self.on_escalate not in ("approval", "fail"):
+            raise ValueError('on_deny: "retry" | "fail"; on_escalate: "approval" | "fail"')
+
+    async def call_tool(self, name: str, tool_args: dict[str, Any], ctx, tool) -> Any:
+        g = self.guard
+        if self.declare and name not in g.tools:
+            td = tool.tool_def
+            g.declare(name, schema=td.parameters_json_schema, description=td.description or "")
+        facts = self.facts(ctx) if callable(self.facts) else self.facts
+        d = await g.acheck({"name": name, "arguments": tool_args, "id": ctx.tool_call_id}, context_of(ctx.messages), facts)
+        if d.outcome == "escalate" and getattr(ctx, "tool_call_approved", False):
+            d = g.resolve(d, approve=True, reviewer="pydantic-ai approval", execute=False)
+        self.decisions.append(d)
+        if d.outcome == "allow":
+            return await super().call_tool(name, tool_args, ctx, tool)
+        if d.outcome == "escalate" and self.on_escalate == "approval":
+            raise ApprovalRequired(metadata={"solvi": d.to_dict()})
+        if d.outcome == "deny" and self.on_deny == "retry":
+            raise ModelRetry(d.message())
+        raise ToolFailed(d.message())
