@@ -557,9 +557,11 @@ class System:
                 from .provenance import TIMED_OUT       # a call that did not finish in time (aask): safeguard "timeout"
                 late = any(TIMED_OUT in (by[f].error or "") for f in list(facts) + [rule.name]
                            if f in by and by[f].value is MISSING)
+                from .provenance import classify
+                grounding = r is not None and classify(r.error) == "grounding"     # a model rule's quote not in the text
                 return Result(None, 0.0, "rule not computed: " + (r.error if r else "no step") +
                               (f"; missing {', '.join(missing)}" if missing else ""), "abstain",
-                              guard="timeout" if late else None)
+                              guard="timeout" if late else "grounding" if grounding else None)
             pc = path_confidence(self.catalog, trace, rule.inputs)
             conf = min(pc, r.confidence)
             why = "; ".join(f"{x} = {srepr(vals.get(x))}" for x in rule.inputs)
