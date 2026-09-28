@@ -1579,7 +1579,7 @@ class DecideModel:
         supports it, else one per question). What the runtime does for parts grouped in `flow.batches`."""
         parts = list(parts)
         t = self.text(text)
-        if len(parts) > 1 and self.batchable and all(p.option_order == "given" for p in parts):
+        if len(parts) > 1 and self.batchable and all(p.option_order != "average" for p in parts):
             raws = self._raw_pass([p.spec for p in parts], t)
         else:
             raws = [(*p._raw([t])[0], False) for p in parts]
@@ -1730,7 +1730,7 @@ class DecideModel:
     def decision(self, name, task, text_fact="doc", options=(), descriptions=None, multi=False, other=None, *, kind=None,
                  type=None, escalate_below=None, act_threshold=None, use_act=None, target_error=None,
                  score_value="median", unknown=False, k=None, bins=None, unit=None, coverage=0.8, evidence=False,
-                 option_order="given", permutations=4, min_margin=None):
+                 option_order="canonical", permutations=4, min_margin=None):
         """A catalog part: text_fact (a fact name, or a list of them) → Decision(value, probs).
 
         The question: `options` (a list, or {option: description}) and `kind` ("choice", "multi", "score", "noul"; default
@@ -1745,9 +1745,10 @@ class DecideModel:
         answer abstains ("model escalated" / "low confidence" in the audit and stats). min_margin=0.1: also escalate when
         the two most probable answers are closer than that (a near tie is where a misleading text flips the choice).
 
-        Option order (choice and multi questions): "given" asks as listed; "canonical" asks in sorted order, so how a
-        caller lists the options cannot change the answer; "average" averages the model's logits over `permutations`
-        rotations of the list (each costs a forward pass) — against a model's preference for positions.
+        Option order (choice and multi questions): "canonical" (the default) asks in sorted order, so how a caller lists
+        the options cannot change the answer (the part's options are then in that order); "given" asks as listed (0.5.0);
+        "average" averages the model's logits over `permutations` rotations of the list (each costs a forward pass) —
+        against a model's preference for positions.
 
         Register with `cat.fn(part)` (a fact other parts read) or make it a question's answer with `part.question(cat)`.
         The value is one of the options by construction; the options are the part's closed set; provenance `decided`; the
@@ -1835,9 +1836,17 @@ class DecisionPart:
 
     def __init__(self, model, name, task, text_fact, options, descriptions=None, multi=False, other=None, *, kind=None,
                  as_bool=False, escalate_below=None, act_threshold=None, use_act=None, score_value="median",
-                 option_order="given", permutations=4, min_margin=None, **prim):
+                 option_order="canonical", permutations=4, min_margin=None, **prim):
         self.model = model
         self.spec = _Spec(task, options, descriptions, multi, other, kind, as_bool, score_value, **prim)
+        sp = self.spec
+        self._shown = None if sp.values is None else list(sp.values)   # the caller's order, for options and probs
+        self._shown_labels = list(sp.options)
+        if option_order == "canonical" and sp.kind in ("choice", "multi") and len(sp.real) > 1:
+            ordered = sorted(sp.real, key=str) + ([sp.other] if sp.other is not None else [])
+            if ordered != list(sp.options):         # the part asks, adapts and answers in the sorted order
+                options, descriptions, other = ordered, dict(sp.descriptions), (sp.other if sp.other is not None else False)
+                self.spec = _Spec(task, options, descriptions, multi, other, kind, as_bool, score_value, **prim)
         self._spec_args = (task, descriptions, multi, other, kind, as_bool, score_value, prim)
         if self.spec.kind not in ("choice", "multi") or len(self.spec.real) < 2:
             option_order = "given"                  # scores, numbers, rankings: the order is the meaning
@@ -1854,7 +1863,7 @@ class DecisionPart:
                                                 for f in self.facts])
         self.__solvi_model__ = self
         self.__solvi_provenance__ = "decided"
-        self.__solvi_options__ = None if self.spec.values is None else list(self.spec.values)
+        self.__solvi_options__ = None if self._shown is None else list(self._shown)
         self.__solvi_decision__ = self
 
     # identity recorded in the trace
@@ -1870,7 +1879,7 @@ class DecisionPart:
     def options(self):
         """The values this decision can take (a bool question: True, False; with "not stated": also Unknown; None for a
         number or a span)."""
-        return None if self.spec.values is None else list(self.spec.values)
+        return None if self._shown is None else list(self._shown)
 
     @property
     def labels(self):
@@ -1899,7 +1908,7 @@ class DecisionPart:
         th = {k: v for k, v in (("escalate_below", self.escalate_below), ("act_threshold", self.act_threshold),
                                 ("use_act", self.use_act), ("guarantee", self.guarantee),
                                 ("conformal", self.conformal_set), ("min_margin", self.min_margin),
-                                ("option_order", None if self.option_order == "given" else
+                                ("option_order", None if self.option_order != "average" else
                                  (self.option_order, self.permutations))) if v is not None}
         if th:
             return digest("DecisionPart", self.model.weights_fingerprint(), self.spec.describe(), a.params() if a else None, th)
@@ -1945,7 +1954,7 @@ class DecisionPart:
         text = self.text_of(args)
         m = self.model
         if (len(siblings) > 1 and m.batchable and all(s.model is m for s in siblings)
-                and all(s.option_order == "given" for s in siblings)):
+                and all(s.option_order != "average" for s in siblings)):
             z, a, shared = m._raw_pass([s.spec for s in siblings], text)[siblings.index(self)]
         else:
             (z, a), shared = self._raw([text])[0], False
@@ -1963,6 +1972,11 @@ class DecisionPart:
             d = self.model._finish(self.spec, d, act, self.escalate_below, self.act_threshold, self.use_act)
         else:
             d = self.model._finish(self.spec, d, act, -math.inf, -math.inf, self.use_act)
+        if self.option_order == "canonical" and d.probs:       # probabilities in the caller's order of the options
+            at = {o: n for n, o in enumerate(self._shown_labels)}
+            d.probs = dict(sorted(d.probs.items(), key=lambda kv: at.get(kv[0], len(at))))
+            if self.spec.multi and isinstance(d.value, tuple):
+                d.value = tuple(sorted(d.value, key=lambda o: at.get(o, len(at))))
         if self.min_margin is not None and not self.spec.multi and len(d.probs) > 1:
             (a1, p1), (a2, p2) = sorted(d.probs.items(), key=lambda kv: -kv[1])[:2]
             d.extra["margin"] = p1 - p2
@@ -2013,7 +2027,7 @@ class DecisionPart:
     def _raw(self, texts):
         """[text] → [(logits in the part's option order, act logit)], asked with each of the part's option orders and
         averaged (the act logit too); the question's adaptation applies afterwards, to the part's own spec."""
-        if self.option_order == "given":
+        if self.option_order != "average":           # given, or canonical (the spec itself is in sorted order)
             return self.model._raw_full([(self.spec, t) for t in texts])
         task, desc, multi, other, kind, as_bool, sv, prim = self._spec_args
         opts = (lambda o: o + [self.spec.other] if self.spec.other is not None and self.spec.other not in o else o)
@@ -2193,7 +2207,8 @@ class DecisionPart:
         name = name or self.__name__
         cat.rule(name)(self)
         sp = self.spec
-        opts = {o: sp.descriptions.get(o, "") for o in sp.options} if sp.descriptions else sp.options
+        order = self._shown_labels if self.option_order == "canonical" else sp.options
+        opts = {o: sp.descriptions.get(o, "") for o in order} if sp.descriptions else list(order)
         if sp.kind == "noul":
             at = Answer.yes_no()
             at.descriptions = dict(sp.descriptions)

@@ -56,9 +56,9 @@ def model(**kw):
     return DecideModel(FakeScorer(**kw), meta={"format": "test", "temperature": 1.0})
 
 
-def team_catalog(m, options=TEAMS, min_confidence=None, as_rule=False):
+def team_catalog(m, options=TEAMS, min_confidence=None, as_rule=False, option_order="given"):
     cat = Catalog()
-    part = m.decision("team", TASK, text_fact="email", options=options)
+    part = m.decision("team", TASK, text_fact="email", options=options, option_order=option_order)
     if as_rule:
         q = part.question(cat, "route", min_confidence=min_confidence)
     else:
@@ -267,7 +267,7 @@ def test_teach_is_consistent_with_a_later_adapt():
 def test_other_is_a_threshold_not_a_scored_label():
     sc = FakeScorer()
     m = DecideModel(sc, meta={"other_threshold": 0.6, "temperature": 1.0})
-    part = m.decision("team", TASK, "email", TEAMS + ["other"])
+    part = m.decision("team", TASK, "email", TEAMS + ["other"], option_order="given")
     d = part(email="hello")
     assert d.value == "other" and sc.calls[-1][0].options == tuple(TEAMS)     # the model never sees "other"
     assert d.conf == pytest.approx(1 - 1 / 3)
@@ -294,7 +294,7 @@ def test_other_can_be_named_or_disabled():
     m = model()
     part = m.decision("team", TASK, "email", TEAMS + ["misc"], other="misc")
     assert part.spec.other == "misc" and part(email="hello").value == "misc"
-    off = m.decision("team2", TASK, "email", TEAMS + ["other"], other=False)
+    off = m.decision("team2", TASK, "email", TEAMS + ["other"], other=False, option_order="given")
     assert off.spec.real == TEAMS + ["other"]
 
 

@@ -279,7 +279,7 @@ class _Combination:
                                                 for f in self.facts])
         self.__solvi_model__ = self
         self.__solvi_provenance__ = "decided"
-        self.__solvi_options__ = None if self.spec.values is None else list(self.spec.values)
+        self.__solvi_options__ = None if self.spec.values is None else list(self._first.options)
         self.__solvi_decision__ = self                # System.teach teaches every part
 
     def _extra_facts(self):
@@ -298,8 +298,22 @@ class _Combination:
         return self.members[0].spec
 
     @property
+    def _first(self):
+        """The first DecisionPart at the bottom of the combination: its option order is how the options are shown."""
+        m = self.members[0]
+        return m.part if isinstance(m, _Leaf) else m._first
+
+    @property
+    def option_order(self):
+        return self._first.option_order
+
+    @property
+    def _shown_labels(self):
+        return self._first._shown_labels
+
+    @property
     def options(self):
-        return None if self.spec.values is None else list(self.spec.values)
+        return self._first.options
 
     @property
     def kind(self):
@@ -671,7 +685,7 @@ class Vote(_Combination):
     def state(self, src):
         pre, groups = {}, {}
         for i, m in enumerate(self.members):          # parts of one model: their questions in one forward pass
-            if isinstance(m, _Leaf) and m.part.model.batchable and m.part.option_order == "given" \
+            if isinstance(m, _Leaf) and m.part.model.batchable and m.part.option_order != "average" \
                     and not m.part.spec.pointer:
                 groups.setdefault((id(m.part.model), m.text(src)), []).append(i)
         for (_, text), ix in groups.items():

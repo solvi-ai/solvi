@@ -559,9 +559,11 @@ Recalibrate when the inputs change: the promise does not survive a shift of doma
 
 #### Option order and near ties
 
-A decider may prefer an option for where it is listed. `option_order="canonical"` asks in sorted order, so how a caller
-lists the options cannot change the answer; `option_order="average"` averages the model's logits over `permutations=4`
-rotations of the list (one forward pass each). `min_margin=0.1` escalates a near tie between the two most probable
+A decider may prefer an option for where it is listed (on a 64-option stress test, reordering changed 41% of
+solvi-large's answers). By default (`option_order="canonical"`) a choice or multi-label decision asks in sorted order, so how
+a caller lists the options cannot change the answer (0.5%, the rest is floating-point noise); options, probabilities and
+multi-label answers are still shown in the caller's order. `option_order="given"` asks as listed (0.5.0);
+`option_order="average"` averages the model's logits over `permutations=4` rotations of the list (one forward pass each). `min_margin=0.1` escalates a near tie between the two most probable
 answers — where a misleading sentence in the input is most likely to flip the choice. Both are in the part's fingerprint.
 
 #### Any System One model as a decider
