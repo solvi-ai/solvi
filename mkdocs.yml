@@ -63,6 +63,12 @@ nav:
       - solvi.learning: api/learning.md
       - solvi.serve: api/serve.md
       - solvi.agents: api/agents.md
+      - solvi.textin: api/textin.md
+      - solvi.longdoc: api/longdoc.md
+      - solvi.report: api/report.md
+      - solvi.otel: api/otel.md
+      - solvi.counterfactual: api/counterfactual.md
+      - solvi.perturb: api/perturb.md
       - solvi.storage: api/storage.md
       - solvi.diff: api/diff.md
       - solvi.testing: api/testing.md

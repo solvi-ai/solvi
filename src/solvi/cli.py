@@ -83,9 +83,14 @@ def load_system(spec):
     return obj
 
 
+STORE_KINDS = (".db / .sqlite / .sqlite3 (SQLite), .duckdb (DuckDB), a postgresql:// URL (PostgreSQL), else a "
+               "JSON-lines file")
+STORE_HELP = "a TraceStorage: " + STORE_KINDS
+
+
 def _store(path, system=None):
     from .storage import open_storage
-    if not os.path.exists(path):
+    if not path.startswith(("postgresql://", "postgres://")) and not os.path.exists(path):
         _fail(f"no such store: {path}")
     return open_storage(path, system)
 
@@ -292,7 +297,7 @@ def ask_parser(sub):
     s.add_argument("--audit", action="store_true", help="also print what each answer rests on (res.audit())")
     s.add_argument("--report", choices=["md", "html"], help="print the decision's report instead (res.report)")
     s.add_argument("--lang", help="the language of the answers and the audit: en (default) or ru")
-    s.add_argument("--store", metavar="PATH", help="save the response to this TraceStorage (.db / .sqlite, else JSON lines)")
+    s.add_argument("--store", metavar="PATH", help="save the response to this TraceStorage: " + STORE_KINDS)
     s.add_argument("--json", action="store_true", help="print the answers (and --audit) as JSON")
     return s
 
@@ -316,7 +321,7 @@ def main(argv=None):
     sub = p.add_subparsers(dest="cmd", required=True)
 
     def common(sp, system=True, filters=True):
-        sp.add_argument("store", help="a TraceStorage: .db / .sqlite (SQLite) or a JSON-lines file")
+        sp.add_argument("store", help=STORE_HELP)
         if system:
             sp.add_argument("--system", required=True, help="module:attr or file.py:attr — a System or a function returning one")
         if filters:
@@ -335,7 +340,7 @@ def main(argv=None):
     d.add_argument("--confidence", type=float, default=0.01,
                    help="report a confidence change above this (default 0.01; negative: ignore confidence)")
     rp = sub.add_parser("report", help="a human-readable report of stored decisions (a period, or one with --id)")
-    rp.add_argument("store", help="a TraceStorage: .db / .sqlite (SQLite) or a JSON-lines file")
+    rp.add_argument("store", help=STORE_HELP)
     rp.add_argument("--system", help="module:attr or file.py:attr — optional: restores typed values; replays one decision")
     for k in ("question", "status", "safeguard", "model", "since", "until"):
         rp.add_argument(f"--{k}", help=f"only stored decisions with this {k} (see TraceStorage.query)")

@@ -453,3 +453,36 @@ def test_models_check_a_real_cached_decider(capsys, tmp_path):
     code, out = run(capsys, "models", "check", "solvi-ai/solvi-base", "--examples", ex, "--task", TASK, "--json")
     data = json.loads(out)
     assert code == 0 and data["id"] == "solvi-ai/solvi-base" and data["examples"]["n"] == 6
+
+
+# --- fixes before 0.7
+@pytest.mark.parametrize("cmd", [["verify"], ["replay"], ["report"], ["ask", "x:y"]])
+def test_store_help_names_every_backend(cmd, capsys):
+    try:
+        main([*cmd, "-h"])
+    except SystemExit:
+        pass
+    out = " ".join(capsys.readouterr().out.split())
+    assert ".duckdb" in out and "postgresql://" in out
+
+
+def test_a_postgres_url_is_not_a_missing_file(monkeypatch):
+    from solvi import cli, storage
+    seen = []
+    monkeypatch.setattr(storage, "PostgresStorage", lambda url, catalog=None: seen.append(url) or "pg")
+    assert cli._store("postgresql://u@h/db") == "pg" and seen == ["postgresql://u@h/db"]
+
+
+def test_api_reference_has_the_07_modules_and_the_guide_is_precise():
+    import re
+    root = Path(__file__).resolve().parents[1]
+    nav = (root / "mkdocs.yml").read_text()
+    index = (root / "docs" / "api" / "index.md").read_text()
+    for m in ("textin", "longdoc", "report", "otel", "counterfactual", "perturb"):
+        page = root / "docs" / "api" / f"{m}.md"
+        assert page.exists() and f"::: solvi.{m}" in page.read_text(), m
+        assert f"solvi.{m}: api/{m}.md" in nav and f"]({m}.md)" in index, m
+    guide = " ".join((root / "docs" / "guide.md").read_text().split())
+    assert not re.search(r'extra\["long"\]`: in the trace record, hashed, printed by the audit \([^)]*\), and re-checked by '
+                         r"replay", guide)
+    assert "trusted replay (`trust_models=True`" in guide

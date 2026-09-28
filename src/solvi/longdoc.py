@@ -12,8 +12,9 @@ offset it gives (a span answer, an evidence quote) is mapped back into the full 
     part = decider.decision("notice", "Notice period for termination?", "contract", Span[str], long="retrieve", top_k=3)
 
 With `long="retrieve"` a decision part does this whenever its text does not fit; the sections it read (offsets, heading,
-score) are recorded in the decision's `extra["long"]`, so they are in the trace, hashed and re-checked by replay (the
-selection is deterministic). Texts that fit are decided as before, with nothing recorded."""
+score) are recorded in the decision's `extra["long"]`, so they are in the trace and hashed; a full replay (models re-run)
+re-checks them, since the selection is deterministic — a trusted replay (trust_models=True) verifies the recorded output
+and does not re-select. Texts that fit are decided as before, with nothing recorded."""
 from __future__ import annotations
 
 import math

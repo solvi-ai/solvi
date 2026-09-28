@@ -530,8 +530,9 @@ their descriptions, and the decider reads the best `top_k` that fit together, jo
 re-orders the best 3·top_k by the decider's own relevance (one yes / no question per candidate section: "does this passage
 help answer …?"; BM25 breaks ties). A span answer and evidence quotes point into the whole text (a span that would cross
 two sections escalates). The sections read — offsets, heading, score, and "bm25" or "bm25+decider" — are in the
-decision's `extra["long"]`: in the trace record, hashed, printed by the audit ("read 3 of 41 sections …"), and re-checked by
-replay, since the selection is deterministic. A text that fits is decided as before, with nothing recorded; `long`,
+decision's `extra["long"]`: in the trace record, hashed and printed by the audit ("read 3 of 41 sections …"). A full
+replay (models re-run) re-checks it — the selection is deterministic, so the same sections must be read; a trusted replay
+(`trust_models=True`, the report's default `replay="trusted"`) verifies the recorded output and does not re-select. A text that fits is decided as before, with nothing recorded; `long`,
 `top_k` and `rerank` are part of the decision's fingerprint.
 
 The same pieces work on their own (`solvi.longdoc`, standard library only):

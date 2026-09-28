@@ -2,6 +2,42 @@
 
 ## Unreleased (0.7)
 
+### Fixes before release (text in, storage, reports)
+
+- **Text in, yes / no fields**: only the field's name ("urgent", or "urgent" for `is_urgent`) and `cues=` make a bool
+  field True; description words only rank candidates (before, any description word quoted alone read as True). A cue
+  with a negation shortly before it in the same clause ("isn't urgent", "not at all urgent", "not really", "hardly",
+  "never", "не срочно", "ни …") is `unparsed` — never True, and False only through a declared negative cue:
+  `TextIn(negatives={field: ["not urgent"]})` or `json_schema_extra={"negative_cues": [...]}`.
+- **Text in, a built TextRead is not trusted**: `ask_text` re-derives every field from its quote (`textin.rederive`: the
+  quote at its offsets, the parser of the field's declared type, the canonical form and the typed value); a field that
+  does not re-derive is `unparsed` (a required one is missing, the question abstains) and the caller's object is left
+  as it was. The field record keeps the value's type (`vtype`), and replay checks the recorded value against the one
+  rebuilt from the canonical form — a value of 5 000 000 on the quote "500" no longer replays as ok.
+- **Text in, dialogue**: a turn that restates a field in a form that does not parse makes it `conflict` (the quote
+  and the old value in `was`; in `missing`, asked by `clarify()`) instead of silently keeping the old value.
+- **Text in, parsers refuse what they would guess**: "5 m" / "2 b" (a one-letter scale apart from the number; "5m",
+  "$5 m" still read), "1.000" (a single `.ddd` group: `TextIn(decimal="." | ",")` says which), "3 100" (digits
+  grouped by plain spaces with no currency next to them; "1 500 000 руб" reads, and its quote includes the currency),
+  "5%" (unless the field is in percent: `TextIn(percent=[field])` / `json_schema_extra={"percent": True}`), and a
+  two-digit year ("01.02.85") without `today=` — with it, the year within (today − 80, today + 20] years. "1.234,5"
+  now reads as 1234.5.
+- **OpenTelemetry**: two identical decisions that were not stored no longer export the same trace and span ids (an
+  unstored response adds a nonce kept on the response); stored decisions keep deterministic ids.
+- **Storage**: `corrections()`, `Stored.meta` and `forget()` read non-finite floats back as floats, not as the stored
+  `{"$float": "inf"}` tag; so does the period report.
+- **JSONL storage**: an append after a last line cut short by a crash starts a new line instead of gluing onto the
+  fragment (the record was lost on reload, its seq reused and the chain forked); `verify` reports the fragment as a
+  record that is not readable JSON.
+- **Long texts**: the ALL-CAPS heading pattern is case-sensitive (with `re.I` every short line was a heading: 15 000
+  sections on 1.26 MB), and the heading check looks back a bounded window instead of copying the text before every
+  candidate (quadratic): a 1 MB text splits in well under a second.
+- **Reports**: the support line is in English like the rest of the report, whatever `System(lang=...)` renders.
+- **Docs and CLI**: the `store` help of `verify` / `replay` / `diff` / `report` / `ask --store` names `.duckdb` and
+  `postgresql://`, and a `postgresql://` URL is no longer refused as a missing file; the guide says `extra["long"]` is
+  re-checked only by a full replay (not with `trust_models=True` / `replay="trusted"`); API reference pages for
+  `solvi.textin`, `longdoc`, `report`, `otel`, `counterfactual` and `perturb`.
+
 
 ### Fixes in the learning loop
 

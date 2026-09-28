@@ -15,6 +15,12 @@ this reference lists what each module exports and the signatures.
 | [`solvi.learning`](learning.md) | learning from corrections with gates and rollback (experimental) |
 | [`solvi.serve`](serve.md) | `solvi serve`: HTTP, MCP and the System One API |
 | [`solvi.agents`](agents.md) | guarding an agent's tool calls: `Guard`, the MCP proxy (adapters for PydanticAI, LangGraph, the OpenAI Agents SDK) |
+| [`solvi.textin`](textin.md) | text in: a message → the question it asks and its typed input state, read with quotes |
+| [`solvi.longdoc`](longdoc.md) | long texts: sections, BM25 retrieval, the window a decider reads |
+| [`solvi.report`](report.md) | reports of one decision or a period of stored decisions (Markdown, HTML, data) |
+| [`solvi.otel`](otel.md) | decisions as OpenTelemetry spans (the API, or OTLP/JSON) |
+| [`solvi.counterfactual`](counterfactual.md) | counterfactuals: the smallest change of the given inputs that changes an answer |
+| [`solvi.perturb`](perturb.md) | instruction-like sentences in an input and the variants without them (`perturb=k`) |
 | [`solvi.storage`](storage.md) | TraceStorage: JSONL, SQLite, PostgreSQL and DuckDB stores, queries, replay |
 | [`solvi.diff`](diff.md) | `solvi diff` and shadow mode |
 | [`solvi.testing`](testing.md) | decision regression tests from `cases.json` |
