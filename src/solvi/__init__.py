@@ -7,7 +7,7 @@ from .storage import JSONLStorage, SQLiteStorage, TraceStorage
 from .system import Response, System
 from .typed import Bins, Estimate, FactTypeError, Maybe, Rank, Scale, Span
 
-__version__ = "0.6.0"
+__version__ = "0.6.1"
 
 __all__ = ["Answer", "AnswerType", "Bins", "Catalog", "Claim", "Decision", "Estimate", "FactTypeError", "JSONLStorage", "Maybe",
            "NotStated", "Question", "Quote", "Rank", "Response", "SQLiteStorage", "Scale", "Shadow", "Span", "System",

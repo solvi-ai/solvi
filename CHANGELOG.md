@@ -148,7 +148,7 @@
   `tests/honesty/injection_v1.json` (no model files): a stand-in decider that obeys its input follows 5 of 5 injections
   without a safeguard and 1 of 5 with `perturb=2` (the wording the rules do not know).
 
-## 0.6.1 — unreleased — deterministic hashes of failed steps
+## 0.6.1 — 2026-09-28 — deterministic hashes of failed steps
 
 - A failed step's value (MISSING) hashed as `repr(object())`, which carries a memory address, so a trace with a failed step
   hashed differently in every process and could not be replayed or verified from a store in another process. It now
