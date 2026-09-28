@@ -123,6 +123,18 @@ enough_notice            = True
 With `"balance": 3` the hard check fails and the answer is `reject` with `status == "forced"`, whatever the rule says.
 `solvi.show.show(res, cat)` prints answers, the planned flow, the computed state and the replay result in one go.
 
+## Command line
+
+```bash
+solvi init triage --with-model && cd triage     # a typed catalog, passing cases.json, README, CI workflow
+solvi test . && solvi check catalog.py:system   # regression cases and the catalog lint (what CI runs)
+solvi ask catalog.py:system example.json --audit            # one decision and what it rests on (--json, --report html)
+solvi models pull solvi-ai/solvi-base           # the only command that downloads; `solvi models` lists, `check` measures
+solvi calibrate catalog.py:system route labels.csv --risk 0.1   # act_guard → route.calib.json, loaded by the catalog
+```
+
+Every command is in the [guide](docs/guide.md#command-line).
+
 ## How it works
 
 - **Catalog.** `@cat.fn` (computation), `@cat.check` (bool), `@cat.extract` (value from text, returned as a `Quote` with

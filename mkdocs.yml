@@ -64,6 +64,9 @@ nav:
       - solvi.testing: api/testing.md
       - solvi.honesty: api/honesty.md
       - solvi.check: api/check.md
+      - solvi.calibfile: api/calibfile.md
+      - solvi.models: api/models.md
+      - solvi.scaffold: api/scaffold.md
       - solvi.i18n: api/i18n.md
   - Changelog: changelog.md
   - Roadmap: roadmap.md

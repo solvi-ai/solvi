@@ -2,6 +2,39 @@
 
 ## Unreleased (0.7)
 
+### Command line: init, ask, calibrate, models
+
+- `solvi init [DIR] [--template support|refunds|minimal] [--with-model] [--force]`: a new project — `catalog.py` (a
+  computation, a hard check with `then=`, a rule; with `--with-model` a question a decider answers, through a keyword
+  stand-in until `SOLVI_DECIDE_MODEL` names a model), `cases.json` (regression cases that pass), `example.json`,
+  a README with the next steps, `.github/workflows/solvi.yml` (`solvi check` and `solvi test`; `working-directory`
+  set when the folder is inside a git repository) and `.gitignore`. Existing files are never overwritten without
+  `--force` (exit status 1, nothing written).
+- `solvi ask SYSTEM (STATE.json | - | --state '{...}' | --text "...") [--question Q] [--decider MODEL] [--audit]
+  [--report md|html] [--lang ru] [--store PATH] [--json]`: one decision — a state (the module's `prepare(state)` runs
+  first, as in `solvi test`) or a text through `ask_text`; the answers, the audit, the report; `--store` saves it to a
+  TraceStorage. Exit status 1 when a question abstained.
+- `solvi calibrate SYSTEM PART LABELS.csv|jsonl --risk 0.1 [--groups a,b] [--method crc|ltt] [--conformal 0.9]
+  [--out F]`: `act_guard` (or `calibrate_for(method="ltt")`) for a model decision on labelled examples (a `label` column
+  and the part's facts, a `text` column or a state); prints the answered share, the error, the risk,
+  `must_escalate_at_least` and the per-group table, and writes the calibration (`PART.calib.json`). Exit status 1 when
+  everything escalates.
+- `solvi models [list | pull ID | check MODEL]`: solvi-ai/solvi-base and solvi-large and every decider in the local
+  Hugging Face cache; `pull` downloads (the only command that does, `huggingface_hub`); `check` prints the checkpoint's
+  declared capabilities, its fingerprint and, with `--examples`, accuracy, escalated share and latency (`--min-accuracy`
+  as a CI gate). MODEL is a folder, a cached Hugging Face id, `systemone:URL#model` or `module:attr`; `solvi ask
+  --decider` takes the same (`solvi.models.load`).
+- `solvi.cli.load_module(spec)`: the module and the attribute of a `module:attr` / `file.py:attr` spec.
+
+### Calibration files
+
+- `part.save_calibration(path)` / `part.load_calibration(path, groups=None, strict=True)` on `DecisionPart` and on
+  `Cascade` / `Vote` / `Route` (`solvi.calibfile`): the escalation thresholds (per group too), the guarantee record and
+  the conformal set, with the question and the fingerprint of the model and adaptation they were fitted on. Loading
+  refuses a file made for another question, checkpoint or adaptation (`strict=False` accepts it) and restores the part's
+  fingerprint exactly, so stored decisions replay. A catalog loads its calibration when it starts; while `solvi
+  calibrate` loads a catalog, calibration files are not applied (the part is calibrated afresh).
+
 ### Documentation site
 
 - `mkdocs.yml` (Material theme): the README, the guide, the format specs (decider checkpoint, model strategist, regression

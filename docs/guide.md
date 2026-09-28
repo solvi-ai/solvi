@@ -20,7 +20,8 @@ Contents:
 14. [Grounded decisions: provenance, audit and safeguards](#grounded-decisions-provenance-audit-and-safeguards)
 15. [Printing results: solvi.show](#printing-results-solvishow)
 16. [Extracting fields from documents](#extracting-fields-from-documents)
-17. [Guarantees and limitations](#guarantees-and-limitations)
+17. [Command line](#command-line)
+18. [Guarantees and limitations](#guarantees-and-limitations)
 
 ## Concepts
 
@@ -599,6 +600,32 @@ must escalate at least (μ − risk) / (1 − risk) of them — `must_escalate_a
 Every decision records the promise of its threshold (`decision.extra["guarantee"]`) and the audit shows it per answer.
 Recalibrate when the inputs change: the promise does not survive a shift of domain.
 
+#### Keeping a calibration: save_calibration, load_calibration
+
+The thresholds live in the part. Save them once, and have the catalog load them every time it starts:
+
+```python
+info = part.act_guard(examples, risk=0.10)
+part.save_calibration("team.calib.json")        # or: solvi calibrate myapp.decisions:system team labels.csv --risk 0.1
+
+# in the catalog module, after making the part and before registering it
+part = model.decision("team", "Which team?", "email", TEAMS)
+part.load_calibration("team.calib.json")
+questions.append(part.question(cat))
+```
+
+The file (`solvi.calibfile`, JSON) holds the escalation thresholds (`escalate_below` / `act_threshold`, one per group
+with `groups=`), the guarantee record every decision carries, the conformal set, and what they were fitted for: the
+question (task, options, kind) and the fingerprint of the checkpoint and of this question's adaptation. A threshold on
+one model's confidence says nothing about another model's, so `load_calibration` refuses (ValueError) a file made for
+another question, another checkpoint or another adaptation — `strict=False` loads it anyway. After loading, the part's
+fingerprint is exactly what it was right after calibrating, so stored decisions replay against it. Thresholds per group
+by fact names load as they are; by a function, pass it again (`load_calibration(path, groups=fn)`; its code must match).
+Adaptations (`fit`, `teach`) are not in the file: keep them with `model.save_adaptations` / `load_adaptations`, loaded
+before the calibration. `Cascade`, `Vote` and `Route` have the same two methods (the shared threshold; every member's
+fingerprint is checked). While `solvi calibrate` loads a catalog, calibration files are not applied: the part is
+calibrated afresh, even when its model changed since the file was written.
+
 #### Thresholds per group: the promise inside every group
 
 The promise of `act_guard` is over the whole stream. When the stream mixes easy and hard inputs, one threshold can meet
@@ -787,7 +814,8 @@ load and behave exactly as before: choose-one and multi-label natively, a score 
 or "yes" / "no", no act head (escalate by `escalate_below`), one question per pass. `load(..., multi_question=..., act=...)`
 overrides the declaration for experiments.
 
-Published deciders are on [huggingface.co/solvi-ai](https://huggingface.co/solvi-ai) (`DecideModel.load("solvi-ai/solvi-base")`).
+Published deciders are on [huggingface.co/solvi-ai](https://huggingface.co/solvi-ai) (`DecideModel.load("solvi-ai/solvi-base")`;
+`solvi models list / pull / check` from the [command line](#models-list-pull-check)).
 Their model cards state what each was measured on and where it is weak; they are previews, so fit and calibrate on 30–60
 labelled examples of your task (below) before trusting the confidences.
 
@@ -1889,6 +1917,99 @@ It is about 3.6x slower than `MultiSpanExtractor` for four fields with similar a
 - Measured on an A100: about 39 ms per receipt for four fields with `MultiSpanExtractor`.
 - On CPU, fp32 ONNX keeps accuracy but took about 0.7 s per receipt on 2 cores. Dynamic int8 quantization of
   ModernBERT-large lost up to 12 points on amounts, company names and addresses, so we do not recommend it yet.
+
+## Command line
+
+`solvi` (also `python -m solvi`) runs every step of a project from a shell: start it, ask it, calibrate its model
+decisions, check the models, and keep it honest in CI. SYSTEM is `module:attr` or `file.py:attr` — a `System`, or a
+function without arguments that returns one. Exit status everywhere: 0 — fine; 1 — the command ran and found a problem;
+2 — usage errors (a bad argument, a file that is not there).
+
+| Command | What it does |
+|---|---|
+| `solvi init [DIR]` | a new project: a typed catalog, regression cases, README, CI workflow |
+| `solvi ask SYSTEM STATE.json` | one decision: answers, `--audit`, `--report md\|html`, `--store` |
+| `solvi test PATH` | regression cases (`cases.json`) — see [testing](testing.md) |
+| `solvi check SYSTEM` | the catalog lint — see [solvi check](#checking-a-catalog-solvi-check) |
+| `solvi calibrate SYSTEM PART LABELS` | `act_guard` on labelled examples, saved to a file the catalog loads |
+| `solvi models [list\|pull\|check]` | the published deciders, the cached ones, a quick check of any decider |
+| `solvi serve SYSTEM` | the questions over HTTP / MCP — see [serving](#serving-http-mcp-and-system-one) |
+| `solvi honesty SET.json` | honesty numbers gated against a baseline — see [honesty](honesty.md) |
+| `solvi verify / replay / diff / report STORE` | stored decisions — see [the trace](#storing-decisions-tracestorage) |
+
+### init: a new project
+
+```
+solvi init triage                               # template "support"; also --template refunds | minimal
+solvi init triage --with-model                  # + a question a decider answers, and labels.csv
+cd triage && solvi test . && solvi check catalog.py:system --strict
+```
+
+It writes `catalog.py` (a computation, a hard check with `then=`, a rule, the questions and `system()`), `cases.json`
+(regression cases that pass, with a forced answer among them), `example.json` (an input for `solvi ask`), `README.md`
+(next steps), `.github/workflows/solvi.yml` (`solvi check` and `solvi test` on every push; in a subfolder of a git
+repository its `working-directory` already points there — move the file to the repository's `.github/workflows`) and
+`.gitignore`. A file that exists stops it with exit status 1 and nothing written; `--force` overwrites.
+
+With `--with-model` the model is a keyword stand-in until `SOLVI_DECIDE_MODEL` names a real one (a folder, a Hugging
+Face id you pulled, `systemone:URL#model`), so tests and CI need no model; the cases pin the model's answer only where a
+hard check forces it. The catalog loads `<question>.calib.json` when it is there (`solvi calibrate` writes it).
+
+### ask: one decision
+
+```
+solvi ask catalog.py:system example.json                     # the answers
+solvi ask catalog.py:system - < state.json --json            # stdin; JSON: answers, safeguards (+ audit, stored_id)
+solvi ask catalog.py:system --state '{"amount": 120, "limit": 500}' --question approve --audit --lang ru
+solvi ask catalog.py:system example.json --report html > decision.html
+solvi ask catalog.py:system example.json --store decisions.db              # then: solvi report decisions.db
+solvi ask app.py:system --text "please refund order A-10457, 1 500 rubles" --decider solvi-ai/solvi-base
+```
+
+A state is JSON; when the module that defines the System also defines `prepare(state)` (turning ISO strings into dates,
+say), it runs first, as in `solvi test`. `--text` goes through `system.ask_text` ([text in](#text-in-from-a-message-to-a-question)):
+with several questions, `--decider MODEL` picks the one the text asks (MODEL as in `solvi models check`), or
+`--question` names it; a required field the text does not give is listed with the clarifying question. `--audit` prints
+what each answer rests on, `--report md|html` prints the decision's report instead ([reports](#reports-for-people-resreport-storereport-solvi-report)),
+`--lang ru` renders the answers and the audit in Russian. Exit status 1 when a question abstained — a person should look.
+
+### calibrate: escalation with a guarantee, kept in a file
+
+```
+solvi calibrate catalog.py:system route labels.csv --risk 0.1 [--out route.calib.json]
+solvi calibrate catalog.py:system route labels.jsonl --risk 0.1 --groups domain,task --min-group 100
+solvi calibrate catalog.py:system route labels.csv --method ltt --risk 0.05       # error among the answered ≤ 5%
+solvi calibrate catalog.py:system route labels.csv --risk 0.1 --conformal 0.9     # + candidate sets for escalations
+```
+
+PART is a question answered by a model decision (or the decision part's name; a `Cascade` / `Vote` / `Route` too).
+LABELS is a CSV or JSON-lines file with a `label` column and the input: the facts the part reads as columns
+(`message`), a `text` / `input` column, or else the other columns as a state; `--groups` columns are read as the group
+facts; a multi-label answer is a JSON list (or `a|b` in a CSV). It runs `part.act_guard(examples, risk=...)` (`--method
+crc`, the default) or `part.calibrate_for(examples, error=..., method="ltt")`, prints the answered share, the error among
+the answered, the risk (answered alone and wrong, of all), `must_escalate_at_least` and the per-group table, and writes
+the calibration (`PART.calib.json` by default) — `part.load_calibration(path)` in the catalog applies it
+([keeping a calibration](#keeping-a-calibration-save_calibration-load_calibration)). Exit status 1 when nothing can be
+answered alone at that risk.
+
+### models: list, pull, check
+
+```
+solvi models                                             # solvi-ai/solvi-base, solvi-ai/solvi-large, and every cached decider
+solvi models pull solvi-ai/solvi-base [--backend onnx|torch|all]       # the only command that downloads
+solvi models check solvi-ai/solvi-base --examples labels.jsonl --task "Which team should handle this?"
+solvi models check ./my-decider | systemone:http://127.0.0.1:8009#kev-latest | mymodels.py:decider
+```
+
+MODEL is a checkpoint folder, a Hugging Face id already in the local cache (`$HF_HUB_CACHE`, `$HF_HOME/hub` or
+`~/.cache/huggingface/hub` — an id that is not there is an error, never a download), `systemone:URL#model` (a System One
+service; `--api-key` or `$SOLVI_SYSTEMONE_API_KEY`) or `module:attr` (a DecideModel your code builds). `check` prints
+what the checkpoint declares in `solvi_decide.json` (format, question kinds, act head, questions per pass, state
+serialization; also when the runtime to load it is missing), the fingerprint the trace will record, and with
+`--examples` the accuracy, the share escalated by the checkpoint's own thresholds, the accuracy of what it answers alone,
+and the latency of one decision (the first call apart, p50 / p95 / mean). The question comes from `--task` and
+`--options` (default: the labels seen) or each row's `task` / `options`. `--min-accuracy 0.8` makes it a CI gate (exit 1
+below). `pull` needs `huggingface_hub` (`solvi[onnx]`). `solvi ask --decider` takes the same MODEL.
 
 ## Guarantees and limitations
 
