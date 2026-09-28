@@ -526,6 +526,18 @@ class _Combination:
         out.update(extra)
         return out
 
+    def save_calibration(self, path):
+        """Write the combination's calibration (the shared threshold, per group too, the guarantee, the conformal set) with
+        the question and every member's fingerprint to a JSON file (solvi.calibfile). → path."""
+        from .calibfile import save
+        return save(self, path)
+
+    def load_calibration(self, path, groups=None, strict=True):
+        """Apply a file written by save_calibration / `solvi calibrate`; refuses one made for other members or another
+        question (strict=False loads it anyway). → self."""
+        from .calibfile import load
+        return load(self, path, groups, strict)
+
     def conformal(self, examples, coverage=0.90):
         """Conformal answer sets for the combination's decisions (the probabilities it answers with: the answering
         stage's for a cascade, the mean of the parts' for a vote), from labelled examples at its current threshold —

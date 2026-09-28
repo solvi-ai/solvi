@@ -2460,6 +2460,23 @@ class DecisionPart:
             sizes.append(len(self.candidates(d)))
         return {"coverage": coverage, "quantile": q, "n": len(scores), "mean_size": float(np.mean(sizes))}
 
+    def save_calibration(self, path):
+        """Write this decision's calibration — the escalation thresholds (per group too), the guarantee record, the
+        conformal set — with the question and the fingerprint of the model and adaptation it was fitted on, to a JSON
+        file (solvi.calibfile; `solvi calibrate` writes the same). → path."""
+        from .calibfile import save
+        return save(self, path)
+
+    def load_calibration(self, path, groups=None, strict=True):
+        """Apply a calibration file written by save_calibration / `solvi calibrate`: afterwards the part escalates, and
+        records its guarantee, exactly as right after calibrating (the same fingerprint). Refuses (ValueError) a file made
+        for another question, another checkpoint or another adaptation of this question — strict=False loads it anyway.
+        Thresholds per group by a function: pass it again as groups=. Call it before registering the part in a catalog
+        when the calibration has groups (the group facts join the part's inputs). While `solvi calibrate` loads a
+        catalog, calibration files are not applied (the part is calibrated afresh). → self."""
+        from .calibfile import load
+        return load(self, path, groups, strict)
+
     def question(self, cat, name=None, text=None, min_confidence=None, checkpoints=None, require_evidence=False):
         """Make this decision the answer of a question: registers it as the question's rule (`cat.rule(name)(self)`) and
         returns the Question — choice, multi, ordinal (score) or yes_no (noul), with the option descriptions. System.teach on
