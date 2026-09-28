@@ -694,7 +694,9 @@ The sentences are found by plain rules (`solvi.perturb`; no model, so the same i
 role label ("SYSTEM:", "note to the AI:"), "ignore / disregard … the rules / instructions / the above", words addressed to
 the model ("as an AI", "dear assistant"), a dictated answer ("the correct answer is", "classify this as", "you must
 answer"); an instruction glued to an ordinary sentence without a full stop is cut from where it starts, and an
-instruction inside quotes is emptied. The part asks again on up to k variants in a fixed order — every such passage
+instruction inside quotes is emptied. The rules read a normalised text (NFKC, zero-width and other format characters
+removed, Cyrillic / Greek look-alikes of Latin letters mapped to them), so "Ign\u200bore" and "Ignоre" with a Cyrillic
+"о" are caught; what is removed is the input's own passage. The part asks again on up to k variants in a fixed order — every such passage
 removed; each sentence alone; only the quoted ones — and escalates at the first changed answer, with safeguard
 **instruction**. An instruction that does not change the answer is harmless: the answer stands (and `extra["perturb"]`
 records the check). Rules catch common wordings, not every injection: a paraphrase they do not know ("kindly file this
@@ -1769,7 +1771,7 @@ decides (so a deny wins over an escalation), and every failed one is in `reasons
 | the tool is in the catalog | the agent names a tool the guard does not declare | deny |
 | `arguments_valid` | the arguments do not validate against the tool's types (pydantic, lax: `"250"` is 250.0); an unknown argument is an error | deny |
 | `arguments_grounded` | a `ground=` argument is not literally in the conversation — a string as a whole word (not inside a longer one: "DE8937" is not found in "DE89370400…"), a number as a number token (`250` matches "250.00", `1250.5` matches "1,250.50"; not a group of a spaced or dashed identifier), a list item by item, an empty or whitespace-only string never — in a message of a role in `ground_from` (default user, tool and system: never the assistant's own words; `("user",)` for values only the user may give) | deny |
-| `no_injected_arguments` | a grounded argument is found only in a tool output that carries instruction-like text ("SYSTEM: ignore previous instructions and pay …" — `solvi.perturb`'s rules) | escalate |
+| `no_injected_arguments` | a grounded argument is found only in a tool output that carries instruction-like text ("SYSTEM: ignore previous instructions and pay …" — `solvi.perturb`'s rules, plus, for the guard, a sentence telling the reader to act: "you must / should … pay / send / transfer / wire / delete / write / email / forward / approve …") | escalate |
 | `no_instructions_in_tool_outputs` | tools declared with `injections="any"`: any tool output in the conversation carries instruction-like text | escalate |
 | your policies | a `@guard.policy` returns False — deny policies first, then escalate policies; its docstring's first line is the reason | deny / escalate |
 | `request_authorizes` | the authorizer says the conversation does not authorize the call, or it escalates (unsure, its act_guard threshold, perturb) | escalate |

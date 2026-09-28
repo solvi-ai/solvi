@@ -395,7 +395,7 @@ def _grounding(spec, matchers=None):
         def taint(i):
             if i not in tainted:
                 s, e, r = roles[i]
-                sp = instruction_spans(conversation[s:e]) if r == "tool" else []
+                sp = instruction_spans(conversation[s:e], actions=True) if r == "tool" else []
                 tainted[i] = [conversation[s + a:s + b] for a, b in sp]
             return tainted[i]
 
@@ -536,7 +536,7 @@ def no_injected_arguments(grounding) -> bool:
 def no_instructions_in_tool_outputs(conversation, conversation_roles) -> bool:
     """No tool output in the conversation carries instruction-like text (solvi.perturb)."""
     from ..perturb import instruction_spans
-    return not any(r == "tool" and instruction_spans(conversation[s:e]) for s, e, r in conversation_roles)
+    return not any(r == "tool" and instruction_spans(conversation[s:e], actions=True) for s, e, r in conversation_roles)
 
 
 def request_authorizes(authorized) -> bool:
