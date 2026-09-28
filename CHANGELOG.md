@@ -22,6 +22,14 @@
   that reason; a transient failure is not cached. `Item.unknown` tells a scorer that "not stated" is an answer; a
   scorer may return an already decoded pointer (`{"null", "spans"}`).
 
+### A vote across model families
+
+- `examples/20_vote_across_families.py`: two stand-in System One servers of different "families" started in-process
+  (no network), each alone and their `Vote` under one guarantee (`act_guard`, risk 10%), a hard check, the audit and
+  the replay; a sure mistake of one family makes the vote escalate. The guide cites the measured result: on
+  typed-decisions a vote of solvi-large and Julia 1 answered 50% alone against 31% / 40% for each alone at the same
+  10% risk (Julia in-distribution there).
+
 ### Command line: init, ask, calibrate, models
 
 - `solvi init [DIR] [--template support|refunds|minimal] [--with-model] [--force]`: a new project — `catalog.py` (a

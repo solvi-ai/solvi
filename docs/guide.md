@@ -835,6 +835,15 @@ their mistakes coincide — but lowered the error among automatic answers: JSON 
 ContractNLI 10.3% → 7.2%. Use a cascade for cost on streams where a small model is often sure, a vote when the errors
 that get through must be rare, preferably with models of different families.
 
+Models of different families make different mistakes, and there a vote also answers more. On typed-decisions, a vote of
+solvi-large and Julia 1 (a 144M decision model of another family) answered 50% of the questions
+alone, against 31% for solvi-large and 40% for Julia 1 each alone, at the same 10% risk (same protocol: 300 calibration
+questions, 200 splits; the risk stayed ≤ 10%). The two agreed on 54% of the questions and were right on 80% of those.
+Julia's number there is in-distribution — it was trained on data like that set — so this is "a model strong in its own
+domain plus ours", not a general ranking of the two. [`examples/20_vote_across_families.py`](../examples/20_vote_across_families.py)
+runs the same comparison with two stand-in System One servers in-process: each alone, the vote, and the vote in a
+catalog with its audit.
+
 **The trace.** The record of a combination names it as the model (`{"type": "Cascade", "id": "cascade(small → large)",
 "fp": ...}`; the fingerprint covers every part's, the rule and the threshold) and keeps every proposal in `extra`:
 `stages` and `answered_by` (cascade), `votes` and `rule` (vote), `route` and `routed` (route) — each proposal with its
