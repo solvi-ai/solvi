@@ -41,6 +41,43 @@
   rewrite against an anchor, index tables) and `replay_all`; `open_storage` / `storage=` take `.duckdb` paths and
   `postgresql://` URLs. The SQL backends share one implementation (SQLiteStorage unchanged in behaviour).
 
+### Any LLM as a decider: solvi.llm
+
+- `solvi.llm.llm(base_url, model, api_key=None, ...)`: any OpenAI-compatible chat-completions server (OpenAI,
+  OpenRouter, vLLM, llama.cpp, Ollama, LM Studio) as a decider — a DecideModel, so it works as a decision part, as the
+  last stage of a `Cascade`, in a `Vote` / `Route`, with `act_guard` / `conformal` / `fit`. One question per request at
+  temperature 0 with a JSON schema for the reply (answer among the options, a probability per option or a confidence, a
+  supporting quote); `response_format` json_schema → json_object → prompt only, as the server accepts; probabilities
+  from the answer's token log-probabilities when the server returns them. Every reply is validated (answer among the
+  options, probabilities consistent with it, quote literally in the text): an invalid, cut-off or refused reply, or a
+  server that does not answer after `retries`, escalates ("model escalated: invalid LLM output — ...") and is never
+  guessed; 401 / 403 / 404 raise `LLMError`. Yes/no, scores, multi-label, spans, "not stated" and evidence quotes.
+- The trace: the model id `llm:<model>@<endpoint>` (no credentials, no query), a fingerprint over the endpoint, model
+  name, prompt-template hash and settings, and `extra["llm"]` per decision (format, probability source, the model that
+  answered, quote, tokens). The API key is never recorded. An LLM decision is not re-run by `replay` (the part's
+  `deterministic` follows its model): the recorded output is checked instead.
+- `llm:URL#model` wherever a MODEL spec is taken (`solvi ask --decider`, `solvi models check`; `$SOLVI_LLM_API_KEY`).
+- Decider scorers may return `escalate` (and `transient`, `info`) with a question's logits: the decision escalates with
+  that reason; a transient failure is not cached. `Item.unknown` tells a scorer that "not stated" is an answer; a
+  scorer may return an already decoded pointer (`{"null", "spans"}`).
+
+### solvi serve: POST /ask_text and the ask_text tool
+
+- `POST /ask_text` (`{"text", "question"?, "store", "today"?}`) and the MCP tool `ask_text`: a free text through
+  `System.ask_text` with the served decider (`--decider`, which now also takes `systemone:URL#model` and
+  `llm:URL#model`, with `--api-key`) → the response as for `/ask` plus `read`: the question it asks, each field with its
+  status, value and quote, the missing fields, a clarifying question and why routing escalated. `Service.ask_text` /
+  `aask_text`; `create_app(..., textin=)` / `Service(..., textin=)` for a configured `TextIn`; `today` defaults to the
+  server's date and is recorded. `--mcp` now loads `--decider` too (it routes the texts).
+
+### A vote across model families
+
+- `examples/20_vote_across_families.py`: two stand-in System One servers of different "families" started in-process
+  (no network), each alone and their `Vote` under one guarantee (`act_guard`, risk 10%), a hard check, the audit and
+  the replay; a sure mistake of one family makes the vote escalate. The guide cites the measured result: on
+  typed-decisions a vote of solvi-large and Julia 1 answered 50% alone against 31% / 40% for each alone at the same
+  10% risk (Julia in-distribution there).
+
 ### Command line: init, ask, calibrate, models
 
 - `solvi init [DIR] [--template support|refunds|minimal] [--with-model] [--force]`: a new project — `catalog.py` (a

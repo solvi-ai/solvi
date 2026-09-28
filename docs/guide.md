@@ -723,6 +723,49 @@ rules, thresholds (act_guard on the confidence: the API has no act signal) and t
 multi-label questions, spans, evidence and "not stated" are not part of the API. The trace records the endpoint and model
 name, not the weights behind them — calibrate again when the service changes its model.
 
+#### Any LLM as a decider
+
+```python
+from solvi.llm import llm
+gpt = llm("https://openrouter.ai/api/v1", "qwen/qwen-2.5-72b-instruct", api_key=os.environ["OPENROUTER_API_KEY"])
+local = llm("http://127.0.0.1:8080/v1", "qwen2.5-7b-instruct")      # llama.cpp; vLLM :8000/v1, Ollama :11434/v1
+part = gpt.decision("team", "Which team should handle this?", "email", TEAMS)
+team = Cascade([small, large, part])      # the LLM only for what both local deciders escalate
+```
+
+Any server of the OpenAI chat-completions API (OpenAI, OpenRouter, vLLM, llama.cpp, Ollama, LM Studio) proposes; solvi
+decides as with any decider. One question is one request at temperature 0, with a JSON schema for the reply — the answer
+among the options, a probability per option (`ask="confidence"`: one number) and a quote from the text that supports it
+— sent as `response_format` json_schema when the server takes it, else as json_object, else in the prompt only
+(`response_format="auto"` tries them in that order and keeps what works). When the server returns log-probabilities
+(`logprobs="auto"`), the probabilities come from the answer's tokens — the chosen option's whole token sequence, the others
+from the alternatives at its first token — not from the numbers the model wrote (`extra["llm"]["probabilities"]` says
+which). Yes/no, scores, multi-label questions, spans (`kind="span"`: the passage must be in the text), "not stated"
+(`Maybe[...]`) and `evidence=True` work; rankings and numbers are asked as a choice over the options / bins.
+
+Everything is checked, and what fails escalates — `model escalated: invalid LLM output — ...` — instead of being turned
+into a guess: an answer that is not one of the options, probabilities that are not numbers in [0, 1] or disagree with
+the answer, a quote that is not literally in the text (runs of whitespace may differ, nothing else), a reply that is not
+JSON, is cut off or refused. A server that does not answer (network, timeout, 408 / 409 / 429 / 5xx) is retried
+(`retries=2`, exponential `backoff`) and then escalates too, without being cached, so the next ask tries again; a wrong
+key, model or URL (401, 403, 404) raises `solvi.llm.LLMError`. There is no act signal: `act_guard` runs on the
+confidence, on your labelled examples, as for System One.
+
+The trace names the model `llm:<model>@<endpoint>` (the URL without credentials or query); the fingerprint covers the
+endpoint, the model name, the hash of the prompt template (`solvi.llm.template_hash()`) and the settings, and each
+decision's `extra["llm"]` records the format used, where the probabilities came from, the model the server says answered,
+the quote and the tokens. The API key goes in the Authorization header only — never in the trace, the fingerprint or an
+error. An LLM's output is not reproducible bit for bit, so `replay` does not call it again: it checks the recorded output
+(the verdict is "trusted"). The server can change the weights behind a name: calibrate again when it does.
+`solvi ask --decider llm:URL#model` and `solvi models check llm:URL#model` take the same (`$SOLVI_LLM_API_KEY`).
+
+**Cost and latency.** Each question about each input is a paid request — the question, every option with its
+description and the whole text, a few hundred tokens or more — and takes 0.3–5 s, where a local decider takes ~50 ms on
+a CPU and costs nothing per call. Several questions about one input are sent in parallel (`workers=4`), not in one
+request; answers are cached per (question, input) while the model object lives; `model.scorer.usage` counts the tokens.
+Put the LLM where it pays for itself: as the last stage of a `Cascade` after local deciders that answer the easy inputs
+(`act_guard` on the cascade keeps one guarantee for the whole), or in a `Vote` as a model of another family.
+
 ### Several questions in one pass
 
 When the checkpoint declares `multi_question` (see [decide_format.md](decide_format.md)), the strategist groups the decision
@@ -792,6 +835,15 @@ solvi-base and solvi-large answered no more alone than the better of them — th
 their mistakes coincide — but lowered the error among automatic answers: JSON questions 2.1% → 0.4% (94% answered),
 ContractNLI 10.3% → 7.2%. Use a cascade for cost on streams where a small model is often sure, a vote when the errors
 that get through must be rare, preferably with models of different families.
+
+Models of different families make different mistakes, and there a vote also answers more. On typed-decisions, a vote of
+solvi-large and Julia 1 (a 144M decision model of another family) answered 50% of the questions
+alone, against 31% for solvi-large and 40% for Julia 1 each alone, at the same 10% risk (same protocol: 300 calibration
+questions, 200 splits; the risk stayed ≤ 10%). The two agreed on 54% of the questions and were right on 80% of those.
+Julia's number there is in-distribution — it was trained on data like that set — so this is "a model strong in its own
+domain plus ours", not a general ranking of the two. [`examples/20_vote_across_families.py`](../examples/20_vote_across_families.py)
+runs the same comparison with two stand-in System One servers in-process: each alone, the vote, and the vote in a
+catalog with its audit.
 
 **The trace.** The record of a combination names it as the model (`{"type": "Cascade", "id": "cascade(small → large)",
 "fp": ...}`; the fingerprint covers every part's, the rule and the threshold) and keeps every proposal in `extra`:
@@ -1479,6 +1531,7 @@ solvi serve myapp.decisions:system --decider solvi-ai/solvi-base   # + POST /v1/
 |---|---|
 | `POST /ask` | `{"state": {...}, "questions": [...] (default: all), "store": true}` → `Response.to_dict()` plus `stored_id` and `trace_hash` |
 | `POST /ask/{question}` | the input state itself as the body → the same response, for that question |
+| `POST /ask_text` | `{"text": "...", "question": null, "store": true, "today": null}` → a free text through [`ask_text`](#text-in-from-a-message-to-a-question): the response as for `/ask` plus `read` — the question it asks, each field with its status, value and quote `[text, start, end]`, `missing`, `clarify` (a question asking for what is missing) and `escalated` |
 | `GET /questions` | each question: its text, answer type and the JSON schema of the input state it reads |
 | `GET /health` | solvi's version, the questions, the catalog's fingerprint, the store, the decider |
 | `POST /v1/systemone` | the System One API answered by a solvi decider (`--decider`) |
@@ -1495,9 +1548,21 @@ updates its measured costs and stats in place. A System with `async def` (or `bl
 [`aask`](#async-execution-aask) instead: its endpoints are async and asks run concurrently on the server's event loop
 (the MCP server too).
 
+**Text in.** `POST /ask_text` reads a message with `solvi.textin.TextIn(system, decider)` — `--decider` picks the entry
+point (any decider: a checkpoint, `systemone:URL#model`, `llm:URL#model`), and its span pointer reads the fields when it
+has one (an LLM does), else the deterministic `CueExtractor`; `create_app(..., textin=TextIn(...))` or
+`Service(..., textin=...)` sets synonyms, patterns and cues. Without a decider a text can only go to a named `question`
+(or to the one question of a System with one), else the request is a 422. Dates without a year and relative dates are
+read against `today` — the request's, else the server's date — which the trace records. A text that does not say which
+question it asks is not an error: `read.question` is null, `read.escalated` says why, the likely questions abstain, and
+`read.clarify` asks which one is meant; a required field the text does not give is listed in `read.missing` and the
+question abstains for lack of it — nothing is guessed.
+
 **MCP.** With `--mcp`, each question is a tool: its input schema is the question's input state schema, and a call returns
 the question's result — answer, confidence, status, why, guard, evidence, the safeguards that fired — with `stored_id`
-and `trace_hash`, as JSON text and as structured content. An abstention is a result, not an error; an exception is a tool
+and `trace_hash`, as JSON text and as structured content. One more tool, `ask_text` (`solvi_ask_text` if a question has
+that name), takes `{"text", "question"?}` and returns what `POST /ask_text` does, so an agent can pass a user's message
+as it is. An abstention is a result, not an error; an exception is a tool
 error (`isError`). The official `mcp` SDK (2.x, `solvi[mcp]`) serves it when installed; otherwise solvi's built-in stdio
 JSON-RPC server answers `initialize`, `ping`, `tools/list` and `tools/call` (`--mcp-impl sdk|builtin` chooses). For an
 MCP client:

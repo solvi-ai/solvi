@@ -257,6 +257,7 @@ class Item:
     multi: bool = False
     kind: str = ""          # the mode on the wire when it is neither "single" nor "multi": "score", "noul", "rank", ...
     pointer: bool = False   # the question wants the pointer (a span answer, or evidence quotes): full layout only
+    unknown: bool = False   # "not stated" is an answer to this question (scorers that ask in words, e.g. solvi.llm)
 
     @property
     def mode(self):
@@ -285,9 +286,14 @@ def pass_prompt(items, markers=None):
 
 class Logits(np.ndarray):
     """A question's logits [K] with an l14g checkpoint's extra outputs: `unknown` (the "not stated" logit) and `pointer`
-    (decoded: {"null": p(null span), "spans": [(p, start, end, text)]}, most probable first)."""
+    (decoded: {"null": p(null span), "spans": [(p, start, end, text)]}, most probable first) — and from a scorer that
+    can fail on one question (solvi.llm): `escalate` (why the output is not usable: the decision escalates with it),
+    `transient` (not cached: ask again next time) and `info` (recorded in the decision's extra)."""
     unknown = None
     pointer = None
+    escalate = None
+    transient = False
+    info = None
 
 
 def decode_pointer(ptr, text, max_span=40, top=20, temperature=1.0):
@@ -946,9 +952,9 @@ class _Spec:
             opts = tuple(noul_labels)
         if self.pointer:
             return Item(self.task, opts, desc if any(desc) else None, text, wire == "multi",
-                        "" if wire in ("single", "multi") else wire, True)
+                        "" if wire in ("single", "multi") else wire, True, self.unknown)
         return Item(self.task, opts, desc if any(desc) else None, text, wire == "multi",
-                    "" if wire in ("single", "multi") else wire)
+                    "" if wire in ("single", "multi") else wire, unknown=self.unknown)
 
     def out(self, label):
         """A label → the decision's value (a bool question: True / False)."""
@@ -1235,8 +1241,10 @@ class DecideModel:
     def _pick(self, sp, o, text=None):
         """One scorer output → (the question's logits [K], the act logit or None). From an l14g checkpoint the logits also
         carry the "not stated" logit (`.unknown`) and the decoded pointer (`.pointer`)."""
-        act = unk = ptr = None
+        act = unk = ptr = why = info = None
+        transient = False
         if isinstance(o, dict):
+            why, info, transient = o.get("escalate"), o.get("info"), bool(o.get("transient"))
             o, act, unk, ptr = o.get("logits"), o.get("act"), o.get("unknown"), o.get("pointer")
             if o is None and sp.kind == "span":
                 o = np.zeros(0)
@@ -1248,13 +1256,17 @@ class DecideModel:
             lg = np.array([lg[0], 0.0])
         if lg.shape != (len(sp.real),):
             raise ValueError(f"the scorer returned {lg.shape} logits for {len(sp.real)} options")
-        if unk is not None or (ptr is not None and sp.pointer):
+        if unk is not None or (ptr is not None and sp.pointer) or why or info:
             lg = lg.view(Logits)
             lg.unknown = None if unk is None else float(unk)
             if ptr is not None and sp.pointer:
-                pc = self.caps.get("pointer") or {}
-                lg.pointer = decode_pointer(ptr, text or "", pc.get("max_span_tokens", 40),
-                                            temperature=self.temperatures.get("span", 1.0))
+                if "spans" in ptr:                    # already decoded by the scorer (quotes it located itself)
+                    lg.pointer = {"null": float(ptr.get("null", 0.0)), "spans": list(ptr["spans"])}
+                else:
+                    pc = self.caps.get("pointer") or {}
+                    lg.pointer = decode_pointer(ptr, text or "", pc.get("max_span_tokens", 40),
+                                                temperature=self.temperatures.get("span", 1.0))
+            lg.escalate, lg.info, lg.transient = (str(why) if why else None), info, transient
         return lg, (None if act is None else float(act))
 
     def _item(self, sp, text):
@@ -1332,7 +1344,8 @@ class DecideModel:
                 for i, o in zip(todo, got):
                     sp = specs_texts[i][0]
                     out[i] = self._pick(sp, o, specs_texts[i][1])
-                    self._cache[(sp.key, specs_texts[i][1])] = out[i]
+                    if not getattr(out[i][0], "transient", False):     # a server that did not answer: ask again
+                        self._cache[(sp.key, specs_texts[i][1])] = out[i]
                 while len(self._cache) > self._cache_size:
                     self._cache.popitem(last=False)
         return out
@@ -1412,14 +1425,20 @@ class DecideModel:
         question asking for evidence gets the pointer's quotes."""
         u, ptr = getattr(z, "unknown", None), getattr(z, "pointer", None)
         if sp.kind == "span":
-            return self._span_decision(sp, ptr)
-        if (sp.unknown and u is not None) or sp.kind in ("rank", "number"):
-            d = self._decision_v3(sp, z, u if sp.unknown else None)
+            d = self._span_decision(sp, ptr)
         else:
-            d = self._decision_v1(sp, z)
-        if sp.evidence and ptr is not None and d.value is not Unknown:
-            ev = (self.caps.get("pointer") or {}).get("evidence") or {}
-            d.evidence = pointer_evidence(ptr, ev.get("threshold", 0.15), min(sp.evidence, ev.get("max_spans", 3)))
+            if (sp.unknown and u is not None) or sp.kind in ("rank", "number"):
+                d = self._decision_v3(sp, z, u if sp.unknown else None)
+            else:
+                d = self._decision_v1(sp, z)
+            if sp.evidence and ptr is not None and d.value is not Unknown:
+                ev = (self.caps.get("pointer") or {}).get("evidence") or {}
+                d.evidence = pointer_evidence(ptr, ev.get("threshold", 0.15), min(sp.evidence, ev.get("max_spans", 3)))
+        info, why = getattr(z, "info", None), getattr(z, "escalate", None)
+        if info:
+            d.extra.update(info)
+        if why and d.escalate is None:              # the scorer could not give a usable output: never a guess
+            d.escalate = f"{ESCALATED}: {why}"
         return d
 
     def _decision_v3(self, sp, z, u):
@@ -1923,8 +1942,6 @@ class DecisionPart:
     is also the model recorded in the trace: `fingerprint()` covers the checkpoint and this question's adaptation and
     thresholds only, so teaching one decision does not mark the others as changed."""
 
-    deterministic = True
-
     def __init__(self, model, name, task, text_fact, options, descriptions=None, multi=False, other=None, *, kind=None,
                  as_bool=False, escalate_below=None, act_threshold=None, use_act=None, score_value="median",
                  option_order="canonical", permutations=4, min_margin=None, long=None, top_k=3, rerank=False,
@@ -1966,6 +1983,12 @@ class DecisionPart:
     @property
     def model_id(self):
         return self.model.model_id
+
+    @property
+    def deterministic(self):
+        """Does the model give the same output for the same input (replay re-runs it)? False for an LLM (solvi.llm):
+        replay then checks the recorded output instead."""
+        return getattr(self.model, "deterministic", True)
 
     @property
     def available(self):
@@ -2218,6 +2241,7 @@ class DecisionPart:
             m = np.mean(zs, axis=0).view(Logits)
             m.unknown = None if any(u is None for u in us) else float(np.mean(us))
             m.pointer = getattr(runs[0][j][0], "pointer", None)
+            m.escalate = next((w for w in (getattr(run[j][0], "escalate", None) for run in runs) if w), None)
             out.append((m, None if any(a is None for a in acts) else float(np.mean(acts))))
         return out
 

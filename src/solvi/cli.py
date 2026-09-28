@@ -286,7 +286,7 @@ def ask_parser(sub):
     s.add_argument("--question", action="append", help="ask only these questions (repeat, or comma-separated); with "
                                                        "--text: the question, without routing")
     s.add_argument("--decider", help="with --text: the model that picks the question (a folder, a cached Hugging Face id, "
-                                     "systemone:URL#model or module:attr; see solvi models)")
+                                     "systemone:URL#model, llm:URL#model or module:attr; see solvi models)")
     s.add_argument("--backend", default="auto", choices=["auto", "onnx", "torch"], help="the decider's backend")
     s.add_argument("--audit", action="store_true", help="also print what each answer rests on (res.audit())")
     s.add_argument("--report", choices=["md", "html"], help="print the decision's report instead (res.report)")

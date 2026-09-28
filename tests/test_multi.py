@@ -300,6 +300,26 @@ def test_example_18_runs_with_the_stand_ins(monkeypatch):
     assert "stage 2 answered" in text and "replay: True" in text and "replay: False" not in text
 
 
+def test_example_20_vote_of_two_families_answers_more_than_either_alone():
+    import io
+    import re
+    import runpy
+    from contextlib import redirect_stdout
+    from pathlib import Path
+    out = io.StringIO()
+    with redirect_stdout(out):
+        runpy.run_path(str(Path(__file__).resolve().parents[1] / "examples" / "20_vote_across_families.py"),
+                       run_name="__main__")
+    text = out.getvalue()
+    got = {m[0]: (int(m[1]), float(m[2])) for m in re.findall(r"  (family A alone|family B alone|vote A \+ B) .*?"
+                                                               r"answered alone +(\d+)%.*?risk +([\d.]+)%", text)}
+    assert set(got) == {"family A alone", "family B alone", "vote A + B"}
+    assert got["vote A + B"][0] > max(got["family A alone"][0], got["family B alone"][0])
+    assert all(r <= 10.0 for _, r in got.values())
+    assert "the models disagree" in text and "hard check not_locked is false" in text
+    assert "replay: True" in text and "replay: False" not in text
+
+
 def _group_stream(rng, tag, n, S, L):
     """As _stream, in two groups: in "hard" both models are right far less often (0.3–0.8), in "easy" more (0.8–1.0)."""
     from solvi.multi import Facts

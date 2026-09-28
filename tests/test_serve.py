@@ -300,7 +300,7 @@ def test_mcp_server_each_question_is_a_tool(catalog_file, tmp_path, impl):
     out = _mcp_session(catalog_file, impl, tmp_path / "mcp.jsonl")
     assert out[1]["result"]["serverInfo"]["name"] == "solvi" and "tools" in out[1]["result"]["capabilities"]
     tools = {t["name"]: t for t in out[2]["result"]["tools"]}
-    assert set(tools) == {"approve", "team"}
+    assert set(tools) == {"approve", "team", "ask_text"}
     assert tools["approve"]["inputSchema"]["properties"]["amount"]["type"] == "integer"
     ok, blocked = out[3]["result"], out[4]["result"]
     assert not ok.get("isError") and ok["structuredContent"]["answer"] == "yes"
@@ -330,3 +330,62 @@ def test_serve_usage_errors():
     with pytest.raises(SystemExit) as e:
         main(["serve"])
     assert e.value.code == 2
+
+
+# --- a free text: POST /ask_text and the ask_text tool
+def _shop():
+    from test_textin import decider, shop
+    from solvi.textin import TextIn
+    _, s = shop()
+    tin = TextIn(s, decider(), patterns={"order_id": r"[A-Z]-\d+"},
+                 synonyms={"currency": {"EUR": ["euro", "euros", "€"], "RUB": ["rubles", "руб", "₽"]}})
+    return s, tin
+
+
+def test_ask_text_over_http_routes_reads_with_quotes_and_answers(tmp_path):
+    s, tin = _shop()
+    c = client(system=s, textin=tin, storage=str(tmp_path / "d.db"))
+    text = "Hi, please refund order A-10457: I paid 1.5 million rubles on 12 September and it arrived broken."
+    d = c.post("/ask_text", json={"text": text, "today": "2026-09-28"}).json()
+    rd = d["read"]
+    assert rd["question"] == "request_refund" and rd["missing"] == [] and rd["clarify"] is None
+    amount = rd["fields"]["amount"]
+    assert amount["status"] == "read" and amount["value"] == 1500000.0
+    q, a, b = amount["quote"]
+    assert text[a:b] == q == "1.5 million"
+    assert d["results"]["request_refund"]["answer"] == "review" and d["stored_id"]
+    assert d["trace_hash"] == d["trace"]["records"][-1]["hash"]
+    stored = s.storage.get(d["stored_id"])
+    assert any(r.kind == "textin" for r in stored.trace.records)
+    missing = c.post("/ask_text", json={"text": "Refund order A-17 please, I paid 40 euros."}).json()
+    assert missing["read"]["missing"] == ["purchase_date"] and "purchase date" in missing["read"]["clarify"]
+    assert missing["results"]["request_refund"]["status"] == "abstain"
+    unsure = c.post("/ask_text", json={"text": "hello there", "store": False}).json()
+    assert unsure["read"]["question"] is None and unsure["read"]["escalated"] and unsure["stored_id"] is None
+    given = c.post("/ask_text", json={"text": "cancel A-5, it is urgent", "question": "cancel_order"}).json()
+    assert given["read"]["question"] == "cancel_order" and given["results"]["cancel_order"]["answer"] == "cancelled"
+    assert c.post("/ask_text", json={"text": "x", "question": "nope"}).status_code == 404
+    assert c.post("/ask_text", json={"text": ""}).status_code == 422
+    assert "/ask_text" in c.get("/openapi.json").json()["paths"]
+
+
+def test_ask_text_needs_a_decider_to_route_and_is_an_mcp_tool():
+    s, _ = _shop()
+    c = client(system=s)                                    # no decider, three entry points
+    r = c.post("/ask_text", json={"text": "refund A-1"})
+    assert r.status_code == 422 and "decider" in r.json()["detail"]
+    ok = c.post("/ask_text", json={"text": "cancel A-5 urgent", "question": "cancel_order", "store": False}).json()
+    assert ok["read"]["missing"] == ["order_id"] and ok["read"]["clarify"] == "Please tell me the order id."
+    assert ok["results"]["cancel_order"]["status"] == "abstain"      # no pattern for the order id: not read, not guessed
+    from solvi.serve import mcp_tools, run_builtin
+    s2, tin = _shop()
+    svc = Service(s2, textin=tin)
+    tools = {t["name"]: t for t in mcp_tools(svc)}
+    assert tools["ask_text"]["inputSchema"]["required"] == ["text"]
+    inp = io.StringIO(json.dumps({"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": {
+        "name": "ask_text", "arguments": {"text": "Please cancel order A-12, urgent!"}}}) + "\n")
+    out = io.StringIO()
+    run_builtin(svc, inp, out)
+    res = json.loads(out.getvalue())["result"]
+    assert not res["isError"] and res["structuredContent"]["read"]["question"] == "cancel_order"
+    assert res["structuredContent"]["results"]["cancel_order"]["answer"] == "cancelled"
