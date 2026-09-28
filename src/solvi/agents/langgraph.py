@@ -32,7 +32,7 @@ from langgraph.prebuilt import ToolNode
 
 from .guard import Guard, messages
 
-APPROVE = (True, "approve", "approved", "allow", "yes")
+APPROVE = ("approve", "approved", "allow", "yes")      # the strings that approve (any case); else only True itself
 
 
 def _messages_of(state):
@@ -44,10 +44,15 @@ def _messages_of(state):
 
 
 def approved(answer) -> bool:
-    """A resume value that approves an escalated call: True, "approve" / "allow" / "yes", or {"approved": True}."""
+    """A resume value that approves an escalated call: True, "approve" / "approved" / "allow" / "yes", or {"approved": one
+    of them} ({"approve": ...} too). Anything else rejects — "false", 1, "no", {"approved": "false"}."""
     if isinstance(answer, dict):
-        return bool(answer.get("approved") or answer.get("approve"))
-    return answer in APPROVE
+        return any(_yes(answer.get(k)) for k in ("approved", "approve"))
+    return _yes(answer)
+
+
+def _yes(v):
+    return v is True or (isinstance(v, str) and v.strip().lower() in APPROVE)
 
 
 class _Wrap:

@@ -619,6 +619,7 @@ class GuardDecision:
     stored_id: str | None = None
     approved_by: str | None = None                             # guard.resolve: the person who approved an escalation
     id: str | None = None                                      # the agent's id of the call, if it gave one
+    resolved: bool = False                                     # guard.resolve answered this escalation (once only)
     catalog: Any = dataclasses.field(default=None, repr=False)
 
     @property
@@ -1006,9 +1007,18 @@ class Guard:
     def resolve(self, decision, approve, reviewer=None, note=None, execute=True):
         """A person's answer to an escalated call: recorded in the store as a correction of its verdict (who, the
         stored decision it answers, a note) and, when approved, the call is made (execute=False: not made — the
-        framework makes it). → the decision, with outcome "allow" (approved_by) or "deny"."""
+        framework makes it; the stored resolution then says executed: false, and the framework's result is not
+        recorded by the guard). → the decision, with outcome "allow" (approved_by) or "deny".
+
+        An escalation is resolved once: a second resolve of the same decision (or, with a store, of a stored decision
+        that already has a resolution) raises ValueError — so an approved call is never made twice."""
         if decision.outcome != "escalate":
             raise ValueError(f"only an escalated call is resolved by a person; this one is {decision.outcome!r}")
+        if decision.resolved or (self.storage is not None and decision.stored_id is not None and any(
+                c["question"] == "verdict" and c["of"] == decision.stored_id for c in self.storage.corrections())):
+            raise ValueError(f"this escalation of {decision.tool} was already resolved"
+                             + (f" (stored decision {decision.stored_id})" if decision.stored_id else ""))
+        decision.resolved = True
         d = dataclasses.replace(decision, outcome="allow" if approve else "deny", approved_by=reviewer if approve else None,
                                 reasons=list(decision.reasons) + ([f"approved by {reviewer or 'a person'}"] if approve
                                                                   else [f"rejected by {reviewer or 'a person'}"]
@@ -1018,7 +1028,8 @@ class Guard:
         if self.storage is not None:
             meta = {"tool": d.tool, "reviewer": reviewer, "note": note, "of": decision.stored_id, "executed": d.executed}
             meta.update(_outcome_meta(d))
-            self.storage.save_correction("verdict", decision.response.trace.init, d.outcome, meta={"guard": meta})
+            self.storage.save_correction("verdict", decision.response.trace.init, d.outcome, meta={"guard": meta},
+                                         by=reviewer, of=decision.stored_id)
         return d
 
     # --- the decision

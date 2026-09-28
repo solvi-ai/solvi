@@ -1817,8 +1817,12 @@ probabilities, its fingerprint, the promise of its threshold and the perturb rec
 `conversation` or `user_request`, and `proposal`) works too.
 
 **Escalations.** `guard.resolve(d, approve=True, reviewer="maria@finance")` records a person's answer in the store (a
-correction of the verdict, with the reviewer, a note and the stored id it answers) and, when approved, makes the call. The
-adapters map an escalation to their framework's human-in-the-loop mechanism (below).
+correction of the verdict, with the reviewer, a note and the stored id it answers) and, when approved, makes the call. An
+escalation is resolved once: resolving the same decision again (or, with a store, a stored decision that already has a
+resolution) raises `ValueError`, so an approved call is never made twice. `execute=False` records the answer without
+making the call (the adapters use it: the framework makes the call); the stored resolution then says `executed: false`,
+and the framework's result is not recorded by the guard. The adapters map an escalation to their framework's
+human-in-the-loop mechanism (below).
 
 **Tool outputs fed back.** `session = guard.session(context, facts)`; `session.call(proposal)` checks and makes calls in a
 conversation and appends each made call's result to it as a tool output — so a later call's grounding and injection checks
