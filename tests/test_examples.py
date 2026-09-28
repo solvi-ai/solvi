@@ -3,11 +3,11 @@ import random
 from datetime import date
 
 from solvi import System
+from solvi.show import show
 from examples_loader import load
 
 L = load("01_leave_request")
 S = load("02_shop_order")
-from solvi.show import show
 
 
 def test_leave_request(capsys):

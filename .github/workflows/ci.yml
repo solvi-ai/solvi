@@ -28,6 +28,18 @@ jobs:
       - name: run core examples
         run: |
           for f in examples/0[1-69]_*.py examples/1[0-7]_*.py; do echo "== $f"; uv run python "$f" > /dev/null; done
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: "3.12"
+      - run: uv sync --group dev
+      - name: ruff (pyproject.toml [tool.ruff])
+        run: uvx ruff@0.16.9 check
+      - name: pyright, basic mode, on src/solvi (pyproject.toml [tool.pyright])
+        run: uvx pyright@1.1.414 --pythonpath .venv/bin/python
   build:
     runs-on: ubuntu-latest
     steps:

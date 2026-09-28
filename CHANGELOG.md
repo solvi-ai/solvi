@@ -27,6 +27,22 @@
 - Uvicorn runs without the `server` header. A Security section in the guide's Serving chapter; SECURITY.md lists
   `solvi serve` bypasses as in scope.
 
+### Static checks
+
+- **ruff** (`[tool.ruff]` in pyproject.toml): pyflakes, pycodestyle, bugbear, blind excepts and bandit's security rules
+  over the repository (the Hugging Face Space apps excepted); line length and formatting are not enforced. What it found
+  and what changed: unused imports and variables (`solvi.check`, `solvi.extract_multi`, tests, an example), a duplicate
+  stop word, SHA-1 used for cache keys now marked `usedforsecurity=False`, and — a real one — the System One client
+  (`solvi.systemone`) passed its base URL to `urlopen` unchecked, so `file://` and other schemes were opened: it now
+  accepts `http://` and `https://` only (`ValueError` otherwise). Deliberate cases are marked inline (`exec` of a task
+  file, SQL built from fixed clauses with bound values).
+- **pyright** (`[tool.pyright]`, basic mode, `src/solvi`): 268 errors on first run, reviewed; they come from the code
+  base's dynamic style (`x: T = None` defaults, `object`-typed fields, attributes set on instances, mixed-value dicts)
+  and none was a bug. Annotations that were wrong are fixed (`Response.violations` / `safeguards`, `Audit.overall`,
+  `Part.func`, `textin.Change.quote` are optional; `Response._system` / `_heads` are declared); the families that
+  report the style are warnings, the optional-access ones off, and everything else in basic mode is an error.
+- CI: a `lint` job runs both (pinned: ruff 0.16.9, pyright 1.1.414).
+
 ### Fixes
 
 - A model-backed rule whose quote is rejected for not being in the text (`quote outside the text` / `not grounded`)
@@ -43,6 +59,8 @@
   chain hash is taken over the tagged form, and records written before 0.7 with a bare `Infinity` still verify and
   load. `part.save_calibration` wrote a bare `Infinity` for an infinite top-level threshold; it writes the tag now (both
   load).
+- `tests/test_fast.py::test_teach_updates_instantly_like_refitting` bounds the median of 20 `teach` times (< 50 ms)
+  instead of every one, so one slow update on a loaded machine no longer fails it.
 - `Response` keeps a strong reference to its System, now documented as deliberate: `System(cat, qs).ask(s).report()`
   must work, and a weak reference would lose the temporary System before the report runs. Drop it with
   `res._system = None` (and pass `system=`) for responses kept for long.

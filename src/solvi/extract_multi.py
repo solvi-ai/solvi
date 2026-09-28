@@ -56,7 +56,6 @@ class MultiSpanExtractor:
         params = list(self.enc.parameters()) + list(self.head.parameters())
         self.enc.train()
         t0 = time.time()
-        F = len(self.fields)
         for ep in range(epochs):
             random.shuffle(idx)
             tot = 0.0
@@ -101,7 +100,7 @@ class MultiSpanExtractor:
 
     def predict_doc(self, text, max_span=64):
         """→ {field: (start, end, confidence)} in a single pass."""
-        key = hashlib.sha1(text.encode()).hexdigest()
+        key = hashlib.sha1(text.encode(), usedforsecurity=False).hexdigest()
         if key in self._cache:
             return self._cache[key]
         torch = self.torch
@@ -121,7 +120,6 @@ class MultiSpanExtractor:
             ps /= ps.sum()
             pe = np.exp((ze - ze.max()) / T)
             pe /= pe.sum()
-            L = len(offs)
             sc = np.triu(np.outer(ps, pe)) - np.triu(np.outer(ps, pe), max_span)
             s, e = np.unravel_index(int(sc.argmax()), sc.shape)
             out[f] = (int(offs[s][0]), int(offs[e][1]), float(sc[s, e]))

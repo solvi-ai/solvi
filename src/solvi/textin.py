@@ -526,7 +526,7 @@ class Change:
     field: str
     old: Any
     new: Any
-    quote: Quote
+    quote: Quote | None
 
 
 @dataclass

@@ -570,7 +570,7 @@ def is_async_func(f):
     if f is None:
         return False
     f = inspect.unwrap(f) if callable(f) else f
-    return inspect.iscoroutinefunction(f) or inspect.iscoroutinefunction(getattr(f, "__call__", None))
+    return inspect.iscoroutinefunction(f) or inspect.iscoroutinefunction(getattr(f, "__call__", None))  # noqa: B004 — an async __call__
 
 
 def async_parts(catalog):

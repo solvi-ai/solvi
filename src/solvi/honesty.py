@@ -73,13 +73,13 @@ def load_task(path):
     task's own types (postponed annotations)."""
     import hashlib
     path = Path(path).resolve()
-    name = f"_solvi_task_{hashlib.sha1(str(path).encode()).hexdigest()[:10]}_{path.stem}"
+    name = f"_solvi_task_{hashlib.sha1(str(path).encode(), usedforsecurity=False).hexdigest()[:10]}_{path.stem}"
     mod = types.ModuleType(name)
     mod.__file__ = str(path)
     sys.modules[name] = mod
     sys.path.insert(0, str(path.parent))          # a task may import its neighbours
     try:
-        exec(compile(path.read_text(), str(path), "exec"), mod.__dict__)
+        exec(compile(path.read_text(), str(path), "exec"), mod.__dict__)  # noqa: S102 — a task file is code, run on purpose
     except BaseException:
         sys.modules.pop(name, None)
         raise

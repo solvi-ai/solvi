@@ -40,12 +40,14 @@ class Response(Serial):
     values: dict
     ms: float
     feasible: bool = True               # do the answers satisfy every applicable constraint?
-    violations: list = None             # names of the constraints still broken (fixed answers that conflict)
+    violations: list | None = None      # names of the constraints still broken (fixed answers that conflict)
     catalog: object = None              # the catalog that answered (for the audit)
-    safeguards: list = None             # safeguard events of this response (see solvi.audit.collect)
+    safeguards: list | None = None      # safeguard events of this response (see solvi.audit.collect)
     model_outputs: int = 0              # outputs produced by models in this response
     stored_id = None                    # its id in a TraceStorage once saved (System(storage=...) saves every ask)
     textin = None                       # ask_text: the solvi.textin.TextRead the question and state were read from
+    _system = None                      # the System that answered (reports, counterfactuals; see the class docs)
+    _heads = None                       # its answer heads (the audit)
 
     def __getitem__(self, q):
         return self.results[q]

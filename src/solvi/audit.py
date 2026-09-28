@@ -362,7 +362,7 @@ class Audit:
     answers: dict                   # question → AnswerAudit
     safeguards: list                # every event in the response
     model_outputs: int
-    overall: dict = None            # Response.overall: confidence, weakest answer, answered / abstained, complete, feasible
+    overall: dict | None = None     # Response.overall: confidence, weakest answer, answered / abstained, complete, feasible
 
     def __getitem__(self, q):
         return self.answers[q]

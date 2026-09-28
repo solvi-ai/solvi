@@ -383,7 +383,7 @@ class Part:
     kind: str                       # extract | fn | check | rule
     name: str                       # fact it sets (for rule: "answer:<question>")
     inputs: list
-    func: Callable
+    func: Callable | None
     doc: str = ""
     hard: bool = False              # check only: hard check
     then: dict = field(default_factory=dict)   # check only: {question: answer} when the check is false
@@ -606,7 +606,8 @@ class Catalog:
                 commit = register(self, p)                 # checks now (FactTypeError), records once the part is in
         if p.provides is not None:
             self._add_alternative(p)
-            commit and commit()
+            if commit:
+                commit()
             return f
         if kind == "rule":
             p.name = "answer:" + p.question
@@ -620,7 +621,8 @@ class Catalog:
             if p.name in self.parts:
                 raise ValueError(f"part {p.name} is already in the catalog")
             self.parts[p.name] = p
-        commit and commit()
+        if commit:
+            commit()
         return f
 
     def _add_alternative(self, p):

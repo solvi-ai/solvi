@@ -691,14 +691,14 @@ class SQLiteStorage(TraceStorage):
             if status is not None:
                 sub.append("a.status = ?")
                 args.append(status)
-            where.append(f"EXISTS (SELECT 1 FROM answers a WHERE {' AND '.join(sub)})")
+            where.append(f"EXISTS (SELECT 1 FROM answers a WHERE {' AND '.join(sub)})")  # noqa: S608 — fixed clauses, values bound
         if safeguard is not None:
             sub = ["s.seq = r.seq", "s.kind = ?"]
             args.append(safeguard)
             if question is not None:
                 sub.append("s.question = ?")
                 args.append(question)
-            where.append(f"EXISTS (SELECT 1 FROM safeguards s WHERE {' AND '.join(sub)})")
+            where.append(f"EXISTS (SELECT 1 FROM safeguards s WHERE {' AND '.join(sub)})")  # noqa: S608
         if model is not None:
             where.append("EXISTS (SELECT 1 FROM models m WHERE m.seq = r.seq AND (m.fp = ? OR m.id = ? OR m.type = ?))")
             args += [model, model, model]
@@ -708,7 +708,7 @@ class SQLiteStorage(TraceStorage):
         if until is not None:
             where.append("r.time < ?")
             args.append(until)
-        sql = f"SELECT r.seq, r.body FROM records r WHERE {' AND '.join(where)} ORDER BY r.seq"
+        sql = f"SELECT r.seq, r.body FROM records r WHERE {' AND '.join(where)} ORDER BY r.seq"  # noqa: S608
         return [_stored(d, self.catalog) for _, d in self._rows(sql, args) if d is not None]
 
     def _backend_problems(self, rows):

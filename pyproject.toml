@@ -50,3 +50,55 @@ docs = ["mkdocs>=1.6,<2", "mkdocs-material>=9.5", "mkdocstrings[python]>=0.26"] 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 markers = ["model: needs a real model checkpoint and its runtime (skipped when they are missing)"]
+
+[tool.ruff]
+line-length = 120
+target-version = "py310"
+extend-exclude = ["spaces"]          # the Hugging Face Space apps: deployed on their own, with their own requirements
+
+[tool.ruff.lint]
+# pyflakes, pycodestyle, bugbear, blind excepts (the code marks the deliberate ones: `# noqa: BLE001`) and bandit's security
+# checks. Not enforced: the line length (long lines are the house style, not a bug) and the formatting.
+select = ["E", "F", "W", "B", "BLE", "S"]
+ignore = [
+    "E501",    # line length: not reformatting the code base
+    "E731",    # a lambda bound to a name, where a def would only add lines
+    "B007",    # unused names in a tuple unpacking in a loop: they document the shape of the items
+    "B023",    # closures over a loop variable that are called within the same iteration (timeit, generator steps)
+    "B905",    # zip() without strict=: solvi zips sequences of equal length by construction
+    "S101",    # assert: tests and invariants
+    "S311",    # random: sampling and shuffling, not cryptography
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["S", "E741"]            # tests exec catalog sources, start subprocesses and use fake secrets
+"benchmarks/**" = ["S"]
+"examples/**" = ["S"]
+"gallery/**" = ["S"]
+"tools/**" = ["S"]
+
+[tool.ruff.lint.flake8-bugbear]
+extend-immutable-calls = ["fastapi.Body"]
+
+[tool.pyright]
+include = ["src/solvi"]
+pythonVersion = "3.10"
+typeCheckingMode = "basic"
+reportMissingImports = "warning"      # the optional extras (torch, transformers, onnxruntime, mcp, ...) may be missing
+reportMissingModuleSource = "none"
+# solvi is a dynamically typed code base: `x: T = None` defaults, facts and records typed `object` / `Any`, attributes set
+# on instances (a Response's System, a loaded model's files) and dicts of mixed values. These rules report that style
+# (about 260 findings on 0.7, none of them a bug on review) — shown as warnings, not failures; the rest of basic mode
+# (undefined and possibly unbound names, bad imports of solvi's own modules, call arity, return types, ...) fails CI.
+reportOptionalMemberAccess = "none"
+reportOptionalSubscript = "none"
+reportOptionalIterable = "none"
+reportOptionalOperand = "none"
+reportAttributeAccessIssue = "warning"
+reportArgumentType = "warning"
+reportCallIssue = "warning"
+reportIndexIssue = "warning"
+reportGeneralTypeIssues = "warning"
+reportAssignmentType = "warning"
+reportOperatorIssue = "warning"
+reportRedeclaration = "warning"

@@ -6,7 +6,7 @@ import re
 import numpy as np
 import pytest
 
-from solvi import Answer, Catalog, Question, System
+from solvi import Catalog, System
 from solvi.decide import DecideModel
 from solvi.multi import Cascade
 from solvi.perturb import instruction_rule, quoted_instructions, sentences, variants

@@ -197,3 +197,11 @@ def test_serve_never_downloads_a_decider_without_pull(tmp_path, monkeypatch, cap
     with pytest.raises(SystemExit) as e:
         main(["serve", "--decider", "solvi-ai/solvi-base", "--pull", "--backend", "torch"])
     assert e.value.code == 2 and pulled == [("solvi-ai/solvi-base", "torch")]
+
+
+def test_the_system_one_client_speaks_http_only():
+    from solvi.systemone import systemone
+    for bad in ("file:///etc/passwd", "ftp://x", "/etc/passwd"):
+        with pytest.raises(ValueError, match="http"):
+            systemone(bad, "m")
+    assert systemone("https://solvi.example", "m").model_id == "systemone:m"
