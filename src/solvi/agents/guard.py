@@ -110,7 +110,12 @@ def messages(context) -> list:
     """A conversation → [(role, text)]: a string (one user message); a list of {"role", "content"} dicts (OpenAI,
     Anthropic, MCP-style; content a string or a list of parts with "text"; {"type": "function_call_output", "output"}
     items are tool outputs), (role, text) pairs, or message objects with .type / .role and .content (LangChain). Roles
-    are normalized to user, assistant, tool and system; anything unreadable is skipped."""
+    are normalized to user, assistant, tool and system; anything unreadable is skipped.
+
+    A content list is read block by block: an Anthropic {"type": "tool_result"} block (or any "*_tool_result") is a tool
+    output even inside a "user" message, and a {"type": "tool_use"} block (or "function_call") is the assistant's —
+    never the user's words, so neither grounds a `ground_from=("user",)` argument, and a tool result gets the injection
+    checks. Consecutive blocks of the same role make one message."""
     if context is None:
         return []
     if isinstance(context, str):
@@ -127,10 +132,51 @@ def messages(context) -> list:
         else:
             role = getattr(m, "role", None) or getattr(m, "type", None)
             content = getattr(m, "content", None)
-        text = _text(content)
         role = ROLES.get(str(role).lower()) if role is not None else None
-        if role is not None and text:
-            out.append((role, text))
+        for r, text in _blocks(role, content):
+            if r is not None and text:
+                out.append((r, text))
+    return out
+
+
+def _block_role(kind):
+    """The role of a content block by its type: a tool result is the tool's, a tool use the assistant's, else None (the
+    message's own role)."""
+    if not isinstance(kind, str):
+        return None
+    if kind.endswith("tool_result") or kind == "function_call_output":
+        return "tool"
+    if kind.endswith("tool_use") or kind == "function_call":
+        return "assistant"
+    return None
+
+
+def _blocks(role, content):
+    """A message's content → [(role, text)]: one part for a string; a list of blocks split where a block's type gives it
+    another role (tool_result → tool, tool_use → assistant), consecutive blocks of one role joined."""
+    if not isinstance(content, (list, tuple)):
+        return [(role, _text(content))]
+    out = []
+    for c in content:
+        kind = c.get("type") if isinstance(c, dict) else getattr(c, "type", None)
+        r = _block_role(kind) or role
+        if r == "assistant" and _block_role(kind) == "assistant":
+            get = c.get if isinstance(c, dict) else (lambda k, _c=c: getattr(_c, k, None))
+            args = next((get(k) for k in ("input", "arguments", "args") if get(k) is not None), {})
+            t = f"{get('name')}({args if isinstance(args, str) else json.dumps(args, ensure_ascii=False, default=str)})"
+        elif isinstance(c, dict) and _block_role(kind) == "tool":
+            t = _text(c.get("content") if "content" in c else c.get("output"))
+        elif _block_role(kind) == "tool":
+            t = _text(getattr(c, "content", None) if getattr(c, "content", None) is not None
+                      else getattr(c, "output", None))
+        else:
+            t = _text([c])
+        if not t:
+            continue
+        if out and out[-1][0] == r:
+            out[-1] = (r, out[-1][1] + "\n" + t)
+        else:
+            out.append((r, t))
     return out
 
 
