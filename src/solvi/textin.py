@@ -237,7 +237,11 @@ def parse_date(s, spec=None):
 
 _YES = {"yes", "y", "true", "on", "1", "yep", "sure", "да", "истина", "верно"}
 _NO = {"no", "n", "false", "off", "0", "none", "нет", "ложь"}
-_NEG = r"(?:not|no|non|never|without|не|нет|без)"
+# a negation word ("not", "isn't", "not at all", "hardly", "не", "ни"): near a yes / no cue it makes the cue unreadable
+_NEG_WORDS = r"(?:not|no|non|never|nor|neither|without|cannot|hardly|barely|scarcely|не|нет|ни|без)"
+NEGATION_RE = re.compile(rf"(?<!\w){_NEG_WORDS}(?!\w)|n['’]t(?!\w)", re.I)
+_CLAUSE_END = re.compile(r"[.;:!?,\n—–]")
+_NEG_WINDOW = 40                    # how far before a cue a negation still counts (chars, within the clause)
 
 
 def _norm(s):
@@ -245,20 +249,27 @@ def _norm(s):
 
 
 def parse_bool(s, spec=None):
-    """A quote → True / False: yes / no words (en, ru), or the field's cue words (spec {"cues": [...]}) — "urgent" → True,
-    "not urgent" / "no rush" style negations of a cue → False."""
+    """A quote → True / False: yes / no words (en, ru); a declared negative cue (spec {"negatives": [...]}: "not urgent",
+    "no rush") → False; the quote is exactly one of the field's cues (spec {"cues": [...]}: its name and the `cues=` words)
+    → True. A cue with a negation near it ("isn't urgent", "not at all urgent", "hardly urgent", "не срочно") is neither:
+    it does not parse — never True, and False only through a declared negative cue."""
     spec = spec or {}
     t = _norm(s)
     if t in _YES:
         return True
     if t in _NO:
         return False
+    if t and t in {_norm(c) for c in spec.get("negatives") or ()}:
+        return False
     cues = [_norm(c) for c in spec.get("cues") or () if _norm(c)]
+    neg = NEGATION_RE.search(str(s))
     for c in sorted(cues, key=len, reverse=True):
-        if re.fullmatch(rf"{_NEG}\s+(?:\w+\s+)?{re.escape(c)}", t) or re.fullmatch(rf"{_NEG}{re.escape(c)}", t):
-            return False
-        if t == c:
-            return True
+        if re.search(rf"(?<!\w){re.escape(c)}(?!\w)", t):
+            if neg:
+                raise ParseError(f"{s!r} negates {c!r} ({neg.group()!r}): not read as a yes or a no "
+                                 "(declare negative cues to read it as no)")
+            if t == c:
+                return True
     raise ParseError(f"not a yes / no: {s!r}")
 
 
@@ -311,13 +322,15 @@ class FieldSpec:
     labels: dict | None = None            # enum: {label: [synonyms]}
     values: dict | None = None            # enum: {label: the typed value (a Literal value, an Enum member)}
     pattern: str | None = None
+    hints: list = field(default_factory=list)       # description words: they rank candidates, never decide a value
+    negatives: list = field(default_factory=list)   # bool: declared phrases that mean False ("not urgent", "no rush")
 
     def parser_spec(self, today=None, dayfirst=True):
         """The parser's arguments, recorded in the trace so a replay parses the quote the same way."""
         if self.kind == "enum":
             return {"labels": self.labels}
         if self.kind == "bool":
-            return {"cues": list(self.cues)}
+            return {"cues": list(self.cues), **({"negatives": list(self.negatives)} if self.negatives else {})}
         if self.kind == "date":
             return {"today": today.isoformat() if today else None, "dayfirst": dayfirst}
         if self.kind == "text":
@@ -341,6 +354,8 @@ class FieldSpec:
 
 _STOP = {"the", "a", "an", "of", "for", "to", "in", "on", "is", "are", "and", "or", "by", "with", "from", "this", "that",
          "what", "which", "when", "how", "id", "number", "value", "read", "given", "none"}
+_BOOL_PREFIX = {"is", "are", "was", "has", "have", "had", "needs", "need", "wants", "want", "should", "must", "can",
+                "requires", "require", "be"}
 
 
 def _base_type(t):
@@ -350,9 +365,11 @@ def _base_type(t):
     return _strip(ms[0]) if len(ms) == 1 else t
 
 
-def field_spec(ef, synonyms=None, cues=None, pattern=None, extra=None):
-    """An EntryField → FieldSpec: the kind from the type, cue words from the name and description (plus `cues`), enum labels
-    from Literal values / Enum members (plus `synonyms` {label: [...]}, keyed by the value or the member name)."""
+def field_spec(ef, synonyms=None, cues=None, pattern=None, extra=None, negatives=None):
+    """An EntryField → FieldSpec: the kind from the type, cue words from the name (plus `cues`), hint words from the
+    description (they rank candidates, never decide), enum labels from Literal values / Enum members (plus `synonyms`
+    {label: [...]}, keyed by the value or the member name). A bool field's value cues are only its name ("urgent", "is
+    urgent" → "urgent") and `cues`; `negatives` (or json_schema_extra "negative_cues") are phrases that mean False."""
     extra = extra or {}
     t = _base_type(ef.type)
     kind, labels, values = "unsupported", None, None
@@ -381,13 +398,20 @@ def field_spec(ef, synonyms=None, cues=None, pattern=None, extra=None):
                 except TypeError:
                     pass
             labels[lab] = list(dict.fromkeys(a for a in al if _norm(a) != _norm(lab)))
+    phrase = ef.name.replace("_", " ").lower()
     words = [w for w in re.split(r"[_\W]+", ef.name.lower()) if w and w not in _STOP]
-    if ef.description:
-        words += [w for w in re.findall(r"\w+", ef.description.lower()) if len(w) > 2 and w not in _STOP]
-    cue = list(dict.fromkeys([ef.name.replace("_", " ").lower()] + words + [str(c).lower() for c in extra.get("cues") or ()]
-                             + [str(c).lower() for c in cues or ()]))
+    desc = [w for w in re.findall(r"\w+", (ef.description or "").lower()) if len(w) > 2 and w not in _STOP]
+    explicit = [str(c).lower() for c in extra.get("cues") or ()] + [str(c).lower() for c in cues or ()]
+    if kind == "bool":                   # only the name and explicit cues can make a field True
+        core = " ".join(w for w in re.split(r"[_\W]+", ef.name.lower()) if w and w not in _BOOL_PREFIX)
+        cue = list(dict.fromkeys([c for c in (phrase, core) if c] + explicit))
+        hints = [w for w in dict.fromkeys(words + desc) if w not in cue]
+    else:
+        cue = list(dict.fromkeys([phrase] + words + explicit))
+        hints = [w for w in dict.fromkeys(desc) if w not in cue]
+    neg = list(dict.fromkeys(str(c).lower() for c in [*(extra.get("negative_cues") or ()), *(negatives or ())]))
     return FieldSpec(ef.name, ef.type, kind, ef.description, ef.required, cue, labels, values,
-                     pattern or extra.get("pattern"))
+                     pattern or extra.get("pattern"), hints, neg)
 
 
 # ------------------------------------------------------------------------------------------------ extractors
@@ -422,10 +446,10 @@ class CueExtractor:
             return self._rank(text, spans, cues, own=True)
         elif fs.kind == "bool":
             spans = []
-            for c in fs.cues:
-                for m in re.finditer(rf"(?<!\w)(?:{_NEG}\s+(?:\w+\s+)?)?{re.escape(c)}(?!\w)", text, re.I):
-                    spans.append((m.start(), m.end()))
-            return self._rank(text, spans, [], own=True)
+            for c in [*fs.cues, *fs.negatives]:
+                for m in re.finditer(rf"(?<!\w){re.escape(c)}(?!\w)", text, re.I):
+                    spans.append((_negated_from(text, m.start()), m.end()))
+            return self._rank(text, spans, self._cues(text, fs, hints_only=True), own=True)
         elif fs.kind == "text":
             if fs.pattern:
                 spans = [(m.start(), m.end()) for m in re.finditer(fs.pattern, text)]
@@ -445,9 +469,9 @@ class CueExtractor:
         return self._rank(text, spans, cues)
 
     @staticmethod
-    def _cues(text, fs):
+    def _cues(text, fs, hints_only=False):
         out = []
-        for c in fs.cues:
+        for c in (fs.hints if hints_only else [*fs.cues, *fs.hints]):
             out += [(m.start(), m.end()) for m in re.finditer(rf"(?<!\w){re.escape(c)}\w*", text, re.I)]
         return sorted(out)
 
@@ -470,6 +494,22 @@ class CueExtractor:
                 scored.append((1, s, s, e, 0.9 if own else 0.6 if len(spans) == 1 else 0.3))
         scored.sort()
         return [Quote(text[s:e], s, e, SOURCE, c) for _, _, s, e, c in scored]
+
+
+def _negated_from(text, start):
+    """Where a yes / no cue at `start` begins once a negation shortly before it in the same clause is included ("it isn't
+    really urgent" → from "isn't"): the parser then sees the negation and does not read the cue as True."""
+    lo = max(0, start - _NEG_WINDOW)
+    window = text[lo:start]
+    cut = [m.end() for m in _CLAUSE_END.finditer(window)]
+    base = lo + (cut[-1] if cut else 0)
+    negs = list(NEGATION_RE.finditer(text, base, start))
+    if not negs:
+        return start
+    s = negs[0].start()
+    while s > base and (text[s - 1].isalnum() or text[s - 1] in "'’"):     # the whole word of "isn't"
+        s -= 1
+    return s
 
 
 class DeciderExtractor:
@@ -637,14 +677,15 @@ class TextIn:
 
     entry_points: the question names to choose from (default: every question). descriptions: {question: text} for the
     router (default: the question's text). synonyms: {field: {label: [synonym]}} for enum fields; cues: {field: [word]}
-    extra cue words; patterns: {field: regex} for string fields (a System(inputs=...) field's json_schema_extra may carry
-    "synonyms", "cues", "pattern" too). today: a date for year-less and relative dates (recorded in the trace).
+    extra cue words; patterns: {field: regex} for string fields; negatives: {field: [phrase]} for yes / no fields — the
+    phrases that mean False ("not urgent", "no rush"; without one a negated cue does not parse) (a System(inputs=...)
+    field's json_schema_extra may carry "synonyms", "cues", "negative_cues", "pattern" too). today: a date for year-less and relative dates (recorded in the trace).
     dayfirst: 12/09 is 12 September. min_confidence / min_margin: the router escalates below this probability or when the
     two best entry points are closer than the margin. min_field_confidence: a span found with less confidence is "unsure"
     (not used). task: the routing question the decider reads. source: the init_state key the text is given under."""
 
     def __init__(self, system, decider=None, extractor=None, *, entry_points=None, descriptions=None, synonyms=None,
-                 cues=None, patterns=None, today=None, dayfirst=True, min_confidence=0.6, min_margin=0.1,
+                 cues=None, patterns=None, negatives=None, today=None, dayfirst=True, min_confidence=0.6, min_margin=0.1,
                  min_field_confidence=0.5, task="Which request is this text making?", source=SOURCE):
         self.system, self.decider = system, decider
         if extractor is None:
@@ -653,6 +694,7 @@ class TextIn:
         self.entry_points = {e.name: e for e in _entry_points(system, entry_points)}
         self.descriptions = dict(descriptions or {})
         self.synonyms, self.cues, self.patterns = dict(synonyms or {}), dict(cues or {}), dict(patterns or {})
+        self.negatives = dict(negatives or {})
         if isinstance(today, str):
             today = _dt.date.fromisoformat(today)
         self.today, self.dayfirst = today, dayfirst
@@ -701,7 +743,8 @@ class TextIn:
             m = getattr(self.system, "inputs", None)
             if m is not None and name in m.model_fields and isinstance(m.model_fields[name].json_schema_extra, dict):
                 extra = m.model_fields[name].json_schema_extra
-            self._specs[key] = field_spec(ef, self.synonyms.get(name), self.cues.get(name), self.patterns.get(name), extra)
+            self._specs[key] = field_spec(ef, self.synonyms.get(name), self.cues.get(name), self.patterns.get(name), extra,
+                                          self.negatives.get(name))
         return self._specs[key]
 
     def _field(self, text, fs, avoid=None):

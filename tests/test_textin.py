@@ -130,7 +130,8 @@ def test_parse_date():
 
 def test_parse_bool_enum_text():
     assert parse_bool("yes") is True and parse_bool("нет") is False
-    assert parse_bool("urgent", {"cues": ["urgent"]}) is True and parse_bool("not urgent", {"cues": ["urgent"]}) is False
+    assert parse_bool("urgent", {"cues": ["urgent"]}) is True
+    assert parse_bool("not urgent", {"cues": ["urgent"], "negatives": ["not urgent"]}) is False
     lab = {"EUR": ["euro", "€"], "RUB": ["rubles"]}
     assert parse_enum("Euro", {"labels": lab}) == "EUR" and parse_enum("5 rubles", {"labels": lab}) == "RUB"
     with pytest.raises(ParseError):
@@ -238,7 +239,8 @@ def test_question_given_skips_routing():
     _, s = shop()
     res = s.ask_text("A-12 cancel, it is urgent", textin=textin(s), question="cancel_order")
     assert res["cancel_order"].answer == "cancelled" and res.textin.route["by"] == "given"
-    res = s.ask_text("A-12 cancel, not urgent", textin=textin(s), question="cancel_order")
+    res = s.ask_text("A-12 cancel, not urgent", textin=textin(s, negatives={"urgent": ["not urgent"]}),
+                     question="cancel_order")
     assert res["cancel_order"].answer == "keep" and res.textin.fields["urgent"].value is False
     with pytest.raises(KeyError):
         textin(s).read("x", question="nope")
@@ -310,3 +312,48 @@ def test_cue_extractor_picks_the_number_after_its_cue():
     fs = tin.spec("request_refund", "amount")
     qs = CueExtractor().find("order A-5, 3 items, amount 250 EUR", fs)
     assert qs[0].value == "250" and qs[0].confidence == 1.0
+
+
+# --------------------------------------------------------------------------------------------------- fixes before 0.7
+def test_bool_description_words_never_decide_true():
+    """A bool field's description words rank candidates but never make it True; only its name and cues= do."""
+    from solvi.textin import EntryField, field_spec
+    fs = field_spec(EntryField("urgent", bool, "Whether the customer asked for express handling", True))
+    assert fs.cues == ["urgent"] and "customer" in fs.hints
+    with pytest.raises(ParseError):
+        parse_bool("customer", fs.parser_spec())
+    assert CueExtractor().find("The customer asked to cancel order A-1.", fs) == []
+    qs = CueExtractor().find("The customer says it is urgent.", fs)
+    assert [q.value for q in qs] == ["urgent"] and parse_bool(qs[0].value, fs.parser_spec()) is True
+    fs2 = field_spec(EntryField("is_urgent", bool, None, True), cues=["asap"])
+    assert fs2.cues == ["is urgent", "urgent", "asap"] and parse_bool("asap", fs2.parser_spec()) is True
+
+
+@pytest.mark.parametrize("text", ["A-12 cancel, it isn't urgent", "A-12 cancel, not at all urgent",
+                                  "A-12 cancel, it is not really urgent", "A-12 cancel, hardly urgent",
+                                  "A-12 cancel, never urgent", "A-12 cancel, I don't think it's urgent"])
+def test_bool_negated_cue_is_unparsed_not_true(text):
+    _, s = shop()
+    read = textin(s).read(text, question="cancel_order")
+    f = read.fields["urgent"]
+    assert f.status == "unparsed" and f.value is None and "urgent" in read.missing
+    res = s.ask_text(read)
+    assert res["cancel_order"].status == "abstain"
+
+
+def test_bool_negation_russian_and_declared_negative():
+    fs_spec = {"cues": ["срочно"]}
+    for q in ("не срочно", "ни разу не срочно"):
+        with pytest.raises(ParseError, match="negates"):
+            parse_bool(q, fs_spec)
+    assert parse_bool("срочно", fs_spec) is True
+    assert parse_bool("не срочно", {**fs_spec, "negatives": ["не срочно"]}) is False
+    _, s = shop()
+    tin = textin(s, cues={"urgent": ["срочно"]}, negatives={"urgent": ["не срочно"]})
+    r = tin.read("A-12 отмените, это не срочно", question="cancel_order")
+    assert r.fields["urgent"].value is False and r.fields["urgent"].quote.value == "не срочно"
+    r = textin(s, cues={"urgent": ["срочно"]}).read("A-12 отмените, это не срочно", question="cancel_order")
+    assert r.fields["urgent"].status == "unparsed"
+    # a negation in another clause does not touch the cue
+    r = textin(s).read("I do not want a refund, cancel A-12, it is urgent", question="cancel_order")
+    assert r.fields["urgent"].value is True

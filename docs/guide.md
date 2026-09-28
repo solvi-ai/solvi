@@ -1665,7 +1665,7 @@ decider's act signal escalates, nothing is chosen: `read.question` is None, `sys
 questions abstain with guard `escalated`, and `read.clarify()` asks which one is meant. The extractor points at the text of
 each field: the decider's own span pointer (`DeciderExtractor`) when the checkpoint has one, else `CueExtractor` — a
 deterministic finder of candidates of the field's type (numbers, dates, enum labels and synonyms, cue words, a pattern)
-nearest after a cue word (the field's name and description words, plus `cues={field: [...]}`); any object with
+nearest after a cue word (the field's name, plus `cues={field: [...]}`; its description's words rank candidates too); any object with
 `find(text, FieldSpec) → [Quote]` works, and a list of extractors is tried in order. Code does the rest: a deterministic
 parser per type turns the quote into the value.
 
@@ -1674,7 +1674,7 @@ parser per type turns the quote into the value.
 | `int`, `float`, `Decimal` | `1500`, `1,500.50`, `1 500 000`, `12,5`, `2k`, `1.5 million`, `3 млн`, `a million`, `полтора миллиона` (an `int` must be whole) |
 | `date` | `2026-09-12`, `12.09.2026`, `12/09/26` (`dayfirst=False`: month first), `12 September 2026`, `September 12`, `12 сентября`; `today` / `yesterday` / `tomorrow` |
 | `Literal[...]`, an `Enum` | the label (or member name), or a synonym: `synonyms={field: {label: [...]}}` or the field's `json_schema_extra={"synonyms": ...}` |
-| `bool` | yes / no words, the field's cue ("urgent"), a negated cue ("not urgent") |
+| `bool` | yes / no words; the field's name or a `cues=` word ("urgent") → True; a phrase declared in `negatives={field: [...]}` (or `json_schema_extra={"negative_cues": ...}`) → False. Description words only rank candidates. A cue with a negation near it ("isn't urgent", "not at all urgent", "hardly urgent", "не срочно") is `unparsed` — never True, and False only through a declared negative |
 | `str` | the quote, trimmed; `patterns={field: regex}` must match it whole |
 
 A date without a year, or a relative one, is read only with `TextIn(today=...)`: without it the field is `unparsed`, never
