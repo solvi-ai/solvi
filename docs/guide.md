@@ -739,7 +739,10 @@ Any server of the OpenAI chat-completions API (OpenAI, OpenRouter, vLLM, llama.c
 decides as with any decider. One question is one request at temperature 0, with a JSON schema for the reply — the answer
 among the options, a probability per option (`ask="confidence"`: one number) and a quote from the text that supports it
 — sent as `response_format` json_schema when the server takes it, else as json_object, else in the prompt only
-(`response_format="auto"` tries them in that order and keeps what works). When the server returns log-probabilities
+(`response_format="auto"` tries them in that order and keeps what works: it steps down only before the first request that
+succeeds, and only on an HTTP 400 / 422 about the format — one that names `response_format`, `json_schema`, `logprobs`
+or says nothing; another 400, 413 or 422 escalates that question, `invalid input for the endpoint: HTTP 400 — <the
+server's message>`, and the format stays). When the server returns log-probabilities
 (`logprobs="auto"`), the probabilities come from the answer's tokens — the chosen option's whole token sequence, the others
 from the alternatives at its first token — not from the numbers the model wrote (`extra["llm"]["probabilities"]` says
 which). Yes/no, scores, multi-label questions, spans (`kind="span"`: the passage must be in the text), "not stated"

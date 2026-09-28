@@ -40,6 +40,7 @@ import hashlib
 import json
 import math
 import re
+import threading
 import time
 import urllib.error
 import urllib.parse
@@ -118,6 +119,28 @@ class LLMError(RuntimeError):
 
 class _Transient(Exception):
     """The server did not answer (network, timeout, 429, 5xx) after the retries."""
+
+
+class _BadInput(Exception):
+    """The server refused this request's input (HTTP 400 / 413 / 422 not about the reply format): that item escalates."""
+
+
+_FORMAT_WORDS = re.compile(r"response_format|json_schema|json_object|logprobs|structured output|guided", re.IGNORECASE)
+
+
+def _error_text(e):
+    """The body of an HTTP error → its message (the JSON error's "message", else the text), cut to 200 characters."""
+    try:
+        raw = e.read(4096).decode("utf-8", "replace")
+    except Exception:  # noqa: BLE001 — no body to read
+        return ""
+    try:
+        j = json.loads(raw)
+        msg = (j.get("error") or {}).get("message") if isinstance(j.get("error"), dict) else j.get("error") or j.get("message")
+        raw = msg if isinstance(msg, str) else raw
+    except (ValueError, AttributeError):
+        pass
+    return " ".join(raw.split())[:200]
 
 
 def _shape(it):
@@ -435,9 +458,12 @@ class LLMScorer:
         self.sleep = sleep or time.sleep
         self.template = template_hash()
         self.model_id = f"llm:{model}@{self.endpoint}"
-        # what the server has accepted so far ("auto": the first that works, kept for the next requests)
+        # what the server has accepted so far ("auto": the first that works, kept for the next requests); worker
+        # threads read and step it down under the lock, and never after a request has succeeded
         self._format = "json_schema" if response_format == "auto" else response_format
         self._lp = logprobs is not False
+        self._ok = False
+        self._lock = threading.Lock()
         self.requests = 0
         self.usage = {"prompt_tokens": 0, "completion_tokens": 0}
 
@@ -474,31 +500,55 @@ class LLMScorer:
         with self.opener(req, timeout=self.timeout) as r:
             return json.loads(r.read().decode())
 
-    def _ladder(self):
-        """The (format, logprobs) settings to try after the server rejects a request (HTTP 400): drop what it may not
-        support, one thing at a time, as far as the configuration allows."""
+    def _ladder(self, fmt=None, lp=None):
+        """The (format, logprobs) settings to try after the server rejects the reply format (HTTP 400): drop what it may
+        not support, one thing at a time, as far as the configuration allows."""
+        fmt = self._format if fmt is None else fmt
+        lp = self._lp if lp is None else lp
         steps = []
-        if self.logprobs == "auto" and self._lp:
-            steps.append((self._format, False))
+        if self.logprobs == "auto" and lp:
+            steps.append((fmt, False))
         if self.response_format == "auto":
-            later = FORMATS[FORMATS.index(self._format) + 1:]
-            steps += [(f, False if self.logprobs == "auto" else self._lp) for f in later]
+            later = FORMATS[FORMATS.index(fmt) + 1:]
+            steps += [(f, False if self.logprobs == "auto" else lp) for f in later]
         return steps
 
+    def _step_down(self, fmt, lp, why):
+        """After HTTP 400 / 422 on a request made with (fmt, lp): True when the next setting of the ladder is to be tried.
+        Only before the first successful request, and only when the error is about the reply format (it names
+        response_format / json_schema / logprobs ..., or says nothing at all); another thread may have stepped already."""
+        with self._lock:
+            if (self._format, self._lp) != (fmt, lp):
+                return True                                    # stepped meanwhile: try the current setting
+            if self._ok or not (_FORMAT_WORDS.search(why) or not re.search(r"[A-Za-z]{3}", why)):
+                return False
+            steps = self._ladder(fmt, lp)
+            if not steps:
+                return False
+            self._format, self._lp = steps[0]
+            return True
+
     def request(self, it):
-        """→ (the server's response dict, the format used); _Transient when the server does not answer."""
+        """→ (the server's response dict, the format used); _Transient when the server does not answer, _BadInput when it
+        refuses this request's input."""
         attempt, last = 0, None
         while True:
-            body = self.body(it)
+            with self._lock:
+                fmt, lp = self._format, self._lp
+            body = self.body(it, fmt, lp)
             try:
                 resp = self._post(body)
-                self.requests += 1
-                return resp, self._format
+                with self._lock:
+                    self.requests += 1
+                    self._ok = True
+                return resp, fmt
             except urllib.error.HTTPError as e:
                 code = e.code
-                if code in (400, 422) and self._ladder():
-                    self._format, self._lp = self._ladder()[0]
-                    continue
+                if code in (400, 413, 422):
+                    why = _error_text(e)
+                    if code != 413 and self._step_down(fmt, lp, why):
+                        continue
+                    raise _BadInput(f"HTTP {code}" + (f" — {why}" if why else "")) from None
                 if code in (408, 409, 429) or code >= 500:
                     last = f"HTTP {code}"
                 else:
@@ -521,15 +571,18 @@ class LLMScorer:
         except _Transient as e:
             return {**blank, "escalate": f"the LLM server did not answer — {e}", "transient": True,
                     "info": {"llm": base}}
+        except _BadInput as e:
+            return {**blank, "escalate": f"invalid input for the endpoint: {e}", "info": {"llm": base}}
         info = {**base, "format": fmt}
         try:
             ch = (resp.get("choices") or [None])[0]
             if not isinstance(ch, dict):
                 raise InvalidOutput("the response has no choices")
             u = resp.get("usage") or {}
-            for key in self.usage:
-                if isinstance(u.get(key), int):
-                    self.usage[key] += u[key]
+            with self._lock:
+                for key in self.usage:
+                    if isinstance(u.get(key), int):
+                        self.usage[key] += u[key]
             if u:
                 info["usage"] = {key: u[key] for key in ("prompt_tokens", "completion_tokens") if isinstance(u.get(key), int)}
             if resp.get("model") and resp.get("model") != self.model:
@@ -566,7 +619,9 @@ def llm(base_url, model, api_key=None, *, timeout=60.0, retries=2, backoff=1.0, 
     base_url: the API root ("https://api.openai.com/v1", "https://openrouter.ai/api/v1", "http://127.0.0.1:8000/v1" for
     vLLM, "http://127.0.0.1:8080/v1" for llama.cpp, "http://127.0.0.1:11434/v1" for Ollama). model: the model name the
     server knows. api_key: sent as a Bearer token, never recorded. response_format: "auto" (json_schema, then json_object,
-    then the contract in the prompt only, as far as the server accepts), or one of them. logprobs: "auto" (ask for them;
+    then the contract in the prompt only, as far as the server accepts — stepped down only before the first successful
+request and on a 400 about the format; any other 400 / 413 / 422 escalates that question: "invalid input for the
+endpoint"), or one of them. logprobs: "auto" (ask for them;
     drop them when the server refuses), True, False. ask: "probabilities" (one per option) or "confidence" (one number,
     fewer tokens; the rest shared evenly). retries / backoff: for network errors, timeouts, 408 / 409 / 429 / 5xx.
     seed: sent when not None (servers that support it are more repeatable). headers: extra HTTP headers (OpenRouter's
