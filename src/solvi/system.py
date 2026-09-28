@@ -118,6 +118,20 @@ class Response(Serial):
         a = build(self, question)
         return a[question] if isinstance(question, str) else a
 
+    def counterfactual(self, question, max_changes=2, over=None, target=None, domains=None, system=None,
+                       max_evals=5000):
+        """The smallest change of the given inputs that changes this answer: "approve if amount ≤ 1000 (now 1200)".
+        Only the deterministic flow is re-run — every model-backed part (extractor, decision, learned head) is held at the
+        proposal it recorded in this trace, and no model is called; the result says which parts were held.
+        over: the given facts to change (default: those the question's flow reads); numbers and dates are searched for
+        the nearest threshold crossing (bisection — exact for inputs the answer is monotone in), booleans, enums and
+        Literal-typed inputs enumerated; `domains` = {fact: [values]} or {fact: (lo, hi)} adds or bounds a domain.
+        max_changes: 1 or 2 inputs changed together (two only when no single change does it). target: an answer to reach
+        (default: any other answer). → solvi.counterfactual.Counterfactuals (print it; .best; .to_dict())."""
+        from .counterfactual import search
+        return search(self, question, max_changes=max_changes, over=over, target=target, domains=domains, system=system,
+                      max_evals=max_evals)
+
     def report(self, format="md", question=None, system=None, replay="trusted"):
         """A human-readable report of this decision for an auditor or a customer: each answer, what it rests on, the quotes
         highlighted in the source text with their offsets, the safeguards that fired, the guarantee line, the models'
@@ -325,6 +339,18 @@ class System:
             self.cost_policy.observe(trace.timings)
         if self.learn:
             self._observe(trace, init_state, vals, policy)
+        results, feasible, violations = self._results(qs, flow, trace, vals)
+        resp = Response(results, flow, trace, vals, now_ms() - t0, feasible, violations, self.catalog)
+        resp._heads = self.heads                      # for the audit: which features a learned head could not use
+        resp._system = self                           # for reports and counterfactuals (questions, answer heads, replay)
+        self._count(resp)
+        if self.storage is not None and store:
+            self.storage.save(resp)                   # sets resp.stored_id
+        return resp
+
+    def _results(self, qs, flow, trace, vals):
+        """The answers from an executed flow: rules / hard checks / heads, calibration, constraints, the low-confidence
+        safeguard → (results, feasible, violations). No side effects besides an answer head's record in the trace."""
         by = {r.name: r for r in trace.records}
         results = {}
         for q in qs:
@@ -340,13 +366,7 @@ class System:
                 results[q.name] = Result(None, r.confidence, f"low confidence {r.confidence:.2f} < {q.min_confidence}; "
                                          f"would have answered {r.answer!r} ({r.why})", "abstain", r.probs, r.provenance,
                                          r.source, "low_confidence", r.repaired, r.kind, r.evidence, r.extra)
-        resp = Response(results, flow, trace, vals, now_ms() - t0, feasible, violations, self.catalog)
-        resp._heads = self.heads                      # for the audit: which features a learned head could not use
-        resp._system = self                           # for reports and counterfactuals (questions, answer heads, replay)
-        self._count(resp)
-        if self.storage is not None and store:
-            self.storage.save(resp)                   # sets resp.stored_id
-        return resp
+        return results, feasible, violations
 
     def fingerprint(self):
         """What makes this system's decisions: {"catalog": the catalog's fingerprint (every part's code and declarations,

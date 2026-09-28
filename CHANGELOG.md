@@ -2,6 +2,16 @@
 
 ## Unreleased (0.7)
 
+### Counterfactual explanations
+
+- `res.counterfactual(question, max_changes=2, over=None, target=None, domains=None)`: the smallest change of the given
+  inputs that changes the answer — "approve if amount ≤ 1000 (now 1200)", "yes if purchase_date ≥ 2026-08-20 (now
+  2026-08-10)". Numbers and dates: the nearest threshold crossing (doubling probes, then bisection; exact for monotone
+  inputs); booleans, Enums, `Literal` inputs and `domains=` values enumerated; two inputs together when one is not enough.
+- Only the deterministic flow is re-run on the recorded plan; every model-backed part is held at its recorded proposal and
+  no model is ever called — the result says which parts were held and which had no proposal.
+- `System._results`: the answer step of `ask` / `aask` without side effects (shared by counterfactuals).
+
 ### Reports for people
 
 - `res.report(format="md" | "html" | "data")`: a report of one decision for an auditor or a customer — each answer, what it

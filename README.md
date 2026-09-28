@@ -210,7 +210,8 @@ Every answer is a value and a confidence, and the types also declare answer prim
   hash chain across them; `solvi diff` shows which stored decisions a rule or model change would flip; `solvi test`,
   `solvi check` and the honesty suite (`solvi honesty`) belong in CI; `res.report(format="html")` and
   `solvi report decisions.db --html out.html` give an auditor one page per decision or per period, and `solvi.otel.export(res)` puts every step in
-  your OpenTelemetry traces.
+  your OpenTelemetry traces. `res.counterfactual("approve")` says what would have changed the answer ("approve if
+  amount ≤ 1000 (now 1200)"), re-running only the code with the models' recorded proposals held.
 
 ## Planning around dead ends and costs (code strategist)
 
