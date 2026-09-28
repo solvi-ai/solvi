@@ -7,6 +7,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
+from . import i18n
 from .provenance import FUZZY, classify, matches, snippet
 
 STAT_KEYS = {"grounding": "grounding_rejected", "type_rejected": "type_rejected", "outside_options": "outside_options",
@@ -18,12 +19,10 @@ STAT_KEYS = {"grounding": "grounding_rejected", "type_rejected": "type_rejected"
 QUIET = {"evidence_missing", "timeout"}      # listed in safeguard_report only once they fire
 STATS = ["asks", "answers", "abstained", "model_outputs"] + list(STAT_KEYS.values())
 
-LABEL = {"grounding": "grounding rejected", "type_rejected": "type rejected", "outside_options": "outside the options",
-         "rule_abstained": "rule abstained",
-         "low_confidence": "low confidence",
-         "validator": "rejected by validate", "hard_check": "hard check decided", "constraint_repair": "constraint repair",
-         "fallback": "fallback producer", "escalated": "model escalated", "evidence_missing": "evidence missing",
-         "timeout": "timed out"}
+LABEL = {k: i18n.label(k) for k in STAT_KEYS}      # safeguard → its English label (solvi.i18n has the other languages)
+COLUMNS = ["col.given", "col.computed", "col.quoted", "col.decided", "col.learned", "col.check", "col.rule", "col.evidence",
+           "col.span", "col.scores", "col.constraint", "col.not_run", "col.answer", "col.support", "col.guarantee",
+           "col.safeguards"]
 
 
 def _missing(v):
@@ -131,32 +130,35 @@ def _model(m):
     return f"{m['type']} {m['id']} #{m['fp'][:8]}" if m else ""
 
 
-def _extra_line(x):
+def _extra_line(x, lang=None):
     """A decision's recorded details: the act probability, an ordinal's expected level, the shared forward pass."""
     if not x:
         return ""
+    t = i18n.t
     out = []
     if x.get("act") is not None:
-        out.append(f"act {x['act']:.2f}")
+        out.append(t("x.act", lang, x=f"{x['act']:.2f}"))
     if x.get("expected") is not None:
-        out.append(f"expected {x['expected']:.2f}")
+        out.append(t("x.expected", lang, x=f"{x['expected']:.2f}"))
     if x.get("margin") is not None:
-        out.append(f"margin {x['margin']:.2f}")
+        out.append(t("x.margin", lang, x=f"{x['margin']:.2f}"))
     if x.get("candidates"):
-        out.append("candidates " + ", ".join(repr(c) for c in x["candidates"]))
+        out.append(t("x.candidates", lang, x=", ".join(repr(c) for c in x["candidates"])))
     ps = x.get("pass")
     if isinstance(ps, dict):
-        out.append(f"one pass with {', '.join(n for n in ps.get('with', []) if n)}" if ps.get("shared", True)
-                   else "own pass (shared pass fell back)")
+        out.append(t("x.pass", lang, x=", ".join(n for n in ps.get("with", []) if n)) if ps.get("shared", True)
+                   else t("x.own_pass", lang))
     return ("  " + "; ".join(out)) if out else ""
 
 
-def _multi_lines(x, pad="              "):
+def _multi_lines(x, pad=None, lang=None):
     """A combination of models (solvi.multi): one line per proposal — each stage of a cascade, each vote, the routed part
     — with its value, its signal and what came of it; nested combinations indented."""
     if not isinstance(x, dict):
         return []
     from .multi import _shown
+    t = i18n.t
+    pad = " " * (2 + i18n.width(COLUMNS, lang)) if pad is None else pad
 
     def prop(e):
         s = f"{e['part']} [{e['model']}]" if e.get("model") else f"{e['part']} ({e.get('kind', '')})"
@@ -166,27 +168,28 @@ def _multi_lines(x, pad="              "):
         return s
 
     def esc(e):
-        return f"escalated — {e['escalate']}" if e.get("escalate") else "answers alone"
+        return t("m.escalated", lang, e=i18n.msg(e["escalate"], lang)) if e.get("escalate") else t("m.alone", lang)
 
     out = []
     if isinstance(x.get("stages"), list):
         by = x.get("answered_by")
-        out.append(f"{pad}cascade     " + (f"stage {by + 1} answered" if by is not None else "every stage escalated")
-                   + f"; {x.get('calls', len(x['stages']))} model(s) called")
+        out.append(pad + t("m.cascade", lang) + (t("m.stage_answered", lang, i=by + 1) if by is not None
+                                                 else t("m.every_stage", lang))
+                   + t("m.calls", lang, n=x.get("calls", len(x["stages"]))))
         for i, e in enumerate(x["stages"]):
-            out.append(f"{pad}  stage {i + 1}   {prop(e)} → " + ("answered" if i == by else esc(e)))
-            out += _multi_lines(e, pad + "    ")
+            out.append(pad + t("m.stage", lang, i=i + 1) + f"{prop(e)} → " + (t("m.answered", lang) if i == by else esc(e)))
+            out += _multi_lines(e, pad + "    ", lang)
     if isinstance(x.get("votes"), list):
         agree = len({repr(e.get("value")) for e in x["votes"]}) == 1
-        out.append(f"{pad}vote        rule {x.get('rule', 'all')}: " + ("all agree" if agree else "they disagree")
-                   + f"; {x.get('calls', len(x['votes']))} model(s) called")
+        out.append(pad + t("m.vote", lang, rule=x.get("rule", "all")) + t("m.all_agree" if agree else "m.disagree", lang)
+                   + t("m.calls", lang, n=x.get("calls", len(x["votes"]))))
         for e in x["votes"]:
-            out.append(f"{pad}  vote      {prop(e)} → {esc(e)}")
-            out += _multi_lines(e, pad + "    ")
+            out.append(pad + t("m.one_vote", lang) + f"{prop(e)} → {esc(e)}")
+            out += _multi_lines(e, pad + "    ", lang)
     if isinstance(x.get("route"), dict) and isinstance(x.get("routed"), dict):
         e = x["routed"]
-        out.append(f"{pad}route       by {x['route'].get('by')} → {prop(e)} → {esc(e)}")
-        out += _multi_lines(e, pad + "    ")
+        out.append(pad + t("m.route", lang, by=x["route"].get("by")) + f"{prop(e)} → {esc(e)}")
+        out += _multi_lines(e, pad + "    ", lang)
     return out
 
 
@@ -229,88 +232,115 @@ class AnswerAudit:
         n = sum(self.counts.values())
         return 1.0 if n == 0 else self.deterministic / n
 
-    def support_line(self):
-        c = self.counts
-        parts = [f"{c[k]} {k.replace('_', ' ')}" for k in ("given", "computed", "quoted", "quoted_by_model", "decided",
-                                                             "learned", "proposed") if c.get(k)]
-        return (f"{sum(c.values())} items ({', '.join(parts) or 'none'}): {self.share_deterministic:.0%} deterministic"
-                + (f", {self.fuzzy} from models" if self.fuzzy else ""))
+    _lang = "en"                                     # the language str() renders in (not a field: to_dict() stays the same)
 
-    def safeguard_line(self):
+    def support_line(self, lang=None):
+        lang = self._lang if lang is None else lang
+        t = i18n.t
+        c = self.counts
+        parts = [t("au.kind", lang, n=c[k], kind=t("kind." + k, lang)) for k in ("given", "computed", "quoted",
+                                                                               "quoted_by_model", "decided", "learned",
+                                                                               "proposed") if c.get(k)]
+        return (t("au.support", lang, n=sum(c.values()), parts=", ".join(parts) or t("au.none", lang),
+                  share=f"{self.share_deterministic:.0%}")
+                + (t("au.from_models", lang, n=self.fuzzy) if self.fuzzy else ""))
+
+    def safeguard_line(self, lang=None):
+        lang = self._lang if lang is None else lang
         if not self.safeguards:
-            return "none fired"
+            return i18n.t("au.none_fired", lang)
         n = {}
         for e in self.safeguards:
             n[e["kind"]] = n.get(e["kind"], 0) + 1
-        return ", ".join(f"{LABEL[k]} ×{v}" for k, v in n.items())
+        return ", ".join(f"{i18n.label(k, lang)} ×{v}" for k, v in n.items())
 
     def __str__(self):
+        return self.render()
+
+    def render(self, lang=None):
+        """The audit of this answer as text, in a language (solvi.i18n; default: the one it was built with, "en")."""
         from .primitives import fmt
+        lang = i18n.check(self._lang if lang is None else lang)
+        t, m = i18n.t, (lambda x: i18n.msg(x, lang))
+        w = i18n.width(COLUMNS, lang)
+        pad = " " * (2 + w)
+
+        def col(key):
+            return "  " + f"{t(key, lang):{w}s}"
         a = "—" if self.answer is None else self.answer
         shown = repr(a) if self.answer is None else fmt(a, self.kind, self.extra)
-        lines = [f"{self.question} = {shown}  [{self.status}]  confidence {self.confidence:.2f}"
-                 + (f"  ← {self.provenance}" if self.provenance else "") + (f" by {self.source}" if self.source else "")]
+        lines = [t("au.answer", lang, q=self.question, shown=shown, status=i18n.status(self.status, lang),
+                   c=f"{self.confidence:.2f}")
+                 + (t("au.prov", lang, prov=i18n.provenance(self.provenance, lang)) if self.provenance else "")
+                 + (t("au.by", lang, src=self.source) if self.source else "")]
         if self.given:
-            lines.append("  given       " + "; ".join(f"{g['name']} = {_short(g['value'], 32)}" for g in self.given))
+            lines.append(col("col.given") + "; ".join(f"{g['name']} = {_short(g['value'], 32)}" for g in self.given))
         for c in self.computed:
-            lines.append(f"  computed    {c['name']} = " + (f"— rejected/failed: {c['error']}" if c.get("error") else _short(c["value"])))
+            lines.append(col("col.computed") + f"{c['name']} = "
+                         + (t("au.failed", lang, err=m(c["error"])) if c.get("error") else _short(c["value"])))
         for q in self.quoted:
             if q.get("error"):
-                lines.append(f"  quoted      {q['name']}: REJECTED — {q['error']}" + (f"  [{q['model']}]" if q.get("model") else ""))
+                lines.append(col("col.quoted") + f"{q['name']}: " + t("au.rejected", lang, err=m(q["error"]))
+                             + (f"  [{q['model']}]" if q.get("model") else ""))
                 continue
-            how = {True: "literal", False: "derived from", None: "converted from"}[q["match"]]
-            lines.append(f"  quoted      {q['name']} = {_short(q['value'])}  {q['source']}[{q['start']}:{q['end']}] {how} "
-                         f"{q['text']!r}" + (f"  confidence {q['confidence']:.2f}" if q["confidence"] < 1 else "")
+            how = t({True: "au.literal", False: "au.derived", None: "au.converted"}[q["match"]], lang)
+            lines.append(col("col.quoted") + f"{q['name']} = {_short(q['value'])}  {q['source']}[{q['start']}:{q['end']}] "
+                         f"{how} {q['text']!r}" + (t("au.confidence", lang, c=f"{q['confidence']:.2f}")
+                                                   if q["confidence"] < 1 else "")
                          + (f"  [{q['model']}]" if q.get("model") else ""))
         for d in self.decided:
             if d.get("error"):
-                lines.append(f"  decided     {d['name']}: REJECTED — {d['error']}" + (f"  [{d['model']}]" if d.get("model") else "")
-                             + _extra_line(d.get("extra")))
-                lines += _multi_lines(d.get("extra"))
+                lines.append(col("col.decided") + f"{d['name']}: " + t("au.rejected", lang, err=m(d["error"]))
+                             + (f"  [{d['model']}]" if d.get("model") else "") + _extra_line(d.get("extra"), lang))
+                lines += _multi_lines(d.get("extra"), pad, lang)
                 continue
-            p = ", ".join(f"{k} {v:.2f}" for k, v in sorted((d["probs"] or {}).items(), key=lambda t: -t[1])[:4])
-            lines.append(f"  decided     {d['name']} = {_short(d['value'])}" + (f"  ({p})" if p else "")
-                         + (f"  [{d['model']}]" if d.get("model") else "") + _extra_line(d.get("extra")))
-            lines += _multi_lines(d.get("extra"))
+            p = ", ".join(f"{k} {v:.2f}" for k, v in sorted((d["probs"] or {}).items(), key=lambda t_: -t_[1])[:4])
+            lines.append(col("col.decided") + f"{d['name']} = {_short(d['value'])}" + (f"  ({p})" if p else "")
+                         + (f"  [{d['model']}]" if d.get("model") else "") + _extra_line(d.get("extra"), lang))
+            lines += _multi_lines(d.get("extra"), pad, lang)
         for l_ in self.learned:
-            p = ", ".join(f"{k} {v:.2f}" for k, v in sorted((l_.get("probs") or {}).items(), key=lambda t: -t[1])[:4])
-            lines.append(f"  learned     {l_['name']} = " + (f"— {l_['error']}" if l_.get("error") else _short(l_["value"]))
+            p = ", ".join(f"{k} {v:.2f}" for k, v in sorted((l_.get("probs") or {}).items(), key=lambda t_: -t_[1])[:4])
+            lines.append(col("col.learned") + f"{l_['name']} = " + (f"— {m(l_['error'])}" if l_.get("error")
+                                                                  else _short(l_["value"]))
                          + (f"  ({p})" if p else "") + (f"  [{l_['model']}]" if l_.get("model") else ""))
             if l_.get("reads"):
-                lines.append(f"              reads {', '.join(l_['reads'])}")
+                lines.append(pad + t("au.reads", lang, x=", ".join(l_["reads"])))
             if l_.get("ignored"):
-                lines.append("              ignored " + "; ".join(f"{f} ({why})" for f, why in l_["ignored"].items()))
+                lines.append(pad + t("au.ignored", lang, x="; ".join(f"{f} ({m(why)})" for f, why in l_["ignored"].items())))
         for c in self.checks:
-            tag = "hard" if c["hard"] else "soft"
-            lines.append(f"  check       {c['name']} = {c['value']!r} ({tag}" + (", decides the answer" if c["decides"] else "") + ")"
-                         + (f" — {c['error']}" if c.get("error") else ""))
+            tag = t("au.hard" if c["hard"] else "au.soft", lang)
+            lines.append(col("col.check") + f"{c['name']} = {c['value']!r} ({tag}"
+                         + (t("au.decides", lang) if c["decides"] else "") + ")"
+                         + (f" — {m(c['error'])}" if c.get("error") else ""))
         if self.rule:
-            lines.append(f"  rule        {self.rule['name']} ({self.rule['provenance']})"
-                         + (f"  [{self.rule['model']}]" if self.rule.get("model") else "") + _extra_line(self.rule.get("extra"))
-                         + (f" — not computed: {self.rule['error']}" if self.rule.get("error") else ""))
-            lines += _multi_lines(self.rule.get("extra"))
+            lines.append(col("col.rule") + f"{self.rule['name']} ({i18n.provenance(self.rule['provenance'], lang)})"
+                         + (f"  [{self.rule['model']}]" if self.rule.get("model") else "")
+                         + _extra_line(self.rule.get("extra"), lang)
+                         + (t("au.not_computed", lang, err=m(self.rule["error"])) if self.rule.get("error") else ""))
+            lines += _multi_lines(self.rule.get("extra"), pad, lang)
         for e in self.evidence:
-            lines.append(f"  {'span' if e.get('span') else 'evidence':11s} {e['source']}[{e['start']}:{e['end']}] {e['text']!r}"
-                         + (("  in the text; support not checked" if e["by_model"] else "  verified") if e["verified"]
-                            else "  NOT IN THE TEXT") + ("  [model]" if e["by_model"] else ""))
+            lines.append(col("col.span" if e.get("span") else "col.evidence")
+                         + f"{e['source']}[{e['start']}:{e['end']}] {e['text']!r}"
+                         + ((t("au.unchecked", lang) if e["by_model"] else t("au.verified", lang)) if e["verified"]
+                            else t("au.not_in_text", lang)) + (t("au.model", lang) if e["by_model"] else ""))
         sc = (self.extra or {}).get("scores")
         if sc:
-            lines.append("  scores      " + ", ".join(f"{k} {v:.2f}" for k, v in list(sc.items())[:6]))
+            lines.append(col("col.scores") + ", ".join(f"{k} {v:.2f}" for k, v in list(sc.items())[:6]))
         for c in self.constraints:
-            lines.append(f"  constraint  {c['name']}: " + ("satisfied" if c["satisfied"] else "BROKEN"))
+            lines.append(col("col.constraint") + f"{c['name']}: " + t("au.satisfied" if c["satisfied"] else "au.broken", lang))
         if self.not_run:
             groups = {}
-            for n, w in self.not_run:
-                groups.setdefault(w, []).append(n)
-            for w, ns in groups.items():
-                lines.append(f"  not run     {', '.join(ns)} ({w})")
-        lines.append(f"  → answer    {shown} — {self.why}")
-        lines.append(f"  support     {self.support_line()}")
+            for n, w_ in self.not_run:
+                groups.setdefault(w_, []).append(n)
+            for w_, ns in groups.items():
+                lines.append(col("col.not_run") + f"{', '.join(ns)} ({m(w_)})")
+        lines.append(col("col.answer") + f"{shown} — {m(self.why)}")
+        lines.append(col("col.support") + self.support_line(lang))
         if self.guarantee:
-            lines.append(f"  guarantee   {self.guarantee}")
-        lines.append(f"  safeguards  {self.safeguard_line()}")
+            lines.append(col("col.guarantee") + m(self.guarantee))
+        lines.append(col("col.safeguards") + self.safeguard_line(lang))
         for e in self.safeguards:
-            lines.append(f"              · {LABEL[e['kind']]}: {e['fact']} — {e['detail']}")
+            lines.append(pad + f"· {i18n.label(e['kind'], lang)}: {e['fact']} — {m(e['detail'])}")
         return "\n".join(lines)
 
     def to_dict(self):
@@ -330,29 +360,39 @@ class Audit:
     def __getitem__(self, q):
         return self.answers[q]
 
+    _lang = "en"                    # the language str() renders in (not a field: to_dict() stays the same)
+
     def __str__(self):
-        head = (f"audit: {len(self.answers)} answer(s), {self.model_outputs} model output(s), "
-                f"{len(self.safeguards)} safeguard event(s)")
-        lines = [head]
+        return self.render()
+
+    def render(self, lang=None):
+        """The whole audit as text, in a language (solvi.i18n; default: the one it was built with, "en")."""
+        lang = i18n.check(self._lang if lang is None else lang)
+        t = i18n.t
+        lines = [t("au.head", lang, n=len(self.answers), m=self.model_outputs, k=len(self.safeguards))]
         o = self.overall
         if o:
-            w = f", weakest {o['weakest'][0]} {o['weakest'][1]:.2f}" if o["weakest"] else ""
-            ab = f", abstained: {', '.join(o['abstained'])}" if o["abstained"] else ""
-            ns = f", not stated: {', '.join(o['not_stated'])}" if o.get("not_stated") else ""
-            lines.append(f"overall: confidence {o['confidence']:.2f}{w}; {o['answered']}/{o['answered'] + len(o['abstained'])} "
-                         f"answered{ab}{ns}" + ("" if o["feasible"] else "; constraints violated"))
-        return "\n".join(lines + [str(a) for a in self.answers.values()])
+            w = t("au.weakest", lang, q=o["weakest"][0], c=f"{o['weakest'][1]:.2f}") if o["weakest"] else ""
+            ab = t("au.abstained", lang, qs=", ".join(o["abstained"])) if o["abstained"] else ""
+            ns = t("au.not_stated", lang, qs=", ".join(o["not_stated"])) if o.get("not_stated") else ""
+            lines.append(t("au.overall", lang, c=f"{o['confidence']:.2f}", weakest=w, a=o["answered"],
+                           t=o["answered"] + len(o["abstained"]), abstained=ab, not_stated=ns)
+                         + ("" if o["feasible"] else t("au.infeasible", lang)))
+        return "\n".join(lines + [a.render(lang) for a in self.answers.values()])
 
-    def compact(self):
+    def compact(self, lang=None):
         """One line per answer: support shares and safeguards (what solvi.show prints)."""
-        return "\n".join(f"{q}: {a.support_line()}; safeguards: {a.safeguard_line()}" for q, a in self.answers.items())
+        lang = self._lang if lang is None else lang
+        return "\n".join(i18n.t("au.compact", lang, q=q, support=a.support_line(lang), safeguards=a.safeguard_line(lang))
+                         for q, a in self.answers.items())
 
     def to_dict(self):
         return {"answers": {q: a.to_dict() for q, a in self.answers.items()}, "safeguards": self.safeguards,
                 "model_outputs": self.model_outputs, "overall": self.overall}
 
 
-def build(res, question=None, catalog=None):
+def build(res, question=None, catalog=None, lang=None):
+    lang = i18n.check(lang)
     catalog = catalog if catalog is not None else getattr(res, "catalog", None)
     events = res.safeguards if getattr(res, "safeguards", None) is not None else None
     if events is None:
@@ -360,7 +400,12 @@ def build(res, question=None, catalog=None):
     else:
         n_model = res.model_outputs
     qs = [question] if isinstance(question, str) else list(question or res.results)
-    return Audit({q: _one(res, q, events, catalog) for q in qs}, events, n_model, getattr(res, "overall", None))
+    out = Audit({q: _one(res, q, events, catalog) for q in qs}, events, n_model, getattr(res, "overall", None))
+    if lang != i18n.DEFAULT:
+        out._lang = lang
+        for a in out.answers.values():
+            a._lang = lang
+    return out
 
 
 def _one(res, q, events, catalog):

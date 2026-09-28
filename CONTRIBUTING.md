@@ -31,6 +31,10 @@ CI runs on every pull request: a broken link, a missing anchor or a docstring th
   in CI (core only, a stand-in for any model) or say which extra it needs.
 - New gallery entries: `gallery/NN_name/` with `task.py`, `state.json`, `run.py` and a README; then
   `uv run python tools/sync_gallery.py` to copy it into the playground Space.
+- Messages solvi writes for people (audit labels, a `why`, a rejection or escalation reason) are recorded in English; a
+  new or changed one needs its Russian template in `solvi/i18n.py` (`RU` for labels, `MESSAGES_RU` for messages).
+  English output must not change by accident: `tests/test_i18n.py` compares it with `tests/i18n/en_golden.json`; when the
+  change is intended, regenerate it with `uv run python tests/i18n/render.py` and say so in the CHANGELOG.
 - Style: plain functions, short docstrings that say what a thing returns and why; line length 120.
 
 ## Pull requests

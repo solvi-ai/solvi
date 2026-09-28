@@ -1451,6 +1451,36 @@ show(res, cat, audit=False)                 # without the audit summary
 show(res)                                   # without the catalog: no replay
 ```
 
+### In Russian
+
+The audit, `solvi.show` and `safeguard_report()` can be printed in Russian; English is the default.
+
+```python
+system = System(cat, QUESTIONS, lang="ru")  # everything this system renders
+print(res.audit(lang="ru"))                 # or per call
+show(res, cat, lang="ru")
+system.safeguard_report(lang="ru")
+```
+
+```
+approve = 'yes'  [ок]  уверенность 0.60  ← вычислено: approve
+  дано          doc = 'Expense claim #2291\nVendor: C…; limit = {'travel': 100, 'meals': 60, 'e…
+  вычислено     amount = 48.6
+  цитата        total = '48.60'  doc[100:105] дословно '48.60'
+  ...
+  защиты        не подтверждено текстом ×1, запасной источник ×1
+                · не подтверждено текстом: total — total_model: не подтверждено текстом: '488.60' — не текст в [100:105] ('48.60')
+                · запасной источник: total — использован total_regex, после того как отклонены total_model
+```
+
+Only the rendering changes. What solvi records — the trace and its hashes, `Result.why`, rejection and escalation
+reasons, stored responses, `to_dict()` — stays in English whatever the language, so a decision replays and verifies the
+same way, and a response stored by a Russian-speaking service is byte for byte the one an English-speaking one stores.
+solvi translates its own words: headings and labels, safeguard names, statuses, and the messages it builds from templates
+(`solvi.i18n.msg`). It never translates what came from you: fact, part and question names, values, options, quoted text,
+the text of your exceptions. A message it has no template for is shown in English. The catalog of words and templates is
+`solvi.i18n` (`EN`, `RU`, `MESSAGES_RU`); another language is one more dict of the same keys.
+
 ## Extracting fields from documents
 
 With `pip install "solvi[model]"`, solvi provides three ModernBERT extractors. All of them predict a start and an end
