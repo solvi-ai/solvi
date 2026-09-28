@@ -214,8 +214,12 @@ Every answer is a value and a confidence, and the types also declare answer prim
   list of candidates. Near ties escalate (`min_margin=`), and the answer does not depend on the order the options are listed
   in (sorted by default).
 - **Any decision model.** `solvi.systemone.systemone(url, model)` puts any `POST /v1/systemone` service (Jev, Kev, Von,
-  Laya-serve, …) behind your rules; `Cascade`, `Vote` and `Route` (`solvi.multi`) combine models — small first, a larger
-  one only when the small one escalates, or answer only when models of different families agree — under one guarantee.
+  Laya-serve, …) behind your rules, and `solvi.llm.llm(base_url, model)` any OpenAI-compatible LLM server (OpenAI,
+  OpenRouter, vLLM, llama.cpp, Ollama) — its JSON replies validated, an invalid one escalated, never guessed;
+  `Cascade`, `Vote` and `Route` (`solvi.multi`) combine models — small first, a larger one or an LLM only when the
+  small one escalates, or answer only when models of different families agree — under one guarantee. On
+  typed-decisions a vote of solvi-large and Julia 1 answered 50% alone against 31% / 40% for each alone, at the same
+  10% risk (Julia in-distribution there; [examples/20_vote_across_families.py](examples/20_vote_across_families.py)).
 - **Serving and operations.** `solvi serve module:system` exposes the questions over HTTP (OpenAPI from the same types),
   MCP and the System One API; `await system.aask(...)` runs async parts concurrently with timeouts; `costs="measured"`
   lets the planner pick the fastest equivalent source and switch when it slows down. `TraceStorage` keeps decisions with a
@@ -227,7 +231,8 @@ Every answer is a value and a confidence, and the types also declare answer prim
 - **Text in.** `system.ask_text("please refund order A-10457, 1.5 million rubles, paid 12 September", decider)`: the
   decider picks which question the message asks (or escalates when unsure), each input field is read with a quote and a
   deterministic parser (numbers, dates, enums, yes / no), missing required fields are listed for a clarifying question,
-  and the trace says those values were read by a model, not given.
+  and the trace says those values were read by a model, not given. `solvi serve` answers texts at `POST /ask_text`
+  and as the MCP tool `ask_text`.
 - **Long documents.** `decider.decision(..., long="retrieve")`: a contract longer than the decider reads is split into
   sections, BM25 picks the few that bear on the question, the decider reads only those, and quotes point into the whole
   document; the trace lists the sections read.
