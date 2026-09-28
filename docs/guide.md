@@ -15,10 +15,11 @@ Contents:
 9. [Confidence, calibration and abstention](#confidence-calibration-and-abstention)
 10. [The trace and verification](#the-trace-and-verification)
 11. [Serving: HTTP, MCP and System One](#serving-http-mcp-and-system-one)
-12. [Grounded decisions: provenance, audit and safeguards](#grounded-decisions-provenance-audit-and-safeguards)
-13. [Printing results: solvi.show](#printing-results-solvishow)
-14. [Extracting fields from documents](#extracting-fields-from-documents)
-15. [Guarantees and limitations](#guarantees-and-limitations)
+12. [Checking a catalog: solvi check](#checking-a-catalog-solvi-check)
+13. [Grounded decisions: provenance, audit and safeguards](#grounded-decisions-provenance-audit-and-safeguards)
+14. [Printing results: solvi.show](#printing-results-solvishow)
+15. [Extracting fields from documents](#extracting-fields-from-documents)
+16. [Guarantees and limitations](#guarantees-and-limitations)
 
 ## Concepts
 
@@ -1149,6 +1150,40 @@ and the answers carry no act / escalate signal: thresholds (`act_guard` and the 
 `systemone(url, model)` turns the probabilities back into a decider. `solvi serve --decider X` without a System serves
 only this endpoint. Without FastAPI, `solvi.serve.Service(system, decider)` answers the same requests in-process
 (`.ask(state)`, `.systemone(body)`, `.tool(question, state)`).
+
+## Checking a catalog: solvi check
+
+`solvi check` lints a catalog for mistakes that can sit in it for a long time before a decision shows them:
+
+```
+solvi check myapp.decisions:system            # exit 0: no errors; 1: errors; 2: usage errors
+solvi check myapp.decisions:system --strict   # warnings fail too;  --json for data
+```
+
+```python
+from solvi.check import lint
+rep = lint(system)                            # or lint(catalog): the checks that need questions are skipped
+print(rep); rep.ok; rep.errors; rep.warnings  # each finding: level, code, where, message
+```
+
+Flows are planned with every given fact present. **Errors**: a hard check whose `then=` sets an answer for a question
+whose flow never runs it (`then_not_in_flow`: the question's rule does not read it through any fact and the question does
+not list it in `checkpoints`, so when the check fails the question is answered as if it had passed — the fix is
+`checkpoints=[...]`); `then=` naming no question or an answer outside the question's options; facts that need each other
+(`cycle`); a question no input can answer (a fact nothing can compute, a missing checkpoint, a span / rank / estimate
+question without a rule); a producer's type its consumer cannot read, or a `System(inputs=...)` field its typed reader
+cannot read (`type_conflict`); constraints between answers that no combination satisfies — one alone or all together,
+tried by brute force over the answers' finite domains (yes/no, choice, ordinal, multi-label up to 10 options; up to
+`--max-combos` combinations per group of constraints that share questions) — and a constraint reading a name that is not
+a question (it never applies). **Warnings**: a part no question's flow uses (a question without a rule, fit or `uses`
+counts as using everything computable: its future head's candidate features); `then=` on a soft check (ignored); a rule
+reading a question's name (answers are not facts); typed readers of a given fact, or alternative producers, whose types no
+value satisfies together; an option the constraints always rule out (`dead_option`); a constraint that raises on some
+answers; and **silent defaults**: in a function that reads the input (a given fact), `x or <literal>` and
+`d.get(k, <literal>)` turn a missing, empty or null input into a value nobody gave — the answer looks decided while it
+rests on a guess. Say what a missing input means (check for `None` and abstain, or declare the default in
+`System(inputs=...)`), or mark the line `# solvi: ok`. **Notes** never fail: a question without a rule abstains until
+an answer head is fitted.
 
 ## Grounded decisions: provenance, audit and safeguards
 

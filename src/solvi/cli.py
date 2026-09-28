@@ -8,10 +8,12 @@
     solvi replay decisions.db --system myapp.decisions:system
     solvi diff   decisions.db --system myapp.decisions_v2:build_system [--question Q] [--since ISO] [--limit N] [--json]
     solvi serve  myapp.decisions:system [--store decisions.db] [--decider ID] [--port 8000] [--mcp]   (solvi.serve)
+    solvi check  myapp.decisions:system [--strict] [--json]                                          (solvi.check)
 
 --system names a System: "package.module:attribute" or "path/to/file.py:attribute", where the attribute is a System or a
-function without arguments that returns one (`solvi serve` takes it as its first argument). Exit status: 0 — verified /
-everything replays / nothing changes; 1 — problems / mismatches / changes; 2 — usage errors."""
+function without arguments that returns one (`solvi serve` and `solvi check` take it as their first argument; check also
+takes a Catalog). Exit status: 0 — verified / everything replays / nothing changes / no catalog errors; 1 — problems /
+mismatches / changes / catalog errors; 2 — usage errors."""
 from __future__ import annotations
 
 import argparse
@@ -27,13 +29,15 @@ def _fail(msg):
     raise SystemExit(2)
 
 
-def load_system(spec):
-    """"module:attr" or "file.py:attr" → the System (calling attr when it is a function)."""
+def load_object(spec):
+    """"module:attr" or "file.py:attr" → the attribute (called when it is a function: a System factory)."""
     mod_name, _, attr = spec.rpartition(":")
     if not mod_name or not attr:
-        _fail(f"--system: expected module:attribute or file.py:attribute, got {spec!r}")
+        _fail(f"expected module:attribute or file.py:attribute, got {spec!r}")
     if mod_name.endswith(".py") or os.sep in mod_name:
         path = os.path.abspath(mod_name)
+        if not os.path.isfile(path):
+            _fail(f"no such file: {mod_name}")
         sys.path.insert(0, os.path.dirname(path))
         s = importlib.util.spec_from_file_location(os.path.splitext(os.path.basename(path))[0], path)
         mod = importlib.util.module_from_spec(s)
@@ -42,9 +46,17 @@ def load_system(spec):
     else:
         sys.path.insert(0, os.getcwd())
         mod = importlib.import_module(mod_name)
+    if not hasattr(mod, attr):
+        _fail(f"{mod_name} has no attribute {attr!r}")
     obj = getattr(mod, attr)
     if callable(obj) and not hasattr(obj, "ask"):
         obj = obj()
+    return obj
+
+
+def load_system(spec):
+    """"module:attr" or "file.py:attr" → the System (calling attr when it is a function)."""
+    obj = load_object(spec)
     if not hasattr(obj, "ask") or not hasattr(obj, "catalog"):
         _fail(f"--system {spec}: not a solvi System")
     return obj
@@ -126,7 +138,7 @@ def main(argv=None):
     if argv and argv[0] in COMMANDS:                  # commands with their own option parsers
         return importlib.import_module(COMMANDS[argv[0]][0]).main(argv[1:])
     p = argparse.ArgumentParser(prog="solvi", description="solvi: test, honesty; verify, replay and diff stored decisions; "
-                                                          "serve a system",
+                                                          "serve and check a system",
                                 epilog="also: " + "; ".join(f"solvi {k} — {w}" for k, (_, w) in COMMANDS.items()))
     sub = p.add_subparsers(dest="cmd", required=True)
 
@@ -151,11 +163,14 @@ def main(argv=None):
                    help="report a confidence change above this (default 0.01; negative: ignore confidence)")
     from .serve import add_parser as serve_parser, cmd_serve
     serve_parser(sub)
+    from .check import add_parser as check_parser, cmd_check
+    check_parser(sub)
     try:
         a = p.parse_args(argv)
     except SystemExit as e:                            # --help: 0; usage errors: 2 — returned, not raised
         return e.code if isinstance(e.code, int) else 2
-    return {"verify": cmd_verify, "replay": cmd_replay, "diff": cmd_diff, "serve": cmd_serve}[a.cmd](a)
+    return {"verify": cmd_verify, "replay": cmd_replay, "diff": cmd_diff, "serve": cmd_serve,
+            "check": cmd_check}[a.cmd](a)
 
 
 if __name__ == "__main__":

@@ -20,6 +20,17 @@
 - `System.response_schema` is built by `solvi.schema.response_model(system, names=None)` (the pydantic class);
   `solvi.strategist.given_facts(catalog)` lists the facts a catalog reads and no part produces.
 
+### solvi check: catalog lint
+
+- `solvi check module:attr` (`solvi.check.lint(system)`): catalog lint with exit status 0 (no errors) / 1 / 2 (usage),
+  `--strict` (warnings fail), `--json`. Errors: a hard check whose `then=` question never runs it (not read by the rule,
+  not in `checkpoints`: a failing check would be ignored), `then=` naming no question or an invalid answer, cycles,
+  questions no input can answer, producer / consumer and `inputs=` type conflicts, constraints that cannot hold (alone or
+  together; brute force over finite answer domains), constraints reading non-questions. Warnings: unused parts, `then=` on
+  soft checks, rules reading question names, disagreeing reader types, options the constraints always rule out, raising
+  constraints, and silent defaults — `x or <literal>` / `.get(k, <literal>)` in functions that read the input (`# solvi:
+  ok` accepts one).
+
 ## 0.5.1 — unreleased — escalation with a guarantee, any System One model, a release gate, stored decisions
 
 ### Escalation with a guarantee
