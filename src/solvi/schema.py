@@ -153,30 +153,51 @@ FLOAT_TAG = "$float"                                  # {"$float": "inf"} / "-in
 def tag_floats(v):
     """JSON data with every non-finite float as {"$float": "inf" | "-inf" | "nan"} (strict JSON: no Infinity / NaN).
     Returns v itself when nothing changes."""
+    try:                                              # fast path: serialized in C, no Infinity / NaN token → nothing to tag
+        from pydantic_core import to_json
+        raw = to_json(v)
+        if b"Infinity" not in raw and b"NaN" not in raw:
+            return v
+    except Exception:  # noqa: BLE001, S110 — not plain JSON data (numpy scalars, ...): walk it
+        pass
+    return _tag(v)
+
+
+def _tag(v):
     t = type(v)
     if t is float or isinstance(v, float):
         return v if math.isfinite(v) else {FLOAT_TAG: repr(float(v))}
     if t is dict:
         out = None
         for k, x in v.items():
-            y = tag_floats(x)
+            y = _tag(x)
             if y is not x and out is None:
                 out = dict(v)
             if out is not None:
                 out[k] = y
         return v if out is None else out
     if t is list or t is tuple:
-        ys = [tag_floats(x) for x in v]
+        ys = [_tag(x) for x in v]
         return v if all(y is x for x, y in zip(ys, v)) else ys
     if t in (str, int, bool) or v is None:
         return v
     if hasattr(v, "item") and not isinstance(v, (str, bytes)) and getattr(v, "ndim", 1) == 0:   # numpy scalars
-        return tag_floats(v.item())
+        return _tag(v.item())
     return v
 
 
 def untag_floats(v):
     """The inverse of tag_floats: {"$float": "inf"} → inf. Returns v itself when nothing changes."""
+    try:                                              # fast path: no tag anywhere → nothing to do
+        from pydantic_core import to_json
+        if b'"$float"' not in to_json(v):
+            return v
+    except Exception:  # noqa: BLE001, S110 — not plain JSON data: walk it
+        pass
+    return _untag(v)
+
+
+def _untag(v):
     t = type(v)
     if t is dict:
         if len(v) == 1 and FLOAT_TAG in v and isinstance(v[FLOAT_TAG], str):
@@ -186,14 +207,14 @@ def untag_floats(v):
                 return v
         out = None
         for k, x in v.items():
-            y = untag_floats(x)
+            y = _untag(x)
             if y is not x and out is None:
                 out = dict(v)
             if out is not None:
                 out[k] = y
         return v if out is None else out
     if t is list:
-        ys = [untag_floats(x) for x in v]
+        ys = [_untag(x) for x in v]
         return v if all(y is x for x, y in zip(ys, v)) else ys
     return v
 
@@ -206,24 +227,40 @@ def dumps(obj, **kw):
 
 # --- dataclass → data
 def _fallback(v):
-    if hasattr(v, "tolist"):                          # numpy arrays and scalars
-        return v.tolist()
+    if hasattr(v, "tolist"):                          # numpy arrays and scalars (a non-finite one tagged)
+        return _tag(v.tolist())
     return repr(v)
 
 
+_LEAVES = (str, int, bool, type(None))
+
+
 def _sorted_sets(v):
-    """Sets as lists in the order vhash uses, so a set fact loaded back from JSON hashes (and replays) as before."""
+    """Sets as lists in the order vhash uses, so a set fact loaded back from JSON hashes (and replays) as before; a
+    non-finite float as {"$float": ...} (tag_floats), in the same walk."""
+    t = type(v)
+    if t in _LEAVES:
+        return v
+    if t is float:
+        return v if math.isfinite(v) else {FLOAT_TAG: repr(v)}
+    if t is dict:
+        return {k: _sorted_sets(x) for k, x in v.items()}
+    if t is list:
+        return [_sorted_sets(x) for x in v]
+    if t is tuple:
+        return tuple(_sorted_sets(x) for x in v)
     if isinstance(v, (set, frozenset)):
         from .runtime import _canon, _ckey
         return [_sorted_sets(x) for x in sorted(v, key=lambda x: _ckey(_canon(x)))]
     if isinstance(v, dict):
         return {k: _sorted_sets(x) for k, x in v.items()}
-    if isinstance(v, (list, tuple)):
-        return type(v)(_sorted_sets(x) for x in v) if type(v) in (list, tuple) else v
+    if isinstance(v, float):                          # numpy float64 and other float subclasses
+        return v if math.isfinite(v) else {FLOAT_TAG: repr(float(v))}
     return v
 
 
 def jsonable(v):
+    """JSON data: pydantic's to_jsonable_python, with sets sorted and non-finite floats tagged (strict JSON)."""
     return to_jsonable_python(_sorted_sets(v), fallback=_fallback)
 
 
@@ -343,7 +380,7 @@ def _to_dict(obj):
 def dump(obj, mode="python"):
     """mode="json": JSON-ready data — non-finite floats tagged ({"$float": "inf"}, see tag_floats), so it is strict JSON."""
     d = _to_dict(obj)
-    return tag_floats(jsonable(d)) if mode == "json" else d
+    return jsonable(d) if mode == "json" else d        # jsonable tags non-finite floats
 
 
 def json_schema(cls):

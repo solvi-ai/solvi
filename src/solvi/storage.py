@@ -106,9 +106,10 @@ def entry(resp, meta=None):
         e["catalog"] = fp["catalog"]                  # the catalog that decided (System.fingerprint)
     if meta is not None:
         e["meta"] = plain(meta)
-    e["response"] = d
     from .schema import tag_floats
-    return tag_floats(e)                              # strict JSON: an inf threshold is {"$float": "inf"}
+    e = tag_floats(e)                                 # strict JSON: an inf threshold is {"$float": "inf"}
+    e["response"] = d                                 # to_dict() has tagged it already
+    return e
 
 
 @dataclass

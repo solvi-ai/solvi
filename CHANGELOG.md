@@ -43,6 +43,17 @@
   report the style are warnings, the optional-access ones off, and everything else in basic mode is an error.
 - CI: a `lint` job runs both (pinned: ruff 0.16.9, pyright 1.1.414).
 
+### Performance
+
+- `benchmarks/ask_overhead.py`: `ask` latency on the gallery and on a keyword-stand-in decider project, 0.5.0-style
+  settings against the 0.7 defaults (trace fingerprint, canonical option order, a calibrated guarantee, storage off /
+  JSONL / SQLite), and against an older release (`--gallery` with its exported gallery). No regression above 10% was
+  found (numbers in docs/benchmarks.md: the fingerprint costs about 3%, the guarantee record about 4%, storing a
+  response about 1 ms).
+- `Response.to_dict()` and stored records: the walk that sorts sets now also tags non-finite floats and dispatches on
+  the exact type first — measured faster than 0.6.1's on the gallery's responses, which pays for the strict-JSON
+  tagging.
+
 ### Fixes
 
 - A model-backed rule whose quote is rejected for not being in the text (`quote outside the text` / `not grounded`)

@@ -84,3 +84,12 @@ def test_a_record_written_before_0_7_with_infinity_still_verifies_and_loads(tmp_
     assert st.verify()["ok"]
     got = st.get(rec["id"], s)
     assert [r for r in got.trace.records if r.name == "answer:team"][0].extra["threshold"] == math.inf
+
+
+def test_numpy_non_finite_values_are_tagged_too():
+    import numpy as np
+
+    from solvi.schema import jsonable
+    d = jsonable({"a": np.float32("inf"), "b": np.float64("-inf"), "c": np.array([1.0, np.inf]), "s": {2.0, math.inf}})
+    json.dumps(d, allow_nan=False)
+    assert d["a"] == {"$float": "inf"} and d["b"] == {"$float": "-inf"} and d["c"] == [1.0, {"$float": "inf"}]
