@@ -59,6 +59,7 @@ nav:
       - solvi.systemone: api/systemone.md
       - solvi.multi: api/multi.md
       - solvi.serve: api/serve.md
+      - solvi.agents: api/agents.md
       - solvi.storage: api/storage.md
       - solvi.diff: api/diff.md
       - solvi.testing: api/testing.md

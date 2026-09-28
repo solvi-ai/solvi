@@ -4,6 +4,7 @@
     solvi serve myapp.decisions:system --decider solvi-ai/solvi-base      # + POST /v1/systemone
     solvi serve --decider ./my-decider --model-name kev-latest             # only POST /v1/systemone
     solvi serve myapp.decisions:system --mcp                              # an MCP server over stdio
+    solvi serve --guard catalog.py:guard --upstream "CMD"                 # an MCP proxy: the guard checks every tool call
 
 HTTP (`solvi[serve]`: fastapi, uvicorn):
   POST /ask              {"state": {...}, "questions": [names] (default: all), "store": true} → Response.to_dict() plus
@@ -563,7 +564,9 @@ def run_mcp(svc, impl="auto"):
 # ------------------------------------------------------------------------------------------------ the command
 def cmd_serve(a):
     """`solvi serve` (see solvi.cli) → exit status."""
-    from .cli import _fail, load_system
+    from .cli import _fail, load_object, load_system
+    if getattr(a, "guard", None) or getattr(a, "upstream", None):
+        return _serve_guard(a, _fail, load_object)
     system = load_system(a.system) if a.system else None
     decider = None
     if a.decider:
@@ -590,6 +593,31 @@ def cmd_serve(a):
     return 0
 
 
+def _serve_guard(a, _fail, load_object):
+    """`solvi serve --guard catalog.py:guard --upstream CMD`: the MCP proxy with a Guard (solvi.agents.mcp)."""
+    if not (a.guard and a.upstream):
+        _fail("serve --guard / --upstream: both are needed — the guard (module:attr or file.py:attr) and the MCP server's "
+              "command line")
+    if a.system or a.decider:
+        _fail("serve --guard: a proxy serves the upstream server's tools; drop the System / --decider")
+    from .agents import Guard
+    from .agents.mcp import run_proxy
+    guard = load_object(a.guard)
+    if not isinstance(guard, Guard):
+        _fail(f"--guard {a.guard}: not a solvi.agents.Guard")
+    if a.store:
+        from .storage import open_storage
+        guard.storage = open_storage(a.store)
+    try:
+        facts = json.loads(a.facts) if a.facts else None
+    except ValueError as e:
+        _fail(f"--facts: not JSON: {e}")
+    if facts is not None and not isinstance(facts, dict):
+        _fail("--facts: a JSON object of facts")
+    run_proxy(guard, a.upstream, facts=facts, escalate=a.escalate)
+    return 0
+
+
 def add_parser(sub):
     """The `serve` subcommand's options (solvi.cli)."""
     s = sub.add_parser("serve", help="serve a System's questions over HTTP (FastAPI) or MCP, and a decider as System One")
@@ -604,4 +632,11 @@ def add_parser(sub):
     s.add_argument("--mcp", action="store_true", help="an MCP server over stdio instead of HTTP: each question is a tool")
     s.add_argument("--mcp-impl", default="auto", choices=["auto", "sdk", "builtin"],
                    help="the official MCP SDK (auto: when installed) or the built-in JSON-RPC subset")
+    s.add_argument("--guard", help="module:attr or file.py:attr — a solvi.agents.Guard: an MCP proxy that checks every "
+                                   "tools/call of --upstream (solvi.agents.mcp)")
+    s.add_argument("--upstream", help="the command line of the MCP server (stdio) behind the guard")
+    s.add_argument("--facts", help="a JSON object of facts the guard's policies read (with --guard)")
+    s.add_argument("--escalate", default="elicit", choices=["elicit", "deny"],
+                   help="with --guard: ask the user about an escalated call (MCP elicitation, when the client supports it) "
+                        "or return it as an error")
     return s

@@ -8,6 +8,7 @@
     solvi replay decisions.db --system myapp.decisions:system
     solvi diff   decisions.db --system myapp.decisions_v2:build_system [--question Q] [--since ISO] [--limit N] [--json]
     solvi serve  myapp.decisions:system [--store decisions.db] [--decider ID] [--port 8000] [--mcp]   (solvi.serve)
+    solvi serve  --guard catalog.py:guard --upstream "MCP SERVER COMMAND" [--store calls.db]         (solvi.agents.mcp)
     solvi check  myapp.decisions:system [--strict] [--json]                                          (solvi.check)
     solvi report decisions.db [--since ISO] [--until ISO] [--question Q] [--id ID] [--html out.html] [--md out.md] [--json]
                                                                                                      (solvi.report)
