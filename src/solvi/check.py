@@ -440,7 +440,8 @@ def cmd_check(a):
         _fail(f"check {a.target}: not a solvi System or Catalog")
     rep = lint(obj, strict=a.strict, max_combos=a.max_combos)
     if a.json:
-        print(json.dumps(rep.to_dict(), ensure_ascii=False, indent=2))
+        from .schema import dumps
+        print(dumps(rep.to_dict(), ensure_ascii=False, indent=2))
     else:
         print(rep)
     return 0 if rep.ok else 1

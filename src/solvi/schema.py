@@ -10,6 +10,7 @@ with the same hashes. Untyped values that JSON cannot carry (a date in an untype
 no longer replay."""
 from __future__ import annotations
 
+import math
 from typing import Any, Literal, Optional
 
 from pydantic import BaseModel, ConfigDict, create_model
@@ -143,6 +144,64 @@ class ResponseModel(BaseModel):
 
 MODELS = {"AnswerType": AnswerSpec, "Question": QuestionSpec, "Result": ResultModel, "Record": RecordModel,
           "Trace": TraceModel, "Flow": FlowModel, "Response": ResponseModel}
+
+
+# --- non-finite floats: JSON has no inf / nan, so they are written as a tagged value that reads back as the float
+FLOAT_TAG = "$float"                                  # {"$float": "inf"} / "-inf" / "nan" (also in calibration files)
+
+
+def tag_floats(v):
+    """JSON data with every non-finite float as {"$float": "inf" | "-inf" | "nan"} (strict JSON: no Infinity / NaN).
+    Returns v itself when nothing changes."""
+    t = type(v)
+    if t is float or isinstance(v, float):
+        return v if math.isfinite(v) else {FLOAT_TAG: repr(float(v))}
+    if t is dict:
+        out = None
+        for k, x in v.items():
+            y = tag_floats(x)
+            if y is not x and out is None:
+                out = dict(v)
+            if out is not None:
+                out[k] = y
+        return v if out is None else out
+    if t is list or t is tuple:
+        ys = [tag_floats(x) for x in v]
+        return v if all(y is x for x, y in zip(ys, v)) else ys
+    if t in (str, int, bool) or v is None:
+        return v
+    if hasattr(v, "item") and not isinstance(v, (str, bytes)) and getattr(v, "ndim", 1) == 0:   # numpy scalars
+        return tag_floats(v.item())
+    return v
+
+
+def untag_floats(v):
+    """The inverse of tag_floats: {"$float": "inf"} → inf. Returns v itself when nothing changes."""
+    t = type(v)
+    if t is dict:
+        if len(v) == 1 and FLOAT_TAG in v and isinstance(v[FLOAT_TAG], str):
+            try:
+                return float(v[FLOAT_TAG])
+            except ValueError:
+                return v
+        out = None
+        for k, x in v.items():
+            y = untag_floats(x)
+            if y is not x and out is None:
+                out = dict(v)
+            if out is not None:
+                out[k] = y
+        return v if out is None else out
+    if t is list:
+        ys = [untag_floats(x) for x in v]
+        return v if all(y is x for x, y in zip(ys, v)) else ys
+    return v
+
+
+def dumps(obj, **kw):
+    """Strict JSON text (json.dumps with allow_nan=False) with non-finite floats tagged (tag_floats)."""
+    import json
+    return json.dumps(tag_floats(obj), allow_nan=False, **kw)
 
 
 # --- dataclass → data
@@ -282,8 +341,9 @@ def _to_dict(obj):
 
 
 def dump(obj, mode="python"):
+    """mode="json": JSON-ready data — non-finite floats tagged ({"$float": "inf"}, see tag_floats), so it is strict JSON."""
     d = _to_dict(obj)
-    return jsonable(d) if mode == "json" else d
+    return tag_floats(jsonable(d)) if mode == "json" else d
 
 
 def json_schema(cls):
@@ -397,7 +457,7 @@ def _load_flow(m, catalog):
 
 def load(cls, data, catalog=None):
     n = cls.__name__
-    m = MODELS[n].model_validate(data)
+    m = MODELS[n].model_validate(untag_floats(data) if isinstance(data, dict) else data)
     catalog, system = _types(catalog)
     if n == "AnswerType":
         return _load_answer(m)

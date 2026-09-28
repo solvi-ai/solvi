@@ -122,7 +122,7 @@ def record(part):
 def save(part, path):
     """Write a part's calibration to a JSON file → path."""
     with open(path, "w", encoding="utf-8") as fh:
-        json.dump(record(part), fh, ensure_ascii=False, indent=1)
+        json.dump(_enc(record(part)), fh, ensure_ascii=False, indent=1, allow_nan=False)
         fh.write("\n")
     return path
 

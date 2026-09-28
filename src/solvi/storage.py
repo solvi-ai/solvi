@@ -40,7 +40,8 @@ ANY = _Any()                                  # a query / provenance argument th
 
 
 def _cj(obj):
-    """Canonical JSON: sorted keys, no spaces — what the record hash is taken over."""
+    """Canonical JSON: sorted keys, no spaces — what the record hash is taken over. New records hold no inf / nan (they are
+    tagged, see entry); records written before 0.7 may, and still hash as they were written (Infinity / NaN)."""
     return json.dumps(obj, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
 
 
@@ -62,7 +63,8 @@ def plain(v):
 
 def akey(v):
     """An answer as an index key (canonical JSON of its stored form): answer=("a", "b") finds a stored ["a", "b"]."""
-    return _cj(plain(v))
+    from .schema import tag_floats
+    return _cj(tag_floats(plain(v)))
 
 
 def _when(t):
@@ -105,7 +107,8 @@ def entry(resp, meta=None):
     if meta is not None:
         e["meta"] = plain(meta)
     e["response"] = d
-    return e
+    from .schema import tag_floats
+    return tag_floats(e)                              # strict JSON: an inf threshold is {"$float": "inf"}
 
 
 @dataclass
@@ -121,7 +124,8 @@ class Stored:
     @property
     def answers(self):
         """question → the stored answer (JSON form: tuples as lists, "not stated" as "<not stated>")."""
-        return {q: a[0] for q, a in (self.data.get("answers") or {}).items()}
+        from .schema import untag_floats
+        return {q: untag_floats(a[0]) for q, a in (self.data.get("answers") or {}).items()}
 
     @property
     def meta(self):
@@ -468,7 +472,7 @@ class JSONLStorage(TraceStorage):
             rec = dict(body, seq=self._count, time=float(self.clock()), prev=self._last)
             rec["hash"] = record_hash(rec)
             rec["id"] = rec["hash"][:16]
-            line = (json.dumps(rec, ensure_ascii=False, sort_keys=True) + "\n").encode()
+            line = (json.dumps(rec, ensure_ascii=False, sort_keys=True, allow_nan=False) + "\n").encode()
             with open(self.path, "ab") as fh:
                 off = fh.tell()
                 fh.write(line)
@@ -634,7 +638,8 @@ class SQLiteStorage(TraceStorage):
         self.db.execute("INSERT INTO records (seq, id, kind, time, init_hash, catalog, prev, hash, body) "
                         "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
                         (s, rec["id"], rec.get("kind", "ask"), rec["time"], rec.get("init_hash"), rec.get("catalog"),
-                         rec["prev"], rec["hash"], json.dumps(rec, ensure_ascii=False, sort_keys=True)))
+                         rec["prev"], rec["hash"], json.dumps(rec, ensure_ascii=False, sort_keys=True,
+                                                                           allow_nan=False)))
         ans, sg, ms = _index_rows(rec)
         self.db.executemany("INSERT INTO answers (seq, question, answer, status, guard) VALUES (?, ?, ?, ?, ?)",
                             [(s, *a) for a in ans])

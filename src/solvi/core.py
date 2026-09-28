@@ -25,7 +25,7 @@ class Serial:
         return dump(self, mode)
 
     def to_json(self, indent=None):
-        return json.dumps(self.model_dump("json"), ensure_ascii=False, indent=indent)
+        return json.dumps(self.model_dump("json"), ensure_ascii=False, indent=indent, allow_nan=False)
 
     @classmethod
     def model_validate(cls, data, catalog=None):

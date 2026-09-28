@@ -99,7 +99,8 @@ def _filters(a):
 
 
 def _dump(obj):
-    print(json.dumps(obj, ensure_ascii=False, indent=2, default=repr))
+    from .schema import dumps
+    print(dumps(obj, ensure_ascii=False, indent=2, default=repr))
 
 
 def cmd_verify(a):

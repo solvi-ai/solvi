@@ -257,7 +257,8 @@ def main(argv=None):
     except Exception as e:  # noqa: BLE001
         print(json.dumps({"set": a.set, "error": f"{type(e).__name__}: {e}", "ok": False}), file=sys.stderr)
         return 2
-    text = json.dumps(out, indent=1, ensure_ascii=False, default=str)
+    from .schema import dumps
+    text = dumps(out, indent=1, ensure_ascii=False, default=str)
     print(text)
     if a.save:
         Path(a.save).write_text(text + "\n")
