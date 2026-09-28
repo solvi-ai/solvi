@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.6.1 — unreleased — deterministic hashes of failed steps
+## 0.6.1 — 2026-09-28 — deterministic hashes of failed steps
 
 - A failed step's value (MISSING) hashed as `repr(object())`, which carries a memory address, so a trace with a failed step
   hashed differently in every process and could not be replayed or verified from a store in another process. It now
