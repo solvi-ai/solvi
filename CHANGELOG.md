@@ -86,7 +86,7 @@
   the proposals, or — trusted or unavailable models — checks that the answer follows from the recorded proposals.
 - `examples/18_several_models.py`: cascade, vote and route under one guarantee, with keyword stand-ins.
 
-## 0.5.1 — unreleased — escalation with a guarantee, any System One model, a release gate, stored decisions
+## 0.5.1 — 2026-09-28 — escalation with a guarantee, any System One model, a release gate, stored decisions
 
 ### Escalation with a guarantee
 
