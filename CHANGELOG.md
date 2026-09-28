@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.5.1 — unreleased — escalation with a guarantee, any System One model, a release gate, stored decisions
+## 0.5.1 — 2026-09-28 — escalation with a guarantee, any System One model, a release gate, stored decisions
 
 ### Escalation with a guarantee
 
