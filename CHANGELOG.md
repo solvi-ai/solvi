@@ -194,6 +194,58 @@ Found in an adversarial re-check of 0.7; each case has a regression test (`tests
   plain allow and was never stored: it is recorded with `error="forwarding failed: <type>"` (stored, and in the
   session's context) before the error is raised.
 
+Found in a third adversarial re-check of 0.7; each case has a regression test (`tests/test_agents_recheck3.py`; the
+framework cases run PydanticAI, LangGraph and the OpenAI Agents SDK for real).
+
+- **PydanticAI: tool content sent as a user prompt.** PydanticAI sends a tool's `ToolReturn(content=...)` and MCP tool
+  text as a `UserPromptPart` in the request that carries the tool return; `context_of` read it as the user's words, so
+  `fetch_invoice` returning "Payee IBAN <evil>" grounded `send_payment(iban=<evil>)` declared `ground_from=("user",)`. A
+  user prompt in a request that also holds tool returns or retry prompts is now a tool output (fail closed); built-in
+  tool returns are tool outputs, a compaction is the model's.
+- **Summaries in the user's place.** LangChain's `SummarizationMiddleware` writes the older history as a
+  `HumanMessage(additional_kwargs={"lc_source": "summarization"})`: tool text in it read as the user's. A message marked
+  as generated (`lc_source`, or a `source` naming a summary / compaction in `additional_kwargs`, `response_metadata`,
+  `metadata`) is the assistant's. The guide says which history compressions break provenance (unmarked summaries,
+  smolagents' "Observation:" user turns, ReAct flattening, a pre-rendered string) and to pass the raw history.
+- **Numbers are exact.** Numbers were compared as floats with a relative tolerance (1e-9·|v|): a 16-digit ID was
+  grounded by a neighbouring ID. An int is now compared exactly, a float by its shortest decimal form; the text's number
+  is read as an exact decimal.
+- **Locale-ambiguous numbers.** "1,500" / "1.500" (one separator, one group of three digits) grounded 1500 or 1.5
+  depending on the separator; it now grounds neither unless the tool declares `locale="en" | "de" | "fr" | "ch"` (or a
+  callable matcher decides). "1,500.00", "1,500,000", "1.5" are unambiguous and still ground.
+- **Invisible characters in arguments.** Grounding read values without format characters (Cf: zero-width, direction
+  marks, tag characters U+E0000–E007F) but the call executed or forwarded them. Any string or key of the arguments that
+  holds one is denied ("invisible characters in argument X") — in `check` / `call`, the adapters and the MCP proxy.
+- **LangGraph: parallel approvals.** The parallel calls of one message share one sequence of resume values, so a bare
+  `Command(resume=True)` could approve a call the person never saw. The interrupt payload carries the tool call id, an
+  arguments hash, the reasons and the approval key; with several calls in the message only `{"approved": True, "id":
+  ...}` or a map keyed by call id approves, a bare True rejects, an answer naming another call is skipped. On resume
+  LangGraph re-ran the whole node, so a call of the same message that had already run (allowed, or approved while
+  another waited) was made again: its result is now returned instead (same process).
+- **Approvals cover their reasons.** `GuardDecision.approval_key()` (tool, call id, arguments, reasons): a resumed call
+  that escalates for other reasons than the approved ones is asked again (LangGraph, PydanticAI) or rejected with the new
+  reasons (OpenAI Agents). The OpenAI Agents guardrail reused the needs_approval decision made before the approval; an
+  answered escalation is checked again as it is now.
+- **OpenAI Agents: standing approvals.** `state.approve(item, always_approve=True)` resolved every later escalation of
+  the tool, injection and provenance included. It now covers only escalations by policies (`GuardDecision.policy_only`);
+  others need an approval of that very call, else the guardrail rejects them.
+- **OpenAI Agents: in-run tool outputs.** The guard read `turn_input` — the run's input only, not the tool outputs the
+  run generated — so an injection in an earlier tool output of the run was not seen (`injections="any"`). New
+  `guard_run_config()`: a RunConfig whose `call_model_input_filter` records the model's input (in the run's task), which
+  the guard then reads. Without it the documented behaviour is fail-closed (such values are not grounded). Handoffs that
+  nest or filter the history are documented as fail-closed.
+- **Policies that read nothing given.** A tool-agnostic policy (or fn) reading a fact that is neither declared nor an
+  argument of any tool applied to no tool, silently; it now raises `ValueError` when a tool's checks are built.
+- **Tool outputs in other shapes.** Any item type ending in `call_output` (Responses API computer / shell / custom tool
+  outputs) or `_tool_result` is a tool output whatever its role; a message or type-less block with a `tool_call_id` /
+  `tool_use_id` is one; a text block's `text` must be a string (a nested list was read as the user's text).
+- MCP elicitation approves only `{"action": "accept", "content": {"approve": true}}` (`"yes"`, 1 or `"true"` approved).
+- Product decisions, documented: text the user pastes is the user's (allowed), and user messages are not scanned by
+  default; `Guard(scan_user=True)` / `tool(scan_user=True)` escalates a value the user wrote only next to an override in
+  their own message (`injection_spans(text, actions=False)`). Frameworks whose formats drop or merge the user's text are
+  read fail-closed; the supported and tested ones are listed. The injection detector flags about 16% of realistic
+  e-mails and invoices (escalation only); per-tool `injections="grounded"` / `"off"` tunes it, provenance still holds.
+
 ### Fixes in the learning loop
 
 - Labels are split into train / calibration / held-out by a hash of their question and input, not of the stored id

@@ -1794,10 +1794,33 @@ what a user-only argument trusts:
 - a content block is read by its type, normalised the same way: a tool result (`tool_result`, any `*_tool_result`,
   `function_response`, `search_result`, …) is a tool output even inside a `user` message, a `tool_use` /
   `function_call` block is the assistant's;
-- in a user message only text blocks are the user's — a string, `{"type": "text" | "input_text"}`, or a block with a
-  `"text"`, no type and no `"content"`. Anything else there (an image with a caption, a block with `"content"` and no
-  type, a type the guard does not know) is read as a tool output: it never grounds a user-only value, and it gets the
-  injection checks.
+- in a user message only text blocks are the user's — a string, `{"type": "text" | "input_text"}` whose `"text"` is a
+  string, or a block with a string `"text"`, no type and no `"content"`. Anything else there (an image with a caption, a
+  block with `"content"` and no type, a `"text"` that is a list or an object, a type the guard does not know) is read as
+  a tool output: it never grounds a user-only value, and it gets the injection checks;
+- a message or a block that carries a `tool_call_id` / `tool_use_id` answers a tool call — a tool output, whatever its
+  role; so is any item whose type ends in `call_output` (the Responses API's `function_call_output`,
+  `computer_call_output`, `local_shell_call_output`, `custom_tool_call_output`, …) or `_tool_result`;
+- a user message a framework wrote in the user's place is the assistant's: LangChain's `SummarizationMiddleware` turns
+  the older history into one `HumanMessage(additional_kwargs={"lc_source": "summarization"})`, and any message whose
+  `additional_kwargs` / `response_metadata` / `metadata` has an `lc_source`, or a `source` naming a summary or a
+  compaction, is read as the assistant's words — a summary restates tool outputs, so it never grounds a user-only value.
+
+**History compression breaks provenance.** Provenance is only as good as the roles of the history the guard is given.
+Anything that rewrites earlier turns into *user* messages makes tool text look like the user's: a summarization
+middleware (the marked ones above are recognised; an unmarked one is not), smolagents' memory, which replays tool
+results as user turns starting with "Observation:", a ReAct loop that flattens the whole scratchpad into one prompt, a
+context pre-rendered into one string (a string is read as one user message). Give the guard the raw, role-separated
+history — keep a copy of the messages before compression and pass that as `context=` — or declare user-only values
+only where the history reaching the guard is raw. Frameworks whose own formats drop or merge the user's text are read
+fail-closed (below): a user-grounded call may be denied, never allowed on tool text.
+
+**Pasted content.** A user who pastes an e-mail or a tool's output into their own message endorses it: a value in it is
+the user's (allowed), and user messages are not scanned for instructions by default — people write "pay …", "send …"
+all the time, and scanning them would escalate ordinary requests. `Guard(scan_user=True)` (or `tool(scan_user=True)`
+for high-impact tools) escalates a call whose user-grounded value the user wrote *only* within 200 characters of an
+override in their own message ("ignore previous instructions", "SYSTEM:", role tags — the narrower rules, not "pay
+… now"): the pasted-injection case. A value the user also wrote plainly elsewhere is taken from there.
 
 **What the guard guarantees, and what it only tries.** The hard guarantee is *provenance*: an argument declared as
 the user's (`ground_from=("user",)`) is allowed only when its value is in a message the user wrote — a value that
@@ -1816,7 +1839,7 @@ decides (so a deny wins over an escalation), and every failed one is in `reasons
 | Check | Fails when | Outcome |
 |---|---|---|
 | the tool is in the catalog | the agent names a tool the guard does not declare | deny |
-| `arguments_valid` | the arguments do not validate against the tool's types (pydantic, lax: `"250"` is 250.0; NaN and infinities are refused); an unknown argument is an error | deny |
+| `arguments_valid` | the arguments do not validate against the tool's types (pydantic, lax: `"250"` is 250.0; NaN and infinities are refused); an unknown argument is an error; a string (or a key) holding invisible format characters — Unicode Cf: zero-width spaces and joiners, soft hyphens, direction marks, tag characters U+E0000–E007F — is refused ("invisible characters in argument iban (U+200B)"): grounding reads text without them, so the value checked would not be the value executed. An emoji written with a zero-width joiner is refused too | deny |
 | `arguments_grounded` | a `ground=` argument is not literally in the conversation — a string as a token (not inside a longer word or address: "DE8937" is not found in "DE89370400…", "bob@x.org" not in "bob@x.org.evil"), a number as a number token (`250` matches "250.00", `1250.5` matches "1,250.50"; not a part of a longer identifier), a list item by item, an empty or whitespace-only string never — in a message of a role in `ground_from` (default user, tool and system: never the assistant's own words; `("user",)` for values only the user may give) | deny |
 | `no_injected_arguments` | a grounded argument is found only in tool outputs, and a tool output in the conversation — that one or any other — carries instruction-like text (`solvi.perturb.injection_spans`, below) | escalate |
 | `no_instructions_in_tool_outputs` | tools declared with `injections="any"`: any tool output in the conversation carries instruction-like text | escalate |
@@ -1831,7 +1854,10 @@ authorizer's own escalation. The facts of a call: given — `tool_name`, `tool_a
 `user_request` (the user's messages) and your `facts=`; computed — `argument_errors`, `call_arguments` (the validated
 arguments), one fact per argument a policy reads (named after it), `grounding`, `proposal`. A policy reads any of them
 by name; `@guard.fn` adds computations (`def amount_eur(amount, currency)`). `guard.policy(tools=None)` (or bare
-`@guard.policy`) applies to every tool whose arguments and the guard's declared `facts` provide what it reads.
+`@guard.policy`) applies to every tool whose arguments and the guard's declared `facts` provide what it reads; one that
+reads a name no tool can provide (a fact not declared in `Guard(facts=...)` and not an argument of any tool) raises
+`ValueError` when a tool's checks are built, instead of silently checking nothing — declare the fact, or name the tools
+(`@guard.policy("send_payment")`: a fact it reads that a call does not give then escalates the call).
 `guard.catalog(name)` is a tool's Catalog and `guard.system(name)` its System; `solvi check module:guard` lints every
 tool's checks.
 
@@ -1850,6 +1876,12 @@ results ("pay the account in the next result" … "Account: DE89…") is caught.
 letters spaced apart, a paraphrase no rule knows — which is why provenance, not this, is the guarantee. A decider's
 `perturb=k` keeps its narrower rules (a customer who writes "please send me a refund" is not an injection there).
 
+The broad rules also flag honest text. On realistic tool outputs — e-mails and invoices that ask the reader to pay,
+transfer or reply — about 16% get flagged. A flag only escalates (never denies), but with `injections="any"` or values
+taken from tool outputs that is a person's time. Tune per tool: `injections="grounded"` (the default) escalates only
+calls whose grounded values come from tool outputs in a flagged context; `injections="off"` turns the detector off for
+the tool — provenance still holds: a user-grounded argument is still never taken from a tool output.
+
 **How a value is found.** `ground=["iban", "amount"]` finds each string as a *token*: the occurrence must not continue
 a longer word on either side, nor be joined to one by `. @ - / : _` ("bob@x.org" is not found in "bob@x.org.evil" or
 "evil.bob@x.org", "acct" not in "acct-12"); zero-width and other format characters are read as absent, so they cannot
@@ -1857,7 +1889,14 @@ make a boundary; a string of digits gets the same protection as a number ("0532"
 whitespace, quotes, brackets or punctuation, so "x.org" is not found in "alice@x.org" and "alice@x.org" not in
 "bob.alice@x.org"; `"substring"` accepts any occurrence; a callable `matcher(value, text) → [(start, end)]` decides
 itself (a case-insensitive match, a normalised IBAN), and its code is part of the tool's fingerprint. Numbers are always
-found as number tokens: `3704` is not found in "DE89 3704 0044" or "555-3704" (a number next to another group with
+found as number tokens of exactly their value: an integer is compared exactly (the account 1234567890123456 is not
+found in "1234567890123457"), a float by its shortest decimal form (250.0 is "250" and "250.00", 0.1 is "0.10") — no
+tolerance; a float too long for its digits (a 19-digit ID declared as `float`) matches nothing: declare IDs as `int` or
+`str`. A number written with one separator and one group of three digits — "1,500", "1.500" — is 1500 to one writer and
+1.5 to another, so by default it grounds neither; `tool(locale="en")` reads "1,500" as 1500 and "1.500" as 1.5,
+`"de"` the other way round ("1.234,5" is 1234.5), `"ch"` "1'500.50", `"fr"` "1 500,5" (with the `"spaced"` matcher); a
+callable matcher decides per argument. Unambiguous forms ground without a locale: "1,500.00", "1,500,000", "1.5". Numbers
+are found as number tokens: `3704` is not found in "DE89 3704 0044" or "555-3704" (a number next to another group with
 digits across one space, or joined to any word by `. @ - / : _`, is part of an identifier: 250 is not in "INV-250", 30
 not in "12:30"), `44` not in "1.44" or "44th", 250 not in "250%" or "250kg". Thousands may be grouped with "," or "'";
 a space groups them only with `ground={"amount": "spaced"}` ("1 250"), because by default "10 250-gram" or "3 250 EUR
@@ -1890,6 +1929,14 @@ resolution) raises `ValueError`, so an approved call is never made twice. `execu
 making the call (the adapters use it: the framework makes the call); the stored resolution then says `executed: false`,
 and the framework's result is not recorded by the guard. The adapters map an escalation to their framework's
 human-in-the-loop mechanism (below).
+
+An approval covers *one call and the reasons it was shown for*: `d.approval_key()` hashes the tool, the call's id, its
+arguments and its reasons. When a framework resumes an approved call, the adapter checks the call again; if it now
+escalates for other reasons (a budget spent meanwhile, a new tool output with instructions, other arguments), the old
+approval does not cover it and the call is asked again (LangGraph, PydanticAI) or rejected with the new reasons
+(OpenAI Agents). A standing approval ("always approve this tool") covers only escalations by your policies
+(`d.policy_only`); an escalation by provenance or instruction-like text, an unreadable schema, the authorizer or a
+check that could not be evaluated always needs a person for that very call.
 
 **Tool outputs fed back.** `session = guard.session(context, facts)`; `session.call(proposal)` checks and makes calls in a
 conversation and appends each made call's result to it as a tool output — so a later call's grounding and injection checks
@@ -1925,10 +1972,14 @@ if isinstance(result.output, DeferredToolRequests):          # escalated calls w
     result = agent.run_sync(message_history=result.all_messages(), deferred_tool_results=DeferredToolResults(approvals=approvals))
 ```
 
-`GuardedToolset` is a `WrapperToolset`: each call is checked against `ctx.messages`; allow → the wrapped toolset runs it;
+`GuardedToolset` is a `WrapperToolset`: each call is checked against `ctx.messages` (a user-prompt part in a request that
+also holds a tool return is a tool output: that is how PydanticAI sends `ToolReturn(content=...)` and MCP tool content;
+a prompt the user sends in the same request as a tool return is read that way too — fail closed); allow → the wrapped toolset runs it;
 deny → `ModelRetry` with the reasons (`on_deny="fail"`: `ToolFailed`); escalate → `ApprovalRequired` (the output type must
 allow `DeferredToolRequests`; `on_escalate="fail"`: `ToolFailed`), and a resumed, approved call is recorded as approved by
-a person. A tool function's first `RunContext` parameter is not an argument. Tested with pydantic-ai 2.51.
+a person. The approval covers the reasons in `metadata[id]["solvi"]` (`metadata[id]["approval_key"]`): a resumed call
+that escalates for others is deferred again (in the process that asked). A tool function's first `RunContext`
+parameter is not an argument. Tested with pydantic-ai 2.51.
 
 ### LangGraph
 
@@ -1942,7 +1993,8 @@ tools = guarded_tool_node([tool(send_payment), tool(search_invoices)], guard,
 graph = builder.add_node("tools", tools)...compile(checkpointer=InMemorySaver())
 out = graph.invoke({"messages": [HumanMessage("Please pay INV-7.")]}, cfg)
 if "__interrupt__" in out:                                   # an escalated call: out["__interrupt__"][0].value["solvi"]
-    out = graph.invoke(Command(resume=True), cfg)            # a person approves (anything else rejects)
+    ask = out["__interrupt__"][0].value                      # {"solvi", "id", "args_hash", "key", "reasons"}
+    out = graph.invoke(Command(resume={"approved": True, "id": ask["id"], "key": ask["key"]}), cfg)
 ```
 
 The guard wraps the ToolNode's execution (`wrap_tool_call` / `awrap_tool_call`, langgraph ≥ 1.0) and reads the graph's
@@ -1950,25 +2002,43 @@ messages; deny → a `ToolMessage` with `status="error"`, the reasons and `artif
 `interrupt(...)` (it needs a checkpointer; `on_escalate="message"` answers with a ToolMessage instead).
 `guard_wrappers(guard)` gives the two wrappers for your own ToolNode. Tested with langgraph 1.2.12 (langchain-core 1.6.5).
 
+Approvals name their call. The parallel calls of one model message run in one node task and share one sequence of
+resume values, so a bare `Command(resume=True)` could be read by a call the person never saw: when the message holds
+several calls, only `{"approved": True, "id": "<tool_call_id>"}` or a map `{"<tool_call_id>": True, ...}` approves (one
+resume value may answer all of them), a bare `True` rejects, and an answer naming another call is not this call's.
+With a single call a bare `True` still approves. With `"key"` in the answer, an approval given for other reasons (the
+call escalated anew since) interrupts again; without it that holds in the process that asked. On resume LangGraph
+re-runs the whole node; a call of the message that already ran (allowed at once, or approved while another call
+waited) is not made again — the wrapper returns its result (in the same process; after a restart keep such tools
+idempotent).
+
 ### OpenAI Agents SDK
 
 ```python
 from agents import Agent, Runner, function_tool
-from solvi.agents.openai_agents import guard_tools
+from solvi.agents.openai_agents import guard_run_config, guard_tools
 
 agent = Agent(name="payer", tools=guard_tools([function_tool(send_payment), function_tool(search_invoices)], guard,
                                               facts=lambda ctx: {"role": ctx.context.role, "spent_today": ctx.context.spent}))
-result = await Runner.run(agent, "Please pay INV-7.", context=app_ctx)
+result = await Runner.run(agent, "Please pay INV-7.", context=app_ctx, run_config=guard_run_config())
 if result.interruptions:                                     # escalated calls wait for a person
     state = result.to_state()
     for item in result.interruptions:
         state.approve(item)                                  # or state.reject(item)
-    result = await Runner.run(agent, state)
+    result = await Runner.run(agent, state, run_config=guard_run_config())
 ```
 
 `guard_tool` returns a copy of a `FunctionTool` with a tool input guardrail (deny → `reject_content` with the reasons as
 the tool's output) and a `needs_approval` function (escalate → the run stops with an interruption; an approved call is
-recorded as approved by a person). The conversation is the turn's input items. When a tool has a `needs_approval`
+recorded as approved by a person). The SDK gives a tool's context only the run's input items (`turn_input`), not the
+tool outputs the run generated since; `guard_run_config(run_config=None)` returns a `RunConfig` whose
+`call_model_input_filter` records each model input (your own filter runs first), and the guard then reads the whole
+input the model saw — an in-run tool output grounds values, taints them, and `injections="any"` sees it. Without it the
+guard reads the run's input alone: a value found only in an in-run tool output is denied, an instruction in one is not
+seen. A standing approval (`state.approve(item, always_approve=True)`) covers later calls only when policies alone
+escalated them; a call escalated by provenance or instruction-like text is rejected unless its own call is approved.
+After a handoff the SDK may nest or filter the history the next agent gets; the guard fails closed — a value the user
+wrote before the handoff may no longer read as the user's, and a user-grounded call is then denied. When a tool has a `needs_approval`
 function, the SDK itself asks for approval if validation changes the arguments (an integer given for a float argument):
 have the model write numbers as the schema says. Tested with openai-agents 0.22.3.
 
@@ -1998,6 +2068,14 @@ itself it is any object); a tool whose arguments collide with the guard's facts 
 {"mcpServers": {"files": {"command": "solvi", "args": ["serve", "--guard", "/path/to/catalog.py:guard",
                                                        "--upstream", "npx -y @modelcontextprotocol/server-filesystem /work"]}}}
 ```
+
+**Which frameworks.** Supported and tested with real runs (`tests/test_agents_frameworks.py`,
+`tests/test_agents_recheck3.py`): PydanticAI (2.51), LangGraph (1.2.12 with langchain-core 1.6.5), the OpenAI Agents SDK
+(0.22.3) and MCP (the proxy). Other frameworks — LlamaIndex, AutoGen, smolagents, CrewAI — have no adapter; their
+histories can be passed to `guard.check` as messages, and shapes the guard does not recognise are read fail-closed
+(unknown blocks are tool outputs), but formats that merge the user's text with tool text (smolagents' "Observation:"
+user turns, AutoGen's and LlamaIndex's flattened chat memories) cannot be read back into roles: a user-grounded call
+may be denied there, and history compression (above) must be avoided.
 
 **Limits.** Grounding is literal: a paraphrased value ("two hundred fifty") is denied, and a value that appears in the
 conversation for another reason passes grounding (a policy or the authorizer has to catch it). The instruction-like rules
