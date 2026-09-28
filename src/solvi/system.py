@@ -27,6 +27,13 @@ class _Prepared:
 
 @dataclass
 class Response(Serial):
+    """The answers of one ask, with the flow, the trace, every fact's value and the safeguards.
+
+    A response keeps a strong reference to the System that answered it (for `report()` and `counterfactual()`: the
+    questions, the answer heads, the replay). Deliberately not a weak one: `System(cat, qs).ask(state).report()` is common
+    and the temporary System would be gone before the report runs. A response you keep for long keeps its System (and its
+    models) alive; keep `res.to_dict()` or the stored record instead, or drop the reference with `res._system = None`
+    (then pass `system=` to report / counterfactual)."""
     results: dict
     flow: object
     trace: object
