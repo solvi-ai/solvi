@@ -4,7 +4,7 @@
     solvi honesty SET.json    honesty numbers of a labelled set, gated against a baseline (solvi.honesty)
     solvi verify | replay | diff over a TraceStorage:
 
-    solvi verify decisions.db [--anchor COUNT:HASH]
+    solvi verify decisions.db [--anchor COUNT:HASH] [--signature SIG.json] [--sign SIG.json]
     solvi replay decisions.db --system myapp.decisions:system
     solvi diff   decisions.db --system myapp.decisions_v2:build_system [--question Q] [--since ISO] [--limit N] [--json]
     solvi serve  myapp.decisions:system [--store decisions.db] [--decider ID] [--port 8000] [--mcp]   (solvi.serve)
@@ -114,7 +114,21 @@ def cmd_verify(a):
     if a.anchor:
         n, _, h = a.anchor.partition(":")
         anchor = {"count": int(n), "hash": h}
-    v = _store(a.store).verify(anchor)
+    store = _store(a.store)
+    sig = None
+    if a.signature:
+        from .signature import load
+        try:
+            sig = load(a.signature)
+        except (OSError, ValueError) as e:
+            _fail(f"cannot read the signature {a.signature}: {e}")
+    try:
+        v = store.verify(anchor, signature=sig)
+    except ValueError as e:
+        _fail(str(e))
+    if a.sign and v["ok"]:                            # never sign a store that does not verify
+        with open(a.sign, "w") as fh:
+            json.dump(store.signature(), fh)
     if a.json:
         _dump(v)
     else:
@@ -122,7 +136,13 @@ def cmd_verify(a):
               + f"; head {v['head']['count']}:{v['head']['hash']}")
         print("chain verified" if v["ok"] else f"{len(v['problems'])} problem(s):")
         for seq, rid, why in v["problems"]:
-            print(f"  #{seq} {rid or ''}: {why}")
+            print(f"  {'' if seq is None else f'#{seq} '}{rid or ''}: {why}".replace(" :", ":"))
+        if sig is not None and v["signature"]["ok"]:
+            print(f"signature verified ({v['signature']['signed']} signed record(s))")
+        elif sig is not None and v["signature"]["digest"]:
+            print(f"  original content hash of #{v['signature']['index']}: {v['signature']['digest']}")
+        if a.sign:
+            print(f"signature written to {a.sign}" if v["ok"] else "signature not written: the store does not verify")
     return 0 if v["ok"] else 1
 
 
@@ -336,6 +356,9 @@ def main(argv=None):
     v = sub.add_parser("verify", help="check the hash chain across stored decisions")
     common(v, system=False, filters=False)
     v.add_argument("--anchor", help="COUNT:HASH — a head() kept elsewhere")
+    v.add_argument("--signature", help="SIG.json (a file or the JSON) — a signature() kept elsewhere: names the one changed "
+                                       "record and its original content hash (solvi.signature)")
+    v.add_argument("--sign", metavar="OUT.json", help="write the store's current signature() to this file")
     r = sub.add_parser("replay", help="re-compute every stored trace against a system")
     common(r)
     r.add_argument("--trust-models", action="store_true", help="do not re-run models; verify their recorded outputs")
