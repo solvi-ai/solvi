@@ -193,6 +193,22 @@ Every answer is a value and a confidence, and the types also declare answer prim
 ([guide](docs/guide.md#answer-primitives-not-stated-evidence-spans-rankings-estimates),
 [examples/16_primitives.py](examples/16_primitives.py)).
 
+## Escalation with a guarantee, several models, serving
+
+- **A guaranteed risk.** `part.act_guard(examples, risk=0.10)` calibrates on a few hundred labelled examples of your stream
+  so that P(answered alone and wrong) ≤ 10% for inputs like them (conformal risk control); the audit shows the promise
+  behind every answer, or says there is none. `part.conformal(examples)` gives the person who takes an escalation a short
+  list of candidates. Near ties escalate (`min_margin=`), and the answer does not depend on the order the options are listed
+  in (sorted by default).
+- **Any decision model.** `solvi.systemone.systemone(url, model)` puts any `POST /v1/systemone` service (Jev, Kev, Von,
+  Laya-serve, …) behind your rules; `Cascade`, `Vote` and `Route` (`solvi.multi`) combine models — small first, a larger
+  one only when the small one escalates, or answer only when models of different families agree — under one guarantee.
+- **Serving and operations.** `solvi serve module:system` exposes the questions over HTTP (OpenAPI from the same types),
+  MCP and the System One API; `await system.aask(...)` runs async parts concurrently with timeouts; `costs="measured"`
+  lets the planner pick the fastest equivalent source and switch when it slows down. `TraceStorage` keeps decisions with a
+  hash chain across them; `solvi diff` shows which stored decisions a rule or model change would flip; `solvi test`,
+  `solvi check` and the honesty suite (`solvi honesty`) belong in CI.
+
 ## Planning around dead ends and costs (code strategist)
 
 The default strategist needs the inputs of every producer of a fact. `solvi.strategy.ModelStrategist()` plans around

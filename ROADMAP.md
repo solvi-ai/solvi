@@ -45,7 +45,7 @@ Status: `planned` · `in progress` · `research` (may not ship) · `done (versio
 | **Reliability-aware producer choice** | Choose among producers by how often each one is accepted and right, learned from outcomes (continues the learned producer policy). | planned |
 | **Text in: entry points** | Text → which question is asked + its typed input state: the decider picks the entry point, spans and deterministic parsers fill the fields with quotes; provenance says the input was read by a model. | research |
 | **Learning from corrections, with gates and rollback** | The system learns from every human correction of an escalation, every known outcome and every proposal your rules rejected — never from its own accepted answers (tried three times: no gain). By the number of labels per process: shift/scale (today's `fit` / `teach`), a memory of corrected cases and a small head, then a LoRA adapter. Every update runs in shadow, is diffed against the current one, must beat it on held-out labels and pass the honesty suite, recalibrates `act_guard` on fresh labels, and is recorded in each trace so it can be rolled back. A simulation on real data sets comes first; it ships only if it helps. | research |
-| **Cascade and memory of corrections** | Decider → larger decider → LLM, escalating by the cost of a mistake; a memory of human-corrected cases (nearest neighbours with an abstain threshold). | planned |
+| **Cascade and memory of corrections** | Decider → larger decider → LLM, escalating by the cost of a mistake; a memory of human-corrected cases (nearest neighbours with an abstain threshold). | cascade, vote, route done (0.6); memory planned |
 | **Task in words → goal and plan** | A model that turns a natural-language task into the questions to ask and the goal to plan for over a catalog; code still verifies and executes. | research |
 | **Name matching across teams** (`solvi.aliases`) | Link parameters and facts whose names differ; acceptance by active, targeted questions and units in types. Experimental today. | research |
 | **Model strategist for plan segments** | The L3–L6 decomposer as a proposer for ambiguous segments. Experimental: adds little over the code planner when contracts and costs are declared. | research |
@@ -69,6 +69,8 @@ Status: `planned` · `in progress` · `research` (may not ship) · `done (versio
 
 | Item | Version |
 |---|---|
+| `solvi serve` (HTTP, MCP, System One API), `solvi check`, Cascade / Vote / Route under one guarantee, `aask` with timeouts, costs from measurements | 0.6.0 |
+| Escalation with a guarantee (`act_guard`, learn-then-test, conformal sets), option order and near-tie safeguards, System One backend, honesty suite, `solvi test`, TraceStorage, `solvi diff` and shadow mode | 0.5.1 |
 | solvi-large / solvi-base (preview); L17 strategist in realms | 0.5.0 |
 | Typed facts (pydantic), questions declared by types, answer primitives (not stated, evidence, span, rank, estimate), overall confidence, typed decider API with act/escalate, code strategist (dead ends, exact cost optimum, memoized planning) | 0.5.0 |
 | Audit shows what a learned head reads and ignores; `rule_abstained` safeguard | 0.4.1 |

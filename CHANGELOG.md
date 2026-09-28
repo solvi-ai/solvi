@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased (0.6)
+## 0.6.0 — 2026-09-28 — serving, catalog lint, several models, async, measured costs
 
 ### Async execution: aask
 
