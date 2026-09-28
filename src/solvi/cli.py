@@ -11,14 +11,24 @@
     solvi check  myapp.decisions:system [--strict] [--json]                                          (solvi.check)
     solvi report decisions.db [--since ISO] [--until ISO] [--question Q] [--id ID] [--html out.html] [--md out.md] [--json]
                                                                                                      (solvi.report)
+    solvi init [DIR] [--template support|refunds|minimal] [--with-model] [--force]                  (solvi.scaffold)
+    solvi ask myapp.decisions:system (STATE.json | - | --state '{...}' | --text "...") [--question Q] [--decider MODEL]
+              [--audit] [--report md|html] [--lang ru] [--store decisions.db] [--json]
+    solvi calibrate myapp.decisions:system PART labels.csv --risk 0.1 [--groups a,b] [--method crc|ltt] [--out F]
+                                                                                                     (solvi.calibfile)
+    solvi models [list | pull ID | check MODEL --examples labels.jsonl --task Q]                       (solvi.models)
 
 --system names a System: "package.module:attribute" or "path/to/file.py:attribute", where the attribute is a System or a
 function without arguments that returns one (`solvi serve` and `solvi check` take it as their first argument; check also
 takes a Catalog). `solvi report` prints a Markdown report of the stored decisions (or of one with --id), or writes it
 as a self-contained HTML page (--html) / a Markdown file (--md); --system is optional there (typed values, the replay of
 one decision).
-Exit status: 0 — verified / everything replays / nothing changes / no catalog errors / report written; 1 — problems /
-mismatches / changes / catalog errors; 2 — usage errors."""
+`solvi ask` asks once (a state, or a text through ask_text) and prints the answers, the audit or a report; a module-level
+`prepare(state)` next to the System runs first, as in `solvi test`.
+Exit status: 0 — verified / everything replays / nothing changes / no catalog errors / report written / scaffold written /
+every asked question answered / something answered alone after calibrating; 1 — problems / mismatches / changes / catalog
+errors / a file exists / a question abstained / the calibration escalates everything / a model that does not load; 2 —
+usage errors."""
 from __future__ import annotations
 
 import argparse
@@ -36,6 +46,11 @@ def _fail(msg):
 
 def load_object(spec):
     """"module:attr" or "file.py:attr" → the attribute (called when it is a function: a System factory)."""
+    return load_module(spec)[1]
+
+
+def load_module(spec):
+    """"module:attr" or "file.py:attr" → (the module, the attribute — called when it is a function: a System factory)."""
     mod_name, _, attr = spec.rpartition(":")
     if not mod_name or not attr:
         _fail(f"expected module:attribute or file.py:attribute, got {spec!r}")
@@ -54,9 +69,9 @@ def load_object(spec):
     if not hasattr(mod, attr):
         _fail(f"{mod_name} has no attribute {attr!r}")
     obj = getattr(mod, attr)
-    if callable(obj) and not hasattr(obj, "ask"):
+    if callable(obj) and not hasattr(obj, "ask") and not callable(getattr(obj, "decision", None)):
         obj = obj()
-    return obj
+    return mod, obj
 
 
 def load_system(spec):
@@ -158,6 +173,128 @@ def cmd_report(a):
     return 0
 
 
+def _read_json(src, what):
+    """A JSON value from a file path, or from stdin when src is "-"."""
+    try:
+        text = sys.stdin.read() if src == "-" else open(src, encoding="utf-8").read()
+    except OSError as e:
+        _fail(f"cannot read {what} {src}: {e.strerror}")
+    try:
+        return json.loads(text)
+    except ValueError as e:
+        _fail(f"{what} {'from stdin' if src == '-' else src}: not JSON: {e}")
+
+
+def _answers(res):
+    from .storage import plain
+    out = {}
+    for q, r in res.results.items():
+        out[q] = {"answer": plain(r.answer), "status": r.status, "confidence": r.confidence, "why": r.why}
+        if getattr(r, "guard", None):
+            out[q]["guard"] = r.guard
+    return out
+
+
+def cmd_ask(a):
+    """`solvi ask` → 0: every asked question answered; 1: at least one abstained (a person should look); 2: usage."""
+    from . import i18n
+    mod, system = load_module(a.system)
+    if not hasattr(system, "ask") or not hasattr(system, "catalog"):
+        _fail(f"ask {a.system}: not a solvi System")
+    given = [x for x in (a.state_file, a.state, a.text) if x is not None]
+    if len(given) != 1:
+        _fail("ask: give one input — a STATE.json file ('-': stdin), --state '{...}' or --text '...'")
+    if a.lang:
+        try:
+            i18n.check(a.lang)
+        except ValueError as e:
+            _fail(str(e))
+    names = None
+    if a.question:
+        names = [q for x in a.question for q in x.split(",") if q]
+        bad = [q for q in names if q not in system.questions]
+        if bad:
+            _fail(f"ask: no question {bad[0]!r} (the system asks: {', '.join(system.questions)})")
+    if a.text is not None:
+        if names is not None and len(names) != 1:
+            _fail("ask --text: at most one --question (it skips routing)")
+        text = sys.stdin.read() if a.text == "-" else a.text
+        decider = None
+        if a.decider:
+            from .models import ModelError, load as load_model
+            try:
+                decider = load_model(a.decider, a.backend)
+            except ModelError as e:
+                _fail(str(e))
+        try:
+            res = system.ask_text(text, decider, question=names[0] if names else None)
+        except (KeyError, ValueError) as e:
+            _fail(f"ask --text: {e.args[0] if e.args else e}")
+    else:
+        if a.decider:
+            _fail("ask: --decider routes a --text; a state is asked as it is")
+        if a.state is not None:
+            try:
+                state = json.loads(a.state)
+            except ValueError as e:
+                _fail(f"--state: not JSON: {e}")
+        else:
+            state = _read_json(a.state_file, "state")
+        if not isinstance(state, dict):
+            _fail("ask: the state must be a JSON object")
+        prep = getattr(mod, "prepare", None)
+        if callable(prep):                             # the module's prepare(state), as `solvi test` runs it
+            state = prep(state)
+        res = system.ask(state, names)
+    stored = None
+    if a.store:
+        from .storage import open_storage
+        stored = open_storage(a.store, system).save(res)
+    lang = a.lang or getattr(system, "lang", None)
+    if a.json:
+        out = {"answers": _answers(res), "safeguards": res.safeguards or [], "ms": res.ms}
+        if a.text is not None and getattr(res, "textin", None) is not None:
+            out["textin"] = res.textin.to_dict()
+        if a.audit:
+            out["audit"] = res.audit().to_dict()
+        if stored:
+            out["stored_id"] = stored
+        _dump(out)
+    elif a.report:
+        print(res.report(a.report), end="")
+    else:
+        from .show import show
+        show(res, flow=False, state=False, audit=False, lang=lang)
+        tin = getattr(res, "textin", None)
+        if tin is not None and tin.missing:
+            print(tin.clarify())
+        if a.audit:
+            print(res.audit(lang=lang))
+    if stored:
+        print(f"stored {stored} in {a.store}", file=sys.stderr)
+    return 0 if all(r.status != "abstain" for r in res.results.values()) else 1
+
+
+def ask_parser(sub):
+    s = sub.add_parser("ask", help="ask a System once: a state (JSON) or a text; print the answers, the audit or a report")
+    s.add_argument("system", help="module:attr or file.py:attr — a System or a function returning one")
+    s.add_argument("state_file", nargs="?", metavar="STATE.json", help="the input state; '-' reads it from stdin")
+    s.add_argument("--state", help="the input state as inline JSON")
+    s.add_argument("--text", help="a free text: the question it asks and its fields are read from it (ask_text); "
+                                  "'-' reads stdin")
+    s.add_argument("--question", action="append", help="ask only these questions (repeat, or comma-separated); with "
+                                                       "--text: the question, without routing")
+    s.add_argument("--decider", help="with --text: the model that picks the question (a folder, a cached Hugging Face id, "
+                                     "systemone:URL#model or module:attr; see solvi models)")
+    s.add_argument("--backend", default="auto", choices=["auto", "onnx", "torch"], help="the decider's backend")
+    s.add_argument("--audit", action="store_true", help="also print what each answer rests on (res.audit())")
+    s.add_argument("--report", choices=["md", "html"], help="print the decision's report instead (res.report)")
+    s.add_argument("--lang", help="the language of the answers and the audit: en (default) or ru")
+    s.add_argument("--store", metavar="PATH", help="save the response to this TraceStorage (.db / .sqlite, else JSON lines)")
+    s.add_argument("--json", action="store_true", help="print the answers (and --audit) as JSON")
+    return s
+
+
 COMMANDS = {"test": ("solvi.testing", "decision regression tests from cases.json files"),
             "honesty": ("solvi.honesty", "honesty numbers of a labelled set, gated against a baseline")}
 
@@ -170,8 +307,9 @@ def main(argv=None):
         return 0
     if argv and argv[0] in COMMANDS:                  # commands with their own option parsers
         return importlib.import_module(COMMANDS[argv[0]][0]).main(argv[1:])
-    p = argparse.ArgumentParser(prog="solvi", description="solvi: test, honesty; verify, replay, diff and report "
-                                                          "stored decisions; serve and check a system",
+    p = argparse.ArgumentParser(prog="solvi", description="solvi: init a project; ask, check, serve a system; test, "
+                                                          "honesty; calibrate a model decision; models; verify, replay, "
+                                                          "diff and report stored decisions",
                                 epilog="also: " + "; ".join(f"solvi {k} — {w}" for k, (_, w) in COMMANDS.items()))
     sub = p.add_subparsers(dest="cmd", required=True)
 
@@ -208,12 +346,20 @@ def main(argv=None):
     serve_parser(sub)
     from .check import add_parser as check_parser, cmd_check
     check_parser(sub)
+    ask_parser(sub)
+    from .calibfile import add_parser as calibrate_parser, cmd_calibrate
+    calibrate_parser(sub)
+    from .models import add_parser as models_parser, cmd_models
+    models_parser(sub)
+    from .scaffold import add_parser as init_parser, cmd_init
+    init_parser(sub)
     try:
         a = p.parse_args(argv)
     except SystemExit as e:                            # --help: 0; usage errors: 2 — returned, not raised
         return e.code if isinstance(e.code, int) else 2
     return {"verify": cmd_verify, "replay": cmd_replay, "diff": cmd_diff, "serve": cmd_serve,
-            "check": cmd_check, "report": cmd_report}[a.cmd](a)
+            "check": cmd_check, "report": cmd_report, "ask": cmd_ask, "calibrate": cmd_calibrate, "models": cmd_models,
+            "init": cmd_init}[a.cmd](a)
 
 
 if __name__ == "__main__":
