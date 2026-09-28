@@ -150,6 +150,45 @@ def _extra_line(x):
     return ("  " + "; ".join(out)) if out else ""
 
 
+def _multi_lines(x, pad="              "):
+    """A combination of models (solvi.multi): one line per proposal — each stage of a cascade, each vote, the routed part
+    — with its value, its signal and what came of it; nested combinations indented."""
+    if not isinstance(x, dict):
+        return []
+    from .multi import _shown
+
+    def prop(e):
+        s = f"{e['part']} [{e['model']}]" if e.get("model") else f"{e['part']} ({e.get('kind', '')})"
+        s += f" {_shown(e.get('value'))}"
+        if e.get("score") is not None:
+            s += f"  {e.get('signal', 'signal')} {e['score']:.2f}"
+        return s
+
+    def esc(e):
+        return f"escalated — {e['escalate']}" if e.get("escalate") else "answers alone"
+
+    out = []
+    if isinstance(x.get("stages"), list):
+        by = x.get("answered_by")
+        out.append(f"{pad}cascade     " + (f"stage {by + 1} answered" if by is not None else "every stage escalated")
+                   + f"; {x.get('calls', len(x['stages']))} model(s) called")
+        for i, e in enumerate(x["stages"]):
+            out.append(f"{pad}  stage {i + 1}   {prop(e)} → " + ("answered" if i == by else esc(e)))
+            out += _multi_lines(e, pad + "    ")
+    if isinstance(x.get("votes"), list):
+        agree = len({repr(e.get("value")) for e in x["votes"]}) == 1
+        out.append(f"{pad}vote        rule {x.get('rule', 'all')}: " + ("all agree" if agree else "they disagree")
+                   + f"; {x.get('calls', len(x['votes']))} model(s) called")
+        for e in x["votes"]:
+            out.append(f"{pad}  vote      {prop(e)} → {esc(e)}")
+            out += _multi_lines(e, pad + "    ")
+    if isinstance(x.get("route"), dict) and isinstance(x.get("routed"), dict):
+        e = x["routed"]
+        out.append(f"{pad}route       by {x['route'].get('by')} → {prop(e)} → {esc(e)}")
+        out += _multi_lines(e, pad + "    ")
+    return out
+
+
 @dataclass
 class AnswerAudit:
     question: str
@@ -226,10 +265,12 @@ class AnswerAudit:
             if d.get("error"):
                 lines.append(f"  decided     {d['name']}: REJECTED — {d['error']}" + (f"  [{d['model']}]" if d.get("model") else "")
                              + _extra_line(d.get("extra")))
+                lines += _multi_lines(d.get("extra"))
                 continue
             p = ", ".join(f"{k} {v:.2f}" for k, v in sorted((d["probs"] or {}).items(), key=lambda t: -t[1])[:4])
             lines.append(f"  decided     {d['name']} = {_short(d['value'])}" + (f"  ({p})" if p else "")
                          + (f"  [{d['model']}]" if d.get("model") else "") + _extra_line(d.get("extra")))
+            lines += _multi_lines(d.get("extra"))
         for l_ in self.learned:
             p = ", ".join(f"{k} {v:.2f}" for k, v in sorted((l_.get("probs") or {}).items(), key=lambda t: -t[1])[:4])
             lines.append(f"  learned     {l_['name']} = " + (f"— {l_['error']}" if l_.get("error") else _short(l_["value"]))
@@ -246,6 +287,7 @@ class AnswerAudit:
             lines.append(f"  rule        {self.rule['name']} ({self.rule['provenance']})"
                          + (f"  [{self.rule['model']}]" if self.rule.get("model") else "") + _extra_line(self.rule.get("extra"))
                          + (f" — not computed: {self.rule['error']}" if self.rule.get("error") else ""))
+            lines += _multi_lines(self.rule.get("extra"))
         for e in self.evidence:
             lines.append(f"  {'span' if e.get('span') else 'evidence':11s} {e['source']}[{e['start']}:{e['end']}] {e['text']!r}"
                          + (("  in the text; support not checked" if e["by_model"] else "  verified") if e["verified"]

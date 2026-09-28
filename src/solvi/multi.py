@@ -1,0 +1,818 @@
+"""Several models, one decision: a cascade, a vote and a route over decision parts (solvi.decide). The models propose;
+deterministic code over their proposals decides; every proposal is in the trace.
+
+    from solvi.multi import Cascade, Route, Vote
+    small = base.decision("team", "Which team?", "email", TEAMS)
+    large = big.decision("team", "Which team?", "email", TEAMS)
+
+    team = Cascade([small, large])            # ask the small model; the large one only when the small one escalates
+    team = Vote([small, large], rule="all")    # answer when they agree and each is sure enough; else escalate
+    team = Route({lambda email: len(email) > 2000: large}, default=small)     # code picks the model per input
+
+    cat.fn(team)                               # like any decision part: a fact, or `team.question(cat)` for an answer
+    team.act_guard(examples, risk=0.10)        # P(answered alone and wrong) ≤ 10%, for the combination as a whole
+
+A combination is a catalog part like a DecisionPart: its value is one of the options, its provenance `decided`, its
+fingerprint covers every model's, and the trace records every proposal: `extra["stages"]` and `extra["answered_by"]`
+(cascade), `extra["votes"]` (vote), `extra["route"]` and `extra["routed"]` (route), and `extra["calls"]`, the models
+called for this decision. The parts must answer the same question (kind and options; the task and the facts they read
+may differ). Combinations nest: `Cascade([small, Vote([mid, large])])`.
+
+Thresholds. Uncalibrated, each part escalates by its own thresholds (act_threshold, escalate_below, min_margin). After
+`act_guard`, one threshold t applies to every part's signal (its act probability when its model gives one, else its
+calibrated confidence) — a one-dimensional family. A cascade's loss is not monotone in t (a higher t can pass a question
+from a wrong small model to a right large one, or back), so conformal risk control runs on the loss monotonized from
+above — the maximum over thresholds ≥ t — which keeps the guarantee (research note L25: the risk stayed ≤ 10% for every
+mode and data set; the cascade answered as much as the large model at half its cost where the small one is often sure;
+voting of two models lowered the error among the automatic answers from 2.1% to 0.4% on JSON questions)."""
+from __future__ import annotations
+
+import dataclasses
+import inspect
+import math
+
+import numpy as np
+
+from .core import Decision, Quote, Unknown
+from .decide import DecisionPart, _single
+from .provenance import ESCALATED, code_fingerprint, digest
+
+RECORD_KEYS = ("stages", "answered_by", "votes", "route", "routed")      # what a replay compares with the recomputed
+
+
+class Facts(dict):
+    """An example input given as facts by name (`Facts(email=..., tier=...)`): each part reads its own facts, a route's
+    predicates read theirs. Any other input is the one input every part reads (a text or a state), as for a DecisionPart."""
+
+
+@dataclasses.dataclass
+class _Src:
+    vals: dict | None = None        # facts by name (a catalog run, Facts)
+    raw: object = None              # one input every part reads
+
+
+def _src(x):
+    return _Src(vals=dict(x)) if isinstance(x, Facts) else _Src(raw=x)
+
+
+def _copy(d):
+    return dataclasses.replace(d, probs=dict(d.probs), extra=dict(d.extra), evidence=list(d.evidence))
+
+
+def _jv(v):
+    """A decision's value as JSON data for the trace."""
+    from enum import Enum
+    if isinstance(v, Quote):
+        return {"quote": [v.value, v.start, v.end, v.source]}
+    if v is Unknown:
+        return {"not_stated": True}
+    if isinstance(v, Enum):
+        return v.value
+    if isinstance(v, (list, tuple)):
+        return [_jv(x) for x in v]
+    if isinstance(v, np.generic):
+        return v.item()
+    return v
+
+
+def _key(v):
+    from .runtime import vhash
+    return vhash(_jv(v))
+
+
+def _shown(jv):
+    if isinstance(jv, dict) and "quote" in jv:
+        return repr(jv["quote"][0])
+    if isinstance(jv, dict) and jv.get("not_stated"):
+        return "not stated"
+    return repr(tuple(jv) if isinstance(jv, list) else jv)
+
+
+def _who(e):
+    return f"{e['part']} ({e['model']})" if e.get("model") else e["part"]
+
+
+def _probs(p):
+    return {str(k): round(float(v), 6) for k, v in p.items()}
+
+
+def _question(sp):
+    """What must be equal for parts to answer the same question."""
+    return {"kind": sp.kind, "options": [str(o) for o in sp.options], "as_bool": sp.as_bool, "unknown": sp.unknown,
+            "k": sp.k, "bins": sp.edges}
+
+
+# ------------------------------------------------------------------------------------------------ members
+class _LeafState:
+    def __init__(self, leaf, d0, act, hard, own, src):
+        self.leaf, self.d0, self.act, self.hard, self.own, self.src = leaf, d0, act, hard, own, src
+        self.signal, self.sig = leaf.part._signal(hard)
+        self.key = _key(hard.value)
+
+    def calls(self):
+        return 1
+
+    def walk(self):
+        yield self
+
+    def force(self):
+        return self
+
+    def sigs(self):
+        return [self.sig]
+
+
+class _Leaf:
+    """A DecisionPart as a member of a combination."""
+
+    kind = "part"
+
+    def __init__(self, part):
+        self.part = part
+        self.name = part.__name__
+        self.cost = 1.0
+        self.calls = 0
+
+    @property
+    def facts(self):
+        return list(self.part.facts)
+
+    @property
+    def spec(self):
+        return self.part.spec
+
+    @property
+    def model_id(self):
+        return self.part.model_id
+
+    def leaves(self):
+        return [self]
+
+    def question(self):
+        return _question(self.part.spec)
+
+    def fingerprint(self):
+        return self.part.fingerprint()
+
+    def text(self, src):
+        p = self.part
+        return p.text_of(src.vals) if src.vals is not None else p.model.text(src.raw)
+
+    def state(self, src, pre=None):
+        p = self.part
+        z, a = pre if pre is not None else p._raw([self.text(src)])[0]
+        d0 = p.model._decision(p.spec, z)
+        hard = p._finish(_copy(d0), a, threshold=-math.inf)     # every safeguard but the threshold
+        own = p._finish(_copy(d0), a)                            # the part's own thresholds
+        if src.vals is not None:
+            hard, own = p._bind(hard, src.vals), p._bind(own, src.vals)
+        return _LeafState(self, d0, a, hard, own, src)
+
+    def vec(self, st, ts):
+        """At each threshold of ts (NaN: the part's own thresholds) → (answers alone [G], value key [G], signal [G],
+        {key: value}, cost [G], calls [G])."""
+        own = np.isnan(ts)
+        with np.errstate(invalid="ignore"):
+            auto = np.where(own, st.own.escalate is None, (st.hard.escalate is None) & (st.sig >= ts))
+        G = len(ts)
+        return (auto, np.full(G, st.key, dtype=object), np.full(G, st.sig), {st.key: st.hard.value},
+                np.full(G, self.cost), np.ones(G))
+
+    def final(self, st, t):
+        """The part's decision at threshold t (None: its own thresholds)."""
+        if t is None:
+            return _copy(st.own)
+        p = self.part
+        d = p._finish(_copy(st.d0), st.act, threshold=t)
+        return p._bind(d, st.src.vals) if st.src.vals is not None else d
+
+    def entry(self, d, st):
+        name, s = self.part._signal(d)
+        return {"part": self.name, "model": self.model_id, "value": _jv(d.value),
+                "confidence": round(float(d.conf), 6), "signal": name, "score": round(s, 6), "escalate": d.escalate,
+                "probs": _probs(d.probs)}
+
+    def check(self, e):
+        opts = self.part.options
+        if opts is None or e.get("value") is None:
+            return []
+        vs = e["value"] if isinstance(e["value"], list) else [e["value"]]
+        known = {_key(o) for o in opts}
+        return [] if all(_key(v) in known for v in vs) else [f"{self.name} proposed {e['value']!r}, not one of its options"]
+
+
+class _State:
+    """A combination's members' states, computed when first needed (a cascade asks the next model only if it must)."""
+
+    def __init__(self, members, src, pre=None, pick=None):
+        self.members, self.src, self.pre, self.pick = members, src, pre or {}, pick
+        self.done = {}
+
+    def get(self, i):
+        if i not in self.done:
+            m = self.members[i]
+            self.done[i] = m.state(self.src, self.pre.get(i)) if isinstance(m, _Leaf) else m.state(self.src)
+        return self.done[i]
+
+    def calls(self):
+        return sum(s.calls() for s in self.done.values())
+
+    def walk(self):
+        for s in self.done.values():
+            yield from s.walk()
+
+    def force(self):
+        for i in (range(len(self.members)) if self.pick is None else [self.pick]):
+            self.get(i).force()
+        return self
+
+    def sigs(self):
+        return [x for s in self.done.values() for x in s.sigs()]
+
+
+def _wrap(m):
+    if isinstance(m, DecisionPart):
+        return _Leaf(m)
+    if isinstance(m, _Combination):
+        return m
+    raise TypeError(f"a combination is made of decision parts (model.decision(...)) or other combinations, not {m!r}")
+
+
+# ------------------------------------------------------------------------------------------------ combinations
+class _Combination:
+    """What Cascade, Vote and Route share: a catalog function over the union of the parts' facts that returns a
+    Decision; the model recorded in the trace (fingerprint over every part's); act_guard, conformal; fit / teach."""
+
+    kind_name = "combination"
+
+    def __init__(self, members, name=None, costs=None):
+        self.members = [_wrap(m) for m in members]
+        if not self.members:
+            raise ValueError(f"a {self.kind_name} needs at least one decision part")
+        q0 = self.members[0].question()
+        for m in self.members[1:]:
+            q = m.question()
+            if q != q0:
+                diff = {k: (q0[k], q[k]) for k in q0 if q0[k] != q[k]}
+                raise ValueError(f"the parts of a {self.kind_name} must answer the same question; {m.name} differs from "
+                                 f"{self.members[0].name} in {diff}")
+        if costs is not None:
+            if len(costs) != len(self.members):
+                raise ValueError(f"costs: one per part ({len(self.members)}), not {len(costs)}")
+            for m, c in zip(self.members, costs):
+                if isinstance(m, _Leaf):
+                    m.cost = float(c)
+        self.costs = None if costs is None else [float(c) for c in costs]
+        self.name = name or self.members[0].name
+        self.threshold = None                   # the shared threshold (act_guard); None: each part's own
+        self.guarantee = None
+        self.conformal_set = None
+        self.asked = 0
+        self._setup()
+
+    def _setup(self):
+        facts = list(dict.fromkeys(f for m in self.members for f in m.facts))
+        self.facts = facts + [f for f in self._extra_facts() if f not in facts]
+        self.__name__ = self.__qualname__ = self.name
+        self.__doc__ = self.spec.task
+        self.__signature__ = inspect.Signature([inspect.Parameter(f, inspect.Parameter.POSITIONAL_OR_KEYWORD)
+                                                for f in self.facts])
+        self.__solvi_model__ = self
+        self.__solvi_provenance__ = "decided"
+        self.__solvi_options__ = None if self.spec.values is None else list(self.spec.values)
+        self.__solvi_decision__ = self                # System.teach teaches every part
+
+    def _extra_facts(self):
+        return []
+
+    # --- the question and identity
+    def question(self, cat=None, name=None, text=None, min_confidence=None, checkpoints=None, require_evidence=False):
+        """With a catalog: make this combination a question's answer (as DecisionPart.question) → the Question. Without:
+        what the parts must agree on (kind, options, ...)."""
+        if cat is None:
+            return self.members[0].question()
+        return DecisionPart.question(self, cat, name, text, min_confidence, checkpoints, require_evidence)
+
+    @property
+    def spec(self):
+        return self.members[0].spec
+
+    @property
+    def options(self):
+        return None if self.spec.values is None else list(self.spec.values)
+
+    @property
+    def kind(self):
+        return self.spec.kind
+
+    @property
+    def available(self):
+        return all(getattr(lf.part, "available", True) for lf in self.leaves())
+
+    @property
+    def deterministic(self):
+        return all(getattr(lf.part.model, "deterministic", True) for lf in self.leaves())
+
+    @property
+    def parts(self):
+        """The members: DecisionParts and nested combinations."""
+        return [m.part if isinstance(m, _Leaf) else m for m in self.members]
+
+    def leaves(self):
+        return [lf for m in self.members for lf in m.leaves()]
+
+    @property
+    def model_id(self):
+        return f"{self.kind_name}({self._sep().join(m.model_id for m in self.members)})"
+
+    def _sep(self):
+        return ", "
+
+    def _describe(self):
+        return {}
+
+    def fingerprint(self):
+        th = {k: v for k, v in (("threshold", self.threshold), ("guarantee", self.guarantee),
+                                ("conformal", self.conformal_set)) if v is not None}
+        return digest(type(self).__name__, self._describe(), [m.fingerprint() for m in self.members], th)
+
+    def __repr__(self):
+        return f"{type(self).__name__}({self.name!r}, {[m.name for m in self.members]}, model={self.model_id!r})"
+
+    # --- deciding
+    def text_of(self, vals):
+        """The facts this combination reads (System.teach passes them back to `teach`)."""
+        return Facts({f: vals[f] for f in self.facts if f in vals})
+
+    def __call__(self, *args, **kw):
+        vals = dict(zip(self.facts, args))
+        vals.update(kw)
+        return self._decide(_Src(vals=vals))
+
+    def decide(self, x):
+        """An input (a text, a state, or Facts) → Decision; a list of inputs → a list."""
+        one = isinstance(x, Facts) or _single(x)
+        out = [self._decide(_src(v)) for v in ([x] if one else list(x))]
+        return out[0] if one else out
+
+    def _decide(self, src):
+        st = self.state(src)
+        d = self.final(st, None)
+        self.asked += 1
+        for ls in st.walk():                          # usage: the models this decision called (not calibration's)
+            ls.leaf.calls += 1
+        return d
+
+    def _t(self, t):
+        return t if t is not None else self.threshold
+
+    def _vt(self, ts):
+        return ts if self.threshold is None else np.where(np.isnan(ts), self.threshold, ts)
+
+    def _wrapup(self, d, t):
+        """The combination's own threshold record, guarantee and conformal candidates (a nested combination under an
+        outer threshold records none of its own)."""
+        if t is None and self.threshold is not None:
+            d.extra["threshold"] = self.threshold
+            if self.guarantee is not None:
+                d.extra["guarantee"] = dict(self.guarantee)
+        if self.conformal_set is not None and d.probs:
+            cands = self.candidates(d)
+            d.extra["candidates"] = cands
+            if d.escalate:
+                d.escalate += f"; candidates at {self.conformal_set['coverage']:.0%}: {cands!r}"
+        return d
+
+    def candidates(self, d):
+        """The conformal answer set of a decision (after conformal(...)), most probable first."""
+        return DecisionPart.candidates(self, d)
+
+    def entry(self, d, st):
+        e = {"part": self.name, "kind": self.kind_name, "value": _jv(d.value), "confidence": round(float(d.conf), 6),
+             "escalate": d.escalate}
+        e.update({k: d.extra[k] for k in RECORD_KEYS + ("rule", "calls") if k in d.extra})
+        return e
+
+    # --- calibration
+    def _examples(self, examples):
+        ex = list(examples)
+        if not ex:
+            raise ValueError("calibration needs labelled examples")
+        return [_src(x) for x, _ in ex], [y for _, y in ex]
+
+    def _right(self, v, y):
+        sp = self.spec
+        if isinstance(v, Quote):
+            v = v.value
+        if isinstance(y, Quote):
+            y = y.value
+        if sp.kind in ("rank", "span"):
+            return v == y
+        return (Unknown if v is Unknown else sp.label(v)) == (Unknown if y is Unknown else sp.label(y))
+
+    def act_guard(self, examples, risk=0.10):
+        """Answer alone only as far as a guarantee allows, for the combination as a whole: on labelled examples of your
+        stream [(input, correct)] (an input is what every part reads, or Facts(...) by name) every part is asked, and
+        one threshold t on every part's signal is chosen by conformal risk control so that P(answered alone AND wrong)
+        ≤ risk for inputs like the examples — a share of all questions. A cascade's loss is not monotone in t, so it is
+        monotonized from above (the maximum over the thresholds ≥ t) before the choice, which keeps the guarantee.
+        Replaces the parts' own thresholds inside this combination (the parts themselves are not changed); changes the
+        combination's fingerprint and clears its conformal sets (call conformal afterwards). Too few or too hard
+        examples → everything escalates (threshold inf). → {"threshold", "answered", "error" (among the answered),
+        "risk" (answered and wrong, on the examples), "n", "guarantee", "calls" (models called per question), "cost"
+        (with costs=), and for a cascade "answered_by" (the share each stage answered)}."""
+        srcs, gold = self._examples(examples)
+        states = [self.state(s).force() for s in srcs]
+        sig = np.array([x for st in states for x in st.sigs()], float)
+        grid = np.concatenate([np.unique(sig[np.isfinite(sig)]), [np.inf]])
+        n, G = len(states), len(grid)
+        loss, auto_all, cost, calls, who = np.zeros((n, G)), np.zeros((n, G), bool), np.zeros((n, G)), np.zeros((n, G)), []
+        for i, st in enumerate(states):
+            auto, keys, _, vals, c, k = self.vec(st, grid)
+            right = {kk: self._right(v, gold[i]) for kk, v in vals.items()}
+            ok = np.array([right[kk] for kk in keys])
+            loss[i], auto_all[i], cost[i], calls[i] = auto & ~ok, auto, c, k
+            who.append(getattr(self, "_answering", lambda st_, ts: None)(st, grid))
+        mono = np.maximum.accumulate(loss[:, ::-1], axis=1)[:, ::-1]
+        r = (mono.sum(0) + 1) / (n + 1)
+        good = np.where(r <= risk + 1e-12)[0]
+        g = int(good[0]) if len(good) else G - 1
+        t = float(grid[g]) if len(good) else math.inf
+        self.threshold = t
+        self.guarantee = {"method": "crc", "risk": risk, "n": n, "signal": "shared threshold on each model's signal",
+                          "promise": f"P(answered alone and wrong) ≤ {risk:g} for inputs like the calibration examples"}
+        self.conformal_set = None
+        a = auto_all[:, g]
+        out = {"threshold": t, "answered": float(a.mean()),
+               "error": float(loss[a, g].sum() / a.sum()) if a.any() else 0.0, "risk": float(loss[:, g].mean()), "n": n,
+               "guarantee": self.guarantee["promise"], "calls": float(calls[:, g].mean())}
+        if any(lf.cost != 1.0 for lf in self.leaves()):
+            out["cost"] = float(cost[:, g].mean())
+        if who[0] is not None:
+            w = np.array([x[g] for x in who])
+            out["answered_by"] = [float((w == j).mean()) for j in range(len(self.members))]
+        return out
+
+    def conformal(self, examples, coverage=0.90):
+        """Conformal answer sets for the combination's decisions (the probabilities it answers with: the answering
+        stage's for a cascade, the mean of the parts' for a vote), from labelled examples at its current threshold —
+        so call it after act_guard. Every decision then carries extra["candidates"]; an escalation lists them.
+        Choice, yes/no, score and number questions. → {"coverage", "quantile", "n", "mean_size"}."""
+        from .calibration import conformal_quantile, set_scores
+        if self.spec.multi or self.kind in ("rank", "span"):
+            raise ValueError(f"conformal sets need a single answer from a closed list; not for {self.kind!r} questions")
+        srcs, gold = self._examples(examples)
+        saved, self.conformal_set = self.conformal_set, None
+        try:
+            ds = [self.final(self.state(s), None) for s in srcs]
+        finally:
+            self.conformal_set = saved
+        ordinal = self.kind in ("score", "number")
+        scores = []
+        for d, y in zip(ds, gold):
+            keys = list(d.probs)
+            g = Unknown if y is Unknown else self.spec.label(y)
+            if g not in keys:
+                raise ValueError(f"{y!r}: this question cannot answer it (its answers: {keys})")
+            scores.append(float(set_scores([d.probs[k] for k in keys], ordinal, Unknown in keys)[keys.index(g)]))
+        q = conformal_quantile(scores, 1 - coverage)
+        self.conformal_set = {"coverage": coverage, "quantile": q, "n": len(scores), "ordinal": ordinal}
+        return {"coverage": coverage, "quantile": q, "n": len(scores),
+                "mean_size": float(np.mean([len(self.candidates(d)) for d in ds]))}
+
+    def usage(self):
+        """What the combination cost since it was made: {"asked" (decisions), "calls" (per part, in leaves order),
+        "per_question" (models called per decision), "cost" (with costs=)}."""
+        lv = self.leaves()
+        calls = [lf.calls for lf in lv]
+        out = {"asked": self.asked, "calls": {f"{i}:{lf.name}": c for i, (lf, c) in enumerate(zip(lv, calls))},
+               "per_question": sum(calls) / self.asked if self.asked else 0.0}
+        if any(lf.cost != 1.0 for lf in lv):
+            out["cost"] = sum(lf.cost * c for lf, c in zip(lv, calls)) / self.asked if self.asked else 0.0
+        return out
+
+    # --- learning: every part learns
+    def _each(self, x):
+        for lf in self.leaves():
+            yield lf.part, (lf.text(_Src(vals=dict(x))) if isinstance(x, Facts) else x)
+
+    def teach(self, x, correct):
+        """One correction, absorbed by every part at once (x: an input, or Facts by name) → total ms."""
+        return sum(p.teach(t, correct) for p, t in self._each(x))
+
+    def fit(self, examples, lam=1.0, folds=4):
+        """Few-shot "S" for every part (see DecisionPart.fit) → [Adaptation]."""
+        ex = list(examples)
+        return [lf.part.fit([(lf.text(_Src(vals=dict(x))) if isinstance(x, Facts) else x, y) for x, y in ex], lam, folds)
+                for lf in self.leaves()]
+
+    def adapt(self, inputs):
+        """Label-bias correction for every part (see DecisionPart.adapt)."""
+        xs = list(inputs)
+        return [lf.part.adapt([lf.text(_Src(vals=dict(x))) if isinstance(x, Facts) else x for x in xs])
+                for lf in self.leaves()]
+
+    def reset(self):
+        for lf in self.leaves():
+            lf.part.reset()
+
+    # --- replay without re-running the models
+    def check_record(self, r):
+        """A recorded decision of this combination, without re-running any model: does the recorded answer follow from
+        the recorded proposals by this combination's rule? → [reason] (empty: it does)."""
+        e = dict(r.extra or {})
+        from .runtime import MISSING
+        e["escalate"] = r.error
+        e["value"] = None if (r.error is not None or r.value is MISSING) else _jv(r.value)
+        return self.check(e, top=True)
+
+    def check(self, e, top=False):
+        raise NotImplementedError
+
+
+def _escalated(e, top):
+    """Was this (recorded) decision escalated by the combination? A top-level record's error may also be another
+    safeguard (min_confidence, a type) that rejected an answer the combination gave."""
+    return e.get("escalate") is not None and (not top or str(e["escalate"]).startswith(ESCALATED))
+
+
+def _same(jv_a, jv_b):
+    from .runtime import vhash
+    if isinstance(jv_b, dict) and "quote" in jv_b and not isinstance(jv_a, dict):
+        return jv_a == jv_b["quote"][0]              # a span's record value is its text
+    return vhash(jv_a) == vhash(jv_b)
+
+
+class Cascade(_Combination):
+    """Ask the parts in order; answer with the first whose decision does not escalate; escalate when all do (with the
+    last part's answer as "would have answered"). The next model is asked only when the one before escalates, so a
+    cheap model that is often sure saves the large model's calls — `usage()` and `extra["calls"]` count them;
+    `costs=[45, 137]` (ms, per part) makes act_guard and usage report the expected cost."""
+
+    kind_name = "cascade"
+
+    def _sep(self):
+        return " → "
+
+    def state(self, src):
+        return _State(self.members, src)
+
+    def vec(self, st, ts):
+        ts = self._vt(ts)
+        G = len(ts)
+        auto, keys, sig = np.zeros(G, bool), np.empty(G, dtype=object), np.zeros(G)
+        cost, calls, vals = np.zeros(G), np.zeros(G), {}
+        for i, m in enumerate(self.members):
+            if auto.all():
+                break
+            a, k, s, v, c, n = m.vec(st.get(i), ts)
+            vals.update(v)
+            asked = ~auto
+            cost += np.where(asked, c, 0.0)
+            calls += np.where(asked, n, 0.0)
+            put = asked & a if i < len(self.members) - 1 else asked       # not answered by anyone: the last proposal
+            keys[put], sig[put] = k[put], s[put]
+            auto |= a
+        return auto, keys, sig, vals, cost, calls
+
+    def _answering(self, st, ts):
+        """The stage that answers at each threshold (−1: every stage escalates)."""
+        ts = self._vt(ts)
+        who = np.full(len(ts), -1)
+        for i, m in enumerate(self.members):
+            a = m.vec(st.get(i), ts)[0]
+            who = np.where((who < 0) & a, i, who)
+        return who
+
+    def final(self, st, t):
+        te = self._t(t)
+        stages, ds, by = [], [], None
+        for i, m in enumerate(self.members):
+            s = st.get(i)
+            d = m.final(s, te)
+            stages.append(m.entry(d, s))
+            ds.append(d)
+            if d.escalate is None:
+                by = i
+                break
+        use = ds[-1]
+        out = Decision(use.value, dict(use.probs), confidence=use.conf, evidence=list(use.evidence))
+        out.extra = {"stages": stages, "answered_by": by, "calls": st.calls()}
+        if by is None:
+            out.escalate = (f"{ESCALATED}: every model of the cascade escalated ("
+                            + "; ".join(f"{_who(e)}: {e['escalate']}" for e in stages) + ")")
+        return self._wrapup(out, t)
+
+    def check(self, e, top=False):
+        stages, by = e.get("stages"), e.get("answered_by")
+        if not stages:
+            return ["a cascade's record lists no stages"]
+        bad = []
+        for m, s in zip(self.members, stages):
+            bad += m.check(s)
+        if len(stages) > len(self.members):
+            return bad + [f"{len(stages)} stages recorded, the cascade has {len(self.members)}"]
+        if by is None:
+            if len(stages) != len(self.members) or any(s.get("escalate") is None for s in stages):
+                bad.append("recorded as escalated, but not every stage escalated")
+            if e.get("escalate") is None:
+                bad.append("every stage escalated, but the cascade answered")
+            return bad
+        if by != len(stages) - 1 or any(s.get("escalate") is not None for s in stages[:by]) \
+                or stages[by].get("escalate") is not None:
+            bad.append(f"stage {by + 1} is recorded as answering, but the recorded stages do not say so")
+        elif _escalated(e, top):
+            bad.append(f"stage {by + 1} answered, but the cascade escalated")
+        elif e.get("value") is not None and not _same(e["value"], stages[by]["value"]):
+            bad.append(f"answer {e['value']!r} ≠ stage {by + 1}'s proposal {stages[by]['value']!r}")
+        return bad
+
+
+def _rule(K, A, rule):
+    """Votes K [M, G] (value keys) and whether each part answers alone A [M, G] → (agreement [G], the agreed — or would-be
+    — key [G], agreeing parts [M, G], answer [G]). "all": every part proposes the same value; "majority": more than half
+    of the parts do. Either way every agreeing part must answer alone (its signal ≥ the threshold, no other safeguard)."""
+    M, G = K.shape
+    if rule == "all":
+        agree = (K == K[0]).all(0)
+        vk = np.where(agree, K[0], K[-1])
+    else:
+        cnt = np.stack([(K == K[j]).sum(0) for j in range(M)])
+        maj = cnt * 2 > M
+        agree = maj.any(0)
+        j = np.argmax(maj, 0)
+        vk = np.where(agree, K[j, np.arange(G)], K[-1])
+    mask = K == vk[None, :]
+    return agree, vk, mask, agree & (A | ~mask).all(0)
+
+
+class Vote(_Combination):
+    """Ask every part; answer when the rule holds — "all": every part proposes the same value, "majority": more than
+    half do — and every agreeing part answers alone (its signal ≥ the threshold); otherwise escalate, listing the
+    proposals. Parts of one model that can share a forward pass are asked in one pass. The probabilities are the mean
+    of the parts'; the confidence the lowest among the agreeing parts'. Models of different families disagree more
+    usefully than a student and its teacher (research note L25)."""
+
+    kind_name = "vote"
+
+    def __init__(self, members, rule="all", name=None, costs=None):
+        if rule not in ("all", "majority"):
+            raise ValueError('rule must be "all" or "majority"')
+        self.rule = rule
+        super().__init__(members, name, costs)
+
+    @property
+    def model_id(self):
+        return f"vote:{self.rule}({', '.join(m.model_id for m in self.members)})"
+
+    def _describe(self):
+        return {"rule": self.rule}
+
+    def state(self, src):
+        pre, groups = {}, {}
+        for i, m in enumerate(self.members):          # parts of one model: their questions in one forward pass
+            if isinstance(m, _Leaf) and m.part.model.batchable and m.part.option_order == "given" \
+                    and not m.part.spec.pointer:
+                groups.setdefault((id(m.part.model), m.text(src)), []).append(i)
+        for (_, text), ix in groups.items():
+            if len(ix) > 1:
+                model = self.members[ix[0]].part.model
+                for i, (z, a, _) in zip(ix, model._raw_pass([self.members[i].part.spec for i in ix], text)):
+                    pre[i] = (z, a)
+        return _State(self.members, src, pre).force()
+
+    def vec(self, st, ts):
+        ts = self._vt(ts)
+        outs = [m.vec(st.get(i), ts) for i, m in enumerate(self.members)]
+        A = np.stack([o[0] for o in outs])
+        K = np.stack([o[1] for o in outs])
+        S = np.stack([o[2] for o in outs])
+        _, vk, mask, auto = _rule(K, A, self.rule)
+        sig = np.where(mask, S, np.inf).min(0)
+        vals = {}
+        for o in outs:
+            vals.update(o[3])
+        return auto, vk, sig, vals, sum(o[4] for o in outs), sum(o[5] for o in outs)
+
+    def final(self, st, t):
+        te = self._t(t)
+        ds = [m.final(st.get(i), te) for i, m in enumerate(self.members)]
+        votes = [m.entry(d, st.get(i)) for i, (m, d) in enumerate(zip(self.members, ds))]
+        K = np.array([[_key(d.value)] for d in ds], dtype=object)
+        A = np.array([[d.escalate is None] for d in ds])
+        agree, _, mask, auto = _rule(K, A, self.rule)
+        agreeing = [d for d, m in zip(ds, mask[:, 0]) if m]
+        use = agreeing[0] if agree[0] else ds[-1]
+        keys = list(dict.fromkeys(k for d in ds for k in d.probs))
+        probs = {k: float(np.mean([d.probs[k] for d in ds if k in d.probs])) for k in keys}
+        conf = min(d.conf for d in agreeing) if agree[0] else use.conf
+        out = Decision(use.value, probs, confidence=conf, evidence=list(use.evidence))
+        out.extra = {"votes": votes, "rule": self.rule, "calls": st.calls()}
+        if not auto[0]:
+            if not agree[0]:
+                out.escalate = (f"{ESCALATED}: the models disagree ({self.rule}): "
+                                + ", ".join(f"{_who(e)} {_shown(e['value'])}" for e in votes))
+            else:
+                out.escalate = (f"{ESCALATED}: the models agree on {use.value!r} ({self.rule}), but "
+                                + "; ".join(f"{_who(e)}: {e['escalate']}" for e, m in zip(votes, mask[:, 0])
+                                            if m and e["escalate"] is not None))
+        return self._wrapup(out, t)
+
+    def check(self, e, top=False):
+        votes = e.get("votes")
+        if not votes or len(votes) != len(self.members):
+            return [f"a vote's record lists {len(votes or [])} votes, the vote has {len(self.members)} parts"]
+        bad = []
+        for m, v in zip(self.members, votes):
+            bad += m.check(v)
+        from .runtime import vhash
+        K = np.array([[vhash(v["value"])] for v in votes], dtype=object)
+        A = np.array([[v.get("escalate") is None] for v in votes])
+        _, vk, _, auto = _rule(K, A, e.get("rule", self.rule))
+        if auto[0] and _escalated(e, top):
+            bad.append("the recorded votes agree and answer alone, but the vote escalated")
+        elif not auto[0] and e.get("escalate") is None:
+            bad.append("the recorded votes do not let the vote answer, but it answered")
+        elif auto[0] and e.get("value") is not None:
+            v = next(v["value"] for v in votes if vhash(v["value"]) == vk[0])
+            if not _same(e["value"], v):
+                bad.append(f"answer {e['value']!r} ≠ the agreed proposal {v!r}")
+        return bad
+
+
+class Route(_Combination):
+    """Pick one part per input by code: `routes` maps a predicate (a function of facts by name — its parameters are
+    facts the route reads — returning true to take that part) or a fact name (its value is true) to a part; the first
+    that holds picks, else `default`. Only the picked part's model is called; `extra["route"]` records which part and
+    why, `extra["routed"]` its proposal. When the example inputs of act_guard are not Facts(...), a predicate with one
+    parameter is called with the input itself."""
+
+    kind_name = "route"
+
+    def __init__(self, routes, default, name=None, costs=None):
+        if not isinstance(routes, dict) or not routes:
+            raise ValueError("routes: {predicate or fact name: part, ...}")
+        self.keys = list(routes)
+        for k in self.keys:
+            if not (callable(k) or isinstance(k, str)):
+                raise TypeError(f"a route's key is a predicate or a fact name, not {k!r}")
+        self._params = {i: (list(inspect.signature(k).parameters) if callable(k) else [k]) for i, k in enumerate(self.keys)}
+        super().__init__(list(routes.values()) + [default], name, costs)
+
+    def _extra_facts(self):
+        return [f for ps in self._params.values() for f in ps]
+
+    def _by(self, i):
+        if i >= len(self.keys):
+            return "default"
+        k = self.keys[i]
+        return k if isinstance(k, str) else getattr(k, "__name__", "predicate")
+
+    @property
+    def model_id(self):
+        return "route(" + " | ".join(f"{self._by(i)}: {m.model_id}" for i, m in enumerate(self.members)) + ")"
+
+    def _describe(self):
+        return {"routes": [k if isinstance(k, str) else code_fingerprint(k) for k in self.keys]}
+
+    def pick(self, src):
+        """The index of the member this input goes to."""
+        for i, k in enumerate(self.keys):
+            ps = self._params[i]
+            if src.vals is not None:
+                args = {p: (src.vals[p].value if isinstance(src.vals.get(p), Quote) else src.vals.get(p)) for p in ps}
+            elif len(ps) == 1:
+                args = {ps[0]: src.raw}
+            else:
+                raise ValueError(f"route {self._by(i)} reads {ps}: give the examples as Facts(...)")
+            if (bool(args[k]) if isinstance(k, str) else bool(k(**args))):
+                return i
+        return len(self.keys)
+
+    def state(self, src):
+        return _State(self.members, src, pick=self.pick(src))
+
+    def vec(self, st, ts):
+        return self.members[st.pick].vec(st.get(st.pick), self._vt(ts))
+
+    def final(self, st, t):
+        i, m = st.pick, self.members[st.pick]
+        s = st.get(i)
+        d = m.final(s, self._t(t))
+        out = Decision(d.value, dict(d.probs), confidence=d.conf, evidence=list(d.evidence), escalate=d.escalate)
+        out.extra = {"route": {"to": i, "part": m.name, "by": self._by(i)}, "routed": m.entry(d, s), "calls": st.calls()}
+        return self._wrapup(out, t)
+
+    def check(self, e, top=False):
+        rt, ent = e.get("route"), e.get("routed")
+        if not isinstance(rt, dict) or not isinstance(ent, dict) or not 0 <= int(rt.get("to", -1)) < len(self.members):
+            return ["a route's record does not say which part it picked"]
+        bad = self.members[int(rt["to"])].check(ent)
+        routed_esc = ent.get("escalate") is not None
+        if routed_esc and e.get("escalate") is None:
+            bad.append("the routed part escalated, but the route answered")
+        elif not routed_esc and not top and e.get("escalate") is not None:
+            bad.append("the routed part answered, but the route escalated")
+        elif not routed_esc and e.get("value") is not None and not _same(e["value"], ent["value"]):
+            bad.append(f"answer {e['value']!r} ≠ the routed part's proposal {ent['value']!r}")
+        return bad

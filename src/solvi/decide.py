@@ -1956,15 +1956,25 @@ class DecisionPart:
     def __repr__(self):
         return f"DecisionPart({self.__name__!r}, {self.spec.kind}, options={self.options}, model={self.model.model_id!r})"
 
-    def _finish(self, d, act):
-        d = self.model._finish(self.spec, d, act, self.escalate_below, self.act_threshold, self.use_act)
+    def _finish(self, d, act, threshold=None):
+        """Act or escalate. threshold: a combination's shared threshold (solvi.multi) in place of this part's own
+        act_threshold / escalate_below — on the part's signal (see _signal); −inf applies only the other safeguards."""
+        if threshold is None:
+            d = self.model._finish(self.spec, d, act, self.escalate_below, self.act_threshold, self.use_act)
+        else:
+            d = self.model._finish(self.spec, d, act, -math.inf, -math.inf, self.use_act)
         if self.min_margin is not None and not self.spec.multi and len(d.probs) > 1:
             (a1, p1), (a2, p2) = sorted(d.probs.items(), key=lambda kv: -kv[1])[:2]
             d.extra["margin"] = p1 - p2
             if d.escalate is None and p1 - p2 < self.min_margin:
                 d.escalate = (f"margin {p1 - p2:.2f} < {self.min_margin:g} between {a1!r} ({p1:.2f}) and {a2!r} ({p2:.2f}); "
                               f"would have answered {d.value!r}")
-        if self.guarantee is not None:
+        if threshold is not None:
+            name, s = self._signal(d)
+            if d.escalate is None and s < threshold:
+                d.escalate = (f"{ESCALATED}: " if name == "act" else "") + \
+                    f"{name} {s:.2f} < {threshold:.2f} (shared threshold); would have answered {d.value!r}"
+        elif self.guarantee is not None:
             d.extra["guarantee"] = dict(self.guarantee)
         if self.conformal_set is not None and d.probs:
             cands = self.candidates(d)
@@ -1972,6 +1982,13 @@ class DecisionPart:
             if d.escalate:
                 d.escalate += f"; candidates at {self.conformal_set['coverage']:.0%}: {cands!r}"
         return d
+
+    def _signal(self, d):
+        """The signal a threshold applies to for a finished decision → ("act", the act probability) when the model gave
+        one and the part uses it, else ("confidence", the calibrated confidence) — as act_guard's signal="auto"."""
+        if d.extra.get("act") is not None and self.use_act is not False:
+            return "act", float(d.extra["act"])
+        return "confidence", float(d.conf)
 
     def candidates(self, d):
         """The conformal answer set of a decision (after conformal(...)): the answers that cannot be ruled out at the
@@ -2242,8 +2259,8 @@ def plan_batches(steps):
         if p.alternatives is not None or p.func is None:
             continue
         d = getattr(p.func, "__solvi_decision__", None)
-        if d is None or not d.model.batchable or d.spec.pointer:     # the pointer needs a pass of its own (full layout)
-            continue
+        if not isinstance(d, DecisionPart) or not d.model.batchable or d.spec.pointer:
+            continue                     # the pointer needs a pass of its own; a combination of models (solvi.multi) too
         groups.setdefault((id(d.model), tuple(d.facts)), (d.model, []))[1].append(p.name)
     out = []
     for model, names in groups.values():

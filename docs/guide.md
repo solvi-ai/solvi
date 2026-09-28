@@ -589,6 +589,71 @@ steps it shared the pass with, and replay re-scores the pass. If the questions d
 an ONNX export without the block inputs falls back to one question per sequence (`extra["pass"]["shared"]` is then false).
 `model.decide_pass(input, parts)` does the same outside a catalog. Catalogs without decisions do none of this work.
 
+### Several models: cascade, vote, route
+
+Several deciders can answer one question together. `solvi.multi` combines decision parts with plain code over their
+proposals; a combination is used wherever a decision part is (`cat.fn(team)`, `team.question(cat)`):
+
+```python
+from solvi.multi import Cascade, Route, Vote
+
+small = base.decision("team", "Which team?", "email", TEAMS)       # solvi-base: ~45 ms on a CPU
+large = big.decision("team", "Which team?", "email", TEAMS)        # solvi-large: ~137 ms
+
+team = Cascade([small, large], costs=[45, 137])      # the large model only when the small one escalates
+team = Vote([large, other], rule="all")              # answer when they agree and each is sure; else escalate
+team = Route({long_email: large, "vip": large}, default=small)   # code picks the model per input
+
+cat.fn(team)
+info = team.act_guard(examples, risk=0.10)           # one guarantee for the combination as a whole
+```
+
+- **Cascade**: ask the parts in order and answer with the first whose decision does not escalate; if every part
+  escalates, the cascade escalates (its message lists each part's reason). A later model is asked only when the earlier
+  one escalated, so where the small model is often sure, the large one is rarely called.
+- **Vote**: ask every part (parts of one model that can share a forward pass are asked in one pass). `rule="all"`: every
+  part proposes the same value; `rule="majority"`: more than half do. Either way each agreeing part must answer alone;
+  otherwise the vote escalates and lists the proposals (`"the models disagree (all): team (large) 'technical', team
+  (other) 'billing'"`). The probabilities are the mean of the parts', the confidence the lowest agreeing one.
+- **Route**: `{predicate or fact name: part}` and a `default`; a predicate is a function of facts by name (its parameters
+  join the route's inputs), a fact name picks its part when the fact is true. The first that holds picks; only that
+  part's model runs.
+
+The parts must answer the same question — the same kind and options (and "not stated", rank `k`, number bins); the
+task and the facts they read may differ. A mismatch raises at construction. Combinations nest: `Cascade([small,
+Vote([mid, large])])`.
+
+**Thresholds and the guarantee.** Before calibration each part escalates by its own thresholds (`escalate_below`,
+`act_threshold`, `min_margin`). `act_guard(examples, risk=0.10)` asks every part on labelled examples of your stream
+(`[(input, correct)]`; an input is what every part reads, or `solvi.multi.Facts(email=..., vip=...)` by name) and chooses
+**one threshold t for every part's signal** — its act probability when its model gives one, else its calibrated confidence
+— by conformal risk control, so that P(answered alone and wrong) ≤ risk for inputs like the examples. A cascade's loss is
+not monotone in t: a higher t can hand a question from a wrong small model to a right large one, or the other way. The
+loss of each example is therefore monotonized from above — the maximum over all thresholds ≥ t — before the choice;
+the actual loss is never above it, so the guarantee holds (the other safeguards of each part, such as `min_margin`, still
+apply). The result has `threshold`, `answered`, `error` (among the answered), `risk`, `calls` (models called per
+question), `cost` (with `costs=`) and, for a cascade, `answered_by` (the share each stage answered). `conformal(examples,
+coverage=0.9)` gives answer sets from the probabilities the combination answers with — call it after `act_guard`, which
+clears it.
+
+Measured on the shipped deciders (research note L25; 300 calibration questions per set, 200 splits, risk 0.10): the risk
+stayed at or below 10% for every mode and data set. The cascade answered as much as the large model at about half its
+cost on ContractNLI (96% answered alone at 64 ms against 97% at 137 ms) and like the small model on JSON questions, but
+saved nothing on typed-decisions and Taskmaster-2, where almost everything goes on to the large model. Voting of
+solvi-base and solvi-large answered no more alone than the better of them — the small model is the large one's student,
+their mistakes coincide — but lowered the error among automatic answers: JSON questions 2.1% → 0.4% (94% answered),
+ContractNLI 10.3% → 7.2%. Use a cascade for cost on streams where a small model is often sure, a vote when the errors
+that get through must be rare, preferably with models of different families.
+
+**The trace.** The record of a combination names it as the model (`{"type": "Cascade", "id": "cascade(small → large)",
+"fp": ...}`; the fingerprint covers every part's, the rule and the threshold) and keeps every proposal in `extra`:
+`stages` and `answered_by` (cascade), `votes` and `rule` (vote), `route` and `routed` (route) — each proposal with its
+part, model, value, probabilities, signal and escalation reason — plus `calls`, the models called for this decision.
+`combination.usage()` sums the calls since it was made. The audit prints one line per stage, vote or route and the
+guarantee line. `replay` re-runs every stage and compares the proposals too, not only the answer; with
+`trust_models=True` (or a part's model unavailable) it checks instead that the recorded answer follows from the recorded
+proposals by the combination's rule. `System.teach` on a question a combination answers teaches every part.
+
 ### Loading a checkpoint
 
 `DecideModel.load(path_or_hf_id, device=None, backend="auto")` reads a folder with `solvi_decide.json`, `config.json`,
