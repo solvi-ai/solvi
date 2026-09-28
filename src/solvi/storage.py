@@ -7,7 +7,9 @@ Every stored decision is one record (a dict of plain JSON):
   kind "ask"      the 0.5 journal line's keys — init_hash, answers {question: [answer, confidence, status]}, flow, records
                   [[step, name, hash]] (and producers) — plus index fields (guards, safeguards, models) and the whole
                   response (Response.to_dict(): answers, flow, trace), which get() loads back and replay_all() re-checks;
-  kind "teach"    a human correction (System.teach): {"teach": question, "init": ..., "answer": ...};
+  kind "teach"    a correction (System.teach): {"teach": question, "init": ..., "answer": ...} and, when given, its
+                  "source" ("outcome", "rule"; none: a human), "by" and "of" (the stored id of the decision it corrects);
+  kind "update"   a learning update (System.learning): what changed, the gates' results, the state to roll back to;
   every record    seq (0, 1, 2, ...), time (seconds since the epoch), meta (optional, yours), prev and hash.
 
 `hash` is the SHA-256 of the record's canonical JSON (keys sorted, without `id` and `hash`), which includes `prev`, the
@@ -29,6 +31,21 @@ from dataclasses import dataclass
 
 GENESIS = ""                                  # prev of the first record
 FORMAT = 1                                    # the record format ("v")
+
+
+TRUSTED_SOURCES = ("human", "outcome", "rule")   # where a label may come from: never the system's own answers
+
+
+class UntrustedLabel(ValueError):
+    """A label from a source outside TRUSTED_SOURCES (the model, the system itself, an unknown process)."""
+
+
+def check_source(source):
+    """A label's source → itself, when it is trusted: "human", "outcome" or "rule"; else UntrustedLabel."""
+    if source not in TRUSTED_SOURCES:
+        raise UntrustedLabel(f"label source {source!r} is not trusted: labels come only from outside the model "
+                             f"({', '.join(TRUSTED_SOURCES)}); the system's own answers are never labels")
+    return source
 
 
 class _Any:
@@ -237,9 +254,20 @@ class TraceStorage:
         response.stored_id = rec["id"]
         return rec["id"]
 
-    def save_correction(self, question, init_state, answer, meta=None):
-        """Store a human correction (what System.teach records) → its id."""
+    def save_correction(self, question, init_state, answer, meta=None, *, source="human", by=None, of=None):
+        """Store a correction (what System.teach records) → its id. source: where the label comes from — "human" (a person
+        corrected or confirmed the answer), "outcome" (what really happened: the parcel was lost, the loan defaulted) or
+        "rule" (code rejected a model's proposal and decided instead); anything else is refused (UntrustedLabel): the
+        system's own answers are never labels. by: who (a user, a reviewer, a process); of: the stored id of the decision
+        it corrects. Records of 0.6 have no source: they are human corrections."""
+        check_source(source)
         body = {"v": FORMAT, "kind": "teach", "teach": question, "init": plain(dict(init_state)), "answer": plain(answer)}
+        if source != "human":
+            body["source"] = source
+        if by is not None:
+            body["by"] = str(by)
+        if of is not None:
+            body["of"] = str(of)
         if meta is not None:
             body["meta"] = plain(meta)
         return self._append(body)["id"]
@@ -269,8 +297,12 @@ class TraceStorage:
         return self.head()["count"]
 
     def corrections(self):
-        """The stored human corrections → [{"id", "time", "question", "init", "answer"}] (feed them to fit / learn_rule)."""
-        return [{"id": s.id, "time": s.time, "question": s.data["teach"], "init": s.data["init"], "answer": s.data["answer"]}
+        """The stored corrections → [{"id", "time", "question", "init", "answer", "source", "by", "of"}] (feed them to fit /
+        learn_rule, a CorrectionMemory or System.learning). source: "human" (also every record without one), "outcome",
+        "rule" — or, for a record written around save_correction, whatever it says (solvi.memory and System.learning refuse
+        anything outside TRUSTED_SOURCES)."""
+        return [{"id": s.id, "time": s.time, "question": s.data["teach"], "init": s.data["init"], "answer": s.data["answer"],
+                 "source": s.data.get("source", "human"), "by": s.data.get("by"), "of": s.data.get("of")}
                 for s in self.iter("teach")]
 
     def query(self, question=None, answer=ANY, status=None, safeguard=None, model=None, since=None, until=None,

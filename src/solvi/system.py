@@ -816,15 +816,25 @@ class System:
         self.calib[question] = (float(a), float(b))
         return self.calib[question]
 
-    def teach(self, question, init_state, correct):
+    def teach(self, question, init_state, correct, *, source="human", by=None, of=None):
         """Human correction. A fast head (fit_fast) absorbs it at once; so does a model decision that answers the question
         (a solvi.decide decision part as the question's rule, or a rule passing a decided fact on): its per-option shift is
         updated. Any correction goes to the storage (journal) for the next fit. Returns the update time in ms when something learned
-        at once, else None."""
+        at once, else None. source ("human", "outcome", "rule"), by (who) and of (the stored id of the decision it corrects)
+        are stored with it (TraceStorage.save_correction). With a learning loop (System.learning(..., gate_teach=True))
+        nothing learns at once: the correction is only stored, and the loop's gates decide whether it is learned."""
         from .decide import decision_of
         from .fast import FastHead
+        from .storage import check_source
+        check_source(source)
         ms = None
         init_state = self._state(init_state)[0]
+        loop = getattr(self, "_learning", None)
+        if loop is not None and loop.gate_teach:
+            if self.storage is None:
+                raise ValueError("a learning loop reads corrections from the storage: System(storage=...)")
+            self.storage.save_correction(question, init_state, correct, source=source, by=by, of=of)
+            return None
         head = self.heads.get(question)
         dec = decision_of(self.catalog, question)
         if isinstance(head, (FastHead, MultiHead)) and getattr(head, "online", True):
@@ -839,7 +849,7 @@ class System:
                 vals = init_state if all(f in init_state for f in dec.facts) else self.facts_for(init_state)
                 ms = dec.teach(dec.text_of(vals), label)
         if self.storage is not None:
-            self.storage.save_correction(question, init_state, correct)
+            self.storage.save_correction(question, init_state, correct, source=source, by=by, of=of)
         return ms
 
 
