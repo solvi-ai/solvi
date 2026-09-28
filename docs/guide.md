@@ -883,8 +883,8 @@ the most weight is proposed when it leads the others by at least `min_strength` 
 at least `min_agreement` (0.8) of the weight; otherwise the memory abstains and says why ("no corrected case within
 distance 0.15", "similar cases disagree: 'billing' 1.20, 'shipping' 0.90"). Ties are broken by case id, so the same memory
 proposes the same thing every time, whatever order the cases were added in. `calibrate(risk)` sets `min_strength` by
-conformal risk control, each case proposed for by the others: P(the memory proposes and is wrong) ≤ risk for inputs like
-the stored corrections.
+conformal risk control, each case proposed for by the others (its twins — the same features and words, e.g. a correction
+stored twice — left out with it): P(the memory proposes and is wrong) ≤ risk for inputs like the stored corrections.
 
 **What it does** (`mode`):
 
@@ -1305,15 +1305,19 @@ on, in this update or any later one. While the loop is attached, `System.teach` 
 `ladder={"memory": {"mode": "answer"}}`); beyond — the `adapter` hook when you give one (`(part, [(text, answer)])` →
 a JSON-able description; an object with `state(part)` / `restore(part, state)` is rolled back too), else the memory.
 
-**The gates** — the update is promoted only if every one passes; otherwise it is undone and recorded as rejected:
+**The gates** — the update is promoted only if every one passes; otherwise it is dropped and recorded as rejected. The
+candidate is built and gated on a shadow of the system (copies of the decision parts, their thresholds and memory, and of
+the model's adaptations; the checkpoint is shared), so asks that run meanwhile see the state in force, never an un-gated
+candidate; the live parts change only when the update is promoted. An `adapter` hook runs on the shadow part and reaches
+the live one through its `state` / `restore`.
 
 | Gate | Passes when |
 |---|---|
 | `consistency` | at most `max_conflict` (20%) of the new training labels are contradicted by a memory of the labels already learned — a batch of wrong corrections hurts more than right ones help |
 | `heldout` | on the held-out labels, asked through the whole system, (right − wrong answered alone) / n improves by at least `min_gain` (0.01), with at least `min_holdout` (5) labels |
 | `honesty` | the honesty numbers (confident errors, coverage at `risk`, quote support) on the held-out labels — and on your own honesty set (`gates={"honesty": path or cases}`) — get no worse than `tolerance` (0.02) |
-| `act_guard` | a part calibrated with `act_guard` / `calibrate_for` is calibrated again, with the same risk, on at least `min_calibration` (30) calibration labels: an old threshold says nothing about a changed signal |
-| `size` | shadow run: the stored decisions of the holdout split (up to `shadow_limit`, 500) are asked with the current and the candidate state and compared (`solvi.diff.compare`); at most `max_change` (30%) may change |
+| `act_guard` | a part calibrated with `act_guard` / `calibrate_for` is calibrated again, with the same risk, on at least `min_calibration` (30) calibration labels: an old threshold says nothing about a changed signal; conformal answer sets are recalibrated on them too, or dropped (and recorded) with fewer |
+| `size` | shadow run: the stored decisions whose input is held out for a learned question — the labels' split, per question (up to `shadow_limit`, 500) are asked with the current and the candidate state and compared (`solvi.diff.compare`); at most `max_change` (30%) may change |
 
 `max_change` is deliberately low: the first update of a badly biased decider can move far more than 30% of the decisions
 and is then rejected until you raise the limit for it (`gates={"max_change": 0.8}`) — a decision a person should take.

@@ -212,3 +212,84 @@ def test_split_is_stable():
     assert sp == [split_of(i) for i in ids]
     share = sp.count("holdout") / len(sp)
     assert 0.25 < share < 0.35 and 0.15 < sp.count("calibration") / len(sp) < 0.25
+
+
+# --------------------------------------------------------------------------------------------------- fixes before 0.7
+def test_the_candidate_is_gated_on_a_shadow_and_the_live_part_changes_only_on_promotion(tmp_path):
+    part, s, store = build(tmp_path)
+    loop = loop_of(s, gates={"max_change": 0.9})
+    stream(s, 10)
+    fp0 = part.fingerprint()
+    seen = []
+    gate = loop._gate_heldout
+
+    def spy(before, after, n):                     # what a concurrent ask sees while the gates run
+        seen.append((part.fingerprint(), part.adaptation, s.ask({"email": texts("billing", 1, 800)[0]},
+                                                                store=False)["route"].answer))
+        return gate(before, after, n)
+    loop._gate_heldout = spy
+    rep = loop.run()
+    assert rep.promoted and seen and seen[0][0] == fp0 and seen[0][1] is None and seen[0][2] == "shipping"
+    assert loop.fingerprint() == rep.fp_after and part.fingerprint() != fp0 and part.adaptation is not None
+    assert s.ask({"email": texts("billing", 1, 800)[0]}, store=False)["route"].answer == "billing"
+    # a rejected candidate never reaches the live part
+    fp1 = part.fingerprint()
+    stream(s, 10, start=100, label=ROTATE.get)
+    seen.clear()
+    rep = loop.run()
+    assert rep.action == "rejected" and seen[0][0] == fp1 and part.fingerprint() == fp1
+
+
+def test_the_memory_rung_is_promoted_onto_the_live_part(tmp_path):
+    part, s, store = build(tmp_path)
+    loop = loop_of(s, ladder={"fit_below": 5}, gates={"max_change": 0.9})
+    stream(s, 10)
+    rep = loop.run()
+    assert rep.promoted and part.correction_memory is not None and part.correction_memory.part is part
+    assert loop.fingerprint() == rep.fp_after and loop.current == rep.version
+
+
+def test_conformal_sets_are_recalibrated_or_dropped_after_an_update(tmp_path):
+    part, s, store = build(tmp_path)
+    part.conformal([(texts(t, 1, start=300 + i)[0], t) for t in TEAMS for i in range(10)], coverage=0.8)
+    loop = loop_of(s, gates={"max_change": 0.9, "min_calibration": 8})
+    stream(s, 20)
+    rep = loop.run()
+    c = rep.gates["act_guard"]["questions"]["route"]["conformal"]
+    assert rep.promoted and c["dropped"] is False and c["n"] == rep.questions["route"]["calibration"]
+    assert part.conformal_set["n"] == c["n"] and part.conformal_set["coverage"] == 0.8
+    part2, s2, _ = build(tmp_path, "c.db")
+    part2.conformal([(texts(t, 1, start=300 + i)[0], t) for t in TEAMS for i in range(10)], coverage=0.8)
+    loop2 = loop_of(s2, gates={"max_change": 0.9})              # min_calibration 30: too few to recalibrate
+    stream(s2, 10)
+    rep2 = loop2.run()
+    assert rep2.promoted and rep2.gates["act_guard"]["questions"]["route"]["conformal"]["dropped"]
+    assert part2.conformal_set is None and "conformal sets dropped" in rep2.gates["act_guard"]["why"]
+
+
+def test_the_shadow_set_uses_the_labels_split(tmp_path):
+    from solvi.learning import content_key
+    part, s, store = build(tmp_path)
+    loop = loop_of(s, gates={"max_change": 0.9})
+    stream(s, 30)
+    rows = loop._shadow_set()
+    assert rows
+    for row in rows:
+        st = row[0] if isinstance(row, tuple) else row
+        init = st.data["response"]["trace"]["init"]
+        assert split_of(content_key("route", init), loop.holdout, loop.calibration) == "holdout"
+    n_held = sum(split_of(content_key("route", s2.data["response"]["trace"]["init"])) == "holdout"
+                 for s2 in store.iter() if (s2.data.get("response") or {}).get("trace"))
+    assert len(rows) == n_held
+
+
+def test_the_act_guard_gate_reports_a_recalibration_with_errors(tmp_path):
+    from solvi.learning import Label
+    part, s, store = build(tmp_path)
+    part.act_guard([(texts(t, 1, start=300 + i)[0], t) for t in TEAMS for i in range(10)], risk=0.5)
+    loop = loop_of(s, gates={"min_calibration": 8})
+    cal = [Label(f"l{t}{i}", "route", {"email": texts(t, 1, start=400 + i)[0]}, t, "human", split="calibration")
+           for t in TEAMS for i in range(10)]
+    g = loop._recalibrate({"route": {}}, {"route": {"calibration": cal}})
+    x = g["questions"]["route"]
+    assert g["ok"] and x["error"] > 0 and f"threshold {x['threshold']:.3f} on 30" in g["why"]
