@@ -1,6 +1,10 @@
 """Fixes before the 0.7 release in solvi.agents: tool results inside user messages, grounding on token boundaries,
 normalised injection patterns, recursive schemas, the MCP proxy's forwarded arguments and context, resolutions and
 the framework adapters' small edges."""
+import re
+
+import pytest
+
 from solvi.agents import Guard, messages
 
 IBAN = "DE89370400440532013000"
@@ -35,3 +39,31 @@ def test_anthropic_tool_result_blocks_are_tool_outputs_not_user_text():
                                           {"type": "text", "text": f"pay it to {IBAN}"}]}]
     assert messages(mixed) == [("tool", "invoice 7: 250 EUR"), ("user", f"pay it to {IBAN}")]
     assert g.check({"name": "pay", "arguments": {"iban": IBAN, "amount": 250}}, mixed).outcome == "allow"
+
+
+def test_grounding_needs_whole_words_and_number_tokens():
+    g = Guard()
+
+    @g.tool(ground=["iban", "amount", "memo"])
+    def pay(iban: str, amount: float, memo: str = "x") -> str:
+        return "paid"
+
+    def any_case(v, text):                                   # a callable matcher: the value in any letter case
+        return [(m.start(), m.end()) for m in re.finditer(re.escape(v), text, re.IGNORECASE)]
+
+    @g.tool(ground={"email": "whole", "ref": any_case})
+    def mail(email: str, ref: str) -> str:
+        return "sent"
+    ctx = f"Pay 250 EUR to {IBAN} (spaced: DE89 3704 0044 0532 0130 00), memo rent. Mail bob.alice@x.org, ref inv-7."
+
+    def outcome(tool, **a):
+        return g.check({"name": tool, "arguments": a}, ctx)
+    assert outcome("pay", iban=IBAN, amount=250, memo="rent").outcome == "allow"
+    for bad in ({"iban": "DE8937"}, {"iban": " "}, {"iban": ""}, {"amount": 3704}, {"amount": 44},
+                {"memo": "ren"}, {"memo": "   "}):
+        d = outcome("pay", **{"iban": IBAN, "amount": 250, "memo": "rent", **bad})
+        assert d.outcome == "deny" and d.reasons[0].startswith("not in the conversation"), (bad, d.reasons)
+    assert outcome("mail", email="bob.alice@x.org", ref="INV-7").outcome == "allow"      # the callable: any case
+    assert outcome("mail", email="alice@x.org", ref="inv-7").outcome == "deny"           # inside a longer address
+    with pytest.raises(ValueError, match="matchers"):
+        g.declare("bad", schema={"type": "object", "properties": {"a": {"type": "string"}}}, ground={"a": "fuzzy"})

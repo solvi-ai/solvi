@@ -30,7 +30,8 @@ Each tool is a small solvi System with one question, `verdict` ∈ {allow, deny,
 catalog, in this order (a failed hard check decides; when several fail, the first in this order):
 
   arguments_valid              the arguments validate against the tool's types (pydantic; unknown arguments are errors) → deny
-  arguments_grounded           every `ground=` argument is literally in the conversation (a quote with offsets) → deny
+  arguments_grounded           every `ground=` argument is in the conversation as a whole word or number token (a quote
+                               with offsets; an empty string never is) → deny
   no_injected_arguments        ... and not only in a tool output that carries instruction-like text (solvi.perturb) → escalate
   no_instructions_in_tool_outputs   tools with injections="any": no tool output in the conversation carries such text → escalate
   your policies                ordinary solvi hard checks over the arguments and the facts your app gives (deny first,
@@ -325,6 +326,7 @@ class Tool:
     ground: dict = dataclasses.field(default_factory=dict)     # argument → roles it may be quoted from
     injections: str = "grounded"                               # "grounded" | "any" | "off"
     authorize: bool | None = None                              # ask the guard's authorizer (None: when it has one)
+    match: dict = dataclasses.field(default_factory=dict)      # argument → how its value is found ("token" when absent)
 
     @property
     def arguments(self):
@@ -376,12 +378,15 @@ def _argument(name, annotation):
     return f
 
 
-def _grounding(spec):
+def _grounding(spec, matchers=None):
+    matchers = dict(matchers or {})                       # argument → a callable matcher (its code is in `spec`)
+
     def grounding(call_arguments, conversation, conversation_roles) -> dict:
         """Where each argument that must come from the conversation is quoted: {"found": {argument: [[text, start, end,
-        role]]}, "missing": [...], "injected": [...]}. A string is found literally, a number as a number in the text
-        (thousands separators allowed), a list item by item; the first occurrence in a message of an allowed role wins,
-        one in a tool output with instruction-like text (solvi.perturb) only when there is no other."""
+        role]]}, "missing": [...], "injected": [...]}. A string is found as a whole word (not inside a longer word; see
+        MATCHERS), a number as a number token (thousands separators allowed; not a group of a spaced identifier), a list
+        item by item; an empty or whitespace-only string is never grounded. The first occurrence in a message of an
+        allowed role wins, one in a tool output with instruction-like text (solvi.perturb) only when there is no other."""
         from ..perturb import instruction_spans
         rules = json.loads(spec)
         roles = [(s, e, r) for s, e, r in conversation_roles]
@@ -400,15 +405,19 @@ def _grounding(spec):
                     return i
             return None
         found, missing, injected = {}, [], []
-        for arg, allowed in rules.items():
+        for arg, allowed in rules["roles"].items():
             v = call_arguments.get(arg)
-            if v is None or v == "" or v == [] or v == ():
+            if v is None or v == [] or v == ():
                 continue
             items = list(v) if isinstance(v, (list, tuple, set, frozenset)) and not isinstance(v, str) else [v]
+            match = matchers[arg] if arg in matchers else rules["match"][arg]
             quotes = []
             for item in items:
+                if isinstance(item, str) and not item.strip():
+                    missing.append(f"{arg}={_short(item)} (empty)")
+                    continue
                 best = None
-                for a, b in _occurrences(item, conversation):
+                for a, b in _occurrences(item, conversation, match):
                     i = where(a, b)
                     if i is None or roles[i][2] not in allowed:
                         continue
@@ -430,13 +439,50 @@ def _grounding(spec):
     return grounding
 
 
-_NUMBER = re.compile(r"(?<![\w.,])-?(?:\d{1,3}(?:[,\u00a0\u202f' ]\d{3})+(?![\d])|\d+)(?:\.\d+)?(?![\d])")
+_NUMBER = re.compile(r"(?<![\w.,])-?(?:\d{1,3}(?:[,\u00a0\u202f' ]\d{3})+(?![\d])|\d+)(?:\.\d+)?(?![\w]|[.,]\d)")
+_WHOLE_EDGE = set(" \t\r\n\"'`()[]{}<>,;:!?")
+MATCHERS = ("token", "whole", "substring")
 
 
-def _occurrences(v, text):
-    """Where a value is written in a text → [(start, end)]: a string literally; a number as a number token (not inside a
-    word; thousands separators "1,250.50", "1 250", "1'250" allowed; 250 matches "250.00"); an Enum by its value;
-    anything else by str()."""
+def _glued(text, a, b):
+    """Is the number at text[a:b] one group of a longer identifier — next to a token with a digit across a single " ",
+    "-" or "/" ("DE89 3704 0044", "555-1234", "2024-03-15")?"""
+    if a >= 2 and text[a - 1] in " -/":
+        k = a - 1
+        while k > 0 and text[k - 1].isalnum():
+            k -= 1
+        if any(c.isdigit() for c in text[k:a - 1]):
+            return True
+    if b + 1 < len(text) and text[b] in " -/":
+        k = b + 1
+        while k < len(text) and text[k].isalnum():
+            k += 1
+        if any(c.isdigit() for c in text[b + 1:k]):
+            return True
+    return False
+
+
+def _bounded(text, a, b, s, match):
+    """Does the occurrence text[a:b] of the string s stand on its own under the matcher?"""
+    if match == "substring":
+        return True
+    before, after = text[a - 1] if a > 0 else "", text[b] if b < len(text) else ""
+    if match == "whole":                 # delimited by whitespace, quotes, brackets or punctuation (a "." ends a sentence)
+        ok_before = before == "" or before in _WHOLE_EDGE
+        ok_after = after == "" or after in _WHOLE_EDGE or (after == "." and (b + 1 >= len(text) or text[b + 1].isspace()))
+        return ok_before and ok_after
+    word = re.compile(r"\w")                                 # "token": not inside a longer word
+    return not (word.match(s[0]) and before and word.match(before)) and not (word.match(s[-1]) and after
+                                                                              and word.match(after))
+
+
+def _occurrences(v, text, match="token"):
+    """Where a value is written in a text → [(start, end)]: a string as a whole word under `match` ("token": not inside a
+    longer word — "DE8937" is not found in "DE89370400…"; "whole": delimited by whitespace, quotes, brackets or
+    punctuation — "x.org" is not found in "alice@x.org"; "substring": anywhere; a callable(value, text) → [(start,
+    end)] decides itself); a number as a number token (not inside a word; thousands separators "1,250.50", "1 250",
+    "1'250" allowed; 250 matches "250.00"; not a group of a spaced or dashed identifier — 3704 is not found in "DE89 3704
+    0044"); an Enum by its value; anything else by str(). An empty or whitespace-only string is found nowhere."""
     import enum
     if isinstance(v, enum.Enum):
         v = v.value
@@ -447,13 +493,19 @@ def _occurrences(v, text):
                 x = float(re.sub(r"[,\u00a0\u202f' ]", "", m.group(0)))
             except ValueError:
                 continue
-            if abs(x - float(v)) <= 1e-9 * max(1.0, abs(float(v))):
+            if abs(x - float(v)) <= 1e-9 * max(1.0, abs(float(v))) and not _glued(text, m.start(), m.end()):
                 out.append((m.start(), m.end()))
         return out
     s = str(v)
+    if not s.strip():
+        return []
+    if callable(match):
+        return [(int(a), int(b)) for a, b in (match(v, text) or ())
+                if 0 <= int(a) < int(b) <= len(text)]
     out, i = [], text.find(s)
-    while i >= 0 and s:
-        out.append((i, i + len(s)))
+    while i >= 0:
+        if _bounded(text, i, i + len(s), s, match):
+            out.append((i, i + len(s)))
         i = text.find(s, i + 1)
     return out
 
@@ -613,7 +665,10 @@ class Guard:
         or `guard.tool(name="refund", schema=RefundArgs)` (a pydantic model or a JSON schema) for a tool the framework or
         an MCP server runs. The function is returned unchanged.
 
-        ground: arguments that must be quoted from the conversation (literally; numbers as numbers; a list item by item);
+        ground: arguments that must be quoted from the conversation (a string as a whole word; numbers as number tokens;
+        a list item by item; an empty string never) — a list of names, or {name: matcher}: "token" (the default: not
+        inside a longer word), "whole" (delimited by whitespace, quotes, brackets or punctuation: for IBANs, e-mails,
+        paths), "substring" (anywhere), or a callable(value, text) → [(start, end)] of the value's occurrences;
         ground_from: the roles of the messages they may be quoted from (default: the user's, tool outputs and system
         messages — never the assistant's own words; ("user",) for values only the user may give, like a payee).
         injections: "grounded" (default: a grounded argument found only in a tool output with instruction-like text
@@ -633,7 +688,13 @@ class Guard:
                 model = schema
             desc = description if description is not None else ((inspect.getdoc(f) or "") if f is not None else "")
             roles = tuple(ROLES.get(r, r) for r in ((ground_from,) if isinstance(ground_from, str) else ground_from))
-            t = Tool(n, f, model, desc.strip(), {a: roles for a in ground}, injections, authorize)
+            spec = {ground: "token"} if isinstance(ground, str) else dict(ground) if isinstance(ground, dict) \
+                else {a: "token" for a in ground}
+            bad = {a: m for a, m in spec.items() if not callable(m) and m not in MATCHERS}
+            if bad:
+                raise ValueError(f"tool {n}: ground= matchers are {', '.join(MATCHERS)} or a callable, not {bad}")
+            t = Tool(n, f, model, desc.strip(), {a: roles for a in spec}, injections, authorize,
+                     {a: m for a, m in spec.items() if m != "token"})
             if injections not in ("grounded", "any", "off"):
                 raise ValueError('injections must be "grounded", "any" or "off"')
             self._check_tool(t)
@@ -758,6 +819,7 @@ class Guard:
         return self.system(name).catalog
 
     def _build(self, t):
+        from ..provenance import code_fingerprint
         from ..system import System
         if t.model is None:
             raise ValueError(f"tool {t.name} has no argument schema yet (guard.tool(..., schema=...) or guard.adopt)")
@@ -787,7 +849,11 @@ class Guard:
             checks.append(f.__name__)
         check(arguments_valid, "deny")
         if t.ground:
-            cat.fn(_grounding(json.dumps({a: list(r) for a, r in t.ground.items()}, sort_keys=True)))
+            match = {a: t.match.get(a, "token") for a in t.ground}
+            match = {a: m if isinstance(m, str) else f"callable {getattr(m, '__qualname__', type(m).__name__)} "
+                     f"{code_fingerprint(m)}" for a, m in match.items()}        # a callable matcher: by its code
+            cat.fn(_grounding(json.dumps({"roles": {a: list(r) for a, r in t.ground.items()}, "match": match},
+                                         sort_keys=True), {a: m for a, m in t.match.items() if callable(m)}))
             check(arguments_grounded, "deny")
             if t.injections != "off":
                 check(no_injected_arguments, "escalate")

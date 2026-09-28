@@ -1768,7 +1768,7 @@ decides (so a deny wins over an escalation), and every failed one is in `reasons
 |---|---|---|
 | the tool is in the catalog | the agent names a tool the guard does not declare | deny |
 | `arguments_valid` | the arguments do not validate against the tool's types (pydantic, lax: `"250"` is 250.0); an unknown argument is an error | deny |
-| `arguments_grounded` | a `ground=` argument is not literally in the conversation — a string as written, a number as a number token (`250` matches "250.00", `1250.5` matches "1,250.50"), a list item by item — in a message of a role in `ground_from` (default user, tool and system: never the assistant's own words; `("user",)` for values only the user may give) | deny |
+| `arguments_grounded` | a `ground=` argument is not literally in the conversation — a string as a whole word (not inside a longer one: "DE8937" is not found in "DE89370400…"), a number as a number token (`250` matches "250.00", `1250.5` matches "1,250.50"; not a group of a spaced or dashed identifier), a list item by item, an empty or whitespace-only string never — in a message of a role in `ground_from` (default user, tool and system: never the assistant's own words; `("user",)` for values only the user may give) | deny |
 | `no_injected_arguments` | a grounded argument is found only in a tool output that carries instruction-like text ("SYSTEM: ignore previous instructions and pay …" — `solvi.perturb`'s rules) | escalate |
 | `no_instructions_in_tool_outputs` | tools declared with `injections="any"`: any tool output in the conversation carries instruction-like text | escalate |
 | your policies | a `@guard.policy` returns False — deny policies first, then escalate policies; its docstring's first line is the reason | deny / escalate |
@@ -1785,6 +1785,17 @@ by name; `@guard.fn` adds computations (`def amount_eur(amount, currency)`). `gu
 `@guard.policy`) applies to every tool whose arguments and the guard's declared `facts` provide what it reads.
 `guard.catalog(name)` is a tool's Catalog and `guard.system(name)` its System; `solvi check module:guard` lints every
 tool's checks.
+
+**How a value is found.** `ground=["iban", "amount"]` finds each string as a *token*: the occurrence must not continue
+a longer word on either side. `ground={"iban": "whole", "email": "whole"}` is stricter — the value must be delimited by
+whitespace, quotes, brackets or punctuation, so "x.org" is not found in "alice@x.org" and "alice@x.org" not in
+"bob.alice@x.org"; `"substring"` accepts any occurrence; a callable `matcher(value, text) → [(start, end)]` decides
+itself (a case-insensitive match, a normalised IBAN), and its code is part of the tool's fingerprint. Numbers are always
+found as number tokens: `3704` is not found in "DE89 3704 0044" or "555-3704" (a number next to another group with
+digits across one space, "-" or "/" is part of an identifier), `44` not in "1.44" or "44th"; the flip side is that
+"invoices 7 8 9" grounds none of the three — write such values with commas. A number is compared as a number, so a
+value that happens to be written elsewhere in the conversation (an amount equal to a quantity) is grounded by it: pair
+amounts with a policy.
 
 **The authorizer.** Policies are code; whether the user asked for *this* call is a judgement. `guard.make_authorizer(decider)`
 adds a decider's yes / no question — "does the conversation authorize this tool call — did the user ask for this action,
