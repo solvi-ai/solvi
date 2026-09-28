@@ -48,3 +48,12 @@ def test_set_fact_replays_after_json_round_trip():
     r = s.ask({"text": "please refund my broken mug now"})
     back = Response.from_json(r.to_json(), catalog=s)
     assert back.trace.replay(s.catalog)["ok"]
+
+
+def test_a_failed_step_hashes_the_same_in_every_process():
+    import subprocess
+    import sys
+    code = "from solvi.runtime import vhash, MISSING; print(vhash(MISSING))"
+    outs = {subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, check=True).stdout
+            for _ in range(3)}
+    assert len(outs) == 1

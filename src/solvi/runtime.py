@@ -31,6 +31,8 @@ def _canon(v):
         return v
     if v is Unknown:
         return {"not_stated": True}
+    if v is MISSING:                              # a failed step: repr(object()) carries a memory address
+        return {"missing": True}
     return repr(v)
 
 
