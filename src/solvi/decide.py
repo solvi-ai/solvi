@@ -1989,9 +1989,8 @@ class DecisionPart:
         if self.option_order == "canonical":
             return [sorted(real, key=str)]
         if self.option_order == "average":
-            k = len(real)
-            return [real[s:] + real[:s] for s in sorted({round(i * k / self.permutations) % k
-                                                         for i in range(min(self.permutations, k))})]
+            k, n = len(real), min(self.permutations, len(real))
+            return [real[s:] + real[:s] for s in sorted({(i * k) // n for i in range(n)})]
         return [real]
 
     def _raw(self, texts):
