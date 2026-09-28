@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import math
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -318,6 +319,11 @@ class System:
         if lost:                                      # a head never guesses from facts that could not be computed
             return Result(None, 0.0, "head features not computed: " + ", ".join(lost), "abstain")
         p = head.predict(vals)
+        if not all(math.isfinite(v) for v in p.values()):   # a NaN / inf feature: the head cannot say, so it does not answer
+            bad = [f for f in head.features if isinstance(vals.get(f), float) and not math.isfinite(vals[f])]
+            return Result(None, 0.0, "the answer head gave no finite probabilities"
+                          + (" (non-finite " + ", ".join(bad) + ")" if bad else ""), "abstain", source=type(head).__name__,
+                          guard="missing_facts")
         if q.answer.kind == "multi":                  # p: option -> probability it applies
             a = tuple(o for o in q.answer.options if p[o] >= 0.5)
             base = min(max(v, 1 - v) for v in p.values())

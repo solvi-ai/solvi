@@ -48,3 +48,12 @@ def test_teach_updates_instantly_like_refitting():
     for st, _ in data(2, 30):                                   # online updates == refit on all 60 (up to fixed scaling)
         a = s.heads["suspicious"].scores(s.facts_for(st))
         assert np.all(np.isfinite(a))
+
+
+def test_a_non_finite_feature_makes_the_head_abstain_not_answer_nan():
+    s = System(S.cat, S.QUESTIONS)
+    s.fit_fast("suspicious", data(0, 300))
+    st = dict(data(3, 1)[0][0])
+    for bad in (float("nan"), float("inf")):
+        r = s.ask({**st, "items": [("A", 3, bad)]})["suspicious"]
+        assert r.status == "abstain" and r.answer is None and r.confidence == 0.0
