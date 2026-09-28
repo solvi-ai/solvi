@@ -87,6 +87,8 @@
   catalog and model fingerprints in use and their changes, and example stored ids.
 - HTML is one self-contained page (inline CSS, light and dark, no scripts or external assets); every value is escaped.
   Markdown escapes every special character.
+- A value derived from its quote ("1.5 million" read as 1500000.0, a card number shown as "card ending 6467") is
+  highlighted as grounded text, not as "not the text at these offsets".
 - `solvi report STORE [--since] [--until] [--question] [--id ID] [--html out.html] [--md out.md] [--json] [--system]`.
 - A response keeps the System that answered (and one loaded with a System, its System) for reports.
 
