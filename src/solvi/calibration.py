@@ -6,8 +6,17 @@ question (solvi answers, a decider, a head).
     threshold_for(conf, correct, 0.9)   # the confidence threshold that gives it (e.g. for Question(min_confidence=...))
 
 `conf` — confidences in [0, 1]; `correct` — whether each answer was right (booleans or 0/1). `evaluate(system, question,
-examples)` collects both from a System on labelled examples (abstentions count as not covered)."""
+examples)` collects both from a System on labelled examples (abstentions count as not covered).
+
+Thresholds with a guarantee (used by DecisionPart.act_guard, calibrate_for(method="ltt") and conformal):
+
+    crc_threshold(score, wrong, risk=0.1)       # P(answered alone and wrong) ≤ 10% of all questions
+    ltt_threshold(score, wrong, error=0.1)      # error among the answered ≤ 10%, with probability ≥ 90%
+
+They hold for inputs like the calibration examples, not under a shift of domain: calibrate on your own labelled data."""
 from __future__ import annotations
+
+import math
 
 import numpy as np
 
@@ -92,3 +101,93 @@ def evaluate(system, question, examples, accuracy=0.9):
     out = summary(conf, ok, accuracy)
     out.update(answered=answered / max(1, len(examples)), accuracy_all=sum(ok) / max(1, len(examples)), conf=conf, correct=ok)
     return out
+
+
+# --- thresholds with a guarantee (conformal risk control, learn-then-test) and conformal answer sets
+# Measured on the shipped deciders (research note L20): an act threshold chosen for "10% error" on one data set gave 32–52%
+# errors among the answers it let through on others; the guarantees below hold only on data like the calibration examples.
+
+def crc_threshold(score, wrong, risk=0.10):
+    """Conformal risk control: the lowest threshold t such that (Σ 1[score ≥ t and wrong] + 1) / (n + 1) ≤ risk; answer
+    alone when score ≥ t. Guarantee (inputs exchangeable with the calibration examples): P(answered alone and wrong) ≤ risk
+    — a share of ALL questions, not of the answered ones. inf when the examples are too few or too hard for the risk."""
+    s, w = _arrays(score, wrong)
+    n = len(s)
+    order = np.argsort(-s, kind="stable")
+    ss, cw = s[order], np.cumsum(w[order])
+    for t in np.concatenate([np.unique(s), [np.inf]]):       # the risk does not grow with t: take the first that holds
+        k = int(np.searchsorted(-ss, -t, side="right"))       # cases with score ≥ t
+        if ((cw[k - 1] if k else 0.0) + 1) / (n + 1) <= risk + 1e-12:
+            return float(t)
+    return float("inf")
+
+
+def _binom_cdf(k, n, p):
+    """P(Binomial(n, p) ≤ k), without scipy."""
+    if n == 0:
+        return 1.0
+    lp, lq = math.log(p), math.log1p(-p)
+    terms = [math.lgamma(n + 1) - math.lgamma(i + 1) - math.lgamma(n - i + 1) + i * lp + (n - i) * lq
+             for i in range(int(k) + 1)]
+    m = max(terms)
+    return min(1.0, math.exp(m) * sum(math.exp(t - m) for t in terms))
+
+
+def ltt_threshold(score, wrong, error=0.10, delta=0.10, grid=None):
+    """Learn-then-test: the lowest threshold t on a fixed grid such that the error AMONG the cases answered alone
+    (score ≥ t) is ≤ error with probability ≥ 1 − delta over the calibration examples (binomial test, Bonferroni over the
+    grid). A stronger promise than crc_threshold, so it often allows no automatic answers at all (inf)."""
+    grid = np.linspace(0.2, 0.995, 32) if grid is None else np.asarray(grid, float)
+    s, w = _arrays(score, wrong)
+    for t in sorted(grid):
+        auto = s >= t
+        k = int(auto.sum())
+        if k and _binom_cdf(float(w[auto].sum()), k, error) <= delta / len(grid):
+            return float(t)
+    return float("inf")
+
+
+def conformal_quantile(scores, alpha):
+    """The ⌈(n + 1)(1 − alpha)⌉-th smallest score; inf when there are too few (n < 1/alpha − 1)."""
+    s = np.sort(np.asarray(scores, float))
+    k = int(math.ceil((len(s) + 1) * (1 - alpha) - 1e-12))
+    return float("inf") if k > len(s) or not len(s) else float(s[k - 1])
+
+
+def set_scores(p, ordinal=False, has_unknown=False):
+    """Non-conformity of every answer of one question, from its probabilities p (the last one "not stated" when
+    has_unknown): 1 − p (LAC); ordinal=True — for scores and numbers — the mass added before an answer while an interval
+    grows from the mode towards the more probable neighbour ("not stated" competes as one more candidate), so the answer
+    set is always one contiguous interval."""
+    p = np.asarray(p, float)
+    if not ordinal:
+        return 1.0 - p
+    nb = len(p) - 1 if has_unknown else len(p)
+    start = int(np.argmax(p))
+    order, unk_in = [start], has_unknown and start == nb
+    lo = hi = None if unk_in else start
+    while len(order) < len(p):
+        cand = []
+        if lo is None:
+            b = int(np.argmax(p[:nb]))
+            cand.append((p[b], b))
+        else:
+            if lo > 0:
+                cand.append((p[lo - 1], lo - 1))
+            if hi < nb - 1:
+                cand.append((p[hi + 1], hi + 1))
+        if has_unknown and not unk_in:
+            cand.append((p[nb], nb))
+        _, c = max(cand, key=lambda t: (t[0], -t[1]))
+        order.append(c)
+        if has_unknown and c == nb:
+            unk_in = True
+        elif lo is None:
+            lo = hi = c
+        else:
+            lo, hi = min(lo, c), max(hi, c)
+    s, cum = np.empty(len(p)), 0.0
+    for c in order:
+        s[c] = cum
+        cum += p[c]
+    return s

@@ -1830,6 +1830,8 @@ class DecisionPart:
         self.spec = _Spec(task, options, descriptions, multi, other, kind, as_bool, score_value, **prim)
         self.facts = [text_fact] if isinstance(text_fact, str) else list(text_fact)
         self.escalate_below, self.act_threshold, self.use_act = escalate_below, act_threshold, use_act
+        self.guarantee = None                   # what the escalation threshold promises (act_guard / calibrate_for)
+        self.conformal_set = None               # the answer-set quantile (conformal)
         self.__name__ = name
         self.__qualname__ = name
         self.__doc__ = task
@@ -1880,7 +1882,8 @@ class DecisionPart:
         from .provenance import digest
         a = self.adaptation
         th = {k: v for k, v in (("escalate_below", self.escalate_below), ("act_threshold", self.act_threshold),
-                                ("use_act", self.use_act)) if v is not None}
+                                ("use_act", self.use_act), ("guarantee", self.guarantee),
+                                ("conformal", self.conformal_set)) if v is not None}
         if th:
             return digest("DecisionPart", self.model.weights_fingerprint(), self.spec.describe(), a.params() if a else None, th)
         return digest("DecisionPart", self.model.weights_fingerprint(), self.spec.describe(), a.params() if a else None)
@@ -1936,7 +1939,25 @@ class DecisionPart:
         return f"DecisionPart({self.__name__!r}, {self.spec.kind}, options={self.options}, model={self.model.model_id!r})"
 
     def _finish(self, d, act):
-        return self.model._finish(self.spec, d, act, self.escalate_below, self.act_threshold, self.use_act)
+        d = self.model._finish(self.spec, d, act, self.escalate_below, self.act_threshold, self.use_act)
+        if self.guarantee is not None:
+            d.extra["guarantee"] = dict(self.guarantee)
+        if self.conformal_set is not None and d.probs:
+            cands = self.candidates(d)
+            d.extra["candidates"] = cands
+            if d.escalate:
+                d.escalate += f"; candidates at {self.conformal_set['coverage']:.0%}: {cands!r}"
+        return d
+
+    def candidates(self, d):
+        """The conformal answer set of a decision (after conformal(...)): the answers that cannot be ruled out at the
+        calibrated coverage, most probable first — a short list for the person who handles an escalation."""
+        from .calibration import set_scores
+        keys = list(d.probs)
+        s = set_scores([d.probs[k] for k in keys], self.conformal_set["ordinal"], Unknown in keys)
+        keep = sorted((i for i in range(len(keys)) if s[i] <= self.conformal_set["quantile"]),
+                      key=lambda i: -d.probs[keys[i]])
+        return [keys[i] if keys[i] is Unknown else self.spec.out(keys[i]) for i in keep]
 
     def _one(self, text):
         z, a = self.model._raw_full([(self.spec, text)])[0]
@@ -1981,38 +2002,106 @@ class DecisionPart:
     def reset(self):
         self.model.reset(**self._kw())
 
-    def calibrate_for(self, examples, error=0.05, signal="auto"):
-        """Choose the escalation threshold for a target error rate on labelled examples [(input, correct)]: the lowest
-        threshold at which the decisions it lets through are wrong at most `error` of the time. signal: "act" (the model's
-        act probability → act_threshold), "confidence" (the calibrated confidence → escalate_below) or "auto" (act when the
-        model has an act head). If no threshold reaches the target, everything escalates (threshold inf). Changes the
-        part's fingerprint. → {"signal", "threshold", "coverage", "error", "n", "target_error"}."""
-        from .calibration import accuracy_at
-        ex = [(self.model.text(t), self.spec.label(y)) for t, y in examples]
+    def _labelled(self, examples, signal):
+        """Decide labelled examples [(input, correct)] → (the signal per example, correct 0/1 per example, "act" |
+        "confidence", [Decision]). "Not stated" (solvi.Unknown) is a label like any other."""
+        ex = [(self.model.text(t), y) for t, y in examples]
         if not ex:
-            raise ValueError("calibrate_for needs labelled examples")
-        raws = self.model._raw_full([(self.spec, t) for t, _ in ex])
-        conf, act, ok = [], [], []
-        for (z, a), (_, y) in zip(raws, ex):
+            raise ValueError("calibration needs labelled examples")
+        if signal not in ("auto", "act", "confidence"):
+            raise ValueError('signal must be "auto", "act" or "confidence"')
+        gold = [Unknown if y is Unknown else self.spec.label(y) for _, y in ex]
+        conf, act, ok, ds = [], [], [], []
+        for (z, a), y in zip(self.model._raw_full([(self.spec, t) for t, _ in ex]), gold):
             d = self.model._decision(self.spec, z)
-            ok.append(float(self.spec.label(d.value) == y))
+            ds.append(d)
+            ok.append(float((Unknown if d.value is Unknown else self.spec.label(d.value)) == y))
             conf.append(d.conf)
             act.append(None if a is None else self.model.act_probability(self.spec, d, a))
         has_act = all(a is not None for a in act)
         if signal == "act" and not has_act:
             raise ValueError("the model gives no act signal: use signal='confidence'")
-        if signal not in ("auto", "act", "confidence"):
-            raise ValueError('signal must be "auto", "act" or "confidence"')
         use_act = signal == "act" or (signal == "auto" and has_act and self.use_act is not False)
-        sig = act if use_act else conf
-        thr = _threshold(sig, ok, error)
-        if use_act:
+        return (act if use_act else conf), ok, ("act" if use_act else "confidence"), ds
+
+    def _set_threshold(self, sig, thr, guarantee):
+        if sig == "act":
             self.act_threshold = thr
         else:
             self.escalate_below = thr
+        self.guarantee = guarantee
+
+    def calibrate_for(self, examples, error=0.05, signal="auto", method="empirical", delta=0.10):
+        """Choose the escalation threshold for a target error rate among the answers given alone, on labelled examples
+        [(input, correct)]. method="empirical": the lowest threshold at which the calibration decisions it lets through
+        are wrong at most `error` of the time — no guarantee on new inputs (it was 3–5× off on other data sets in our
+        measurements); method="ltt" (learn-then-test): the error among the answered is ≤ `error` with probability
+        ≥ 1 − delta for inputs like the examples — a strong promise, so it often lets nothing through. signal: "act"
+        (the model's act probability → act_threshold), "confidence" (the calibrated confidence → escalate_below) or
+        "auto" (act when the model has an act head). No threshold reaches the target → everything escalates (inf).
+        Changes the part's fingerprint. → {"signal", "threshold", "coverage", "error", "n", "target_error", "method",
+        "guarantee"}. For a guarantee on the share of all questions answered wrongly, see act_guard."""
+        from .calibration import accuracy_at, ltt_threshold
+        if method not in ("empirical", "ltt"):
+            raise ValueError('method must be "empirical" or "ltt"')
+        sig, ok, name, _ = self._labelled(examples, signal)
+        if method == "ltt":
+            thr = ltt_threshold(sig, [1 - o for o in ok], error, delta)
+            g = {"method": "ltt", "error": error, "delta": delta, "n": len(ok), "signal": name,
+                 "promise": f"error among the answers given alone ≤ {error:g} with probability ≥ {1 - delta:g}, "
+                            "for inputs like the calibration examples"}
+        else:
+            thr = _threshold(sig, ok, error)
+            g = {"method": "empirical", "error": error, "n": len(ok), "signal": name,
+                 "promise": "none: the error was measured on the calibration examples only"}
+        self._set_threshold(name, thr, g)
         acc, cov = accuracy_at(sig, ok, thr)
-        return {"signal": "act" if use_act else "confidence", "threshold": thr, "coverage": cov,
-                "error": (1 - acc) if cov else 0.0, "n": len(ex), "target_error": error}
+        return {"signal": name, "threshold": thr, "coverage": cov, "error": (1 - acc) if cov else 0.0, "n": len(ok),
+                "target_error": error, "method": method, "guarantee": g["promise"]}
+
+    def act_guard(self, examples, risk=0.10, signal="auto"):
+        """Answer alone only as far as a guarantee allows (conformal risk control), from labelled examples of your own
+        stream [(input, correct)] — a few hundred is typical: the escalation threshold is set so that, for inputs like
+        the examples, P(answered alone AND wrong) ≤ risk — a share of all questions (answered or escalated), not of
+        the answered ones. It holds for your stream, not under a shift of domain: recalibrate when the inputs change.
+        Too few or too hard examples → everything escalates (threshold inf). Changes the part's fingerprint; the trace
+        of every decision records the promise. → {"signal", "threshold", "answered" (share answered alone on the
+        examples), "error" (among them), "risk" (answered and wrong, on the examples), "n", "guarantee"}."""
+        from .calibration import crc_threshold
+        sig, ok, name, _ = self._labelled(examples, signal)
+        thr = crc_threshold(sig, [1 - o for o in ok], risk)
+        g = {"method": "crc", "risk": risk, "n": len(ok), "signal": name,
+             "promise": f"P(answered alone and wrong) ≤ {risk:g} for inputs like the calibration examples"}
+        self._set_threshold(name, thr, g)
+        s, o = np.asarray(sig, float), np.asarray(ok, float)
+        auto = s >= thr
+        return {"signal": name, "threshold": thr, "answered": float(auto.mean()),
+                "error": float(1 - o[auto].mean()) if auto.any() else 0.0,
+                "risk": float(((1 - o) * auto).mean()), "n": len(ok), "guarantee": g["promise"]}
+
+    def conformal(self, examples, coverage=0.90):
+        """Conformal answer sets from labelled examples [(input, correct)]: afterwards every decision carries
+        `extra["candidates"]` — the answers that cannot be ruled out, which contain the right one with probability
+        ≥ coverage for inputs like the examples (score and number questions: one contiguous interval) — and an
+        escalation's message lists them for the person who takes over. It does not change what is answered alone
+        (see act_guard). Choice, yes/no, score and number questions. → {"coverage", "quantile", "n", "mean_size"}."""
+        from .calibration import conformal_quantile, set_scores
+        if self.spec.multi or self.kind in ("rank", "span"):
+            raise ValueError(f"conformal sets need a single answer from a closed list; not for {self.kind!r} questions")
+        _, _, _, ds = self._labelled(examples, "confidence")
+        ordinal = self.kind in ("score", "number")
+        scores, sizes = [], []
+        for d, (_, y) in zip(ds, examples):
+            keys = list(d.probs)
+            g = Unknown if y is Unknown else self.spec.label(y)
+            if g not in keys:
+                raise ValueError(f"{y!r}: this question cannot answer it (its answers: {keys})")
+            scores.append(float(set_scores([d.probs[k] for k in keys], ordinal, Unknown in keys)[keys.index(g)]))
+        q = conformal_quantile(scores, 1 - coverage)
+        self.conformal_set = {"coverage": coverage, "quantile": q, "n": len(scores), "ordinal": ordinal}
+        for d in ds:
+            sizes.append(len(self.candidates(d)))
+        return {"coverage": coverage, "quantile": q, "n": len(scores), "mean_size": float(np.mean(sizes))}
 
     def question(self, cat, name=None, text=None, min_confidence=None, checkpoints=None, require_evidence=False):
         """Make this decision the answer of a question: registers it as the question's rule (`cat.rule(name)(self)`) and
