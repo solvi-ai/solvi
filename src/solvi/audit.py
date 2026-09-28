@@ -147,6 +147,10 @@ def _extra_line(x):
         out.append(f"margin {x['margin']:.2f}")
     if x.get("candidates"):
         out.append("candidates " + ", ".join(repr(c) for c in x["candidates"]))
+    lg = x.get("long")
+    if isinstance(lg, dict):                          # a long text: the sections the decider read (solvi.longdoc)
+        out.append(f"read {lg.get('read')} of {lg.get('of')} sections ({lg.get('by')}): "
+                   + ", ".join(f"[{a}:{b}]" + (f" {h[:30]!r}" if h else "") for a, b, h, _ in lg.get("sections") or []))
     ps = x.get("pass")
     if isinstance(ps, dict):
         out.append(f"one pass with {', '.join(n for n in ps.get('with', []) if n)}" if ps.get("shared", True)

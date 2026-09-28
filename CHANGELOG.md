@@ -24,6 +24,17 @@
 - A dialogue: `tin.update(read, next_message)` reads the next turn over the whole dialogue and lists `changes` (old value,
   new value, quote); "not A-10457 but A-10475" changes the field to the new value.
 
+### Long documents: find first, then decide
+
+- `decider.decision(..., long="retrieve", top_k=3, rerank=False)`: a text beyond the decider's `max_len` is split into
+  sections (headings, paragraphs, sentences), the `top_k` that bear on the question are selected by BM25 (stdlib) —
+  `rerank=True`: re-ordered by the decider's own yes / no relevance — and decided on; span answers and evidence quotes
+  point into the whole text; the sections read (offsets, heading, score) are in `extra["long"]`, so in the trace, the
+  audit and replay. Texts that fit are decided exactly as before. `DecideModel.max_len`, `DecideModel.count_tokens`,
+  `DecisionPart.budget()`.
+- `solvi.longdoc`: `LongDocument(text, max_tokens, count)` → `sections`, `select(query, k, budget, rerank)`,
+  `window(sections)` with `to_doc(start, end)`; `BM25`, `approx_tokens`.
+
 ## 0.6.0 — 2026-09-28 — serving, catalog lint, several models, async, measured costs
 
 ### Async execution: aask

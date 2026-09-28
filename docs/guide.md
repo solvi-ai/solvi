@@ -511,6 +511,43 @@ strings without quotes, a new line becomes a space; `null` / `true` / `false`; f
 says which of `"paths"`, `"tree"` (YAML-like) or `"json"` it reads — see [decide_format.md](decide_format.md). A pydantic
 model and the equal dict give the same text.
 
+### Long documents: find first, then decide
+
+A decider reads `max_len` tokens (the question and the input together; `m.max_len`, `m.count_tokens(text)`). By default a
+longer text is cut at the end by the tokenizer. `long="retrieve"` finds the relevant parts first:
+
+```python
+part = m.decision("notice", "Notice period for termination for convenience?", "contract", Span[str],
+                  long="retrieve", top_k=3, rerank=False)
+```
+
+When the text does not fit (`part.budget()`: max_len minus the question), code splits it into sections that each fit
+`budget // top_k` tokens — at headings (a Markdown `#`, `1.`, `1.2`, `Article 5`, `Section 3`, `§ 4`, a Roman numeral, an
+ALL-CAPS line), then blank lines, sentence ends and spaces — scores them with BM25 against the question, its options and
+their descriptions, and the decider reads the best `top_k` that fit together, joined in document order. `rerank=True`
+re-orders the best 3·top_k by the decider's own relevance (one yes / no question per candidate section: "does this passage
+help answer …?"; BM25 breaks ties). A span answer and evidence quotes point into the whole text (a span that would cross
+two sections escalates). The sections read — offsets, heading, score, and "bm25" or "bm25+decider" — are in the
+decision's `extra["long"]`: in the trace record, hashed, printed by the audit ("read 3 of 41 sections …"), and re-checked by
+replay, since the selection is deterministic. A text that fits is decided as before, with nothing recorded; `long`,
+`top_k` and `rerank` are part of the decision's fingerprint.
+
+The same pieces work on their own (`solvi.longdoc`, standard library only):
+
+```python
+from solvi.longdoc import LongDocument
+
+doc = LongDocument(contract, max_tokens=200)            # count= a tokenizer's counter (default: words × 1.3)
+doc.sections                                           # [Section(start, end, heading, index)], covering the text
+top = doc.select("How much notice does termination need?", k=3, budget=600)   # [(Section, BM25 score)]
+win = doc.window([s for s, _ in top])                  # the text the decider would read
+win.to_doc(start, end)                                 # a range in the window → the range in the document
+```
+
+This is retrieval by words: a question phrased with none of the section's words ("how long before I can leave?" for a
+"termination" clause) may miss it — `rerank=True` helps only among the candidates BM25 found, so raise `top_k` or phrase
+the task with the document's terms.
+
 ### The output: probabilities, calibrated confidence, act or escalate
 
 Each decision has probabilities over its options, a calibrated confidence (the checkpoint's temperature per question kind,

@@ -212,6 +212,9 @@ Every answer is a value and a confidence, and the types also declare answer prim
   decider picks which question the message asks (or escalates when unsure), each input field is read with a quote and a
   deterministic parser (numbers, dates, enums, yes / no), missing required fields are listed for a clarifying question,
   and the trace says those values were read by a model, not given.
+- **Long documents.** `decider.decision(..., long="retrieve")`: a contract longer than the decider reads is split into
+  sections, BM25 picks the few that bear on the question, the decider reads only those, and quotes point into the whole
+  document; the trace lists the sections read.
 
 ## Planning around dead ends and costs (code strategist)
 

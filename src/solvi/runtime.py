@@ -305,9 +305,9 @@ def _recompute(part, r, args, init, catalog=None):
             v = resolved(part.func(**plain) if sibs is None else part.func.in_pass(sibs, plain, r.extra["pass"]["with"]))
         except Exception as e:  # noqa: BLE001
             return [] if r.error is not None else [(r.step, r.name, f"recompute failed: {type(e).__name__}")]
-        if isinstance(v, Decision) and isinstance(r.extra, dict):     # several models (solvi.multi): every proposal
-            from .multi import RECORD_KEYS
-            for k in RECORD_KEYS:
+        if isinstance(v, Decision) and isinstance(r.extra, dict):     # several models (solvi.multi): every proposal;
+            from .multi import RECORD_KEYS                            # a long text: the sections read (solvi.longdoc)
+            for k in RECORD_KEYS + ("long",):
                 if (k in r.extra or k in v.extra) and vhash(r.extra.get(k)) != vhash(v.extra.get(k)):
                     return [(r.step, r.name, f"recorded {k} differ from the recomputed ones")]
         v = locate(part, v, init)
