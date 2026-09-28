@@ -64,6 +64,8 @@ nav:
       - solvi.serve: api/serve.md
       - solvi.agents: api/agents.md
       - solvi.textin: api/textin.md
+      - solvi.specialist: api/specialist.md
+      - solvi.charts: api/charts.md
       - solvi.longdoc: api/longdoc.md
       - solvi.report: api/report.md
       - solvi.otel: api/otel.md
