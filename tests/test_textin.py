@@ -117,7 +117,7 @@ def test_parse_number_rejects():
 def test_parse_date():
     t = {"today": "2026-09-28"}
     assert parse_date("2026-09-12") == "2026-09-12"
-    assert parse_date("12.09.2026") == "2026-09-12" and parse_date("09/12/26", {"dayfirst": False}) == "2026-09-12"
+    assert parse_date("12.09.2026") == "2026-09-12" and parse_date("09/12/26", {"dayfirst": False, **t}) == "2026-09-12"
     assert parse_date("12 September 2026") == parse_date("September 12, 2026") == parse_date("12th of Sep 2026") == "2026-09-12"
     assert parse_date("12 сентября", t) == "2026-09-12" and parse_date("yesterday", t) == "2026-09-27"
     with pytest.raises(ParseError, match="no year"):
@@ -413,3 +413,46 @@ def test_dialogue_correction_that_does_not_parse_is_a_conflict():
     assert res["request_refund"].status == "abstain" and "purchase_date" not in res.trace.init
     assert res.trace.replay(s)["ok"]
     assert [c.field for c in r2.changes] == []               # nothing changed to a value: it is asked instead
+
+
+@pytest.mark.parametrize("s", ["5 m long", "2 b", "1.000", "12.345", "3 100", "5%", "12 percent", "a b"])
+def test_parse_number_refuses_ambiguous_forms(s):
+    with pytest.raises(ParseError):
+        parse_number(s)
+
+
+def test_parse_number_ambiguity_resolved_by_context():
+    assert parse_number("5m") == "5000000" and parse_number("$5 m") == "5000000" and parse_number("2bn") == "2000000000"
+    assert parse_number("1,000") == "1000" and parse_number("0.125") == "0.125" and parse_number("1.5") == "1.5"
+    assert parse_number("1.000", {"decimal": ","}) == "1000" and parse_number("1.000", {"decimal": "."}) == "1"
+    assert parse_number("1,000", {"decimal": ","}) == "1" and parse_number("1.234,5", {"decimal": ","}) == "1234.5"
+    assert parse_number("1 500 000 руб") == "1500000" and parse_number("$3 100") == "3100"
+    assert parse_number("1\u00a0500\u00a0000") == "1500000"      # a no-break space groups digits on purpose
+    assert parse_number("5%", {"percent": True}) == "5" and parse_number("12.5 percent", {"percent": True}) == "12.5"
+
+
+def test_number_fields_in_a_text_are_not_misread():
+    _, s = shop()
+    tin = textin(s)
+    r = tin.read("refund A-7: I paid 1 500 000 руб on 2026-09-20")
+    assert r.fields["amount"].value == 1500000.0 and r.fields["amount"].quote.value == "1 500 000 руб"
+    assert s.ask_text(r).trace.replay(s)["ok"]
+    r = tin.read("refund A-7: the box is 5 m long, 20 EUR paid 2026-09-20")
+    assert r.fields["amount"].value != 5_000_000.0
+    r = tin.read("refund A-7: amount 1.000 EUR paid 2026-09-20")
+    assert r.fields["amount"].status == "unparsed" and "ambiguous" in r.fields["amount"].why
+    r = textin(s, decimal=",").read("refund A-7: amount 1.000 EUR paid 2026-09-20")
+    assert r.fields["amount"].value == 1000.0 and r.fields["amount"].spec == {"decimal": ","}
+    res = s.ask_text(r)
+    assert res.trace.replay(s)["ok"]
+    r = tin.read("refund A-7: amount 5% EUR paid 2026-09-20")
+    assert r.fields["amount"].status == "unparsed" and "percent" in r.fields["amount"].why
+
+
+def test_two_digit_year_needs_today_and_a_window():
+    with pytest.raises(ParseError, match="two-digit year"):
+        parse_date("01.02.85")
+    t = {"today": "2026-09-28"}
+    assert parse_date("01.02.85", t) == "1985-02-01" and parse_date("01.02.30", t) == "2030-02-01"
+    assert parse_date("01.02.46", t) == "2046-02-01" and parse_date("01.02.47", t) == "1947-02-01"
+    assert parse_date("01.02.26", t) == "2026-02-01"

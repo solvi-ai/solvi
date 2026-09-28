@@ -1671,8 +1671,8 @@ parser per type turns the quote into the value.
 
 | Type | Reads |
 |---|---|
-| `int`, `float`, `Decimal` | `1500`, `1,500.50`, `1 500 000`, `12,5`, `2k`, `1.5 million`, `3 млн`, `a million`, `полтора миллиона` (an `int` must be whole) |
-| `date` | `2026-09-12`, `12.09.2026`, `12/09/26` (`dayfirst=False`: month first), `12 September 2026`, `September 12`, `12 сентября`; `today` / `yesterday` / `tomorrow` |
+| `int`, `float`, `Decimal` | `1500`, `1,500.50`, `1 500 000 руб`, `12,5`, `2k`, `5m`, `$5 m`, `1.5 million`, `3 млн`, `a million`, `полтора миллиона` (an `int` must be whole). Not guessed, so `unparsed`: `5 m` / `2 b` (a one-letter scale apart from the number may be a unit), `1.000` (a thousand or one? `TextIn(decimal="," or ".")` says), `3 100` (digits grouped by plain spaces with no currency next to them may be two numbers), `5%` (unless the field is declared in percent: `TextIn(percent=[field])` or `json_schema_extra={"percent": True}`) |
+| `date` | `2026-09-12`, `12.09.2026`, `12/09/26` (`dayfirst=False`: month first; a two-digit year only with `today=`, within 80 years back and 20 ahead), `12 September 2026`, `September 12`, `12 сентября`; `today` / `yesterday` / `tomorrow` |
 | `Literal[...]`, an `Enum` | the label (or member name), or a synonym: `synonyms={field: {label: [...]}}` or the field's `json_schema_extra={"synonyms": ...}` |
 | `bool` | yes / no words; the field's name or a `cues=` word ("urgent") → True; a phrase declared in `negatives={field: [...]}` (or `json_schema_extra={"negative_cues": ...}`) → False. Description words only rank candidates. A cue with a negation near it ("isn't urgent", "not at all urgent", "hardly urgent", "не срочно") is `unparsed` — never True, and False only through a declared negative |
 | `str` | the quote, trimmed; `patterns={field: regex}` must match it whole |

@@ -120,26 +120,41 @@ _SCALES = {"hundred": 100, "thousand": 10 ** 3, "thousands": 10 ** 3, "k": 10 **
            "m": 10 ** 6, "млн": 10 ** 6, "миллион": 10 ** 6, "миллиона": 10 ** 6, "миллионов": 10 ** 6,
            "billion": 10 ** 9, "billions": 10 ** 9, "bn": 10 ** 9, "b": 10 ** 9, "млрд": 10 ** 9, "миллиард": 10 ** 9,
            "миллиарда": 10 ** 9, "миллиардов": 10 ** 9}
-_DIGITS = r"[-+−]?(?:\d{1,3}(?:[   ',]\d{3})+(?:[.,]\d+)?|\d{1,3}(?:\.\d{3}){2,}(?:,\d+)?|\d+(?:[.,]\d+)?)"
+_DIGITS = r"[-+−]?(?:\d{1,3}(?:[   ',]\d{3})+(?:[.,]\d+)?|\d{1,3}(?:\.\d{3})+,\d+|\d{1,3}(?:\.\d{3}){2,}|\d+(?:[.,]\d+)?)"
 _SCALE_RE = "|".join(sorted((re.escape(s) for s in _SCALES), key=len, reverse=True))
+_SCALE_WORDS_RE = "|".join(sorted((re.escape(s) for s in _SCALES if len(s) > 1), key=len, reverse=True))
 _WORD_RE = "|".join(sorted((re.escape(w) for w in _NUM_WORDS), key=len, reverse=True))
 _CUR = r"(?:[$€£₽¥]|usd|eur|rub|gbp)"
+# a currency after a number: the context that makes "1 500 000" one space-grouped number
+_CUR_AFTER = re.compile(r"\s?(?:[$€£₽¥]|(?:usd|eur|rub|gbp|руб\w*|р\.|rubles?|roubles?|euros?|dollars?|pounds?)(?!\w))",
+                        re.I)
+_PCT = r"\s?(?:%|percent(?!\w)|per\s+cent(?!\w)|процент\w*)"
 NUMBER_RE = re.compile(
-    rf"(?<![\w.,\-/])(?:{_CUR}\s?)?(?:(?P<d>{_DIGITS})(?:\s?(?P<s1>{_SCALE_RE})\.?(?!\w))?|"
-    rf"(?P<w>{_WORD_RE})\s+(?P<s2>{_SCALE_RE})(?!\w))(?![\w]|[.,/\-]\d)", re.I)
+    rf"(?<![\w.,\-/])(?P<cur>{_CUR}\s?)?(?:(?P<d>{_DIGITS})(?:(?P<sp>\s?)(?P<s1>{_SCALE_RE})\.?(?!\w))?|"
+    rf"(?P<w>{_WORD_RE})\s+(?P<s2>{_SCALE_WORDS_RE})(?!\w))(?![\w]|[.,/\-]\d)(?P<pct>{_PCT})?", re.I)
 
 
-def _digits(s):
-    """A digit string with thousands separators and a decimal point or comma → Decimal."""
-    s = s.replace("−", "-").replace(" ", " ").replace(" ", " ")
+def _digits(s, decimal=None):
+    """A digit string with thousands separators and a decimal point or comma → Decimal. decimal: "." or "," when the
+    locale says which one is the decimal separator; None: "1,000" is a thousand, "1,5" one and a half, and a single
+    ".ddd" group ("1.000", "12.345") is ambiguous — an error, never a guess."""
+    s = s.replace("−", "-").replace("\u00a0", " ").replace("\u202f", " ")
     for sep in (" ", "'"):
         s = s.replace(sep, "")
-    if "," in s and "." in s:                               # the last one is the decimal separator
+    if decimal == ".":
+        s = s.replace(",", "")
+    elif decimal == ",":
+        if s.count(",") > 1:
+            raise ParseError(f"not a number with a decimal comma: {s!r}")
+        s = s.replace(".", "").replace(",", ".")
+    elif "," in s and "." in s:                             # the last one is the decimal separator
         s = s.replace(",", "") if s.rfind(".") > s.rfind(",") else s.replace(".", "").replace(",", ".")
     elif "," in s:
         s = s.replace(",", "") if re.fullmatch(r"[-+]?\d{1,3}(,\d{3})+", s) else s.replace(",", ".")
     elif re.fullmatch(r"[-+]?\d{1,3}(\.\d{3}){2,}", s):      # 1.500.000
         s = s.replace(".", "")
+    elif re.fullmatch(r"[-+]?[1-9]\d{0,2}\.\d{3}", s):       # 1.000: a thousand, or one?
+        raise ParseError(f"{s!r} is ambiguous: a thousands point or a decimal point (TextIn(decimal=...) says which)")
     try:
         return Decimal(s)
     except InvalidOperation:
@@ -150,6 +165,10 @@ def parse_number(s, spec=None):
     """A quote → the number it states, as a canonical string ("1500000", "12.5"): digits with thousands separators, a
     decimal point or comma, a scale word ("1.5 million", "2k", "3 млн") or a number word with one ("a million", "полтора
     миллиона"); a currency sign or code around it is allowed. Exactly one number: two numbers in the quote are an error.
+    Refused as ambiguous rather than guessed: a one-letter scale apart from the number ("5 m" — metres? "5m" and "$5 m"
+    are read), a single ".ddd" group ("1.000"; spec {"decimal": "." | ","} decides), digits grouped by plain spaces
+    without a currency next to them ("3 100" may be two numbers; "1 500 000 руб" is read), a percentage ("5%"; spec
+    {"percent": True}: the field is in percent, 5% → 5), and a two-digit year is the date parser's.
     spec {"integer": True}: the number must be whole."""
     spec = spec or {}
     found = list(NUMBER_RE.finditer(s))
@@ -157,16 +176,35 @@ def parse_number(s, spec=None):
         raise ParseError(f"{'no number' if not found else 'more than one number'} in {s!r}")
     m = found[0]
     if m.group("d") is not None:
-        v = _digits(m.group("d"))
+        d = m.group("d")
+        if " " in d and not m.group("cur") and not m.group("s1") and not _CUR_AFTER.match(s, m.end()):
+            raise ParseError(f"{d!r} is ambiguous: digits grouped by spaces without a currency may be two numbers")
+        v = _digits(d, spec.get("decimal"))
         sc = m.group("s1")
+        if sc and len(sc) == 1 and m.group("sp") and not m.group("cur"):
+            raise ParseError(f"{m.group()!r} is ambiguous: a one-letter scale apart from the number may be a unit "
+                             f"(write {d}{sc} or put a currency before it)")
     else:
         v = Decimal(_NUM_WORDS[m.group("w").lower()])
         sc = m.group("s2")
+    if m.group("pct") and not spec.get("percent"):
+        raise ParseError(f"{m.group()!r} is a percentage, and the field is not declared in percent")
     if sc:
         v *= _SCALES[sc.lower()]
     if spec.get("integer") and v != v.to_integral_value():
         raise ParseError(f"{s!r} is not a whole number")
     return _canon_decimal(v)
+
+
+def _number_span(text, m):
+    """A number candidate's span, with the currency after a space-grouped number ("1 500 000 руб") so the parser sees
+    the context that makes it one number."""
+    e = m.end()
+    if " " in (m.group("d") or "") and not m.group("pct"):
+        c = _CUR_AFTER.match(text, e)
+        if c:
+            e = c.end()
+    return m.start(), e
 
 
 def _canon_decimal(v):
@@ -197,11 +235,16 @@ DATE_RES = [
 ]
 
 
+YEAR_AHEAD = 20                     # a two-digit year is read within (today - 80 years, today + 20 years]
+
+
 def parse_date(s, spec=None):
     """A quote → the date it states, ISO ("2026-09-12"): 2026-09-12; 12.09.2026 / 12/09/26 (day first; spec
     {"dayfirst": False}: month first); 12 September 2026, September 12, 2026, 12 Sep, 12 сентября; today / yesterday /
-    tomorrow. A date without a year, or a relative one, needs spec {"today": "YYYY-MM-DD"} (TextIn(today=...)): without it
-    it is an error, never a guessed year. Exactly one date in the quote."""
+    tomorrow. A date without a year, a two-digit year, or a relative date needs spec {"today": "YYYY-MM-DD"}
+    (TextIn(today=...)): without it it is an error, never a guessed year or century. A two-digit year is the one within
+    (today − 80 years, today + 20 years]: with today 2026-09-28, "85" is 1985 and "30" is 2030. Exactly one date in the
+    quote."""
     spec = spec or {}
     today = _dt.date.fromisoformat(spec["today"]) if spec.get("today") else None
     hits = []
@@ -222,7 +265,14 @@ def parse_date(s, spec=None):
         a, b = int(m.group("a")), int(m.group("b"))
         d, mo = (a, b) if spec.get("dayfirst", True) else (b, a)
         y = int(m.group("y"))
-        y = y + 2000 if y < 100 else y
+        if len(m.group("y")) == 2:                  # 85: 1985 or 2085? only with today=, within a window around it
+            if today is None:
+                raise ParseError(f"{m.group()!r} has a two-digit year: pass today= to read it")
+            y += today.year // 100 * 100
+            if y > today.year + YEAR_AHEAD:
+                y -= 100
+            elif y <= today.year + YEAR_AHEAD - 100:
+                y += 100
     else:
         d, mo = int(m.group("d")), _MONTHS[m.group("mon").lower()]
         y = m.group("y")
@@ -325,10 +375,13 @@ class FieldSpec:
     values: dict | None = None            # enum: {label: the typed value (a Literal value, an Enum member)}
     pattern: str | None = None
     hints: list = field(default_factory=list)       # description words: they rank candidates, never decide a value
+    percent: bool = False                           # number: the field is in percent ("5%" → 5)
     negatives: list = field(default_factory=list)   # bool: declared phrases that mean False ("not urgent", "no rush")
 
-    def parser_spec(self, today=None, dayfirst=True):
+    def parser_spec(self, today=None, dayfirst=True, decimal=None):
         """The parser's arguments, recorded in the trace so a replay parses the quote the same way."""
+        if self.kind in ("number", "integer"):
+            return {**({"decimal": decimal} if decimal else {}), **({"percent": True} if self.percent else {})}
         if self.kind == "enum":
             return {"labels": self.labels}
         if self.kind == "bool":
@@ -367,11 +420,12 @@ def _base_type(t):
     return _strip(ms[0]) if len(ms) == 1 else t
 
 
-def field_spec(ef, synonyms=None, cues=None, pattern=None, extra=None, negatives=None):
+def field_spec(ef, synonyms=None, cues=None, pattern=None, extra=None, negatives=None, percent=False):
     """An EntryField → FieldSpec: the kind from the type, cue words from the name (plus `cues`), hint words from the
     description (they rank candidates, never decide), enum labels from Literal values / Enum members (plus `synonyms`
     {label: [...]}, keyed by the value or the member name). A bool field's value cues are only its name ("urgent", "is
-    urgent" → "urgent") and `cues`; `negatives` (or json_schema_extra "negative_cues") are phrases that mean False."""
+    urgent" → "urgent") and `cues`; `negatives` (or json_schema_extra "negative_cues") are phrases that mean False.
+    percent (or json_schema_extra "percent"): a number field in percent, so "5%" reads as 5."""
     extra = extra or {}
     t = _base_type(ef.type)
     kind, labels, values = "unsupported", None, None
@@ -413,7 +467,8 @@ def field_spec(ef, synonyms=None, cues=None, pattern=None, extra=None, negatives
         hints = [w for w in dict.fromkeys(desc) if w not in cue]
     neg = list(dict.fromkeys(str(c).lower() for c in [*(extra.get("negative_cues") or ()), *(negatives or ())]))
     return FieldSpec(ef.name, ef.type, kind, ef.description, ef.required, cue, labels, values,
-                     pattern or extra.get("pattern"), hints, neg)
+                     pattern or extra.get("pattern"), hints=hints, negatives=neg,
+                     percent=bool(percent or extra.get("percent")))
 
 
 # ------------------------------------------------------------------------------------------------ extractors
@@ -433,7 +488,7 @@ class CueExtractor:
         """→ [Quote] candidates, best first (confidence 1.0 near a cue, lower without one); [] when not stated."""
         cues = self._cues(text, fs)
         if fs.kind in ("number", "integer"):
-            spans = [(m.start(), m.end()) for m in NUMBER_RE.finditer(text)]
+            spans = [_number_span(text, m) for m in NUMBER_RE.finditer(text)]
             dates = [(m.start(), m.end()) for _, rx in DATE_RES for m in rx.finditer(text)]
             spans = [s for s in spans if not any(a < s[1] and s[0] < b for a, b in dates)]
         elif fs.kind == "date":
@@ -689,13 +744,15 @@ class TextIn:
     router (default: the question's text). synonyms: {field: {label: [synonym]}} for enum fields; cues: {field: [word]}
     extra cue words; patterns: {field: regex} for string fields; negatives: {field: [phrase]} for yes / no fields — the
     phrases that mean False ("not urgent", "no rush"; without one a negated cue does not parse) (a System(inputs=...)
-    field's json_schema_extra may carry "synonyms", "cues", "negative_cues", "pattern" too). today: a date for year-less and relative dates (recorded in the trace).
-    dayfirst: 12/09 is 12 September. min_confidence / min_margin: the router escalates below this probability or when the
+    field's json_schema_extra may carry "synonyms", "cues", "negative_cues", "pattern", "percent" too). percent: the
+    number fields in percent ("5%" → 5; elsewhere a percentage does not parse). decimal: "." or "," — the decimal
+    separator of the texts (default None: "1,000" is a thousand and "1.000" is ambiguous, so it does not parse). today: a
+    date for year-less, two-digit-year and relative dates (recorded in the trace). dayfirst: 12/09 is 12 September. min_confidence / min_margin: the router escalates below this probability or when the
     two best entry points are closer than the margin. min_field_confidence: a span found with less confidence is "unsure"
     (not used). task: the routing question the decider reads. source: the init_state key the text is given under."""
 
     def __init__(self, system, decider=None, extractor=None, *, entry_points=None, descriptions=None, synonyms=None,
-                 cues=None, patterns=None, negatives=None, today=None, dayfirst=True, min_confidence=0.6, min_margin=0.1,
+                 cues=None, patterns=None, negatives=None, percent=(), today=None, dayfirst=True, decimal=None, min_confidence=0.6, min_margin=0.1,
                  min_field_confidence=0.5, task="Which request is this text making?", source=SOURCE):
         self.system, self.decider = system, decider
         if extractor is None:
@@ -705,6 +762,10 @@ class TextIn:
         self.descriptions = dict(descriptions or {})
         self.synonyms, self.cues, self.patterns = dict(synonyms or {}), dict(cues or {}), dict(patterns or {})
         self.negatives = dict(negatives or {})
+        self.percent = set(percent or ())
+        if decimal not in (None, ".", ","):
+            raise ValueError(f"decimal= is '.' or ',', not {decimal!r}")
+        self.decimal = decimal
         if isinstance(today, str):
             today = _dt.date.fromisoformat(today)
         self.today, self.dayfirst = today, dayfirst
@@ -754,7 +815,7 @@ class TextIn:
             if m is not None and name in m.model_fields and isinstance(m.model_fields[name].json_schema_extra, dict):
                 extra = m.model_fields[name].json_schema_extra
             self._specs[key] = field_spec(ef, self.synonyms.get(name), self.cues.get(name), self.patterns.get(name), extra,
-                                          self.negatives.get(name))
+                                          self.negatives.get(name), name in self.percent)
         return self._specs[key]
 
     def _field(self, text, fs, avoid=None):
@@ -763,7 +824,7 @@ class TextIn:
         if fs.kind == "unsupported":
             from .typed import type_name
             return FieldRead(fs.name, "unsupported", why=f"no parser reads {type_name(fs.type)}", required=fs.required)
-        parser, spec = fs.kind, fs.parser_spec(self.today, self.dayfirst)
+        parser, spec = fs.kind, fs.parser_spec(self.today, self.dayfirst, self.decimal)
         first_bad = None
         for ex in self.extractors:
             cands = ex.find(text, fs)
