@@ -225,6 +225,32 @@ def test_load_calibration_refuses_another_model_or_question(tmp_path):
         other.load_calibration(tmp_path / "bad.json")
 
 
+def test_a_calibration_file_does_not_load_onto_a_part_computing_another_signal(tmp_path):
+    m = model(noise=3.0)
+    for made, other in ((dict(option_order="average"), dict(option_order="given")),
+                        (dict(option_order="average", permutations=3), dict(option_order="average", permutations=2)),
+                        (dict(long="retrieve"), {}),
+                        (dict(long="retrieve", top_k=2), dict(long="retrieve", top_k=3)),
+                        (dict(long="retrieve", rerank=True), dict(long="retrieve"))):
+        part = m.decision("team", TASK, "email", TEAMS, **made)
+        part.act_guard(_examples(), risk=0.2)
+        f = part.save_calibration(tmp_path / "s.json")
+        assert m.decision("team", TASK, "email", TEAMS, **made).load_calibration(f).fingerprint() == part.fingerprint()
+        with pytest.raises(ValueError, match="computes its signal"):
+            m.decision("team", TASK, "email", TEAMS, **other).load_calibration(f)
+
+
+def test_loading_a_calibration_keeps_both_thresholds_as_saved(tmp_path):
+    m = model(noise=3.0)
+    part = m.decision("team", TASK, "email", TEAMS)
+    part.act_guard(_examples(), risk=0.2)
+    part.act_threshold = 0.7                             # set by hand after calibrating: saved and restored as it is
+    f = part.save_calibration(tmp_path / "t.json")
+    fresh = m.decision("team", TASK, "email", TEAMS).load_calibration(f)
+    assert (fresh.escalate_below, fresh.act_threshold) == (part.escalate_below, 0.7)
+    assert fresh.fingerprint() == part.fingerprint()
+
+
 def test_calibration_with_groups_and_everything_escalated(tmp_path):
     m = model(noise=3.0)
     part = m.decision("team", TASK, "email", TEAMS)

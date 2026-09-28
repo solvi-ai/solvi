@@ -157,8 +157,10 @@ class _Leaf:
         p = self.part
         text = self.text(src)
         ctx = dict(p._ctx(text, src.vals, src.raw), combined=True)    # a memory of corrections only checks here
-        z, a = pre if pre is not None else p._raw([text])[0]
-        d0 = p.model._decision(p.spec, z)
+        if pre is not None:
+            d0, a = p.model._decision(p.spec, pre[0]), pre[1]
+        else:
+            d0, a = p._initial(text)          # as the part alone reads it (a long text: its retrieved window)
         hard = p._finish(_copy(d0), a, threshold=-math.inf, ctx=ctx)     # every safeguard but the threshold
         own = p._finish(_copy(d0), a, ctx=ctx)                            # the part's own thresholds
         if src.vals is not None:
@@ -760,7 +762,7 @@ class Vote(_Combination):
         pre, groups = {}, {}
         for i, m in enumerate(self.members):          # parts of one model: their questions in one forward pass
             if isinstance(m, _Leaf) and m.part.model.batchable and m.part.option_order != "average" \
-                    and not m.part.spec.pointer:
+                    and not m.part.spec.pointer and not (m.part.long is not None and m.part._too_long(m.text(src))):
                 groups.setdefault((id(m.part.model), m.text(src)), []).append(i)
         for (_, text), ix in groups.items():
             if len(ix) > 1:

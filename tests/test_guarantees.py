@@ -285,3 +285,72 @@ def test_act_guard_per_group_on_a_decision_part_records_the_group_and_holds_insi
         part.act_guard([("cal 1", "a")] * 5, groups="domain")
     part.act_guard(cal, risk=0.10)                                  # without groups again: one threshold, inputs as before
     assert part.groups is None and list(part.__signature__.parameters) == ["doc"]
+
+
+# --------------------------------------------------------------------------------------------------- fixes before 0.7
+def test_conformal_takes_an_iterator_of_examples():
+    ex = _labelled()
+    a = model(noise=2.0).decision("team", "Which team?", "email", TEAMS)
+    b = model(noise=2.0).decision("team", "Which team?", "email", TEAMS)
+    ia = a.conformal(ex, coverage=0.90)
+    ib = b.conformal(zip([t for t, _ in ex], [y for _, y in ex]), coverage=0.90)   # a one-pass iterator
+    assert ib["n"] == ia["n"] == 240 and ib["quantile"] == ia["quantile"] < float("inf")
+
+
+def test_fit_teach_adapt_with_average_order_use_the_averaged_logits():
+    m = _biased()
+    part = m.decision("t", "Team?", "email", ["technical", "billing"], option_order="average")
+    ex = [("A refund please.", "billing"), ("It crashed.", "technical")] * 4
+    a = part.fit(ex)
+    for (z, _), (t, _) in zip(a.examples, ex):
+        assert z == pytest.approx(list(part._raw([t])[0][0]))      # not the single-order logits (position bias 1.5)
+    part.teach("A refund, now.", "billing")
+    assert a.examples[-1][0] == pytest.approx(list(part._raw(["A refund, now."])[0][0]))
+    b = part.adapt(["A refund please.", "It crashed.", "Hello."])
+    mean = np.mean([part._raw([t])[0][0] for t in ["A refund please.", "It crashed.", "Hello."]], 0)
+    assert b.bias == pytest.approx(list(mean - mean.mean()))
+    assert abs(b.bias[0] - b.bias[1]) < 1.0                       # the position bias was averaged away, not learned
+
+
+class KeywordAct:
+    """Keyword logits (test_decide.KW) and an act logit that grows with the number of keywords."""
+    model_id = "test/keyword-act"
+
+    def fingerprint(self):
+        return "keyword-act-1"
+
+    def logits(self, items):
+        from test_decide import KW
+        out = []
+        for it in items:
+            z = np.array([2.0 * sum(it.text.lower().count(k) for k in KW.get(o, [])) for o in it.options])
+            out.append({"logits": z, "act": float(z.max()) - 1.0, "unknown": -4.0})
+        return out
+
+
+def test_switching_the_signal_clears_the_other_threshold():
+    from solvi.decide import DecideModel
+    from test_primitives import L14G
+    part = DecideModel(KeywordAct(), L14G).decision("team", "Which team?", "email", TEAMS, act_threshold=0.99)
+    ex = [(t, team) for team in TEAMS for t in texts(team, 100)]
+    part.calibrate_for(ex, error=0.05, signal="confidence")
+    assert part.act_threshold is None and part.guarantee["cleared"] == {"act_threshold": 0.99}
+    assert part.escalate_below is not None
+    info = part.act_guard(ex, risk=0.10, signal="act")
+    assert part.escalate_below is None and part.act_threshold == info["threshold"]
+    assert "escalate_below" in part.guarantee["cleared"]
+    assert not part(email=texts("billing", 1, 500)[0]).escalate      # the stale confidence threshold no longer applies
+
+
+@pytest.mark.parametrize("error", [0, 0.0, 1, 1.5, -0.1, "x"])
+def test_ltt_and_calibrate_for_refuse_an_error_outside_0_1(error):
+    with pytest.raises(ValueError, match="error must be a number strictly between 0 and 1"):
+        ltt_threshold([0.9, 0.8], [0, 1], error=error)
+    part = model().decision("team", "Which team?", "email", TEAMS)
+    with pytest.raises(ValueError, match="strictly between 0 and 1"):
+        part.calibrate_for(_labelled()[:20], error=error, method="ltt")
+    if error not in (0, 0.0):                                  # empirical: 0 is a target (no error on the examples)
+        with pytest.raises(ValueError, match=r"in \[0, 1\)"):
+            part.calibrate_for(_labelled()[:20], error=error, method="empirical")
+    with pytest.raises(ValueError, match="delta"):
+        ltt_threshold([0.9, 0.8], [0, 1], error=0.1, delta=0)

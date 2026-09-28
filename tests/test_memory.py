@@ -208,3 +208,47 @@ def test_text_words_and_multi_label_and_facts():
     assert d.value == ("billing", "technical") and d.extra["memory"]["action"] == "agrees"
     with pytest.raises(ValueError):
         m.decision("where", "Where?", "email", kind="span").memory()
+
+
+# --------------------------------------------------------------------------------------------------- fixes before 0.7
+def test_calibrate_does_not_change_the_live_min_strength_while_it_runs():
+    _, _, part, _ = setup()
+    mem = part.memory(min_strength=2.5)
+    for t in texts("billing", 20) + texts("technical", 20):
+        mem.add(t, "billing" if "charged" in t else "technical")
+    seen = []
+    orig = mem._propose
+
+    def spy(*a, **kw):                         # what a concurrent decision would read meanwhile
+        seen.append(mem.min_strength)
+        return orig(*a, **kw)
+    mem._propose = spy
+    mem.calibrate(risk=0.2)
+    assert seen and set(seen) == {2.5}
+
+
+def test_a_case_added_during_a_proposal_does_not_break_it():
+    _, _, part, _ = setup()
+    mem = part.memory(radius=0.9, min_strength=0.1, min_agreement=0.5)
+    for t in texts("billing", 5):
+        mem.add(t, "billing")
+    orig, extra = mem._distances, iter(texts("technical", 50))
+
+    def racing(*a, **kw):                      # another thread adds a case between the distances and the ranking
+        d = orig(*a, **kw)
+        mem.add(next(extra), "technical")
+        return d
+    mem._distances = racing
+    p = mem.propose("I was charged twice, please refund order 99.")
+    assert p.label == "billing" and len(p.neighbours) == 5
+
+
+def test_leave_one_out_leaves_out_the_cases_twins():
+    _, _, part, _ = setup()
+    mem = part.memory(radius=0.05, min_strength=0.0, min_agreement=0.5)
+    far = [texts("billing", 1)[0], texts("technical", 1)[0], texts("shipping", 1)[0]]
+    for t, y in zip(far, ["billing", "technical", "shipping"]):
+        mem.add(t, y, by="ann")
+        mem.add(t, y, by="bob")               # the same correction stored twice: a twin, not independent evidence
+    got = mem.calibrate(risk=0.3)
+    assert got["proposed"] == 0.0                # each case's only neighbour is its twin: nothing left to propose

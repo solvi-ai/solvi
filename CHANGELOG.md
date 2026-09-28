@@ -38,6 +38,40 @@
   re-checked only by a full replay (not with `trust_models=True` / `replay="trusted"`); API reference pages for
   `solvi.textin`, `longdoc`, `report`, `otel`, `counterfactual` and `perturb`.
 
+### Fixes before release (core)
+
+- **Long inputs (`long="retrieve"`) keep their context**: per-group thresholds (`act_guard(groups=...)`) no longer
+  escalate every long input as "group unknown", and `perturb=` and the correction memory now run on long inputs (also in
+  a shared pass). Calibration (`act_guard`, `calibrate_for`, `conformal`), `fit` / `teach` / `adapt`, the memory's
+  features and the perturb re-asks read a long input by its retrieved window — the signal the part answers on — so the
+  promise holds for what is deployed. Cascade / Vote / Route and `DecideModel.decide_pass` read a long part the same
+  way (its retrieved window, with its context), so a combination scores the signal the part alone and its calibration
+  score.
+- **`option_order="average"`**: `DecisionPart.fit` / `teach` / `adapt` are fitted on the averaged logits the part decides
+  on (they were fitted on single-order logits and applied to averaged ones). `DecideModel.fit` / `teach` / `adapt` take
+  precomputed `logits=`.
+- `conformal(examples)` with an iterator (e.g. `zip(...)`) calibrated on nothing (n = 0, quantile inf); it now reads
+  any iterable.
+- Calibrating on one signal clears the other signal's threshold (a stale `escalate_below` stayed active after an
+  `act_guard` on the act signal, and vice versa); what was cleared is in the guarantee record (`"cleared"`).
+- Calibration files: the fingerprint a file is checked against now covers `option_order="average"` / `permutations` and
+  `long` / `top_k` / `rerank`, so a file cannot load onto a part computing a different signal (files for parts with the
+  defaults are unchanged). `load_calibration` restores both thresholds exactly as saved.
+- `ltt_threshold(error=0)` failed with a math domain error: `error` (and `delta`) must be strictly between 0 and 1, with
+  a clear message; `calibrate_for` checks it too (`method="empirical"` still accepts 0).
+- Memory of corrections: `calibrate` no longer sets the live `min_strength` to −inf while it runs (concurrent decisions
+  saw no floor); leave-one-out also leaves out a case's twins (same features and words — a correction stored twice
+  vouched for itself); an abstention is not counted as "proposed"; `add` / `remove` / `load` against a running proposal
+  are safe (it ranks a snapshot of the cases and their matrix).
+- Learning loop: the candidate update is built and gated on a shadow of the system (copies of the parts, their
+  thresholds and memory, and of the model's adaptations); the live parts change only when it is promoted, so concurrent
+  asks never see an un-gated candidate. A part's conformal sets are recalibrated on the calibration labels after an
+  update, or dropped and recorded when there are too few. The size gate's shadow set uses the labels' split per question
+  (it used a question-less key, so it could compare inputs the update had trained on). The `act_guard` gate's message no
+  longer raises TypeError when a recalibration has a non-zero error rate.
+- `perturb`: overlapping quoted and unquoted instruction spans are merged before cutting — the instruction after a
+  quote could stay in the variant while `removed` said it was gone.
+
 
 ### Fixes in the learning loop
 

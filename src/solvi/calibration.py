@@ -133,10 +133,25 @@ def _binom_cdf(k, n, p):
     return min(1.0, math.exp(m) * sum(math.exp(t - m) for t in terms))
 
 
+def check_rate(name, v, zero=False):
+    """A target error rate / risk / delta must be strictly between 0 and 1 (0 cannot be certified from finitely many
+    examples; 1 promises nothing) → ValueError with the name otherwise. zero=True also allows 0 (an empirical target:
+    no error on the calibration examples)."""
+    try:
+        ok = (0 <= float(v) if zero else 0 < float(v)) and float(v) < 1
+    except (TypeError, ValueError):
+        ok = False
+    if not ok:
+        raise ValueError(f"{name} must be a number {'in [0, 1)' if zero else 'strictly between 0 and 1'}, not {v!r}")
+    return float(v)
+
+
 def ltt_threshold(score, wrong, error=0.10, delta=0.10, grid=None):
     """Learn-then-test: the lowest threshold t on a fixed grid such that the error AMONG the cases answered alone
     (score ≥ t) is ≤ error with probability ≥ 1 − delta over the calibration examples (binomial test, Bonferroni over the
     grid). A stronger promise than crc_threshold, so it often allows no automatic answers at all (inf)."""
+    check_rate("error", error)
+    check_rate("delta", delta)
     grid = np.linspace(0.2, 0.995, 32) if grid is None else np.asarray(grid, float)
     s, w = _arrays(score, wrong)
     for t in sorted(grid):

@@ -772,6 +772,14 @@ def capabilities(meta, multi_question=None, act=None):
 
 
 # ------------------------------------------------------------------------------------------------ calibration of one decision
+def _given(logits, n):
+    """Precomputed logits for adapt / fit / teach → a list of n arrays."""
+    Z = [np.asarray(z, float) for z in logits]
+    if len(Z) != n:
+        raise ValueError(f"{len(Z)} logits for {n} input(s)")
+    return Z
+
+
 @dataclass
 class Adaptation:
     """What solvi learned for one question (task, options, kind): the label-bias correction, the few-shot shift / scale, the
@@ -1613,14 +1621,16 @@ class DecideModel:
         supports it, else one per question). What the runtime does for parts grouped in `flow.batches`."""
         parts = list(parts)
         t = self.text(text)
-        if len(parts) > 1 and self.batchable and all(p.option_order != "average" for p in parts):
-            raws = self._raw_pass([p.spec for p in parts], t)
+        long = any(p.long is not None and p._too_long(t) for p in parts)    # a long text: each part retrieves its own
+        if len(parts) > 1 and self.batchable and all(p.option_order != "average" for p in parts) and not long:
+            firsts = [(self._decision(p.spec, z), a, shared)
+                      for p, (z, a, shared) in zip(parts, self._raw_pass([p.spec for p in parts], t))]
         else:
-            raws = [(*p._raw([t])[0], False) for p in parts]
+            firsts = [(*p._initial(t), False) for p in parts]
         names = list(names) if names else [p.__name__ for p in parts]
         out = []
-        for p, (z, a, shared) in zip(parts, raws):
-            d = p._finish(self._decision(p.spec, z), a)
+        for p, (d0, a, shared) in zip(parts, firsts):
+            d = p._finish(d0, a, ctx=p._ctx(t, vals=text if isinstance(text, Facts) else None, raw=text))
             d.extra["pass"] = {"with": names, "shared": shared}
             out.append(d)
         return out
@@ -1632,17 +1642,18 @@ class DecideModel:
             self.adaptations[sp.key] = Adaptation()
         return self.adaptations.get(sp.key)
 
-    def adapt(self, texts, task, options, descriptions=None, multi=False, other=None, kind=None, **spec):
+    def adapt(self, texts, task, options, descriptions=None, multi=False, other=None, kind=None, logits=None, **spec):
         """Label-bias correction without labels: the mean logit of each option over unlabelled inputs of the domain
         (centered over the options) is subtracted before the softmax / sigmoid. → the Adaptation. A later fit is kept
-        consistent."""
+        consistent. logits: the inputs' logits already computed (one per text, in the question's option order) — what a
+        DecisionPart passes, so the correction is fitted on the signal it decides on (option_order="average", long)."""
         sp = _Spec(task, options, descriptions, multi, other, kind, **spec)
         if sp.kind == "span":
             raise ValueError("a span question has no options to adapt")
         texts = [self.text(t) for t in texts]
         if not texts:
             raise ValueError("adapt needs unlabelled texts")
-        Z = np.array(self._raw([(sp, t) for t in texts]))
+        Z = np.array(self._raw([(sp, t) for t in texts]) if logits is None else _given(logits, len(texts)))
         mean = Z.mean(0)
         a = self.adaptations.setdefault(sp.key, Adaptation())
         a.bias = [float(v) for v in mean - mean.mean()]
@@ -1651,26 +1662,33 @@ class DecideModel:
             self._refit(sp, a)
         return a
 
-    def fit(self, examples, task, options, descriptions=None, multi=False, other=None, lam=1.0, folds=4, kind=None, **spec):
+    def fit(self, examples, task, options, descriptions=None, multi=False, other=None, lam=1.0, folds=4, kind=None,
+            logits=None, **spec):
         """Few-shot adaptation "S" from labelled examples [(input, correct)]: a shift and a shared scale on the
         (bias-corrected) logits by L-BFGS (per option; a score: a tilt and a spread over the levels; yes/no: one bias), a
         temperature on out-of-fold predictions, and — when some examples are labelled "other" — the "other" threshold that
         maximizes out-of-fold accuracy. Replaces earlier examples. Examples labelled "not stated" are left out (the "not
-        stated" logit is not adapted). → the Adaptation."""
+        stated" logit is not adapted). logits: the examples' logits already computed (one per example; see adapt).
+        → the Adaptation."""
         sp = _Spec(task, options, descriptions, multi, other, kind, **spec)
-        ex = [(self.text(t), y) for t, y in examples if y is not Unknown]
-        Z = self._raw([(sp, t) for t, _ in ex])
+        examples = list(examples)
+        given = None if logits is None else _given(logits, len(examples))
+        keep = [i for i, (_, y) in enumerate(examples) if y is not Unknown]
+        ex = [(self.text(examples[i][0]), examples[i][1]) for i in keep]
+        Z = self._raw([(sp, t) for t, _ in ex]) if given is None else [given[i] for i in keep]
         a = self.adaptations.setdefault(sp.key, Adaptation())
         a.examples = [(list(map(float, z)), sp.label(y)) for z, (_, y) in zip(Z, ex)]
         self._refit(sp, a, lam, folds)
         return a
 
-    def teach(self, text, correct, task, options, descriptions=None, multi=False, other=None, lam=1.0, kind=None, **spec):
+    def teach(self, text, correct, task, options, descriptions=None, multi=False, other=None, lam=1.0, kind=None,
+              logits=None, **spec):
         """One labelled example, absorbed at once: the shift / scale is refitted from the kept examples (warm start, K + 1
         parameters or fewer — about a millisecond or two); the temperature and the "other" threshold stay until the next
-        fit. → the update time in ms (the model's forward pass, if the input was not scored before, is not included)."""
+        fit. logits: the input's logits already computed (see adapt). → the update time in ms (the model's forward pass,
+        if the input was not scored before, is not included)."""
         sp = _Spec(task, options, descriptions, multi, other, kind, **spec)
-        z = self._raw([(sp, self.text(text))])[0]
+        z = self._raw([(sp, self.text(text))])[0] if logits is None else _given([logits], 1)[0]
         t0 = time.perf_counter()
         a = self.adaptations.setdefault(sp.key, Adaptation())
         a.examples.append((list(map(float, z)), sp.label(correct)))
@@ -2092,7 +2110,7 @@ class DecisionPart:
         ctx = self._ctx(text, vals=args)
         m = self.model
         if self.long is not None and self._too_long(text):   # a long text: this part retrieves and decides on its own
-            d = self._bind(self._one(text), args)
+            d = self._bind(self._one(text, ctx), args)
             d.extra["pass"] = {"with": list(names) if names else [s.__name__ for s in siblings], "shared": False}
             return d
         if (len(siblings) > 1 and m.batchable and all(s.model is m for s in siblings)
@@ -2174,7 +2192,7 @@ class DecisionPart:
         vs = variants(text, self.perturb)
         if not vs:
             return d
-        outs = self._raw([v.text for v in vs])
+        outs = self._read([v.text for v in vs])
         base, flip, answers = _vkey(d.value), None, []
         for v, (z, _) in zip(vs, outs):
             val = self.model._decision(self.spec, z).value
@@ -2246,10 +2264,20 @@ class DecisionPart:
         return out
 
     def _one(self, text, ctx=None):
+        ctx = ctx if ctx is not None else self._ctx(text)
         if self.long is not None and self._too_long(text):
-            return self._retrieve(text)
+            return self._retrieve(text, ctx)
         z, a = self._raw([text])[0]
-        return self._finish(self.model._decision(self.spec, z), a, ctx=ctx if ctx is not None else self._ctx(text))
+        return self._finish(self.model._decision(self.spec, z), a, ctx=ctx)
+
+    def _read(self, texts):
+        """[text] → [(logits, act logit)] as a decision reads them: with long="retrieve", a text over the budget by the
+        window of its retrieved sections (the signal the part answers on) — so calibration, fit / teach / adapt, the
+        memory's features and the perturb re-asks see what a decision sees."""
+        texts = list(texts)
+        if self.long is not None:
+            texts = [self._window(t)[2].text if self._too_long(t) else t for t in texts]
+        return self._raw(texts)
 
     # --- long texts (long="retrieve", solvi.longdoc)
     def _prompt_tokens(self):
@@ -2264,9 +2292,8 @@ class DecisionPart:
     def _too_long(self, text):
         return self.model.count_tokens(text) > self.budget()
 
-    def _retrieve(self, text):
-        """Decide on the top_k sections of a long text; spans and evidence mapped back into the text; the sections read
-        in extra["long"]."""
+    def _window(self, text):
+        """The top_k sections of a long text → (the LongDocument, [(section, score)], the window read, reranked?)."""
         from .longdoc import LongDocument
         budget = self.budget()
         doc = LongDocument(text, max_tokens=max(16, budget // self.top_k), count=self.model.count_tokens)
@@ -2274,9 +2301,29 @@ class DecisionPart:
         query = " ".join([sp.task] + [str(o) for o in sp.real] + [str(v) for v in (sp.descriptions or {}).values() if v])
         rr = self._relevance if self.rerank else None
         sel = doc.select(query, k=self.top_k, budget=budget, rerank=rr)
-        win = doc.window([s for s, _ in sel])
+        return doc, sel, doc.window([s for s, _ in sel]), rr is not None
+
+    def _retrieve(self, text, ctx=None):
+        """Decide on the top_k sections of a long text; spans and evidence mapped back into the text; the sections read
+        in extra["long"]. ctx: as for _finish (the group, and the whole text for perturb and the memory)."""
+        d, a = self._windowed(text)
+        return self._finish(d, a, ctx=ctx if ctx is not None else self._ctx(text))
+
+    def _initial(self, text):
+        """→ (the model's decision before any safeguard, its act logit), as the part reads the text: a long text
+        (long="retrieve") by its retrieved window, spans and evidence mapped back. What a combination (solvi.multi) and
+        DecideModel.decide_pass start from."""
+        if self.long is not None and self._too_long(text):
+            return self._windowed(text)
+        z, a = self._raw([text])[0]
+        return self.model._decision(self.spec, z), a
+
+    def _windowed(self, text):
+        """The decision on a long text's window, before the safeguards → (Decision, act logit)."""
+        sp = self.spec
+        doc, sel, win, rr = self._window(text)
         z, a = self._raw([win.text])[0]
-        d = self._finish(self.model._decision(sp, z), a)
+        d = self.model._decision(sp, z)
         score = {s.index: sc for s, sc in sel}
         d.extra["long"] = {"read": len(sel), "of": len(doc), "by": "bm25+decider" if rr else "bm25",
                            "sections": [[s.start, s.end, s.heading, round(float(score[s.index]), 6)] for s in win.sections]}
@@ -2295,7 +2342,7 @@ class DecisionPart:
             else:
                 ev.append(e)
         d.evidence = ev
-        return d
+        return d, a
 
     def _relevance(self, texts):
         """The decider's own relevance of passages to this question: p(yes) of "Does this passage help answer: …?"."""
@@ -2332,17 +2379,25 @@ class DecisionPart:
             kw.update(coverage=sp.coverage, integer=sp.integer)
         return kw
 
+    # adapt / fit / teach are fitted on the logits the part decides on (self._read: every option order averaged with
+    # option_order="average", a long input's retrieved window), not on the model's single-order logits of the whole text
     def adapt(self, texts):
         """Label-bias correction from unlabelled inputs of the domain (see DecideModel.adapt)."""
-        return self.model.adapt(texts, **self._kw())
+        ts = [self._input_text(t) for t in texts]
+        if self.spec.kind == "span" or not ts:
+            return self.model.adapt(ts, **self._kw())             # raises the model's error
+        return self.model.adapt(ts, logits=[z for z, _ in self._read(ts)], **self._kw())
 
     def fit(self, examples, lam=1.0, folds=4):
         """Few-shot "S" from [(input, correct)] (see DecideModel.fit)."""
-        return self.model.fit([(t, self.spec.label(y)) for t, y in examples], lam=lam, folds=folds, **self._kw())
+        ex = [(self._input_text(t), self.spec.label(y)) for t, y in examples if y is not Unknown]
+        return self.model.fit(ex, lam=lam, folds=folds, logits=[z for z, _ in self._read([t for t, _ in ex])],
+                              **self._kw())
 
     def teach(self, text, correct):
         """One correction, absorbed at once (see DecideModel.teach). → ms."""
-        return self.model.teach(text, self.spec.label(correct), **self._kw())
+        t = self._input_text(text)
+        return self.model.teach(t, self.spec.label(correct), logits=self._read([t])[0][0], **self._kw())
 
     def reset(self):
         self.model.reset(**self._kw())
@@ -2357,7 +2412,7 @@ class DecisionPart:
             raise ValueError('signal must be "auto", "act" or "confidence"')
         gold = [Unknown if y is Unknown else self.spec.label(y) for _, y in ex]
         conf, act, ok, ds = [], [], [], []
-        for (z, a), y in zip(self._raw([t for t, _ in ex]), gold):
+        for (z, a), y in zip(self._read([t for t, _ in ex]), gold):    # a long input: the window a decision reads
             d = self.model._decision(self.spec, z)
             ds.append(d)
             ok.append(float((Unknown if d.value is Unknown else self.spec.label(d.value)) == y))
@@ -2370,10 +2425,18 @@ class DecisionPart:
         return (act if use_act else conf), ok, ("act" if use_act else "confidence"), ds
 
     def _set_threshold(self, sig, thr, guarantee, groups=None):
+        """Set the calibrated threshold on its signal and clear the other signal's (an earlier calibration's threshold on
+        the other signal would still escalate, so the new calibration's numbers would not describe the part); what was
+        cleared is recorded in the guarantee as "cleared"."""
+        other = "escalate_below" if sig == "act" else "act_threshold"
+        old = getattr(self, other)
+        setattr(self, other, None)
         if sig == "act":
             self.act_threshold = thr
         else:
             self.escalate_below = thr
+        if old is not None:
+            guarantee = {**guarantee, "cleared": {other: old}}
         self.guarantee = guarantee
         self.groups = groups
         extra = [n for n in (groups["by"].names if groups else []) if n not in self.facts]
@@ -2390,10 +2453,13 @@ class DecisionPart:
         "auto" (act when the model has an act head). No threshold reaches the target → everything escalates (inf).
         Changes the part's fingerprint. → {"signal", "threshold", "coverage", "error", "n", "target_error", "method",
         "guarantee"}. For a guarantee on the share of all questions answered wrongly, see act_guard."""
-        from .calibration import accuracy_at, ltt_threshold
+        from .calibration import accuracy_at, check_rate, ltt_threshold
         examples = list(examples)
         if method not in ("empirical", "ltt"):
             raise ValueError('method must be "empirical" or "ltt"')
+        check_rate("error", error, zero=method == "empirical")     # ltt cannot certify 0 (math domain error before)
+        if method == "ltt":
+            check_rate("delta", delta)
         sig, ok, name, _ = self._labelled(examples, signal)
         if method == "ltt":
             thr = ltt_threshold(sig, [1 - o for o in ok], error, delta)
@@ -2473,6 +2539,7 @@ class DecisionPart:
         from .calibration import conformal_quantile, set_scores
         if self.spec.multi or self.kind in ("rank", "span"):
             raise ValueError(f"conformal sets need a single answer from a closed list; not for {self.kind!r} questions")
+        examples = list(examples)                    # an iterator (zip, a generator) is read twice below
         _, _, _, ds = self._labelled(examples, "confidence")
         ordinal = self.kind in ("score", "number")
         scores, sizes = [], []

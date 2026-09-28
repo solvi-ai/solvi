@@ -30,10 +30,20 @@ The gates (every one must pass, else the update is undone and recorded as reject
                labels — and on your own honesty set when given (gates={"honesty": cases or a set file}) — must not get
                worse by more than `tolerance` (0.02);
   act_guard    a part calibrated with act_guard / calibrate_for is recalibrated on the calibration labels (at least
-               `min_calibration`, 30), with the same risk: an old threshold says nothing about a changed signal;
-  size         shadow run: the stored decisions of the holdout split (at most `shadow_limit`, 500) are asked with the
-               current and the candidate state and compared (solvi.diff.compare); at most `max_change` (30%) of them may
-               change — one update may not move more.
+               `min_calibration`, 30), with the same risk: an old threshold says nothing about a changed signal; a
+               part's conformal answer sets are recalibrated on them too (with fewer labels they are dropped, and the
+               gate's record says so — they no longer hold for the changed probabilities);
+  size         shadow run: the stored decisions whose input is held out for a learned question (the same split as the
+               labels: per question, by content_key) — at most `shadow_limit`, 500 — are asked with the current and the
+               candidate state and compared (solvi.diff.compare) on those questions and the unlearned ones; at most
+               `max_change` (30%) of them may change — one update may not move more.
+
+The candidate is built and gated on a shadow of the system: copies of the decision parts (their thresholds, memory,
+and the model's adaptations; the checkpoint itself is shared) in a shallow copy of the catalog and the System. The live
+parts are not touched until the update is promoted, so asks that run meanwhile (another thread, the server) see the
+state in force, never an un-gated candidate. An `adapter` hook runs on the shadow part: its effect reaches the live part
+through its state(part) / restore(part, state); a hook without them only keeps what it changes in objects the shadow
+shares with the live part (the checkpoint), and such changes are not isolated.
 
 A promoted update gets the next version number; every run that proposes an update is recorded in the changelog (a
 TraceStorage, by default the same store: kind "update", hash-chained with the decisions) with its gates' results, the
@@ -236,13 +246,17 @@ class Learning:
     # --- state: snapshots, fingerprints, versions
     def fingerprint(self):
         """The fingerprint of the loop's current state: every learned part's fingerprint."""
-        from .provenance import digest
-        return digest("learning", sorted((q, p.fingerprint()) for q, p in self.parts.items()))
+        return self._fingerprint_of(self.parts)
 
-    def _snapshot(self):
+    @staticmethod
+    def _fingerprint_of(parts):
+        from .provenance import digest
+        return digest("learning", sorted((q, p.fingerprint()) for q, p in parts.items()))
+
+    def _snapshot(self, parts=None):
         from .decide import Adaptation
         out = {}
-        for q, p in self.parts.items():
+        for q, p in (parts or self.parts).items():
             a = p.adaptation
             ad = None if a is None else {**Adaptation.params(a), "examples": [[list(z), list(y) if isinstance(y, tuple)
                                                                                else y] for z, y in a.examples]}
@@ -260,6 +274,63 @@ class Learning:
     def _live(self):
         """What JSON cannot hold (per-group thresholds, the memory object) for an in-process restore."""
         return {q: {"groups": p.groups, "memory": p.correction_memory} for q, p in self.parts.items()}
+
+    # --- the shadow a candidate is built on
+    def _shadow(self):
+        """→ (a shadow System, {question: shadow part}): every decision part of the catalog whose model is behind a learned
+        part is copied onto a copy of that model (its own adaptations; the scorer, cache and checkpoint are shared), with
+        its own thresholds; the catalog and the System are shallow copies whose parts point at the copies."""
+        import dataclasses
+
+        from .core import _group_func
+        from .decide import DecisionPart
+        models = {}
+        for p in self.parts.values():
+            if id(p.model) not in models:
+                m = copy.copy(p.model)
+                if isinstance(getattr(p.model, "adaptations", None), dict):
+                    m.adaptations = copy.deepcopy(p.model.adaptations)
+                models[id(p.model)] = m
+        made = {}
+
+        def sub(obj):
+            if not isinstance(obj, DecisionPart) or id(obj.model) not in models:
+                return obj
+            if id(obj) not in made:
+                made[id(obj)] = _shadow_part(obj, models[id(obj.model)])
+            return made[id(obj)]
+
+        def part(p):
+            if p.alternatives is not None:
+                alts = [part(a) for a in p.alternatives]
+                if all(a is b for a, b in zip(alts, p.alternatives)):
+                    return p
+                g = dataclasses.replace(p, alternatives=alts)
+                g.func = _group_func(g)
+                return g
+            f, m = sub(p.func), sub(p.model)
+            return p if f is p.func and m is p.model else dataclasses.replace(p, func=f, model=m)
+
+        cat = copy.copy(self.system.catalog)
+        cat.parts = {k: part(p) for k, p in cat.parts.items()}
+        cat.rules = {k: part(p) for k, p in cat.rules.items()}
+        cat.__dict__.pop("_fp_cache", None)
+        system = copy.copy(self.system)
+        system.catalog = cat
+        system._learning = None
+        return system, {q: sub(p) for q, p in self.parts.items()}
+
+    def _promote(self, cand, fp):
+        """Carry a gated candidate's state (adaptations, thresholds, conformal sets, memory, adapter state) from the
+        shadow parts to the live ones."""
+        live = {}
+        for q, sp in cand.items():
+            mem = sp.correction_memory
+            live[q] = {"groups": sp.groups, "memory": mem if mem is not None and mem.part is self.parts[q] else None}
+        self._restore(self._snapshot(cand), live)
+        if self.fingerprint() != fp:
+            raise RuntimeError(f"promoting the candidate did not give its fingerprint (#{fp}, now #{self.fingerprint()}): "
+                               "a part changed in a way the loop cannot carry over")
 
     def _restore(self, state, live=None):
         from .decide import Adaptation
@@ -384,25 +455,22 @@ class Learning:
         holdout = [lab for q in self.parts for lab in by[q]["holdout"]]
         shadow = self._shadow_set()
         before = self._evaluate(holdout, shadow)
-        snap, live = self._snapshot(), self._live()
+        system, cand = self._shadow()               # the candidate is built on copies: the live parts stay as they are
         gates = {}
-        try:
-            gates["consistency"] = self._consistency(plan, by, trained)
-            applied = {q: self._apply(q, x["rung"], by[q]["train"]) for q, x in plan.items()}
-            for q in plan:
-                plan[q]["applied"] = applied[q]
-            gates["act_guard"] = self._recalibrate(plan, by)
-            after = self._evaluate(holdout, shadow)
-            gates["heldout"] = self._gate_heldout(before, after, len(holdout))
-            gates["honesty"] = self._gate_honesty(before, after)
-            gates["size"] = self._gate_size(before, after)
-        except BaseException:
-            self._restore(snap, live)
-            raise
+        gates["consistency"] = self._consistency(plan, by, trained)
+        applied = {q: self._apply(q, x["rung"], by[q]["train"], cand[q]) for q, x in plan.items()}
+        for q in plan:
+            plan[q]["applied"] = applied[q]
+        gates["act_guard"] = self._recalibrate(plan, by, cand)
+        after = self._evaluate(holdout, shadow, system)
+        gates["heldout"] = self._gate_heldout(before, after, len(holdout))
+        gates["honesty"] = self._gate_honesty(before, after)
+        gates["size"] = self._gate_size(before, after)
         ok = all(g["ok"] for g in gates.values())
-        fp_after = self.fingerprint()
+        fp_after = self._fingerprint_of(cand)
         train_ids = {q: sorted(lab.id for lab in by[q]["train"]) for q in self.parts if by[q]["train"]}
         if ok:
+            self._promote(cand, fp_after)
             version = self._next_version()
             self._states[version] = (self._snapshot(), self._live())
             rec = self._record({"action": "update", "version": version, "promoted": True, "parent": cur,
@@ -410,7 +478,6 @@ class Learning:
                                 "questions": plan, "labels": {q: train_ids.get(q, []) for q in self.parts},
                                 "gates": gates, "state": self._states[version][0]})
             return UpdateReport("promoted", version, version, plan, gates, fp_before, fp_after, got["rejected"], rec["id"])
-        self._restore(snap, live)
         rec = self._record({"action": "update", "version": None, "promoted": False, "parent": cur, "fp_before": fp_before,
                             "fp_after": fp_after, "questions": plan, "labels": train_ids, "gates": gates, "state": None})
         return UpdateReport("rejected", None, cur, plan, gates, fp_before, fp_after, got["rejected"], rec["id"])
@@ -425,11 +492,12 @@ class Learning:
     def _examples(self, q, labels):
         return [(self._text(q, lab.init), lab.answer) for lab in labels]
 
-    def _apply(self, q, rung, train):
-        """Apply one question's update in place → a JSON-able description."""
+    def _apply(self, q, rung, train, part=None):
+        """Apply one question's update to `part` (the shadow part of the candidate; default: the live part) → a JSON-able
+        description."""
         from .core import Unknown
         from .memory import CorrectionMemory
-        part = self.parts[q]
+        part = self.parts[q] if part is None else part
         ex = self._examples(q, train)
         fit_ex = [(t, y) for t, y in ex if y is not Unknown]
         out = {}
@@ -472,41 +540,68 @@ class Learning:
         return {"ok": share <= mx, "share": share, "max": mx, "questions": per,
                 "why": f"{n_bad} of {n_new} new label(s) contradicted by earlier corrections ({share:.0%}, max {mx:.0%})"}
 
-    def _recalibrate(self, plan, by):
-        """Parts calibrated with act_guard / calibrate_for: calibrate again on the calibration labels."""
+    def _recalibrate(self, plan, by, parts=None):
+        """Parts calibrated with act_guard / calibrate_for: calibrate again on the calibration labels. Conformal answer
+        sets: recalibrated on them too, or dropped (recorded) when there are too few."""
         per, ok = {}, True
+        parts = parts or self.parts
         for q in plan:
-            part = self.parts[q]
-            g = part.guarantee
-            if g is None:
-                per[q] = {"skipped": "no act_guard / calibrate_for on this part"}
-                continue
-            if part.groups is not None:
-                ok = False
-                per[q] = {"error": "per-group thresholds are not recalibrated by the loop yet"}
-                continue
+            part = parts[q]
             cal = [(t, y) for t, y in self._examples(q, by[q]["calibration"])]
-            if len(cal) < self.gates["min_calibration"]:
-                ok = False
-                per[q] = {"error": f"{len(cal)} calibration label(s) < {self.gates['min_calibration']}: the old threshold "
-                                   "no longer holds for the changed signal"}
-                continue
-            sig = g.get("signal", "auto")
-            if g.get("method") == "crc":
-                r = part.act_guard(cal, risk=g["risk"], signal=sig)
-            else:
-                r = part.calibrate_for(cal, error=g["error"], signal=sig, method=g["method"], delta=g.get("delta", 0.10))
-            per[q] = {k: r.get(k) for k in ("signal", "threshold", "answered", "error", "risk", "n", "guarantee")}
-        why = "; ".join(f"{q}: " + (x.get("error") or x.get("skipped") or f"threshold {x['threshold']:.3f} on {x['n']}")
+            fine, per[q] = self._recalibrate_guard(part, cal)
+            ok = ok and fine
+            if part.conformal_set is not None:
+                per[q]["conformal"] = self._recalibrate_conformal(part, cal)
+        def said(x):                                 # a failure's message (the recalibrated error rate is a number)
+            return x["error"] if isinstance(x.get("error"), str) else None
+        why = "; ".join(f"{q}: " + (said(x) or x.get("skipped") or f"threshold {x['threshold']:.3f} on {x['n']}")
+                        + ("" if "conformal" not in x else "; conformal sets " + ("dropped" if x["conformal"].get("dropped")
+                                                                                  else "recalibrated"))
                         for q, x in per.items())
         return {"ok": ok, "questions": per, "why": why}
 
+    def _recalibrate_guard(self, part, cal):
+        """→ (ok, the record)."""
+        g = part.guarantee
+        if g is None:
+            return True, {"skipped": "no act_guard / calibrate_for on this part"}
+        if part.groups is not None:
+            return False, {"error": "per-group thresholds are not recalibrated by the loop yet"}
+        if len(cal) < self.gates["min_calibration"]:
+            return False, {"error": f"{len(cal)} calibration label(s) < {self.gates['min_calibration']}: the old "
+                                    "threshold no longer holds for the changed signal"}
+        sig = g.get("signal", "auto")
+        if g.get("method") == "crc":
+            r = part.act_guard(cal, risk=g["risk"], signal=sig)
+        else:
+            r = part.calibrate_for(cal, error=g["error"], signal=sig, method=g["method"], delta=g.get("delta", 0.10))
+        return True, {k: r.get(k) for k in ("signal", "threshold", "answered", "error", "risk", "n", "guarantee")}
+
+    def _recalibrate_conformal(self, part, cal):
+        """The conformal set was calibrated on the old probabilities: recalibrate it at the same coverage on the
+        calibration labels, or drop it (a set that is claimed must hold for the changed signal)."""
+        cov = part.conformal_set["coverage"]
+        if len(cal) < self.gates["min_calibration"]:
+            part.conformal_set = None
+            return {"dropped": True, "coverage": cov,
+                    "why": f"{len(cal)} calibration label(s) < {self.gates['min_calibration']}"}
+        try:
+            r = part.conformal(cal, coverage=cov)
+        except ValueError as e:
+            part.conformal_set = None
+            return {"dropped": True, "coverage": cov, "why": str(e)}
+        return {"dropped": False, **r}
+
     # --- evaluation
     def _shadow_set(self):
-        def held(s):                                 # a stored decision is held out when its input is (any question)
+        """The stored decisions for the size gate → [(stored, {learned questions its input is held out for})]: the split is
+        the labels' (content_key(question, input)), so an input trained on for a question is never compared on it."""
+        rows = []
+        for s in self.storage.iter():
             init = ((s.data.get("response") or {}).get("trace") or {}).get("init") or {}
-            return split_of(content_key("", init), self.holdout, self.calibration) == "holdout"
-        rows = [s for s in self.storage.iter() if held(s)]
+            held = {q for q in self.parts if split_of(content_key(q, init), self.holdout, self.calibration) == "holdout"}
+            if held:
+                rows.append((s, held))
         return rows[-self.gates["shadow_limit"]:] if self.gates["shadow_limit"] else []
 
     def _honesty_cases(self):
@@ -518,18 +613,23 @@ class Learning:
         from .honesty import load_set
         return load_set(h)["cases"]
 
-    def _evaluate(self, holdout, shadow):
+    def _evaluate(self, holdout, shadow, system=None):
+        """The held-out labels, the honesty set and the shadow rows asked through `system` (the candidate's shadow; default:
+        the live system)."""
         from .honesty import run
+        system = self.system if system is None else system
         cases = [{"name": lab.id, "state": dict(lab.init), "gold": {lab.question: plain(lab.answer)}} for lab in holdout]
-        out = {"heldout": run(self.system, cases, store=False) if cases else []}
+        out = {"heldout": run(system, cases, store=False) if cases else []}
         hc = self._honesty_cases()
-        out["honesty_set"] = None if hc is None else run(self.system, hc, store=False)
+        out["honesty_set"] = None if hc is None else run(system, hc, store=False)
         resp = {}
-        for s in shadow:
+        for s, held in shadow:
             try:
                 old = s.response(self.system)
-                names = [q for q in old.results if q in self.system.questions]
-                resp[s.id] = self.system.ask(dict(old.trace.init), names, store=False)
+                names = [q for q in old.results if q in self.system.questions and (q in held or q not in self.parts)]
+                if not names:
+                    continue
+                resp[s.id] = system.ask(dict(old.trace.init), names, store=False)
             except Exception as e:  # noqa: BLE001
                 resp[s.id] = e
         out["shadow"] = resp
@@ -583,6 +683,16 @@ class Learning:
                 "max": mx, "errors": len(rep.errors), "by_question": rep.by_question(),
                 "why": f"{len(rep.changed)} of {rep.total} stored decision(s) change in shadow ({share:.0%}, max {mx:.0%})"
                        + (f"; {len(rep.errors)} could not be re-run" if rep.errors else "")}
+
+
+def _shadow_part(p, model):
+    """A copy of a decision part on `model` (a copy of its model): its own thresholds, guarantee and conformal set; the
+    correction memory is shared until the candidate replaces it (it is only read)."""
+    sp = copy.copy(p)
+    sp.model = model
+    sp.__solvi_model__ = sp.__solvi_decision__ = sp
+    sp.guarantee, sp.conformal_set = copy.deepcopy(p.guarantee), copy.deepcopy(p.conformal_set)
+    return sp
 
 
 __all__ = ["ExperimentalWarning", "Label", "Learning", "TRUSTED_SOURCES", "UpdateReport", "split_of"]

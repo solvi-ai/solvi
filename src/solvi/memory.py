@@ -38,6 +38,7 @@ from __future__ import annotations
 import json
 import math
 import re
+import threading
 import zlib
 from dataclasses import asdict, dataclass, field
 
@@ -108,9 +109,10 @@ class CorrectionMemory:
         self.min_strength, self.min_agreement = float(min_strength), float(min_agreement)
         self.text, self.text_weight, self.mode = bool(text), float(text_weight), mode
         self.guarantee = None                     # what calibrate promises for the memory's own answers
-        self.cases = []
+        self.cases = []                           # replaced, never changed in place (a proposal reads a snapshot)
         self._ids = set()
         self._F = None                            # the features as a matrix (rebuilt when cases change)
+        self._lock = threading.Lock()             # add / remove / load against a proposal's snapshot of cases + matrix
         self.weights = part.model.weights_fingerprint()
 
     # --- the cases
@@ -120,7 +122,7 @@ class CorrectionMemory:
     def features(self, text):
         """The decider's probabilities over the options for a text (raw logits, checkpoint temperature), rounded."""
         sp = self.part.spec
-        z, _ = self.part._raw([text])[0]
+        z, _ = self.part._read([text])[0]           # a long input: the window a decision reads
         z = np.asarray(z, float) / self.part.model._T(sp)
         if sp.multi:
             p = 1 / (1 + np.exp(-z))
@@ -147,10 +149,11 @@ class CorrectionMemory:
         cid = digest("case", f, ws, lab, source, by, time, stored_id)
         case = Case(cid, f, lab, source, None if by is None else str(by), None if time is None else float(time),
                     None if stored_id is None else str(stored_id), ws)
-        if cid not in self._ids:
-            self.cases.append(case)
-            self._ids.add(cid)
-            self._F = None
+        with self._lock:
+            if cid not in self._ids:
+                self.cases = self.cases + [case]
+                self._ids.add(cid)
+                self._F = None
         return case
 
     def learn_from(self, storage, question=None, system=None):
@@ -183,27 +186,34 @@ class CorrectionMemory:
     def remove(self, ids):
         """Forget cases by id (e.g. a correction found to be wrong) → how many were removed."""
         ids = set(ids)
-        n = len(self.cases)
-        self.cases = [c for c in self.cases if c.id not in ids]
-        self._ids = {c.id for c in self.cases}
-        self._F = None
-        return n - len(self.cases)
+        with self._lock:
+            n = len(self.cases)
+            self.cases = [c for c in self.cases if c.id not in ids]
+            self._ids = {c.id for c in self.cases}
+            self._F = None
+            return n - len(self.cases)
 
     # --- nearest neighbours
-    def _matrix(self):
-        if self._F is None:
-            self._F = np.array([c.features for c in self.cases], float) if self.cases else np.zeros((0, 0))
-        return self._F
+    def _snapshot(self):
+        """(the cases, their features as a matrix), taken together: a case added meanwhile is in neither."""
+        with self._lock:
+            if self._F is None:
+                self._F = np.array([c.features for c in self.cases], float) if self.cases else np.zeros((0, 0))
+            return self.cases, self._F
 
-    def _distances(self, f, ws):
-        F = self._matrix()
+    def _matrix(self):
+        return self._snapshot()[1]
+
+    def _distances(self, f, ws, cases=None, F=None):
+        if cases is None:
+            cases, F = self._snapshot()
         d = 0.5 * np.abs(F - np.asarray(f, float)).sum(1)
         if self.part.spec.multi:
             d = d / max(1, F.shape[1]) * 2        # sigmoids: the mean difference per option, in [0, 1]
         if self.text and ws is not None:
             a = set(ws)
             jd = np.array([1.0 - (len(a & set(c.words or ())) / len(a | set(c.words or ())) if (a or c.words) else 0.0)
-                           for c in self.cases])
+                           for c in cases])
             d = (1 - self.text_weight) * d + self.text_weight * jd
         return d
 
@@ -211,20 +221,24 @@ class CorrectionMemory:
         """The memory's proposal for an input (a text, a state or Facts) → Proposal."""
         return self._propose(self.part._input_text(x), exclude)
 
-    def _propose(self, text, exclude=None, f=None, ws=None):
-        if not self.cases:
+    def _propose(self, text, exclude=None, f=None, ws=None, min_strength=None):
+        """exclude: a case id or a set of them (leave-one-out); min_strength: in place of self.min_strength."""
+        cases, F = self._snapshot()
+        if not cases:
             return Proposal(abstain="the memory holds no corrected cases")
         f = self.features(text) if f is None else f
         if self.text and ws is None and text is not None:
             ws = words(text)
-        d = self._distances(f, ws)
-        order = sorted((round(float(d[i]), 9), self.cases[i].id, i) for i in range(len(self.cases))
-                       if (exclude is None or self.cases[i].id != exclude) and d[i] < self.radius)[: self.k]
+        d = self._distances(f, ws, cases, F)
+        ex = set() if exclude is None else {exclude} if isinstance(exclude, str) else set(exclude)
+        order = sorted((round(float(d[i]), 9), cases[i].id, i) for i in range(len(cases))
+                       if cases[i].id not in ex and d[i] < self.radius)[: self.k]
         if not order:
             return Proposal(abstain=f"no corrected case within distance {self.radius:g}")
+        floor = self.min_strength if min_strength is None else min_strength
         weight, near = {}, []
         for dist, _, i in order:
-            c = self.cases[i]
+            c = cases[i]
             w = 1.0 - dist / self.radius
             weight[_key(c.label)] = weight.get(_key(c.label), 0.0) + w
             near.append({"id": c.id, "label": c.label, "distance": round(dist, 6), "weight": round(w, 6),
@@ -238,8 +252,8 @@ class CorrectionMemory:
         if agreement < self.min_agreement:
             p.abstain = ("similar cases disagree: " + ", ".join(f"{json.loads(k)!r} {v:.2f}" for k, v in ranked[:3])
                          + f" (agreement {agreement:.2f} < {self.min_agreement:g})")
-        elif strength < self.min_strength:
-            p.abstain = f"too little support: strength {strength:.2f} < {self.min_strength:g}"
+        elif strength < floor:
+            p.abstain = f"too little support: strength {strength:.2f} < {floor:g}"
         if p.abstain:
             p.label = None
         return p
@@ -248,33 +262,34 @@ class CorrectionMemory:
     def calibrate(self, risk=0.05):
         """Choose min_strength by conformal risk control, leave-one-out over the stored cases: each case is proposed for by
         the others, and the lowest strength is taken at which P(the memory proposes AND is wrong) ≤ risk, for inputs like
-        the stored corrections (inf: it never proposes). Recorded as the memory's promise; changes its fingerprint.
+        the stored corrections (inf: it never proposes). A case's twins — cases with the same features (and words) —
+        are left out with it: a correction stored twice would otherwise vouch for itself. Recorded as the memory's
+        promise; changes its fingerprint.
         → {"min_strength", "proposed" (share of the cases it would propose for), "error" (among them), "risk", "n",
         "guarantee"}."""
         from .calibration import crc_threshold
-        if len(self.cases) < 2:
+        cases, _ = self._snapshot()
+        if len(cases) < 2:
             raise ValueError("calibration needs at least two stored cases")
-        keep = self.min_strength
-        self.min_strength = -math.inf
-        try:
-            sig, wrong = [], []
-            for c in self.cases:
-                p = self._propose(None, exclude=c.id, f=c.features, ws=c.words)
-                sig.append(p.strength if p.label is not None else -1e9)
-                wrong.append(float(p.label is not None and _key(p.label) != _key(c.label)))
-        finally:
-            self.min_strength = keep
+        twins = {}
+        for c in cases:
+            twins.setdefault((c.features, c.words), set()).add(c.id)
+        sig, wrong = [], []
+        for c in cases:                           # the live min_strength is not touched: decisions go on meanwhile
+            p = self._propose(None, exclude=twins[(c.features, c.words)], f=c.features, ws=c.words,
+                              min_strength=-math.inf)
+            sig.append(p.strength if p.label is not None else -1e9)
+            wrong.append(float(p.label is not None and _key(p.label) != _key(c.label)))
         t = crc_threshold(sig, wrong, risk)
         self.min_strength = t
         s, w = np.array(sig), np.array(wrong)
-        auto = s >= t
-        self.guarantee = {"method": "crc-loo", "risk": risk, "n": len(self.cases),
+        auto = (s >= t) & (s > -1e9)              # an abstention (no label) is never a proposal, whatever the floor
+        self.guarantee = {"method": "crc-loo", "risk": risk, "n": len(cases),
                           "promise": f"P(the memory answers and is wrong) ≤ {risk:g} for inputs like the stored "
                                      "corrections (leave-one-out)"}
-        self._F = None
         return {"min_strength": t, "proposed": float(auto.mean()),
                 "error": float(w[auto].mean()) if auto.any() else 0.0, "risk": float((w * auto).mean()),
-                "n": len(self.cases), "guarantee": self.guarantee["promise"]}
+                "n": len(cases), "guarantee": self.guarantee["promise"]}
 
     # --- identity and state
     def settings(self):
@@ -301,13 +316,15 @@ class CorrectionMemory:
                 setattr(self, k, s[k])
         if s.get("text_weight") is not None:
             self.text_weight = s["text_weight"]
-        self.cases = [Case(c["id"], tuple(c["features"]), c["label"], c["source"], c.get("by"), c.get("time"),
-                           c.get("stored_id"), None if c.get("words") is None else tuple(c["words"]))
-                      for c in data.get("cases") or ()]
-        for c in self.cases:
+        cases = [Case(c["id"], tuple(c["features"]), c["label"], c["source"], c.get("by"), c.get("time"),
+                      c.get("stored_id"), None if c.get("words") is None else tuple(c["words"]))
+                 for c in data.get("cases") or ()]
+        for c in cases:
             check_source(c.source)
-        self._ids = {c.id for c in self.cases}
-        self._F = None
+        with self._lock:
+            self.cases = cases
+            self._ids = {c.id for c in cases}
+            self._F = None
         return self
 
     def save(self, path):
