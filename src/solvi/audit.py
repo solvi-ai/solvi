@@ -44,6 +44,9 @@ def collect(res, catalog=None):
         if r.model is not None or r.origin in FUZZY:
             n_model += 1
         where = [r.name[7:]] if r.name.startswith("answer:") else qs_of(r.name)
+        if r.kind == "textin":                        # ask_text: the entry point / a field read from the text
+            where = sorted(q for q in (r.extra or {}).get("candidates") or [r.value] if q in asked) \
+                if r.name == "textin" else sorted(asked)
         if r.tried is not None:
             first = None
             for name, why in r.tried:
@@ -71,8 +74,8 @@ def collect(res, catalog=None):
         events.append({"kind": "type_rejected", "fact": fact, "detail": why,
                        "questions": sorted(q for q, fs in res.flow.unresolved.items() if set(fs) & down and q in asked)})
     for q, a in res.results.items():
-        if a.guard in ("low_confidence", "escalated") and any(e["fact"] == "answer:" + q and e["kind"] == a.guard
-                                                             for e in events):
+        if a.guard in ("low_confidence", "escalated") and any(e["fact"] in ("answer:" + q, "textin") and q in e["questions"]
+                                                             and e["kind"] == a.guard for e in events):
             pass                                      # the answer step itself was rejected: already counted once
         elif a.guard in ("hard_check", "outside_options", "rule_abstained", "low_confidence", "escalated", "grounding",
                          "type_rejected", "evidence_missing"):
@@ -384,9 +387,24 @@ def _one(res, q, events, catalog):
         reads |= set(rule_part.inputs)
     if head is not None:
         reads |= set(head.inputs)
+    read = {r.name[7:]: r for r in tr.records if r.kind == "textin" and r.name.startswith("textin:")}
     for k in sorted(x for x in reads if x in init):
+        r = read.get(k)
+        if r is not None and r.quote and r.provenance != "given":   # read from a text by a model (ask_text): not given
+            s, e, src = r.quote
+            full = init.get(src)[s:e] if isinstance(init.get(src), str) else None
+            au.quoted.append({"name": k, "value": init[k], "start": s, "end": e, "source": src, "text": snippet(init, r.quote),
+                              "match": None if full is None else matches(init[k], full), "confidence": r.confidence,
+                              "model": _model(r.model), "error": None, "producer": "text in"})
+            count("quoted_by_model")
+            continue
         au.given.append({"name": k, "value": init[k]})
         count("given")
+    entry = next((r for r in tr.records if r.kind == "textin" and r.name == "textin"), None)
+    if entry is not None and (entry.value == q or q in ((entry.extra or {}).get("candidates") or ())):
+        au.decided.append({"name": "entry point", "value": entry.value, "probs": entry.probs, "model": _model(entry.model),
+                           "error": entry.error, "extra": None})
+        count("decided" if entry.origin == "decided" else "given" if entry.origin == "given" else "computed")
     skipped = dict(tr.skipped)
     deciding = a.source if a.guard == "hard_check" else None
     for st in flow.steps:

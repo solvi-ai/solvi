@@ -15,11 +15,12 @@ Contents:
 9. [Confidence, calibration and abstention](#confidence-calibration-and-abstention)
 10. [The trace and verification](#the-trace-and-verification)
 11. [Serving: HTTP, MCP and System One](#serving-http-mcp-and-system-one)
-12. [Checking a catalog: solvi check](#checking-a-catalog-solvi-check)
-13. [Grounded decisions: provenance, audit and safeguards](#grounded-decisions-provenance-audit-and-safeguards)
-14. [Printing results: solvi.show](#printing-results-solvishow)
-15. [Extracting fields from documents](#extracting-fields-from-documents)
-16. [Guarantees and limitations](#guarantees-and-limitations)
+12. [Text in: from a message to a question](#text-in-from-a-message-to-a-question)
+13. [Checking a catalog: solvi check](#checking-a-catalog-solvi-check)
+14. [Grounded decisions: provenance, audit and safeguards](#grounded-decisions-provenance-audit-and-safeguards)
+15. [Printing results: solvi.show](#printing-results-solvishow)
+16. [Extracting fields from documents](#extracting-fields-from-documents)
+17. [Guarantees and limitations](#guarantees-and-limitations)
 
 ## Concepts
 
@@ -1277,6 +1278,80 @@ and the answers carry no act / escalate signal: thresholds (`act_guard` and the 
 `systemone(url, model)` turns the probabilities back into a decider. `solvi serve --decider X` without a System serves
 only this endpoint. Without FastAPI, `solvi.serve.Service(system, decider)` answers the same requests in-process
 (`.ask(state)`, `.systemone(body)`, `.tool(question, state)`).
+
+## Text in: from a message to a question
+
+`system.ask(state)` needs a typed state. A person writes a message instead: "please refund order A-10457, I paid 1.5
+million rubles on 12 September". `solvi.textin` turns such a text into the question it asks and that question's input
+state, reads every value with a quote, and leaves the decision to the catalog as before.
+
+```python
+from solvi.textin import TextIn
+
+eps = system.entry_points()          # the questions with the typed input state each one reads
+eps[0].fields["amount"]              # EntryField(name="amount", type=float, description=..., required=True)
+eps[0].tool()                        # the same as a function-calling tool: {"type": "function", "function": {...}}
+
+tin = TextIn(system, decider, today=date(2026, 9, 28),
+             synonyms={"currency": {"RUB": ["rubles", "руб", "₽"], "EUR": ["euro", "€"]}},
+             patterns={"order_id": r"[A-Z]-\d+"})
+read = tin.read("Please refund order A-10457: I paid 1.5 million rubles on 12 September.")
+read.question                        # "request_refund"
+read.state                           # {"order_id": "A-10457", "amount": 1500000.0, "currency": "RUB",
+                                     #  "purchase_date": date(2026, 9, 12)}
+read.fields["amount"].quote          # Quote("1.5 million", 36, 47, "request_text", ...)
+read.missing, read.clarify()         # required fields the text does not give, and a question asking for them
+
+res = system.ask_text(read)          # or system.ask_text(text, decider) / ask_text(text, textin=tin); aask_text is async
+res["request_refund"].answer
+```
+
+**Entry points.** Every question is an entry point (or the names you pass: `TextIn(..., entry_points=[...])`); its input
+fields are the given facts its flow reads, with their types (`System(inputs=...)`, else the types the catalog's parts
+declare) and whether the question needs them — the same schemas `solvi serve` publishes at `GET /questions`.
+
+**Who does what.** The decider picks the entry point: one choice question over the entry points, each described by its
+question text (or `descriptions={name: text}`). Below `min_confidence` (0.6), on a near tie (`min_margin` 0.1), or when the
+decider's act signal escalates, nothing is chosen: `read.question` is None, `system.ask_text` runs nothing and the likely
+questions abstain with guard `escalated`, and `read.clarify()` asks which one is meant. The extractor points at the text of
+each field: the decider's own span pointer (`DeciderExtractor`) when the checkpoint has one, else `CueExtractor` — a
+deterministic finder of candidates of the field's type (numbers, dates, enum labels and synonyms, cue words, a pattern)
+nearest after a cue word (the field's name and description words, plus `cues={field: [...]}`); any object with
+`find(text, FieldSpec) → [Quote]` works, and a list of extractors is tried in order. Code does the rest: a deterministic
+parser per type turns the quote into the value.
+
+| Type | Reads |
+|---|---|
+| `int`, `float`, `Decimal` | `1500`, `1,500.50`, `1 500 000`, `12,5`, `2k`, `1.5 million`, `3 млн`, `a million`, `полтора миллиона` (an `int` must be whole) |
+| `date` | `2026-09-12`, `12.09.2026`, `12/09/26` (`dayfirst=False`: month first), `12 September 2026`, `September 12`, `12 сентября`; `today` / `yesterday` / `tomorrow` |
+| `Literal[...]`, an `Enum` | the label (or member name), or a synonym: `synonyms={field: {label: [...]}}` or the field's `json_schema_extra={"synonyms": ...}` |
+| `bool` | yes / no words, the field's cue ("urgent"), a negated cue ("not urgent") |
+| `str` | the quote, trimmed; `patterns={field: regex}` must match it whole |
+
+A date without a year, or a relative one, is read only with `TextIn(today=...)`: without it the field is `unparsed`, never
+a guessed year. Every field ends in one state: `read`, `not_stated`, `unparsed` (the quote does not parse), `unsure` (found
+with confidence below `min_field_confidence`, 0.5) or `unsupported` (no parser for the type). A required field that is not
+`read` is in `read.missing`: the question is asked anyway (a hard check may already decide it), and without that field it
+abstains — "not stated in the text: purchase_date; cannot compute: ..." — instead of guessing.
+
+**Provenance.** The text itself is a given fact (`init_state["request_text"]`); the values read from it are not. The trace
+of `ask_text` holds, after the flow's steps, one record for the entry point (kind `textin`, provenance `decided`, the
+decider's identity and probabilities) and one per field (`textin:<field>`, provenance `quoted`, the quote's offsets, the
+parser and its arguments, the extractor's identity and fingerprint). The audit lists those fields under `quoted` with the
+model, counts them as "quoted by model" and the entry point as "decided" — not in the deterministic share — and an answer's
+confidence is at most the entry point's and the read fields' confidences. Replay re-checks each record: the quote is
+literally in the text at its offsets, the recorded parser gives the recorded value, and the flow read exactly that value.
+Even `CueExtractor`, which is plain code, is recorded this way: which number is "the amount" is still a guess.
+
+**A dialogue.** `tin.update(read, next_message)` reads the next turn over the whole dialogue (turns joined by a new line;
+every quote points into it) and lists `changes` — field, old value, new value, quote. A turn that names the old value next
+to a new one ("the order is not A-10457 but A-10475") changes it to the new one; fields the turn does not state keep their
+value and quote; the entry point stays the one chosen (an escalated read is routed again on the whole dialogue).
+`tin.update({"order_id": "A-1"}, text, question=...)` starts from a state you already have: those fields stay `given`.
+`system.ask_text(updated)` answers on the whole dialogue, in one trace.
+
+**The call is data.** A text can only select one of the entry points and fill typed fields through the parsers: nothing
+in it is executed, and the functions that run are the catalog's, planned by the strategist as for any `ask`.
 
 ## Checking a catalog: solvi check
 

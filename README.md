@@ -208,6 +208,10 @@ Every answer is a value and a confidence, and the types also declare answer prim
   lets the planner pick the fastest equivalent source and switch when it slows down. `TraceStorage` keeps decisions with a
   hash chain across them; `solvi diff` shows which stored decisions a rule or model change would flip; `solvi test`,
   `solvi check` and the honesty suite (`solvi honesty`) belong in CI.
+- **Text in.** `system.ask_text("please refund order A-10457, 1.5 million rubles, paid 12 September", decider)`: the
+  decider picks which question the message asks (or escalates when unsure), each input field is read with a quote and a
+  deterministic parser (numbers, dates, enums, yes / no), missing required fields are listed for a clarifying question,
+  and the trace says those values were read by a model, not given.
 
 ## Planning around dead ends and costs (code strategist)
 

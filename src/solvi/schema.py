@@ -364,7 +364,8 @@ def _load_trace(m, catalog, system):
     from .core import Unknown
     for r in m.records:
         v = MISSING if r.missing else Unknown if r.not_stated else r.value if r.native else \
-            _restore(_fact_type(catalog, r.name, r.producer), r.value)
+            _restore(_given_type(catalog, system, r.name[7:]) if r.kind == "textin" else
+                     _fact_type(catalog, r.name, r.producer), r.value)
         recs.append(Record(r.step, r.kind, r.name, dict(r.inputs), v, None if r.quote is None else tuple(r.quote),
                            r.confidence, r.error, r.prev, r.hash, r.producer,
                            None if r.tried is None else [list(t) for t in r.tried], r.provenance, r.model,

@@ -205,6 +205,12 @@ class Trace(Serial):
             if r.kind == "head":
                 bad += _replay_head(r, heads, vals, trust_models, models)
                 continue
+            if r.kind == "textin":                        # ask_text: the entry point and fields read from the text
+                from .textin import replay_record
+                bad += replay_record(r, self.init)
+                if r.model is not None:
+                    models.append((r.step, r.name, "trusted"))
+                continue
             if r.kind == "plan":                          # a strategist's plan record (solvi.strategy): re-verified, not re-run
                 from .strategy import replay_plan
                 bad += replay_plan(r, catalog, self.init)
