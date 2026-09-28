@@ -144,3 +144,20 @@ def test_act_guard_reports_how_much_must_escalate_when_the_model_is_often_wrong(
     assert info["base_error"] > 0.05
     assert info["must_escalate_at_least"] == pytest.approx((info["base_error"] - 0.05) / 0.95)
     assert 1 - info["answered"] >= info["must_escalate_at_least"] - 1e-9
+
+
+def test_the_audit_says_what_the_thresholds_behind_an_answer_promise():
+    from solvi import Answer, Catalog, Question, System
+    part = model(noise=2.0).decision("team", "Which team?", "email", TEAMS)
+    cat = Catalog()
+    cat.fn(part)
+
+    @cat.rule("route")
+    def route(team):
+        return team
+    s = System(cat, [Question("route", "Route", Answer.choice(TEAMS))])
+    email = {"email": "I was charged twice, please refund order 3."}
+    assert "guarantee   none for some decisions" in str(s.ask(email).audit("route"))
+    part.act_guard(_labelled(), risk=0.10)
+    txt = str(s.ask(email).audit("route"))
+    assert "guarantee   P(answered alone and wrong) ≤ 0.1" in txt and "(crc, n = 240)" in txt

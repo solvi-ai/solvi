@@ -112,6 +112,20 @@ def _short(v, n=48):
     return s if len(s) <= n else s[: n - 1] + "…"
 
 
+def _guarantee(au):
+    """The promise of the escalation thresholds of the model decisions behind an answer: each distinct promise (from
+    act_guard / calibrate_for), or "none" when a model decided without a calibrated threshold."""
+    xs = [d.get("extra") or {} for d in au.decided] + ([au.rule.get("extra") or {}] if au.rule and au.rule.get("model")
+                                                       else [])
+    if not xs:
+        return None
+    got = sorted({f"{x['guarantee']['promise']} ({x['guarantee']['method']}, n = {x['guarantee']['n']})"
+                  for x in xs if isinstance(x.get("guarantee"), dict)})
+    if len(got) < len(xs):
+        got.append("none for some decisions: their thresholds were not calibrated on your data (see act_guard)")
+    return "; ".join(got)
+
+
 def _model(m):
     return f"{m['type']} {m['id']} #{m['fp'][:8]}" if m else ""
 
@@ -125,6 +139,10 @@ def _extra_line(x):
         out.append(f"act {x['act']:.2f}")
     if x.get("expected") is not None:
         out.append(f"expected {x['expected']:.2f}")
+    if x.get("margin") is not None:
+        out.append(f"margin {x['margin']:.2f}")
+    if x.get("candidates"):
+        out.append("candidates " + ", ".join(repr(c) for c in x["candidates"]))
     ps = x.get("pass")
     if isinstance(ps, dict):
         out.append(f"one pass with {', '.join(n for n in ps.get('with', []) if n)}" if ps.get("shared", True)
@@ -151,6 +169,7 @@ class AnswerAudit:
     constraints: list = field(default_factory=list)  # [{"name", "satisfied"}]
     safeguards: list = field(default_factory=list)   # events (see collect)
     not_run: list = field(default_factory=list)      # [(part, why)] parts of the flow skipped at run time
+    guarantee: str | None = None                     # what the model thresholds behind the answer promise (act_guard …)
     counts: dict = field(default_factory=dict)       # support by provenance: given, computed, quoted, quoted_by_model, ...
     kind: str | None = None                          # the answer type's kind
     evidence: list = field(default_factory=list)     # [{"text", "start", "end", "source", "verified", "by_model"}] (a span first)
@@ -229,7 +248,8 @@ class AnswerAudit:
                          + (f" — not computed: {self.rule['error']}" if self.rule.get("error") else ""))
         for e in self.evidence:
             lines.append(f"  {'span' if e.get('span') else 'evidence':11s} {e['source']}[{e['start']}:{e['end']}] {e['text']!r}"
-                         + ("  verified" if e["verified"] else "  NOT IN THE TEXT") + ("  [model]" if e["by_model"] else ""))
+                         + (("  in the text; support not checked" if e["by_model"] else "  verified") if e["verified"]
+                            else "  NOT IN THE TEXT") + ("  [model]" if e["by_model"] else ""))
         sc = (self.extra or {}).get("scores")
         if sc:
             lines.append("  scores      " + ", ".join(f"{k} {v:.2f}" for k, v in list(sc.items())[:6]))
@@ -243,6 +263,8 @@ class AnswerAudit:
                 lines.append(f"  not run     {', '.join(ns)} ({w})")
         lines.append(f"  → answer    {shown} — {self.why}")
         lines.append(f"  support     {self.support_line()}")
+        if self.guarantee:
+            lines.append(f"  guarantee   {self.guarantee}")
         lines.append(f"  safeguards  {self.safeguard_line()}")
         for e in self.safeguards:
             lines.append(f"              · {LABEL[e['kind']]}: {e['fact']} — {e['detail']}")
@@ -393,5 +415,6 @@ def _one(res, q, events, catalog):
                                 "by_model": by_model, "span": a.kind == "span" and i == 0})
             count("quoted_by_model" if by_model else "quoted")
     au.safeguards = [e for e in events if q in e["questions"]]
+    au.guarantee = _guarantee(au)
     au.counts = counts
     return au
