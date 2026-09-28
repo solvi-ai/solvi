@@ -7,7 +7,9 @@ Every stored decision is one record (a dict of plain JSON):
   kind "ask"      the 0.5 journal line's keys — init_hash, answers {question: [answer, confidence, status]}, flow, records
                   [[step, name, hash]] (and producers) — plus index fields (guards, safeguards, models) and the whole
                   response (Response.to_dict(): answers, flow, trace), which get() loads back and replay_all() re-checks;
-  kind "teach"    a human correction (System.teach): {"teach": question, "init": ..., "answer": ...};
+  kind "teach"    a correction (System.teach): {"teach": question, "init": ..., "answer": ...} and, when given, its
+                  "source" ("outcome", "rule"; none: a human), "by" and "of" (the stored id of the decision it corrects);
+  kind "update"   a learning update (System.learning): what changed, the gates' results, the state to roll back to;
   every record    seq (0, 1, 2, ...), time (seconds since the epoch), meta (optional, yours), prev and hash.
 
 `hash` is the SHA-256 of the record's canonical JSON (keys sorted, without `id` and `hash`), which includes `prev`, the
@@ -16,8 +18,10 @@ hash of the record before it: editing, deleting, inserting or reordering a store
 count and the last hash (head()) — next to the log and verify() checks it; a head you published elsewhere
 (verify(anchor=head)) also catches a rewrite of the whole chain together with the stored head.
 
-Backends: JSONLStorage (append-only file, one record per line; what System(journal=...) writes) and SQLiteStorage (stdlib
-sqlite3; indexed by question, answer, status, safeguard, model fingerprint and time; several processes may write)."""
+Backends: JSONLStorage (append-only file, one record per line; what System(journal=...) writes), SQLiteStorage (stdlib
+sqlite3; indexed by question, answer, status, safeguard, model fingerprint and time; several processes may write),
+PostgresStorage (psycopg 3; the same tables, several services writing) and DuckDBStorage (duckdb; the same tables in a
+DuckDB file, for analytics)."""
 from __future__ import annotations
 
 import hashlib
@@ -29,6 +33,21 @@ from dataclasses import dataclass
 
 GENESIS = ""                                  # prev of the first record
 FORMAT = 1                                    # the record format ("v")
+
+
+TRUSTED_SOURCES = ("human", "outcome", "rule")   # where a label may come from: never the system's own answers
+
+
+class UntrustedLabel(ValueError):
+    """A label from a source outside TRUSTED_SOURCES (the model, the system itself, an unknown process)."""
+
+
+def check_source(source):
+    """A label's source → itself, when it is trusted: "human", "outcome" or "rule"; else UntrustedLabel."""
+    if source not in TRUSTED_SOURCES:
+        raise UntrustedLabel(f"label source {source!r} is not trusted: labels come only from outside the model "
+                             f"({', '.join(TRUSTED_SOURCES)}); the system's own answers are never labels")
+    return source
 
 
 class _Any:
@@ -237,9 +256,20 @@ class TraceStorage:
         response.stored_id = rec["id"]
         return rec["id"]
 
-    def save_correction(self, question, init_state, answer, meta=None):
-        """Store a human correction (what System.teach records) → its id."""
+    def save_correction(self, question, init_state, answer, meta=None, *, source="human", by=None, of=None):
+        """Store a correction (what System.teach records) → its id. source: where the label comes from — "human" (a person
+        corrected or confirmed the answer), "outcome" (what really happened: the parcel was lost, the loan defaulted) or
+        "rule" (code rejected a model's proposal and decided instead); anything else is refused (UntrustedLabel): the
+        system's own answers are never labels. by: who (a user, a reviewer, a process); of: the stored id of the decision
+        it corrects. Records of 0.6 have no source: they are human corrections."""
+        check_source(source)
         body = {"v": FORMAT, "kind": "teach", "teach": question, "init": plain(dict(init_state)), "answer": plain(answer)}
+        if source != "human":
+            body["source"] = source
+        if by is not None:
+            body["by"] = str(by)
+        if of is not None:
+            body["of"] = str(of)
         if meta is not None:
             body["meta"] = plain(meta)
         return self._append(body)["id"]
@@ -269,8 +299,12 @@ class TraceStorage:
         return self.head()["count"]
 
     def corrections(self):
-        """The stored human corrections → [{"id", "time", "question", "init", "answer"}] (feed them to fit / learn_rule)."""
-        return [{"id": s.id, "time": s.time, "question": s.data["teach"], "init": s.data["init"], "answer": s.data["answer"]}
+        """The stored corrections → [{"id", "time", "question", "init", "answer", "source", "by", "of"}] (feed them to fit /
+        learn_rule, a CorrectionMemory or System.learning). source: "human" (also every record without one), "outcome",
+        "rule" — or, for a record written around save_correction, whatever it says (solvi.memory and System.learning refuse
+        anything outside TRUSTED_SOURCES)."""
+        return [{"id": s.id, "time": s.time, "question": s.data["teach"], "init": s.data["init"], "answer": s.data["answer"],
+                 "source": s.data.get("source", "human"), "by": s.data.get("by"), "of": s.data.get("of")}
                 for s in self.iter("teach")]
 
     def query(self, question=None, answer=ANY, status=None, safeguard=None, model=None, since=None, until=None,
@@ -553,26 +587,27 @@ def _head_problems(h, rows):
                                                          "of the log was replaced")]
 
 
-# --- SQLite
+# --- SQL backends: SQLite, PostgreSQL, DuckDB
 _SCHEMA = """
-CREATE TABLE IF NOT EXISTS records (seq INTEGER PRIMARY KEY, id TEXT NOT NULL UNIQUE, kind TEXT NOT NULL, time REAL NOT NULL,
-                                    init_hash TEXT, catalog TEXT, prev TEXT NOT NULL, hash TEXT NOT NULL, body TEXT NOT NULL);
-CREATE INDEX IF NOT EXISTS records_time ON records(time);
-CREATE INDEX IF NOT EXISTS records_catalog ON records(catalog);
-CREATE INDEX IF NOT EXISTS records_init ON records(init_hash);
-CREATE TABLE IF NOT EXISTS answers (seq INTEGER NOT NULL, question TEXT NOT NULL, answer TEXT NOT NULL, status TEXT NOT NULL,
-                                    guard TEXT);
-CREATE INDEX IF NOT EXISTS answers_question ON answers(question, answer);
-CREATE INDEX IF NOT EXISTS answers_answer ON answers(answer);
-CREATE INDEX IF NOT EXISTS answers_seq ON answers(seq);
-CREATE TABLE IF NOT EXISTS safeguards (seq INTEGER NOT NULL, kind TEXT NOT NULL, fact TEXT NOT NULL, question TEXT);
-CREATE INDEX IF NOT EXISTS safeguards_kind ON safeguards(kind, question);
-CREATE INDEX IF NOT EXISTS safeguards_seq ON safeguards(seq);
-CREATE TABLE IF NOT EXISTS models (seq INTEGER NOT NULL, fp TEXT, id TEXT, type TEXT);
-CREATE INDEX IF NOT EXISTS models_fp ON models(fp);
-CREATE INDEX IF NOT EXISTS models_id ON models(id);
-CREATE INDEX IF NOT EXISTS models_seq ON models(seq);
-CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS {p}records (seq {INT} PRIMARY KEY, "id" {TEXT} NOT NULL UNIQUE, kind {TEXT} NOT NULL,
+                                       "time" {REAL} NOT NULL, init_hash {TEXT}, "catalog" {TEXT}, prev {TEXT} NOT NULL,
+                                       hash {TEXT} NOT NULL, body {TEXT} NOT NULL);
+CREATE INDEX IF NOT EXISTS {p}records_time ON {p}records("time");
+CREATE INDEX IF NOT EXISTS {p}records_catalog ON {p}records("catalog");
+CREATE INDEX IF NOT EXISTS {p}records_init ON {p}records(init_hash);
+CREATE TABLE IF NOT EXISTS {p}answers (seq {INT} NOT NULL, question {TEXT} NOT NULL, answer {TEXT} NOT NULL,
+                                       status {TEXT} NOT NULL, guard {TEXT});
+CREATE INDEX IF NOT EXISTS {p}answers_question ON {p}answers(question, answer);
+CREATE INDEX IF NOT EXISTS {p}answers_answer ON {p}answers(answer);
+CREATE INDEX IF NOT EXISTS {p}answers_seq ON {p}answers(seq);
+CREATE TABLE IF NOT EXISTS {p}safeguards (seq {INT} NOT NULL, kind {TEXT} NOT NULL, fact {TEXT} NOT NULL, question {TEXT});
+CREATE INDEX IF NOT EXISTS {p}safeguards_kind ON {p}safeguards(kind, question);
+CREATE INDEX IF NOT EXISTS {p}safeguards_seq ON {p}safeguards(seq);
+CREATE TABLE IF NOT EXISTS {p}models (seq {INT} NOT NULL, fp {TEXT}, "id" {TEXT}, "type" {TEXT});
+CREATE INDEX IF NOT EXISTS {p}models_fp ON {p}models(fp);
+CREATE INDEX IF NOT EXISTS {p}models_id ON {p}models("id");
+CREATE INDEX IF NOT EXISTS {p}models_seq ON {p}models(seq);
+CREATE TABLE IF NOT EXISTS {p}meta ("key" {TEXT} PRIMARY KEY, "value" {TEXT} NOT NULL)
 """
 
 
@@ -587,24 +622,43 @@ def _index_rows(d):
     return ans, sg, ms
 
 
-class SQLiteStorage(TraceStorage):
-    """SQLite (stdlib sqlite3): one row per record with the record's JSON, plus index tables — answers (question, answer,
-    status), safeguards (kind, question), models (fingerprint, id, type) — and the time. The head is kept in the `meta`
-    table. Appends run in a write transaction, so several processes may write to one file."""
+class _SQLStorage(TraceStorage):
+    """What the SQL backends share: one row per record with the record's JSON (the text that is hashed, kept verbatim),
+    plus index tables — answers (question, answer, status), safeguards (kind, question), models (fingerprint, id, type) —
+    and the time; the head in the `meta` table. Every append reads the head and writes the record, its index rows and the
+    new head in one transaction (a backend's `lock` statement keeps two writers from taking the same head). A backend
+    sets the connection (`db`: a DB-API connection in autocommit mode, whose execute returns something with fetchall),
+    its placeholder, its column types and the statement that begins a write transaction. Table names start with
+    `prefix`."""
 
-    def __init__(self, path, catalog=None, clock=None, timeout=30.0):
-        import sqlite3
-        super().__init__(catalog, clock)
-        self.path = os.fspath(path)
+    placeholder = "?"
+    begin = "BEGIN"
+    lock = None                                   # a statement run first in a write transaction (PostgreSQL: LOCK TABLE)
+    types = {"INT": "BIGINT", "REAL": "DOUBLE PRECISION", "TEXT": "TEXT"}
+
+    def _open(self, db, prefix=""):
+        if not isinstance(prefix, str) or not all(c.isalnum() or c == "_" for c in prefix):
+            raise ValueError(f"prefix must be letters, digits and _, not {prefix!r}")
+        self.db, self.prefix = db, prefix
         self._lock = threading.Lock()
-        self.db = sqlite3.connect(self.path, timeout=timeout, isolation_level=None, check_same_thread=False)
-        self.db.executescript(_SCHEMA)
+        with self._lock:
+            for stmt in _SCHEMA.format(p=prefix, **self.types).split(";"):
+                if stmt.strip():
+                    self._x(stmt)
 
     def close(self):
         self.db.close()
 
+    def _sql(self, sql):
+        sql = sql.replace("{p}", self.prefix)
+        return sql if self.placeholder == "?" else sql.replace("?", self.placeholder)
+
+    def _x(self, sql, args=()):
+        """Run one statement (SQL written with ? placeholders and {p} for the table prefix)."""
+        return self.db.execute(self._sql(sql), tuple(args))
+
     def _head(self):
-        row = self.db.execute("SELECT value FROM meta WHERE key = 'head'").fetchone()
+        row = self._x("SELECT \"value\" FROM {p}meta WHERE \"key\" = 'head'").fetchone()
         return json.loads(row[0]) if row else {"count": 0, "hash": GENESIS}
 
     def head(self):
@@ -613,37 +667,41 @@ class SQLiteStorage(TraceStorage):
 
     def _append(self, body):
         with self._lock:
-            db = self.db
-            db.execute("BEGIN IMMEDIATE")
+            self._x(self.begin)
             try:
+                if self.lock:
+                    self._x(self.lock)
                 h = self._head()
                 rec = dict(body, seq=h["count"], time=float(self.clock()), prev=h["hash"])
                 rec["hash"] = record_hash(rec)
                 rec["id"] = rec["hash"][:16]
                 self._insert(rec)
-                db.execute("INSERT OR REPLACE INTO meta (key, value) VALUES ('head', ?)",
-                           (json.dumps({"count": rec["seq"] + 1, "hash": rec["hash"]}),))
-                db.execute("COMMIT")
+                self._x("INSERT INTO {p}meta (\"key\", \"value\") VALUES ('head', ?) "
+                        "ON CONFLICT (\"key\") DO UPDATE SET \"value\" = excluded.\"value\"",
+                        (json.dumps({"count": rec["seq"] + 1, "hash": rec["hash"]}),))
+                self._x("COMMIT")
             except BaseException:
-                db.execute("ROLLBACK")
+                self._x("ROLLBACK")
                 raise
             return rec
 
     def _insert(self, rec):
         s = rec["seq"]
-        self.db.execute("INSERT INTO records (seq, id, kind, time, init_hash, catalog, prev, hash, body) "
-                        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                        (s, rec["id"], rec.get("kind", "ask"), rec["time"], rec.get("init_hash"), rec.get("catalog"),
-                         rec["prev"], rec["hash"], json.dumps(rec, ensure_ascii=False, sort_keys=True)))
+        self._x("INSERT INTO {p}records (seq, \"id\", kind, \"time\", init_hash, \"catalog\", prev, hash, body) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (s, rec["id"], rec.get("kind", "ask"), rec["time"], rec.get("init_hash"), rec.get("catalog"),
+                 rec["prev"], rec["hash"], json.dumps(rec, ensure_ascii=False, sort_keys=True)))
         ans, sg, ms = _index_rows(rec)
-        self.db.executemany("INSERT INTO answers (seq, question, answer, status, guard) VALUES (?, ?, ?, ?, ?)",
-                            [(s, *a) for a in ans])
-        self.db.executemany("INSERT INTO safeguards (seq, kind, fact, question) VALUES (?, ?, ?, ?)", [(s, *x) for x in sg])
-        self.db.executemany("INSERT INTO models (seq, fp, id, type) VALUES (?, ?, ?, ?)", [(s, *m) for m in ms])
+        for a in ans:
+            self._x("INSERT INTO {p}answers (seq, question, answer, status, guard) VALUES (?, ?, ?, ?, ?)", (s, *a))
+        for x in sg:
+            self._x("INSERT INTO {p}safeguards (seq, kind, fact, question) VALUES (?, ?, ?, ?)", (s, *x))
+        for m in ms:
+            self._x("INSERT INTO {p}models (seq, fp, \"id\", \"type\") VALUES (?, ?, ?, ?)", (s, *m))
 
-    def _rows(self, sql="SELECT seq, body FROM records ORDER BY seq", args=()):
+    def _rows(self, sql="SELECT seq, body FROM {p}records ORDER BY seq", args=()):
         with self._lock:
-            rows = self.db.execute(sql, args).fetchall()
+            rows = self._x(sql, args).fetchall()
         for seq, body in rows:
             try:
                 d = json.loads(body)
@@ -655,7 +713,7 @@ class SQLiteStorage(TraceStorage):
         return self._rows()
 
     def _find(self, id):
-        for _, d in self._rows("SELECT seq, body FROM records WHERE id = ?", (id,)):
+        for _, d in self._rows("SELECT seq, body FROM {p}records WHERE \"id\" = ?", (id,)):
             return d
         return None
 
@@ -663,7 +721,7 @@ class SQLiteStorage(TraceStorage):
         if kind is None:
             rows = self._rows()
         else:
-            rows = self._rows("SELECT seq, body FROM records WHERE kind = ? ORDER BY seq", (kind,))
+            rows = self._rows("SELECT seq, body FROM {p}records WHERE kind = ? ORDER BY seq", (kind,))
         for _, d in rows:
             if d is not None:
                 yield _stored(d, self.catalog)
@@ -673,7 +731,7 @@ class SQLiteStorage(TraceStorage):
         since, until = _when(since), _when(until)
         where, args = ["r.kind = 'ask'"], []
         if catalog is not None:
-            where.append("r.catalog = ?")
+            where.append("r.\"catalog\" = ?")
             args.append(catalog)
         if question is not None or answer is not ANY or status is not None:
             sub = ["a.seq = r.seq"]
@@ -686,36 +744,37 @@ class SQLiteStorage(TraceStorage):
             if status is not None:
                 sub.append("a.status = ?")
                 args.append(status)
-            where.append(f"EXISTS (SELECT 1 FROM answers a WHERE {' AND '.join(sub)})")
+            where.append(f"EXISTS (SELECT 1 FROM {{p}}answers a WHERE {' AND '.join(sub)})")
         if safeguard is not None:
             sub = ["s.seq = r.seq", "s.kind = ?"]
             args.append(safeguard)
             if question is not None:
                 sub.append("s.question = ?")
                 args.append(question)
-            where.append(f"EXISTS (SELECT 1 FROM safeguards s WHERE {' AND '.join(sub)})")
+            where.append(f"EXISTS (SELECT 1 FROM {{p}}safeguards s WHERE {' AND '.join(sub)})")
         if model is not None:
-            where.append("EXISTS (SELECT 1 FROM models m WHERE m.seq = r.seq AND (m.fp = ? OR m.id = ? OR m.type = ?))")
+            where.append("EXISTS (SELECT 1 FROM {p}models m WHERE m.seq = r.seq AND (m.fp = ? OR m.\"id\" = ? OR "
+                         "m.\"type\" = ?))")
             args += [model, model, model]
         if since is not None:
-            where.append("r.time >= ?")
+            where.append("r.\"time\" >= ?")
             args.append(since)
         if until is not None:
-            where.append("r.time < ?")
+            where.append("r.\"time\" < ?")
             args.append(until)
-        sql = f"SELECT r.seq, r.body FROM records r WHERE {' AND '.join(where)} ORDER BY r.seq"
+        sql = f"SELECT r.seq, r.body FROM {{p}}records r WHERE {' AND '.join(where)} ORDER BY r.seq"
         return [_stored(d, self.catalog) for _, d in self._rows(sql, args) if d is not None]
 
     def _backend_problems(self, rows):
         out = []
         with self._lock:
-            cols = {s: (i, k, t, ih, c, p, h) for s, i, k, t, ih, c, p, h in
-                    self.db.execute("SELECT seq, id, kind, time, init_hash, catalog, prev, hash FROM records")}
+            cols = {s: (i, k, t, ih, c, p, h) for s, i, k, t, ih, c, p, h in self._x(
+                "SELECT seq, \"id\", kind, \"time\", init_hash, \"catalog\", prev, hash FROM {p}records").fetchall()}
             idx = {}
-            for table, q in (("answers", "SELECT seq, question, answer, status, guard FROM answers"),
-                             ("safeguards", "SELECT seq, kind, fact, question FROM safeguards"),
-                             ("models", "SELECT seq, fp, id, type FROM models")):
-                for row in self.db.execute(q):
+            for table, q in (("answers", "SELECT seq, question, answer, status, guard FROM {p}answers"),
+                             ("safeguards", "SELECT seq, kind, fact, question FROM {p}safeguards"),
+                             ("models", "SELECT seq, fp, \"id\", \"type\" FROM {p}models")):
+                for row in self._x(q).fetchall():
                     idx.setdefault((table, row[0]), []).append(tuple(row[1:]))
         for d in rows:
             s = d.get("seq")
@@ -737,12 +796,74 @@ class SQLiteStorage(TraceStorage):
         return out + _head_problems(h, rows)
 
 
+class SQLiteStorage(_SQLStorage):
+    """SQLite (stdlib sqlite3): one row per record with the record's JSON, plus index tables — answers (question, answer,
+    status), safeguards (kind, question), models (fingerprint, id, type) — and the time. The head is kept in the `meta`
+    table. Appends run in a write transaction, so several processes may write to one file."""
+
+    begin = "BEGIN IMMEDIATE"
+    types = {"INT": "INTEGER", "REAL": "REAL", "TEXT": "TEXT"}
+
+    def __init__(self, path, catalog=None, clock=None, timeout=30.0):
+        import sqlite3
+        super().__init__(catalog, clock)
+        self.path = os.fspath(path)
+        self._open(sqlite3.connect(self.path, timeout=timeout, isolation_level=None, check_same_thread=False))
+
+
+class PostgresStorage(_SQLStorage):
+    """PostgreSQL (psycopg 3, `pip install solvi[postgres]`): the tables of SQLiteStorage, named with `prefix`
+    ("solvi_records", ...), created when missing. Several processes and services may write: an append locks the head
+    table (LOCK TABLE ... IN SHARE ROW EXCLUSIVE MODE — readers are not blocked) for its transaction, so the chain has
+    no forks. `conninfo`: a connection string ("postgresql://user@host/db") or an open psycopg connection in autocommit
+    mode (the store runs its own BEGIN / COMMIT)."""
+
+    placeholder = "%s"
+    lock = "LOCK TABLE {p}meta IN SHARE ROW EXCLUSIVE MODE"
+
+    def __init__(self, conninfo, catalog=None, clock=None, prefix="solvi_"):
+        super().__init__(catalog, clock)
+        if isinstance(conninfo, str):
+            try:
+                import psycopg
+            except ImportError as e:
+                raise ImportError("PostgresStorage needs psycopg 3: pip install 'solvi[postgres]'") from e
+            db = psycopg.connect(conninfo, autocommit=True)
+        else:
+            db = conninfo
+        self.conninfo = conninfo if isinstance(conninfo, str) else None
+        self._open(db, prefix)
+
+
+class DuckDBStorage(_SQLStorage):
+    """DuckDB (`pip install solvi[duckdb]`): the tables of SQLiteStorage in a DuckDB file (":memory:" for none) — for
+    analytics over the stored decisions next to JSONL or Parquet files (`store.db.sql(...)`). One writing process at a
+    time (DuckDB's own rule); threads of that process are fine."""
+
+    begin = "BEGIN TRANSACTION"
+    types = {"INT": "BIGINT", "REAL": "DOUBLE", "TEXT": "VARCHAR"}
+
+    def __init__(self, path, catalog=None, clock=None, prefix=""):
+        try:
+            import duckdb
+        except ImportError as e:
+            raise ImportError("DuckDBStorage needs duckdb: pip install 'solvi[duckdb]'") from e
+        super().__init__(catalog, clock)
+        self.path = os.fspath(path)
+        self._open(duckdb.connect(self.path), prefix)
+
+
 def open_storage(where, catalog=None):
-    """A TraceStorage from a path: .db / .sqlite / .sqlite3 → SQLiteStorage, anything else → JSONLStorage; a TraceStorage
-    is returned as it is."""
+    """A TraceStorage from a path: .db / .sqlite / .sqlite3 → SQLiteStorage, .duckdb → DuckDBStorage, a
+    postgresql:// (or postgres://) URL → PostgresStorage, anything else → JSONLStorage; a TraceStorage is returned as
+    it is."""
     if where is None or isinstance(where, TraceStorage):
         return where
     p = os.fspath(where)
+    if p.startswith(("postgresql://", "postgres://")):
+        return PostgresStorage(p, catalog)
+    if p.endswith(".duckdb"):
+        return DuckDBStorage(p, catalog)
     if p.endswith((".db", ".sqlite", ".sqlite3")):
         return SQLiteStorage(p, catalog)
     return JSONLStorage(p, catalog)

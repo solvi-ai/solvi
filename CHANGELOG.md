@@ -2,6 +2,45 @@
 
 ## Unreleased (0.7)
 
+### Memory of corrections
+
+- `part.memory(k=7, radius=0.15, min_strength=1.0, min_agreement=0.8, text=False, mode="check")` →
+  `solvi.memory.CorrectionMemory`: corrected cases of a decision part (the decider's probabilities from raw logits, before
+  any adaptation; optional hashed words; the label; `source`, `by`, `time`, `stored_id`) and their nearest neighbours at
+  decision time, with an abstain threshold. Only `source="human"`, `"outcome"` or `"rule"` are accepted
+  (`UntrustedLabel` otherwise); `learn_from(store)` reads a TraceStorage's corrections, never its stored decisions.
+  `calibrate(risk)` picks the abstain threshold by conformal risk control, leave-one-out.
+- `mode="check"` escalates when similar corrected cases say another answer (new safeguard `memory`, counted as
+  `memory_disagreements`); `mode="answer"` may also answer where the part escalated by its own threshold, and says so.
+  Inside a Cascade / Vote / Route a memory only checks.
+- `extra["memory"]` on every decision: the proposal, the action, the cases it rests on, the memory's fingerprint (also part
+  of the part's fingerprint; replay compares the record); `res.audit(q).memory` and the audit's lines, in English and
+  Russian. `mem.save` / `load` refuse another checkpoint.
+
+### Learning from corrections (experimental)
+
+- `System.learning(storage, parts=, ladder=, gates=, changelog=, holdout=0.3, calibration=0.2, gate_teach=True,
+  harvest_rules=False)` → `solvi.learning.Learning`; off until called (warns `ExperimentalWarning`). `loop.run()` reads
+  trusted corrections only (the stored decisions are never labels), splits them by a hash of their id into train /
+  calibration / holdout, proposes an update by the ladder (fit under 50 labels per question, fit + a memory of corrections
+  under 1000, an adapter hook beyond), runs the gates — consistency with earlier corrections, held-out gain, honesty
+  numbers (held-out labels and an optional honesty set), `act_guard` recalibration, a shadow run with a limit on the share
+  of stored decisions an update may change — and promotes it only if all pass. Every proposed update is recorded (kind
+  `"update"`, hash-chained) with its gates; a promoted one with its state, so `loop.rollback(version)` restores any
+  version, also from another process. While attached, `System.teach` only stores the correction.
+- Corrections carry provenance: `System.teach(..., source="human" | "outcome" | "rule", by=, of=)` and
+  `TraceStorage.save_correction(...)` store it, `corrections()` returns it; any other source raises `UntrustedLabel`.
+- `solvi.honesty.run(..., store=False)`.
+
+### Storage backends: PostgreSQL and DuckDB
+
+- `PostgresStorage(conninfo, prefix="solvi_")` (`solvi[postgres]`, psycopg 3): the SQLite tables in PostgreSQL; each
+  append locks the head table for its transaction, so several services writing cannot fork the chain.
+- `DuckDBStorage(path)` (`solvi[duckdb]`): the same tables in a DuckDB file, for analytics.
+- Both implement the whole TraceStorage interface — queries, the hash chain, `verify` (edits, deletions, a cut tail, a
+  rewrite against an anchor, index tables) and `replay_all`; `open_storage` / `storage=` take `.duckdb` paths and
+  `postgresql://` URLs. The SQL backends share one implementation (SQLiteStorage unchanged in behaviour).
+
 ### Command line: init, ask, calibrate, models
 
 - `solvi init [DIR] [--template support|refunds|minimal] [--with-model] [--force]`: a new project — `catalog.py` (a

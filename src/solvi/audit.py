@@ -15,8 +15,9 @@ STAT_KEYS = {"grounding": "grounding_rejected", "type_rejected": "type_rejected"
              "low_confidence": "low_confidence",
              "validator": "validator_rejected", "hard_check": "forced_by_hard_check",
              "constraint_repair": "constraint_repairs", "fallback": "fallbacks", "escalated": "model_escalated",
-             "evidence_missing": "evidence_missing", "timeout": "timeouts", "instruction": "instruction_flips"}
-QUIET = {"evidence_missing", "timeout", "instruction"}      # listed in safeguard_report only once they fire
+             "evidence_missing": "evidence_missing", "timeout": "timeouts", "instruction": "instruction_flips",
+             "memory": "memory_disagreements"}
+QUIET = {"evidence_missing", "timeout", "instruction", "memory"}      # listed in safeguard_report only once they fire
 STATS = ["asks", "answers", "abstained", "model_outputs"] + list(STAT_KEYS.values())
 
 LABEL = {k: i18n.label(k) for k in STAT_KEYS}      # safeguard → its English label (solvi.i18n has the other languages)
@@ -73,11 +74,11 @@ def collect(res, catalog=None):
         events.append({"kind": "type_rejected", "fact": fact, "detail": why,
                        "questions": sorted(q for q, fs in res.flow.unresolved.items() if set(fs) & down and q in asked)})
     for q, a in res.results.items():
-        if a.guard in ("low_confidence", "escalated", "instruction") and any(
+        if a.guard in ("low_confidence", "escalated", "instruction", "memory") and any(
                 e["fact"] in ("answer:" + q, "textin") and q in e["questions"] and e["kind"] == a.guard for e in events):
             pass                                      # the answer step itself was rejected: already counted once
         elif a.guard in ("hard_check", "outside_options", "rule_abstained", "low_confidence", "escalated", "grounding",
-                         "type_rejected", "evidence_missing", "instruction"):
+                         "type_rejected", "evidence_missing", "instruction", "memory"):
             events.append({"kind": a.guard, "fact": "answer:" + q, "detail": a.why, "questions": [q]})
         if a.repaired:
             was, cons = a.repaired
@@ -197,6 +198,31 @@ def _multi_lines(x, pad=None, lang=None):
         e = x["routed"]
         out.append(pad + t("m.route", lang, by=x["route"].get("by")) + f"{prop(e)} → {esc(e)}")
         out += _multi_lines(e, pad + "    ", lang)
+    if isinstance(x.get("memory"), dict):
+        out += memory_lines(x["memory"], pad, lang)
+    return out
+
+
+def memory_lines(mem, pad="", lang=None):
+    """A memory of corrections on a decision (solvi.memory): its proposal or why it abstained, what came of it, and the
+    corrected cases it rests on (id, label, distance, source, who, the stored id)."""
+    t = i18n.t
+    near = mem.get("neighbours") or []
+    head = pad + t("mem.head", lang, n=mem.get("n", 0), k=len(near))
+    if mem.get("proposal") is None:
+        head += t("mem.abstains", lang, why=i18n.msg(mem.get("abstain") or "", lang))
+    else:
+        head += t("mem.proposes", lang, v=repr(mem["proposal"]), s=f"{mem.get('strength', 0):.2f}",
+                  a=f"{mem.get('agreement', 0):.0%}")
+        act = mem.get("action", "")
+        head += (t("mem.answered", lang, x=i18n.msg(mem.get("replaced", ""), lang)) if act == "answered" else
+                 t({"agrees": "mem.agrees", "escalated": "mem.escalated",
+                    "agrees (already escalated)": "mem.agrees_late"}.get(act, "mem.disagrees"), lang))
+    out = [head]
+    for c in near:
+        src = ", ".join(str(v) for v in (c.get("source"), c.get("by"),
+                                         f"#{c['stored_id']}" if c.get("stored_id") else None) if v)
+        out.append(pad + t("mem.case", lang, id=c["id"][:8], v=repr(c["label"]), d=f"{c['distance']:.3f}", src=src))
     return out
 
 
@@ -224,6 +250,14 @@ class AnswerAudit:
     kind: str | None = None                          # the answer type's kind
     evidence: list = field(default_factory=list)     # [{"text", "start", "end", "source", "verified", "by_model"}] (a span first)
     extra: dict | None = None                        # an estimate's interval, a ranking's scores
+
+    @property
+    def memory(self):
+        """The memories of corrections consulted for this answer (solvi.memory): [{"name", the recorded extra["memory"]:
+        "proposal", "action", "neighbours" — the corrected cases it rested on — "fp", ...}]."""
+        xs = [(d["name"], d.get("extra")) for d in self.decided] + ([(self.rule["name"], self.rule.get("extra"))]
+                                                                   if self.rule else [])
+        return [{"name": n, **x["memory"]} for n, x in xs if isinstance(x, dict) and isinstance(x.get("memory"), dict)]
 
     @property
     def deterministic(self):
