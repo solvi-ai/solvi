@@ -206,3 +206,28 @@ def test_calibration_and_fit_read_a_long_input_as_a_decision_does():
     a = part.fit([(TEXT, "France")] * 4 + [(TEXT.replace("law of France", "law of England"), "England")] * 4)
     win = part._window(TEXT)[2].text
     assert a.examples[0][0] == pytest.approx(list(part._raw([win])[0][0]))
+
+
+def test_combinations_read_a_long_input_by_its_window():
+    from solvi.decide import Facts
+    from solvi.multi import Cascade, Vote
+    m = model()
+    a, b = _law(m), m.decision("law", "Which country's law governs this agreement?", "contract", LAW, long="retrieve",
+                                top_k=1, option_order="given")
+    for comb in (Cascade([a, b], name="law"), Vote([a, b], name="law")):
+        d = comb(contract=TEXT)                                 # the whole text truncated would say "Germany"
+        assert d.value == "France", type(comb).__name__
+    v = Vote([a, b], name="law").decide(Facts(contract=TEXT))
+    assert v.value == "France"
+
+
+def test_decide_pass_reads_a_long_input_by_its_window_with_its_context():
+    from solvi.decide import Facts
+    m = model()
+    a = _law(m)
+    paid = m.decision("paid", "Is it paid?", "contract", bool)
+    d, _ = m.decide_pass(TEXT, [a, paid])
+    assert d.value == "France" and d.extra["long"]["read"] == 1 and d.extra["pass"]["shared"] is False
+    a.act_guard([(Facts(contract=TEXT, domain="supply"), "France")] * 3, risk=0.10, groups="domain", min_group=1)
+    d, _ = m.decide_pass(Facts(contract=TEXT, domain="supply"), [a, paid])
+    assert d.extra["guarantee"]["group"] == ["supply"]

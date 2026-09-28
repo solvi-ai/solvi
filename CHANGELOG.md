@@ -8,7 +8,9 @@
   escalate every long input as "group unknown", and `perturb=` and the correction memory now run on long inputs (also in
   a shared pass). Calibration (`act_guard`, `calibrate_for`, `conformal`), `fit` / `teach` / `adapt`, the memory's
   features and the perturb re-asks read a long input by its retrieved window — the signal the part answers on — so the
-  promise holds for what is deployed.
+  promise holds for what is deployed. Cascade / Vote / Route and `DecideModel.decide_pass` read a long part the same
+  way (its retrieved window, with its context), so a combination scores the signal the part alone and its calibration
+  score.
 - **`option_order="average"`**: `DecisionPart.fit` / `teach` / `adapt` are fitted on the averaged logits the part decides
   on (they were fitted on single-order logits and applied to averaged ones). `DecideModel.fit` / `teach` / `adapt` take
   precomputed `logits=`.

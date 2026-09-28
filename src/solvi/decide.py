@@ -1621,14 +1621,16 @@ class DecideModel:
         supports it, else one per question). What the runtime does for parts grouped in `flow.batches`."""
         parts = list(parts)
         t = self.text(text)
-        if len(parts) > 1 and self.batchable and all(p.option_order != "average" for p in parts):
-            raws = self._raw_pass([p.spec for p in parts], t)
+        long = any(p.long is not None and p._too_long(t) for p in parts)    # a long text: each part retrieves its own
+        if len(parts) > 1 and self.batchable and all(p.option_order != "average" for p in parts) and not long:
+            firsts = [(self._decision(p.spec, z), a, shared)
+                      for p, (z, a, shared) in zip(parts, self._raw_pass([p.spec for p in parts], t))]
         else:
-            raws = [(*p._raw([t])[0], False) for p in parts]
+            firsts = [(*p._initial(t), False) for p in parts]
         names = list(names) if names else [p.__name__ for p in parts]
         out = []
-        for p, (z, a, shared) in zip(parts, raws):
-            d = p._finish(self._decision(p.spec, z), a)
+        for p, (d0, a, shared) in zip(parts, firsts):
+            d = p._finish(d0, a, ctx=p._ctx(t, vals=text if isinstance(text, Facts) else None, raw=text))
             d.extra["pass"] = {"with": names, "shared": shared}
             out.append(d)
         return out
@@ -2304,10 +2306,24 @@ class DecisionPart:
     def _retrieve(self, text, ctx=None):
         """Decide on the top_k sections of a long text; spans and evidence mapped back into the text; the sections read
         in extra["long"]. ctx: as for _finish (the group, and the whole text for perturb and the memory)."""
+        d, a = self._windowed(text)
+        return self._finish(d, a, ctx=ctx if ctx is not None else self._ctx(text))
+
+    def _initial(self, text):
+        """→ (the model's decision before any safeguard, its act logit), as the part reads the text: a long text
+        (long="retrieve") by its retrieved window, spans and evidence mapped back. What a combination (solvi.multi) and
+        DecideModel.decide_pass start from."""
+        if self.long is not None and self._too_long(text):
+            return self._windowed(text)
+        z, a = self._raw([text])[0]
+        return self.model._decision(self.spec, z), a
+
+    def _windowed(self, text):
+        """The decision on a long text's window, before the safeguards → (Decision, act logit)."""
         sp = self.spec
         doc, sel, win, rr = self._window(text)
         z, a = self._raw([win.text])[0]
-        d = self._finish(self.model._decision(sp, z), a, ctx=ctx if ctx is not None else self._ctx(text))
+        d = self.model._decision(sp, z)
         score = {s.index: sc for s, sc in sel}
         d.extra["long"] = {"read": len(sel), "of": len(doc), "by": "bm25+decider" if rr else "bm25",
                            "sections": [[s.start, s.end, s.heading, round(float(score[s.index]), 6)] for s in win.sections]}
@@ -2326,7 +2342,7 @@ class DecisionPart:
             else:
                 ev.append(e)
         d.evidence = ev
-        return d
+        return d, a
 
     def _relevance(self, texts):
         """The decider's own relevance of passages to this question: p(yes) of "Does this passage help answer: …?"."""
