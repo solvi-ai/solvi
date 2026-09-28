@@ -357,3 +357,43 @@ def test_bool_negation_russian_and_declared_negative():
     # a negation in another clause does not touch the cue
     r = textin(s).read("I do not want a refund, cancel A-12, it is urgent", question="cancel_order")
     assert r.fields["urgent"].value is True
+
+
+def test_ask_text_rederives_values_from_quotes():
+    """A caller-built TextRead cannot carry a value its quote does not state: ask_text re-derives each field."""
+    import dataclasses
+    _, s = shop()
+    read = textin(s).read("refund A-7: 500 EUR paid 2026-09-20")
+    assert read.fields["amount"].quote.value == "500"
+    forged = dataclasses.replace(read, fields=dict(read.fields, amount=dataclasses.replace(read.fields["amount"],
+                                                                                          value=5_000_000.0)))
+    res = s.ask_text(forged)
+    f = res.textin.fields["amount"]
+    assert f.status == "unparsed" and "re-derive" in f.why and "amount" in res.textin.missing
+    assert "amount" not in res.trace.init and res["request_refund"].status == "abstain"
+    assert forged.fields["amount"].value == 5_000_000.0          # the caller's object is not changed
+    assert res.trace.replay(s)["ok"]
+    # a quote that is not in the text, or a canonical form the quote does not parse to
+    moved = dataclasses.replace(read, fields=dict(read.fields, amount=dataclasses.replace(
+        read.fields["amount"], quote=dataclasses.replace(read.fields["amount"].quote, value="900"))))
+    assert s.ask_text(moved).textin.fields["amount"].status == "unparsed"
+    canon = dataclasses.replace(read, fields=dict(read.fields, amount=dataclasses.replace(
+        read.fields["amount"], canonical="5000000", value=5_000_000.0)))
+    assert s.ask_text(canon).textin.fields["amount"].status == "unparsed"
+    # an honest read goes through as it is
+    res = s.ask_text(read)
+    assert res.textin is read and res.trace.init["amount"] == 500.0 and res["request_refund"].answer == "approve"
+
+
+def test_replay_rebuilds_the_typed_value_from_the_quote():
+    import dataclasses
+    _, s = shop()
+    res = s.ask_text("refund A-7: 500 EUR paid 2026-09-20", textin=textin(s))
+    rec = next(r for r in res.trace.records if r.name == "textin:amount")
+    assert rec.extra["vtype"] == "float" and replay_record(rec, res.trace.init) == []
+    forged = dataclasses.replace(rec, value=5_000_000.0)
+    bad = replay_record(forged, dict(res.trace.init, amount=5_000_000.0))
+    assert any("not what the quote parses to" in why for *_, why in bad)
+    d = next(r for r in res.trace.records if r.name == "textin:purchase_date")
+    assert replay_record(dataclasses.replace(d, value=dt.date(2026, 9, 21)),
+                         dict(res.trace.init, purchase_date=dt.date(2026, 9, 21)))

@@ -300,6 +300,8 @@ class System:
         return textin.read(text, question=question)
 
     def _prepare_text(self, read, order):
+        from .textin import rederive
+        read = rederive(self, read)                   # each value re-derived from its quote: a built TextRead is not trusted
         if read.question is not None:
             p = self._prepare(read.init_state(), [read.question], order)
         else:                                         # the entry point escalated: nothing is asked

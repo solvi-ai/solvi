@@ -1688,8 +1688,11 @@ of `ask_text` holds, after the flow's steps, one record for the entry point (kin
 decider's identity and probabilities) and one per field (`textin:<field>`, provenance `quoted`, the quote's offsets, the
 parser and its arguments, the extractor's identity and fingerprint). The audit lists those fields under `quoted` with the
 model, counts them as "quoted by model" and the entry point as "decided" — not in the deterministic share — and an answer's
-confidence is at most the entry point's and the read fields' confidences. Replay re-checks each record: the quote is
-literally in the text at its offsets, the recorded parser gives the recorded value, and the flow read exactly that value.
+confidence is at most the entry point's and the read fields' confidences. `ask_text` does not trust a `TextRead` it is
+handed: each field is re-derived from its quote (the quote at its offsets, the parser of the field's type, the typed
+value), and a field that does not re-derive is `unparsed` — a required one is missing and the question abstains. Replay
+re-checks each record: the quote is literally in the text at its offsets, the recorded parser gives the recorded
+canonical form and the typed value rebuilt from it, and the flow read exactly that value.
 Even `CueExtractor`, which is plain code, is recorded this way: which number is "the amount" is still a guess.
 
 **A dialogue.** `tin.update(read, next_message)` reads the next turn over the whole dialogue (turns joined by a new line;

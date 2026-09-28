@@ -21,8 +21,10 @@ question instead of a guess.
 Provenance: a field read from the text is `quoted` by a model (the extractor's identity and fingerprint are recorded), never
 `given`, so the audit counts it among the model outputs ("quoted by model"), not in the deterministic share; the choice
 of entry point is `decided` by the decider. The records (kind "textin") are hash-chained into the answer's trace, and replay
-re-checks each one: the quote is literally in the text at its offsets, the parser gives the recorded value from it, and the
-value is the one the flow read. Nothing is executed from the text: the "call" is data — a question name from the closed
+re-checks each one: the quote is literally in the text at its offsets, the parser gives the recorded value from it (the
+canonical form and the typed value rebuilt from it), and the value is the one the flow read. System.ask_text re-derives
+each field from its quote before asking (`rederive`): a caller-built TextRead cannot carry a value its quote does not
+state. Nothing is executed from the text: the "call" is data — a question name from the closed
 set of entry points and typed values — that solvi checks and then asks itself."""
 from __future__ import annotations
 
@@ -654,6 +656,8 @@ class TextRead:
                 ex["quoted"] = r.quote.value
             if r.ok:
                 ex["canonical"] = r.canonical
+            if r.status == "read":
+                ex["vtype"] = _vtype(r.value)          # replay rebuilds the typed value from the canonical one
             if r.was is not None:
                 from .runtime import srepr
                 ex["was"] = srepr(r.was)
@@ -842,6 +846,94 @@ class TextIn:
                         router=prev.router if isinstance(prev, TextRead) else None)
 
 
+# ------------------------------------------------------------------------------------------------ re-derivation
+_VTYPES = {"float": float, "int": int, "Decimal": Decimal}
+
+
+def _vtype(v):
+    return "enum" if isinstance(v, Enum) else type(v).__name__
+
+
+def _label(v):
+    return str(v.value) if isinstance(v, Enum) else str(v)
+
+
+def _same(a, b):
+    return type(a) is type(b) and a == b
+
+
+def _value_problem(kind, vtype, canonical, value):
+    """Is `value` the typed value of the parser's `canonical` output? → None, or what is wrong. vtype: the recorded type
+    name (None in traces written before it was recorded: then only the number is compared)."""
+    try:
+        if kind == "enum":
+            ok = _label(value) == str(canonical)
+            want = canonical
+        elif kind in ("number", "integer"):
+            d = Decimal(str(canonical))
+            if vtype == "int" and d != d.to_integral_value():
+                return f"the recorded canonical {canonical!r} is not whole"
+            want = _VTYPES.get(vtype, float)(d)   # compared by number: a round trip may change float ↔ Decimal
+            ok = not isinstance(value, bool) and isinstance(value, (int, float, Decimal)) and value == want
+        elif kind == "date":
+            want = _dt.date.fromisoformat(str(canonical))
+            ok = value == want or (isinstance(value, str) and value == canonical)
+        elif kind == "bool":
+            want = canonical
+            ok = isinstance(value, bool) and value is canonical
+        else:
+            want = canonical
+            ok = value == canonical
+    except (InvalidOperation, ValueError, TypeError) as e:
+        return f"the recorded canonical {canonical!r} is not a {kind}: {e}"
+    return None if ok else f"value {value!r} is not what the quote parses to ({want!r})"
+
+
+def rederive(system, read):
+    """The fields of a TextRead re-derived from their quotes before System.ask_text trusts them: each field `read` must
+    quote the text at its offsets, and the field's parser (the kind its declared type gives) must turn the quote, with the
+    recorded arguments, into the recorded canonical form and typed value. A field that does not re-derive becomes
+    `unparsed` (so a required one is missing and the question abstains or escalates); a field the entry point does not read
+    is dropped. → the read itself when everything holds, else a copy (the caller's TextRead is not changed)."""
+    if read.question is None:
+        return read
+    ep = entry_points(system, [read.question])[0]
+    fields, changed = {}, False
+    for f, r in read.fields.items():
+        if f not in ep.fields:
+            changed = True
+            continue
+        why = None if r.status != "read" else _rederive_problem(read, r, field_spec(ep.fields[f]))
+        if why is None:
+            fields[f] = r
+        else:
+            changed = True
+            fields[f] = FieldRead(f, "unparsed", quote=r.quote, confidence=r.confidence, parser=r.parser, spec=r.spec,
+                                  why=f"does not re-derive from its quote: {why}", required=ep.fields[f].required,
+                                  model=r.model)
+    return dataclasses.replace(read, fields=fields) if changed else read
+
+
+def _rederive_problem(read, r, fs):
+    q = r.quote
+    if q is None:
+        return "no quote"
+    if q.source != read.source or not (0 <= q.start <= q.end <= len(read.text)) or read.text[q.start:q.end] != q.value:
+        return f"{q.value!r} is not at [{q.start}:{q.end}] of the text"
+    if fs.kind == "unsupported" or r.parser != fs.kind:
+        return f"parser {r.parser!r} does not read the field's type (kind {fs.kind})"
+    try:
+        c = PARSERS[r.parser](q.value, r.spec or {})
+        want = fs.value(c)
+    except (ParseError, KeyError, ValueError, InvalidOperation) as e:
+        return f"the quote does not parse: {e}"
+    if c != r.canonical:
+        return f"parsed {c!r} ≠ {r.canonical!r}"
+    if not _same(r.value, want):
+        return f"value {r.value!r} is not what the quote parses to ({want!r})"
+    return None
+
+
 # ------------------------------------------------------------------------------------------------ replay
 def replay_record(r, init):
     """Re-check a "textin" trace record against the recorded input → [(step, name, reason)]: the entry point is one of the
@@ -871,6 +963,10 @@ def replay_record(r, init):
             return [(r.step, r.name, f"the quote does not parse any more: {err}")]
         if c != ex.get("canonical"):
             bad.append((r.step, r.name, f"parsed {c!r} ≠ recorded {ex.get('canonical')!r}"))
+        else:
+            why = _value_problem(ex["parser"], ex.get("vtype"), c, r.value)
+            if why:
+                bad.append((r.step, r.name, why))
         if f in init and init[f] != r.value:
             bad.append((r.step, r.name, f"the flow read {f} = {init[f]!r}, not the value read from the text {r.value!r}"))
     elif ex.get("status") == "given":
