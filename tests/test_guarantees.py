@@ -91,3 +91,56 @@ def test_conformal_sets_cover_the_right_answer_and_reach_the_escalation_message(
     d = part(email="The app crashed after the refund of order 5.")
     assert d.escalate and "candidates at 90%" in d.escalate
     assert set(d.extra["candidates"]) <= set(TEAMS)
+
+
+class PositionBiased:
+    """Keyword logits plus a strong preference for whatever option is listed first."""
+    model_id = "test/position-biased"
+
+    def fingerprint(self):
+        return "position-biased-1"
+
+    def logits(self, items):
+        out = []
+        for it in items:
+            low = it.text.lower()
+            z = [1.0 * ("refund" in low and o == "billing") + 1.0 * ("crash" in low and o == "technical")
+                 + (1.5 if i == 0 else 0.0) for i, o in enumerate(it.options)]
+            out.append(np.stack([np.array(z), np.array(z) - 1.0], 1))
+        return out
+
+
+def _biased():
+    from solvi.decide import DecideModel
+    return DecideModel(PositionBiased(), meta={"format": "test", "temperature": 1.0})
+
+
+def test_option_order_canonical_and_average_remove_the_callers_order_from_the_answer():
+    m = _biased()
+    text = "A refund please."
+    given = [m.decision("t", "Team?", "email", o).decide(text).value
+             for o in (["billing", "technical"], ["technical", "billing"])]
+    assert given == ["billing", "technical"]                       # the listed order decides: a position bias
+    for mode in ("canonical", "average"):
+        got = {m.decision("t", "Team?", "email", o, option_order=mode).decide(text).value
+               for o in (["billing", "technical"], ["technical", "billing"])}
+        assert len(got) == 1, mode
+    avg = m.decision("t", "Team?", "email", ["technical", "billing"], option_order="average")
+    assert avg.decide(text).probs["billing"] == pytest.approx(1 / (1 + np.exp(-1.0)), abs=1e-9)  # the bias cancels
+    assert avg.fingerprint() != m.decision("t", "Team?", "email", ["technical", "billing"]).fingerprint()
+
+
+def test_a_near_tie_escalates_with_min_margin():
+    m = model()
+    part = m.decision("team", "Which team?", "email", TEAMS, min_margin=0.2)
+    d = part(email="The app crashed after the refund of order 7.")
+    assert d.escalate and "margin" in d.escalate and d.extra["margin"] < 0.2
+    assert not part(email="I was charged twice, please refund order 3.").escalate
+
+
+def test_act_guard_reports_how_much_must_escalate_when_the_model_is_often_wrong():
+    part = model(noise=2.0).decision("team", "Which team?", "email", TEAMS)
+    info = part.act_guard(_labelled(), risk=0.05)
+    assert info["base_error"] > 0.05
+    assert info["must_escalate_at_least"] == pytest.approx((info["base_error"] - 0.05) / 0.95)
+    assert 1 - info["answered"] >= info["must_escalate_at_least"] - 1e-9

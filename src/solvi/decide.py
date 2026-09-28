@@ -1579,10 +1579,10 @@ class DecideModel:
         supports it, else one per question). What the runtime does for parts grouped in `flow.batches`."""
         parts = list(parts)
         t = self.text(text)
-        if len(parts) > 1 and self.batchable:
+        if len(parts) > 1 and self.batchable and all(p.option_order == "given" for p in parts):
             raws = self._raw_pass([p.spec for p in parts], t)
         else:
-            raws = [(z, a, False) for z, a in self._raw_full([(p.spec, t) for p in parts])]
+            raws = [(*p._raw([t])[0], False) for p in parts]
         names = list(names) if names else [p.__name__ for p in parts]
         out = []
         for p, (z, a, shared) in zip(parts, raws):
@@ -1729,7 +1729,8 @@ class DecideModel:
     # --- catalog parts
     def decision(self, name, task, text_fact="doc", options=(), descriptions=None, multi=False, other=None, *, kind=None,
                  type=None, escalate_below=None, act_threshold=None, use_act=None, target_error=None,
-                 score_value="median", unknown=False, k=None, bins=None, unit=None, coverage=0.8, evidence=False):
+                 score_value="median", unknown=False, k=None, bins=None, unit=None, coverage=0.8, evidence=False,
+                 option_order="given", permutations=4, min_margin=None):
         """A catalog part: text_fact (a fact name, or a list of them) → Decision(value, probs).
 
         The question: `options` (a list, or {option: description}) and `kind` ("choice", "multi", "score", "noul"; default
@@ -1741,7 +1742,12 @@ class DecideModel:
         Escalation: the model's act signal when it has one (use_act=False ignores it; act_threshold overrides the
         checkpoint's threshold; target_error=0.1 takes the checkpoint's threshold for that error rate), and a calibrated
         confidence below escalate_below (see calibrate_for); an escalated decision is rejected — the fact is missing, the
-        answer abstains ("model escalated" / "low confidence" in the audit and stats).
+        answer abstains ("model escalated" / "low confidence" in the audit and stats). min_margin=0.1: also escalate when
+        the two most probable answers are closer than that (a near tie is where a misleading text flips the choice).
+
+        Option order (choice and multi questions): "given" asks as listed; "canonical" asks in sorted order, so how a
+        caller lists the options cannot change the answer; "average" averages the model's logits over `permutations`
+        rotations of the list (each costs a forward pass) — against a model's preference for positions.
 
         Register with `cat.fn(part)` (a fact other parts read) or make it a question's answer with `part.question(cat)`.
         The value is one of the options by construction; the options are the part's closed set; provenance `decided`; the
@@ -1773,8 +1779,11 @@ class DecideModel:
         if prim["unknown"] and not self.has_unknown:
             raise ValueError(f"{name}: this checkpoint has no 'not stated' output (declare 'unknown', docs/decide_format.md "
                              "§9); drop Maybe[...] / unknown=True")
+        if option_order not in ("given", "canonical", "average"):
+            raise ValueError('option_order must be "given", "canonical" or "average"')
         return DecisionPart(self, name, task, text_fact, options, descriptions, multi, other, kind=kind, as_bool=as_bool,
                             escalate_below=escalate_below, act_threshold=act_threshold, use_act=use_act,
+                            option_order=option_order, permutations=permutations, min_margin=min_margin,
                             score_value=score_value, **{x: v for x, v in prim.items() if v not in (None, False, 0)
                                                          or x == "coverage"})
 
@@ -1825,9 +1834,15 @@ class DecisionPart:
     deterministic = True
 
     def __init__(self, model, name, task, text_fact, options, descriptions=None, multi=False, other=None, *, kind=None,
-                 as_bool=False, escalate_below=None, act_threshold=None, use_act=None, score_value="median", **prim):
+                 as_bool=False, escalate_below=None, act_threshold=None, use_act=None, score_value="median",
+                 option_order="given", permutations=4, min_margin=None, **prim):
         self.model = model
         self.spec = _Spec(task, options, descriptions, multi, other, kind, as_bool, score_value, **prim)
+        self._spec_args = (task, descriptions, multi, other, kind, as_bool, score_value, prim)
+        if self.spec.kind not in ("choice", "multi") or len(self.spec.real) < 2:
+            option_order = "given"                  # scores, numbers, rankings: the order is the meaning
+        self.option_order, self.permutations, self.min_margin = option_order, max(1, int(permutations)), min_margin
+        self._orders = self._option_orders()
         self.facts = [text_fact] if isinstance(text_fact, str) else list(text_fact)
         self.escalate_below, self.act_threshold, self.use_act = escalate_below, act_threshold, use_act
         self.guarantee = None                   # what the escalation threshold promises (act_guard / calibrate_for)
@@ -1883,7 +1898,9 @@ class DecisionPart:
         a = self.adaptation
         th = {k: v for k, v in (("escalate_below", self.escalate_below), ("act_threshold", self.act_threshold),
                                 ("use_act", self.use_act), ("guarantee", self.guarantee),
-                                ("conformal", self.conformal_set)) if v is not None}
+                                ("conformal", self.conformal_set), ("min_margin", self.min_margin),
+                                ("option_order", None if self.option_order == "given" else
+                                 (self.option_order, self.permutations))) if v is not None}
         if th:
             return digest("DecisionPart", self.model.weights_fingerprint(), self.spec.describe(), a.params() if a else None, th)
         return digest("DecisionPart", self.model.weights_fingerprint(), self.spec.describe(), a.params() if a else None)
@@ -1927,10 +1944,11 @@ class DecisionPart:
         records the pass."""
         text = self.text_of(args)
         m = self.model
-        if len(siblings) > 1 and m.batchable and all(s.model is m for s in siblings):
+        if (len(siblings) > 1 and m.batchable and all(s.model is m for s in siblings)
+                and all(s.option_order == "given" for s in siblings)):
             z, a, shared = m._raw_pass([s.spec for s in siblings], text)[siblings.index(self)]
         else:
-            (z, a), shared = m._raw_full([(self.spec, text)])[0], False
+            (z, a), shared = self._raw([text])[0], False
         d = self._bind(self._finish(m._decision(self.spec, z), a), args)
         d.extra["pass"] = {"with": list(names) if names else [s.__name__ for s in siblings], "shared": shared}
         return d
@@ -1940,6 +1958,12 @@ class DecisionPart:
 
     def _finish(self, d, act):
         d = self.model._finish(self.spec, d, act, self.escalate_below, self.act_threshold, self.use_act)
+        if self.min_margin is not None and not self.spec.multi and len(d.probs) > 1:
+            (a1, p1), (a2, p2) = sorted(d.probs.items(), key=lambda kv: -kv[1])[:2]
+            d.extra["margin"] = p1 - p2
+            if d.escalate is None and p1 - p2 < self.min_margin:
+                d.escalate = (f"margin {p1 - p2:.2f} < {self.min_margin:g} between {a1!r} ({p1:.2f}) and {a2!r} ({p2:.2f}); "
+                              f"would have answered {d.value!r}")
         if self.guarantee is not None:
             d.extra["guarantee"] = dict(self.guarantee)
         if self.conformal_set is not None and d.probs:
@@ -1959,8 +1983,46 @@ class DecisionPart:
                       key=lambda i: -d.probs[keys[i]])
         return [keys[i] if keys[i] is Unknown else self.spec.out(keys[i]) for i in keep]
 
+    def _option_orders(self):
+        """The option lists the model is asked with: [the given one], [sorted], or `permutations` rotations."""
+        real = list(self.spec.real)
+        if self.option_order == "canonical":
+            return [sorted(real, key=str)]
+        if self.option_order == "average":
+            k = len(real)
+            return [real[s:] + real[:s] for s in sorted({round(i * k / self.permutations) % k
+                                                         for i in range(min(self.permutations, k))})]
+        return [real]
+
+    def _raw(self, texts):
+        """[text] → [(logits in the part's option order, act logit)], asked with each of the part's option orders and
+        averaged (the act logit too); the question's adaptation applies afterwards, to the part's own spec."""
+        if self.option_order == "given":
+            return self.model._raw_full([(self.spec, t) for t in texts])
+        task, desc, multi, other, kind, as_bool, sv, prim = self._spec_args
+        opts = (lambda o: o + [self.spec.other] if self.spec.other is not None and self.spec.other not in o else o)
+        specs = [_Spec(task, opts(list(o)), desc, multi, other, kind, as_bool, sv, **prim) for o in self._orders]
+        idx = {o: i for i, o in enumerate(self.spec.real)}
+        runs = [self.model._raw_full([(sp, t) for t in texts]) for sp in specs]
+        out = []
+        for j in range(len(texts)):
+            zs, us, acts = [], [], []
+            for sp, run in zip(specs, runs):
+                z, a = run[j]
+                back = np.empty(len(self.spec.real))
+                for pos, o in enumerate(sp.real):
+                    back[idx[o]] = z[pos]
+                zs.append(back)
+                us.append(getattr(z, "unknown", None))
+                acts.append(a)
+            m = np.mean(zs, axis=0).view(Logits)
+            m.unknown = None if any(u is None for u in us) else float(np.mean(us))
+            m.pointer = getattr(runs[0][j][0], "pointer", None)
+            out.append((m, None if any(a is None for a in acts) else float(np.mean(acts))))
+        return out
+
     def _one(self, text):
-        z, a = self.model._raw_full([(self.spec, text)])[0]
+        z, a = self._raw([text])[0]
         return self._finish(self.model._decision(self.spec, z), a)
 
     # the model's methods for this decision
@@ -1969,7 +2031,7 @@ class DecisionPart:
         one = _single(text)
         texts = [text] if one else list(text)
         out = [self._finish(self.model._decision(self.spec, z), a)
-               for z, a in self.model._raw_full([(self.spec, self.model.text(t)) for t in texts])]
+               for z, a in self._raw([self.model.text(t) for t in texts])]
         return out[0] if one else out
 
     def score(self, text):
@@ -2012,7 +2074,7 @@ class DecisionPart:
             raise ValueError('signal must be "auto", "act" or "confidence"')
         gold = [Unknown if y is Unknown else self.spec.label(y) for _, y in ex]
         conf, act, ok, ds = [], [], [], []
-        for (z, a), y in zip(self.model._raw_full([(self.spec, t) for t, _ in ex]), gold):
+        for (z, a), y in zip(self._raw([t for t, _ in ex]), gold):
             d = self.model._decision(self.spec, z)
             ds.append(d)
             ok.append(float((Unknown if d.value is Unknown else self.spec.label(d.value)) == y))
@@ -2064,7 +2126,9 @@ class DecisionPart:
         stream [(input, correct)] — a few hundred is typical: the escalation threshold is set so that, for inputs like
         the examples, P(answered alone AND wrong) ≤ risk — a share of all questions (answered or escalated), not of
         the answered ones. It holds for your stream, not under a shift of domain: recalibrate when the inputs change.
-        Too few or too hard examples → everything escalates (threshold inf). Changes the part's fingerprint; the trace
+        Too few or too hard examples → everything escalates (threshold inf). Feasibility: when the model is wrong on
+        a share μ > risk of the examples, any rule must escalate at least (μ − risk) / (1 − risk) of the inputs
+        ("must_escalate_at_least"; arXiv 2606.29054) — a better signal can only get closer to that bound. Changes the part's fingerprint; the trace
         of every decision records the promise. → {"signal", "threshold", "answered" (share answered alone on the
         examples), "error" (among them), "risk" (answered and wrong, on the examples), "n", "guarantee"}."""
         from .calibration import crc_threshold
@@ -2075,9 +2139,11 @@ class DecisionPart:
         self._set_threshold(name, thr, g)
         s, o = np.asarray(sig, float), np.asarray(ok, float)
         auto = s >= thr
+        base = float(1 - o.mean())
         return {"signal": name, "threshold": thr, "answered": float(auto.mean()),
                 "error": float(1 - o[auto].mean()) if auto.any() else 0.0,
-                "risk": float(((1 - o) * auto).mean()), "n": len(ok), "guarantee": g["promise"]}
+                "risk": float(((1 - o) * auto).mean()), "n": len(ok), "guarantee": g["promise"],
+                "base_error": base, "must_escalate_at_least": max(0.0, (base - risk) / (1 - risk))}
 
     def conformal(self, examples, coverage=0.90):
         """Conformal answer sets from labelled examples [(input, correct)]: afterwards every decision carries
