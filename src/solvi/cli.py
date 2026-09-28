@@ -225,13 +225,16 @@ def cmd_ask(a):
         if a.decider:
             from .models import ModelError, load as load_model
             try:
-                decider = load_model(a.decider, a.backend)
+                decider = load_model(a.decider, a.backend, api_key=a.api_key)
             except ModelError as e:
                 _fail(str(e))
+        from .llm import LLMError
         try:
             res = system.ask_text(text, decider, question=names[0] if names else None)
         except (KeyError, ValueError) as e:
             _fail(f"ask --text: {e.args[0] if e.args else e}")
+        except LLMError as e:                          # a wrong key, model or URL: said plainly, no traceback
+            _fail(f"ask --decider {a.decider}: {e}")
     else:
         if a.decider:
             _fail("ask: --decider routes a --text; a state is asked as it is")
@@ -289,6 +292,8 @@ def ask_parser(sub):
     s.add_argument("--decider", help="with --text: the model that picks the question (a folder, a cached Hugging Face id, "
                                      "systemone:URL#model, llm:URL#model or module:attr; see solvi models)")
     s.add_argument("--backend", default="auto", choices=["auto", "onnx", "torch"], help="the decider's backend")
+    s.add_argument("--api-key", help="for a systemone: / llm: decider (default $SOLVI_SYSTEMONE_API_KEY / "
+                   "$SOLVI_LLM_API_KEY; prefer the variable: arguments are visible to other local users)")
     s.add_argument("--audit", action="store_true", help="also print what each answer rests on (res.audit())")
     s.add_argument("--report", choices=["md", "html"], help="print the decision's report instead (res.report)")
     s.add_argument("--lang", help="the language of the answers and the audit: en (default) or ru")

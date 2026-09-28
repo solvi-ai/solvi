@@ -453,3 +453,32 @@ def test_models_check_a_real_cached_decider(capsys, tmp_path):
     code, out = run(capsys, "models", "check", "solvi-ai/solvi-base", "--examples", ex, "--task", TASK, "--json")
     data = json.loads(out)
     assert code == 0 and data["id"] == "solvi-ai/solvi-base" and data["examples"]["n"] == 6
+
+
+def test_ask_text_with_an_llm_decider_takes_an_api_key_and_fails_cleanly(tmp_path, capsys):
+    f = tmp_path / "texttask.py"
+    f.write_text(TEXT_TASK)
+    seen = []
+
+    class Refuse(http.server.BaseHTTPRequestHandler):
+        def do_POST(self):
+            seen.append(self.headers.get("Authorization"))
+            self.rfile.read(int(self.headers.get("Content-Length") or 0))
+            self.send_response(401)
+            self.end_headers()
+            self.wfile.write(b'{"error": {"message": "bad key"}}')
+
+        def log_message(self, *a):
+            pass
+    srv = http.server.HTTPServer(("127.0.0.1", 0), Refuse)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    try:
+        capsys.readouterr()
+        with pytest.raises(SystemExit) as e:
+            main(["ask", f"{f}:two", "--text", "please refund 80", "--decider",
+                  f"llm:http://127.0.0.1:{srv.server_port}/v1#tiny", "--api-key", "sk-test-1"])
+    finally:
+        srv.shutdown()
+    err = capsys.readouterr().err
+    assert e.value.code == 2 and seen and seen[0] == "Bearer sk-test-1"
+    assert "HTTP 401" in err and "Traceback" not in err and "sk-test-1" not in err

@@ -762,7 +762,8 @@ decision's `extra["llm"]` records the format used, where the probabilities came 
 the quote and the tokens. The API key goes in the Authorization header only — never in the trace, the fingerprint or an
 error. An LLM's output is not reproducible bit for bit, so `replay` does not call it again: it checks the recorded output
 (the verdict is "trusted"). The server can change the weights behind a name: calibrate again when it does.
-`solvi ask --decider llm:URL#model` and `solvi models check llm:URL#model` take the same (`$SOLVI_LLM_API_KEY`).
+`solvi ask --decider llm:URL#model` and `solvi models check llm:URL#model` take the same (`--api-key`, or
+`$SOLVI_LLM_API_KEY`); a wrong key, model or URL ends `solvi ask` with exit status 2 and the server's refusal in one line.
 
 **Cost and latency.** Each question about each input is a paid request — the question, every option with its
 description and the whole text, a few hundred tokens or more — and takes 0.3–5 s, where a local decider takes ~50 ms on
