@@ -17,7 +17,9 @@ returns log-probabilities for the answer's tokens, the probabilities come from t
 its tokens' probabilities; the others: the alternatives at its first token), not from the numbers the model wrote.
 
 Everything is validated: the answer is one of the options, the probabilities are numbers in [0, 1] that agree with the
-answer, the quote is literally in the text. An invalid reply, a refusal, a cut-off reply or a server that does not answer
+answer, the quote is in the text (literally, up to typographic quotes and apostrophes, dashes and runs of whitespace). A
+quote that is not in the text escalates when the question asks for evidence; otherwise it is dropped (the answer stands,
+`extra["llm"]["quote_dropped"]` records it). An invalid reply, a refusal, a cut-off reply or a server that does not answer
 (after `retries`) escalates — "model escalated: invalid LLM output — ..." — and is never turned into a guess. The
 probabilities become the decider's logits (log p), so everything built on a DecideModel works unchanged: act_guard /
 conformal / calibrate_for on your labelled examples (on the confidence: an LLM gives no act signal), fit / teach / adapt,
@@ -37,6 +39,7 @@ answer the easy inputs, or in a Vote with a model of another family."""
 from __future__ import annotations
 
 import hashlib
+import http.client
 import json
 import math
 import re
@@ -125,22 +128,35 @@ class _BadInput(Exception):
     """The server refused this request's input (HTTP 400 / 413 / 422 not about the reply format): that item escalates."""
 
 
-_FORMAT_WORDS = re.compile(r"response_format|json_schema|json_object|logprobs|structured output|guided", re.IGNORECASE)
+_FORMAT_WORDS = re.compile(r"response_format|json_schema|json_object|logprobs|structured[ _-]?outputs?|guided",
+                           re.IGNORECASE)
+WHY_CHARS = 300                                        # how much of a server's error message goes into an escalation
 
 
 def _error_text(e):
-    """The body of an HTTP error → its message (the JSON error's "message", else the text), cut to 200 characters."""
+    """The body of an HTTP error → its message: the JSON error's "message", else the text. A gateway that wraps the
+    upstream provider's error (OpenRouter: "Provider returned error" with the real cause in `error.metadata.raw`) → the
+    message and that cause. Whitespace runs collapsed; not cut (the caller cuts what it shows)."""
     try:
-        raw = e.read(4096).decode("utf-8", "replace")
+        raw = e.read(16384).decode("utf-8", "replace")
     except Exception:  # noqa: BLE001 — no body to read
         return ""
     try:
         j = json.loads(raw)
-        msg = (j.get("error") or {}).get("message") if isinstance(j.get("error"), dict) else j.get("error") or j.get("message")
-        raw = msg if isinstance(msg, str) else raw
+        err = j.get("error")
+        msg = err.get("message") if isinstance(err, dict) else err or j.get("message")
+        out = msg if isinstance(msg, str) else raw
+        meta = err.get("metadata") if isinstance(err, dict) else None
+        cause = meta.get("raw") if isinstance(meta, dict) else None
+        if cause is not None and not isinstance(cause, str):
+            cause = json.dumps(cause, ensure_ascii=False)
+        if cause and cause.strip():
+            who = meta.get("provider_name")
+            out += f" ({who}: {cause})" if isinstance(who, str) and who else f" ({cause})"
+        raw = out
     except (ValueError, AttributeError):
         pass
-    return " ".join(raw.split())[:200]
+    return " ".join(raw.split())
 
 
 def _shape(it):
@@ -220,18 +236,29 @@ def _json(content):
     return v
 
 
+# typographic quotes, apostrophes and dashes → their ASCII form, one character for one (offsets stay valid)
+_TYPO = str.maketrans({"\u2018": "'", "\u2019": "'", "\u201a": "'", "\u201b": "'",
+                       "\u201c": '"', "\u201d": '"', "\u201e": '"', "\u201f": '"',
+                       "\u2010": "-", "\u2011": "-", "\u2012": "-", "\u2013": "-", "\u2014": "-", "\u2212": "-"})
+
+
 def locate(passage, text):
-    """A passage → (start, end) of its first literal occurrence in the text; runs of whitespace may differ (a new line
-    written as a space), nothing else. None when it is not there."""
+    """A passage → (start, end) of its first occurrence in the text. Literal up to typographic quotes and apostrophes
+    (’ ‘ “ ” as ' "), dashes (– — ‑ − as -) and runs of whitespace (a new line written as a space); nothing else. The
+    offsets are into the text as given. None when it is not there."""
     if not passage:
         return None
     i = text.find(passage)
     if i >= 0:
         return i, i + len(passage)
-    words = passage.split()
+    p, t = passage.translate(_TYPO), text.translate(_TYPO)
+    i = t.find(p)
+    if i >= 0:
+        return i, i + len(p)
+    words = p.split()
     if not words:
         return None
-    m = re.search(r"\s+".join(re.escape(w) for w in words), text)
+    m = re.search(r"\s+".join(re.escape(w) for w in words), t)
     return (m.start(), m.end()) if m else None
 
 
@@ -355,13 +382,16 @@ def read_reply(it, content, logprobs=None, ask="probabilities"):
         quote = ""
     if not isinstance(quote, str):
         raise InvalidOutput(f"the quote is not a string: {quote!r}")
+    needs_evidence = bool(it.pointer) and shape != "span"
     qspan = locate(quote.strip(), text) if quote.strip() else None
     if quote.strip() and qspan is None:
-        raise InvalidOutput(f"the quote {quote.strip()[:80]!r} is not in the text")
+        if needs_evidence:
+            raise InvalidOutput(f"the quote {quote.strip()[:80]!r} is not in the text")
+        info["quote_dropped"] = quote.strip()[:200]     # no evidence asked for: the answer stands, the quote does not
     if qspan is not None:
         info["quote"] = [text[qspan[0]:qspan[1]], qspan[0], qspan[1]]
     evidence = None if qspan is None else {"null": 0.0, "spans": [(1.0, qspan[0], qspan[1], text[qspan[0]:qspan[1]])]}
-    if it.pointer and shape != "span" and qspan is None and reply.get("answer") not in (NOT_STATED, [NOT_STATED]):
+    if needs_evidence and qspan is None and reply.get("answer") not in (NOT_STATED, [NOT_STATED]):
         raise InvalidOutput("evidence was asked for and the reply quotes nothing")
 
     if shape == "span":
@@ -425,6 +455,27 @@ def read_reply(it, content, logprobs=None, ask="probabilities"):
 
 
 # ------------------------------------------------------------------------------------------------ the scorer
+# the request fields solvi sets itself: the reply contract, the format ladder and the trace depend on them
+RESERVED = ("model", "messages", "response_format", "logprobs", "top_logprobs", "temperature", "max_tokens", "seed",
+            "stream", "n")
+
+
+def _extra_body(extra):
+    """extra_body → a JSON-safe copy; ValueError for a non-dict, a value that is not JSON or a field solvi sets itself."""
+    if extra is None:
+        return None
+    if not isinstance(extra, dict):
+        raise ValueError(f"extra_body is a dict of request fields, not {type(extra).__name__}")
+    taken = sorted(k for k in extra if k in RESERVED)
+    if taken:
+        raise ValueError(f"extra_body cannot set {taken}: solvi sets them itself (model, max_tokens and seed are "
+                         "arguments; the messages, reply format, logprobs and temperature 0 are the reply contract)")
+    try:
+        return json.loads(json.dumps(extra, allow_nan=False))
+    except (TypeError, ValueError) as e:
+        raise ValueError(f"extra_body is not JSON: {e}") from None
+
+
 class LLMScorer:
     """A scorer for DecideModel over an OpenAI-compatible `POST {base_url}/chat/completions` (standard library HTTP, no
     dependencies). See the module docs; `llm(...)` builds the DecideModel."""
@@ -432,8 +483,8 @@ class LLMScorer:
     tag = "llm"
 
     def __init__(self, base_url, model, api_key=None, *, timeout=60.0, retries=2, backoff=1.0, response_format="auto",
-                 logprobs="auto", ask="probabilities", max_tokens=512, seed=0, headers=None, workers=4, opener=None,
-                 sleep=None):
+                 logprobs="auto", ask="probabilities", max_tokens=512, seed=None, headers=None, extra_body=None,
+                 workers=4, opener=None, sleep=None):
         if response_format not in ("auto",) + FORMATS:
             raise ValueError(f"response_format must be 'auto' or one of {FORMATS}")
         if logprobs not in ("auto", True, False):
@@ -453,6 +504,7 @@ class LLMScorer:
         self.response_format, self.logprobs, self.ask = response_format, logprobs, ask
         self.max_tokens, self.seed = int(max_tokens), seed
         self._headers = dict(headers or {})
+        self.extra_body = _extra_body(extra_body)
         self.workers = max(1, int(workers))
         self.opener = opener or urllib.request.urlopen
         self.sleep = sleep or time.sleep
@@ -471,14 +523,20 @@ class LLMScorer:
         return f"LLMScorer({self.endpoint!r}, {self.model!r})"
 
     def fingerprint(self):
-        return f"llm|{self.endpoint}|{self.model}|{self.template}|{self.ask}|{self.response_format}|{self.logprobs}|" \
-               f"{self.max_tokens}|{self.seed}"
+        fp = f"llm|{self.endpoint}|{self.model}|{self.template}|{self.ask}|{self.response_format}|{self.logprobs}|" \
+             f"{self.max_tokens}|{self.seed}"
+        if self.extra_body:                            # provider pinning, reasoning ... change what answers
+            blob = json.dumps(self.extra_body, sort_keys=True, ensure_ascii=False)
+            fp += "|x:" + hashlib.sha256(blob.encode()).hexdigest()[:16]
+        return fp
 
     # --- one request
     def body(self, it, fmt=None, lp=None):
         fmt = fmt or self._format
         lp = self._lp if lp is None else lp
-        b = {"model": self.model, "messages": messages(it, self.ask), "temperature": 0, "max_tokens": self.max_tokens}
+        b = json.loads(json.dumps(self.extra_body)) if self.extra_body else {}      # a fresh copy per request
+        b.update({"model": self.model, "messages": messages(it, self.ask), "temperature": 0,
+                  "max_tokens": self.max_tokens})
         if self.seed is not None:
             b["seed"] = self.seed
         if fmt == "json_schema":
@@ -531,10 +589,12 @@ class LLMScorer:
     def request(self, it):
         """→ (the server's response dict, the format used); _Transient when the server does not answer, _BadInput when it
         refuses this request's input."""
-        attempt, last = 0, None
+        attempt, last, tried = 0, None, []
         while True:
             with self._lock:
                 fmt, lp = self._format, self._lp
+            if (fmt, lp) not in tried:
+                tried.append((fmt, lp))
             body = self.body(it, fmt, lp)
             try:
                 resp = self._post(body)
@@ -548,13 +608,16 @@ class LLMScorer:
                     why = _error_text(e)
                     if code != 413 and self._step_down(fmt, lp, why):
                         continue
-                    raise _BadInput(f"HTTP {code}" + (f" — {why}" if why else "")) from None
+                    steps = "" if len(tried) < 2 else " after trying " + ", ".join(
+                        f + (" with logprobs" if with_lp else "") for f, with_lp in tried)
+                    raise _BadInput(f"HTTP {code}{steps}" + (f" — {why[:WHY_CHARS]}" if why else "")) from None
                 if code in (408, 409, 429) or code >= 500:
                     last = f"HTTP {code}"
                 else:
                     raise LLMError(f"HTTP {code} from {self.endpoint} (model {self.model!r}): check the URL, the model "
                                    "name and the API key") from None
-            except (urllib.error.URLError, TimeoutError, OSError, ValueError) as e:
+            except (urllib.error.URLError, TimeoutError, OSError, ValueError, http.client.HTTPException) as e:
+                # HTTPException: the connection broke mid-answer (IncompleteRead, RemoteDisconnected, BadStatusLine)
                 last = f"{type(e).__name__}: {getattr(e, 'reason', e)}"
             attempt += 1
             if attempt > self.retries:
@@ -613,7 +676,7 @@ MODES = ["single", "multi", "score", "noul", "span"]
 
 
 def llm(base_url, model, api_key=None, *, timeout=60.0, retries=2, backoff=1.0, response_format="auto", logprobs="auto",
-        ask="probabilities", max_tokens=512, seed=0, headers=None, workers=4, opener=None, sleep=None):
+        ask="probabilities", max_tokens=512, seed=None, headers=None, extra_body=None, workers=4, opener=None, sleep=None):
     """A DecideModel over an OpenAI-compatible chat-completions server (see the module docs).
 
     base_url: the API root ("https://api.openai.com/v1", "https://openrouter.ai/api/v1", "http://127.0.0.1:8000/v1" for
@@ -624,12 +687,22 @@ request and on a 400 about the format; any other 400 / 413 / 422 escalates that 
 endpoint"), or one of them. logprobs: "auto" (ask for them;
     drop them when the server refuses), True, False. ask: "probabilities" (one per option) or "confidence" (one number,
     fewer tokens; the rest shared evenly). retries / backoff: for network errors, timeouts, 408 / 409 / 429 / 5xx.
-    seed: sent when not None (servers that support it are more repeatable). headers: extra HTTP headers (OpenRouter's
-    HTTP-Referer, X-Title). workers: parallel requests for several questions. opener: a replacement for urllib's urlopen
+    seed: sent only when set (default None: not sent; some providers reject seed 0, and at temperature 0 it rarely
+    matters). headers: extra HTTP headers (OpenRouter's HTTP-Referer, X-Title). extra_body: server-specific request
+    fields merged into every request's JSON — OpenRouter's provider routing and reasoning settings, vLLM's sampling
+    extras. A field solvi sets itself (model, messages, response_format, logprobs, top_logprobs, temperature,
+    max_tokens, seed, stream, n) is refused with ValueError, never overridden; extra_body enters the fingerprint.
+    Pinning one OpenRouter provider, with no fallback to another:
+
+        llm("https://openrouter.ai/api/v1", "openai/gpt-oss-20b", api_key=KEY,
+            extra_body={"provider": {"order": ["groq"], "allow_fallbacks": False},
+                        "reasoning": {"effort": "low"}})
+
+    workers: parallel requests for several questions. opener: a replacement for urllib's urlopen
     (tests, proxies); sleep: for the backoff (tests)."""
     sc = LLMScorer(base_url, model, api_key, timeout=timeout, retries=retries, backoff=backoff,
                    response_format=response_format, logprobs=logprobs, ask=ask, max_tokens=max_tokens, seed=seed,
-                   headers=headers, workers=workers, opener=opener, sleep=sleep)
+                   headers=headers, extra_body=extra_body, workers=workers, opener=opener, sleep=sleep)
     meta = {"format": "solvi_decide v3", "subformat": TEMPLATE_VERSION, "modes": list(MODES), "temperature": 1.0,
             "noul_labels": ["yes", "no"], "state_serialization": ["paths", "tree", "json"], "act": None,
             "unknown": {"label": NOT_STATED}, "pointer": {"evidence": {"threshold": 0.0, "max_spans": 1}},

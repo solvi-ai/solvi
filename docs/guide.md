@@ -741,9 +741,10 @@ decides as with any decider. One question is one request at temperature 0, with 
 among the options, a probability per option (`ask="confidence"`: one number) and a quote from the text that supports it
 — sent as `response_format` json_schema when the server takes it, else as json_object, else in the prompt only
 (`response_format="auto"` tries them in that order and keeps what works: it steps down only before the first request that
-succeeds, and only on an HTTP 400 / 422 about the format — one that names `response_format`, `json_schema`, `logprobs`
-or says nothing; another 400, 413 or 422 escalates that question, `invalid input for the endpoint: HTTP 400 — <the
-server's message>`, and the format stays). When the server returns log-probabilities
+succeeds, and only on an HTTP 400 / 422 about the format — one that names `response_format`, `json_schema`, `logprobs`,
+structured outputs, or says nothing; a gateway's wrapped error counts too, such as OpenRouter's "Provider returned error"
+with the provider's own message in `error.metadata.raw`; another 400, 413 or 422 escalates that question, `invalid input
+for the endpoint: HTTP 400 — <the server's message and the provider's cause>`, and the format stays). When the server returns log-probabilities
 (`logprobs="auto"`), the probabilities come from the answer's tokens — the chosen option's whole token sequence, the others
 from the alternatives at its first token — not from the numbers the model wrote (`extra["llm"]["probabilities"]` says
 which). Yes/no, scores, multi-label questions, spans (`kind="span"`: the passage must be in the text), "not stated"
@@ -751,8 +752,11 @@ which). Yes/no, scores, multi-label questions, spans (`kind="span"`: the passage
 
 Everything is checked, and what fails escalates — `model escalated: invalid LLM output — ...` — instead of being turned
 into a guess: an answer that is not one of the options, probabilities that are not numbers in [0, 1] or disagree with
-the answer, a quote that is not literally in the text (runs of whitespace may differ, nothing else), a reply that is not
-JSON, is cut off or refused. A server that does not answer (network, timeout, 408 / 409 / 429 / 5xx) is retried
+the answer, a reply that is not JSON, is cut off or refused. The quote is looked up literally, up to typographic quotes
+and apostrophes (’ ‘ “ ” as ' "), dashes (– — as -) and runs of whitespace; a quote still not found escalates when the
+question asks for evidence (`evidence=True`), and otherwise is dropped — the answer stands and
+`extra["llm"]["quote_dropped"]` records the quote. A server that does not answer (network, timeout, a connection cut
+mid-reply, 408 / 409 / 429 / 5xx) is retried
 (`retries=2`, exponential `backoff`) and then escalates too, without being cached, so the next ask tries again; a wrong
 key, model or URL (401, 403, 404) raises `solvi.llm.LLMError`. There is no act signal: `act_guard` runs on the
 confidence, on your labelled examples, as for System One.
@@ -765,6 +769,12 @@ error. An LLM's output is not reproducible bit for bit, so `replay` does not cal
 (the verdict is "trusted"). The server can change the weights behind a name: calibrate again when it does.
 `solvi ask --decider llm:URL#model` and `solvi models check llm:URL#model` take the same (`--api-key`, or
 `$SOLVI_LLM_API_KEY`); a wrong key, model or URL ends `solvi ask` with exit status 2 and the server's refusal in one line.
+
+`seed` is sent only when you set it (some providers refuse `seed=0`). `extra_body={...}` adds server-specific fields to
+every request — on OpenRouter, `{"provider": {"order": ["groq"], "allow_fallbacks": False}}` pins the provider (the
+same name can be served by several, with different quantization and behaviour) and `{"reasoning": {"effort": "low"}}`
+sets reasoning. It cannot set what solvi sets itself (the messages, the reply format, logprobs, the model, temperature,
+max_tokens, seed): those raise `ValueError`. It enters the fingerprint.
 
 **Cost and latency.** Each question about each input is a paid request — the question, every option with its
 description and the whole text, a few hundred tokens or more — and takes 0.3–5 s, where a local decider takes ~50 ms on

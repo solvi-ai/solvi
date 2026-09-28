@@ -7,6 +7,27 @@ output never grounds an argument that must come from the user) and your policies
 text is a heuristic second line. `System.learning` is experimental and off unless you call it. Three code reviews and
 three adversarial passes ran before this release; their fixes are listed under "Fixes before release".
 
+### Fixes before release (LLM decider)
+
+Found by a measurement run through OpenRouter, where most invalid replies were quotes the model had re-typed.
+
+- **Quotes**: a quote is found in the text up to typographic quotes and apostrophes (’ ‘ “ ” as ' "), dashes (– — ‑ as
+  -) and runs of whitespace. A quote still not found is dropped when the question does not ask for evidence (the answer
+  stands; `extra["llm"]["quote_dropped"]` records it) instead of escalating the question; with `evidence=True` it still
+  escalates.
+- **`extra_body={...}`**: server-specific fields merged into every request, e.g. OpenRouter's
+  `{"provider": {"order": [...], "allow_fallbacks": False}}` to pin a provider and `{"reasoning": {...}}`. Fields solvi
+  sets itself (messages, response_format, logprobs, model, temperature, max_tokens, seed, stream, n) raise `ValueError`
+  rather than being overridden; `extra_body` enters the fingerprint.
+- **`seed`** now defaults to None and is sent only when you set it: some providers refuse `seed=0`, and at temperature 0
+  it rarely changes anything. Pass `seed=...` to send one.
+- **Format fallback behind a gateway**: an HTTP 400 whose body mentions response_format / json_schema / structured
+  outputs — including the provider's cause that OpenRouter wraps in `error.metadata.raw` under "Provider returned
+  error" — steps the reply format down as a direct rejection does. When every format fails, the escalation names the
+  formats tried and the provider's cause.
+- **A connection cut mid-reply** (`http.client.IncompleteRead` and other `http.client` errors) is retried like a 5xx
+  and then escalates as "did not answer"; it no longer ends the call with an exception.
+
 ### Fixes before release (text in, storage, reports)
 
 - **Text in, yes / no fields**: only the field's name ("urgent", or "urgent" for `is_urgent`) and `cues=` make a bool

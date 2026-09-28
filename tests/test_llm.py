@@ -2,6 +2,7 @@
 schema in the request, probabilities from the reply or from log-probabilities, validation (an invalid reply escalates,
 never a guess), retries, format fallback, the trace (endpoint, model, template hash — never the key), a Cascade with the
 LLM as the last stage and a Vote."""
+import http.client
 import io
 import json
 import math
@@ -134,8 +135,6 @@ def test_log_probabilities_give_the_probabilities_when_the_server_returns_them()
     ('{"answer": "legal", "probabilities": {"billing": 0.5, "shipping": 0.5}, "quote": ""}', "not one of the options"),
     ('{"answer": "billing", "probabilities": {"billing": 0.1, "shipping": 0.9}, "quote": ""}', "not its most probable"),
     ('{"answer": "billing", "probabilities": {"billing": 1.7, "shipping": 0.1}, "quote": ""}', "not a probability"),
-    ('{"answer": "billing", "probabilities": {"billing": 0.9, "shipping": 0.1}, "quote": "I was billed thrice"}',
-     "not in the text"),
     ('{"answer": "billing", "quote": ""}', "neither probabilities nor a confidence"),
 ])
 def test_an_invalid_reply_escalates_and_is_never_guessed(reply, why):
@@ -365,3 +364,119 @@ def test_concurrent_rejections_step_the_format_down_once():
     seen = (sc._format, sc._lp)                                   # two workers sent this and both got a 400
     assert sc._step_down(*seen, "logprobs is not supported") and (sc._format, sc._lp) == ("json_schema", False)
     assert sc._step_down(*seen, "logprobs is not supported") and (sc._format, sc._lp) == ("json_schema", False)
+
+
+# ------------------------------------------------------------------------------------------------ robustness fixes
+def test_locate_treats_typographic_quotes_dashes_and_whitespace_as_ascii():
+    t = "He said \u201cI\u2019m done\u201d \u2014 twice,\n\tthen left \u2013 fast."
+    q = locate('said "I\'m done" - twice, then', t)
+    assert q is not None and t[q[0]:q[1]] == "said \u201cI\u2019m done\u201d \u2014 twice,\n\tthen"
+    plain = "it's the 5-7 range"
+    a, b = locate("it\u2019s the 5\u20137 range", plain)
+    assert plain[a:b] == plain
+    assert locate("it is the 5-7 range", plain) is None                          # only typography, not wording
+
+
+def test_a_quote_not_in_the_text_is_dropped_unless_evidence_is_asked_for():
+    bad = '{"answer": "billing", "probabilities": {"billing": 0.9, "shipping": 0.1}, "quote": "I was billed thrice"}'
+    m = model(FakeLLM(reply=bad))
+    d = m.decision("team", "Which team?", "email", TEAMS).decide("I was charged twice")
+    assert d.escalate is None and d.value == "billing"
+    assert d.extra["llm"]["quote_dropped"] == "I was billed thrice" and "quote" not in d.extra["llm"]
+    ev = m.decision("team2", "Which team?", "email", TEAMS, evidence=True).decide("I was charged twice")
+    assert ev.escalate and "invalid LLM output" in ev.escalate and "not in the text" in ev.escalate
+    curly = '{"answer": "billing", "probabilities": {"billing": 0.9, "shipping": 0.1}, "quote": "I\u2019m charged \u2014 twice"}'
+    text = "Hi, I'm charged - twice for it"
+    ok = model(FakeLLM(reply=curly)).decision("t3", "Which team?", "email", TEAMS, evidence=True).decide(text)
+    assert ok.escalate is None and [q.value for q in ok.evidence] == ["I'm charged - twice"]
+
+
+def test_extra_body_is_merged_and_cannot_override_the_contract():
+    pin = {"provider": {"order": ["groq"], "allow_fallbacks": False}, "reasoning": {"effort": "low"}}
+    fake = FakeLLM()
+    m = model(fake, extra_body=pin)
+    assert m.decision("team", "Which team?", "email", TEAMS).decide("my parcel is late").value == "shipping"
+    body = fake.bodies[-1]
+    assert body["provider"] == pin["provider"] and body["reasoning"] == {"effort": "low"}
+    assert body["response_format"]["type"] == "json_schema" and body["model"] == "tiny-chat"
+    pin["provider"]["order"] = ["other"]                                     # copied: a later edit changes nothing
+    m.decision("team", "Which team?", "email", TEAMS).decide("I was charged")
+    assert fake.bodies[-1]["provider"]["order"] == ["groq"]
+    assert m.fingerprint() != model(FakeLLM()).fingerprint()
+    assert model(FakeLLM(), extra_body={"reasoning": {"effort": "high"}}).fingerprint() != m.fingerprint()
+    for key in ("messages", "response_format", "model", "logprobs", "temperature", "seed", "stream"):
+        with pytest.raises(ValueError, match="extra_body cannot set"):
+            model(FakeLLM(), extra_body={key: 1})
+    with pytest.raises(ValueError, match="dict"):
+        model(FakeLLM(), extra_body=[("provider", {})])
+    with pytest.raises(ValueError, match="not JSON"):
+        model(FakeLLM(), extra_body={"x": object()})
+
+
+def test_seed_is_sent_only_when_set():
+    fake = FakeLLM()
+    model(fake).decision("team", "Which team?", "email", TEAMS).decide("my parcel is late")
+    assert "seed" not in fake.bodies[-1]
+    fake = FakeLLM()
+    model(fake, seed=7).decision("team", "Which team?", "email", TEAMS).decide("my parcel is late")
+    assert fake.bodies[-1]["seed"] == 7
+
+
+class Gateway(FakeLLM):
+    """OpenRouter-style: "Provider returned error" (HTTP 400) with the provider's cause in error.metadata.raw, whenever
+    the request carries response_format (or always, with always=True)."""
+
+    RAW = json.dumps({"error": {"message": "Provider returned error", "code": 400, "metadata": {
+        "provider_name": "Cloudflare", "raw": '{"errors":[{"message":"json_schema response format is not supported"}]}'}}})
+
+    def __init__(self, always=False, **kw):
+        super().__init__(**kw)
+        self.always = always
+
+    def __call__(self, req, timeout=None):
+        body = json.loads(req.data.decode())
+        if self.always or body.get("response_format"):
+            self.bodies.append(body)
+            raise urllib.error.HTTPError(req.full_url, 400, "bad", {}, io.BytesIO(self.RAW.encode()))
+        return super().__call__(req, timeout)
+
+
+def test_a_wrapped_provider_error_about_the_format_steps_the_ladder_down():
+    fake = Gateway()
+    d = model(fake).decision("team", "Which team?", "email", TEAMS).decide("my parcel is late")
+    assert d.value == "shipping" and d.extra["llm"]["format"] == "prompt"
+    assert [b.get("response_format", {}).get("type") for b in fake.bodies] == \
+        ["json_schema", "json_schema", "json_object", None]
+    down = Gateway(always=True)
+    d = model(down).decision("team", "Which team?", "email", TEAMS).decide("my parcel is late")
+    assert d.escalate and "invalid input for the endpoint: HTTP 400 after trying" in d.escalate
+    assert "Provider returned error" in d.escalate and "json_schema response format is not supported" in d.escalate
+    assert "Cloudflare" in d.escalate and len(down.bodies) == 4
+
+
+class Truncating(FakeLLM):
+    """The first `cut` answers break off mid-body (http.client.IncompleteRead)."""
+
+    def __init__(self, cut=1, **kw):
+        super().__init__(**kw)
+        self.cut = cut
+
+    def __call__(self, req, timeout=None):
+        resp = super().__call__(req, timeout)
+        if self.cut:
+            self.cut -= 1
+
+            class Broken(io.BytesIO):
+                def read(self, *a):
+                    raise http.client.IncompleteRead(b'{"choi', 200)
+            return Broken()
+        return resp
+
+
+def test_a_connection_cut_mid_reply_is_retried_like_a_5xx():
+    fake = Truncating(cut=1)
+    d = model(fake, retries=2).decision("team", "Which team?", "email", TEAMS).decide("my parcel is late")
+    assert d.value == "shipping" and len(fake.bodies) == 2
+    dead = Truncating(cut=10)
+    d = model(dead, retries=1).decision("team", "Which team?", "email", TEAMS).decide("my parcel is late")
+    assert d.escalate and "did not answer" in d.escalate and "IncompleteRead" in d.escalate and len(dead.bodies) == 2
