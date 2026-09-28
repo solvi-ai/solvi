@@ -14,6 +14,17 @@ from .strategist import computable, plan
 
 
 @dataclass
+class _Prepared:
+    state: dict
+    known: dict | None
+    rejected: list | None
+    questions: list
+    flow: object
+    order: object
+    policy: object
+
+
+@dataclass
 class Response(Serial):
     results: dict
     flow: object
@@ -110,7 +121,8 @@ class Response(Serial):
 
 class System:
     def __init__(self, catalog: Catalog, questions, journal: str | None = None, workers: int = 1, order: str = "default",
-                 producers: str = "declared", learn: bool | None = None, inputs=None, strategist=None, storage=None):
+                 producers: str = "declared", learn: bool | None = None, inputs=None, strategist=None, storage=None,
+                 timeout: float | None = None):
         """order: "default" (hard checks and their inputs first, all together) or "learned" (hard checks one at a time, most
         expected saving first — see learn_order). producers: "declared" (alternative producers of a fact are tried in
         declaration order) or "learned" (a policy picks the order per input and learns from outcomes). learn: after every
@@ -122,7 +134,8 @@ class System:
         strategist (experimental: solvi.strategy.ModelStrategist; its plan is recorded in the trace, see docs/strategist.md).
         storage: a solvi.storage.TraceStorage (or a path: .db / .sqlite → SQLite, else JSON lines) — every ask saves its
         response (answers, flow, whole trace) there, hash-chained across responses, and teach saves the correction; the
-        response's `stored_id` is its id in the store. journal="file.jsonl" is the same as storage=JSONLStorage("file.jsonl")."""
+        response's `stored_id` is its id in the store. journal="file.jsonl" is the same as storage=JSONLStorage("file.jsonl").
+        timeout: seconds a part's call may take under `aask` when the part declares no `timeout=` (None: no limit)."""
         from .learned import CostBook, OrderModel, ProducerPolicy
         self.catalog = catalog
         self.inputs = inputs
@@ -137,6 +150,7 @@ class System:
         if self.storage is not None and self.storage.catalog is None:
             self.storage.catalog = self               # typed values of stored responses are restored with this system
         self.workers = workers                    # >1: independent steps run in parallel threads
+        self.timeout = timeout                    # aask: default seconds per call of a part
         self.calib: dict[str, tuple] = {}         # question → (a, b): confidence' = σ(a·logit(confidence) + b)
         self.learned_rules = {}                   # question → RuleList (readable rules learned from examples)
         if order not in ("default", "learned"):
@@ -186,8 +200,44 @@ class System:
     def ask(self, init_state, names=None, workers=None, order=None, store=True):
         """init_state: a dict of given facts, or a pydantic BaseModel instance (its fields). order: override the system's
         order for this ask — "default", "learned", or an object with p_fail(check, row) and row(vals, init_keys) (e.g. an
-        oracle for experiments). store=False: do not save this response to the system's storage."""
+        oracle for experiments). store=False: do not save this response to the system's storage.
+        An `async def` part is awaited in an event loop of its own, one call at a time: use `aask` for such catalogs."""
         t0 = now_ms()
+        p = self._prepare(init_state, names, order)
+        trace, vals = execute(self.catalog, p.flow, p.state, workers=workers or self.workers, order=p.order,
+                              costs=self.costs, policy=p.policy, known=p.known)
+        return self._respond(p, trace, vals, t0, store)
+
+    async def aask(self, init_state, names=None, order=None, store=True, timeout=None, speculate=False):
+        """`ask` on an event loop: `async def` parts (database lookups, HTTP APIs, model servers) are awaited, parts marked
+        `blocking=True` run in worker threads (asyncio.to_thread), plain sync parts inline; steps whose inputs are ready run
+        concurrently. The answers, records and hashes are those of `ask` on the same input: records are written in flow
+        order after the run, whatever finished first.
+        timeout: seconds per call of a part without its own `timeout=` (default: System(timeout=)); a call that does not
+        finish in time fails with "timed out after ... s" (safeguard `timeout`), and the questions that need it abstain —
+        a producer of a fact that times out is followed by the next one. A timeout cannot stop a plain sync part running
+        inline: mark it blocking, or make it async.
+        speculate=False: hard checks and the steps they read first, then what the open questions need (as `ask`: no call
+        starts that `ask` would not make). speculate=True: every step starts once its inputs are ready, and a failed hard
+        check cancels the pending calls that only the questions it settles needed (lower latency; some paid calls may start
+        and be cancelled). Cancelling `aask` itself cancels every pending call."""
+        from .runtime import aexecute
+        t0 = now_ms()
+        p = self._prepare(init_state, names, order)
+        trace, vals = await aexecute(self.catalog, p.flow, p.state, order=p.order, costs=self.costs, policy=p.policy,
+                                     known=p.known, timeout=self.timeout if timeout is None else timeout,
+                                     speculate=speculate)
+        return self._respond(p, trace, vals, t0, store)
+
+    @property
+    def is_async(self):
+        """Does the catalog have parts that `aask` awaits (`async def`, or marked blocking=True)? `solvi serve` then
+        answers with aask."""
+        from .runtime import async_parts
+        return bool(async_parts(self.catalog))
+
+    def _prepare(self, init_state, names, order):
+        """What ask and aask share before running: the given facts, the questions, the flow, the order and the policy."""
         known = None
         if self.inputs is not None or type(init_state) is not dict:
             from .typed import field_types, is_model
@@ -203,8 +253,12 @@ class System:
         mode = self.order if order is None else order
         om = None if mode == "default" else (self.order_model if mode == "learned" else mode)
         policy = self.producer_policy if self.producers == "learned" else None
-        trace, vals = execute(self.catalog, flow, init_state, workers=workers or self.workers, order=om, costs=self.costs,
-                              policy=policy, known=known)
+        return _Prepared(init_state, known, rejected, qs, flow, om, policy)
+
+    def _respond(self, p, trace, vals, t0, store):
+        """What ask and aask share after running: the trace's plan record and fingerprint, costs, answers, safeguards,
+        storage."""
+        init_state, rejected, qs, flow, policy = p.state, p.rejected, p.questions, p.flow, p.policy
         if rejected:
             trace.rejected = rejected
         if getattr(flow, "strategy", None) is not None and getattr(self.strategist, "record", True):
@@ -341,8 +395,12 @@ class System:
                     return Result(None, r.confidence, r.error, "abstain", dict(r.probs), r.origin,
                                   rule.func.__name__ if rule.func is not None else rule.name, g)
             if r is None or r.value is MISSING:
+                from .provenance import TIMED_OUT       # a call that did not finish in time (aask): safeguard "timeout"
+                late = any(TIMED_OUT in (by[f].error or "") for f in list(facts) + [rule.name]
+                           if f in by and by[f].value is MISSING)
                 return Result(None, 0.0, "rule not computed: " + (r.error if r else "no step") +
-                              (f"; missing {', '.join(missing)}" if missing else ""), "abstain")
+                              (f"; missing {', '.join(missing)}" if missing else ""), "abstain",
+                              guard="timeout" if late else None)
             pc = path_confidence(self.catalog, trace, rule.inputs)
             conf = min(pc, r.confidence)
             why = "; ".join(f"{x} = {srepr(vals.get(x))}" for x in rule.inputs)

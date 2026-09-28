@@ -2,6 +2,28 @@
 
 ## Unreleased (0.6)
 
+### Async execution: aask
+
+- `await system.aask(state, names=None, order=None, store=True, timeout=None, speculate=False)` next to `ask`:
+  `async def` catalog parts (fn, extract, check, rule, alternative producers) are awaited; steps run concurrently as
+  soon as the steps they read have finished; sync parts run inline, or in a worker thread (`asyncio.to_thread`) when
+  declared `blocking=True`.
+- Early exit: by default in the phases of `ask` (hard checks and what they read first), so no call starts that `ask`
+  would not make; `speculate=True` starts every ready step at once and cancels the pending calls that a failed hard
+  check makes unnecessary. Cancelling `aask` cancels every pending call.
+- Timeouts: `timeout=` (seconds) on a part (`@cat.fn(timeout=2)`, extract, check, rule), per call (`aask(timeout=)`) or
+  for the System (`System(timeout=)`). A call that does not finish fails with "timed out after 2 s"; the questions that
+  need it abstain with guard `timeout` — a new safeguard in `res.safeguards`, the audit, `system.stats["timeouts"]` and
+  `safeguard_report()` (listed once it fires) — and a producer that times out is followed by the next one. Replay does
+  not re-run a step that timed out.
+- The trace is the one `ask` writes: records in flow order, the same answers and hashes whatever finished first — tested
+  on all 117 gallery cases and on examples 01, 03, 04, 09, 12 and 16, phased and speculative, and with storage,
+  concurrent asks, batched decisions and `Cascade` / `Vote` / `Route`.
+- `ask`, replay and `facts_for` still work on catalogs with `async def` parts (each call awaited in an event loop of its
+  own). `System.is_async` (`solvi.runtime.async_parts(catalog)`) says whether a catalog has parts that `aask` awaits;
+  `solvi serve` answers such a System with `aask` (async HTTP endpoints, concurrent asks; the MCP server too).
+- `solvi.runtime.aexecute` is the async executor; `execute` and `aexecute` share one plan of phases.
+
 ### solvi serve: HTTP, MCP and System One
 
 - `solvi serve module:attr` (or `file.py:attr`) serves a System's questions over HTTP (`solvi[serve]`: FastAPI, uvicorn):

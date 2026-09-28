@@ -129,7 +129,8 @@ def questions_info(system):
 # ------------------------------------------------------------------------------------------------ the service
 class Service:
     """What the HTTP app and the MCP server call: asks a System (one at a time: a System learns costs and counts stats
-    in place), answers System One requests with a decider."""
+    in place; a System with async parts is asked with System.aask, concurrently on the server's event loop), answers
+    System One requests with a decider."""
 
     def __init__(self, system=None, decider=None, storage=None, model_name=None):
         if system is None and decider is None:
@@ -150,7 +151,7 @@ class Service:
         d["stored_id"], d["trace_hash"] = resp.stored_id, trace_hash(resp)
         return d
 
-    def _ask(self, state, names, store):
+    def _checked(self, state, names):
         s = self.system
         if s is None:
             raise LookupError("this server has no System (only POST /v1/systemone)")
@@ -159,13 +160,47 @@ class Service:
         bad = [n for n in names or () if n not in s.questions]
         if bad:
             raise KeyError(f"no such question: {', '.join(bad)}")
+        return s
+
+    def _ask(self, state, names, store):
+        s = self._checked(state, names)
         with self._lock:
+            if self.is_async:                         # async parts: awaited concurrently within the ask (System.aask)
+                from .runtime import run_sync
+                return run_sync(s.aask(state, names=list(names) if names else None, store=store))
             return s.ask(state, names=list(names) if names else None, store=store)
+
+    @property
+    def is_async(self):
+        """Does the System have parts that aask awaits? Then asks go through System.aask."""
+        if getattr(self, "_async", None) is None:
+            self._async = self.system is not None and self.system.is_async
+        return self._async
+
+    async def _aask(self, state, names, store):
+        """System.aask on the server's event loop: asks run concurrently (a System's costs and stats are updated between
+        awaits, so they need no lock)."""
+        s = self._checked(state, names)
+        return await s.aask(state, names=list(names) if names else None, store=store)
+
+    async def aask(self, state, names=None, store=True):
+        """ask, for an async System (System.aask)."""
+        resp = await self._aask(state, names, store)
+        d = resp.to_dict()
+        d["stored_id"], d["trace_hash"] = resp.stored_id, trace_hash(resp)
+        return d
 
     def tool(self, name, state):
         """An MCP tool call: one question → its result (answer, confidence, status, why, ...), the safeguards that fired
         for it, "stored_id" and "trace_hash"."""
-        resp = self._ask(state, [name], True)
+        return self._tool_result(name, self._ask(state, [name], True))
+
+    async def atool(self, name, state):
+        """tool, for an async System (System.aask)."""
+        return self._tool_result(name, await self._aask(state, [name], True))
+
+    @staticmethod
+    def _tool_result(name, resp):
         d = resp.to_dict()
         out = {"question": name, **d["results"][name]}
         out["safeguards"] = [e for e in d["safeguards"] if name in (e.get("questions") or [name])]
@@ -298,6 +333,15 @@ def create_app(system=None, decider=None, storage=None, model_name=None, title=N
         except (TypeError, ValueError) as e:
             raise HTTPException(422, str(e)) from None
 
+    async def acall(f, *args):
+        try:
+            return JSONResponse(await f(*args))
+        except LookupError as e:
+            raise HTTPException(404, str(e.args[0] if e.args else e)) from None
+        except (TypeError, ValueError) as e:
+            raise HTTPException(422, str(e)) from None
+    run_async = system is not None and svc.is_async   # async parts: the questions are async endpoints (System.aask)
+
     @app.get("/health", tags=["service"])
     def health():
         return svc.health()
@@ -313,14 +357,23 @@ def create_app(system=None, decider=None, storage=None, model_name=None, title=N
         def questions():
             return questions_info(system)
 
-        @app.post("/ask", tags=["questions"], response_model=None)
-        def ask(body: AskRequest):
-            return call(svc.ask, body.state, body.questions, body.store)
+        if run_async:
+            @app.post("/ask", tags=["questions"], response_model=None)
+            async def ask(body: AskRequest):
+                return await acall(svc.aask, body.state, body.questions, body.store)
+        else:
+            @app.post("/ask", tags=["questions"], response_model=None)
+            def ask(body: AskRequest):
+                return call(svc.ask, body.state, body.questions, body.store)
         documented["/ask"] = (None, with_ids(response_model(system), "AskResponse"))
 
         def route(name):
-            def ask_one(state: dict = Body(...)):
-                return call(svc.ask, state, [name])
+            if run_async:
+                async def ask_one(state: dict = Body(...)):
+                    return await acall(svc.aask, state, [name])
+            else:
+                def ask_one(state: dict = Body(...)):
+                    return call(svc.ask, state, [name])
             ask_one.__name__ = f"ask_{name}"
             app.post(f"/ask/{name}", tags=["questions"], response_model=None, summary=system.questions[name].text or name,
                      description=f"Ask {name!r}: the body is the input state.")(ask_one)
@@ -388,6 +441,21 @@ def call_tool(svc, name, arguments):
     try:
         return svc.tool(names[name], dict(arguments or {})), False
     except Exception as e:  # noqa: BLE001 — a tool error is reported to the agent, not a protocol error
+        return {"error": f"{type(e).__name__}: {e}"}, True
+
+
+async def acall_tool(svc, name, arguments):
+    """tools/call on an event loop → (result dict, is_error): an async System is asked with aask, a sync one in a worker
+    thread (its lock serializes the asks)."""
+    names = {tool_name(q): q for q in svc.system.questions}
+    if name not in names:
+        raise KeyError(name)
+    if not svc.is_async:
+        import asyncio
+        return await asyncio.to_thread(call_tool, svc, name, arguments)
+    try:
+        return await svc.atool(names[name], dict(arguments or {})), False
+    except Exception as e:  # noqa: BLE001
         return {"error": f"{type(e).__name__}: {e}"}, True
 
 
@@ -459,7 +527,7 @@ def run_sdk(svc):
 
     async def on_call(ctx, params):
         try:
-            out, bad = call_tool(svc, params.name, params.arguments)
+            out, bad = await acall_tool(svc, params.name, params.arguments)
         except KeyError:
             out, bad = {"error": f"unknown tool: {params.name}"}, True
         return types.CallToolResult(content=[types.TextContent(type="text", text=json.dumps(out, ensure_ascii=False,

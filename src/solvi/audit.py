@@ -14,15 +14,16 @@ STAT_KEYS = {"grounding": "grounding_rejected", "type_rejected": "type_rejected"
              "low_confidence": "low_confidence",
              "validator": "validator_rejected", "hard_check": "forced_by_hard_check",
              "constraint_repair": "constraint_repairs", "fallback": "fallbacks", "escalated": "model_escalated",
-             "evidence_missing": "evidence_missing"}
-QUIET = {"evidence_missing"}                  # listed in safeguard_report only once they fire
+             "evidence_missing": "evidence_missing", "timeout": "timeouts"}
+QUIET = {"evidence_missing", "timeout"}      # listed in safeguard_report only once they fire
 STATS = ["asks", "answers", "abstained", "model_outputs"] + list(STAT_KEYS.values())
 
 LABEL = {"grounding": "grounding rejected", "type_rejected": "type rejected", "outside_options": "outside the options",
          "rule_abstained": "rule abstained",
          "low_confidence": "low confidence",
          "validator": "rejected by validate", "hard_check": "hard check decided", "constraint_repair": "constraint repair",
-         "fallback": "fallback producer", "escalated": "model escalated", "evidence_missing": "evidence missing"}
+         "fallback": "fallback producer", "escalated": "model escalated", "evidence_missing": "evidence missing",
+         "timeout": "timed out"}
 
 
 def _missing(v):

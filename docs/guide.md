@@ -72,6 +72,10 @@ Part names must be unique in a catalog (a duplicate raises `ValueError`). A rule
 a second rule for the same question replaces the first. The decorators return the original function, so parts stay
 ordinary, testable Python.
 
+A part may be an `async def` function (a database or HTTP lookup): `system.aask` awaits it, concurrently with the other
+steps; `timeout=` (seconds) and `blocking=True` (a sync function that waits: run in a worker thread) on any decorator
+apply under `aask` (see [Async execution](#async-execution-aask)).
+
 ```python
 @cat.fn
 def total(items):                           # reads "items", sets "total"
@@ -857,6 +861,51 @@ res = system.ask(claim)
 print(res.trace.skipped)      # e.g. [("fraud_score", "not needed: hard check policy_in_force failed"), ...]
 ```
 
+### Async execution: aask
+
+`await system.aask(state)` is `ask` on an event loop, for catalogs whose parts wait on the network — database lookups,
+HTTP APIs, model servers — and for callers that are async themselves (web servers, agents; Pyodide in the browser):
+
+```python
+@cat.fn(timeout=2.0)                         # seconds; else System(timeout=...), else no limit
+async def credit_score(customer_id):
+    async with httpx.AsyncClient() as c:
+        return (await c.get(f"{BUREAU}/score/{customer_id}")).json()["score"]
+
+@cat.fn(blocking=True)                       # a sync client: aask runs it in a worker thread
+def sanctions_hit(name):
+    return screening.lookup(name)
+
+system = System(cat, QUESTIONS, timeout=5.0)
+res = await system.aask(application)         # same Response as ask
+res = await system.aask(application, speculate=True)
+```
+
+- `async def` parts (fn, extract, check, rule, alternative producers) are awaited; a sync part marked `blocking=True`
+  runs in a worker thread (`asyncio.to_thread`); any other sync part runs inline, as in `ask`.
+- Steps run as soon as the steps they read have finished, all concurrently. By default in the phases of `ask`: hard
+  checks and what they read first, then what the open questions still need — so no call starts that `ask` would not
+  make, and a failed hard check stops the paid lookups behind it. `speculate=True` starts every step as soon as its
+  inputs are ready and **cancels** the pending calls a failed hard check makes unnecessary (lower latency; some calls may
+  start and be cancelled; steps that finished anyway are dropped). Cancelling `aask` itself cancels every pending call.
+- **Timeouts.** A call that takes longer than its part's `timeout=` (or `aask(timeout=)`, or `System(timeout=)`) fails
+  with `timed out after 2 s`: the fact is missing and the questions that need it abstain with guard `timeout` (a hard
+  check that times out: "could not be evaluated", as for any error). The safeguard `timeout` is in `res.safeguards`, the
+  audit and `system.stats["timeouts"]`. A producer of a fact that times out is followed by the next producer. A plain
+  sync part running inline cannot be interrupted: mark it `blocking=True` (the thread finishes in the background, its
+  result is ignored) or make it async.
+- **Same trace as `ask`.** Records are written in flow order after the run, so the answers, the records and every hash
+  are those of `ask` on the same input, whatever finished first (tested on every gallery case and on the examples, with
+  and without `speculate`). A replay re-runs async parts in an event loop of its own and does not re-run a step that
+  timed out (a timeout depends on the moment, not on the inputs).
+- Storage, the audit, safeguards, batched decisions and `Cascade` / `Vote` / `Route` work as under `ask`. Concurrent
+  `aask` calls on one System are safe on one event loop: its costs, stats and storage are updated between awaits.
+- `ask` still works on a catalog with `async def` parts: each such call runs in an event loop of its own, one after
+  another (on a worker thread when `ask` is called from a running loop). `system.is_async` says whether a catalog has
+  parts that `aask` awaits; `solvi serve` answers such systems with `aask`.
+
+Plain CPU parts gain nothing from `aask`: for them the sync `ask` stays the default.
+
 ### Learned order of hard checks
 
 Every `ask` measures the run time of each part: `system.costs` keeps a moving average (ms) per part (`cost=` on a decorator
@@ -1181,7 +1230,9 @@ has each answer as its closed set (`System.response_schema`). The web layer does
 it abstain, and the response says why (safeguard `type_rejected`) — rather than as a 422. Unknown questions are a 404.
 With `--store` (or a System built with `storage=`), every answer is saved with its whole trace; `stored_id` finds it
 (`store.get(id)`) and `solvi verify` / `replay` / `diff` work on the store. Asks are served one at a time: a System
-updates its measured costs and stats in place.
+updates its measured costs and stats in place. A System with `async def` (or `blocking=True`) parts is served with
+[`aask`](#async-execution-aask) instead: its endpoints are async and asks run concurrently on the server's event loop
+(the MCP server too).
 
 **MCP.** With `--mcp`, each question is a tool: its input schema is the question's input state schema, and a call returns
 the question's result — answer, confidence, status, why, guard, evidence, the safeguards that fired — with `stored_id`

@@ -401,6 +401,8 @@ class Part:
     source: str | None = None            # extract only: the given fact its quotes point into, when it is not "doc"
     types: dict | None = None            # typed arguments: {argument: type} (see solvi.typed); None — untyped
     returns: Any = None                  # the return type (the fact's type; for a Quote / Decision, of its value); None — untyped
+    timeout: float | None = None         # System.aask: seconds a call may take (else System(timeout=)); then the step fails
+    blocking: bool = False               # System.aask: a sync part that blocks (I/O, a model) runs in a worker thread
     tin: dict | None = field(default=None, repr=False, compare=False)   # compiled validators of the typed arguments
     tout: Any = field(default=None, repr=False, compare=False)          # ... and of the return type
 
@@ -424,7 +426,8 @@ def _group_func(group):
                     why.append(f"{alt.name}: {reason}")
                     continue
             try:
-                v = alt.func(**a)
+                from .runtime import resolved
+                v = resolved(alt.func(**a))
             except Exception as e:  # noqa: BLE001
                 why.append(f"{alt.name}: {type(e).__name__}")
                 continue
@@ -460,12 +463,20 @@ def _sourced(f, source):
     import dataclasses
     import functools
 
-    @functools.wraps(f)
-    def run(*args, **kw):
-        v = f(*args, **kw)
+    def fix(v):
         if isinstance(v, Quote) and v.source == "doc":
             return dataclasses.replace(v, source=source)
         return v
+    from .runtime import is_async_func
+    if is_async_func(f):
+        @functools.wraps(f)
+        async def arun(*args, **kw):
+            return fix(await f(*args, **kw))
+        return arun
+
+    @functools.wraps(f)
+    def run(*args, **kw):
+        return fix(f(*args, **kw))
     return run
 
 
@@ -627,10 +638,11 @@ class Catalog:
         elif g.alternatives is None:
             if g.kind not in ("fn", "extract"):
                 raise ValueError(f"{fact} is a {g.kind}; only fn and extract parts can have alternatives")
+            # a plain producer declared first becomes the first alternative
             first = Part(kind=g.kind, name=g.func.__name__ + "__declared", inputs=g.inputs, func=g.func, doc=g.doc,
                          cost=g.cost, provides=fact, validate=g.validate, min_confidence=g.min_confidence, model=g.model,
                          provenance=g.provenance, options=g.options, exact=g.exact, types=g.types, returns=g.returns,
-                         tin=g.tin, tout=g.tout, source=g.source)   # a plain producer declared first becomes the first alternative
+                         tin=g.tin, tout=g.tout, source=g.source, timeout=g.timeout, blocking=g.blocking)
             g = Part(kind=g.kind, name=fact, inputs=list(g.inputs), func=None, doc=f"alternative producers of {fact}",
                      alternatives=[first])
             g.func = _group_func(g)
@@ -651,7 +663,7 @@ class Catalog:
         return self._add(kind, f, **kw)
 
     def extract(self, f=None, *, provides=None, cost=None, validate=None, min_confidence=None, model=None, provenance=None,
-                exact=None, source=None):
+                exact=None, source=None, timeout=None, blocking=None):
         """Extract a value from text (returns a Quote). With `provides="fact"` the function is one of several alternative
         producers of that fact: its output is used only if it passes `validate` / `min_confidence`, otherwise the next
         alternative runs. `cost` (ms) is a prior for scheduling until run times are measured.
@@ -659,20 +671,26 @@ class Catalog:
         at its offsets or it is rejected (`exact=False` turns that off, `exact=True` turns it on for hand-written code).
         `source`: the given fact (text) its quotes point into. By default: "doc" if the function reads doc, else its only
         argument, else its only str-typed argument; if that is ambiguous, registration raises and asks for source=. A
-        returned Quote that names another source (Quote(..., source="notes")) keeps it."""
+        returned Quote that names another source (Quote(..., source="notes")) keeps it.
+        The function may be `async def` (awaited by System.aask). `timeout` (seconds) and `blocking` (a sync function that
+        waits on I/O or a model: aask runs it in a worker thread) apply under aask; see System.aask."""
         return self._deco("extract", f, provides=provides, cost=cost, validate=validate, min_confidence=min_confidence,
-                          model=model, provenance=provenance, exact=exact, source=source)
+                          model=model, provenance=provenance, exact=exact, source=source, timeout=timeout,
+                          blocking=blocking)
 
     def fn(self, f=None, *, provides=None, cost=None, validate=None, model=None, provenance=None, options=None,
-           min_confidence=None):
-        """A computation. `provides`, `validate`, `cost`: as for extract. A model-backed fn (`model=`) with `options` is a
-        model decision: it returns a Decision (or a plain value) that must be one of the options, else it is rejected."""
+           min_confidence=None, timeout=None, blocking=None):
+        """A computation. `provides`, `validate`, `cost`, `timeout`, `blocking`: as for extract. A model-backed fn (`model=`)
+        with `options` is a model decision: it returns a Decision (or a plain value) that must be one of the options, else
+        it is rejected."""
         return self._deco("fn", f, provides=provides, cost=cost, validate=validate, model=model, provenance=provenance,
-                          options=None if options is None else list(options), min_confidence=min_confidence)
+                          options=None if options is None else list(options), min_confidence=min_confidence,
+                          timeout=timeout, blocking=blocking)
 
-    def check(self, f=None, *, hard=False, then=None, cost=None, model=None, provenance=None):
+    def check(self, f=None, *, hard=False, then=None, cost=None, model=None, provenance=None, timeout=None, blocking=None):
         if f is None:
-            return lambda g: self._add("check", g, hard=hard, then=then or {}, cost=cost, model=model, provenance=provenance)
+            return lambda g: self._add("check", g, hard=hard, then=then or {}, cost=cost, model=model, provenance=provenance,
+                                       timeout=timeout, blocking=blocking)
         return self._add("check", f)
 
     def features(self, fact):
@@ -690,10 +708,12 @@ class Catalog:
             return f
         return deco
 
-    def rule(self, question, *, model=None, provenance=None):
+    def rule(self, question, *, model=None, provenance=None, timeout=None, blocking=None):
         """The answer rule of a question. With `model=` the rule is a model's decision: it may return a Decision with
-        probabilities; an answer outside the question's options abstains, as for any rule."""
-        return lambda f: self._add("rule", f, question=question, model=model, provenance=provenance)
+        probabilities; an answer outside the question's options abstains, as for any rule. `timeout`, `blocking`: as for
+        extract."""
+        return lambda f: self._add("rule", f, question=question, model=model, provenance=provenance, timeout=timeout,
+                                   blocking=blocking)
 
     def constraint(self, f):
         """A rule between answers: argument names are question names, it returns True when the answers fit together

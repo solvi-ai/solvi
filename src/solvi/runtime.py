@@ -1,15 +1,17 @@
 """Flow execution: computed_state with provenance and a hash chain, answers, hard checks, independent replay."""
 from __future__ import annotations
 
+import asyncio
 import hashlib
-import sys
+import inspect
 import json
+import sys
 import time
 from dataclasses import dataclass, field
 from typing import Any
 
 from .core import Decision, Quote, Serial, Unknown, accept, evidence_rows, ground, has_evidence, locate, unwrap, validated
-from .provenance import model_info
+from .provenance import TIMED_OUT, model_info
 
 
 def _canon(v):
@@ -222,6 +224,8 @@ class Trace(Serial):
                 if r.inputs.get(x) != vhash(v):
                     bad.append((r.step, r.name, f"input {x} does not match the recorded one"))
             vals[r.name] = r.value
+            if r.value is MISSING and _timed_out(r):     # a call that did not finish in time (aask): nothing to re-run
+                continue
             if part.alternatives is not None:
                 bad += _replay_group(part, r, args, self.init, trust_models, models)
                 continue
@@ -241,6 +245,12 @@ class Trace(Serial):
         out = {"ok": not bad, "steps": len(self.records), "mismatches": bad, "models": models}
         out.update(_catalog_verdict(self.fingerprint, catalog))
         return out
+
+
+def _timed_out(r):
+    """Did this step fail by a timeout (aask)? A timeout depends on the moment, not on the inputs, so a replay does not
+    re-run it (a producer of a fact that timed out: see _replay_group)."""
+    return r.tried is None and bool(r.error) and r.error.startswith(TIMED_OUT)
 
 
 def _catalog_verdict(fp, catalog):
@@ -286,7 +296,7 @@ def _recompute(part, r, args, init, catalog=None):
         return [(r.step, r.name, "a decision of its shared pass is no longer in the catalog")]
     if why is None:
         try:
-            v = part.func(**plain) if sibs is None else part.func.in_pass(sibs, plain, r.extra["pass"]["with"])
+            v = resolved(part.func(**plain) if sibs is None else part.func.in_pass(sibs, plain, r.extra["pass"]["with"]))
         except Exception as e:  # noqa: BLE001
             return [] if r.error is not None else [(r.step, r.name, f"recompute failed: {type(e).__name__}")]
         if isinstance(v, Decision) and isinstance(r.extra, dict):     # several models (solvi.multi): every proposal
@@ -443,7 +453,7 @@ def _replay_group(group, r, args, init, trust_models=False, models=None):
         if name not in alts:
             bad.append((r.step, r.name, f"unknown producer {name}"))
             continue
-        if outcome.startswith("shadow"):
+        if outcome.startswith(("shadow", TIMED_OUT)):   # shadow runs, and producers that did not finish in time (aask)
             continue
         a = alts[name]
         if name == r.producer and (a.model is not None or r.model is not None):
@@ -460,7 +470,7 @@ def _replay_group(group, r, args, init, trust_models=False, models=None):
             v, val, (aargs, why) = None, None, _typed_args(a, _plain_args(args, a.inputs))
             ok = False
             if why is None:
-                v = a.func(**aargs)
+                v = resolved(a.func(**aargs))
                 g = _plain_args(args, group.inputs)
                 ok, why, val = accept(a, v, {**g, **aargs} if a.tin else g, init)
         except Exception as e:  # noqa: BLE001
@@ -524,9 +534,103 @@ def _extra(v):
     return x
 
 
-def _run_step(p, vals, init_state, policy=None, costs=None, known=None, memo=None, batch=None):
-    """Evaluate one part on the current facts → StepOut. batch: (step names, decision parts) of a shared forward pass this
-    decision part belongs to (see Flow.batches)."""
+class PartTimeout(Exception):
+    """A part did not finish within its timeout (aask): the step fails with this reason, like any other error."""
+
+
+def run_sync(aw):
+    """Wait for an awaitable from sync code (an `async def` part called by `ask`, a replay, `facts_for`): in a new event
+    loop — on a worker thread when this thread already runs one (ask called from async code)."""
+    async def main():
+        return await aw
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        return asyncio.run(main())
+    from concurrent.futures import ThreadPoolExecutor
+    with ThreadPoolExecutor(1) as ex:
+        return ex.submit(asyncio.run, main()).result()
+
+
+def resolved(v):
+    """A part's output: awaited when it is an awaitable (an `async def` part called from sync code)."""
+    return run_sync(v) if inspect.isawaitable(v) else v
+
+
+def is_async_func(f):
+    """Is f an `async def` function (or an object with an async __call__, or a wrapper of one)?"""
+    if f is None:
+        return False
+    f = inspect.unwrap(f) if callable(f) else f
+    return inspect.iscoroutinefunction(f) or inspect.iscoroutinefunction(getattr(f, "__call__", None))
+
+
+def async_parts(catalog):
+    """The parts (producers, rules) of a catalog that aask awaits: `async def` functions and parts marked blocking=True."""
+    out = []
+    for p in list(catalog.parts.values()) + list(catalog.rules.values()):
+        for a in (p.alternatives if p.alternatives is not None else [p]):
+            if a.blocking or is_async_func(a.func):
+                out.append(a.name)
+    return out
+
+
+def _drive(g):
+    """Run a step generator (see _step) from sync code: each call of user code is made here, an awaitable it returns is
+    awaited in an event loop of its own."""
+    try:
+        req = next(g)
+        while True:
+            try:
+                v = resolved(req[1]())
+            except Exception as e:  # noqa: BLE001 — the step decides what an exception means
+                req = g.throw(e)
+            else:
+                req = g.send(v)
+    except StopIteration as s:
+        return s.value
+
+
+async def _acall(part, call, timeout):
+    """One call of user code under aask: an `async def` part is awaited, a part marked blocking runs in a worker thread,
+    a plain sync part runs inline; a timeout (the part's, else the run's) raises PartTimeout."""
+    t = part.timeout if part.timeout is not None else timeout
+    if part.blocking and _THREADS:
+        aw = asyncio.to_thread(call)
+    else:
+        v = call()
+        if not inspect.isawaitable(v):
+            return v
+        aw = v
+    if t is None:
+        v = await aw
+    else:
+        try:
+            v = await asyncio.wait_for(aw, t)
+        except asyncio.TimeoutError:
+            raise PartTimeout(f"{TIMED_OUT} after {t:g} s") from None
+    return await v if inspect.isawaitable(v) else v
+
+
+async def _adrive(g, timeout):
+    """Run a step generator under aask (see _acall)."""
+    try:
+        req = next(g)
+        while True:
+            try:
+                v = await _acall(req[0], req[1], timeout)
+            except Exception as e:  # noqa: BLE001 — CancelledError is not an Exception: a cancelled step stops here
+                req = g.throw(e)
+            else:
+                req = g.send(v)
+    except StopIteration as s:
+        return s.value
+
+
+def _step(p, vals, init_state, policy=None, costs=None, known=None, memo=None, batch=None):
+    """Evaluate one part on the current facts → StepOut. A generator: every call of user code is yielded as (part, call) and
+    made by the driver (_drive: sync, _adrive: async), which sends back its value or throws its exception in. batch: (step
+    names, decision parts) of a shared forward pass this decision part belongs to (see Flow.batches)."""
     t0 = time.perf_counter()
     args = {x: vals.get(x, MISSING) for x in p.inputs}
     h = memo if memo is not None else vhash
@@ -535,7 +639,7 @@ def _run_step(p, vals, init_state, policy=None, costs=None, known=None, memo=Non
         err = "missing inputs: " + ", ".join(x for x, v in args.items() if v is MISSING)
         return StepOut(MISSING, None, 1.0, err, hashes, 0.0, tried=[] if p.alternatives is not None else None)
     if p.alternatives is not None:
-        out = _run_group(p, args, init_state, policy, costs, known)
+        out = yield from _group(p, args, init_state, policy, costs, known)
         out.hashes = hashes
         out.ms = (time.perf_counter() - t0) * 1000
         return out
@@ -544,7 +648,9 @@ def _run_step(p, vals, init_state, policy=None, costs=None, known=None, memo=Non
         if why:
             return StepOut(MISSING, None, 1.0, why, hashes, (time.perf_counter() - t0) * 1000)
     try:
-        v = p.func(**args) if batch is None else p.func.in_pass(batch[1], args, batch[0])
+        v = yield (p, (lambda: p.func(**args)) if batch is None else (lambda: p.func.in_pass(batch[1], args, batch[0])))
+    except PartTimeout as e:
+        return StepOut(MISSING, None, 1.0, str(e), hashes, (time.perf_counter() - t0) * 1000)
     except Exception as e:  # noqa: BLE001
         return StepOut(MISSING, None, 1.0, f"{type(e).__name__}: {str(e)[:120]}", hashes, (time.perf_counter() - t0) * 1000)
     ms = (time.perf_counter() - t0) * 1000
@@ -561,11 +667,15 @@ def _run_step(p, vals, init_state, policy=None, costs=None, known=None, memo=Non
                    extra=_extra(v))
 
 
+def _run_step(p, vals, init_state, policy=None, costs=None, known=None, memo=None, batch=None):
+    """_step, driven from sync code."""
+    return _drive(_step(p, vals, init_state, policy, costs, known, memo, batch))
+
+
 def group_features(group, args):
     from .learned import scalar_row
     plain = _plain_args(args, group.inputs)
     if group.features is not None:
-        import inspect
         names = list(inspect.signature(group.features).parameters)
         try:
             return scalar_row(group.features(**{x: plain[x] for x in names}))
@@ -574,9 +684,10 @@ def group_features(group, args):
     return scalar_row(plain)
 
 
-def _run_group(group, args, init_state, policy, costs, known=None):
+def _group(group, args, init_state, policy, costs, known=None):
     """Alternative producers of one fact: try them in the policy's order (declaration order without a policy); the first
-    output that passes its producer's checks is used. A shadow run (policy exploration) runs the rest too, for learning only."""
+    output that passes its producer's checks is used. A shadow run (policy exploration) runs the rest too, for learning only.
+    A generator of calls, like _step: a producer that times out is rejected and the next one is tried."""
     row, notes, shadow = None, None, False
     order = list(group.alternatives)
     if policy is not None:
@@ -592,8 +703,10 @@ def _run_group(group, args, init_state, policy, costs, known=None):
             v, val, ok = None, None, False
             aargs, why = _typed_args(a, {x: args[x] for x in a.inputs}, known)
             if why is None:
-                v = locate(a, a.func(**aargs), init_state)
+                v = locate(a, (yield (a, lambda: a.func(**aargs))), init_state)
                 ok, why, val = accept(a, v, {**plain, **aargs} if a.tin else plain, init_state)
+        except PartTimeout as e:
+            v, ok, why = None, False, str(e)
         except Exception as e:  # noqa: BLE001
             v, ok, why = None, False, f"error: {type(e).__name__}: {str(e)[:80]}"
         alt_ms[a.name] = (time.perf_counter() - t) * 1000
@@ -635,7 +748,8 @@ def execute(catalog, flow, init_state, workers=1, early_exit=True, order=None, c
     """Run the flow. Hard checks and what they depend on run first; a failed hard check settles the questions whose flow contains
     it, and the steps only those questions needed are skipped (early exit). Steps that do not depend on each other run in
     parallel when workers > 1 (threads: suits I/O-bound parts such as API calls and model inference). Records are always written
-    in flow order, so the hash chain and replay do not depend on scheduling.
+    in flow order, so the hash chain and replay do not depend on scheduling. An `async def` part is awaited in an event loop
+    of its own (aexecute runs such catalogs concurrently).
 
     order: None — all hard checks (and their inputs) first, together. An object with `p_fail(check, row)` and `row(vals,
     init_keys)` (solvi.learned.OrderModel, or an oracle) — hard checks one at a time, most expected saving first, stopping
@@ -643,134 +757,240 @@ def execute(catalog, flow, init_state, workers=1, early_exit=True, order=None, c
     costs: a CostBook (ms per part) for the learned order and the producer policy. policy: a ProducerPolicy for facts with
     alternative producers (without one they are tried in declaration order). known: given fact → the type its value was
     already validated against (System(inputs=...)), so typed parts reading it with that type skip re-validation."""
-    from .learned import CostBook
-    costs = costs if costs is not None else CostBook()
-    vals = dict(init_state)
-    steps = flow.steps
-    names = [st.part.name for st in steps]
-    index = {n: i for i, n in enumerate(names)}
-    done = {}
-    live = set(flow.per_question)
-    settled_by = {}
-    schedule = []
+    run = _Run(catalog, flow, init_state, early_exit, order, costs, policy, known)
+    for idxs in run.phases():
+        run.run_sync(idxs, workers)
+    return run.finish()
 
-    known = dict(known) if known else ({} if (catalog.readers or catalog.types) else None)
 
-    memo = HashMemo()
-    batch_of = {}                                     # step name → (names, decision parts) of its shared forward pass
-    for group in getattr(flow, "batches", None) or ():
-        group = [n for n in group if n in index]
-        if len(group) > 1:
-            b = (group, [steps[index[n]].part.func for n in group])
-            for n in group:
-                batch_of[n] = b
+async def aexecute(catalog, flow, init_state, early_exit=True, order=None, costs=None, policy=None, known=None,
+                   timeout=None, speculate=False):
+    """execute, on an event loop: `async def` parts are awaited, parts marked blocking run in worker threads, plain sync
+    parts inline; steps whose inputs are ready run concurrently. timeout: seconds per call of a part without its own
+    `timeout=` (None: no limit) — a step that does not finish in time fails with "timed out after ... s".
+    speculate=False: the phases of execute (hard checks and their inputs first, then what the open questions need), so no
+    step starts that execute would not run. speculate=True (default order only): every step starts as soon as its inputs
+    are ready; a failed hard check cancels the pending steps that only the questions it settles needed, and steps that
+    finished anyway are dropped. Either way the records, values and hashes are those of execute (a timeout aside)."""
+    run = _Run(catalog, flow, init_state, early_exit, order, costs, policy, known)
+    run.timeout = timeout
+    if speculate and early_exit and run.hard and order is None:
+        await run.speculate()
+    else:
+        for idxs in run.phases():
+            await run.run_async(idxs)
+    return run.finish()
 
-    def one(i, v):
-        return _run_step(steps[i].part, v, init_state, policy, costs, known, memo, batch_of.get(names[i]) if batch_of else None)
 
-    def keep(i):
-        vals[names[i]] = done[i].value
-        if known is not None and done[i].typed is not None:
-            known[names[i]] = done[i].typed
+class _Run:
+    """One execution of a flow: the plan of phases and the state the sync and async drivers share."""
 
-    def run(idxs):
+    def __init__(self, catalog, flow, init_state, early_exit=True, order=None, costs=None, policy=None, known=None):
+        from .learned import CostBook
+        self.catalog, self.flow, self.init_state = catalog, flow, init_state
+        self.early_exit, self.order, self.policy = early_exit, order, policy
+        self.costs = costs if costs is not None else CostBook()
+        self.vals = dict(init_state)
+        self.steps = steps = flow.steps
+        self.names = names = [st.part.name for st in steps]
+        self.index = index = {n: i for i, n in enumerate(names)}
+        self.done = {}
+        self.live = set(flow.per_question)
+        self.settled_by = {}
+        self.schedule = []
+        self.timeout = None
+        self.known = dict(known) if known else ({} if (catalog.readers or catalog.types) else None)
+        self.memo = HashMemo()
+        self.batch_of = {}                            # step name → (names, decision parts) of its shared forward pass
+        for group in getattr(flow, "batches", None) or ():
+            group = [n for n in group if n in index]
+            if len(group) > 1:
+                b = (group, [steps[index[n]].part.func for n in group])
+                for n in group:
+                    self.batch_of[n] = b
+        self.hard = [i for i, st in enumerate(steps) if st.part.kind == "check" and st.part.hard]
+        self.gov = {}
+        for i in self.hard:
+            part = steps[i].part
+            checkpoint_of = {r.split(" ", 1)[1] for r in steps[i].reasons if r.startswith("checkpoint ")}
+            self.gov[i] = {q for q in flow.per_question if names[i] in flow.per_question[q]
+                           and (not part.then or q in part.then or q in checkpoint_of)}
+
+    def step(self, i, vals):
+        return _step(self.steps[i].part, vals, self.init_state, self.policy, self.costs, self.known, self.memo,
+                     self.batch_of.get(self.names[i]) if self.batch_of else None)
+
+    def keep(self, i):
+        self.vals[self.names[i]] = self.done[i].value
+        if self.known is not None and self.done[i].typed is not None:
+            self.known[self.names[i]] = self.done[i].typed
+
+    def ancestors(self, i, acc=None):
+        acc = set() if acc is None else acc
+        if i not in acc and i not in self.done:
+            acc.add(i)
+            for x in self.steps[i].part.inputs:
+                if x in self.index:
+                    self.ancestors(self.index[x], acc)
+        return acc
+
+    def needed(self, i, live=None):
+        live = self.live if live is None else live
+        p = self.steps[i].part
+        if not self.early_exit:
+            return True
+        if p.kind == "rule":
+            return p.question in live
+        return any(p.name in self.flow.per_question.get(q, ()) for q in live)
+
+    def first(self):
+        """The hard checks and every step they read (the first phase of the default order)."""
+        acc = set()
+        for i in self.hard:
+            self.ancestors(i, acc)
+        return acc
+
+    def settle(self):
+        """Default order, every hard check evaluated: the questions settled by the failed ones (the first in flow order)."""
+        for i in self.hard:
+            if self.done[i].value is False:
+                for q in [q for q in self.live if q in self.gov[i]]:
+                    self.live.discard(q)
+                    self.settled_by[q] = self.names[i]
+
+    def phases(self):
+        """The sets of steps to run, one after another (a driver runs each and fills `done` before asking for the next)."""
+        if self.early_exit and self.hard and self.order is None:
+            yield sorted(self.first())
+            self.settle()
+        elif self.early_exit and self.hard:
+            yield from _learned_hard_checks(self)
+        yield [i for i in range(len(self.steps)) if i not in self.done and self.needed(i)]
+
+    def _got(self, i, out):
+        self.done[i] = out
+        if out.value is not MISSING:
+            self.keep(i)
+
+    def run_sync(self, idxs, workers=1):
         if workers <= 1 or len(idxs) <= 1 or not _THREADS:
             for i in idxs:                                  # idxs are in topological (flow) order
-                done[i] = one(i, vals)
-                if done[i].value is not MISSING:
-                    keep(i)
+                self._got(i, _drive(self.step(i, self.vals)))
             return
         # dependency-driven: a step starts as soon as the steps it reads have finished
         from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
         todo = set(idxs)
-        deps = {i: {index[x] for x in steps[i].part.inputs if x in index and index[x] in todo} for i in idxs}
+        deps = {i: {self.index[x] for x in self.steps[i].part.inputs if x in self.index and self.index[x] in todo}
+                for i in idxs}
         running = {}
         with ThreadPoolExecutor(workers) as ex:
             while todo or running:
                 for i in sorted(i for i in todo if not deps[i] & (todo | set(running.values()))):
                     todo.discard(i)
-                    running[ex.submit(one, i, dict(vals))] = i
+                    running[ex.submit(lambda i, v: _drive(self.step(i, v)), i, dict(self.vals))] = i
                 finished, _ = wait(list(running), return_when=FIRST_COMPLETED)
                 for fut in finished:
                     i = running.pop(fut)
-                    done[i] = fut.result()
-                    if done[i].value is not MISSING:
-                        keep(i)
+                    self._got(i, fut.result())
 
-    def ancestors(i, acc=None):
-        acc = set() if acc is None else acc
-        if i not in acc and i not in done:
-            acc.add(i)
-            for x in steps[i].part.inputs:
-                if x in index:
-                    ancestors(index[x], acc)
-        return acc
+    async def _astep(self, i):
+        return await _adrive(self.step(i, self.vals), self.timeout)
 
-    hard = [i for i, st in enumerate(steps) if st.part.kind == "check" and st.part.hard]
-    gov = {}
-    for i in hard:
-        part = steps[i].part
-        checkpoint_of = {r.split(" ", 1)[1] for r in steps[i].reasons if r.startswith("checkpoint ")}
-        gov[i] = {q for q in flow.per_question if names[i] in flow.per_question[q]
-                  and (not part.then or q in part.then or q in checkpoint_of)}
-    if early_exit and hard and order is None:
-        first = set()
-        for i in hard:
-            ancestors(i, first)
-        run(sorted(first))
-        for i in hard:
-            if done[i].value is False:
-                for q in [q for q in live if q in gov[i]]:
-                    live.discard(q)
-                    settled_by[q] = names[i]
-    elif early_exit and hard:
-        _learned_hard_checks(catalog, flow, init_state, order, costs, steps, names, index, done, vals, live, settled_by,
-                             hard, gov, run, ancestors, schedule)
+    async def run_async(self, idxs):
+        """Run steps as asyncio tasks, each as soon as the steps it reads have finished (started in flow order)."""
+        todo = set(idxs)
+        deps = {i: {self.index[x] for x in self.steps[i].part.inputs if x in self.index and self.index[x] in todo}
+                for i in idxs}
+        await self._tasks(todo, deps, lambda i: True)
 
-    def needed(i):
-        p = steps[i].part
-        if not early_exit:
-            return True
-        if p.kind == "rule":
-            return p.question in live
-        return any(p.name in flow.per_question.get(q, ()) for q in live)
-    run([i for i in range(len(steps)) if i not in done and needed(i)])
+    async def speculate(self):
+        """Every step the default order could run starts as soon as its inputs are ready; a failed hard check cancels the
+        pending steps no open question needs. Then what the default order would not have run is dropped."""
+        first = self.first()
+        live = set(self.live)
+        hard = set(self.hard)
 
-    init_hash = vhash(init_state)
-    memo.clear()
-    prev, recs, skipped, timings = init_hash, [], [], {}
-    for i, st in enumerate(steps, 1):
-        if i - 1 not in done:
-            by = sorted({settled_by[q] for q in settled_by if st.part.name in flow.per_question.get(q, ()) or
-                         (st.part.kind == "rule" and st.part.question == q)})
-            skipped.append((st.part.name, "not needed: hard check " + ", ".join(by) + " failed" if by else "not needed"))
-            continue
-        o = done[i - 1]
-        timings[st.part.name] = o.ms
-        for a, ms in (o.alt_ms or {}).items():
-            timings[a] = ms
-        part = st.part
-        if o.producer is not None:
-            part = catalog.alternative(st.part.name, o.producer)
-        rec = Record(step=i, kind=part.kind, name=st.part.name, inputs=o.hashes, value=o.value, quote=o.quote,
-                     confidence=o.confidence, error=o.error, prev=prev, producer=o.producer, tried=o.tried,
-                     provenance=provenance_of(part, o), model=model_info(part.model) if part.model is not None else None,
-                     probs=o.probs, extra=o.extra)
-        rec.hash = vhash(rec.body())
-        prev = rec.hash
-        recs.append(rec)
-    final = {k: v for k, v in vals.items()}
-    trace = Trace(init_hash, recs, dict(init_state), skipped, schedule, timings)
-    trace._outs = {names[i]: o for i, o in done.items() if o.outcomes is not None}    # for the producer policy (not hashed)
-    return trace, final
+        def want(i):
+            return i in first or self.needed(i, live)
+
+        def seen(i, out):
+            if i in hard and out.value is False:
+                live.difference_update(self.gov[i])
+        todo = {i for i in range(len(self.steps)) if want(i)}
+        deps = {i: {self.index[x] for x in self.steps[i].part.inputs if x in self.index} for i in todo}
+        await self._tasks(todo, deps, want, seen)
+        self.settle()
+        for i in [i for i in self.done if i not in first and not self.needed(i)]:
+            del self.done[i]                          # finished before the check that makes it unnecessary: not recorded
+            self.vals.pop(self.names[i], None)
+            if self.known is not None:
+                self.known.pop(self.names[i], None)
+
+    async def _tasks(self, todo, deps, want, seen=None):
+        running = {}
+        try:
+            while todo or running:
+                for t, i in list(running.items()):
+                    if not want(i):                   # no open question needs it any more: stop the call
+                        t.cancel()
+                        del running[t]
+                todo.difference_update([i for i in todo if not want(i)])
+                busy = todo | set(running.values())
+                for i in sorted(i for i in todo if not deps[i] & busy):
+                    todo.discard(i)
+                    running[asyncio.ensure_future(self._astep(i))] = i
+                if not running:
+                    break
+                finished, _ = await asyncio.wait(list(running), return_when=asyncio.FIRST_COMPLETED)
+                for t in sorted(finished, key=lambda t: running[t]):
+                    i = running.pop(t)
+                    self._got(i, t.result())
+                    if seen is not None:
+                        seen(i, self.done[i])
+        finally:
+            for t in running:                         # aask itself cancelled (or failed): no call keeps running
+                t.cancel()
+
+    def finish(self):
+        """The records in flow order (hash-chained), the skipped steps and why → (trace, values)."""
+        steps, done, catalog, flow = self.steps, self.done, self.catalog, self.flow
+        init_hash = vhash(self.init_state)
+        self.memo.clear()
+        prev, recs, skipped, timings = init_hash, [], [], {}
+        for i, st in enumerate(steps, 1):
+            if i - 1 not in done:
+                by = sorted({self.settled_by[q] for q in self.settled_by if st.part.name in flow.per_question.get(q, ()) or
+                             (st.part.kind == "rule" and st.part.question == q)})
+                skipped.append((st.part.name, "not needed: hard check " + ", ".join(by) + " failed" if by else "not needed"))
+                continue
+            o = done[i - 1]
+            timings[st.part.name] = o.ms
+            for a, ms in (o.alt_ms or {}).items():
+                timings[a] = ms
+            part = st.part
+            if o.producer is not None:
+                part = catalog.alternative(st.part.name, o.producer)
+            rec = Record(step=i, kind=part.kind, name=st.part.name, inputs=o.hashes, value=o.value, quote=o.quote,
+                         confidence=o.confidence, error=o.error, prev=prev, producer=o.producer, tried=o.tried,
+                         provenance=provenance_of(part, o), model=model_info(part.model) if part.model is not None else None,
+                         probs=o.probs, extra=o.extra)
+            rec.hash = vhash(rec.body())
+            prev = rec.hash
+            recs.append(rec)
+        final = {k: v for k, v in self.vals.items()}
+        trace = Trace(init_hash, recs, dict(self.init_state), skipped, self.schedule, timings)
+        trace._outs = {self.names[i]: o for i, o in done.items() if o.outcomes is not None}   # for the producer policy
+        return trace, final
 
 
-def _learned_hard_checks(catalog, flow, init_state, order, costs, steps, names, index, done, vals, live, settled_by, hard,
-                         gov, run, ancestors, schedule):
+def _learned_hard_checks(run):
     """Hard checks one at a time, most expected saving first. A question is settled by a failed hard check only when every
     hard check governing it and declared earlier in the catalog has been evaluated and passed — so the check that decides is
     the same as with the default order (the first declared failed one). Stops when no unevaluated hard check is in the flow
-    of a question that is still open."""
+    of a question that is still open. A generator of phases (see _Run.phases)."""
+    catalog, flow, init_state, order, costs = run.catalog, run.flow, run.init_state, run.order, run.costs
+    steps, names, index, done, vals = run.steps, run.names, run.index, run.done, run.vals
+    live, settled_by, hard, gov, ancestors, schedule = run.live, run.settled_by, run.hard, run.gov, run.ancestors, run.schedule
     pos = {n: k for k, n in enumerate(catalog.parts)}
     need_by = {}
     for j, st in enumerate(steps):
@@ -783,7 +1003,7 @@ def _learned_hard_checks(catalog, flow, init_state, order, costs, steps, names, 
         acc = set()
         for f in feats:
             ancestors(index[f], acc)
-        run(sorted(acc))
+        yield sorted(acc)
 
     def settle():
         for q in list(live):
@@ -845,7 +1065,7 @@ def _learned_hard_checks(catalog, flow, init_state, order, costs, steps, names, 
             if best is None or key < best[0]:
                 best = (key, i, anc, p, saves, c_eval + c_settle, score, why)
         _, i, anc, p, saves, c, score, why = best
-        run(sorted(anc))
+        yield sorted(anc)
         rank += 1
         failed = done[i].value is False
         settle()
