@@ -1,0 +1,53 @@
+name: smoke-spaces
+
+# Open the public Hugging Face Spaces in a headless browser and check that each one loads, runs a preset and prints the
+# expected output (tools/smoke_spaces.py). The Spaces install solvi from PyPI when the page loads, so this runs after the
+# PyPI upload (the "publish" workflow) and can be started by hand, e.g. after uploading a new version of a Space.
+# It only opens public pages: no secrets, nothing is uploaded.
+on:
+  workflow_run:
+    workflows: [publish]
+    types: [completed]
+  workflow_dispatch:
+    inputs:
+      only:
+        description: "Spaces to check (comma-separated)"
+        default: "playground,arcade,realms,documents"
+      timeout:
+        description: "Seconds to wait for a Space to load"
+        default: "600"
+      with_model:
+        description: "documents: download the 790 MB extractor and run a use case"
+        type: boolean
+        default: false
+
+jobs:
+  smoke:
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: "3.12"
+      - name: wait for the new release to reach the PyPI index and its CDN
+        if: ${{ github.event_name == 'workflow_run' }}
+        run: sleep 300
+      - name: install Playwright and Chromium
+        run: uv run --no-project --with playwright python -m playwright install --with-deps chromium
+      - name: smoke test
+        run: |
+          mkdir -p smoke
+          uv run --no-project --with playwright python tools/smoke_spaces.py --require --retries 1 \
+            --only "${{ inputs.only || 'playground,arcade,realms,documents' }}" \
+            --timeout "${{ inputs.timeout || '600' }}" \
+            ${{ inputs.with_model && '--with-model' || '' }} \
+            --screenshots smoke --json | tee smoke/results.json
+      - name: keep the results and the screenshots of failures
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: smoke-spaces
+          path: smoke/
+          if-no-files-found: ignore

@@ -182,6 +182,12 @@ def serialize(res, cat, state, questions, show_text="", system=None):
     out["feasible"] = bool(getattr(res, "feasible", True))
     out["violations"] = list(getattr(res, "violations", None) or [])
     out["audit"] = audit_dict(res, state)
+    out["report_md"] = None
+    if hasattr(res, "report"):                           # solvi 0.7: a report for people (no model is called)
+        try:
+            out["report_md"] = res.report(format="md", system=system)
+        except Exception as e:  # noqa: BLE001 — the report is an extra; the rest of the panel must still render
+            out["report_md"] = f"**The report could not be built:** `{type(e).__name__}: {e}`"
     if system is not None:
         out["stats"] = dict(system.stats)
     return out

@@ -241,3 +241,24 @@ def test_cli_report(store, tmp_path, capsys):
     with pytest.raises(SystemExit) as e:
         main(["report", path, "--id", "nope"])
     assert e.value.code == 2
+
+
+def test_derived_quote_is_not_flagged_as_a_mismatch():
+    """A value derived from a quote (the text "lawyer" → "legal threat") is grounded text, not "not the text at these
+    offsets"."""
+    from solvi import Catalog, Question, Quote, System
+    cat = Catalog()
+
+    @cat.extract
+    def threat(message: str) -> str:
+        i = message.find("lawyer")
+        return Quote("legal threat", i, i + 6, source="message")
+
+    @cat.rule("priority")
+    def priority(threat: str) -> bool:
+        return threat == "legal threat"
+
+    res = System(cat, [Question("priority", "High priority?")]).ask({"message": "Refund me or my lawyer calls."})
+    md = res.report()
+    assert "**lawyer**" in md and "NOT the text" not in md
+    assert "not the text at these offsets" not in res.report(format="html")

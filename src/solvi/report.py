@@ -142,8 +142,10 @@ def decision(res, question=None, system=None, replay="trusted"):
                             "detail": e["detail"]} for e in au.safeguards]})
         for x in au.quoted:
             if not x.get("error"):
+                # a quote without an error was grounded: its offsets lie in the text. A value derived from it ("1.5
+                # million" → 1500000.0, match False) or converted is still that text, not a mismatch
                 spans.setdefault(x["source"], []).append({"start": x["start"], "end": x["end"], "label": f"{q}: {x['name']}",
-                                                          "ok": x["match"] is not False})
+                                                          "ok": True})
         for e in au.evidence:
             spans.setdefault(e["source"], []).append({"start": e["start"], "end": e["end"],
                                                       "label": f"{q}: {'span' if e.get('span') else 'evidence'}",

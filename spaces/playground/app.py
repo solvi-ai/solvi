@@ -23,6 +23,7 @@ import gradio as gr
 import pandas as pd
 
 import demos
+import new07
 import strategy_demo as sd
 from audit_view import audit_html, fmt_answer
 from sandbox import LIMITS_NOTE, run_job, serialize
@@ -212,6 +213,14 @@ def _job(code, state_json, selected, known, tamper=None):
             "tamper": tamper}, None
 
 
+def report_text(out):
+    """The Markdown report of the decision (solvi 0.7), or a note when this solvi has no reports."""
+    if out.get("report_md"):
+        return out["report_md"]
+    return (f"Reports for people (`res.report()`) need solvi 0.7 or newer; this Space loaded solvi {new07.solvi_version()}. "
+            "Reload the page after the release.")
+
+
 def run_playground(code, state_json, selected, known):
     """Run button: execute the catalog in-process (in the visitor's browser) and render everything."""
     job, err = _job(code, state_json, selected, known)
@@ -222,14 +231,14 @@ def run_playground(code, state_json, selected, known):
         msg = f"**Could not run.** {out.get('error', 'unknown error')}"
         tb = out.get("traceback") or ""
         return (msg, gr.update(value=tb, visible=bool(tb)), EMPTY_DF["answers"], "", EMPTY_DF["flow"], EMPTY_DF["skipped"],
-                EMPTY_DF["state"], "", gr.update(), known, gr.update(choices=[], value=None), "")
+                EMPTY_DF["state"], "", gr.update(), known, gr.update(choices=[], value=None), "", "")
     names = out["questions"]
     ch, default = tamper_choices(out)
     stdout = out.get("stdout") or ""
     raw = out["show"] + (f"\n── your code printed ──\n{stdout}" if stdout.strip() else "")
     return (summary_md(out, rt), gr.update(value="", visible=False), answers_df(out), audit_html(out), flow_df(out),
             skipped_df(out), state_df(out), raw, gr.update(choices=names, value=out["asked"]), names,
-            gr.update(choices=ch, value=default), chain_text(out))
+            gr.update(choices=ch, value=default), chain_text(out), report_text(out))
 
 
 def tamper_playground(code, state_json, selected, known, step, value, rehash):
@@ -711,6 +720,8 @@ def solvi_version():
 
 
 ABOUT = """
+**New in 0.7** (the "New in 0.7" tab): escalation with a guarantee you set (`act_guard`: P(answered alone and wrong) ≤ risk, and the audit's guarantee line), a vote of two model families, text in (a message → the question it asks and its fields, each with a quote) and reports for people (`res.report()`, also under the Playground's answers). The deciders there are keyword stand-ins, not models.
+
 **New in 0.4: grounded decisions.** Fuzzy proposes, deterministic decides, everything is in the trace: a model may quote, pick a category or learn an answer, but plain code checks its output (grounding, closed options, confidence, hard checks, constraints between answers) before anything uses it.
 `res.audit()` shows what every answer rests on and which safeguards fired, and replay reports "model changed since this decision" when a model is swapped; try the three "New in 0.4" presets and the Audit panel.
 
@@ -761,6 +772,8 @@ with gr.Blocks(title="solvi playground", theme=THEME, css=CSS) as demo:
                 flow = gr.Dataframe(label="Flow chosen by the strategist (execution order)", wrap=True, interactive=False)
                 skipped = gr.Dataframe(label="Parts NOT taken, and why", wrap=True, interactive=False)
                 cstate = gr.Dataframe(label="computed_state with provenance", wrap=True, interactive=False)
+                with gr.Accordion("Report for people: res.report() (solvi 0.7)", open=False):
+                    report = gr.Markdown()
                 with gr.Accordion("Raw output of solvi.show(res, cat)", open=False):
                     raw = gr.Code(language=None, interactive=False, elem_classes="mono", lines=12)
                 with gr.Accordion("Tamper with the trace", open=False):
@@ -780,10 +793,32 @@ with gr.Blocks(title="solvi playground", theme=THEME, css=CSS) as demo:
                     t_out = gr.Markdown()
 
         preset.change(load_preset, preset, [code, init_json, qs, known])
-        play_outputs = [summary, err_box, ans, aud, flow, skipped, cstate, raw, qs, known, t_step, chain]
+        play_outputs = [summary, err_box, ans, aud, flow, skipped, cstate, raw, qs, known, t_step, chain, report]
         run_btn.click(run_playground, [code, init_json, qs, known], play_outputs)
         t_btn.click(tamper_playground, [code, init_json, qs, known, t_step, t_val, t_rehash], t_out)
         t_model.click(replace_model_playground, [code, init_json, qs, known], t_out)
+
+    with gr.Tab("New in 0.7"):
+        gr.Markdown("Four features of solvi 0.7 on a support desk. **No model runs here:** the deciders are keyword "
+                    "stand-ins with a decider's contract, so the numbers show the mechanics, not a model's quality. A "
+                    "demo that needs a newer solvi than the one this tab loaded says so.", elem_classes="note")
+        with gr.Row():
+            with gr.Column(scale=4):
+                n_demo = gr.Dropdown(list(new07.DEMOS), value=next(iter(new07.DEMOS)), label="Demo")
+                n_text = gr.Textbox(next(iter(new07.DEMOS.values()))[1], lines=3, label="Message")
+                n_risk = gr.Slider(0.02, 0.30, value=0.10, step=0.01, label="risk (act_guard)",
+                                   info="P(answered alone and wrong) the thresholds promise to stay under")
+                n_btn = gr.Button("Run", variant="primary")
+            with gr.Column(scale=6):
+                n_out = gr.Markdown("Press **Run**.")
+                with gr.Accordion("Audit of the decision", open=True):
+                    n_audit = gr.Code(language=None, interactive=False, elem_classes="mono", lines=10)
+                with gr.Accordion("Report (Markdown)", open=False):
+                    n_md = gr.Markdown()
+                with gr.Accordion("Report (the self-contained HTML page)", open=False):
+                    n_html = gr.HTML()
+        n_demo.change(lambda name: new07.DEMOS[name][1], n_demo, n_text)
+        n_btn.click(new07.run, [n_demo, n_text, n_risk], [n_out, n_audit, n_md, n_html])
 
     with gr.Tab("Strategy"):
         gr.Markdown(f"An insurance claim desk with **{len(sd.cat.parts)} parts and {len(sd.cat.rules)} rules** "

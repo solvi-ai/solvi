@@ -37,6 +37,30 @@ CI runs on every pull request: a broken link, a missing anchor or a docstring th
   change is intended, regenerate it with `uv run python tests/i18n/render.py` and say so in the CHANGELOG.
 - Style: plain functions, short docstrings that say what a thing returns and why; line length 120.
 
+## Releasing
+
+1. Move the CHANGELOG's "Unreleased" section under the new version and date; bump the version in `pyproject.toml`.
+2. Publish a GitHub release (tag `vX.Y.Z`). The `publish` workflow builds and uploads to PyPI; the `docs` workflow
+   deploys the documentation site.
+3. The browser Spaces (`spaces/playground`, `arcade`, `realms`, `documents-web`) install solvi from PyPI when a page
+   loads, so they pick up the release by themselves; upload a Space's folder only when its own files changed. Before
+   uploading, check the new version locally in a real browser:
+
+   ```bash
+   cd spaces/playground && python -m http.server 8000 &
+   uv run --with playwright python -m playwright install chromium          # once
+   uv run --with playwright python tools/smoke_spaces.py --only playground --url playground=http://localhost:8000/index.html
+   ```
+
+4. After the upload to PyPI, the `smoke-spaces` workflow runs `tools/smoke_spaces.py` against the public Spaces (it can
+   also be started by hand from the Actions tab). It opens each Space in headless Chromium, waits for Pyodide to install
+   solvi (a cold load takes one to several minutes), runs one preset and checks its output: the playground's
+   "Trace replay: OK" and its "New in 0.7" tab, a tic-tac-toe move in the arcade, a turn in realms, and Python + solvi
+   ready in documents (`--with-model` also downloads the 790 MB extractor and runs a use case). It prints the solvi
+   version each Space loaded; the results and a screenshot of every failing Space are kept as the run's artifact.
+   Without Playwright the script skips (exit 0; `--require` makes it exit 2). A cold load now and then stalls on a CDN,
+   so a failing Space is tried once more (`--retries`).
+
 ## Pull requests
 
 Small and focused is best. Describe what changes for a user, how you tested it, and anything that changes a trace hash or

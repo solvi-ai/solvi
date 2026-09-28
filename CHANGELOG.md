@@ -196,6 +196,8 @@
   catalog and model fingerprints in use and their changes, and example stored ids.
 - HTML is one self-contained page (inline CSS, light and dark, no scripts or external assets); every value is escaped.
   Markdown escapes every special character.
+- A value derived from its quote ("1.5 million" read as 1500000.0, a card number shown as "card ending 6467") is
+  highlighted as grounded text, not as "not the text at these offsets".
 - `solvi report STORE [--since] [--until] [--question] [--id ID] [--html out.html] [--md out.md] [--json] [--system]`.
 - A response keeps the System that answered (and one loaded with a System, its System) for reports.
 
@@ -264,6 +266,18 @@
 - `solvi.calibration`: `group_nodes`, `node_of`, `loss_budget`, `certify_groups`, `group_thresholds`, `group_path`.
 - `solvi.decide.Facts` (the same class as `solvi.multi.Facts`): a DecisionPart also takes examples and inputs given as
   facts by name.
+
+### Browser playground and a smoke test for the Spaces
+
+- The playground Space (`spaces/playground`) has a "New in 0.7" tab: escalation with a guarantee (`act_guard` on labelled
+  examples, the answered share, error and risk on new ones, `must_escalate_at_least`, the audit's guarantee line), a vote
+  of two model families, text in (a message → the question and its fields with quotes, `ask_text`) and a report
+  (Markdown and the HTML page). The deciders are keyword stand-ins. Every run in the Playground tab also shows its report,
+  and the audit panel shows the guarantee line. The Space installs solvi from PyPI: each feature is detected, and a demo
+  that needs a newer solvi says which one.
+- `tools/smoke_spaces.py`: opens each public Space (playground, arcade, documents, realms) in a headless browser
+  (Playwright, optional), waits for it to load, runs one preset and checks the output; `.github/workflows/smoke-spaces.yml`
+  runs it by hand or after a release is published.
 
 ### Instructions inside the input: perturb and injection traps
 
