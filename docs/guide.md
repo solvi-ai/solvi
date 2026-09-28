@@ -801,6 +801,57 @@ guarantee line. `replay` re-runs every stage and compares the proposals too, not
 `trust_models=True` (or a part's model unavailable) it checks instead that the recorded answer follows from the recorded
 proposals by the combination's rule. `System.teach` on a question a combination answers teaches every part.
 
+### A memory of corrections: part.memory
+
+The cases people corrected are the best evidence of where a decider goes wrong. A memory of corrected cases keeps them
+and, at decision time, finds the nearest ones — a second signal next to the model, never a silent override:
+
+```python
+mem = team.memory()                                  # a solvi.memory.CorrectionMemory bound to the part
+mem.add(email, "billing", source="human", by="ann", stored_id=res.stored_id)
+mem.learn_from(store)                                # every trusted correction of the question in a TraceStorage
+mem.calibrate(risk=0.05)                             # the abstain threshold, leave-one-out over the stored cases
+
+res = system.ask({"email": text})
+res.audit("route").memory                            # the proposal, what came of it, the cases it rests on
+```
+
+**A case** is the decider's probabilities over the options for the input — from the raw logits at the checkpoint's
+temperature, before `adapt` / `fit` / `teach`, so a later fit does not move the stored cases — optionally the input's
+words (`text=True`: hashed words, no embedding model), the label and its provenance: `source`, `by`, `time`,
+`stored_id`. Only `source="human"`, `"outcome"` or `"rule"` are accepted; anything else raises `UntrustedLabel`, so the
+system's own answers cannot become cases. `learn_from(store)` reads the store's corrections of the question (the
+system's stored decisions are never read) and skips, with the reason, those from another source or with an answer the
+decision cannot give.
+
+**The proposal.** The `k` nearest cases (7) within `radius` (0.15; total-variation distance between the probability
+vectors, averaged with the words' Jaccard distance when `text=True`), each weighted 1 − distance / radius. The label with
+the most weight is proposed when it leads the others by at least `min_strength` (1.0: its weight minus theirs) and holds
+at least `min_agreement` (0.8) of the weight; otherwise the memory abstains and says why ("no corrected case within
+distance 0.15", "similar cases disagree: 'billing' 1.20, 'shipping' 0.90"). Ties are broken by case id, so the same memory
+proposes the same thing every time, whatever order the cases were added in. `calibrate(risk)` sets `min_strength` by
+conformal risk control, each case proposed for by the others: P(the memory proposes and is wrong) ≤ risk for inputs like
+the stored corrections.
+
+**What it does** (`mode`):
+
+- `"check"` (default) — it never answers. When the decider would answer alone and the memory proposes another label, the
+  decision escalates: `memory of corrections disagrees: 4 similar corrected case(s) say 'shipping' (strength 3.21); would
+  have answered 'billing'` (safeguard `memory`). It can only make more decisions escalate, so an `act_guard` promise
+  still holds.
+- `"answer"` — as `"check"`, and where the decider escalated by its own threshold (act, confidence, margin — not a
+  perturbation or another safeguard) and the memory proposes a label, the memory answers with it. The trace says so
+  (action `answered`, the escalation it replaced, the model's answer); the part's `act_guard` promise is not claimed for
+  that answer, the memory's own (from `calibrate`) is recorded instead.
+
+Inside a `Cascade`, `Vote` or `Route` a part's memory only checks, and each stage's record carries it. Every decision
+records `extra["memory"]` — `fp`, `n`, `mode`, `proposal`, `strength`, `agreement`, `abstain`, `action` and `neighbours`
+(`id`, `label`, `distance`, `weight`, `source`, `by`, `time`, `stored_id`); the audit prints them. The memory's
+fingerprint is part of the part's, so a replay of a decision made with another memory state reports "model changed", and
+a replay with the same state recomputes the proposal and compares it. `mem.save(path)` / `CorrectionMemory(part).load(path)`
+keep it with the checkpoint's fingerprint (another checkpoint is refused: build it again with `learn_from`);
+`mem.remove(ids)` forgets cases found to be wrong; `team.memory(False)` detaches it.
+
 ### Loading a checkpoint
 
 `DecideModel.load(path_or_hf_id, device=None, backend="auto")` reads a folder with `solvi_decide.json`, `config.json`,
@@ -1168,6 +1219,60 @@ read the corrections back (`system.storage.corrections()`, or the `{"teach": ...
 include them in the next `fit` or `learn_rule` call. Non-JSON values in `init_state` are stored as JSON (dates as ISO
 strings; 0.5 wrote their `repr`), other objects as their `repr`.
 
+Each correction keeps where it came from: `system.teach("risk", state, "high", source="outcome", by="ledger",
+of=res.stored_id)` — `source` is `"human"` (the default: a person corrected or confirmed the answer), `"outcome"` (what
+really happened) or `"rule"` (your code rejected a model's proposal and decided instead); anything else raises
+`UntrustedLabel`. `of` is the stored id of the decision it corrects; `corrections()` returns all three.
+
+### Learning from corrections with gates and rollback (experimental)
+
+`system.learning(...)` turns the stored corrections into updates of the model decisions — only through gates, recorded,
+and reversible. It is off until you call it, and experimental (it warns `ExperimentalWarning`; its API and defaults may
+change):
+
+```python
+loop = system.learning(store, gates={"honesty": "tests/honesty/core_v1.json"})
+# ... the system runs; people correct escalations with system.teach(...) — now stored only, not learned at once
+rep = loop.run()                  # labels → a proposed update → gates → promoted or undone; recorded either way
+print(rep)                        # the rung per question and each gate's numbers
+loop.versions()                   # [{"version", "fp", "time", "action"}]
+loop.rollback(2)                  # any promoted version, in this process or another one on the same store
+```
+
+**Labels** come only from outside the model: the store's corrections from `"human"`, `"outcome"` and `"rule"` sources
+(`harvest_rules=True` also takes the stored decisions where a hard check forced another answer than the model proposed).
+A correction from any other source is refused and listed (`loop.labels()["rejected"]`); the stored decisions — the
+system's own answers — are never read as labels, so self-training is impossible by construction. Each label goes, by a
+hash of its id, to `"train"`, `"calibration"` or `"holdout"` (50 / 20 / 30% by default): a held-out label is never trained
+on, in this update or any later one. While the loop is attached, `System.teach` only stores the correction
+(`gate_teach=False` keeps the instant update; `loop.detach()` ends it).
+
+**The ladder**, per question, by the number of training labels: under `fit_below` (50) — the decider's shift / scale
+(`fit`); under `memory_below` (1000) — `fit` plus a memory of the corrected cases (`part.memory`, mode `"check"` unless
+`ladder={"memory": {"mode": "answer"}}`); beyond — the `adapter` hook when you give one (`(part, [(text, answer)])` →
+a JSON-able description; an object with `state(part)` / `restore(part, state)` is rolled back too), else the memory.
+
+**The gates** — the update is promoted only if every one passes; otherwise it is undone and recorded as rejected:
+
+| Gate | Passes when |
+|---|---|
+| `consistency` | at most `max_conflict` (20%) of the new training labels are contradicted by a memory of the labels already learned — a batch of wrong corrections hurts more than right ones help |
+| `heldout` | on the held-out labels, asked through the whole system, (right − wrong answered alone) / n improves by at least `min_gain` (0.01), with at least `min_holdout` (5) labels |
+| `honesty` | the honesty numbers (confident errors, coverage at `risk`, quote support) on the held-out labels — and on your own honesty set (`gates={"honesty": path or cases}`) — get no worse than `tolerance` (0.02) |
+| `act_guard` | a part calibrated with `act_guard` / `calibrate_for` is calibrated again, with the same risk, on at least `min_calibration` (30) calibration labels: an old threshold says nothing about a changed signal |
+| `size` | shadow run: the stored decisions of the holdout split (up to `shadow_limit`, 500) are asked with the current and the candidate state and compared (`solvi.diff.compare`); at most `max_change` (30%) may change |
+
+`max_change` is deliberately low: the first update of a badly biased decider can move far more than 30% of the decisions
+and is then rejected until you raise the limit for it (`gates={"max_change": 0.8}`) — a decision a person should take.
+
+**The record.** Every run that proposes an update writes a record of kind `"update"` to the changelog (by default the
+same store, hash-chained with the decisions; `changelog=` for another): the version it came from, the fingerprints before
+and after, the rung and label counts per question, the training label ids, every gate's numbers and — for a promoted
+state — the state itself (the adaptation with its examples, the thresholds and guarantee, the memory's cases). The first
+run records the state it started from as a baseline version. Each decision's trace names the part's fingerprint, and
+`loop.version_of(fp)` the version it belongs to. Limits: only questions answered by a single decision part (not a
+combination), and per-group `act_guard` thresholds are not recalibrated (such an update is rejected).
+
 ## Confidence, calibration and abstention
 
 How confidence is computed (what it means for each answer kind: the table in
@@ -1268,9 +1373,13 @@ store.replay_all(system)                        # [] when every stored trace rep
 store.verify()                                  # the chain across stored records
 ```
 
-Two backends ship, both without dependencies: `JSONLStorage` (an append-only file, one record per line; one writing
+Two backends ship without dependencies: `JSONLStorage` (an append-only file, one record per line; one writing
 process) and `SQLiteStorage` (stdlib `sqlite3`; index tables by question, answer, status, safeguard kind, model and time;
-several processes may write to one file). A stored record holds the answers, the safeguards, the models, the whole
+several processes may write to one file). Two more take an optional dependency and keep the same tables:
+`PostgresStorage("postgresql://user@host/db")` (`pip install 'solvi[postgres]'`, psycopg 3; tables named `solvi_*` —
+`prefix=` to change; several services may write: each append locks the head table for its transaction, so the chain
+cannot fork) and `DuckDBStorage("decisions.duckdb")` (`pip install 'solvi[duckdb]'`; one writing process; query the tables
+with DuckDB next to JSONL or Parquet files). `storage="decisions.duckdb"` or a `postgresql://` URL work too. A stored record holds the answers, the safeguards, the models, the whole
 response (`res.to_dict()`), the time and your own `meta` (`store.save(res, meta={"ticket": 42})`). `teach` stores its
 corrections in the same chain (`store.corrections()`).
 
