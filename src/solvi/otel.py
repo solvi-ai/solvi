@@ -16,12 +16,14 @@ A step that failed or whose output was rejected has status ERROR with the reason
 says status abstain and the guard). Times: a trace records each step's run time, not its start, so the step spans are laid
 end to end from the decision's start — their durations are measured, their start times are not (and parallel steps are
 shown one after another). A stored decision starts at its stored time minus its run time; a fresh response ends when it is
-exported, unless `end_ns=` is given. In the OTLP JSON the ids are derived from the trace's hashes (the same decision
-exports the same ids); through the API the SDK assigns them."""
+exported, unless `end_ns=` is given. In the OTLP JSON the ids are derived from the trace's hashes and the stored id (the
+same stored decision exports the same ids); an unstored response adds a random nonce of its own (kept on the response),
+so two identical unstored decisions never share ids; through the API the SDK assigns them."""
 from __future__ import annotations
 
 import hashlib
 import json
+import os
 import time
 
 SCOPE = "solvi"
@@ -45,13 +47,27 @@ def _hid(*parts, n=16):
     return hashlib.sha256("|".join(str(p) for p in parts).encode()).hexdigest()[:n]
 
 
+def _nonce(res):
+    """An unstored response's own random id part: two identical decisions that were not stored (same trace, no stored id)
+    are still two decisions, so their trace ids must differ; the same response object keeps its nonce and exports the
+    same ids again."""
+    n = getattr(res, "_otel_nonce", None)
+    if n is None:
+        n = os.urandom(8).hex()
+        try:
+            res._otel_nonce = n
+        except (AttributeError, TypeError, ValueError):   # pragma: no cover - a response that takes no attributes
+            pass
+    return n
+
+
 def spans(res, end_ns=None, stored_time=None):
     """One decision as neutral span dicts (the root first): {"name", "span_id", "parent", "trace_id", "start", "end",
     "attributes", "status": None or ("ERROR", message), "events": [(name, time, attributes)]}."""
     from .runtime import MISSING
     tr = res.trace
     head = tr.records[-1].hash if tr.records else tr.init_hash
-    trace_id = _hid(tr.init_hash, head, getattr(res, "stored_id", None), n=32)
+    trace_id = _hid(tr.init_hash, head, getattr(res, "stored_id", None) or _nonce(res), n=32)
     total = max(int(round(float(res.ms) * 1e6)), 1)
     if end_ns is None:
         end_ns = int(stored_time * 1e9) if stored_time is not None else time.time_ns()

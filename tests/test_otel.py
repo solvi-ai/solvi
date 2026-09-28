@@ -117,3 +117,17 @@ def test_otlp_json_error_status():
     bad = [s for s in ss if s["status"]]
     assert bad and all(s["status"]["code"] == 2 and s["status"]["message"] for s in bad)
     assert spans(res)[0]["attributes"]["solvi.complete"] is False
+
+
+def test_identical_unstored_decisions_get_distinct_ids():
+    s = build()
+    a, b = s.ask(STATE, store=False), s.ask(STATE, store=False)
+    assert a.stored_id is None and a.trace.records[-1].hash == b.trace.records[-1].hash
+    ia = to_otlp_json(a, end_ns=1)["resourceSpans"][0]["scopeSpans"][0]["spans"]
+    ib = to_otlp_json(b, end_ns=1)["resourceSpans"][0]["scopeSpans"][0]["spans"]
+    assert ia[0]["traceId"] != ib[0]["traceId"] and not {x["spanId"] for x in ia} & {x["spanId"] for x in ib}
+    # the same response keeps its ids; a stored decision's ids come from its stored id alone
+    assert to_otlp_json(a, end_ns=1)["resourceSpans"][0]["scopeSpans"][0]["spans"][0]["traceId"] == ia[0]["traceId"]
+    a.stored_id = b.stored_id = "0123456789abcdef"
+    del a._otel_nonce
+    assert spans(a)[0]["trace_id"] == spans(b)[0]["trace_id"]
