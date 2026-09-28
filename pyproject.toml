@@ -24,6 +24,12 @@ dependencies = ["numpy", "scipy", "pydantic>=2"]
 model = ["torch", "transformers"]   # model-based extraction from text (solvi.extract_*), the decider (solvi.decide), the model strategist and name matcher (solvi.strategy_model, solvi.aliases) — torch backends
 onnx = ["onnxruntime", "tokenizers", "huggingface_hub"]   # the decider, the model strategist and the name matcher without torch (backend="onnx")
 
+[project.scripts]
+solvi = "solvi.cli:main"
+
+[project.entry-points.pytest11]
+solvi = "solvi.pytest_plugin"
+
 [project.urls]
 Homepage = "https://github.com/solvi-ai/solvi"
 Documentation = "https://github.com/solvi-ai/solvi/blob/main/docs/guide.md"
@@ -39,3 +45,4 @@ dev = ["pytest>=8"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+markers = ["model: needs a real model checkpoint and its runtime (skipped when they are missing)"]

@@ -1,0 +1,25 @@
+{
+ "set": "core",
+ "version": "1",
+ "cases": 26,
+ "metrics": {
+  "n": 41,
+  "acted": 30,
+  "escalated": 11,
+  "correct": 28,
+  "confident_errors": 2,
+  "confident_error_rate": 0.04878048780487805,
+  "risk": 0.1,
+  "coverage_at_risk": 0.7317073170731707,
+  "threshold": 0.7499999999999999,
+  "quotes": 15,
+  "quotes_supporting": 14,
+  "quote_support_proxy": 0.9333333333333333,
+  "should_abstain": 9,
+  "abstained_when_should": 9
+ },
+ "baseline": null,
+ "tolerance": 0.02,
+ "regressions": [],
+ "ok": true
+}
