@@ -112,6 +112,8 @@ def answer_card(d):
             '<span class="aud-ok">satisfied</span>' if c["satisfied"] else '<span class="aud-bad">BROKEN</span>')))
     for n, why in d.get("not_run") or []:
         rows.append(_row("notrun", "not run", f'<b>{esc(n)}</b> ({esc(why)})'))
+    if d.get("guarantee"):                                # solvi 0.5.1+: what the calibrated thresholds promise
+        rows.append(_row("check", "guarantee", esc(d["guarantee"])))
     rows.append(_row("answer", "→ answer", f'<b>{esc(fmt_answer(d["answer"]))}</b> — {esc(d["why"])}'))
     sg = d.get("safeguards") or []
     if sg:

@@ -33,6 +33,14 @@ Tabs:
   tasks. The
   System is kept while the code is unchanged, so `setup` (e.g. `fit_fast`) runs once and the stats accumulate. The code runs in-process (`sandbox.py`: `exec` in a fresh
   module) with a 5 s time guard (`sys.settrace` on the visitor's own frames), so an infinite loop is stopped.
+- **New in 0.7**: four demos on a support desk, with keyword stand-ins in place of models (no model runs in the browser):
+  escalation with a guarantee (`act_guard` on 300 labelled emails: the answered share, the error, the risk on new emails,
+  `must_escalate_at_least`, and the guarantee line of the audit; a slider sets the risk), a vote of two model families
+  (`solvi.multi.Vote`: disagreement escalates with both proposals), text in (`solvi.textin.TextIn` with `CueExtractor`: a
+  message → the question it asks and its fields, each with a quote; `system.ask_text` answers it) and a report for people
+  (`res.report()` as Markdown and as the self-contained HTML page). The Playground tab also shows the report of every run.
+  Each feature is detected before use: with an older solvi from PyPI a demo says which version it needs instead of failing
+  (act_guard needs 0.5.1, Vote 0.6, text in and reports 0.7).
 - **Strategy**: an insurance claim desk with 21 parts and 5 rules, six of them slow on purpose. The generated plan as a graph,
   early exit on failed hard checks, and live timings: plain script vs solvi one by one. Pyodide has no threads, so the
   parallel run (`workers=8`) is shown as the native numbers from the solvi README. Plus a scale test on catalogs of 100 to
@@ -46,6 +54,7 @@ Another Space: [solvi arcade](https://huggingface.co/spaces/solvi-ai/arcade).
 ## Files
 
 - `index.html`: loads `@gradio/lite` from jsDelivr and lists the Python files (`<gradio-file url=...>`) and requirements.
+- `new07.py`: the "New in 0.7" demos (pure Python, no gradio; each feature detected before use).
 - `audit_view.py`: renders the audit panel from `Response.audit().to_dict()`.
 - `app.py` (entrypoint), `sandbox.py`, `demos.py`, `strategy_demo.py`, `presets/`: the app, ported from the Gradio 6 server
   Space in `../playground` to the Gradio 5 API that Gradio-Lite ships.
