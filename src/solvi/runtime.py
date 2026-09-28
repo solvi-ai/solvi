@@ -230,7 +230,7 @@ class Trace(Serial):
                 bad += extra
                 models.append((r.step, r.name, verdict))
                 if verdict != "recomputed":
-                    bad += _grounded(part, r, self.init)
+                    bad += _grounded(part, r, self.init) + _checked(part.model, r)
                     continue
             bad += _recompute(part, r, args, self.init, catalog)
         if flow is not None:
@@ -289,6 +289,11 @@ def _recompute(part, r, args, init, catalog=None):
             v = part.func(**plain) if sibs is None else part.func.in_pass(sibs, plain, r.extra["pass"]["with"])
         except Exception as e:  # noqa: BLE001
             return [] if r.error is not None else [(r.step, r.name, f"recompute failed: {type(e).__name__}")]
+        if isinstance(v, Decision) and isinstance(r.extra, dict):     # several models (solvi.multi): every proposal
+            from .multi import RECORD_KEYS
+            for k in RECORD_KEYS:
+                if (k in r.extra or k in v.extra) and vhash(r.extra.get(k)) != vhash(v.extra.get(k)):
+                    return [(r.step, r.name, f"recorded {k} differ from the recomputed ones")]
         v = locate(part, v, init)
         value, quote, _, _ = unwrap(v)
         why = ground(part, v, init)
@@ -359,6 +364,13 @@ def _grounded(part, r, init):
         if any(x not in opts for x in vs):
             return [(r.step, r.name, f"recorded decision {r.value!r} is {OUTSIDE_OPTIONS} {list(opts)}")]
     return []
+
+
+def _checked(model, r):
+    """Without re-running the models: a model that can check its own record (a combination of models, solvi.multi: the
+    answer follows from the recorded proposals by its rule) → mismatches."""
+    chk = getattr(model, "check_record", None)
+    return [(r.step, r.name, f"recorded proposals: {why}") for why in chk(r)] if callable(chk) else []
 
 
 def _replay_head(r, heads, vals, trust_models, models):
@@ -440,7 +452,7 @@ def _replay_group(group, r, args, init, trust_models=False, models=None):
             if models is not None:
                 models.append((r.step, f"{r.name} ({name})", verdict))
             if verdict != "recomputed":
-                bad += _grounded(a, r, init)
+                bad += _grounded(a, r, init) + _checked(a.model, r)
                 break
         elif name != r.producer and a.model is not None and (trust_models or getattr(a.model, "available", True) is False):
             continue                                  # a rejected model output is not re-run when models are trusted
