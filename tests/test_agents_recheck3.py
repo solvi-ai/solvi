@@ -379,3 +379,135 @@ def test_pydantic_ai_approval_covers_only_the_reasons_it_was_asked_for():
     r3 = agent.run_sync(message_history=r2.all_messages(),
                         deferred_tool_results=DeferredToolResults(approvals={again.tool_call_id: True}))
     assert paid == [2000.0] and r3.output == "done"
+
+
+# ------------------------------------------------------------------------------------ B5: LangGraph approvals are bound
+def langgraph_app(amounts, facts=None):
+    from typing import Annotated, TypedDict
+
+    from langchain_core.messages import AIMessage, HumanMessage
+    from langchain_core.tools import tool
+    from langgraph.checkpoint.memory import InMemorySaver
+    from langgraph.graph import END, START, StateGraph
+    from langgraph.graph.message import add_messages
+
+    from solvi.agents.langgraph import guarded_tool_node
+    paid = []
+
+    def send_payment(iban: str, amount: float) -> str:
+        """Pay."""
+        paid.append(amount)
+        return f"paid {amount}"
+    g = Guard(facts=["spent_today"] if facts is not None else None)
+    g.tool(send_payment, ground=["iban"])
+
+    @g.policy("send_payment", on_fail="escalate")
+    def auto_limit(amount: float) -> bool:
+        """Above 1 000 needs a person."""
+        return amount <= 1000
+    if facts is not None:
+        @g.policy("send_payment", on_fail="escalate")
+        def budget(amount: float, spent_today: float) -> bool:
+            """The day's budget."""
+            return amount + spent_today <= 10_000
+
+    class State(TypedDict):
+        messages: Annotated[list, add_messages]
+
+    def agent(state):
+        if isinstance(state["messages"][-1], HumanMessage):
+            return {"messages": [AIMessage("", tool_calls=[{"name": "send_payment", "args": {"iban": IB, "amount": a},
+                                                            "id": f"c{int(a)}"} for a in amounts])]}
+        return {"messages": [AIMessage("done")]}
+    node = guarded_tool_node([tool(send_payment)], g, facts=(lambda s: dict(facts)) if facts is not None else None)
+    b = StateGraph(State)
+    b.add_node("agent", agent)
+    b.add_node("tools", node)
+    b.add_edge(START, "agent")
+    b.add_conditional_edges("agent", lambda s: "tools" if s["messages"][-1].tool_calls else END)
+    b.add_edge("tools", END)
+    app = b.compile(checkpointer=InMemorySaver())
+    return app, paid, HumanMessage(f"Pay {IB}: 5000 and 9000.")
+
+
+def pending(r):
+    return [i.value["id"] for i in r.get("__interrupt__", [])]
+
+
+def test_langgraph_a_bare_true_does_not_approve_parallel_calls():
+    pytest.importorskip("langgraph")
+    from langgraph.types import Command
+    app, paid, ask = langgraph_app([5000.0, 9000.0])
+    cfg = {"configurable": {"thread_id": "bare"}}
+    r = app.invoke({"messages": [ask]}, cfg)
+    [first] = pending(r)
+    payload = r["__interrupt__"][0].value
+    assert payload["id"] == first and payload["key"] and payload["args_hash"] and payload["reasons"]
+    for _ in range(3):                                    # a bare True never pays either of them
+        r = app.invoke(Command(resume=True), cfg)
+        if not pending(r):
+            break
+    assert paid == []
+    assert all("does not name the call" in m.content for m in r["messages"] if getattr(m, "status", None) == "error")
+
+
+def test_langgraph_an_approval_names_its_call():
+    pytest.importorskip("langgraph")
+    from langgraph.types import Command
+    app, paid, ask = langgraph_app([5000.0, 9000.0])
+    cfg = {"configurable": {"thread_id": "by-id"}}
+    r = app.invoke({"messages": [ask]}, cfg)
+    [first] = pending(r)
+    other = ({"c5000", "c9000"} - {first}).pop()
+    r = app.invoke(Command(resume={"approved": True, "id": first}), cfg)
+    assert paid == [float(first[1:])] and pending(r) == [other]            # only the call the person saw
+    r = app.invoke(Command(resume={"approved": True, "id": "c-someone-else"}), cfg)
+    assert paid == [float(first[1:])] and pending(r) == [other]            # not its answer: still waiting
+    r = app.invoke(Command(resume={other: False}), cfg)                    # a map keyed by call id
+    assert paid == [float(first[1:])] and not pending(r)
+    app2, paid2, ask2 = langgraph_app([5000.0, 9000.0])
+    cfg = {"configurable": {"thread_id": "map"}}
+    r = app2.invoke({"messages": [ask2]}, cfg)
+    for _ in range(3):
+        if not pending(r):
+            break
+        r = app2.invoke(Command(resume={"c5000": True, "c9000": True}), cfg)
+    assert sorted(paid2) == [5000.0, 9000.0]
+
+
+def test_langgraph_a_single_call_still_takes_a_bare_true_and_new_reasons_ask_again():
+    pytest.importorskip("langgraph")
+    from langgraph.types import Command
+    app, paid, ask = langgraph_app([5000.0])
+    cfg = {"configurable": {"thread_id": "one"}}
+    app.invoke({"messages": [ask]}, cfg)
+    r = app.invoke(Command(resume=True), cfg)
+    assert paid == [5000.0] and not pending(r)
+    facts = {"spent_today": 0.0}
+    app, paid, ask = langgraph_app([5000.0], facts)
+    cfg = {"configurable": {"thread_id": "reasons"}}
+    r = app.invoke({"messages": [ask]}, cfg)
+    old = r["__interrupt__"][0].value
+    assert old["reasons"] == ["auto_limit: Above 1 000 needs a person. [escalate]"]
+    facts["spent_today"] = 8000.0                          # the budget ran low before the person answered
+    r = app.invoke(Command(resume=True), cfg)
+    assert paid == [] and pending(r) == ["c5000"]         # asked again, with the new reason
+    new = r["__interrupt__"][0].value
+    assert "budget: The day's budget. [escalate]" in new["reasons"] and new["key"] != old["key"]
+    r = app.invoke(Command(resume={"approved": True, "id": "c5000", "key": old["key"]}), cfg)
+    assert paid == [] and pending(r) == ["c5000"]         # an answer carrying the old key does not cover it
+    r = app.invoke(Command(resume={"approved": True, "id": "c5000", "key": new["key"]}), cfg)
+    assert paid == [5000.0] and not pending(r)
+
+
+def test_langgraph_a_call_already_made_is_not_made_again_when_the_node_re_runs():
+    pytest.importorskip("langgraph")
+    from langgraph.types import Command
+    app, paid, ask = langgraph_app([250.0, 5000.0])            # 250 is allowed at once, 5000 waits for a person
+    cfg = {"configurable": {"thread_id": "rerun"}}
+    r = app.invoke({"messages": [ask]}, cfg)
+    assert pending(r) == ["c5000"] and paid == [250.0]
+    r = app.invoke(Command(resume={"approved": True, "id": "c5000"}), cfg)
+    assert sorted(paid) == [250.0, 5000.0] and not pending(r)  # the re-run node did not pay 250 again
+    outs = {m.tool_call_id: m.content for m in r["messages"] if getattr(m, "type", None) == "tool"}
+    assert outs == {"c250": "paid 250.0", "c5000": "paid 5000.0"}
