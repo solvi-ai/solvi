@@ -2,6 +2,7 @@
 of responses and corrections (solvi.storage; journal= is a JSONL store)."""
 from __future__ import annotations
 
+import dataclasses
 import math
 from dataclasses import dataclass
 from pathlib import Path
@@ -291,8 +292,8 @@ class System:
 
     def _textin(self, text, decider, textin, question):
         from .textin import TextIn, TextRead
-        if isinstance(text, TextRead):
-            return text
+        if isinstance(text, TextRead):                # its fields are re-derived with textin's specs when given
+            return text if textin is None else dataclasses.replace(text, reader=textin)
         if textin is None:
             textin = TextIn(self, decider)
         elif decider is not None:
@@ -313,7 +314,9 @@ class System:
     def ask_text(self, text, decider=None, *, textin=None, question=None, store=True, workers=None, order=None):
         """A free text → the answer of the question it asks, in one trace: a solvi.textin.TextIn (made from `decider`, or
         `textin=`) picks the entry point and reads its input fields with quotes, then the question is asked on that state.
-        `text` may be a TextRead already (TextIn.read / update). question=: skip routing.
+        `text` may be a TextRead already (TextIn.read / update): each field is re-derived from its quote with the field's
+        own parser arguments (those of `textin=`, else of the TextIn that read it) before it is used. question=: skip
+        routing.
         The trace holds the text (init_state[read.source]), the entry-point decision and one record per field (kind
         "textin": quote, parser, the model that found it); the audit counts the fields as quoted by a model, not given.
         When the entry point escalates, nothing runs: the likely questions abstain (guard "escalated"). A required field the

@@ -1695,7 +1695,7 @@ parser per type turns the quote into the value.
 | `int`, `float`, `Decimal` | `1500`, `1,500.50`, `1 500 000 руб`, `12,5`, `2k`, `5m`, `$5 m`, `1.5 million`, `3 млн`, `a million`, `полтора миллиона` (an `int` must be whole). Not guessed, so `unparsed`: `5 m` / `2 b` (a one-letter scale apart from the number may be a unit), `1.000` (a thousand or one? `TextIn(decimal="," or ".")` says), `3 100` (digits grouped by plain spaces with no currency next to them may be two numbers), `5%` (unless the field is declared in percent: `TextIn(percent=[field])` or `json_schema_extra={"percent": True}`) |
 | `date` | `2026-09-12`, `12.09.2026`, `12/09/26` (`dayfirst=False`: month first; a two-digit year only with `today=`, within 80 years back and 20 ahead), `12 September 2026`, `September 12`, `12 сентября`; `today` / `yesterday` / `tomorrow` |
 | `Literal[...]`, an `Enum` | the label (or member name), or a synonym: `synonyms={field: {label: [...]}}` or the field's `json_schema_extra={"synonyms": ...}` |
-| `bool` | yes / no words; the field's name or a `cues=` word ("urgent") → True; a phrase declared in `negatives={field: [...]}` (or `json_schema_extra={"negative_cues": ...}`) → False. Description words only rank candidates. A cue with a negation near it ("isn't urgent", "not at all urgent", "hardly urgent", "не срочно") is `unparsed` — never True, and False only through a declared negative |
+| `bool` | yes / no words; the field's name or a `cues=` word ("urgent") → True; a phrase declared in `negatives={field: [...]}` (or `json_schema_extra={"negative_cues": ...}`) → False. Description words only rank candidates. A cue answered by a yes / no word ("Urgent: no", "urgent = false", "Is it urgent? No.") is that answer. A cue with a negation near it, before or after it in the sentence ("isn't urgent", "far from urgent", "anything but urgent", "urgent? not at all", "was urgent yesterday, not anymore", "urgent but cancelling isn't", "не срочно") is `unparsed` — never True, and False only through a declared negative |
 | `str` | the quote, trimmed; `patterns={field: regex}` must match it whole |
 
 A date without a year, or a relative one, is read only with `TextIn(today=...)`: without it the field is `unparsed`, never
@@ -1711,7 +1711,10 @@ parser and its arguments, the extractor's identity and fingerprint). The audit l
 model, counts them as "quoted by model" and the entry point as "decided" — not in the deterministic share — and an answer's
 confidence is at most the entry point's and the read fields' confidences. `ask_text` does not trust a `TextRead` it is
 handed: each field is re-derived from its quote (the quote at its offsets, the parser of the field's type, the typed
-value), and a field that does not re-derive is `unparsed` — a required one is missing and the question abstains. Replay
+value) with the field's own parser arguments — rebuilt from the entry point's field by `textin=` (else the TextIn that
+made the read, else a default `TextIn(system)`), so a read that brings its own cues (`{"cues": ["banana"]}`), labels or
+pattern does not re-derive; only a date's `today` may come from the read. A field that does not re-derive is
+`unparsed` — a required one is missing and the question abstains. Replay
 re-checks each record: the quote is literally in the text at its offsets, the recorded parser gives the recorded
 canonical form and the typed value rebuilt from it, and the flow read exactly that value.
 Even `CueExtractor`, which is plain code, is recorded this way: which number is "the amount" is still a guess.

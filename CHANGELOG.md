@@ -177,6 +177,15 @@ Found in an adversarial re-check of 0.7; each case has a regression test (`tests
   data) in `trace.records[].error`, the alternatives tried, `why` and the safeguards' details. The answer now names the
   exception's type and an incident id (`solvi.serve.redact`); the full text is in the server log under that id and in
   the stored trace.
+- **Text in: a hand-built TextRead's parser arguments.** `ask_text` re-derived a field with the spec the read carried,
+  so a read with `{"cues": ["banana"]}` made "banana" read as urgent. The spec is rebuilt from the entry point's field
+  (by `ask_text(..., textin=)`, else the TextIn that made the read — `TextRead.reader` — else `TextIn(system)`) and the
+  recorded one must equal it; only a date's `today` may come from the read.
+- **Text in: a negation or a "no" after a yes / no cue.** "Urgent: no", "Is it urgent? No.", "urgent? not at all",
+  "far from urgent", "was urgent yesterday, not anymore", "urgent-ish, not really" and "the refund is urgent but
+  cancelling isn't" read as True. The cue's quote now runs on to a negation or a "no" up to 25 characters after it in
+  the same sentence; "cue: no" / "cue = false" / "cue? no" read as False ("cue: yes" as True); "far from", "anything
+  but", "not anymore", "no longer", "less than" are negations; anything else with a negation is `unparsed`.
 
 ### Fixes in the learning loop
 

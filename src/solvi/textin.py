@@ -290,10 +290,14 @@ def parse_date(s, spec=None):
 _YES = {"yes", "y", "true", "on", "1", "yep", "sure", "да", "истина", "верно"}
 _NO = {"no", "n", "false", "off", "0", "none", "нет", "ложь"}
 # a negation word ("not", "isn't", "not at all", "hardly", "не", "ни"): near a yes / no cue it makes the cue unreadable
-_NEG_WORDS = r"(?:not|no|non|never|nor|neither|without|cannot|hardly|barely|scarcely|не|нет|ни|без)"
+_NEG_WORDS = (r"(?:far from|anything but|not anymore|no longer|no more|less than|not|no|non|never|nor|neither|without|"
+              r"cannot|hardly|barely|scarcely|false|nope|не|нет|ни|без|вовсе не|далеко не|уже не|больше не)")
 NEGATION_RE = re.compile(rf"(?<!\w){_NEG_WORDS}(?!\w)|n['’]t(?!\w)", re.I)
 _CLAUSE_END = re.compile(r"[.;:!?,\n—–]")
 _NEG_WINDOW = 40                    # how far before a cue a negation still counts (chars, within the clause)
+_NEG_AFTER = 25                     # how far after a cue a negation or a "no" still counts (chars, to the sentence end)
+_SENTENCE_END = re.compile(r"[.;!\n]")
+_ANSWER = re.compile(r"\s*(?:[:=?\-–—]\s*)?(?P<a>yes|true|on|y|да|no|false|off|nope|n|нет)\s*[.!]?\s*", re.I)
 
 
 def _norm(s):
@@ -302,9 +306,11 @@ def _norm(s):
 
 def parse_bool(s, spec=None):
     """A quote → True / False: yes / no words (en, ru); a declared negative cue (spec {"negatives": [...]}: "not urgent",
-    "no rush") → False; the quote is exactly one of the field's cues (spec {"cues": [...]}: its name and the `cues=` words)
-    → True. A cue with a negation near it ("isn't urgent", "not at all urgent", "hardly urgent", "не срочно") is neither:
-    it does not parse — never True, and False only through a declared negative cue."""
+    "no rush") → False; a cue answered by a yes / no word ("urgent: no", "urgent = false", "is it urgent? no" → False;
+    "urgent: yes" → True); the quote is exactly one of the field's cues (spec {"cues": [...]}: its name and the `cues=`
+    words) → True. A cue with a negation near it, before or after ("isn't urgent", "far from urgent", "anything but
+    urgent", "urgent? not at all", "was urgent yesterday, not anymore", "urgent but cancelling isn't", "не срочно") is
+    neither: it does not parse — never True, and False only through a declared negative cue."""
     spec = spec or {}
     t = _norm(s)
     if t in _YES:
@@ -314,6 +320,11 @@ def parse_bool(s, spec=None):
     if t and t in {_norm(c) for c in spec.get("negatives") or ()}:
         return False
     cues = [_norm(c) for c in spec.get("cues") or () if _norm(c)]
+    raw = str(s).strip()
+    for c in sorted(cues, key=len, reverse=True):          # "urgent: no", "urgent = false", "is it urgent? no"
+        m = re.match(r"(?:(?:is|was) (?:it|this) )?" + r"[\s_\-]+".join(map(re.escape, c.split())) + r"(?!\w)", raw, re.I)
+        if m and m.end() < len(raw) and (a := _ANSWER.fullmatch(raw, m.end())):
+            return a.group("a").casefold() in _YES
     neg = NEGATION_RE.search(str(s))
     for c in sorted(cues, key=len, reverse=True):
         if re.search(rf"(?<!\w){re.escape(c)}(?!\w)", t):
@@ -505,7 +516,7 @@ class CueExtractor:
             spans = []
             for c in [*fs.cues, *fs.negatives]:
                 for m in re.finditer(rf"(?<!\w){re.escape(c)}(?!\w)", text, re.I):
-                    spans.append((_negated_from(text, m.start()), m.end()))
+                    spans.append((_negated_from(text, m.start()), _negated_to(text, m.end())))
             return self._rank(text, spans, self._cues(text, fs, hints_only=True), own=True)
         elif fs.kind == "text":
             if fs.pattern:
@@ -567,6 +578,18 @@ def _negated_from(text, start):
     while s > base and (text[s - 1].isalnum() or text[s - 1] in "'’"):     # the whole word of "isn't"
         s -= 1
     return s
+
+
+def _negated_to(text, end):
+    """Where a yes / no cue ending at `end` ends once a negation or a "no" shortly after it in the same sentence is
+    included ("urgent: no", "is it urgent? No", "was urgent yesterday, not anymore", "urgent-ish, not really"): the parser
+    then sees it and does not read the cue as True."""
+    window = text[end:end + _NEG_AFTER]
+    stop = _SENTENCE_END.search(window)
+    if stop is not None:
+        window = window[:stop.start()]
+    negs = list(NEGATION_RE.finditer(window))
+    return end + negs[-1].end() if negs else end
 
 
 class DeciderExtractor:
@@ -640,6 +663,7 @@ class TextRead:
     changes: list = field(default_factory=list)
     entry_points: list = field(default_factory=list)
     router: dict | None = None             # the decider's identity (model_info)
+    reader: Any = field(default=None, repr=False, compare=False)   # the TextIn that read it: whose field specs it used
 
     @property
     def state(self):
@@ -868,7 +892,7 @@ class TextIn:
         q = rt["question"]
         fields = self._fields(q, text) if q is not None else {}
         return TextRead(text, q, fields, rt, self.source, entry_points=sorted(self.entry_points),
-                        router=model_info(self.decider) if rt["by"] == "decider" else None)
+                        router=model_info(self.decider) if rt["by"] == "decider" else None, reader=self)
 
     def update(self, prev, new_text, question=None):
         """A dialogue turn: `prev` (a TextRead, or a state dict with question=) and the next message → a new TextRead over
@@ -916,7 +940,7 @@ class TextIn:
             else:
                 fields[f] = old if old is not None and (old.ok or r.status == "not_stated") else r
         return TextRead(text, q, fields, rt, self.source, changes, sorted(self.entry_points),
-                        router=prev.router if isinstance(prev, TextRead) else None)
+                        router=prev.router if isinstance(prev, TextRead) else None, reader=self)
 
 
 # ------------------------------------------------------------------------------------------------ re-derivation
@@ -962,21 +986,27 @@ def _value_problem(kind, vtype, canonical, value):
     return None if ok else f"value {value!r} is not what the quote parses to ({want!r})"
 
 
-def rederive(system, read):
+def rederive(system, read, textin=None):
     """The fields of a TextRead re-derived from their quotes before System.ask_text trusts them: each field `read` must
-    quote the text at its offsets, and the field's parser (the kind its declared type gives) must turn the quote, with the
-    recorded arguments, into the recorded canonical form and typed value. A field that does not re-derive becomes
-    `unparsed` (so a required one is missing and the question abstains or escalates); a field the entry point does not read
-    is dropped. → the read itself when everything holds, else a copy (the caller's TextRead is not changed)."""
+    quote the text at its offsets, its parser must be the one the field's declared type gives, and its parser arguments
+    (the spec: a yes / no field's cues and negatives, an enum's labels, a pattern, the decimal separator, ...) must be the
+    ones the field's own spec gives — rebuilt from the entry point's field by `textin` (else the TextIn that made the read,
+    else TextIn(system)); only a date's `today` is taken from the read. With them, the quote must parse to the recorded
+    canonical form and typed value. A field that does not re-derive becomes `unparsed` (so a required one is missing and
+    the question abstains or escalates); a field the entry point does not read is dropped. → the read itself when
+    everything holds, else a copy (the caller's TextRead is not changed)."""
     if read.question is None:
         return read
     ep = entry_points(system, [read.question])[0]
+    tin = textin if textin is not None else read.reader if isinstance(read.reader, TextIn) else None
+    if tin is None or read.question not in tin.entry_points:
+        tin = TextIn(system, extractor=CueExtractor())
     fields, changed = {}, False
     for f, r in read.fields.items():
         if f not in ep.fields:
             changed = True
             continue
-        why = None if r.status != "read" else _rederive_problem(read, r, field_spec(ep.fields[f]))
+        why = None if r.status != "read" else _rederive_problem(read, r, tin.spec(read.question, f), tin)
         if why is None:
             fields[f] = r
         else:
@@ -987,7 +1017,22 @@ def rederive(system, read):
     return dataclasses.replace(read, fields=fields) if changed else read
 
 
-def _rederive_problem(read, r, fs):
+def _own_spec(fs, tin, recorded):
+    """The parser arguments a field's own spec gives (TextIn settings: dayfirst, decimal); a date's `today` from the
+    recorded spec (an ISO date or None) — the one thing a read may bring."""
+    want = fs.parser_spec(None, tin.dayfirst, tin.decimal)
+    if fs.kind == "date":
+        today = (recorded or {}).get("today") if isinstance(recorded, dict) else None
+        if today is not None:
+            try:
+                _dt.date.fromisoformat(today)
+            except (TypeError, ValueError):
+                return None
+        want["today"] = today
+    return want
+
+
+def _rederive_problem(read, r, fs, tin):
     q = r.quote
     if q is None:
         return "no quote"
@@ -995,15 +1040,18 @@ def _rederive_problem(read, r, fs):
         return f"{q.value!r} is not at [{q.start}:{q.end}] of the text"
     if fs.kind == "unsupported" or r.parser != fs.kind:
         return f"parser {r.parser!r} does not read the field's type (kind {fs.kind})"
+    want = _own_spec(fs, tin, r.spec)
+    if want is None or (r.spec or {}) != want:
+        return f"parser arguments {r.spec!r} are not the field's own ({want!r})"
     try:
-        c = PARSERS[r.parser](q.value, r.spec or {})
-        want = fs.value(c)
+        c = PARSERS[r.parser](q.value, want)
+        typed = fs.value(c)
     except (ParseError, KeyError, ValueError, InvalidOperation) as e:
         return f"the quote does not parse: {e}"
     if c != r.canonical:
         return f"parsed {c!r} ≠ {r.canonical!r}"
-    if not _same(r.value, want):
-        return f"value {r.value!r} is not what the quote parses to ({want!r})"
+    if not _same(r.value, typed):
+        return f"value {r.value!r} is not what the quote parses to ({typed!r})"
     return None
 
 
