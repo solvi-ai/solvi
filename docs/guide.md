@@ -1771,7 +1771,9 @@ await `async def` tools and policies. A call is read in the shapes agents write 
 "args", "id"}`, Anthropic's `{"type": "tool_use", "name", "input"}`. The context is a string (one user message) or a list
 of messages — `{"role", "content"}` dicts (content a string or a list of text parts), `{"type": "function_call_output",
 "output"}` items, `(role, text)` pairs, or message objects with `.type` / `.content` (LangChain); roles become user,
-assistant, tool and system.
+assistant, tool and system. A content list is read block by block: an Anthropic `tool_result` block is a tool output
+even inside a `user` message (so it never grounds a user-only value and gets the injection checks), a `tool_use` block
+is the assistant's.
 
 **What is checked, in order.** Each tool is a small solvi System with one question, `verdict`, whose catalog holds the
 checks below as hard checks with `then={"verdict": "deny" | "escalate"}`. When several fail, the first in this order
