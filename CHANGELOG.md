@@ -32,6 +32,41 @@
   safeguard report) and on examples 12 and 18 (`tests/i18n/en_golden.json`).
 - `AnswerAudit.render(lang=None)`, `Audit.render(lang=None)`, `Audit.compact(lang=None)`; `solvi.audit.LABEL` is unchanged.
 
+### Counterfactual explanations
+
+- `res.counterfactual(question, max_changes=2, over=None, target=None, domains=None)`: the smallest change of the given
+  inputs that changes the answer — "approve if amount ≤ 1000 (now 1200)", "yes if purchase_date ≥ 2026-08-20 (now
+  2026-08-10)". Numbers and dates: the nearest threshold crossing (doubling probes, then bisection; exact for monotone
+  inputs); booleans, Enums, `Literal` inputs and `domains=` values enumerated; two inputs together when one is not enough.
+- Only the deterministic flow is re-run on the recorded plan; every model-backed part is held at its recorded proposal and
+  no model is ever called — the result says which parts were held and which had no proposal.
+- `System._results`: the answer step of `ask` / `aask` without side effects (shared by counterfactuals).
+
+### Reports for people
+
+- `res.report(format="md" | "html" | "data")`: a report of one decision for an auditor or a customer — each answer, what it
+  rests on (given, computed, quoted with offsets, decided with the model and probabilities, learned, checks, rule,
+  evidence), the safeguards that fired, the guarantee line (the promise of the calibrated thresholds behind it, "none",
+  or no model decided it), the source texts with every quote highlighted, every model that ran with its fingerprint, the
+  trace's hashes and the replay status (`replay="trusted"` by default: no model is called).
+- `store.report(since=, until=, question=, format=, examples=3)`: a report of a period — per question the counts by
+  answer, status and safeguard, the escalation rate, the guarantee coverage of the answers a model took part in, the
+  catalog and model fingerprints in use and their changes, and example stored ids.
+- HTML is one self-contained page (inline CSS, light and dark, no scripts or external assets); every value is escaped.
+  Markdown escapes every special character.
+- `solvi report STORE [--since] [--until] [--question] [--id ID] [--html out.html] [--md out.md] [--json] [--system]`.
+- A response keeps the System that answered (and one loaded with a System, its System) for reports.
+
+### OpenTelemetry export
+
+- `solvi.otel.export(res_or_store, tracer=None, **filters)`: decisions as OpenTelemetry spans — a root `solvi.decision`,
+  one span per step (fact, provenance, value, confidence, error, producer, quote offsets, model id and fingerprint,
+  probabilities, safeguards, the step's hash and its link) and one per answer; failed or rejected steps with status
+  ERROR; the root is a child of the caller's current span. A store exports every stored decision, or a query's.
+- `solvi.otel.to_otlp_json(...)`: the same spans as OTLP/JSON (an ExportTraceServiceRequest body) without OpenTelemetry;
+  ids derived from the trace's hashes.
+- New extra `otel` (`opentelemetry-api`, `opentelemetry-sdk`).
+
 ## 0.6.1 — unreleased — deterministic hashes of failed steps
 
 - A failed step's value (MISSING) hashed as `repr(object())`, which carries a memory address, so a trace with a failed step

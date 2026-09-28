@@ -66,6 +66,7 @@ pip install solvi              # core: rules, checks, learned answer heads (nump
 pip install "solvi[model]"     # + torch, transformers: ModernBERT field extractors for documents and the decider
 pip install "solvi[onnx]"      # + onnxruntime, tokenizers: the decider (solvi.decide) on CPU without torch
 pip install "solvi[serve]"     # + fastapi, uvicorn: `solvi serve app.py:system` — the questions over HTTP (also --mcp)
+pip install "solvi[otel]"      # + opentelemetry: decisions as OpenTelemetry spans (solvi.otel)
 ```
 
 Requires Python 3.10+.
@@ -207,7 +208,10 @@ Every answer is a value and a confidence, and the types also declare answer prim
   MCP and the System One API; `await system.aask(...)` runs async parts concurrently with timeouts; `costs="measured"`
   lets the planner pick the fastest equivalent source and switch when it slows down. `TraceStorage` keeps decisions with a
   hash chain across them; `solvi diff` shows which stored decisions a rule or model change would flip; `solvi test`,
-  `solvi check` and the honesty suite (`solvi honesty`) belong in CI.
+  `solvi check` and the honesty suite (`solvi honesty`) belong in CI; `res.report(format="html")` and
+  `solvi report decisions.db --html out.html` give an auditor one page per decision or per period, and `solvi.otel.export(res)` puts every step in
+  your OpenTelemetry traces. `res.counterfactual("approve")` says what would have changed the answer ("approve if
+  amount ≤ 1000 (now 1200)"), re-running only the code with the models' recorded proposals held.
 
 ## Planning around dead ends and costs (code strategist)
 

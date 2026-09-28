@@ -1430,6 +1430,116 @@ approve = 'yes'  [ok]  confidence 0.60  ← computed by approve
               · fallback producer: total — total_regex used after total_model rejected
 ```
 
+### Counterfactual explanations: res.counterfactual
+
+"What would have changed the answer?" — the smallest change of the given inputs, for adverse-action reasons in lending and
+clear answers in support:
+
+```python
+res = system.ask({"amount": 1200.0, "debt": 1000, "income": 5000, "history": "on time", "age": 30})
+cf = res.counterfactual("approve")
+print(cf)
+# approve = decline [ok]
+#   approve if amount ≤ 1000 (now 1200)
+#   held at their recorded proposals (no model called): risk
+#   not searched: history (str: no domain (pass domains={'history': [...]}))
+cf.best.changes[0]            # Change(fact="amount", now=1200.0, to=1000.0, op="≤", cost=0.17)
+cf.to_dict()
+```
+
+Only the deterministic flow is re-run, on the recorded plan: every model-backed part — an extractor, a model decision, a
+learned answer head — is **held at the proposal it recorded in this trace**, and no model is called. The explanation is
+"what the code would decide if the models said what they said"; the result lists the parts held. A model part that did not
+run in the recorded decision (a hard check failed first) has no proposal: inputs that need it make the question abstain and
+do not count as a change (listed as "without a recorded proposal"). Learned rule lists (`learn_rule`) are code and re-run.
+
+What is searched (`over=`: default, the given facts the question's flow reads):
+
+- numbers and dates — outward from the current value in both directions with doubling steps, then bisection between the
+  last unchanged and the first changed value: the nearest threshold crossing, exact for inputs the answer is monotone in
+  (a non-monotone input can hide a nearer crossing between two probes). Integers and dates give exact bounds
+  (`debt ≤ 1999`, `purchase_date ≥ 2026-08-20`); floats are shown at the shortest decimal that holds, `≤` or `<` as the
+  rule has it. A non-negative input stays non-negative;
+- booleans, Enums and `Literal` fields of `System(inputs=...)` — every other value;
+- anything else only with `domains={"history": ["on time", "late"]}`; a tuple bounds a number: `domains={"amount": (0, 5000)}`.
+
+`max_changes=2` (the default) tries two inputs together when no single input changes the answer ("approve if amount ≤ 1000
+(now 1200) and debt ≤ 1999 (now 2500)" — each bound holds with the other change made); `max_changes=1` does not.
+`target="approve"` looks only for that answer. Results are ranked by the number of changes, then their size (the relative
+change of a number; 1 for an enumerated value). `max_evals=5000` caps the re-runs (`cf.exhausted`). A response loaded from
+a store with its System works the same; one loaded without it needs `system=`.
+
+### Reports for people: res.report, store.report, solvi report
+
+The audit is for developers; a report is for an auditor or a customer — one page per decision or per period, as Markdown,
+one self-contained HTML file (no external assets, scripts or fonts; every value escaped) or data (`format="data"`).
+
+```python
+print(res.report())                          # Markdown
+open("decision.html", "w").write(res.report(format="html"))
+res.report(format="data")                    # the same as a dict (answers, documents, models, trace, replay)
+```
+
+A decision report shows, per answer: the answer, status and confidence, the reason; what it rests on (given inputs,
+computed facts, quotes with their offsets, model decisions with probabilities and the model, learned parts, checks — which
+one decided —, the rule, evidence, constraints, parts not run); the safeguards that fired; and the **guarantee line** — the
+promise of the calibrated thresholds of the model decisions behind it (`act_guard`, `calibrate_for`), "none" when a model
+decided without one, or that no model decided the answer. Then the source texts with every quote highlighted (the offsets
+on hover; a quote that is not the text at its offsets in red; a text over 20 000 characters as excerpts around the
+quotes), every model that ran with its fingerprint (also the ones whose output was rejected), the trace's input and last
+hashes, the catalog's fingerprint and the replay status. `replay="trusted"` (the default) re-runs the deterministic steps
+and verifies the models' recorded outputs without calling them; `replay="full"` re-runs the models too, `replay=False`
+skips it. A response loaded from a store with its System (`store.get(id)` when the store belongs to a System) reports
+like the original.
+
+```python
+print(store.report(since="2026-09-01", until="2026-10-01"))            # every question
+store.report(question="refund", format="html", examples=5)               # one question
+```
+
+A period report counts per question: the answers, the statuses, the escalation rate (abstentions — handed to a person — by
+the safeguard that caused them), the safeguards that fired, and the **guarantee coverage**: of the answers a model decided
+or took part in, how many rest only on calibrated thresholds (answers from code alone are counted apart). It lists the
+catalog and model fingerprints in use and every change of them over the period (from which stored decision on), and up
+to `examples` stored ids per answer, escalation reason and safeguard — `res = store.get(id)` and `res.report()` give the
+page of one. From the shell:
+
+```
+solvi report decisions.db --since 2026-09-01 --question refund          # Markdown to stdout
+solvi report decisions.db --html september.html                          # a self-contained page
+solvi report decisions.db --id 3f9a0c1d2e4b5a67 --system app.py:system   # one decision, replayed against the system
+```
+
+### OpenTelemetry: solvi.otel
+
+`solvi.otel.export(res_or_store, tracer=None, **filters)` sends decisions to your tracing backend as OpenTelemetry spans
+(`pip install "solvi[otel]"`): per decision a root span `solvi.decision`, a child span per step of the trace
+(`solvi.fn risk`, `solvi.extract total`, `solvi.rule answer:pay`, …) and one per answer (`solvi.answer pay`). A store
+exports every stored decision, or those matching the query filters (`export(store, question="refund", since=...)`).
+The root span is a child of the span current in your code, so a decision sits inside the request that asked it.
+
+```python
+from solvi.otel import export, to_otlp_json
+
+with tracer.start_as_current_span("POST /refund"):
+    res = system.ask(state)
+    export(res)                               # the global tracer provider's "solvi" tracer, or tracer=...
+
+body = to_otlp_json(res, service_name="refunds")   # OTLP/JSON without OpenTelemetry: POST it to a collector's /v1/traces
+```
+
+| Span | Attributes |
+|---|---|
+| step | `solvi.step`, `solvi.kind`, `solvi.fact`, `solvi.provenance`, `solvi.value` (a short repr), `solvi.confidence`, `solvi.error`, `solvi.producer`, `solvi.tried`, `solvi.quote.source` / `.start` / `.end`, `solvi.model.type` / `.id` / `.fingerprint`, `solvi.probs` (JSON), `solvi.safeguard` (kinds that fired on this fact), `solvi.inputs`, `solvi.hash`, `solvi.prev` |
+| answer | `solvi.question`, `solvi.answer`, `solvi.status`, `solvi.confidence`, `solvi.why`, `solvi.guard`, `solvi.provenance`, `solvi.source`, `solvi.safeguard` |
+| root | `solvi.questions`, `solvi.trace.init_hash`, `solvi.trace.head`, `solvi.trace.steps`, `solvi.catalog.fingerprint`, `solvi.questions.fingerprint`, `solvi.stored_id`, `solvi.ms`, `solvi.confidence`, `solvi.complete`, `solvi.model_outputs`; an event `solvi.skipped` per step skipped at run time |
+
+A failed or rejected step has status ERROR with the reason; an abstention is not an error. The trace records each step's
+run time, not its start: step spans are laid end to end from the decision's start (durations measured, start times not;
+parallel steps appear one after another). A stored decision ends at its stored time; a fresh one when exported (or at
+`end_ns=`). In the OTLP JSON the trace and span ids are derived from the trace's hashes; through the API the SDK assigns
+them — `solvi.hash` ties a span to its trace record either way.
+
 ### Lifetime stats
 
 `system.stats` counts, over the system's lifetime: `asks`, `answers`, `abstained`, `model_outputs` (outputs of model-backed
