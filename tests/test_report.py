@@ -262,3 +262,20 @@ def test_derived_quote_is_not_flagged_as_a_mismatch():
     md = res.report()
     assert "**lawyer**" in md and "NOT the text" not in md
     assert "not the text at these offsets" not in res.report(format="html")
+
+
+def test_period_report_shows_non_finite_answers_untagged(tmp_path):
+    import math
+    cat = Catalog()
+
+    @cat.rule("limit")
+    def limit(x):
+        return math.inf
+
+    st = JSONLStorage(tmp_path / "p.jsonl")
+    s = System(cat, [Question("limit", "Limit?", Answer.estimate())], storage=st)
+    s.ask({"x": 1.0})
+    text = st.report()
+    assert "$float" not in text and "inf" in text
+    from solvi.report import period
+    assert "$float" not in json.dumps(period(st), default=str)

@@ -149,7 +149,8 @@ class Stored:
 
     @property
     def meta(self):
-        return self.data.get("meta")
+        from .schema import untag_floats
+        return untag_floats(self.data.get("meta"))
 
     def response(self, catalog=None):
         """The stored response, loaded back (typed values restored from `catalog` — a Catalog or a System — or from the
@@ -308,8 +309,10 @@ class TraceStorage:
         learn_rule, a CorrectionMemory or System.learning). source: "human" (also every record without one), "outcome",
         "rule" — or, for a record written around save_correction, whatever it says (solvi.memory and System.learning refuse
         anything outside TRUSTED_SOURCES)."""
-        return [{"id": s.id, "time": s.time, "question": s.data["teach"], "init": s.data["init"], "answer": s.data["answer"],
-                 "source": s.data.get("source", "human"), "by": s.data.get("by"), "of": s.data.get("of")}
+        from .schema import untag_floats                # stored tagged ({"$float": "inf"}), read back as the float
+        return [{"id": s.id, "time": s.time, "question": s.data["teach"], "init": untag_floats(s.data["init"]),
+                 "answer": untag_floats(s.data["answer"]), "source": s.data.get("source", "human"), "by": s.data.get("by"),
+                 "of": s.data.get("of")}
                 for s in self.iter("teach")]
 
     def query(self, question=None, answer=ANY, status=None, safeguard=None, model=None, since=None, until=None,
@@ -413,6 +416,7 @@ class TraceStorage:
         → {"fact", "value", "dependent": the stored decisions whose answers rest on it (as quarantine), "stored": ids of the
         stored records that hold it without an answer resting on it (responses and corrections), "deleted": 0}."""
         from .runtime import vhash
+        from .schema import untag_floats
         vh = None if value is ANY else {vhash(value), vhash(plain(value))}
         dependent, stored = [], []
         for s in self.iter(None):
@@ -424,7 +428,7 @@ class TraceStorage:
                     continue
             else:
                 init = s.data.get("init") or {}
-            if fact in init and (vh is None or vhash(init[fact]) in vh):
+            if fact in init and (vh is None or vhash(init[fact]) in vh or vhash(untag_floats(init[fact])) in vh):
                 stored.append(s.id)
         return {"fact": fact, "value": None if value is ANY else plain(value), "dependent": dependent, "stored": stored,
                 "deleted": 0}

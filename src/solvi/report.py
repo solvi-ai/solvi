@@ -203,6 +203,8 @@ def _when(t):
 
 def _shown(v):
     """A stored answer (JSON form) for people."""
+    from .schema import untag_floats
+    v = untag_floats(v)                               # {"$float": "inf"} as stored → inf
     if v is None:
         return "—"
     if v == "<not stated>":

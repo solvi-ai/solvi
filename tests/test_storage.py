@@ -474,3 +474,17 @@ def test_sqlite_file_is_plain_sqlite(filled):
     con = sqlite3.connect(store.path)
     n = con.execute("SELECT count(*) FROM answers WHERE question = 'approve' AND answer = ?", ('"no"',)).fetchone()[0]
     assert n == 3
+
+
+# --- fixes before 0.7
+@pytest.mark.parametrize("kind", ["jsonl", "sqlite"])
+def test_corrections_and_meta_read_back_non_finite_floats(tmp_path, kind):
+    import math
+    st = JSONLStorage(tmp_path / "c.jsonl") if kind == "jsonl" else SQLiteStorage(tmp_path / "c.db")
+    st.save_correction("q", {"limit": math.inf, "x": 1.0}, -math.inf, meta={"t": math.inf})
+    c = st.corrections()[0]
+    assert c["init"] == {"limit": math.inf, "x": 1.0} and c["answer"] == -math.inf
+    assert next(st.iter("teach")).meta == {"t": math.inf}
+    assert st.forget("limit", math.inf)["stored"] == [c["id"]]
+    assert st.verify()["ok"]
+
