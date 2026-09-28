@@ -67,6 +67,39 @@
   ids derived from the trace's hashes.
 - New extra `otel` (`opentelemetry-api`, `opentelemetry-sdk`).
 
+### Text in: entry points
+
+- `system.entry_points(names=None)`: the questions as entry points — name, text and the typed input fields each one reads
+  (type, description, required), from the same schemas as `solvi serve`; `ep.tool()` is the function-calling form.
+- `solvi.textin.TextIn(system, decider, extractor=None, ...)`: `read(text)` → a `TextRead` — the entry point the decider
+  picks (a choice over the entry points and their descriptions; escalates below `min_confidence=0.6`, on a near tie
+  `min_margin=0.1` or on the decider's act signal), and each input field read by span extraction with a quote and a
+  deterministic parser per type: numbers ("1,500.50", "1.5 million", "2k", "полтора миллиона"), dates ("2026-09-12",
+  "12.09.2026", "12 September", "12 сентября"; year-less and relative dates only with `today=`), enums by label or
+  synonym, booleans, strings (with `patterns=`). A field is `read`, `not_stated`, `unparsed`, `unsure` or `unsupported`;
+  required fields not read are in `read.missing`, and `read.clarify()` asks for them — nothing is guessed.
+- Extractors: the decider's span pointer (`DeciderExtractor`, when the checkpoint has one) or `CueExtractor` (deterministic
+  candidates of the field's type nearest after a cue word); any object with `find(text, FieldSpec) → [Quote]`.
+- `system.ask_text(text | TextRead, decider=None, *, textin=None, question=None)` (and `aask_text`): TextIn + ask in one
+  trace. The text is a given fact (`request_text`); the entry point (`textin`, provenance `decided`) and each field
+  (`textin:<field>`, provenance `quoted`, with the extractor's fingerprint, the parser and its arguments) are hash-chained
+  records. The audit shows the fields as quoted by a model — never given, not in the deterministic share — and an answer's
+  confidence is at most the reading's. Replay re-checks each quote, re-parses it and checks the flow read that value. An
+  escalated entry point runs nothing: the likely questions abstain with guard `escalated`. `res.textin` is the TextRead.
+- A dialogue: `tin.update(read, next_message)` reads the next turn over the whole dialogue and lists `changes` (old value,
+  new value, quote); "not A-10457 but A-10475" changes the field to the new value.
+
+### Long documents: find first, then decide
+
+- `decider.decision(..., long="retrieve", top_k=3, rerank=False)`: a text beyond the decider's `max_len` is split into
+  sections (headings, paragraphs, sentences), the `top_k` that bear on the question are selected by BM25 (stdlib) —
+  `rerank=True`: re-ordered by the decider's own yes / no relevance — and decided on; span answers and evidence quotes
+  point into the whole text; the sections read (offsets, heading, score) are in `extra["long"]`, so in the trace, the
+  audit and replay. Texts that fit are decided exactly as before. `DecideModel.max_len`, `DecideModel.count_tokens`,
+  `DecisionPart.budget()`.
+- `solvi.longdoc`: `LongDocument(text, max_tokens, count)` → `sections`, `select(query, k, budget, rerank)`,
+  `window(sections)` with `to_doc(start, end)`; `BM25`, `approx_tokens`.
+
 ## 0.6.1 — unreleased — deterministic hashes of failed steps
 
 - A failed step's value (MISSING) hashed as `repr(object())`, which carries a memory address, so a trace with a failed step

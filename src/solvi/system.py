@@ -22,6 +22,7 @@ class _Prepared:
     flow: object
     order: object
     policy: object
+    textin: object = None               # a solvi.textin.TextRead (ask_text): its records go into the trace
 
 
 @dataclass
@@ -37,6 +38,7 @@ class Response(Serial):
     safeguards: list = None             # safeguard events of this response (see solvi.audit.collect)
     model_outputs: int = 0              # outputs produced by models in this response
     stored_id = None                    # its id in a TraceStorage once saved (System(storage=...) saves every ask)
+    textin = None                       # ask_text: the solvi.textin.TextRead the question and state were read from
 
     def __getitem__(self, q):
         return self.results[q]
@@ -270,6 +272,61 @@ class System:
                               costs=self.costs, policy=p.policy, known=p.known)
         return self._respond(p, trace, vals, t0, store)
 
+    # --- text in
+    def entry_points(self, names=None):
+        """The questions as entry points: each question's name, text and the typed input state it reads — every given fact
+        its flow reads, with its type, description and whether the question needs it (the schemas `solvi serve` publishes).
+        → [solvi.textin.EntryPoint]; `ep.tool()` is the function-calling form."""
+        from .textin import entry_points
+        return entry_points(self, names)
+
+    def _textin(self, text, decider, textin, question):
+        from .textin import TextIn, TextRead
+        if isinstance(text, TextRead):
+            return text
+        if textin is None:
+            textin = TextIn(self, decider)
+        elif decider is not None:
+            raise ValueError("pass a decider or a TextIn, not both")
+        return textin.read(text, question=question)
+
+    def _prepare_text(self, read, order):
+        if read.question is not None:
+            p = self._prepare(read.init_state(), [read.question], order)
+        else:                                         # the entry point escalated: nothing is asked
+            state, rejected = self._state(read.init_state())
+            p = _Prepared(state, None, rejected, [], plan(self.catalog, [], state.keys(), self.heads), None, None)
+        p.textin = read
+        return p
+
+    def ask_text(self, text, decider=None, *, textin=None, question=None, store=True, workers=None, order=None):
+        """A free text → the answer of the question it asks, in one trace: a solvi.textin.TextIn (made from `decider`, or
+        `textin=`) picks the entry point and reads its input fields with quotes, then the question is asked on that state.
+        `text` may be a TextRead already (TextIn.read / update). question=: skip routing.
+        The trace holds the text (init_state[read.source]), the entry-point decision and one record per field (kind
+        "textin": quote, parser, the model that found it); the audit counts the fields as quoted by a model, not given.
+        When the entry point escalates, nothing runs: the likely questions abstain (guard "escalated"). A required field the
+        text does not state is not guessed: the question abstains for lack of it. `res.textin` is the TextRead
+        (`res.textin.missing`, `res.textin.clarify()`)."""
+        read = self._textin(text, decider, textin, question)
+        t0 = now_ms()
+        p = self._prepare_text(read, order)
+        trace, vals = execute(self.catalog, p.flow, p.state, workers=workers or self.workers, order=p.order,
+                              costs=self.costs, policy=p.policy, known=p.known)
+        return self._respond(p, trace, vals, t0, store)
+
+    async def aask_text(self, text, decider=None, *, textin=None, question=None, store=True, timeout=None,
+                        speculate=False, order=None):
+        """ask_text with aask (async parts awaited)."""
+        from .runtime import aexecute
+        read = self._textin(text, decider, textin, question)
+        t0 = now_ms()
+        p = self._prepare_text(read, order)
+        trace, vals = await aexecute(self.catalog, p.flow, p.state, order=p.order, costs=self.costs, policy=p.policy,
+                                     known=p.known, timeout=self.timeout if timeout is None else timeout,
+                                     speculate=speculate)
+        return self._respond(p, trace, vals, t0, store)
+
     async def aask(self, init_state, names=None, order=None, store=True, timeout=None, speculate=False):
         """`ask` on an event loop: `async def` parts (database lookups, HTTP APIs, model servers) are awaited, parts marked
         `blocking=True` run in worker threads (asyncio.to_thread), plain sync parts inline; steps whose inputs are ready run
@@ -346,6 +403,9 @@ class System:
         if getattr(flow, "strategy", None) is not None and getattr(self.strategist, "record", True):
             from .strategy import plan_record         # the strategist's plan, hashed into the trace (solvi.strategy)
             _append(trace, plan_record(flow), len(flow.steps))
+        if p.textin is not None:                      # ask_text: the entry point and the fields read from the text
+            for rec in p.textin.records():
+                _append(trace, rec, len(flow.steps))
         trace.fingerprint = self._fingerprint(flow)
         for name, ms in trace.timings.items():         # cost tracking is cheap: always on
             self.costs.observe(name, ms)
@@ -353,10 +413,11 @@ class System:
             self.cost_policy.observe(trace.timings)
         if self.learn:
             self._observe(trace, init_state, vals, policy)
-        results, feasible, violations = self._results(qs, flow, trace, vals)
+        results, feasible, violations = self._results(qs, flow, trace, vals, p.textin)
         resp = Response(results, flow, trace, vals, now_ms() - t0, feasible, violations, self.catalog)
         resp._heads = self.heads                      # for the audit: which features a learned head could not use
         resp._system = self                           # for reports and counterfactuals (questions, answer heads, replay)
+        resp.textin = p.textin
         if self.lang != "en":
             resp.lang = self.lang                     # rendering only (audit, show): nothing recorded depends on it
         self._count(resp)
@@ -364,7 +425,7 @@ class System:
             self.storage.save(resp)                   # sets resp.stored_id
         return resp
 
-    def _results(self, qs, flow, trace, vals):
+    def _results(self, qs, flow, trace, vals, textin=None):
         """The answers from an executed flow: rules / hard checks / heads, calibration, constraints, the low-confidence
         safeguard → (results, feasible, violations). No side effects besides an answer head's record in the trace."""
         by = {r.name: r for r in trace.records}
@@ -375,6 +436,8 @@ class System:
             if q.name in self.calib and r.status == "ok":
                 r.confidence = _platt(r.confidence, *self.calib[q.name])
             results[q.name] = r
+        if textin is not None:
+            _read_results(textin, results)
         feasible, violations = self._joint(results)
         for q in qs:                                  # low-confidence safeguard: abstain rather than answer unsure
             r = results[q.name]
@@ -841,6 +904,26 @@ def _resolved(q, r, pc, why, src, init):
         why = f"not stated; {why}"
     return Result(a, min(pc, out["confidence"]), why, probs=out["probs"], provenance=r.origin, source=src, evidence=ev,
                   extra=out["extra"])
+
+
+def _read_results(read, results):
+    """ask_text: an escalated entry point → the likely questions abstain (guard "escalated"); an answer rests on the
+    reading too, so its confidence is at most the entry point's and the read fields' (min, as along a flow); a question
+    that abstains for lack of a required field says the text does not state it."""
+    if read.question is None:
+        rt = read.route
+        for q in rt.get("candidates") or []:
+            results[q] = Result(None, 0.0, f"the entry point is unsure, nothing was asked: {rt.get('escalated')}",
+                                "abstain", dict(rt.get("probs") or {}), "decided", "textin", "escalated")
+        return
+    r = results.get(read.question)
+    if r is None:
+        return
+    confs = [float(read.route.get("confidence", 1.0))] + [f.confidence for f in read.fields.values() if f.status == "read"]
+    if r.status in ("ok", "forced"):
+        r.confidence = min([r.confidence] + confs)
+    elif r.status == "abstain" and read.missing:
+        r.why = f"not stated in the text: {', '.join(read.missing)}; {r.why}"
 
 
 def governs(part, question):

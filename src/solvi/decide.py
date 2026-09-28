@@ -1212,6 +1212,21 @@ class DecideModel:
         default; a text-only checkpoint such as L14d reads the "paths" lines as text)."""
         return self.caps["state_format"]
 
+    @property
+    def max_len(self):
+        """The tokens this checkpoint reads in one sequence (question and input): the encoder's, else the checkpoint's
+        `max_len`, else 512."""
+        enc = getattr(self.scorer, "enc", None)
+        return int(getattr(enc, "max_len", 0) or self.meta.get("max_len") or getattr(self.scorer, "max_len", 0) or 512)
+
+    def count_tokens(self, text):
+        """Tokens of a text for this checkpoint: its tokenizer when it has one, else solvi.longdoc.approx_tokens."""
+        tok = getattr(getattr(self.scorer, "enc", None), "tok", None)
+        if tok is not None:
+            return len(tok.encode(text, add_special_tokens=False).ids)
+        from .longdoc import approx_tokens
+        return approx_tokens(text)
+
     def text(self, v):
         """An input (a text, a Quote, a scalar or a state) → the text this checkpoint reads."""
         return _text(v, self.caps["state_format"])
@@ -1730,7 +1745,7 @@ class DecideModel:
     def decision(self, name, task, text_fact="doc", options=(), descriptions=None, multi=False, other=None, *, kind=None,
                  type=None, escalate_below=None, act_threshold=None, use_act=None, target_error=None,
                  score_value="median", unknown=False, k=None, bins=None, unit=None, coverage=0.8, evidence=False,
-                 option_order="canonical", permutations=4, min_margin=None):
+                 option_order="canonical", permutations=4, min_margin=None, long=None, top_k=3, rerank=False):
         """A catalog part: text_fact (a fact name, or a list of them) → Decision(value, probs).
 
         The question: `options` (a list, or {option: description}) and `kind` ("choice", "multi", "score", "noul"; default
@@ -1758,7 +1773,12 @@ class DecideModel:
         answer (solvi.Unknown); `Rank[Literal[...], k]` or kind="rank", k= — the options best first; `Estimate[edges]` or
         kind="number", bins=, unit=, coverage= — a number over bins; `Span[T]` or kind="span" — a piece of the (one, given)
         text fact, coerced to T when it is a question's answer; evidence=True (or a number) — supporting quotes from the
-        pointer. A checkpoint that cannot give what is asked raises here."""
+        pointer. A checkpoint that cannot give what is asked raises here.
+
+        Long texts: long=None cuts a text beyond max_len (the tokenizer truncates it, as before); long="retrieve" splits
+        it into sections, selects the top_k that bear on the question by BM25 (rerank=True: re-ordered by the decider's own
+        relevance, one yes / no pass per candidate section) and decides on them; spans and evidence point into the whole
+        text, and the sections read are in the decision's extra["long"] (solvi.longdoc)."""
         as_bool, extra = False, {}
         if type is None and _is_type(options):
             type, options = options, ()
@@ -1782,9 +1802,12 @@ class DecideModel:
                              "§9); drop Maybe[...] / unknown=True")
         if option_order not in ("given", "canonical", "average"):
             raise ValueError('option_order must be "given", "canonical" or "average"')
+        if long not in (None, "retrieve"):
+            raise ValueError('long must be None (truncate) or "retrieve"')
         return DecisionPart(self, name, task, text_fact, options, descriptions, multi, other, kind=kind, as_bool=as_bool,
                             escalate_below=escalate_below, act_threshold=act_threshold, use_act=use_act,
                             option_order=option_order, permutations=permutations, min_margin=min_margin,
+                            long=long, top_k=top_k, rerank=rerank,
                             score_value=score_value, **{x: v for x, v in prim.items() if v not in (None, False, 0)
                                                          or x == "coverage"})
 
@@ -1836,8 +1859,9 @@ class DecisionPart:
 
     def __init__(self, model, name, task, text_fact, options, descriptions=None, multi=False, other=None, *, kind=None,
                  as_bool=False, escalate_below=None, act_threshold=None, use_act=None, score_value="median",
-                 option_order="canonical", permutations=4, min_margin=None, **prim):
+                 option_order="canonical", permutations=4, min_margin=None, long=None, top_k=3, rerank=False, **prim):
         self.model = model
+        self.long, self.top_k, self.rerank = long, max(1, int(top_k)), bool(rerank)
         self.spec = _Spec(task, options, descriptions, multi, other, kind, as_bool, score_value, **prim)
         sp = self.spec
         self._shown = None if sp.values is None else list(sp.values)   # the caller's order, for options and probs
@@ -1909,7 +1933,9 @@ class DecisionPart:
                                 ("use_act", self.use_act), ("guarantee", self.guarantee),
                                 ("conformal", self.conformal_set), ("min_margin", self.min_margin),
                                 ("option_order", None if self.option_order != "average" else
-                                 (self.option_order, self.permutations))) if v is not None}
+                                 (self.option_order, self.permutations)),
+                                ("long", None if self.long is None else (self.long, self.top_k, self.rerank)))
+              if v is not None}
         if th:
             return digest("DecisionPart", self.model.weights_fingerprint(), self.spec.describe(), a.params() if a else None, th)
         return digest("DecisionPart", self.model.weights_fingerprint(), self.spec.describe(), a.params() if a else None)
@@ -1953,6 +1979,10 @@ class DecisionPart:
         records the pass."""
         text = self.text_of(args)
         m = self.model
+        if self.long is not None and self._too_long(text):   # a long text: this part retrieves and decides on its own
+            d = self._bind(self._one(text), args)
+            d.extra["pass"] = {"with": list(names) if names else [s.__name__ for s in siblings], "shared": False}
+            return d
         if (len(siblings) > 1 and m.batchable and all(s.model is m for s in siblings)
                 and all(s.option_order != "average" for s in siblings)):
             z, a, shared = m._raw_pass([s.spec for s in siblings], text)[siblings.index(self)]
@@ -2052,16 +2082,72 @@ class DecisionPart:
         return out
 
     def _one(self, text):
+        if self.long is not None and self._too_long(text):
+            return self._retrieve(text)
         z, a = self._raw([text])[0]
         return self._finish(self.model._decision(self.spec, z), a)
+
+    # --- long texts (long="retrieve", solvi.longdoc)
+    def _prompt_tokens(self):
+        sp = self.spec
+        return self.model.count_tokens(" ".join([sp.task] + [str(o) for o in sp.options] +
+                                                [str(v) for v in (sp.descriptions or {}).values() if v])) + len(sp.options) + 8
+
+    def budget(self):
+        """The tokens of input this decision can read in one pass: max_len minus its question."""
+        return max(32, self.model.max_len - self._prompt_tokens())
+
+    def _too_long(self, text):
+        return self.model.count_tokens(text) > self.budget()
+
+    def _retrieve(self, text):
+        """Decide on the top_k sections of a long text; spans and evidence mapped back into the text; the sections read
+        in extra["long"]."""
+        from .longdoc import LongDocument
+        budget = self.budget()
+        doc = LongDocument(text, max_tokens=max(16, budget // self.top_k), count=self.model.count_tokens)
+        sp = self.spec
+        query = " ".join([sp.task] + [str(o) for o in sp.real] + [str(v) for v in (sp.descriptions or {}).values() if v])
+        rr = self._relevance if self.rerank else None
+        sel = doc.select(query, k=self.top_k, budget=budget, rerank=rr)
+        win = doc.window([s for s, _ in sel])
+        z, a = self._raw([win.text])[0]
+        d = self._finish(self.model._decision(sp, z), a)
+        score = {s.index: sc for s, sc in sel}
+        d.extra["long"] = {"read": len(sel), "of": len(doc), "by": "bm25+decider" if rr else "bm25",
+                           "sections": [[s.start, s.end, s.heading, round(float(score[s.index]), 6)] for s in win.sections]}
+        if isinstance(d.value, Quote):
+            got = win.to_doc(d.value.start, d.value.end)
+            if got is None:
+                d.escalate = d.escalate or "the span crosses two sections of the long text"
+            else:
+                d.value = dataclasses.replace(d.value, start=got[0], end=got[1])
+        ev = []
+        for e in d.evidence:
+            if isinstance(e, Quote):
+                got = win.to_doc(e.start, e.end)
+                if got is not None:
+                    ev.append(dataclasses.replace(e, start=got[0], end=got[1]))
+            else:
+                ev.append(e)
+        d.evidence = ev
+        return d
+
+    def _relevance(self, texts):
+        """The decider's own relevance of passages to this question: p(yes) of "Does this passage help answer: …?"."""
+        task = f"Does this passage help answer the question: {self.spec.task}"
+        ds = self.model.decide(list(texts), task, ["yes", "no"], kind="noul")
+        return [float(d.probs.get("yes", 0.0)) for d in ds]
 
     # the model's methods for this decision
     def decide(self, text):
         """An input (a text or a state) → Decision; a list of inputs → a list."""
         one = _single(text)
-        texts = [text] if one else list(text)
-        out = [self._finish(self.model._decision(self.spec, z), a)
-               for z, a in self._raw([self.model.text(t) for t in texts])]
+        texts = [self.model.text(t) for t in ([text] if one else list(text))]
+        if self.long is not None and any(self._too_long(t) for t in texts):
+            out = [self._one(t) for t in texts]
+        else:
+            out = [self._finish(self.model._decision(self.spec, z), a) for z, a in self._raw(texts)]
         return out[0] if one else out
 
     def score(self, text):
