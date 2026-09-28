@@ -488,3 +488,24 @@ def test_corrections_and_meta_read_back_non_finite_floats(tmp_path, kind):
     assert st.forget("limit", math.inf)["stored"] == [c["id"]]
     assert st.verify()["ok"]
 
+
+def test_jsonl_append_after_a_cut_short_last_line_does_not_glue(tmp_path):
+    cat, qs = build()
+    p = tmp_path / "j.jsonl"
+    s = System(cat, qs, storage=JSONLStorage(p))
+    s.ask(STATES[0])
+    s.ask(STATES[1])
+    raw = p.read_bytes()
+    last = raw.rstrip(b"\n").rsplit(b"\n", 1)[1]
+    p.write_bytes(raw[:len(raw) - len(last) // 2 - 1])            # a crash in the middle of writing the last record
+    st = JSONLStorage(p)
+    assert len(st) == 1
+    s2 = System(cat, qs, storage=st)
+    rid = s2.ask(STATES[2]).stored_id
+    assert st.get(rid) is not None and len(st) == 2
+    again = JSONLStorage(p)                                         # a fresh reader sees the new record, not a glued line
+    assert len(again) == 2 and again.get(rid).stored_id == rid
+    assert [x.seq for x in again.iter()] == [0, 1]
+    v = again.verify()
+    assert not v["ok"] and any("not readable JSON" in why for *_, why in v["problems"])
+    assert v["count"] == 2

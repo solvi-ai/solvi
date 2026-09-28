@@ -347,7 +347,8 @@ class TraceStorage:
         prev, n = GENESIS, 0
         for pos, d in self._raw():
             if d is None:
-                problems.append((n, None, f"record at position {pos} is not readable JSON"))
+                problems.append((n, None, f"record at position {pos} is not readable JSON (a record cut short by a crash "
+                                          "while it was written, or an edit)"))
                 continue
             rid = d.get("id")
             if d.get("hash") != record_hash(d):
@@ -512,8 +513,13 @@ class JSONLStorage(TraceStorage):
             rec["hash"] = record_hash(rec)
             rec["id"] = rec["hash"][:16]
             line = (json.dumps(rec, ensure_ascii=False, sort_keys=True, allow_nan=False) + "\n").encode()
-            with open(self.path, "ab") as fh:
-                off = fh.tell()
+            with open(self.path, "a+b") as fh:
+                off = fh.seek(0, os.SEEK_END)
+                if off:                               # a crash cut the last line short: end it, never glue onto it
+                    fh.seek(off - 1)
+                    if fh.read(1) != b"\n":
+                        fh.write(b"\n")                # the fragment stays a line of its own: verify reports it
+                        off += 1
                 fh.write(line)
                 fh.flush()
                 if self.fsync:
