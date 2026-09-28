@@ -24,6 +24,20 @@
   `solvi serve` answers such a System with `aask` (async HTTP endpoints, concurrent asks; the MCP server too).
 - `solvi.runtime.aexecute` is the async executor; `execute` and `aexecute` share one plan of phases.
 
+### Costs from measurements
+
+- `System(..., producers="equivalent", costs="measured")`: the cost-optimal planner (`ModelStrategist(producers=
+  "equivalent")`; `producers="equivalent"` on the System is now a shortcut for it) plans with the run times
+  `system.costs` measures instead of declared costs. Warm-up: a producer counts its measured time after `min_samples`
+  runs; before that its declared `cost=`, or 0 ms when undeclared, so each is tried and measured. When the producer in use
+  slows down, the next plans switch; a producer unused for `recheck` asks gets one more trial. Settings:
+  `solvi.learned.MeasuredCosts(min_samples=3, recheck=50, alpha=None)` (`alpha`: the smoothing of `system.costs`).
+- `system.freeze_costs()` fixes the planner's costs at what was measured (the choice stops changing; measuring goes on),
+  `system.unfreeze_costs()` resumes.
+- The plan record says why each path was chosen: `extra["costs"]` lists, per fact with several usable producers, each
+  producer's cost and its source (`measured`, `declared`, `warm-up`, `recheck`, `frozen: ...`) and a `why` line.
+- `ModelStrategist.plan(..., costs={producer: cost})` takes costs from the caller (under the strategist's own `costs=`).
+
 ### solvi serve: HTTP, MCP and System One
 
 - `solvi serve module:attr` (or `file.py:attr`) serves a System's questions over HTTP (`solvi[serve]`: FastAPI, uvicorn):

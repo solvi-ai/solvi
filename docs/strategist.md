@@ -52,6 +52,33 @@ System(cat, questions, strategist=ModelStrategist.load("path/to/strategist-check
    kept). A rejected segment falls back to code's choice for that fact; a plan that fails validation falls back to
    `fallback="code"` (code's plan), `"deterministic"` (solvi.strategist.plan) or `"abstain"`.
 
+### Costs from measurements
+
+With no `cost=` declared, interchangeable producers tie and the first declared wins. `System(cat, questions,
+producers="equivalent", costs="measured")` (the same as `strategist=ModelStrategist(producers="equivalent")` plus
+`costs="measured"`) plans with the run times solvi measures anyway (`system.costs`, a moving average in ms per part):
+
+- **Warm-up.** A producer counts its measured time once it has run `min_samples` times (default 3); before that its
+  declared `cost=`, or 0 ms when it declares none — so each undeclared producer gets chosen, and measured, in turn.
+- **Smoothing and adapting.** The moving average weighs the newest run by `alpha` (CostBook's 0.3 unless set). When the
+  producer in use slows down, its average rises above the others' and the next plans switch.
+- **Recheck.** A producer not run for `recheck` asks (default 50) counts 0 ms for one plan, so a source that got faster
+  again is noticed (`recheck=None`: never).
+- **Freeze.** `system.freeze_costs()` fixes the planner's costs at what was measured (a producer that never ran: its
+  declared cost, else 1) — the choice stops changing, measuring goes on; `system.unfreeze_costs()` resumes.
+
+```python
+from solvi.learned import MeasuredCosts
+system = System(cat, questions, producers="equivalent", costs=MeasuredCosts(min_samples=5, recheck=100, alpha=0.2))
+```
+
+Every plan record then carries `extra["costs"]`: `{"mode": "measured" | "frozen", "facts": {fact: {"chosen",
+"producers": {name: {"ms", "from", "runs"}}, "why"}}}` — per fact with several usable producers, the cost of each and where
+it came from (`measured`, `declared`, `warm-up`, `recheck`, `frozen: measured` ...), e.g. `"why": "cheapest plan: rate_table
+measured 0.012 ms ×5; rate_live measured 301.448 ms ×3"`. The choice is made on the costs of the whole plan (a producer
+that reads an expensive fact pays for it too). Since measured costs depend on timing, so does this record's hash — it
+says what was known when the plan was made; the rest of the trace is as always.
+
 `strategist.last` is the report of the last plan: the choice per fact, the mandatory checks, per segment what code chose,
 what the model proposed, whether it was accepted (and why) or rejected (and why), the fallback if any, and the time.
 

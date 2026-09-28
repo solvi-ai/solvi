@@ -605,10 +605,16 @@ class ModelStrategist:
         """{"type", "id", "fp"} of the model (as in trace records), or None."""
         return None if self.model is None else self.model.info()
 
-    def plan(self, catalog, questions, init_keys, heads=None):
+    def plan(self, catalog, questions, init_keys, heads=None, costs=None):
+        """→ Flow. costs: {producer: cost} from the caller (System(costs="measured") passes measured run times), under the
+        strategist's own `costs=` (which wins where both name a producer)."""
         t0 = time.perf_counter()
         init = set(init_keys)
         qs = list(questions)
+        costs = self.costs if costs is None else {**costs, **(self.costs or {})}
+        return self._plan(catalog, qs, init, heads, t0, costs)
+
+    def _plan(self, catalog, qs, init, heads, t0, costs):
         if self.producers == "declared":
             reach = reachable(catalog, init)
             flow = det_plan(view_usable(catalog, reach), qs, init, heads)
@@ -624,7 +630,7 @@ class ModelStrategist:
             return self._done(flow, report, t0, sel)
         gov = mandatory_checks(catalog, qs, init, heads)
         must = [c for cs in gov.values() for c in cs]
-        code = search(catalog, qs, init, self.costs, heads, extra=must, max_expand=self.max_expand)
+        code = search(catalog, qs, init, costs, heads, extra=must, max_expand=self.max_expand)
         report = {"strategist": "model" if self.model is not None else "code", "segments": [], "fallback": None,
                   "code_cost": code.cost, "proven": code.proven, "mandatory": gov}
         if not code.feasible:
@@ -632,7 +638,7 @@ class ModelStrategist:
             report["fallback"] = "no feasible selection: " + code.why
             return self._done(flow, report, t0, None)
         sel, code_flow = code, build(catalog, qs, init, code, heads, self.fallbacks, gov)
-        segs = segments(catalog, qs, init, code, self.costs) if self.model is not None else []
+        segs = segments(catalog, qs, init, code, costs) if self.model is not None else []
         fixed = {}
         if segs:
             props = self.model.propose(segs)
@@ -656,7 +662,7 @@ class ModelStrategist:
                     row["by"] = "code"
                 report["segments"].append(row)
             if fixed:
-                sel = search(catalog, qs, init, self.costs, heads, fixed=fixed, extra=must, max_expand=self.max_expand)
+                sel = search(catalog, qs, init, costs, heads, fixed=fixed, extra=must, max_expand=self.max_expand)
                 ignored = [f for f, n in fixed.items() if sel.choice.get(f) not in (None, n)]
                 if ignored:
                     report["overridden"] = ignored
@@ -708,6 +714,8 @@ def plan_record(flow):
                                                           for r in s.get("segments", ())]}
     if s.get("fallback"):
         extra["fallback"] = s["fallback"]
+    if s.get("costs"):                                # costs from measurements (System(costs="measured")): why each choice
+        extra["costs"] = s["costs"]
     return Record(step=0, kind="plan", name="plan:strategy", inputs={}, value=value,
                   provenance="proposed" if by_model else "computed", model=s.get("model") if by_model else None, extra=extra)
 

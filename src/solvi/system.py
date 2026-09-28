@@ -122,7 +122,7 @@ class Response(Serial):
 class System:
     def __init__(self, catalog: Catalog, questions, journal: str | None = None, workers: int = 1, order: str = "default",
                  producers: str = "declared", learn: bool | None = None, inputs=None, strategist=None, storage=None,
-                 timeout: float | None = None):
+                 timeout: float | None = None, costs="declared"):
         """order: "default" (hard checks and their inputs first, all together) or "learned" (hard checks one at a time, most
         expected saving first — see learn_order). producers: "declared" (alternative producers of a fact are tried in
         declaration order) or "learned" (a policy picks the order per input and learns from outcomes). learn: after every
@@ -135,7 +135,12 @@ class System:
         storage: a solvi.storage.TraceStorage (or a path: .db / .sqlite → SQLite, else JSON lines) — every ask saves its
         response (answers, flow, whole trace) there, hash-chained across responses, and teach saves the correction; the
         response's `stored_id` is its id in the store. journal="file.jsonl" is the same as storage=JSONLStorage("file.jsonl").
-        timeout: seconds a part's call may take under `aask` when the part declares no `timeout=` (None: no limit)."""
+        timeout: seconds a part's call may take under `aask` when the part declares no `timeout=` (None: no limit).
+        producers="equivalent": the producers of a fact are interchangeable — the cost-optimal planner
+        (solvi.strategy.ModelStrategist(producers="equivalent")) picks one per fact, the cheapest valid plan.
+        costs: what that planner's costs are — "declared" (`cost=`, 1 when undeclared) or "measured" (the run times
+        system.costs measures, after a warm-up; or a solvi.learned.MeasuredCosts with its settings). freeze_costs() fixes
+        them; the plan record in each trace says which cost decided each choice."""
         from .learned import CostBook, OrderModel, ProducerPolicy
         self.catalog = catalog
         self.inputs = inputs
@@ -155,14 +160,34 @@ class System:
         self.learned_rules = {}                   # question → RuleList (readable rules learned from examples)
         if order not in ("default", "learned"):
             raise ValueError('order must be "default" or "learned"')
-        if producers not in ("declared", "learned"):
-            raise ValueError('producers must be "declared" or "learned"')
+        if producers not in ("declared", "learned", "equivalent"):
+            raise ValueError('producers must be "declared", "learned" or "equivalent"')
+        if producers == "equivalent":
+            from .strategy import ModelStrategist
+            if strategist is None:
+                self.strategist = strategist = ModelStrategist(producers="equivalent")
+            elif getattr(strategist, "producers", None) != "equivalent":
+                raise ValueError('producers="equivalent" with a strategist: give it producers="equivalent" too')
+        from .learned import MeasuredCosts
+        if isinstance(costs, MeasuredCosts):
+            self.cost_policy = costs
+        elif costs == "measured":
+            self.cost_policy = MeasuredCosts()
+        elif costs == "declared":
+            self.cost_policy = None
+        else:
+            raise ValueError('costs must be "declared", "measured" or a MeasuredCosts')
+        if self.cost_policy is not None and getattr(self.strategist, "producers", None) != "equivalent":
+            raise ValueError('costs="measured" needs the cost-optimal planner: System(..., producers="equivalent") or '
+                             'strategist=ModelStrategist(producers="equivalent")')
         # online learning of order / producer choice costs time inside ask (periodic refits), so it is on only when a learned
         # policy will use it (or when asked explicitly); plain systems keep flat, predictable decision times
         if learn is None:
             learn = order != "default" or producers == "learned"
         self.order, self.producers, self.learn = order, producers, learn
         self.costs = CostBook()                   # moving average of each part's run time, ms
+        if self.cost_policy is not None and self.cost_policy.alpha is not None:
+            self.costs.alpha = self.cost_policy.alpha
         self.order_model = OrderModel()           # P(hard check fails | cheap facts)
         self.producer_policy = ProducerPolicy()   # which producer of a fact to try first
         from .audit import STATS
@@ -236,6 +261,20 @@ class System:
         from .runtime import async_parts
         return bool(async_parts(self.catalog))
 
+    def freeze_costs(self):
+        """Fix the costs the planner uses (System(costs="measured")) at what was measured so far — a producer that never
+        ran: its declared cost, else 1 — so the choice of producers stops changing; measuring goes on. → {producer: ms}"""
+        return self._measured().freeze(self.costs, _producers(self.catalog))
+
+    def unfreeze_costs(self):
+        """Back to the measured costs (see freeze_costs)."""
+        self._measured().frozen = None
+
+    def _measured(self):
+        if self.cost_policy is None:
+            raise ValueError('costs are declared: freeze_costs needs System(..., costs="measured")')
+        return self.cost_policy
+
     def _prepare(self, init_state, names, order):
         """What ask and aask share before running: the given facts, the questions, the flow, the order and the policy."""
         known = None
@@ -249,7 +288,13 @@ class System:
         else:
             rejected = None
         qs = [self.questions[n] for n in (names or self.questions)]
-        flow = (plan if self.strategist is None else self.strategist.plan)(self.catalog, qs, init_state.keys(), self.heads)
+        if self.cost_policy is not None:              # costs from measurements (see MeasuredCosts)
+            c, src = self.cost_policy.costs(self.costs, _producers(self.catalog))
+            flow = self.strategist.plan(self.catalog, qs, init_state.keys(), self.heads, costs=c)
+            _why_costs(self.catalog, flow, init_state.keys(), c, src, self.cost_policy.frozen is not None)
+        else:
+            flow = (plan if self.strategist is None else self.strategist.plan)(self.catalog, qs, init_state.keys(),
+                                                                               self.heads)
         mode = self.order if order is None else order
         om = None if mode == "default" else (self.order_model if mode == "learned" else mode)
         policy = self.producer_policy if self.producers == "learned" else None
@@ -267,6 +312,8 @@ class System:
         trace.fingerprint = self._fingerprint(flow)
         for name, ms in trace.timings.items():         # cost tracking is cheap: always on
             self.costs.observe(name, ms)
+        if self.cost_policy is not None:
+            self.cost_policy.observe(trace.timings)
         if self.learn:
             self._observe(trace, init_state, vals, policy)
         by = {r.name: r for r in trace.records}
@@ -767,4 +814,36 @@ def _platt(c, a, b):
     import math
     c = min(max(c, 1e-4), 1 - 1e-4)
     return 1 / (1 + math.exp(-(a * math.log(c / (1 - c)) + b)))
+
+
+def _producers(catalog):
+    """Every producer in a catalog: plain parts and each alternative producer of a fact."""
+    return [a for p in catalog.parts.values() for a in (p.alternatives if p.alternatives is not None else [p])]
+
+
+def _why_costs(catalog, flow, init_keys, costs, src, frozen):
+    """Record in the flow's strategy (and so in the trace's plan record) the costs behind each choice among producers."""
+    s = getattr(flow, "strategy", None)
+    if s is None or not s.get("choice"):
+        return
+    from .strategy import reachable, usable
+    reach = reachable(catalog, set(init_keys))
+
+    def say(n):
+        how, runs = src.get(n, ("declared", 0))
+        return f"{n} {how} {costs.get(n, 1.0):.3f} ms" + (f" ×{runs}" if runs else "")
+    facts = {}
+    for f, chosen in s["choice"].items():
+        p = catalog.parts.get(f)
+        if p is None or p.alternatives is None:
+            continue
+        us = usable(catalog, f, reach)
+        if len(us) < 2:
+            continue
+        others = sorted((a.name for a in us if a.name != chosen), key=lambda n: costs.get(n, 1.0))
+        facts[f] = {"chosen": chosen,
+                    "producers": {a.name: {"ms": round(costs.get(a.name, 1.0), 3), "from": src.get(a.name, ("declared",))[0],
+                                           "runs": src.get(a.name, (None, 0))[1]} for a in us},
+                    "why": "cheapest plan: " + "; ".join(say(n) for n in [chosen] + others)}
+    s["costs"] = {"mode": "frozen" if frozen else "measured", "facts": facts}
 

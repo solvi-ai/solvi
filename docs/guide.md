@@ -839,9 +839,18 @@ every request with the same keys.
 `System(..., strategist=...)` takes another planner. `solvi.strategy.ModelStrategist()` builds the same plan with producers
 whose inputs are never given dropped (the deterministic strategist needs the inputs of every producer of a fact);
 `ModelStrategist(producers="equivalent")` treats the producers of a fact as interchangeable and picks the cheapest verified
-plan by declared `cost=`, keeping every hard check that governs a question. Both are code only. A segment model and name
-matching (`solvi.aliases`) are experimental. Details, the trace record of a plan and what was measured:
-[docs/strategist.md](strategist.md).
+plan by declared `cost=`, keeping every hard check that governs a question (`System(..., producers="equivalent")` is a
+shortcut for it). Both are code only. A segment model and name matching (`solvi.aliases`) are experimental. Details, the
+trace record of a plan and what was measured: [docs/strategist.md](strategist.md).
+
+**Costs from measurements.** `System(cat, questions, producers="equivalent", costs="measured")` plans with the run times
+`system.costs` measures instead of declared costs: after a warm-up (each producer measured `min_samples` times; an
+undeclared one is tried at 0 ms, a declared one keeps its `cost=` until measured) it picks the fastest of equivalent
+producers — a local table over a 300 ms feed — and switches when that one slows down; a producer unused for `recheck`
+asks gets one more trial. `system.freeze_costs()` stops the switching (`unfreeze_costs()` resumes). The plan record of each
+trace says, per fact, which cost decided and where it came from (declared, warm-up, measured, recheck, frozen). Settings:
+`costs=solvi.learned.MeasuredCosts(min_samples=3, recheck=50, alpha=None)`; see
+[docs/strategist.md](strategist.md#costs-from-measurements).
 
 ### Early exit and parallel execution
 
@@ -909,7 +918,7 @@ Plain CPU parts gain nothing from `aask`: for them the sync `ask` stays the defa
 ### Learned order of hard checks
 
 Every `ask` measures the run time of each part: `system.costs` keeps a moving average (ms) per part (`cost=` on a decorator
-is the prior until a part has run). It also records which hard checks failed on which input.
+is the prior until a part has run; `costs="measured"` also feeds it to the planner, see above). It also records which hard checks failed on which input.
 
 `System(cat, questions, order="learned")` — or `system.learn_order(examples)` on a list of `init_state`s, which runs only the
 hard checks and what they read and then switches the order — makes the executor evaluate hard checks **one at a time**, the
