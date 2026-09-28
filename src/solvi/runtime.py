@@ -149,6 +149,7 @@ class Trace(Serial):
     schedule: list = field(default_factory=list)    # learned order: why each hard check ran when it did (not hashed)
     timings: dict = field(default_factory=dict)     # part (and producer) → run time in ms (not hashed)
     rejected: list = field(default_factory=list)    # [(given fact, why)] inputs that failed System(inputs=...) (not facts)
+    fingerprint: dict = field(default_factory=dict)  # which catalog / questions / models decided (System.fingerprint; not hashed)
 
     def explain_order(self):
         """The learned schedule as text: which hard check ran first and why."""
@@ -179,8 +180,10 @@ class Trace(Serial):
         recorded output is verified instead — a quote must be literally at its offsets, a decision among its options.
         Pass the System instead of the catalog to verify answer-head records too (else they are reported as unavailable).
 
-        → {"ok", "steps", "mismatches": [(step, name, reason)], "models": [(step, name, verdict)]} with verdicts
-        "recomputed", "trusted", "unavailable" or "changed".
+        → {"ok", "steps", "mismatches": [(step, name, reason)], "models": [(step, name, verdict)], "catalog"} with verdicts
+        "recomputed", "trusted", "unavailable" or "changed". "catalog": "same", "changed" (with "changed_parts": the parts of
+        this trace whose code or declarations differ from when it was recorded) or "unrecorded" — for information: a
+        changed part that still re-computes the recorded values is not a mismatch.
         Limits: a trace rebuilt honestly from a *different* input is internally consistent — compare `init_hash` with a
         receipt you published elsewhere to catch that."""
         heads = None
@@ -235,7 +238,21 @@ class Trace(Serial):
             for st in flow.steps:
                 if st.part.name not in seen:
                     bad.append((0, st.part.name, "planned step missing from the trace"))
-        return {"ok": not bad, "steps": len(self.records), "mismatches": bad, "models": models}
+        out = {"ok": not bad, "steps": len(self.records), "mismatches": bad, "models": models}
+        out.update(_catalog_verdict(self.fingerprint, catalog))
+        return out
+
+
+def _catalog_verdict(fp, catalog):
+    """The recorded catalog fingerprint against the catalog replaying the trace."""
+    if not fp or not fp.get("catalog") or catalog is None or not hasattr(catalog, "parts"):
+        return {"catalog": "unrecorded"}
+    from .provenance import catalog_fingerprint
+    now = catalog_fingerprint(catalog)
+    if now["fp"] == fp["catalog"]:
+        return {"catalog": "same"}
+    was = fp.get("parts") or {}
+    return {"catalog": "changed", "changed_parts": sorted(n for n, h in was.items() if now["parts"].get(n) != h)}
 
 
 def _pass_siblings(catalog, r):

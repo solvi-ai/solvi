@@ -209,6 +209,7 @@ class System:
         if getattr(flow, "strategy", None) is not None and getattr(self.strategist, "record", True):
             from .strategy import plan_record         # the strategist's plan, hashed into the trace (solvi.strategy)
             _append(trace, plan_record(flow), len(flow.steps))
+        trace.fingerprint = self._fingerprint(flow)
         for name, ms in trace.timings.items():         # cost tracking is cheap: always on
             self.costs.observe(name, ms)
         if self.learn:
@@ -234,6 +235,41 @@ class System:
         if self.storage is not None and store:
             self.storage.save(resp)                   # sets resp.stored_id
         return resp
+
+    def fingerprint(self):
+        """What makes this system's decisions: {"catalog": the catalog's fingerprint (every part's code and declarations,
+        see solvi.provenance.catalog_fingerprint), "questions": the questions' (answer types, thresholds, calibration),
+        "parts": {part: fingerprint}, "models": {part or "answer:<question>": model fingerprint} for model-backed parts and
+        answer heads}. Every trace records the catalog and question fingerprints and those of the parts in its flow
+        (trace.fingerprint); the models it used are recorded with the steps they produced."""
+        from .provenance import catalog_fingerprint, fingerprint
+        c = catalog_fingerprint(self.catalog)
+        models = {}
+        for n, p in list(self.catalog.parts.items()) + [(p.name, p) for p in self.catalog.rules.values()]:
+            for a in (p.alternatives or [p]):
+                if a.model is not None:
+                    models[n if a is p else f"{n} ({a.name})"] = fingerprint(a.model)
+        for q, h in self.heads.items():
+            models["answer:" + q] = fingerprint(h)
+        return {"catalog": c["fp"], "questions": self._questions_fp(), "parts": dict(c["parts"]), "models": models}
+
+    def _questions_fp(self):
+        """The questions' fingerprint (answer types, min_confidence, checkpoints, calibration); cached while the question
+        objects and the calibration are the same."""
+        from .provenance import digest
+        from .schema import dump
+        key = (tuple((n, id(q)) for n, q in self.questions.items()), tuple(sorted(self.calib.items())))
+        cached = getattr(self, "_qfp", None)
+        if cached is None or cached[0] != key:
+            cached = self._qfp = (key, digest(sorted((q.name, dump(q, "json")) for q in self.questions.values()), list(key[1])))
+        return cached[1]
+
+    def _fingerprint(self, flow):
+        """trace.fingerprint: the catalog's and questions' fingerprints and those of the parts in this flow."""
+        from .provenance import catalog_fingerprint
+        c = catalog_fingerprint(self.catalog)
+        return {"catalog": c["fp"], "questions": self._questions_fp(),
+                "parts": {s.part.name: c["parts"][s.part.name] for s in flow.steps if s.part.name in c["parts"]}}
 
     def _count(self, resp):
         from .audit import STAT_KEYS, collect

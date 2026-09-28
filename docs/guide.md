@@ -896,6 +896,10 @@ Every step of the flow is a `Record` in `res.trace.records`:
 Answers from a learned head are records too (`kind="head"`, after the flow's steps): the answer, its probabilities and the
 head's fingerprint.
 
+`res.trace.fingerprint` records what decided: the catalog's fingerprint, the questions' and the fingerprint of every part
+in the flow (see [Catalog fingerprint, solvi diff and shadow mode](#catalog-fingerprint-solvi-diff-and-shadow-mode)); it is
+not part of the hash chain (a stored response is covered by the store's chain).
+
 `res.trace.init` keeps `init_state` and `res.trace.init_hash` its hash. `res.trace.value(name)` returns a recorded value.
 `res.trace.to_json()` / `Trace.from_json(text, catalog=cat)` store and load a trace (typed values are restored, see
 [Types](#types-questions-and-model-decisions)); the loaded trace replays like the original.
@@ -908,7 +912,9 @@ head's fingerprint.
 - that quotes lie within the source text (and, for model-backed parts, are literally the quoted text);
 - for model-backed steps, that the recorded model fingerprint matches the catalog's current model (see below).
 
-It returns `{"ok": bool, "steps": int, "mismatches": [(step, name, reason), ...], "models": [(step, name, verdict), ...]}`.
+It returns `{"ok": bool, "steps": int, "mismatches": [(step, name, reason), ...], "models": [(step, name, verdict), ...],
+"catalog": "same" | "changed" | "unrecorded"}` (with `"changed_parts"` when the catalog changed since the trace was
+recorded — for information: a changed part that still re-computes the recorded value is not a mismatch).
 
 Continuing the README quickstart:
 
@@ -978,6 +984,57 @@ store: deleting a record would break the chain by design.
 
 **Existing journals.** A 0.5 journal file keeps working: its old lines stay at the start of the file, are skipped by
 `get` / `query` / `iter` and counted by `verify()` as `legacy`; new lines are chained after them.
+
+### Catalog fingerprint, solvi diff and shadow mode
+
+`system.fingerprint()` → `{"catalog", "questions", "parts", "models"}`. A part's fingerprint covers its declarations (kind,
+inputs, `hard` / `then`, options, `validate`, `min_confidence`, declared types — a pydantic model by its fields, an Enum by
+its members — and the type of its model) and its code: the function's syntax tree without decorators, docstring, comments
+or formatting, the simple values it closes over or reads as module constants, and the module's own functions it calls. A
+model's weights are not in the catalog's fingerprint: they are the model's own fingerprint, recorded with every step it
+produced. Every trace records the catalog's and the questions' fingerprints and those of its flow's parts;
+`store.query(catalog=fp)` finds the decisions made by one catalog. Limits: a module constant rebound after the first ask,
+or a part edited in place, is not noticed within the process; code the fingerprint does not reach (another module's
+functions, a database) changes nothing in it.
+
+**solvi diff.** "We changed a rule — which decisions change?"
+
+```python
+from solvi.diff import diff
+
+rep = diff(store, new_system)              # re-runs every stored decision (or diff(store, s, question="refund", since=...))
+print(rep)                                 # per question: how many changed and how (yes → no: 12); per decision the first
+rep.changed                                # step whose output differs and why: its code changed, its model changed, its
+rep.ok                                     # inputs changed, or none of these (a non-deterministic or external source)
+```
+
+Each stored decision's recorded input is asked again for the same questions (`store=False`: the new system's own storage
+is not written) and compared with the stored response: answer, status, the guard that settled it, the safeguard events
+concerning it, and a confidence change above `confidence=0.01` (`None` ignores confidence). The same from the shell:
+
+```
+solvi diff decisions.db --system myapp.decisions_v2:system        # exit status 1 when something changes
+solvi replay decisions.db --system myapp.decisions:system         # every stored trace against the current system
+solvi verify decisions.db --anchor 1204:3f9a...                  # the chain, against a head kept elsewhere
+```
+
+`--system` is `module:attribute` or `file.py:attribute` (a System, or a function returning one); `python -m solvi ...`
+works too.
+
+**Shadow mode.** Run a new version next to the current one before switching:
+
+```python
+from solvi import Shadow, SQLiteStorage
+
+shadow = Shadow(current, candidate, storage=SQLiteStorage("shadow.db"))
+res = shadow.ask(state)                    # the current system's response, exactly as current.ask(state)
+print(shadow.report())                     # candidate agrees on 981, differs on 19; refund: 'no' → 'yes' ×12, ...
+```
+
+The candidate runs on the same input after the current system; its response is stored in the shadow store with `meta`
+`{"shadow_of": the current response's stored id, "current_catalog", "diff"}`, never in its own storage, and a failing
+candidate is counted (`shadow.stats["errors"]`), never raised. The candidate runs in the same thread: it adds its own
+time to each ask.
 
 ## Grounded decisions: provenance, audit and safeguards
 

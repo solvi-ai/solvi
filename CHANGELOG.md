@@ -14,6 +14,14 @@
 - `System(..., storage=...)` saves every ask (`res.stored_id`) and every `teach`; `ask(..., store=False)` skips one.
   `journal="file.jsonl"` is now a `JSONLStorage`: the 0.5 line keys are kept (plus the whole response and the chain
   fields), 0.5 lines already in the file are kept and reported as `legacy`; `teach` lines store dates as ISO strings.
+- Catalog fingerprint: `System.fingerprint()` and `trace.fingerprint` (the catalog's, the questions' and every flow
+  part's fingerprint: declarations, declared types and the code's syntax tree with the constants and same-module helpers
+  it reads; `solvi.provenance.catalog_fingerprint`). `Trace.replay` says whether the catalog changed since the trace was
+  recorded and which parts; `TraceStorage.query(catalog=fp)`.
+- `solvi.diff.diff(store, system)`: re-run stored decisions with a new catalog or model and list the answers, statuses,
+  safeguards and confidences that change, each with the first step that differs and why. `Shadow(current, candidate,
+  storage=...)`: answer with the current system, store the candidate's response and the differences.
+- A `solvi` command (also `python -m solvi`): `solvi verify`, `solvi replay`, `solvi diff` over a store.
 - `Result.why` shows set-valued facts in a fixed order (it depended on `PYTHONHASHSEED`), so stored responses hash the same
   in every process.
 

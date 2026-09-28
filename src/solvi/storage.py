@@ -99,6 +99,9 @@ def entry(resp, meta=None):
             m = {k: str(r.model.get(k)) for k in ("type", "id", "fp")}
             models[_cj(m)] = m
     e["models"] = [models[k] for k in sorted(models)]
+    fp = getattr(tr, "fingerprint", None) or {}
+    if fp.get("catalog"):
+        e["catalog"] = fp["catalog"]                  # the catalog that decided (System.fingerprint)
     if meta is not None:
         e["meta"] = plain(meta)
     e["response"] = d
@@ -140,7 +143,9 @@ def _stored(d, catalog=None):
 
 
 # --- filters shared by the backends (SQLite runs the same filters as SQL)
-def _matches(d, question, answer, status, safeguard, model, since, until):
+def _matches(d, question, answer, status, safeguard, model, since, until, catalog=None):
+    if catalog is not None and d.get("catalog") != catalog:
+        return False
     if since is not None and d["time"] < since:
         return False
     if until is not None and d["time"] >= until:
@@ -268,15 +273,17 @@ class TraceStorage:
         return [{"id": s.id, "time": s.time, "question": s.data["teach"], "init": s.data["init"], "answer": s.data["answer"]}
                 for s in self.iter("teach")]
 
-    def query(self, question=None, answer=ANY, status=None, safeguard=None, model=None, since=None, until=None):
+    def query(self, question=None, answer=ANY, status=None, safeguard=None, model=None, since=None, until=None,
+              catalog=None):
         """Stored responses that match every filter given → [Stored] in stored order.
         question: asked this question; answer: answered this (with question: that question's answer; None matches an
         abstention); status: "ok" / "forced" / "abstain" (with question: of that question); safeguard: a safeguard of this
         kind fired ("grounding", "hard_check", "low_confidence", ...; with question: one that concerns it); model: a model
         with this fingerprint, id or type produced a step; since / until: stored in [since, until) — seconds since the
-        epoch, a datetime, a date or an ISO string."""
+        epoch, a datetime, a date or an ISO string; catalog: decided by the catalog with this fingerprint
+        (System.fingerprint()["catalog"])."""
         since, until = _when(since), _when(until)
-        return [s for s in self.iter() if _matches(s.data, question, answer, status, safeguard, model, since, until)]
+        return [s for s in self.iter() if _matches(s.data, question, answer, status, safeguard, model, since, until, catalog)]
 
     # --- integrity
     def verify(self, anchor=None):
@@ -540,8 +547,9 @@ def _head_problems(h, rows):
 # --- SQLite
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS records (seq INTEGER PRIMARY KEY, id TEXT NOT NULL UNIQUE, kind TEXT NOT NULL, time REAL NOT NULL,
-                                    init_hash TEXT, prev TEXT NOT NULL, hash TEXT NOT NULL, body TEXT NOT NULL);
+                                    init_hash TEXT, catalog TEXT, prev TEXT NOT NULL, hash TEXT NOT NULL, body TEXT NOT NULL);
 CREATE INDEX IF NOT EXISTS records_time ON records(time);
+CREATE INDEX IF NOT EXISTS records_catalog ON records(catalog);
 CREATE INDEX IF NOT EXISTS records_init ON records(init_hash);
 CREATE TABLE IF NOT EXISTS answers (seq INTEGER NOT NULL, question TEXT NOT NULL, answer TEXT NOT NULL, status TEXT NOT NULL,
                                     guard TEXT);
@@ -614,9 +622,10 @@ class SQLiteStorage(TraceStorage):
 
     def _insert(self, rec):
         s = rec["seq"]
-        self.db.execute("INSERT INTO records (seq, id, kind, time, init_hash, prev, hash, body) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-                        (s, rec["id"], rec.get("kind", "ask"), rec["time"], rec.get("init_hash"), rec["prev"], rec["hash"],
-                         json.dumps(rec, ensure_ascii=False, sort_keys=True)))
+        self.db.execute("INSERT INTO records (seq, id, kind, time, init_hash, catalog, prev, hash, body) "
+                        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                        (s, rec["id"], rec.get("kind", "ask"), rec["time"], rec.get("init_hash"), rec.get("catalog"),
+                         rec["prev"], rec["hash"], json.dumps(rec, ensure_ascii=False, sort_keys=True)))
         ans, sg, ms = _index_rows(rec)
         self.db.executemany("INSERT INTO answers (seq, question, answer, status, guard) VALUES (?, ?, ?, ?, ?)",
                             [(s, *a) for a in ans])
@@ -650,9 +659,13 @@ class SQLiteStorage(TraceStorage):
             if d is not None:
                 yield _stored(d, self.catalog)
 
-    def query(self, question=None, answer=ANY, status=None, safeguard=None, model=None, since=None, until=None):
+    def query(self, question=None, answer=ANY, status=None, safeguard=None, model=None, since=None, until=None,
+              catalog=None):
         since, until = _when(since), _when(until)
         where, args = ["r.kind = 'ask'"], []
+        if catalog is not None:
+            where.append("r.catalog = ?")
+            args.append(catalog)
         if question is not None or answer is not ANY or status is not None:
             sub = ["a.seq = r.seq"]
             if question is not None:
@@ -687,8 +700,8 @@ class SQLiteStorage(TraceStorage):
     def _backend_problems(self, rows):
         out = []
         with self._lock:
-            cols = {s: (i, k, t, ih, p, h) for s, i, k, t, ih, p, h in
-                    self.db.execute("SELECT seq, id, kind, time, init_hash, prev, hash FROM records")}
+            cols = {s: (i, k, t, ih, c, p, h) for s, i, k, t, ih, c, p, h in
+                    self.db.execute("SELECT seq, id, kind, time, init_hash, catalog, prev, hash FROM records")}
             idx = {}
             for table, q in (("answers", "SELECT seq, question, answer, status, guard FROM answers"),
                              ("safeguards", "SELECT seq, kind, fact, question FROM safeguards"),
@@ -700,7 +713,8 @@ class SQLiteStorage(TraceStorage):
             c = cols.get(s)
             if c is None:
                 continue
-            if c != (d.get("id"), d.get("kind", "ask"), d.get("time"), d.get("init_hash"), d.get("prev"), d.get("hash")):
+            if c != (d.get("id"), d.get("kind", "ask"), d.get("time"), d.get("init_hash"), d.get("catalog"), d.get("prev"),
+                     d.get("hash")):
                 out.append((s, d.get("id"), "the record's columns differ from its stored JSON (edited in the table)"))
             for table, want in zip(("answers", "safeguards", "models"), _index_rows(d)):
                 if sorted(idx.get((table, s), []), key=repr) != sorted(want, key=repr):

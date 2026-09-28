@@ -30,6 +30,9 @@ Documentation = "https://github.com/solvi-ai/solvi/blob/main/docs/guide.md"
 Issues = "https://github.com/solvi-ai/solvi/issues"
 Models = "https://huggingface.co/solvi-ai"
 
+[project.scripts]
+solvi = "solvi.cli:main"   # solvi verify | replay | diff over stored decisions (also: python -m solvi)
+
 [build-system]
 requires = ["uv_build>=0.9.17,<0.10.0"]
 build-backend = "uv_build"
