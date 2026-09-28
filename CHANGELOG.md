@@ -1,5 +1,26 @@
 # Changelog
 
+## Unreleased (0.6)
+
+### Several models, one decision
+
+- `solvi.multi.Cascade([small, large])`: ask the decision parts in order, answer with the first that does not escalate,
+  escalate when all do. The next model is asked only when needed; `costs=[45, 137]` reports the expected cost.
+- `solvi.multi.Vote([a, b], rule="all" | "majority")`: answer when the rule holds and every agreeing part is sure;
+  disagreement escalates with the proposals listed. Parts of one model share a forward pass when they can.
+- `solvi.multi.Route({predicate or fact name: part}, default=part)`: code picks the part per input; only its model runs.
+- A combination is used wherever a decision part is (`cat.fn`, `.question(cat)`, `System.teach` teaches every part);
+  the parts must answer the same question (checked at construction); combinations nest.
+- `act_guard(examples, risk=0.10)` on the combination: one threshold on every part's signal, chosen by conformal risk
+  control on the loss monotonized from above (a cascade's loss is not monotone in the threshold), so P(answered alone
+  and wrong) ≤ risk holds for the whole. Measured with solvi-base → solvi-large at risk 0.10: the risk stayed ≤ 10% on
+  every data set; the cascade answered 96% of ContractNLI alone at 64 ms per question against the large model's 97% at
+  137 ms; voting lowered the error among automatic answers on JSON questions from 2.1% to 0.4%. Also `conformal`.
+- The trace records every proposal (`extra["stages"]` / `["answered_by"]`, `["votes"]`, `["route"]` / `["routed"]`) and
+  the models called (`extra["calls"]`); the audit lists each stage, vote or route; replay re-runs every stage and compares
+  the proposals, or — trusted or unavailable models — checks that the answer follows from the recorded proposals.
+- `examples/18_several_models.py`: cascade, vote and route under one guarantee, with keyword stand-ins.
+
 ## 0.5.1 — unreleased — escalation with a guarantee, any System One model, a release gate, stored decisions
 
 ### Escalation with a guarantee
