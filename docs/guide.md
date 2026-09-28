@@ -1632,8 +1632,11 @@ only this endpoint. Without FastAPI, `solvi.serve.Service(system, decider)` answ
   part sets one), so a slow part makes its questions abstain (safeguard `timeout`) and the request still answers.
 - **Errors.** A refused request says what was refused. Any other failure is logged on the server with its traceback
   (logger `solvi.serve`); the client gets a 500 with an incident id to look it up — never an exception text, a traceback
-  or a path. An exception inside a catalog part is not a server error: it is part of the decision, and its message is in
-  the trace (`why`, the step's `error`), as it is for `System.ask`. `/health` names the store by its file name only.
+  or a path. An exception inside a catalog part is not a server error: it is part of the decision (the questions that
+  need it abstain). Its text may carry paths or data, so the answer the client gets names only its type and an incident
+  id — in the step's `error`, the alternatives tried, `why` and the safeguards' details ("rule not computed:
+  RuntimeError (incident 3f2a…)"); the full text is in the server log under that id and in the stored trace (`solvi
+  replay` / `verify` read it; `trace_hash` is the stored trace's). `/health` names the store by its file name only.
 - **Every entry point.** `POST /ask_text` and the MCP `ask_text` tool go through the same token, limits, timeout and
   error hiding as the questions. A malformed MCP message (a tool name that is not a string) is a JSON-RPC
   error, and nothing in a message stops the built-in server. The MCP proxy (`--guard --upstream`) bounds each client message by `--max-body` /

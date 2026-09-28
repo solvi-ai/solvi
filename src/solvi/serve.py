@@ -38,13 +38,16 @@ of JSON; a System One request at most `--max-questions` questions of `--max-opti
 sync requests run or wait at once, each waiting at most `--queue-timeout` s for the System (then 503 busy); a request
 takes at most `--timeout` seconds (async Systems: through System.aask's part timeout, so the answer
 abstains rather than the request failing); a failure the client did not cause is logged here and answered with an
-incident id, never a traceback or a path; CORS headers only with `--cors ORIGIN`; nothing is imported or loaded from
+incident id, never a traceback or a path — also inside an answer: a part that raised is in the response as its
+exception's type and an incident id (records[].error, the alternatives tried, why, the safeguards' details), its text
+only in the stored trace and the server log; CORS headers only with `--cors ORIGIN`; nothing is imported or loaded from
 request data; `--decider` never downloads without `--pull`."""
 import contextlib
 import hmac
 import json
 import logging
 import os
+import re
 import sys
 import threading
 import time
@@ -239,6 +242,48 @@ def internal_error(where):
     return f"internal error (incident {incident}; the details are in the server log)"
 
 
+# an exception's text as the runtime records it: "Type: message" (a step), "error: Type: message" (an alternative tried)
+_EXC = re.compile(r"^(?:error: )?([A-Z][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)*): ")
+
+
+def redact(d, where="an answer"):
+    """A response's data for a client, without the text of any exception a part raised → d (changed in place): each
+    exception text in the trace's records (their error, the alternatives tried) — and wherever it is repeated (why, the
+    safeguards' details, a group's "no producer accepted") — becomes "Type (incident …)". The full texts are logged on
+    the server under the incident id and stay in the stored trace; the response's trace_hash is the stored trace's."""
+    found = {}
+    for r in ((d.get("trace") or {}).get("records") or []) if isinstance(d, dict) else []:
+        cands = [r.get("error")] + [t[1] for t in (r.get("tried") or []) if isinstance(t, (list, tuple)) and len(t) > 1]
+        for c in cands:
+            if isinstance(c, str) and (m := _EXC.match(c)):
+                text = c[len("error: "):] if c.startswith("error: ") else c
+                found.setdefault(text, (m.group(1), r.get("name")))
+    if not found:
+        return d
+    incident = uuid.uuid4().hex[:12]
+    for text, (typ, part) in found.items():
+        log.error("solvi serve: %s — part %s raised (incident %s): %s", where, part, incident, text)
+    subs = sorted(found.items(), key=lambda kv: -len(kv[0]))           # the longest first: a text may contain another
+
+    def clean(v):
+        if isinstance(v, str):
+            for text, (typ, _) in subs:
+                if text in v:
+                    v = v.replace(text, f"{typ} (incident {incident})")
+            return v
+        if isinstance(v, dict):
+            return {k: clean(x) for k, x in v.items()}
+        if isinstance(v, list):
+            return [clean(x) for x in v]
+        if isinstance(v, tuple):
+            return tuple(clean(x) for x in v)
+        return v
+    for k in list(d):
+        if k not in ("stored_id", "trace_hash"):
+            d[k] = clean(d[k])
+    return d
+
+
 # ------------------------------------------------------------------------------------------------ the service
 class Service:
     """What the HTTP app and the MCP server call: asks a System (one at a time: a System learns costs and counts stats
@@ -290,7 +335,7 @@ class Service:
         resp = self._ask(state, names, self.storing(store))
         d = resp.to_dict()
         d["stored_id"], d["trace_hash"] = resp.stored_id, trace_hash(resp)
-        return d
+        return redact(d, "ask")
 
     def _checked(self, state, names):
         s = self.system
@@ -340,7 +385,7 @@ class Service:
         resp = await self._aask(state, names, self.storing(store))
         d = resp.to_dict()
         d["stored_id"], d["trace_hash"] = resp.stored_id, trace_hash(resp)
-        return d
+        return redact(d, "ask")
 
     def tool(self, name, state):
         """An MCP tool call: one question → its result (answer, confidence, status, why, ...), the safeguards that fired
@@ -390,7 +435,7 @@ class Service:
         read = resp.textin
         d["read"] = {**read.to_dict(), "clarify": read.clarify(), "escalated": read.escalated}
         d["stored_id"], d["trace_hash"] = resp.stored_id, trace_hash(resp)
-        return d
+        return redact(d, "ask_text")
 
     def ask_text(self, text, question=None, store=True, today=None):
         """A free text → Response.to_dict() of System.ask_text plus "read" (the question it asks, the fields read with
@@ -411,7 +456,7 @@ class Service:
 
     @staticmethod
     def _tool_result(name, resp):
-        d = resp.to_dict()
+        d = redact(resp.to_dict(), f"tool {name}")
         out = {"question": name, **d["results"][name]}
         out["safeguards"] = [e for e in d["safeguards"] if name in (e.get("questions") or [name])]
         out["stored_id"], out["trace_hash"] = resp.stored_id, trace_hash(resp)

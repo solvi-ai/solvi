@@ -173,6 +173,10 @@ Found in an adversarial re-check of 0.7; each case has a regression test (`tests
   by `. @ - / : _`; format characters are read as absent; a number (or a string of digits) joined to any word by those
   characters, or followed by `%` or a unit, is not grounded; a space groups thousands only with the new `"spaced"`
   matcher (`ground={"amount": "spaced"}`).
+- **serve: exception texts in answers.** `/ask`, `/ask_text` and the MCP tools returned a part's exception text (paths,
+  data) in `trace.records[].error`, the alternatives tried, `why` and the safeguards' details. The answer now names the
+  exception's type and an incident id (`solvi.serve.redact`); the full text is in the server log under that id and in
+  the stored trace.
 
 ### Fixes in the learning loop
 
