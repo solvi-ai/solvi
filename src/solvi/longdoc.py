@@ -28,7 +28,8 @@ _STOP = {"a", "an", "the", "of", "to", "in", "on", "for", "and", "or", "is", "ar
          "will", "shall", "can", "may", "was", "were", "has", "have"}
 HEADING = re.compile(
     r"^[ \t]{0,3}(?:#{1,6}[ \t]+\S.*|(?:(?:article|section|clause|schedule|annex|appendix|part|chapter)\s+[\dIVXLC]+[.:)]?|§\s*\d+|"
-    r"\d{1,2}(?:\.\d{1,2})*\.?|[IVXLC]{1,5}\.)[ \t]+\S.{0,100}|[A-Z][A-Z0-9 ,&'/()\-]{3,80})[ \t]*$", re.I | re.M)
+    r"\d{1,2}(?:\.\d{1,2})*\.?|[IVXLC]{1,5}\.)[ \t]+\S.{0,100}|(?-i:[A-Z][A-Z0-9 ,&'/()\-]{3,80}))[ \t]*$", re.I | re.M)
+# the ALL-CAPS alternative is case-sensitive ((?-i:...)): under re.I every short line was a heading
 _CAPS = re.compile(r"^[ \t]*[A-Z][A-Z0-9 ,&'/()\-]{3,80}[ \t]*$", re.M)
 
 
@@ -210,6 +211,9 @@ class LongDocument:
         return Window("".join(parts), pieces, chosen)
 
 
+_LOOK_BACK = 512                    # how far _is_heading looks before a line for the blank line above it
+
+
 def _is_heading(m, text):
     """A heading line is short and stands alone: an ALL-CAPS line needs a letter run, a numbered line must not be a list
     item inside a paragraph (the previous line is blank, or the line is itself short)."""
@@ -218,7 +222,7 @@ def _is_heading(m, text):
         return False
     if _CAPS.fullmatch(m.group()) and not re.search(r"[A-Z]{3}", line):
         return False
-    before = text[:m.start()]
+    before = text[max(0, m.start() - _LOOK_BACK):m.start()]      # a bounded window, not a copy of the text so far
     prev = before.rstrip(" \t").rsplit("\n", 2)
     blank_before = m.start() == 0 or before.endswith("\n\n") or (len(prev) >= 2 and not prev[-1].strip())
     return blank_before or len(line) <= 60

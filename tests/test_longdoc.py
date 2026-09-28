@@ -166,3 +166,27 @@ def test_long_parts_in_a_shared_pass_and_bad_option():
     assert res["law"].answer == "France" and res.trace.replay(s)["ok"]
     with pytest.raises(ValueError, match="long"):
         m.decision("x", "t", "contract", LAW, long="summarize")
+
+
+# --- fixes before 0.7
+def test_short_lowercase_lines_are_not_headings():
+    from solvi.longdoc import LongDocument
+    text = "ARTICLE 1. DEFINITIONS\n\nthe goods are delivered\nshort line here\n\nPAYMENT TERMS\n\nthe buyer pays\n"
+    doc = LongDocument(text, max_tokens=8)
+    heads = {s.heading for s in doc.sections}
+    assert heads == {"ARTICLE 1. DEFINITIONS", "PAYMENT TERMS"}
+
+
+def test_splitting_a_megabyte_is_fast():
+    import time
+
+    from solvi.longdoc import LongDocument
+    para = ("The supplier shall deliver the goods within thirty days of the order and\ninvoice the buyer at the agreed "
+            "price.\nshort line here\n\n")
+    heads = "".join(f"## Section {i}\n\nThe buyer pays within {i} days.\n\n" for i in range(12000))
+    for text in ("ARTICLE 1. DEFINITIONS\n\n" + para * 8000, heads):
+        assert len(text) > 500_000
+        t0 = time.perf_counter()
+        doc = LongDocument(text)
+        assert time.perf_counter() - t0 < 1.0, len(doc)
+    assert len({s.heading for s in LongDocument("ARTICLE 1. DEFINITIONS\n\n" + para * 8000).sections}) == 1
