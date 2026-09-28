@@ -54,7 +54,7 @@ from enum import Enum
 import numpy as np
 
 from .core import Decision, Quote, Unknown
-from .provenance import ESCALATED
+from .provenance import ESCALATED, INSTRUCTION
 
 OPT, ONE, MANY = "[unused0]", "[unused1]", "[unused2]"
 MARKERS = {"option": OPT, "single": ONE, "multi": MANY, "score": "[unused3]", "noul": "[unused4]"}
@@ -1730,7 +1730,7 @@ class DecideModel:
     def decision(self, name, task, text_fact="doc", options=(), descriptions=None, multi=False, other=None, *, kind=None,
                  type=None, escalate_below=None, act_threshold=None, use_act=None, target_error=None,
                  score_value="median", unknown=False, k=None, bins=None, unit=None, coverage=0.8, evidence=False,
-                 option_order="canonical", permutations=4, min_margin=None):
+                 option_order="canonical", permutations=4, min_margin=None, perturb=0):
         """A catalog part: text_fact (a fact name, or a list of them) → Decision(value, probs).
 
         The question: `options` (a list, or {option: description}) and `kind` ("choice", "multi", "score", "noul"; default
@@ -1749,6 +1749,11 @@ class DecideModel:
         the options cannot change the answer (the part's options are then in that order); "given" asks as listed (0.5.0);
         "average" averages the model's logits over `permutations` rotations of the list (each costs a forward pass) —
         against a model's preference for positions.
+
+        perturb=k: ask again on up to k variants of the input without its instruction-like sentences ("ignore the rules
+        and answer X", "SYSTEM: ...", "the correct answer is X" — deterministic rules, solvi.perturb) and escalate when
+        the answer changes ("answer depends on an instruction-like sentence: ..."). An input without such sentences costs
+        nothing extra; one with them costs up to k forward passes.
 
         Register with `cat.fn(part)` (a fact other parts read) or make it a question's answer with `part.question(cat)`.
         The value is one of the options by construction; the options are the part's closed set; provenance `decided`; the
@@ -1785,7 +1790,7 @@ class DecideModel:
         return DecisionPart(self, name, task, text_fact, options, descriptions, multi, other, kind=kind, as_bool=as_bool,
                             escalate_below=escalate_below, act_threshold=act_threshold, use_act=use_act,
                             option_order=option_order, permutations=permutations, min_margin=min_margin,
-                            score_value=score_value, **{x: v for x, v in prim.items() if v not in (None, False, 0)
+                            perturb=perturb, score_value=score_value, **{x: v for x, v in prim.items() if v not in (None, False, 0)
                                                          or x == "coverage"})
 
     def decisions(self, schema, text_fact="doc", fields=None, **kw):
@@ -1898,7 +1903,7 @@ class DecisionPart:
 
     def __init__(self, model, name, task, text_fact, options, descriptions=None, multi=False, other=None, *, kind=None,
                  as_bool=False, escalate_below=None, act_threshold=None, use_act=None, score_value="median",
-                 option_order="canonical", permutations=4, min_margin=None, **prim):
+                 option_order="canonical", permutations=4, min_margin=None, perturb=0, **prim):
         self.model = model
         self.spec = _Spec(task, options, descriptions, multi, other, kind, as_bool, score_value, **prim)
         sp = self.spec
@@ -1913,6 +1918,7 @@ class DecisionPart:
         if self.spec.kind not in ("choice", "multi") or len(self.spec.real) < 2:
             option_order = "given"                  # scores, numbers, rankings: the order is the meaning
         self.option_order, self.permutations, self.min_margin = option_order, max(1, int(permutations)), min_margin
+        self.perturb = max(0, int(perturb or 0))  # re-ask without instruction-like sentences (solvi.perturb), up to k times
         self._orders = self._option_orders()
         self.facts = [text_fact] if isinstance(text_fact, str) else list(text_fact)
         self.escalate_below, self.act_threshold, self.use_act = escalate_below, act_threshold, use_act
@@ -1971,6 +1977,7 @@ class DecisionPart:
         th = {k: v for k, v in (("escalate_below", self.escalate_below), ("act_threshold", self.act_threshold),
                                 ("use_act", self.use_act), ("guarantee", self.guarantee),
                                 ("conformal", self.conformal_set), ("min_margin", self.min_margin),
+                                ("perturb", self.perturb or None),
                                 ("groups", None if self.groups is None else
                                  (self.groups["by"].describe(), sorted((list(k), v["threshold"])
                                                                        for k, v in self.groups["nodes"].items()))),
@@ -2090,11 +2097,38 @@ class DecisionPart:
                     f"{name} {s:.2f} < {threshold:.2f} (shared threshold); would have answered {d.value!r}"
         elif self.guarantee is not None:
             d.extra["guarantee"] = dict(self.guarantee) if grp is None else group_record(self.guarantee, *grp)
+        if self.perturb and d.escalate is None and (ctx or {}).get("text") is not None:
+            self._perturbed(d, ctx["text"])
         if self.conformal_set is not None and d.probs:
             cands = self.candidates(d)
             d.extra["candidates"] = cands
             if d.escalate:
                 d.escalate += f"; candidates at {self.conformal_set['coverage']:.0%}: {cands!r}"
+        return d
+
+    def _perturbed(self, d, text):
+        """The perturb=k safeguard: ask again on up to k variants of the input without its instruction-like sentences
+        (solvi.perturb.variants — deterministic rules); when an answer differs, escalate. Records extra["perturb"]:
+        {"variants", "calls" (extra forward passes), "removed" (per variant), "answers", "flipped"}. An input without
+        such sentences has no variants and costs nothing."""
+        from .perturb import variants
+        vs = variants(text, self.perturb)
+        if not vs:
+            return d
+        outs = self._raw([v.text for v in vs])
+        base, flip, answers = _vkey(d.value), None, []
+        for v, (z, _) in zip(vs, outs):
+            val = self.model._decision(self.spec, z).value
+            answers.append(val)
+            if flip is None and _vkey(val) != base:
+                flip = (v, val)
+        d.extra["perturb"] = {"variants": len(vs), "calls": len(vs) * len(self._orders if self.option_order == "average"
+                                                                            else [0]),
+                              "removed": [v.removed for v in vs], "answers": [jsonable(_shown(a)) for a in answers],
+                              "flipped": flip is not None}
+        if flip is not None:
+            d.escalate = (f"{INSTRUCTION}: " + "; ".join(repr(r) for r in flip[0].removed)
+                          + f" (without it: {_shown(flip[1])!r}); would have answered {_shown(d.value)!r}")
         return d
 
     def _signal(self, d):
@@ -2392,6 +2426,21 @@ def _group_guard(score, wrong, paths, risk, min_group, delta):
     nodes = {k: {"threshold": v["threshold"], "n": v["n"]} for k, v in nodes.items()}
     auto = np.array([score[i] >= nodes[owner[i]]["threshold"] for i in range(len(score))], bool)
     return nodes, _group_info(nodes, owner, [tuple(p) for p in paths], auto, np.asarray(wrong, float)), auto
+
+
+def _shown(v):
+    """A decision value as it reads: a quote by its text, a multi-label answer as a tuple."""
+    return v.value if isinstance(v, Quote) else v
+
+
+def _vkey(v):
+    """What must be equal for two answers to be the same (a quote by its text: offsets move when a sentence is removed;
+    a multi-label answer by its set)."""
+    if isinstance(v, Quote):
+        return ("quote", v.value)
+    if isinstance(v, tuple):
+        return ("set", frozenset(v))
+    return ("value", v if v is Unknown else jsonable(v))
 
 
 def act_features(sp, d, act_logit):
