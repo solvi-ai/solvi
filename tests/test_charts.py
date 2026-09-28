@@ -348,3 +348,15 @@ def test_llm_proposer_through_a_fake_server():
     assert "sk-secret" not in json.dumps(r.to_dict()) and r.trace.step("propose")["proposer"].startswith("llm:tiny@")
     with pytest.raises(ValueError):
         LLMProposer("file:///etc/passwd", "x")
+
+
+def test_example_21(tmp_path, capsys):
+    from examples_loader import load
+    r1, r2, r3 = load("21_verified_chart").main(tmp_path)
+    out = capsys.readouterr().out
+    assert r1.checked.verified.kind == "pie" and r2.checked.verified.kind == "line"
+    assert codes(r3, DROPPED) == ["value_mismatch", "quote_outside", "unit_mismatch", "no_quote"]
+    assert "replay: True" in out and "replay of an edited record: False" in out
+    assert sorted(p.name for p in tmp_path.iterdir()) == ["21_careless_model.svg", "21_quarters_line.svg",
+                                                          "21_region_pie.svg"]
+    assert (tmp_path / "21_careless_model.svg").read_text() == r3.output

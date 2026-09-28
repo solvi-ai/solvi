@@ -180,7 +180,7 @@ class ChartChecker:
         def verify(pt, path, u):
             """→ VerifiedPoint or None (an issue added)."""
             if pt.quote is None:
-                issues.append(Issue(DROPPED, "no_quote", f"{pt.label!r} = {_fmt(pt.value)}: no quote in the source — "
+                issues.append(Issue(DROPPED, "no_quote", f"{pt.label!r} = {_fmt(pt.value)}{_unit_suffix(u, spec.scale)}: no quote in the source — "
                                     "a value without a quote is not drawn", path))
                 return None
             q = pt.quote
