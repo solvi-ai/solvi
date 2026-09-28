@@ -6,7 +6,8 @@
 
 MODEL (here, and `solvi ask --decider`): a local checkpoint folder; a Hugging Face id already in the local cache (nothing
 is downloaded outside `pull`); `systemone:URL#model` — a System One service (`--api-key`, or $SOLVI_SYSTEMONE_API_KEY);
-or `module:attr` / `file.py:attr` — a DecideModel your code builds.
+`llm:URL#model` — an OpenAI-compatible chat-completions server (solvi.llm), e.g. llm:http://127.0.0.1:8080/v1#qwen2.5-7b
+(`--api-key`, or $SOLVI_LLM_API_KEY); or `module:attr` / `file.py:attr` — a DecideModel your code builds.
 
 `check` prints what the checkpoint declares (solvi_decide.json: format, question kinds, act head, questions per pass,
 state serialization), its fingerprint, and — with labelled examples (JSON lines or CSV: `label` plus `text` / `input`
@@ -81,9 +82,12 @@ def cached():
 
 # --------------------------------------------------------------------------------------------------- naming a model
 def kind_of(spec):
-    """How a MODEL spec is read: "systemone", "folder", "code" (module:attr / file.py:attr) or "hub" (a Hugging Face id)."""
+    """How a MODEL spec is read: "systemone", "llm", "folder", "code" (module:attr / file.py:attr) or "hub" (a Hugging
+    Face id)."""
     if spec.startswith("systemone:"):
         return "systemone"
+    if spec.startswith("llm:"):
+        return "llm"
     if os.path.isdir(spec):
         return "folder"
     mod, _, attr = spec.rpartition(":")
@@ -93,21 +97,24 @@ def kind_of(spec):
 
 
 def resolve(spec):
-    """A MODEL spec → (kind, where): a folder for "folder" and a cached "hub" id, (url, model) for "systemone", the spec for
-    "code". A Hugging Face id that is not in the cache raises ModelError (run `solvi models pull ID`)."""
+    """A MODEL spec → (kind, where): a folder for "folder" and a cached "hub" id, (url, model) for "systemone" and "llm",
+    the spec for "code". A Hugging Face id that is not in the cache raises ModelError (run `solvi models pull ID`)."""
     k = kind_of(spec)
-    if k == "systemone":
-        rest = spec[len("systemone:"):]
+    if k in ("systemone", "llm"):
+        rest = spec[len(k) + 1:]
         url, sep, model = rest.rpartition("#")
         if not sep or not url or not model:
-            raise ModelError(f"{spec!r}: write systemone:URL#model, e.g. systemone:http://127.0.0.1:8009#kev-latest")
+            eg = ("systemone:http://127.0.0.1:8009#kev-latest" if k == "systemone" else
+                  "llm:http://127.0.0.1:8080/v1#qwen2.5-7b")
+            raise ModelError(f"{spec!r}: write {k}:URL#model, e.g. {eg}")
         return k, (url, model)
     if k == "folder":
         return k, spec
     if k == "code":
         return k, spec
     if spec.count("/") != 1:
-        raise ModelError(f"{spec!r}: not a folder, a Hugging Face id (org/name), systemone:URL#model or module:attr")
+        raise ModelError(f"{spec!r}: not a folder, a Hugging Face id (org/name), systemone:URL#model, llm:URL#model or "
+                         "module:attr")
     p = cached_path(spec)
     if p is None:
         raise ModelError(f"{spec} is not downloaded: solvi models pull {spec}")
@@ -132,6 +139,9 @@ def load(spec, backend="auto", api_key=None):
     if k == "systemone":
         from .systemone import systemone
         return systemone(where[0], where[1], api_key=api_key or os.environ.get("SOLVI_SYSTEMONE_API_KEY"))
+    if k == "llm":
+        from .llm import llm
+        return llm(where[0], where[1], api_key=api_key or os.environ.get("SOLVI_LLM_API_KEY"))
     if k == "code":
         from .cli import load_object
         m = load_object(spec)
@@ -352,7 +362,8 @@ def add_parser(sub):
                    help="which weights: onnx (default; for solvi[onnx]), torch (safetensors) or all")
     p.add_argument("--revision", help="a branch, tag or commit (default main)")
     c = ms.add_parser("check", help="load a decider and print its capabilities, fingerprint, latency and accuracy")
-    c.add_argument("model", help="a checkpoint folder, a cached Hugging Face id, systemone:URL#model or module:attr")
+    c.add_argument("model", help="a checkpoint folder, a cached Hugging Face id, systemone:URL#model, llm:URL#model or "
+                   "module:attr")
     c.add_argument("--examples", help="labelled examples (.jsonl / .csv: 'label' plus 'text' / 'input' or a state)")
     c.add_argument("--task", help="the question the examples answer (else each row's 'task')")
     c.add_argument("--options", help="its options, comma-separated (default: the labels seen)")
@@ -360,7 +371,7 @@ def add_parser(sub):
     c.add_argument("--limit", type=int, default=200, help="at most this many examples (default 200; 0: all)")
     c.add_argument("--min-accuracy", type=float, help="exit 1 below this accuracy (e.g. 0.8)")
     c.add_argument("--backend", default="auto", choices=["auto", "onnx", "torch"], help="for a checkpoint folder / id")
-    c.add_argument("--api-key", help="for systemone: (default $SOLVI_SYSTEMONE_API_KEY)")
+    c.add_argument("--api-key", help="for systemone: / llm: (default $SOLVI_SYSTEMONE_API_KEY / $SOLVI_LLM_API_KEY)")
     c.add_argument("--json", action="store_true", help="print JSON")
     return m
 

@@ -2,6 +2,26 @@
 
 ## Unreleased (0.7)
 
+### Any LLM as a decider: solvi.llm
+
+- `solvi.llm.llm(base_url, model, api_key=None, ...)`: any OpenAI-compatible chat-completions server (OpenAI,
+  OpenRouter, vLLM, llama.cpp, Ollama, LM Studio) as a decider — a DecideModel, so it works as a decision part, as the
+  last stage of a `Cascade`, in a `Vote` / `Route`, with `act_guard` / `conformal` / `fit`. One question per request at
+  temperature 0 with a JSON schema for the reply (answer among the options, a probability per option or a confidence, a
+  supporting quote); `response_format` json_schema → json_object → prompt only, as the server accepts; probabilities
+  from the answer's token log-probabilities when the server returns them. Every reply is validated (answer among the
+  options, probabilities consistent with it, quote literally in the text): an invalid, cut-off or refused reply, or a
+  server that does not answer after `retries`, escalates ("model escalated: invalid LLM output — ...") and is never
+  guessed; 401 / 403 / 404 raise `LLMError`. Yes/no, scores, multi-label, spans, "not stated" and evidence quotes.
+- The trace: the model id `llm:<model>@<endpoint>` (no credentials, no query), a fingerprint over the endpoint, model
+  name, prompt-template hash and settings, and `extra["llm"]` per decision (format, probability source, the model that
+  answered, quote, tokens). The API key is never recorded. An LLM decision is not re-run by `replay` (the part's
+  `deterministic` follows its model): the recorded output is checked instead.
+- `llm:URL#model` wherever a MODEL spec is taken (`solvi ask --decider`, `solvi models check`; `$SOLVI_LLM_API_KEY`).
+- Decider scorers may return `escalate` (and `transient`, `info`) with a question's logits: the decision escalates with
+  that reason; a transient failure is not cached. `Item.unknown` tells a scorer that "not stated" is an answer; a
+  scorer may return an already decoded pointer (`{"null", "spans"}`).
+
 ### Command line: init, ask, calibrate, models
 
 - `solvi init [DIR] [--template support|refunds|minimal] [--with-model] [--force]`: a new project — `catalog.py` (a

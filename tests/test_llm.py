@@ -1,0 +1,289 @@
+"""An OpenAI-compatible chat-completions server as a solvi decider (solvi.llm), against a fake server (no network): the
+schema in the request, probabilities from the reply or from log-probabilities, validation (an invalid reply escalates,
+never a guess), retries, format fallback, the trace (endpoint, model, template hash — never the key), a Cascade with the
+LLM as the last stage and a Vote."""
+import io
+import json
+import math
+import re
+import urllib.error
+
+import numpy as np
+import pytest
+
+from solvi import Answer, Catalog, Question, System, Unknown
+from solvi.decide import DecideModel
+from solvi.llm import LLMError, llm, locate, template_hash
+from solvi.multi import Cascade, Vote
+
+TEAMS = {"billing": "Charges, invoices, refunds", "shipping": "Delivery, parcels, tracking"}
+KEY = "sk-secret-123"
+
+
+def _text(body):
+    return re.search(r"<text>\n(.*)\n</text>", body["messages"][1]["content"], re.S).group(1)
+
+
+def _options(body):
+    fmt = body.get("response_format") or {}
+    if fmt.get("type") == "json_schema":
+        ans = fmt["json_schema"]["schema"]["properties"]["answer"]
+        return ans.get("enum") or (ans.get("items") or {}).get("enum")
+    return re.findall(r"^- ([^:\n]+)", body["messages"][1]["content"], re.M)
+
+
+class FakeLLM:
+    """Answers like a chat-completions server: keyword choice with stated probabilities; `reply` overrides the content,
+    `logprobs=True` adds token log-probabilities, `fail` lists HTTP codes to raise first, `reject` rejects bodies that
+    carry these keys (HTTP 400)."""
+
+    def __init__(self, reply=None, logprobs=False, fail=(), reject=(), model_name=None):
+        self.reply, self.logprobs, self.fail, self.reject = reply, logprobs, list(fail), set(reject)
+        self.bodies, self.headers, self.model_name = [], [], model_name
+
+    def content(self, body):
+        if self.reply is not None:
+            return self.reply(body) if callable(self.reply) else self.reply
+        text, opts = _text(body), _options(body)
+        low = text.lower()
+        raw = {o: 1.0 + 4.0 * (o == "billing" and "charged" in low) + 4.0 * (o == "shipping" and "parcel" in low)
+               for o in opts}
+        z = sum(raw.values())
+        best = max(raw, key=raw.get)
+        m = re.search(r"charged[^.]*|parcel[^.]*", text)
+        return json.dumps({"answer": best, "probabilities": {o: round(r / z, 4) for o, r in raw.items()},
+                           "quote": m.group(0) if m else ""})
+
+    def __call__(self, req, timeout=None):
+        body = json.loads(req.data.decode())
+        self.bodies.append(body)
+        self.headers.append(dict(req.header_items()))
+        if self.fail:
+            code = self.fail.pop(0)
+            raise urllib.error.HTTPError(req.full_url, code, "error", {}, io.BytesIO(b"{}"))
+        if self.reject & set(body) or ("response_format" in self.reject and body.get("response_format")):
+            raise urllib.error.HTTPError(req.full_url, 400, "unsupported", {}, io.BytesIO(b"{}"))
+        content = self.content(body)
+        ch = {"index": 0, "message": {"role": "assistant", "content": content}, "finish_reason": "stop"}
+        if self.logprobs and body.get("logprobs"):
+            ch["logprobs"] = {"content": self.tokens(content)}
+        return io.BytesIO(json.dumps({"model": self.model_name or body["model"], "choices": [ch],
+                                      "usage": {"prompt_tokens": 120, "completion_tokens": 30}}).encode())
+
+    @staticmethod
+    def tokens(content):
+        """Tokens: the answer's value split as '"bill' + 'ing' (p 0.8 × 0.99) with the alternative '"ship' (p 0.15)."""
+        m = re.search(r'"answer"\s*:\s*"', content)
+        a0 = m.end() - 1                                     # the opening quote mark goes with the first token
+        value = content[m.end():content.index('"', m.end())]
+        head, tail = value[:4], value[4:]
+        alt = '"ship' if not value.startswith("ship") else '"bill'
+        toks = [{"token": content[:a0], "logprob": 0.0, "top_logprobs": []},
+                {"token": '"' + head, "logprob": math.log(0.8),
+                 "top_logprobs": [{"token": '"' + head, "logprob": math.log(0.8)},
+                                  {"token": alt, "logprob": math.log(0.15)},
+                                  {"token": '"x', "logprob": math.log(0.05)}]}]
+        if tail:
+            toks.append({"token": tail, "logprob": math.log(0.99), "top_logprobs": []})
+        rest = content[m.end() + len(value):]
+        toks.append({"token": rest, "logprob": 0.0, "top_logprobs": []})
+        return toks
+
+
+
+def model(fake, **kw):
+    return llm("https://user:pw@llm.example/v1/?key=abc", "tiny-chat", api_key=KEY, opener=fake, sleep=lambda s: None, **kw)
+
+
+def test_a_choice_goes_with_its_schema_and_becomes_a_decision():
+    fake = FakeLLM()
+    m = model(fake)
+    team = m.decision("team", "Which team should handle this?", "email", TEAMS)
+    d = team.decide("I was charged twice for order 7.")
+    assert d.value == "billing" and d.escalate is None and d.probs["billing"] == pytest.approx(5 / 6, abs=1e-3)
+    body = fake.bodies[-1]
+    assert body["temperature"] == 0 and body["model"] == "tiny-chat"
+    sch = body["response_format"]["json_schema"]["schema"]
+    assert sch["properties"]["answer"]["enum"] == ["billing", "shipping"] and sch["additionalProperties"] is False
+    assert "billing: Charges, invoices, refunds" in body["messages"][1]["content"]
+    assert fake.headers[-1]["Authorization"] == f"Bearer {KEY}"
+    info = d.extra["llm"]
+    assert info["endpoint"] == "https://llm.example/v1/chat/completions" and info["model"] == "tiny-chat"
+    assert info["template"] == template_hash() and info["probabilities"] == "stated"
+    assert info["quote"][0] == "charged twice for order 7"
+    assert KEY not in json.dumps(d.extra) and KEY not in m.fingerprint() and KEY not in repr(m.scorer)
+    assert "pw" not in m.model_id and "key=abc" not in m.model_id
+    n = len(fake.bodies)
+    team.decide("I was charged twice for order 7.")            # cached: no second request
+    assert len(fake.bodies) == n
+
+
+def test_log_probabilities_give_the_probabilities_when_the_server_returns_them():
+    fake = FakeLLM(logprobs=True)
+    m = model(fake)
+    d = m.decision("team", "Which team?", "email", TEAMS).decide("I was charged twice")
+    assert fake.bodies[-1]["logprobs"] is True and fake.bodies[-1]["top_logprobs"] == 5
+    p_bill, p_ship = 0.8 * 0.99, 0.15
+    assert d.extra["llm"]["probabilities"] == "logprobs"
+    assert d.probs["billing"] == pytest.approx(p_bill / (p_bill + p_ship), abs=1e-4)
+    assert d.probs["shipping"] == pytest.approx(p_ship / (p_bill + p_ship), abs=1e-4)
+
+
+@pytest.mark.parametrize("reply, why", [
+    ("not json at all", "not JSON"),
+    ('{"answer": "legal", "probabilities": {"billing": 0.5, "shipping": 0.5}, "quote": ""}', "not one of the options"),
+    ('{"answer": "billing", "probabilities": {"billing": 0.1, "shipping": 0.9}, "quote": ""}', "not its most probable"),
+    ('{"answer": "billing", "probabilities": {"billing": 1.7, "shipping": 0.1}, "quote": ""}', "not a probability"),
+    ('{"answer": "billing", "probabilities": {"billing": 0.9, "shipping": 0.1}, "quote": "I was billed thrice"}',
+     "not in the text"),
+    ('{"answer": "billing", "quote": ""}', "neither probabilities nor a confidence"),
+])
+def test_an_invalid_reply_escalates_and_is_never_guessed(reply, why):
+    m = model(FakeLLM(reply=reply))
+    d = m.decision("team", "Which team?", "email", TEAMS).decide("I was charged twice")
+    assert d.escalate and d.escalate.startswith("model escalated: invalid LLM output") and why in d.escalate
+    assert d.conf <= 0.5 + 1e-9                                  # uniform: nothing proposed
+
+
+def test_a_catalog_answer_abstains_on_an_invalid_reply_and_the_audit_says_why():
+    m = model(FakeLLM(reply='{"answer": "legal", "confidence": 0.99, "quote": ""}'))
+    cat = Catalog()
+    m.decision("team", "Which team?", "email", TEAMS).question(cat, "route")
+    s = System(cat, [Question("route", "Route", Answer.choice(list(TEAMS)))])
+    r = s.ask({"email": "I was charged twice"})
+    assert r["route"].status == "abstain" and "invalid LLM output" in str(r.audit())
+
+
+def test_retries_then_escalation_when_the_server_does_not_answer():
+    fake = FakeLLM(fail=[503, 429])
+    m = model(fake, retries=2)
+    part = m.decision("team", "Which team?", "email", TEAMS)
+    assert part.decide("I was charged twice").value == "billing" and len(fake.bodies) == 3
+    down = FakeLLM(fail=[503] * 10)
+    part2 = model(down, retries=1).decision("team", "Which team?", "email", TEAMS)
+    d = part2.decide("I was charged twice")
+    assert d.escalate and "did not answer" in d.escalate and len(down.bodies) == 2
+    part2.decide("I was charged twice")                          # not cached: asked again
+    assert len(down.bodies) == 4
+
+
+def test_a_wrong_key_or_model_is_an_error_not_an_escalation():
+    m = model(FakeLLM(fail=[401]))
+    with pytest.raises(LLMError) as e:
+        m.decision("team", "Which team?", "email", TEAMS).decide("x")
+    assert KEY not in str(e.value) and "llm.example" in str(e.value)
+
+
+def test_the_format_falls_back_when_the_server_rejects_it():
+    fake = FakeLLM(reject={"logprobs"})
+    m = model(fake)
+    assert m.decision("team", "Which team?", "email", TEAMS).decide("my parcel is late").value == "shipping"
+    assert "logprobs" not in fake.bodies[-1] and fake.bodies[-1]["response_format"]["type"] == "json_schema"
+    fake2 = FakeLLM(reject={"response_format"})
+    m2 = model(fake2)
+    d = m2.decision("team", "Which team?", "email", TEAMS).decide("my parcel is late")
+    assert d.value == "shipping" and d.extra["llm"]["format"] == "prompt"
+    assert "response_format" not in fake2.bodies[-1] and '"answer"' in fake2.bodies[-1]["messages"][0]["content"]
+    fenced = model(FakeLLM(reply='```json\n{"answer": "shipping", "confidence": 0.8, "quote": "parcel"}\n```'),
+                   response_format="prompt")
+    d = fenced.decision("team", "Which team?", "email", TEAMS).decide("my parcel is late")
+    assert d.value == "shipping" and d.probs["shipping"] == pytest.approx(0.8)
+
+
+def test_yes_no_multi_span_not_stated_and_evidence():
+    def reply(body):
+        c = body["messages"][1]["content"]
+        props = body["response_format"]["json_schema"]["schema"]["properties"]
+        if "Urgent" in c:
+            return json.dumps({"answer": "yes", "probabilities": {"yes": 0.9, "no": 0.1}, "quote": "ASAP"})
+        if "Topics" in c:
+            return json.dumps({"answer": ["billing", "shipping"], "probabilities": {"billing": 0.8, "shipping": 0.7},
+                               "quote": "charged"})
+        if "order number" in c:
+            return json.dumps({"answer": "A-17", "confidence": 0.95, "quote": "A-17"})
+        if "refund" in c.lower():
+            assert "not stated" in props["answer"]["enum"]
+            return json.dumps({"answer": "not stated", "probabilities": {"yes": 0.1, "no": 0.1, "not stated": 0.8},
+                               "quote": ""})
+        return "{}"
+    m = model(FakeLLM(reply=reply))
+    text = "Order A-17: I was charged twice, fix it ASAP and where is my parcel"
+    assert m.decision("u", "Urgent?", "email", type=bool).decide(text).value is True
+    tags = m.decision("t", "Topics?", "email", list(TEAMS), multi=True).decide(text)
+    assert tags.value == ("billing", "shipping") and tags.probs["shipping"] == pytest.approx(0.7, abs=1e-4)
+    span = m.decision("o", "What is the order number?", "email", kind="span").decide(text)
+    assert span.value.value == "A-17" and text[span.value.start:span.value.end] == "A-17"
+    ns = m.decision("r", "Does the customer want a refund?", "email", type=bool, unknown=True).decide(text)
+    assert ns.value is Unknown
+    ev = m.decision("u2", "Urgent?", "email", type=bool, evidence=True).decide(text)
+    assert [q.value for q in ev.evidence] == ["ASAP"] and text[ev.evidence[0].start:ev.evidence[0].end] == "ASAP"
+
+
+def test_an_llm_decision_is_traced_calibrated_and_replayed_without_calling_it_again():
+    fake = FakeLLM()
+    m = model(fake)
+    part = m.decision("team", "Which team?", "email", TEAMS)
+    info = part.act_guard([("charged twice", "billing"), ("my parcel", "shipping")] * 30 + [("hello", "shipping")] * 10,
+                          risk=0.10)
+    assert info["signal"] == "confidence" and info["risk"] <= 0.10
+    cat = Catalog()
+    part.question(cat, "route")
+    s = System(cat, [Question("route", "Route", Answer.choice(list(TEAMS)))])
+    r = s.ask({"email": "I was charged twice"})
+    assert r["route"].answer == "billing"
+    step = next(x for x in r.trace.records if x.model)
+    assert step.model["id"] == "llm:tiny-chat@https://llm.example/v1/chat/completions"
+    assert step.extra["llm"]["template"] == template_hash() and KEY not in json.dumps(r.to_dict())
+    n = len(fake.bodies)
+    rep = r.trace.replay(s.catalog, r.flow)
+    assert rep["ok"] and [v for _, _, v in rep["models"]] == ["trusted"] and len(fake.bodies) == n
+
+
+class Keywords:
+    """A local stand-in decider: sure on plain texts, unsure on mixed ones."""
+    model_id = "local-small"
+
+    def fingerprint(self):
+        return "local-1"
+
+    def logits(self, items):
+        out = []
+        for it in items:
+            low = it.text.lower()
+            out.append(np.array([3.0 * ("charged" in low) + 0.1, 3.0 * ("parcel" in low)])[:len(it.options)])
+        return out
+
+
+def test_the_llm_as_the_last_stage_of_a_cascade_and_in_a_vote():
+    fake = FakeLLM()
+    small = DecideModel(Keywords(), meta={"format": "test", "temperature": 1.0}).decision(
+        "team", "Which team?", "email", TEAMS, escalate_below=0.9)
+    big = model(fake).decision("team", "Which team?", "email", TEAMS, escalate_below=0.7)
+    c = Cascade([small, big])
+    d = c.decide("I was charged twice")
+    assert d.value == "billing" and d.extra["answered_by"] == 0 and not fake.bodies
+    d = c.decide("where is my order")                          # the small model is unsure: the LLM is asked
+    assert len(fake.bodies) == 1 and d.escalate                 # ... and is unsure too (0.5): the cascade escalates
+    d = c.decide("charged for a parcel twice")
+    stages = d.extra["stages"]
+    assert len(stages) == 2 and stages[1]["model"].startswith("llm:tiny-chat")
+    v = Vote([small, model(FakeLLM()).decision("team", "Which team?", "email", TEAMS, escalate_below=0.7)])
+    assert v.decide("I was charged twice").value == "billing"
+
+
+def test_locate_is_literal_up_to_whitespace():
+    t = "Total:\n1 500 EUR, paid."
+    assert locate("1 500 EUR", t) == (7, 16)
+    assert locate("Total: 1 500", t) == (0, 12)
+    assert locate("1500 EUR", t) is None and locate("", t) is None
+
+
+def test_an_llm_spec_names_a_decider(monkeypatch):
+    from solvi.models import ModelError, load, resolve
+    assert resolve("llm:http://127.0.0.1:8080/v1#qwen2.5-7b") == ("llm", ("http://127.0.0.1:8080/v1", "qwen2.5-7b"))
+    monkeypatch.setenv("SOLVI_LLM_API_KEY", KEY)
+    m = load("llm:http://127.0.0.1:8080/v1#qwen2.5-7b")
+    assert m.backend == "llm" and m.model_id == "llm:qwen2.5-7b@http://127.0.0.1:8080/v1/chat/completions"
+    assert m.scorer._key == KEY and KEY not in m.fingerprint()
+    with pytest.raises(ModelError, match="llm:URL#model"):
+        resolve("llm:http://127.0.0.1:8080/v1")

@@ -722,6 +722,49 @@ rules, thresholds (act_guard on the confidence: the API has no act signal) and t
 multi-label questions, spans, evidence and "not stated" are not part of the API. The trace records the endpoint and model
 name, not the weights behind them — calibrate again when the service changes its model.
 
+#### Any LLM as a decider
+
+```python
+from solvi.llm import llm
+gpt = llm("https://openrouter.ai/api/v1", "qwen/qwen-2.5-72b-instruct", api_key=os.environ["OPENROUTER_API_KEY"])
+local = llm("http://127.0.0.1:8080/v1", "qwen2.5-7b-instruct")      # llama.cpp; vLLM :8000/v1, Ollama :11434/v1
+part = gpt.decision("team", "Which team should handle this?", "email", TEAMS)
+team = Cascade([small, large, part])      # the LLM only for what both local deciders escalate
+```
+
+Any server of the OpenAI chat-completions API (OpenAI, OpenRouter, vLLM, llama.cpp, Ollama, LM Studio) proposes; solvi
+decides as with any decider. One question is one request at temperature 0, with a JSON schema for the reply — the answer
+among the options, a probability per option (`ask="confidence"`: one number) and a quote from the text that supports it
+— sent as `response_format` json_schema when the server takes it, else as json_object, else in the prompt only
+(`response_format="auto"` tries them in that order and keeps what works). When the server returns log-probabilities
+(`logprobs="auto"`), the probabilities come from the answer's tokens — the chosen option's whole token sequence, the others
+from the alternatives at its first token — not from the numbers the model wrote (`extra["llm"]["probabilities"]` says
+which). Yes/no, scores, multi-label questions, spans (`kind="span"`: the passage must be in the text), "not stated"
+(`Maybe[...]`) and `evidence=True` work; rankings and numbers are asked as a choice over the options / bins.
+
+Everything is checked, and what fails escalates — `model escalated: invalid LLM output — ...` — instead of being turned
+into a guess: an answer that is not one of the options, probabilities that are not numbers in [0, 1] or disagree with
+the answer, a quote that is not literally in the text (runs of whitespace may differ, nothing else), a reply that is not
+JSON, is cut off or refused. A server that does not answer (network, timeout, 408 / 409 / 429 / 5xx) is retried
+(`retries=2`, exponential `backoff`) and then escalates too, without being cached, so the next ask tries again; a wrong
+key, model or URL (401, 403, 404) raises `solvi.llm.LLMError`. There is no act signal: `act_guard` runs on the
+confidence, on your labelled examples, as for System One.
+
+The trace names the model `llm:<model>@<endpoint>` (the URL without credentials or query); the fingerprint covers the
+endpoint, the model name, the hash of the prompt template (`solvi.llm.template_hash()`) and the settings, and each
+decision's `extra["llm"]` records the format used, where the probabilities came from, the model the server says answered,
+the quote and the tokens. The API key goes in the Authorization header only — never in the trace, the fingerprint or an
+error. An LLM's output is not reproducible bit for bit, so `replay` does not call it again: it checks the recorded output
+(the verdict is "trusted"). The server can change the weights behind a name: calibrate again when it does.
+`solvi ask --decider llm:URL#model` and `solvi models check llm:URL#model` take the same (`$SOLVI_LLM_API_KEY`).
+
+**Cost and latency.** Each question about each input is a paid request — the question, every option with its
+description and the whole text, a few hundred tokens or more — and takes 0.3–5 s, where a local decider takes ~50 ms on
+a CPU and costs nothing per call. Several questions about one input are sent in parallel (`workers=4`), not in one
+request; answers are cached per (question, input) while the model object lives; `model.scorer.usage` counts the tokens.
+Put the LLM where it pays for itself: as the last stage of a `Cascade` after local deciders that answer the easy inputs
+(`act_guard` on the cascade keeps one guarantee for the whole), or in a `Vote` as a model of another family.
+
 ### Several questions in one pass
 
 When the checkpoint declares `multi_question` (see [decide_format.md](decide_format.md)), the strategist groups the decision
