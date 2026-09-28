@@ -40,6 +40,22 @@ def vhash(v) -> str:
     return hashlib.sha256(json.dumps(_canon(v), ensure_ascii=False, sort_keys=True).encode()).hexdigest()[:16]
 
 
+def srepr(v):
+    """repr with sets in vhash's fixed order (repr(set) depends on PYTHONHASHSEED): for text that is stored, e.g. `why`."""
+    if isinstance(v, (set, frozenset)):
+        if not v:
+            return repr(v)
+        items = ", ".join(srepr(x) for x in sorted(v, key=lambda x: _ckey(_canon(x))))
+        return "{" + items + "}" if type(v) is set else f"frozenset({{{items}}})"
+    if type(v) is list:
+        return "[" + ", ".join(srepr(x) for x in v) + "]"
+    if type(v) is tuple:
+        return "(" + ", ".join(srepr(x) for x in v) + ("," if len(v) == 1 else "") + ")"
+    if type(v) is dict:
+        return "{" + ", ".join(f"{srepr(k)}: {srepr(x)}" for k, x in v.items()) + "}"
+    return repr(v)
+
+
 MISSING = object()
 
 

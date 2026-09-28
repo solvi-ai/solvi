@@ -1,14 +1,14 @@
-"""System: catalog + questions → ask(init_state) → answers with confidence, flow, computed_state, trace; fit / teach / journal."""
+"""System: catalog + questions → ask(init_state) → answers with confidence, flow, computed_state, trace; fit / teach; storage
+of responses and corrections (solvi.storage; journal= is a JSONL store)."""
 from __future__ import annotations
 
-import json
 from dataclasses import dataclass
 from pathlib import Path
 
 from .core import Catalog, Serial
 from .heads import Head
 from .provenance import model_info
-from .runtime import MISSING, Record, Result, execute, now_ms, path_confidence, vhash
+from .runtime import MISSING, Record, Result, execute, now_ms, path_confidence, srepr, vhash
 from .strategist import computable, plan
 
 
@@ -24,6 +24,7 @@ class Response(Serial):
     catalog: object = None              # the catalog that answered (for the audit)
     safeguards: list = None             # safeguard events of this response (see solvi.audit.collect)
     model_outputs: int = 0              # outputs produced by models in this response
+    stored_id = None                    # its id in a TraceStorage once saved (System(storage=...) saves every ask)
 
     def __getitem__(self, q):
         return self.results[q]
@@ -108,7 +109,7 @@ class Response(Serial):
 
 class System:
     def __init__(self, catalog: Catalog, questions, journal: str | None = None, workers: int = 1, order: str = "default",
-                 producers: str = "declared", learn: bool | None = None, inputs=None, strategist=None):
+                 producers: str = "declared", learn: bool | None = None, inputs=None, strategist=None, storage=None):
         """order: "default" (hard checks and their inputs first, all together) or "learned" (hard checks one at a time, most
         expected saving first — see learn_order). producers: "declared" (alternative producers of a fact are tried in
         declaration order) or "learned" (a policy picks the order per input and learns from outcomes). learn: after every
@@ -117,14 +118,23 @@ class System:
         defaults) are the given facts, a field that fails is left out and reported (safeguard type_rejected). ask also takes
         a BaseModel instance directly, with or without `inputs`.
         strategist: an object with plan(catalog, questions, init_keys, heads) → Flow used by ask instead of the deterministic
-        strategist (experimental: solvi.strategy.ModelStrategist; its plan is recorded in the trace, see docs/strategist.md)."""
+        strategist (experimental: solvi.strategy.ModelStrategist; its plan is recorded in the trace, see docs/strategist.md).
+        storage: a solvi.storage.TraceStorage (or a path: .db / .sqlite → SQLite, else JSON lines) — every ask saves its
+        response (answers, flow, whole trace) there, hash-chained across responses, and teach saves the correction; the
+        response's `stored_id` is its id in the store. journal="file.jsonl" is the same as storage=JSONLStorage("file.jsonl")."""
         from .learned import CostBook, OrderModel, ProducerPolicy
         self.catalog = catalog
         self.inputs = inputs
         self.strategist = strategist              # None: the deterministic strategist (solvi.strategist.plan)
         self.questions = {q.name: self._typed_question(q) for q in questions}
         self.heads: dict[str, Head] = {}
+        from .storage import JSONLStorage, open_storage
+        if journal and storage is not None:
+            raise ValueError("pass journal= or storage=, not both (journal= is a JSONL storage)")
         self.journal = Path(journal) if journal else None
+        self.storage = JSONLStorage(self.journal) if journal else open_storage(storage)
+        if self.storage is not None and self.storage.catalog is None:
+            self.storage.catalog = self               # typed values of stored responses are restored with this system
         self.workers = workers                    # >1: independent steps run in parallel threads
         self.calib: dict[str, tuple] = {}         # question → (a, b): confidence' = σ(a·logit(confidence) + b)
         self.learned_rules = {}                   # question → RuleList (readable rules learned from examples)
@@ -172,10 +182,10 @@ class System:
         return response_schema(self)
 
     # --- answers
-    def ask(self, init_state, names=None, workers=None, order=None):
+    def ask(self, init_state, names=None, workers=None, order=None, store=True):
         """init_state: a dict of given facts, or a pydantic BaseModel instance (its fields). order: override the system's
         order for this ask — "default", "learned", or an object with p_fail(check, row) and row(vals, init_keys) (e.g. an
-        oracle for experiments)."""
+        oracle for experiments). store=False: do not save this response to the system's storage."""
         t0 = now_ms()
         known = None
         if self.inputs is not None or type(init_state) is not dict:
@@ -221,8 +231,8 @@ class System:
         resp = Response(results, flow, trace, vals, now_ms() - t0, feasible, violations, self.catalog)
         resp._heads = self.heads                      # for the audit: which features a learned head could not use
         self._count(resp)
-        if self.journal:
-            self._log(init_state, resp)
+        if self.storage is not None and store:
+            self.storage.save(resp)                   # sets resp.stored_id
         return resp
 
     def _count(self, resp):
@@ -298,7 +308,7 @@ class System:
                               (f"; missing {', '.join(missing)}" if missing else ""), "abstain")
             pc = path_confidence(self.catalog, trace, rule.inputs)
             conf = min(pc, r.confidence)
-            why = "; ".join(f"{x} = {vals.get(x)!r}" for x in rule.inputs)
+            why = "; ".join(f"{x} = {srepr(vals.get(x))}" for x in rule.inputs)
             src = rule.func.__name__ if rule.func is not None else rule.name
             if r.value is None:                       # the rule itself declined to answer (e.g. a split vote): a deliberate abstention
                 return Result(None, 0.0, f"the rule abstained (returned None); {why}", "abstain", provenance=r.origin,
@@ -309,7 +319,7 @@ class System:
                 return Result(q.answer.normalize(r.value), conf, why, probs=dict(r.probs or {}), provenance=r.origin,
                               source=src)
             except ValueError:
-                return Result(None, 0.0, f"rule returned {r.value!r}, not one of the answer options; {why}", "abstain",
+                return Result(None, 0.0, f"rule returned {srepr(r.value)}, not one of the answer options; {why}", "abstain",
                               provenance=r.origin, source=src, guard="outside_options")
         head = self.heads.get(q.name)
         if head is None:
@@ -332,7 +342,7 @@ class System:
             a = max(p, key=p.get)
             base = p[a]
         contrib = head.contributions(vals)
-        why = ", ".join(f"{f} = {vals.get(f)!r} ({c:+.2f})" for f, c in sorted(contrib.items(), key=lambda t: -abs(t[1]))[:4])
+        why = ", ".join(f"{f} = {srepr(vals.get(f))} ({c:+.2f})" for f, c in sorted(contrib.items(), key=lambda t: -abs(t[1]))[:4])
         if soft_failed:
             why += "; failed checks: " + ", ".join(soft_failed)
         conf = base * path_confidence(self.catalog, trace, head.features)
@@ -550,7 +560,7 @@ class System:
     def teach(self, question, init_state, correct):
         """Human correction. A fast head (fit_fast) absorbs it at once; so does a model decision that answers the question
         (a solvi.decide decision part as the question's rule, or a rule passing a decided fact on): its per-option shift is
-        updated. Any correction goes to the journal for the next fit. Returns the update time in ms when something learned
+        updated. Any correction goes to the storage (journal) for the next fit. Returns the update time in ms when something learned
         at once, else None."""
         from .decide import decision_of
         from .fast import FastHead
@@ -569,19 +579,9 @@ class System:
             if label is not None:
                 vals = init_state if all(f in init_state for f in dec.facts) else self.facts_for(init_state)
                 ms = dec.teach(dec.text_of(vals), label)
-        if self.journal:
-            with open(self.journal, "a") as fh:
-                fh.write(json.dumps({"teach": question, "init": _jsonable(init_state), "answer": correct}, ensure_ascii=False) + "\n")
+        if self.storage is not None:
+            self.storage.save_correction(question, init_state, correct)
         return ms
-
-    def _log(self, init_state, resp):
-        with open(self.journal, "a") as fh:
-            fh.write(json.dumps({"init_hash": resp.trace.init_hash,
-                                 "answers": {q: [r.answer, round(r.confidence, 4), r.status] for q, r in resp.results.items()},
-                                 "flow": [s.part.name for s in resp.flow.steps],
-                                 **({"producers": {r.name: r.producer for r in resp.trace.records if r.tried is not None}}
-                                    if any(r.tried is not None for r in resp.trace.records) else {}),
-                                 "records": [[r.step, r.name, r.hash] for r in resp.trace.records]}, ensure_ascii=False) + "\n")
 
 
 class MultiHead:
@@ -668,6 +668,3 @@ def _platt(c, a, b):
     c = min(max(c, 1e-4), 1 - 1e-4)
     return 1 / (1 + math.exp(-(a * math.log(c / (1 - c)) + b)))
 
-
-def _jsonable(d):
-    return json.loads(json.dumps(d, default=repr))
