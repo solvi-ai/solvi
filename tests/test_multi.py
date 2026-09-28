@@ -283,3 +283,18 @@ def test_conformal_sets_for_a_vote():
     assert info["n"] == 240 and 1 <= info["mean_size"] <= 3
     hits = [y in v(email=t).extra["candidates"] for t, y in _labelled(1000)]
     assert np.mean(hits) >= 0.85
+
+
+def test_example_18_runs_with_the_stand_ins(monkeypatch):
+    import io
+    import runpy
+    from contextlib import redirect_stdout
+    from pathlib import Path
+    for env in ("SOLVI_DECIDE_MODEL", "SOLVI_DECIDE_SMALL"):
+        monkeypatch.delenv(env, raising=False)
+    out = io.StringIO()
+    with redirect_stdout(out):
+        runpy.run_path(str(Path(__file__).resolve().parents[1] / "examples" / "18_several_models.py"), run_name="__main__")
+    text = out.getvalue()
+    assert "cascade small → large" in text and "the models disagree" in text and "route by length" in text
+    assert "stage 2 answered" in text and "replay: True" in text and "replay: False" not in text
