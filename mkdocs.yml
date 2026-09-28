@@ -70,6 +70,7 @@ nav:
       - solvi.counterfactual: api/counterfactual.md
       - solvi.perturb: api/perturb.md
       - solvi.storage: api/storage.md
+      - solvi.signature: api/signature.md
       - solvi.diff: api/diff.md
       - solvi.testing: api/testing.md
       - solvi.honesty: api/honesty.md

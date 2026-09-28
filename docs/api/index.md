@@ -22,6 +22,7 @@ this reference lists what each module exports and the signatures.
 | [`solvi.counterfactual`](counterfactual.md) | counterfactuals: the smallest change of the given inputs that changes an answer |
 | [`solvi.perturb`](perturb.md) | instruction-like sentences in an input and the variants without them (`perturb=k`) |
 | [`solvi.storage`](storage.md) | TraceStorage: JSONL, SQLite, PostgreSQL and DuckDB stores, queries, replay |
+| [`solvi.signature`](signature.md) | a signature of a trace or a store that names the one changed record (preview) |
 | [`solvi.diff`](diff.md) | `solvi diff` and shadow mode |
 | [`solvi.testing`](testing.md) | decision regression tests from `cases.json` |
 | [`solvi.honesty`](honesty.md) | the honesty suite |

@@ -1,5 +1,25 @@
 # Changelog
 
+## Unreleased (0.8)
+
+### Which record changed: `solvi.signature` (preview)
+
+- **A signature of a trace or a store** — 32 numbers (`{"alg", "count", "root"}`, plain JSON) to keep next to the head.
+  The hash chain says a store was rewritten; the signature says which record and what its content hash was:
+  `store.signature()`, `store.verify(signature=sig, candidates=backup_records)`, `solvi verify decisions.db --signature
+  sig.json` (and `--sign sig.json` to write one; a store that does not verify is never signed), `res.signature()` for one
+  response's trace, and `solvi.signature.sign / check / locate / repair / extend` for any list of items.
+- How: a positional octonion code — each record's content hash (the chain fields left out) written into 4 octonions,
+  times an element of its position; the signature is their ordered product. One changed record is solved back from it.
+- Measured (`benchmarks/trace_signature.py`, stores of 2–500 records): one edited record located and its content hash
+  restored in 2000 of 2000, 0 wrong; two or three edited records detected in 1500 of 1500 and never located at a wrong
+  record (`NotLocatable`). A reorder, a deletion or an insertion in the middle: detected, not located; records appended
+  after signing are not covered. Sign / locate: 14 / 16 ms for 1000 records, 0.19 / 0.16 s for 10 000.
+- Honest note: on a flat store a classical syndrome code (two sums mod a 256-bit prime, 64 bytes) locates and restores
+  the same (2000 of 2000, 0 wrong) about 60x faster; the octonions' non-associativity only matters for tree-shaped
+  signed objects. The API may keep its name and switch the code before it leaves preview.
+- It is an error-locating code, not a MAC: keep the signature where you keep the head.
+
 ## 0.7.0 — 2026-09-29 — text in, agent guard (preview), several models with an LLM stage, memory and a learning loop (experimental), reports, docs site
 
 The agent guard (`solvi.agents`) ships as a **preview**: its hard line is provenance (a value found only in a tool's
