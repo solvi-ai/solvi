@@ -119,6 +119,17 @@ def instruction_spans(text):
     return out
 
 
+def _merge(spans):
+    """Overlapping spans as their union, sorted — a quoted instruction may overlap a sentence cut from inside the quote."""
+    out = []
+    for a, b in sorted(spans):
+        if out and a < out[-1][1]:
+            out[-1] = (out[-1][0], max(out[-1][1], b))
+        else:
+            out.append((a, b))
+    return out
+
+
 def _cut(text, spans):
     """The text without the spans (sorted, non-overlapping); a removed sentence takes one following space with it."""
     out, at = [], 0
@@ -149,11 +160,12 @@ def variants(text, k=2):
         cands.append(quotes)
     out, seen = [], {text}
     for spans in cands:
+        spans = _merge(spans)                  # what is cut is exactly what `removed` lists
         t = "\n".join(line.rstrip() for line in _cut(text, spans).split("\n")).strip()
         if not t or t in seen:
             continue
         seen.add(t)
-        out.append(Variant(t, [text[a:b] for a, b in sorted(spans)]))
+        out.append(Variant(t, [text[a:b] for a, b in spans]))
         if len(out) >= k:
             break
     return out
