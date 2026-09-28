@@ -17,6 +17,16 @@
 - `solvi report STORE [--since] [--until] [--question] [--id ID] [--html out.html] [--md out.md] [--json] [--system]`.
 - A response keeps the System that answered (and one loaded with a System, its System) for reports.
 
+### OpenTelemetry export
+
+- `solvi.otel.export(res_or_store, tracer=None, **filters)`: decisions as OpenTelemetry spans — a root `solvi.decision`,
+  one span per step (fact, provenance, value, confidence, error, producer, quote offsets, model id and fingerprint,
+  probabilities, safeguards, the step's hash and its link) and one per answer; failed or rejected steps with status
+  ERROR; the root is a child of the caller's current span. A store exports every stored decision, or a query's.
+- `solvi.otel.to_otlp_json(...)`: the same spans as OTLP/JSON (an ExportTraceServiceRequest body) without OpenTelemetry;
+  ids derived from the trace's hashes.
+- New extra `otel` (`opentelemetry-api`, `opentelemetry-sdk`).
+
 ## 0.6.0 — 2026-09-28 — serving, catalog lint, several models, async, measured costs
 
 ### Async execution: aask

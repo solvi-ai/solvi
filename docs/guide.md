@@ -1471,6 +1471,36 @@ solvi report decisions.db --html september.html                          # a sel
 solvi report decisions.db --id 3f9a0c1d2e4b5a67 --system app.py:system   # one decision, replayed against the system
 ```
 
+### OpenTelemetry: solvi.otel
+
+`solvi.otel.export(res_or_store, tracer=None, **filters)` sends decisions to your tracing backend as OpenTelemetry spans
+(`pip install "solvi[otel]"`): per decision a root span `solvi.decision`, a child span per step of the trace
+(`solvi.fn risk`, `solvi.extract total`, `solvi.rule answer:pay`, …) and one per answer (`solvi.answer pay`). A store
+exports every stored decision, or those matching the query filters (`export(store, question="refund", since=...)`).
+The root span is a child of the span current in your code, so a decision sits inside the request that asked it.
+
+```python
+from solvi.otel import export, to_otlp_json
+
+with tracer.start_as_current_span("POST /refund"):
+    res = system.ask(state)
+    export(res)                               # the global tracer provider's "solvi" tracer, or tracer=...
+
+body = to_otlp_json(res, service_name="refunds")   # OTLP/JSON without OpenTelemetry: POST it to a collector's /v1/traces
+```
+
+| Span | Attributes |
+|---|---|
+| step | `solvi.step`, `solvi.kind`, `solvi.fact`, `solvi.provenance`, `solvi.value` (a short repr), `solvi.confidence`, `solvi.error`, `solvi.producer`, `solvi.tried`, `solvi.quote.source` / `.start` / `.end`, `solvi.model.type` / `.id` / `.fingerprint`, `solvi.probs` (JSON), `solvi.safeguard` (kinds that fired on this fact), `solvi.inputs`, `solvi.hash`, `solvi.prev` |
+| answer | `solvi.question`, `solvi.answer`, `solvi.status`, `solvi.confidence`, `solvi.why`, `solvi.guard`, `solvi.provenance`, `solvi.source`, `solvi.safeguard` |
+| root | `solvi.questions`, `solvi.trace.init_hash`, `solvi.trace.head`, `solvi.trace.steps`, `solvi.catalog.fingerprint`, `solvi.questions.fingerprint`, `solvi.stored_id`, `solvi.ms`, `solvi.confidence`, `solvi.complete`, `solvi.model_outputs`; an event `solvi.skipped` per step skipped at run time |
+
+A failed or rejected step has status ERROR with the reason; an abstention is not an error. The trace records each step's
+run time, not its start: step spans are laid end to end from the decision's start (durations measured, start times not;
+parallel steps appear one after another). A stored decision ends at its stored time; a fresh one when exported (or at
+`end_ns=`). In the OTLP JSON the trace and span ids are derived from the trace's hashes; through the API the SDK assigns
+them — `solvi.hash` ties a span to its trace record either way.
+
 ### Lifetime stats
 
 `system.stats` counts, over the system's lifetime: `asks`, `answers`, `abstained`, `model_outputs` (outputs of model-backed
