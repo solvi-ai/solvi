@@ -61,6 +61,7 @@ from ..core import Answer, Catalog, Claim, Question, Quote
 VERDICTS = ("allow", "deny", "escalate")
 GIVEN = ("tool_name", "tool_arguments", "conversation", "conversation_roles", "user_request")
 BUILTIN = ("argument_errors", "call_arguments", "grounding", "proposal", "arguments_valid", "arguments_grounded",
+           "schema_error", "schema_readable",
            "no_injected_arguments", "no_instructions_in_tool_outputs", "request_authorizes", "verdict", "tools_known",
            "known_tool")
 ROLES = {"user": "user", "human": "user", "assistant": "assistant", "ai": "assistant", "model": "assistant",
@@ -245,39 +246,49 @@ def arguments_model(name, func):
             raise ValueError(f"tool {name}: *{p.name} / **{p.name} cannot be checked; declare every argument")
         t = hints.get(p.name, p.annotation if p.annotation is not p.empty else Any)
         fields[p.name] = (t, ... if p.default is p.empty else p.default)
-    return create_model(_camel(name) + "Arguments", __config__=ConfigDict(extra="forbid", arbitrary_types_allowed=True),
-                        **fields)
+    return create_model(_camel(name) + "Arguments", __config__=ConfigDict(extra="forbid", arbitrary_types_allowed=True,
+                                                                          allow_inf_nan=False), **fields)
 
 
 def model_from_json_schema(name, schema):
     """A JSON schema of an object (an MCP tool's inputSchema, an OpenAI function's parameters) → a pydantic model: string,
-    integer, number, boolean, null, array (items), object (properties → a nested model, else a dict), enum / const
-    (Literal), anyOf / oneOf / type lists (a Union), defaults and required. Anything else is Any. Unknown arguments are
-    forbidden."""
+    integer, number (finite: NaN and infinities are refused), boolean, null, array (items), object (properties → a
+    nested model, else a dict), enum / const (Literal), anyOf / oneOf / type lists (a Union), $ref to $defs /
+    definitions, defaults and required. A recursive $ref is followed once: inside itself it is any object (a dict) — the
+    model stays finite. Anything else is Any. Unknown arguments are forbidden."""
     import typing
 
     from pydantic import ConfigDict, Field, create_model
     defs = dict(schema.get("$defs") or schema.get("definitions") or {})
 
-    def resolve(s):
+    def ref_of(s):
         ref = s.get("$ref") if isinstance(s, dict) else None
-        if isinstance(ref, str) and ref.rsplit("/", 1)[-1] in defs:
-            return resolve(defs[ref.rsplit("/", 1)[-1]])
-        return s if isinstance(s, dict) else {}
+        return ref.rsplit("/", 1)[-1] if isinstance(ref, str) and ref.rsplit("/", 1)[-1] in defs else None
 
-    def typ(s, path):
-        s = resolve(s)
+    def resolve(s, seen):
+        """→ (the schema a $ref points to, the refs followed so far) — None when the ref is already being followed."""
+        hops = 0
+        while (r := ref_of(s)) is not None:
+            if r in seen or hops > len(defs):
+                return None, seen
+            seen, s, hops = seen | {r}, defs[r], hops + 1
+        return (s if isinstance(s, dict) else {}), seen
+
+    def typ(s, path, seen):
+        s, seen = resolve(s, seen)
+        if s is None:                                     # a recursive reference: any JSON object from here on
+            return dict
         if "const" in s:
             return typing.Literal[s["const"]]
         if isinstance(s.get("enum"), list) and s["enum"]:
             return typing.Literal[tuple(s["enum"])]
         alts = s.get("anyOf") or s.get("oneOf")
         if isinstance(alts, list) and alts:
-            ts = tuple(typ(a, path) for a in alts)
+            ts = tuple(typ(a, path, seen) for a in alts)
             return ts[0] if len(ts) == 1 else typing.Union[ts]
         t = s.get("type")
         if isinstance(t, list):
-            ts = tuple(typ({**s, "type": x}, path) for x in t)
+            ts = tuple(typ({**s, "type": x}, path, seen) for x in t)
             return ts[0] if len(ts) == 1 else typing.Union[ts]
         if t == "string":
             return str
@@ -290,23 +301,30 @@ def model_from_json_schema(name, schema):
         if t == "null":
             return type(None)
         if t == "array":
-            return list[typ(s.get("items") or {}, path)]
+            return list[typ(s.get("items") or {}, path, seen)]
         if t == "object" or "properties" in s:
             if s.get("properties"):
-                return obj(s, path)
+                return obj(s, path, seen)
             return dict
         return Any
 
-    def obj(s, path):
+    def obj(s, path, seen):
         req = set(s.get("required") or ())
         fields = {}
         for k, p in (s.get("properties") or {}).items():
-            p = resolve(p)
-            default = ... if k in req else p.get("default", None)
-            fields[k] = (typ(p, path + [k]), Field(default, description=p.get("description")))
+            r, _ = resolve(p, seen)
+            default = ... if k in req else (r or {}).get("default", None)
+            fields[k] = (typ(p, path + [k], seen), Field(default, description=(r or {}).get("description")))
         return create_model(_camel("_".join([name] + path)) + ("Arguments" if not path else ""),
-                            __config__=ConfigDict(extra="forbid"), **fields)
-    return obj(resolve(schema), [])
+                            __config__=ConfigDict(extra="forbid", allow_inf_nan=False), **fields)
+    top, seen = resolve(schema, frozenset())
+    return obj(top or {}, [], seen)
+
+
+def permissive_model(name):
+    """The arguments' model of a tool whose schema could not be read: any JSON object (the guard escalates its calls)."""
+    from pydantic import ConfigDict, create_model
+    return create_model(_camel(name) + "Arguments", __config__=ConfigDict(extra="allow", allow_inf_nan=False))
 
 
 def _camel(name):
@@ -327,6 +345,7 @@ class Tool:
     injections: str = "grounded"                               # "grounded" | "any" | "off"
     authorize: bool | None = None                              # ask the guard's authorizer (None: when it has one)
     match: dict = dataclasses.field(default_factory=dict)      # argument → how its value is found ("token" when absent)
+    schema_error: str | None = None                            # adopt: the schema could not be read (its calls escalate)
 
     @property
     def arguments(self):
@@ -364,7 +383,7 @@ def _call_arguments(model, schema):
         """The proposed arguments, validated and coerced to the tool's types (defaults filled in)."""
         _ = schema
         m = model.model_validate(tool_arguments)
-        return {k: getattr(m, k) for k in type(m).model_fields}
+        return {**{k: getattr(m, k) for k in type(m).model_fields}, **(m.model_extra or {})}   # solvi: ok
     return call_arguments
 
 
@@ -516,6 +535,18 @@ def _short(v, n=60):
         s = repr(v)
         return s if len(s) <= n else s[: n - 1] + "…"
     return repr(v) if len(v) <= n else repr(v[: n - 1] + "…")
+
+
+def _schema_error(text):
+    def schema_error(tool_name) -> str:
+        """Why the tool's input schema could not be read (adopt): its arguments are not checked against types."""
+        return text
+    return schema_error
+
+
+def schema_readable(schema_error) -> bool:
+    """The tool's input schema could be read; a tool whose schema could not be read needs a person for every call."""
+    return not schema_error
 
 
 def arguments_valid(argument_errors) -> bool:
@@ -716,7 +747,14 @@ class Guard:
         does this from the server's tools/list. A tool that has a schema keeps it."""
         t = self.tools[name]
         if t.model is None:
-            t.model = model_from_json_schema(name, json_schema or {"type": "object"})
+            try:
+                t.model = model_from_json_schema(name, json_schema if isinstance(json_schema, dict) else {"type": "object"})
+                t.schema_error = None
+            except Exception as e:  # noqa: BLE001 — one bad schema must not break the others: this tool's calls escalate
+                import logging
+                t.model, t.schema_error = permissive_model(name), f"{type(e).__name__}: {str(e)[:200]}"
+                logging.getLogger("solvi.agents").warning("tool %s: its input schema could not be read (%s); its calls "
+                                                          "escalate", name, t.schema_error)
             t.description = t.description or description or ""
             self._check_tool(t)
             self._systems.pop(name, None)
@@ -847,6 +885,9 @@ class Guard:
         def check(f, on_fail):
             cat.check(hard=True, then={"verdict": on_fail})(f)
             checks.append(f.__name__)
+        if t.schema_error is not None:
+            cat.fn(_schema_error(t.schema_error))
+            check(schema_readable, "escalate")
         check(arguments_valid, "deny")
         if t.ground:
             match = {a: t.match.get(a, "token") for a in t.ground}
@@ -1017,6 +1058,8 @@ class Guard:
                 out.append("not in the conversation: " + ", ".join(vals["grounding"]["missing"]))
             elif n == "no_injected_arguments":
                 out.append("; ".join(vals["grounding"]["injected"]))
+            elif n == "schema_readable":
+                out.append(f"the tool's input schema could not be read ({vals.get('schema_error')}): a person decides")
             elif n == "no_instructions_in_tool_outputs":
                 out.append("a tool output in the conversation carries instruction-like text")
             elif n == "request_authorizes":
@@ -1078,10 +1121,11 @@ class Guard:
                             "mismatches": v["mismatches"]})
         return bad
 
-    def session(self, context=None, facts=None):
+    def session(self, context=None, facts=None, max_messages=None, max_chars=None):
         """A conversation the guard follows: calls made through it add their results to its context as tool outputs,
-        so a later call's grounding and injection checks see them. → Session."""
-        return Session(self, context, facts)
+        so a later call's grounding and injection checks see them; max_messages / max_chars cap the context kept (see
+        Session). → Session."""
+        return Session(self, context, facts, max_messages, max_chars)
 
 
 def _outcome_meta(d):
@@ -1105,16 +1149,35 @@ def _names(tools):
 
 class Session:
     """A conversation with an agent: `session.call(proposal)` checks and makes calls in its context and appends each
-    made call's result as a tool output (`add` appends other messages)."""
+    made call's result as a tool output (`add` appends other messages).
 
-    def __init__(self, guard, context=None, facts=None):
+    max_messages / max_chars: the context kept for checking (None: all of it) — the oldest messages are dropped first,
+    and a message longer than max_chars keeps its beginning plus any instruction-like sentence of the rest (so the taint
+    of a long tool output is not cut away). Every decision's trace records the context it was checked against, so the cap
+    also bounds what each stored decision holds; a value or an instruction that has left the window no longer grounds a
+    value or taints a call."""
+
+    def __init__(self, guard, context=None, facts=None, max_messages=None, max_chars=None):
         self.guard = guard
-        self.context = [(r, t) for r, t in messages(context)]
+        self.max_messages, self.max_chars = max_messages, max_chars
+        self.context = []
+        for r, t in messages(context):
+            self._append(r, t)
         self.facts = dict(facts or {})
         self.decisions = []
 
+    def _append(self, role, text):
+        if self.max_chars is not None and len(text) > self.max_chars:
+            text = _clip(text, self.max_chars)
+        self.context.append((role, text))
+        if self.max_messages is not None and len(self.context) > self.max_messages:
+            del self.context[:len(self.context) - self.max_messages]
+        if self.max_chars is not None:
+            while len(self.context) > 1 and sum(len(t) for _, t in self.context) > self.max_chars:
+                del self.context[0]
+
     def add(self, role, text):
-        self.context.append((ROLES.get(role, role), _text(text)))
+        self._append(ROLES.get(role, role), _text(text))
         return self
 
     def check(self, call):
@@ -1135,3 +1198,21 @@ class Session:
         if d.executed:
             self.add("tool", f"{d.tool}: {d.error if d.error else _text(d.result)}")
         return d
+
+
+def _clip(text, n):
+    """A text cut to about n characters: its beginning, and the instruction-like passages of the rest (whose taint must
+    survive the cut) — a long one by its 400-character windows that are instruction-like themselves."""
+    from ..perturb import instruction_like, instruction_spans
+    rest = []
+    for a, b in instruction_spans(text, actions=True):
+        if b <= n:
+            continue
+        a = max(a, n)
+        if b - a <= 400:
+            rest.append(text[a:b])
+            continue
+        wins = [text[i:i + 400] for i in range(a, b, 200)]
+        rest += [w for w in wins if instruction_like(w, actions=True)] or [text[a:a + 400]]
+    tail = "\n[…]" + ("\n" + "\n".join(rest) if rest else "")
+    return text[: max(0, n - len(tail))] + tail

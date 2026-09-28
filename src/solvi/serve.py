@@ -993,8 +993,12 @@ def _serve_guard(a, _fail, load_object):
         _fail(f"--facts: not JSON: {e}")
     if facts is not None and not isinstance(facts, dict):
         _fail("--facts: a JSON object of facts")
+    for k in ("context_messages", "context_chars"):
+        if getattr(a, k) < 0:
+            _fail(f"serve --{k.replace('_', '-')}: must be at least 0 (0: no limit)")
     run_proxy(guard, a.upstream, facts=facts, escalate=a.escalate,
-              limits=Limits(a.max_body, a.max_depth, a.timeout if a.timeout and a.timeout > 0 else None))
+              limits=Limits(a.max_body, a.max_depth, a.timeout if a.timeout and a.timeout > 0 else None),
+              context_messages=a.context_messages or None, context_chars=a.context_chars or None)
     return 0
 
 
@@ -1035,4 +1039,9 @@ def add_parser(sub):
     s.add_argument("--escalate", default="elicit", choices=["elicit", "deny"],
                    help="with --guard: ask the user about an escalated call (MCP elicitation, when the client supports it) "
                         "or return it as an error")
+    from .agents.mcp import CONTEXT_CHARS, CONTEXT_MESSAGES
+    s.add_argument("--context-messages", type=int, default=CONTEXT_MESSAGES, metavar="N",
+                   help=f"with --guard: the tool outputs the session keeps for checking (default {CONTEXT_MESSAGES}; 0: all)")
+    s.add_argument("--context-chars", type=int, default=CONTEXT_CHARS, metavar="N",
+                   help=f"with --guard: their characters in all (default {CONTEXT_CHARS}; 0: no limit)")
     return s
