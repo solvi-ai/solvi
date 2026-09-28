@@ -35,7 +35,7 @@ solvi = "solvi.pytest_plugin"
 
 [project.urls]
 Homepage = "https://github.com/solvi-ai/solvi"
-Documentation = "https://github.com/solvi-ai/solvi/blob/main/docs/guide.md"
+Documentation = "https://solvi-ai.github.io/solvi/"
 Issues = "https://github.com/solvi-ai/solvi/issues"
 Models = "https://huggingface.co/solvi-ai"
 
