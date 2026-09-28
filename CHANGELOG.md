@@ -146,6 +146,9 @@ weights are not published.
 
 ### Fixes and tooling
 
+- Set-valued facts hash in a fixed order (sorted canonical elements) and are exported to JSON in that order: trace hashes
+  no longer depend on `PYTHONHASHSEED`, and a set fact replays after a JSON round trip. Traces from 0.4.x that contain sets
+  hash differently (their hashes depended on the process anyway).
 - Replay catches a value written into a step that failed (a record with an error must carry no value), also when the
   attacker re-hashes the chain; before, such an edit replayed as ok.
 - A hard check that raises while it runs now makes the questions it governs abstain ("hard check … could not be

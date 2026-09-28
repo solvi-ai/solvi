@@ -151,8 +151,20 @@ def _fallback(v):
     return repr(v)
 
 
+def _sorted_sets(v):
+    """Sets as lists in the order vhash uses, so a set fact loaded back from JSON hashes (and replays) as before."""
+    if isinstance(v, (set, frozenset)):
+        from .runtime import _canon, _ckey
+        return [_sorted_sets(x) for x in sorted(v, key=lambda x: _ckey(_canon(x)))]
+    if isinstance(v, dict):
+        return {k: _sorted_sets(x) for k, x in v.items()}
+    if isinstance(v, (list, tuple)):
+        return type(v)(_sorted_sets(x) for x in v) if type(v) in (list, tuple) else v
+    return v
+
+
 def jsonable(v):
-    return to_jsonable_python(v, fallback=_fallback)
+    return to_jsonable_python(_sorted_sets(v), fallback=_fallback)
 
 
 def native(v):

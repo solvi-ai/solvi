@@ -19,6 +19,8 @@ def _canon(v):
         return {"decision": [_canon(v.value), _canon(v.probs)]}
     if isinstance(v, (list, tuple)):
         return [_canon(x) for x in v]
+    if isinstance(v, (set, frozenset)):          # in a fixed order: repr(set) depends on PYTHONHASHSEED
+        return sorted((_canon(x) for x in v), key=_ckey)
     if isinstance(v, dict):
         return {str(k): _canon(x) for k, x in sorted(v.items(), key=lambda kv: str(kv[0]))}
     if isinstance(v, float):
@@ -28,6 +30,10 @@ def _canon(v):
     if v is Unknown:
         return {"not_stated": True}
     return repr(v)
+
+
+def _ckey(c):
+    return json.dumps(c, ensure_ascii=False, sort_keys=True)
 
 
 def vhash(v) -> str:
