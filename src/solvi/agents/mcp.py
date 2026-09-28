@@ -30,7 +30,8 @@ The proxy speaks MCP over stdio (JSON-RPC, one message per line) to the client a
                output in the proxy's session, so later calls are checked against it (grounding, instruction-like text);
                deny: an error result with the reasons; escalate: with --escalate elicit (default) and a client that
                declares the elicitation capability, the user is asked (elicitation/create: approve yes / no) and the
-               answer is recorded as a person's resolution; otherwise an error result saying it waits for a person
+               answer is recorded as a person's resolution (only `{"action": "accept", "content": {"approve": true}}`
+               approves: "yes", 1 or "true" do not); otherwise an error result saying it waits for a person
   ping         answered
 
 Every decision goes to the guard's store (or --store) with the call's outcome; `_meta.solvi` on each result carries the
@@ -265,7 +266,8 @@ def run_proxy(guard, upstream, facts=None, escalate="elicit", stdin=None, stdout
                 continue
             if isinstance(msg, dict) and msg.get("id") == rid and "method" not in msg:
                 r = msg.get("result") or {}
-                return bool(r.get("action") == "accept" and (r.get("content") or {}).get("approve"))
+                content = r.get("content")
+                return r.get("action") == "accept" and isinstance(content, dict) and content.get("approve") is True
             if isinstance(msg, dict) and "method" in msg and "id" in msg:
                 error(msg["id"], -32603, "the solvi proxy is waiting for the user's answer to an escalated call")
         return None

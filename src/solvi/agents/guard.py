@@ -29,7 +29,8 @@ ToolCall.parse) — never code: solvi looks the tool up in its catalog, and only
 Each tool is a small solvi System with one question, `verdict` ∈ {allow, deny, escalate}; the checks of a call are its
 catalog, in this order (a failed hard check decides; when several fail, the first in this order):
 
-  arguments_valid              the arguments validate against the tool's types (pydantic; unknown arguments are errors) → deny
+  arguments_valid              the arguments validate against the tool's types (pydantic; unknown arguments are errors)
+                               and hold no invisible (format, Unicode Cf) characters → deny
   arguments_grounded           every `ground=` argument is in the conversation as a token or number token (a quote
                                with offsets; an empty string never is), in a message of a role in `ground_from` → deny
   no_injected_arguments        ... and not only in tool outputs when any tool output in the conversation carries
@@ -127,9 +128,18 @@ def messages(context) -> list:
     - a content block is read by its type, normalised the same way: a tool result (`tool_result`, any `*_tool_result`,
       `function_call_output`, `function_response`, `search_result`, ...) is a tool output, a tool use (`tool_use`,
       `function_call`) the assistant's;
-    - in a user message only text blocks are the user's (a string, `{"type": "text" | "input_text"}`, or a block with a
-      "text" and no type and no "content"); any other block (an image with a caption, a block with "content" and no
-      type, an unknown type) is read as a tool output — never the user's words, and it gets the injection checks.
+    - in a user message only text blocks are the user's (a string, `{"type": "text" | "input_text"}` with a string
+      "text", or a block with a string "text" and no type and no "content"); any other block (an image with a caption,
+      a block with "content" and no type, a "text" that is not a string, an unknown type) is read as a tool output —
+      never the user's words, and it gets the injection checks;
+    - a message or a block that carries a `tool_call_id` / `tool_use_id` answers a tool call: a tool output; any item
+      type ending in "call_output" (the Responses API's function / computer / shell / custom tool outputs) or
+      "_tool_result" is one whatever its role;
+    - a user message a framework generated in the user's place — LangChain's SummarizationMiddleware summary
+      (`additional_kwargs={"lc_source": "summarization"}`), a "source" naming a summary or compaction — is the
+      assistant's: a summary rewrites tool outputs into what looks like the user's turn, so it never grounds a
+      user-only value. Other history compressions that rewrite turns as user messages cannot be recognised: give the
+      guard the raw history.
 
     Consecutive blocks of the same role make one message."""
     return [(r, t) for r, t, _ in _messages(context)]
@@ -155,13 +165,39 @@ def _kind(kind):
     return re.sub(r"[-\s.]+", "_", k).lower()
 
 
-_TOOL_KINDS = ("tool_result", "function_call_output", "function_response", "function_result", "search_result",
+_TOOL_KINDS = ("tool_result", "call_output", "function_response", "function_result", "search_result",
                "tool_output", "tool_response", "tool_message")
+_TOOL_IDS = ("tool_call_id", "tool_use_id")               # a message or block answering a tool call carries one
+# a message a framework generated in the user's place (LangChain's SummarizationMiddleware writes its summary as a
+# HumanMessage with additional_kwargs={"lc_source": "summarization"}): the words are not the user's
+_GENERATED = ("summar", "compact", "compress", "condens", "memory", "generated", "trimm")
 
 
 def _message_kind_is_tool(kind):
+    """A message's or item's type names a tool output: "tool", or ending in a tool result kind — any "*_call_output"
+    (Responses API: function / computer / shell / custom tool call outputs) or "*_tool_result"."""
     k = _kind(kind)
     return k is not None and (k == "tool" or k.endswith(_TOOL_KINDS))
+
+
+def _has_tool_id(m):
+    return any(_get(m, k) is not None for k in _TOOL_IDS)
+
+
+def _generated(m):
+    """Was the message written by a framework in the user's place — a summary of the history, a compacted turn? Marked
+    by `additional_kwargs` / `response_metadata` / `metadata` with an "lc_source" (any), or a "source" that names a
+    summary, compaction, compression, condensation or memory."""
+    for attr in ("additional_kwargs", "response_metadata", "metadata"):
+        d = _get(m, attr)
+        if not isinstance(d, dict):
+            continue
+        if d.get("lc_source"):
+            return True
+        src = d.get("source")
+        if isinstance(src, str) and any(g in src.lower() for g in _GENERATED):
+            return True
+    return False
 
 
 def _messages(context) -> list:
@@ -176,27 +212,29 @@ def _messages(context) -> list:
         if isinstance(m, (tuple, list)) and len(m) == 2:
             role, content = m
         elif isinstance(m, dict):
-            if _message_kind_is_tool(m.get("type")):
+            if _message_kind_is_tool(m.get("type")) or _has_tool_id(m):
                 role, content = "tool", m.get("content") if m.get("content") is not None else m.get("output")
             else:
                 role, content = m.get("role") or m.get("type"), m.get("content")
         else:
             kind = getattr(m, "type", None)
             content = getattr(m, "content", None)
-            role = "tool" if _message_kind_is_tool(kind) else (getattr(m, "role", None) or kind)
+            role = "tool" if _message_kind_is_tool(kind) or _has_tool_id(m) else (getattr(m, "role", None) or kind)
         role = ROLES.get(str(role).lower()) if role is not None else None
+        if role == "user" and not isinstance(m, (tuple, list)) and _generated(m):
+            role = "assistant"                            # a summary / compaction in the user's place: not their words
         for r, text in _blocks(role, content):
             if r is not None and text:
                 out.append((r, text, tainted))
     return out
 
 
-def _block_role(kind):
+def _block_role(kind, c=None):
     """The role of a content block by its (normalised) type: a tool result is the tool's, a tool use the assistant's,
-    else None (the message's own role)."""
+    a block without a type that carries a tool_use_id / tool_call_id the tool's, else None (the message's own role)."""
     k = _kind(kind)
     if k is None:
-        return None
+        return "tool" if c is not None and not isinstance(c, str) and _has_tool_id(c) else None
     if k == "tool" or k.endswith(_TOOL_KINDS):
         return "tool"
     if k.endswith(("tool_use", "tool_call")) or k == "function_call":
@@ -209,15 +247,17 @@ def _get(c, k):
 
 
 def _user_text_block(c, kind):
-    """Is a block of a user message the user's own text? A string, a {"type": "text" | "input_text"} block, or a block
-    with a "text", no type and no "content"."""
+    """Is a block of a user message the user's own text? A string, a {"type": "text" | "input_text"} block whose "text"
+    is a string, or a block with a string "text", no type and no "content" — and no tool_use_id / tool_call_id."""
     if isinstance(c, str):
         return True
+    if _has_tool_id(c):
+        return False
     k = _kind(kind)
     if k in ("text", "input_text"):
-        return True
+        return isinstance(_get(c, "text"), str)
     if k is None and isinstance(c, dict):
-        return "text" in c and "content" not in c
+        return isinstance(c.get("text"), str) and "content" not in c
     return False
 
 
@@ -241,7 +281,7 @@ def _blocks(role, content):
     out = []
     for c in content:
         kind = c.get("type") if isinstance(c, dict) else getattr(c, "type", None)
-        br = _block_role(kind)
+        br = _block_role(kind, c)
         if br == "assistant":
             r = "assistant"
             args = next((_get(c, k) for k in ("input", "arguments", "args") if _get(c, k) is not None), {})
@@ -426,6 +466,8 @@ class Tool:
     authorize: bool | None = None                              # ask the guard's authorizer (None: when it has one)
     match: dict = dataclasses.field(default_factory=dict)      # argument → how its value is found ("token" when absent)
     schema_error: str | None = None                            # adopt: the schema could not be read (its calls escalate)
+    locale: str | None = None                                  # how a lone "1,500" reads (LOCALES); None: it grounds nothing
+    scan_user: bool = False                                    # a value the user wrote next to instruction-like text escalates
 
     @property
     def arguments(self):
@@ -448,14 +490,38 @@ def _argument_errors(model, schema):
         if not isinstance(tool_arguments, dict):
             return [f"the arguments are not a JSON object: {tool_arguments!r:.120}"]
         from pydantic import ValidationError
+        out = _invisible(tool_arguments)
         try:
             model.model_validate(tool_arguments)
         except ValidationError as e:
-            return [f"{'.'.join(str(x) for x in err['loc']) or '(arguments)'}: {err['msg']}"   # solvi: ok
+            out += [f"{'.'.join(str(x) for x in err['loc']) or '(arguments)'}: {err['msg']}"   # solvi: ok
                     + (f" (got {err['input']!r:.80})" if "input" in err and err["type"] != "missing" else "")
                     for err in e.errors()]
-        return []
+        return out
     return argument_errors
+
+
+def _invisible(value, path=()):
+    """"invisible characters in argument X (U+200B)" for every string (or key) of the arguments that holds format
+    characters (Unicode Cf: zero-width spaces and joiners, soft hyphens, direction marks, tag characters U+E0000–E007F).
+    Grounding reads a text without them, so a value carrying them would be checked as one string and executed as
+    another: such an argument is refused."""
+    out = []
+    if isinstance(value, str):
+        cs = sorted(set(_cf().findall(value)))
+        if cs:
+            where = ".".join(path) or "(arguments)"
+            out.append(f"invisible characters in argument {where} ("
+                       + ", ".join(f"U+{ord(c):04X}" for c in cs[:5]) + (", …" if len(cs) > 5 else "") + ")")
+    elif isinstance(value, dict):
+        for k, v in value.items():
+            if isinstance(k, str) and _cf().search(k):
+                out += _invisible(k, path + (_visible(k) or "?",))
+            out += _invisible(v, path + (str(k),))
+    elif isinstance(value, (list, tuple)):
+        for i, v in enumerate(value):
+            out += _invisible(v, path + (str(i),))
+    return out
 
 
 def _call_arguments(model, schema):
@@ -477,25 +543,41 @@ def _argument(name, annotation):
     return f
 
 
+NEAR = 200                                               # scan_user: characters around a value that count as "around"
+
+
 def _grounding(spec, matchers=None):
     matchers = dict(matchers or {})                       # argument → a callable matcher (its code is in `spec`)
 
     def grounding(call_arguments, conversation, conversation_roles) -> dict:
         """Where each argument that must come from the conversation is quoted: {"found": {argument: [[text, start, end,
         role]]}, "missing": [...], "injected": [...]}. A string is found as a token (not inside a longer word or
-        address; see MATCHERS), a number as a number token (not a group of a longer identifier), a list item by item; an
-        empty or whitespace-only string is never grounded. The first occurrence in a message of an allowed role wins.
-        Taint is context-wide: when any tool output in the conversation carries instruction-like text
-        (solvi.perturb.injection_spans), a value found only in tool outputs is injected."""
+        address; see MATCHERS), a number as a number token of exactly its value (a lone "1,500" only under a locale), a
+        list item by item; an empty or whitespace-only string is never grounded. The first occurrence in a message of
+        an allowed role wins (an untainted one before a tainted one). Taint is context-wide: when any tool output in the
+        conversation carries instruction-like text (solvi.perturb.injection_spans), a value found only in tool outputs
+        is injected. With scan_user, a value the user wrote only within NEAR characters of an override in their own
+        message (injection_spans(actions=False): "ignore previous instructions", role tags — pasted content, not the
+        user's own requests to pay or send) is injected too."""
+        from ..perturb import injection_spans
         rules = json.loads(spec)
         roles = [(x[0], x[1], x[2]) for x in conversation_roles]
         taints = _taints(conversation, conversation_roles)
         anywhere = [t for ts in taints.values() for t in ts]
+        scan_user, locale, user_spans = bool(rules.get("scan_user")), rules.get("locale"), {}
 
-        def taint(i):
-            if roles[i][2] != "tool":
-                return []
-            return taints.get(i) or anywhere
+        def taint(i, a, b):
+            """→ (the instruction-like passages that taint an occurrence at [a, b) of message i, how)."""
+            s, _, r = roles[i]
+            if r == "tool":
+                return (taints[i], "own") if taints.get(i) else (anywhere, "context")
+            if r == "user" and scan_user:
+                if i not in user_spans:
+                    user_spans[i] = [(s + x, s + y) for x, y in injection_spans(conversation[s:roles[i][1]],
+                                                                                 actions=False)]
+                near = [conversation[x:y] for x, y in user_spans[i] if x - NEAR <= b and a <= y + NEAR]
+                return near, "user"
+            return [], None
 
         def where(a, b):
             for i, (s, e, _) in enumerate(roles):
@@ -515,12 +597,13 @@ def _grounding(spec, matchers=None):
                     missing.append(f"{arg}={_short(item)} (empty)")
                     continue
                 best = None
-                for a, b in _occurrences(item, conversation, match):
+                for a, b in _occurrences(item, conversation, match, locale):
                     i = where(a, b)
                     if i is None or roles[i][2] not in allowed:
                         continue
-                    cand = [conversation[a:b], a, b, roles[i][2], taint(i)]
-                    if not cand[4]:
+                    said, how = taint(i, a, b)
+                    cand = [conversation[a:b], a, b, roles[i][2], said, how]
+                    if not said:
                         best = cand
                         break
                     best = best or cand
@@ -528,11 +611,13 @@ def _grounding(spec, matchers=None):
                     missing.append(f"{arg}={_short(item)}")
                     continue
                 if best[4]:
-                    injected.append(f"{arg}={_short(item)} appears only in a tool output that says "
-                                    + "; ".join(_short(x, 80) for x in best[4])
-                                    if taints.get(where(best[1], best[2])) else
-                                    f"{arg}={_short(item)} appears only in tool outputs, and a tool output in the "
-                                    f"conversation says " + "; ".join(_short(x, 80) for x in best[4]))
+                    says = "; ".join(_short(x, 80) for x in best[4])
+                    injected.append(
+                        f"{arg}={_short(item)} appears only in a tool output that says {says}" if best[5] == "own" else
+                        f"{arg}={_short(item)} is written by the user only next to instruction-like text (pasted "
+                        f"content?): {says}" if best[5] == "user" else
+                        f"{arg}={_short(item)} appears only in tool outputs, and a tool output in the conversation "
+                        f"says {says}")
                 quotes.append(best[:4])
             if quotes:
                 found[arg] = quotes
@@ -557,11 +642,54 @@ def _taints(conversation, conversation_roles):
     return out
 
 
-_SEP = r"[,']"                                           # thousands separators a number may use by default
-_SPACE_SEP = r"[,'   ]"                          # ... and with the "spaced" matcher
-_NUMBER_RX = r"(?<![\w.,])-?(?:\d{1,3}(?:SEP\d{3})+(?![\d])|\d+)(?:\.\d+)?(?![\w%‰°]|[.,]\d)"
-_NUMBER = re.compile(_NUMBER_RX.replace("SEP", _SEP))
-_NUMBER_SPACED = re.compile(_NUMBER_RX.replace("SEP", _SPACE_SEP))
+_SPACES = "\u00a0\u202f\u2009 "                     # the spaces a number may group its thousands with ("spaced")
+LOCALES = {"en": (",'", "."), "de": (".'", ","), "fr": ("'", ","), "ch": ("'", ".")}   # locale → (thousands, decimal)
+_AMBIGUOUS = re.compile(r"-?[1-9]\d{0,2}[.,]\d{3}")     # "1,500" / "1.500": 1500 or 1.5 — only a locale says which
+_NUMBER_RXS = {}
+
+
+def _number_rx(locale=None, spaced=False):
+    """The number tokens of a text under a locale (None: "," and "'" group thousands, "." is the decimal point, and a
+    lone "d,ddd" / "d.ddd" is ambiguous) — and the thousands separators and decimal mark to read them with."""
+    key = (locale, spaced)
+    if key not in _NUMBER_RXS:
+        thousands, dec = LOCALES[locale] if locale is not None else (",'", ".")
+        if spaced:
+            thousands += _SPACES
+        rx = re.compile(r"(?<![\w.,])-?(?:\d{1,3}(?:[" + re.escape(thousands) + r"]\d{3})+(?!\d)|\d+)(?:"
+                        + re.escape(dec) + r"\d+)?(?![\w%‰°]|[.,]\d)")
+        _NUMBER_RXS[key] = (rx, thousands, dec)
+    return _NUMBER_RXS[key]
+
+
+def _number_at(token, thousands, dec):
+    """A number token's exact value (a Decimal), or None."""
+    from decimal import Decimal, InvalidOperation
+    t = "".join(ch for ch in token if ch not in thousands)
+    if dec != ".":
+        t = t.replace(dec, ".")
+    try:
+        return Decimal(t)
+    except InvalidOperation:
+        return None
+
+
+def _same_number(v, x):
+    """Is the argument v exactly the number x (a Decimal read from the text)? An int compares exactly; a float by its
+    shortest decimal form (250.0 is "250" and "250.00"; a float too long for its digits — a 19-digit ID read as a
+    float — matches nothing); no tolerance."""
+    from decimal import Decimal
+    if x is None or isinstance(v, bool):
+        return False
+    if isinstance(v, int):
+        return x == v
+    if isinstance(v, float):
+        return x == Decimal(repr(v))
+    if isinstance(v, Decimal):
+        return x == v
+    return False
+
+
 _WHOLE_EDGE = set(" \t\r\n\"'`()[]{}<>,;:!?")
 _JOIN = set(".@-/:_")                                    # joins two tokens into one identifier ("x.org", "INV-250")
 MATCHERS = ("token", "whole", "substring", "spaced")
@@ -627,15 +755,18 @@ def _visible(text):
     return _cf().sub("", text)
 
 
-def _occurrences(v, text, match="token"):
+def _occurrences(v, text, match="token", locale=None):
     """Where a value is written in a text → [(start, end)]: a string as a whole word under `match` ("token": not inside a
     longer word, nor joined to one by ". @ - / : _" — "DE8937" is not found in "DE89370400…", "bob@x.org" not in
     "bob@x.org.evil", "acct" not in "acct-12", a digit string not as a group of a spaced IBAN; "whole": delimited by
     whitespace, quotes, brackets or punctuation — "x.org" is not found in "alice@x.org"; "substring": anywhere; a
-    callable(value, text) → [(start, end)] decides itself); a number as a number token (not inside a word; thousands
-    separators "1,250.50", "1'250" allowed — "1 250" only with the "spaced" matcher; 250 matches "250.00"; not 250 in
-    "250%" or "250kg"; not a group of a longer identifier — 3704 is not found in "DE89 3704 0044", 250 not in "INV-250",
-    30 not in "12:30"); an Enum by its value; anything else by str(). Format characters (zero-width spaces, ...) are
+    callable(value, text) → [(start, end)] decides itself); a number as a number token of exactly its value (not inside
+    a word; thousands separators "1,250.50", "1'250" allowed — "1 250" only with the "spaced" matcher; 250 matches
+    "250.00"; an int is compared exactly and a float by its shortest decimal form, never with a tolerance — the ID
+    1234567890123456 is not found in "1234567890123457"; not 250 in "250%" or "250kg"; not a group of a longer
+    identifier — 3704 is not found in "DE89 3704 0044", 250 not in "INV-250", 30 not in "12:30"; a lone "1,500" or
+    "1.500" is 1500 or 1.5 only under a `locale` — LOCALES: "en" 1,500.5, "de" 1.500,5, "fr" 1 500,5 with "spaced",
+    "ch" 1'500.5 — and neither without one); an Enum by its value; anything else by str(). Format characters (zero-width spaces, ...) are
     read as absent, so one cannot make a boundary. An empty or whitespace-only string is found nowhere."""
     import enum
     if isinstance(v, enum.Enum):
@@ -651,14 +782,14 @@ def _occurrences(v, text, match="token"):
         keep = [i for i, ch in enumerate(text) if not _cf().match(ch)]
         text = "".join(text[i] for i in keep)
     out = []
-    if isinstance(v, (int, float)) and not isinstance(v, bool):
-        rx = _NUMBER_SPACED if match == "spaced" else _NUMBER
+    from decimal import Decimal
+    if isinstance(v, (int, float, Decimal)) and not isinstance(v, bool):
+        rx, thousands, dec = _number_rx(locale, match == "spaced")
         for m in rx.finditer(text):
-            try:
-                x = float(re.sub(r"[,  ' ]", "", m.group(0)))
-            except ValueError:
+            tok = m.group(0)
+            if locale is None and _AMBIGUOUS.fullmatch(tok):        # 1500 or 1.5? neither, without a locale
                 continue
-            if abs(x - float(v)) <= 1e-9 * max(1.0, abs(float(v))) and not _glued(text, m.start(), m.end()):
+            if _same_number(v, _number_at(tok, thousands, dec)) and not _glued(text, m.start(), m.end()):
                 out.append((m.start(), m.end()))
     else:
         s = _visible(str(v))
@@ -764,6 +895,7 @@ class GuardDecision:
     approved_by: str | None = None                             # guard.resolve: the person who approved an escalation
     id: str | None = None                                      # the agent's id of the call, if it gave one
     resolved: bool = False                                     # guard.resolve answered this escalation (once only)
+    failed: list = dataclasses.field(default_factory=list)     # the names of the checks that failed, in catalog order
     catalog: Any = dataclasses.field(default=None, repr=False)
 
     @property
@@ -788,6 +920,25 @@ class GuardDecision:
             return f"{self.tool} allowed" + (f" (approved by {self.approved_by})" if self.approved_by else "")
         head = "denied" if self.outcome == "deny" else "escalated to a person for approval (not executed)"
         return f"{self.tool} {head}: " + "; ".join(self.reasons)
+
+    @property
+    def policy_only(self):
+        """An escalation by your policies alone (`@guard.policy(on_fail="escalate")`): no provenance, injection, schema
+        or authorizer check failed and nothing abstained. Only such an escalation may be covered by a standing
+        approval ("always approve this tool"); any other needs a person for this very call."""
+        return self.outcome == "escalate" and bool(self.failed) and all(n not in BUILTIN for n in self.failed)
+
+    def approval_key(self):
+        """What a person's approval of this escalation covers: a hash of the tool, the call's id, its arguments and the
+        reasons it escalated for. An approval given for one key does not cover a call whose key differs — other
+        arguments, another call, or new reasons (the adapters re-escalate)."""
+        import hashlib
+
+        from ..decide import jsonable
+        blob = json.dumps({"tool": self.tool, "id": self.id, "arguments": jsonable(self.arguments),
+                           "reasons": sorted(str(r) for r in self.reasons)}, sort_keys=True, ensure_ascii=False,
+                          default=str)
+        return hashlib.sha256(blob.encode()).hexdigest()[:32]
 
     def audit(self, lang=None):
         """The solvi audit of the verdict (what it rests on, the checks, the safeguards that fired)."""
@@ -820,9 +971,9 @@ class Guard:
     "conversation" (or "user_request") and "proposal" — see `make_authorizer()`; its act_guard threshold and perturb=k
     apply. facts: names (or {name: type}) of facts your app gives with every call (a user's role, a budget left): policies
     that read them apply to every tool without naming it (the types are for readers: a policy's own annotations are what
-    solvi validates)."""
+    solvi validates). scan_user: the default of every tool's `scan_user` (see `tool`)."""
 
-    def __init__(self, storage=None, authorizer=None, facts=None, lang="en"):
+    def __init__(self, storage=None, authorizer=None, facts=None, lang="en", scan_user=False):
         from ..storage import open_storage
         self.storage = open_storage(storage)
         self.tools: dict[str, Tool] = {}
@@ -833,10 +984,11 @@ class Guard:
         self._systems = {}
         self._unknown = None
         self.lang = lang
+        self.scan_user = bool(scan_user)
 
     # --- the catalog
     def tool(self, func=None, *, name=None, schema=None, description=None, ground=(), ground_from=("user", "tool", "system"),
-             injections="grounded", authorize=None):
+             injections="grounded", authorize=None, locale=None, scan_user=None):
         """Declare a tool the agent may call. As a decorator on a typed function (`@guard.tool`, `@guard.tool(ground=[...])`),
         or `guard.tool(name="refund", schema=RefundArgs)` (a pydantic model or a JSON schema) for a tool the framework or
         an MCP server runs. The function is returned unchanged.
@@ -850,7 +1002,12 @@ class Guard:
         messages — never the assistant's own words; ("user",) for values only the user may give, like a payee).
         injections: "grounded" (default: a grounded argument found only in tool outputs escalates when any tool
         output in the conversation has instruction-like text), "any" (also: any instruction-like text in a tool output escalates the call — for high-impact
-        tools), "off". authorize: ask the guard's authorizer about this tool (default: when the guard has one)."""
+        tools), "off". authorize: ask the guard's authorizer about this tool (default: when the guard has one).
+        locale: how a number written with one separator and one group of three digits reads — "1,500" / "1.500" is 1500
+        or 1.5 depending on the writer, so without a locale it grounds neither (deny); "en" (1,500.5), "de" (1.500,5),
+        "fr" (1 500,5 — with the "spaced" matcher), "ch" (1'500.5). A callable matcher decides per argument.
+        scan_user: a value the user wrote only next to instruction-like text in their own message (pasted content that
+        carries an instruction) escalates (`no_injected_arguments`); default: the guard's `scan_user` (False)."""
         def add(f):
             n = name or (f.__name__ if f is not None else None)
             if not n:
@@ -870,10 +1027,13 @@ class Guard:
             bad = {a: m for a, m in spec.items() if not callable(m) and m not in MATCHERS}
             if bad:
                 raise ValueError(f"tool {n}: ground= matchers are {', '.join(MATCHERS)} or a callable, not {bad}")
-            t = Tool(n, f, model, desc.strip(), {a: roles for a in spec}, injections, authorize,
-                     {a: m for a, m in spec.items() if m != "token"})
             if injections not in ("grounded", "any", "off"):
                 raise ValueError('injections must be "grounded", "any" or "off"')
+            if locale is not None and locale not in LOCALES:
+                raise ValueError(f"tool {n}: locale is one of {', '.join(LOCALES)} or None, not {locale!r}")
+            t = Tool(n, f, model, desc.strip(), {a: roles for a in spec}, injections, authorize,
+                     {a: m for a, m in spec.items() if m != "token"}, locale=locale,
+                     scan_user=self.scan_user if scan_user is None else bool(scan_user))
             self._check_tool(t)
             self.tools[n] = t
             self._systems.pop(n, None)
@@ -916,6 +1076,27 @@ class Guard:
         unknown = [a for a in t.ground if a not in t.arguments]
         if unknown:
             raise ValueError(f"tool {t.name}: ground= names no argument: {unknown} (its arguments: {t.arguments})")
+
+    def _check_policies(self):
+        """A policy (or fn) for every tool (tools=None) that reads a name no tool can provide — neither a fact the guard
+        declares, nor a given or computed fact, nor an argument of any tool — would apply to no tool at all: a
+        ValueError, not a silently dropped check. (Skipped while a declared tool has no schema yet: its arguments are
+        not known.)"""
+        if any(t.model is None for t in self.tools.values()):
+            return
+        names = set(GIVEN) | set(self.facts) | {"argument_errors", "call_arguments", "grounding", "proposal"}
+        names |= {a for t in self.tools.values() for a in t.arguments} | {f.__name__ for f, _ in self._fns}
+        for kind, items in (("policy", [(f, tools) for f, tools, _ in self._policies]), ("fn", self._fns)):
+            for f, tools in items:
+                if tools is not None:
+                    continue
+                lack = [p for p in inspect.signature(f).parameters if p not in names]
+                if lack:
+                    raise ValueError(
+                        f"{kind} {f.__name__} applies to every tool, but reads {lack}: neither a fact the guard "
+                        f"declares (Guard(facts=[...]): {sorted(self.facts)}) nor an argument of any tool — it would "
+                        f"check nothing. Declare the fact, or name the tools (guard.{kind}(\"tool_name\")), whose "
+                        f"calls then escalate while the fact is not given")
 
     def policy(self, tools=None, *, on_fail="deny"):
         """A policy over calls: an ordinary solvi hard check — argument names are the facts it reads (the call's
@@ -1007,6 +1188,7 @@ class Guard:
         from ..system import System
         if t.model is None:
             raise ValueError(f"tool {t.name} has no argument schema yet (guard.tool(..., schema=...) or guard.adopt)")
+        self._check_policies()
         cat = Catalog()
         schema = json.dumps(t.model.model_json_schema(), sort_keys=True, default=str)
         have = set(GIVEN) | set(self.facts) | set(t.arguments) | {"argument_errors", "call_arguments", "grounding",
@@ -1039,8 +1221,12 @@ class Guard:
             match = {a: t.match.get(a, "token") for a in t.ground}
             match = {a: m if isinstance(m, str) else f"callable {getattr(m, '__qualname__', type(m).__name__)} "
                      f"{code_fingerprint(m)}" for a, m in match.items()}        # a callable matcher: by its code
-            cat.fn(_grounding(json.dumps({"roles": {a: list(r) for a, r in t.ground.items()}, "match": match},
-                                         sort_keys=True), {a: m for a, m in t.match.items() if callable(m)}))
+            spec = {"roles": {a: list(r) for a, r in t.ground.items()}, "match": match}
+            if t.locale is not None:
+                spec["locale"] = t.locale
+            if t.scan_user:
+                spec["scan_user"] = True
+            cat.fn(_grounding(json.dumps(spec, sort_keys=True), {a: m for a, m in t.match.items() if callable(m)}))
             check(arguments_grounded, "deny")
             if t.injections != "off":
                 check(no_injected_arguments, "escalate")
@@ -1187,13 +1373,20 @@ class Guard:
         if args is MISSING:
             args = c.arguments
         d = GuardDecision(outcome, c.name, args, self._reasons(c, system, res, r, outcome), res, id=c.id,
-                          catalog=system.catalog)
+                          catalog=system.catalog, failed=self._failed(system, res) if outcome != "allow" else [])
         g = res.values.get("grounding") if known else None
         if isinstance(g, dict):
             d.evidence = [(a, q[0], q[1], q[2], q[3]) for a, qs in g.get("found", {}).items() for q in qs]
         if store:
             self._save(d)
         return d
+
+    @staticmethod
+    def _failed(system, res):
+        cat, order = system.catalog, {n: i for i, n in enumerate(system.catalog.parts)}
+        return [x.name for x in sorted((x for x in res.trace.records if x.value is False and x.name in cat.parts
+                                        and cat.parts[x.name].kind == "check" and cat.parts[x.name].hard),
+                                       key=lambda x: order[x.name])]
 
     def _reasons(self, c, system, res, r, outcome):
         if outcome == "allow":
