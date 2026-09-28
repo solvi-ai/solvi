@@ -1,5 +1,22 @@
 # Changelog
 
+## Unreleased (0.7)
+
+### Documentation site
+
+- `mkdocs.yml` (Material theme): the README, the guide, the format specs (decider checkpoint, model strategist, regression
+  tests, honesty suite, benchmarks), the examples and gallery indexes, this changelog and the roadmap as one site, plus an
+  API reference generated from the docstrings (mkdocstrings) for `solvi`, `solvi.decide`, `solvi.calibration`,
+  `solvi.systemone`, `solvi.multi`, `solvi.serve`, `solvi.storage`, `solvi.diff`, `solvi.testing`, `solvi.honesty` and
+  `solvi.check`. Local preview: `uv sync --group docs && uv run mkdocs serve`.
+- The Markdown files are unchanged and still read as before on GitHub; `tools/mkdocs_hooks.py` adapts them at build time.
+  The guide becomes one page per chapter; links to `guide.md#anchor` (and `#anchor` inside the guide) go to the chapter
+  that has the anchor, and `guide/#anchor` on the site forwards there, so every existing guide anchor keeps working.
+  Links to scripts and folders that are not pages (`examples/*.py`, gallery entries, `LICENSE`) point to GitHub.
+- `.github/workflows/docs.yml`: `mkdocs build --strict` on every pull request (a broken link, a missing anchor or a
+  link to a file not in the repository fails it); on a release tag (`v*`) the site is deployed to GitHub Pages.
+- A `docs` dependency group (mkdocs, mkdocs-material, mkdocstrings[python]).
+
 ## 0.6.0 — 2026-09-28 — serving, catalog lint, several models, async, measured costs
 
 ### Async execution: aask
