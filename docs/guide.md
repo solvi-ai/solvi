@@ -1736,6 +1736,14 @@ in it is executed, and the functions that run are the catalog's, planned by the 
 > grounds an argument that must come from the user, and your policies always apply. Detecting injected instructions in
 > text is a heuristic second line and is not sufficient on its own. Three adversarial reviews before this release found
 > and fixed bypasses in message formats of specific frameworks; report new ones as security issues (SECURITY.md).
+>
+> **Measured.** On the AgentDojo benchmark (97 agent tasks, five kinds of prompt injection in tool outputs, two open
+> models), the guard with default settings cut successful attacks by 84–91%: every attack that needed an attacker's
+> account number, address or link was stopped, and a check takes about 2 ms. The cost is utility: requiring payees,
+> amounts and recipients to come from the user's own words blocked 17–26% of honest tasks that take these values from a
+> file or an email, so declare user-only arguments where that trade is acceptable. Attacks that still pass are actions
+> with no user-supplied argument (booking a hotel, creating a calendar event, visiting a URL), instructions pasted into
+> the user's own message (`scan_user=True` catches these), and wordings the text heuristic does not recognise.
 
 An LLM agent calls tools: it pays invoices, writes files, sends e-mails. With `solvi.agents` the agent does not call
 them: it **proposes** a call — `{"name": "send_payment", "arguments": {...}}`, data and never code — and a `Guard` checks
