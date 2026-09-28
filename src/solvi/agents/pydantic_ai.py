@@ -17,7 +17,13 @@ against the conversation so far (`ctx.messages`: system prompts, user prompts, t
   deny      on_deny="retry" (default): ModelRetry with the reasons, so the model can fix the call; "fail": ToolFailed
   escalate  on_escalate="approval" (default): ApprovalRequired — the run ends with DeferredToolRequests (the output type
             must allow it); resume with DeferredToolResults(approvals={id: True}) and the call is made, recorded as
-            approved by a person (guard.resolve); "fail": ToolFailed with the reasons
+            approved by a person (guard.resolve); "fail": ToolFailed with the reasons. An approval covers the call
+            with the arguments and the reasons it was asked for (metadata["approval_key"]): a resumed call that
+            escalates for other reasons (other arguments — ToolApproved(override_args=...) —, a changed fact) is asked
+            again. This binding holds in the process that asked; after a restart the resumed call is approved as is.
+
+The conversation is `ctx.messages`; a user prompt sent in the same request as a tool return is a tool output (that is
+how PydanticAI sends `ToolReturn(content=...)` and MCP tool content), see `context_of`.
 
 A tool the guard does not know is denied; with declare=True it is declared from its JSON schema on first use (the
 guard then checks its types, and any policies that name it). The first parameter of a tool function typed as RunContext
@@ -33,19 +39,31 @@ from pydantic_ai.toolsets import WrapperToolset
 from .guard import Guard, _text
 
 
+_FROM_TOOLS = ("tool-return", "retry-prompt", "builtin-tool-return")
+
+
 def context_of(messages) -> list:
-    """PydanticAI's message history → [(role, text)] for the guard (by each part's part_kind)."""
+    """PydanticAI's message history → [(role, text)] for the guard (by each part's part_kind): system prompts, the user's
+    prompts, tool returns (and a model's built-in tool returns: web search results ...), the model's text.
+
+    A user-prompt part in a request that also holds tool returns or retry prompts is read as a tool output: PydanticAI
+    sends a tool's `ToolReturn(content=...)` and an MCP tool's text or files that way — as a user prompt next to the
+    return — so it is not the user's words (fail closed: a prompt the user wrote in the same request as a tool return is
+    read as a tool output too). A retry prompt's own text (a validation error, the guard's own reasons) is not read:
+    it repeats the rejected values. A compaction (a summary of the history) is the model's."""
     out = []
     for m in messages or ():
-        for p in getattr(m, "parts", ()) or ():
+        parts = list(getattr(m, "parts", ()) or ())
+        from_tools = any(getattr(p, "part_kind", None) in _FROM_TOOLS for p in parts)
+        for p in parts:
             kind = getattr(p, "part_kind", None)
             if kind == "system-prompt":
                 out.append(("system", _text(p.content)))
             elif kind == "user-prompt":
-                out.append(("user", _text(p.content)))
-            elif kind == "tool-return":
+                out.append(("tool" if from_tools else "user", _text(p.content)))
+            elif kind in ("tool-return", "builtin-tool-return"):
                 out.append(("tool", p.model_response_str() if hasattr(p, "model_response_str") else _text(p.content)))
-            elif kind == "text":
+            elif kind in ("text", "compaction"):
                 out.append(("assistant", _text(p.content)))
     return [(r, t) for r, t in out if t]
 
@@ -60,6 +78,7 @@ class GuardedToolset(WrapperToolset):
     on_escalate: str = "approval"
     declare: bool = False
     decisions: list = dataclasses.field(default_factory=list, repr=False)   # every GuardDecision, in order
+    _asked: dict = dataclasses.field(default_factory=dict, repr=False)      # call id → the approval key asked for
 
     def __post_init__(self):
         if not isinstance(self.guard, Guard):
@@ -74,13 +93,18 @@ class GuardedToolset(WrapperToolset):
             g.declare(name, schema=td.parameters_json_schema, description=td.description or "")
         facts = self.facts(ctx) if callable(self.facts) else self.facts
         d = await g.acheck({"name": name, "arguments": tool_args, "id": ctx.tool_call_id}, context_of(ctx.messages), facts)
-        if d.outcome == "escalate" and getattr(ctx, "tool_call_approved", False):
+        asked = self._asked.get(ctx.tool_call_id)
+        if d.outcome == "escalate" and getattr(ctx, "tool_call_approved", False) and asked in (None, d.approval_key()):
+            self._asked.pop(ctx.tool_call_id, None)
             d = g.resolve(d, approve=True, reviewer="pydantic-ai approval", execute=False)
         self.decisions.append(d)
         if d.outcome == "allow":
             return await super().call_tool(name, tool_args, ctx, tool)
         if d.outcome == "escalate" and self.on_escalate == "approval":
-            raise ApprovalRequired(metadata={"solvi": d.to_dict()})
+            # the approval covers this call with these arguments and these reasons: a resumed call that escalates for
+            # other ones (other arguments, a changed fact, a new tool output) is asked again
+            self._asked[ctx.tool_call_id] = d.approval_key()
+            raise ApprovalRequired(metadata={"solvi": d.to_dict(), "approval_key": d.approval_key()})
         if d.outcome == "deny" and self.on_deny == "retry":
             raise ModelRetry(d.message())
         raise ToolFailed(d.message())
