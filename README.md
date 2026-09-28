@@ -231,7 +231,7 @@ Every answer is a value and a confidence, and the types also declare answer prim
   `solvi report decisions.db --html out.html` give an auditor one page per decision or per period, and `solvi.otel.export(res)` puts every step in
   your OpenTelemetry traces. `res.counterfactual("approve")` says what would have changed the answer ("approve if
   amount ≤ 1000 (now 1200)"), re-running only the code with the models' recorded proposals held.
-- **Guarding an agent's tool calls.** The agent proposes `{"name": tool, "arguments": {...}}`; `solvi.agents.Guard` checks
+- **Guarding an agent's tool calls (preview).** The agent proposes `{"name": tool, "arguments": {...}}`; `solvi.agents.Guard` checks
   it — the tool is in the catalog, the arguments validate against its types, the values that must come from the
   conversation are quoted there (and not only from a tool output that says "ignore previous instructions"), your policies
   (limits, roles, allow-lists) are ordinary hard checks, and an optional decider asks "did the user ask for this?" under

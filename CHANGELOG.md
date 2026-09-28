@@ -1,6 +1,11 @@
 # Changelog
 
-## Unreleased (0.7)
+## 0.7.0 — 2026-09-29 — text in, agent guard (preview), several models with an LLM stage, memory and a learning loop (experimental), reports, docs site
+
+The agent guard (`solvi.agents`) ships as a **preview**: its hard line is provenance (a value found only in a tool's
+output never grounds an argument that must come from the user) and your policies; detecting injected instructions in
+text is a heuristic second line. `System.learning` is experimental and off unless you call it. Three code reviews and
+three adversarial passes ran before this release; their fixes are listed under "Fixes before release".
 
 ### Fixes before release (text in, storage, reports)
 

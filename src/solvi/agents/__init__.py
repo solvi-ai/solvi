@@ -1,4 +1,4 @@
-"""solvi.agents — guarding an agent's tool calls: the agent proposes a call, solvi checks it and makes it.
+"""solvi.agents (preview in 0.7) — guarding an agent's tool calls: the agent proposes a call, solvi checks it and makes it.
 
     from solvi.agents import Guard
     guard = Guard(storage="calls.db")

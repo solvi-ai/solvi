@@ -16,7 +16,7 @@ Contents:
 10. [The trace and verification](#the-trace-and-verification)
 11. [Serving: HTTP, MCP and System One](#serving-http-mcp-and-system-one)
 12. [Text in: from a message to a question](#text-in-from-a-message-to-a-question)
-13. [Guarding an agent's tool calls](#guarding-an-agents-tool-calls)
+13. [Guarding an agent's tool calls (preview)](#guarding-an-agents-tool-calls)
 14. [Checking a catalog: solvi check](#checking-a-catalog-solvi-check)
 15. [Grounded decisions: provenance, audit and safeguards](#grounded-decisions-provenance-audit-and-safeguards)
 16. [Printing results: solvi.show](#printing-results-solvishow)
@@ -1731,6 +1731,11 @@ value and quote; a field the turn restates in a form that does not parse becomes
 in it is executed, and the functions that run are the catalog's, planned by the strategist as for any `ask`.
 
 ## Guarding an agent's tool calls
+
+> **Preview in 0.7.** The guard's API may change. Its hard line is provenance: a value found only in a tool's output never
+> grounds an argument that must come from the user, and your policies always apply. Detecting injected instructions in
+> text is a heuristic second line and is not sufficient on its own. Three adversarial reviews before this release found
+> and fixed bypasses in message formats of specific frameworks; report new ones as security issues (SECURITY.md).
 
 An LLM agent calls tools: it pays invoices, writes files, sends e-mails. With `solvi.agents` the agent does not call
 them: it **proposes** a call — `{"name": "send_payment", "arguments": {...}}`, data and never code — and a `Guard` checks
