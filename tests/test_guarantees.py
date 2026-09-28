@@ -118,7 +118,7 @@ def _biased():
 def test_option_order_canonical_and_average_remove_the_callers_order_from_the_answer():
     m = _biased()
     text = "A refund please."
-    given = [m.decision("t", "Team?", "email", o).decide(text).value
+    given = [m.decision("t", "Team?", "email", o, option_order="given").decide(text).value
              for o in (["billing", "technical"], ["technical", "billing"])]
     assert given == ["billing", "technical"]                       # the listed order decides: a position bias
     for mode in ("canonical", "average"):
@@ -161,3 +161,11 @@ def test_the_audit_says_what_the_thresholds_behind_an_answer_promise():
     part.act_guard(_labelled(), risk=0.10)
     txt = str(s.ask(email).audit("route"))
     assert "guarantee   P(answered alone and wrong) ≤ 0.1" in txt and "(crc, n = 240)" in txt
+
+
+def test_by_default_the_callers_order_neither_changes_the_answer_nor_how_it_is_shown():
+    m = _biased()
+    parts = [m.decision("t", "Team?", "email", o) for o in (["billing", "technical"], ["technical", "billing"])]
+    ds = [p.decide("A refund please.") for p in parts]
+    assert ds[0].value == ds[1].value and ds[0].probs["billing"] == pytest.approx(ds[1].probs["billing"])
+    assert list(ds[1].probs) == ["technical", "billing"] and parts[1].options == ["technical", "billing"]

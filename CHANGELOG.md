@@ -22,8 +22,12 @@ promise on inputs like your calibration examples.
 
 ### Safeguards
 
-- `option_order="canonical"` or `"average"` (over rotations of the list) on choice and multi-label decisions: how a caller
-  lists the options cannot change the answer.
+- **Changed default:** choice and multi-label decisions ask the model with the options in sorted order
+  (`option_order="canonical"`), so how a caller lists them cannot change the answer. On an independent stress test
+  (decision-models-under-pressure, 64 options) reordering the options changed 41% of solvi-large's answers in the given
+  order and 0.5% in the canonical one, at about the same accuracy. Options, probabilities and multi-label answers are still
+  shown in the caller's order. `option_order="given"` restores 0.5.0 (and its fingerprints); `"average"` averages over
+  rotations of the list. Parts whose options were not already sorted get a new fingerprint.
 - `min_margin=0.1`: escalate a near tie between the two most probable answers (where a misleading text flips a choice).
 - An answer head with a NaN or infinite feature abstains instead of answering with confidence NaN (found by fuzzing).
 - Quotes proposed by a model are shown in the audit as "in the text; support not checked" (the text match is checked;

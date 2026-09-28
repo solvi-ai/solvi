@@ -331,7 +331,7 @@ def test_an_escalated_decision_falls_back_to_the_next_producer():
 
 def test_calibrate_for_a_target_error_rate():
     m = v2(act=False)
-    part = m.decision("team", "Which team?", "email", TEAMS)
+    part = m.decision("team", "Which team?", "email", TEAMS, option_order="given")
     ex = ([("charged twice, refund", "billing")] * 6 + [("the app shows an error", "technical")] * 6
           + [("a crash and a refund", "billing")] * 2 + [("a crash and a refund", "technical")] * 2)
     info = part.calibrate_for(ex, error=0.05)
@@ -559,7 +559,7 @@ def test_legacy_checkpoint_hashes_and_asks_as_before():
     assert m.weights_fingerprint() == digest("DecideModel", "legacy-1", "Legacy", 1.2, 1.0, 0.3, 0.4)
     stand_in = DecideModel(Legacy(), {"format": "demo stand-in", "temperature": 1.0})       # any other format: as before
     assert stand_in.weights_fingerprint() == digest("DecideModel", "legacy-1", "Legacy", 1.0, 1.0, 0.5, 0.5)
-    part = m.decision("team", "Which team?", "email", TEAMS)
+    part = m.decision("team", "Which team?", "email", TEAMS, option_order="given")   # 0.5.0's order: the same hash
     assert part.fingerprint() == digest("DecisionPart", m.weights_fingerprint(),
                                         {"task": "Which team?", "options": TEAMS, "descriptions": {}, "multi": False,
                                          "other": None}, None)
