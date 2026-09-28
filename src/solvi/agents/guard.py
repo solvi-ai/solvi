@@ -30,10 +30,16 @@ Each tool is a small solvi System with one question, `verdict` ∈ {allow, deny,
 catalog, in this order (a failed hard check decides; when several fail, the first in this order):
 
   arguments_valid              the arguments validate against the tool's types (pydantic; unknown arguments are errors) → deny
-  arguments_grounded           every `ground=` argument is in the conversation as a whole word or number token (a quote
-                               with offsets; an empty string never is) → deny
-  no_injected_arguments        ... and not only in a tool output that carries instruction-like text (solvi.perturb) → escalate
+  arguments_grounded           every `ground=` argument is in the conversation as a token or number token (a quote
+                               with offsets; an empty string never is), in a message of a role in `ground_from` → deny
+  no_injected_arguments        ... and not only in tool outputs when any tool output in the conversation carries
+                               instruction-like text (solvi.perturb.injection_spans) → escalate
   no_instructions_in_tool_outputs   tools with injections="any": no tool output in the conversation carries such text → escalate
+
+The hard guarantee is provenance: an argument grounded only from the user (`ground_from=("user",)`) is never taken from
+a tool output, whatever the output says. Recognising instruction-like text is a heuristic second line (patterns: a
+paraphrase, base64, spaced-out letters pass it) — not sufficient on its own: declare high-impact arguments as
+user-grounded and add policies.
   your policies                ordinary solvi hard checks over the arguments and the facts your app gives (deny first,
                                then escalate); `guard.fn` adds computations they read
   request_authorizes           with an authorizer (a decider's yes / no, act_guard, perturb): "does the conversation
@@ -110,69 +116,142 @@ class ToolCall:
 
 def messages(context) -> list:
     """A conversation → [(role, text)]: a string (one user message); a list of {"role", "content"} dicts (OpenAI,
-    Anthropic, MCP-style; content a string or a list of parts with "text"; {"type": "function_call_output", "output"}
+    Anthropic, MCP-style; content a string, a block or a list of blocks; {"type": "function_call_output", "output"}
     items are tool outputs), (role, text) pairs, or message objects with .type / .role and .content (LangChain). Roles
     are normalized to user, assistant, tool and system; anything unreadable is skipped.
 
-    A content list is read block by block: an Anthropic {"type": "tool_result"} block (or any "*_tool_result") is a tool
-    output even inside a "user" message, and a {"type": "tool_use"} block (or "function_call") is the assistant's —
-    never the user's words, so neither grounds a `ground_from=("user",)` argument, and a tool result gets the injection
-    checks. Consecutive blocks of the same role make one message."""
+    What counts as the user's words is narrow, because a value the user gave is what `ground_from=("user",)` trusts:
+
+    - a message whose `type` names a tool output ("tool", "tool_result", "function_call_output", "function_response",
+      in any letter case, with "-" or camelCase) is a tool output whatever its role;
+    - a content block is read by its type, normalised the same way: a tool result (`tool_result`, any `*_tool_result`,
+      `function_call_output`, `function_response`, `search_result`, ...) is a tool output, a tool use (`tool_use`,
+      `function_call`) the assistant's;
+    - in a user message only text blocks are the user's (a string, `{"type": "text" | "input_text"}`, or a block with a
+      "text" and no type and no "content"); any other block (an image with a caption, a block with "content" and no
+      type, an unknown type) is read as a tool output — never the user's words, and it gets the injection checks.
+
+    Consecutive blocks of the same role make one message."""
+    return [(r, t) for r, t, _ in _messages(context)]
+
+
+class Message(tuple):
+    """A (role, text) message of a Session's context, with a flag: `tainted` — the message, before the session cut it
+    to its size cap, carried instruction-like text (the guard treats it as tainted even if the cut kept none)."""
+    tainted = False
+
+    def __new__(cls, role, text, tainted=False):
+        m = super().__new__(cls, (role, text))
+        m.tainted = bool(tainted)
+        return m
+
+
+def _kind(kind):
+    """A block's or message's type, normalised: lower case, "-", spaces and camelCase humps → "_" ("toolResult",
+    "TOOL-RESULT" → "tool_result"). None when it is not a string."""
+    if not isinstance(kind, str):
+        return None
+    k = re.sub(r"(?<=[a-z0-9])(?=[A-Z])", "_", kind.strip())
+    return re.sub(r"[-\s.]+", "_", k).lower()
+
+
+_TOOL_KINDS = ("tool_result", "function_call_output", "function_response", "function_result", "search_result",
+               "tool_output", "tool_response", "tool_message")
+
+
+def _message_kind_is_tool(kind):
+    k = _kind(kind)
+    return k is not None and (k == "tool" or k.endswith(_TOOL_KINDS))
+
+
+def _messages(context) -> list:
+    """messages(context) with each message's taint flag → [(role, text, tainted)]."""
     if context is None:
         return []
     if isinstance(context, str):
-        return [("user", context)]
+        return [("user", context, False)]
     out = []
     for m in context:
+        tainted = bool(getattr(m, "tainted", False))
         if isinstance(m, (tuple, list)) and len(m) == 2:
             role, content = m
         elif isinstance(m, dict):
-            if m.get("type") == "function_call_output":
-                role, content = "tool", m.get("output")
+            if _message_kind_is_tool(m.get("type")):
+                role, content = "tool", m.get("content") if m.get("content") is not None else m.get("output")
             else:
                 role, content = m.get("role") or m.get("type"), m.get("content")
         else:
-            role = getattr(m, "role", None) or getattr(m, "type", None)
+            kind = getattr(m, "type", None)
             content = getattr(m, "content", None)
+            role = "tool" if _message_kind_is_tool(kind) else (getattr(m, "role", None) or kind)
         role = ROLES.get(str(role).lower()) if role is not None else None
         for r, text in _blocks(role, content):
             if r is not None and text:
-                out.append((r, text))
+                out.append((r, text, tainted))
     return out
 
 
 def _block_role(kind):
-    """The role of a content block by its type: a tool result is the tool's, a tool use the assistant's, else None (the
-    message's own role)."""
-    if not isinstance(kind, str):
+    """The role of a content block by its (normalised) type: a tool result is the tool's, a tool use the assistant's,
+    else None (the message's own role)."""
+    k = _kind(kind)
+    if k is None:
         return None
-    if kind.endswith("tool_result") or kind == "function_call_output":
+    if k == "tool" or k.endswith(_TOOL_KINDS):
         return "tool"
-    if kind.endswith("tool_use") or kind == "function_call":
+    if k.endswith(("tool_use", "tool_call")) or k == "function_call":
         return "assistant"
     return None
 
 
+def _get(c, k):
+    return c.get(k) if isinstance(c, dict) else getattr(c, k, None)
+
+
+def _user_text_block(c, kind):
+    """Is a block of a user message the user's own text? A string, a {"type": "text" | "input_text"} block, or a block
+    with a "text", no type and no "content"."""
+    if isinstance(c, str):
+        return True
+    k = _kind(kind)
+    if k in ("text", "input_text"):
+        return True
+    if k is None and isinstance(c, dict):
+        return "text" in c and "content" not in c
+    return False
+
+
+def _block_text(c):
+    """The text of a non-text block: its content, else its output, else its text."""
+    for k in ("content", "output", "text"):
+        v = _get(c, k)
+        if v is not None:
+            return _text(v)
+    return ""
+
+
 def _blocks(role, content):
-    """A message's content → [(role, text)]: one part for a string; a list of blocks split where a block's type gives it
-    another role (tool_result → tool, tool_use → assistant), consecutive blocks of one role joined."""
+    """A message's content → [(role, text)]: one part for a string; a block (a dict) is a list of one; a list of blocks
+    split where a block's type gives it another role (tool_result → tool, tool_use → assistant; in a user message
+    anything but a text block → tool), consecutive blocks of one role joined."""
+    if isinstance(content, dict):
+        content = [content]
     if not isinstance(content, (list, tuple)):
         return [(role, _text(content))]
     out = []
     for c in content:
         kind = c.get("type") if isinstance(c, dict) else getattr(c, "type", None)
-        r = _block_role(kind) or role
-        if r == "assistant" and _block_role(kind) == "assistant":
-            get = c.get if isinstance(c, dict) else (lambda k, _c=c: getattr(_c, k, None))
-            args = next((get(k) for k in ("input", "arguments", "args") if get(k) is not None), {})
-            t = f"{get('name')}({args if isinstance(args, str) else json.dumps(args, ensure_ascii=False, default=str)})"
-        elif isinstance(c, dict) and _block_role(kind) == "tool":
-            t = _text(c.get("content") if "content" in c else c.get("output"))
-        elif _block_role(kind) == "tool":
-            t = _text(getattr(c, "content", None) if getattr(c, "content", None) is not None
-                      else getattr(c, "output", None))
+        br = _block_role(kind)
+        if br == "assistant":
+            r = "assistant"
+            args = next((_get(c, k) for k in ("input", "arguments", "args") if _get(c, k) is not None), {})
+            t = f"{_get(c, 'name')}({args if isinstance(args, str) else json.dumps(args, ensure_ascii=False, default=str)})"
+        elif br == "tool":
+            r, t = "tool", _block_text(c)
+        elif role == "user" and not _user_text_block(c, kind):
+            r, t = "tool", _block_text(c)                 # not the user's words: an attachment, a result, unknown
         else:
-            t = _text([c])
+            r, t = role, _text([c])
         if not t:
             continue
         if out and out[-1][0] == r:
@@ -206,18 +285,19 @@ def _text(content):
 
 def conversation(context):
     """A conversation → (text, [[start, end, role]], the user's messages as one text). A plain string is the text itself
-    (one user message); messages are written one per line as "[role] text"."""
+    (one user message); messages are written one per line as "[role] text". A tool output a Session flagged as tainted
+    (its instruction-like text was cut away with the rest of it) is [start, end, "tool", True]."""
     if isinstance(context, str):
         return context, [[0, len(context), "user"]], context
     parts, roles, at = [], [], 0
-    for role, text in messages(context):
+    for role, text, tainted in _messages(context):
         head = f"[{role}] "
         s = at + len(head)
-        roles.append([s, s + len(text), role])
+        roles.append([s, s + len(text), role] + ([True] if tainted and role == "tool" else []))
         parts.append(head + text)
         at = s + len(text) + 1
     text = "\n".join(parts)
-    return text, roles, "\n".join(text[s:e] for s, e, r in roles if r == "user")
+    return text, roles, "\n".join(text[x[0]:x[1]] for x in roles if x[2] == "user")
 
 
 # ------------------------------------------------------------------------------------------------ tools
@@ -402,21 +482,20 @@ def _grounding(spec, matchers=None):
 
     def grounding(call_arguments, conversation, conversation_roles) -> dict:
         """Where each argument that must come from the conversation is quoted: {"found": {argument: [[text, start, end,
-        role]]}, "missing": [...], "injected": [...]}. A string is found as a whole word (not inside a longer word; see
-        MATCHERS), a number as a number token (thousands separators allowed; not a group of a spaced identifier), a list
-        item by item; an empty or whitespace-only string is never grounded. The first occurrence in a message of an
-        allowed role wins, one in a tool output with instruction-like text (solvi.perturb) only when there is no other."""
-        from ..perturb import instruction_spans
+        role]]}, "missing": [...], "injected": [...]}. A string is found as a token (not inside a longer word or
+        address; see MATCHERS), a number as a number token (not a group of a longer identifier), a list item by item; an
+        empty or whitespace-only string is never grounded. The first occurrence in a message of an allowed role wins.
+        Taint is context-wide: when any tool output in the conversation carries instruction-like text
+        (solvi.perturb.injection_spans), a value found only in tool outputs is injected."""
         rules = json.loads(spec)
-        roles = [(s, e, r) for s, e, r in conversation_roles]
-        tainted = {}
+        roles = [(x[0], x[1], x[2]) for x in conversation_roles]
+        taints = _taints(conversation, conversation_roles)
+        anywhere = [t for ts in taints.values() for t in ts]
 
         def taint(i):
-            if i not in tainted:
-                s, e, r = roles[i]
-                sp = instruction_spans(conversation[s:e], actions=True) if r == "tool" else []
-                tainted[i] = [conversation[s + a:s + b] for a, b in sp]
-            return tainted[i]
+            if roles[i][2] != "tool":
+                return []
+            return taints.get(i) or anywhere
 
         def where(a, b):
             for i, (s, e, _) in enumerate(roles):
@@ -432,7 +511,7 @@ def _grounding(spec, matchers=None):
             match = matchers[arg] if arg in matchers else rules["match"][arg]
             quotes = []
             for item in items:
-                if isinstance(item, str) and not item.strip():
+                if isinstance(item, str) and not _visible(item).strip():
                     missing.append(f"{arg}={_short(item)} (empty)")
                     continue
                 best = None
@@ -450,7 +529,10 @@ def _grounding(spec, matchers=None):
                     continue
                 if best[4]:
                     injected.append(f"{arg}={_short(item)} appears only in a tool output that says "
-                                    + "; ".join(_short(x, 80) for x in best[4]))
+                                    + "; ".join(_short(x, 80) for x in best[4])
+                                    if taints.get(where(best[1], best[2])) else
+                                    f"{arg}={_short(item)} appears only in tool outputs, and a tool output in the "
+                                    f"conversation says " + "; ".join(_short(x, 80) for x in best[4]))
                 quotes.append(best[:4])
             if quotes:
                 found[arg] = quotes
@@ -458,21 +540,48 @@ def _grounding(spec, matchers=None):
     return grounding
 
 
-_NUMBER = re.compile(r"(?<![\w.,])-?(?:\d{1,3}(?:[,\u00a0\u202f' ]\d{3})+(?![\d])|\d+)(?:\.\d+)?(?![\w]|[.,]\d)")
+def _taints(conversation, conversation_roles):
+    """The instruction-like passages of each tool output in the conversation → {message index: [text]} (only tainted
+    ones): solvi.perturb.injection_spans, or — for an output a Session flagged before cutting it — a note saying so."""
+    from ..perturb import injection_spans
+    out = {}
+    for i, x in enumerate(conversation_roles):
+        s, e, r = x[0], x[1], x[2]
+        if r != "tool":
+            continue
+        found = [conversation[s + a:s + b] for a, b in injection_spans(conversation[s:e])]
+        if not found and len(x) > 3 and x[3]:
+            found = ["(instruction-like text, cut from the kept context)"]
+        if found:
+            out[i] = found
+    return out
+
+
+_SEP = r"[,']"                                           # thousands separators a number may use by default
+_SPACE_SEP = r"[,'   ]"                          # ... and with the "spaced" matcher
+_NUMBER_RX = r"(?<![\w.,])-?(?:\d{1,3}(?:SEP\d{3})+(?![\d])|\d+)(?:\.\d+)?(?![\w%‰°]|[.,]\d)"
+_NUMBER = re.compile(_NUMBER_RX.replace("SEP", _SEP))
+_NUMBER_SPACED = re.compile(_NUMBER_RX.replace("SEP", _SPACE_SEP))
 _WHOLE_EDGE = set(" \t\r\n\"'`()[]{}<>,;:!?")
-MATCHERS = ("token", "whole", "substring")
+_JOIN = set(".@-/:_")                                    # joins two tokens into one identifier ("x.org", "INV-250")
+MATCHERS = ("token", "whole", "substring", "spaced")
 
 
 def _glued(text, a, b):
-    """Is the number at text[a:b] one group of a longer identifier — next to a token with a digit across a single " ",
-    "-" or "/" ("DE89 3704 0044", "555-1234", "2024-03-15")?"""
-    if a >= 2 and text[a - 1] in " -/":
+    """Is the number (or digit string) at text[a:b] part of a longer identifier — joined to an alphanumeric token by
+    ". @ - / : _" ("INV-250", "12:30", "250-gram", "v1.250"), or next to a token with a digit across a single " "
+    ("DE89 3704 0044", "3 250 EUR")?"""
+    if a >= 2 and text[a - 1] in _JOIN and text[a - 2].isalnum():
+        return True
+    if b + 1 < len(text) and text[b] in _JOIN and text[b + 1].isalnum():
+        return True
+    if a >= 2 and text[a - 1] == " ":
         k = a - 1
         while k > 0 and text[k - 1].isalnum():
             k -= 1
         if any(c.isdigit() for c in text[k:a - 1]):
             return True
-    if b + 1 < len(text) and text[b] in " -/":
+    if b + 1 < len(text) and text[b] == " ":
         k = b + 1
         while k < len(text) and text[k].isalnum():
             k += 1
@@ -490,42 +599,78 @@ def _bounded(text, a, b, s, match):
         ok_before = before == "" or before in _WHOLE_EDGE
         ok_after = after == "" or after in _WHOLE_EDGE or (after == "." and (b + 1 >= len(text) or text[b + 1].isspace()))
         return ok_before and ok_after
-    word = re.compile(r"\w")                                 # "token": not inside a longer word
-    return not (word.match(s[0]) and before and word.match(before)) and not (word.match(s[-1]) and after
-                                                                              and word.match(after))
+    word = re.compile(r"\w")                                 # "token": not inside a longer word or address
+    if (word.match(s[0]) and before and word.match(before)) or (word.match(s[-1]) and after and word.match(after)):
+        return False
+    if before in _JOIN and a >= 2 and word.match(text[a - 2]):        # "evil.bob@x.org", "x-acct"
+        return False
+    if after in _JOIN and b + 1 < len(text) and word.match(text[b + 1]):   # "bob@x.org.evil", "acct-12"
+        return False
+    return not (s.isdigit() and _glued(text, a, b))          # a digit string: not a group of a longer identifier
+
+
+_CF = None
+
+
+def _cf():
+    global _CF
+    if _CF is None:
+        import sys
+        import unicodedata
+        _CF = re.compile("[" + "".join(re.escape(chr(c)) for c in range(sys.maxunicode + 1)
+                                       if unicodedata.category(chr(c)) == "Cf") + "]")
+    return _CF
+
+
+def _visible(text):
+    """The text without format characters (Unicode Cf: zero-width spaces and joiners, soft hyphens, direction marks)."""
+    return _cf().sub("", text)
 
 
 def _occurrences(v, text, match="token"):
     """Where a value is written in a text → [(start, end)]: a string as a whole word under `match` ("token": not inside a
-    longer word — "DE8937" is not found in "DE89370400…"; "whole": delimited by whitespace, quotes, brackets or
-    punctuation — "x.org" is not found in "alice@x.org"; "substring": anywhere; a callable(value, text) → [(start,
-    end)] decides itself); a number as a number token (not inside a word; thousands separators "1,250.50", "1 250",
-    "1'250" allowed; 250 matches "250.00"; not a group of a spaced or dashed identifier — 3704 is not found in "DE89 3704
-    0044"); an Enum by its value; anything else by str(). An empty or whitespace-only string is found nowhere."""
+    longer word, nor joined to one by ". @ - / : _" — "DE8937" is not found in "DE89370400…", "bob@x.org" not in
+    "bob@x.org.evil", "acct" not in "acct-12", a digit string not as a group of a spaced IBAN; "whole": delimited by
+    whitespace, quotes, brackets or punctuation — "x.org" is not found in "alice@x.org"; "substring": anywhere; a
+    callable(value, text) → [(start, end)] decides itself); a number as a number token (not inside a word; thousands
+    separators "1,250.50", "1'250" allowed — "1 250" only with the "spaced" matcher; 250 matches "250.00"; not 250 in
+    "250%" or "250kg"; not a group of a longer identifier — 3704 is not found in "DE89 3704 0044", 250 not in "INV-250",
+    30 not in "12:30"); an Enum by its value; anything else by str(). Format characters (zero-width spaces, ...) are
+    read as absent, so one cannot make a boundary. An empty or whitespace-only string is found nowhere."""
     import enum
     if isinstance(v, enum.Enum):
         v = v.value
+    if callable(match):
+        s = str(v)
+        if not s.strip():
+            return []
+        return [(int(a), int(b)) for a, b in (match(v, text) or ())
+                if 0 <= int(a) < int(b) <= len(text)]
+    keep = None
+    if _cf().search(text):                                # read the text without format characters, map back
+        keep = [i for i, ch in enumerate(text) if not _cf().match(ch)]
+        text = "".join(text[i] for i in keep)
+    out = []
     if isinstance(v, (int, float)) and not isinstance(v, bool):
-        out = []
-        for m in _NUMBER.finditer(text):
+        rx = _NUMBER_SPACED if match == "spaced" else _NUMBER
+        for m in rx.finditer(text):
             try:
-                x = float(re.sub(r"[,\u00a0\u202f' ]", "", m.group(0)))
+                x = float(re.sub(r"[,  ' ]", "", m.group(0)))
             except ValueError:
                 continue
             if abs(x - float(v)) <= 1e-9 * max(1.0, abs(float(v))) and not _glued(text, m.start(), m.end()):
                 out.append((m.start(), m.end()))
-        return out
-    s = str(v)
-    if not s.strip():
-        return []
-    if callable(match):
-        return [(int(a), int(b)) for a, b in (match(v, text) or ())
-                if 0 <= int(a) < int(b) <= len(text)]
-    out, i = [], text.find(s)
-    while i >= 0:
-        if _bounded(text, i, i + len(s), s, match):
-            out.append((i, i + len(s)))
-        i = text.find(s, i + 1)
+    else:
+        s = _visible(str(v))
+        if not s.strip():
+            return []
+        i = text.find(s)
+        while i >= 0:
+            if _bounded(text, i, i + len(s), s, match):
+                out.append((i, i + len(s)))
+            i = text.find(s, i + 1)
+    if keep is not None:
+        out = [(keep[a], keep[b - 1] + 1) for a, b in out]
     return out
 
 
@@ -565,9 +710,8 @@ def no_injected_arguments(grounding) -> bool:
 
 
 def no_instructions_in_tool_outputs(conversation, conversation_roles) -> bool:
-    """No tool output in the conversation carries instruction-like text (solvi.perturb)."""
-    from ..perturb import instruction_spans
-    return not any(r == "tool" and instruction_spans(conversation[s:e], actions=True) for s, e, r in conversation_roles)
+    """No tool output in the conversation carries instruction-like text (solvi.perturb.injection_spans)."""
+    return not _taints(conversation, conversation_roles)
 
 
 def request_authorizes(authorized) -> bool:
@@ -699,12 +843,13 @@ class Guard:
 
         ground: arguments that must be quoted from the conversation (a string as a whole word; numbers as number tokens;
         a list item by item; an empty string never) — a list of names, or {name: matcher}: "token" (the default: not
-        inside a longer word), "whole" (delimited by whitespace, quotes, brackets or punctuation: for IBANs, e-mails,
-        paths), "substring" (anywhere), or a callable(value, text) → [(start, end)] of the value's occurrences;
+        inside a longer word, nor joined to one by ". @ - / : _"), "whole" (delimited by whitespace, quotes, brackets or
+        punctuation: for IBANs, e-mails, paths), "spaced" (as "token", and a number may group its thousands with spaces:
+        "1 250"), "substring" (anywhere), or a callable(value, text) → [(start, end)] of the value's occurrences;
         ground_from: the roles of the messages they may be quoted from (default: the user's, tool outputs and system
         messages — never the assistant's own words; ("user",) for values only the user may give, like a payee).
-        injections: "grounded" (default: a grounded argument found only in a tool output with instruction-like text
-        escalates), "any" (also: any instruction-like text in a tool output escalates the call — for high-impact
+        injections: "grounded" (default: a grounded argument found only in tool outputs escalates when any tool
+        output in the conversation has instruction-like text), "any" (also: any instruction-like text in a tool output escalates the call — for high-impact
         tools), "off". authorize: ask the guard's authorizer about this tool (default: when the guard has one)."""
         def add(f):
             n = name or (f.__name__ if f is not None else None)
@@ -1163,28 +1308,32 @@ class Session:
     made call's result as a tool output (`add` appends other messages).
 
     max_messages / max_chars: the context kept for checking (None: all of it) — the oldest messages are dropped first,
-    and a message longer than max_chars keeps its beginning plus any instruction-like sentence of the rest (so the taint
-    of a long tool output is not cut away). Every decision's trace records the context it was checked against, so the cap
-    also bounds what each stored decision holds; a value or an instruction that has left the window no longer grounds a
-    value or taints a call."""
+    and a message longer than max_chars keeps its beginning plus any instruction-like passage of the rest. A tool output
+    that carried instruction-like text before the cut is flagged as tainted (`Message.tainted`), so its taint survives
+    even if the cut kept none of it. Every decision's trace records the context it was checked against, so the cap also
+    bounds what each stored decision holds; a value or an instruction that has left the window no longer grounds a value
+    or taints a call."""
 
     def __init__(self, guard, context=None, facts=None, max_messages=None, max_chars=None):
         self.guard = guard
         self.max_messages, self.max_chars = max_messages, max_chars
         self.context = []
-        for r, t in messages(context):
-            self._append(r, t)
+        for r, t, tainted in _messages(context):
+            self._append(r, t, tainted)
         self.facts = dict(facts or {})
         self.decisions = []
 
-    def _append(self, role, text):
+    def _append(self, role, text, tainted=False):
         if self.max_chars is not None and len(text) > self.max_chars:
+            if role == "tool" and not tainted:
+                from ..perturb import injection_spans
+                tainted = bool(injection_spans(text))      # on the whole message, before the cut
             text = _clip(text, self.max_chars)
-        self.context.append((role, text))
+        self.context.append(Message(role, text, tainted and role == "tool"))
         if self.max_messages is not None and len(self.context) > self.max_messages:
             del self.context[:len(self.context) - self.max_messages]
         if self.max_chars is not None:
-            while len(self.context) > 1 and sum(len(t) for _, t in self.context) > self.max_chars:
+            while len(self.context) > 1 and sum(len(m[1]) for m in self.context) > self.max_chars:
                 del self.context[0]
 
     def add(self, role, text):
@@ -1212,18 +1361,27 @@ class Session:
 
 
 def _clip(text, n):
-    """A text cut to about n characters: its beginning, and the instruction-like passages of the rest (whose taint must
-    survive the cut) — a long one by its 400-character windows that are instruction-like themselves."""
-    from ..perturb import instruction_like, instruction_spans
-    rest = []
-    for a, b in instruction_spans(text, actions=True):
-        if b <= n:
-            continue
-        a = max(a, n)
-        if b - a <= 400:
-            rest.append(text[a:b])
-            continue
-        wins = [text[i:i + 400] for i in range(a, b, 200)]
-        rest += [w for w in wins if instruction_like(w, actions=True)] or [text[a:a + 400]]
-    tail = "\n[…]" + ("\n" + "\n".join(rest) if rest else "")
-    return text[: max(0, n - len(tail))] + tail
+    """A text cut to at most n characters: its beginning, and the instruction-like passages of the rest (whose taint must
+    survive the cut) — every passage that does not end inside the kept beginning, whole (from its own start, so the cut
+    never halves it); a long one by its overlapping windows (up to 400 characters, at most half the cap) that are
+    instruction-like themselves. What still does not fit is cut; the session's taint flag carries what was lost."""
+    from ..perturb import injection_spans, instruction_rule
+    spans = injection_spans(text)
+    w = max(40, min(400, n // 2))
+    head, tail = n, "\n[…]"
+    for _ in range(4):                                   # the kept beginning shrinks as the tail grows: settle it
+        rest = []
+        for a, b in spans:
+            if b <= head:
+                continue
+            if b - a <= w:
+                rest.append(text[a:b])
+                continue
+            wins = [text[i:i + w] for i in range(a, b, w // 2)]
+            rest += [x for x in wins if instruction_rule(x, actions=True)] or [text[a:a + w]]
+        tail = ("\n[…]" + ("\n" + "\n".join(rest) if rest else ""))[:n]
+        new_head = max(0, n - len(tail))
+        if new_head == head:
+            break
+        head = new_head
+    return text[:max(0, n - len(tail))] + tail
