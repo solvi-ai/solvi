@@ -2,6 +2,11 @@
 
 ## Unreleased (0.7)
 
+
+### Fixes in the learning loop
+
+- Labels are split into train / calibration / held-out by a hash of their question and input, not of the stored id
+  (whose hash covers measured timings): the split is the same in every run, and the loop's tests no longer flake.
 ### `solvi serve`: security
 
 - **Bearer token**: `--token` / `$SOLVI_SERVE_TOKEN` (`create_app(token=...)`) — every HTTP request needs

@@ -61,8 +61,15 @@ class ExperimentalWarning(UserWarning):
     """A feature whose API and behaviour may still change."""
 
 
+def content_key(question, init):
+    """What a label's split is decided by: the question and a hash of its input — never a stored id, whose hash covers
+    measured timings and so differs from run to run."""
+    from .runtime import vhash
+    return f"{question}|{vhash(dict(init or {}))}"
+
+
 def split_of(label_id, holdout=0.3, calibration=0.2):
-    """A label's split by a hash of its id — "holdout", "calibration" or "train" — the same in every run."""
+    """A label's split by a hash of its key (content_key) — "holdout", "calibration" or "train" — the same in every run."""
     h = int(hashlib.sha256(("solvi-learning:" + str(label_id)).encode()).hexdigest()[:8], 16) / 2 ** 32
     return "holdout" if h < holdout else "calibration" if h < holdout + calibration else "train"
 
@@ -180,7 +187,7 @@ class Learning:
                 rejected.append((c["id"], f"{type(e).__name__}: {e}"))
                 continue
             out.append(Label(c["id"], q, dict(c["init"]), ans, c.get("source", "human"), c.get("by"), c.get("of"),
-                             c.get("time"), split_of(c["id"], self.holdout, self.calibration)))
+                             c.get("time"), split_of(content_key(q, c["init"]), self.holdout, self.calibration)))
             seen.add((c.get("of"), q))
         if self.harvest_rules:
             for s in self.storage.iter():
@@ -218,7 +225,8 @@ class Learning:
             return None
         init = (resp.get("trace") or {}).get("init") or {}
         lid = f"{s.id}:{q}"
-        return Label(lid, q, dict(init), ans, "rule", None, s.id, s.time, split_of(lid, self.holdout, self.calibration))
+        return Label(lid, q, dict(init), ans, "rule", None, s.id, s.time,
+                     split_of(content_key(q, init), self.holdout, self.calibration))
 
     def _text(self, q, init):
         part = self.parts[q]
@@ -495,7 +503,10 @@ class Learning:
 
     # --- evaluation
     def _shadow_set(self):
-        rows = [s for s in self.storage.iter() if split_of(s.id, self.holdout, self.calibration) == "holdout"]
+        def held(s):                                 # a stored decision is held out when its input is (any question)
+            init = ((s.data.get("response") or {}).get("trace") or {}).get("init") or {}
+            return split_of(content_key("", init), self.holdout, self.calibration) == "holdout"
+        rows = [s for s in self.storage.iter() if held(s)]
         return rows[-self.gates["shadow_limit"]:] if self.gates["shadow_limit"] else []
 
     def _honesty_cases(self):
