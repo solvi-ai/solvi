@@ -14,10 +14,11 @@ Contents:
 8. [Questions without a rule: fit, learn_rule, teach](#questions-without-a-rule-fit-learn_rule-teach)
 9. [Confidence, calibration and abstention](#confidence-calibration-and-abstention)
 10. [The trace and verification](#the-trace-and-verification)
-11. [Grounded decisions: provenance, audit and safeguards](#grounded-decisions-provenance-audit-and-safeguards)
-12. [Printing results: solvi.show](#printing-results-solvishow)
-13. [Extracting fields from documents](#extracting-fields-from-documents)
-14. [Guarantees and limitations](#guarantees-and-limitations)
+11. [Serving: HTTP, MCP and System One](#serving-http-mcp-and-system-one)
+12. [Grounded decisions: provenance, audit and safeguards](#grounded-decisions-provenance-audit-and-safeguards)
+13. [Printing results: solvi.show](#printing-results-solvishow)
+14. [Extracting fields from documents](#extracting-fields-from-documents)
+15. [Guarantees and limitations](#guarantees-and-limitations)
 
 ## Concepts
 
@@ -39,6 +40,8 @@ status.
 pip install solvi              # core: numpy, scipy, pydantic (imported only for typed parts and serialization)
 pip install "solvi[model]"     # + torch, transformers, for the ModernBERT extractors (solvi.extract_*) and the decider
 pip install "solvi[onnx]"      # + onnxruntime, tokenizers: the decider (solvi.decide) on CPU without torch
+pip install "solvi[serve]"     # + fastapi, uvicorn: solvi serve over HTTP
+pip install "solvi[mcp]"       # + the official MCP SDK for solvi serve --mcp (without it, a built-in stdio server is used)
 ```
 
 For development, from a clone: `uv sync`, then `uv run pytest`.
@@ -1082,6 +1085,70 @@ The candidate runs on the same input after the current system; its response is s
 `{"shadow_of": the current response's stored id, "current_catalog", "diff"}`, never in its own storage, and a failing
 candidate is counted (`shadow.stats["errors"]`), never raised. The candidate runs in the same thread: it adds its own
 time to each ask.
+
+## Serving: HTTP, MCP and System One
+
+`solvi serve` puts a System behind an HTTP API, or behind an MCP server so that an agent calls its questions as tools.
+The System is named as for `solvi diff`: `module:attribute` or `file.py:attribute` (a System, or a function returning one).
+
+```
+solvi serve myapp/decisions.py:system --store decisions.db     # HTTP on 127.0.0.1:8000 (--host, --port); every answer stored
+solvi serve myapp.decisions:system --mcp                       # an MCP server over stdio: each question is a tool
+solvi serve myapp.decisions:system --decider solvi-ai/solvi-base   # + POST /v1/systemone
+```
+
+| Endpoint | What it does |
+|---|---|
+| `POST /ask` | `{"state": {...}, "questions": [...] (default: all), "store": true}` → `Response.to_dict()` plus `stored_id` and `trace_hash` |
+| `POST /ask/{question}` | the input state itself as the body → the same response, for that question |
+| `GET /questions` | each question: its text, answer type and the JSON schema of the input state it reads |
+| `GET /health` | solvi's version, the questions, the catalog's fingerprint, the store, the decider |
+| `POST /v1/systemone` | the System One API answered by a solvi decider (`--decider`) |
+
+The OpenAPI document (`/openapi.json`, `/docs`) is built from the same pydantic types as the rest of solvi: a question's
+input schema lists the given facts its flow reads — typed by `System(inputs=...)`, else by the types its typed readers
+declare — with the ones it cannot be answered without as required (`solvi.serve.question_inputs`); its response schema
+has each answer as its closed set (`System.response_schema`). The web layer does not validate the state: it goes to
+`System.ask` as it is, so a wrong-typed field is handled as solvi handles it — the fact is missing, the answers that need
+it abstain, and the response says why (safeguard `type_rejected`) — rather than as a 422. Unknown questions are a 404.
+With `--store` (or a System built with `storage=`), every answer is saved with its whole trace; `stored_id` finds it
+(`store.get(id)`) and `solvi verify` / `replay` / `diff` work on the store. Asks are served one at a time: a System
+updates its measured costs and stats in place.
+
+**MCP.** With `--mcp`, each question is a tool: its input schema is the question's input state schema, and a call returns
+the question's result — answer, confidence, status, why, guard, evidence, the safeguards that fired — with `stored_id`
+and `trace_hash`, as JSON text and as structured content. An abstention is a result, not an error; an exception is a tool
+error (`isError`). The official `mcp` SDK (2.x, `solvi[mcp]`) serves it when installed; otherwise solvi's built-in stdio
+JSON-RPC server answers `initialize`, `ping`, `tools/list` and `tools/call` (`--mcp-impl sdk|builtin` chooses). For an
+MCP client:
+
+```json
+{"mcpServers": {"refunds": {"command": "solvi", "args": ["serve", "/path/to/refunds.py:system", "--mcp",
+                                                         "--store", "/path/to/decisions.db"]}}}
+```
+
+**System One.** With `--decider` (a checkpoint folder or a Hugging Face id; `--backend onnx|torch`), the same server
+answers `POST /v1/systemone` — the protocol `solvi.systemone` speaks as a client — so solvi can stand where a Jev or Kev
+client points:
+
+```
+{"state": "I was charged twice" (or a JSON state), "model": "...",
+ "questions": {"team":   {"type": "choice", "instructions": "Which team?", "criteria": {"billing": "Charges", "shipping": null}},
+               "urgent": {"type": "noul",   "instructions": "Urgent?"},
+               "level":  {"type": "score",  "instructions": "Priority?", "criteria": {"low": null, "medium": null, "high": null}}}}
+→ {"model": "<--model-name, default the decider's id>", "usage": {"questions": 3, "passes": 3}, "latency_ms": 41.2,
+   "answers": {"team":   {"type": "choice", "choice": "billing", "confidence": 0.93, "probabilities": {...}},
+               "urgent": {"type": "noul", "noul": 0.12},
+               "level":  {"type": "score", "score": 0.4, "confidence": 0.7, "legend": ["low", "medium", "high"],
+                          "probabilities": {...}}}}
+```
+
+`noul` is P(yes); a score's `score` is the expected level index (0 = `legend[0]`, the lowest); criteria are the options
+in order, with optional descriptions. Every option is scored ("other" / "none" included: the API has no abstain option),
+and the answers carry no act / escalate signal: thresholds (`act_guard` and the rest) belong to the client, where
+`systemone(url, model)` turns the probabilities back into a decider. `solvi serve --decider X` without a System serves
+only this endpoint. Without FastAPI, `solvi.serve.Service(system, decider)` answers the same requests in-process
+(`.ask(state)`, `.systemone(body)`, `.tool(question, state)`).
 
 ## Grounded decisions: provenance, audit and safeguards
 

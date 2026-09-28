@@ -7,10 +7,11 @@
     solvi verify decisions.db [--anchor COUNT:HASH]
     solvi replay decisions.db --system myapp.decisions:system
     solvi diff   decisions.db --system myapp.decisions_v2:build_system [--question Q] [--since ISO] [--limit N] [--json]
+    solvi serve  myapp.decisions:system [--store decisions.db] [--decider ID] [--port 8000] [--mcp]   (solvi.serve)
 
 --system names a System: "package.module:attribute" or "path/to/file.py:attribute", where the attribute is a System or a
-function without arguments that returns one. Exit status: 0 — verified / everything replays / nothing changes; 1 —
-problems / mismatches / changes; 2 — usage errors."""
+function without arguments that returns one (`solvi serve` takes it as its first argument). Exit status: 0 — verified /
+everything replays / nothing changes; 1 — problems / mismatches / changes; 2 — usage errors."""
 from __future__ import annotations
 
 import argparse
@@ -124,7 +125,8 @@ def main(argv=None):
         return 0
     if argv and argv[0] in COMMANDS:                  # commands with their own option parsers
         return importlib.import_module(COMMANDS[argv[0]][0]).main(argv[1:])
-    p = argparse.ArgumentParser(prog="solvi", description="solvi: test, honesty; verify, replay and diff stored decisions",
+    p = argparse.ArgumentParser(prog="solvi", description="solvi: test, honesty; verify, replay and diff stored decisions; "
+                                                          "serve a system",
                                 epilog="also: " + "; ".join(f"solvi {k} — {w}" for k, (_, w) in COMMANDS.items()))
     sub = p.add_subparsers(dest="cmd", required=True)
 
@@ -147,11 +149,13 @@ def main(argv=None):
     d.add_argument("--limit", type=int, help="at most this many stored decisions")
     d.add_argument("--confidence", type=float, default=0.01,
                    help="report a confidence change above this (default 0.01; negative: ignore confidence)")
+    from .serve import add_parser as serve_parser, cmd_serve
+    serve_parser(sub)
     try:
         a = p.parse_args(argv)
     except SystemExit as e:                            # --help: 0; usage errors: 2 — returned, not raised
         return e.code if isinstance(e.code, int) else 2
-    return {"verify": cmd_verify, "replay": cmd_replay, "diff": cmd_diff}[a.cmd](a)
+    return {"verify": cmd_verify, "replay": cmd_replay, "diff": cmd_diff, "serve": cmd_serve}[a.cmd](a)
 
 
 if __name__ == "__main__":

@@ -23,6 +23,8 @@ dependencies = ["numpy", "scipy", "pydantic>=2"]
 [project.optional-dependencies]
 model = ["torch", "transformers"]   # model-based extraction from text (solvi.extract_*), the decider (solvi.decide), the model strategist and name matcher (solvi.strategy_model, solvi.aliases) — torch backends
 onnx = ["onnxruntime", "tokenizers", "huggingface_hub"]   # the decider, the model strategist and the name matcher without torch (backend="onnx")
+serve = ["fastapi>=0.100", "uvicorn"]   # solvi serve: the questions over HTTP, POST /v1/systemone
+mcp = ["mcp>=2"]   # solvi serve --mcp with the official MCP SDK (without it: a built-in stdio server)
 
 [project.scripts]
 solvi = "solvi.cli:main"
@@ -41,7 +43,7 @@ requires = ["uv_build>=0.9.17,<0.10.0"]
 build-backend = "uv_build"
 
 [dependency-groups]
-dev = ["pytest>=8"]
+dev = ["pytest>=8", "fastapi>=0.141.1", "uvicorn>=0.54.0", "mcp>=2.2.0", "httpx2>=2.13.1"]   # httpx2: FastAPI's TestClient
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

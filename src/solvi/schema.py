@@ -425,10 +425,13 @@ def load(cls, data, catalog=None):
 
 
 # --- a system's own response schema
-def response_schema(system):
-    """ResponseModel's JSON schema with `results` as an object of the system's questions, each answer its closed set."""
+def response_model(system, names=None):
+    """ResponseModel with `results` as an object of the system's questions (or of `names`), each answer its closed set: a
+    pydantic class (solvi serve documents its endpoints with it)."""
     fields = {}
     for q in system.questions.values():
+        if names is not None and q.name not in names:
+            continue
         at = q.answer
         lit = Literal[tuple(at.options)] if at.options else Any
         ans = list[lit] if at.kind in ("multi", "rank") else float if at.kind == "estimate" else Any if at.kind == "span" \
@@ -436,6 +439,10 @@ def response_schema(system):
         R = create_model(f"Result_{q.name}", __base__=ResultModel, __doc__=q.text or None,
                          answer=(Optional[ans], None))
         fields[q.name] = (R, ...)
-    Results = create_model("Results", **fields)
-    M = create_model("Response", __base__=ResponseModel, results=(Results, ...))
-    return M.model_json_schema()
+    Results = create_model("Results" if names is None else "Results_" + "_".join(fields), **fields)
+    return create_model("Response", __base__=ResponseModel, results=(Results, ...))
+
+
+def response_schema(system):
+    """ResponseModel's JSON schema with `results` as an object of the system's questions, each answer its closed set."""
+    return response_model(system).model_json_schema()

@@ -65,6 +65,7 @@ double-charge refunds, predictive maintenance), each with scenarios, a runner an
 pip install solvi              # core: rules, checks, learned answer heads (numpy, scipy, pydantic)
 pip install "solvi[model]"     # + torch, transformers: ModernBERT field extractors for documents and the decider
 pip install "solvi[onnx]"      # + onnxruntime, tokenizers: the decider (solvi.decide) on CPU without torch
+pip install "solvi[serve]"     # + fastapi, uvicorn: `solvi serve app.py:system` — the questions over HTTP (also --mcp)
 ```
 
 Requires Python 3.10+.

@@ -58,6 +58,17 @@ def computable(catalog, init_keys):
     return have
 
 
+def given_facts(catalog, questions=()):
+    """The facts the catalog reads but no part produces — what init_state has to provide: arguments of parts and rules,
+    and the questions' `uses` hints. (A rule that reads a question's name reads a given fact: answers are not facts.)"""
+    read = set()
+    for p in list(catalog.parts.values()) + list(catalog.rules.values()):
+        read.update(p.inputs)
+    for q in questions:
+        read.update(q.uses or ())
+    return read - set(catalog.parts)
+
+
 def plan(catalog, questions, init_keys, heads=None):
     heads = heads or {}
     init_keys = set(init_keys)

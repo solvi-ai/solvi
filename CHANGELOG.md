@@ -1,5 +1,25 @@
 # Changelog
 
+## Unreleased (0.6)
+
+### solvi serve: HTTP, MCP and System One
+
+- `solvi serve module:attr` (or `file.py:attr`) serves a System's questions over HTTP (`solvi[serve]`: FastAPI, uvicorn):
+  `POST /ask` (state in; `Response.to_dict()` out with `stored_id` and `trace_hash`), `POST /ask/{question}`,
+  `GET /questions`, `GET /health`. The OpenAPI document comes from the same pydantic types: each question's input state
+  schema (the given facts its flow reads, typed by `System(inputs=...)` or by their typed readers, the ones it cannot be
+  answered without as required; `solvi.serve.question_inputs`) and each response's answers as closed sets. The state is
+  not validated by the web layer: a wrong-typed field is rejected by solvi as usual (the answers that need it abstain,
+  safeguard `type_rejected`). `--store PATH` saves every answer with its trace to a TraceStorage.
+- `solvi serve --mcp`: an MCP server over stdio, each question a tool whose input schema is the question's input state
+  schema; a call returns the answer, confidence, status, why and safeguards with the stored id. Uses the official `mcp`
+  SDK (2.x, `solvi[mcp]`) when installed, else a built-in JSON-RPC server (initialize, ping, tools/list, tools/call).
+- `POST /v1/systemone` backed by a solvi decider (`--decider path_or_hf_id`, `--model-name`): the System One protocol
+  (choice → probabilities, noul → P(yes), score → expected level index with its legend), so solvi answers where a Jev /
+  Kev client points; `solvi.systemone` round-trips against it. `solvi serve --decider X` alone serves only this endpoint.
+- `System.response_schema` is built by `solvi.schema.response_model(system, names=None)` (the pydantic class);
+  `solvi.strategist.given_facts(catalog)` lists the facts a catalog reads and no part produces.
+
 ## 0.5.1 — unreleased — escalation with a guarantee, any System One model, a release gate, stored decisions
 
 ### Escalation with a guarantee
