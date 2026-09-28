@@ -275,7 +275,7 @@ def _num(x):
 
 def bin_labels(edges, integer=True, unit=None):
     """Bin edges e0 < … < e_last → the labels of their len(edges) + 1 bins (−∞, e0), [e0, e1), …, [e_last, ∞) — exactly the
-    L14g decider's labels (exps_v2/experiments/l14g_format.py `bin_labels`): "less than e0", then "a" (a one-wide integer
+    labels of the answer-primitives decider (its training code's `bin_labels`): "less than e0", then "a" (a one-wide integer
     bin), "a–(b−1)" (integers) or "a to b", then "e_last or more"; the unit after a space."""
     u = f" {unit}" if unit else ""
     out = [f"less than {_num(edges[0])}{u}"]

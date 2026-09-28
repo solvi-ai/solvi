@@ -1,6 +1,6 @@
 # Alt text for the solvi 0.5.0 launch images
 
-Numbers come from the model cards (solvi-ai/solvi-large, solvi-ai/solvi-base) and exps_v2/RESULTS/experiments/L19.md.
+Numbers come from the model cards (solvi-ai/solvi-large, solvi-ai/solvi-base) and the research repository's report on them.
 
 ## cover_1600x900.png, cover_linkedin_1200x627.png
 
@@ -42,9 +42,9 @@ Numbers come from the model cards (solvi-ai/solvi-large, solvi-ai/solvi-base) an
 
 ## evidence.png / evidence_ru.png
 
-- EN: Bar chart, ContractNLI test: share of evidence quotes that support the answer. Previous base (L14g) 23%, solvi-base
+- EN: Bar chart, ContractNLI test: share of evidence quotes that support the answer. Previous base (the decide-* preview) 23%, solvi-base
   46%, solvi-large 62%. In-distribution: the ContractNLI train split was used for training.
-- RU: Столбчатая диаграмма, ContractNLI test: доля цитат-доводов, поддерживающих ответ. Прежний base (L14g) 23%,
+- RU: Столбчатая диаграмма, ContractNLI test: доля цитат-доводов, поддерживающих ответ. Прежний base (превью decide-*) 23%,
   solvi-base 46%, solvi-large 62%. Тест в распределении: train-часть ContractNLI была в обучении.
 
 ## playground_audit.png
@@ -69,11 +69,11 @@ Numbers come from the model cards (solvi-ai/solvi-large, solvi-ai/solvi-base) an
 
 ## realms_l17.png
 
-- EN: Screenshot of solvi realms after 100 turns with the L17 policy-net faction: the strategy map with four factions'
+- EN: Screenshot of solvi realms after 100 turns with the policy-net faction: the strategy map with four factions'
   territories, cities and units, and the decision card of archer #156: order_military = attack, confidence 0.97; why: "L17
   policy net: attack +0.06, move +0.03, fortify -0.00, defend -0.08; laws removed: none; check: ok → attack"; the answer
   check (laws re-verified after the net) ok; hard check keeps_capital_defender passed.
-- RU: Снимок solvi realms после 100 ходов с фракцией L17: карта с территориями четырёх фракций, городами и отрядами, и
+- RU: Снимок solvi realms после 100 ходов с фракцией policy net: карта с территориями четырёх фракций, городами и отрядами, и
   карточка решения лучника #156: order_military = attack, уверенность 0.97; почему: «L17 policy net: attack +0.06,
   move +0.03, fortify -0.00, defend -0.08; laws removed: none; check: ok → attack»; повторная проверка законов после
   сети — ok; жёсткая проверка keeps_capital_defender пройдена.

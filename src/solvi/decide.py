@@ -25,7 +25,7 @@ fact is missing, the answer abstains, and the audit and stats say "model escalat
 
 On top of the raw logits, per question (task, options, kind):
   - label-bias correction without labels (`adapt`): the mean logit of each option over unlabelled inputs of the domain is
-    subtracted before the softmax (the decider likes some labels regardless of the text; +7 points in research L14b);
+    subtracted before the softmax (the decider likes some labels regardless of the text; +7 points in research);
   - few-shot adaptation "S" (`fit`, `teach`): a shift and a shared scale fitted on k labelled examples (L-BFGS), with a
     temperature fitted on out-of-fold predictions, so confidences are calibrated; `teach` updates the shift at once. The
     shift is per option (choice, multi), a tilt / spread over the levels (score) or one yes−no bias (noul);
@@ -59,9 +59,9 @@ from .provenance import ESCALATED, INSTRUCTION
 OPT, ONE, MANY = "[unused0]", "[unused1]", "[unused2]"
 MARKERS = {"option": OPT, "single": ONE, "multi": MANY, "score": "[unused3]", "noul": "[unused4]"}
 OTHER_NAMES = ("other", "none", "none of the above", "none of these", "other / none", "nothing")
-DEFAULT_T = {"l14b_decider v1": 1.45}          # temperature fitted on the training pool's validation split (L14b)
+DEFAULT_T = {"l14b_decider v1": 1.45}          # temperature fitted on the training pool's validation split
 LEGACY_FORMAT, TYPED_FORMAT, FORMAT = "l14b_decider v1", "l14f typed v1", "solvi_decide v2"
-TYPED2_FORMAT = "l14g typed v2"                 # L14g: rank, number, span, "not stated", evidence (subformat of solvi_decide v2)
+TYPED2_FORMAT = "l14g typed v2"                 # answer primitives: rank, number, span, "not stated", evidence (subformat of solvi_decide v2)
 ACT_FEATURES = ("confidence", "margin", "entropy", "act_logit", "n_options", "kind=choice", "kind=multi", "kind=score",
                 "kind=noul")
 ACT_FEATURES_V3 = ACT_FEATURES + ("p_unknown", "kind=rank", "kind=number", "kind=span")
@@ -102,8 +102,8 @@ def state_text(obj, fmt="paths"):
     Keys in their order (a pydantic model: field order); a key that is not [A-Za-z0-9_-]+ is written ["key"] (a JSON
     string); strings without quotes (a new line becomes a space); null / true / false; floats rounded to 6 decimals without
     trailing zeros; empty {} and [] kept; a scalar at the top is ".: value". "tree" is the YAML-like indented form, "json"
-    is json.dumps with ", " / ": " separators. These are exactly the L14f training serializations
-    (exps_v2/experiments/l14f_format.py `serialize`); docs/decide_format.md has the rules."""
+    is json.dumps with ", " / ": " separators. These are exactly the typed decider's training serializations
+    (`serialize` of its training code); docs/decide_format.md has the rules."""
     if isinstance(obj, Quote):
         obj = obj.value
     if isinstance(obj, str):
@@ -299,11 +299,11 @@ class Logits(np.ndarray):
 def decode_pointer(ptr, text, max_span=40, top=20, temperature=1.0):
     """The pointer's raw output → {"null", "spans"}: a span's score is start_i + end_j over the input's tokens i ≤ j <
     i + max_span, the null span's start_m + end_m at the mode marker; p = softmax over the null span and every span
-    (exactly `span_dist` of exps_v2/experiments/l14g_format.py). A span's text is the input's characters from token i's
+    (exactly `span_dist` of the training code). A span's text is the input's characters from token i's
     start to token j's end, without surrounding whitespace — so it is literally in the input. `ptr`: {"start": [T],
     "end": [T], "offsets": [(char start, char end)] per token, "null": [start_m, end_m] (or their sum)}. `temperature`
     (the checkpoint's `temperature.span`) divides every start / end score, the null span's too, before the softmax — as
-    the L14g calibration fitted it."""
+    the answer-primitives calibration fitted it."""
     t = float(temperature) if temperature and temperature > 0 else 1.0
     s = np.asarray(ptr["start"], dtype=np.float64).ravel() / t
     e = np.asarray(ptr["end"], dtype=np.float64).ravel() / t
@@ -672,14 +672,14 @@ def _multi_question(v):
 
 
 _DEFAULTS = {
-    # L14b–L14e: choose-one / multi-label, text input, two head columns, one question per pass, no act head
+    # the first, text-only deciders: choose-one / multi-label, text input, two head columns, one question per pass, no act head
     LEGACY_FORMAT: {"modes": ["single", "multi"], "columns": {"single": 0, "multi": 1}, "noul_labels": ["yes", "no"],
                     "state_serialization": ["text"], "act": None},
-    # L14f: every kind natively, "paths" / "tree" / "json" states, three head columns (the third: act, at the mode token)
+    # the first typed checkpoints: every kind natively, "paths" / "tree" / "json" states, three head columns (the third: act, at the mode token)
     TYPED_FORMAT: {"modes": ["single", "multi", "score", "noul"],
                    "columns": {"single": 0, "multi": 1, "score": 0, "noul": 0, "act": 2}, "noul_labels": ["true", "false"],
                    "state_serialization": ["paths", "tree", "json"], "act": {}},
-    # L14g: + rank, number (bins as ordered options), span; "not stated" (column 3 at the mode marker); a pointer
+    # answer primitives: + rank, number (bins as ordered options), span; "not stated" (column 3 at the mode marker); a pointer
     # (columns 4 / 5 over the input's tokens, full layout only) for span answers and evidence quotes
     TYPED2_FORMAT: {"modes": ["single", "multi", "score", "noul", "rank", "number", "span"],
                     "columns": {"single": 0, "multi": 1, "score": 0, "noul": 0, "rank": 0, "number": 0, "act": 2,
@@ -690,7 +690,7 @@ _DEFAULTS = {
 
 
 def _v3(meta):
-    """Is this a checkpoint of the answer-primitives contract (L14g: `subformat` 'l14g typed v2', or format 'l14g typed v2'
+    """Is this a checkpoint of the answer-primitives contract (`subformat` 'l14g typed v2', or format 'l14g typed v2'
     / 'solvi_decide v3')? Only such checkpoints get the new capability fields (older ones hash as before)."""
     fmt, sub = str(meta.get("format", "")), str(meta.get("subformat", ""))
     return fmt.startswith(("l14g", "solvi_decide v3")) or sub.startswith("l14g")
@@ -723,7 +723,7 @@ def _pointer_caps(v, columns):
 
 def capabilities(meta, multi_question=None, act=None):
     """What a checkpoint can do, from its solvi_decide.json (see docs/decide_format.md): the fields it declares over the
-    defaults of its format ('l14b_decider v1': L14b–L14e; 'l14f typed v1': L14f; 'solvi_decide v2': the legacy defaults,
+    defaults of its format ('l14b_decider v1': the text-only deciders; 'l14f typed v1': the first typed ones; 'solvi_decide v2': the legacy defaults,
     everything else declared). multi_question / act: overrides (experiments), part of the fingerprint."""
     meta = meta or {}
     fmt = str(meta.get("format", ""))
@@ -952,7 +952,7 @@ class _Spec:
             self.key = self.key + ("pointer",)
 
     def item(self, text, wire="single", noul_labels=None):
-        """The question as the scorer sees it; a native yes/no question uses the checkpoint's option labels (L14f: "true",
+        """The question as the scorer sees it; a native yes/no question uses the checkpoint's option labels ('l14f typed v1': "true",
         "false") with the yes / no descriptions."""
         desc = tuple(self.descriptions.get(o, "") for o in self.real)
         opts = tuple(str(o) for o in self.real)
@@ -1223,7 +1223,7 @@ class DecideModel:
     @property
     def state_format(self):
         """The serialization of states for this checkpoint: the first of its declared ones that solvi writes ("paths" by
-        default; a text-only checkpoint such as L14d reads the "paths" lines as text)."""
+        default; a text-only checkpoint reads the "paths" lines as text)."""
         return self.caps["state_format"]
 
     @property

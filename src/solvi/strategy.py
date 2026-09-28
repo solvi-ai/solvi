@@ -1,4 +1,4 @@
-"""Model strategist (experimental, exps_v2 L18): the typed decomposer of the L3–L6 research series as a solvi strategist.
+"""Model strategist (experimental): the typed decomposer from research as a solvi strategist.
 
 The deterministic strategist (solvi.strategist) walks back from each question's targets by exact names and, for a fact with
 alternative producers (`provides=`), needs the inputs of ALL of them (a fallback chain). This module plans differently:
@@ -28,7 +28,7 @@ re-verifies it against the catalog.
     system = System(cat, questions, strategist=ModelStrategist.load("path/to/strategist-checkpoint"))
     system = System(cat, questions, strategist=ModelStrategist())      # code only: cheapest verified plan, no model
 
-Experimental: see docs/strategist.md for what was measured (L18) and when the model helps at all."""
+Experimental: see docs/strategist.md for what was measured and when the model helps at all."""
 from __future__ import annotations
 
 import dataclasses

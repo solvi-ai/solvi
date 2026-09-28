@@ -154,7 +154,7 @@ def distribution(at, v, probs):
 def estimate_of(at, p):
     """A distribution over the bins → (value, [lo, hi], mass): the middle of the median bin (an open bin: its edge), the
     bins from the (1 − c)/2 to the (1 + c)/2 cumulative probability (None for an open end), and their probability mass —
-    the probability that the value lies in the interval. The L14g decider's `number_summary`, in solvi."""
+    the probability that the value lies in the interval. The answer-primitives decider's `number_summary`, in solvi."""
     c = at.coverage or 0.8
     cdf, acc = [], 0.0
     for x in p:

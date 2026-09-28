@@ -394,7 +394,7 @@ def repair_days(doc: str) -> Estimate[0, 3, 7, 14]:
 `Answer.maybe(t)`, `Answer.span`, `Answer.rank` and `Answer.estimate` build the same answer types without type hints. Learned
 heads (`fit`, `fit_fast`) answer the four classic kinds only (examples answered `Unknown` are left out). All of it
 round-trips through JSON (`result.not_stated`, `evidence`, `extra`) and replays. From a decider — `model.decision(name,
-task, fact, Maybe[...] / Span[T] / Rank[...] / Estimate[...], evidence=True)` — these need an L14g checkpoint (its "not
+task, fact, Maybe[...] / Span[T] / Rank[...] / Estimate[...], evidence=True)` — these need an answer-primitives checkpoint (its "not
 stated" output and its pointer; see [decide_format.md §9](decide_format.md#9-answer-primitives-l14g-typed-v2-proposed-solvi_decide-v3)).
 [examples/16_primitives.py](../examples/16_primitives.py) answers all five from rules and from a decider.
 
@@ -508,7 +508,7 @@ items[0].sku: A-17
 ```
 
 Several facts with a state among them are serialized as `{fact: value}`. A scalar (a number, a date) is read as its text. The
-serialization is the one the L14f decider is trained on (keys in their order; `["key"]` for keys outside `[A-Za-z0-9_-]`;
+serialization is the one the typed decider is trained on (keys in their order; `["key"]` for keys outside `[A-Za-z0-9_-]`;
 strings without quotes, a new line becomes a space; `null` / `true` / `false`; floats to 6 decimals), and the checkpoint
 says which of `"paths"`, `"tree"` (YAML-like) or `"json"` it reads — see [decide_format.md](decide_format.md). A pydantic
 model and the equal dict give the same text.
@@ -787,7 +787,7 @@ Put the LLM where it pays for itself: as the last stage of a `Cascade` after loc
 
 When the checkpoint declares `multi_question` (see [decide_format.md](decide_format.md)), the strategist groups the decision
 parts of a flow that read the same facts with the same model (`res.flow.batches`) and the executor scores each group in
-**one forward pass** — `model.passes` counts the passes. In the checkpoint's `block` layout (L14f), the input is encoded once
+**one forward pass** — `model.passes` counts the passes. In the checkpoint's `block` layout (typed checkpoints), the input is encoded once
 and each question sees the input and itself only, so an answer does not depend on which other questions share its pass;
 solvi then scores every question of that model in the block layout, alone or together, so fit / teach and the runtime see
 the same logits. The results have the same structure as one question per pass; each record's `extra["pass"]` names the
@@ -844,7 +844,7 @@ clears it. `act_guard(examples, risk=0.10, groups="domain", min_group=100, delta
 threshold per group on the same monotonized loss, with the same rules as for one part (thresholds per group, above);
 the examples are then `Facts(...)` with the group facts, which join the combination's inputs.
 
-Measured on the shipped deciders (research note L25; 300 calibration questions per set, 200 splits, risk 0.10): the risk
+Measured on the shipped deciders (research repository; 300 calibration questions per set, 200 splits, risk 0.10): the risk
 stayed at or below 10% for every mode and data set. The cascade answered as much as the large model at about half its
 cost on ContractNLI (96% answered alone at 64 ms against 97% at 137 ms) and like the small model on JSON questions, but
 saved nothing on typed-decisions and Taskmaster-2, where almost everything goes on to the large model. Voting of
@@ -930,7 +930,7 @@ keep it with the checkpoint's fingerprint (another checkpoint is refused: build 
 needs `solvi[model]` (CUDA when available); `"auto"` takes ONNX when the file and onnxruntime are there. Both give the same
 probabilities to about three decimals. `solvi_decide.json` declares what the checkpoint can do — its format, the question
 kinds it was trained on, the head columns, the state serialization, the act head, several questions per pass, temperatures
-and thresholds: **[docs/decide_format.md](decide_format.md)** is the contract. L14b–L14e checkpoints (`l14b_decider v1`)
+and thresholds: **[docs/decide_format.md](decide_format.md)** is the contract. The first, text-only checkpoints (`l14b_decider v1`)
 load and behave exactly as before: choose-one and multi-label natively, a score or yes/no asked as a choice among the levels
 or "yes" / "no", no act head (escalate by `escalate_below`), one question per pass. `load(..., multi_question=..., act=...)`
 overrides the declaration for experiments.
@@ -965,7 +965,7 @@ system.teach("team", {"email": text}, "billing")   # one correction, absorbed at
 
 A decider likes some labels whatever the text. `adapt` estimates that preference on unlabelled inputs of your domain: for
 each option, the mean logit over the inputs (centered over the options) is subtracted before the softmax / sigmoid. No
-labels are needed; in research (L14b) this gave +7 points on unseen domains.
+labels are needed; in research this gave +7 points on unseen domains.
 
 `fit` learns a shift and one shared scale on the (bias-corrected) logits by L-BFGS (`(a·z + b) / temperature`, regularized
 towards the model's defaults), then fits the temperature on out-of-fold predictions (4 folds), so confidences are calibrated
@@ -991,7 +991,7 @@ include at least three labelled "other" (and three others), else `other_threshol
 confidence is `1 − m`; in `probs` it gets `π = g / (1 + g)` with `g = thr·(1 − m)/(1 − thr)` and the real options share
 `1 − π`, so it is the most probable option exactly when `m < thr` (joint decoding sees consistent probabilities). For
 multi-label, "none" is chosen when no option reaches the threshold. Checkpoints trained with "other" as an ordinary option
-(L14d) recommend `other=False`.
+(the text-only deciders) recommend `other=False`.
 
 ### Calibration utilities
 

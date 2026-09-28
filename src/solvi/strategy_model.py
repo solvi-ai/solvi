@@ -1,6 +1,6 @@
-"""The segment model behind solvi.strategy.ModelStrategist (experimental, exps_v2 L18): the typed decomposer of L3–L6,
-compressed as in L5 (the first 2 layers of ModernBERT-base, a vocabulary cut to 8192 tokens), without the graph level (L5:
-not needed), reading one short task per segment and pointing at 1–4 catalog parts.
+"""The segment model behind solvi.strategy.ModelStrategist (experimental): the typed decomposer from research,
+compressed (the first 2 layers of ModernBERT-base, a vocabulary cut to 8192 tokens), without the graph level (the compressed
+decomposer did not need it), reading one short task per segment and pointing at 1–4 catalog parts.
 
 A segment (solvi.strategy.segments) becomes cells — short texts, each encoded on its own:
   GOAL   "produce <fact>: <type> | for: <question>"
@@ -21,7 +21,7 @@ import os
 import numpy as np
 
 FORMAT = "solvi_strategist v1"
-CELL_KINDS = ["GOAL", "FACT", "FUNC", "CONST", "REG"]          # the L3–L5 decomposer's cell kinds (weights are shared)
+CELL_KINDS = ["GOAL", "FACT", "FUNC", "CONST", "REG"]          # the typed decomposer's cell kinds (weights are shared)
 VTYPES = ["num", "bool", "str", "entity", "list<entity>", "list<num>", "func", "goal", "none"]
 NODE_TYPES = ["EMPTY", "STEP", "CHECK", "BRANCH", "FOREACH", "RETRY", "STOP", "ESCALATE", "GOTO"]
 N_NODES = 8
@@ -192,7 +192,7 @@ def _log_softmax(x):
 
 # ---------------------------------------------------------------------------------------------------------------- torch
 def build_net(enc_config, n_nodes=N_NODES, d=512, heads=8, layers=4, passes=3, vocab_full=50368):
-    """The segment network (torch). Parameter names follow the L3–L5 Decomposer, so an L5 checkpoint initialises it."""
+    """The segment network (torch). Parameter names follow the typed Decomposer, so a compressed-decomposer checkpoint initialises it."""
     import torch
     import torch.nn as nn
     import torch.nn.functional as F
@@ -263,7 +263,7 @@ def build_net(enc_config, n_nodes=N_NODES, d=512, heads=8, layers=4, passes=3, v
                     c["layer_types"] = lt[: c["num_hidden_layers"]]
                 for k in ("pad_token_id", "bos_token_id", "eos_token_id", "cls_token_id", "sep_token_id"):
                     if isinstance(c.get(k), int) and c[k] >= c.get("vocab_size", 1 << 30):
-                        c[k] = 0                        # a cut vocabulary (L5): ids are remapped before the encoder
+                        c[k] = 0                        # a cut vocabulary: ids are remapped before the encoder
                 cfg = ModernBertConfig(**c)
             else:
                 cfg = enc_config
@@ -344,7 +344,7 @@ def build_net(enc_config, n_nodes=N_NODES, d=512, heads=8, layers=4, passes=3, v
 
 
 def loss(outs, type_lab, fn_lab):
-    """Cross-entropy over the slots, every pass (the last ×1, earlier ×0.5), as in L3–L6."""
+    """Cross-entropy over the slots, every pass (the last ×1, earlier ×0.5), as in the typed decomposer's training."""
     import torch.nn.functional as F
     tot = 0.0
     for p, (tl, fl) in enumerate(outs):
@@ -356,7 +356,7 @@ def loss(outs, type_lab, fn_lab):
 
 
 def init_from_l5(net, state):
-    """Initialise from an L5 Decomposer state dict (TRUNC2_VOCAB): encoder, projections, embeddings, decoder, type and fn
+    """Initialise from a compressed Decomposer state dict (TRUNC2_VOCAB): encoder, projections, embeddings, decoder, type and fn
     heads; the graph level and the other heads are dropped; queries keep the first N_NODES slots. → (loaded, skipped)."""
     import torch
     own = net.state_dict()

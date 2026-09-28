@@ -22,7 +22,7 @@ Thresholds. Uncalibrated, each part escalates by its own thresholds (act_thresho
 `act_guard`, one threshold t applies to every part's signal (its act probability when its model gives one, else its
 calibrated confidence) — a one-dimensional family. A cascade's loss is not monotone in t (a higher t can pass a question
 from a wrong small model to a right large one, or back), so conformal risk control runs on the loss monotonized from
-above — the maximum over thresholds ≥ t — which keeps the guarantee (research note L25: the risk stayed ≤ 10% for every
+above — the maximum over thresholds ≥ t — which keeps the guarantee (measured on the shipped deciders: the risk stayed ≤ 10% for every
 mode and data set; the cascade answered as much as the large model at half its cost where the small one is often sure;
 voting of two models lowered the error among the automatic answers from 2.1% to 0.4% on JSON questions)."""
 from __future__ import annotations
@@ -741,7 +741,7 @@ class Vote(_Combination):
     half do — and every agreeing part answers alone (its signal ≥ the threshold); otherwise escalate, listing the
     proposals. Parts of one model that can share a forward pass are asked in one pass. The probabilities are the mean
     of the parts'; the confidence the lowest among the agreeing parts'. Models of different families disagree more
-    usefully than a student and its teacher (research note L25)."""
+    usefully than a student and its teacher (measured on the shipped deciders)."""
 
     kind_name = "vote"
 

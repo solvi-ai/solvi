@@ -11,10 +11,10 @@ format is in [strategist.md](strategist.md).
 
 | `format` | Checkpoints | Defaults |
 |---|---|---|
-| `l14b_decider v1` | L14b – L14e (current releases) | modes `single`, `multi`; columns `single` 0, `multi` 1; text input; no act head; one question per pass |
-| `l14f typed v1` | L14f | modes `single`, `multi`, `score`, `noul`; columns `single` / `score` / `noul` 0, `multi` 1, `act` 2; states `paths`, `tree`, `json`; act head in column 2; noul labels `true` / `false`; one question per pass unless `multi_question` is declared |
+| `l14b_decider v1` | the first, text-only deciders | modes `single`, `multi`; columns `single` 0, `multi` 1; text input; no act head; one question per pass |
+| `l14f typed v1` | the first typed checkpoints | modes `single`, `multi`, `score`, `noul`; columns `single` / `score` / `noul` 0, `multi` 1, `act` 2; states `paths`, `tree`, `json`; act head in column 2; noul labels `true` / `false`; one question per pass unless `multi_question` is declared |
 | `solvi_decide v2` | any other model | the `l14b_decider v1` defaults; everything else declared |
-| `solvi_decide v2` with `"subformat": "l14g typed v2"` (also `format` `l14g typed v2` or `solvi_decide v3`) | L14g and later (the published decide-* previews) | the answer primitives, §9: the L14f defaults plus modes `rank`, `number`, `span`, "not stated" (column 3), a pointer (columns 4 / 5) |
+| `solvi_decide v2` with `"subformat": "l14g typed v2"` (also `format` `l14g typed v2` or `solvi_decide v3`) | the answer-primitives checkpoints and later (the published decide-* previews) | the answer primitives, §9: the `l14f typed v1` defaults plus modes `rank`, `number`, `span`, "not stated" (column 3), a pointer (columns 4 / 5) |
 
 `l14f typed v1.N`, `l14g typed v2.N` and `solvi_decide v2.N` / `v3.N` (a minor version) load the same way; any other format is refused
 (`ValueError: unknown decider format`). A checkpoint without `format` is read as `l14b_decider v1`. An `l14b_decider v1`
@@ -64,14 +64,14 @@ solvi_decide.json      format and capabilities (below)
 | `markers` | the mode marker of each kind and the option marker (tokens of `tokenizer.json`) | `[unused0]` option, `[unused1..4]` single, multi, score, noul |
 | `columns` | which head output column holds each kind's option logits, and `act` the act logit | per format |
 | `noul_labels` | the option labels of a native yes/no question, the "yes" one first | per format |
-| `state_serialization` | the state serializations the model was trained on, preferred first; solvi uses the first of `paths`, `tree`, `json` it finds. `["text"]` (L14b–L14e): states are sent as `paths` lines, which the model reads as text. A v2 checkpoint that lists none of the three is refused | per format |
+| `state_serialization` | the state serializations the model was trained on, preferred first; solvi uses the first of `paths`, `tree`, `json` it finds. `["text"]` (the text-only deciders): states are sent as `paths` lines, which the model reads as text. A v2 checkpoint that lists none of the three is refused | per format |
 | `multi_question` | several questions per forward pass: `false`, `true`, a number (`max_questions`), or `{"layout", "max_questions", "max_len", "window"}` — layout `block` (§5), `max_questions` per pass (default 6), `max_len` of a block sequence (1024), `window` of the local attention layers (64, ±tokens) | `false` |
-| `temperature` | a number (the single-choice temperature; `temperature_multi` then gives the multi-label one), or one per kind: `choice` (or `single`), `multi`, `score`, `noul` (missing kinds: the single-choice one) | L14b: 1.45; else 1.0 |
-| `thresholds` | `other` (the "other" abstain threshold, §6), `multi` (a multi-label option applies at p ≥ it), `escalate_below` (a default confidence threshold for parts that set none). The top-level `other_threshold`, `multi_threshold`, `temperature_multi` of L14b–L14e are still read | 0.5, 0.5, none |
+| `temperature` | a number (the single-choice temperature; `temperature_multi` then gives the multi-label one), or one per kind: `choice` (or `single`), `multi`, `score`, `noul` (missing kinds: the single-choice one) | `l14b_decider v1`: 1.45; else 1.0 |
+| `thresholds` | `other` (the "other" abstain threshold, §6), `multi` (a multi-label option applies at p ≥ it), `escalate_below` (a default confidence threshold for parts that set none). The top-level `other_threshold`, `multi_threshold`, `temperature_multi` of the text-only deciders are still read | 0.5, 0.5, none |
 | `act` | the act / escalate head: `false` / absent — none; `{}` or `"act_head": true` — present with defaults. `column` (default `columns.act`), `temperature` (1.0), `calibrator` (optional, §6), `threshold` (0.5), `threshold_for_error` (`{"target error": threshold}`, used by `target_error=`) | per format |
 
 Other keys (`base`, `training`, `licenses`, ...) are free: `model.metadata()` shows them. Every capability field, the
-temperatures and thresholds are part of the checkpoint's fingerprint (a v2 or L14f checkpoint; `l14b_decider v1` hashes as
+temperatures and thresholds are part of the checkpoint's fingerprint (a v2 or `l14f typed v1` checkpoint; `l14b_decider v1` hashes as
 before).
 
 ## 4. One question: the sequence
@@ -89,10 +89,10 @@ An option with a description is `label: description`. Options by kind:
   it as an abstain threshold (§6), else it is an ordinary option;
 - `multi`: the options in declaration order;
 - `score`: the levels, lowest first (2–10);
-- `noul`: two options, `noul_labels` (L14f: `true`, `false`), the "yes" one first, with the question's yes / no
+- `noul`: two options, `noul_labels` (`l14f typed v1`: `true`, `false`), the "yes" one first, with the question's yes / no
   descriptions when it has them (e.g. `true: The sender expects a reply.`); asked as `single`, the labels are `yes`, `no`.
 
-The **full layout** (one question per sequence, L14b–L14f): `[CLS] segment [SEP] input [SEP]`, full attention, only the
+The **full layout** (one question per sequence, the text-only deciders and the first typed checkpoints): `[CLS] segment [SEP] input [SEP]`, full attention, only the
 input truncated to `max_len`. The mode marker is at position 1.
 
 ## 5. Several questions: the block layout
@@ -113,7 +113,7 @@ With `multi_question.layout = "block"`: the input first, then one block per ques
   (sdpa attention); an ONNX export for this layout takes `input_ids`, `position_ids`, `full_attention_mask`,
   `sliding_attention_mask` ([B,1,L,L] bool) — without those inputs solvi scores one question per sequence;
 - consequence: a question's logits do not depend on which other questions share its pass (verified: max |Δ| 9e-7 on the
-  L14d weights), so solvi scores every question of a block checkpoint in the block layout — alone or together — and fit /
+  text-only decider's weights), so solvi scores every question of a block checkpoint in the block layout — alone or together — and fit /
   teach / adapt see the same logits as the runtime. Which layout the temperatures and the act calibrator are fitted on must
   therefore be the block layout for a block checkpoint.
 
@@ -158,7 +158,7 @@ Then, per question (task, options, descriptions, kind):
 
 A text is sent as it is. A state (a dict, a list, a pydantic model, a dataclass) is first made JSON data, then serialized.
 Reference implementations: `solvi.decide.state_text(obj, fmt)` and `serialize(state, fmt)` in
-`exps_v2/experiments/l14f_format.py` (the L14f training code) — identical on JSON data (checked on 7 644 random states,
+the training code of the first typed checkpoints (in the research repository) — identical on JSON data (checked on 7 644 random states,
 all three formats).
 
 **To JSON data** (`solvi.decide.jsonable`; the training side starts from JSON already): a pydantic model → its
@@ -209,10 +209,10 @@ defaults and hashes as in solvi 0.4.
 
 The contract for a decider that answers every answer primitive of solvi (see the
 [guide](guide.md#answer-primitives-not-stated-evidence-spans-rankings-estimates)): "not stated", evidence quotes, spans,
-rankings and numbers. It is the L14g training format — `exps_v2/experiments/l14g_format.py` writes it and is the reference
-for the network side — and solvi 0.5 reads it. Where L14g left a choice open, solvi's choice is marked **(solvi)**.
+rankings and numbers. It is the training format of the answer-primitives checkpoints — their training code (in the research repository)
+writes it and is the reference for the network side — and solvi 0.5 reads it. Where that format left a choice open, solvi's choice is marked **(solvi)**.
 
-A checkpoint is read with this contract when its `solvi_decide.json` has `"subformat": "l14g typed v2"` (L14g writes
+A checkpoint is read with this contract when its `solvi_decide.json` has `"subformat": "l14g typed v2"` (their training code writes
 `"format": "solvi_decide v2"` with it), or `"format": "l14g typed v2"` / `"solvi_decide v3"`. Only such checkpoints get the
 new capability fields: `l14b_decider v1`, `l14f typed v1` and plain `solvi_decide v2` checkpoints parse, score and hash
 exactly as before (same `model.caps`, temperatures and fingerprints).
@@ -250,8 +250,8 @@ exactly as before (same `model.caps`, temperatures and fingerprints).
 | `columns` | `rank`, `number`: the option logits (column 0); `unknown` 3; `span_start` 4, `span_end` 5 | as shown |
 | `unknown` | the "not stated" logit u: `column` at the mode marker; `joint` — the kinds whose options compete with it in one softmax; `multi: "sigmoid"` — p = σ(u); `span: "null_span"` — the pointer's null span; `threshold` **(solvi)** — see 9.3 (0.5). `false` / absent: none | as shown |
 | `pointer` | `start` / `end` columns over the input's tokens; `layouts` where it exists (`["full"]`: not in the block layout, where the input does not see the question); `max_span_tokens` (40); `null` (`"mode"`: the null span is scored at the mode marker); `evidence`: `threshold` (0.15), `max_spans` (3) | as shown |
-| `number` | `interval`: the coverage L14g evaluates with (informational; each question sets its own, default 0.8) | 0.8 |
-| `multi_question.pointer` | whether the pointer works in a shared pass (L14g: no) | false |
+| `number` | `interval`: the coverage the training evaluation uses (informational; each question sets its own, default 0.8) | 0.8 |
+| `multi_question.pointer` | whether the pointer works in a shared pass (the answer-primitives checkpoints: no) | false |
 | `temperature` | adds `rank`, `number` (default: the `score` one), `span` (1.0; divides the pointer's start / end scores and the null span's before the softmax, for spans and evidence) | per kind |
 | `act.calibrator.features` | may also use `p_unknown` (the decision's p("not stated"), 0 when not asked) and `kind=rank`, `kind=number`, `kind=span` | — |
 
@@ -293,11 +293,11 @@ and T the kind's temperature; p(not stated) = p_{K+1}. For `multi`, p(not stated
 hash) with p(not stated); the value of a "not stated" decision is `solvi.Unknown`.
 
 **Pointer.** A span's score is S(i, j) = start_i + end_j over input tokens i ≤ j < i + `max_span_tokens`; the null span's is
-N = start_m + end_m; p = softmax over {N / T} ∪ {S(i, j) / T}, T = `temperature.span` (L14g `span_dist` as its eval applies it). A span's text is the input from token i's start to
+N = start_m + end_m; p = softmax over {N / T} ∪ {S(i, j) / T}, T = `temperature.span` (the training code's `span_dist` as its evaluation applies it). A span's text is the input from token i's start to
 token j's end (tokenizer offsets), without surrounding whitespace — so it is literally in the input. A span question takes
 the best span (without "not stated": p renormalized without the null span); evidence takes greedily up to `max_spans`
 non-overlapping spans with p ≥ `evidence.threshold`, none when the null span is at least as probable as the best span
-(L14g `evidence`). **(solvi)** Quotes are bound to the fact the decision read: a span or evidence needs a decision that reads
+(the training code's `evidence`). **(solvi)** Quotes are bound to the fact the decision read: a span or evidence needs a decision that reads
 **one given text fact** (the pointer's offsets are into that text; a state serialization is not a text in the input), else a
 span escalates and evidence is dropped. solvi re-checks every quote literally at its offsets (safeguard "grounding
 rejected" if not) and replays it.
@@ -305,7 +305,7 @@ rejected" if not) and replays it.
 **rank.** p = softmax over the options (column 0, joint with u); the value is the options in decreasing p(· | stated),
 the top k; confidence = the Plackett–Luce probability of that top k in that order × p(stated). **number.** p over the bins;
 the value is the middle of the median bin (an open bin: its edge), the interval the bins from the (1 − c)/2 to the
-(1 + c)/2 cumulative probability (L14g `number_summary`, c = the question's coverage), confidence = their mass × p(stated),
+(1 + c)/2 cumulative probability (the training code's `number_summary`, c = the question's coverage), confidence = their mass × p(stated),
 `decision.extra` = `{"interval", "coverage"}`. **span**: `Decision(Quote(text, start, end, fact), confidence=p)`, the answer
 coerced to the question's type (`Span[float]`) when it is resolved — a failure is "type rejected".
 

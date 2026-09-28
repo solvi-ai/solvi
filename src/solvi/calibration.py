@@ -104,7 +104,7 @@ def evaluate(system, question, examples, accuracy=0.9):
 
 
 # --- thresholds with a guarantee (conformal risk control, learn-then-test) and conformal answer sets
-# Measured on the shipped deciders (research note L20): an act threshold chosen for "10% error" on one data set gave 32–52%
+# Measured on the shipped deciders: an act threshold chosen for "10% error" on one data set gave 32–52%
 # errors among the answers it let through on others; the guarantees below hold only on data like the calibration examples.
 
 def crc_threshold(score, wrong, risk=0.10):

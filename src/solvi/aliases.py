@@ -1,4 +1,4 @@
-"""Name matching (experimental; exps_v2 L16 → L16b → L18): when the catalog's parameter names do not match its facts —
+"""Name matching (experimental; from the name-matching research): when the catalog's parameter names do not match its facts —
 parts written by different teams, each with its own naming style — a matcher model proposes aliases ("the parameter
 `INVC_AMNT` is the fact `invoice_total`"), and deterministic code decides which to accept.
 
@@ -10,7 +10,7 @@ parts written by different teams, each with its own naming style — a matcher m
         cat2 = apply(cat, got.aliases)                                # parts rewired to the facts; cat2.aliases lists them
         System(cat2, questions)                                       # plans by exact names again; the trace is unchanged
 
-Acceptance (L16b): a proposal is accepted only if its answers match every labelled example AND no neighbouring wiring
+Acceptance: a proposal is accepted only if its answers match every labelled example AND no neighbouring wiring
 (another proposal, one alias swapped for another candidate, two same-typed aliases exchanged) also matches the examples but
 answers differently on the unlabelled probes. In the active mode, while such neighbours remain, solvi picks the probe on
 which most of them disagree with the proposal and asks `oracle(state)` for its right answers (a person labels that case);
@@ -38,7 +38,7 @@ NCH = len(CH) + 2
 
 
 def split_ident(s):
-    """An identifier → lowercase words (snake, camel, UPPER): exactly the L16 / L16b training split."""
+    """An identifier → lowercase words (snake, camel, UPPER): exactly the matcher's training split."""
     s = re.sub(r"([a-z0-9])([A-Z])", r"\1 \2", s)
     s = re.sub(r"([A-Z]+)([A-Z][a-z])", r"\1 \2", s)
     return " ".join(t for t in re.split(r"[_\s]+", s.lower()) if t)
@@ -116,7 +116,7 @@ def source_text(catalog, kind, f, init_types):
 
 # ---------------------------------------------------------------------------------------------------------------- matcher
 class NameMatcher:
-    """The L16b link encoder: all-MiniLM-L6-v2 over texts (name, type, docstring), for arch "char" fused with a character CNN
+    """The link encoder: all-MiniLM-L6-v2 over texts (name, type, docstring), for arch "char" fused with a character CNN
     over the identifier (score = w_t·cos_text + w_c·cos_char), for arch "text" the text part alone; divided by T (0.05).
     Backends: "torch" (transformers) or "onnx" (onnxruntime + tokenizers)."""
 
@@ -175,7 +175,7 @@ class _TorchEnc:
         sd = load_file(os.path.join(path, "model.safetensors"))
         self.text.load_state_dict({k[5:]: v for k, v in sd.items() if k.startswith("text.")}, strict=False)
         self.text.eval()
-        self.char = None                              # arch "text": the L16b ablation without the character CNN
+        self.char = None                              # arch "text": the ablation without the character CNN
         if meta.get("arch", "char") == "char":
             self.char = _char_cnn(torch)
             self.char.load_state_dict({k[5:]: v for k, v in sd.items() if k.startswith("char.")})

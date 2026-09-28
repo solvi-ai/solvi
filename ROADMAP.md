@@ -50,15 +50,16 @@ Status: `planned` · `in progress` · `research` (may not ship) · `done (versio
 | **Text in: entry points** | Text → which question is asked + its typed input state: the decider picks the entry point, spans and deterministic parsers fill the fields with quotes; provenance says the input was read by a model. `system.ask_text`, `solvi.textin.TextIn`, dialogue updates; served as `POST /ask_text` and an MCP tool. Next: measure the share of wrong actions that pass the checks on gallery catalogs, and a generative fallback only where a parser fails. | done (0.7, unreleased) |
 | **Learning from corrections, with gates and rollback** | The system learns from every human correction of an escalation, every known outcome and every proposal your rules rejected — never from its own accepted answers (tried three times: no gain). By the number of labels per process: shift/scale (today's `fit` / `teach`), a memory of corrected cases and a small head, then a LoRA adapter. Every update runs in shadow, is diffed against the current one, must beat it on held-out labels and pass the honesty suite, recalibrates `act_guard` on fresh labels, and is recorded in each trace so it can be rolled back. The scaffold ships in 0.7 as experimental and off by default (`System.learning`: trusted labels only, the ladder, the gates, versions and rollback, tested with stand-in models); the simulation on real data sets decides whether it becomes a default. | experimental (0.7); simulation research |
 | **Cascade and memory of corrections** | Decider → larger decider → LLM, escalating by the cost of a mistake; a memory of human-corrected cases (nearest neighbours with an abstain threshold). Any OpenAI-compatible LLM server is a decider (`solvi.llm`: JSON-schema replies validated, invalid output escalates, probabilities from log-probabilities when given), so it can be the last stage of a cascade or a family in a vote. | cascade, vote, route done (0.6); LLM stage and memory done (0.7, unreleased) |
+| **LLM decider confidence** | Log-probabilities from LLMs are saturated (≥ 0.999 on almost every answer while still ranking right and wrong well), so a risk threshold on them lets nothing through; take the threshold by rank or on a log(1 − p) scale. | planned (0.8) |
 | **Task in words → goal and plan** | A model that turns a natural-language task into the questions to ask and the goal to plan for over a catalog; code still verifies and executes. | research |
 | **Name matching across teams** (`solvi.aliases`) | Link parameters and facts whose names differ; acceptance by active, targeted questions and units in types. Experimental today. | research |
-| **Model strategist for plan segments** | The L3–L6 decomposer as a proposer for ambiguous segments. Experimental: adds little over the code planner when contracts and costs are declared. | research |
+| **Model strategist for plan segments** | The typed decomposer from research as a proposer for ambiguous segments. Experimental: adds little over the code planner when contracts and costs are declared. | research |
 
 ## Games and demos
 
 | Item | What it gives | Status |
 |---|---|---|
-| **L17 strategist in realms** | A tiny learned policy behind hard laws; leads 23 of 32 new maps over 5,000 turns with zero law violations. | done (0.5.0) |
+| **Learned strategist in realms** | A tiny learned policy behind hard laws; leads 23 of 32 new maps over 5,000 turns with zero law violations. | done (0.5.0) |
 | **Lookahead + policy mode** | Stronger (leads 29/32) but up to 0.9 s per decision; needs a faster search to fit the browser. | research |
 
 ## Docs
@@ -75,7 +76,7 @@ Status: `planned` · `in progress` · `research` (may not ship) · `done (versio
 |---|---|
 | `solvi serve` (HTTP, MCP, System One API), `solvi check`, Cascade / Vote / Route under one guarantee, `aask` with timeouts, costs from measurements | 0.6.0 |
 | Escalation with a guarantee (`act_guard`, learn-then-test, conformal sets), option order and near-tie safeguards, System One backend, honesty suite, `solvi test`, TraceStorage, `solvi diff` and shadow mode | 0.5.1 |
-| solvi-large / solvi-base (preview); L17 strategist in realms | 0.5.0 |
+| solvi-large / solvi-base (preview); learned strategist in realms | 0.5.0 |
 | Typed facts (pydantic), questions declared by types, answer primitives (not stated, evidence, span, rank, estimate), overall confidence, typed decider API with act/escalate, code strategist (dead ends, exact cost optimum, memoized planning) | 0.5.0 |
 | Audit shows what a learned head reads and ignores; `rule_abstained` safeguard | 0.4.1 |
 | Provenance, audit and safeguards; decisions with a model | 0.4.0 |

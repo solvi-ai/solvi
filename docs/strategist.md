@@ -16,9 +16,9 @@ code's own plan is used); it never becomes a silent wrong wiring — as far as t
 
 Status: experimental in 0.5.0. The code strategist (`ModelStrategist()`, `producers="equivalent"`) is ready and needs no
 model. **The segment model's and the name matcher's weights are not published with 0.5.0**: `ModelStrategist.load` and
-`NameMatcher.load` read a checkpoint in the format below that you trained yourself (exps_v2 L18 has the recipe); without one,
-examples/17 uses stand-ins with the same interfaces. The research behind it (exps_v2 L3–L6, L16, L16b, L18) and what was measured are summarised
-[below](#what-was-measured-l18).
+`NameMatcher.load` read a checkpoint in the format below that you trained yourself (the research repository has the recipe); without one,
+examples/17 uses stand-ins with the same interfaces. The research behind it (the typed decomposer, name matching, the segment model) and what was measured are summarised
+[below](#what-was-measured).
 
 ## Planning: `ModelStrategist`
 
@@ -106,7 +106,7 @@ if got.aliases is not None:
 ```
 
 - **Propose.** The matcher (all-MiniLM-L6-v2 + a character CNN over identifiers, trained on a broad family of name
-  perturbations — L16b) scores every unresolved name against the given facts and the facts parts produce (type-compatible
+  perturbations) scores every unresolved name against the given facts and the facts parts produce (type-compatible
   only); a beam search over the names builds joint proposals (a part never reads one fact twice, no cycles; a name may stay
   unresolved — an input nobody gives).
 - **Accept** (deterministic; the model does not take part). The first proposal whose answers match every labelled example
@@ -167,16 +167,16 @@ README.md                model card
 
 Per cell also: `depth` (0 goal / facts; 1 a producer of the segment's fact; 2 a producer of an input of one; …) and
 `ready` (0 not a part; 1 all its inputs are available; 2 not) — both computed by code. **Output**: 8 query slots; slot
-*i* → a node type (0 EMPTY, 1 STEP; the other 7 of the L3 plan language are unused) and a pointer over the candidate cells;
+*i* → a node type (0 EMPTY, 1 STEP; the other 7 of the decomposer's plan language are unused) and a pointer over the candidate cells;
 the proposal is the slots up to the first EMPTY. `solvi.strategy_model.seg_cells`, `batch_arrays`, `decode` implement
-exactly this; the training side (exps_v2/experiments/l18_train.py) uses the same functions.
+exactly this; the training side (in the research repository) uses the same functions.
 
 The fingerprint recorded in traces is a hash of `solvi_strategist.json`, `config.json`, `tokenizer.json` and the weights file
 the backend loads (`model.safetensors` or the two ONNX files): a retrained or re-exported checkpoint has another one.
 
-## What was measured (L18)
+## What was measured
 
-The full report is in the research repository (exps_v2/RESULTS/experiments/L18.md); criteria were registered before training.
+The full report is in the research repository; criteria were registered before training.
 Synthetic long catalogs (chains of stages as real solvi catalogs, up to 128 steps; half the stages with an extra producer: a
 dead end, a costly or a cheap shortcut, plus stages with a cheap and a costly producer; every producer of a fact gives the
 same value), 100 tasks per length bucket on training themes, 60 on held-out themes with held-out docstring phrasings:
