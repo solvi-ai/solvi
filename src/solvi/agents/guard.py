@@ -52,6 +52,7 @@ from __future__ import annotations
 import dataclasses
 import inspect
 import json
+import re
 from typing import Any, Callable
 
 from ..core import Answer, Catalog, Claim, Question, Quote
@@ -303,7 +304,7 @@ def _argument_errors(model, schema):
         try:
             model.model_validate(tool_arguments)
         except ValidationError as e:
-            return [f"{'.'.join(str(x) for x in err['loc']) or '(arguments)'}: {err['msg']}"
+            return [f"{'.'.join(str(x) for x in err['loc']) or '(arguments)'}: {err['msg']}"   # solvi: ok
                     + (f" (got {err['input']!r:.80})" if "input" in err and err["type"] != "missing" else "")
                     for err in e.errors()]
         return []
@@ -383,16 +384,26 @@ def _grounding(spec):
     return grounding
 
 
-def _occurrences(v, text):
-    """Where a value is written in a text → [(start, end)]: a string literally; a number as a number (solvi's grounding
-    rule: thousands separators allowed); an Enum by its value; anything else by str()."""
-    import enum
+_NUMBER = re.compile(r"(?<![\w.,])-?(?:\d{1,3}(?:[,\u00a0\u202f' ]\d{3})+(?![\d])|\d+)(?:\.\d+)?(?![\d])")
 
-    from ..provenance import _NUM, matches
+
+def _occurrences(v, text):
+    """Where a value is written in a text → [(start, end)]: a string literally; a number as a number token (not inside a
+    word; thousands separators "1,250.50", "1 250", "1'250" allowed; 250 matches "250.00"); an Enum by its value;
+    anything else by str()."""
+    import enum
     if isinstance(v, enum.Enum):
         v = v.value
     if isinstance(v, (int, float)) and not isinstance(v, bool):
-        return [(m.start(), m.end()) for m in _NUM.finditer(text) if matches(v, m.group(0).strip())]
+        out = []
+        for m in _NUMBER.finditer(text):
+            try:
+                x = float(re.sub(r"[,\u00a0\u202f' ]", "", m.group(0)))
+            except ValueError:
+                continue
+            if abs(x - float(v)) <= 1e-9 * max(1.0, abs(float(v))):
+                out.append((m.start(), m.end()))
+        return out
     s = str(v)
     out, i = [], text.find(s)
     while i >= 0 and s:
@@ -402,8 +413,11 @@ def _occurrences(v, text):
 
 
 def _short(v, n=60):
-    s = v if isinstance(v, str) else repr(v)
-    return repr(s) if len(s) <= n else repr(s[: n - 1] + "…")
+    """A value for a reason: a string quoted (cut at n characters), anything else as its repr."""
+    if not isinstance(v, str):
+        s = repr(v)
+        return s if len(s) <= n else s[: n - 1] + "…"
+    return repr(v) if len(v) <= n else repr(v[: n - 1] + "…")
 
 
 def arguments_valid(argument_errors) -> bool:
@@ -702,10 +716,23 @@ class Guard:
             raise ValueError(f"tool {t.name} has no argument schema yet (guard.tool(..., schema=...) or guard.adopt)")
         cat = Catalog()
         schema = json.dumps(t.model.model_json_schema(), sort_keys=True, default=str)
+        have = set(GIVEN) | set(self.facts) | set(t.arguments) | {"argument_errors", "call_arguments", "grounding",
+                                                                  "proposal"}
+        fns = []                                  # the helper computations and policies this tool gets
+        for f, tools in self._fns:
+            ins = set(inspect.signature(f).parameters)
+            if (tools is None and ins <= have) or (tools is not None and t.name in tools):
+                fns.append(f)
+                have.add(f.__name__)
+        policies = [(f, of) for of in ("deny", "escalate") for f, tools, o in self._policies if o == of
+                    and ((tools is None and set(inspect.signature(f).parameters) <= have)
+                         or (tools is not None and t.name in tools))]
+        read = {x for f in fns + [f for f, _ in policies] for x in inspect.signature(f).parameters}
         cat.fn(_argument_errors(t.model, schema))
         cat.fn(_call_arguments(t.model, schema))
-        for a, fi in t.model.model_fields.items():
-            cat.fn(_argument(a, fi.annotation))
+        for a, fi in t.model.model_fields.items():       # an argument is a fact of its own when something reads it
+            if a in read:
+                cat.fn(_argument(a, fi.annotation))
         checks = []
 
         def check(f, on_fail):
@@ -719,20 +746,10 @@ class Guard:
                 check(no_injected_arguments, "escalate")
         if t.injections == "any":
             check(no_instructions_in_tool_outputs, "escalate")
-        have = set(GIVEN) | set(self.facts) | set(t.arguments) | {"argument_errors", "call_arguments", "grounding",
-                                                                  "proposal"}
-        for f, tools in self._fns:
-            ins = set(inspect.signature(f).parameters)
-            if (tools is None and ins <= have) or (tools is not None and t.name in tools):
-                cat.fn(f)
-                have.add(f.__name__)
-        for on_fail in ("deny", "escalate"):
-            for f, tools, of in self._policies:
-                if of != on_fail:
-                    continue
-                ins = set(inspect.signature(f).parameters)
-                if (tools is None and ins <= have) or (tools is not None and t.name in tools):
-                    check(f, on_fail)
+        for f in fns:
+            cat.fn(f)
+        for f, on_fail in policies:
+            check(f, on_fail)
         auth = self._authorizer is not None and t.authorize is not False
         if auth:
             cat.fn(proposal)
@@ -875,10 +892,11 @@ class Guard:
             return [f"unknown tool {c.name!r}: the catalog has {sorted(self.tools)}"]
         cat, vals = system.catalog, res.values
         out = []
-        for rec in res.trace.records:
-            p = cat.parts.get(rec.name)
-            if p is None or p.kind != "check" or not p.hard or rec.value is not False:
-                continue
+        order = {n: i for i, n in enumerate(cat.parts)}          # the catalog's order: the order checks decide in
+        failed = sorted((r for r in res.trace.records if r.value is False and r.name in cat.parts
+                         and cat.parts[r.name].kind == "check" and cat.parts[r.name].hard), key=lambda r: order[r.name])
+        for rec in failed:
+            p = cat.parts[rec.name]
             n = p.name
             if n == "arguments_valid":
                 out.append("invalid arguments: " + "; ".join(vals.get("argument_errors") or []))

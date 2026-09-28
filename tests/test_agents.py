@@ -339,3 +339,27 @@ def test_tool_definitions_for_the_model():
     d = g.tools["send_payment"].definition()
     assert d["name"] == "send_payment" and d["description"] == "Pay an invoice."
     assert d["parameters"]["required"] == ["iban", "amount"] and json.dumps(d)
+
+
+def test_example_19_runs(capsys):
+    from examples_loader import load
+    ex = load("19_agent_guard")
+    ex.main()
+    out = capsys.readouterr().out
+    assert "a person approves → ALLOW paid 1900.00 EUR to Globex SA" in out
+    assert "the authorizer escalated: answer depends on an instruction-like sentence" in out
+    assert "chain verified: True; every decision replays: True" in out
+    assert ex.PAID == [(ex.ACME, 250.0, "EUR"), (ex.ACME, 250.0, "EUR"), (ex.GLOBEX, 1900.0, "EUR")]
+
+
+def test_solvi_check_lints_every_tool():
+    from solvi.check import lint
+    g, _ = make()
+    g.declare("later")                                          # no schema yet: a note, not an error
+    rep = lint(g)
+    assert rep.ok and rep.codes() == ["no_schema"]
+
+    @g.policy("send_payment")
+    def lenient(spent_today: float) -> bool:
+        return (spent_today or 0) < 50_000                      # a silent default: flagged, with the tool's name
+    assert [f.where.split(":")[0] for f in lint(g).findings if f.code == "silent_default"] == ["send_payment"]
