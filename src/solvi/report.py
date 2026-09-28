@@ -136,7 +136,8 @@ def decision(res, question=None, system=None, replay="trusted"):
             "question": q, "text": getattr((getattr(system, "questions", None) or {}).get(q), "text", ""),
             "answer": _answer_text(a), "status": a.status, "confidence": round(float(a.confidence), 4),
             "provenance": a.provenance, "source": a.source, "why": a.why, "guard": a.guard,
-            "support": au.support_line(), "share_deterministic": au.share_deterministic, "rests_on": _rests_on(au),
+            # the report is English (labels, headings, <html lang="en">), whatever System(lang=...) renders
+            "support": au.support_line(lang="en"), "share_deterministic": au.share_deterministic, "rests_on": _rests_on(au),
             "guarantee": g, "guaranteed": covered,
             "safeguards": [{"kind": e["kind"], "label": LABEL.get(e["kind"], e["kind"]), "fact": e["fact"],
                             "detail": e["detail"]} for e in au.safeguards]})

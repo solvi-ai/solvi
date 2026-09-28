@@ -279,3 +279,13 @@ def test_period_report_shows_non_finite_answers_untagged(tmp_path):
     assert "$float" not in text and "inf" in text
     from solvi.report import period
     assert "$float" not in json.dumps(period(st), default=str)
+
+
+def test_report_stays_english_for_a_system_in_another_language():
+    s = build(guarantee=True)
+    s.lang = "ru"
+    res = s.ask(STATE)
+    assert re.search("[а-яА-Я]", res.audit("pay").support_line())             # the audit itself renders in Russian
+    d = res.report(format="data")
+    assert not re.search("[а-яА-Я]", json.dumps(d, ensure_ascii=False))
+    assert not re.search("[а-яА-Я]", res.report()) and not re.search("[а-яА-Я]", res.report(format="html"))
