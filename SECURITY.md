@@ -21,6 +21,9 @@ solvi's promises are about verification, so these are in scope:
 - a hard check that fails and does not force its answer;
 - loading a response or trace from JSON (`Response.from_json`, `model_validate`) that executes code or reads files;
 - code execution through a checkpoint's metadata (`solvi_decide.json`, `solvi_strategist.json`).
+- `solvi serve`: a request that gets past the bearer token, the size / depth limits or the timeout, a response that
+  carries a traceback or a server path, or request data that makes the server import or load something (see the
+  guide's Serving chapter, Security).
 
 Out of scope: running untrusted Python catalog code — a catalog is code and runs with your privileges (the playground Space
 runs visitors' code only in their own browser); model accuracy (a wrong but grounded answer is a quality issue, please open a

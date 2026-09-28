@@ -2,6 +2,51 @@
 
 ## Unreleased (0.7)
 
+### `solvi serve`: security
+
+- **Bearer token**: `--token` / `$SOLVI_SERVE_TOKEN` (`create_app(token=...)`) — every HTTP request needs
+  `Authorization: Bearer <token>` (401 otherwise; `hmac.compare_digest`). Listening beyond the loopback address without a
+  token prints a warning.
+- **Limits** (`solvi.serve.Limits`, `--max-body`, `--max-depth`, `--timeout`): a request body / MCP message is at most
+  1 000 000 bytes (413; checked on `Content-Length` and on the bytes received, before FastAPI parses), its JSON at most
+  32 levels deep (400; hostile nesting no longer reaches a `RecursionError`), and a request takes at most 60 s (504; an
+  MCP tool error). Sync Systems are asked in a worker thread under the timeout; async Systems pass 80% of it to
+  `System.aask(timeout=)` (unless `System(timeout=)` is set), so a slow part makes its questions abstain with safeguard
+  `timeout` and the request still answers. The built-in MCP server bounds each line it reads and runs `tools/call` in a
+  worker thread under the timeout; the SDK server checks the size and depth of a call's arguments.
+- **Errors never leak**: a refused request (`solvi.serve.RequestError`: `NotFound` 404, `BadRequest` 422, 413, 504)
+  says what was refused; anything else is logged with its traceback (logger `solvi.serve`) and answered with a 500 /
+  a tool error that carries only an incident id — before, a tool error returned the exception's type and text, and a
+  `TypeError` / `ValueError` from anywhere became a 422 with its message. `/health` names the store by its file name,
+  not its path.
+- **CORS** stays off by default (no `Access-Control-Allow-*` headers); `--cors ORIGIN` (repeatable) allows one.
+- Nothing is imported or loaded from request data (the System One `model` field is a name echoed back) — now tested.
+- `--decider` is read like `solvi ask --decider` (`solvi.models.load`: a folder, a cached Hugging Face id,
+  `systemone:URL#model`, `module:attr`) and **never downloads**: a Hugging Face id that is not cached is a usage error
+  (exit 2) unless `--pull` is given. Before, `serve --decider ID` downloaded the model implicitly.
+- Uvicorn runs without the `server` header. A Security section in the guide's Serving chapter; SECURITY.md lists
+  `solvi serve` bypasses as in scope.
+
+### Fixes
+
+- A model-backed rule whose quote is rejected for not being in the text (`quote outside the text` / `not grounded`)
+  now abstains with `Result.guard == "grounding"` (it was `None`); the safeguard event is still recorded once (the audit
+  does not count it twice).
+- **Strict JSON for non-finite floats.** An infinite escalation threshold (a calibration no threshold could meet) was
+  written into traces, stored records and `--json` output as `Infinity` — not JSON, and a 500 in `solvi serve` (its
+  responses are strict). Non-finite floats are now written as `{"$float": "inf"}` (`"-inf"`, `"nan"`) — the tag
+  calibration files already used — by `Response.to_dict()` / `to_json()` / `model_dump("json")`, TraceStorage records
+  (JSONL and SQLite), the report data, the CLI's `--json` output and the MCP servers, and read back as the float by
+  `model_validate` / `from_json` / `store.get`. Every one of these writes with `allow_nan=False` now
+  (`solvi.schema.dumps`, `tag_floats`, `untag_floats`). **Hashes:** a trace's record hashes are unchanged (they are
+  taken over the in-memory values, so a stored trace with an inf threshold replays as before); a new stored record's
+  chain hash is taken over the tagged form, and records written before 0.7 with a bare `Infinity` still verify and
+  load. `part.save_calibration` wrote a bare `Infinity` for an infinite top-level threshold; it writes the tag now (both
+  load).
+- `Response` keeps a strong reference to its System, now documented as deliberate: `System(cat, qs).ask(s).report()`
+  must work, and a weak reference would lose the temporary System before the report runs. Drop it with
+  `res._system = None` (and pass `system=`) for responses kept for long.
+
 ### Command line: init, ask, calibrate, models
 
 - `solvi init [DIR] [--template support|refunds|minimal] [--with-model] [--force]`: a new project — `catalog.py` (a
