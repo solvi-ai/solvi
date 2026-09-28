@@ -120,7 +120,7 @@ class CorrectionMemory:
     def features(self, text):
         """The decider's probabilities over the options for a text (raw logits, checkpoint temperature), rounded."""
         sp = self.part.spec
-        z, _ = self.part._raw([text])[0]
+        z, _ = self.part._read([text])[0]           # a long input: the window a decision reads
         z = np.asarray(z, float) / self.part.model._T(sp)
         if sp.multi:
             p = 1 / (1 + np.exp(-z))

@@ -81,10 +81,18 @@ def _kind_of(part):
 
 def base_fingerprint(part):
     """What a calibration is fitted to: the part's fingerprint without its thresholds (the checkpoint, the question, this
-    question's adaptation; for a combination every member)."""
+    question's adaptation, and how the part computes its signal — option_order="average" with its permutations, long=
+    with top_k and rerank; for a combination every member)."""
     from .provenance import digest
     if _kind_of(part) == "DecisionPart":
         a = part.adaptation
+        signal = {k: v for k, v in (("option_order", None if part.option_order != "average" else
+                                     (part.option_order, part.permutations)),
+                                    ("long", None if part.long is None else (part.long, part.top_k, part.rerank)))
+                  if v is not None}
+        if signal:                                  # a part with the default signal keeps the fingerprint it had
+            return digest("DecisionPart", part.model.weights_fingerprint(), part.spec.describe(), a.params() if a else None,
+                          signal)
         return digest("DecisionPart", part.model.weights_fingerprint(), part.spec.describe(), a.params() if a else None)
     return digest(type(part).__name__, part._describe(), [m.fingerprint() for m in part.members], {})
 
@@ -169,8 +177,9 @@ def load(part, path, groups=None, strict=True):
                                  f"this part runs {', '.join(f'{k} #{v}' for k, v in mine.items())} — calibrate again "
                                  "(solvi calibrate) with this model")
             raise ValueError(f"{path}: calibrated for fingerprint #{rec.get('fingerprint')}, this part is #{fp}: the "
-                             "question's adaptation (fit / teach / adapt) differs — load the adaptations it was calibrated "
-                             "with (model.load_adaptations), or calibrate again")
+                             "question's adaptation (fit / teach / adapt) or how the part computes its signal (option_order="
+                             "\"average\", permutations, long, top_k, rerank) differs — load the adaptations it was "
+                             "calibrated with (model.load_adaptations), make the part as it was, or calibrate again")
     grp = None
     if rec.get("groups") is not None:
         g = rec["groups"]
@@ -178,8 +187,9 @@ def load(part, path, groups=None, strict=True):
         if kind == "DecisionPart":
             grp["signal"] = g.get("signal")
     if kind == "DecisionPart":
-        part.escalate_below, part.act_threshold = rec.get("escalate_below"), rec.get("act_threshold")
-        part._set_threshold("act", part.act_threshold, rec.get("guarantee"), grp)   # sets guarantee, groups, inputs
+        part._set_threshold("act", rec.get("act_threshold"), rec.get("guarantee"), grp)   # sets groups, inputs
+        part.escalate_below, part.act_threshold = rec.get("escalate_below"), rec.get("act_threshold")   # both, as saved
+        part.guarantee = rec.get("guarantee")
         part.conformal_set = rec.get("conformal")
     else:
         part.threshold, part.guarantee, part.groups = rec.get("threshold"), rec.get("guarantee"), grp
