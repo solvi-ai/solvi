@@ -20,6 +20,8 @@ jobs:
       - run: uv run pytest -q
       - name: honesty gate (docs/honesty.md)
         run: uv run python -m solvi.honesty tests/honesty/core_v1.json --baseline tests/honesty/core_v1.baseline.json
+      - name: gallery cases as regression tests (docs/testing.md)
+        run: uv run solvi test gallery/ -q
       - name: run the gallery
         run: |
           for f in gallery/*/run.py; do echo "== $f"; uv run python "$f" > /dev/null; done

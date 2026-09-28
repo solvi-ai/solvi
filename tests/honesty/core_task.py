@@ -23,7 +23,7 @@ from solvi.provenance import ESCALATED
 cat = Catalog()
 
 
-# --------------------------------------------------------------------------------------------------- paid: not stated
+# ------------------------------------------------------------------------------------- paid: not stated
 PAID = (("not paid", False), ("unpaid", False), ("paid in full", True), ("payment received", True))
 
 
@@ -38,7 +38,7 @@ def paid(doc: str) -> Maybe[bool]:
     return Unknown
 
 
-# --------------------------------------------------------------------------------------------------- total: conflicting sources
+# ------------------------------------------------------------------------------------- total: conflicting sources
 TOTAL = re.compile(r"total(?: due)?:?\s*(\d+(?:\.\d+)?)", re.IGNORECASE)
 
 
@@ -54,7 +54,7 @@ def total(doc: str) -> Maybe[Span[float]]:
     return Quote(v, s, e)
 
 
-# --------------------------------------------------------------------------------------------------- currency: outside the options
+# ------------------------------------------------------------------------------------- currency: outside the options
 @cat.rule("currency")
 def currency(doc):
     """The first ISO code in the text, whatever it is: the question's closed set decides whether it is an answer."""
@@ -62,7 +62,7 @@ def currency(doc):
     return m.group(1) if m else None
 
 
-# --------------------------------------------------------------------------------------------------- method: act / escalate, quotes
+# ------------------------------------------------------------------------------------- method: act / escalate, quotes
 class StubReader:
     """Stands in for a generative reader: picks the payment method by keyword and cites a canonical phrase for it — which
     it paraphrases when the text words it differently (the quote is then not in the text). Without a keyword its act
@@ -90,7 +90,7 @@ def method(doc):
     return READER(doc)
 
 
-# --------------------------------------------------------------------------------------------------- team: a decider that acts or escalates
+# ------------------------------------------------------------------------------------- team: a decider that acts or escalates
 KW = {"billing": ["charged", "refund", "invoice"], "technical": ["crash", "error", "bug"],
       "shipping": ["parcel", "delivery", "tracking"]}
 
@@ -115,7 +115,7 @@ DECIDER = DecideModel(KeywordScorer(), meta={"format": "test", "temperature": 1.
 TEAM = DECIDER.decision("team", "Which team handles this message?", "doc", list(KW), escalate_below=0.6)
 
 
-# --------------------------------------------------------------------------------------------------- approve: a hard check that raises
+# ------------------------------------------------------------------------------------- approve: a hard check that raises
 @cat.check(hard=True, then={"approve": "no"})
 def amount_ok(amount):
     return float(amount) < 1000

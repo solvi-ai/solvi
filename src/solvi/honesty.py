@@ -57,13 +57,21 @@ def load_set(path):
 
 
 def load_task(path):
-    """Execute a task.py in a fresh module namespace (the way the gallery runners and the playground load a preset)."""
-    path = Path(path)
-    mod = types.ModuleType(path.stem)
+    """Execute a task.py in a fresh module namespace (the way the gallery runners and the playground load a preset). The
+    module is registered in sys.modules under a name unique to its path, so pydantic and dataclasses can resolve the
+    task's own types (postponed annotations)."""
+    import hashlib
+    path = Path(path).resolve()
+    name = f"_solvi_task_{hashlib.sha1(str(path).encode()).hexdigest()[:10]}_{path.stem}"
+    mod = types.ModuleType(name)
     mod.__file__ = str(path)
+    sys.modules[name] = mod
     sys.path.insert(0, str(path.parent))          # a task may import its neighbours
     try:
         exec(compile(path.read_text(), str(path), "exec"), mod.__dict__)
+    except BaseException:
+        sys.modules.pop(name, None)
+        raise
     finally:
         sys.path.remove(str(path.parent))
     return mod
@@ -212,7 +220,7 @@ def report(set_path, baseline=None, tolerance=0.02, risk=0.10, rows=False):
 
 
 def main(argv=None):
-    ap = argparse.ArgumentParser(prog="python -m solvi.honesty", description="Honesty numbers of a labelled set, gated "
+    ap = argparse.ArgumentParser(prog="solvi honesty", description="Honesty numbers of a labelled set, gated "
                                  "against a baseline: confident errors, coverage at a target risk, quote support (proxy).")
     ap.add_argument("set", help="the set's JSON file")
     ap.add_argument("--baseline", help="a previous report (JSON) to compare with; exit 1 if a number got worse")

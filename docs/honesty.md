@@ -49,7 +49,7 @@ uv run pytest -q tests/honesty
 uv run --with onnxruntime --with tokenizers pytest -q -m model tests/honesty
 ```
 
-The command prints a JSON report: `{"set", "version", "metrics", "regressions", "ok", ...}`. It exits with 0 when no
+`solvi honesty ...` is the same command. It prints a JSON report: `{"set", "version", "metrics", "regressions", "ok", ...}`. It exits with 0 when no
 number got worse than the baseline by more than `--tolerance` (default 0.02, absolute), 1 when something regressed, and 2
 when the set cannot be run. Other options: `--risk 0.1` sets the target risk for the coverage number, `--rows` adds every
 answer with its gold, confidence, safeguards and quotes, and `--save PATH` writes the report to a file.

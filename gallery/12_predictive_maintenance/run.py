@@ -62,6 +62,14 @@ def got(r):
     return "abstain" if r.status == "abstain" else r.answer
 
 
+def system():
+    """The system cases.json expects: the 'fault' rule list learned from the same 150 past incidents as below (what
+    `solvi test` and the pytest plugin build, via "system": "run.py:system" in cases.json)."""
+    s = System(task.cat, task.QUESTIONS)
+    s.learn_rule("fault", [(st, y) for st, y, _ in incidents(random.Random(12), 150)], task.FAULT_FACTS)
+    return s
+
+
 if __name__ == "__main__":
     system = System(task.cat, task.QUESTIONS)
     rng = random.Random(12)
@@ -74,7 +82,7 @@ if __name__ == "__main__":
     print(f"'fault' learned from {len(past)} labeled incidents in {t_learn:.0f} ms: {len(rules.rules)} rules\n{rules}")
     print(f"accuracy on {len(test)} new incidents (true fault): {acc:.3f}\n")
 
-    cases = json.loads((HERE / "cases.json").read_text())
+    cases = json.loads((HERE / "cases.json").read_text())["cases"]
     tally = Tally()
     failures, times = [], []
     for i, case in enumerate(cases, 1):
