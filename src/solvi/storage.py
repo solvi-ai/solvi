@@ -338,12 +338,13 @@ class TraceStorage:
         return render(period(self, since, until, question, examples, system, **filters), format)
 
     # --- integrity
-    def signature(self):
-        """The algebraic signature of the chained records (solvi.signature.sign): {"alg", "count", "root": 32 numbers}.
-        Keep it where you keep the head: verify(signature=...) then names the one record that changed — even when every
-        hash after it and the stored head were recomputed — and restores its content hash."""
+    def signature(self, alg="syndrome"):
+        """The signature of the chained records (solvi.signature.sign): {"alg", "count", "root"} — with the default
+        "syndrome" code two numbers (64 bytes). Keep it where you keep the head: verify(signature=...) then names the one
+        record that changed — even when every hash after it and the stored head were recomputed — and restores its
+        content hash."""
         from .signature import sign
-        return sign(self)
+        return sign(self, alg)
 
     def verify(self, anchor=None, signature=None, candidates=None):
         """Check the chain across stored records: each record's hash, its link to the record before it, the sequence

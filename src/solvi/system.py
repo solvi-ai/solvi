@@ -100,11 +100,11 @@ class Response(Serial):
 
     lang = "en"                         # the language of rendering (System(lang=...)); not a field: never serialized or hashed
 
-    def signature(self):
-        """The algebraic signature of this response's trace (solvi.signature.sign: the input, then every record) — 32
-        numbers to keep next to the stored id; solvi.signature.locate(res, sig) later names the one record that changed."""
+    def signature(self, alg="syndrome"):
+        """The signature of this response's trace (solvi.signature.sign: the input, then every record) — a few numbers to
+        keep next to the stored id; solvi.signature.locate(res, sig) later names the one record that changed."""
         from .signature import sign
-        return sign(self)
+        return sign(self, alg)
 
     @property
     def computed_state(self):

@@ -4,7 +4,7 @@
     solvi honesty SET.json    honesty numbers of a labelled set, gated against a baseline (solvi.honesty)
     solvi verify | replay | diff over a TraceStorage:
 
-    solvi verify decisions.db [--anchor COUNT:HASH] [--signature SIG.json] [--sign SIG.json]
+    solvi verify decisions.db [--anchor COUNT:HASH] [--signature SIG.json] [--sign SIG.json [--alg syndrome|octonion]]
     solvi replay decisions.db --system myapp.decisions:system
     solvi diff   decisions.db --system myapp.decisions_v2:build_system [--question Q] [--since ISO] [--limit N] [--json]
     solvi serve  myapp.decisions:system [--store decisions.db] [--decider ID] [--port 8000] [--mcp]   (solvi.serve)
@@ -128,7 +128,7 @@ def cmd_verify(a):
         _fail(str(e))
     if a.sign and v["ok"]:                            # never sign a store that does not verify
         with open(a.sign, "w") as fh:
-            json.dump(store.signature(), fh)
+            json.dump(store.signature(a.alg), fh)
     if a.json:
         _dump(v)
     else:
@@ -359,6 +359,8 @@ def main(argv=None):
     v.add_argument("--signature", help="SIG.json (a file or the JSON) — a signature() kept elsewhere: names the one changed "
                                        "record and its original content hash (solvi.signature)")
     v.add_argument("--sign", metavar="OUT.json", help="write the store's current signature() to this file")
+    v.add_argument("--alg", choices=["syndrome", "octonion"], default="syndrome",
+                   help="the code --sign writes (default syndrome; --signature reads it from the file)")
     r = sub.add_parser("replay", help="re-compute every stored trace against a system")
     common(r)
     r.add_argument("--trust-models", action="store_true", help="do not re-run models; verify their recorded outputs")

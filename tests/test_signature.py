@@ -1,5 +1,5 @@
-"""solvi.signature: the positional octonion signature of a trace / a store names the one changed record and restores its
-content hash; its limits are pinned too.
+"""solvi.signature: a signature of a trace / a store names the one changed record and restores its content hash; its
+limits are pinned too. Every test runs for both codes: "syndrome" (the default) and "octonion".
 
 Claims, written down before the numbers below were measured (the source: our trace-signature experiment on solver
 traces — 7218 derivation trees, 34 356 substitutions of 7 kinds; the positional octonion code, 32 numbers: every kind
@@ -24,7 +24,9 @@ detected, 0 located; S4, S5, S6 as claimed; S7 sign 1000 items 14–18 ms, locat
 at a larger scale: 2000/2000 single changes located and restored, 1500/1500 multi-changes detected, 0 wrongly located;
 10 000 items: sign 0.19 s, locate 0.16 s. A classical syndrome code (two sums mod a 256-bit prime, 64 bytes) does the
 same on these flat lists — 2000/2000, 0 wrong — about 60x faster: on a flat list of records the octonions add nothing
-over it; what they add over the hash chain, any single-error-locating code adds.
+over it; what they add over the hash chain, any single-error-locating code adds. So the syndrome code became the
+default, and S1–S7 hold for it too (the whole 32-byte hash restored instead of 28 bytes; S7: sign / locate 1000 items
+1.3 / 1.4 ms, ~10x faster than the octonion code with the hashing of the items included).
 """
 import hashlib
 import json
@@ -37,7 +39,14 @@ import pytest
 from test_storage import STATES, Clock, _edit_answer, _jsonl_lines, _jsonl_write, _rehash, _sql_bodies, build, make_store
 
 from solvi import System
-from solvi.signature import BYTES, NotLocatable, check, extend, inv, load, locate, mul, record_digest, repair, sign
+from solvi.signature import ALGS, BYTES, NotLocatable, check, extend, inv, load, locate, mul, record_digest, repair, sign
+
+alg = pytest.mark.parametrize("alg", ALGS)
+
+
+def _restored(alg, digest):
+    """What the signature restores of a content hash: all of it (syndrome) or its first 28 bytes (octonion)."""
+    return (digest if alg == "syndrome" else digest[:BYTES]).hex()
 
 
 def _rand_items(rng, n):
@@ -57,35 +66,39 @@ def test_octonion_algebra():
 
 
 # --- S1, S2: one change located and restored; no false alarms
-def test_single_change_located_and_restored():
+@alg
+def test_single_change_located_and_restored(alg):
     rng = random.Random(1)
     located = restored = matched = alarms = 0
     for _ in range(600):
         its = _rand_items(rng, rng.randint(1, 300))
-        sig = json.loads(json.dumps(sign(its)))                              # kept as JSON elsewhere
+        sig = load(json.dumps(sign(its, alg)))                              # kept as JSON elsewhere
         alarms += locate(its, sig) is not None
         k = rng.randrange(len(its))
         orig, its[k] = its[k], rng.randbytes(rng.randint(1, 60))
         r = repair(its, sig, candidates=[rng.randbytes(8), orig, rng.randbytes(8)])
         located += r["index"] == k
-        restored += r["digest"] == hashlib.sha256(orig).digest()[:BYTES].hex()
+        restored += r["digest"] == _restored(alg, hashlib.sha256(orig).digest())
         matched += r["match"] == orig
     assert (located, restored, matched, alarms) == (600, 600, 600, 0)
 
 
-def test_unchanged_and_empty():
-    assert locate([], sign([])) is None
+@alg
+def test_unchanged_and_empty(alg):
+    assert locate([], sign([], alg)) is None
     its = [b"a", b"b", b"c"]
-    assert check(its, sign(its))["ok"] and repair(its, sign(its)) is None
+    assert check(its, sign(its, alg))["ok"] and repair(its, sign(its, alg)) is None
+    assert sign(its, alg)["alg"] == alg and check(its, sign(its, alg))["alg"] == alg
 
 
 # --- S3, S4: honest limits
-def test_two_changes_detected_not_located():
+@alg
+def test_two_changes_detected_not_located(alg):
     rng = random.Random(2)
     detected = wrong = 0
     for _ in range(300):
         its = _rand_items(rng, rng.randint(2, 300))
-        sig = sign(its)
+        sig = sign(its, alg)
         for k in rng.sample(range(len(its)), 2):
             its[k] = rng.randbytes(20)
         r = check(its, sig)
@@ -94,10 +107,11 @@ def test_two_changes_detected_not_located():
     assert (detected, wrong) == (300, 0)
 
 
-def test_reorder_delete_insert_detected_not_located():
+@alg
+def test_reorder_delete_insert_detected_not_located(alg):
     rng = random.Random(3)
     base = _rand_items(rng, 50)
-    sig = sign(base)
+    sig = sign(base, alg)
     swapped = list(base)
     swapped[10], swapped[30] = swapped[30], swapped[10]
     deleted = base[:20] + base[21:]
@@ -113,32 +127,42 @@ def test_reorder_delete_insert_detected_not_located():
         locate(base[:20] + base[21:] + [b"filler"], sig)    # a deletion hidden by an append: still not one change
 
 
-def test_appended_items_not_covered_and_extend():
+@alg
+def test_appended_items_not_covered_and_extend(alg):
     rng = random.Random(4)
     its = _rand_items(rng, 40)
-    sig = sign(its)
+    sig = sign(its, alg)
     more = its + _rand_items(rng, 7)
     assert locate(more, sig) is None                         # the signed prefix is unchanged
-    assert np.allclose(extend(sig, more[40:])["root"], sign(more)["root"]) and extend(sig, more[40:])["count"] == 47
+    ext, full = extend(sig, more[40:]), sign(more, alg)
+    assert ext["count"] == 47 and ext["alg"] == alg
+    assert ext["root"] == full["root"] if alg == "syndrome" else np.allclose(ext["root"], full["root"])
+    assert extend(sign([], alg), more)["root"] == full["root"] if alg == "syndrome" else True
     more[42] = b"edited after signing"
     assert locate(more, sig) is None                         # ... and what came after it is not covered
 
 
 def test_bad_signature_refused():
+    for bad in ({"alg": "other", "count": 1, "root": [0.0] * 32}, {"alg": "syndrome", "count": 1, "root": [0.0] * 32},
+                {"alg": "octonion", "count": 1, "root": ["a", "b"]}):
+        with pytest.raises(ValueError):
+            check([b"a"], bad)
     with pytest.raises(ValueError):
-        check([b"a"], {"alg": "other", "count": 1, "root": [0.0] * 32})
+        sign([b"a"], "other")
+    assert sign([b"a"])["alg"] == "syndrome" and len(sign([b"a"])["root"]) == 2      # the default: 64 bytes
     assert load(json.dumps(sign([b"a"])))["count"] == 1
 
 
 # --- S5: a store rewritten after an edit, the stored head included
+@alg
 @pytest.mark.parametrize("kind", ["jsonl", "sqlite"])
-def test_store_rewrite_located_by_signature(kind, tmp_path):
+def test_store_rewrite_located_by_signature(alg, kind, tmp_path):
     store = make_store(kind, tmp_path, Clock())
     cat, qs = build()
     s = System(cat, qs, storage=store)
     for st in STATES:
         s.ask(st)
-    anchor, sig = store.head(), store.signature()
+    anchor, sig = store.head(), store.signature(alg)
     assert sig["count"] == 4 and store.verify(signature=sig)["ok"]
     recs = _jsonl_lines(store) if kind == "jsonl" else _sql_bodies(store)
     backup = json.loads(json.dumps(recs[1]))
@@ -160,15 +184,16 @@ def test_store_rewrite_located_by_signature(kind, tmp_path):
     assert not va["ok"] and va["problems"][-1][0] == 3       # the anchor: "rewritten", at its own position only
     v = store.verify(signature=sig, candidates=[recs[0], backup])
     assert not v["ok"] and [p[0] for p in v["problems"]] == [1]
-    assert v["signature"]["digest"] == record_digest(backup)[:BYTES].hex() and v["signature"]["match"] is backup
+    assert v["signature"]["digest"] == _restored(alg, record_digest(backup)) and v["signature"]["match"] is backup
 
 
 # --- S6: a trace changed consistently (value and every hash recomputed)
-def test_trace_record_located_and_value_restored():
+@alg
+def test_trace_record_located_and_value_restored(alg):
     from solvi.runtime import vhash
     cat, qs = build()
     res = System(cat, qs).ask(STATES[0])
-    sig = res.signature()
+    sig = res.signature(alg)
     assert sig["count"] == 1 + len(res.trace.records) and locate(res, sig) is None
     i = next(k for k, r in enumerate(res.trace.records) if r.name == "risk")
     old = res.trace.records[i].value
@@ -187,7 +212,8 @@ def test_trace_record_located_and_value_restored():
 
 
 # --- the CLI
-def test_cli_verify_signature(tmp_path, capsys):
+@alg
+def test_cli_verify_signature(alg, tmp_path, capsys):
     from solvi.cli import main
     store = make_store("jsonl", tmp_path, Clock())
     cat, qs = build()
@@ -195,7 +221,7 @@ def test_cli_verify_signature(tmp_path, capsys):
     for st in STATES:
         s.ask(st)
     out = tmp_path / "sig.json"
-    assert main(["verify", store.path, "--sign", str(out)]) == 0 and load(str(out))["count"] == 4
+    assert main(["verify", store.path, "--sign", str(out), "--alg", alg]) == 0 and load(str(out))["alg"] == alg
     assert main(["verify", store.path, "--signature", str(out)]) == 0
     assert "signature verified" in capsys.readouterr().out
     recs = _jsonl_lines(store)
@@ -212,11 +238,12 @@ def test_cli_verify_signature(tmp_path, capsys):
 
 
 # --- S7: speed
-def test_speed():
+@alg
+def test_speed(alg):
     rng = random.Random(5)
     its = _rand_items(rng, 1000)
     t = time.perf_counter()
-    sig = sign(its)
+    sig = sign(its, alg)
     t_sign = time.perf_counter() - t
     its[500] = b"x"
     t = time.perf_counter()
