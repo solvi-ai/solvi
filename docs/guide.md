@@ -516,7 +516,7 @@ a fallback producer (a rule, a human queue) runs if there is one:
   checkpoint's threshold for that error rate (`model.act_threshold_for(0.1)`), `use_act=False` ignores the signal.
   **The checkpoint's thresholds were fitted on the model's own validation data and do not hold on a new domain** (measured:
   a "10% error" threshold gave 38–52% error on unseen tasks). For a real error target, calibrate on your own labelled
-  stream with `part.calibrate_for(examples, error=...)`;
+  stream with `part.act_guard(examples, risk=...)` (below);
 - without an act head (or besides it): `escalate_below=0.8` — a calibrated confidence below it escalates as **low
   confidence** (`"confidence 0.62 < 0.80 (escalate_below); would have answered 'billing'"`);
 - `part.calibrate_for(examples, error=0.05)` picks the threshold for a target error rate on labelled examples
@@ -525,6 +525,53 @@ a fallback producer (a rule, a human queue) runs if there is one:
 
 The provenance stays `decided` and the model's fingerprint is in the trace either way; `Decision.act` is `False` for an
 escalated decision.
+
+#### Thresholds with a guarantee: act_guard, learn-then-test, conformal sets
+
+`calibrate_for(method="empirical")` fits the error on the examples it was chosen on; on new inputs it can be several times
+higher. Two thresholds come with a promise that holds for inputs like the calibration examples (exchangeable with them —
+the same stream, not a new domain):
+
+```python
+info = part.act_guard(examples, risk=0.10)     # a few hundred [(input, correct)] from your own stream
+# P(answered alone and wrong) ≤ 10% — a share of ALL questions, answered or escalated
+info["answered"], info["error"], info["risk"], info["must_escalate_at_least"]
+
+part.calibrate_for(examples, error=0.05, method="ltt", delta=0.1)
+# the error AMONG the answers given alone ≤ 5% with probability ≥ 90% — stricter, often lets nothing through
+
+part.conformal(examples, coverage=0.90)
+# every decision: extra["candidates"] — the answers that cannot be ruled out (they contain the right one 90% of the time);
+# an escalation's message lists them for the person who takes over
+```
+
+`act_guard` is conformal risk control: the lowest threshold whose risk on the examples, (errors let through + 1) / (n + 1),
+is at most `risk`. Measured on solvi-large with 300 examples per data set (200 random splits): the risk on the held-out
+questions was 9.6–10.0% on every set, while the answered share depends on how hard the questions are (typed-decisions 32%,
+Taskmaster-2 50%, ContractNLI 97%, JSON questions 99.6%). When the model is wrong on a share μ of the examples, any rule
+must escalate at least (μ − risk) / (1 − risk) of them — `must_escalate_at_least` tells you before you tune anything.
+Every decision records the promise of its threshold (`decision.extra["guarantee"]`) and the audit shows it per answer.
+Recalibrate when the inputs change: the promise does not survive a shift of domain.
+
+#### Option order and near ties
+
+A decider may prefer an option for where it is listed. `option_order="canonical"` asks in sorted order, so how a caller
+lists the options cannot change the answer; `option_order="average"` averages the model's logits over `permutations=4`
+rotations of the list (one forward pass each). `min_margin=0.1` escalates a near tie between the two most probable
+answers — where a misleading sentence in the input is most likely to flip the choice. Both are in the part's fingerprint.
+
+#### Any System One model as a decider
+
+```python
+from solvi.systemone import systemone
+model = systemone("http://127.0.0.1:8009", "kev-latest")        # api_key="..." for a hosted service such as Jev
+part = model.decision("team", "Which team should handle this?", "email", {"billing": "Charges", "shipping": "Delivery"})
+```
+
+Any server of `POST /v1/systemone` (Jev, and open ones: Kev, Von, Laya-serve, Intern-Decision) proposes; solvi's checks,
+rules, thresholds (act_guard on the confidence: the API has no act signal) and trace decide. Choice and yes/no questions;
+multi-label questions, spans, evidence and "not stated" are not part of the API. The trace records the endpoint and model
+name, not the weights behind them — calibrate again when the service changes its model.
 
 ### Several questions in one pass
 
