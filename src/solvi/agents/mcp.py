@@ -47,7 +47,7 @@ import shlex
 import subprocess
 import sys
 
-from .guard import Guard, _text
+from .guard import Guard, ToolCall, _text
 
 CONTEXT_MESSAGES = 50            # the tool outputs the proxy's session keeps for checking
 CONTEXT_CHARS = 100_000          # ... and their characters in all
@@ -165,12 +165,15 @@ class Proxy:
         """tools/call → the result for the client. ask(message) → the user's answer (True / False / None) or None."""
         if self.listed is None:
             self.tools()
-        name, args = params.get("name"), params.get("arguments") or {}
+        name, args = params.get("name"), params.get("arguments")
+        args = {} if args is None else args               # MCP: arguments are a JSON object — a string is not parsed
         g = self.guard
+        if not isinstance(name, str) or not name:
+            return {"content": [{"type": "text", "text": "tools/call needs a tool name (a string)"}], "isError": True}
         if name in g.tools and name not in self.listed:          # declared, but hidden (see tools)
             return {"content": [{"type": "text", "text": f"{name} is not available through this proxy"}],
                     "isError": True}
-        d = g.check({"name": name, "arguments": args}, self.session.context, self.session.facts, store=False)
+        d = g.check(ToolCall(name, args), self.session.context, self.session.facts, store=False)
         if d.outcome == "escalate" and ask is not None:
             answer = ask(d)
             if answer is not None:
@@ -187,6 +190,11 @@ class Proxy:
         except UpstreamError as e:
             d.error = str(e)
             result = {"content": [{"type": "text", "text": f"{name} failed: {e}"}], "isError": True}
+        except Exception as e:                            # the call may or may not have reached the server: recorded
+            d.error = f"forwarding failed: {type(e).__name__}"
+            self.session.add("tool", f"{name}: {d.error}")
+            g._save(d)
+            raise
         else:
             if result.get("isError"):
                 d.error = _text(result.get("content")) or "error"

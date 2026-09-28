@@ -35,7 +35,8 @@ the protocol that tools need (initialize, ping, tools/list, tools/call).
 Security (see docs/guide.md, Serving): `--token` / $SOLVI_SERVE_TOKEN requires `Authorization: Bearer <token>` on every
 HTTP request (constant-time compare); a request body / MCP message is at most `--max-body` bytes and `--max-depth` levels
 of JSON; a System One request at most `--max-questions` questions of `--max-options` options; at most `--max-inflight`
-sync requests run or wait at once, each waiting at most `--queue-timeout` s for the System (then 503 busy); a request
+requests run or wait at once (an async System's too), each sync one waiting at most `--queue-timeout` s for the
+System (then 503 busy); a request
 takes at most `--timeout` seconds (async Systems: through System.aask's part timeout, so the answer
 abstains rather than the request failing); a failure the client did not cause is logged here and answered with an
 incident id, never a traceback or a path — also inside an answer: a part that raised is in the response as its
@@ -161,8 +162,9 @@ class Limits:
     answers 504 after it, an MCP tool call an error; an async System's parts are given 80% of it as System.aask's timeout
     (unless System(timeout=) or the part sets one), so a slow part makes its questions abstain (safeguard `timeout`) and
     the request still answers. max_questions / max_options: questions in one System One request, options (criteria) of
-    one of them — more is refused (422). max_inflight: requests answered by a worker thread at once (running or waiting
-    for the System; a request whose thread timed out still counts until the thread ends) — more are refused at once
+    one of them — more is refused (422). max_inflight: requests answered at once — by a worker thread (running or
+    waiting for the System; a request whose thread timed out still counts until the thread ends) or, for an async
+    System, on the event loop — more are refused at once
     with 503 "busy"; queue_timeout: seconds a request waits for the System while another is being answered (None: as
     long as it takes) — then 503 "busy", instead of piling up threads behind a slow one."""
     max_body: int = 1_000_000
@@ -323,6 +325,17 @@ class Service:
         finally:
             self._slots.release()
 
+    @contextlib.asynccontextmanager
+    async def aslot(self):
+        """An async request's slot among Limits.max_inflight (shared with the sync ones; none free: Busy at once) — an
+        async System answers requests concurrently, so this is what bounds them."""
+        if not self._slots.acquire(blocking=False):
+            raise Busy(f"the server is busy ({self.limits.max_inflight} requests in flight): try again later")
+        try:
+            yield
+        finally:
+            self._slots.release()
+
     def storing(self, store):
         """Whether a request is stored: always (a server with a store keeps every answer), unless the server allows
         clients to opt out (allow_client_no_store) and this one did."""
@@ -382,7 +395,8 @@ class Service:
 
     async def aask(self, state, names=None, store=True):
         """ask, for an async System (System.aask)."""
-        resp = await self._aask(state, names, self.storing(store))
+        async with self.aslot():
+            resp = await self._aask(state, names, self.storing(store))
         d = resp.to_dict()
         d["stored_id"], d["trace_hash"] = resp.stored_id, trace_hash(resp)
         return redact(d, "ask")
@@ -394,7 +408,8 @@ class Service:
 
     async def atool(self, name, state):
         """tool, for an async System (System.aask)."""
-        return self._tool_result(name, await self._aask(state, [name], True))
+        async with self.aslot():
+            return self._tool_result(name, await self._aask(state, [name], True))
 
     # --- a free text (System.ask_text)
     def textin(self, today=None):
@@ -451,8 +466,9 @@ class Service:
 
     async def aask_text(self, text, question=None, store=True, today=None):
         """ask_text, for an async System (System.aask_text)."""
-        read = self._read(text, question, today)
-        return self._text_result(await self.system.aask_text(read, store=self.storing(store)))
+        async with self.aslot():
+            read = self._read(text, question, today)
+            return self._text_result(await self.system.aask_text(read, store=self.storing(store)))
 
     @staticmethod
     def _tool_result(name, resp):

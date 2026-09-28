@@ -1626,8 +1626,8 @@ only this endpoint. Without FastAPI, `solvi.serve.Service(system, decider)` answ
   at most `--max-depth` levels deep (default 32: 400), and a request takes at most `--timeout` seconds (default 60:
   504; an MCP tool error). A sync System cannot be interrupted: the ask finishes in a worker thread, and the next ask
   waits for the System at most `--queue-timeout` seconds (default 10), then gets a 503 "busy"; at most `--max-inflight`
-  requests (default 8, a timed-out one included until its thread ends) are running or waiting at once — more get a 503
-  at once, so slow asks never pile up threads. `POST /v1/systemone` takes at most `--max-questions` questions (default
+  requests (default 8, a timed-out one included until its thread ends; an async System's requests count too) are
+  running or waiting at once — more get a 503 at once, so slow asks never pile up. `POST /v1/systemone` takes at most `--max-questions` questions (default
   32) of at most `--max-options` options each (default 64): 422 above. An async System's parts get 80% of the timeout as `aask`'s timeout (unless `System(timeout=)` or the
   part sets one), so a slow part makes its questions abstain (safeguard `timeout`) and the request still answers.
 - **Errors.** A refused request says what was refused. Any other failure is logged on the server with its traceback

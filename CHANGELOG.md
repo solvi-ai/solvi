@@ -186,6 +186,13 @@ Found in an adversarial re-check of 0.7; each case has a regression test (`tests
   cancelling isn't" read as True. The cue's quote now runs on to a negation or a "no" up to 25 characters after it in
   the same sentence; "cue: no" / "cue = false" / "cue? no" read as False ("cue: yes" as True); "far from", "anything
   but", "not anymore", "no longer", "less than" are negations; anything else with a negation is `unparsed`.
+- serve: an async System ignored `--max-inflight` (its requests ran on the event loop without a slot); they now take
+  one of the same slots (`Service.aslot`), and more are refused at once with 503 "busy".
+- MCP proxy: a `tools/call` whose `arguments` were a JSON string was parsed for the check and then failed when
+  forwarded; MCP arguments are an object, so a string is denied ("the arguments are not a JSON object"), and a
+  non-string tool name is an error result. An allowed call whose forwarding raised stayed in `session.decisions` as a
+  plain allow and was never stored: it is recorded with `error="forwarding failed: <type>"` (stored, and in the
+  session's context) before the error is raised.
 
 ### Fixes in the learning loop
 

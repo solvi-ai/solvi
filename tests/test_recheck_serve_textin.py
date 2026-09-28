@@ -163,3 +163,69 @@ def test_a_negation_or_a_no_after_the_cue_is_read(said, want):
     assert res.trace.replay(s)["ok"]
     if want is not True:
         assert res["cancel_order"].answer != "now", said
+
+
+# ---------------------------------------------------------------------------------------------------- minor edges
+def test_async_systems_respect_max_inflight():
+    import asyncio
+
+    from solvi.serve import Busy, Limits, Service
+    cat = Catalog()
+    gate = {}
+
+    @cat.fn
+    async def slow(text: str) -> str:
+        await gate["go"].wait()
+        return text
+
+    @cat.rule("q")
+    def q(slow) -> str:
+        return "yes"
+    svc = Service(System(cat, [Question("q", "?", Answer.choice(["yes", "no"]))]), limits=Limits(max_inflight=1))
+    assert svc.is_async
+
+    async def main():
+        gate["go"] = asyncio.Event()
+        first = asyncio.ensure_future(svc.aask({"text": "a"}))
+        await asyncio.sleep(0.01)
+        with pytest.raises(Busy):
+            await svc.aask({"text": "b"})
+        with pytest.raises(Busy):
+            await svc.atool("q", {"text": "b"})
+        gate["go"].set()
+        assert (await first)["results"]["q"]["answer"] == "yes"
+        assert (await svc.aask({"text": "c"}))["results"]["q"]["answer"] == "yes"     # the slot is free again
+    asyncio.run(main())
+
+
+def test_mcp_proxy_denies_arguments_given_as_a_json_string():
+    from test_agents_hardening import SCHEMA, make_proxy
+
+    from solvi.agents import Guard
+    g = Guard()
+    g.declare("delete")
+    px, up = make_proxy(g, [{"name": "delete", "inputSchema": SCHEMA}])
+    r = px.call({"name": "delete", "arguments": json.dumps({"n": 2})})
+    assert r["isError"] and r["structuredContent"]["solvi"]["outcome"] == "deny" and up.calls == []
+    assert "not a JSON object" in r["content"][0]["text"]
+    assert not px.call({"name": "delete", "arguments": {"n": 2}}).get("isError") and len(up.calls) == 1
+    assert px.call({"name": ["delete"], "arguments": {}})["isError"]
+
+
+def test_mcp_proxy_records_a_forward_that_failed(tmp_path):
+    from test_agents_hardening import SCHEMA, make_proxy
+
+    from solvi.agents import Guard
+
+    def boom(name, args):
+        raise RuntimeError("the pipe broke")
+    g = Guard(storage=tmp_path / "calls.jsonl")
+    g.declare("delete")
+    px, _ = make_proxy(g, [{"name": "delete", "inputSchema": SCHEMA}], reply=boom)
+    with pytest.raises(RuntimeError):
+        px.call({"name": "delete", "arguments": {"n": 2}})
+    d = px.session.decisions[-1]
+    assert d.outcome == "allow" and d.error == "forwarding failed: RuntimeError" and d.stored_id is not None
+    [st] = list(g.storage.iter())
+    assert st.meta["guard"]["error"] == "forwarding failed: RuntimeError"
+    assert "forwarding failed" in px.session.context[-1][1]
