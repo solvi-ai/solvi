@@ -419,8 +419,12 @@ def load(cls, data, catalog=None):
         known = dict(tr.init)
         known.update({r.name: r.value for r in tr.records if r.value is not MISSING})
         values = {k: known.get(k, v) for k, v in m.values.items()}
-        return Response({q: _load_result(r) for q, r in m.results.items()}, _load_flow(m.flow, catalog), tr, values, m.ms,
+        resp = Response({q: _load_result(r) for q, r in m.results.items()}, _load_flow(m.flow, catalog), tr, values, m.ms,
                         m.feasible, list(m.violations), catalog, [e.model_dump() for e in m.safeguards], m.model_outputs)
+        if system is not None:
+            resp._system = system                     # loaded with a System: reports and counterfactuals use it
+            resp._heads = system.heads
+        return resp
     raise TypeError(f"no schema for {n}")
 
 

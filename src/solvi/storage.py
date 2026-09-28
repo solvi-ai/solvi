@@ -285,6 +285,15 @@ class TraceStorage:
         since, until = _when(since), _when(until)
         return [s for s in self.iter() if _matches(s.data, question, answer, status, safeguard, model, since, until, catalog)]
 
+    def report(self, since=None, until=None, question=None, format="md", examples=3, system=None, **filters):
+        """A human-readable report of the stored decisions in [since, until) (optionally of one question): counts by
+        answer, status and safeguard, the escalation rate, the guarantee coverage of the answers a model took part in,
+        changes of the catalog's and the models' fingerprints, and `examples` stored ids per answer, escalation and
+        safeguard. format: "md", "html" (one self-contained page) or "data" (a dict); other `filters` as query. See
+        solvi.report."""
+        from .report import period, render
+        return render(period(self, since, until, question, examples, system, **filters), format)
+
     # --- integrity
     def verify(self, anchor=None):
         """Check the chain across stored records: each record's hash, its link to the record before it, the sequence

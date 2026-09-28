@@ -118,6 +118,15 @@ class Response(Serial):
         a = build(self, question)
         return a[question] if isinstance(question, str) else a
 
+    def report(self, format="md", question=None, system=None, replay="trusted"):
+        """A human-readable report of this decision for an auditor or a customer: each answer, what it rests on, the quotes
+        highlighted in the source text with their offsets, the safeguards that fired, the guarantee line, the models'
+        fingerprints, the trace's hashes and the replay status. format: "md" (Markdown), "html" (one self-contained page,
+        every value escaped) or "data" (a dict). replay: "trusted" (default: deterministic steps re-run, model outputs
+        verified from the record — no model is called), "full" (models re-run too) or False. See solvi.report."""
+        from .report import decision, render
+        return render(decision(self, question, system, replay), format)
+
 
 class System:
     def __init__(self, catalog: Catalog, questions, journal: str | None = None, workers: int = 1, order: str = "default",
@@ -333,6 +342,7 @@ class System:
                                          r.source, "low_confidence", r.repaired, r.kind, r.evidence, r.extra)
         resp = Response(results, flow, trace, vals, now_ms() - t0, feasible, violations, self.catalog)
         resp._heads = self.heads                      # for the audit: which features a learned head could not use
+        resp._system = self                           # for reports and counterfactuals (questions, answer heads, replay)
         self._count(resp)
         if self.storage is not None and store:
             self.storage.save(resp)                   # sets resp.stored_id

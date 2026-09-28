@@ -9,10 +9,15 @@
     solvi diff   decisions.db --system myapp.decisions_v2:build_system [--question Q] [--since ISO] [--limit N] [--json]
     solvi serve  myapp.decisions:system [--store decisions.db] [--decider ID] [--port 8000] [--mcp]   (solvi.serve)
     solvi check  myapp.decisions:system [--strict] [--json]                                          (solvi.check)
+    solvi report decisions.db [--since ISO] [--until ISO] [--question Q] [--id ID] [--html out.html] [--md out.md] [--json]
+                                                                                                     (solvi.report)
 
 --system names a System: "package.module:attribute" or "path/to/file.py:attribute", where the attribute is a System or a
 function without arguments that returns one (`solvi serve` and `solvi check` take it as their first argument; check also
-takes a Catalog). Exit status: 0 — verified / everything replays / nothing changes / no catalog errors; 1 — problems /
+takes a Catalog). `solvi report` prints a Markdown report of the stored decisions (or of one with --id), or writes it
+as a self-contained HTML page (--html) / a Markdown file (--md); --system is optional there (typed values, the replay of
+one decision).
+Exit status: 0 — verified / everything replays / nothing changes / no catalog errors / report written; 1 — problems /
 mismatches / changes / catalog errors; 2 — usage errors."""
 from __future__ import annotations
 
@@ -125,6 +130,34 @@ def cmd_diff(a):
     return 0 if rep.ok else 1
 
 
+def cmd_report(a):
+    from .report import decision, period, render
+    system = load_system(a.system) if a.system else None
+    store = _store(a.store, system)
+    if a.id:
+        try:
+            res = store.get(a.id, system)
+        except KeyError as e:
+            _fail(str(e.args[0]))
+        data = decision(res, system=system, replay="trusted" if system is not None else False)
+    else:
+        f = {k: getattr(a, k) for k in ("status", "safeguard", "model") if getattr(a, k, None) is not None}
+        data = period(store, a.since, a.until, a.question, a.examples, system, **f)
+    if a.json:
+        _dump(data)
+    if a.html:
+        with open(a.html, "w", encoding="utf-8") as fh:
+            fh.write(render(data, "html"))
+        print(f"wrote {a.html}", file=sys.stderr)
+    if a.md:
+        with open(a.md, "w", encoding="utf-8") as fh:
+            fh.write(render(data, "md"))
+        print(f"wrote {a.md}", file=sys.stderr)
+    if not (a.json or a.html or a.md):
+        print(render(data, "md"), end="")
+    return 0
+
+
 COMMANDS = {"test": ("solvi.testing", "decision regression tests from cases.json files"),
             "honesty": ("solvi.honesty", "honesty numbers of a labelled set, gated against a baseline")}
 
@@ -137,8 +170,8 @@ def main(argv=None):
         return 0
     if argv and argv[0] in COMMANDS:                  # commands with their own option parsers
         return importlib.import_module(COMMANDS[argv[0]][0]).main(argv[1:])
-    p = argparse.ArgumentParser(prog="solvi", description="solvi: test, honesty; verify, replay and diff stored decisions; "
-                                                          "serve and check a system",
+    p = argparse.ArgumentParser(prog="solvi", description="solvi: test, honesty; verify, replay, diff and report "
+                                                          "stored decisions; serve and check a system",
                                 epilog="also: " + "; ".join(f"solvi {k} — {w}" for k, (_, w) in COMMANDS.items()))
     sub = p.add_subparsers(dest="cmd", required=True)
 
@@ -161,6 +194,16 @@ def main(argv=None):
     d.add_argument("--limit", type=int, help="at most this many stored decisions")
     d.add_argument("--confidence", type=float, default=0.01,
                    help="report a confidence change above this (default 0.01; negative: ignore confidence)")
+    rp = sub.add_parser("report", help="a human-readable report of stored decisions (a period, or one with --id)")
+    rp.add_argument("store", help="a TraceStorage: .db / .sqlite (SQLite) or a JSON-lines file")
+    rp.add_argument("--system", help="module:attr or file.py:attr — optional: restores typed values; replays one decision")
+    for k in ("question", "status", "safeguard", "model", "since", "until"):
+        rp.add_argument(f"--{k}", help=f"only stored decisions with this {k} (see TraceStorage.query)")
+    rp.add_argument("--id", help="the report of this one stored decision")
+    rp.add_argument("--examples", type=int, default=3, help="example ids per answer, escalation and safeguard (default 3)")
+    rp.add_argument("--html", metavar="OUT.html", help="write a self-contained HTML page")
+    rp.add_argument("--md", metavar="OUT.md", help="write Markdown to a file")
+    rp.add_argument("--json", action="store_true", help="print the report's data as JSON")
     from .serve import add_parser as serve_parser, cmd_serve
     serve_parser(sub)
     from .check import add_parser as check_parser, cmd_check
@@ -170,7 +213,7 @@ def main(argv=None):
     except SystemExit as e:                            # --help: 0; usage errors: 2 — returned, not raised
         return e.code if isinstance(e.code, int) else 2
     return {"verify": cmd_verify, "replay": cmd_replay, "diff": cmd_diff, "serve": cmd_serve,
-            "check": cmd_check}[a.cmd](a)
+            "check": cmd_check, "report": cmd_report}[a.cmd](a)
 
 
 if __name__ == "__main__":

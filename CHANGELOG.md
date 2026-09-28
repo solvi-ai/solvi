@@ -1,5 +1,22 @@
 # Changelog
 
+## Unreleased (0.7)
+
+### Reports for people
+
+- `res.report(format="md" | "html" | "data")`: a report of one decision for an auditor or a customer — each answer, what it
+  rests on (given, computed, quoted with offsets, decided with the model and probabilities, learned, checks, rule,
+  evidence), the safeguards that fired, the guarantee line (the promise of the calibrated thresholds behind it, "none",
+  or no model decided it), the source texts with every quote highlighted, every model that ran with its fingerprint, the
+  trace's hashes and the replay status (`replay="trusted"` by default: no model is called).
+- `store.report(since=, until=, question=, format=, examples=3)`: a report of a period — per question the counts by
+  answer, status and safeguard, the escalation rate, the guarantee coverage of the answers a model took part in, the
+  catalog and model fingerprints in use and their changes, and example stored ids.
+- HTML is one self-contained page (inline CSS, light and dark, no scripts or external assets); every value is escaped.
+  Markdown escapes every special character.
+- `solvi report STORE [--since] [--until] [--question] [--id ID] [--html out.html] [--md out.md] [--json] [--system]`.
+- A response keeps the System that answered (and one loaded with a System, its System) for reports.
+
 ## 0.6.0 — 2026-09-28 — serving, catalog lint, several models, async, measured costs
 
 ### Async execution: aask

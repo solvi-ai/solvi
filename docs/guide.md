@@ -1430,6 +1430,47 @@ approve = 'yes'  [ok]  confidence 0.60  ← computed by approve
               · fallback producer: total — total_regex used after total_model rejected
 ```
 
+### Reports for people: res.report, store.report, solvi report
+
+The audit is for developers; a report is for an auditor or a customer — one page per decision or per period, as Markdown,
+one self-contained HTML file (no external assets, scripts or fonts; every value escaped) or data (`format="data"`).
+
+```python
+print(res.report())                          # Markdown
+open("decision.html", "w").write(res.report(format="html"))
+res.report(format="data")                    # the same as a dict (answers, documents, models, trace, replay)
+```
+
+A decision report shows, per answer: the answer, status and confidence, the reason; what it rests on (given inputs,
+computed facts, quotes with their offsets, model decisions with probabilities and the model, learned parts, checks — which
+one decided —, the rule, evidence, constraints, parts not run); the safeguards that fired; and the **guarantee line** — the
+promise of the calibrated thresholds of the model decisions behind it (`act_guard`, `calibrate_for`), "none" when a model
+decided without one, or that no model decided the answer. Then the source texts with every quote highlighted (the offsets
+on hover; a quote that is not the text at its offsets in red; a text over 20 000 characters as excerpts around the
+quotes), every model that ran with its fingerprint (also the ones whose output was rejected), the trace's input and last
+hashes, the catalog's fingerprint and the replay status. `replay="trusted"` (the default) re-runs the deterministic steps
+and verifies the models' recorded outputs without calling them; `replay="full"` re-runs the models too, `replay=False`
+skips it. A response loaded from a store with its System (`store.get(id)` when the store belongs to a System) reports
+like the original.
+
+```python
+print(store.report(since="2026-09-01", until="2026-10-01"))            # every question
+store.report(question="refund", format="html", examples=5)               # one question
+```
+
+A period report counts per question: the answers, the statuses, the escalation rate (abstentions — handed to a person — by
+the safeguard that caused them), the safeguards that fired, and the **guarantee coverage**: of the answers a model decided
+or took part in, how many rest only on calibrated thresholds (answers from code alone are counted apart). It lists the
+catalog and model fingerprints in use and every change of them over the period (from which stored decision on), and up
+to `examples` stored ids per answer, escalation reason and safeguard — `res = store.get(id)` and `res.report()` give the
+page of one. From the shell:
+
+```
+solvi report decisions.db --since 2026-09-01 --question refund          # Markdown to stdout
+solvi report decisions.db --html september.html                          # a self-contained page
+solvi report decisions.db --id 3f9a0c1d2e4b5a67 --system app.py:system   # one decision, replayed against the system
+```
+
 ### Lifetime stats
 
 `system.stats` counts, over the system's lifetime: `asks`, `answers`, `abstained`, `model_outputs` (outputs of model-backed

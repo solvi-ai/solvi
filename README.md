@@ -207,7 +207,8 @@ Every answer is a value and a confidence, and the types also declare answer prim
   MCP and the System One API; `await system.aask(...)` runs async parts concurrently with timeouts; `costs="measured"`
   lets the planner pick the fastest equivalent source and switch when it slows down. `TraceStorage` keeps decisions with a
   hash chain across them; `solvi diff` shows which stored decisions a rule or model change would flip; `solvi test`,
-  `solvi check` and the honesty suite (`solvi honesty`) belong in CI.
+  `solvi check` and the honesty suite (`solvi honesty`) belong in CI; `res.report(format="html")` and
+  `solvi report decisions.db --html out.html` give an auditor one page per decision or per period.
 
 ## Planning around dead ends and costs (code strategist)
 
