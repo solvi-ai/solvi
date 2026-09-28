@@ -210,7 +210,7 @@ def demo_vote(email, risk=0.10):
     b_part = stand_in("family-b", **FAMILY_B).decision("team", TASK, "email", TEAMS)
     vote = Vote([a_part, b_part], rule="all")
     calib, test = dataset(1, 300), dataset(2, 600)
-    lines = [f"**A vote of two model families** — `Vote([a, b], rule=\"all\")`: an answer only when both propose the same "
+    lines = ["**A vote of two model families** — `Vote([a, b], rule=\"all\")`: an answer only when both propose the same "
              "team and each is sure; otherwise the email escalates with both proposals listed.", ""]
     rows = []
     for name, p in (("family A alone", a_part), ("family B alone", b_part)):
@@ -229,7 +229,7 @@ def demo_vote(email, risk=0.10):
     for v in (d.extra or {}).get("votes", []):
         props.append(f"{v.get('model', v.get('part', '?'))}: `{v.get('value')}`"
                      + (f" (escalated: {v['escalate']})" if v.get("escalate") else ""))
-    lines += ["", f"**This email:** " + (f"**{d.value}** (both agree)" if d.escalate is None else f"escalated — {d.escalate}")]
+    lines += ["", "**This email:** " + (f"**{d.value}** (both agree)" if d.escalate is None else f"escalated — {d.escalate}")]
     if props:
         lines += ["", "Proposals: " + "; ".join(props)]
     lines += ["", "_Two keyword stand-ins with different keywords and noise play two families; their mistakes differ, "
@@ -306,7 +306,7 @@ def demo_textin(message, risk=None):
     if not has_textin():
         return needs("solvi.textin.TextIn and system.ask_text", "0.7"), "", "", ""
     from solvi.textin import CueExtractor, TextIn
-    cat, system = shop()
+    _, system = shop()
     decider = DecideModel(RouteScorer(), meta={"format": "stand-in", "temperature": 1.0})
     tin = TextIn(system, decider, CueExtractor(), today=TODAY, patterns={"order_id": r"[A-Z]-\d+"},
                  synonyms={"currency": {"EUR": ["euro", "euros", "€"], "RUB": ["rubles", "руб", "₽"],
@@ -346,7 +346,7 @@ def demo_report(email, risk=0.10):
     """The report of one decision for an auditor or a customer: the guarantee demo's decision as a page."""
     if not has_report():
         return needs("res.report", "0.7"), "", "", ""
-    text, audit, md, frame = demo_guard(email, risk)
+    _, audit, md, frame = demo_guard(email, risk)
     lead = ("**A report for people** — `res.report(format=\"md\" | \"html\" | \"data\")`: each answer, what it rests on, "
             "the safeguards that fired, the guarantee line, the models with their fingerprints, the trace's hashes and "
             "the replay status (no model is called). Below: the Markdown and the self-contained HTML page of the "
