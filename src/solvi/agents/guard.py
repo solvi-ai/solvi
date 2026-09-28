@@ -30,7 +30,8 @@ Each tool is a small solvi System with one question, `verdict` ∈ {allow, deny,
 catalog, in this order (a failed hard check decides; when several fail, the first in this order):
 
   arguments_valid              the arguments validate against the tool's types (pydantic; unknown arguments are errors) → deny
-  arguments_grounded           every `ground=` argument is literally in the conversation (a quote with offsets) → deny
+  arguments_grounded           every `ground=` argument is in the conversation as a whole word or number token (a quote
+                               with offsets; an empty string never is) → deny
   no_injected_arguments        ... and not only in a tool output that carries instruction-like text (solvi.perturb) → escalate
   no_instructions_in_tool_outputs   tools with injections="any": no tool output in the conversation carries such text → escalate
   your policies                ordinary solvi hard checks over the arguments and the facts your app gives (deny first,
@@ -60,6 +61,7 @@ from ..core import Answer, Catalog, Claim, Question, Quote
 VERDICTS = ("allow", "deny", "escalate")
 GIVEN = ("tool_name", "tool_arguments", "conversation", "conversation_roles", "user_request")
 BUILTIN = ("argument_errors", "call_arguments", "grounding", "proposal", "arguments_valid", "arguments_grounded",
+           "schema_error", "schema_readable",
            "no_injected_arguments", "no_instructions_in_tool_outputs", "request_authorizes", "verdict", "tools_known",
            "known_tool")
 ROLES = {"user": "user", "human": "user", "assistant": "assistant", "ai": "assistant", "model": "assistant",
@@ -110,7 +112,12 @@ def messages(context) -> list:
     """A conversation → [(role, text)]: a string (one user message); a list of {"role", "content"} dicts (OpenAI,
     Anthropic, MCP-style; content a string or a list of parts with "text"; {"type": "function_call_output", "output"}
     items are tool outputs), (role, text) pairs, or message objects with .type / .role and .content (LangChain). Roles
-    are normalized to user, assistant, tool and system; anything unreadable is skipped."""
+    are normalized to user, assistant, tool and system; anything unreadable is skipped.
+
+    A content list is read block by block: an Anthropic {"type": "tool_result"} block (or any "*_tool_result") is a tool
+    output even inside a "user" message, and a {"type": "tool_use"} block (or "function_call") is the assistant's —
+    never the user's words, so neither grounds a `ground_from=("user",)` argument, and a tool result gets the injection
+    checks. Consecutive blocks of the same role make one message."""
     if context is None:
         return []
     if isinstance(context, str):
@@ -127,10 +134,51 @@ def messages(context) -> list:
         else:
             role = getattr(m, "role", None) or getattr(m, "type", None)
             content = getattr(m, "content", None)
-        text = _text(content)
         role = ROLES.get(str(role).lower()) if role is not None else None
-        if role is not None and text:
-            out.append((role, text))
+        for r, text in _blocks(role, content):
+            if r is not None and text:
+                out.append((r, text))
+    return out
+
+
+def _block_role(kind):
+    """The role of a content block by its type: a tool result is the tool's, a tool use the assistant's, else None (the
+    message's own role)."""
+    if not isinstance(kind, str):
+        return None
+    if kind.endswith("tool_result") or kind == "function_call_output":
+        return "tool"
+    if kind.endswith("tool_use") or kind == "function_call":
+        return "assistant"
+    return None
+
+
+def _blocks(role, content):
+    """A message's content → [(role, text)]: one part for a string; a list of blocks split where a block's type gives it
+    another role (tool_result → tool, tool_use → assistant), consecutive blocks of one role joined."""
+    if not isinstance(content, (list, tuple)):
+        return [(role, _text(content))]
+    out = []
+    for c in content:
+        kind = c.get("type") if isinstance(c, dict) else getattr(c, "type", None)
+        r = _block_role(kind) or role
+        if r == "assistant" and _block_role(kind) == "assistant":
+            get = c.get if isinstance(c, dict) else (lambda k, _c=c: getattr(_c, k, None))
+            args = next((get(k) for k in ("input", "arguments", "args") if get(k) is not None), {})
+            t = f"{get('name')}({args if isinstance(args, str) else json.dumps(args, ensure_ascii=False, default=str)})"
+        elif isinstance(c, dict) and _block_role(kind) == "tool":
+            t = _text(c.get("content") if "content" in c else c.get("output"))
+        elif _block_role(kind) == "tool":
+            t = _text(getattr(c, "content", None) if getattr(c, "content", None) is not None
+                      else getattr(c, "output", None))
+        else:
+            t = _text([c])
+        if not t:
+            continue
+        if out and out[-1][0] == r:
+            out[-1] = (r, out[-1][1] + "\n" + t)
+        else:
+            out.append((r, t))
     return out
 
 
@@ -198,39 +246,49 @@ def arguments_model(name, func):
             raise ValueError(f"tool {name}: *{p.name} / **{p.name} cannot be checked; declare every argument")
         t = hints.get(p.name, p.annotation if p.annotation is not p.empty else Any)
         fields[p.name] = (t, ... if p.default is p.empty else p.default)
-    return create_model(_camel(name) + "Arguments", __config__=ConfigDict(extra="forbid", arbitrary_types_allowed=True),
-                        **fields)
+    return create_model(_camel(name) + "Arguments", __config__=ConfigDict(extra="forbid", arbitrary_types_allowed=True,
+                                                                          allow_inf_nan=False), **fields)
 
 
 def model_from_json_schema(name, schema):
     """A JSON schema of an object (an MCP tool's inputSchema, an OpenAI function's parameters) → a pydantic model: string,
-    integer, number, boolean, null, array (items), object (properties → a nested model, else a dict), enum / const
-    (Literal), anyOf / oneOf / type lists (a Union), defaults and required. Anything else is Any. Unknown arguments are
-    forbidden."""
+    integer, number (finite: NaN and infinities are refused), boolean, null, array (items), object (properties → a
+    nested model, else a dict), enum / const (Literal), anyOf / oneOf / type lists (a Union), $ref to $defs /
+    definitions, defaults and required. A recursive $ref is followed once: inside itself it is any object (a dict) — the
+    model stays finite. Anything else is Any. Unknown arguments are forbidden."""
     import typing
 
     from pydantic import ConfigDict, Field, create_model
     defs = dict(schema.get("$defs") or schema.get("definitions") or {})
 
-    def resolve(s):
+    def ref_of(s):
         ref = s.get("$ref") if isinstance(s, dict) else None
-        if isinstance(ref, str) and ref.rsplit("/", 1)[-1] in defs:
-            return resolve(defs[ref.rsplit("/", 1)[-1]])
-        return s if isinstance(s, dict) else {}
+        return ref.rsplit("/", 1)[-1] if isinstance(ref, str) and ref.rsplit("/", 1)[-1] in defs else None
 
-    def typ(s, path):
-        s = resolve(s)
+    def resolve(s, seen):
+        """→ (the schema a $ref points to, the refs followed so far) — None when the ref is already being followed."""
+        hops = 0
+        while (r := ref_of(s)) is not None:
+            if r in seen or hops > len(defs):
+                return None, seen
+            seen, s, hops = seen | {r}, defs[r], hops + 1
+        return (s if isinstance(s, dict) else {}), seen
+
+    def typ(s, path, seen):
+        s, seen = resolve(s, seen)
+        if s is None:                                     # a recursive reference: any JSON object from here on
+            return dict
         if "const" in s:
             return typing.Literal[s["const"]]
         if isinstance(s.get("enum"), list) and s["enum"]:
             return typing.Literal[tuple(s["enum"])]
         alts = s.get("anyOf") or s.get("oneOf")
         if isinstance(alts, list) and alts:
-            ts = tuple(typ(a, path) for a in alts)
+            ts = tuple(typ(a, path, seen) for a in alts)
             return ts[0] if len(ts) == 1 else typing.Union[ts]
         t = s.get("type")
         if isinstance(t, list):
-            ts = tuple(typ({**s, "type": x}, path) for x in t)
+            ts = tuple(typ({**s, "type": x}, path, seen) for x in t)
             return ts[0] if len(ts) == 1 else typing.Union[ts]
         if t == "string":
             return str
@@ -243,23 +301,30 @@ def model_from_json_schema(name, schema):
         if t == "null":
             return type(None)
         if t == "array":
-            return list[typ(s.get("items") or {}, path)]
+            return list[typ(s.get("items") or {}, path, seen)]
         if t == "object" or "properties" in s:
             if s.get("properties"):
-                return obj(s, path)
+                return obj(s, path, seen)
             return dict
         return Any
 
-    def obj(s, path):
+    def obj(s, path, seen):
         req = set(s.get("required") or ())
         fields = {}
         for k, p in (s.get("properties") or {}).items():
-            p = resolve(p)
-            default = ... if k in req else p.get("default", None)
-            fields[k] = (typ(p, path + [k]), Field(default, description=p.get("description")))
+            r, _ = resolve(p, seen)
+            default = ... if k in req else (r or {}).get("default", None)
+            fields[k] = (typ(p, path + [k], seen), Field(default, description=(r or {}).get("description")))
         return create_model(_camel("_".join([name] + path)) + ("Arguments" if not path else ""),
-                            __config__=ConfigDict(extra="forbid"), **fields)
-    return obj(resolve(schema), [])
+                            __config__=ConfigDict(extra="forbid", allow_inf_nan=False), **fields)
+    top, seen = resolve(schema, frozenset())
+    return obj(top or {}, [], seen)
+
+
+def permissive_model(name):
+    """The arguments' model of a tool whose schema could not be read: any JSON object (the guard escalates its calls)."""
+    from pydantic import ConfigDict, create_model
+    return create_model(_camel(name) + "Arguments", __config__=ConfigDict(extra="allow", allow_inf_nan=False))
 
 
 def _camel(name):
@@ -279,6 +344,8 @@ class Tool:
     ground: dict = dataclasses.field(default_factory=dict)     # argument → roles it may be quoted from
     injections: str = "grounded"                               # "grounded" | "any" | "off"
     authorize: bool | None = None                              # ask the guard's authorizer (None: when it has one)
+    match: dict = dataclasses.field(default_factory=dict)      # argument → how its value is found ("token" when absent)
+    schema_error: str | None = None                            # adopt: the schema could not be read (its calls escalate)
 
     @property
     def arguments(self):
@@ -316,7 +383,7 @@ def _call_arguments(model, schema):
         """The proposed arguments, validated and coerced to the tool's types (defaults filled in)."""
         _ = schema
         m = model.model_validate(tool_arguments)
-        return {k: getattr(m, k) for k in type(m).model_fields}
+        return {**{k: getattr(m, k) for k in type(m).model_fields}, **(m.model_extra or {})}   # solvi: ok
     return call_arguments
 
 
@@ -330,12 +397,15 @@ def _argument(name, annotation):
     return f
 
 
-def _grounding(spec):
+def _grounding(spec, matchers=None):
+    matchers = dict(matchers or {})                       # argument → a callable matcher (its code is in `spec`)
+
     def grounding(call_arguments, conversation, conversation_roles) -> dict:
         """Where each argument that must come from the conversation is quoted: {"found": {argument: [[text, start, end,
-        role]]}, "missing": [...], "injected": [...]}. A string is found literally, a number as a number in the text
-        (thousands separators allowed), a list item by item; the first occurrence in a message of an allowed role wins,
-        one in a tool output with instruction-like text (solvi.perturb) only when there is no other."""
+        role]]}, "missing": [...], "injected": [...]}. A string is found as a whole word (not inside a longer word; see
+        MATCHERS), a number as a number token (thousands separators allowed; not a group of a spaced identifier), a list
+        item by item; an empty or whitespace-only string is never grounded. The first occurrence in a message of an
+        allowed role wins, one in a tool output with instruction-like text (solvi.perturb) only when there is no other."""
         from ..perturb import instruction_spans
         rules = json.loads(spec)
         roles = [(s, e, r) for s, e, r in conversation_roles]
@@ -344,7 +414,7 @@ def _grounding(spec):
         def taint(i):
             if i not in tainted:
                 s, e, r = roles[i]
-                sp = instruction_spans(conversation[s:e]) if r == "tool" else []
+                sp = instruction_spans(conversation[s:e], actions=True) if r == "tool" else []
                 tainted[i] = [conversation[s + a:s + b] for a, b in sp]
             return tainted[i]
 
@@ -354,15 +424,19 @@ def _grounding(spec):
                     return i
             return None
         found, missing, injected = {}, [], []
-        for arg, allowed in rules.items():
+        for arg, allowed in rules["roles"].items():
             v = call_arguments.get(arg)
-            if v is None or v == "" or v == [] or v == ():
+            if v is None or v == [] or v == ():
                 continue
             items = list(v) if isinstance(v, (list, tuple, set, frozenset)) and not isinstance(v, str) else [v]
+            match = matchers[arg] if arg in matchers else rules["match"][arg]
             quotes = []
             for item in items:
+                if isinstance(item, str) and not item.strip():
+                    missing.append(f"{arg}={_short(item)} (empty)")
+                    continue
                 best = None
-                for a, b in _occurrences(item, conversation):
+                for a, b in _occurrences(item, conversation, match):
                     i = where(a, b)
                     if i is None or roles[i][2] not in allowed:
                         continue
@@ -384,13 +458,50 @@ def _grounding(spec):
     return grounding
 
 
-_NUMBER = re.compile(r"(?<![\w.,])-?(?:\d{1,3}(?:[,\u00a0\u202f' ]\d{3})+(?![\d])|\d+)(?:\.\d+)?(?![\d])")
+_NUMBER = re.compile(r"(?<![\w.,])-?(?:\d{1,3}(?:[,\u00a0\u202f' ]\d{3})+(?![\d])|\d+)(?:\.\d+)?(?![\w]|[.,]\d)")
+_WHOLE_EDGE = set(" \t\r\n\"'`()[]{}<>,;:!?")
+MATCHERS = ("token", "whole", "substring")
 
 
-def _occurrences(v, text):
-    """Where a value is written in a text → [(start, end)]: a string literally; a number as a number token (not inside a
-    word; thousands separators "1,250.50", "1 250", "1'250" allowed; 250 matches "250.00"); an Enum by its value;
-    anything else by str()."""
+def _glued(text, a, b):
+    """Is the number at text[a:b] one group of a longer identifier — next to a token with a digit across a single " ",
+    "-" or "/" ("DE89 3704 0044", "555-1234", "2024-03-15")?"""
+    if a >= 2 and text[a - 1] in " -/":
+        k = a - 1
+        while k > 0 and text[k - 1].isalnum():
+            k -= 1
+        if any(c.isdigit() for c in text[k:a - 1]):
+            return True
+    if b + 1 < len(text) and text[b] in " -/":
+        k = b + 1
+        while k < len(text) and text[k].isalnum():
+            k += 1
+        if any(c.isdigit() for c in text[b + 1:k]):
+            return True
+    return False
+
+
+def _bounded(text, a, b, s, match):
+    """Does the occurrence text[a:b] of the string s stand on its own under the matcher?"""
+    if match == "substring":
+        return True
+    before, after = text[a - 1] if a > 0 else "", text[b] if b < len(text) else ""
+    if match == "whole":                 # delimited by whitespace, quotes, brackets or punctuation (a "." ends a sentence)
+        ok_before = before == "" or before in _WHOLE_EDGE
+        ok_after = after == "" or after in _WHOLE_EDGE or (after == "." and (b + 1 >= len(text) or text[b + 1].isspace()))
+        return ok_before and ok_after
+    word = re.compile(r"\w")                                 # "token": not inside a longer word
+    return not (word.match(s[0]) and before and word.match(before)) and not (word.match(s[-1]) and after
+                                                                              and word.match(after))
+
+
+def _occurrences(v, text, match="token"):
+    """Where a value is written in a text → [(start, end)]: a string as a whole word under `match` ("token": not inside a
+    longer word — "DE8937" is not found in "DE89370400…"; "whole": delimited by whitespace, quotes, brackets or
+    punctuation — "x.org" is not found in "alice@x.org"; "substring": anywhere; a callable(value, text) → [(start,
+    end)] decides itself); a number as a number token (not inside a word; thousands separators "1,250.50", "1 250",
+    "1'250" allowed; 250 matches "250.00"; not a group of a spaced or dashed identifier — 3704 is not found in "DE89 3704
+    0044"); an Enum by its value; anything else by str(). An empty or whitespace-only string is found nowhere."""
     import enum
     if isinstance(v, enum.Enum):
         v = v.value
@@ -401,13 +512,19 @@ def _occurrences(v, text):
                 x = float(re.sub(r"[,\u00a0\u202f' ]", "", m.group(0)))
             except ValueError:
                 continue
-            if abs(x - float(v)) <= 1e-9 * max(1.0, abs(float(v))):
+            if abs(x - float(v)) <= 1e-9 * max(1.0, abs(float(v))) and not _glued(text, m.start(), m.end()):
                 out.append((m.start(), m.end()))
         return out
     s = str(v)
+    if not s.strip():
+        return []
+    if callable(match):
+        return [(int(a), int(b)) for a, b in (match(v, text) or ())
+                if 0 <= int(a) < int(b) <= len(text)]
     out, i = [], text.find(s)
-    while i >= 0 and s:
-        out.append((i, i + len(s)))
+    while i >= 0:
+        if _bounded(text, i, i + len(s), s, match):
+            out.append((i, i + len(s)))
         i = text.find(s, i + 1)
     return out
 
@@ -418,6 +535,18 @@ def _short(v, n=60):
         s = repr(v)
         return s if len(s) <= n else s[: n - 1] + "…"
     return repr(v) if len(v) <= n else repr(v[: n - 1] + "…")
+
+
+def _schema_error(text):
+    def schema_error(tool_name) -> str:
+        """Why the tool's input schema could not be read (adopt): its arguments are not checked against types."""
+        return text
+    return schema_error
+
+
+def schema_readable(schema_error) -> bool:
+    """The tool's input schema could be read; a tool whose schema could not be read needs a person for every call."""
+    return not schema_error
 
 
 def arguments_valid(argument_errors) -> bool:
@@ -438,7 +567,7 @@ def no_injected_arguments(grounding) -> bool:
 def no_instructions_in_tool_outputs(conversation, conversation_roles) -> bool:
     """No tool output in the conversation carries instruction-like text (solvi.perturb)."""
     from ..perturb import instruction_spans
-    return not any(r == "tool" and instruction_spans(conversation[s:e]) for s, e, r in conversation_roles)
+    return not any(r == "tool" and instruction_spans(conversation[s:e], actions=True) for s, e, r in conversation_roles)
 
 
 def request_authorizes(authorized) -> bool:
@@ -490,6 +619,7 @@ class GuardDecision:
     stored_id: str | None = None
     approved_by: str | None = None                             # guard.resolve: the person who approved an escalation
     id: str | None = None                                      # the agent's id of the call, if it gave one
+    resolved: bool = False                                     # guard.resolve answered this escalation (once only)
     catalog: Any = dataclasses.field(default=None, repr=False)
 
     @property
@@ -567,7 +697,10 @@ class Guard:
         or `guard.tool(name="refund", schema=RefundArgs)` (a pydantic model or a JSON schema) for a tool the framework or
         an MCP server runs. The function is returned unchanged.
 
-        ground: arguments that must be quoted from the conversation (literally; numbers as numbers; a list item by item);
+        ground: arguments that must be quoted from the conversation (a string as a whole word; numbers as number tokens;
+        a list item by item; an empty string never) — a list of names, or {name: matcher}: "token" (the default: not
+        inside a longer word), "whole" (delimited by whitespace, quotes, brackets or punctuation: for IBANs, e-mails,
+        paths), "substring" (anywhere), or a callable(value, text) → [(start, end)] of the value's occurrences;
         ground_from: the roles of the messages they may be quoted from (default: the user's, tool outputs and system
         messages — never the assistant's own words; ("user",) for values only the user may give, like a payee).
         injections: "grounded" (default: a grounded argument found only in a tool output with instruction-like text
@@ -587,7 +720,13 @@ class Guard:
                 model = schema
             desc = description if description is not None else ((inspect.getdoc(f) or "") if f is not None else "")
             roles = tuple(ROLES.get(r, r) for r in ((ground_from,) if isinstance(ground_from, str) else ground_from))
-            t = Tool(n, f, model, desc.strip(), {a: roles for a in ground}, injections, authorize)
+            spec = {ground: "token"} if isinstance(ground, str) else dict(ground) if isinstance(ground, dict) \
+                else {a: "token" for a in ground}
+            bad = {a: m for a, m in spec.items() if not callable(m) and m not in MATCHERS}
+            if bad:
+                raise ValueError(f"tool {n}: ground= matchers are {', '.join(MATCHERS)} or a callable, not {bad}")
+            t = Tool(n, f, model, desc.strip(), {a: roles for a in spec}, injections, authorize,
+                     {a: m for a, m in spec.items() if m != "token"})
             if injections not in ("grounded", "any", "off"):
                 raise ValueError('injections must be "grounded", "any" or "off"')
             self._check_tool(t)
@@ -609,7 +748,14 @@ class Guard:
         does this from the server's tools/list. A tool that has a schema keeps it."""
         t = self.tools[name]
         if t.model is None:
-            t.model = model_from_json_schema(name, json_schema or {"type": "object"})
+            try:
+                t.model = model_from_json_schema(name, json_schema if isinstance(json_schema, dict) else {"type": "object"})
+                t.schema_error = None
+            except Exception as e:  # noqa: BLE001 — one bad schema must not break the others: this tool's calls escalate
+                import logging
+                t.model, t.schema_error = permissive_model(name), f"{type(e).__name__}: {str(e)[:200]}"
+                logging.getLogger("solvi.agents").warning("tool %s: its input schema could not be read (%s); its calls "
+                                                          "escalate", name, t.schema_error)
             t.description = t.description or description or ""
             self._check_tool(t)
             self._systems.pop(name, None)
@@ -712,6 +858,7 @@ class Guard:
         return self.system(name).catalog
 
     def _build(self, t):
+        from ..provenance import code_fingerprint
         from ..system import System
         if t.model is None:
             raise ValueError(f"tool {t.name} has no argument schema yet (guard.tool(..., schema=...) or guard.adopt)")
@@ -739,9 +886,16 @@ class Guard:
         def check(f, on_fail):
             cat.check(hard=True, then={"verdict": on_fail})(f)
             checks.append(f.__name__)
+        if t.schema_error is not None:
+            cat.fn(_schema_error(t.schema_error))
+            check(schema_readable, "escalate")
         check(arguments_valid, "deny")
         if t.ground:
-            cat.fn(_grounding(json.dumps({a: list(r) for a, r in t.ground.items()}, sort_keys=True)))
+            match = {a: t.match.get(a, "token") for a in t.ground}
+            match = {a: m if isinstance(m, str) else f"callable {getattr(m, '__qualname__', type(m).__name__)} "
+                     f"{code_fingerprint(m)}" for a, m in match.items()}        # a callable matcher: by its code
+            cat.fn(_grounding(json.dumps({"roles": {a: list(r) for a, r in t.ground.items()}, "match": match},
+                                         sort_keys=True), {a: m for a, m in t.match.items() if callable(m)}))
             check(arguments_grounded, "deny")
             if t.injections != "off":
                 check(no_injected_arguments, "escalate")
@@ -853,9 +1007,18 @@ class Guard:
     def resolve(self, decision, approve, reviewer=None, note=None, execute=True):
         """A person's answer to an escalated call: recorded in the store as a correction of its verdict (who, the
         stored decision it answers, a note) and, when approved, the call is made (execute=False: not made — the
-        framework makes it). → the decision, with outcome "allow" (approved_by) or "deny"."""
+        framework makes it; the stored resolution then says executed: false, and the framework's result is not
+        recorded by the guard). → the decision, with outcome "allow" (approved_by) or "deny".
+
+        An escalation is resolved once: a second resolve of the same decision (or, with a store, of a stored decision
+        that already has a resolution) raises ValueError — so an approved call is never made twice."""
         if decision.outcome != "escalate":
             raise ValueError(f"only an escalated call is resolved by a person; this one is {decision.outcome!r}")
+        if decision.resolved or (self.storage is not None and decision.stored_id is not None and any(
+                c["question"] == "verdict" and c["of"] == decision.stored_id for c in self.storage.corrections())):
+            raise ValueError(f"this escalation of {decision.tool} was already resolved"
+                             + (f" (stored decision {decision.stored_id})" if decision.stored_id else ""))
+        decision.resolved = True
         d = dataclasses.replace(decision, outcome="allow" if approve else "deny", approved_by=reviewer if approve else None,
                                 reasons=list(decision.reasons) + ([f"approved by {reviewer or 'a person'}"] if approve
                                                                   else [f"rejected by {reviewer or 'a person'}"]
@@ -865,7 +1028,8 @@ class Guard:
         if self.storage is not None:
             meta = {"tool": d.tool, "reviewer": reviewer, "note": note, "of": decision.stored_id, "executed": d.executed}
             meta.update(_outcome_meta(d))
-            self.storage.save_correction("verdict", decision.response.trace.init, d.outcome, meta={"guard": meta})
+            self.storage.save_correction("verdict", decision.response.trace.init, d.outcome, meta={"guard": meta},
+                                         by=reviewer, of=decision.stored_id)
         return d
 
     # --- the decision
@@ -905,6 +1069,8 @@ class Guard:
                 out.append("not in the conversation: " + ", ".join(vals["grounding"]["missing"]))
             elif n == "no_injected_arguments":
                 out.append("; ".join(vals["grounding"]["injected"]))
+            elif n == "schema_readable":
+                out.append(f"the tool's input schema could not be read ({vals.get('schema_error')}): a person decides")
             elif n == "no_instructions_in_tool_outputs":
                 out.append("a tool output in the conversation carries instruction-like text")
             elif n == "request_authorizes":
@@ -966,10 +1132,11 @@ class Guard:
                             "mismatches": v["mismatches"]})
         return bad
 
-    def session(self, context=None, facts=None):
+    def session(self, context=None, facts=None, max_messages=None, max_chars=None):
         """A conversation the guard follows: calls made through it add their results to its context as tool outputs,
-        so a later call's grounding and injection checks see them. → Session."""
-        return Session(self, context, facts)
+        so a later call's grounding and injection checks see them; max_messages / max_chars cap the context kept (see
+        Session). → Session."""
+        return Session(self, context, facts, max_messages, max_chars)
 
 
 def _outcome_meta(d):
@@ -993,16 +1160,35 @@ def _names(tools):
 
 class Session:
     """A conversation with an agent: `session.call(proposal)` checks and makes calls in its context and appends each
-    made call's result as a tool output (`add` appends other messages)."""
+    made call's result as a tool output (`add` appends other messages).
 
-    def __init__(self, guard, context=None, facts=None):
+    max_messages / max_chars: the context kept for checking (None: all of it) — the oldest messages are dropped first,
+    and a message longer than max_chars keeps its beginning plus any instruction-like sentence of the rest (so the taint
+    of a long tool output is not cut away). Every decision's trace records the context it was checked against, so the cap
+    also bounds what each stored decision holds; a value or an instruction that has left the window no longer grounds a
+    value or taints a call."""
+
+    def __init__(self, guard, context=None, facts=None, max_messages=None, max_chars=None):
         self.guard = guard
-        self.context = [(r, t) for r, t in messages(context)]
+        self.max_messages, self.max_chars = max_messages, max_chars
+        self.context = []
+        for r, t in messages(context):
+            self._append(r, t)
         self.facts = dict(facts or {})
         self.decisions = []
 
+    def _append(self, role, text):
+        if self.max_chars is not None and len(text) > self.max_chars:
+            text = _clip(text, self.max_chars)
+        self.context.append((role, text))
+        if self.max_messages is not None and len(self.context) > self.max_messages:
+            del self.context[:len(self.context) - self.max_messages]
+        if self.max_chars is not None:
+            while len(self.context) > 1 and sum(len(t) for _, t in self.context) > self.max_chars:
+                del self.context[0]
+
     def add(self, role, text):
-        self.context.append((ROLES.get(role, role), _text(text)))
+        self._append(ROLES.get(role, role), _text(text))
         return self
 
     def check(self, call):
@@ -1023,3 +1209,21 @@ class Session:
         if d.executed:
             self.add("tool", f"{d.tool}: {d.error if d.error else _text(d.result)}")
         return d
+
+
+def _clip(text, n):
+    """A text cut to about n characters: its beginning, and the instruction-like passages of the rest (whose taint must
+    survive the cut) — a long one by its 400-character windows that are instruction-like themselves."""
+    from ..perturb import instruction_like, instruction_spans
+    rest = []
+    for a, b in instruction_spans(text, actions=True):
+        if b <= n:
+            continue
+        a = max(a, n)
+        if b - a <= 400:
+            rest.append(text[a:b])
+            continue
+        wins = [text[i:i + 400] for i in range(a, b, 200)]
+        rest += [w for w in wins if instruction_like(w, actions=True)] or [text[a:a + 400]]
+    tail = "\n[…]" + ("\n" + "\n".join(rest) if rest else "")
+    return text[: max(0, n - len(tail))] + tail

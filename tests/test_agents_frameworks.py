@@ -153,3 +153,34 @@ def test_openai_agents_guardrail_and_approval():
     assert r.final_output == "done" and paid == [(IBAN, 250.0), (IBAN, 5000.0)]
     assert outs["c0"].startswith("send_payment denied: not in the conversation")
     assert [d.outcome for d in sg.decisions] == ["deny", "allow", "allow"] and sg.decisions[-1].approved_by
+
+
+def test_langgraph_approves_only_true_or_an_approving_word():
+    pytest.importorskip("langgraph")
+    from solvi.agents.langgraph import approved
+    assert approved(True) and approved("Approve") and approved({"approved": True}) and approved({"approve": "yes"})
+    for no in ({"approved": "false"}, {"approved": 1}, 1, 1.0, "false", "no", None, {"approved": {"x": 1}}, [True]):
+        assert not approved(no), no
+
+
+def test_openai_agents_guardrail_rechecks_a_call_whose_arguments_changed():
+    pytest.importorskip("agents")
+    import json
+    from types import SimpleNamespace
+
+    from agents import function_tool
+
+    from solvi.agents.openai_agents import guard_tool
+    g, send_payment, paid = guard_and_tool()
+    t = guard_tool(function_tool(send_payment), g)
+    sg = t.solvi_guard
+    ctx = SimpleNamespace(turn_input=[{"role": "user", "content": PROMPT}])
+    assert not asyncio.run(sg.needs_approval(ctx, CALLS[1], "c1"))           # allowed for these arguments
+    other = SimpleNamespace(turn_input=ctx.turn_input, tool_call_id="c1", tool_arguments=json.dumps(CALLS[0]),
+                            get_approval_status=lambda name, call_id: None)
+    asyncio.run(sg.guardrail(SimpleNamespace(context=other)))                   # same id, another IBAN
+    assert sg.decisions[-1].outcome == "deny" and sg.decisions[-1].arguments["iban"] == CALLS[0]["iban"]
+    same = SimpleNamespace(**{**vars(other), "tool_arguments": json.dumps(CALLS[1])})
+    assert not asyncio.run(sg.needs_approval(ctx, CALLS[1], "c2"))
+    asyncio.run(sg.guardrail(SimpleNamespace(context=SimpleNamespace(**{**vars(same), "tool_call_id": "c2"}))))
+    assert sg.decisions[-1].outcome == "allow" and sg.pending == {}

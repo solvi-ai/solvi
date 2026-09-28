@@ -319,3 +319,49 @@ def test_text_in_with_an_llm_routes_and_points_at_each_field():
     res = s.ask_text(read)
     assert res["request_refund"].answer == "review"
     assert res.trace.replay(s.catalog)["ok"]
+
+
+class Picky(FakeLLM):
+    """A server that rejects texts with "BAD" (HTTP 400, a message about the input) and, optionally, logprobs."""
+
+    def __init__(self, **kw):
+        super().__init__(**kw)
+        self.calls = 0
+
+    def __call__(self, req, timeout=None):
+        body = json.loads(req.data.decode())
+        self.calls += 1
+        if "BAD" in body["messages"][1]["content"]:
+            self.bodies.append(body)
+            raise urllib.error.HTTPError(req.full_url, 400, "bad", {}, io.BytesIO(
+                b'{"error": {"message": "This model\'s maximum context length is 8192 tokens"}}'))
+        return super().__call__(req, timeout)
+
+
+def test_a_400_about_the_input_escalates_that_item_and_keeps_the_format():
+    fake = Picky()
+    m = model(fake)
+    part = m.decision("team", "Which team?", "email", TEAMS)
+    assert part.decide("my parcel is late").value == "shipping"
+    d = part.decide("BAD input")
+    assert d.escalate and "invalid input for the endpoint: HTTP 400 — This model's maximum context length" in d.escalate
+    assert fake.bodies[-1]["response_format"]["type"] == "json_schema" and "logprobs" in fake.bodies[-1]
+    assert part.decide("I was charged").value == "billing"
+    assert fake.bodies[-1]["response_format"]["type"] == "json_schema"         # the format was never stepped down
+    first = Picky()
+    d = model(first).decision("team", "Which team?", "email", TEAMS).decide("BAD before any success")
+    assert d.escalate and "invalid input" in d.escalate and first.calls == 1   # not a format problem: no ladder
+    late = FakeLLM()
+    lm = model(late)
+    lm.decision("team", "Which team?", "email", TEAMS).decide("my parcel is late")
+    late.reject = {"response_format"}                                         # after a success: never stepped down
+    d = lm.decision("team", "Which team?", "email", TEAMS).decide("I was charged")
+    assert d.escalate and "invalid input for the endpoint: HTTP 400" in d.escalate
+    assert lm.scorer._format == "json_schema"
+
+
+def test_concurrent_rejections_step_the_format_down_once():
+    sc = model(FakeLLM()).scorer
+    seen = (sc._format, sc._lp)                                   # two workers sent this and both got a 400
+    assert sc._step_down(*seen, "logprobs is not supported") and (sc._format, sc._lp) == ("json_schema", False)
+    assert sc._step_down(*seen, "logprobs is not supported") and (sc._format, sc._lp) == ("json_schema", False)

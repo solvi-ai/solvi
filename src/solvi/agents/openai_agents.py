@@ -26,7 +26,8 @@ For each call the guard checks the proposal (the tool's name and its JSON argume
 
 A tool the guard does not know is denied (declare=True: declared from the tool's params_json_schema on first use). A
 tool's own needs_approval (True, or a function) still applies. The decision made for needs_approval is reused by the
-guardrail of the same call id in the same process; after a resume in another process it is checked again."""
+guardrail of the same call id with the same arguments in the same process (a call that reaches the guardrail with other
+arguments is checked again); after a resume in another process it is checked again."""
 from __future__ import annotations
 
 import dataclasses
@@ -51,7 +52,7 @@ class _Guarded:
             raise ValueError('on_escalate: "approval" | "reject"')
         self.tool, self.guard, self.facts, self.on_escalate, self.declare = tool, guard, facts, on_escalate, declare
         self.own = tool.needs_approval
-        self.pending = {}                              # call id → the decision made for needs_approval
+        self.pending = {}                              # (call id, the arguments) → the decision made for needs_approval
         self.decisions = []
 
     async def check(self, wrapper, params, call_id):
@@ -68,17 +69,19 @@ class _Guarded:
             if hasattr(own, "__await__"):
                 own = await own
         d = await self.check(wrapper, params, call_id)
-        self.pending[call_id] = d
+        self.pending[(call_id, _canonical(params))] = d
         return bool(own) or (d.outcome == "escalate" and self.on_escalate == "approval")
 
     async def guardrail(self, data):
         c = data.context
-        d = self.pending.pop(c.tool_call_id, None)
+        try:
+            params = json.loads(c.tool_arguments or "{}")
+        except ValueError:
+            params = c.tool_arguments
+        d = self.pending.pop((c.tool_call_id, _canonical(params)), None)
+        for k in [k for k in self.pending if k[0] == c.tool_call_id]:     # made for other arguments: stale
+            del self.pending[k]
         if d is None:
-            try:
-                params = json.loads(c.tool_arguments or "{}")
-            except ValueError:
-                params = c.tool_arguments
             d = await self.check(c, params, c.tool_call_id)
         if d.outcome == "escalate" and self.on_escalate == "approval":
             status = _approval(c, self.tool.name, c.tool_call_id)
@@ -90,6 +93,14 @@ class _Guarded:
         if d.outcome == "allow":
             return ToolGuardrailFunctionOutput.allow(output_info={"solvi": d.to_dict()})
         return ToolGuardrailFunctionOutput.reject_content(d.message(), output_info={"solvi": d.to_dict()})
+
+
+def _canonical(params):
+    """The arguments as a key: their JSON with sorted keys (a string that is not JSON as it is)."""
+    try:
+        return json.dumps(params, sort_keys=True, ensure_ascii=False, default=str)
+    except (TypeError, ValueError):
+        return repr(params)
 
 
 def _approval(ctx, name, call_id):

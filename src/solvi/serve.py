@@ -23,7 +23,8 @@ the given facts its flow reads (System(inputs=...) fields, else the types its ty
 answers as their closed sets (System.response_schema). Inputs are not validated by the web layer: the state goes to
 System.ask as it is, so a wrong-typed field is what it is in solvi — the fact is missing, the answers that need it
 abstain, and the trace and the audit say why (safeguard type_rejected). With `--store`, every answer is stored with its
-whole trace in a TraceStorage (hash-chained), and `solvi verify` / `replay` / `diff` work on that store.
+whole trace in a TraceStorage (hash-chained), and `solvi verify` / `replay` / `diff` work on that store — a request's
+"store": false is honoured only with `--allow-client-no-store`.
 
 MCP (`--mcp`): each question is a tool whose input schema is the question's input state schema; a call answers that
 question and returns its result (answer, confidence, status, why, safeguards) with the stored id and trace hash; the tool
@@ -33,10 +34,13 @@ the protocol that tools need (initialize, ping, tools/list, tools/call).
 
 Security (see docs/guide.md, Serving): `--token` / $SOLVI_SERVE_TOKEN requires `Authorization: Bearer <token>` on every
 HTTP request (constant-time compare); a request body / MCP message is at most `--max-body` bytes and `--max-depth` levels
-of JSON; a request takes at most `--timeout` seconds (async Systems: through System.aask's part timeout, so the answer
+of JSON; a System One request at most `--max-questions` questions of `--max-options` options; at most `--max-inflight`
+sync requests run or wait at once, each waiting at most `--queue-timeout` s for the System (then 503 busy); a request
+takes at most `--timeout` seconds (async Systems: through System.aask's part timeout, so the answer
 abstains rather than the request failing); a failure the client did not cause is logged here and answered with an
 incident id, never a traceback or a path; CORS headers only with `--cors ORIGIN`; nothing is imported or loaded from
 request data; `--decider` never downloads without `--pull`."""
+import contextlib
 import hmac
 import json
 import logging
@@ -153,10 +157,18 @@ class Limits:
     max_depth: nesting of JSON objects and arrays in it; timeout: seconds a request may take (None: no limit) — HTTP
     answers 504 after it, an MCP tool call an error; an async System's parts are given 80% of it as System.aask's timeout
     (unless System(timeout=) or the part sets one), so a slow part makes its questions abstain (safeguard `timeout`) and
-    the request still answers."""
+    the request still answers. max_questions / max_options: questions in one System One request, options (criteria) of
+    one of them — more is refused (422). max_inflight: requests answered by a worker thread at once (running or waiting
+    for the System; a request whose thread timed out still counts until the thread ends) — more are refused at once
+    with 503 "busy"; queue_timeout: seconds a request waits for the System while another is being answered (None: as
+    long as it takes) — then 503 "busy", instead of piling up threads behind a slow one."""
     max_body: int = 1_000_000
     max_depth: int = 32
     timeout: Optional[float] = 60.0
+    max_questions: int = 32
+    max_options: int = 64
+    max_inflight: int = 8
+    queue_timeout: Optional[float] = 10.0
 
 
 class RequestError(Exception):
@@ -180,6 +192,12 @@ class BadRequest(RequestError, ValueError, TypeError):
 
 class RequestTimeout(RequestError, TimeoutError):
     status = 504
+
+
+class Busy(RequestError):
+    """The server is answering as many requests as it may (Limits.max_inflight), or the System stayed busy longer than
+    Limits.queue_timeout: try again later."""
+    status = 503
 
 
 def too_deep(v, max_depth):
@@ -227,7 +245,8 @@ class Service:
     in place; a System with async parts is asked with System.aask, concurrently on the server's event loop), answers
     System One requests with a decider. `limits`: a Limits (the request size, JSON depth and timeout)."""
 
-    def __init__(self, system=None, decider=None, storage=None, model_name=None, limits=None, textin=None):
+    def __init__(self, system=None, decider=None, storage=None, model_name=None, limits=None, textin=None,
+                 allow_client_no_store=False):
         if system is None and decider is None:
             raise ValueError("solvi serve needs a System, a decider (--decider), or both")
         self.system, self.decider = system, decider
@@ -237,13 +256,38 @@ class Service:
             system.storage = open_storage(storage, system)
         self.model_name = model_name or (getattr(decider, "model_id", None) if decider is not None else None)
         self.limits = limits or Limits()
+        self.allow_client_no_store = bool(allow_client_no_store)   # else storing is the server's policy
         self._lock = threading.Lock()
+        self._slots = threading.BoundedSemaphore(max(1, int(self.limits.max_inflight)))
         self._schemas = {}
+
+    @contextlib.contextmanager
+    def exclusive(self):
+        """The System (or the decider) for one sync request: a slot among Limits.max_inflight (none free: Busy at once),
+        then the lock, waited for at most Limits.queue_timeout (then Busy) — never an unbounded queue of threads."""
+        if not self._slots.acquire(blocking=False):
+            raise Busy(f"the server is busy ({self.limits.max_inflight} requests in flight): try again later")
+        try:
+            t = self.limits.queue_timeout
+            if not self._lock.acquire(timeout=-1 if t is None else max(0.0, float(t))):
+                raise Busy("the server is busy (another request holds the System): try again later")
+            try:
+                yield
+            finally:
+                self._lock.release()
+        finally:
+            self._slots.release()
+
+    def storing(self, store):
+        """Whether a request is stored: always (a server with a store keeps every answer), unless the server allows
+        clients to opt out (allow_client_no_store) and this one did."""
+        return bool(store) or not self.allow_client_no_store
 
     # --- a System
     def ask(self, state, names=None, store=True):
-        """→ Response.to_dict() with "stored_id" and "trace_hash"."""
-        resp = self._ask(state, names, store)
+        """→ Response.to_dict() with "stored_id" and "trace_hash". store=False is honoured only when the server allows
+        clients to opt out of storing (allow_client_no_store)."""
+        resp = self._ask(state, names, self.storing(store))
         d = resp.to_dict()
         d["stored_id"], d["trace_hash"] = resp.stored_id, trace_hash(resp)
         return d
@@ -271,7 +315,7 @@ class Service:
 
     def _ask(self, state, names, store):
         s = self._checked(state, names)
-        with self._lock:
+        with self.exclusive():
             if self.is_async:                         # async parts: awaited concurrently within the ask (System.aask)
                 from .runtime import run_sync
                 return run_sync(s.aask(state, names=list(names) if names else None, store=store,
@@ -293,7 +337,7 @@ class Service:
 
     async def aask(self, state, names=None, store=True):
         """ask, for an async System (System.aask)."""
-        resp = await self._aask(state, names, store)
+        resp = await self._aask(state, names, self.storing(store))
         d = resp.to_dict()
         d["stored_id"], d["trace_hash"] = resp.stored_id, trace_hash(resp)
         return d
@@ -352,18 +396,18 @@ class Service:
         """A free text → Response.to_dict() of System.ask_text plus "read" (the question it asks, the fields read with
         their quotes, the missing ones, a clarifying question), "stored_id" and "trace_hash"."""
         read = self._read(text, question, today)
-        with self._lock:
+        with self.exclusive():
             if self.is_async:
                 from .runtime import run_sync
-                resp = run_sync(self.system.aask_text(read, store=store))
+                resp = run_sync(self.system.aask_text(read, store=self.storing(store)))
             else:
-                resp = self.system.ask_text(read, store=store)
+                resp = self.system.ask_text(read, store=self.storing(store))
         return self._text_result(resp)
 
     async def aask_text(self, text, question=None, store=True, today=None):
         """ask_text, for an async System (System.aask_text)."""
         read = self._read(text, question, today)
-        return self._text_result(await self.system.aask_text(read, store=store))
+        return self._text_result(await self.system.aask_text(read, store=self.storing(store)))
 
     @staticmethod
     def _tool_result(name, resp):
@@ -407,11 +451,18 @@ class Service:
             except ValidationError as e:
                 raise BadRequest(f"not a System One request: {e.error_count()} problem(s), e.g. "
                                  f"{'.'.join(map(str, e.errors()[0]['loc']))}: {e.errors()[0]['msg']}") from None
+        lim = self.limits
+        if len(req.questions) > lim.max_questions:
+            raise BadRequest(f"a System One request has at most {lim.max_questions} questions, got {len(req.questions)}")
+        wide = [n for n, q in req.questions.items() if len(q.criteria or {}) > lim.max_options]
+        if wide:
+            raise BadRequest(f"a question has at most {lim.max_options} options (criteria): {str(wide[0])[:64]} has "
+                             f"{len(req.questions[wide[0]].criteria or {})}")
         t0 = time.perf_counter()
         m = self.decider
         passes = m.passes
         answers = {}
-        with self._lock:
+        with self.exclusive():
             for name, q in req.questions.items():
                 answers[name] = self._one(m, req.state, q)
         return {"model": self.model_name, "answers": answers,
@@ -489,13 +540,15 @@ class SystemOneResponse(BaseModel):
 class AskRequest(BaseModel):
     state: dict[str, Any] = Field(description="the given facts")
     questions: Optional[list[str]] = Field(None, description="ask only these questions (default: all)")
-    store: bool = Field(True, description="save the response to the server's store (if it has one)")
+    store: bool = Field(True, description="save the response to the server's store (if it has one); false is honoured only "
+                                          "when the server was started with --allow-client-no-store")
 
 
 class AskTextRequest(BaseModel):
     text: str = Field(description="a free text: a message, an e-mail, a chat turn")
     question: Optional[str] = Field(None, description="the question it asks (default: the decider picks the entry point)")
-    store: bool = Field(True, description="save the response to the server's store (if it has one)")
+    store: bool = Field(True, description="save the response to the server's store (if it has one); false is honoured only "
+                                          "when the server was started with --allow-client-no-store")
     today: Optional[str] = Field(None, description="ISO date for year-less and relative dates (default: the server's date)")
 
 
@@ -505,6 +558,9 @@ class Guard:
 
     def __init__(self, app, limits, token=None):
         self.app, self.limits = app, limits
+        if token is not None and not str(token).strip():
+            raise ValueError("an empty bearer token would let any request with 'Authorization: Bearer ' in: "
+                             "give a token, or None for no authentication")
         self.token = None if token is None else token.encode()
 
     async def __call__(self, scope, receive, send):
@@ -561,12 +617,17 @@ async def _reply(send, status, detail, headers=()):
 
 
 def create_app(system=None, decider=None, storage=None, model_name=None, title=None, limits=None, token=None,
-               cors=None, textin=None):
+               cors=None, textin=None, allow_client_no_store=False):
     """The FastAPI app (see the module docs). `system`: a System; `decider`: a DecideModel for POST /v1/systemone and for
     routing texts (POST /ask_text); `storage`: a TraceStorage or a path (every ask is stored); `model_name`: the model name
     System One answers carry; `limits`: a Limits (request size, JSON depth, timeout); `token`: every request must carry
     `Authorization: Bearer <token>` (None: no authentication); `cors`: the origins browsers may call it from (None: no
-    CORS headers at all); `textin`: a solvi.textin.TextIn for POST /ask_text (default: TextIn(system, decider))."""
+    CORS headers at all); `textin`: a solvi.textin.TextIn for POST /ask_text (default: TextIn(system, decider));
+    `allow_client_no_store`: honour a request's "store": false (default: with a store, every answer is saved — the
+    server's policy, not the client's). A token that is empty or blank is a configuration error (ValueError)."""
+    if token is not None and not str(token).strip():
+        raise ValueError("create_app(token=...): an empty token would accept 'Authorization: Bearer ' — give a token, "
+                         "or None for no authentication")
     import asyncio
 
     from fastapi import Body, FastAPI, HTTPException, Request
@@ -574,7 +635,7 @@ def create_app(system=None, decider=None, storage=None, model_name=None, title=N
     from fastapi.responses import JSONResponse
 
     from . import __version__
-    svc = Service(system, decider, storage, model_name, limits, textin)
+    svc = Service(system, decider, storage, model_name, limits, textin, allow_client_no_store)
     lim = svc.limits
     app = FastAPI(title=title or "solvi", version=__version__,
                   description="Decisions from a solvi catalog: the model proposes, code decides, everything is in the trace.")
@@ -778,7 +839,8 @@ def run_builtin(svc, stdin=None, stdout=None):
     """A stdio MCP server without the SDK: JSON-RPC 2.0, one message per line; initialize, ping, tools/list, tools/call
     (notifications are read and ignored). A message is at most `svc.limits.max_body` characters and max_depth deep; a
     tools/call runs in a worker thread and fails after `svc.limits.timeout` seconds (the thread cannot be stopped: it
-    finishes in the background, and the System's lock makes later calls wait for it)."""
+    finishes in the background, and a later call waits for the System at most `queue_timeout` seconds, then is told the
+    server is busy). A malformed message is answered with a JSON-RPC error; nothing in a message stops the server."""
     from concurrent.futures import ThreadPoolExecutor
     from concurrent.futures import TimeoutError as FutureTimeout
 
@@ -821,32 +883,38 @@ def run_builtin(svc, stdin=None, stdout=None):
             if not isinstance(params, dict):
                 error(id_, -32602, "invalid params: an object is expected")
                 continue
-            if method == "initialize":
-                v = params.get("protocolVersion")
-                send({"jsonrpc": "2.0", "id": id_, "result": {
-                    "protocolVersion": v if v in PROTOCOL_VERSIONS else PROTOCOL_VERSIONS[-1],
-                    "capabilities": {"tools": {"listChanged": False}},
-                    "serverInfo": {"name": "solvi", "version": __version__},
-                    "instructions": "Each tool is a question of a solvi decision system: pass the input state, get the "
-                                    "answer with its confidence, why, safeguards and the id of the stored trace."}})
-            elif method == "ping":
-                send({"jsonrpc": "2.0", "id": id_, "result": {}})
-            elif method == "tools/list":
-                send({"jsonrpc": "2.0", "id": id_, "result": {"tools": mcp_tools(svc)}})
-            elif method == "tools/call":
-                name = params.get("name")
-                try:
-                    out, bad = pool.submit(call_tool, svc, name, params.get("arguments")).result(lim.timeout)
-                except KeyError:
-                    error(id_, -32602, f"unknown tool: {str(name)[:64]}")
-                    continue
-                except FutureTimeout:
-                    out, bad = {"error": f"the call did not finish within {lim.timeout:g} s"}, True
-                send({"jsonrpc": "2.0", "id": id_, "result": {
-                    "content": [{"type": "text", "text": dumps(out, ensure_ascii=False, default=repr)}],
-                    "structuredContent": out, "isError": bad}})
-            else:
-                error(id_, -32601, f"method not found: {str(method)[:64]}")
+            try:
+                if method == "initialize":
+                    v = params.get("protocolVersion")
+                    send({"jsonrpc": "2.0", "id": id_, "result": {
+                        "protocolVersion": v if v in PROTOCOL_VERSIONS else PROTOCOL_VERSIONS[-1],
+                        "capabilities": {"tools": {"listChanged": False}},
+                        "serverInfo": {"name": "solvi", "version": __version__},
+                        "instructions": "Each tool is a question of a solvi decision system: pass the input state, get the "
+                                        "answer with its confidence, why, safeguards and the id of the stored trace."}})
+                elif method == "ping":
+                    send({"jsonrpc": "2.0", "id": id_, "result": {}})
+                elif method == "tools/list":
+                    send({"jsonrpc": "2.0", "id": id_, "result": {"tools": mcp_tools(svc)}})
+                elif method == "tools/call":
+                    name, arguments = params.get("name"), params.get("arguments")
+                    if not isinstance(name, str):
+                        error(id_, -32602, "invalid params: tools/call takes a tool name (a string)")
+                        continue
+                    try:
+                        out, bad = pool.submit(call_tool, svc, name, arguments).result(lim.timeout)
+                    except KeyError:
+                        error(id_, -32602, f"unknown tool: {name[:64]}")
+                        continue
+                    except FutureTimeout:
+                        out, bad = {"error": f"the call did not finish within {lim.timeout:g} s"}, True
+                    send({"jsonrpc": "2.0", "id": id_, "result": {
+                        "content": [{"type": "text", "text": dumps(out, ensure_ascii=False, default=repr)}],
+                        "structuredContent": out, "isError": bad}})
+                else:
+                    error(id_, -32601, f"method not found: {str(method)[:64]}")
+            except Exception:  # noqa: BLE001 — a malformed message never stops the server; the details are in the log
+                error(id_, -32603, internal_error(f"MCP {str(method)[:64]}"))
     finally:
         pool.shutdown(wait=False)
 
@@ -949,27 +1017,43 @@ def cmd_serve(a):
     for k in ("max_body", "max_depth"):
         if getattr(a, k) < 1:
             _fail(f"serve --{k.replace('_', '-')}: must be at least 1")
-    limits = Limits(a.max_body, a.max_depth, a.timeout if a.timeout and a.timeout > 0 else None)
+    for k in ("max_questions", "max_options", "max_inflight"):
+        if getattr(a, k) < 1:
+            _fail(f"serve --{k.replace('_', '-')}: must be at least 1")
+    limits = _limits(a)
     if a.mcp:
         if system is None:
             _fail("serve --mcp: needs a System (its questions are the tools)")
         if a.mcp_impl == "sdk" and not sdk_available():
             _fail("serve --mcp-impl sdk: the MCP SDK (mcp>=2) is not installed: pip install 'solvi[mcp]'")
-        svc = Service(system, decider, a.store, limits=limits)   # the decider routes texts for the ask_text tool
+        svc = Service(system, decider, a.store, limits=limits,      # the decider routes texts for the ask_text tool
+                      allow_client_no_store=a.allow_client_no_store)
         run_mcp(svc, a.mcp_impl)
         return 0
     try:
         import uvicorn
     except ImportError:
         _fail("serve: HTTP needs FastAPI and uvicorn: pip install 'solvi[serve]'")
-    token = a.token or os.environ.get("SOLVI_SERVE_TOKEN") or None
+    if a.token is not None and not a.token.strip():
+        _fail("serve --token: an empty token would accept 'Authorization: Bearer ' — give a token (or leave it out)")
+    env = os.environ.get("SOLVI_SERVE_TOKEN")
+    if env is not None and not env.strip() and not a.token:
+        print("solvi serve: warning: SOLVI_SERVE_TOKEN is set but empty — no token is required", file=sys.stderr)
+    token = a.token or (env if env and env.strip() else None)
     if token is None and a.host not in LOOPBACK:
         print(f"solvi serve: warning: listening on {a.host} without a token — anyone who can reach it can ask and store "
               "decisions (set SOLVI_SERVE_TOKEN)", file=sys.stderr)
     app = create_app(system, decider, a.store, a.model_name, title=f"solvi: {a.system}" if a.system else "solvi",
-                     limits=limits, token=token, cors=a.cors)
+                     limits=limits, token=token, cors=a.cors, allow_client_no_store=a.allow_client_no_store)
     uvicorn.run(app, host=a.host, port=a.port, log_level=a.log_level, server_header=False)
     return 0
+
+
+def _limits(a):
+    """The Limits of `solvi serve`'s options (0 or less: no timeout / no queue timeout)."""
+    return Limits(a.max_body, a.max_depth, a.timeout if a.timeout and a.timeout > 0 else None,
+                  max_questions=a.max_questions, max_options=a.max_options, max_inflight=a.max_inflight,
+                  queue_timeout=a.queue_timeout if a.queue_timeout and a.queue_timeout > 0 else None)
 
 
 def _serve_guard(a, _fail, load_object):
@@ -993,8 +1077,11 @@ def _serve_guard(a, _fail, load_object):
         _fail(f"--facts: not JSON: {e}")
     if facts is not None and not isinstance(facts, dict):
         _fail("--facts: a JSON object of facts")
+    for k in ("context_messages", "context_chars"):
+        if getattr(a, k) < 0:
+            _fail(f"serve --{k.replace('_', '-')}: must be at least 0 (0: no limit)")
     run_proxy(guard, a.upstream, facts=facts, escalate=a.escalate,
-              limits=Limits(a.max_body, a.max_depth, a.timeout if a.timeout and a.timeout > 0 else None))
+              limits=_limits(a), context_messages=a.context_messages or None, context_chars=a.context_chars or None)
     return 0
 
 
@@ -1023,6 +1110,17 @@ def add_parser(sub):
                    help=f"the deepest nesting of JSON objects and arrays in a request (default {d.max_depth})")
     s.add_argument("--timeout", type=float, default=d.timeout, metavar="SECONDS",
                    help=f"seconds a request may take: then 504 / an MCP error (default {d.timeout:g}; 0: no limit)")
+    s.add_argument("--max-questions", type=int, default=d.max_questions, metavar="N",
+                   help=f"the most questions in one POST /v1/systemone request (default {d.max_questions})")
+    s.add_argument("--max-options", type=int, default=d.max_options, metavar="N",
+                   help=f"the most options (criteria) of one System One question (default {d.max_options})")
+    s.add_argument("--max-inflight", type=int, default=d.max_inflight, metavar="N",
+                   help=f"requests answered at once by worker threads; more get 503 busy (default {d.max_inflight})")
+    s.add_argument("--queue-timeout", type=float, default=d.queue_timeout, metavar="SECONDS",
+                   help=f"seconds a request waits for the System while another is answered, then 503 busy (default "
+                        f"{d.queue_timeout:g}; 0: no limit)")
+    s.add_argument("--allow-client-no-store", action="store_true",
+                   help='honour a request\'s "store": false (default: with --store, every answer is saved)')
     s.add_argument("--cors", action="append", metavar="ORIGIN",
                    help="let browsers on this origin call the API (repeat; default: no CORS headers)")
     s.add_argument("--mcp", action="store_true", help="an MCP server over stdio instead of HTTP: each question is a tool")
@@ -1035,4 +1133,9 @@ def add_parser(sub):
     s.add_argument("--escalate", default="elicit", choices=["elicit", "deny"],
                    help="with --guard: ask the user about an escalated call (MCP elicitation, when the client supports it) "
                         "or return it as an error")
+    from .agents.mcp import CONTEXT_CHARS, CONTEXT_MESSAGES
+    s.add_argument("--context-messages", type=int, default=CONTEXT_MESSAGES, metavar="N",
+                   help=f"with --guard: the tool outputs the session keeps for checking (default {CONTEXT_MESSAGES}; 0: all)")
+    s.add_argument("--context-chars", type=int, default=CONTEXT_CHARS, metavar="N",
+                   help=f"with --guard: their characters in all (default {CONTEXT_CHARS}; 0: no limit)")
     return s

@@ -2,25 +2,31 @@
 passes the guard before it reaches the server.
 
     solvi serve --guard catalog.py:guard --upstream "npx -y @modelcontextprotocol/server-filesystem /work" \\
-                [--store calls.db] [--facts '{"role": "viewer"}'] [--escalate elicit|deny]
+                [--store calls.db] [--facts '{"role": "viewer"}'] [--escalate elicit|deny] \\
+                [--context-messages 50] [--context-chars 100000]
 
 `catalog.py` declares which of the server's tools the agent may call and the policies over them — without functions
 (the server runs them) and usually without schemas (the proxy takes each tool's inputSchema from the server):
+
+    from pathlib import Path
 
     guard = Guard(storage="calls.db")
     guard.declare("read_text_file")
     guard.declare("write_file", injections="any")          # no writes after a tool output that carries instructions
 
     @guard.policy(["read_text_file", "write_file"])
-    def inside_work(path: str) -> bool:
-        return path.startswith("/work/")
+    def inside_work(path: str) -> bool:         # resolved: "/work/../etc/passwd" and symlinks out of /work fail
+        return Path(path).resolve().is_relative_to(Path("/work").resolve())
 
 The proxy speaks MCP over stdio (JSON-RPC, one message per line) to the client and to the server it starts:
 
   initialize   initializes the server, answers with the tools capability (and the server's name in ours)
   tools/list   the server's tools that the guard declares (others are hidden; each declared tool without a schema
-               adopts the server's inputSchema)
-  tools/call   the guard checks the call — allow: forwarded to the server, and its result's text is kept as a tool
+               adopts the server's inputSchema — one that cannot be read gives that tool a permissive schema, a warning in
+               the log, and every call of it escalates; a tool whose arguments collide with the guard's facts is hidden)
+  tools/call   the guard checks the call — allow: forwarded to the server with the arguments as the guard validated
+               them (coerced to the schema's types: "2" for an integer is sent as 2, "no" for a boolean as false; the
+               arguments the client did not send are not added), and its result's text is kept as a tool
                output in the proxy's session, so later calls are checked against it (grounding, instruction-like text);
                deny: an error result with the reasons; escalate: with --escalate elicit (default) and a client that
                declares the elicitation capability, the user is asked (elicitation/create: approve yes / no) and the
@@ -29,15 +35,23 @@ The proxy speaks MCP over stdio (JSON-RPC, one message per line) to the client a
 
 Every decision goes to the guard's store (or --store) with the call's outcome; `_meta.solvi` on each result carries the
 outcome, the stored id and the trace hash. The proxy does not see the user's messages: an argument declared with ground=
-is found only in the tool outputs of this session (and denied otherwise)."""
+is found only in the tool outputs of this session (and denied otherwise). The session keeps the last `context_messages`
+tool outputs, at most `context_chars` characters in all (Session's max_messages / max_chars): each decision's trace
+records the context it was checked against, so the cap bounds what every stored decision holds — an output that has
+left the window no longer grounds values or taints calls."""
 from __future__ import annotations
 
 import json
+import logging
 import shlex
 import subprocess
 import sys
 
 from .guard import Guard, _text
+
+CONTEXT_MESSAGES = 50            # the tool outputs the proxy's session keeps for checking
+CONTEXT_CHARS = 100_000          # ... and their characters in all
+log = logging.getLogger("solvi.agents")
 
 PROTOCOL = "2025-06-18"
 
@@ -118,14 +132,15 @@ class Upstream:
 class Proxy:
     """The proxy's state: the guard, the upstream server, the session (tool outputs seen so far, the facts)."""
 
-    def __init__(self, guard, upstream, facts=None, escalate="elicit"):
+    def __init__(self, guard, upstream, facts=None, escalate="elicit", context_messages=CONTEXT_MESSAGES,
+                 context_chars=CONTEXT_CHARS):
         if not isinstance(guard, Guard):
             raise TypeError("--guard names a solvi.agents.Guard")
         if escalate not in ("elicit", "deny"):
             raise ValueError('escalate: "elicit" | "deny"')
         self.guard = guard
         self.upstream = upstream if isinstance(upstream, Upstream) else Upstream(upstream)
-        self.session = guard.session(facts=facts)
+        self.session = guard.session(facts=facts, max_messages=context_messages, max_chars=context_chars)
         self.escalate = escalate
         self.listed = None
         self.client_caps = {}
@@ -137,7 +152,11 @@ class Proxy:
         for t in self.upstream.tools():
             name = t.get("name")
             if name in g.tools:
-                g.adopt(name, t.get("inputSchema") or {"type": "object"}, t.get("description") or "")
+                try:
+                    g.adopt(name, t.get("inputSchema") or {"type": "object"}, t.get("description") or "")
+                except ValueError as e:              # its arguments collide with the guard's facts: not offered
+                    log.warning("solvi proxy: tool %s is hidden: %s", name, e)
+                    continue
                 out.append(t)
         self.listed = {t["name"] for t in out}
         return out
@@ -148,6 +167,9 @@ class Proxy:
             self.tools()
         name, args = params.get("name"), params.get("arguments") or {}
         g = self.guard
+        if name in g.tools and name not in self.listed:          # declared, but hidden (see tools)
+            return {"content": [{"type": "text", "text": f"{name} is not available through this proxy"}],
+                    "isError": True}
         d = g.check({"name": name, "arguments": args}, self.session.context, self.session.facts, store=False)
         if d.outcome == "escalate" and ask is not None:
             answer = ask(d)
@@ -161,7 +183,7 @@ class Proxy:
                     "isError": True, "_meta": {"solvi": _meta(d)}}
         d.executed = True
         try:
-            result = self.upstream.request("tools/call", {"name": name, "arguments": args})
+            result = self.upstream.request("tools/call", {"name": name, "arguments": forwarded(g.tools[name], args)})
         except UpstreamError as e:
             d.error = str(e)
             result = {"content": [{"type": "text", "text": f"{name} failed: {e}"}], "isError": True}
@@ -177,12 +199,20 @@ class Proxy:
         return result
 
 
+def forwarded(tool, args):
+    """The arguments sent to the server for an allowed call: the ones the client sent, as the guard validated them
+    (coerced to the schema's types — what the checks read is what the server gets), as JSON."""
+    return tool.model.model_validate(args).model_dump(mode="json", exclude_unset=True, by_alias=True)
+
+
 def _meta(d):
     return {"outcome": d.outcome, "stored_id": d.stored_id, "trace_hash": d.trace_hash}
 
 
-def run_proxy(guard, upstream, facts=None, escalate="elicit", stdin=None, stdout=None, limits=None):
-    """The proxy over stdio (see the module docs). upstream: a command line (or an Upstream). limits: a
+def run_proxy(guard, upstream, facts=None, escalate="elicit", stdin=None, stdout=None, limits=None,
+              context_messages=CONTEXT_MESSAGES, context_chars=CONTEXT_CHARS):
+    """The proxy over stdio (see the module docs). upstream: a command line (or an Upstream). context_messages /
+    context_chars: the session's context kept for checking (None: unbounded). limits: a
     solvi.serve.Limits — a client message is at most max_body characters and max_depth levels of JSON; a failure of the
     proxy itself is logged (logger solvi.serve) and answered with an incident id, never the exception's text."""
     from .. import __version__
@@ -190,7 +220,7 @@ def run_proxy(guard, upstream, facts=None, escalate="elicit", stdin=None, stdout
     from ..serve import Limits, RequestError, _readline, internal_error, parse_json
     stdin, stdout = stdin or sys.stdin, stdout or sys.stdout
     lim = limits or Limits()
-    px = Proxy(guard, upstream, facts, escalate)
+    px = Proxy(guard, upstream, facts, escalate, context_messages, context_chars)
 
     def lines():
         while True:
