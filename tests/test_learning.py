@@ -293,3 +293,12 @@ def test_the_act_guard_gate_reports_a_recalibration_with_errors(tmp_path):
     g = loop._recalibrate({"route": {}}, {"route": {"calibration": cal}})
     x = g["questions"]["route"]
     assert g["ok"] and x["error"] > 0 and f"threshold {x['threshold']:.3f} on 30" in g["why"]
+
+
+def test_open_answers_are_left_out_of_the_loop(tmp_path):
+    part, s, _ = build(tmp_path)
+    part.spec.kind = "span"                       # stand-in for a span question (the stub decider has no pointer)
+    with pytest.raises(ValueError, match="closed-list"):
+        loop_of(s, parts=["route"])
+    with pytest.raises(ValueError, match="nothing to learn"):
+        loop_of(s)                                # chosen automatically: open questions are skipped

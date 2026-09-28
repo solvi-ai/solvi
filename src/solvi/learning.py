@@ -71,6 +71,9 @@ class ExperimentalWarning(UserWarning):
     """A feature whose API and behaviour may still change."""
 
 
+OPEN_KINDS = ("span", "rank", "number")        # answers not from a closed list: the loop leaves them alone
+
+
 def content_key(question, init):
     """What a label's split is decided by: the question and a hash of its input — never a stored id, whose hash covers
     measured timings and so differs from run to run."""
@@ -153,14 +156,19 @@ class Learning:
         else:
             names = list(system.questions) if parts is None else list(parts)
             chosen = {q: decision_of(system.catalog, q) for q in names}
-            if parts is None:
-                chosen = {q: p for q, p in chosen.items() if p is not None}
+            if parts is None:                          # closed-list questions only (see below)
+                chosen = {q: p for q, p in chosen.items()
+                          if p is not None and not (isinstance(p, DecisionPart) and p.spec.kind in OPEN_KINDS)}
         for q, p in chosen.items():
             if q not in system.questions:
                 raise ValueError(f"{q!r} is not a question of this system")
             if not isinstance(p, DecisionPart):
                 raise ValueError(f"question {q!r}: the learning loop updates a decision part (model.decision(...)); "
                                  f"{p!r} is not one (combinations are not supported yet)")
+            if p.spec.kind in OPEN_KINDS:
+                raise ValueError(f"question {q!r}: the learning loop learns closed-list questions (choice, multi-label, "
+                                 f"score, yes/no); a {p.spec.kind} question is not one — in a simulation on real "
+                                 "streams learning did not help spans and a memory of corrections hurt them")
         if not chosen:
             raise ValueError("no question of this system is answered by a decision part: nothing to learn")
         self.parts = chosen

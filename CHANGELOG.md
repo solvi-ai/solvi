@@ -139,6 +139,9 @@ Found in a code review of 0.7; each has a regression test.
 - Labels are split into train / calibration / held-out by a hash of their question and input, not of the stored id
   (whose hash covers measured timings): the split is the same in every run, and the loop's tests no longer flake.
 ### `solvi serve`: security
+- The loop learns closed-list questions only (choice, multi-label, score, yes/no): spans, rankings and numbers are left
+  out (an explicit `parts=` with one raises). In a simulation on real streams learning helped a closed-list stream (+6
+  points answered alone at the same risk) and did nothing or hurt for spans.
 
 - **Bearer token**: `--token` / `$SOLVI_SERVE_TOKEN` (`create_app(token=...)`) — every HTTP request needs
   `Authorization: Bearer <token>` (401 otherwise; `hmac.compare_digest`). Listening beyond the loopback address without a
