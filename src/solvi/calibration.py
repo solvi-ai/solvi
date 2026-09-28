@@ -191,3 +191,113 @@ def set_scores(p, ordinal=False, has_unknown=False):
         s[c] = cum
         cum += p[c]
     return s
+
+
+# --- group-wise guarantees: a threshold per group of a hierarchy (domain → task), after HG-CRC (arXiv 2607.24562)
+# A threshold calibrated on the whole stream holds on average over it; inside a hard group the share answered alone and
+# wrong can be far above the risk (tests/test_guarantees.py simulates it). Here every group with enough examples gets its
+# own threshold; a smaller group is pooled with the rest of its parent (the parent's threshold is calibrated on exactly
+# those pooled examples); the whole stream takes what is left.
+
+def group_path(g):
+    """A group as a path from the top of the hierarchy: a tuple of strings. A scalar is a one-level group, a tuple or list
+    a path (domain, task); the path stops at the first None; None alone is the whole stream ()."""
+    if g is None:
+        return ()
+    if isinstance(g, (tuple, list)):
+        out = []
+        for x in g:
+            if x is None:
+                break
+            out.append(str(x))
+        return tuple(out)
+    return (str(g),)
+
+
+def group_nodes(paths, min_group=100):
+    """Which groups get a threshold of their own. Deepest level first: a group whose examples not yet taken by a group
+    under it number at least `min_group` becomes a node and takes them; the whole stream () takes the rest. → ({node:
+    [example indices]}, the node of each example). Depends on the group sizes only, not on the labels."""
+    paths = [group_path(p) for p in paths]
+    owner = [None] * len(paths)
+    nodes = {}
+    for d in range(max((len(p) for p in paths), default=0), 0, -1):
+        cand = {}
+        for i, p in enumerate(paths):
+            if owner[i] is None and len(p) >= d:
+                cand.setdefault(p[:d], []).append(i)
+        for node in sorted(cand):
+            if len(cand[node]) >= min_group:
+                nodes[node] = cand[node]
+                for i in cand[node]:
+                    owner[i] = node
+    nodes[()] = [i for i, o in enumerate(owner) if o is None]
+    return nodes, [() if o is None else o for o in owner]
+
+
+def node_of(path, nodes):
+    """The node whose threshold applies to an input of this group: the deepest node on its path (a new or small group
+    falls back to its parent's, then to the whole stream's)."""
+    p = group_path(path)
+    for d in range(len(p), -1, -1):
+        if p[:d] in nodes:
+            return p[:d]
+    return ()
+
+
+def loss_budget(n, risk, delta=None):
+    """The most examples of n that may be answered alone and wrong for a threshold to certify `risk`: conformal risk
+    control (delta=None: (k + 1) / (n + 1) ≤ risk, a promise on average) or a binomial test at level delta (k with
+    P(Binomial(n, risk) ≤ k) ≤ delta: the risk ≤ `risk` with probability ≥ 1 − delta). −1: no threshold can."""
+    if not 0 < risk < 1:
+        raise ValueError("risk must be between 0 and 1")
+    if delta is None:
+        return int(math.floor(risk * (n + 1) - 1 + 1e-9))
+    if n == 0:
+        return -1
+    lp, lq, cdf, k = math.log(risk), math.log1p(-risk), 0.0, -1
+    while k < n:
+        j = k + 1
+        term = math.exp(math.lgamma(n + 1) - math.lgamma(j + 1) - math.lgamma(n - j + 1) + j * lp + (n - j) * lq)
+        if cdf + term > delta + 1e-15:
+            break
+        cdf, k = cdf + term, j
+    return k
+
+
+def certify_groups(losses_of, paths, risk=0.10, min_group=100, delta=0.10):
+    """Group-wise risk control over a hierarchy: `losses_of(indices)` → (candidate thresholds ascending, answered-alone-
+    and-wrong count at each — non-increasing) for those examples. Each node (group_nodes) takes the lowest candidate whose
+    count is within loss_budget(n, risk, delta / nodes) — Bonferroni over the nodes, so with probability ≥ 1 − delta the
+    promise holds in every group at once; delta=None: conformal risk control per group (each group on average, no
+    correction needed). → ({node: {"threshold", "n", "index"}}, node of each example); inf where no threshold certifies."""
+    nodes, owner = group_nodes(paths, min_group)
+    d = None if delta is None else delta / len(nodes)
+    out = {}
+    for node, ix in nodes.items():
+        grid, k = losses_of(ix)
+        budget = loss_budget(len(ix), risk, d)
+        good = np.where(np.asarray(k, float) <= budget)[0] if budget >= 0 else []
+        g = int(good[0]) if len(good) else None
+        out[node] = {"threshold": float(grid[g]) if g is not None else math.inf, "n": len(ix), "index": g}
+    return out, owner
+
+
+def _signal_losses(score, wrong):
+    s, w = _arrays(score, wrong)
+
+    def losses_of(ix):
+        ss, ww = s[ix], w[ix]
+        grid = np.concatenate([np.unique(ss), [np.inf]])
+        order = np.argsort(-ss, kind="stable")
+        cw = np.concatenate([[0.0], np.cumsum(ww[order])])
+        k = cw[np.searchsorted(-ss[order], -grid, side="right")]       # wrong among the cases with score ≥ t
+        return grid, k
+    return losses_of
+
+
+def group_thresholds(score, wrong, groups, risk=0.10, min_group=100, delta=0.10):
+    """certify_groups for one signal (answer alone when score ≥ the threshold of the input's node) → {node: threshold};
+    apply with node_of(group, nodes). groups: one per example — a value, a path (domain, task) or None."""
+    nodes, _ = certify_groups(_signal_losses(score, wrong), groups, risk, min_group, delta)
+    return {k: v["threshold"] for k, v in nodes.items()}

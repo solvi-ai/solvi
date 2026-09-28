@@ -561,6 +561,45 @@ must escalate at least (μ − risk) / (1 − risk) of them — `must_escalate_a
 Every decision records the promise of its threshold (`decision.extra["guarantee"]`) and the audit shows it per answer.
 Recalibrate when the inputs change: the promise does not survive a shift of domain.
 
+#### Thresholds per group: the promise inside every group
+
+The promise of `act_guard` is over the whole stream. When the stream mixes easy and hard inputs, one threshold can meet
+it on average while the hard ones are answered wrongly far more often: in a simulation with 20% hard inputs (the model
+right 30–80% of the time there, 80–100% elsewhere), a threshold with P(answered alone and wrong) ≤ 10% overall gave 28%
+inside the hard group. `groups=` calibrates a threshold per group of a hierarchy:
+
+```python
+from solvi.decide import Facts          # also solvi.multi.Facts
+
+examples = [(Facts(email=text, domain="billing", task="refunds"), "approve"), ...]   # or states with those keys
+info = part.act_guard(examples, risk=0.10, groups=["domain", "task"], min_group=100, delta=0.10)
+info["groups"]      # {("billing", "refunds"): {"threshold", "n", "answered", "error", "risk", "pooled"}, ("billing",): ..., (): ...}
+```
+
+`groups` is a fact name, a list of fact names (a hierarchy, top first) or a function of facts that returns a group or a
+path — `lambda email: ("long" if len(email) > 2000 else "short")`; a function of one parameter also takes an input that
+is not given as facts. How the thresholds are chosen (after HG-CRC, arXiv 2607.24562):
+
+- **who gets a threshold**: deepest level first, every group with at least `min_group` examples of its own gets one; a
+  smaller group is pooled with the rest of its parent, whose threshold is calibrated on exactly those pooled examples
+  (so it holds for them); the rest of the stream takes what is left. A group never seen in calibration falls back the
+  same way. The choice depends on the group sizes only, not on the labels;
+- **the bound**: with `delta=0.10` (the default) each group's threshold is the lowest whose count of answered-alone-and-
+  wrong examples passes a binomial test at level delta / (number of groups) — a Bonferroni correction — so with
+  probability ≥ 90% over the examples, P(answered alone and wrong | group) ≤ risk in every group at once. `delta=None`
+  uses conformal risk control per group instead: each group on average, answering more (in the simulation above both
+  held the risk in each group; the plain threshold broke it in 100% of the runs, delta=0.1 in 4.5%, delta=None in 55% of
+  the runs for at least one group — on average it held);
+- **the cost**: a hard group escalates more. In the simulation the grouped thresholds answered 77% alone overall against
+  74% for the plain one — more on the easy inputs, less on the hard ones; with small groups the binomial bound is
+  strict (below about 30 examples it can certify nothing at 10%, and the group escalates everything).
+
+Every decision records its group and the group whose threshold applied (`extra["guarantee"]["group"]`, `["applied"]`,
+`["threshold"]`, `["n"]`) and the audit prints the group's promise; an input that does not give its group escalates
+("group unknown"). The group facts join the part's inputs, so register the part in a catalog (`cat.fn(part)`) after
+calibrating with groups. `act_guard` without `groups` returns to one threshold. Combinations take the same arguments
+(below).
+
 #### Option order and near ties
 
 A decider may prefer an option for where it is listed (on a 64-option stress test, reordering changed 41% of
@@ -640,7 +679,9 @@ the actual loss is never above it, so the guarantee holds (the other safeguards 
 apply). The result has `threshold`, `answered`, `error` (among the answered), `risk`, `calls` (models called per
 question), `cost` (with `costs=`) and, for a cascade, `answered_by` (the share each stage answered). `conformal(examples,
 coverage=0.9)` gives answer sets from the probabilities the combination answers with — call it after `act_guard`, which
-clears it.
+clears it. `act_guard(examples, risk=0.10, groups="domain", min_group=100, delta=0.10)` chooses one shared
+threshold per group on the same monotonized loss, with the same rules as for one part (thresholds per group, above);
+the examples are then `Facts(...)` with the group facts, which join the combination's inputs.
 
 Measured on the shipped deciders (research note L25; 300 calibration questions per set, 200 splits, risk 0.10): the risk
 stayed at or below 10% for every mode and data set. The cascade answered as much as the large model at about half its

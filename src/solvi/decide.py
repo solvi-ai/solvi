@@ -1827,6 +1827,68 @@ def _json_default(o):
     return repr(o)
 
 
+class Facts(dict):
+    """An example input given as facts by name (`Facts(email=..., tier=...)`): each part reads its own facts, a route's
+    predicates and a grouping (act_guard(groups=...)) read theirs. Any other input is the one input every part reads (a
+    text or a state)."""
+
+
+class GroupBy:
+    """Which group an input belongs to, for thresholds per group (act_guard(groups=...)): a fact name ("domain"), a list of
+    fact names — a hierarchy, top first (["domain", "task"]) — or a function whose parameters are fact names and which
+    returns a group or a path (domain, task). A function with one parameter also takes an input that is not given as
+    facts (a text or a state): it is called with the input itself. A state (dict) input gives facts by its keys."""
+
+    def __init__(self, by):
+        if isinstance(by, str):
+            self.names, self.fn = [by], None
+        elif isinstance(by, (list, tuple)) and by and all(isinstance(x, str) for x in by):
+            self.names, self.fn = list(by), None
+        elif callable(by):
+            self.names, self.fn = list(inspect.signature(by).parameters), by
+        else:
+            raise TypeError(f"groups: a fact name, a list of fact names or a function, not {by!r}")
+        self.by = by
+
+    def describe(self):
+        from .provenance import code_fingerprint
+        return list(self.names) if self.fn is None else {"fn": code_fingerprint(self.fn), "reads": self.names}
+
+    def label(self):
+        return " → ".join(self.names) if self.fn is None else getattr(self.fn, "__name__", "a function")
+
+    def path(self, vals=None, raw=None):
+        """The input's group path (a tuple), or None when the input does not give it."""
+        from .calibration import group_path
+        if vals is None:
+            if isinstance(raw, Mapping) and all(n in raw for n in self.names):
+                vals = raw
+            elif self.fn is not None and len(self.names) == 1:
+                return group_path(self.fn(raw))
+            else:
+                return None
+        if any(n not in vals for n in self.names):
+            return None
+        args = {n: (vals[n].value if isinstance(vals[n], Quote) else vals[n]) for n in self.names}
+        return group_path(self.fn(**args) if self.fn is not None else tuple(args[n] for n in self.names))
+
+
+def group_name(path):
+    """A group path as people read it: "billing / refunds"; the whole stream: "(the rest of the stream)"."""
+    return " / ".join(path) if path else "(the rest of the stream)"
+
+
+def group_record(g, path, node, info):
+    """A decision's guarantee under thresholds per group: the part's promise, the input's group, the group whose
+    threshold applied (its own, or a parent's when the group had too few examples), that threshold and its examples."""
+    pooled = tuple(node) != tuple(path)
+    out = dict(g, group=list(path), applied=list(node), threshold=info["threshold"], n=info["n"])
+    out["promise"] = (f"{g['promise']}; here: group {group_name(node)} (threshold {info['threshold']:.4g}, n = "
+                      f"{info['n']})" + (f", pooled: {group_name(path)} had fewer than {g['min_group']} examples"
+                                         if pooled else ""))
+    return out
+
+
 class DecisionPart:
     """A decider bound to one question (name, task, options, kind, the facts it reads). Callable as a catalog function; it
     is also the model recorded in the trace: `fingerprint()` covers the checkpoint and this question's adaptation and
@@ -1856,6 +1918,7 @@ class DecisionPart:
         self.escalate_below, self.act_threshold, self.use_act = escalate_below, act_threshold, use_act
         self.guarantee = None                   # what the escalation threshold promises (act_guard / calibrate_for)
         self.conformal_set = None               # the answer-set quantile (conformal)
+        self.groups = None                      # thresholds per group (act_guard(groups=...)): {"by", "nodes", "signal"}
         self.__name__ = name
         self.__qualname__ = name
         self.__doc__ = task
@@ -1908,6 +1971,9 @@ class DecisionPart:
         th = {k: v for k, v in (("escalate_below", self.escalate_below), ("act_threshold", self.act_threshold),
                                 ("use_act", self.use_act), ("guarantee", self.guarantee),
                                 ("conformal", self.conformal_set), ("min_margin", self.min_margin),
+                                ("groups", None if self.groups is None else
+                                 (self.groups["by"].describe(), sorted((list(k), v["threshold"])
+                                                                       for k, v in self.groups["nodes"].items()))),
                                 ("option_order", None if self.option_order != "average" else
                                  (self.option_order, self.permutations))) if v is not None}
         if th:
@@ -1926,9 +1992,20 @@ class DecisionPart:
                           self.model.state_format)
 
     def __call__(self, *args, **kw):
-        vals = dict(zip(self.facts, args))
+        vals = dict(zip(self.__signature__.parameters, args))
         vals.update(kw)
-        return self._bind(self._one(self.text_of(vals)), vals)
+        text = self.text_of(vals)
+        return self._bind(self._one(text, self._ctx(text, vals=vals)), vals)
+
+    def _ctx(self, text, vals=None, raw=None):
+        """What _finish needs besides the model's output: the input's text and, with thresholds per group, its group."""
+        c = {"text": text}
+        if self.groups is not None:
+            c["path"] = self.groups["by"].path(vals, raw)
+        return c
+
+    def _input_text(self, x):
+        return self.text_of(x) if isinstance(x, Facts) else self.model.text(x)
 
     def _bind(self, d, vals):
         """Point a span's / the evidence's quotes into the fact they were read from: a decision reading one given text fact
@@ -1952,24 +2029,47 @@ class DecisionPart:
         input in one forward pass (cached, so the siblings read it) and return this part's decision; the decision's extra
         records the pass."""
         text = self.text_of(args)
+        ctx = self._ctx(text, vals=args)
         m = self.model
         if (len(siblings) > 1 and m.batchable and all(s.model is m for s in siblings)
                 and all(s.option_order != "average" for s in siblings)):
             z, a, shared = m._raw_pass([s.spec for s in siblings], text)[siblings.index(self)]
         else:
             (z, a), shared = self._raw([text])[0], False
-        d = self._bind(self._finish(m._decision(self.spec, z), a), args)
+        d = self._bind(self._finish(m._decision(self.spec, z), a, ctx=ctx), args)
         d.extra["pass"] = {"with": list(names) if names else [s.__name__ for s in siblings], "shared": shared}
         return d
 
     def __repr__(self):
         return f"DecisionPart({self.__name__!r}, {self.spec.kind}, options={self.options}, model={self.model.model_id!r})"
 
-    def _finish(self, d, act, threshold=None):
+    def _group_threshold(self, ctx):
+        """With thresholds per group: (the input's group path, the node whose threshold applies, its info) — None when
+        the input does not say which group it is in."""
+        path = (ctx or {}).get("path")
+        if path is None:
+            return None
+        from .calibration import node_of
+        node = node_of(path, self.groups["nodes"])
+        return path, node, self.groups["nodes"][node]
+
+    def _finish(self, d, act, threshold=None, ctx=None):
         """Act or escalate. threshold: a combination's shared threshold (solvi.multi) in place of this part's own
-        act_threshold / escalate_below — on the part's signal (see _signal); −inf applies only the other safeguards."""
+        act_threshold / escalate_below — on the part's signal (see _signal); −inf applies only the other safeguards.
+        ctx: the input (see _ctx) — with thresholds per group, the threshold of the input's group applies."""
+        grp = None
         if threshold is None:
-            d = self.model._finish(self.spec, d, act, self.escalate_below, self.act_threshold, self.use_act)
+            eb, at = self.escalate_below, self.act_threshold
+            if self.groups is not None:
+                grp = self._group_threshold(ctx)
+                if grp is not None and self.groups["signal"] == "act":
+                    at = grp[2]["threshold"]
+                elif grp is not None:
+                    eb = grp[2]["threshold"]
+            d = self.model._finish(self.spec, d, act, eb, at, self.use_act)
+            if self.groups is not None and grp is None:          # no group, no threshold that holds for it
+                d.escalate = (f"group unknown: the thresholds are per group ({self.groups['by'].label()}) and this input "
+                              f"does not give {self.groups['by'].names}; would have answered {d.value!r}")
         else:
             d = self.model._finish(self.spec, d, act, -math.inf, -math.inf, self.use_act)
         if self.option_order == "canonical" and d.probs:       # probabilities in the caller's order of the options
@@ -1989,7 +2089,7 @@ class DecisionPart:
                 d.escalate = (f"{ESCALATED}: " if name == "act" else "") + \
                     f"{name} {s:.2f} < {threshold:.2f} (shared threshold); would have answered {d.value!r}"
         elif self.guarantee is not None:
-            d.extra["guarantee"] = dict(self.guarantee)
+            d.extra["guarantee"] = dict(self.guarantee) if grp is None else group_record(self.guarantee, *grp)
         if self.conformal_set is not None and d.probs:
             cands = self.candidates(d)
             d.extra["candidates"] = cands
@@ -2051,17 +2151,19 @@ class DecisionPart:
             out.append((m, None if any(a is None for a in acts) else float(np.mean(acts))))
         return out
 
-    def _one(self, text):
+    def _one(self, text, ctx=None):
         z, a = self._raw([text])[0]
-        return self._finish(self.model._decision(self.spec, z), a)
+        return self._finish(self.model._decision(self.spec, z), a, ctx=ctx if ctx is not None else self._ctx(text))
 
     # the model's methods for this decision
     def decide(self, text):
-        """An input (a text or a state) → Decision; a list of inputs → a list."""
-        one = _single(text)
-        texts = [text] if one else list(text)
-        out = [self._finish(self.model._decision(self.spec, z), a)
-               for z, a in self._raw([self.model.text(t) for t in texts])]
+        """An input (a text, a state, or Facts by name) → Decision; a list of inputs → a list."""
+        one = isinstance(text, Facts) or _single(text)
+        xs = [text] if one else list(text)
+        ts = [self._input_text(x) for x in xs]
+        out = [self._finish(self.model._decision(self.spec, z), a,
+                            ctx=self._ctx(t, vals=x if isinstance(x, Facts) else None, raw=x))
+               for (z, a), t, x in zip(self._raw(ts), ts, xs)]
         return out[0] if one else out
 
     def score(self, text):
@@ -2097,7 +2199,7 @@ class DecisionPart:
     def _labelled(self, examples, signal):
         """Decide labelled examples [(input, correct)] → (the signal per example, correct 0/1 per example, "act" |
         "confidence", [Decision]). "Not stated" (solvi.Unknown) is a label like any other."""
-        ex = [(self.model.text(t), y) for t, y in examples]
+        ex = [(self._input_text(t), y) for t, y in examples]
         if not ex:
             raise ValueError("calibration needs labelled examples")
         if signal not in ("auto", "act", "confidence"):
@@ -2116,12 +2218,16 @@ class DecisionPart:
         use_act = signal == "act" or (signal == "auto" and has_act and self.use_act is not False)
         return (act if use_act else conf), ok, ("act" if use_act else "confidence"), ds
 
-    def _set_threshold(self, sig, thr, guarantee):
+    def _set_threshold(self, sig, thr, guarantee, groups=None):
         if sig == "act":
             self.act_threshold = thr
         else:
             self.escalate_below = thr
         self.guarantee = guarantee
+        self.groups = groups
+        extra = [n for n in (groups["by"].names if groups else []) if n not in self.facts]
+        self.__signature__ = inspect.Signature([inspect.Parameter(f, inspect.Parameter.POSITIONAL_OR_KEYWORD)
+                                                for f in self.facts + extra])
 
     def calibrate_for(self, examples, error=0.05, signal="auto", method="empirical", delta=0.10):
         """Choose the escalation threshold for a target error rate among the answers given alone, on labelled examples
@@ -2134,6 +2240,7 @@ class DecisionPart:
         Changes the part's fingerprint. → {"signal", "threshold", "coverage", "error", "n", "target_error", "method",
         "guarantee"}. For a guarantee on the share of all questions answered wrongly, see act_guard."""
         from .calibration import accuracy_at, ltt_threshold
+        examples = list(examples)
         if method not in ("empirical", "ltt"):
             raise ValueError('method must be "empirical" or "ltt"')
         sig, ok, name, _ = self._labelled(examples, signal)
@@ -2151,7 +2258,7 @@ class DecisionPart:
         return {"signal": name, "threshold": thr, "coverage": cov, "error": (1 - acc) if cov else 0.0, "n": len(ok),
                 "target_error": error, "method": method, "guarantee": g["promise"]}
 
-    def act_guard(self, examples, risk=0.10, signal="auto"):
+    def act_guard(self, examples, risk=0.10, signal="auto", groups=None, min_group=100, delta=0.10):
         """Answer alone only as far as a guarantee allows (conformal risk control), from labelled examples of your own
         stream [(input, correct)] — a few hundred is typical: the escalation threshold is set so that, for inputs like
         the examples, P(answered alone AND wrong) ≤ risk — a share of all questions (answered or escalated), not of
@@ -2160,20 +2267,51 @@ class DecisionPart:
         a share μ > risk of the examples, any rule must escalate at least (μ − risk) / (1 − risk) of the inputs
         ("must_escalate_at_least"; arXiv 2606.29054) — a better signal can only get closer to that bound. Changes the part's fingerprint; the trace
         of every decision records the promise. → {"signal", "threshold", "answered" (share answered alone on the
-        examples), "error" (among them), "risk" (answered and wrong, on the examples), "n", "guarantee"}."""
+        examples), "error" (among them), "risk" (answered and wrong, on the examples), "n", "guarantee"}.
+
+        groups: a threshold per group — a fact name ("domain"), a hierarchy of fact names (["domain", "task"]) or a
+        function of facts returning a group or a path (see GroupBy); the examples then give those facts (Facts(...) or
+        a state with those keys). The promise over the whole stream allows a hard group to be answered wrongly far more
+        often than `risk`; per group it holds inside each: every group with at least `min_group` examples gets its own
+        threshold, a smaller one is pooled with the rest of its parent (whose threshold is calibrated on exactly those
+        examples), the rest of the stream takes what is left. delta=0.10: with probability ≥ 90% over the examples,
+        P(answered alone and wrong | group) ≤ risk in every group at once (a binomial bound per group at delta divided
+        by the number of groups — Bonferroni; after HG-CRC, arXiv 2607.24562); delta=None: conformal risk control per
+        group (each group on average). Every decision records its group and the group whose threshold applied; an
+        input that does not give its group escalates. The group facts join the part's inputs: register the part in a
+        catalog after act_guard. Adds "groups" ({path: {"threshold", "n", "answered", "error", "risk", "pooled"}}) to
+        the result."""
         from .calibration import crc_threshold
+        examples = list(examples)
         sig, ok, name, _ = self._labelled(examples, signal)
-        thr = crc_threshold(sig, [1 - o for o in ok], risk)
-        g = {"method": "crc", "risk": risk, "n": len(ok), "signal": name,
-             "promise": f"P(answered alone and wrong) ≤ {risk:g} for inputs like the calibration examples"}
-        self._set_threshold(name, thr, g)
         s, o = np.asarray(sig, float), np.asarray(ok, float)
-        auto = s >= thr
         base = float(1 - o.mean())
-        return {"signal": name, "threshold": thr, "answered": float(auto.mean()),
-                "error": float(1 - o[auto].mean()) if auto.any() else 0.0,
-                "risk": float(((1 - o) * auto).mean()), "n": len(ok), "guarantee": g["promise"],
-                "base_error": base, "must_escalate_at_least": max(0.0, (base - risk) / (1 - risk))}
+        if groups is None:
+            thr = crc_threshold(sig, [1 - x for x in ok], risk)
+            g = {"method": "crc", "risk": risk, "n": len(ok), "signal": name,
+                 "promise": f"P(answered alone and wrong) ≤ {risk:g} for inputs like the calibration examples"}
+            self._set_threshold(name, thr, g)
+            auto = s >= thr
+            out = {}
+        else:
+            by = GroupBy(groups)
+            paths = [by.path(x if isinstance(x, Facts) else None, x) for x, _ in examples]
+            if any(p is None for p in paths):
+                i = next(i for i, p in enumerate(paths) if p is None)
+                raise ValueError(f"example {i}: its group ({by.names}) is not given; give the examples as Facts(...) or "
+                                 "states with those keys")
+            nodes, info, auto = _group_guard(s, 1 - o, paths, risk, min_group, delta)
+            g = {"method": "crc-groups" if delta is None else "group-bound", "risk": risk, "n": len(ok), "signal": name,
+                 "groups": by.label(), "min_group": min_group, "delta": delta,
+                 "promise": _group_promise(risk, delta, len(nodes))}
+            self._set_threshold(name, nodes[()]["threshold"], g, {"by": by, "nodes": nodes, "signal": name})
+            thr = nodes[()]["threshold"]
+            out = {"groups": info}
+        out = {"signal": name, "threshold": thr, "answered": float(auto.mean()),
+               "error": float(1 - o[auto].mean()) if auto.any() else 0.0,
+               "risk": float(((1 - o) * auto).mean()), "n": len(ok), "guarantee": g["promise"],
+               "base_error": base, "must_escalate_at_least": max(0.0, (base - risk) / (1 - risk)), **out}
+        return out
 
     def conformal(self, examples, coverage=0.90):
         """Conformal answer sets from labelled examples [(input, correct)]: afterwards every decision carries
@@ -2224,6 +2362,36 @@ class DecisionPart:
             at = Answer.maybe(at)
         return Question(name, text or sp.task, at, checkpoints=list(checkpoints or []), min_confidence=min_confidence,
                         require_evidence=require_evidence)
+
+
+def _group_promise(risk, delta, n_groups):
+    if delta is None:
+        return (f"P(answered alone and wrong) ≤ {risk:g} within each group, for inputs like the calibration examples "
+                "(conformal risk control per group)")
+    return (f"P(answered alone and wrong) ≤ {risk:g} within every group at once ({n_groups} groups), with probability "
+            f"≥ {1 - delta:g}, for inputs like the calibration examples")
+
+
+def _group_info(nodes, owner, paths, auto, wrong):
+    """The per-group report of act_guard(groups=...): each node's threshold, examples, answered share, error and risk on
+    them, and the groups pooled into it."""
+    info = {}
+    for node, v in nodes.items():
+        ix = [i for i, o in enumerate(owner) if o == node]
+        a, w = auto[ix], wrong[ix]
+        info[node] = {"threshold": v["threshold"], "n": v["n"], "answered": float(a.mean()) if ix else 0.0,
+                      "error": float(w[a].mean()) if a.any() else 0.0, "risk": float((w * a).mean()) if ix else 0.0,
+                      "pooled": sorted({paths[i] for i in ix if paths[i] != node})}
+    return info
+
+
+def _group_guard(score, wrong, paths, risk, min_group, delta):
+    """Thresholds per group for one signal → (nodes {path: {"threshold", "n"}}, report per node, answered alone [n])."""
+    from .calibration import _signal_losses, certify_groups
+    nodes, owner = certify_groups(_signal_losses(score, wrong), paths, risk, min_group, delta)
+    nodes = {k: {"threshold": v["threshold"], "n": v["n"]} for k, v in nodes.items()}
+    auto = np.array([score[i] >= nodes[owner[i]]["threshold"] for i in range(len(score))], bool)
+    return nodes, _group_info(nodes, owner, [tuple(p) for p in paths], auto, np.asarray(wrong, float)), auto
 
 
 def act_features(sp, d, act_logit):

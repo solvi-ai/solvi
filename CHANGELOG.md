@@ -1,5 +1,30 @@
 # Changelog
 
+## Unreleased (0.7)
+
+### Thresholds per group: the guarantee inside every group
+
+- `part.act_guard(examples, risk=0.10, groups=..., min_group=100, delta=0.10)` and the same on `Cascade` / `Vote` /
+  `Route`: a threshold per group of a hierarchy — `groups` is a fact name, a list of fact names (`["domain", "task"]`,
+  top first) or a function of facts returning a group or a path. Deepest level first, a group with at least `min_group`
+  examples of its own gets a threshold; a smaller one is pooled with the rest of its parent (whose threshold is
+  calibrated on exactly those examples); the rest of the stream takes what is left; a group unseen in calibration falls
+  back the same way. With `delta` (default 0.10) each threshold passes a binomial test at delta / (number of groups) —
+  Bonferroni — so with probability ≥ 1 − delta, P(answered alone and wrong | group) ≤ risk in every group at once;
+  `delta=None` is conformal risk control per group (each group on average). After HG-CRC (arXiv 2607.24562).
+- Why: one threshold meets the risk over the stream while a hard group can be far over it — in the test simulation (20%
+  hard inputs) 28% answered alone and wrong inside the hard group at a 10% promise, in every run; per group it stayed at
+  most 10% in each (violated in 4.5% of runs with delta=0.1), answering 77% alone overall against 74%.
+- Every decision records its group, the group whose threshold applied, that threshold and its examples
+  (`extra["guarantee"]`: `group`, `applied`, `threshold`, `n`; method `group-bound`, or `crc-groups` with
+  delta=None); the audit prints the group's promise. An input that does not give its group escalates ("group
+  unknown"). The group facts join the part's (the combination's) inputs.
+- The result of `act_guard` has `groups`: per group its threshold, examples, answered share, error, risk and the smaller
+  groups pooled into it.
+- `solvi.calibration`: `group_nodes`, `node_of`, `loss_budget`, `certify_groups`, `group_thresholds`, `group_path`.
+- `solvi.decide.Facts` (the same class as `solvi.multi.Facts`): a DecisionPart also takes examples and inputs given as
+  facts by name.
+
 ## 0.6.0 — 2026-09-28 — serving, catalog lint, several models, async, measured costs
 
 ### Async execution: aask
