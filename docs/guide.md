@@ -1548,7 +1548,9 @@ has each answer as its closed set (`System.response_schema`). The web layer does
 `System.ask` as it is, so a wrong-typed field is handled as solvi handles it — the fact is missing, the answers that need
 it abstain, and the response says why (safeguard `type_rejected`) — rather than as a 422. Unknown questions are a 404.
 With `--store` (or a System built with `storage=`), every answer is saved with its whole trace; `stored_id` finds it
-(`store.get(id)`) and `solvi verify` / `replay` / `diff` work on the store. Asks are served one at a time: a System
+(`store.get(id)`) and `solvi verify` / `replay` / `diff` work on the store. Storing is the server's policy: a request's
+`"store": false` is ignored unless the server was started with `--allow-client-no-store`
+(`create_app(..., allow_client_no_store=True)`). Asks are served one at a time: a System
 updates its measured costs and stats in place. A System with `async def` (or `blocking=True`) parts is served with
 [`aask`](#async-execution-aask) instead: its endpoints are async and asks run concurrently on the server's event loop
 (the MCP server too).
@@ -1610,20 +1612,25 @@ only this endpoint. Without FastAPI, `solvi.serve.Service(system, decider)` answ
 
 - **Authentication.** `SOLVI_SERVE_TOKEN=... solvi serve ...` (or `--token`, which other local users can see in the
   process list) makes every HTTP request — the docs and `/health` included — carry `Authorization: Bearer <token>`; the
-  token is compared in constant time. Without a token the server warns when it listens beyond the loopback address. For
+  token is compared in constant time; an empty `--token ""` is refused (`create_app(token="")` raises), and an empty
+  `SOLVI_SERVE_TOKEN` counts as no token, with a warning. Without a token the server warns when it listens beyond the loopback address. For
   anything more (users, rate limits, TLS) put it behind a reverse proxy. MCP runs over stdio: the client that starts
   the process is the one that can call it.
 - **Limits.** A request body (an MCP message) is at most `--max-body` bytes (default 1 000 000: 413 above it), its JSON
   at most `--max-depth` levels deep (default 32: 400), and a request takes at most `--timeout` seconds (default 60:
-  504; an MCP tool error). A sync System cannot be interrupted: the ask finishes in a worker thread and the next asks
-  wait for it. An async System's parts get 80% of the timeout as `aask`'s timeout (unless `System(timeout=)` or the
+  504; an MCP tool error). A sync System cannot be interrupted: the ask finishes in a worker thread, and the next ask
+  waits for the System at most `--queue-timeout` seconds (default 10), then gets a 503 "busy"; at most `--max-inflight`
+  requests (default 8, a timed-out one included until its thread ends) are running or waiting at once — more get a 503
+  at once, so slow asks never pile up threads. `POST /v1/systemone` takes at most `--max-questions` questions (default
+  32) of at most `--max-options` options each (default 64): 422 above. An async System's parts get 80% of the timeout as `aask`'s timeout (unless `System(timeout=)` or the
   part sets one), so a slow part makes its questions abstain (safeguard `timeout`) and the request still answers.
 - **Errors.** A refused request says what was refused. Any other failure is logged on the server with its traceback
   (logger `solvi.serve`); the client gets a 500 with an incident id to look it up — never an exception text, a traceback
   or a path. An exception inside a catalog part is not a server error: it is part of the decision, and its message is in
   the trace (`why`, the step's `error`), as it is for `System.ask`. `/health` names the store by its file name only.
 - **Every entry point.** `POST /ask_text` and the MCP `ask_text` tool go through the same token, limits, timeout and
-  error hiding as the questions. The MCP proxy (`--guard --upstream`) bounds each client message by `--max-body` /
+  error hiding as the questions. A malformed MCP message (a tool name that is not a string) is a JSON-RPC
+  error, and nothing in a message stops the built-in server. The MCP proxy (`--guard --upstream`) bounds each client message by `--max-body` /
   `--max-depth` and answers a failure of its own with an incident id; an upstream server's own errors are passed on.
 - **CORS** is off: no `Access-Control-Allow-*` headers, so browsers on other origins cannot read the answers. `--cors
   https://app.example` (repeatable) allows one origin.

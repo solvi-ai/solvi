@@ -112,8 +112,8 @@ def test_ask_over_http_stores_the_answer_with_its_trace(system, tmp_path):
     assert list(one["results"]) == ["team"] and one["results"]["team"]["answer"] == "shipping"
     blocked = c.post("/ask", json={"state": {"text": "hi", "amount": 5, "email": "blocked@x", "phone": "1"}, "questions": ["approve"],
                                    "store": False}).json()
-    assert blocked["results"]["approve"]["status"] == "forced" and blocked["stored_id"] is None
-    assert system.storage.verify()["ok"] and system.storage.verify()["count"] == 2
+    assert blocked["results"]["approve"]["status"] == "forced" and blocked["stored_id"]    # storing: the server's policy
+    assert system.storage.verify()["ok"] and system.storage.verify()["count"] == 3
 
 
 def test_wrong_inputs_are_decided_by_solvi_and_wrong_requests_are_http_errors(system):
@@ -359,7 +359,7 @@ def test_ask_text_over_http_routes_reads_with_quotes_and_answers(tmp_path):
     assert missing["read"]["missing"] == ["purchase_date"] and "purchase date" in missing["read"]["clarify"]
     assert missing["results"]["request_refund"]["status"] == "abstain"
     unsure = c.post("/ask_text", json={"text": "hello there", "store": False}).json()
-    assert unsure["read"]["question"] is None and unsure["read"]["escalated"] and unsure["stored_id"] is None
+    assert unsure["read"]["question"] is None and unsure["read"]["escalated"] and unsure["stored_id"]   # stored anyway
     given = c.post("/ask_text", json={"text": "cancel A-5, it is urgent", "question": "cancel_order"}).json()
     assert given["read"]["question"] == "cancel_order" and given["results"]["cancel_order"]["answer"] == "cancelled"
     assert c.post("/ask_text", json={"text": "x", "question": "nope"}).status_code == 404
