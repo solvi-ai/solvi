@@ -15,8 +15,8 @@ STAT_KEYS = {"grounding": "grounding_rejected", "type_rejected": "type_rejected"
              "low_confidence": "low_confidence",
              "validator": "validator_rejected", "hard_check": "forced_by_hard_check",
              "constraint_repair": "constraint_repairs", "fallback": "fallbacks", "escalated": "model_escalated",
-             "evidence_missing": "evidence_missing", "timeout": "timeouts"}
-QUIET = {"evidence_missing", "timeout"}      # listed in safeguard_report only once they fire
+             "evidence_missing": "evidence_missing", "timeout": "timeouts", "instruction": "instruction_flips"}
+QUIET = {"evidence_missing", "timeout", "instruction"}      # listed in safeguard_report only once they fire
 STATS = ["asks", "answers", "abstained", "model_outputs"] + list(STAT_KEYS.values())
 
 LABEL = {k: i18n.label(k) for k in STAT_KEYS}      # safeguard → its English label (solvi.i18n has the other languages)
@@ -73,11 +73,11 @@ def collect(res, catalog=None):
         events.append({"kind": "type_rejected", "fact": fact, "detail": why,
                        "questions": sorted(q for q, fs in res.flow.unresolved.items() if set(fs) & down and q in asked)})
     for q, a in res.results.items():
-        if a.guard in ("low_confidence", "escalated") and any(e["fact"] in ("answer:" + q, "textin") and q in e["questions"]
-                                                             and e["kind"] == a.guard for e in events):
+        if a.guard in ("low_confidence", "escalated", "instruction") and any(
+                e["fact"] in ("answer:" + q, "textin") and q in e["questions"] and e["kind"] == a.guard for e in events):
             pass                                      # the answer step itself was rejected: already counted once
         elif a.guard in ("hard_check", "outside_options", "rule_abstained", "low_confidence", "escalated", "grounding",
-                         "type_rejected", "evidence_missing"):
+                         "type_rejected", "evidence_missing", "instruction"):
             events.append({"kind": a.guard, "fact": "answer:" + q, "detail": a.why, "questions": [q]})
         if a.repaired:
             was, cons = a.repaired

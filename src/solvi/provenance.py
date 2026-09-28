@@ -29,13 +29,16 @@ VALIDATE = "rejected by validate"
 TYPE_REJECTED = "type rejected"               # a typed fact failed its type (solvi.typed)
 ESCALATED = "model escalated"                 # a decider's own act / escalate signal said "hand it to a person" (solvi.decide)
 TIMED_OUT = "timed out"                       # a part did not finish within its timeout (System.aask)
+INSTRUCTION = "answer depends on an instruction-like sentence"   # perturb=k: the answer changed without such a sentence
 
 
 def classify(reason):
     """A rejection reason → the safeguard that fired (grounding, type_rejected, outside_options, low_confidence, escalated,
-    validator, timeout) or None."""
+    validator, timeout, instruction) or None."""
     if not reason:
         return None
+    if reason.startswith(INSTRUCTION):
+        return "instruction"
     if reason.startswith(ESCALATED):
         return "escalated"
     if reason.startswith((QUOTE_OUTSIDE, NOT_GROUNDED)):

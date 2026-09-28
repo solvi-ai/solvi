@@ -169,3 +169,119 @@ def test_by_default_the_callers_order_neither_changes_the_answer_nor_how_it_is_s
     ds = [p.decide("A refund please.") for p in parts]
     assert ds[0].value == ds[1].value and ds[0].probs["billing"] == pytest.approx(ds[1].probs["billing"])
     assert list(ds[1].probs) == ["technical", "billing"] and parts[1].options == ["technical", "billing"]
+
+
+# --------------------------------------------------------------------------------------------------- thresholds per group
+def _groups_stream(rng, n, share_hard=0.2):
+    """Two groups of different difficulty: P(right) = 0.8–1.0 in "easy", 0.3–0.8 in "hard", rising with the confidence."""
+    g = np.where(rng.uniform(size=n) < share_hard, "hard", "easy")
+    c = rng.uniform(0.5, 1.0, n)
+    p = np.where(g == "hard", 0.3 + 0.5 * (c - 0.5) * 2, 0.8 + 0.2 * (c - 0.5) * 2)
+    return c, (rng.uniform(size=n) > p).astype(float), g
+
+
+def test_plain_crc_breaks_the_risk_inside_a_hard_group_and_thresholds_per_group_keep_it():
+    from solvi.calibration import group_thresholds, node_of
+    rng = np.random.default_rng(0)
+    risk = {"plain": {"easy": [], "hard": []}, "groups": {"easy": [], "hard": []}}
+    violated = {"plain": 0, "groups": 0}
+    for _ in range(100):
+        c, w, g = _groups_stream(rng, 1000)
+        t = crc_threshold(c, w, 0.10)
+        th = group_thresholds(c, w, list(g), risk=0.10, min_group=100, delta=0.10)
+        c2, w2, g2 = _groups_stream(rng, 20000)
+        for key, thr in (("plain", {"easy": t, "hard": t}), ("groups", {x: th[node_of(x, th)] for x in ("easy", "hard")})):
+            auto = c2 >= np.where(g2 == "hard", thr["hard"], thr["easy"])
+            r = {x: float((auto * w2)[g2 == x].mean()) for x in ("easy", "hard")}
+            for x in r:
+                risk[key][x].append(r[x])
+            violated[key] += max(r.values()) > 0.10
+    assert np.mean(risk["plain"]["hard"]) > 0.25                   # the promise over the stream hides a hard group
+    assert np.mean(risk["plain"]["easy"]) + 0.2 * np.mean(risk["plain"]["hard"]) <= 0.10 / 0.8 + 0.01
+    assert violated["plain"] == 100
+    assert max(np.mean(risk["groups"][x]) for x in ("easy", "hard")) <= 0.10
+    assert violated["groups"] <= 10                               # every group at once, with probability ≥ 90%
+
+
+def test_small_groups_are_pooled_with_their_parent_and_the_nodes_depend_on_sizes_only():
+    from solvi.calibration import group_nodes, loss_budget, node_of
+    paths = [("a", "x")] * 120 + [("a", "y")] * 30 + [("a", "z")] * 90 + [("b", "u")] * 50
+    nodes, owner = group_nodes(paths, min_group=100)
+    assert set(nodes) == {("a", "x"), ("a",), ()}                # a/y + a/z (120) pool into a; b/u (50) into the rest
+    assert len(nodes[("a",)]) == 120 and len(nodes[()]) == 50 and owner[130] == ("a",)
+    assert node_of(("a", "new"), nodes) == ("a",) and node_of("c", nodes) == () and node_of(("a", "x"), nodes) == ("a", "x")
+    assert loss_budget(300, 0.1) == 29 and loss_budget(20, 0.1, 0.1) == -1       # 20 examples cannot certify 10% at 90%
+    assert 15 < loss_budget(300, 0.1, 0.1) < 29                                 # the binomial bound is stricter than CRC
+
+
+class Table:
+    """A scorer reading prepared logits by input text (a synthetic stream with known right answers)."""
+    model_id = "test/table"
+
+    def __init__(self):
+        self.table = {}
+
+    def fingerprint(self):
+        return "table"
+
+    def logits(self, items):
+        return [np.stack([self.table[it.text], self.table[it.text] - 1.0], 1) for it in items]
+
+
+def _table_stream(rng, tab, tag, n):
+    from solvi.multi import Facts
+    c, w, g = _groups_stream(rng, n)
+    out = []
+    for i in range(n):
+        t, y = f"{tag} {i}", ("a", "b")[rng.integers(2)]
+        pred = y if not w[i] else ("b" if y == "a" else "a")
+        tab.table[t] = np.log(np.array([c[i], 1 - c[i]]) if pred == "a" else np.array([1 - c[i], c[i]]))
+        out.append((Facts(doc=t, domain=str(g[i]), task="refunds" if i % 2 else "invoices"), y))
+    return out
+
+
+def test_act_guard_per_group_on_a_decision_part_records_the_group_and_holds_inside_it():
+    from solvi import Answer, Catalog, Question, System
+    from solvi.decide import DecideModel
+    rng = np.random.default_rng(3)
+    tab = Table()
+    m = DecideModel(tab, meta={"format": "test", "temperature": 1.0})
+    part = m.decision("q", "Q?", "doc", ["a", "b"])
+    cal, test = _table_stream(rng, tab, "cal", 1500), _table_stream(rng, tab, "test", 6000)
+    plain = part.act_guard(cal, risk=0.10)
+    fp = part.fingerprint()
+
+    def risk_in(group):
+        ds = part.decide([x for x, _ in test if x["domain"] == group])
+        ys = [y for x, y in test if x["domain"] == group]
+        return float(np.mean([d.escalate is None and d.value != y for d, y in zip(ds, ys)]))
+    assert risk_in("hard") > 0.2 and plain["risk"] <= 0.10
+    info = part.act_guard(cal, risk=0.10, groups=["domain", "task"], min_group=200)
+    assert part.fingerprint() != fp and part.groups is not None
+    assert risk_in("hard") <= 0.10 and risk_in("easy") <= 0.10
+    g = info["groups"]
+    assert ("easy", "refunds") in g and g[("easy", "refunds")]["n"] >= 200
+    hard = [k for k in g if k[:1] == ("hard",)]
+    assert hard and all(g[k]["threshold"] > g[("easy", "refunds")]["threshold"] for k in hard)
+    d = part.decide(test[0][0])
+    rec = d.extra["guarantee"]
+    assert rec["method"] == "group-bound" and rec["group"] == [test[0][0]["domain"], test[0][0]["task"]]
+    assert rec["applied"] == rec["group"][:len(rec["applied"])] and "within every group at once" in rec["promise"]
+    assert "here: group" in rec["promise"]
+    d = part.decide("cal 1")                                       # no group given: no threshold holds for it
+    assert d.escalate.startswith("group unknown")
+    # in a catalog, the group facts join the part's inputs and the audit prints the group's promise
+    cat = Catalog()
+    cat.fn(part)
+
+    @cat.rule("answer")
+    def answer(q):
+        return q
+    s = System(cat, [Question("answer", "A?", Answer.choice(["a", "b"]))])
+    x = dict(test[1][0])
+    res = s.ask(x)
+    assert "within every group at once" in str(res.audit("answer")) and "here: group" in str(res.audit("answer"))
+    with pytest.raises(ValueError, match="group"):
+        part.act_guard([("cal 1", "a")] * 5, groups="domain")
+    part.act_guard(cal, risk=0.10)                                  # without groups again: one threshold, inputs as before
+    assert part.groups is None and list(part.__signature__.parameters) == ["doc"]

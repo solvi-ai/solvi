@@ -298,3 +298,59 @@ def test_example_18_runs_with_the_stand_ins(monkeypatch):
     text = out.getvalue()
     assert "cascade small → large" in text and "the models disagree" in text and "route by length" in text
     assert "stage 2 answered" in text and "replay: True" in text and "replay: False" not in text
+
+
+def _group_stream(rng, tag, n, S, L):
+    """As _stream, in two groups: in "hard" both models are right far less often (0.3–0.8), in "easy" more (0.8–1.0)."""
+    from solvi.multi import Facts
+    out = []
+    for i in range(n):
+        grp = "hard" if rng.uniform() < 0.25 else "easy"
+        t, y = f"{tag} {i}", ("a", "b")[rng.integers(2)]
+        for tab in (S, L):
+            c = rng.uniform(0.5, 1.0)
+            lo, gain = (0.3, 0.5) if grp == "hard" else (0.8, 0.2)
+            ok = rng.uniform() < lo + gain * (c - 0.5) * 2
+            pred = y if ok else ("b" if y == "a" else "a")
+            tab.table[t] = np.log(np.array([c, 1 - c]) if pred == "a" else np.array([1 - c, c]))
+        out.append((Facts(doc=t, domain=grp), y))
+    return out
+
+
+@pytest.mark.parametrize("make", [lambda s, l_: Cascade([s, l_]), lambda s, l_: Vote([s, l_], rule="all")])
+def test_act_guard_per_group_on_a_combination_holds_inside_every_group(make):
+    rng = np.random.default_rng(1)
+    S, L = Table("S"), Table("L")
+    ms, ml = (DecideModel(x, meta={"format": "test", "temperature": 1.0}) for x in (S, L))
+    comb = make(ms.decision("q", "Q?", "doc", ["a", "b"]), ml.decision("q", "Q?", "doc", ["a", "b"]))
+    cal, test = _group_stream(rng, "c", 1600, S, L), _group_stream(rng, "t", 6000, S, L)
+
+    def risk_in(group):
+        ex = [(x, y) for x, y in test if x["domain"] == group]
+        return float(np.mean([d.escalate is None and d.value != y for d, (_, y) in zip(comb.decide([x for x, _ in ex]), ex)]))
+    comb.act_guard(cal, risk=0.10)
+    plain_hard = risk_in("hard")
+    fp = comb.fingerprint()
+    info = comb.act_guard(cal, risk=0.10, groups="domain", min_group=100)
+    assert comb.fingerprint() != fp and comb.facts == ["doc", "domain"]
+    assert set(info["groups"]) == {("easy",), ("hard",), ()} and info["groups"][()]["n"] == 0
+    assert info["groups"][("hard",)]["threshold"] > info["groups"][("easy",)]["threshold"]
+    assert all(v["risk"] <= 0.10 for v in info["groups"].values())
+    assert plain_hard > 0.15                                        # one threshold for the stream: over the risk in "hard"
+    assert risk_in("hard") <= 0.10 and risk_in("easy") <= 0.10
+    d = comb.decide(test[0][0])
+    g = d.extra["guarantee"]
+    assert g["group"] == [test[0][0]["domain"]] and g["applied"] == g["group"] and d.extra["threshold"] == g["threshold"]
+    d = comb.decide("t 3")
+    assert d.escalate and "group unknown" in d.escalate
+    cat = Catalog()                                                  # in a catalog: the group fact is an input
+    cat.fn(comb)
+
+    @cat.rule("answer")
+    def answer(q):
+        return q
+    sys_ = System(cat, [Question("answer", "A?", Answer.choice(["a", "b"]))])
+    res = sys_.ask({"doc": "t 5", "domain": test[5][0]["domain"]})
+    rec = next(r for r in res.trace.records if r.name == "q")
+    assert rec.extra["guarantee"]["group"] == [test[5][0]["domain"]] and res.trace.replay(cat)["ok"]
+    assert "within every group at once" in str(res.audit("answer"))

@@ -34,15 +34,10 @@ import math
 import numpy as np
 
 from .core import Decision, Quote, Unknown
-from .decide import DecisionPart, _single
+from .decide import DecisionPart, Facts, GroupBy, _group_info, _group_promise, _single, group_record
 from .provenance import ESCALATED, code_fingerprint, digest
 
 RECORD_KEYS = ("stages", "answered_by", "votes", "route", "routed")      # what a replay compares with the recomputed
-
-
-class Facts(dict):
-    """An example input given as facts by name (`Facts(email=..., tier=...)`): each part reads its own facts, a route's
-    predicates read theirs. Any other input is the one input every part reads (a text or a state), as for a DecisionPart."""
 
 
 @dataclasses.dataclass
@@ -104,8 +99,8 @@ def _question(sp):
 
 # ------------------------------------------------------------------------------------------------ members
 class _LeafState:
-    def __init__(self, leaf, d0, act, hard, own, src):
-        self.leaf, self.d0, self.act, self.hard, self.own, self.src = leaf, d0, act, hard, own, src
+    def __init__(self, leaf, d0, act, hard, own, src, ctx=None):
+        self.leaf, self.d0, self.act, self.hard, self.own, self.src, self.ctx = leaf, d0, act, hard, own, src, ctx
         self.signal, self.sig = leaf.part._signal(hard)
         self.key = _key(hard.value)
 
@@ -160,13 +155,15 @@ class _Leaf:
 
     def state(self, src, pre=None):
         p = self.part
-        z, a = pre if pre is not None else p._raw([self.text(src)])[0]
+        text = self.text(src)
+        ctx = p._ctx(text, src.vals, src.raw)
+        z, a = pre if pre is not None else p._raw([text])[0]
         d0 = p.model._decision(p.spec, z)
-        hard = p._finish(_copy(d0), a, threshold=-math.inf)     # every safeguard but the threshold
-        own = p._finish(_copy(d0), a)                            # the part's own thresholds
+        hard = p._finish(_copy(d0), a, threshold=-math.inf, ctx=ctx)     # every safeguard but the threshold
+        own = p._finish(_copy(d0), a, ctx=ctx)                            # the part's own thresholds
         if src.vals is not None:
             hard, own = p._bind(hard, src.vals), p._bind(own, src.vals)
-        return _LeafState(self, d0, a, hard, own, src)
+        return _LeafState(self, d0, a, hard, own, src, ctx)
 
     def vec(self, st, ts):
         """At each threshold of ts (NaN: the part's own thresholds) → (answers alone [G], value key [G], signal [G],
@@ -183,7 +180,7 @@ class _Leaf:
         if t is None:
             return _copy(st.own)
         p = self.part
-        d = p._finish(_copy(st.d0), st.act, threshold=t)
+        d = p._finish(_copy(st.d0), st.act, threshold=t, ctx=st.ctx)
         return p._bind(d, st.src.vals) if st.src.vals is not None else d
 
     def entry(self, d, st):
@@ -265,6 +262,7 @@ class _Combination:
         self.costs = None if costs is None else [float(c) for c in costs]
         self.name = name or self.members[0].name
         self.threshold = None                   # the shared threshold (act_guard); None: each part's own
+        self.groups = None                      # thresholds per group (act_guard(groups=...)): {"by", "nodes"}
         self.guarantee = None
         self.conformal_set = None
         self.asked = 0
@@ -283,7 +281,7 @@ class _Combination:
         self.__solvi_decision__ = self                # System.teach teaches every part
 
     def _extra_facts(self):
-        return []
+        return [] if self.groups is None else list(self.groups["by"].names)
 
     # --- the question and identity
     def question(self, cat=None, name=None, text=None, min_confidence=None, checkpoints=None, require_evidence=False):
@@ -348,6 +346,9 @@ class _Combination:
     def fingerprint(self):
         th = {k: v for k, v in (("threshold", self.threshold), ("guarantee", self.guarantee),
                                 ("conformal", self.conformal_set)) if v is not None}
+        if self.groups is not None:
+            th["groups"] = (self.groups["by"].describe(),
+                            sorted((list(k), v["threshold"]) for k, v in self.groups["nodes"].items()))
         return digest(type(self).__name__, self._describe(), [m.fingerprint() for m in self.members], th)
 
     def __repr__(self):
@@ -377,19 +378,41 @@ class _Combination:
             ls.leaf.calls += 1
         return d
 
-    def _t(self, t):
-        return t if t is not None else self.threshold
+    def _group(self, src):
+        """With thresholds per group: (the input's group path, the node whose threshold applies, its info), or None
+        when the input does not give its group."""
+        from .calibration import node_of
+        path = self.groups["by"].path(src.vals, src.raw)
+        if path is None:
+            return None
+        node = node_of(path, self.groups["nodes"])
+        return path, node, self.groups["nodes"][node]
 
-    def _vt(self, ts):
-        return ts if self.threshold is None else np.where(np.isnan(ts), self.threshold, ts)
+    def _own(self, src):
+        """The combination's own threshold for this input: the shared one, its group's, inf when its group is unknown."""
+        if self.groups is None or src is None:
+            return self.threshold
+        g = self._group(src)
+        return math.inf if g is None else g[2]["threshold"]
 
-    def _wrapup(self, d, t):
+    def _t(self, t, src=None):
+        return t if t is not None else self._own(src)
+
+    def _vt(self, ts, src=None):
+        own = self._own(src)
+        return ts if own is None else np.where(np.isnan(ts), own, ts)
+
+    def _wrapup(self, d, t, src=None):
         """The combination's own threshold record, guarantee and conformal candidates (a nested combination under an
         outer threshold records none of its own)."""
         if t is None and self.threshold is not None:
-            d.extra["threshold"] = self.threshold
+            g = None if self.groups is None else self._group(src)
+            d.extra["threshold"] = self._own(src)
             if self.guarantee is not None:
-                d.extra["guarantee"] = dict(self.guarantee)
+                d.extra["guarantee"] = dict(self.guarantee) if g is None else group_record(self.guarantee, *g)
+            if self.groups is not None and g is None and d.escalate is not None:
+                d.escalate += (f"; group unknown: the thresholds are per group ({self.groups['by'].label()}) and this "
+                               f"input does not give {self.groups['by'].names}")
         if self.conformal_set is not None and d.probs:
             cands = self.candidates(d)
             d.extra["candidates"] = cands
@@ -424,7 +447,7 @@ class _Combination:
             return v == y
         return (Unknown if v is Unknown else sp.label(v)) == (Unknown if y is Unknown else sp.label(y))
 
-    def act_guard(self, examples, risk=0.10):
+    def act_guard(self, examples, risk=0.10, groups=None, min_group=100, delta=0.10):
         """Answer alone only as far as a guarantee allows, for the combination as a whole: on labelled examples of your
         stream [(input, correct)] (an input is what every part reads, or Facts(...) by name) every part is asked, and
         one threshold t on every part's signal is chosen by conformal risk control so that P(answered alone AND wrong)
@@ -434,7 +457,12 @@ class _Combination:
         combination's fingerprint and clears its conformal sets (call conformal afterwards). Too few or too hard
         examples → everything escalates (threshold inf). → {"threshold", "answered", "error" (among the answered),
         "risk" (answered and wrong, on the examples), "n", "guarantee", "calls" (models called per question), "cost"
-        (with costs=), and for a cascade "answered_by" (the share each stage answered)}."""
+        (with costs=), and for a cascade "answered_by" (the share each stage answered)}.
+
+        groups, min_group, delta: one shared threshold per group, as DecisionPart.act_guard(groups=...) — on the same
+        monotonized loss, so the promise holds within every group; the group facts join the combination's inputs.
+        Adds "groups" to the result."""
+        from .calibration import certify_groups
         srcs, gold = self._examples(examples)
         states = [self.state(s).force() for s in srcs]
         sig = np.array([x for st in states for x in st.sigs()], float)
@@ -448,23 +476,54 @@ class _Combination:
             loss[i], auto_all[i], cost[i], calls[i] = auto & ~ok, auto, c, k
             who.append(getattr(self, "_answering", lambda st_, ts: None)(st, grid))
         mono = np.maximum.accumulate(loss[:, ::-1], axis=1)[:, ::-1]
-        r = (mono.sum(0) + 1) / (n + 1)
-        good = np.where(r <= risk + 1e-12)[0]
-        g = int(good[0]) if len(good) else G - 1
-        t = float(grid[g]) if len(good) else math.inf
+        promise = f"P(answered alone and wrong) ≤ {risk:g} for inputs like the calibration examples"
+        extra = {}
+        if groups is None:
+            r = (mono.sum(0) + 1) / (n + 1)
+            good = np.where(r <= risk + 1e-12)[0]
+            gi = np.full(n, int(good[0]) if len(good) else G - 1)
+            t = float(grid[gi[0]]) if len(good) else math.inf
+            self.groups = None
+            self.guarantee = {"method": "crc", "risk": risk, "n": n, "signal": "shared threshold on each model's signal",
+                              "promise": promise}
+        else:
+            by = GroupBy(groups)
+            paths = [by.path(s.vals, s.raw) for s in srcs]
+            if any(p is None for p in paths):
+                i = next(i for i, p in enumerate(paths) if p is None)
+                raise ValueError(f"example {i}: its group ({by.names}) is not given; give the examples as Facts(...)")
+            got, owner = certify_groups(lambda ix: (grid, mono[ix].sum(0)), paths, risk, min_group, delta)
+            nodes = {k: {"threshold": v["threshold"], "n": v["n"]} for k, v in got.items()}
+            # a node that certifies nothing answers nothing: its index is past the grid (every example escalates)
+            gi = np.array([got[o]["index"] if got[o]["index"] is not None else G - 1 for o in owner])
+            t = nodes[()]["threshold"]
+            self.groups = {"by": by, "nodes": nodes}
+            self.guarantee = {"method": "crc-groups" if delta is None else "group-bound", "risk": risk, "n": n,
+                              "signal": "shared threshold on each model's signal, per group", "groups": by.label(),
+                              "min_group": min_group, "delta": delta, "promise": _group_promise(risk, delta, len(nodes))}
+            a_ = auto_all[np.arange(n), gi] & np.array([got[o]["index"] is not None for o in owner])
+            extra["groups"] = _group_info(nodes, owner, paths, a_, loss[np.arange(n), gi] > 0)
         self.threshold = t
-        self.guarantee = {"method": "crc", "risk": risk, "n": n, "signal": "shared threshold on each model's signal",
-                          "promise": f"P(answered alone and wrong) ≤ {risk:g} for inputs like the calibration examples"}
         self.conformal_set = None
-        a = auto_all[:, g]
+        self._setup()
+        rows = np.arange(n)
+        a = auto_all[rows, gi]
+        lo = loss[rows, gi]
+        if groups is not None:
+            live = np.array([got[o]["index"] is not None for o in owner])
+            a, lo = a & live, lo * live
+        elif not np.isfinite(t):
+            a, lo = np.zeros(n, bool), np.zeros(n)
         out = {"threshold": t, "answered": float(a.mean()),
-               "error": float(loss[a, g].sum() / a.sum()) if a.any() else 0.0, "risk": float(loss[:, g].mean()), "n": n,
-               "guarantee": self.guarantee["promise"], "calls": float(calls[:, g].mean())}
+               "error": float(lo[a].sum() / a.sum()) if a.any() else 0.0, "risk": float(lo.mean()), "n": n,
+               "guarantee": self.guarantee["promise"], "calls": float(calls[rows, gi].mean())}
         if any(lf.cost != 1.0 for lf in self.leaves()):
-            out["cost"] = float(cost[:, g].mean())
+            out["cost"] = float(cost[rows, gi].mean())
         if who[0] is not None:
-            w = np.array([x[g] for x in who])
+            w = np.array([x[g] for x, g in zip(who, gi)])
+            w = np.where(a, w, -1)
             out["answered_by"] = [float((w == j).mean()) for j in range(len(self.members))]
+        out.update(extra)
         return out
 
     def conformal(self, examples, coverage=0.90):
@@ -572,7 +631,7 @@ class Cascade(_Combination):
         return _State(self.members, src)
 
     def vec(self, st, ts):
-        ts = self._vt(ts)
+        ts = self._vt(ts, st.src)
         G = len(ts)
         auto, keys, sig = np.zeros(G, bool), np.empty(G, dtype=object), np.zeros(G)
         cost, calls, vals = np.zeros(G), np.zeros(G), {}
@@ -591,7 +650,7 @@ class Cascade(_Combination):
 
     def _answering(self, st, ts):
         """The stage that answers at each threshold (−1: every stage escalates)."""
-        ts = self._vt(ts)
+        ts = self._vt(ts, st.src)
         who = np.full(len(ts), -1)
         for i, m in enumerate(self.members):
             a = m.vec(st.get(i), ts)[0]
@@ -599,7 +658,7 @@ class Cascade(_Combination):
         return who
 
     def final(self, st, t):
-        te = self._t(t)
+        te = self._t(t, st.src)
         stages, ds, by = [], [], None
         for i, m in enumerate(self.members):
             s = st.get(i)
@@ -615,7 +674,7 @@ class Cascade(_Combination):
         if by is None:
             out.escalate = (f"{ESCALATED}: every model of the cascade escalated ("
                             + "; ".join(f"{_who(e)}: {e['escalate']}" for e in stages) + ")")
-        return self._wrapup(out, t)
+        return self._wrapup(out, t, st.src)
 
     def check(self, e, top=False):
         stages, by = e.get("stages"), e.get("answered_by")
@@ -696,7 +755,7 @@ class Vote(_Combination):
         return _State(self.members, src, pre).force()
 
     def vec(self, st, ts):
-        ts = self._vt(ts)
+        ts = self._vt(ts, st.src)
         outs = [m.vec(st.get(i), ts) for i, m in enumerate(self.members)]
         A = np.stack([o[0] for o in outs])
         K = np.stack([o[1] for o in outs])
@@ -709,7 +768,7 @@ class Vote(_Combination):
         return auto, vk, sig, vals, sum(o[4] for o in outs), sum(o[5] for o in outs)
 
     def final(self, st, t):
-        te = self._t(t)
+        te = self._t(t, st.src)
         ds = [m.final(st.get(i), te) for i, m in enumerate(self.members)]
         votes = [m.entry(d, st.get(i)) for i, (m, d) in enumerate(zip(self.members, ds))]
         K = np.array([[_key(d.value)] for d in ds], dtype=object)
@@ -730,7 +789,7 @@ class Vote(_Combination):
                 out.escalate = (f"{ESCALATED}: the models agree on {use.value!r} ({self.rule}), but "
                                 + "; ".join(f"{_who(e)}: {e['escalate']}" for e, m in zip(votes, mask[:, 0])
                                             if m and e["escalate"] is not None))
-        return self._wrapup(out, t)
+        return self._wrapup(out, t, st.src)
 
     def check(self, e, top=False):
         votes = e.get("votes")
@@ -774,7 +833,7 @@ class Route(_Combination):
         super().__init__(list(routes.values()) + [default], name, costs)
 
     def _extra_facts(self):
-        return [f for ps in self._params.values() for f in ps]
+        return [f for ps in self._params.values() for f in ps] + super()._extra_facts()
 
     def _by(self, i):
         if i >= len(self.keys):
@@ -807,15 +866,15 @@ class Route(_Combination):
         return _State(self.members, src, pick=self.pick(src))
 
     def vec(self, st, ts):
-        return self.members[st.pick].vec(st.get(st.pick), self._vt(ts))
+        return self.members[st.pick].vec(st.get(st.pick), self._vt(ts, st.src))
 
     def final(self, st, t):
         i, m = st.pick, self.members[st.pick]
         s = st.get(i)
-        d = m.final(s, self._t(t))
+        d = m.final(s, self._t(t, st.src))
         out = Decision(d.value, dict(d.probs), confidence=d.conf, evidence=list(d.evidence), escalate=d.escalate)
         out.extra = {"route": {"to": i, "part": m.name, "by": self._by(i)}, "routed": m.entry(d, s), "calls": st.calls()}
-        return self._wrapup(out, t)
+        return self._wrapup(out, t, st.src)
 
     def check(self, e, top=False):
         rt, ent = e.get("route"), e.get("routed")

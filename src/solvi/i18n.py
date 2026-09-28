@@ -26,7 +26,7 @@ EN = {
     "sg.grounding": "grounding rejected", "sg.type_rejected": "type rejected", "sg.outside_options": "outside the options",
     "sg.rule_abstained": "rule abstained", "sg.low_confidence": "low confidence", "sg.validator": "rejected by validate",
     "sg.hard_check": "hard check decided", "sg.constraint_repair": "constraint repair", "sg.fallback": "fallback producer",
-    "sg.escalated": "model escalated", "sg.evidence_missing": "evidence missing", "sg.timeout": "timed out",
+    "sg.escalated": "model escalated", "sg.evidence_missing": "evidence missing", "sg.timeout": "timed out", "sg.instruction": "answer depends on an instruction-like sentence",
     # statuses and provenance kinds
     "status.ok": "ok", "status.abstain": "abstain", "status.forced": "forced",
     "prov.given": "given", "prov.computed": "computed", "prov.quoted": "quoted", "prov.decided": "decided",
@@ -78,7 +78,7 @@ RU = {
     "sg.low_confidence": "низкая уверенность", "sg.validator": "отклонено validate",
     "sg.hard_check": "решила жёсткая проверка", "sg.constraint_repair": "исправлено ограничением",
     "sg.fallback": "запасной источник", "sg.escalated": "модель передала человеку",
-    "sg.evidence_missing": "нет подтверждающей цитаты", "sg.timeout": "время истекло",
+    "sg.evidence_missing": "нет подтверждающей цитаты", "sg.timeout": "время истекло", "sg.instruction": "ответ зависит от фразы-инструкции во входе",
     "status.ok": "ок", "status.abstain": "воздержание", "status.forced": "решено проверкой",
     "prov.given": "дано", "prov.computed": "вычислено", "prov.quoted": "цитата", "prov.decided": "решение модели",
     "prov.learned": "обучено", "prov.proposed": "предложено",
