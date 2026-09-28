@@ -543,9 +543,10 @@ class Guard:
     storage: a TraceStorage or a path (.db / .sqlite: SQLite, else JSON lines) — every decision is saved with its trace
     and the outcome (meta "guard": tool, outcome, reasons, executed, the result's hash or the error).
     authorizer: an optional decision part answering "does the conversation authorize this call?" (bool) over the facts
-    "conversation" (or "user_request") and "proposal" — see `authorizer()`; its act_guard threshold and perturb=k apply.
-    facts: names (or {name: type}) of facts your app gives with every call (a user's role, a budget left): policies that
-    read them apply to every tool without naming it."""
+    "conversation" (or "user_request") and "proposal" — see `make_authorizer()`; its act_guard threshold and perturb=k
+    apply. facts: names (or {name: type}) of facts your app gives with every call (a user's role, a budget left): policies
+    that read them apply to every tool without naming it (the types are for readers: a policy's own annotations are what
+    solvi validates)."""
 
     def __init__(self, storage=None, authorizer=None, facts=None, lang="en"):
         from ..storage import open_storage
