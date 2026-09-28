@@ -816,6 +816,18 @@ class System:
         self.calib[question] = (float(a), float(b))
         return self.calib[question]
 
+    def learning(self, storage=None, parts=None, ladder=None, gates=None, **options):
+        """Learning from corrections with gates and rollback — experimental, off until you call this (see
+        solvi.learning): → a Learning loop over `storage` (default: this system's) for the questions answered by the
+        decision parts in `parts` (default: all of them). Labels come only from human corrections, outcomes and rule
+        rejections; loop.run() proposes an update by the ladder (ladder=: fit_below, memory_below, adapter, memory), runs
+        the gates (gates=: min_gain, min_holdout, tolerance, risk, max_change, shadow_limit, max_conflict,
+        min_calibration, honesty) and promotes it only when all pass; loop.rollback(version) restores any promoted
+        version. options: changelog= (another TraceStorage for the update records), holdout=0.3, calibration=0.2,
+        gate_teach=True (teach only stores corrections while the loop is attached), harvest_rules=False."""
+        from .learning import Learning
+        return Learning(self, storage, parts, ladder, gates, **options)
+
     def teach(self, question, init_state, correct, *, source="human", by=None, of=None):
         """Human correction. A fast head (fit_fast) absorbs it at once; so does a model decision that answers the question
         (a solvi.decide decision part as the question's rule, or a rule passing a decided fact on): its per-option shift is
