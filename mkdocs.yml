@@ -1,0 +1,107 @@
+# The documentation site: uv sync --group docs && uv run mkdocs serve   (build: uv run mkdocs build --strict)
+# README, CHANGELOG, ROADMAP and the examples / gallery indexes are pulled in, and the guide is split into one page per
+# chapter, by tools/mkdocs_hooks.py; the Markdown files themselves stay as they read on GitHub.
+site_name: solvi
+site_description: Decision systems from a catalog of Python functions and checks, with answers you can verify
+site_url: https://solvi-ai.github.io/solvi/
+repo_url: https://github.com/solvi-ai/solvi
+repo_name: solvi-ai/solvi
+edit_uri: edit/main/docs/
+copyright: Apache-2.0
+
+docs_dir: docs
+exclude_docs: |
+  images/ALT.md
+
+hooks:
+  - tools/mkdocs_hooks.py
+
+theme:
+  name: material
+  features:
+    - navigation.sections
+    - navigation.indexes
+    - navigation.top
+    - navigation.footer
+    - toc.follow
+    - search.suggest
+    - search.highlight
+    - content.code.copy
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      toggle:
+        icon: material/brightness-7
+        name: Dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      toggle:
+        icon: material/brightness-4
+        name: Light mode
+
+nav:
+  - Home: index.md
+  - Guide: guide/index.md          # expanded into one page per chapter by the hook
+  - Formats and tools:
+      - Decider checkpoint and input format: decide_format.md
+      - Model strategist and name matching: strategist.md
+      - Regression tests: testing.md
+      - Honesty suite: honesty.md
+      - Benchmarks: benchmarks.md
+  - Examples:
+      - Examples: examples.md
+      - Gallery: gallery.md
+  - API reference:
+      - api/index.md
+      - solvi: api/solvi.md
+      - solvi.decide: api/decide.md
+      - solvi.calibration: api/calibration.md
+      - solvi.systemone: api/systemone.md
+      - solvi.multi: api/multi.md
+      - solvi.serve: api/serve.md
+      - solvi.storage: api/storage.md
+      - solvi.diff: api/diff.md
+      - solvi.testing: api/testing.md
+      - solvi.honesty: api/honesty.md
+      - solvi.check: api/check.md
+      - solvi.i18n: api/i18n.md
+  - Changelog: changelog.md
+  - Roadmap: roadmap.md
+
+markdown_extensions:
+  - toc:
+      permalink: true
+      slugify: !!python/object/apply:pymdownx.slugs.slugify
+        kwds:
+          case: lower
+  - tables
+  - admonition
+  - attr_list
+  - md_in_html
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - pymdownx.superfences
+  - pymdownx.inlinehilite
+
+plugins:
+  - search
+  - mkdocstrings:
+      handlers:
+        python:
+          paths: [src]
+          options:
+            docstring_style: google
+            show_source: false
+            show_root_heading: false
+            show_root_toc_entry: false
+            members_order: source
+            filters: ["!^_"]
+            show_signature_annotations: true
+            separate_signature: true
+            merge_init_into_class: true
+
+validation:
+  omitted_files: warn
+  absolute_links: warn
+  unrecognized_links: warn
+  anchors: warn

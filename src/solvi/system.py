@@ -86,43 +86,53 @@ class Response(Serial):
         """model_dump(mode="json"): answers, flow, trace, values, safeguards as JSON-ready data (see Serial)."""
         return self.model_dump("json")
 
+    lang = "en"                         # the language of rendering (System(lang=...)); not a field: never serialized or hashed
+
     @property
     def computed_state(self):
         """Each computed fact with its value; a quote's offsets; for anything not computed by plain code, its provenance
         (quoted by a model, decided, learned) and the model; errors, including rejected (ungrounded) model outputs."""
+        return self.computed_state_text()
+
+    def computed_state_text(self, lang=None):
+        """computed_state in a language (solvi.i18n; default: the System's)."""
+        from . import i18n
+        lang = i18n.check(self.lang if lang is None else lang)
+        t = i18n.t
         lines = []
         for r in self.trace.records:
             if r.kind in ("rule", "head"):
                 continue
             v = "—" if r.value is MISSING else repr(r.value)
-            extra = f"   quote [{r.quote[0]}:{r.quote[1]}]" if r.quote else ""
+            extra = t("cs.quote", lang, s=r.quote[0], e=r.quote[1]) if r.quote else ""
             if r.confidence < 1:
-                extra += f" confidence {r.confidence:.2f}"
+                extra += t("cs.confidence", lang, c=f"{r.confidence:.2f}")
             if r.origin not in ("computed", "quoted"):
-                extra += f"   {r.origin}"
+                extra += f"   {i18n.provenance(r.origin, lang)}"
                 if r.probs:
-                    extra += " (" + ", ".join(f"{k} {float(p):.2f}" for k, p in sorted(r.probs.items(), key=lambda t: -t[1])[:3]) + ")"
+                    extra += " (" + ", ".join(f"{k} {float(p):.2f}" for k, p in sorted(r.probs.items(), key=lambda t_: -t_[1])[:3]) + ")"
             if r.model is not None:
-                extra += f"   model {r.model['type']} {r.model['id']} #{r.model['fp'][:8]}"
+                extra += t("cs.model", lang, m=f"{r.model['type']} {r.model['id']} #{r.model['fp'][:8]}")
             if r.error:
-                extra += f"   ERROR: {r.error}"
+                extra += t("cs.error", lang, err=i18n.msg(r.error, lang))
             lines.append(f"{r.name:24s} = {v}{extra}")
         return "\n".join(lines)
 
-    def audit(self, question=None):
+    def audit(self, question=None, lang=None):
         """What each answer rests on and which safeguards fired: given inputs → computed facts → quotes (offsets and quoted
         text) → model decisions (model, probabilities) → learned parts → checks, rule, constraints → answer; plus the share
         of the support that is deterministic. `print(res.audit())`, or `res.audit("q").to_dict()` for data.
+        lang: the language str() renders in (solvi.i18n; default: the System's, "en"); the data is the same in every one.
         → an Audit of every answer, or the AnswerAudit of one question when `question` is given."""
         from .audit import build
-        a = build(self, question)
+        a = build(self, question, lang=self.lang if lang is None else lang)
         return a[question] if isinstance(question, str) else a
 
 
 class System:
     def __init__(self, catalog: Catalog, questions, journal: str | None = None, workers: int = 1, order: str = "default",
                  producers: str = "declared", learn: bool | None = None, inputs=None, strategist=None, storage=None,
-                 timeout: float | None = None, costs="declared"):
+                 timeout: float | None = None, costs="declared", lang: str = "en"):
         """order: "default" (hard checks and their inputs first, all together) or "learned" (hard checks one at a time, most
         expected saving first — see learn_order). producers: "declared" (alternative producers of a fact are tried in
         declaration order) or "learned" (a policy picks the order per input and learns from outcomes). learn: after every
@@ -140,8 +150,12 @@ class System:
         (solvi.strategy.ModelStrategist(producers="equivalent")) picks one per fact, the cheapest valid plan.
         costs: what that planner's costs are — "declared" (`cost=`, 1 when undeclared) or "measured" (the run times
         system.costs measures, after a warm-up; or a solvi.learned.MeasuredCosts with its settings). freeze_costs() fixes
-        them; the plan record in each trace says which cost decided each choice."""
+        them; the plan record in each trace says which cost decided each choice.
+        lang: the language of what solvi renders for people — res.audit(), solvi.show, safeguard_report() — "en" (default)
+        or "ru" (solvi.i18n). Only the rendering changes: traces, stored responses, hashes and `why` stay in English."""
+        from . import i18n
         from .learned import CostBook, OrderModel, ProducerPolicy
+        self.lang = i18n.check(lang)
         self.catalog = catalog
         self.inputs = inputs
         self.strategist = strategist              # None: the deterministic strategist (solvi.strategist.plan)
@@ -333,6 +347,8 @@ class System:
                                          r.source, "low_confidence", r.repaired, r.kind, r.evidence, r.extra)
         resp = Response(results, flow, trace, vals, now_ms() - t0, feasible, violations, self.catalog)
         resp._heads = self.heads                      # for the audit: which features a learned head could not use
+        if self.lang != "en":
+            resp.lang = self.lang                     # rendering only (audit, show): nothing recorded depends on it
         self._count(resp)
         if self.storage is not None and store:
             self.storage.save(resp)                   # sets resp.stored_id
@@ -389,15 +405,18 @@ class System:
                 seen.add(key)
                 st[STAT_KEYS[e["kind"]]] += 1
 
-    def safeguard_report(self):
-        """The lifetime stats as text: how many model outputs, and how many were caught by each safeguard."""
-        from .audit import LABEL, STAT_KEYS
+    def safeguard_report(self, lang=None):
+        """The lifetime stats as text: how many model outputs, and how many were caught by each safeguard.
+        lang: solvi.i18n (default: the System's)."""
+        from . import i18n
+        from .audit import QUIET, STAT_KEYS
+        lang = i18n.check(self.lang if lang is None else lang)
         st = self.stats
-        from .audit import QUIET
-        lines = [f"asks {st['asks']}, answers {st['answers']}, abstained {st['abstained']}, model outputs {st['model_outputs']}"]
+        w = i18n.width(["sg." + k for k in STAT_KEYS], lang, en=22)
+        lines = [i18n.t("rp.head", lang, **{k: st[k] for k in ("asks", "answers", "abstained", "model_outputs")})]
         for k, key in STAT_KEYS.items():
             if k not in QUIET or st[key]:             # "evidence missing" is listed once it fires
-                lines.append(f"  {LABEL[k]:22s} {st[key]}")
+                lines.append(f"  {i18n.label(k, lang):{w}s} {st[key]}")
         return "\n".join(lines)
 
     def _answer(self, q, flow, trace, vals, by):

@@ -1,5 +1,37 @@
 # Changelog
 
+## Unreleased (0.7)
+
+### Documentation site
+
+- `mkdocs.yml` (Material theme): the README, the guide, the format specs (decider checkpoint, model strategist, regression
+  tests, honesty suite, benchmarks), the examples and gallery indexes, this changelog and the roadmap as one site, plus an
+  API reference generated from the docstrings (mkdocstrings) for `solvi`, `solvi.decide`, `solvi.calibration`,
+  `solvi.systemone`, `solvi.multi`, `solvi.serve`, `solvi.storage`, `solvi.diff`, `solvi.testing`, `solvi.honesty` and
+  `solvi.check`. Local preview: `uv sync --group docs && uv run mkdocs serve`.
+- The Markdown files are unchanged and still read as before on GitHub; `tools/mkdocs_hooks.py` adapts them at build time.
+  The guide becomes one page per chapter; links to `guide.md#anchor` (and `#anchor` inside the guide) go to the chapter
+  that has the anchor, and `guide/#anchor` on the site forwards there, so every existing guide anchor keeps working.
+  Links to scripts and folders that are not pages (`examples/*.py`, gallery entries, `LICENSE`) point to GitHub.
+- `.github/workflows/docs.yml`: `mkdocs build --strict` on every pull request (a broken link, a missing anchor or a
+  link to a file not in the repository fails it); on a release tag (`v*`) the site is deployed to GitHub Pages.
+- A `docs` dependency group (mkdocs, mkdocs-material, mkdocstrings[python]).
+
+### Explanations and safeguard messages in Russian
+
+- `System(..., lang="ru")`, `res.audit(lang="ru")`, `solvi.show(res, lang="ru")`, `system.safeguard_report(lang="ru")`,
+  `res.computed_state_text(lang="ru")`: the audit, `show`, the compact audit and the safeguard report in Russian —
+  headings and labels, safeguard names, statuses and provenance kinds, and the messages solvi writes itself (the `why` of
+  an answer, rejection, grounding and type reasons, escalation messages of deciders and of `Cascade` / `Vote` / `Route`,
+  guarantees, parts not run, the strategist's reasons in the flow). English is the default.
+- Rendering only: the trace, its hashes, `Result.why`, `to_dict()`, stored responses and replay are the same in every
+  language (messages are recorded in English and translated when printed, by templates in `solvi.i18n`). Names, values,
+  options, quoted text and the text of your own exceptions are never translated; a message without a template is shown
+  in English.
+- English output is byte for byte what 0.6.0 printed: tested on every gallery case (audit, compact audit, `show`,
+  safeguard report) and on examples 12 and 18 (`tests/i18n/en_golden.json`).
+- `AnswerAudit.render(lang=None)`, `Audit.render(lang=None)`, `Audit.compact(lang=None)`; `solvi.audit.LABEL` is unchanged.
+
 ## 0.6.1 — unreleased — deterministic hashes of failed steps
 
 - A failed step's value (MISSING) hashed as `repr(object())`, which carries a memory address, so a trace with a failed step

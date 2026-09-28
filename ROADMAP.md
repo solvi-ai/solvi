@@ -61,8 +61,8 @@ Status: `planned` · `in progress` · `research` (may not ship) · `done (versio
 
 | Item | Status |
 |---|---|
-| Documentation site (mkdocs on GitHub Pages) built from the guide, format specs and examples | planned |
-| Explanations and safeguard messages in more languages (Russian first) | planned |
+| Documentation site (mkdocs on GitHub Pages) built from the guide, format specs and examples, with an API reference from the docstrings | done (0.7) |
+| Explanations and safeguard messages in more languages (Russian first): audit, `show` and the safeguard report render in Russian with `lang="ru"`; traces and hashes stay in English | Russian done (0.7); more languages planned |
 | How-to series: support triage, classification with guarantees, solvi as a tool for an LLM agent, moderation and PII spans, three-way invoice matching, KYC screening, learning from 10 examples, field extraction with quotes | in progress |
 
 ## Done
