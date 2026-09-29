@@ -795,7 +795,9 @@ model = systemone("https://openrouter.ai/api", "<model>", api_key=os.environ["OP
 `questions`) are refused, and extra_body is part of the fingerprint. Each decision's `extra["systemone"]` records the
 request's `ms` and, when the service reports them, its `usage` and `cost` (for the whole request: `questions` says how
 many questions it answered). A hosted model is not replayed (`deterministic=False`, the default): replay checks the
-recorded output; pass `deterministic=True` for a local server whose output is reproducible.
+recorded output; pass `deterministic=True` for a local server whose output is reproducible. A service that does not
+answer (network errors, timeouts, 429, 5xx: `retries=2` more attempts with backoff), refuses a request (another 4xx, with
+its error text) or breaks the reply contract escalates the decision instead of raising; a failed request is not cached.
 
 #### Any LLM as a decider
 

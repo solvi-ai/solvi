@@ -1,6 +1,8 @@
 """A System One endpoint (POST /v1/systemone) as a solvi decider, against a fake server."""
+import http.client
 import io
 import json
+import urllib.error
 
 import pytest
 
@@ -211,3 +213,62 @@ def test_a_hosted_model_is_not_replayed_but_a_deterministic_local_one_is():
         assert rep["ok"] and len(svc.bodies) - n == calls
         if not deterministic:
             assert [v for _, _, v in rep["models"]] == ["trusted"]
+
+
+class Flaky:
+    """Fails with the given errors first, then answers like FakeService."""
+
+    def __init__(self, *errors):
+        self.errors, self.ok, self.calls = list(errors), FakeService(), 0
+
+    def __call__(self, req, timeout=None):
+        self.calls += 1
+        if self.errors:
+            e = self.errors.pop(0)
+            raise e() if callable(e) and not isinstance(e, Exception) else e
+        return self.ok(req, timeout)
+
+
+def http_error(code, body=b""):
+    return urllib.error.HTTPError("http://localhost:8009/v1/systemone", code, "x", {}, io.BytesIO(body))
+
+
+def test_transient_errors_are_retried_with_backoff_then_the_decision_escalates_and_is_asked_again():
+    waits = []
+    svc = Flaky(http_error(429), http_error(503), http.client.IncompleteRead(b"{"))
+    m = systemone("http://localhost:8009", "kev-latest", opener=svc, retries=3, backoff=0.5, sleep=waits.append)
+    assert m.decision("team", "Which team?", "email", TEAMS).decide("I was charged twice").value == "billing"
+    assert svc.calls == 4 and waits == [0.5, 1.0, 2.0]
+    down = Flaky(*[TimeoutError("timed out"), ConnectionResetError("reset"), http_error(502)])
+    m = systemone("http://localhost:8009", "kev-latest", api_key="sekret", opener=down, retries=2, sleep=lambda s: None)
+    part = m.decision("team", "Which team?", "email", TEAMS)
+    d = part.decide("I was charged twice")
+    assert d.escalate and "did not answer after 3 attempts: HTTP 502" in d.escalate and "sekret" not in d.escalate
+    assert down.calls == 3
+    again = part.decide("I was charged twice")                        # not cached: the service is asked again
+    assert down.calls == 4 and again.escalate is None and again.value == "billing"
+
+
+def test_a_refused_request_escalates_at_once_with_the_services_error_text():
+    body = json.dumps({"error": {"message": "Provider returned error", "code": 400,
+                                 "metadata": {"raw": "criteria too long", "provider_name": "Someone"}}}).encode()
+    svc = Flaky(http_error(400, body))
+    m = systemone("http://localhost:8009", "kev-latest", opener=svc, sleep=lambda s: pytest.fail("no retry"))
+    d = m.decision("tags", "Which topics?", "email", TEAMS, multi=True).decide("x")
+    assert svc.calls == 1 and d.escalate
+    assert "HTTP 400" in d.escalate and "Provider returned error (Someone: criteria too long)" in d.escalate
+    cat = Catalog()
+    part = m.decision("team", "Which team?", "email", TEAMS)
+    part.question(cat, "route")
+    s = System(cat, [Question("route", "Route", Answer.choice(list(TEAMS)))])
+    svc.errors = [http_error(401, b'{"error": {"message": "bad key"}}')]
+    r = s.ask({"email": "I was charged twice"})["route"]
+    assert r.status == "abstain"                                       # no exception, no guess
+
+
+def test_a_reply_that_breaks_the_contract_escalates():
+    def broken(req, timeout=None):
+        return io.BytesIO(json.dumps({"answers": {"q0": {"type": "choice", "probabilities": {"billing": 1.0}}}}).encode())
+    d = systemone("http://localhost:8009", "kev-latest", opener=broken).decision("team", "Which team?", "email",
+                                                                                  TEAMS).decide("x")
+    assert d.escalate and "invalid System One output" in d.escalate and "shipping" in d.escalate

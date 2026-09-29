@@ -27,7 +27,10 @@ Spans and evidence quotes are not part of the API (ValueError).
 fields solvi sets (model, state, questions) are refused, and extra_body enters the fingerprint. Per decision
 `extra["systemone"]` records the endpoint, the model name (and `served_by` when the service names another), the request's
 `ms` and, when the service reports them, its `usage` and `cost` — for the whole request, which answers `questions`
-questions at once. The API key is sent in the Authorization header only, never recorded.
+questions at once. The API key is sent in the Authorization header only, never recorded. A service that does not answer
+(network errors, timeouts, 429, 5xx: `retries` more attempts with backoff), refuses the request (another 4xx: its error
+text) or gives a reply that breaks the contract escalates the decision — never a guess, never an exception; a failed
+request is not cached.
 
 A hosted model is not replayed (`deterministic=False`, the default): replay checks the recorded output instead of calling
 the service again; `deterministic=True` for a local server whose output is reproducible. The trace records the endpoint
@@ -35,14 +38,17 @@ and the model name — not the weights behind them, which the service can change
 from __future__ import annotations
 
 import hashlib
+import http.client
 import json
 import math
 import time
+import urllib.error
 import urllib.request
 
 import numpy as np
 
 from .decide import DecideModel, _unknown_caps
+from .llm import WHY_CHARS, _error_text
 
 EPS = 1e-6
 NOT_STATED = "not stated"
@@ -82,12 +88,17 @@ def _not_stated(it):
     return bool(getattr(it, "unknown", False)) and NOT_STATED not in it.options
 
 
+class _Failed(Exception):
+    """The service did not answer (after the retries) or refused the request: the reason, for the escalation."""
+
+
 class SystemOneScorer:
     """A scorer for DecideModel over `POST {base_url}/v1/systemone` (standard library HTTP, no dependencies)."""
 
     tag = "systemone"
 
-    def __init__(self, base_url, model, api_key=None, timeout=30.0, opener=None, *, extra_body=None):
+    def __init__(self, base_url, model, api_key=None, timeout=30.0, opener=None, *, extra_body=None, retries=2,
+                 backoff=1.0, sleep=None):
         if not str(base_url).lower().startswith(("http://", "https://")):
             raise ValueError(f"a System One service is an http(s):// URL, not {str(base_url)[:40]!r}")  # no file: / ftp:
         self.url = base_url.rstrip("/") + "/v1/systemone"
@@ -96,6 +107,8 @@ class SystemOneScorer:
         self.timeout = timeout
         self.opener = opener or urllib.request.urlopen
         self.extra_body = _extra_body(extra_body)
+        self.retries, self.backoff = max(0, int(retries)), float(backoff)
+        self.sleep = sleep or time.sleep
         self.model_id = f"systemone:{model}"
         self.requests = 0
         self.usage = {"input_tokens": 0, "output_tokens": 0}
@@ -181,6 +194,29 @@ class SystemOneScorer:
             self.requests += 1
             return json.loads(r.read().decode())
 
+    def request(self, body):
+        """→ the service's response; _Failed (with the reason, never the key) when it does not answer after the retries
+        (network errors, timeouts, a broken connection, 408 / 409 / 429 / 5xx) or refuses the request (another 4xx)."""
+        attempt, last = 0, None
+        while True:
+            try:
+                return self._post(body)
+            except urllib.error.HTTPError as e:
+                if not (e.code in (408, 409, 429) or e.code >= 500):
+                    why = _error_text(e)
+                    raise _Failed(f"the System One service refused the request: HTTP {e.code}"
+                                  + (f" — {why[:WHY_CHARS]}" if why else "")) from None
+                why = _error_text(e)
+                last = f"HTTP {e.code}" + (f" — {why[:WHY_CHARS]}" if why else "")
+            except (urllib.error.URLError, TimeoutError, OSError, ValueError, http.client.HTTPException) as e:
+                # HTTPException: the connection broke mid-answer (IncompleteRead, RemoteDisconnected, BadStatusLine);
+                # ValueError: a reply that is not JSON
+                last = f"{type(e).__name__}: {getattr(e, 'reason', e)}"
+            attempt += 1
+            if attempt > self.retries:
+                raise _Failed(f"the System One service did not answer after {attempt} attempts: {last}")
+            self.sleep(self.backoff * 2 ** (attempt - 1))
+
     def body(self, text, questions):
         b = json.loads(json.dumps(self.extra_body)) if self.extra_body else {}      # a fresh copy per request
         b.update({"state": text, "model": self.model, "questions": questions})
@@ -209,22 +245,36 @@ class SystemOneScorer:
             names = {f"q{k}": i for k, i in enumerate(idx)}
             qs = {n: self.questions(items[i]) for n, i in names.items()}
             t0 = time.perf_counter()
-            resp = self._post(self.body(text, {n + s: q for n, sub in qs.items() for s, q in sub.items()}))
+            try:
+                resp = self.request(self.body(text, {n + s: q for n, sub in qs.items() for s, q in sub.items()}))
+                if not isinstance(resp, dict):
+                    raise _Failed("the System One service's reply is not a JSON object")
+            except _Failed as e:              # escalate every question of the request; not cached: asked again next time
+                for i in idx:
+                    out[i] = {"logits": np.zeros(len(items[i].options)), "escalate": str(e), "transient": True,
+                              "info": {"systemone": {"endpoint": self.url, "model": self.model, "questions": len(idx)}}}
+                continue
             ms = (time.perf_counter() - t0) * 1000
             info = self._info(resp, ms, len(idx))
             for k in info.get("usage", {}):
                 self.usage[k] += info["usage"][k]
             self.cost += info.get("cost", 0.0)
-            answers = resp.get("answers") or {}
+            answers = resp.get("answers") if isinstance(resp.get("answers"), dict) else {}
             for n, i in names.items():
-                gone = [n + s for s in qs[n] if n + s not in answers]
-                if gone:
-                    raise ValueError(f"the service gave no answer to question {gone[0]!r}")
-                out[i] = {**self.read(items[i], {s: answers[n + s] for s in qs[n]}), "info": {"systemone": dict(info)}}
+                try:
+                    gone = [n + s for s in qs[n] if not isinstance(answers.get(n + s), dict)]
+                    if gone:
+                        raise ValueError(f"the service gave no answer to question {gone[0]!r}")
+                    out[i] = {**self.read(items[i], {s: answers[n + s] for s in qs[n]}),
+                              "info": {"systemone": dict(info)}}
+                except (ValueError, TypeError, KeyError) as e:     # a reply that breaks the contract: never a guess
+                    out[i] = {"logits": np.zeros(len(items[i].options)), "escalate": f"invalid System One output — {e}",
+                              "info": {"systemone": dict(info)}}
         return out
 
 
-def systemone(base_url, model, api_key=None, timeout=30.0, opener=None, *, extra_body=None, deterministic=False):
+def systemone(base_url, model, api_key=None, timeout=30.0, opener=None, *, extra_body=None, deterministic=False,
+              retries=2, backoff=1.0, sleep=None):
     """A DecideModel over a System One endpoint (see the module docs).
 
     extra_body: request fields merged into every request's JSON, e.g. OpenRouter's provider routing and `user`; a field
@@ -235,9 +285,14 @@ def systemone(base_url, model, api_key=None, timeout=30.0, opener=None, *, extra
                   extra_body={"provider": {"only": ["<provider>"], "allow_fallbacks": False}})
 
     deterministic: False (default) — replay checks the recorded output instead of calling the service again; True for a
-    local server whose output is reproducible (replay re-runs it and compares). opener: a replacement for urllib's
-    urlopen (tests, proxies)."""
-    sc = SystemOneScorer(base_url, model, api_key, timeout, opener, extra_body=extra_body)
+    local server whose output is reproducible (replay re-runs it and compares). retries / backoff: for network errors,
+    timeouts, a broken connection, 408 / 409 / 429 / 5xx (backoff · 2^k seconds between attempts); after them the
+    decision escalates ("did not answer after N attempts: ...") and is not cached. Another 4xx escalates at once, with
+    the service's error text (and a gateway's wrapped cause, OpenRouter's `error.metadata.raw`); a reply that breaks the
+    contract escalates too ("invalid System One output — ..."). opener: a replacement for urllib's urlopen (tests,
+    proxies); sleep: for the backoff (tests)."""
+    sc = SystemOneScorer(base_url, model, api_key, timeout, opener, extra_body=extra_body, retries=retries,
+                         backoff=backoff, sleep=sleep)
     m = DecideModel(sc, meta={"format": "systemone", "temperature": 1.0}, model_id=sc.model_id, backend="systemone")
     # "not stated" is asked in words (an option of its own, as solvi.llm does); set on the capabilities directly so that
     # the model's fingerprint stays what it was

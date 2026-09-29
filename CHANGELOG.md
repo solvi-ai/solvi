@@ -83,6 +83,12 @@ fallback, and says what the offline rules cannot read. All three are playground 
   service names another), the request's `ms` and, when the service reports them, its `usage` tokens and `cost` — for
   the whole request (`questions`: how many questions it answered); the scorer sums them in `usage` and `cost`.
   `costs="measured"` already plans on each part's measured run time, the request included.
+- **Behaviour change:** `solvi.systemone` handles a service that fails as `solvi.llm` does, instead of raising:
+  network errors, timeouts, a broken connection (`IncompleteRead`, a reset), 408 / 409 / 429 and 5xx are retried
+  (`retries=2`, `backoff=1.0` s doubling), then the decision escalates ("the System One service did not answer after 3
+  attempts: ...") and is not cached, so the next ask tries again; another 4xx escalates at once with the service's error
+  text, a gateway's wrapped cause included (OpenRouter's `error.metadata.raw`); a reply that breaks the contract (a
+  missing answer or probability) escalates ("invalid System One output — ..."). The API key is never in the reason.
 - **Behaviour change:** a System One model is `deterministic=False` by default, as `solvi.llm`'s: replay checks the
   recorded output instead of calling the service again. `systemone(..., deterministic=True)` keeps the old re-run for
   a local server whose output is reproducible.
