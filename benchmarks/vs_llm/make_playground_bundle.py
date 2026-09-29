@@ -211,13 +211,18 @@ def arm_label(kind, name):
     return "solvi" if kind == "a" else B.LABEL.get(name, name) + B.ARM_KINDS[kind][0]
 
 
-def case_record(recs_by, cid, scored):
+def own_latency(name):
+    """The registry's latency for a self-hosted model whose recorded times include queueing, else None."""
+    return B.REGISTRY.get(name, {}).get("latency")
+
+
+def case_record(recs_by, cid, scored, name=None):
     base = recs_by.get((cid, "base"))
     if base is None:
         return None
     rec = {"answers": _ans(base.get("answers"))}
     if scored == "confidence":
-        if base.get("ms") is not None:
+        if base.get("ms") is not None and not own_latency(name):
             rec["ms"] = round(base["ms"])
         if base.get("cost") is not None:
             rec["usd"] = _r(base["cost"], 6)
@@ -326,7 +331,11 @@ def summary(expected, res, ins, extra):
             cells.append(c)
         else:
             cells.append("")
-        if kind == "a":
+        lat_own = own_latency(name)
+        if lat_own and kind != "a":
+            cells.append(lat_own["per_decision" if mode == "llm" else "per_question"] + mark(lat_own["note"][0].upper() + lat_own["note"][1:] + "."))
+            cells.append("own GPU")
+        elif kind == "a":
             lat = _range([m.get("ms_median") for m in rule], _ms, " ms (CPU)")
             if per["T"] is not None and per["T"].get("ms_median") is not None:
                 lat += f"; {per['T']['ms_median']:.0f} ms on bank messages (GPU)"
@@ -374,7 +383,7 @@ def build(dirs):
         arm = {"key": key, "kind": kind, "name": name, "label": arm_label(kind, name), "group": gid,
                "scored": g["scored"], "published": key not in extra, "sets": {}}
         r = ins.get(name) or {}
-        if g["scored"] == "escalation" and r.get("ms_median"):
+        if g["scored"] == "escalation" and r.get("ms_median") and not own_latency(name):
             arm["per_question"] = {"ms_median": round(r["ms_median"]), "usd_per_1k": _r(r.get("usd_per_1k"), 4)}
         arms.append(arm)
     sets = {}
@@ -390,6 +399,8 @@ def build(dirs):
             st = arm_set_stats(res, arm["key"], s)
             if not recs or st is None or res[s][arm["key"]].get("verdict_printed") is False:
                 continue
+            if own_latency(arm["name"]):
+                st.pop("ms_median", None)
             arm["sets"][s] = st
             raws[arm["key"]] = {(o["id"], o.get("variant", "base")): o for o in recs if "id" in o}
         out = []
@@ -403,7 +414,7 @@ def build(dirs):
                 c["published_solvi"] = {q: v[0] for q, v in pub["answers"].items()}
             for key, by in raws.items():
                 arm = next(a for a in arms if a["key"] == key)
-                rec = case_record(by, cid, arm["scored"])
+                rec = case_record(by, cid, arm["scored"], arm["name"])
                 if rec is not None:
                     c["arms"][key] = rec
             out.append(c)
