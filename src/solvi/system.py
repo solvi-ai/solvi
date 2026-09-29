@@ -783,6 +783,7 @@ class System:
         examples = _learnable(q, examples)
         t0 = time.perf_counter()
         rows = [self.facts_for(s) for s, _ in examples]
+        explicit = features is not None
         if features is None:
             keys = set(self._state(examples[0][0])[0].keys())
             features = sorted(f for f in computable(self.catalog, keys) - keys)
@@ -794,7 +795,7 @@ class System:
             head = FastHead(q.answer.options, lam=lam, refit=refit, refit_until=refit_until).fit(rows, ans, list(features))
         head.fit_ms = (time.perf_counter() - t0) * 1000
         dropped = getattr(head, "dropped", None) or {}
-        if dropped and features is not None:           # features the caller asked for explicitly must not vanish silently
+        if dropped and explicit:           # features the caller asked for explicitly must not vanish silently
             import warnings
             warnings.warn(f"fit_fast({question!r}): features not used — " +
                           "; ".join(f"{f}: {why}" for f, why in dropped.items()), stacklevel=2)
