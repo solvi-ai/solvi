@@ -6,4 +6,6 @@ are described in the [guide](../guide.md#guarding-an-agents-tool-calls).
 
 ::: solvi.agents.guard
 
+::: solvi.agents.intents
+
 ::: solvi.agents.mcp

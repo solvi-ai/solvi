@@ -131,6 +131,59 @@ three adversarial passes ran before this release; their fixes are listed under "
   may change. Guide: "A LoRA adapter per question"; API page `solvi.lora`; tests on a tiny random decider
   (`uv sync --group lora`; skipped without torch and peft).
 
+### Agent guard: after a benchmark run (preview)
+
+A run on AgentDojo (97 agent tasks, five kinds of prompt injection, gpt-oss-120b and Qwen3-235B) showed where the
+default guard costs honest work. Every change below is opt-in, except the detector's, and keeps the provenance
+guarantee of the default. Each has tests (`tests/test_agents_next.py`).
+
+- **Middle mode: `Guard(tool_values="escalate")` / `tool(..., tool_values="escalate")`.** A user-only argument whose
+  value is not in the user's words but is in a tool output escalates (the new check `arguments_from_user`, with the
+  quote and, in a tainted context, the instruction) instead of being denied.
+  - *What it relaxes:* such a call is decided by a person instead of refused. Nothing is allowed on its own that the
+    default denies. A value found nowhere, or only in the assistant's or system's words, is still denied. The
+    escalation is never covered by a standing approval (`policy_only` is False).
+  - *Security cost:* the guarantee for these values moves to the reviewer. In the run, a call with the attacker's
+    value reached the (simulated, strict) reviewer in 24–43% of attacked runs. Attacks that succeeded went from 2.1% /
+    1.6% to 1.9% / 2.7%: e-mails to real meeting participants carrying an attacker's link were approved.
+  - *Utility:* with a reviewer, honest tasks solved rose by 7 and 16 points over the default with the same reviewer.
+    Without one, by nothing.
+- **URL matcher: `ground={"url": "url"}` and `"url_prefix"`.** URLs are compared by parsing, not as tokens:
+  - equal host (lower case, IDNA, no trailing dot, one leading `www.` ignored), port (80 / 443 default), path (trailing
+    `/` ignored), query and fragment; http and https count as the same;
+  - never a match: userinfo (`good.com@evil.com`), a host that only contains the name (`evil.com/good.com`,
+    `good.com.evil.com`), a backslash, other schemes, `.` / `..` segments, a look-alike IDN;
+  - `"url_prefix"` lets the path continue a written one at a `/` (for reads only);
+  - `solvi.agents.same_url` / `url_parts` for your own policies.
+
+  *What it relaxes:* the scheme, `www.`, a trailing slash, a default port and the letter case of the host, and a
+  Unicode host equals its punycode form. With `url_prefix`, any sub-path of a written URL. In the run, web page reads
+  refused because the model added `http://` went from 27 to 0.
+- **`guard.require_request(tools, intent, phrases=None, on_fail="escalate")`** is a policy for actions with no
+  user-given value (book, create an event, read a URL a document names). The call goes ahead only when the user's own
+  messages ask for this kind of action (`solvi.agents.INTENTS`: reserve, event, visit, pay, send, delete, invite,
+  post, share — English and Russian — or your own regular expressions); otherwise it escalates or is denied. It checks
+  the kind of action, not the call: a user who asked for any calendar event "asked" for one with an attacker's title,
+  which is the one attack that still passed.
+- **The detector sees more commands** (the guard's rules only; a decider's `perturb=k` is unchanged):
+  - at the start of a sentence or after a colon: "Make a reservation for …", "…, and make a reservation", "Book … for
+    / at …", "Visit / go to <URL>", "Create … event / meeting / reminder";
+  - in Russian: "забронируй", "сделай бронирование", "зайди / перейди на сайт …", "создай событие …";
+  - "reserve" and "visit" join the verbs of "please … / you must …";
+  - a JSON or `repr` tool output is read again with its escaped `\n` as line breaks. Before, every start-of-line rule
+    missed an instruction inside such an output.
+
+  False flags on honest text: 1.2% → 2.0% of AgentDojo's environment texts, 10.1% → 10.3% of ordinary Enron e-mails.
+- **Measured, all together** (middle mode with a reviewer, URL matcher, `require_request`, the detector):
+  - successful attacks 29.5% → 0.6% and 47.6% → 1.6% of attacked runs (no guard → guard), against 2.1% / 1.6% for the
+    default;
+  - honest tasks solved 72% and 75%, against 67% / 84% with no guard and 51% / 56% with the default;
+  - a person was asked in 28–31% of honest tasks (about 0.5 escalations per task).
+
+  These numbers are from the same tasks whose failures the new rules and intents were written for: they are not a
+  measurement on unseen attacks. The `\n` reading was added after the run: on the scripted reference calls, it lowered
+  attacks passing the default from 6.2% to 2.1%, with no change in utility.
+
 ### Fixes before release (LLM decider)
 
 Found by a measurement run through OpenRouter, where most invalid replies were quotes the model had re-typed.

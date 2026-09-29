@@ -287,7 +287,8 @@ def paragraphs(text):
 def injection_spans(text, actions=True):
     """The guard's detector of instruction-like text in a tool output → [(start, end)], merged: the instruction-like
     sentences and the quoted instructions (actions=True), read per line, again with the line breaks read as spaces (an
-    instruction split across lines), and each paragraph as a whole. A heuristic: it catches the common wordings, not
+    instruction split across lines), again with escaped line breaks ("\\n" in a JSON or repr output) read as line
+    breaks, and each paragraph as a whole. A heuristic: it catches the common wordings, not
     every injection (a paraphrase, base64, letters spaced apart are not covered) — the guard's hard guarantee is where a
     value comes from (`ground_from=("user",)`), not this. actions=False: without the action rules ("pay / transfer …
     now") — the overrides and role tags only, for text where requests are expected (the user's own messages)."""
@@ -296,6 +297,10 @@ def injection_spans(text, actions=True):
     flat = re.sub(r"[\r\n\u2028\u2029\x0b\x0c\x85]", " ", text)          # same length: the offsets stay
     spans = instruction_spans(text, actions=actions) + quoted_instructions(text, actions=actions)
     spans += instruction_spans(flat, actions=actions) + quoted_instructions(flat, actions=actions)
+    if "\\" in text:                   # a JSON / repr tool output writes its line breaks as "\n": read them as breaks
+        unesc = re.sub(r"\\[nr]", "\n ", re.sub(r"\\t", "  ", text))    # two characters for two: the offsets stay
+        if unesc != text:
+            spans += instruction_spans(unesc, actions=actions) + quoted_instructions(unesc, actions=actions)
     spans += [(a, b) for a, b in paragraphs(text)                  # a paragraph whose sentences alone say nothing
               if not any(a <= x < b for x, _ in spans) and instruction_rule(flat[a:b], actions=actions)]
     return _merge(spans)

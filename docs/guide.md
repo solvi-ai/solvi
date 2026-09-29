@@ -1918,12 +1918,26 @@ in it is executed, and the functions that run are the catalog's, planned by the 
 > and fixed bypasses in message formats of specific frameworks; report new ones as security issues (SECURITY.md).
 >
 > **Measured.** On the AgentDojo benchmark (97 agent tasks, five kinds of prompt injection in tool outputs, two open
-> models), the guard with default settings cut successful attacks by 84–91%: every attack that needed an attacker's
-> account number, address or link was stopped, and a check takes about 2 ms. The cost is utility: requiring payees,
-> amounts and recipients to come from the user's own words blocked 17–26% of honest tasks that take these values from a
-> file or an email, so declare user-only arguments where that trade is acceptable. Attacks that still pass are actions
-> with no user-supplied argument (booking a hotel, creating a calendar event, visiting a URL), instructions pasted into
-> the user's own message (`scan_user=True` catches these), and wordings the text heuristic does not recognise.
+> models: gpt-oss-120b and Qwen3-235B), the guard with default settings cut successful attacks by 93–97% (from 30% and
+> 48% of attacked runs to 2.1% and 1.6%). Every attack that needed an attacker's account number, address or link was
+> stopped. A check takes about 2.5 ms (median). The cost is utility: requiring payees, amounts and recipients to come
+> from the user's own words blocked honest tasks that take these values from a file or an e-mail. Honest tasks solved
+> fell from 67% to 51% and from 84% to 56%.
+>
+> Three opt-in tools narrow that gap; all three together, in the same benchmark:
+>
+> | | gpt-oss-120b | Qwen3-235B |
+> |---|---|---|
+> | successful attacks: no guard → default → all three | 29.5% → 2.1% → 0.6% | 47.6% → 1.6% → 1.6% |
+> | honest tasks solved: no guard → default → all three | 67% → 51% → 72% | 84% → 56% → 75% |
+> | honest tasks where a person was asked | 31% | 28% |
+>
+> The three tools are `tool_values="escalate"` (a value from a tool output goes to a person), the `"url"` matcher, and
+> `require_request` policies. The utility comes back only because a person answers the escalations. The simulated
+> reviewer approved every escalation of an honest task and rejected calls carrying the attacker's values. Under attack,
+> a call with the attacker's value reached that reviewer in 33–51% of attacked runs, so in this mode the reviewer is
+> the protection. Still passing: a calendar event with an attacker's title when the user did ask for an event, and
+> instructions pasted into the user's own message (`scan_user=True` catches these).
 
 An LLM agent calls tools: it pays invoices, writes files, sends e-mails. With `solvi.agents` the agent does not call
 them: it **proposes** a call — `{"name": "send_payment", "arguments": {...}}`, data and never code — and a `Guard` checks
@@ -2034,6 +2048,7 @@ decides (so a deny wins over an escalation), and every failed one is in `reasons
 | the tool is in the catalog | the agent names a tool the guard does not declare | deny |
 | `arguments_valid` | the arguments do not validate against the tool's types (pydantic, lax: `"250"` is 250.0; NaN and infinities are refused); an unknown argument is an error; a string (or a key) holding invisible format characters — Unicode Cf: zero-width spaces and joiners, soft hyphens, direction marks, tag characters U+E0000–E007F — is refused ("invisible characters in argument iban (U+200B)"): grounding reads text without them, so the value checked would not be the value executed. An emoji written with a zero-width joiner is refused too | deny |
 | `arguments_grounded` | a `ground=` argument is not literally in the conversation — a string as a token (not inside a longer word or address: "DE8937" is not found in "DE89370400…", "bob@x.org" not in "bob@x.org.evil"), a number as a number token (`250` matches "250.00", `1250.5` matches "1,250.50"; not a part of a longer identifier), a list item by item, an empty or whitespace-only string never — in a message of a role in `ground_from` (default user, tool and system: never the assistant's own words; `("user",)` for values only the user may give) | deny |
+| `arguments_from_user` | only for tools with `tool_values="escalate"` (the middle mode, below): a user-only argument is not in the user's words but is in a tool output | escalate |
 | `no_injected_arguments` | a grounded argument is found only in tool outputs, and a tool output in the conversation — that one or any other — carries instruction-like text (`solvi.perturb.injection_spans`, below) | escalate |
 | `no_instructions_in_tool_outputs` | tools declared with `injections="any"`: any tool output in the conversation carries instruction-like text | escalate |
 | your policies | a `@guard.policy` returns False — deny policies first, then escalate policies; its docstring's first line is the reason | deny / escalate |
@@ -2062,12 +2077,20 @@ broader ones: a sentence telling the reader to act ("you must / should / need to
 delete / write / email / forward / approve …", "the assistant / AI / agent must …", "please / kindly transfer …",
 "Transfer 250 EUR to … now"), role tags (`<system>`, `[SYSTEM]`, `### System`, "system:" mid-sentence, "New
 instructions:"), "forget what you were told", "do not follow the user", an override padded with filler, an HTML comment
-that addresses the agent, and Russian wordings ("проигнорируй инструкции", "переведи / оплати / отправь …"); the text is
-read NFKC-normalised, without zero-width characters and with look-alike letters mapped. Taint is context-wide: once
+that addresses the agent, commands for actions without a user-given value at the start of a sentence or after a
+colon ("Make a reservation for …", "…, and make a reservation", "Book a room at … for …", "Visit www.… / go to
+https://…", "Create a calendar event …"), and Russian wordings ("проигнорируй инструкции", "переведи / оплати /
+отправь …", "забронируй …", "зайди на сайт …", "создай событие …"); the text is
+read NFKC-normalised, without zero-width characters and with look-alike letters mapped, and a JSON or `repr`
+output is read again with its escaped `\n` as line breaks (a rule for the start of a sentence would not see one
+otherwise). Taint is context-wide: once
 any tool output carries such text, *every* value found only in tool outputs escalates — an injection split across two
 results ("pay the account in the next result" … "Account: DE89…") is caught. Not covered: base64 or other encodings,
 letters spaced apart, a paraphrase no rule knows — which is why provenance, not this, is the guarantee. A decider's
 `perturb=k` keeps its narrower rules (a customer who writes "please send me a refund" is not an injection there).
+
+The rules for bookings, events and visits added under one point of false flags (1.2% → 2.0% of the text
+fields of AgentDojo's clean environments, 10.1% → 10.3% of 1000 ordinary Enron e-mails).
 
 The broad rules also flag honest text. On realistic tool outputs — e-mails and invoices that ask the reader to pay,
 transfer or reply — about 16% get flagged. A flag only escalates (never denies), but with `injections="any"` or values
@@ -2097,6 +2120,80 @@ invoices" would read as 10 250 and 3 250. The flip side is that "invoices 7 8 9"
 values with commas. A number is compared as a number, so a
 value that happens to be written elsewhere in the conversation (an amount equal to a quantity) is grounded by it: pair
 amounts with a policy.
+
+**Web addresses.** A model rewrites URLs: the user types `www.example.com`, the call says `https://example.com/`.
+Token matching reads these as different strings, so `ground={"url": "url"}` compares addresses instead. Both sides are
+parsed with the standard URL parser. The host must be equal: lower case, IDNA-encoded, without a trailing dot and
+without one leading `www.`. So must the port (80 and 443 are the default), the path (a trailing `/` aside), the query and
+the fragment. `http://` and `https://` count as the same address. What never matches:
+
+- a host that merely contains the name: `evil.com/good.com` is `evil.com`, and `good.com.evil.com`, `xgood.com` and
+  `sub.good.com` are other hosts;
+- userinfo: `good.com@evil.com` and `user:pw@good.com` are refused outright, and an e-mail address `user@good.com` in
+  the text is not the site;
+- a backslash, whitespace, control or invisible characters, or a `.` / `..` path segment (also percent-encoded);
+- any scheme other than http(s) (`javascript:`, `file:`, `ftp:`) and a protocol-relative `//host`;
+- a look-alike host: `gооgle.com` with Cyrillic о is another IDNA name.
+
+The text is scanned for URL-like runs (split at whitespace, quotes, brackets, `,` and `;`, with a closing `.` or `?`
+dropped). A label glued in front is skipped: `Link:https://x.com`. `ground={"url": "url_prefix"}` also lets the call's
+path continue a written one at a `/`: `x.com/docs` covers `x.com/docs/intro`, but not `x.com/docsevil` and not
+`x.com/docs/../admin`. The query must still be as written. Use it only for reading: for an argument that sends
+something (a URL to post to), a path can carry the data out. `solvi.agents.same_url(a, b, path="exact")` and
+`url_parts(u)` are the same comparison for your own policies. On AgentDojo, one model added `http://` to addresses
+the user typed without it: 27 web page reads were refused in 97 honest tasks by token matching, none with `"url"`.
+
+**Values from tool outputs: the middle mode.** A user-only argument (`ground_from=("user",)`) is denied when its value
+is only in a tool output. That rule is what stops an injected payee. It also stops honest tasks that take the payee
+from a document the user points to ("pay the bill in bill.txt", "invite Dora, her address is on her site").
+`Guard(tool_values="escalate")` (or `tool(..., tool_values="escalate")` per tool) sends such a call to a person
+instead. The check `arguments_from_user` escalates, and the reason names each value and says it is "not in the user's
+words, only in a tool output". When a tool output in the conversation carries instruction-like text, the reason adds
+it. The quote is in `grounding["from_tool_quotes"]` for the reviewer.
+
+What this relaxes, exactly: a call the default denies because a user-only value came from a tool output becomes a
+question to a person. Nothing is allowed on its own that the default would deny. These calls are still denied:
+
+- a value found nowhere;
+- a value only in the assistant's or the system's words;
+- a call where another argument is missing.
+
+Such an escalation is never covered by a standing approval (`policy_only` is False). The guarantee moves from the code
+to the reviewer. A reviewer who approves whatever reaches them lets an injected payee through. Use the mode where a
+person really reads each call, with the reasons in front of them.
+
+In the AgentDojo run above, the mode alone, with a reviewer, solved 7 and 16 points more honest tasks than the default
+with the same reviewer (60% and 72% against 53% and 57%). A person was asked in 24% of honest tasks. Without a reviewer
+it gives nothing: an escalation that nobody answers is a refusal. Under attack, a call with the attacker's value
+reached the reviewer in 24% and 43% of attacked runs. With a reviewer who rejected those, successful attacks stayed at
+1.9% and 2.7% (default: 2.1% and 1.6%). The one kind that got through: e-mails to real meeting participants, whose
+addresses came from the calendar, carrying the attacker's link. The simulated reviewer approved them; the reason shown
+quoted the injected instruction.
+
+**Actions without a user-given value.** Some actions carry nothing the user must give. "Book the best-rated hotel"
+takes the hotel from a search result. "Add it to my calendar" takes a title and a time the agent chose. "Read the
+article Bob posted" takes the URL from a message. Declaring those arguments as the user's denies every honest call.
+Leaving them free lets a tool output that says "make a reservation for …" through. `guard.require_request` puts a
+policy on the action itself:
+
+```python
+guard.require_request(["reserve_hotel", "reserve_restaurant"], "reserve")   # "book", "reservation", "забронируй"
+guard.require_request("create_calendar_event", "event")                    # "calendar", "meeting", "remind", "встреча"
+guard.require_request("get_webpage", "visit", on_fail="deny")              # "visit", "website", "link", a URL, "сайт"
+guard.require_request("launch_job", phrases=[r"\blaunch\b", r"(?<!\w)запусти\w*"])   # your own patterns
+```
+
+The call goes ahead only when the user's own messages (`user_request`: never tool outputs, never the assistant's
+words) ask for this kind of action. Otherwise it escalates (or is denied with `on_fail="deny"`). The built-in intents
+are in `solvi.agents.INTENTS`: `reserve`, `event`, `visit`, `pay`, `send`, `delete`, `invite`, `post` and `share`,
+with English and Russian word patterns over the NFKC-normalised text. Each is an ordinary policy named
+`user_asked_to_<intent>`: in the catalog, the trace and the reasons, and fingerprinted with its patterns. It says the
+user asked for *such* an action, not for this very call. A user who asked to book one hotel has also "asked" for a
+booking of another, so pair it with `injections="grounded"` or `"any"` on the tool and with value policies (dates,
+a price cap). Being a policy, a standing approval can cover its escalations. On AgentDojo, these policies with the
+`"url"` matcher and the wider detector cut the attacks that still passed the default in the travel and messaging tasks from
+4–5% to 1% of attacked runs, at no measurable cost in honest tasks (−2 and +2 points). What still passed: a calendar event
+with an attacker's title, when the user had asked for an event.
 
 **The authorizer.** Policies are code; whether the user asked for *this* call is a judgement. `guard.make_authorizer(decider)`
 adds a decider's yes / no question — "does the conversation authorize this tool call — did the user ask for this action,
