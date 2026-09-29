@@ -2157,7 +2157,7 @@ calibrated on. The guard checks the calls an agent proposes; what a tool does on
 
 ## Verified charts: a specialist that checks every number
 
-> **Preview in 0.8.** The first *specialist*: a small model proposes, code checks against the source, code renders.
+> **Preview in 0.7.** The first *specialist*: a small model proposes, code checks against the source, code renders.
 > The promise is narrow on purpose: every number drawn is quoted from the text, with its unit and scale; what does not
 > verify is not drawn and the report says why. Beauty is not promised, and the pairing of a label with its number is
 > the proposer's (a warning says when the label's words are not near the number).

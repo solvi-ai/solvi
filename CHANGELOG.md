@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased (0.8)
+## 0.7.0 — 2026-09-29 — text in, agent guard (preview), several models with an LLM stage, memory and a learning loop (experimental), reports, docs site, trace signature and verified charts (preview)
 
 ### Which record changed: `solvi.signature` (preview)
 
@@ -49,7 +49,6 @@
 - `examples/21_verified_chart.py`, a guide chapter, API pages for `solvi.specialist` and `solvi.charts`; sample SVGs in
   `docs/images/charts/`.
 
-## 0.7.0 — 2026-09-29 — text in, agent guard (preview), several models with an LLM stage, memory and a learning loop (experimental), reports, docs site
 
 The agent guard (`solvi.agents`) ships as a **preview**: its hard line is provenance (a value found only in a tool's
 output never grounds an argument that must come from the user) and your policies; detecting injected instructions in
