@@ -33,6 +33,17 @@ Tabs:
   tasks (13–15: helpers for coding agents, with keyword stand-ins for the deciders). The
   System is kept while the code is unchanged, so `setup` (e.g. `fit_fast`) runs once and the stats accumulate. The code runs in-process (`sandbox.py`: `exec` in a fresh
   module) with a 5 s time guard (`sys.settrace` on the visitor's own frames), so an infinite loop is stopped.
+- **solvi vs LLM**: cases from the public benchmark ([docs/vs_llm.md](../../docs/vs_llm.md),
+  [benchmarks/vs_llm](../../benchmarks/vs_llm)), 15 refund and 15 3-way-match cases picked to be instructive (values at
+  a limit, currency conversion, injected instructions, missing and conflicting facts, plain cases). For a case: its input,
+  the right answer, what each LLM answered when asked directly (the saved answers of the published run, with their
+  confidence, marked right or wrong; no API call, no key), what solvi decides (the gallery catalog runs live, with the
+  rule or hard check behind each answer and the audit), and what the same LLMs answered inside solvi (alone or sent to a
+  person). "Reorder the options" runs solvi again with its options in another order and the input's keys shuffled (the
+  same answers) next to the LLMs' saved answers to a reordered request, where the run has one; "Replay" re-executes the
+  trace, and a tampered copy fails. Below, the benchmark's main table. An honest summary on top: strong LLMs follow
+  these rules nearly perfectly and solvi is not more accurate there; the differences are cost, speed, repeatability,
+  replay and the guarantee.
 - **New in 0.7**: small live demos, with keyword stand-ins in place of models and a scripted agent (no model runs in
   the browser): escalation with a guarantee (`act_guard` on 300 labelled emails: the answered share, the error, the risk
   on new emails, `must_escalate_at_least`, and the guarantee line of the audit; a slider sets the risk), a vote of two
@@ -62,6 +73,11 @@ Another Space: [solvi arcade](https://huggingface.co/spaces/solvi-ai/arcade).
 ## Files
 
 - `index.html`: loads `@gradio/lite` from jsDelivr and lists the Python files (`<gradio-file url=...>`) and requirements.
+- `vs_llm.py`: the "solvi vs LLM" tab (pure Python, no gradio): renders a case, runs the gallery catalog live, reorders
+  the options, replays the trace. Its arms and groups come from `vs_llm.json`, so a new model or a new kind of arm shows
+  up without a code change.
+- `vs_llm.json`: that tab's data (curated cases, the saved answers of every arm on them, the summary table), built by
+  `benchmarks/vs_llm/make_playground_bundle.py` (rerun it after the benchmark changes; `--check` says whether it is stale).
 - `new07.py`: the "New in 0.7" demos (pure Python, no gradio; each feature detected before use; `run(name, text, risk)`
   returns the markdown, the audit, the report as Markdown and HTML, and a picture).
 - `audit_view.py`: renders the audit panel from `Response.audit().to_dict()`.

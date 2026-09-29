@@ -16,6 +16,7 @@ model.
 | `data/blind_claims.json` | 80 messages about double charges written blind, for the task 11 claim reader |
 | `raw/` | the raw answers of the published run: `a_solvi_*`, `b_<model>_*` (directly), `c_<model>_*` (inside solvi), `requests.jsonl.gz` (latency and cost of every request); Jev's are `b_jev-1.13_*` and `c_jev-1.13_*` |
 | `expected.json` | every number of the published tables, and the task 11 numbers before and in 0.7.0 |
+| `make_playground_bundle.py` | builds `spaces/playground/vs_llm.json`, the data of the playground's "solvi vs LLM" tab: curated refund and 3-way-match cases, every arm's saved answers on them, the summary table (`--check`: is it up to date) |
 
 The sets take 83 KB and the raw answers 1.1 MB, all compressed except the 11 KB of blind messages.
 

@@ -25,6 +25,7 @@ import pandas as pd
 import demos
 import new07
 import strategy_demo as sd
+import vs_llm
 from audit_view import audit_html, fmt_answer
 from sandbox import LIMITS_NOTE, run_job, serialize
 from solvi import System
@@ -723,6 +724,8 @@ def solvi_version():
 
 
 ABOUT = """
+**solvi vs LLM** (its own tab): cases from the public benchmark side by side — the saved answers of LLMs asked directly and inside solvi, next to solvi deciding live in this tab; reorder the options, replay the trace, and the benchmark's main table. Strong LLMs follow these short rules nearly perfectly; the differences are cost, speed, repeatability, replay and the guarantee.
+
 **New in 0.7** (the "New in 0.7" tab, this Space pins solvi 0.7.0): escalation with a guarantee you set (`act_guard`: P(answered alone and wrong) ≤ risk, and the audit's guarantee line), a vote of two model families under one guarantee, text in (a message → the question it asks and its fields, each with a quote), the agent guard (preview: allow / deny / escalate a proposed tool call, the URL matcher), a verified chart from a text with numbers (preview, SVG), the trace signature that names the one changed record (preview), learning from corrections with `fit_fast`'s refit, and reports for people (`res.report()`, also under the Playground's answers). The deciders there are keyword stand-ins and the agent is scripted: no model runs.
 
 **New in 0.4: grounded decisions.** Fuzzy proposes, deterministic decides, everything is in the trace: a model may quote, pick a category or learn an answer, but plain code checks its output (grounding, closed options, confidence, hard checks, constraints between answers) before anything uses it.
@@ -749,7 +752,7 @@ THEME = gr.themes.Soft(primary_hue="indigo", neutral_hue="slate",
                        font_mono=[gr.themes.GoogleFont("IBM Plex Mono"), "ui-monospace", "Consolas", "monospace"])
 ANS_W = ["17%", "14%", "11%", "14%", "44%"]
 
-with gr.Blocks(title="solvi playground", theme=THEME, css=CSS) as demo:
+with gr.Blocks(title="solvi playground", theme=THEME, css=CSS + vs_llm.CSS) as demo:
     gr.Markdown(f"# solvi playground\n{PITCH}\n\n" + (
         "**Runs entirely in your browser** (Python via Pyodide): no server, nothing you type leaves this tab." if IN_BROWSER
         else "Running as a normal Gradio server app."), elem_id="header")
@@ -800,6 +803,38 @@ with gr.Blocks(title="solvi playground", theme=THEME, css=CSS) as demo:
         run_btn.click(run_playground, [code, init_json, qs, known], play_outputs)
         t_btn.click(tamper_playground, [code, init_json, qs, known, t_step, t_val, t_rehash], t_out)
         t_model.click(replace_model_playground, [code, init_json, qs, known], t_out)
+
+    with gr.Tab("solvi vs LLM"):
+        V_SET = vs_llm.set_choices()[0][1]
+        gr.Markdown(vs_llm.intro(IN_BROWSER))
+        with gr.Row():
+            v_set = gr.Radio(vs_llm.set_choices(), value=V_SET, label="Set", scale=1, min_width=220)
+            v_case = gr.Radio(vs_llm.case_choices(V_SET), value=vs_llm.first_case(V_SET), label="Case", scale=5,
+                              info="Picked to be instructive: values at a limit, currency conversion, injected "
+                                   "instructions, missing and conflicting facts, and plain cases.")
+        with gr.Row():
+            with gr.Column(scale=4, min_width=300):
+                v_facts = gr.HTML()
+            with gr.Column(scale=7):
+                gr.Markdown("**Side by side:** the right answer, solvi (running now) and each LLM asked directly (its "
+                            "saved answer).")
+                v_cmp = gr.HTML()
+                with gr.Row():
+                    v_reorder = gr.Button("Reorder the options")
+                    v_replay = gr.Button("Replay solvi's trace")
+                v_extra = gr.HTML()
+                with gr.Accordion("What solvi did: the rule or hard check behind each answer", open=True):
+                    v_solvi = gr.HTML()
+                v_inside = gr.HTML()
+                with gr.Accordion("Audit of solvi's decision: res.audit()", open=False):
+                    v_audit = gr.HTML()
+        with gr.Accordion("Summary: the benchmark's main table", open=True):
+            gr.HTML(vs_llm.summary_html())
+        v_out = [v_facts, v_cmp, v_solvi, v_inside, v_audit, v_extra]
+        v_set.change(lambda s: gr.update(choices=vs_llm.case_choices(s), value=vs_llm.first_case(s)), v_set, v_case)
+        v_case.change(vs_llm.show, [v_set, v_case], v_out)
+        v_reorder.click(vs_llm.reorder, [v_set, v_case], v_extra)
+        v_replay.click(vs_llm.replay, [v_set, v_case], v_extra)
 
     with gr.Tab("New in 0.7"):
         gr.Markdown("Features of solvi 0.7, each a small live demo. **No model runs here:** the deciders are keyword "
@@ -1005,6 +1040,7 @@ with gr.Blocks(title="solvi playground", theme=THEME, css=CSS) as demo:
         gr.Markdown(f"Running solvi **{solvi_version()}** in this browser tab.")
 
     demo.load(run_playground, [code, init_json, qs, known], play_outputs)
+    demo.load(vs_llm.show, [v_set, v_case], v_out)
     demo.load(run_strategy, [s_qs, *s_fields], s_out)
     demo.load(run_leave, l_in, l_out)
     demo.load(run_invoice, i_in, i_out)

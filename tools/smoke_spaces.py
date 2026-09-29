@@ -8,8 +8,10 @@ loaded (Pyodide installs solvi from PyPI in the page, so the first load takes mi
 
 What is checked, per Space (the direct *.static.hf.space page, not the huggingface.co frame around it):
 
-- playground: the first preset runs on load and prints "Trace replay: OK"; the Run button runs it again; the "New in 0.7"
-  tab, when the deployed page has it, runs its first demo (its output, or a note that the solvi it loaded is too old);
+- playground: the first preset runs on load and prints "Trace replay: OK"; the Run button runs it again; the "solvi vs
+  LLM" tab, when the deployed page has it, decides its second case and then its first one live, reorders the options
+  (solvi's answers stay the same) and replays the trace ("replay ok"); the "New in 0.7" tab, when the deployed page has
+  it, runs its first demo (its output, or a note that the solvi it loaded is too old);
 - arcade: tic-tac-toe loads; "O (solvi starts)" makes solvi move and explain the move ("solvi plays …");
 - realms: a world is generated ("Turn 0 · N factions alive"); "Next turn" advances it;
 - documents: Python and solvi load in the page ("+ solvi <version>: ready"). The extractor model (790 MB) is not
@@ -68,6 +70,7 @@ def check_playground(page, timeout_s, with_model=False):
     page.get_by_role("button", name="Run", exact=True).first.click()
     _wait_text(page, r"Trace replay: OK", 120)
     notes.append("Run pressed: Trace replay OK")
+    notes.append(_check_vs_llm(page))
     tab = page.get_by_role("tab", name="New in 0.7")
     if tab.count():
         tab.first.click()
@@ -80,6 +83,28 @@ def check_playground(page, timeout_s, with_model=False):
         notes.append("no 'New in 0.7' tab on the deployed page")
     page.get_by_role("tab", name="About").first.click()
     return notes, _gradio_solvi_version(page)
+
+
+def _check_vs_llm(page):
+    """The "solvi vs LLM" tab: pick the second case, then the first one (each decided live: "solvi <version> · <case id>
+    · N answers in X ms"), reorder the options, replay the trace."""
+    tab = page.get_by_role("tab", name="solvi vs LLM")
+    if not tab.count():
+        return "no 'solvi vs LLM' tab on the deployed page"
+    tab.first.click()
+    _wait_text(page, r"Side by side", 60)
+    cases = page.locator("label").filter(has_text=re.compile(r"^\s*[A-Z]-\d{3} · "))
+    cases.nth(1).wait_for(state="visible", timeout=60_000)            # the tab renders when it is first opened
+    ids = [cases.nth(i).inner_text().strip().split(" · ")[0] for i in (0, 1)]
+    for i in (1, 0):
+        cases.nth(i).click()
+        m = _wait_text(page, rf"solvi [\w.+-]+ · {re.escape(ids[i])} · (\d+) answers in ([\d.]+) ms", 60)
+    page.get_by_role("button", name="Reorder the options", exact=True).first.click()
+    _wait_text(page, r"solvi: the same \d+ answers", 60)
+    page.get_by_role("button", name="Replay solvi's trace", exact=True).first.click()
+    _wait_text(page, r"replay ok", 60)
+    return (f"solvi vs LLM tab: {ids[1]} then {ids[0]} decided live ({m.group(1)} answers in {m.group(2)} ms); reordered "
+            "options: the same answers; replay ok")
 
 
 def check_arcade(page, timeout_s, with_model=False):
