@@ -220,7 +220,8 @@ class TraceStorage:
     """A store of responses and their traces with a hash chain across the stored records (see the module docstring).
 
     save(response, meta=None) → id; get(id) → Response; record(id) → the stored dict; iter() / query(...) → [Stored];
-    corrections() → the teach records; head() → {"count", "hash"}; verify(anchor=None); replay_all(system);
+    corrections() → the teach records; head() → {"count", "hash"}; signature(); verify(anchor=None, signature=None);
+    replay_all(system);
     quarantine(fact, value=...); forget(fact, value=...).
 
     `catalog`: a Catalog or System used to restore typed values (dates, enums, models) when loading responses;
@@ -337,12 +338,23 @@ class TraceStorage:
         return render(period(self, since, until, question, examples, system, **filters), format)
 
     # --- integrity
-    def verify(self, anchor=None):
+    def signature(self, alg="syndrome"):
+        """The signature of the chained records (solvi.signature.sign): {"alg", "count", "root"} — with the default
+        "syndrome" code two numbers (64 bytes). Keep it where you keep the head: verify(signature=...) then names the one
+        record that changed — even when every hash after it and the stored head were recomputed — and restores its
+        content hash."""
+        from .signature import sign
+        return sign(self, alg)
+
+    def verify(self, anchor=None, signature=None, candidates=None):
         """Check the chain across stored records: each record's hash, its link to the record before it, the sequence
         numbers, the stored response against its own summary, and the stored head (a cut-off tail). `anchor`: a head()
         taken earlier and kept elsewhere — the chain must still contain it (catches a rewrite of the whole store).
-        → {"ok", "count", "head", "legacy", "problems": [(seq, id, reason)]}. Records written before the chain (0.5
-        journal lines) are counted in `legacy` and not checked."""
+        `signature`: a signature() taken earlier and kept elsewhere — the records it covers must be the ones signed; when one
+        changed, its seq is named and `signature` in the result holds solvi.signature.check's answer (the original content
+        hash; `candidates`: records, e.g. from a backup, one of which may be the original → its "match").
+        → {"ok", "count", "head", "legacy", "problems": [(seq, id, reason)]} (+ "signature" when given). Records written
+        before the chain (0.5 journal lines) are counted in `legacy` and not checked."""
         problems, rows = [], []
         prev, n = GENESIS, 0
         for pos, d in self._raw():
@@ -374,8 +386,23 @@ class TraceStorage:
             elif k > 0 and rows[k - 1].get("hash") != h:
                 problems.append((k - 1, rows[k - 1].get("id"), "the record at the anchor differs from the anchored one: "
                                                                "the store was rewritten"))
-        return {"ok": not problems, "count": len(rows), "head": {"count": len(rows), "hash": prev}, "legacy": self._legacy(),
-                "problems": problems}
+        out = {"ok": not problems, "count": len(rows), "head": {"count": len(rows), "hash": prev}, "legacy": self._legacy()}
+        if signature is not None:
+            from .signature import check
+            sc = check(self, signature, candidates)
+            out["signature"] = sc
+            if not sc["ok"]:
+                i = sc["index"]
+                if i is None:
+                    problems.append((None, None, f"the signature does not match: {sc['reason']}"))
+                else:
+                    rid = rows[i].get("id") if i < len(rows) else None
+                    problems.append((i, rid, "the record differs from the signed one (its original content hash "
+                                             f"{sc['digest'][:16]}...)" + (" — a candidate matches it" if sc["match"]
+                                                                          is not None else "")))
+        out["ok"] = not problems
+        out["problems"] = problems
+        return out
 
     def replay_all(self, system, trust_models=False, **filters):
         """Replay every stored trace (or those matching query `filters`) against `system` (a System or a Catalog): each

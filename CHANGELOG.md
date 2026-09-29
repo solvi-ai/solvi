@@ -1,5 +1,54 @@
 # Changelog
 
+## Unreleased (0.8)
+
+### Which record changed: `solvi.signature` (preview)
+
+- **A signature of a trace or a store** — two numbers, 64 bytes (`{"alg": "syndrome", "count", "root"}`, plain JSON) to
+  keep next to the head. The hash chain says a store was rewritten; the signature says which record and what its content
+  hash was: `store.signature()`, `store.verify(signature=sig, candidates=backup_records)`, `solvi verify decisions.db
+  --signature sig.json` (and `--sign sig.json` to write one; a store that does not verify is never signed),
+  `res.signature()` for one response's trace, and `solvi.signature.sign / check / locate / repair / extend` for any list
+  of items.
+- How (the default, `alg="syndrome"`): over the records' content hashes h_i (the chain fields left out), S0 = Σ h_i and
+  S1 = Σ (i+1)·h_i mod a 256-bit prime. One change at k by d moves them by d and (k+1)·d: k and the whole original hash
+  follow. `alg="octonion"` (a positional octonion product, 32 floats) is kept as the variant for future tree-shaped
+  (derivation) signatures, where its non-associativity sees a change of brackets; on a flat store it locates the same,
+  4x larger and ~10x slower — not recommended there. A signature carries its "alg"; check / locate / repair / extend
+  and `solvi verify --signature` read it from there (`--sign --alg octonion` writes the other one).
+- Measured (`benchmarks/trace_signature.py`, stores of 2–500 records, both codes): one edited record located and its
+  content hash restored in 2000 of 2000, 0 wrong; two or three edited records detected in 1500 of 1500 and never
+  located at a wrong record (`NotLocatable`). A reorder, a deletion or an insertion in the middle: detected, not located;
+  records appended after signing are not covered (`extend(sig, new)` updates it). Sign / locate with the default: 1.3 /
+  1.4 ms for 1000 records, 13 / 14 ms for 10 000 (octonion: 13 / 16 ms, 175 / 149 ms).
+- It is an error-locating code, not a MAC: keep the signature where you keep the head.
+
+### Verified charts: the first specialist (preview)
+
+- **`solvi.specialist`**: one contract for "a model proposes, code checks, code renders". A proposer writes a typed spec
+  (pydantic), never the result; `check` verifies it against the source and returns what passed plus an `Issue` per
+  problem (dropped / changed / warning / blocked, a stable code, a message, the path in the spec); `render` builds the
+  result from the verified spec only; every step goes into a hash chain (the source's hash, the proposal, the check,
+  the output's hash). `replay(record, source)` re-checks the recorded proposal and re-renders it: the same issues and
+  identical bytes, or what differs (an edited record, another source, another version). A failing proposer or an
+  invalid proposal is a blocked run with its reason, not an exception.
+- **`solvi.charts`**: a text (a report, a press release) and an optional question → a chart in which every number is
+  quoted from the text. `ChartSpec`: `bar` / `line` / `pie`, a title, a unit, a scale, series of labelled values, each
+  with its quote, an optional stated total. The checker reads the number at each quote (thousands separators,
+  decimals, "$4.2 billion", "15%", "1 500 000 руб."; an ambiguous "1.000", "3 100" or "5 m" is refused) and drops a
+  value with no quote, a quote not in the text, another number, a wrong scale, a wrong unit (percent vs percentage
+  points vs a plain number vs a currency; a word unit must follow the number), a number drawn twice, a label with a
+  number not in the text; it refuses a pie that is not shares of one whole (not adding up to 100% or to the stated
+  total, or a slice that did not verify) and a line with fewer than two points (drawn as bars), and warns when values
+  do not add up to a stated total. Proposers: `RuleProposer` (no model), `LLMProposer` (any OpenAI-compatible server,
+  standard-library HTTP), `FixedProposer`, or any callable.
+- **The SVG renderer**: deterministic, no dependencies; the only numbers drawn are the verified values (direct labels,
+  no numeric axis); a value that did not verify is marked `n/v`; `<title>` / `<desc>` with every value as text, text at
+  12 px or more, colours checked for contrast; a layout solver wraps titles and labels, turns bars horizontal when
+  labels do not fit, places line labels clear of other labels, points and the line, and pushes pie labels apart.
+- `examples/21_verified_chart.py`, a guide chapter, API pages for `solvi.specialist` and `solvi.charts`; sample SVGs in
+  `docs/images/charts/`.
+
 ## 0.7.0 — 2026-09-29 — text in, agent guard (preview), several models with an LLM stage, memory and a learning loop (experimental), reports, docs site
 
 The agent guard (`solvi.agents`) ships as a **preview**: its hard line is provenance (a value found only in a tool's

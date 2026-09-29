@@ -64,12 +64,15 @@ nav:
       - solvi.serve: api/serve.md
       - solvi.agents: api/agents.md
       - solvi.textin: api/textin.md
+      - solvi.specialist: api/specialist.md
+      - solvi.charts: api/charts.md
       - solvi.longdoc: api/longdoc.md
       - solvi.report: api/report.md
       - solvi.otel: api/otel.md
       - solvi.counterfactual: api/counterfactual.md
       - solvi.perturb: api/perturb.md
       - solvi.storage: api/storage.md
+      - solvi.signature: api/signature.md
       - solvi.diff: api/diff.md
       - solvi.testing: api/testing.md
       - solvi.honesty: api/honesty.md
