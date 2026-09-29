@@ -779,7 +779,7 @@ model = systemone("http://127.0.0.1:8009", "kev-latest")        # api_key="..." 
 part = model.decision("team", "Which team should handle this?", "email", {"billing": "Charges", "shipping": "Delivery"})
 ```
 
-Any server of `POST /v1/systemone` (Jev, and open ones: Kev, Von, Laya-serve, Intern-Decision) proposes; solvi's checks,
+Any server of `POST /v1/systemone` (Jev, and open ones: Kev, Jeeves, Von, Laya-serve, Intern-Decision) proposes; solvi's checks,
 rules, thresholds (act_guard on the confidence: the API has no act signal) and trace decide. Choice, yes/no and score
 questions are sent as they are. What the API has no type for is asked in its terms: "not stated" (`unknown=True`,
 `Maybe[...]`) is one more option with a description (a yes/no question that allows it becomes a choice over yes / no /
@@ -795,13 +795,32 @@ model = systemone("https://openrouter.ai/api", "<model>", api_key=os.environ["OP
                   extra_body={"provider": {"only": ["<provider>"], "allow_fallbacks": False}})
 ```
 
-`extra_body` fields (provider routing, `user`) go into every request; the fields solvi sets (`model`, `state`,
-`questions`) are refused, and extra_body is part of the fingerprint. Each decision's `extra["systemone"]` records the
-request's `ms` and, when the service reports them, its `usage` and `cost` (for the whole request: `questions` says how
-many questions it answered). A hosted model is not replayed (`deterministic=False`, the default): replay checks the
+`extra_body` fields (provider routing, `user`, a thinking model's `options`) go into every request; the fields solvi
+sets (`model`, `state`, `questions`) are refused, and extra_body is part of the fingerprint. Each decision's
+`extra["systemone"]` records the request's `ms` and, when the service reports them, its `usage` (input, output and
+reasoning tokens), `cost` and `latency_ms` (for the whole request: `questions` says how many questions it answered). A hosted model is not replayed (`deterministic=False`, the default): replay checks the
 recorded output; pass `deterministic=True` for a local server whose output is reproducible. A service that does not
 answer (network errors, timeouts, 429, 5xx: `retries=2` more attempts with backoff), refuses a request (another 4xx, with
 its error text) or breaks the reply contract escalates the decision instead of raising; a failed request is not cached.
+
+**Local decision models.** [Kev](https://github.com/jaredpalmer/kev) and [Jeeves](https://github.com/PostHog/jeeves)
+serve the same protocol on your own GPU, so either one can be the model inside solvi's checks, guarantee and trace.
+Jeeves reasons before it decides; its `options` pass through `extra_body`:
+
+```python
+jeeves = systemone("http://127.0.0.1:8009", "jeeves-latest",
+                   extra_body={"options": {"max_think": 512, "nothink_threshold": 0.9}})
+team = jeeves.decision("team", "Which team should handle this?", "email", TEAMS)
+```
+
+`max_think` caps each reasoning chain in tokens, `nothink_threshold` answers without thinking when the model is already
+that sure, `"think": False` skips thinking, and `"return_reasoning": True` records each question's chain in
+`extra["systemone"]["reasoning"]` (cut to 1,000 characters, for the audit: the answer still comes from the
+probabilities, and this option does not change the fingerprint). An option Jeeves does not know is refused with a 422,
+and the decision escalates with its message. The trade-off is speed: Jeeves's README reports about 0.3 s per request
+without thinking and a 3.3 s median with it on one H100 (17.1 s at p90 with full chains; 2.0 s median with `max_think`
+768 and `nothink_threshold` 0.9). Those are their published numbers, not ours; ours will be on the
+[benchmark page](vs_llm.md) once we have measured them. Any claim about its accuracy is theirs as well: see their README.
 
 #### Any LLM as a decider
 

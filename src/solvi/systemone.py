@@ -1,5 +1,6 @@
-"""Any decision model that speaks the System One HTTP API (`POST /v1/systemone`: Jev, and open servers such as Kev, Von,
-Laya-serve, Intern-Decision) as a solvi decider — the model proposes, solvi's checks, rules and thresholds decide.
+"""Any decision model that speaks the System One HTTP API (`POST /v1/systemone`: Jev, and open servers such as Kev,
+Jeeves, Von, Laya-serve, Intern-Decision) as a solvi decider — the model proposes, solvi's checks, rules and thresholds
+decide.
 
     from solvi.systemone import systemone
     model = systemone("http://127.0.0.1:8009", "kev-latest")            # api_key= for a hosted service
@@ -23,14 +24,18 @@ What the API has no type for is asked in its terms:
 
 Spans and evidence quotes are not part of the API (ValueError).
 
-`extra_body`: server-specific request fields merged into every request (OpenRouter's `provider` routing, `user`); the
-fields solvi sets (model, state, questions) are refused, and extra_body enters the fingerprint. Per decision
-`extra["systemone"]` records the endpoint, the model name (and `served_by` when the service names another), the request's
-`ms` and, when the service reports them, its `usage` and `cost` — for the whole request, which answers `questions`
-questions at once. The API key is sent in the Authorization header only, never recorded. A service that does not answer
-(network errors, timeouts, 429, 5xx: `retries` more attempts with backoff), refuses the request (another 4xx: its error
-text) or gives a reply that breaks the contract escalates the decision — never a guess, never an exception; a failed
-request is not cached.
+`extra_body`: server-specific request fields merged into every request (OpenRouter's `provider` routing, `user`; a
+thinking decision model's controls, e.g. Jeeves's `{"options": {"max_think": 512, "nothink_threshold": 0.9}}`); the
+fields solvi sets (model, state, questions) are refused, and extra_body enters the fingerprint (except Jeeves's
+`options.return_reasoning`, which changes the reply, not the answers). Per decision `extra["systemone"]` records the
+endpoint, the model name (and `served_by` when the service names another), the request's `ms` and, when the service
+reports them, its `usage` (input / output / reasoning tokens), `cost` and `latency_ms` — for the whole request, which
+answers `questions` questions at once — and the question's `reasoning` when the service returns it (Jeeves with
+`return_reasoning`: the text cut to REASONING_CHARS characters, for the audit; the answer is read from the
+probabilities, never from that text). The API key is sent in the Authorization header only, never recorded. A service
+that does not answer (network errors, timeouts, 429, 5xx: `retries` more attempts with backoff), refuses the request
+(another 4xx: its error text) or gives a reply that breaks the contract escalates the decision — never a guess, never
+an exception; a failed request is not cached.
 
 A hosted model is not replayed (`deterministic=False`, the default): replay checks the recorded output instead of calling
 the service again; `deterministic=True` for a local server whose output is reproducible. The trace records the endpoint
@@ -51,6 +56,7 @@ from .decide import DecideModel, _unknown_caps
 from .llm import WHY_CHARS, _error_text
 
 EPS = 1e-6
+REASONING_CHARS = 1000          # the most characters of a question's reasoning text kept in a decision's extra
 NOT_STATED = "not stated"
 NOT_STATED_DESCRIPTION = ("The input does not state it: the facts this question needs are missing (absent, empty or "
                           "unknown), and nothing that is given decides it.")
@@ -111,7 +117,7 @@ class SystemOneScorer:
         self.sleep = sleep or time.sleep
         self.model_id = f"systemone:{model}"
         self.requests = 0
-        self.usage = {"input_tokens": 0, "output_tokens": 0}
+        self.usage = {"input_tokens": 0, "output_tokens": 0, "reasoning_tokens": 0}   # reasoning: thinking models
         self.cost = 0.0                                  # the sum of the replies' usage.cost
 
     def __repr__(self):                                  # never the key
@@ -119,8 +125,13 @@ class SystemOneScorer:
 
     def fingerprint(self):
         fp = f"systemone|{self.url}|{self.model}"
-        if self.extra_body:                              # provider pinning ... changes what answers
-            blob = json.dumps(self.extra_body, sort_keys=True, ensure_ascii=False)
+        x = self.extra_body
+        if x and isinstance(x.get("options"), dict) and "return_reasoning" in x["options"]:
+            # Jeeves's return_reasoning only adds the chains to the reply: the answers, and the fingerprint, stay
+            x = {**x, "options": {k: v for k, v in x["options"].items() if k != "return_reasoning"}}
+            x = {k: v for k, v in x.items() if k != "options" or v}
+        if x:                                            # provider pinning, thinking options ... change what answers
+            blob = json.dumps(x, sort_keys=True, ensure_ascii=False)
             fp += "|x:" + hashlib.sha256(blob.encode()).hexdigest()[:16]
         return fp
 
@@ -234,7 +245,39 @@ class SystemOneScorer:
         c = u.get("cost")
         if isinstance(c, (int, float)) and not isinstance(c, bool) and math.isfinite(c):
             info["cost"] = float(c)
+        lat = resp.get("latency_ms")                     # the service's own time for the request (Jeeves)
+        if isinstance(lat, (int, float)) and not isinstance(lat, bool) and math.isfinite(lat) and lat >= 0:
+            info["latency_ms"] = float(lat)
         return info
+
+    @staticmethod
+    def _reasoning(it, qs, resp):
+        """The reasoning a service returned for an Item's questions (Jeeves with options.return_reasoning) → what the
+        decision records: {"text" (at most REASONING_CHARS characters), "tokens", "thought", "closed", "truncated"?} —
+        per option for a multi-label question ({option | "not stated": ...}); None when there is none. It is recorded
+        for the audit only: the answer is read from the probabilities, never from this text."""
+        r = resp.get("reasoning")
+        if not isinstance(r, dict):
+            return None
+        out = {}
+        for name, suffix in qs:
+            x = r.get(name)
+            if not isinstance(x, dict) or not isinstance(x.get("text"), str):
+                continue
+            text = x["text"]
+            rec = {"text": text[:REASONING_CHARS]}
+            if len(text) > REASONING_CHARS:
+                rec["truncated"] = len(text)
+            if isinstance(x.get("tokens"), int) and not isinstance(x.get("tokens"), bool):
+                rec["tokens"] = x["tokens"]
+            for k in ("thought", "closed"):
+                if isinstance(x.get(k), bool):
+                    rec[k] = x[k]
+            key = "" if not suffix else (NOT_STATED if suffix == "__ns" else it.options[int(suffix[2:])])
+            out[key] = rec
+        if not out:
+            return None
+        return out[""] if list(out) == [""] else out
 
     def logits(self, items):
         by_text = {}
@@ -265,8 +308,11 @@ class SystemOneScorer:
                     gone = [n + s for s in qs[n] if not isinstance(answers.get(n + s), dict)]
                     if gone:
                         raise ValueError(f"the service gave no answer to question {gone[0]!r}")
-                    out[i] = {**self.read(items[i], {s: answers[n + s] for s in qs[n]}),
-                              "info": {"systemone": dict(info)}}
+                    rec = dict(info)
+                    why = self._reasoning(items[i], [(n + s, s) for s in qs[n]], resp)
+                    if why is not None:
+                        rec["reasoning"] = why
+                    out[i] = {**self.read(items[i], {s: answers[n + s] for s in qs[n]}), "info": {"systemone": rec}}
                 except (ValueError, TypeError, KeyError) as e:     # a reply that breaks the contract: never a guess
                     out[i] = {"logits": np.zeros(len(items[i].options)), "escalate": f"invalid System One output — {e}",
                               "info": {"systemone": dict(info)}}
@@ -283,6 +329,11 @@ def systemone(base_url, model, api_key=None, timeout=30.0, opener=None, *, extra
 
         systemone("https://openrouter.ai/api", "<model>", api_key=KEY,
                   extra_body={"provider": {"only": ["<provider>"], "allow_fallbacks": False}})
+
+    A local Jeeves server with shorter thinking (its `options`; an option it does not know is a 422, which escalates):
+
+        systemone("http://127.0.0.1:8009", "jeeves-latest",
+                  extra_body={"options": {"max_think": 512, "nothink_threshold": 0.9}})
 
     deterministic: False (default) — replay checks the recorded output instead of calling the service again; True for a
     local server whose output is reproducible (replay re-runs it and compares). retries / backoff: for network errors,

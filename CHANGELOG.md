@@ -2,9 +2,23 @@
 
 ## 0.7.2 — unreleased
 
-- Docs only: a published long-input checkpoint for `long="full"` — [solvi-ai/solvi-large-long](https://huggingface.co/solvi-ai/solvi-large-long)
+- Docs: a published long-input checkpoint for `long="full"` — [solvi-ai/solvi-large-long](https://huggingface.co/solvi-ai/solvi-large-long)
   (solvi-large fine-tuned to read up to 8,192 tokens whole; `max_len_long: 8192`); the guide's "Long documents" section
-  names it. No code changes.
+  names it.
+- Jeeves (github.com/PostHog/jeeves), a local decision model that reasons before it decides, works as a System One
+  decider: `systemone("http://127.0.0.1:8009", "jeeves-latest", extra_body={"options": {"max_think": 512,
+  "nothink_threshold": 0.9}})`. Its `options` pass through `extra_body` unchanged. `extra["systemone"]["usage"]` now
+  records `reasoning_tokens`, and `scorer.usage` sums them. The service's own `latency_ms` is recorded next to solvi's
+  `ms`. With `"return_reasoning": True`, each question's reasoning goes into `extra["systemone"]["reasoning"]` (text cut
+  to 1,000 characters, with its token count and whether the model thought; per option for a multi-label question). It is
+  recorded for the audit only: the answer is still read from the probabilities. `return_reasoning` does not change the
+  fingerprint, but the other options do.
+- A refused System One or LLM request whose error body is `{"detail": "..."}` (Jeeves, FastAPI) now escalates with that
+  message rather than the raw JSON.
+- The guide's System One section gains a "Local decision models" paragraph (Kev and Jeeves; Jeeves's published latency
+  numbers, attributed to its README). New tests run solvi against a stand-in Jeeves server that validates requests and
+  shapes replies as Jeeves's own server does: every question type, "not stated", multi-label, a vote with another
+  family, act_guard and replay.
 
 ## 0.7.1 — 2026-09-29 — solvi behind a coding agent's hooks (preview), gallery for coding agents, hosted decision services (System One) hardened, benchmark vs LLMs
 

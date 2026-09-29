@@ -134,9 +134,10 @@ WHY_CHARS = 300                                        # how much of a server's 
 
 
 def _error_text(e):
-    """The body of an HTTP error → its message: the JSON error's "message", else the text. A gateway that wraps the
-    upstream provider's error (OpenRouter: "Provider returned error" with the real cause in `error.metadata.raw`) → the
-    message and that cause. Whitespace runs collapsed; not cut (the caller cuts what it shows)."""
+    """The body of an HTTP error → its message: the JSON error's "message" (or a string "detail", as FastAPI and Jeeves
+    send), else the text. A gateway that wraps the upstream provider's error (OpenRouter: "Provider returned error" with
+    the real cause in `error.metadata.raw`) → the message and that cause. Whitespace runs collapsed; not cut (the caller
+    cuts what it shows)."""
     try:
         raw = e.read(16384).decode("utf-8", "replace")
     except Exception:  # noqa: BLE001 — no body to read
@@ -145,6 +146,8 @@ def _error_text(e):
         j = json.loads(raw)
         err = j.get("error")
         msg = err.get("message") if isinstance(err, dict) else err or j.get("message")
+        if not isinstance(msg, str) and isinstance(j.get("detail"), str):   # FastAPI / Jeeves: {"detail": "..."}
+            msg = j["detail"]
         out = msg if isinstance(msg, str) else raw
         meta = err.get("metadata") if isinstance(err, dict) else None
         cause = meta.get("raw") if isinstance(meta, dict) else None
