@@ -579,13 +579,13 @@ Span answers and evidence quotes point into the whole text, as with retrieve. Th
 trace and the audit ("read whole (5234 tokens, up to 8192)"); the mode, `max_len_long` and `top_k` are part of the
 fingerprint, and a full replay re-reads the text and re-checks the record.
 
-When to use which (measured on 4–8k-token contracts and reports, with solvi-large fine-tuned on inputs up to 8k tokens —
-not yet published):
+When to use which (measured on 4–8k-token contracts and reports, with
+[solvi-large-long](https://huggingface.co/solvi-ai/solvi-large-long), solvi-large fine-tuned on inputs up to 8k tokens):
 
 | | accuracy on 4–8k-token documents | CPU cost per question (× a 512-token pass) |
 |---|---|---|
-| truncate at 512 (`long=None`) | 45% | 1× |
-| `long="retrieve"`, `max_len` 512 | 78% | ≈ 1× |
+| truncate at 512 (`long=None`) | 44% | 1× |
+| `long="retrieve"`, `max_len` 512 | 77% | ≈ 1× |
 | `long="retrieve"`, `max_len=2048` (12 sections of ≈ 170 tokens) | 85% | ≈ 3× |
 | `long="full"` (whole, up to 8k tokens) | 85% | 12× at 4k tokens, 31× at 8k |
 
@@ -599,7 +599,11 @@ not yet published):
   `long="retrieve"`: solvi-large (trained on 512-token inputs) read 4–8k-token documents whole no better than retrieve
   (74% vs 73%) and quoted the right passage less often (35% vs 50%). `DecideModel.load(path, max_len_long=N)` forces it,
   with a warning.
-- The published deciders read 512 tokens; none declares `max_len_long` yet. The ONNX backend reads any length (the export
+- **A published long-input decider:** [solvi-ai/solvi-large-long](https://huggingface.co/solvi-ai/solvi-large-long)
+  (`max_len_long: 8192`) — on 4–8k-token documents 84.6% read whole vs 73.2% for solvi-large with retrieve, and at risk
+  0.10 it answers 95% of contract questions on its own vs 70%; its act signal on short contract windows is weaker than
+  solvi-large's, so keep solvi-large as the default. `DecideModel.load("solvi-ai/solvi-large-long", device="cuda")`.
+  solvi-base and solvi-large read 512 tokens and declare no `max_len_long`. The ONNX backend reads any length (the export
   has a dynamic sequence length); `adapt_lora` does not train on whole long texts (use `long="retrieve"` there).
 
 ### The output: probabilities, calibrated confidence, act or escalate

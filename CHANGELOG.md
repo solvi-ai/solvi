@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.7.2 — unreleased
+
+- Docs only: a published long-input checkpoint for `long="full"` — [solvi-ai/solvi-large-long](https://huggingface.co/solvi-ai/solvi-large-long)
+  (solvi-large fine-tuned to read up to 8,192 tokens whole; `max_len_long: 8192`); the guide's "Long documents" section
+  names it. No code changes.
+
 ## 0.7.1 — 2026-09-29 — solvi behind a coding agent's hooks (preview), gallery for coding agents, hosted decision services (System One) hardened, benchmark vs LLMs
 
 ### solvi behind a coding agent's hooks (preview)
