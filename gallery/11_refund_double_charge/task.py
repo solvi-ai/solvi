@@ -1,7 +1,8 @@
 """Support desk: "I was charged twice" -> is it a double charge?, refund automatically / manually / not at all, which reply.
 
-The ticket text is only the customer's claim: whether they say they were charged twice, and the amount they mention, are
-extracted with a Quote (character offsets in the ticket). The decision comes from the ledger: a double charge is two
+The ticket text is only the customer's claim: what they say about being charged twice (claimed / denied / unclear / not
+mentioned) and the amount they mention are extracted with a Quote (character offsets in the ticket); an unclear claim makes
+the claim question abstain instead of guessing. The decision comes from the ledger: a double charge is two
 settled charges of the same amount at the same merchant within 10 minutes that have not been refunded. A released card
 authorisation is not a charge, and a monthly renewal is not a duplicate. The refund is the ledger amount, not the claimed
 one. It is automatic up to 500 when the free balance of the payout account (balance - reserved) covers it; otherwise it goes
@@ -19,8 +20,76 @@ cat = Catalog()
 DOUBLE_WINDOW_MIN = 10          # two identical charges this close together are a double charge
 AUTO_REFUND_LIMIT = 500.0
 
-CLAIM = re.compile(r"(charged|billed|debited|taken)\s+(me\s+)?(twice|two times|double)|double[- ]?(charged?|billed|billing|payment)"
-                   r"|duplicate (charge|payment|transaction)|two (identical |same )?(charges|payments)", re.IGNORECASE)
+# ---------- reading the claim: a plain rule, clause by clause (no model; the same ticket always reads the same way)
+# A claim is a word for taking money and a word for "twice" in one clause ("billed me two times", "duplicate transaction",
+# "the same payment went through again"). "not" / "never" / "nobody" up to five words before it makes it a denial; "if",
+# "maybe", "not sure whether" before it, or a yes/no question ("Was I charged twice?"), makes it unclear, and unclear
+# abstains. What it cannot read is listed in the README.
+MONEY_WORD = (r"charg\w*|bill\w*|debit\w*|deduct\w*|withdr[ae]w\w*|taken|took|paid|payments?|transactions?|money"
+              r"|went through|gone through|go through|processed|hit|pulled|came out|collected")
+TWICE = (r"twice|two times|2 times|2x|x2|a second time|one more time|once more|double[ds]?|duplicat\w*|repeated"
+         r"|two (?:identical|equal) (?:charges|payments|transactions|debits|withdrawals)")
+AGAIN = r"again|another|second|extra|additional|two (?:charges|payments|transactions|debits|withdrawals)"   # only with SAME
+SAME = r"\bsame\b|\bidentical\b|right after|straight after|immediately|(?:minutes?|seconds?) later"
+NOT_A_CLAIM = r"double[- ]?check\w*|twice (?:as|a (?:day|week|month|year))|two times (?:as|a (?:day|week|month|year))"
+NEGATION = r"\b(?:not|never|no|nobody|no one|none|nor)\b|n['\u2019]t\b"
+IDIOM = (r"can(?:no|['\u2019])t believe|don['\u2019]?t (?:know|understand|see) why|not sure why|no idea why"   # neither
+         r"|not (?:happy|ok|okay|acceptable)|no (?:reason|explanation)|^\W*no\s*[,!]"             # deny nor doubt
+         r"|if (?:possible|you can|you could)|as if|even if")
+HEDGE = r"\b(?:if|whether|maybe|perhaps|possibly|might|may have|could have|unsure|not sure|wonder\w*|in case|thought)\b"
+YES_NO_QUESTION = r"^\W*(?:was|were|did|is|are|have|has|am|do|does)\b"
+CLAUSE = re.compile(r"(?:[^.!?;\n]|\.(?=\d))+[.!?;]*")             # sentences (a full stop inside "54.99" does not end one)
+SPLIT = re.compile(r"\bbut\b|\bhowever\b|\s-\s|\s\u2013\s")         # ... cut again at "but", "however" and a dash
+CLAIMED, DENIED, UNCLEAR, NONE = "claimed", "denied", "unclear", "not mentioned"  # "none" would mean "none of these" to a decider
+
+
+def _blank(text, pattern):
+    """the text with every match of pattern replaced by spaces (offsets stay the same)"""
+    return re.sub(pattern, lambda m: " " * len(m.group()), text, flags=re.IGNORECASE)
+
+
+def _mention(clause):
+    """(start, end) of "money word ... twice" in a clause, or None"""
+    c = _blank(clause, NOT_A_CLAIM)
+    money = [m.span() for m in re.finditer(rf"\b(?:{MONEY_WORD})\b", c, re.IGNORECASE)]
+    twice = [m.span() for m in re.finditer(rf"\b(?:{TWICE})\b", c, re.IGNORECASE)]
+    if re.search(SAME, c, re.IGNORECASE):
+        twice += [m.span() for m in re.finditer(rf"\b(?:{AGAIN})\b", c, re.IGNORECASE)]
+    pairs = [(min(a[0], b[0]), max(a[1], b[1])) for a in money for b in twice]
+    return min(pairs, key=lambda p: (p[1] - p[0], p[0])) if pairs else None
+
+
+def read_claim(ticket):
+    """(verdict, start, end): what the ticket says about being charged twice, and where"""
+    found = []
+    for m in CLAUSE.finditer(ticket):
+        pieces, at = [], 0
+        for s in SPLIT.finditer(m.group()):
+            pieces.append((at, s.start()))
+            at = s.end()
+        pieces.append((at, len(m.group())))
+        for a, b in pieces:
+            clause = m.group()[a:b]
+            span = _mention(clause)
+            if span is None:
+                continue
+            before = _blank(clause[:span[0]], IDIOM)
+            asks = clause.rstrip().endswith("?") and re.search(YES_NO_QUESTION, clause, re.IGNORECASE)
+            if asks or re.search(HEDGE, before, re.IGNORECASE):
+                verdict = UNCLEAR
+            elif re.search(NEGATION, " ".join(before.split()[-5:]), re.IGNORECASE):   # a negation up to 5 words before it
+                verdict = DENIED
+            else:
+                verdict = CLAIMED
+            start = m.start() + a
+            found.append((verdict, start + span[0], start + span[1]))
+    for verdict in (CLAIMED, UNCLEAR, DENIED):                        # one clear claim is enough; then doubt; then a denial
+        hit = next((f for f in found if f[0] == verdict), None)
+        if hit:
+            return hit
+    return NONE, 0, 0
+
+
 MONEY = re.compile(r"(?:[$€£]\s?|\b(?:USD|EUR|GBP)\s?)?(\d{1,3}(?:,\d{3})*\.\d{2})\b")
 
 
@@ -32,10 +101,11 @@ def prepare(state):
 
 # ---------- what the customer says (cited)
 @cat.extract
-def claims_double_charge(ticket):
-    """the phrase in which the customer says they were charged twice (an empty quote at 0:0 when there is none)"""
-    m = CLAIM.search(ticket)
-    return Quote(True, m.start(), m.end(), "ticket") if m else Quote(False, 0, 0, "ticket")
+def double_charge_claim(ticket):
+    """what the customer says about being charged twice: claimed / denied / unclear / not mentioned, cited (an empty quote at 0:0
+    when not mentioned)"""
+    verdict, start, end = read_claim(ticket)
+    return Quote(verdict, start, end, "ticket")
 
 
 @cat.extract(exact=True)                  # the amount must be the number written at its offsets (the audit checks it)
@@ -99,8 +169,9 @@ def no_open_chargeback(ledger):
 
 # ---------- answers
 @cat.rule("customer_claims_double")
-def customer_claims_double(claims_double_charge):
-    return claims_double_charge
+def customer_claims_double(double_charge_claim):
+    """unclear -> None: the question abstains and a person reads the ticket"""
+    return {CLAIMED: True, DENIED: False, NONE: False}.get(double_charge_claim)
 
 
 @cat.rule("is_double_charge")
@@ -117,12 +188,14 @@ def refund(outstanding_duplicates, balance_covers, within_auto_limit):
 
 
 @cat.rule("reply")
-def reply(claims_double_charge, duplicate_pairs, outstanding_duplicates, balance_covers, within_auto_limit):
+def reply(double_charge_claim, duplicate_pairs, outstanding_duplicates, balance_covers, within_auto_limit):
     if outstanding_duplicates:
         return "confirm refund" if balance_covers and within_auto_limit else "under review"
     if duplicate_pairs:
         return "already refunded"
-    return "no duplicate found" if claims_double_charge else "not about a charge"
+    if double_charge_claim == UNCLEAR:
+        return None                       # the reply depends on what the customer meant: a person reads it
+    return "no duplicate found" if double_charge_claim == CLAIMED else "not about a charge"
 
 
 QUESTIONS = [

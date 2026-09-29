@@ -16,7 +16,7 @@ computed facts, quotes with offsets, learned parts with their fingerprints, chec
 prints one line per case (support items, deterministic share, safeguards) and asserts the audit's invariants
 ([`_audit.py`](_audit.py)): every quote lies in its text, and is literally the text where the part is `exact=True` or
 model-backed; answers are valid for their type; every forced answer names the hard check that decided it; a repaired answer
-has a constraint-repair event; a catalog without learned parts is 100% deterministic. Over the twelve runners: 117 scenario
+has a constraint-repair event; a catalog without learned parts is 100% deterministic. Over the twelve runners: 124 scenario
 responses (plus 10 in 03's learned-verdict demo), all invariants hold. Learned parts are labelled as such: the rule lists
 of 01 and 02 are registered with `model=`, so the audit counts them as learned (90–91% deterministic there) instead of
 passing them off as plain code; 09's `fit_fast` head and 12's `learn_rule` list show up the same way (97–98%).
@@ -35,7 +35,7 @@ passing them off as plain code; 09's `fit_fast` head and 12's `learn_rule` list 
 | [08](08_clinical_screening) | healthcare (demo) | escalation, NEWS2 band, sepsis screen | NEWS2 exactly per the RCP table, qSOFA; missing vitals abstain; escalation and band ordinal, tied by a constraint; a linear answerer trained on 4 000 patients missed 144–156 of 501 emergencies | `hard checks` `trace replay` `abstains` `ordinal` `constraints` `audited` |
 | [09](09_credit_adverse_action) | lending | approve / decline / refer, adverse-action reasons | reasons in Regulation B wording as computed facts; "refer to underwriter" learned with `fit_fast`, corrected by `teach` in 0.17 ms | `hard checks` `early exit` `trace replay` `learns in ms` `abstains` `audited` |
 | [10](10_procurement_3way_match) | procurement | pay / hold / reject, duplicate, approver | PO / receipt / invoice matched per line with tolerances in base currency (FX), duplicate "INV-001187" = "inv 1187"; the rate from the table, else from a same-day feed (a stale rate is rejected by `validate`) | `hard checks` `strategist plan` `early exit` `trace replay` `abstains` `fallback producers` `typed` `audited` |
-| [11](11_refund_double_charge) | payments support | double charge?, refund, reply | the customer's claim is quoted, the decision reads the ledger — they disagree in 4 of 9 cases | `cited` `hard checks` `early exit` `trace replay` `audited` |
+| [11](11_refund_double_charge) | payments support | double charge?, refund, reply | the customer's claim is quoted, the decision reads the ledger — they disagree in 6 of 16 cases; paraphrases and denials are read by a rule, unclear text abstains | `cited` `hard checks` `early exit` `trace replay` `abstains` `audited` |
 | [12](12_predictive_maintenance) | industrial IoT | ok / watch / service / stop, likely fault | least-squares trends, z-scores, hours to the alert level; hard trips work with a sensor offline; 6 readable learned rules | `hard checks` `trace replay` `readable learned rules` `abstains` `audited` |
 
 More directions in [examples/](../examples): HR leave approval (01), e-commerce fraud with a learned head (02), accounts payable

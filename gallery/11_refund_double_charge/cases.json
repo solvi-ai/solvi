@@ -393,5 +393,118 @@
     },
     "expected": {"customer_claims_double": "yes", "is_double_charge": "no", "refund": "none", "reply": "already refunded"},
     "note": "true, but the duplicate was refunded on 12 September; nothing is left to refund"
+  },
+  {
+    "name": "paraphrase_billed_two_times",
+    "state": {
+      "customer_id": "C-41822",
+      "ticket": "Your system billed me two times for one PixelForge order (29.00). One of them has to go back.",
+      "ledger": [
+        {"id": "tx-9001", "ts": "2026-09-02T08:12:44", "type": "charge", "amount": 3.8, "merchant": "Bean There Coffee", "status": "settled"},
+        {"id": "tx-9002", "ts": "2026-09-05T19:40:10", "type": "charge", "amount": 61.25, "merchant": "GreenLeaf Market", "status": "settled"},
+        {"id": "tx-9301", "ts": "2026-09-21T10:02:11", "type": "charge", "amount": 29.0, "merchant": "PixelForge", "status": "settled"},
+        {"id": "tx-9302", "ts": "2026-09-21T10:03:40", "type": "charge", "amount": 29.0, "merchant": "PixelForge", "status": "settled"}
+      ],
+      "payout_account": {"balance": 18450.0, "reserved": 3200.0}
+    },
+    "expected": {"customer_claims_double": "yes", "is_double_charge": "yes", "refund": "auto", "reply": "confirm refund"},
+    "note": "'billed me two times': the money word and 'two times' need not be side by side, only in the same sentence"
+  },
+  {
+    "name": "paraphrase_same_payment_again",
+    "state": {
+      "customer_id": "C-52210",
+      "ticket": "My Harbor Hotels deposit of 120.00 was processed, and a minute later the same deposit was processed again.",
+      "ledger": [
+        {"id": "tx-9001", "ts": "2026-09-02T08:12:44", "type": "charge", "amount": 3.8, "merchant": "Bean There Coffee", "status": "settled"},
+        {"id": "tx-9002", "ts": "2026-09-05T19:40:10", "type": "charge", "amount": 61.25, "merchant": "GreenLeaf Market", "status": "settled"},
+        {"id": "tx-9311", "ts": "2026-09-22T18:40:00", "type": "charge", "amount": 120.0, "merchant": "Harbor Hotels", "status": "settled"},
+        {"id": "tx-9312", "ts": "2026-09-22T18:41:05", "type": "charge", "amount": 120.0, "merchant": "Harbor Hotels", "status": "settled"}
+      ],
+      "payout_account": {"balance": 18450.0, "reserved": 3200.0}
+    },
+    "expected": {"customer_claims_double": "yes", "is_double_charge": "yes", "refund": "auto", "reply": "confirm refund"},
+    "note": "'the same ... again' with a money word in the sentence counts as twice; 'again' alone (a renewal complaint) does not"
+  },
+  {
+    "name": "paraphrase_duplicate_transaction_renewal",
+    "state": {
+      "customer_id": "C-60931",
+      "ticket": "There is a duplicate transaction from BookNest on my card, 18.50 on the 20th. Please look into it.",
+      "ledger": [
+        {"id": "tx-9001", "ts": "2026-09-02T08:12:44", "type": "charge", "amount": 3.8, "merchant": "Bean There Coffee", "status": "settled"},
+        {"id": "tx-9002", "ts": "2026-09-05T19:40:10", "type": "charge", "amount": 61.25, "merchant": "GreenLeaf Market", "status": "settled"},
+        {"id": "tx-8820", "ts": "2026-08-20T07:00:03", "type": "charge", "amount": 18.5, "merchant": "BookNest", "status": "settled"},
+        {"id": "tx-9320", "ts": "2026-09-20T07:00:05", "type": "charge", "amount": 18.5, "merchant": "BookNest", "status": "settled"}
+      ],
+      "payout_account": {"balance": 18450.0, "reserved": 3200.0}
+    },
+    "expected": {"customer_claims_double": "yes", "is_double_charge": "no", "refund": "none", "reply": "no duplicate found"},
+    "note": "the customer calls a monthly renewal a duplicate transaction: the claim is read, the ledger says no"
+  },
+  {
+    "name": "negated_claim_wants_receipt",
+    "state": {
+      "customer_id": "C-70316",
+      "ticket": "Just so you know, I was NOT charged twice this time. I only need a receipt for the 54.99 StreamFlix payment.",
+      "ledger": [
+        {"id": "tx-9001", "ts": "2026-09-02T08:12:44", "type": "charge", "amount": 3.8, "merchant": "Bean There Coffee", "status": "settled"},
+        {"id": "tx-9002", "ts": "2026-09-05T19:40:10", "type": "charge", "amount": 61.25, "merchant": "GreenLeaf Market", "status": "settled"},
+        {"id": "tx-9331", "ts": "2026-09-23T20:14:03", "type": "charge", "amount": 54.99, "merchant": "StreamFlix", "status": "settled"}
+      ],
+      "payout_account": {"balance": 18450.0, "reserved": 3200.0}
+    },
+    "expected": {"customer_claims_double": "no", "is_double_charge": "no", "refund": "none", "reply": "not about a charge"},
+    "note": "'NOT charged twice': a negation just before the phrase makes it a denial (cited), not a claim"
+  },
+  {
+    "name": "negated_claim_ledger_disagrees",
+    "state": {
+      "customer_id": "C-71450",
+      "ticket": "I don't think I was billed double, but could you send me the invoice for 79.90? Thanks.",
+      "ledger": [
+        {"id": "tx-9001", "ts": "2026-09-02T08:12:44", "type": "charge", "amount": 3.8, "merchant": "Bean There Coffee", "status": "settled"},
+        {"id": "tx-9002", "ts": "2026-09-05T19:40:10", "type": "charge", "amount": 61.25, "merchant": "GreenLeaf Market", "status": "settled"},
+        {"id": "tx-9341", "ts": "2026-09-24T09:15:20", "type": "charge", "amount": 79.9, "merchant": "SoundWave", "status": "settled"},
+        {"id": "tx-9342", "ts": "2026-09-24T09:16:02", "type": "charge", "amount": 79.9, "merchant": "SoundWave", "status": "settled"}
+      ],
+      "payout_account": {"balance": 18450.0, "reserved": 3200.0}
+    },
+    "expected": {"customer_claims_double": "no", "is_double_charge": "yes", "refund": "auto", "reply": "confirm refund"},
+    "note": "the customer denies it, the ledger has two settled 79.90 charges 0.7 min apart: the refund follows the ledger"
+  },
+  {
+    "name": "unclear_claim_abstains",
+    "state": {
+      "customer_id": "C-80277",
+      "ticket": "Not sure whether I was charged twice for UrbanRide (12.40) - the app shows something odd.",
+      "ledger": [
+        {"id": "tx-9001", "ts": "2026-09-02T08:12:44", "type": "charge", "amount": 3.8, "merchant": "Bean There Coffee", "status": "settled"},
+        {"id": "tx-9002", "ts": "2026-09-05T19:40:10", "type": "charge", "amount": 61.25, "merchant": "GreenLeaf Market", "status": "settled"},
+        {"id": "auth-931", "ts": "2026-09-25T08:30:00", "type": "authorization", "amount": 12.4, "merchant": "UrbanRide", "status": "released"},
+        {"id": "tx-9351", "ts": "2026-09-25T08:31:10", "type": "charge", "amount": 12.4, "merchant": "UrbanRide", "status": "settled"}
+      ],
+      "payout_account": {"balance": 18450.0, "reserved": 3200.0}
+    },
+    "expected": {"customer_claims_double": "abstain", "is_double_charge": "no", "refund": "none", "reply": "abstain"},
+    "status": {"customer_claims_double": "abstain", "reply": "abstain"},
+    "note": "the customer is unsure: the claim question abstains, and so does the reply ('no duplicate found' or 'not about a charge' depends on what they meant); the ledger answers stand"
+  },
+  {
+    "name": "unclear_question_ledger_decides",
+    "state": {
+      "customer_id": "C-81904",
+      "ticket": "Did you take my MealKit Co payment twice? I see 64.00 two times in the app.",
+      "ledger": [
+        {"id": "tx-9001", "ts": "2026-09-02T08:12:44", "type": "charge", "amount": 3.8, "merchant": "Bean There Coffee", "status": "settled"},
+        {"id": "tx-9002", "ts": "2026-09-05T19:40:10", "type": "charge", "amount": 61.25, "merchant": "GreenLeaf Market", "status": "settled"},
+        {"id": "tx-9361", "ts": "2026-09-26T12:00:40", "type": "charge", "amount": 64.0, "merchant": "MealKit Co", "status": "settled"},
+        {"id": "tx-9362", "ts": "2026-09-26T12:02:15", "type": "charge", "amount": 64.0, "merchant": "MealKit Co", "status": "settled"}
+      ],
+      "payout_account": {"balance": 18450.0, "reserved": 3200.0}
+    },
+    "expected": {"customer_claims_double": "abstain", "is_double_charge": "yes", "refund": "auto", "reply": "confirm refund"},
+    "status": {"customer_claims_double": "abstain"},
+    "note": "a yes/no question is not a claim, and 'I see 64.00 two times' names no charge word: the claim abstains; the reply does not need it when the ledger has a duplicate to refund"
   }
 ]

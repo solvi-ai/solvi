@@ -40,21 +40,24 @@ if __name__ == "__main__":
     system = System(task.cat, task.QUESTIONS)
     cases = json.loads((HERE / "cases.json").read_text())
     tally = Tally()
-    failures, times, claim_vs_ledger = [], [], 0
+    failures, times, claim_vs_ledger, unclear = [], [], 0, 0
     for i, case in enumerate(cases, 1):
         res = system.ask(state_of(case["state"]))
         times.append(res.ms)
         v = res.values
         print(f"[{i}/{len(cases)}] {case['name']}  ({case['note']})")
         print(f"    ticket: {case['state']['ticket']!r}")
-        print(f"    claim (cited): {cited(res, 'claims_double_charge')}; {cited(res, 'claimed_amount')}")
+        print(f"    claim (cited): {cited(res, 'double_charge_claim')}; {cited(res, 'claimed_amount')}")
         pairs = v.get("duplicate_pairs", [])
         print("    ledger: " + ("; ".join(f"{p['first']} + {p['duplicate']} {p['merchant']} {p['amount']:.2f}, {p['minutes_apart']} min apart"
                                    + (" (already refunded)" if p["refunded"] else "") for p in pairs) or "no double charge")
               + (f" · refund {v['refund_amount']:.2f}, free balance {v['free_balance']:.2f}" if "free_balance" in v else ""))
         for q, r in res.results.items():
             print(f"    {q:22s} {got(r)!s:22s} {r.status:7s} {r.confidence:.2f}" + ("  " + r.why if r.status != "ok" else ""))
-        claim_vs_ledger += res["customer_claims_double"].answer != res["is_double_charge"].answer
+        if res["customer_claims_double"].status == "abstain":
+            unclear += 1
+        else:
+            claim_vs_ledger += res["customer_claims_double"].answer != res["is_double_charge"].answer
         print("    " + audit_line(tally.add(check(res, system))))      # asserts the audit's invariants
         rep = res.trace.replay(task.cat)
         bad = [f"{q}: expected {want}, got {got(res[q])}" for q, want in case["expected"].items() if got(res[q]) != want]
@@ -62,7 +65,8 @@ if __name__ == "__main__":
         print(f"    replay {'ok' if rep['ok'] else 'FAILED'} ({rep['steps']} records, quotes checked against the ticket) · "
               f"{res.ms:.2f} ms · " + ("expected ✓" if not bad else "MISMATCH: " + "; ".join(bad)) + "\n")
 
-    print(f"the ticket and the ledger disagree in {claim_vs_ledger} of {len(cases)} cases; every refund decision followed the ledger")
+    print(f"the ticket and the ledger disagree in {claim_vs_ledger} of {len(cases)} cases (the claim is unclear in {unclear} more); "
+          "every refund decision followed the ledger")
     print(tally)
     res = system.ask(state_of(cases[1]["state"]))
     print(f"\nthe audit of '{cases[1]['name']}' (the claim and the ledger):\n" + str(res.audit(['customer_claims_double', 'is_double_charge'])) + "\n")

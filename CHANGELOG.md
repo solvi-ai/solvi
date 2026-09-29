@@ -55,6 +55,15 @@ output never grounds an argument that must come from the user) and your policies
 text is a heuristic second line. `System.learning` is experimental and off unless you call it. Three code reviews and
 three adversarial passes ran before this release; their fixes are listed under "Fixes before release".
 
+### Fixes before release (gallery 11, "I was charged twice")
+
+- The claim reader was one regular expression for fixed phrases: it missed paraphrases ("billed me two times", "the same
+  payment went through again") and read "I was NOT charged twice" as a claim. It is now a rule over clauses with four
+  outcomes (claimed / denied / unclear / not mentioned): a money word and a "twice" word in one clause, a negation just
+  before it makes a denial, a hedge or a yes/no question makes it unclear, and unclear abstains instead of guessing. The
+  ledger decisions are unchanged. Seven new cases (16 in all); the README lists what the rule still misreads, measured on
+  80 messages it was not written on, and shows an LLM decider as the first producer with the rule as its fallback.
+
 ### Fixes before release (LLM decider)
 
 Found by a measurement run through OpenRouter, where most invalid replies were quotes the model had re-typed.
