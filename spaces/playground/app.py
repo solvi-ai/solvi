@@ -720,7 +720,7 @@ def solvi_version():
 
 
 ABOUT = """
-**New in 0.7** (the "New in 0.7" tab): escalation with a guarantee you set (`act_guard`: P(answered alone and wrong) ≤ risk, and the audit's guarantee line), a vote of two model families, text in (a message → the question it asks and its fields, each with a quote) and reports for people (`res.report()`, also under the Playground's answers). The deciders there are keyword stand-ins, not models.
+**New in 0.7** (the "New in 0.7" tab, this Space pins solvi 0.7.0): escalation with a guarantee you set (`act_guard`: P(answered alone and wrong) ≤ risk, and the audit's guarantee line), a vote of two model families under one guarantee, text in (a message → the question it asks and its fields, each with a quote), the agent guard (preview: allow / deny / escalate a proposed tool call, the URL matcher), a verified chart from a text with numbers (preview, SVG), the trace signature that names the one changed record (preview), learning from corrections with `fit_fast`'s refit, and reports for people (`res.report()`, also under the Playground's answers). The deciders there are keyword stand-ins and the agent is scripted: no model runs.
 
 **New in 0.4: grounded decisions.** Fuzzy proposes, deterministic decides, everything is in the trace: a model may quote, pick a category or learn an answer, but plain code checks its output (grounding, closed options, confidence, hard checks, constraints between answers) before anything uses it.
 `res.audit()` shows what every answer rests on and which safeguards fired, and replay reports "model changed since this decision" when a model is swapped; try the three "New in 0.4" presets and the Audit panel.
@@ -799,26 +799,31 @@ with gr.Blocks(title="solvi playground", theme=THEME, css=CSS) as demo:
         t_model.click(replace_model_playground, [code, init_json, qs, known], t_out)
 
     with gr.Tab("New in 0.7"):
-        gr.Markdown("Four features of solvi 0.7 on a support desk. **No model runs here:** the deciders are keyword "
-                    "stand-ins with a decider's contract, so the numbers show the mechanics, not a model's quality. A "
+        gr.Markdown("Features of solvi 0.7, each a small live demo. **No model runs here:** the deciders are keyword "
+                    "stand-ins with a decider's contract and the agent is scripted, so the numbers show the mechanics, "
+                    "not a model's quality. The agent guard, verified charts and the trace signature are **previews**; "
+                    "the gated learning loop and LoRA adapters are **experimental** and not shown (LoRA needs torch). A "
                     "demo that needs a newer solvi than the one this tab loaded says so.", elem_classes="note")
         with gr.Row():
             with gr.Column(scale=4):
                 n_demo = gr.Dropdown(list(new07.DEMOS), value=next(iter(new07.DEMOS)), label="Demo")
-                n_text = gr.Textbox(next(iter(new07.DEMOS.values()))[1], lines=3, label="Message")
+                n_text = gr.Textbox(next(iter(new07.DEMOS.values()))[1], lines=3,
+                                    label=new07.label(next(iter(new07.DEMOS))))
                 n_risk = gr.Slider(0.02, 0.30, value=0.10, step=0.01, label="risk (act_guard)",
-                                   info="P(answered alone and wrong) the thresholds promise to stay under")
+                                   info="P(answered alone and wrong) the thresholds promise to stay under (the "
+                                        "act_guard, vote and report demos)")
                 n_btn = gr.Button("Run", variant="primary")
             with gr.Column(scale=6):
                 n_out = gr.Markdown("Press **Run**.")
-                with gr.Accordion("Audit of the decision", open=True):
+                n_pic = gr.HTML()
+                with gr.Accordion("Audit of the decision / details", open=True):
                     n_audit = gr.Code(language=None, interactive=False, elem_classes="mono", lines=10)
                 with gr.Accordion("Report (Markdown)", open=False):
                     n_md = gr.Markdown()
                 with gr.Accordion("Report (the self-contained HTML page)", open=False):
                     n_html = gr.HTML()
-        n_demo.change(lambda name: new07.DEMOS[name][1], n_demo, n_text)
-        n_btn.click(new07.run, [n_demo, n_text, n_risk], [n_out, n_audit, n_md, n_html])
+        n_demo.change(lambda name: gr.update(value=new07.DEMOS[name][1], label=new07.label(name)), n_demo, n_text)
+        n_btn.click(new07.run, [n_demo, n_text, n_risk], [n_out, n_audit, n_md, n_html, n_pic])
 
     with gr.Tab("Strategy"):
         gr.Markdown(f"An insurance claim desk with **{len(sd.cat.parts)} parts and {len(sd.cat.rules)} rules** "
