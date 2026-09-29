@@ -11,7 +11,7 @@ them with plain code, and act_guard puts one guarantee on the combination: P(ans
   4. a route: code picks the model per input (long emails to the large model);
   5. one email through the cascade in a catalog: the audit lists each stage, the trace replays.
 
-The measurements behind these modes (research note L25, real deciders, 300 calibration questions per set): the risk
+The measurements behind these modes (our measurements with real deciders, 300 calibration questions per set): the risk
 stayed ≤ 10% for every mode; the cascade answered like the large model at ~half its cost on sets where the small model is
 often sure; voting lowered the error among automatic answers from 2.1% to 0.4% on JSON questions.
 
@@ -96,7 +96,7 @@ def load(env, stand_in):
     return DecideModel(stand_in, meta={"format": "stand-in", "temperature": 1.0})
 
 
-COST = {"small": 45.0, "large": 137.0, "other": 90.0}          # ms per question on a CPU (L19 measurements for S / L)
+COST = {"small": 45.0, "large": 137.0, "other": 90.0}          # ms per question on a CPU (measured for the small / large decider)
 
 
 def risk_on(comb, test):

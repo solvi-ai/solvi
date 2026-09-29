@@ -10,11 +10,11 @@ A claims desk reads delivery-damage claims. Each question's type says what kind 
 
   1. plain rules answer all five (no model): Unknown vs abstain, spans, evidence, a ranking, an estimate; the audit
   2. what goes wrong is caught: a quote not in the text, a span that is not a number, an answer without evidence
-  3. a decider answers the same types (a stand-in with the L14g contract: "not stated", a pointer, rank, number)
+  3. a decider answers the same types (a stand-in with the typed v2 contract: "not stated", a pointer, rank, number)
   4. confidence means the same thing everywhere: the table, and the response's overall confidence per kind
   5. the response as JSON loads back, and its trace replays
 
-The real decider runs when SOLVI_DECIDE_MODEL points to an L14g checkpoint ('l14g typed v2'); otherwise a keyword stand-in
+The real decider runs when SOLVI_DECIDE_MODEL points to a typed v2 checkpoint ('l14g typed v2'); otherwise a keyword stand-in
 with that contract plays its part.
 
 Run:  uv run python examples/16_primitives.py"""
@@ -101,18 +101,18 @@ def show(res):
         print(f"  {q:8s} {fmt(r.answer, r.kind, r.extra):34s} confidence {r.confidence:.2f}{extra}")
 
 
-# --- 3. a decider with the L14g contract
+# --- 3. a decider with the typed v2 contract
 class StandIn:
     """Keyword logits for every kind; a "not stated" logit (high when the claim says nothing about the question); a pointer
     over whitespace tokens that points at the token after a cue word."""
-    model_id = "demo/stand-in-l14g"
+    model_id = "demo/stand-in-typed-v2"
     META = {"format": "solvi_decide v2", "subformat": "l14g typed v2",
             "multi_question": {"layout": "block", "max_questions": 6}, "temperature": {"choice": 1.0}}
     CUES = {"signed": ["signed"], "amount": ["quote:", "amount:"], "damaged": ["cracked", "broken", "wet"],
             "contact": ["call", "phone", "email", "write"], "repair": ["days"]}
 
     def fingerprint(self):
-        return "stand-in-l14g-1"
+        return "stand-in-typed-v2-1"
 
     def _one(self, it, text):
         low = text.lower()
@@ -157,7 +157,7 @@ def load_model():
         m = DecideModel.load(os.path.expanduser(src))
         if m.has_unknown and m.has_pointer:
             return m
-        print(f"  ({src} is not an L14g checkpoint: using the stand-in)")
+        print(f"  ({src} is not a typed v2 checkpoint: using the stand-in)")
     return DecideModel(StandIn(), StandIn.META)
 
 

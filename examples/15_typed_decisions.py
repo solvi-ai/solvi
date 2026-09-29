@@ -18,9 +18,9 @@ threats to a person as "critical", a constraint sends refunds to billing (joint 
   4. an unclear ticket: the model escalates — abstain, "model escalated" in the audit and the stats
   5. a correction absorbed at once; the traces replay
 
-The real decider runs when SOLVI_DECIDE_MODEL points to a checkpoint (an L14d checkpoint has no act head and answers one
-question per pass: the example then escalates by calibrated confidence instead); otherwise a keyword stand-in with the
-L14f contract (act head, several questions per pass) plays its part.
+The real decider runs when SOLVI_DECIDE_MODEL points to a checkpoint (a single-question checkpoint has no act head and
+answers one question per pass: the example then escalates by calibrated confidence instead); otherwise a keyword
+stand-in with the typed v1 contract (act head, several questions per pass) plays its part.
 
 Run:  uv run python examples/15_typed_decisions.py"""
 from __future__ import annotations
@@ -62,7 +62,7 @@ class Triage(BaseModel):
 
 
 class StandIn:
-    """A keyword stand-in for a decider with the L14f contract: every question kind natively, an act logit per question
+    """A keyword stand-in for a decider with the typed v1 contract: every question kind natively, an act logit per question
     (low when the ticket gives little evidence), several questions per forward pass."""
     model_id = "demo/stand-in-typed-decider"
     META = {"format": "l14f typed v1", "multi_question": {"layout": "block", "max_questions": 6},
