@@ -1375,9 +1375,12 @@ class Guard:
         for a, fi in t.model.model_fields.items():       # an argument is a fact of its own when something reads it
             if a in read:
                 cat.fn(_argument(a, fi.annotation))
-        checks = []
+        checks, later = [], []
 
-        def check(f, on_fail):
+        def check(f, on_fail):                    # the first failed check declared decides: every deny check is
+            if on_fail == "escalate":             # declared before every escalate check, so a deny always wins
+                later.append(f)
+                return
             cat.check(hard=True, then={"verdict": on_fail})(f)
             checks.append(f.__name__)
         if t.schema_error is not None:
@@ -1413,6 +1416,9 @@ class Guard:
             cat.fn(proposal)
             cat.fn(self._authorizer)
             check(request_authorizes, "escalate")
+        for f in later:
+            cat.check(hard=True, then={"verdict": "escalate"})(f)
+            checks.append(f.__name__)
         if t.ground:
             cat.rule("verdict")(grounded_verdict)
         else:
