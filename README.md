@@ -120,7 +120,7 @@ days_requested           = 5
 remaining_after          = 9
 enough_balance           = True
 enough_notice            = True
-{'ok': True, 'steps': 5, 'mismatches': [], 'models': []}
+{'ok': True, 'steps': 5, 'mismatches': [], 'models': [], 'catalog': 'same'}
 ```
 
 With `"balance": 3` the hard check fails and the answer is `reject` with `status == "forced"`, whatever the rule says.
