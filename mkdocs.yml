@@ -60,6 +60,7 @@ nav:
       - solvi.llm: api/llm.md
       - solvi.multi: api/multi.md
       - solvi.memory: api/memory.md
+      - solvi.lora: api/lora.md
       - solvi.learning: api/learning.md
       - solvi.serve: api/serve.md
       - solvi.agents: api/agents.md

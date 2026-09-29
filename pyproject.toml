@@ -28,6 +28,7 @@ mcp = ["mcp>=2"]   # solvi serve --mcp with the official MCP SDK (without it: a 
 otel = ["opentelemetry-api>=1.20", "opentelemetry-sdk>=1.20"]   # solvi.otel.export: traces as OpenTelemetry spans (without it: to_otlp_json)
 duckdb = ["duckdb>=1.0"]   # solvi.DuckDBStorage: decisions in a DuckDB file (analytics next to JSONL / Parquet)
 postgres = ["psycopg>=3.1"]   # solvi.PostgresStorage: decisions in PostgreSQL, several services writing
+lora = ["torch", "transformers", "peft>=0.13"]   # part.adapt_lora (experimental): a LoRA adapter on the decider for one question (torch backend)
 
 [project.scripts]
 solvi = "solvi.cli:main"
@@ -50,6 +51,7 @@ dev = ["pytest>=8", "fastapi>=0.141.1", "uvicorn>=0.54.0", "mcp>=2.2.0", "httpx2
        "duckdb>=1.0"]   # httpx2: FastAPI's TestClient; duckdb: DuckDBStorage's tests
 docs = ["mkdocs>=1.6,<2", "mkdocs-material>=9.5", "mkdocstrings[python]>=0.26"]   # the documentation site: uv run mkdocs serve
 agents = ["pydantic-ai-slim>=1.0", "langgraph>=1.0", "openai-agents>=0.22"]   # solvi.agents adapters: tests/test_agents_frameworks.py
+lora = ["torch", "transformers", "peft>=0.13"]   # part.adapt_lora: tests/test_lora.py (skipped without them; torch is too big for the dev group)
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

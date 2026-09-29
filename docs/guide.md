@@ -47,6 +47,7 @@ pip install "solvi[model]"     # + torch, transformers, for the ModernBERT extra
 pip install "solvi[onnx]"      # + onnxruntime, tokenizers: the decider (solvi.decide) on CPU without torch
 pip install "solvi[serve]"     # + fastapi, uvicorn: solvi serve over HTTP
 pip install "solvi[mcp]"       # + the official MCP SDK for solvi serve --mcp (without it, a built-in stdio server is used)
+pip install "solvi[lora]"      # + torch, transformers, peft: part.adapt_lora, a LoRA adapter per question (experimental)
 ```
 
 For development, from a clone: `uv sync`, then `uv run pytest`.
@@ -1013,6 +1014,62 @@ Adaptations are stored per question (task, options, descriptions, kind) in `mode
 fingerprint, so a replay of a decision made before them reports "model changed since this decision".
 `model.save_adaptations(path)` / `model.load_adaptations(path)` keep them with the checkpoint's fingerprint (loading onto a
 different checkpoint is refused unless `strict=False`); `part.reset()` forgets one.
+
+#### A LoRA adapter per question: adapt_lora (experimental)
+
+```python
+model = DecideModel.load("solvi-ai/solvi-base", backend="torch")    # pip install "solvi[lora]"
+team = model.decision("team", "Which team?", "email", TEAMS)
+report = team.adapt_lora(labelled, holdout=300)     # [(input, correct)]; 300 of them calibrate act_guard, the rest train
+report["holdout"]           # {"n", "accuracy_before", "accuracy_after", "act_guard": {...}}
+team.save_calibration("team.calib.json")            # writes team.calib.lora.safetensors beside it
+team.remove_lora()                                  # roll back: the checkpoint answers again, thresholds as before
+```
+
+`fit` moves the logits (a shift and a scale); it cannot change what the model reads in the input, so beyond a hundred
+examples or so it stops improving. `adapt_lora` trains a small LoRA adapter — low-rank updates of the encoder's attention
+and MLP weights in every layer, plus the last layer of the output head — on the question's labelled examples, with the
+rest of the checkpoint frozen. **Which one to use:**
+
+| labelled examples of the question | use |
+|---|---|
+| fewer than ~100 | `part.fit` (milliseconds; for a question without a model, `system.fit_fast` or `system.fit`) |
+| ~100 or more, solvi-base | `part.adapt_lora`, with `act_guard` on ~300 other labels |
+| solvi-large, or thousands of examples | `tools/adapt_lora_gpu.py` on a GPU, then `part.load_lora(path)` |
+
+What we measured on solvi-base (typed decisions of four processes; the same examples for both; 500 test answers per
+process):
+
+- **Accuracy.** `fit` reached 59.1, 60.9, 62.7 and 63.4% with 32, 100, 300 and 1000 examples per process: it levels off.
+  The adapter reached 62.0, 65.2, 68.7 and 72.6% — 3, 4, 6 and 9 points more. Fine-tuning the whole model was another 3–4
+  points better from 300 examples on, but it is a 285 MB copy; the adapter is 3.2 MB. On single short texts with only 32–64
+  labelled rows per domain the adapter was within noise of `fit` (1–2 points).
+- **Confidence.** After training the model is overconfident: its calibration error was 1.5–3 times that of `fit`.
+  `act_guard` on about 300 labels that were **not** used for training fixes what matters for escalation: the risk held at
+  the target (0.10) on the test answers, and the adapted model answered alone more often than with `fit` (53% against 45%
+  at 300 examples). That is why `holdout=` exists, and why `adapt_lora` warns when it is not given.
+- **Time.** On 4 server CPU cores: about 2, 4, 13 and 25 minutes at 32, 100, 300 and 1000 examples (a laptop is likely
+  1.5–2 times slower); on a GPU about 20 seconds for 300 examples. `adapt_lora` times one update on your machine and
+  reports the estimate (a `solvi.lora.LoraWarning`) before training.
+- **Other questions.** The adapter is active only while its own question is scored; the model's other questions are
+  answered by the checkpoint exactly as before.
+
+`holdout` is a list of `[(input, correct)]`, a share of the examples (`0.25`) or a number of them split off by the seed;
+act_guard runs on it after training (`risk=0.10`, on the calibrated confidence: `signal="confidence"`). The question's
+earlier adaptation (`adapt` / `fit` / `teach`) and thresholds are cleared when an adapter is set — they were fitted on the
+model without it. Options: `r=8` (the rank), `epochs=6` (updates of 8 examples, 40 to `max_updates=400`), `lr=3e-4`,
+`seed=0` (the same seed, examples and thread count give the same adapter on a CPU), `device=None` (where the decider
+runs). Examples labelled "not stated" or "other" are not trained on.
+
+The adapter's hash is part of the part's fingerprint (and the model's), and every decision records it in
+`extra["lora"]`, so a replay knows which weights answered. `part.save_lora(path)` / `part.load_lora(path)` keep it in a
+`.safetensors` file with the question and the checkpoint it was trained for (another question or checkpoint is refused
+unless `strict=False`); `save_calibration` writes it next to the calibration file and `load_calibration` loads it first.
+`part.remove_lora()` rolls back: the adapter leaves the model and the part's adaptation and thresholds return to what they
+were before the first adapter. It is refused for a decider that is not a torch encoder (an ONNX one: load it with
+`backend="torch"`; an LLM or a rule has no weights to adapt), for checkpoints larger than solvi-base (use the GPU script)
+and for rank / number / span questions. **Experimental:** the API, the recipe and the file format may change; the first
+use warns (`solvi.learning.ExperimentalWarning`).
 
 ### "Other" as an abstain threshold
 

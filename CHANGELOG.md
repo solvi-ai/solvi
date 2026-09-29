@@ -94,6 +94,35 @@ three adversarial passes ran before this release; their fixes are listed under "
   complement each other by confidence, and a cascade with a threshold per stage came out 1–2 points below the better
   model alone.
 
+### A LoRA adapter per question: `part.adapt_lora` (experimental)
+
+- **`part.adapt_lora(examples, r=8, epochs=6, holdout=None, seed=0, device=None, lr=3e-4, risk=0.10)`** trains a small
+  LoRA adapter (rank 8 on the attention and MLP weights of every encoder layer, plus the output head's last layer) on one
+  decision's labelled examples, for solvi-base with the torch backend and `pip install "solvi[lora]"` (peft, imported
+  only when used). `fit` levels off beyond about a hundred examples because it only moves the logits; the adapter keeps
+  improving. Measured on solvi-base (typed decisions of four processes, the same examples for both): 62.0 / 65.2 / 68.7 /
+  72.6% against `fit`'s 59.1 / 60.9 / 62.7 / 63.4% at 32 / 100 / 300 / 1000 examples per process; the adapter is 3.2 MB.
+  On single short texts with 32–64 labelled rows the gain was within noise. So: `fit` (or `fit_fast` for questions
+  without a model) below ~100 examples, `adapt_lora` from ~100 on solvi-base.
+- **Calibration is part of the call.** After LoRA the confidences are overconfident (calibration error 1.5–3× that of
+  `fit`); `holdout=` (a list, a share or a number of the examples) runs `act_guard` on labels not used for training and
+  reports the held-out accuracy before and after — in the measurement the risk held at 0.10 and the adapter answered alone
+  53% of the time against 45% for `fit` at 300 examples. Without a holdout a `solvi.lora.LoraWarning` says escalation is
+  not calibrated. The question's earlier adaptation and thresholds are cleared when an adapter is set.
+- **Time.** Minutes on a CPU (about 4 at 100 examples and 13 at 300 on 4 server cores; a laptop is slower): one update is
+  timed on your machine and the estimate reported before training; a warning below 100 examples. Deterministic for a
+  seed on a CPU.
+- **Identity and rollback.** The adapter is active only while its own question is scored (other questions of the model
+  answer exactly as before); its hash is in the part's and the model's fingerprint and in every decision's
+  `extra["lora"]`. `part.save_lora` / `load_lora` (a `.safetensors` file refused for another question or checkpoint),
+  `save_calibration` writes the adapter next to the calibration file and `load_calibration` loads it first;
+  `part.remove_lora()` restores the checkpoint's answers to the bit and the part's earlier adaptation and thresholds.
+- **Scope.** Refused, with what to do instead, for solvi-large and larger (`tools/adapt_lora_gpu.py` trains the same
+  adapter on a GPU; `load_lora` loads it anywhere), for ONNX (load with `backend="torch"`), LLM and rule deciders, and for
+  rank / number / span questions. Experimental: warns `ExperimentalWarning` on first use; the API, recipe and file format
+  may change. Guide: "A LoRA adapter per question"; API page `solvi.lora`; tests on a tiny random decider
+  (`uv sync --group lora`; skipped without torch and peft).
+
 ### Fixes before release (LLM decider)
 
 Found by a measurement run through OpenRouter, where most invalid replies were quotes the model had re-typed.

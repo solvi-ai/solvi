@@ -67,6 +67,7 @@ pip install "solvi[model]"     # + torch, transformers: ModernBERT field extract
 pip install "solvi[onnx]"      # + onnxruntime, tokenizers: the decider (solvi.decide) on CPU without torch
 pip install "solvi[serve]"     # + fastapi, uvicorn: `solvi serve app.py:system` — the questions over HTTP (also --mcp)
 pip install "solvi[otel]"      # + opentelemetry: decisions as OpenTelemetry spans (solvi.otel)
+pip install "solvi[lora]"      # + torch, transformers, peft: part.adapt_lora, a LoRA adapter per question (experimental)
 ```
 
 `solvi.agents` (guarding an agent's tool calls) needs only the core; its adapters use the PydanticAI, LangGraph or OpenAI

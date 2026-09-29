@@ -89,7 +89,8 @@ def base_fingerprint(part):
         a = part.adaptation
         signal = {k: v for k, v in (("option_order", None if part.option_order != "average" else
                                      (part.option_order, part.permutations)),
-                                    ("long", None if part.long is None else (part.long, part.top_k, part.rerank)))
+                                    ("long", None if part.long is None else (part.long, part.top_k, part.rerank)),
+                                    ("lora", None if part.lora is None else part.lora.hash))
                   if v is not None}
         if signal:                                  # a part with the default signal keeps the fingerprint it had
             return digest("DecisionPart", part.model.weights_fingerprint(), part.spec.describe(), a.params() if a else None,
@@ -127,15 +128,29 @@ def record(part):
         if part.scale == "rank":                    # each member's sorted calibration signals (at most multi.MAX_RANKS)
             out["ranks"] = [[float(x) for x in r] for r in part.ranks]
     out.update(guarantee=part.guarantee, conformal=part.conformal_set, groups=_groups_record(part.groups))
+    if kind == "DecisionPart" and part.lora is not None:     # the adapter it was calibrated with, in a file beside it
+        out["lora"] = {"hash": part.lora.hash}
     from . import __version__
     out["solvi"] = __version__
     return _norm(out)
 
 
+def lora_path(path):
+    """The adapter file written next to a calibration file: team.calib.json → team.calib.lora.safetensors."""
+    base = str(path)[:-5] if str(path).endswith(".json") else str(path)
+    return base + ".lora.safetensors"
+
+
 def save(part, path):
-    """Write a part's calibration to a JSON file → path."""
+    """Write a part's calibration to a JSON file (and its LoRA adapter, if it has one, next to it) → path."""
+    import os
+    rec = record(part)
+    if "lora" in rec:
+        from .lora import save as save_lora
+        save_lora(part, lora_path(path))
+        rec["lora"]["file"] = os.path.basename(lora_path(path))
     with open(path, "w", encoding="utf-8") as fh:
-        json.dump(_enc(record(part)), fh, ensure_ascii=False, indent=1, allow_nan=False)
+        json.dump(_enc(rec), fh, ensure_ascii=False, indent=1, allow_nan=False)
         fh.write("\n")
     return path
 
@@ -169,6 +184,12 @@ def load(part, path, groups=None, strict=True):
     kind = _kind_of(part)
     if rec.get("kind") != kind:
         raise ValueError(f"{path}: a calibration of a {rec.get('kind')}, not of a {kind}")
+    lo = rec.get("lora")
+    if kind == "DecisionPart" and lo and (part.lora is None or part.lora.hash != lo.get("hash")):
+        import os                                   # calibrated with an adapter: load it first (from beside the file)
+        from .lora import load as load_lora
+        f = os.path.join(os.path.dirname(os.path.abspath(str(path))), lo.get("file") or os.path.basename(lora_path(path)))
+        load_lora(part, f, strict, expect=lo.get("hash"))
     if strict:
         if rec.get("question") != _norm(part.spec.describe()):
             raise ValueError(f"{path}: made for another question ({rec.get('name')!r}: {rec.get('question')}); this part "
@@ -182,9 +203,10 @@ def load(part, path, groups=None, strict=True):
                                  f"this part runs {', '.join(f'{k} #{v}' for k, v in mine.items())} — calibrate again "
                                  "(solvi calibrate) with this model")
             raise ValueError(f"{path}: calibrated for fingerprint #{rec.get('fingerprint')}, this part is #{fp}: the "
-                             "question's adaptation (fit / teach / adapt) or how the part computes its signal (option_order="
-                             "\"average\", permutations, long, top_k, rerank) differs — load the adaptations it was "
-                             "calibrated with (model.load_adaptations), make the part as it was, or calibrate again")
+                             "question's adaptation (fit / teach / adapt), its LoRA adapter or how the part computes its "
+                             "signal (option_order=\"average\", permutations, long, top_k, rerank) differs — load the "
+                             "adaptations it was calibrated with (model.load_adaptations), make the part as it was, or "
+                             "calibrate again")
     grp = None
     if rec.get("groups") is not None:
         g = rec["groups"]
