@@ -1,0 +1,9 @@
+{
+ "about": "The models the runner knows. Add one entry to add a model: `bench.py llm <name>` / `bench.py inside <name>` then use it, and `bench.py score` picks up its raw files (b_<name>_<set>.jsonl.gz, c_<name>_<set>.jsonl.gz) and prints it under `label`. base_url and key_env are optional (default: OpenRouter, $OPENROUTER_API_KEY); extra is merged into every request; price_in / price_out ($ per 1M tokens) are only a fallback for an endpoint that does not report usage.cost.",
+ "models": {
+  "grok-4.7": {"label": "Grok 4.7", "id": "x-ai/grok-4.7", "extra": {}, "max_tokens": 16000, "price_in": 1.6, "price_out": 4.8},
+  "gpt-oss-120b": {"label": "gpt-oss-120b", "id": "openai/gpt-oss-120b", "extra": {}, "max_tokens": 16000, "price_in": 0.15, "price_out": 0.6},
+  "qwen3-235b-2507": {"label": "Qwen3-235B-2507", "id": "qwen/qwen3-235b-a22b-2507", "extra": {}, "max_tokens": 4000, "price_in": 0.087, "price_out": 0.35},
+  "deepseek-v3.2": {"label": "DeepSeek-V3.2", "id": "deepseek/deepseek-v3.2", "extra": {"reasoning": {"enabled": true}}, "max_tokens": 16000, "price_in": 0.28, "price_out": 0.42}
+ }
+}

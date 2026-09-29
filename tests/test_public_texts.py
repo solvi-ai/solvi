@@ -1,10 +1,12 @@
-"""The published trees (README, docs, the package, the gallery, the examples) do not point into the private research repo."""
+"""The published trees (README, docs, the package, the gallery, the examples, the benchmarks) do not point into the private
+research repo and carry no research experiment codes."""
+import gzip
 import pathlib
 import re
 
 ROOT = pathlib.Path(__file__).parents[1]
-PRIVATE = re.compile(r"new_kelly|exps_v2")
-TREES = ["README.md", "docs", "src", "gallery", "examples"]
+PRIVATE = re.compile(r"new_kelly|exps_v2|kelly", re.IGNORECASE)
+TREES = ["README.md", "docs", "src", "gallery", "examples", "benchmarks"]
 TEXT = {".md", ".py", ".json", ".yml", ".yaml", ".toml", ".txt", ".html", ".csv"}
 
 
@@ -39,3 +41,21 @@ def test_no_experiment_codes_in_published_trees():
                     if CODE.search(CODE_OK.sub("", line)):
                         hits.append(f"{rel}:{n}: {line.strip()[:100]}")
     assert not hits, "\n".join(hits)
+
+
+def _gz_texts():
+    """The compressed data and raw answers under benchmarks/ (JSON lines, gzipped): (relative path, text)."""
+    for p in sorted((ROOT / "benchmarks").rglob("*.gz")):
+        with gzip.open(p, "rt", encoding="utf-8", errors="replace") as f:
+            yield p.relative_to(ROOT).as_posix(), f.read()
+
+
+def test_benchmark_data_has_no_private_references_or_codes():
+    """The shipped sets and raw answers too: no private paths, no project code names, no experiment codes."""
+    private = re.compile(r"new_kelly|exps_v2|kelly", re.IGNORECASE)
+    hits = []
+    for rel, text in _gz_texts():
+        for n, line in enumerate(text.splitlines(), 1):
+            if private.search(line) or CODE.search(CODE_OK.sub("", line)):
+                hits.append(f"{rel}:{n}: {line.strip()[:100]}")
+    assert not hits, "\n".join(hits[:50])

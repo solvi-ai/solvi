@@ -63,3 +63,4 @@ directory before the first release.
 | `perturb_injection.py` | `perturb=k` against instructions appended to Bitext support messages: how often they are followed, what it costs |
 | `fast_head.py`, `strategist_scale.py` | `fit_fast` and the strategist at scale |
 | `textin_massive.py` | text in on MASSIVE (en-US, CC BY 4.0; `$MASSIVE_DIR`): routing to eight entry points of a home assistant, and each field read by `CueExtractor` and by the decider's span pointer — right, overlapping, wrong, missed |
+| `vs_llm/` | solvi vs asking an LLM: the sets, the written policies, the runner for solvi / an LLM directly / an LLM inside solvi, and every raw answer of the published run ([docs/vs_llm.md](../docs/vs_llm.md)) |

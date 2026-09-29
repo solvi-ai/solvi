@@ -4,6 +4,9 @@ This page gives the setups, per-question numbers and caveats behind the results 
 numbers come from pre-registered experiments: success criteria were written down before each run, and results are
 reported whether or not the criteria were met. Dataset loaders are in [benchmarks/datasets/](../benchmarks/datasets/).
 
+How solvi compares to giving the same rules to an LLM (Grok 4.7, gpt-oss-120b, Qwen3-235B, DeepSeek-V3.2), answering
+directly or inside solvi, is on its own page: [solvi vs asking an LLM](vs_llm.md).
+
 ## Setup
 
 - **solvi**: ModernBERT-large field extractors (start/end pointer heads) plus ordinary functions, checks and rules; rules
@@ -135,6 +138,15 @@ the 0.5.0 gallery: 1.09-1.14 ms per ask; this version on the same gallery: 0.99-
 ```
 uv run python benchmarks/ask_overhead.py [--quick] [--only gallery|decider] [--json out.json]
 ```
+
+## solvi vs asking an LLM
+
+The gallery, generated refund and 3-way-match sets with values exactly at limits, conflicts, missing facts and injected
+instructions, and Banking77 routing, given to solvi and to four LLMs (directly, and inside solvi under `act_guard`).
+Strong reasoning models followed the short written rules as accurately as solvi. solvi's advantage there is cost,
+latency, repeatability, audit and hard checks that hold whatever the model says. On free text the LLMs were clearly
+better. Tables, caveats and the reproduction are on [solvi vs asking an LLM](vs_llm.md). Data, runner and raw answers
+are in [benchmarks/vs_llm/](../benchmarks/vs_llm/).
 
 ## Known negative results
 

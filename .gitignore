@@ -21,3 +21,7 @@ spaces/realms/results/lookahead/colab/ckpt_*.json
 spaces/realms/results/lookahead/dev/
 spaces/realms/results/lookahead/colab/endless_5.json
 site/
+
+# benchmarks/vs_llm: its sets are shipped (data/ above is for downloaded datasets); new runs are not
+!benchmarks/vs_llm/data/
+benchmarks/vs_llm/out/

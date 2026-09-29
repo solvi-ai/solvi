@@ -328,6 +328,25 @@ directly, fine-tuned with its authors' recipe. Details and caveats: [docs/benchm
 - Speed: about 0.4 ms per decision when no model is involved; about 39 ms per receipt with the one-pass extractor on an
   A100 GPU.
 
+### How it compares to asking an LLM
+
+We gave the same inputs and written rules to solvi and to four LLMs: Grok 4.7, gpt-oss-120b, Qwen3-235B-2507 and
+DeepSeek-V3.2. The sets were the gallery, generated refund and 3-way-match cases built to trip models up, and Banking77
+message routing. Strong reasoning LLMs followed short written rules as accurately as solvi. solvi was not more accurate
+there. What differs is everything around accuracy:
+
+| Refunds, 576 decisions | solvi | Grok 4.7 | gpt-oss-120b | Qwen3-235B-2507 |
+|---|---|---|---|---|
+| accuracy | 0.894 in the run, 1.000 with 0.7.0's claim reader (not blind) | 1.000 | 1.000 | 0.844 |
+| limit violations | 0 | 0 | 0 | 70 |
+| answers changed by reordering the options | 0% | 0% | 0% | 9.6% |
+| per decision | 0.6 ms, CPU | 2.0 s | 1.9 s | 1.1 s |
+| $ per 1,000 decisions | $0 | $1.30 | $0.12 | $0.03 |
+
+Inside solvi, no LLM broke a hard check, and wrong answers given without a person stayed within the promised 10%. On free
+text the LLMs win: 0.925-0.972 on bank messages against 0.675 for solvi-large. Full tables, caveats and a reproducible
+runner with every raw answer: [docs/vs_llm.md](docs/vs_llm.md), [benchmarks/vs_llm/](benchmarks/vs_llm/).
+
 ## Speed
 
 Strategist on random layered catalogs ([benchmarks/strategist_scale.py](benchmarks/strategist_scale.py), one CPU core):
@@ -403,6 +422,7 @@ Run them from a clone: `python examples/01_leave_request.py`.
 - [docs/strategist.md](docs/strategist.md): the code strategist and the experimental model strategist and name matching.
 - [ROADMAP.md](ROADMAP.md), [CHANGELOG.md](CHANGELOG.md), [CONTRIBUTING.md](CONTRIBUTING.md), [SECURITY.md](SECURITY.md).
 - [docs/benchmarks.md](docs/benchmarks.md): setups, per-question numbers, caveats.
+- [docs/vs_llm.md](docs/vs_llm.md): solvi vs asking an LLM (Grok 4.7, gpt-oss-120b, Qwen3, DeepSeek), with raw answers.
 - [benchmarks/](benchmarks/): dataset loaders and benchmark scripts (SROIE, CORD, CUAD, Kleister-NDA).
 - Tests: `pytest`.
 

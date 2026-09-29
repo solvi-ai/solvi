@@ -48,6 +48,7 @@ nav:
       - Regression tests: testing.md
       - Honesty suite: honesty.md
       - Benchmarks: benchmarks.md
+      - solvi vs asking an LLM: vs_llm.md
   - Examples:
       - Examples: examples.md
       - Gallery: gallery.md
@@ -93,6 +94,7 @@ markdown_extensions:
         kwds:
           case: lower
   - tables
+  - footnotes
   - admonition
   - attr_list
   - md_in_html
