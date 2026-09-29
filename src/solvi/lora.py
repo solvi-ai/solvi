@@ -25,8 +25,8 @@ What changes and what does not:
   earlier adaptation and thresholds are cleared: they were fitted on the model without the adapter.
 - Deterministic for a fixed seed on a CPU (the same examples, seed, torch version and thread count give the same adapter,
   and the same hash).
-- solvi-base-sized checkpoints only; for solvi-large or thousands of examples, tools/adapt_lora_gpu.py trains the same
-  adapter on a GPU, and `part.load_lora(path)` loads it.
+- solvi-base-sized checkpoints only; for solvi-large or thousands of examples, tools/adapt_lora_gpu.py (in the solvi
+  repository, not installed by pip) trains the same adapter on a GPU, and `part.load_lora(path)` loads it.
 
 Needs the torch backend and peft: `pip install "solvi[lora]"`."""
 from __future__ import annotations
@@ -47,7 +47,8 @@ TARGET = r".*layers\.\d+\.(attn\.(Wqkv|Wo)|mlp\.(Wi|Wo))"     # ModernBERT: atte
 HEAD = "head.3."                                              # the output head's last layer is trained too
 BS = 8                                                        # examples per update
 MAX_HIDDEN = 768                                              # solvi-base; larger checkpoints: the GPU script
-GPU_SCRIPT = "tools/adapt_lora_gpu.py"
+GPU_SCRIPT = ("tools/adapt_lora_gpu.py (in the solvi repository, not installed by pip: "
+              "https://github.com/solvi-ai/solvi/blob/main/tools/adapt_lora_gpu.py)")
 MIN_EXAMPLES, FEW_EXAMPLES = 8, 100
 _state_lock = threading.Lock()
 _warned = [False]
