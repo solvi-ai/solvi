@@ -125,7 +125,7 @@ def _guarantee(au):
         return None
     got = sorted({f"{x['guarantee']['promise']} ({x['guarantee']['method']}, n = {x['guarantee']['n']})"
                   for x in xs if isinstance(x.get("guarantee"), dict)})
-    if len(got) < len(xs):
+    if any(not isinstance(x.get("guarantee"), dict) for x in xs):     # two decisions may share one promise
         got.append("none for some decisions: their thresholds were not calibrated on your data (see act_guard)")
     return "; ".join(got)
 

@@ -68,9 +68,9 @@ def texts(lang=None):
 
 
 def sha(text):
-    # a fast head's fingerprint hashes its float weights, whose last bits differ between numpy builds (the text around it
-    # is what this checks): masked before hashing
-    text = re.sub(r"(FastHead #)[0-9a-f]+", r"\1…", text)
+    # a fast head's fingerprint hashes its float weights, and a decision part's its calibrated threshold (a probability);
+    # their last bits differ between numpy builds (the text around them is what this checks): masked before hashing
+    text = re.sub(r"(FastHead #|DecisionPart \S+ #)[0-9a-f]+", r"\1…", text)
     return hashlib.sha256(text.encode()).hexdigest()
 
 

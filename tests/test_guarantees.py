@@ -138,6 +138,16 @@ def test_a_near_tie_escalates_with_min_margin():
     assert not part(email="I was charged twice, please refund order 3.").escalate
 
 
+def test_a_near_tie_is_a_low_confidence_safeguard_in_the_audit():
+    from solvi import Catalog, System
+    part = model().decision("team", "Which team?", "email", TEAMS, min_margin=0.2)
+    cat = Catalog()
+    q = part.question(cat)
+    res = System(cat, [q]).ask({"email": "The app crashed after the refund of order 7."})
+    assert res["team"].status == "abstain" and res["team"].guard == "low_confidence"
+    assert [e["kind"] for e in res.safeguards] == ["low_confidence"] and "margin" in res.safeguards[0]["detail"]
+
+
 def test_act_guard_reports_how_much_must_escalate_when_the_model_is_often_wrong():
     part = model(noise=2.0).decision("team", "Which team?", "email", TEAMS)
     info = part.act_guard(_labelled(), risk=0.05)
@@ -161,6 +171,25 @@ def test_the_audit_says_what_the_thresholds_behind_an_answer_promise():
     part.act_guard(_labelled(), risk=0.10)
     txt = str(s.ask(email).audit("route"))
     assert "guarantee   P(answered alone and wrong) ≤ 0.1" in txt and "(crc, n = 240)" in txt
+
+
+def test_two_decisions_with_the_same_promise_are_not_reported_as_uncalibrated():
+    from solvi import Answer, Catalog, Question, System
+    m = model(noise=2.0)
+    a = m.decision("team", "Which team?", "email", TEAMS)
+    b = m.decision("team_again", "Which team handles it?", "email", TEAMS)
+    for part in (a, b):
+        part.act_guard(_labelled(), risk=0.10)
+    cat = Catalog()
+    cat.fn(a)
+    cat.fn(b)
+
+    @cat.rule("route")
+    def route(team, team_again):
+        return team
+    s = System(cat, [Question("route", "Route", Answer.choice(TEAMS))])
+    txt = str(s.ask({"email": "I was charged twice, please refund order 3."}).audit("route"))
+    assert "(crc, n = 240)" in txt and "none for some decisions" not in txt
 
 
 def test_by_default_the_callers_order_neither_changes_the_answer_nor_how_it_is_shown():

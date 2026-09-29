@@ -29,8 +29,8 @@ Tabs:
   `System.stats`), the planned flow (and what was not taken), `computed_state` with provenance, the trace replay, and what
   happens when you tamper with the trace or replace a model after the decision. Presets: two for solvi 0.5 (typed facts
   checked by pydantic; answer primitives — "not stated", a span, evidence quotes, a ranking, an estimate), three for 0.4 (a
-  lying model caught by grounding, rules between answers, multi-label + ordinal), nine small tasks and the twelve gallery
-  tasks. The
+  lying model caught by grounding, rules between answers, multi-label + ordinal), nine small tasks and the fifteen gallery
+  tasks (13–15: helpers for coding agents, with keyword stand-ins for the deciders). The
   System is kept while the code is unchanged, so `setup` (e.g. `fit_fast`) runs once and the stats accumulate. The code runs in-process (`sandbox.py`: `exec` in a fresh
   module) with a 5 s time guard (`sys.settrace` on the visitor's own frames), so an infinite loop is stopped.
 - **New in 0.7**: small live demos, with keyword stand-ins in place of models and a scripted agent (no model runs in

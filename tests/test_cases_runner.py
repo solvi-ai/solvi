@@ -68,10 +68,10 @@ def _write(tmp_path, cases=CASES, name="cases.json", task=TASK):
 
 def test_gallery_cases_pass():
     files = testing.run_path(ROOT / "gallery")
-    assert len(files) == 12 and all(f.error is None for f in files)
+    assert len(files) == 15 and all(f.error is None for f in files)
     bad = [(f.path.parent.name, c.name, c.problems) for f in files for c in f.cases if not c.ok]
     assert not bad
-    assert sum(len(f.cases) for f in files) >= 117
+    assert sum(len(f.cases) for f in files) >= 163
 
 
 def test_a_passing_file(tmp_path):

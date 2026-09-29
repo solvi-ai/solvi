@@ -50,7 +50,7 @@ def classify(reason):
         return "type_rejected"
     if OUTSIDE_OPTIONS in reason:
         return "outside_options"
-    if reason.startswith("confidence ") and "<" in reason:
+    if reason.startswith(("confidence ", "margin ")) and "<" in reason:     # min_margin: a near tie is unsure too
         return "low_confidence"
     if reason.startswith((VALIDATE, "validate raised")):
         return "validator"

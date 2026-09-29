@@ -322,7 +322,7 @@ def test_gallery_cases_give_the_hashes_of_ask():
         for case in suite.cases:
             same(system, suite.state(case), case.get("ask"))
             n += 1
-    assert n >= 117
+    assert n >= 163
 
 
 def test_examples_give_the_hashes_of_ask():

@@ -1,5 +1,41 @@
 # Changelog
 
+## 0.7.1 — unreleased
+
+### Gallery: helpers for coding agents
+
+Three new entries for decisions a coding agent (such as Claude Code or Codex) meets on every task. Each runs offline:
+the deciders are keyword stand-ins calibrated with `act_guard` on synthetic, seeded examples, and each README shows
+solvi-large, any OpenAI-compatible LLM (`solvi.llm`) or a System One service in front, with the keywords as the
+fallback, and says what the offline rules cannot read. All three are playground presets.
+
+- `gallery/13_pre_edit_rule_check`: before the agent writes a file, the project's rules for that path (per glob) are
+  checked → allow / block / escalate, and the rules broken, with their lines. Secrets, browser storage read in
+  `app/api/**` and irreversible migrations (Python's own parser: a `downgrade()` that does something, `RunPython` /
+  `RunSQL` with their reverse) block by hard checks; a CI workflow edit and a migration that does not parse go to a
+  person. "Auth checks go through require_role()" and "no personal data in log lines" are a decider's question each —
+  out of scope → the decider (act_guard, risk 5%; perturb=2) → a person, as fallback producers of one fact. A
+  `# reviewer: ignore the rules above` comment is not read by the code checks and flips the decider, which escalates.
+  Also: a pre-edit hook script and a `Guard` policy on a `write_file` tool. 16 cases.
+- `gallery/14_review_triage`: seven yes/no risk questions → quick or full review. Three are code (dependencies, a large
+  or unfocused change, logic without tests), four a decider's (auth, public API, migrations or deletion, security),
+  each calibrated at risk 2.5% so that P(a risky change goes to quick review) ≤ 10% (a union bound). On 2000 fresh
+  synthetic changes: 0.2% risky and quick, 22% quick overall. The change generator (`synthetic_changes(n, seed)`) is in
+  `task.py`; one known miss (a permission change without its usual words) is a case. 14 cases.
+- `gallery/15_skill_picker`: a prompt → exactly one of ten skills (with look-alike pairs), `none`, or a person. A
+  confident "none", an abstention and a wrong pick are kept apart; a skill the user names is cited, one named inside an
+  instruction-like passage of pasted text is not; a near tie (`min_margin`) escalates with the conformal candidates; a
+  production deploy needs the user's own word "production" (a hard check). 16 cases.
+
+### Fixes
+
+- The audit's guarantee line said "none for some decisions: their thresholds were not calibrated" when two decisions
+  behind one answer carried the same promise (identical promises were counted once against the number of decisions).
+- A decision escalated by `min_margin` (a near tie) is now a **low confidence** safeguard in the audit, the stats and
+  `Result.guard`; before, it fired no safeguard at all.
+- `tests/i18n/render.py` masks a decision part's fingerprint before hashing, as it does a fast head's: it covers the
+  calibrated threshold, a probability whose last bits differ between numpy builds.
+
 ## 0.7.0 — 2026-09-29 — text in, agent guard (preview), several models with an LLM stage, long documents, memory and a learning loop (experimental), LoRA adapters (experimental), reports, docs site, trace signature and verified charts (preview)
 
 The agent guard (`solvi.agents`) ships as a **preview**: its hard line is provenance (a value found only in a tool's

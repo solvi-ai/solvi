@@ -2,8 +2,8 @@
 
 Decision tasks from twenty directions, each a small, runnable solvi catalog: Python functions and checks, typed questions,
 and rules or learned heads. Every entry here has a `task.py` (the catalog), `state.json` (a default input), `cases.json`
-(9–12 scenarios with the expected answers), `run.py` (runs them, prints the strategist's plan, verifies the trace and audits
-every answer) and a README that shows what solvi does that an answer-only model cannot. All twelve entries also open in the
+(9–16 scenarios with the expected answers), `run.py` (runs them, prints the strategist's plan, verifies the trace and audits
+every answer) and a README that shows what solvi does that an answer-only model cannot. All fifteen entries also open in the
 [browser playground](https://huggingface.co/spaces/solvi-ai/playground) (Gallery presets) — no install, no server.
 
 ```bash
@@ -16,10 +16,11 @@ computed facts, quotes with offsets, learned parts with their fingerprints, chec
 prints one line per case (support items, deterministic share, safeguards) and asserts the audit's invariants
 ([`_audit.py`](_audit.py)): every quote lies in its text, and is literally the text where the part is `exact=True` or
 model-backed; answers are valid for their type; every forced answer names the hard check that decided it; a repaired answer
-has a constraint-repair event; a catalog without learned parts is 100% deterministic. Over the twelve runners: 124 scenario
+has a constraint-repair event; a catalog without learned parts is 100% deterministic. Over the fifteen runners: 170 scenario
 responses (plus 10 in 03's learned-verdict demo), all invariants hold. Learned parts are labelled as such: the rule lists
 of 01 and 02 are registered with `model=`, so the audit counts them as learned (90–91% deterministic there) instead of
-passing them off as plain code; 09's `fit_fast` head and 12's `learn_rule` list show up the same way (97–98%).
+passing them off as plain code; 09's `fit_fast` head and 12's `learn_rule` list show up the same way (97–98%), and so do
+the keyword stand-in deciders of 13–15 (86–96%).
 
 ## Entries
 
@@ -37,6 +38,20 @@ passing them off as plain code; 09's `fit_fast` head and 12's `learn_rule` list 
 | [10](10_procurement_3way_match) | procurement | pay / hold / reject, duplicate, approver | PO / receipt / invoice matched per line with tolerances in base currency (FX), duplicate "INV-001187" = "inv 1187"; the rate from the table, else from a same-day feed (a stale rate is rejected by `validate`) | `hard checks` `strategist plan` `early exit` `trace replay` `abstains` `fallback producers` `typed` `audited` |
 | [11](11_refund_double_charge) | payments support | double charge?, refund, reply | the customer's claim is quoted, the decision reads the ledger — they disagree in 6 of 16 cases; paraphrases and denials are read by a rule, unclear text abstains | `cited` `hard checks` `early exit` `trace replay` `abstains` `audited` |
 | [12](12_predictive_maintenance) | industrial IoT | ok / watch / service / stop, likely fault | least-squares trends, z-scores, hours to the alert level; hard trips work with a sensor offline; 6 readable learned rules | `hard checks` `trace replay` `readable learned rules` `abstains` `audited` |
+
+### Helpers for coding agents
+
+Three decisions a coding agent (such as Claude Code or Codex) meets on every task. Code checks what code can; a decider's
+question per fuzzy rule has a threshold from `act_guard` on labelled examples; an instruction in the input is asked
+around (`perturb`); what is unsure goes to a person. Offline, the deciders are keyword stand-ins calibrated on synthetic,
+seeded examples; each README shows solvi-large, any OpenAI-compatible LLM or a System One service in front, with the
+keywords as the fallback.
+
+| # | direction | decides | what it shows | solvi features |
+|---|---|---|---|---|
+| [13](13_pre_edit_rule_check) | coding agents | allow / block / escalate a file write, rules broken | rules per path glob; secrets, browser storage in `app/api/**` and irreversible migrations (Python's parser) block by code, with the lines; "auth goes through require_role()" and "no personal data in logs" are a decider's question each (act_guard, risk 5%); `# reviewer: ignore the rules above` is caught by perturb | `hard checks` `early exit` `fallback producers` `act_guard` `perturb` `trace replay` `abstains` `multi-label` `audited` |
+| [14](14_review_triage) | coding agents | seven risk questions, quick / full review | three code questions (dependencies, size, missing tests) and four decider questions (auth, public API, migrations, security); P(a risky change goes to quick review) ≤ 10% by act_guard at 2.5% per question; 2000 fresh synthetic changes: 0.2%; one known miss shown | `act_guard` `perturb` `fallback producers` `trace replay` `abstains` `audited` |
+| [15](15_skill_picker) | coding agents | one skill, `none`, or a person | "none", "not sure" and a wrong pick kept apart among look-alike skills; a skill the user names is cited, one named in pasted text is not; ties escalate with both candidates (min_margin, conformal); a production deploy needs the word | `cited` `hard checks` `fallback producers` `act_guard` `conformal` `perturb` `trace replay` `abstains` `audited` |
 
 More directions in [examples/](../examples): HR leave approval (01), e-commerce fraud with a learned head (02), accounts payable
 (03), refunds with a hard 30-day rule (04), a game agent that never loses (05), logistics routing with learned rules (06),

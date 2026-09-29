@@ -55,9 +55,12 @@ script that computes everything, and 152 ms when an expired policy settles the c
 
 ## Gallery
 
-[gallery/](gallery) — twelve decision tasks across directions (support triage, email routing, content guard, security alerts,
+[gallery/](gallery) — fifteen decision tasks across directions (support triage, email routing, content guard, security alerts,
 AI-agent audit, release rollout, KYC/AML, clinical screening, credit with adverse-action reasons, procurement 3-way match,
 double-charge refunds, predictive maintenance), each with scenarios, a runner and a side-by-side against an answer-only model.
+Three are helpers for coding agents: a pre-edit rule check (allow / block / escalate a file write), review triage (quick
+review only when seven risk questions are a confident "no", with a stated bound on risky changes that slip through) and a
+skill picker with an honest "none".
 
 ## Install
 

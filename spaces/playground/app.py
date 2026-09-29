@@ -63,6 +63,9 @@ PRESET_TITLES = {
     "g10_procurement_3way_match": 'Gallery · 10 · Procurement: 3-way match',
     "g11_refund_double_charge": 'Gallery · 11 · "I was charged twice": refund from the ledger, not from the ticket',
     "g12_predictive_maintenance": 'Gallery · 12 · Predictive maintenance',
+    "g13_pre_edit_rule_check": 'Gallery · 13 · Pre-edit rule check for a coding agent',
+    "g14_review_triage": 'Gallery · 14 · Review triage: quick review only for a confident "no" to every risk',
+    "g15_skill_picker": 'Gallery · 15 · Skill picker with an honest "none"',
 }
 PRESETS = {}
 for stem, title in PRESET_TITLES.items():
