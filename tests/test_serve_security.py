@@ -73,8 +73,11 @@ def test_request_size_and_depth_are_limited():
         deep = {"a": deep}
     r = c.post("/ask/team", json=deep)
     assert r.status_code == 400 and "deeper than 8" in r.json()["detail"]
-    hostile = c.post("/ask/team", content=b"[" * 1500, headers={"content-type": "application/json"})
+    hostile = c.post("/ask/team", content=b"[" * 900 + b"]" * 900, headers={"content-type": "application/json"})
     assert hostile.status_code == 400                                             # no RecursionError, no 500
+    # unterminated: refused as deep (400) or as invalid JSON (422, the framework's own check) — never a 500
+    cut = c.post("/ask/team", content=b"[" * 1500, headers={"content-type": "application/json"})
+    assert cut.status_code in (400, 422)
     assert c.post("/ask/team", content=b"{not json", headers={"content-type": "application/json"}).status_code == 422
     assert too_deep([[[1]]], 2) and not too_deep([[[1]]], 3) and not too_deep({"a": 1, "b": [1, 2]}, 2)
 

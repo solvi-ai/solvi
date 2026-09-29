@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import contextlib
 import hashlib
+import re
 import io
 import json
 import runpy
@@ -67,6 +68,9 @@ def texts(lang=None):
 
 
 def sha(text):
+    # a fast head's fingerprint hashes its float weights, whose last bits differ between numpy builds (the text around it
+    # is what this checks): masked before hashing
+    text = re.sub(r"(FastHead #)[0-9a-f]+", r"\1…", text)
     return hashlib.sha256(text.encode()).hexdigest()
 
 
