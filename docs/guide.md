@@ -1085,7 +1085,7 @@ rest of the checkpoint frozen. **Which one to use:**
 |---|---|
 | fewer than ~100 | `part.fit` (milliseconds; for a question without a model, `system.fit_fast` or `system.fit`) |
 | ~100 or more, solvi-base | `part.adapt_lora`, with `act_guard` on ~300 other labels |
-| solvi-large, or thousands of examples | `tools/adapt_lora_gpu.py` on a GPU, then `part.load_lora(path)` |
+| solvi-large, or thousands of examples | [`tools/adapt_lora_gpu.py`](../tools/adapt_lora_gpu.py) from the repository (not installed by pip) on a GPU, then `part.load_lora(path)` |
 
 What we measured on solvi-base (typed decisions of four processes; the same examples for both; 500 test answers per
 process):
@@ -2084,17 +2084,19 @@ have said.
 
 **What is checked, in order.** Each tool is a small solvi System with one question, `verdict`, whose catalog holds the
 checks below as hard checks with `then={"verdict": "deny" | "escalate"}`. When several fail, the first in this order
-decides (so a deny wins over an escalation), and every failed one is in `reasons`:
+decides — every deny check comes before every escalate check, so a deny always wins over an escalation — and every
+failed one is in `reasons`:
 
 | Check | Fails when | Outcome |
 |---|---|---|
 | the tool is in the catalog | the agent names a tool the guard does not declare | deny |
 | `arguments_valid` | the arguments do not validate against the tool's types (pydantic, lax: `"250"` is 250.0; NaN and infinities are refused); an unknown argument is an error; a string (or a key) holding invisible format characters — Unicode Cf: zero-width spaces and joiners, soft hyphens, direction marks, tag characters U+E0000–E007F — is refused ("invisible characters in argument iban (U+200B)"): grounding reads text without them, so the value checked would not be the value executed. An emoji written with a zero-width joiner is refused too | deny |
 | `arguments_grounded` | a `ground=` argument is not literally in the conversation — a string as a token (not inside a longer word or address: "DE8937" is not found in "DE89370400…", "bob@x.org" not in "bob@x.org.evil"), a number as a number token (`250` matches "250.00", `1250.5` matches "1,250.50"; not a part of a longer identifier), a list item by item, an empty or whitespace-only string never — in a message of a role in `ground_from` (default user, tool and system: never the assistant's own words; `("user",)` for values only the user may give) | deny |
+| your deny policies | a `@guard.policy` (`on_fail="deny"`, the default) returns False; its docstring's first line is the reason | deny |
 | `arguments_from_user` | only for tools with `tool_values="escalate"` (the middle mode, below): a user-only argument is not in the user's words but is in a tool output | escalate |
 | `no_injected_arguments` | a grounded argument is found only in tool outputs, and a tool output in the conversation — that one or any other — carries instruction-like text (`solvi.perturb.injection_spans`, below) | escalate |
 | `no_instructions_in_tool_outputs` | tools declared with `injections="any"`: any tool output in the conversation carries instruction-like text | escalate |
-| your policies | a `@guard.policy` returns False — deny policies first, then escalate policies; its docstring's first line is the reason | deny / escalate |
+| your escalate policies | a `@guard.policy(..., on_fail="escalate")` (and `require_request` with its default) returns False | escalate |
 | `request_authorizes` | the authorizer says the conversation does not authorize the call, or it escalates (unsure, its act_guard threshold, perturb) | escalate |
 
 The rule `verdict` then answers `allow`, with each grounded argument's quote as its evidence — offsets into the

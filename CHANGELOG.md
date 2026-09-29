@@ -1,161 +1,67 @@
 # Changelog
 
-## 0.7.0 — 2026-09-29 — text in, agent guard (preview), several models with an LLM stage, memory and a learning loop (experimental), reports, docs site, trace signature and verified charts (preview)
+## 0.7.0 — 2026-09-29 — text in, agent guard (preview), several models with an LLM stage, long documents, memory and a learning loop (experimental), LoRA adapters (experimental), reports, docs site, trace signature and verified charts (preview)
 
 The agent guard (`solvi.agents`) ships as a **preview**: its hard line is provenance (a value found only in a tool's
 output never grounds an argument that must come from the user) and your policies; detecting injected instructions in
-text is a heuristic second line. `System.learning` is experimental and off unless you call it. Three code reviews and
-three adversarial passes ran before this release; their fixes are listed under "Fixes before release".
+text is a heuristic second line. `System.learning` is experimental and off unless you call it; `part.adapt_lora` is
+experimental too. Three code reviews and three adversarial passes ran before this release; their fixes are listed under
+"Fixes before release".
 
-### Reading long documents whole: `long="full"`
+### Text in: entry points
 
-- **`long="full"`** for deciders trained on long inputs: a text that does not fit `max_len` is read whole, in one pass
-  of up to the checkpoint's long-input length; a longer text falls back to retrieve within that length. The decision's
-  `extra["long"]` records it — `{"mode": "full", "tokens", "max_len"}`, plus `"fallback": "retrieve"` and the sections
-  read when the text was longer — in the trace and the audit ("read whole (5234 tokens, up to 8192)"); span answers and
-  evidence quotes point into the whole text. The mode, the length and `top_k` are part of the decision's fingerprint;
-  a full replay re-reads and re-checks.
-- **A checkpoint declares it**: `"max_len_long": 8192` in `solvi_decide.json` (`max_len` stays the ordinary pass;
-  docs/decide_format.md). A checkpoint without it refuses `long="full"` and points to `long="retrieve"`;
-  `DecideModel.load(path, max_len_long=N)` forces a length, with a `LongInputWarning` that the model was not trained
-  on inputs that long (solvi-large read 4–8k-token documents whole no better than retrieve, 74% vs 73%, and quoted
-  the right passage less often, 35% vs 50%). `m.long_len`, `m.long_declared`.
-- **A GPU mode.** On a CPU a whole 4k-token text costs about 12× a 512-token pass and an 8k one about 31× (about 1.6 s
-  and 4 s per question on a 4-thread laptop CPU); `long="full"` warns once per model when it reads a text over 2k tokens
-  on a CPU. For a model trained on long inputs, `long="retrieve"` with `max_len=2048` matched reading whole on 4–8k-token
-  documents (85% both, against 78% at `max_len` 512) at about 3× a 512-token pass. The published deciders read 512
-  tokens and declare no long-input length yet.
-- **`top_k=None` is now the default**: sections of about 170 tokens, budget / 170 and at least 3 — 3 at `max_len` 512
-  (as before, the same fingerprint), 6 at 1024, 12 at 2048. More sections of the same size beat larger sections when
-  the budget grows. An explicit `top_k` wins.
-- Works with the torch and ONNX backends (the ONNX export has a dynamic sequence length). `part.adapt_lora` refuses a
-  `long="full"` decision (adapters train on ordinary passes). Tests: `tests/test_long_full.py`, a tiny checkpoint with
-  a real tokenizer and a pointer (whole reads, the fallback, quote offsets, refusal and warnings, fingerprint and replay,
-  ONNX).
+- `system.entry_points(names=None)`: the questions as entry points — name, text and the typed input fields each one reads
+  (type, description, required), from the same schemas as `solvi serve`; `ep.tool()` is the function-calling form.
+- `solvi.textin.TextIn(system, decider, extractor=None, ...)`: `read(text)` → a `TextRead` — the entry point the decider
+  picks (a choice over the entry points and their descriptions; escalates below `min_confidence=0.6`, on a near tie
+  `min_margin=0.1` or on the decider's act signal), and each input field read by span extraction with a quote and a
+  deterministic parser per type: numbers ("1,500.50", "1.5 million", "2k", "полтора миллиона"), dates ("2026-09-12",
+  "12.09.2026", "12 September", "12 сентября"; year-less and relative dates only with `today=`), enums by label or
+  synonym, booleans, strings (with `patterns=`). A field is `read`, `not_stated`, `unparsed`, `unsure` or `unsupported`;
+  required fields not read are in `read.missing`, and `read.clarify()` asks for them — nothing is guessed.
+- Extractors: the decider's span pointer (`DeciderExtractor`, when the checkpoint has one) or `CueExtractor` (deterministic
+  candidates of the field's type nearest after a cue word); any object with `find(text, FieldSpec) → [Quote]`.
+- `system.ask_text(text | TextRead, decider=None, *, textin=None, question=None)` (and `aask_text`): TextIn + ask in one
+  trace. The text is a given fact (`request_text`); the entry point (`textin`, provenance `decided`) and each field
+  (`textin:<field>`, provenance `quoted`, with the extractor's fingerprint, the parser and its arguments) are hash-chained
+  records. The audit shows the fields as quoted by a model — never given, not in the deterministic share — and an answer's
+  confidence is at most the reading's. Replay re-checks each quote, re-parses it and checks the flow read that value. An
+  escalated entry point runs nothing: the likely questions abstain with guard `escalated`. `res.textin` is the TextRead.
+- A dialogue: `tin.update(read, next_message)` reads the next turn over the whole dialogue and lists `changes` (old value,
+  new value, quote); "not A-10457 but A-10475" changes the field to the new value.
 
-### Fixes before release (long documents)
+### Guarding an agent's tool calls
 
-- **`long="retrieve"` crashed on every text longer than the checkpoint's `max_len`** with a real tokenizer ("Truncation
-  error: Second sequence not provided"): `DecideModel.count_tokens` counted with the encoder's truncating tokenizer. It
-  now counts with the untruncated one. The tests used models without a tokenizer and missed it; a new test builds a tiny
-  checkpoint with a real tokenizer and reads a text longer than its `max_len`. The guide now says what a larger budget
-  (`max_len`, `top_k`) costs and gains.
-
-### Which record changed: `solvi.signature` (preview)
-
-- **A signature of a trace or a store** — two numbers, 64 bytes (`{"alg": "syndrome", "count", "root"}`, plain JSON) to
-  keep next to the head. The hash chain says a store was rewritten; the signature says which record and what its content
-  hash was: `store.signature()`, `store.verify(signature=sig, candidates=backup_records)`, `solvi verify decisions.db
-  --signature sig.json` (and `--sign sig.json` to write one; a store that does not verify is never signed),
-  `res.signature()` for one response's trace, and `solvi.signature.sign / check / locate / repair / extend` for any list
-  of items.
-- How (the default, `alg="syndrome"`): over the records' content hashes h_i (the chain fields left out), S0 = Σ h_i and
-  S1 = Σ (i+1)·h_i mod a 256-bit prime. One change at k by d moves them by d and (k+1)·d: k and the whole original hash
-  follow. `alg="octonion"` (a positional octonion product, 32 floats) is kept as the variant for future tree-shaped
-  (derivation) signatures, where its non-associativity sees a change of brackets; on a flat store it locates the same,
-  4x larger and ~10x slower — not recommended there. A signature carries its "alg"; check / locate / repair / extend
-  and `solvi verify --signature` read it from there (`--sign --alg octonion` writes the other one).
-- Measured (`benchmarks/trace_signature.py`, stores of 2–500 records, both codes): one edited record located and its
-  content hash restored in 2000 of 2000, 0 wrong; two or three edited records detected in 1500 of 1500 and never
-  located at a wrong record (`NotLocatable`). A reorder, a deletion or an insertion in the middle: detected, not located;
-  records appended after signing are not covered (`extend(sig, new)` updates it). Sign / locate with the default: 1.3 /
-  1.4 ms for 1000 records, 13 / 14 ms for 10 000 (octonion: 13 / 16 ms, 175 / 149 ms).
-- It is an error-locating code, not a MAC: keep the signature where you keep the head.
-
-### Verified charts: the first specialist (preview)
-
-- **`solvi.specialist`**: one contract for "a model proposes, code checks, code renders". A proposer writes a typed spec
-  (pydantic), never the result; `check` verifies it against the source and returns what passed plus an `Issue` per
-  problem (dropped / changed / warning / blocked, a stable code, a message, the path in the spec); `render` builds the
-  result from the verified spec only; every step goes into a hash chain (the source's hash, the proposal, the check,
-  the output's hash). `replay(record, source)` re-checks the recorded proposal and re-renders it: the same issues and
-  identical bytes, or what differs (an edited record, another source, another version). A failing proposer or an
-  invalid proposal is a blocked run with its reason, not an exception.
-- **`solvi.charts`**: a text (a report, a press release) and an optional question → a chart in which every number is
-  quoted from the text. `ChartSpec`: `bar` / `line` / `pie`, a title, a unit, a scale, series of labelled values, each
-  with its quote, an optional stated total. The checker reads the number at each quote (thousands separators,
-  decimals, "$4.2 billion", "15%", "1 500 000 руб."; an ambiguous "1.000", "3 100" or "5 m" is refused) and drops a
-  value with no quote, a quote not in the text, another number, a wrong scale, a wrong unit (percent vs percentage
-  points vs a plain number vs a currency; a word unit must follow the number), a number drawn twice, a label with a
-  number not in the text; it refuses a pie that is not shares of one whole (not adding up to 100% or to the stated
-  total, or a slice that did not verify) and a line with fewer than two points (drawn as bars), and warns when values
-  do not add up to a stated total. Proposers: `RuleProposer` (no model), `LLMProposer` (any OpenAI-compatible server,
-  standard-library HTTP), `FixedProposer`, or any callable.
-- **The SVG renderer**: deterministic, no dependencies; the only numbers drawn are the verified values (direct labels,
-  no numeric axis); a value that did not verify is marked `n/v`; `<title>` / `<desc>` with every value as text, text at
-  12 px or more, colours checked for contrast; a layout solver wraps titles and labels, turns bars horizontal when
-  labels do not fit, places line labels clear of other labels, points and the line, and pushes pie labels apart.
-- `examples/21_verified_chart.py`, a guide chapter, API pages for `solvi.specialist` and `solvi.charts`; sample SVGs in
-  `docs/images/charts/`.
-
-### Fixes before release (gallery 11, "I was charged twice")
-
-- The claim reader was one regular expression for fixed phrases: it missed paraphrases ("billed me two times", "the same
-  payment went through again") and read "I was NOT charged twice" as a claim. It is now a rule over clauses with four
-  outcomes (claimed / denied / unclear / not mentioned): a money word and a "twice" word in one clause, a negation just
-  before it makes a denial, a hedge or a yes/no question makes it unclear, and unclear abstains instead of guessing. The
-  ledger decisions are unchanged. Seven new cases (16 in all); the README lists what the rule still misreads, measured on
-  80 messages it was not written on, and shows an LLM decider as the first producer with the rule as its fallback.
-
-### Several models with an LLM: an optional rank scale, an LTT grid from the data
-
-- **`act_guard(..., scale="rank")` on `Cascade` / `Vote` / `Route`, opt-in.** Before the shared threshold, each part's
-  signal is replaced by its rank among that part's own signals on the calibration examples
-  (`searchsorted(sorted_calibration, s, "right") / n`). On raw signals, one threshold effectively fits one model when
-  their scales differ — an act probability spread over [0, 1] against an LLM's confidence near 1 — and the combination
-  behaves like that model alone. Measured on a cascade of solvi-large and an LLM over three data sets (risk ≤ 10% in
-  every mode), the rank helped on one (33.7% → 44.8% answered alone; the first stage never answered on the raw scale)
-  and hurt on two (45.8% → 41.3%, 96.7% → 79.1%); votes unchanged. Compare both on held-out calibration data. The
-  rank reads the calibration inputs, not their labels. The sorted calibration signals of each part (at most 1024,
-  evenly spaced by order beyond that) are kept in the combination, its fingerprint and its calibration file (`"scale"`,
-  `"ranks"`); `guarantee["signal"]` reads "shared threshold on each model's rank among the calibration examples"; the
-  result has `"scale"`.
-- `scale="raw"` stays the default and is the previous behaviour, exactly: the same thresholds, decisions and
-  fingerprints. A calibration file without `"scale"` (written before 0.7) loads on the raw scale.
-- `act_guard` on a `Cascade` adds `"warnings"` when a stage answers alone on less than 5% of the calibration questions:
-  the cascade is then no better than a single model; on the raw scale the warning suggests trying `scale="rank"`.
-  `solvi calibrate` prints them.
-- **`calibration.ltt_threshold(grid=None)`**, and so `calibrate_for(method="ltt")` and `solvi calibrate --method ltt`:
-  the default grid is now at most 64 quantiles of the distinct calibration scores (`calibration.ltt_grid`), not
-  `linspace(0.2, 0.995, 32)`. The grid reads the scores only, never the labels, so the promise holds; the Bonferroni
-  correction is over the grid's size. The old grid let nothing through for an LLM decider whose confidences sit above
-  0.999. **Behaviour change:** the same examples can give another LTT threshold than in 0.6; an explicit `grid=` is
-  unchanged.
-- The LLM decider's confidence is unchanged (no new transform): a threshold taken from the distinct values of the
-  signal, as `act_guard` does, separates confidences packed near 1 as they are.
-- Guide: with an LLM, start with the LLM alone under `act_guard`, or a vote of solvi-large and the LLM where the two
-  are about equally strong; "a small model first, the LLM second" is not a default — the stages' mistakes did not
-  complement each other by confidence, and a cascade with a threshold per stage came out 1–2 points below the better
-  model alone.
-
-### A LoRA adapter per question: `part.adapt_lora` (experimental)
-
-- **`part.adapt_lora(examples, r=8, epochs=6, holdout=None, seed=0, device=None, lr=3e-4, risk=0.10)`** trains a small
-  LoRA adapter (rank 8 on the attention and MLP weights of every encoder layer, plus the output head's last layer) on one
-  decision's labelled examples, for solvi-base with the torch backend and `pip install "solvi[lora]"` (peft, imported
-  only when used). `fit` levels off beyond about a hundred examples because it only moves the logits; the adapter keeps
-  improving. Measured on solvi-base (typed decisions of four processes, the same examples for both): 62.0 / 65.2 / 68.7 /
-  72.6% against `fit`'s 59.1 / 60.9 / 62.7 / 63.4% at 32 / 100 / 300 / 1000 examples per process; the adapter is 3.2 MB.
-  On single short texts with 32–64 labelled rows the gain was within noise. So: `fit` (or `fit_fast` for questions
-  without a model) below ~100 examples, `adapt_lora` from ~100 on solvi-base.
-- **Calibration is part of the call.** After LoRA the confidences are overconfident (calibration error 1.5–3× that of
-  `fit`); `holdout=` (a list, a share or a number of the examples) runs `act_guard` on labels not used for training and
-  reports the held-out accuracy before and after — in the measurement the risk held at 0.10 and the adapter answered alone
-  53% of the time against 45% for `fit` at 300 examples. Without a holdout a `solvi.lora.LoraWarning` says escalation is
-  not calibrated. The question's earlier adaptation and thresholds are cleared when an adapter is set.
-- **Time.** Minutes on a CPU (about 4 at 100 examples and 13 at 300 on 4 server cores; a laptop is slower): one update is
-  timed on your machine and the estimate reported before training; a warning below 100 examples. Deterministic for a
-  seed on a CPU.
-- **Identity and rollback.** The adapter is active only while its own question is scored (other questions of the model
-  answer exactly as before); its hash is in the part's and the model's fingerprint and in every decision's
-  `extra["lora"]`. `part.save_lora` / `load_lora` (a `.safetensors` file refused for another question or checkpoint),
-  `save_calibration` writes the adapter next to the calibration file and `load_calibration` loads it first;
-  `part.remove_lora()` restores the checkpoint's answers to the bit and the part's earlier adaptation and thresholds.
-- **Scope.** Refused, with what to do instead, for solvi-large and larger (`tools/adapt_lora_gpu.py` trains the same
-  adapter on a GPU; `load_lora` loads it anywhere), for ONNX (load with `backend="torch"`), LLM and rule deciders, and for
-  rank / number / span questions. Experimental: warns `ExperimentalWarning` on first use; the API, recipe and file format
-  may change. Guide: "A LoRA adapter per question"; API page `solvi.lora`; tests on a tiny random decider
-  (`uv sync --group lora`; skipped without torch and peft).
+- `solvi.agents.Guard`: an agent proposes a tool call (`{"name", "arguments"}` — data, never code; OpenAI, LangChain,
+  Anthropic and MCP shapes are read by `ToolCall.parse`) and solvi checks it as a proposal: the tool is in the catalog
+  (`@guard.tool` on typed functions, `guard.declare(name, schema=...)` for a pydantic model or a JSON schema), the
+  arguments validate against its types (unknown arguments are errors), the `ground=` arguments are quoted from the
+  conversation (strings literally, numbers as number tokens, lists item by item; `ground_from=` the roles allowed — never
+  the assistant's own words), not only from a tool output that carries instruction-like text (solvi.perturb's rules;
+  `injections="any"`: any such tool output escalates the call), your policies (`@guard.policy(tools, on_fail="deny" |
+  "escalate")`: ordinary solvi hard checks over the arguments and the facts your app gives; `@guard.fn` for computations
+  they read) and, optionally, an authorizer — a decider's yes / no "does the conversation authorize this call?"
+  (`guard.make_authorizer(decider)`, perturb=2, `guard.calibrate_authorizer(examples, risk=0.10)` = act_guard).
+- The outcome: `allow` (solvi runs the registered function: `d.result`, or `d.error` when it raised), `deny` or
+  `escalate`, with the reasons in words (`d.reasons`, `d.message()` for the model), the candidate call and the evidence
+  (where each grounded argument is quoted). A failed deny check wins over a failed escalate check; an abstention (a fact
+  not given, an unsure authorizer) is an escalation. `guard.resolve(d, approve, reviewer)` records a person's answer and
+  makes an approved call. `guard.session(context, facts)` follows a conversation and feeds tool outputs back into it.
+- Each tool is a solvi System with one question, `verdict`: every decision is a full response — trace, audit, stored with
+  `meta["guard"]` (outcome, reasons, executed, the result's hash or the error) in a TraceStorage; `guard.replay(id)`,
+  `guard.replay_all()`; the same call in the same conversation gives the same trace. `guard.check` / `acheck` decide
+  without running anything; `acall` awaits async tools and policies.
+- Adapters (each imports its framework only when used): `solvi.agents.pydantic_ai.GuardedToolset` (a WrapperToolset:
+  deny → ModelRetry, escalate → ApprovalRequired and deferred approval), `solvi.agents.langgraph.guarded_tool_node` (a
+  ToolNode with wrap_tool_call: deny → an error ToolMessage, escalate → interrupt / Command(resume=...)),
+  `solvi.agents.openai_agents.guard_tools` (a tool input guardrail + needs_approval: deny → reject_content, escalate →
+  an interruption to approve). Tested with pydantic-ai 2.51, langgraph 1.2.12 and openai-agents 0.22.3 and their
+  scripted models (dependency group `agents`; the tests skip without them).
+- `solvi serve --guard catalog.py:guard --upstream CMD [--facts JSON] [--escalate elicit|deny] [--store]`: an MCP proxy
+  in front of an MCP server — `tools/list` shows the declared tools (their schemas adopted from the server), every
+  `tools/call` passes the guard; an escalation asks the user through MCP elicitation when the client supports it.
+- `solvi check` lints a Guard (every tool's checks). [examples/19_agent_guard.py](examples/19_agent_guard.py): an
+  accounts-payable agent, scripted, through every case.
 
 ### Agent guard: after a benchmark run (preview)
 
@@ -211,28 +117,537 @@ guarantee of the default. Each has tests (`tests/test_agents_next.py`).
   measurement on unseen attacks. The `\n` reading was added after the run: on the scripted reference calls, it lowered
   attacks passing the default from 6.2% to 2.1%, with no change in utility.
 
-### Fixes before release (LLM decider)
+### Any LLM as a decider: solvi.llm
 
-Found by a measurement run through OpenRouter, where most invalid replies were quotes the model had re-typed.
+- `solvi.llm.llm(base_url, model, api_key=None, ...)`: any OpenAI-compatible chat-completions server (OpenAI,
+  OpenRouter, vLLM, llama.cpp, Ollama, LM Studio) as a decider — a DecideModel, so it works as a decision part, as the
+  last stage of a `Cascade`, in a `Vote` / `Route`, with `act_guard` / `conformal` / `fit`. One question per request at
+  temperature 0 with a JSON schema for the reply (answer among the options, a probability per option or a confidence, a
+  supporting quote); `response_format` json_schema → json_object → prompt only, as the server accepts; probabilities
+  from the answer's token log-probabilities when the server returns them. Every reply is validated (answer among the
+  options, probabilities consistent with it, quote literally in the text): an invalid, cut-off or refused reply, or a
+  server that does not answer after `retries`, escalates ("model escalated: invalid LLM output — ...") and is never
+  guessed; 401 / 403 / 404 raise `LLMError`. Yes/no, scores, multi-label, spans, "not stated" and evidence quotes.
+- The trace: the model id `llm:<model>@<endpoint>` (no credentials, no query), a fingerprint over the endpoint, model
+  name, prompt-template hash and settings, and `extra["llm"]` per decision (format, probability source, the model that
+  answered, quote, tokens). The API key is never recorded. An LLM decision is not re-run by `replay` (the part's
+  `deterministic` follows its model): the recorded output is checked instead.
+- `llm:URL#model` wherever a MODEL spec is taken (`solvi ask --decider`, `solvi models check`; `$SOLVI_LLM_API_KEY`).
+- Decider scorers may return `escalate` (and `transient`, `info`) with a question's logits: the decision escalates with
+  that reason; a transient failure is not cached. `Item.unknown` tells a scorer that "not stated" is an answer; a
+  scorer may return an already decoded pointer (`{"null", "spans"}`).
 
-- **Quotes**: a quote is found in the text up to typographic quotes and apostrophes (’ ‘ “ ” as ' "), dashes (– — ‑ as
-  -) and runs of whitespace. A quote still not found is dropped when the question does not ask for evidence (the answer
-  stands; `extra["llm"]["quote_dropped"]` records it) instead of escalating the question; with `evidence=True` it still
-  escalates.
-- **`extra_body={...}`**: server-specific fields merged into every request, e.g. OpenRouter's
-  `{"provider": {"order": [...], "allow_fallbacks": False}}` to pin a provider and `{"reasoning": {...}}`. Fields solvi
-  sets itself (messages, response_format, logprobs, model, temperature, max_tokens, seed, stream, n) raise `ValueError`
-  rather than being overridden; `extra_body` enters the fingerprint.
-- **`seed`** now defaults to None and is sent only when you set it: some providers refuse `seed=0`, and at temperature 0
-  it rarely changes anything. Pass `seed=...` to send one.
-- **Format fallback behind a gateway**: an HTTP 400 whose body mentions response_format / json_schema / structured
-  outputs — including the provider's cause that OpenRouter wraps in `error.metadata.raw` under "Provider returned
-  error" — steps the reply format down as a direct rejection does. When every format fails, the escalation names the
-  formats tried and the provider's cause.
-- **A connection cut mid-reply** (`http.client.IncompleteRead` and other `http.client` errors) is retried like a 5xx
-  and then escalates as "did not answer"; it no longer ends the call with an exception.
+### A vote across model families
 
-### Fixes before release (text in, storage, reports)
+- `examples/20_vote_across_families.py`: two stand-in System One servers of different "families" started in-process
+  (no network), each alone and their `Vote` under one guarantee (`act_guard`, risk 10%), a hard check, the audit and
+  the replay; a sure mistake of one family makes the vote escalate. The guide cites the measured result: on
+  typed-decisions a vote of solvi-large and Julia 1 answered 50% alone against 31% / 40% for each alone at the same
+  10% risk (Julia in-distribution there).
+
+### Several models with an LLM: an optional rank scale, an LTT grid from the data
+
+- **`act_guard(..., scale="rank")` on `Cascade` / `Vote` / `Route`, opt-in.** Before the shared threshold, each part's
+  signal is replaced by its rank among that part's own signals on the calibration examples
+  (`searchsorted(sorted_calibration, s, "right") / n`). On raw signals, one threshold effectively fits one model when
+  their scales differ — an act probability spread over [0, 1] against an LLM's confidence near 1 — and the combination
+  behaves like that model alone. Measured on a cascade of solvi-large and an LLM over three data sets (risk ≤ 10% in
+  every mode), the rank helped on one (33.7% → 44.8% answered alone; the first stage never answered on the raw scale)
+  and hurt on two (45.8% → 41.3%, 96.7% → 79.1%); votes unchanged. Compare both on held-out calibration data. The
+  rank reads the calibration inputs, not their labels. The sorted calibration signals of each part (at most 1024,
+  evenly spaced by order beyond that) are kept in the combination, its fingerprint and its calibration file (`"scale"`,
+  `"ranks"`); `guarantee["signal"]` reads "shared threshold on each model's rank among the calibration examples"; the
+  result has `"scale"`.
+- `scale="raw"` stays the default and is the previous behaviour, exactly: the same thresholds, decisions and
+  fingerprints. A calibration file without `"scale"` (written before 0.7) loads on the raw scale.
+- `act_guard` on a `Cascade` adds `"warnings"` when a stage answers alone on less than 5% of the calibration questions:
+  the cascade is then no better than a single model; on the raw scale the warning suggests trying `scale="rank"`.
+  `solvi calibrate` prints them.
+- **`calibration.ltt_threshold(grid=None)`**, and so `calibrate_for(method="ltt")` and `solvi calibrate --method ltt`:
+  the default grid is now at most 64 quantiles of the distinct calibration scores (`calibration.ltt_grid`), not
+  `linspace(0.2, 0.995, 32)`. The grid reads the scores only, never the labels, so the promise holds; the Bonferroni
+  correction is over the grid's size. The old grid let nothing through for an LLM decider whose confidences sit above
+  0.999. **Behaviour change:** the same examples can give another LTT threshold than in 0.6; an explicit `grid=` is
+  unchanged.
+- The LLM decider's confidence is unchanged (no new transform): a threshold taken from the distinct values of the
+  signal, as `act_guard` does, separates confidences packed near 1 as they are.
+- Guide: with an LLM, start with the LLM alone under `act_guard`, or a vote of solvi-large and the LLM where the two
+  are about equally strong; "a small model first, the LLM second" is not a default — the stages' mistakes did not
+  complement each other by confidence, and a cascade with a threshold per stage came out 1–2 points below the better
+  model alone.
+
+### Thresholds per group: the guarantee inside every group
+
+- `part.act_guard(examples, risk=0.10, groups=..., min_group=100, delta=0.10)` and the same on `Cascade` / `Vote` /
+  `Route`: a threshold per group of a hierarchy — `groups` is a fact name, a list of fact names (`["domain", "task"]`,
+  top first) or a function of facts returning a group or a path. Deepest level first, a group with at least `min_group`
+  examples of its own gets a threshold; a smaller one is pooled with the rest of its parent (whose threshold is
+  calibrated on exactly those examples); the rest of the stream takes what is left; a group unseen in calibration falls
+  back the same way. With `delta` (default 0.10) each threshold passes a binomial test at delta / (number of groups) —
+  Bonferroni — so with probability ≥ 1 − delta, P(answered alone and wrong | group) ≤ risk in every group at once;
+  `delta=None` is conformal risk control per group (each group on average). After HG-CRC (arXiv 2607.24562).
+- Why: one threshold meets the risk over the stream while a hard group can be far over it — in the test simulation (20%
+  hard inputs) 28% answered alone and wrong inside the hard group at a 10% promise, in every run; per group it stayed at
+  most 10% in each (violated in 4.5% of runs with delta=0.1), answering 77% alone overall against 74%.
+- Every decision records its group, the group whose threshold applied, that threshold and its examples
+  (`extra["guarantee"]`: `group`, `applied`, `threshold`, `n`; method `group-bound`, or `crc-groups` with
+  delta=None); the audit prints the group's promise. An input that does not give its group escalates ("group
+  unknown"). The group facts join the part's (the combination's) inputs.
+- The result of `act_guard` has `groups`: per group its threshold, examples, answered share, error, risk and the smaller
+  groups pooled into it.
+- `solvi.calibration`: `group_nodes`, `node_of`, `loss_budget`, `certify_groups`, `group_thresholds`, `group_path`.
+- `solvi.decide.Facts` (the same class as `solvi.multi.Facts`): a DecisionPart also takes examples and inputs given as
+  facts by name.
+
+### Memory of corrections
+
+- `part.memory(k=7, radius=0.15, min_strength=1.0, min_agreement=0.8, text=False, mode="check")` →
+  `solvi.memory.CorrectionMemory`: corrected cases of a decision part (the decider's probabilities from raw logits, before
+  any adaptation; optional hashed words; the label; `source`, `by`, `time`, `stored_id`) and their nearest neighbours at
+  decision time, with an abstain threshold. Only `source="human"`, `"outcome"` or `"rule"` are accepted
+  (`UntrustedLabel` otherwise); `learn_from(store)` reads a TraceStorage's corrections, never its stored decisions.
+  `calibrate(risk)` picks the abstain threshold by conformal risk control, leave-one-out.
+- `mode="check"` escalates when similar corrected cases say another answer (new safeguard `memory`, counted as
+  `memory_disagreements`); `mode="answer"` may also answer where the part escalated by its own threshold, and says so.
+  Inside a Cascade / Vote / Route a memory only checks.
+- `extra["memory"]` on every decision: the proposal, the action, the cases it rests on, the memory's fingerprint (also part
+  of the part's fingerprint; replay compares the record); `res.audit(q).memory` and the audit's lines, in English and
+  Russian. `mem.save` / `load` refuse another checkpoint.
+
+### Learning from corrections (experimental)
+
+- `System.learning(storage, parts=, ladder=, gates=, changelog=, holdout=0.3, calibration=0.2, gate_teach=True,
+  harvest_rules=False)` → `solvi.learning.Learning`; off until called (warns `ExperimentalWarning`). `loop.run()` reads
+  trusted corrections only (the stored decisions are never labels), splits them by a hash of their question and input into
+  train / calibration / holdout, proposes an update by the ladder (fit under 50 labels per question, fit + a memory of corrections
+  under 1000, an adapter hook beyond), runs the gates — consistency with earlier corrections, held-out gain, honesty
+  numbers (held-out labels and an optional honesty set), `act_guard` recalibration, a shadow run with a limit on the share
+  of stored decisions an update may change — and promotes it only if all pass. Every proposed update is recorded (kind
+  `"update"`, hash-chained) with its gates; a promoted one with its state, so `loop.rollback(version)` restores any
+  version, also from another process. While attached, `System.teach` only stores the correction.
+- Corrections carry provenance: `System.teach(..., source="human" | "outcome" | "rule", by=, of=)` and
+  `TraceStorage.save_correction(...)` store it, `corrections()` returns it; any other source raises `UntrustedLabel`.
+- `solvi.honesty.run(..., store=False)`.
+- The loop learns closed-list questions only (choice, multi-label, score, yes/no): spans, rankings and numbers are left
+  out (an explicit `parts=` with one raises). In a simulation on real streams learning helped a closed-list stream (+6
+  points answered alone at the same risk) and did nothing or hurt for spans.
+
+### Fast heads refit as corrections accumulate
+
+- **`fit_fast` heads refit on doubling.** A head taught through `System.teach` kept the ridge strength, the featurizer
+  (number scales, known category values) and the pairwise-products decision of its first fit; started on 10 examples and
+  taught up to 300, it was 5.8 points less accurate than a fit on all 300 (on eight tabular sets; up to 17 points on
+  one). A `FastHead` now keeps its examples and, each time their number doubles, fits again on all of them — the same
+  as a fresh `fit_fast` on those rows — then continues with rank-one steps. Measured: at 100 and 300 examples it is 0.3 /
+  0.2 points above a full fit (within noise), and the share answered under `act_guard` 82% / 86% instead
+  of 70% / 67%.
+- Cost: the triggering update is as slow as a fit on those rows (about 11 ms at 640 rows of 14 facts, 100 ms for 2000,
+  up to about 200 ms for an early refit that switches pairwise products on; 40% of one core); total update time was at most about 0.6 ms per update higher and often lower. Memory: the kept fact
+  rows (about 1 KB per row of 14 plain facts), up to `refit_until=2000` examples; past it no refit is due and the rows
+  are dropped. A refit is applied at once like any `teach` update and is not gated; the learning loop does not manage
+  fast heads (with `gate_teach=True` they do not move at all).
+- `fit_fast(..., refit=2.0, refit_until=2000)` and `FastHead(..., refit=, refit_until=)`; `refit=None` restores the old
+  behaviour (no rows kept). Heads pickled before 0.7 load and keep learning by rank-one steps only, with unchanged
+  fingerprints. `FastHead.fit` called again on a head now chooses the ridge strength and pairs again as given to the
+  constructor (it used to keep what the previous fit chose). The strategist's own online models
+  (`solvi.learned.Binary`) keep their fixed refit every 50 rows.
+
+### A LoRA adapter per question: `part.adapt_lora` (experimental)
+
+- **`part.adapt_lora(examples, r=8, epochs=6, holdout=None, seed=0, device=None, lr=3e-4, risk=0.10)`** trains a small
+  LoRA adapter (rank 8 on the attention and MLP weights of every encoder layer, plus the output head's last layer) on one
+  decision's labelled examples, for solvi-base with the torch backend and `pip install "solvi[lora]"` (peft, imported
+  only when used). `fit` levels off beyond about a hundred examples because it only moves the logits; the adapter keeps
+  improving. Measured on solvi-base (typed decisions of four processes, the same examples for both): 62.0 / 65.2 / 68.7 /
+  72.6% against `fit`'s 59.1 / 60.9 / 62.7 / 63.4% at 32 / 100 / 300 / 1000 examples per process; the adapter is 3.2 MB.
+  On single short texts with 32–64 labelled rows the gain was within noise. So: `fit` (or `fit_fast` for questions
+  without a model) below ~100 examples, `adapt_lora` from ~100 on solvi-base.
+- **Calibration is part of the call.** After LoRA the confidences are overconfident (calibration error 1.5–3× that of
+  `fit`); `holdout=` (a list, a share or a number of the examples) runs `act_guard` on labels not used for training and
+  reports the held-out accuracy before and after — in the measurement the risk held at 0.10 and the adapter answered alone
+  53% of the time against 45% for `fit` at 300 examples. Without a holdout a `solvi.lora.LoraWarning` says escalation is
+  not calibrated. The question's earlier adaptation and thresholds are cleared when an adapter is set.
+- **Time.** Minutes on a CPU (about 4 at 100 examples and 13 at 300 on 4 server cores; a laptop is slower): one update is
+  timed on your machine and the estimate reported before training; a warning below 100 examples. Deterministic for a
+  seed on a CPU.
+- **Identity and rollback.** The adapter is active only while its own question is scored (other questions of the model
+  answer exactly as before); its hash is in the part's and the model's fingerprint and in every decision's
+  `extra["lora"]`. `part.save_lora` / `load_lora` (a `.safetensors` file refused for another question or checkpoint),
+  `save_calibration` writes the adapter next to the calibration file and `load_calibration` loads it first;
+  `part.remove_lora()` restores the checkpoint's answers to the bit and the part's earlier adaptation and thresholds.
+- **Scope.** Refused, with what to do instead, for solvi-large and larger (`tools/adapt_lora_gpu.py` trains the same
+  adapter on a GPU; `load_lora` loads it anywhere), for ONNX (load with `backend="torch"`), LLM and rule deciders, and for
+  rank / number / span questions. Experimental: warns `ExperimentalWarning` on first use; the API, recipe and file format
+  may change. Guide: "A LoRA adapter per question"; API page `solvi.lora`; tests on a tiny random decider
+  (`uv sync --group lora`; skipped without torch and peft).
+
+### Long documents: find first, then decide
+
+- `decider.decision(..., long="retrieve", top_k=3, rerank=False)`: a text beyond the decider's `max_len` is split into
+  sections (headings, paragraphs, sentences), the `top_k` that bear on the question are selected by BM25 (stdlib) —
+  `rerank=True`: re-ordered by the decider's own yes / no relevance — and decided on; span answers and evidence quotes
+  point into the whole text; the sections read (offsets, heading, score) are in `extra["long"]`, so in the trace, the
+  audit and replay. Texts that fit are decided exactly as before. `DecideModel.max_len`, `DecideModel.count_tokens`,
+  `DecisionPart.budget()`.
+- `solvi.longdoc`: `LongDocument(text, max_tokens, count)` → `sections`, `select(query, k, budget, rerank)`,
+  `window(sections)` with `to_doc(start, end)`; `BM25`, `approx_tokens`.
+
+### Reading long documents whole: `long="full"`
+
+- **`long="full"`** for deciders trained on long inputs: a text that does not fit `max_len` is read whole, in one pass
+  of up to the checkpoint's long-input length; a longer text falls back to retrieve within that length. The decision's
+  `extra["long"]` records it — `{"mode": "full", "tokens", "max_len"}`, plus `"fallback": "retrieve"` and the sections
+  read when the text was longer — in the trace and the audit ("read whole (5234 tokens, up to 8192)"); span answers and
+  evidence quotes point into the whole text. The mode, the length and `top_k` are part of the decision's fingerprint;
+  a full replay re-reads and re-checks.
+- **A checkpoint declares it**: `"max_len_long": 8192` in `solvi_decide.json` (`max_len` stays the ordinary pass;
+  docs/decide_format.md). A checkpoint without it refuses `long="full"` and points to `long="retrieve"`;
+  `DecideModel.load(path, max_len_long=N)` forces a length, with a `LongInputWarning` that the model was not trained
+  on inputs that long (solvi-large read 4–8k-token documents whole no better than retrieve, 74% vs 73%, and quoted
+  the right passage less often, 35% vs 50%). `m.long_len`, `m.long_declared`.
+- **A GPU mode.** On a CPU a whole 4k-token text costs about 12× a 512-token pass and an 8k one about 31× (about 1.6 s
+  and 4 s per question on a 4-thread laptop CPU); `long="full"` warns once per model when it reads a text over 2k tokens
+  on a CPU. For a model trained on long inputs, `long="retrieve"` with `max_len=2048` matched reading whole on 4–8k-token
+  documents (85% both, against 78% at `max_len` 512) at about 3× a 512-token pass. The published deciders read 512
+  tokens and declare no long-input length yet.
+- **`top_k=None` is now the default**: sections of about 170 tokens, budget / 170 and at least 3 — 3 at `max_len` 512
+  (as before, the same fingerprint), 6 at 1024, 12 at 2048. More sections of the same size beat larger sections when
+  the budget grows. An explicit `top_k` wins.
+- Works with the torch and ONNX backends (the ONNX export has a dynamic sequence length). `part.adapt_lora` refuses a
+  `long="full"` decision (adapters train on ordinary passes). Tests: `tests/test_long_full.py`, a tiny checkpoint with
+  a real tokenizer and a pointer (whole reads, the fallback, quote offsets, refusal and warnings, fingerprint and replay,
+  ONNX).
+
+### Reports for people
+
+- `res.report(format="md" | "html" | "data")`: a report of one decision for an auditor or a customer — each answer, what it
+  rests on (given, computed, quoted with offsets, decided with the model and probabilities, learned, checks, rule,
+  evidence), the safeguards that fired, the guarantee line (the promise of the calibrated thresholds behind it, "none",
+  or no model decided it), the source texts with every quote highlighted, every model that ran with its fingerprint, the
+  trace's hashes and the replay status (`replay="trusted"` by default: no model is called).
+- `store.report(since=, until=, question=, format=, examples=3)`: a report of a period — per question the counts by
+  answer, status and safeguard, the escalation rate, the guarantee coverage of the answers a model took part in, the
+  catalog and model fingerprints in use and their changes, and example stored ids.
+- HTML is one self-contained page (inline CSS, light and dark, no scripts or external assets); every value is escaped.
+  Markdown escapes every special character.
+- A value derived from its quote ("1.5 million" read as 1500000.0, a card number shown as "card ending 6467") is
+  highlighted as grounded text, not as "not the text at these offsets".
+- `solvi report STORE [--since] [--until] [--question] [--id ID] [--html out.html] [--md out.md] [--json] [--system]`.
+- A response keeps the System that answered (and one loaded with a System, its System) for reports.
+
+### Counterfactual explanations
+
+- `res.counterfactual(question, max_changes=2, over=None, target=None, domains=None)`: the smallest change of the given
+  inputs that changes the answer — "approve if amount ≤ 1000 (now 1200)", "yes if purchase_date ≥ 2026-08-20 (now
+  2026-08-10)". Numbers and dates: the nearest threshold crossing (doubling probes, then bisection; exact for monotone
+  inputs); booleans, Enums, `Literal` inputs and `domains=` values enumerated; two inputs together when one is not enough.
+- Only the deterministic flow is re-run on the recorded plan; every model-backed part is held at its recorded proposal and
+  no model is ever called — the result says which parts were held and which had no proposal.
+- `System._results`: the answer step of `ask` / `aask` without side effects (shared by counterfactuals).
+
+### Explanations and safeguard messages in Russian
+
+- `System(..., lang="ru")`, `res.audit(lang="ru")`, `solvi.show(res, lang="ru")`, `system.safeguard_report(lang="ru")`,
+  `res.computed_state_text(lang="ru")`: the audit, `show`, the compact audit and the safeguard report in Russian —
+  headings and labels, safeguard names, statuses and provenance kinds, and the messages solvi writes itself (the `why` of
+  an answer, rejection, grounding and type reasons, escalation messages of deciders and of `Cascade` / `Vote` / `Route`,
+  guarantees, parts not run, the strategist's reasons in the flow). English is the default.
+- Rendering only: the trace, its hashes, `Result.why`, `to_dict()`, stored responses and replay are the same in every
+  language (messages are recorded in English and translated when printed, by templates in `solvi.i18n`). Names, values,
+  options, quoted text and the text of your own exceptions are never translated; a message without a template is shown
+  in English.
+- English output is byte for byte what 0.6.0 printed: tested on every gallery case (audit, compact audit, `show`,
+  safeguard report) and on examples 12 and 18 (`tests/i18n/en_golden.json`).
+- `AnswerAudit.render(lang=None)`, `Audit.render(lang=None)`, `Audit.compact(lang=None)`; `solvi.audit.LABEL` is unchanged.
+
+### Which record changed: `solvi.signature` (preview)
+
+- **A signature of a trace or a store** — two numbers, 64 bytes (`{"alg": "syndrome", "count", "root"}`, plain JSON) to
+  keep next to the head. The hash chain says a store was rewritten; the signature says which record and what its content
+  hash was: `store.signature()`, `store.verify(signature=sig, candidates=backup_records)`, `solvi verify decisions.db
+  --signature sig.json` (and `--sign sig.json` to write one; a store that does not verify is never signed),
+  `res.signature()` for one response's trace, and `solvi.signature.sign / check / locate / repair / extend` for any list
+  of items.
+- How (the default, `alg="syndrome"`): over the records' content hashes h_i (the chain fields left out), S0 = Σ h_i and
+  S1 = Σ (i+1)·h_i mod a 256-bit prime. One change at k by d moves them by d and (k+1)·d: k and the whole original hash
+  follow. `alg="octonion"` (a positional octonion product, 32 floats) is kept as the variant for future tree-shaped
+  (derivation) signatures, where its non-associativity sees a change of brackets; on a flat store it locates the same,
+  4x larger and ~10x slower — not recommended there. A signature carries its "alg"; check / locate / repair / extend
+  and `solvi verify --signature` read it from there (`--sign --alg octonion` writes the other one).
+- Measured (`benchmarks/trace_signature.py`, stores of 2–500 records, both codes): one edited record located and its
+  content hash restored in 2000 of 2000, 0 wrong; two or three edited records detected in 1500 of 1500 and never
+  located at a wrong record (`NotLocatable`). A reorder, a deletion or an insertion in the middle: detected, not located;
+  records appended after signing are not covered (`extend(sig, new)` updates it). Sign / locate with the default: 1.3 /
+  1.4 ms for 1000 records, 13 / 14 ms for 10 000 (octonion: 13 / 16 ms, 175 / 149 ms).
+- It is an error-locating code, not a MAC: keep the signature where you keep the head.
+
+### Verified charts: the first specialist (preview)
+
+- **`solvi.specialist`**: one contract for "a model proposes, code checks, code renders". A proposer writes a typed spec
+  (pydantic), never the result; `check` verifies it against the source and returns what passed plus an `Issue` per
+  problem (dropped / changed / warning / blocked, a stable code, a message, the path in the spec); `render` builds the
+  result from the verified spec only; every step goes into a hash chain (the source's hash, the proposal, the check,
+  the output's hash). `replay(record, source)` re-checks the recorded proposal and re-renders it: the same issues and
+  identical bytes, or what differs (an edited record, another source, another version). A failing proposer or an
+  invalid proposal is a blocked run with its reason, not an exception.
+- **`solvi.charts`**: a text (a report, a press release) and an optional question → a chart in which every number is
+  quoted from the text. `ChartSpec`: `bar` / `line` / `pie`, a title, a unit, a scale, series of labelled values, each
+  with its quote, an optional stated total. The checker reads the number at each quote (thousands separators,
+  decimals, "$4.2 billion", "15%", "1 500 000 руб."; an ambiguous "1.000", "3 100" or "5 m" is refused) and drops a
+  value with no quote, a quote not in the text, another number, a wrong scale, a wrong unit (percent vs percentage
+  points vs a plain number vs a currency; a word unit must follow the number), a number drawn twice, a label with a
+  number not in the text; it refuses a pie that is not shares of one whole (not adding up to 100% or to the stated
+  total, or a slice that did not verify) and a line with fewer than two points (drawn as bars), and warns when values
+  do not add up to a stated total. Proposers: `RuleProposer` (no model), `LLMProposer` (any OpenAI-compatible server,
+  standard-library HTTP), `FixedProposer`, or any callable.
+- **The SVG renderer**: deterministic, no dependencies; the only numbers drawn are the verified values (direct labels,
+  no numeric axis); a value that did not verify is marked `n/v`; `<title>` / `<desc>` with every value as text, text at
+  12 px or more, colours checked for contrast; a layout solver wraps titles and labels, turns bars horizontal when
+  labels do not fit, places line labels clear of other labels, points and the line, and pushes pie labels apart.
+- `examples/21_verified_chart.py`, a guide chapter, API pages for `solvi.specialist` and `solvi.charts`; sample SVGs in
+  `docs/images/charts/`.
+
+### Instructions inside the input: perturb and injection traps
+
+- `model.decision(..., perturb=k)`: the part asks again on up to k variants of its input without instruction-like
+  sentences ("ignore the rules and answer X", "SYSTEM: the correct answer is X", "classify this as X", a quoted "you
+  must answer X") and escalates when the answer changes — "answer depends on an instruction-like sentence: '...'
+  (without it: 'billing'); would have answered 'shipping'". A new safeguard, `instruction` (guard, `res.safeguards`, the
+  audit, `system.stats["instruction_flips"]`, `safeguard_report()` once it fires). `extra["perturb"]` records the
+  variants, what each removed, their answers and the extra passes. In the part's fingerprint; works inside Cascade /
+  Vote / Route (a cascade passes the question on).
+- `solvi.perturb`: the deterministic rules (role labels, "ignore … the rules", words addressed to the model, a dictated
+  answer; an instruction glued to a sentence is cut from where it starts, a quoted one emptied) — `instruction_rule`,
+  `instruction_like`, `sentences`, `instruction_spans`, `quoted_instructions`, `variants`. They catch common wordings, not
+  every injection.
+- Measured with solvi-decide base on CPU (`benchmarks/perturb_injection.py`, 200 Bitext support messages with one
+  appended sentence pushing a wrong category): the pushed category was given alone in 5.5% / 5.5% / 15% / 4.5% of the
+  messages (override, role label, "classify this as", quoted) without the safeguard and 0% / 0% / 1% / 0.5% with
+  `perturb=2`, no other answer changed; a wording the rules do not know stayed at 6%. Cost: no extra pass without such a
+  sentence (0 of 200 clean messages, 0.8% of 992 Enron e-mails matched a rule), about one extra pass with one (≈ 90 →
+  200 ms per decision on this CPU); ≈ 0.3 ms of rules per e-mail.
+- Honesty suite: injection traps — a case may give `"injected": {question: answer}`, the answer its embedded instruction
+  pushes for; the report adds `injection_followed_rate` (gated, lower is better; the share of such answers given alone
+  with the injected answer), `injection_by_question`, `injection_cases`, `injection_followed`. New set
+  `tests/honesty/injection_v1.json` (no model files): a stand-in decider that obeys its input follows 5 of 5 injections
+  without a safeguard and 1 of 5 with `perturb=2` (the wording the rules do not know).
+
+### Storage backends: PostgreSQL and DuckDB
+
+- `PostgresStorage(conninfo, prefix="solvi_")` (`solvi[postgres]`, psycopg 3): the SQLite tables in PostgreSQL; each
+  append locks the head table for its transaction, so several services writing cannot fork the chain.
+- `DuckDBStorage(path)` (`solvi[duckdb]`): the same tables in a DuckDB file, for analytics.
+- Both implement the whole TraceStorage interface — queries, the hash chain, `verify` (edits, deletions, a cut tail, a
+  rewrite against an anchor, index tables) and `replay_all`; `open_storage` / `storage=` take `.duckdb` paths and
+  `postgresql://` URLs. The SQL backends share one implementation (SQLiteStorage unchanged in behaviour).
+
+### OpenTelemetry export
+
+- `solvi.otel.export(res_or_store, tracer=None, **filters)`: decisions as OpenTelemetry spans — a root `solvi.decision`,
+  one span per step (fact, provenance, value, confidence, error, producer, quote offsets, model id and fingerprint,
+  probabilities, safeguards, the step's hash and its link) and one per answer; failed or rejected steps with status
+  ERROR; the root is a child of the caller's current span. A store exports every stored decision, or a query's.
+- `solvi.otel.to_otlp_json(...)`: the same spans as OTLP/JSON (an ExportTraceServiceRequest body) without OpenTelemetry;
+  ids derived from the trace's hashes.
+- New extra `otel` (`opentelemetry-api`, `opentelemetry-sdk`).
+
+### solvi serve: POST /ask_text and the ask_text tool
+
+- `POST /ask_text` (`{"text", "question"?, "store", "today"?}`) and the MCP tool `ask_text`: a free text through
+  `System.ask_text` with the served decider (`--decider`, which now also takes `systemone:URL#model` and
+  `llm:URL#model`, with `--api-key`) → the response as for `/ask` plus `read`: the question it asks, each field with its
+  status, value and quote, the missing fields, a clarifying question and why routing escalated. `Service.ask_text` /
+  `aask_text`; `create_app(..., textin=)` / `Service(..., textin=)` for a configured `TextIn`; `today` defaults to the
+  server's date and is recorded. `--mcp` now loads `--decider` too (it routes the texts).
+
+### `solvi serve`: security
+
+- **Bearer token**: `--token` / `$SOLVI_SERVE_TOKEN` (`create_app(token=...)`) — every HTTP request needs
+  `Authorization: Bearer <token>` (401 otherwise; `hmac.compare_digest`). Listening beyond the loopback address without a
+  token prints a warning.
+- **Limits** (`solvi.serve.Limits`, `--max-body`, `--max-depth`, `--timeout`): a request body / MCP message is at most
+  1 000 000 bytes (413; checked on `Content-Length` and on the bytes received, before FastAPI parses), its JSON at most
+  32 levels deep (400; hostile nesting no longer reaches a `RecursionError`), and a request takes at most 60 s (504; an
+  MCP tool error). Sync Systems are asked in a worker thread under the timeout; async Systems pass 80% of it to
+  `System.aask(timeout=)` (unless `System(timeout=)` is set), so a slow part makes its questions abstain with safeguard
+  `timeout` and the request still answers. The built-in MCP server bounds each line it reads and runs `tools/call` in a
+  worker thread under the timeout; the SDK server checks the size and depth of a call's arguments.
+- **Errors never leak**: a refused request (`solvi.serve.RequestError`: `NotFound` 404, `BadRequest` 422, 413, 504)
+  says what was refused; anything else is logged with its traceback (logger `solvi.serve`) and answered with a 500 /
+  a tool error that carries only an incident id — before, a tool error returned the exception's type and text, and a
+  `TypeError` / `ValueError` from anywhere became a 422 with its message. `/health` names the store by its file name,
+  not its path.
+- **CORS** stays off by default (no `Access-Control-Allow-*` headers); `--cors ORIGIN` (repeatable) allows one.
+- The same holds for `POST /ask_text` and the MCP `ask_text` tool (text-reading errors are `RequestError`s: an empty
+  text, an unknown entry point, a bad `today` → 4xx), and for the MCP proxy (`--guard --upstream`): client messages
+  bounded by `--max-body` / `--max-depth`, the proxy's own failures answered with an incident id. The LLM decider
+  (`solvi.llm`), like the System One client, accepts `http(s)://` endpoints only.
+- Nothing is imported or loaded from request data (the System One `model` field is a name echoed back) — now tested.
+- `--decider` is read like `solvi ask --decider` (`solvi.models.load`: a folder, a cached Hugging Face id,
+  `systemone:URL#model`, `module:attr`) and **never downloads**: a Hugging Face id that is not cached is a usage error
+  (exit 2) unless `--pull` is given. Before, `serve --decider ID` downloaded the model implicitly.
+- Uvicorn runs without the `server` header. A Security section in the guide's Serving chapter; SECURITY.md lists
+  `solvi serve` bypasses as in scope.
+
+### Command line: init, ask, calibrate, models
+
+- `solvi init [DIR] [--template support|refunds|minimal] [--with-model] [--force]`: a new project — `catalog.py` (a
+  computation, a hard check with `then=`, a rule; with `--with-model` a question a decider answers, through a keyword
+  stand-in until `SOLVI_DECIDE_MODEL` names a model), `cases.json` (regression cases that pass), `example.json`,
+  a README with the next steps, `.github/workflows/solvi.yml` (`solvi check` and `solvi test`; `working-directory`
+  set when the folder is inside a git repository) and `.gitignore`. Existing files are never overwritten without
+  `--force` (exit status 1, nothing written).
+- `solvi ask SYSTEM (STATE.json | - | --state '{...}' | --text "...") [--question Q] [--decider MODEL] [--audit]
+  [--report md|html] [--lang ru] [--store PATH] [--json]`: one decision — a state (the module's `prepare(state)` runs
+  first, as in `solvi test`) or a text through `ask_text`; the answers, the audit, the report; `--store` saves it to a
+  TraceStorage. Exit status 1 when a question abstained.
+- `solvi calibrate SYSTEM PART LABELS.csv|jsonl --risk 0.1 [--groups a,b] [--method crc|ltt] [--conformal 0.9]
+  [--out F]`: `act_guard` (or `calibrate_for(method="ltt")`) for a model decision on labelled examples (a `label` column
+  and the part's facts, a `text` column or a state); prints the answered share, the error, the risk,
+  `must_escalate_at_least` and the per-group table, and writes the calibration (`PART.calib.json`). Exit status 1 when
+  everything escalates.
+- `solvi models [list | pull ID | check MODEL]`: solvi-ai/solvi-base and solvi-large and every decider in the local
+  Hugging Face cache; `pull` downloads (the only command that does, `huggingface_hub`); `check` prints the checkpoint's
+  declared capabilities, its fingerprint and, with `--examples`, accuracy, escalated share and latency (`--min-accuracy`
+  as a CI gate). MODEL is a folder, a cached Hugging Face id, `systemone:URL#model` or `module:attr`; `solvi ask
+  --decider` takes the same (`solvi.models.load`).
+- `solvi.cli.load_module(spec)`: the module and the attribute of a `module:attr` / `file.py:attr` spec.
+
+### Calibration files
+
+- `part.save_calibration(path)` / `part.load_calibration(path, groups=None, strict=True)` on `DecisionPart` and on
+  `Cascade` / `Vote` / `Route` (`solvi.calibfile`): the escalation thresholds (per group too), the guarantee record and
+  the conformal set, with the question and the fingerprint of the model and adaptation they were fitted on. Loading
+  refuses a file made for another question, checkpoint or adaptation (`strict=False` accepts it) and restores the part's
+  fingerprint exactly, so stored decisions replay. A catalog loads its calibration when it starts; while `solvi
+  calibrate` loads a catalog, calibration files are not applied (the part is calibrated afresh).
+
+### Documentation site
+
+- `mkdocs.yml` (Material theme): the README, the guide, the format specs (decider checkpoint, model strategist, regression
+  tests, honesty suite, benchmarks), the examples and gallery indexes, this changelog and the roadmap as one site, plus an
+  API reference generated from the docstrings (mkdocstrings) for `solvi`, `solvi.decide`, `solvi.calibration`,
+  `solvi.systemone`, `solvi.multi`, `solvi.serve`, `solvi.storage`, `solvi.diff`, `solvi.testing`, `solvi.honesty` and
+  `solvi.check`. Local preview: `uv sync --group docs && uv run mkdocs serve`.
+- The Markdown files are unchanged and still read as before on GitHub; `tools/mkdocs_hooks.py` adapts them at build time.
+  The guide becomes one page per chapter; links to `guide.md#anchor` (and `#anchor` inside the guide) go to the chapter
+  that has the anchor, and `guide/#anchor` on the site forwards there, so every existing guide anchor keeps working.
+  Links to scripts and folders that are not pages (`examples/*.py`, gallery entries, `LICENSE`) point to GitHub.
+- `.github/workflows/docs.yml`: `mkdocs build --strict` on every pull request (a broken link, a missing anchor or a
+  link to a file not in the repository fails it); on a release tag (`v*`) the site is deployed to GitHub Pages.
+- A `docs` dependency group (mkdocs, mkdocs-material, mkdocstrings[python]).
+
+### Browser playground and a smoke test for the Spaces
+
+- The playground Space (`spaces/playground`) has a "New in 0.7" tab: escalation with a guarantee (`act_guard` on labelled
+  examples, the answered share, error and risk on new ones, `must_escalate_at_least`, the audit's guarantee line), a vote
+  of two model families, text in (a message → the question and its fields with quotes, `ask_text`) and a report
+  (Markdown and the HTML page). The deciders are keyword stand-ins. Every run in the Playground tab also shows its report,
+  and the audit panel shows the guarantee line. The Space installs solvi from PyPI: each feature is detected, and a demo
+  that needs a newer solvi says which one.
+- `tools/smoke_spaces.py`: opens each public Space (playground, arcade, documents, realms) in a headless browser
+  (Playwright, optional), waits for it to load, runs one preset and checks the output; `.github/workflows/smoke-spaces.yml`
+  runs it by hand or after a release is published.
+
+### Static checks
+
+- **ruff** (`[tool.ruff]` in pyproject.toml): pyflakes, pycodestyle, bugbear, blind excepts and bandit's security rules
+  over the repository (the Hugging Face Space apps excepted); line length and formatting are not enforced. What it found
+  and what changed: unused imports and variables (`solvi.check`, `solvi.extract_multi`, tests, an example), a duplicate
+  stop word, SHA-1 used for cache keys now marked `usedforsecurity=False`, and — a real one — the System One client
+  (`solvi.systemone`) passed its base URL to `urlopen` unchecked, so `file://` and other schemes were opened: it now
+  accepts `http://` and `https://` only (`ValueError` otherwise). Deliberate cases are marked inline (`exec` of a task
+  file, SQL built from fixed clauses with bound values).
+- **pyright** (`[tool.pyright]`, basic mode, `src/solvi`): 268 errors on first run, reviewed; they come from the code
+  base's dynamic style (`x: T = None` defaults, `object`-typed fields, attributes set on instances, mixed-value dicts)
+  and none was a bug. Annotations that were wrong are fixed (`Response.violations` / `safeguards`, `Audit.overall`,
+  `Part.func`, `textin.Change.quote` are optional; `Response._system` / `_heads` are declared); the families that
+  report the style are warnings, the optional-access ones off, and everything else in basic mode is an error.
+- CI: a `lint` job runs both (pinned: ruff 0.16.9, pyright 1.1.414).
+
+### Performance
+
+- `benchmarks/ask_overhead.py`: `ask` latency on the gallery and on a keyword-stand-in decider project, 0.5.0-style
+  settings against the 0.7 defaults (trace fingerprint, canonical option order, a calibrated guarantee, storage off /
+  JSONL / SQLite), and against an older release (`--gallery` with its exported gallery). No regression above 10% was
+  found (numbers in docs/benchmarks.md: the fingerprint costs about 3%, the guarantee record about 4%, storing a
+  response about 1 ms).
+- `Response.to_dict()` and stored records: the walk that sorts sets now also tags non-finite floats and dispatches on
+  the exact type first — measured faster than 0.6.1's on the gallery's responses, which pays for the strict-JSON
+  tagging.
+
+### Fixes before release
+
+#### Traces, JSON and grounding
+
+- A model-backed rule whose quote is rejected for not being in the text (`quote outside the text` / `not grounded`)
+  now abstains with `Result.guard == "grounding"` (it was `None`); the safeguard event is still recorded once (the audit
+  does not count it twice).
+- **Strict JSON for non-finite floats.** An infinite escalation threshold (a calibration no threshold could meet) was
+  written into traces, stored records and `--json` output as `Infinity` — not JSON, and a 500 in `solvi serve` (its
+  responses are strict). Non-finite floats are now written as `{"$float": "inf"}` (`"-inf"`, `"nan"`) — the tag
+  calibration files already used — by `Response.to_dict()` / `to_json()` / `model_dump("json")`, TraceStorage records
+  (JSONL and SQLite), the report data, the CLI's `--json` output and the MCP servers, and read back as the float by
+  `model_validate` / `from_json` / `store.get`. Every one of these writes with `allow_nan=False` now
+  (`solvi.schema.dumps`, `tag_floats`, `untag_floats`). **Hashes:** a trace's record hashes are unchanged (they are
+  taken over the in-memory values, so a stored trace with an inf threshold replays as before); a new stored record's
+  chain hash is taken over the tagged form, and records written before 0.7 with a bare `Infinity` still verify and
+  load. `part.save_calibration` wrote a bare `Infinity` for an infinite top-level threshold; it writes the tag now (both
+  load).
+- `tests/test_fast.py::test_teach_updates_instantly_like_refitting` bounds the median of 20 `teach` times (< 50 ms)
+  instead of every one, so one slow update on a loaded machine no longer fails it.
+- `Response` keeps a strong reference to its System, now documented as deliberate: `System(cat, qs).ask(s).report()`
+  must work, and a weak reference would lose the temporary System before the report runs. Drop it with
+  `res._system = None` (and pass `system=`) for responses kept for long.
+
+#### Core
+
+- **Long inputs (`long="retrieve"`) keep their context**: per-group thresholds (`act_guard(groups=...)`) no longer
+  escalate every long input as "group unknown", and `perturb=` and the correction memory now run on long inputs (also in
+  a shared pass). Calibration (`act_guard`, `calibrate_for`, `conformal`), `fit` / `teach` / `adapt`, the memory's
+  features and the perturb re-asks read a long input by its retrieved window — the signal the part answers on — so the
+  promise holds for what is deployed. Cascade / Vote / Route and `DecideModel.decide_pass` read a long part the same
+  way (its retrieved window, with its context), so a combination scores the signal the part alone and its calibration
+  score.
+- **`option_order="average"`**: `DecisionPart.fit` / `teach` / `adapt` are fitted on the averaged logits the part decides
+  on (they were fitted on single-order logits and applied to averaged ones). `DecideModel.fit` / `teach` / `adapt` take
+  precomputed `logits=`.
+- `conformal(examples)` with an iterator (e.g. `zip(...)`) calibrated on nothing (n = 0, quantile inf); it now reads
+  any iterable.
+- Calibrating on one signal clears the other signal's threshold (a stale `escalate_below` stayed active after an
+  `act_guard` on the act signal, and vice versa); what was cleared is in the guarantee record (`"cleared"`).
+- Calibration files: the fingerprint a file is checked against now covers `option_order="average"` / `permutations` and
+  `long` / `top_k` / `rerank`, so a file cannot load onto a part computing a different signal (files for parts with the
+  defaults are unchanged). `load_calibration` restores both thresholds exactly as saved.
+- `ltt_threshold(error=0)` failed with a math domain error: `error` (and `delta`) must be strictly between 0 and 1, with
+  a clear message; `calibrate_for` checks it too (`method="empirical"` still accepts 0).
+- Memory of corrections: `calibrate` no longer sets the live `min_strength` to −inf while it runs (concurrent decisions
+  saw no floor); leave-one-out also leaves out a case's twins (same features and words — a correction stored twice
+  vouched for itself); an abstention is not counted as "proposed"; `add` / `remove` / `load` against a running proposal
+  are safe (it ranks a snapshot of the cases and their matrix).
+- Learning loop: the candidate update is built and gated on a shadow of the system (copies of the parts, their
+  thresholds and memory, and of the model's adaptations); the live parts change only when it is promoted, so concurrent
+  asks never see an un-gated candidate. A part's conformal sets are recalibrated on the calibration labels after an
+  update, or dropped and recorded when there are too few. The size gate's shadow set uses the labels' split per question
+  (it used a question-less key, so it could compare inputs the update had trained on). The `act_guard` gate's message no
+  longer raises TypeError when a recalibration has a non-zero error rate.
+- `perturb`: overlapping quoted and unquoted instruction spans are merged before cutting — the instruction after a
+  quote could stay in the variant while `removed` said it was gone.
+
+#### Learning loop
+
+- Labels are split into train / calibration / held-out by a hash of their question and input, not of the stored id
+  (whose hash covers measured timings): the split is the same in every run, and the loop's tests no longer flake.
+
+#### Long documents
+
+- **`long="retrieve"` crashed on every text longer than the checkpoint's `max_len`** with a real tokenizer ("Truncation
+  error: Second sequence not provided"): `DecideModel.count_tokens` counted with the encoder's truncating tokenizer. It
+  now counts with the untruncated one. The tests used models without a tokenizer and missed it; a new test builds a tiny
+  checkpoint with a real tokenizer and reads a text longer than its `max_len`. The guide now says what a larger budget
+  (`max_len`, `top_k`) costs and gains.
+
+#### Text in, storage, reports
 
 - **Text in, yes / no fields**: only the field's name ("urgent", or "urgent" for `is_urgent`) and `cues=` make a bool
   field True; description words only rank candidates (before, any description word quoted alone read as True). A cue
@@ -268,41 +683,28 @@ Found by a measurement run through OpenRouter, where most invalid replies were q
   re-checked only by a full replay (not with `trust_models=True` / `replay="trusted"`); API reference pages for
   `solvi.textin`, `longdoc`, `report`, `otel`, `counterfactual` and `perturb`.
 
-### Fixes before release (core)
+#### LLM decider
 
-- **Long inputs (`long="retrieve"`) keep their context**: per-group thresholds (`act_guard(groups=...)`) no longer
-  escalate every long input as "group unknown", and `perturb=` and the correction memory now run on long inputs (also in
-  a shared pass). Calibration (`act_guard`, `calibrate_for`, `conformal`), `fit` / `teach` / `adapt`, the memory's
-  features and the perturb re-asks read a long input by its retrieved window — the signal the part answers on — so the
-  promise holds for what is deployed. Cascade / Vote / Route and `DecideModel.decide_pass` read a long part the same
-  way (its retrieved window, with its context), so a combination scores the signal the part alone and its calibration
-  score.
-- **`option_order="average"`**: `DecisionPart.fit` / `teach` / `adapt` are fitted on the averaged logits the part decides
-  on (they were fitted on single-order logits and applied to averaged ones). `DecideModel.fit` / `teach` / `adapt` take
-  precomputed `logits=`.
-- `conformal(examples)` with an iterator (e.g. `zip(...)`) calibrated on nothing (n = 0, quantile inf); it now reads
-  any iterable.
-- Calibrating on one signal clears the other signal's threshold (a stale `escalate_below` stayed active after an
-  `act_guard` on the act signal, and vice versa); what was cleared is in the guarantee record (`"cleared"`).
-- Calibration files: the fingerprint a file is checked against now covers `option_order="average"` / `permutations` and
-  `long` / `top_k` / `rerank`, so a file cannot load onto a part computing a different signal (files for parts with the
-  defaults are unchanged). `load_calibration` restores both thresholds exactly as saved.
-- `ltt_threshold(error=0)` failed with a math domain error: `error` (and `delta`) must be strictly between 0 and 1, with
-  a clear message; `calibrate_for` checks it too (`method="empirical"` still accepts 0).
-- Memory of corrections: `calibrate` no longer sets the live `min_strength` to −inf while it runs (concurrent decisions
-  saw no floor); leave-one-out also leaves out a case's twins (same features and words — a correction stored twice
-  vouched for itself); an abstention is not counted as "proposed"; `add` / `remove` / `load` against a running proposal
-  are safe (it ranks a snapshot of the cases and their matrix).
-- Learning loop: the candidate update is built and gated on a shadow of the system (copies of the parts, their
-  thresholds and memory, and of the model's adaptations); the live parts change only when it is promoted, so concurrent
-  asks never see an un-gated candidate. A part's conformal sets are recalibrated on the calibration labels after an
-  update, or dropped and recorded when there are too few. The size gate's shadow set uses the labels' split per question
-  (it used a question-less key, so it could compare inputs the update had trained on). The `act_guard` gate's message no
-  longer raises TypeError when a recalibration has a non-zero error rate.
-- `perturb`: overlapping quoted and unquoted instruction spans are merged before cutting — the instruction after a
-  quote could stay in the variant while `removed` said it was gone.
+Found by a measurement run through OpenRouter, where most invalid replies were quotes the model had re-typed.
 
-### Fixes before release
+- **Quotes**: a quote is found in the text up to typographic quotes and apostrophes (’ ‘ “ ” as ' "), dashes (– — ‑ as
+  -) and runs of whitespace. A quote still not found is dropped when the question does not ask for evidence (the answer
+  stands; `extra["llm"]["quote_dropped"]` records it) instead of escalating the question; with `evidence=True` it still
+  escalates.
+- **`extra_body={...}`**: server-specific fields merged into every request, e.g. OpenRouter's
+  `{"provider": {"order": [...], "allow_fallbacks": False}}` to pin a provider and `{"reasoning": {...}}`. Fields solvi
+  sets itself (messages, response_format, logprobs, model, temperature, max_tokens, seed, stream, n) raise `ValueError`
+  rather than being overridden; `extra_body` enters the fingerprint.
+- **`seed`** now defaults to None and is sent only when you set it: some providers refuse `seed=0`, and at temperature 0
+  it rarely changes anything. Pass `seed=...` to send one.
+- **Format fallback behind a gateway**: an HTTP 400 whose body mentions response_format / json_schema / structured
+  outputs — including the provider's cause that OpenRouter wraps in `error.metadata.raw` under "Provider returned
+  error" — steps the reply format down as a direct rejection does. When every format fails, the escalation names the
+  formats tried and the provider's cause.
+- **A connection cut mid-reply** (`http.client.IncompleteRead` and other `http.client` errors) is retried like a 5xx
+  and then escalates as "did not answer"; it no longer ends the call with an exception.
+
+#### Agent guard, `solvi serve` and the MCP proxy: code review and adversarial re-checks
 
 Found in a code review of 0.7; each has a regression test.
 
@@ -475,412 +877,21 @@ framework cases run PydanticAI, LangGraph and the OpenAI Agents SDK for real).
   read fail-closed; the supported and tested ones are listed. The injection detector flags about 16% of realistic
   e-mails and invoices (escalation only); per-tool `injections="grounded"` / `"off"` tunes it, provenance still holds.
 
-### Fixes in the learning loop
+Found in the final release check:
 
-- Labels are split into train / calibration / held-out by a hash of their question and input, not of the stored id
-  (whose hash covers measured timings): the split is the same in every run, and the loop's tests no longer flake.
-### `solvi serve`: security
-- The loop learns closed-list questions only (choice, multi-label, score, yes/no): spans, rankings and numbers are left
-  out (an explicit `parts=` with one raises). In a simulation on real streams learning helped a closed-list stream (+6
-  points answered alone at the same risk) and did nothing or hurt for spans.
+- **Guard: a deny always wins.** The first failed check declared decided, and the escalating checks (provenance in the
+  middle mode, `no_injected_arguments`, `no_instructions_in_tool_outputs`) were declared before your policies: in a
+  tainted context a call that a deny policy refused (`require_request(..., on_fail="deny")`, an amount cap) escalated
+  to a person instead. Every deny check is now declared before every escalate check.
 
-- **Bearer token**: `--token` / `$SOLVI_SERVE_TOKEN` (`create_app(token=...)`) — every HTTP request needs
-  `Authorization: Bearer <token>` (401 otherwise; `hmac.compare_digest`). Listening beyond the loopback address without a
-  token prints a warning.
-- **Limits** (`solvi.serve.Limits`, `--max-body`, `--max-depth`, `--timeout`): a request body / MCP message is at most
-  1 000 000 bytes (413; checked on `Content-Length` and on the bytes received, before FastAPI parses), its JSON at most
-  32 levels deep (400; hostile nesting no longer reaches a `RecursionError`), and a request takes at most 60 s (504; an
-  MCP tool error). Sync Systems are asked in a worker thread under the timeout; async Systems pass 80% of it to
-  `System.aask(timeout=)` (unless `System(timeout=)` is set), so a slow part makes its questions abstain with safeguard
-  `timeout` and the request still answers. The built-in MCP server bounds each line it reads and runs `tools/call` in a
-  worker thread under the timeout; the SDK server checks the size and depth of a call's arguments.
-- **Errors never leak**: a refused request (`solvi.serve.RequestError`: `NotFound` 404, `BadRequest` 422, 413, 504)
-  says what was refused; anything else is logged with its traceback (logger `solvi.serve`) and answered with a 500 /
-  a tool error that carries only an incident id — before, a tool error returned the exception's type and text, and a
-  `TypeError` / `ValueError` from anywhere became a 422 with its message. `/health` names the store by its file name,
-  not its path.
-- **CORS** stays off by default (no `Access-Control-Allow-*` headers); `--cors ORIGIN` (repeatable) allows one.
-- The same holds for `POST /ask_text` and the MCP `ask_text` tool (text-reading errors are `RequestError`s: an empty
-  text, an unknown entry point, a bad `today` → 4xx), and for the MCP proxy (`--guard --upstream`): client messages
-  bounded by `--max-body` / `--max-depth`, the proxy's own failures answered with an incident id. The LLM decider
-  (`solvi.llm`), like the System One client, accepts `http(s)://` endpoints only.
-- Nothing is imported or loaded from request data (the System One `model` field is a name echoed back) — now tested.
-- `--decider` is read like `solvi ask --decider` (`solvi.models.load`: a folder, a cached Hugging Face id,
-  `systemone:URL#model`, `module:attr`) and **never downloads**: a Hugging Face id that is not cached is a usage error
-  (exit 2) unless `--pull` is given. Before, `serve --decider ID` downloaded the model implicitly.
-- Uvicorn runs without the `server` header. A Security section in the guide's Serving chapter; SECURITY.md lists
-  `solvi serve` bypasses as in scope.
+#### Gallery 11, "I was charged twice"
 
-### Static checks
-
-- **ruff** (`[tool.ruff]` in pyproject.toml): pyflakes, pycodestyle, bugbear, blind excepts and bandit's security rules
-  over the repository (the Hugging Face Space apps excepted); line length and formatting are not enforced. What it found
-  and what changed: unused imports and variables (`solvi.check`, `solvi.extract_multi`, tests, an example), a duplicate
-  stop word, SHA-1 used for cache keys now marked `usedforsecurity=False`, and — a real one — the System One client
-  (`solvi.systemone`) passed its base URL to `urlopen` unchecked, so `file://` and other schemes were opened: it now
-  accepts `http://` and `https://` only (`ValueError` otherwise). Deliberate cases are marked inline (`exec` of a task
-  file, SQL built from fixed clauses with bound values).
-- **pyright** (`[tool.pyright]`, basic mode, `src/solvi`): 268 errors on first run, reviewed; they come from the code
-  base's dynamic style (`x: T = None` defaults, `object`-typed fields, attributes set on instances, mixed-value dicts)
-  and none was a bug. Annotations that were wrong are fixed (`Response.violations` / `safeguards`, `Audit.overall`,
-  `Part.func`, `textin.Change.quote` are optional; `Response._system` / `_heads` are declared); the families that
-  report the style are warnings, the optional-access ones off, and everything else in basic mode is an error.
-- CI: a `lint` job runs both (pinned: ruff 0.16.9, pyright 1.1.414).
-
-### Performance
-
-- `benchmarks/ask_overhead.py`: `ask` latency on the gallery and on a keyword-stand-in decider project, 0.5.0-style
-  settings against the 0.7 defaults (trace fingerprint, canonical option order, a calibrated guarantee, storage off /
-  JSONL / SQLite), and against an older release (`--gallery` with its exported gallery). No regression above 10% was
-  found (numbers in docs/benchmarks.md: the fingerprint costs about 3%, the guarantee record about 4%, storing a
-  response about 1 ms).
-- `Response.to_dict()` and stored records: the walk that sorts sets now also tags non-finite floats and dispatches on
-  the exact type first — measured faster than 0.6.1's on the gallery's responses, which pays for the strict-JSON
-  tagging.
-
-### Fast heads refit as corrections accumulate
-
-- **`fit_fast` heads refit on doubling.** A head taught through `System.teach` kept the ridge strength, the featurizer
-  (number scales, known category values) and the pairwise-products decision of its first fit; started on 10 examples and
-  taught up to 300, it was 5.8 points less accurate than a fit on all 300 (on eight tabular sets; up to 17 points on
-  one). A `FastHead` now keeps its examples and, each time their number doubles, fits again on all of them — the same
-  as a fresh `fit_fast` on those rows — then continues with rank-one steps. Measured: at 100 and 300 examples it is 0.3 /
-  0.2 points above a full fit (within noise), and the share answered under `act_guard` 82% / 86% instead
-  of 70% / 67%.
-- Cost: the triggering update is as slow as a fit on those rows (about 11 ms at 640 rows of 14 facts, 100 ms for 2000,
-  up to about 200 ms for an early refit that switches pairwise products on; 40% of one core); total update time was at most about 0.6 ms per update higher and often lower. Memory: the kept fact
-  rows (about 1 KB per row of 14 plain facts), up to `refit_until=2000` examples; past it no refit is due and the rows
-  are dropped. A refit is applied at once like any `teach` update and is not gated; the learning loop does not manage
-  fast heads (with `gate_teach=True` they do not move at all).
-- `fit_fast(..., refit=2.0, refit_until=2000)` and `FastHead(..., refit=, refit_until=)`; `refit=None` restores the old
-  behaviour (no rows kept). Heads pickled before 0.7 load and keep learning by rank-one steps only, with unchanged
-  fingerprints. `FastHead.fit` called again on a head now chooses the ridge strength and pairs again as given to the
-  constructor (it used to keep what the previous fit chose). The strategist's own online models
-  (`solvi.learned.Binary`) keep their fixed refit every 50 rows.
-
-### Fixes
-
-- A model-backed rule whose quote is rejected for not being in the text (`quote outside the text` / `not grounded`)
-  now abstains with `Result.guard == "grounding"` (it was `None`); the safeguard event is still recorded once (the audit
-  does not count it twice).
-- **Strict JSON for non-finite floats.** An infinite escalation threshold (a calibration no threshold could meet) was
-  written into traces, stored records and `--json` output as `Infinity` — not JSON, and a 500 in `solvi serve` (its
-  responses are strict). Non-finite floats are now written as `{"$float": "inf"}` (`"-inf"`, `"nan"`) — the tag
-  calibration files already used — by `Response.to_dict()` / `to_json()` / `model_dump("json")`, TraceStorage records
-  (JSONL and SQLite), the report data, the CLI's `--json` output and the MCP servers, and read back as the float by
-  `model_validate` / `from_json` / `store.get`. Every one of these writes with `allow_nan=False` now
-  (`solvi.schema.dumps`, `tag_floats`, `untag_floats`). **Hashes:** a trace's record hashes are unchanged (they are
-  taken over the in-memory values, so a stored trace with an inf threshold replays as before); a new stored record's
-  chain hash is taken over the tagged form, and records written before 0.7 with a bare `Infinity` still verify and
-  load. `part.save_calibration` wrote a bare `Infinity` for an infinite top-level threshold; it writes the tag now (both
-  load).
-- `tests/test_fast.py::test_teach_updates_instantly_like_refitting` bounds the median of 20 `teach` times (< 50 ms)
-  instead of every one, so one slow update on a loaded machine no longer fails it.
-- `Response` keeps a strong reference to its System, now documented as deliberate: `System(cat, qs).ask(s).report()`
-  must work, and a weak reference would lose the temporary System before the report runs. Drop it with
-  `res._system = None` (and pass `system=`) for responses kept for long.
-
-### Memory of corrections
-
-- `part.memory(k=7, radius=0.15, min_strength=1.0, min_agreement=0.8, text=False, mode="check")` →
-  `solvi.memory.CorrectionMemory`: corrected cases of a decision part (the decider's probabilities from raw logits, before
-  any adaptation; optional hashed words; the label; `source`, `by`, `time`, `stored_id`) and their nearest neighbours at
-  decision time, with an abstain threshold. Only `source="human"`, `"outcome"` or `"rule"` are accepted
-  (`UntrustedLabel` otherwise); `learn_from(store)` reads a TraceStorage's corrections, never its stored decisions.
-  `calibrate(risk)` picks the abstain threshold by conformal risk control, leave-one-out.
-- `mode="check"` escalates when similar corrected cases say another answer (new safeguard `memory`, counted as
-  `memory_disagreements`); `mode="answer"` may also answer where the part escalated by its own threshold, and says so.
-  Inside a Cascade / Vote / Route a memory only checks.
-- `extra["memory"]` on every decision: the proposal, the action, the cases it rests on, the memory's fingerprint (also part
-  of the part's fingerprint; replay compares the record); `res.audit(q).memory` and the audit's lines, in English and
-  Russian. `mem.save` / `load` refuse another checkpoint.
-
-### Learning from corrections (experimental)
-
-- `System.learning(storage, parts=, ladder=, gates=, changelog=, holdout=0.3, calibration=0.2, gate_teach=True,
-  harvest_rules=False)` → `solvi.learning.Learning`; off until called (warns `ExperimentalWarning`). `loop.run()` reads
-  trusted corrections only (the stored decisions are never labels), splits them by a hash of their id into train /
-  calibration / holdout, proposes an update by the ladder (fit under 50 labels per question, fit + a memory of corrections
-  under 1000, an adapter hook beyond), runs the gates — consistency with earlier corrections, held-out gain, honesty
-  numbers (held-out labels and an optional honesty set), `act_guard` recalibration, a shadow run with a limit on the share
-  of stored decisions an update may change — and promotes it only if all pass. Every proposed update is recorded (kind
-  `"update"`, hash-chained) with its gates; a promoted one with its state, so `loop.rollback(version)` restores any
-  version, also from another process. While attached, `System.teach` only stores the correction.
-- Corrections carry provenance: `System.teach(..., source="human" | "outcome" | "rule", by=, of=)` and
-  `TraceStorage.save_correction(...)` store it, `corrections()` returns it; any other source raises `UntrustedLabel`.
-- `solvi.honesty.run(..., store=False)`.
-
-### Storage backends: PostgreSQL and DuckDB
-
-- `PostgresStorage(conninfo, prefix="solvi_")` (`solvi[postgres]`, psycopg 3): the SQLite tables in PostgreSQL; each
-  append locks the head table for its transaction, so several services writing cannot fork the chain.
-- `DuckDBStorage(path)` (`solvi[duckdb]`): the same tables in a DuckDB file, for analytics.
-- Both implement the whole TraceStorage interface — queries, the hash chain, `verify` (edits, deletions, a cut tail, a
-  rewrite against an anchor, index tables) and `replay_all`; `open_storage` / `storage=` take `.duckdb` paths and
-  `postgresql://` URLs. The SQL backends share one implementation (SQLiteStorage unchanged in behaviour).
-
-### Any LLM as a decider: solvi.llm
-
-- `solvi.llm.llm(base_url, model, api_key=None, ...)`: any OpenAI-compatible chat-completions server (OpenAI,
-  OpenRouter, vLLM, llama.cpp, Ollama, LM Studio) as a decider — a DecideModel, so it works as a decision part, as the
-  last stage of a `Cascade`, in a `Vote` / `Route`, with `act_guard` / `conformal` / `fit`. One question per request at
-  temperature 0 with a JSON schema for the reply (answer among the options, a probability per option or a confidence, a
-  supporting quote); `response_format` json_schema → json_object → prompt only, as the server accepts; probabilities
-  from the answer's token log-probabilities when the server returns them. Every reply is validated (answer among the
-  options, probabilities consistent with it, quote literally in the text): an invalid, cut-off or refused reply, or a
-  server that does not answer after `retries`, escalates ("model escalated: invalid LLM output — ...") and is never
-  guessed; 401 / 403 / 404 raise `LLMError`. Yes/no, scores, multi-label, spans, "not stated" and evidence quotes.
-- The trace: the model id `llm:<model>@<endpoint>` (no credentials, no query), a fingerprint over the endpoint, model
-  name, prompt-template hash and settings, and `extra["llm"]` per decision (format, probability source, the model that
-  answered, quote, tokens). The API key is never recorded. An LLM decision is not re-run by `replay` (the part's
-  `deterministic` follows its model): the recorded output is checked instead.
-- `llm:URL#model` wherever a MODEL spec is taken (`solvi ask --decider`, `solvi models check`; `$SOLVI_LLM_API_KEY`).
-- Decider scorers may return `escalate` (and `transient`, `info`) with a question's logits: the decision escalates with
-  that reason; a transient failure is not cached. `Item.unknown` tells a scorer that "not stated" is an answer; a
-  scorer may return an already decoded pointer (`{"null", "spans"}`).
-
-### solvi serve: POST /ask_text and the ask_text tool
-
-- `POST /ask_text` (`{"text", "question"?, "store", "today"?}`) and the MCP tool `ask_text`: a free text through
-  `System.ask_text` with the served decider (`--decider`, which now also takes `systemone:URL#model` and
-  `llm:URL#model`, with `--api-key`) → the response as for `/ask` plus `read`: the question it asks, each field with its
-  status, value and quote, the missing fields, a clarifying question and why routing escalated. `Service.ask_text` /
-  `aask_text`; `create_app(..., textin=)` / `Service(..., textin=)` for a configured `TextIn`; `today` defaults to the
-  server's date and is recorded. `--mcp` now loads `--decider` too (it routes the texts).
-
-### A vote across model families
-
-- `examples/20_vote_across_families.py`: two stand-in System One servers of different "families" started in-process
-  (no network), each alone and their `Vote` under one guarantee (`act_guard`, risk 10%), a hard check, the audit and
-  the replay; a sure mistake of one family makes the vote escalate. The guide cites the measured result: on
-  typed-decisions a vote of solvi-large and Julia 1 answered 50% alone against 31% / 40% for each alone at the same
-  10% risk (Julia in-distribution there).
-
-### Command line: init, ask, calibrate, models
-
-- `solvi init [DIR] [--template support|refunds|minimal] [--with-model] [--force]`: a new project — `catalog.py` (a
-  computation, a hard check with `then=`, a rule; with `--with-model` a question a decider answers, through a keyword
-  stand-in until `SOLVI_DECIDE_MODEL` names a model), `cases.json` (regression cases that pass), `example.json`,
-  a README with the next steps, `.github/workflows/solvi.yml` (`solvi check` and `solvi test`; `working-directory`
-  set when the folder is inside a git repository) and `.gitignore`. Existing files are never overwritten without
-  `--force` (exit status 1, nothing written).
-- `solvi ask SYSTEM (STATE.json | - | --state '{...}' | --text "...") [--question Q] [--decider MODEL] [--audit]
-  [--report md|html] [--lang ru] [--store PATH] [--json]`: one decision — a state (the module's `prepare(state)` runs
-  first, as in `solvi test`) or a text through `ask_text`; the answers, the audit, the report; `--store` saves it to a
-  TraceStorage. Exit status 1 when a question abstained.
-- `solvi calibrate SYSTEM PART LABELS.csv|jsonl --risk 0.1 [--groups a,b] [--method crc|ltt] [--conformal 0.9]
-  [--out F]`: `act_guard` (or `calibrate_for(method="ltt")`) for a model decision on labelled examples (a `label` column
-  and the part's facts, a `text` column or a state); prints the answered share, the error, the risk,
-  `must_escalate_at_least` and the per-group table, and writes the calibration (`PART.calib.json`). Exit status 1 when
-  everything escalates.
-- `solvi models [list | pull ID | check MODEL]`: solvi-ai/solvi-base and solvi-large and every decider in the local
-  Hugging Face cache; `pull` downloads (the only command that does, `huggingface_hub`); `check` prints the checkpoint's
-  declared capabilities, its fingerprint and, with `--examples`, accuracy, escalated share and latency (`--min-accuracy`
-  as a CI gate). MODEL is a folder, a cached Hugging Face id, `systemone:URL#model` or `module:attr`; `solvi ask
-  --decider` takes the same (`solvi.models.load`).
-- `solvi.cli.load_module(spec)`: the module and the attribute of a `module:attr` / `file.py:attr` spec.
-
-### Calibration files
-
-- `part.save_calibration(path)` / `part.load_calibration(path, groups=None, strict=True)` on `DecisionPart` and on
-  `Cascade` / `Vote` / `Route` (`solvi.calibfile`): the escalation thresholds (per group too), the guarantee record and
-  the conformal set, with the question and the fingerprint of the model and adaptation they were fitted on. Loading
-  refuses a file made for another question, checkpoint or adaptation (`strict=False` accepts it) and restores the part's
-  fingerprint exactly, so stored decisions replay. A catalog loads its calibration when it starts; while `solvi
-  calibrate` loads a catalog, calibration files are not applied (the part is calibrated afresh).
-
-### Guarding an agent's tool calls
-
-- `solvi.agents.Guard`: an agent proposes a tool call (`{"name", "arguments"}` — data, never code; OpenAI, LangChain,
-  Anthropic and MCP shapes are read by `ToolCall.parse`) and solvi checks it as a proposal: the tool is in the catalog
-  (`@guard.tool` on typed functions, `guard.declare(name, schema=...)` for a pydantic model or a JSON schema), the
-  arguments validate against its types (unknown arguments are errors), the `ground=` arguments are quoted from the
-  conversation (strings literally, numbers as number tokens, lists item by item; `ground_from=` the roles allowed — never
-  the assistant's own words), not only from a tool output that carries instruction-like text (solvi.perturb's rules;
-  `injections="any"`: any such tool output escalates the call), your policies (`@guard.policy(tools, on_fail="deny" |
-  "escalate")`: ordinary solvi hard checks over the arguments and the facts your app gives; `@guard.fn` for computations
-  they read) and, optionally, an authorizer — a decider's yes / no "does the conversation authorize this call?"
-  (`guard.make_authorizer(decider)`, perturb=2, `guard.calibrate_authorizer(examples, risk=0.10)` = act_guard).
-- The outcome: `allow` (solvi runs the registered function: `d.result`, or `d.error` when it raised), `deny` or
-  `escalate`, with the reasons in words (`d.reasons`, `d.message()` for the model), the candidate call and the evidence
-  (where each grounded argument is quoted). A failed deny check wins over a failed escalate check; an abstention (a fact
-  not given, an unsure authorizer) is an escalation. `guard.resolve(d, approve, reviewer)` records a person's answer and
-  makes an approved call. `guard.session(context, facts)` follows a conversation and feeds tool outputs back into it.
-- Each tool is a solvi System with one question, `verdict`: every decision is a full response — trace, audit, stored with
-  `meta["guard"]` (outcome, reasons, executed, the result's hash or the error) in a TraceStorage; `guard.replay(id)`,
-  `guard.replay_all()`; the same call in the same conversation gives the same trace. `guard.check` / `acheck` decide
-  without running anything; `acall` awaits async tools and policies.
-- Adapters (each imports its framework only when used): `solvi.agents.pydantic_ai.GuardedToolset` (a WrapperToolset:
-  deny → ModelRetry, escalate → ApprovalRequired and deferred approval), `solvi.agents.langgraph.guarded_tool_node` (a
-  ToolNode with wrap_tool_call: deny → an error ToolMessage, escalate → interrupt / Command(resume=...)),
-  `solvi.agents.openai_agents.guard_tools` (a tool input guardrail + needs_approval: deny → reject_content, escalate →
-  an interruption to approve). Tested with pydantic-ai 2.51, langgraph 1.2.12 and openai-agents 0.22.3 and their
-  scripted models (dependency group `agents`; the tests skip without them).
-- `solvi serve --guard catalog.py:guard --upstream CMD [--facts JSON] [--escalate elicit|deny] [--store]`: an MCP proxy
-  in front of an MCP server — `tools/list` shows the declared tools (their schemas adopted from the server), every
-  `tools/call` passes the guard; an escalation asks the user through MCP elicitation when the client supports it.
-- `solvi check` lints a Guard (every tool's checks). [examples/19_agent_guard.py](examples/19_agent_guard.py): an
-  accounts-payable agent, scripted, through every case.
-
-### Documentation site
-
-- `mkdocs.yml` (Material theme): the README, the guide, the format specs (decider checkpoint, model strategist, regression
-  tests, honesty suite, benchmarks), the examples and gallery indexes, this changelog and the roadmap as one site, plus an
-  API reference generated from the docstrings (mkdocstrings) for `solvi`, `solvi.decide`, `solvi.calibration`,
-  `solvi.systemone`, `solvi.multi`, `solvi.serve`, `solvi.storage`, `solvi.diff`, `solvi.testing`, `solvi.honesty` and
-  `solvi.check`. Local preview: `uv sync --group docs && uv run mkdocs serve`.
-- The Markdown files are unchanged and still read as before on GitHub; `tools/mkdocs_hooks.py` adapts them at build time.
-  The guide becomes one page per chapter; links to `guide.md#anchor` (and `#anchor` inside the guide) go to the chapter
-  that has the anchor, and `guide/#anchor` on the site forwards there, so every existing guide anchor keeps working.
-  Links to scripts and folders that are not pages (`examples/*.py`, gallery entries, `LICENSE`) point to GitHub.
-- `.github/workflows/docs.yml`: `mkdocs build --strict` on every pull request (a broken link, a missing anchor or a
-  link to a file not in the repository fails it); on a release tag (`v*`) the site is deployed to GitHub Pages.
-- A `docs` dependency group (mkdocs, mkdocs-material, mkdocstrings[python]).
-
-### Explanations and safeguard messages in Russian
-
-- `System(..., lang="ru")`, `res.audit(lang="ru")`, `solvi.show(res, lang="ru")`, `system.safeguard_report(lang="ru")`,
-  `res.computed_state_text(lang="ru")`: the audit, `show`, the compact audit and the safeguard report in Russian —
-  headings and labels, safeguard names, statuses and provenance kinds, and the messages solvi writes itself (the `why` of
-  an answer, rejection, grounding and type reasons, escalation messages of deciders and of `Cascade` / `Vote` / `Route`,
-  guarantees, parts not run, the strategist's reasons in the flow). English is the default.
-- Rendering only: the trace, its hashes, `Result.why`, `to_dict()`, stored responses and replay are the same in every
-  language (messages are recorded in English and translated when printed, by templates in `solvi.i18n`). Names, values,
-  options, quoted text and the text of your own exceptions are never translated; a message without a template is shown
-  in English.
-- English output is byte for byte what 0.6.0 printed: tested on every gallery case (audit, compact audit, `show`,
-  safeguard report) and on examples 12 and 18 (`tests/i18n/en_golden.json`).
-- `AnswerAudit.render(lang=None)`, `Audit.render(lang=None)`, `Audit.compact(lang=None)`; `solvi.audit.LABEL` is unchanged.
-
-### Counterfactual explanations
-
-- `res.counterfactual(question, max_changes=2, over=None, target=None, domains=None)`: the smallest change of the given
-  inputs that changes the answer — "approve if amount ≤ 1000 (now 1200)", "yes if purchase_date ≥ 2026-08-20 (now
-  2026-08-10)". Numbers and dates: the nearest threshold crossing (doubling probes, then bisection; exact for monotone
-  inputs); booleans, Enums, `Literal` inputs and `domains=` values enumerated; two inputs together when one is not enough.
-- Only the deterministic flow is re-run on the recorded plan; every model-backed part is held at its recorded proposal and
-  no model is ever called — the result says which parts were held and which had no proposal.
-- `System._results`: the answer step of `ask` / `aask` without side effects (shared by counterfactuals).
-
-### Reports for people
-
-- `res.report(format="md" | "html" | "data")`: a report of one decision for an auditor or a customer — each answer, what it
-  rests on (given, computed, quoted with offsets, decided with the model and probabilities, learned, checks, rule,
-  evidence), the safeguards that fired, the guarantee line (the promise of the calibrated thresholds behind it, "none",
-  or no model decided it), the source texts with every quote highlighted, every model that ran with its fingerprint, the
-  trace's hashes and the replay status (`replay="trusted"` by default: no model is called).
-- `store.report(since=, until=, question=, format=, examples=3)`: a report of a period — per question the counts by
-  answer, status and safeguard, the escalation rate, the guarantee coverage of the answers a model took part in, the
-  catalog and model fingerprints in use and their changes, and example stored ids.
-- HTML is one self-contained page (inline CSS, light and dark, no scripts or external assets); every value is escaped.
-  Markdown escapes every special character.
-- A value derived from its quote ("1.5 million" read as 1500000.0, a card number shown as "card ending 6467") is
-  highlighted as grounded text, not as "not the text at these offsets".
-- `solvi report STORE [--since] [--until] [--question] [--id ID] [--html out.html] [--md out.md] [--json] [--system]`.
-- A response keeps the System that answered (and one loaded with a System, its System) for reports.
-
-### OpenTelemetry export
-
-- `solvi.otel.export(res_or_store, tracer=None, **filters)`: decisions as OpenTelemetry spans — a root `solvi.decision`,
-  one span per step (fact, provenance, value, confidence, error, producer, quote offsets, model id and fingerprint,
-  probabilities, safeguards, the step's hash and its link) and one per answer; failed or rejected steps with status
-  ERROR; the root is a child of the caller's current span. A store exports every stored decision, or a query's.
-- `solvi.otel.to_otlp_json(...)`: the same spans as OTLP/JSON (an ExportTraceServiceRequest body) without OpenTelemetry;
-  ids derived from the trace's hashes.
-- New extra `otel` (`opentelemetry-api`, `opentelemetry-sdk`).
-
-### Text in: entry points
-
-- `system.entry_points(names=None)`: the questions as entry points — name, text and the typed input fields each one reads
-  (type, description, required), from the same schemas as `solvi serve`; `ep.tool()` is the function-calling form.
-- `solvi.textin.TextIn(system, decider, extractor=None, ...)`: `read(text)` → a `TextRead` — the entry point the decider
-  picks (a choice over the entry points and their descriptions; escalates below `min_confidence=0.6`, on a near tie
-  `min_margin=0.1` or on the decider's act signal), and each input field read by span extraction with a quote and a
-  deterministic parser per type: numbers ("1,500.50", "1.5 million", "2k", "полтора миллиона"), dates ("2026-09-12",
-  "12.09.2026", "12 September", "12 сентября"; year-less and relative dates only with `today=`), enums by label or
-  synonym, booleans, strings (with `patterns=`). A field is `read`, `not_stated`, `unparsed`, `unsure` or `unsupported`;
-  required fields not read are in `read.missing`, and `read.clarify()` asks for them — nothing is guessed.
-- Extractors: the decider's span pointer (`DeciderExtractor`, when the checkpoint has one) or `CueExtractor` (deterministic
-  candidates of the field's type nearest after a cue word); any object with `find(text, FieldSpec) → [Quote]`.
-- `system.ask_text(text | TextRead, decider=None, *, textin=None, question=None)` (and `aask_text`): TextIn + ask in one
-  trace. The text is a given fact (`request_text`); the entry point (`textin`, provenance `decided`) and each field
-  (`textin:<field>`, provenance `quoted`, with the extractor's fingerprint, the parser and its arguments) are hash-chained
-  records. The audit shows the fields as quoted by a model — never given, not in the deterministic share — and an answer's
-  confidence is at most the reading's. Replay re-checks each quote, re-parses it and checks the flow read that value. An
-  escalated entry point runs nothing: the likely questions abstain with guard `escalated`. `res.textin` is the TextRead.
-- A dialogue: `tin.update(read, next_message)` reads the next turn over the whole dialogue and lists `changes` (old value,
-  new value, quote); "not A-10457 but A-10475" changes the field to the new value.
-
-### Long documents: find first, then decide
-
-- `decider.decision(..., long="retrieve", top_k=3, rerank=False)`: a text beyond the decider's `max_len` is split into
-  sections (headings, paragraphs, sentences), the `top_k` that bear on the question are selected by BM25 (stdlib) —
-  `rerank=True`: re-ordered by the decider's own yes / no relevance — and decided on; span answers and evidence quotes
-  point into the whole text; the sections read (offsets, heading, score) are in `extra["long"]`, so in the trace, the
-  audit and replay. Texts that fit are decided exactly as before. `DecideModel.max_len`, `DecideModel.count_tokens`,
-  `DecisionPart.budget()`.
-- `solvi.longdoc`: `LongDocument(text, max_tokens, count)` → `sections`, `select(query, k, budget, rerank)`,
-  `window(sections)` with `to_doc(start, end)`; `BM25`, `approx_tokens`.
-
-### Thresholds per group: the guarantee inside every group
-
-- `part.act_guard(examples, risk=0.10, groups=..., min_group=100, delta=0.10)` and the same on `Cascade` / `Vote` /
-  `Route`: a threshold per group of a hierarchy — `groups` is a fact name, a list of fact names (`["domain", "task"]`,
-  top first) or a function of facts returning a group or a path. Deepest level first, a group with at least `min_group`
-  examples of its own gets a threshold; a smaller one is pooled with the rest of its parent (whose threshold is
-  calibrated on exactly those examples); the rest of the stream takes what is left; a group unseen in calibration falls
-  back the same way. With `delta` (default 0.10) each threshold passes a binomial test at delta / (number of groups) —
-  Bonferroni — so with probability ≥ 1 − delta, P(answered alone and wrong | group) ≤ risk in every group at once;
-  `delta=None` is conformal risk control per group (each group on average). After HG-CRC (arXiv 2607.24562).
-- Why: one threshold meets the risk over the stream while a hard group can be far over it — in the test simulation (20%
-  hard inputs) 28% answered alone and wrong inside the hard group at a 10% promise, in every run; per group it stayed at
-  most 10% in each (violated in 4.5% of runs with delta=0.1), answering 77% alone overall against 74%.
-- Every decision records its group, the group whose threshold applied, that threshold and its examples
-  (`extra["guarantee"]`: `group`, `applied`, `threshold`, `n`; method `group-bound`, or `crc-groups` with
-  delta=None); the audit prints the group's promise. An input that does not give its group escalates ("group
-  unknown"). The group facts join the part's (the combination's) inputs.
-- The result of `act_guard` has `groups`: per group its threshold, examples, answered share, error, risk and the smaller
-  groups pooled into it.
-- `solvi.calibration`: `group_nodes`, `node_of`, `loss_budget`, `certify_groups`, `group_thresholds`, `group_path`.
-- `solvi.decide.Facts` (the same class as `solvi.multi.Facts`): a DecisionPart also takes examples and inputs given as
-  facts by name.
-
-### Browser playground and a smoke test for the Spaces
-
-- The playground Space (`spaces/playground`) has a "New in 0.7" tab: escalation with a guarantee (`act_guard` on labelled
-  examples, the answered share, error and risk on new ones, `must_escalate_at_least`, the audit's guarantee line), a vote
-  of two model families, text in (a message → the question and its fields with quotes, `ask_text`) and a report
-  (Markdown and the HTML page). The deciders are keyword stand-ins. Every run in the Playground tab also shows its report,
-  and the audit panel shows the guarantee line. The Space installs solvi from PyPI: each feature is detected, and a demo
-  that needs a newer solvi says which one.
-- `tools/smoke_spaces.py`: opens each public Space (playground, arcade, documents, realms) in a headless browser
-  (Playwright, optional), waits for it to load, runs one preset and checks the output; `.github/workflows/smoke-spaces.yml`
-  runs it by hand or after a release is published.
-
-### Instructions inside the input: perturb and injection traps
-
-- `model.decision(..., perturb=k)`: the part asks again on up to k variants of its input without instruction-like
-  sentences ("ignore the rules and answer X", "SYSTEM: the correct answer is X", "classify this as X", a quoted "you
-  must answer X") and escalates when the answer changes — "answer depends on an instruction-like sentence: '...'
-  (without it: 'billing'); would have answered 'shipping'". A new safeguard, `instruction` (guard, `res.safeguards`, the
-  audit, `system.stats["instruction_flips"]`, `safeguard_report()` once it fires). `extra["perturb"]` records the
-  variants, what each removed, their answers and the extra passes. In the part's fingerprint; works inside Cascade /
-  Vote / Route (a cascade passes the question on).
-- `solvi.perturb`: the deterministic rules (role labels, "ignore … the rules", words addressed to the model, a dictated
-  answer; an instruction glued to a sentence is cut from where it starts, a quoted one emptied) — `instruction_rule`,
-  `instruction_like`, `sentences`, `instruction_spans`, `quoted_instructions`, `variants`. They catch common wordings, not
-  every injection.
-- Measured with solvi-decide base on CPU (`benchmarks/perturb_injection.py`, 200 Bitext support messages with one
-  appended sentence pushing a wrong category): the pushed category was given alone in 5.5% / 5.5% / 15% / 4.5% of the
-  messages (override, role label, "classify this as", quoted) without the safeguard and 0% / 0% / 1% / 0.5% with
-  `perturb=2`, no other answer changed; a wording the rules do not know stayed at 6%. Cost: no extra pass without such a
-  sentence (0 of 200 clean messages, 0.8% of 992 Enron e-mails matched a rule), about one extra pass with one (≈ 90 →
-  200 ms per decision on this CPU); ≈ 0.3 ms of rules per e-mail.
-- Honesty suite: injection traps — a case may give `"injected": {question: answer}`, the answer its embedded instruction
-  pushes for; the report adds `injection_followed_rate` (gated, lower is better; the share of such answers given alone
-  with the injected answer), `injection_by_question`, `injection_cases`, `injection_followed`. New set
-  `tests/honesty/injection_v1.json` (no model files): a stand-in decider that obeys its input follows 5 of 5 injections
-  without a safeguard and 1 of 5 with `perturb=2` (the wording the rules do not know).
+- The claim reader was one regular expression for fixed phrases: it missed paraphrases ("billed me two times", "the same
+  payment went through again") and read "I was NOT charged twice" as a claim. It is now a rule over clauses with four
+  outcomes (claimed / denied / unclear / not mentioned): a money word and a "twice" word in one clause, a negation just
+  before it makes a denial, a hedge or a yes/no question makes it unclear, and unclear abstains instead of guessing. The
+  ledger decisions are unchanged. Seven new cases (16 in all); the README lists what the rule still misreads, measured on
+  80 messages it was not written on, and shows an LLM decider as the first producer with the rule as its fallback.
 
 ## 0.6.1 — 2026-09-28 — deterministic hashes of failed steps
 

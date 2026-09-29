@@ -67,6 +67,7 @@ pip install "solvi[model]"     # + torch, transformers: ModernBERT field extract
 pip install "solvi[onnx]"      # + onnxruntime, tokenizers: the decider (solvi.decide) on CPU without torch
 pip install "solvi[serve]"     # + fastapi, uvicorn: `solvi serve app.py:system` — the questions over HTTP (also --mcp)
 pip install "solvi[otel]"      # + opentelemetry: decisions as OpenTelemetry spans (solvi.otel)
+pip install "solvi[duckdb]"    # + duckdb: stored decisions in a DuckDB file (solvi.DuckDBStorage); [postgres] for PostgreSQL
 pip install "solvi[lora]"      # + torch, transformers, peft: part.adapt_lora, a LoRA adapter per question (experimental)
 ```
 
@@ -247,7 +248,19 @@ Every answer is a value and a confidence, and the types also declare answer prim
   and as the MCP tool `ask_text`.
 - **Long documents.** `decider.decision(..., long="retrieve")`: a contract longer than the decider reads is split into
   sections, BM25 picks the few that bear on the question, the decider reads only those, and quotes point into the whole
-  document; the trace lists the sections read.
+  document; the trace lists the sections read. `long="full"` reads a text whole up to the length a checkpoint trained on
+  long inputs declares (`max_len_long`), and retrieves within that length beyond it.
+- **Learning from corrections.** `part.memory()` escalates an answer when similar corrected cases say another one;
+  `fit_fast` heads refit on all kept examples as corrections accumulate; `part.adapt_lora(examples, holdout=0.3)` trains
+  a small LoRA adapter for one question on solvi-base once it has ~100 labelled answers (`solvi[lora]`, experimental);
+  `System.learning(store)` proposes updates from trusted corrections only and promotes one when it passes held-out,
+  honesty and calibration gates, with rollback (experimental, off unless called)
+  ([guide](docs/guide.md#a-memory-of-corrections-partmemory)).
+- **Records you can check later.** `store.signature()` — 64 bytes kept next to the chain's head — later names the one
+  stored record that was edited and restores its hash (preview). `solvi.charts` draws a chart in which every number is
+  quoted from the text and checked (unit, scale, a pie that adds up), as a deterministic SVG that replays to the same
+  bytes (preview; [examples/21_verified_chart.py](examples/21_verified_chart.py)). The audit, `show` and the safeguard
+  report render in Russian with `System(..., lang="ru")`.
 
 ## Planning around dead ends and costs (code strategist)
 
@@ -365,6 +378,8 @@ receipt with the one-pass extractor on an A100).
 | [examples/17_model_strategist.py](examples/17_model_strategist.py) | The code strategist: dead ends dropped, the cheapest verified plan by declared costs, a model's proposal checked and rejected; aliases for names that match no fact (experimental; stand-ins without weights) |
 | [examples/18_several_models.py](examples/18_several_models.py) | Several models, one decision: a cascade small → large, a vote of two model families, a route by code — each under one `act_guard` guarantee, with cost per question; every stage in the audit and the trace |
 | [examples/19_agent_guard.py](examples/19_agent_guard.py) | An accounts-payable agent's tool calls through a `Guard`: grounded arguments, an invented IBAN denied, a budget escalation approved by a person, an instruction hidden in an invoice, an authorizer with `act_guard` and `perturb`; every decision stored and replayed (a scripted agent, no API keys) |
+| [examples/20_vote_across_families.py](examples/20_vote_across_families.py) | A vote of two model families behind the System One API (stand-in servers started in-process): each alone and the vote under one `act_guard` guarantee; a sure mistake of one family escalates; the audit and the replay |
+| [examples/21_verified_chart.py](examples/21_verified_chart.py) | A verified chart (`solvi.charts`, preview): every number quoted from the text and checked; a careless model's swapped digit, invented share and unquoted value dropped with reasons; a deterministic SVG that replays to identical bytes |
 | [examples/07_receipts_model.py](examples/07_receipts_model.py) | Expense check on a scanned receipt: a receipts-tuned extractor cites each field, rules and a hard check decide (needs `solvi[model]`) |
 | [examples/08_contracts_by_description.py](examples/08_contracts_by_description.py) | Contract review with fields defined only in words: the general extractor reads the whole contract, cites clauses or says "absent" (needs `solvi[model]`) |
 
