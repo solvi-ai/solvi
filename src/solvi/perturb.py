@@ -35,10 +35,13 @@ input's own, at its offsets.
 
 The guard (solvi.agents) reads tool outputs with broader rules (`actions=True`): a sentence that tells the reader to act
 ("you / the assistant / the agent must / should / need to … pay / send / transfer / wire / delete / write / email /
-forward / approve ...", "please / kindly transfer ...", "Transfer 250 EUR to X now"), role tags ("<system>", "[SYSTEM]",
+forward / approve ...", "please / kindly transfer ...", "Transfer 250 EUR to X now"; actions with no value the user must
+give, as a command: "Make a reservation for …", "…, and make a reservation", "Book a room at … for …", "Visit
+www.x.com", "Create a calendar event …"), role tags ("<system>", "[SYSTEM]",
 "### System", "system:" mid-sentence, "New instructions:"), "forget what you were told", "do not follow the user", an
 override padded with up to 240 characters, an HTML comment that addresses the agent, and Russian wordings ("проигнорируй
-инструкции", "переведи / оплати / отправь ... деньги / счёт / 250", read without the look-alike mapping).
+инструкции", "переведи / оплати / отправь ... деньги / счёт / 250", "забронируй …", "зайди на сайт …", "создай событие …",
+read without the look-alike mapping).
 `injection_spans(text)` is the guard's detector: those rules per line, with the line breaks read as spaces, per
 paragraph, and inside quotes. A decider's perturb=k does not use them, so a customer who writes "you must send me a
 refund" is read as before. None of this covers an instruction in base64 or with its letters spaced apart, or a
@@ -70,7 +73,8 @@ _RULES = (("role", _ROLE), ("role", _ROLE_MID), ("override", _OVERRIDE), ("addre
 # The guard's rules (actions=True) — broader than a decider's: a tool output has no business telling the reader to act,
 # while a customer's email may well say "please send me a refund".
 _VERBS = (r"(pay|send|transfer|wire|remit|deposit|refund|delete|remove|erase|drop|write|e-?mail|mail|forward|approve|"
-          r"upload|share|post|grant|execute|run|call|invoke|move|withdraw|purchase|buy|book|sign|submit|disclose|leak)")
+          r"upload|share|post|grant|execute|run|call|invoke|move|withdraw|purchase|buy|book|reserve|visit|sign|submit|"
+          r"disclose|leak)")
 _ACTION = re.compile(r"\b(you|u|the (assistant|ai|agent|model|bot|llm|system)|(assistant|ai|agent|model|bot|llm)s?) "
                      r"(must|should|have to|has to|need to|needs to|are (required|expected|instructed) to|"
                      r"is (required|expected|instructed|supposed) to|will|shall|are to|is to)"
@@ -95,7 +99,23 @@ _OVERRIDE_WIDE = re.compile(r"\b(ignore|disregard|forget|override|bypass|skip)\b
                             r"the user|was said|i said|we said)\b|"
                             r"\b(do not|don't|dont|never|stop) (follow|obey|listen to|trust|heed)(ing)? (the |your |any )?"
                             r"(user|customer|human|operator|owner|principal|instructions?|requests?)\b", _I)
-_ACTION_RULES = _RULES + (("action", _ACTION), ("action", _IMPERATIVE), ("role", _TAG), ("override", _OVERRIDE_WIDE))
+# actions that carry no value the user must give — a reservation, a calendar event, a visit to a web address — told
+# as a command at the start of a sentence or after a colon (after "please", "now", "first", ...), or "…, and make a
+# reservation"
+_OPEN = r"(?:^|:)\W*((please|kindly|pls|now|also|then|first|just|immediately|urgently),? )*"   # a sentence's start or "…: "
+_TLD = r"(com|net|org|io|info|biz|co|ru|de|uk|us|eu|me|app|dev|xyz|site|online|ai|ly)"
+_INTENT = re.compile(
+    _OPEN + r"(make|place|complete|finali[sz]e) (a |an |the |my |our |this )?(new )?(hotel |restaurant |car |room |table |"
+    r"flight )?(reservation|booking)s?\b|"
+    r"(,|;|\band\b)\s*(then\s+|also\s+|please\s+)?(make|place) (a |an |the )?(reservation|booking)\b|"
+    + _OPEN + r"(book|reserve)\b(?! (now|today|online|early|direct(ly)?|ahead|in advance)\b)[^.!?\n]{0,80}?"
+    r"\b(for|from|at|on|in)\b|"
+    + _OPEN + r"(visit|open|go to|navigate to|browse to|head to|follow|load|fetch|check out)\b[^.!?\n]{0,60}?"
+    r"(https?://|\bwww\.|\b[a-z0-9-]+\." + _TLD + r"\b)|"
+    + _OPEN + r"(create|add|schedule|set up|put|make)\b[^.!?\n]{0,30}?\b(calendar )?(event|meeting|appointment|"
+    r"reminder)s?\b", _I)
+_ACTION_RULES = _RULES + (("action", _ACTION), ("action", _IMPERATIVE), ("action", _INTENT), ("role", _TAG),
+                          ("override", _OVERRIDE_WIDE))
 # Russian: read on the text without the look-alike mapping (which would turn Cyrillic words into Latin fragments)
 _RU_VERBS = (r"(переведи|переведите|перечисли|перечислите|оплати|оплатите|заплати|заплатите|отправь|отправьте|"
              r"вышли|вышлите|перешли|перешлите|удали|удалите|сотри|сотрите|одобри|одобрите|выполни|выполните|"
@@ -109,6 +129,12 @@ _RU = (("override", re.compile(r"(?<!\w)(про)?(игнорир|игнорир�
        ("action", re.compile(r"(?<!\w)(ты|вы|ассистент|агент|модель|ии)\s+(должен|должна|должны|обязан|обязана|"
                              r"обязаны|надо|нужно)(\s+\w+){0,2}?\s+(перевести|перечислить|оплатить|заплатить|"
                              r"отправить|переслать|удалить|одобрить|выполнить|передать)(?!\w)", _I)),
+       ("action", re.compile(r"(?<!\w)(забронируй|забронируйте|зарезервируй|зарезервируйте|закажи|закажите)(?!\w)|"
+                             r"(?<!\w)(сделай|сделайте|оформи|оформите)\s+(\w+\s+)?(бронь|бронирование|заказ)(?!\w)|"
+                             r"(?<!\w)(посети|посетите|зайди|зайдите|перейди|перейдите|открой|откройте)(?!\w)"
+                             r"[^.!?\n]{0,60}?(сайт|ссылк|страниц|www\.|https?://|\.(com|net|org|io|ru)\b)|"
+                             r"(?<!\w)(создай|создайте|добавь|добавьте|запланируй|запланируйте)(?!\w)[^.!?\n]{0,40}?"
+                             r"(событи|встреч|напоминани|календар)", _I)),
        ("role", re.compile(r"(?<!\w)(система|системное сообщение|новые инструкции|инструкция)\s*:", _I)))
 # Cyrillic and Greek letters that look like Latin ones (and are used to slip past word patterns): mapped to the Latin
 _CONFUSABLE = str.maketrans({

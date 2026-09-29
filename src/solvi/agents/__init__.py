@@ -11,7 +11,8 @@ solvi.agents.langgraph (a ToolNode with the guard around every call), solvi.agen
 plus needs_approval for escalations); `solvi serve --guard catalog.py:guard --upstream CMD` puts the guard in front of an
 MCP server (solvi.agents.mcp)."""
 from .guard import (AUTHORIZE_TASK, VERDICTS, Guard, GuardDecision, Session, Tool, ToolCall, arguments_model,
-                    conversation, messages, model_from_json_schema)
+                    conversation, messages, model_from_json_schema, same_url, url_parts)
+from .intents import INTENTS
 
-__all__ = ["AUTHORIZE_TASK", "VERDICTS", "Guard", "GuardDecision", "Session", "Tool", "ToolCall", "arguments_model",
-           "conversation", "messages", "model_from_json_schema"]
+__all__ = ["AUTHORIZE_TASK", "INTENTS", "VERDICTS", "Guard", "GuardDecision", "Session", "Tool", "ToolCall",
+           "arguments_model", "conversation", "messages", "model_from_json_schema", "same_url", "url_parts"]

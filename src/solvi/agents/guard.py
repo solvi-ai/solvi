@@ -33,6 +33,8 @@ catalog, in this order (a failed hard check decides; when several fail, the firs
                                and hold no invisible (format, Unicode Cf) characters → deny
   arguments_grounded           every `ground=` argument is in the conversation as a token or number token (a quote
                                with offsets; an empty string never is), in a message of a role in `ground_from` → deny
+  arguments_from_user          tools with tool_values="escalate": a user-only argument written only in a tool output
+                               (not by the user) → escalate instead of deny (a person decides; never allowed on its own)
   no_injected_arguments        ... and not only in tool outputs when any tool output in the conversation carries
                                instruction-like text (solvi.perturb.injection_spans) → escalate
   no_instructions_in_tool_outputs   tools with injections="any": no tool output in the conversation carries such text → escalate
@@ -68,7 +70,7 @@ from ..core import Answer, Catalog, Claim, Question, Quote
 VERDICTS = ("allow", "deny", "escalate")
 GIVEN = ("tool_name", "tool_arguments", "conversation", "conversation_roles", "user_request")
 BUILTIN = ("argument_errors", "call_arguments", "grounding", "proposal", "arguments_valid", "arguments_grounded",
-           "schema_error", "schema_readable",
+           "arguments_from_user", "schema_error", "schema_readable",
            "no_injected_arguments", "no_instructions_in_tool_outputs", "request_authorizes", "verdict", "tools_known",
            "known_tool")
 ROLES = {"user": "user", "human": "user", "assistant": "assistant", "ai": "assistant", "model": "assistant",
@@ -468,6 +470,7 @@ class Tool:
     schema_error: str | None = None                            # adopt: the schema could not be read (its calls escalate)
     locale: str | None = None                                  # how a lone "1,500" reads (LOCALES); None: it grounds nothing
     scan_user: bool = False                                    # a value the user wrote next to instruction-like text escalates
+    tool_values: str = "deny"                                  # a user-only value found only in tool outputs: deny | escalate
 
     @property
     def arguments(self):
@@ -584,7 +587,8 @@ def _grounding(spec, matchers=None):
                 if s <= a and b <= e:
                     return i
             return None
-        found, missing, injected = {}, [], []
+        found, missing, injected, from_tools, outside = {}, [], [], [], {}
+        tool_values = rules.get("tool_values") == "escalate"
         for arg, allowed in rules["roles"].items():
             v = call_arguments.get(arg)
             if v is None or v == [] or v == ():
@@ -597,7 +601,8 @@ def _grounding(spec, matchers=None):
                     missing.append(f"{arg}={_short(item)} (empty)")
                     continue
                 best = None
-                for a, b in _occurrences(item, conversation, match, locale):
+                occ = _occurrences(item, conversation, match, locale)
+                for a, b in occ:
                     i = where(a, b)
                     if i is None or roles[i][2] not in allowed:
                         continue
@@ -607,6 +612,26 @@ def _grounding(spec, matchers=None):
                         best = cand
                         break
                     best = best or cand
+                if best is None and tool_values and "tool" not in allowed:
+                    # tool_values="escalate": a value the user did not write but a tool output did goes to a person
+                    alt = None
+                    for a, b in occ:
+                        i = where(a, b)
+                        if i is None or roles[i][2] != "tool":
+                            continue
+                        said, how = taint(i, a, b)
+                        cand = [conversation[a:b], a, b, "tool", said, how]
+                        if not said:
+                            alt = cand
+                            break
+                        alt = alt or cand
+                    if alt is not None:
+                        says = ("; a tool output in the conversation says " + "; ".join(_short(x, 80) for x in alt[4])
+                                if alt[4] else "")
+                        from_tools.append(f"{arg}={_short(item)} is not in the user's words, only in a tool output"
+                                          + says)
+                        outside.setdefault(arg, []).append(alt[:4])
+                        continue
                 if best is None:
                     missing.append(f"{arg}={_short(item)}")
                     continue
@@ -621,7 +646,10 @@ def _grounding(spec, matchers=None):
                 quotes.append(best[:4])
             if quotes:
                 found[arg] = quotes
-        return {"found": found, "missing": missing, "injected": injected}
+        out = {"found": found, "missing": missing, "injected": injected}
+        if tool_values:
+            out["from_tools"], out["from_tool_quotes"] = from_tools, outside
+        return out
     return grounding
 
 
@@ -692,7 +720,102 @@ def _same_number(v, x):
 
 _WHOLE_EDGE = set(" \t\r\n\"'`()[]{}<>,;:!?")
 _JOIN = set(".@-/:_")                                    # joins two tokens into one identifier ("x.org", "INV-250")
-MATCHERS = ("token", "whole", "substring", "spaced")
+MATCHERS = ("token", "whole", "substring", "spaced", "url", "url_prefix")
+
+
+# ------------------------------------------------------------------------------------------------ URLs
+_URL_CANDIDATE = re.compile(r"[^\s\"'`<>()\[\]{}|\\^,;]+")   # a run of characters a URL written in text may hold
+_URL_LABEL = re.compile(r"[A-Za-z][\w-]{0,19}[:=]")          # "Link:" / "url=" glued in front of a URL
+_URL_SCHEME = re.compile(r"[A-Za-z][A-Za-z0-9+.-]*:")
+_HOST_LABEL = re.compile(r"[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?")
+
+
+def url_parts(url):
+    """A URL → (host, port, path, query, fragment) as the "url" matcher compares them, or None when it is not a plain
+    web address. Read with urllib's parser: "http://" / "https://" or no scheme (read as a web address: "www.x.com/a");
+    any other scheme ("javascript:", "ftp://", "file:"), a protocol-relative "//x", userinfo ("good.com@evil.com",
+    "user:pass@x"), a backslash, whitespace, control or format characters, a "." / ".." path segment (also
+    percent-encoded) or a host that is not a valid DNS name or IP address → None. The host is lower case, IDNA-encoded
+    (an internationalised name compares by its xn-- form), without a trailing dot and without one leading "www."; the
+    default ports 80 and 443 are dropped; the path loses its trailing "/" (the root is ""); query and fragment are kept
+    as written. The scheme is not compared: http and https name the same address."""
+    import ipaddress
+    from urllib.parse import urlsplit
+    if not isinstance(url, str):
+        return None
+    s = url.strip()
+    if not s or any(c.isspace() or ord(c) < 32 or ord(c) == 127 or c == "\\" for c in s) or _cf().search(s):
+        return None
+    low = s.lower()
+    if not low.startswith(("http://", "https://")):
+        if s.startswith("//"):
+            return None
+        m = _URL_SCHEME.match(s)
+        if m and not re.fullmatch(r"\d+", s[m.end():].split("/", 1)[0].split("?", 1)[0].split("#", 1)[0]):
+            return None                                   # a scheme ("mailto:", "javascript:", "ftp://"), not a port
+        s = "http://" + s
+    try:
+        sp = urlsplit(s)
+        port = sp.port
+    except ValueError:
+        return None
+    if sp.scheme.lower() not in ("http", "https") or "@" in sp.netloc or not sp.hostname:
+        return None
+    host = sp.hostname.rstrip(".")
+    try:
+        ipaddress.ip_address(host)
+    except ValueError:
+        try:
+            host = host.encode("idna").decode("ascii").lower()
+        except (UnicodeError, ValueError):
+            return None
+        labels = host.split(".")
+        if len(labels) < 2 and host != "localhost":
+            return None
+        if not all(_HOST_LABEL.fullmatch(x) for x in labels):
+            return None
+        if host.startswith("www.") and host.count(".") >= 2:
+            host = host[4:]
+    path = sp.path
+    if any(seg in (".", "..") or re.fullmatch(r"(\.|%2e){1,2}", seg, re.I) for seg in path.split("/")):
+        return None
+    return host, (None if port in (None, 80, 443) else port), path.rstrip("/"), sp.query, sp.fragment
+
+
+def same_url(value, written, path="exact"):
+    """Does the URL `value` (a call's argument) name the address `written` (in the conversation)? Both read with
+    `url_parts`; the host must be equal (never a suffix or a prefix: "good.com" is not "evil.com/good.com",
+    "good.com.evil.com", "good.com@evil.com" or "xgood.com"), and so must the port, the query and the fragment.
+    path="exact": the path is equal too (a trailing "/" aside); path="prefix": the value's path may continue the
+    written one at a "/" ("x.com/docs" covers "x.com/docs/a", not "x.com/docsevil") — only for reading: a path can carry
+    data out."""
+    if path not in ("exact", "prefix"):
+        raise ValueError('path is "exact" or "prefix"')
+    a, b = url_parts(value), url_parts(written)
+    if a is None or b is None or a[0] != b[0] or a[1] != b[1] or a[3] != b[3] or a[4] != b[4]:
+        return False
+    return a[2] == b[2] or (path == "prefix" and a[2].startswith(b[2] + "/"))
+
+
+def _url_occurrences(v, text, path):
+    """Where the URL v is written in a text, by `same_url` → [(start, end)]: every run of characters that may be a URL
+    (split at whitespace, quotes, brackets, "\\", "|", "^", "," and ";"; a sentence's closing ". : ! ?" dropped), and the
+    URL in it after a glued label ("Link:https://x.com", "url=x.com")."""
+    if url_parts(v) is None:
+        return []
+    out = []
+    for m in _URL_CANDIDATE.finditer(text):
+        tok, a = m.group(0), m.start()
+        tok = tok.rstrip(".:!?")
+        starts = [0]
+        lab = _URL_LABEL.match(tok)
+        if lab and lab.end() < len(tok):
+            starts.append(lab.end())
+        for k in starts:
+            if tok[k:] and same_url(v, tok[k:], path):
+                out.append((a + k, a + len(tok)))
+                break
+    return out
 
 
 def _glued(text, a, b):
@@ -760,7 +883,8 @@ def _occurrences(v, text, match="token", locale=None):
     longer word, nor joined to one by ". @ - / : _" — "DE8937" is not found in "DE89370400…", "bob@x.org" not in
     "bob@x.org.evil", "acct" not in "acct-12", a digit string not as a group of a spaced IBAN; "whole": delimited by
     whitespace, quotes, brackets or punctuation — "x.org" is not found in "alice@x.org"; "substring": anywhere; a
-    callable(value, text) → [(start, end)] decides itself); a number as a number token of exactly its value (not inside
+    callable(value, text) → [(start, end)] decides itself; "url" / "url_prefix": a web address by `same_url`); a number
+    as a number token of exactly its value (not inside
     a word; thousands separators "1,250.50", "1'250" allowed — "1 250" only with the "spaced" matcher; 250 matches
     "250.00"; an int is compared exactly and a float by its shortest decimal form, never with a tolerance — the ID
     1234567890123456 is not found in "1234567890123457"; not 250 in "250%" or "250kg"; not a group of a longer
@@ -783,7 +907,9 @@ def _occurrences(v, text, match="token", locale=None):
         text = "".join(text[i] for i in keep)
     out = []
     from decimal import Decimal
-    if isinstance(v, (int, float, Decimal)) and not isinstance(v, bool):
+    if match in ("url", "url_prefix"):
+        out = _url_occurrences(str(v), text, "prefix" if match == "url_prefix" else "exact")
+    elif isinstance(v, (int, float, Decimal)) and not isinstance(v, bool):
         rx, thousands, dec = _number_rx(locale, match == "spaced")
         for m in rx.finditer(text):
             tok = m.group(0)
@@ -833,6 +959,12 @@ def arguments_valid(argument_errors) -> bool:
 def arguments_grounded(grounding) -> bool:
     """Every argument that must come from the conversation is quoted there."""
     return not grounding["missing"]
+
+
+def arguments_from_user(grounding) -> bool:
+    """Every argument that must come from the user is in the user's words (tool_values="escalate": one written only in
+    a tool output needs a person)."""
+    return not grounding.get("from_tools")
 
 
 def no_injected_arguments(grounding) -> bool:
@@ -971,9 +1103,9 @@ class Guard:
     "conversation" (or "user_request") and "proposal" — see `make_authorizer()`; its act_guard threshold and perturb=k
     apply. facts: names (or {name: type}) of facts your app gives with every call (a user's role, a budget left): policies
     that read them apply to every tool without naming it (the types are for readers: a policy's own annotations are what
-    solvi validates). scan_user: the default of every tool's `scan_user` (see `tool`)."""
+    solvi validates). scan_user, tool_values: the defaults of every tool's `scan_user` and `tool_values` (see `tool`)."""
 
-    def __init__(self, storage=None, authorizer=None, facts=None, lang="en", scan_user=False):
+    def __init__(self, storage=None, authorizer=None, facts=None, lang="en", scan_user=False, tool_values="deny"):
         from ..storage import open_storage
         self.storage = open_storage(storage)
         self.tools: dict[str, Tool] = {}
@@ -985,10 +1117,13 @@ class Guard:
         self._unknown = None
         self.lang = lang
         self.scan_user = bool(scan_user)
+        if tool_values not in ("deny", "escalate"):
+            raise ValueError('tool_values must be "deny" or "escalate"')
+        self.tool_values = tool_values
 
     # --- the catalog
     def tool(self, func=None, *, name=None, schema=None, description=None, ground=(), ground_from=("user", "tool", "system"),
-             injections="grounded", authorize=None, locale=None, scan_user=None):
+             injections="grounded", authorize=None, locale=None, scan_user=None, tool_values=None):
         """Declare a tool the agent may call. As a decorator on a typed function (`@guard.tool`, `@guard.tool(ground=[...])`),
         or `guard.tool(name="refund", schema=RefundArgs)` (a pydantic model or a JSON schema) for a tool the framework or
         an MCP server runs. The function is returned unchanged.
@@ -997,7 +1132,10 @@ class Guard:
         a list item by item; an empty string never) — a list of names, or {name: matcher}: "token" (the default: not
         inside a longer word, nor joined to one by ". @ - / : _"), "whole" (delimited by whitespace, quotes, brackets or
         punctuation: for IBANs, e-mails, paths), "spaced" (as "token", and a number may group its thousands with spaces:
-        "1 250"), "substring" (anywhere), or a callable(value, text) → [(start, end)] of the value's occurrences;
+        "1 250"), "url" (a web address: the same host, port, path, query and fragment as a URL written in the
+        conversation, with or without "http(s)://", a leading "www." or a trailing "/" — see `same_url`), "url_prefix"
+        (as "url", and the path may continue the written one at a "/": only for reading, a path can carry data out),
+        "substring" (anywhere), or a callable(value, text) → [(start, end)] of the value's occurrences;
         ground_from: the roles of the messages they may be quoted from (default: the user's, tool outputs and system
         messages — never the assistant's own words; ("user",) for values only the user may give, like a payee).
         injections: "grounded" (default: a grounded argument found only in tool outputs escalates when any tool
@@ -1007,7 +1145,11 @@ class Guard:
         or 1.5 depending on the writer, so without a locale it grounds neither (deny); "en" (1,500.5), "de" (1.500,5),
         "fr" (1 500,5 — with the "spaced" matcher), "ch" (1'500.5). A callable matcher decides per argument.
         scan_user: a value the user wrote only next to instruction-like text in their own message (pasted content that
-        carries an instruction) escalates (`no_injected_arguments`); default: the guard's `scan_user` (False)."""
+        carries an instruction) escalates (`no_injected_arguments`); default: the guard's `scan_user` (False).
+        tool_values: what happens to an argument whose `ground_from` leaves out tool outputs (a user-only value) when
+        its value is not in the allowed messages but is in a tool output — "deny" (the default) or "escalate" (the
+        check `arguments_from_user`: a person decides, with the reason and the quote; never allowed on its own). A value
+        found nowhere is denied either way; default: the guard's `tool_values`."""
         def add(f):
             n = name or (f.__name__ if f is not None else None)
             if not n:
@@ -1029,11 +1171,14 @@ class Guard:
                 raise ValueError(f"tool {n}: ground= matchers are {', '.join(MATCHERS)} or a callable, not {bad}")
             if injections not in ("grounded", "any", "off"):
                 raise ValueError('injections must be "grounded", "any" or "off"')
+            tv = self.tool_values if tool_values is None else tool_values
+            if tv not in ("deny", "escalate"):
+                raise ValueError('tool_values must be "deny" or "escalate"')
             if locale is not None and locale not in LOCALES:
                 raise ValueError(f"tool {n}: locale is one of {', '.join(LOCALES)} or None, not {locale!r}")
             t = Tool(n, f, model, desc.strip(), {a: roles for a in spec}, injections, authorize,
                      {a: m for a, m in spec.items() if m != "token"}, locale=locale,
-                     scan_user=self.scan_user if scan_user is None else bool(scan_user))
+                     scan_user=self.scan_user if scan_user is None else bool(scan_user), tool_values=tv)
             self._check_tool(t)
             self.tools[n] = t
             self._systems.pop(n, None)
@@ -1115,6 +1260,22 @@ class Guard:
             f, tools = tools, None
             return add(f)
         return add
+
+    def require_request(self, tools, intent=None, *, phrases=None, on_fail="escalate"):
+        """A policy for actions that carry no value the user must give (book a hotel, create an event, read a URL a
+        document names): the call goes ahead only when the user's own messages (`user_request`, never tool outputs)
+        ask for this kind of action — `intent`, a key of solvi.agents.intents.INTENTS ("reserve", "event", "visit",
+        "pay", "send", "delete", "invite", "post", "share"; English and Russian word patterns) or a list of them, and /
+        or `phrases`, your own regular expressions. Otherwise the call escalates (on_fail="deny": is denied). It is an
+        ordinary policy named `user_asked_to_<intent>`: in the catalog, the trace and the reasons. It checks that the
+        user asked for such an action, not for this very call. → the policy function."""
+        from .intents import request_policy
+        f = request_policy(intent, phrases)
+        names = _names(tools)
+        for g, ts, _ in self._policies:
+            if g.__name__ == f.__name__ and (ts is None or names is None or ts & names):
+                raise ValueError(f"{f.__name__} is already required for {sorted(ts & names) if ts and names else 'every tool'}")
+        return self.policy(sorted(names) if names else None, on_fail=on_fail)(f)
 
     def fn(self, f=None, *, tools=None):
         """A computation the policies read (an ordinary solvi fn: `amount_eur(amount, currency)`), for the given tools
@@ -1226,8 +1387,13 @@ class Guard:
                 spec["locale"] = t.locale
             if t.scan_user:
                 spec["scan_user"] = True
+            middle = t.tool_values == "escalate" and any("tool" not in r for r in t.ground.values())
+            if middle:
+                spec["tool_values"] = "escalate"
             cat.fn(_grounding(json.dumps(spec, sort_keys=True), {a: m for a, m in t.match.items() if callable(m)}))
             check(arguments_grounded, "deny")
+            if middle:
+                check(arguments_from_user, "escalate")
             if t.injections != "off":
                 check(no_injected_arguments, "escalate")
         if t.injections == "any":
@@ -1405,6 +1571,8 @@ class Guard:
                 out.append("invalid arguments: " + "; ".join(vals.get("argument_errors") or []))
             elif n == "arguments_grounded":
                 out.append("not in the conversation: " + ", ".join(vals["grounding"]["missing"]))
+            elif n == "arguments_from_user":
+                out.append("a person decides: " + "; ".join(vals["grounding"]["from_tools"]))
             elif n == "no_injected_arguments":
                 out.append("; ".join(vals["grounding"]["injected"]))
             elif n == "schema_readable":
