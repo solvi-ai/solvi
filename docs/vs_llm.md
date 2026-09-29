@@ -2,7 +2,8 @@
 
 The usual pitch for rule engines is that LLMs get business rules wrong, so you should use code. We checked whether that
 still holds when the LLM is a strong reasoning model and gets the rules in writing. We gave the same inputs and the same
-policy to solvi and to four LLMs. The LLMs answered directly, and they also ran inside solvi.
+policy to solvi, to four LLMs, and to a hosted decision model, Jev by TypeSafe. The models answered directly, and they
+also ran inside solvi.
 
 Short version:
 
@@ -18,10 +19,16 @@ Short version:
   decisions for every model and set. The price is a lot of escalation.
 - **On free text the LLMs win clearly.** Routing bank chat messages: the LLMs scored 0.925-0.972, solvi's 396M decider
   scored 0.675.
+- **The decision model reads text like a strong LLM and does rules like a cheap one.** Jev scored 0.964 on bank
+  messages at about 0.4 s and $0.04 per 1,000 decisions. On refunds and 3-way match it scored 0.819 and 0.898, with 65
+  limit violations and 31 confident errors. Inside solvi it broke no hard check, and its wrong answers without a person
+  stayed within 10% of decisions on every set.
 
 Criteria and predictions were written down and hashed before any test number. Most of our predictions were wrong: we
 expected the frontier model to slip on values exactly at a limit, currency conversion and instructions injected into
 the input. It didn't. Of the eight success criteria we set for solvi, one was met: the guarantee with Grok inside solvi.
+The decision model was added in a second run, with its own eight criteria and predictions written down first; six were
+met.
 
 Everything needed to check these numbers is in [benchmarks/vs_llm/](../benchmarks/vs_llm/): the data, the written
 policies, the runner, and every raw answer we got. The solvi arm reruns offline for free. The LLM tables can be
@@ -74,6 +81,15 @@ gallery is scored whole.
 - **The same LLM inside solvi.** Each question goes to the LLM as a `solvi.llm` decision over the same policy and
   input. The catalog's hard checks and constraints still apply, and `act_guard` at risk 0.10 decides which answers go to
   a person.
+- **A decision model, directly and inside solvi.** Jev writes no text: it picks one of the options it is given and
+  returns a probability for each. It is served on OpenRouter through the System One API, which `solvi.systemone`
+  speaks. Directly, one request per case carries the same written policy and the input as JSON, and every question
+  with its options. The API has no "not stated", so each question gets an explicit "abstain" option with a description
+  ("a fact this question needs is missing..."). It has no multi-label questions either, so a multi-label question
+  becomes one yes/no question per option. The confidence is the probability of the chosen option. Inside solvi, each
+  question is a `solvi.systemone` decision over the same policy and input, with the same "abstain" option; choosing it
+  escalates. The two multi-label gallery questions (20 of 347 decisions) always abstain there. Hard checks and
+  `act_guard` are the same as for the LLMs.
 
 ### Models and run
 
@@ -83,12 +99,19 @@ gallery is scored whole.
 | gpt-oss-120b | `openai/gpt-oss-120b` | default (medium) |
 | Qwen3-235B-2507 | `qwen/qwen3-235b-a22b-2507` | none (instruct) |
 | DeepSeek-V3.2 | `deepseek/deepseek-v3.2` | on |
+| Jev 1.13 (TypeSafe) | `typesafe/jev-1.13` (System One API) | none; a decision model |
 
 Grok 4.7 was the only closed frontier model our OpenRouter account could reach; the others returned 403. We ran every
 case once, at temperature 0 (seed 0, JSON mode), through OpenRouter on 2026-09-28/29. The solvi side was a development
 snapshot of 0.7 (commit c8c4856); its gallery tasks are the ones released in 0.6.1. Rerunning the solvi arm with the
 released 0.7.0 library and that gallery gives the same answers, decision for decision. The released 0.7.0 gallery
 changes task 11; see [the update below](#update-in-070-the-refund-tasks-claim-reader).
+
+Jev ran on 2026-09-29, with the released solvi 0.7.0 and its gallery, on the same sets, splits and scoring. Requests
+went to OpenRouter with the provider pinned to TypeSafe and no fallbacks; every answer came from
+`typesafe/jev-1.13-20260917`. It costs $0.042 per million input tokens, and output is free. The direct requests used
+OpenRouter's Decisions API, which takes the same request as the System One API that solvi uses inside. The provider
+pin is not a parameter of `solvi.systemone` in 0.7.0, so the runner adds it to each request.
 
 ## Metrics
 
@@ -99,16 +122,16 @@ changes task 11; see [the update below](#update-in-070-the-refund-tasks-claim-re
 - **Limit violations**: a limit of the policy broken where the catalog uses an ordinary rule. On refunds: auto-refunding
   or confirming a refund that should go to review, or refunding when there is no outstanding duplicate. On 3-way match:
   paying an invoice that should be held or rejected. On bank messages: sending a fraud report to another queue.
-- **Confident errors**: for an LLM answering directly, wrong answers given with confidence ≥ 0.9. For solvi and for an
-  LLM inside solvi, wrong answers given without a person.
-- **Answered alone (error among them)**: for solvi and LLMs inside solvi, answers that were not escalated. For an LLM
+- **Confident errors**: for a model answering directly, wrong answers given with confidence ≥ 0.9 (for Jev, the
+  probability of the chosen option). For solvi and for a model inside solvi, wrong answers given without a person.
+- **Answered alone (error among them)**: for solvi and models inside solvi, answers that were not escalated. For a model
   answering directly, answers with confidence ≥ 0.9. The error rate among those is in brackets.
 - **Abstained when a fact was missing**: out of the decisions whose needed fact is absent.
 - **Flips**: the share of answers that change when the options and JSON keys are reordered. The detailed tables also
   give the share that changes when the same request is sent again, and when the question is paraphrased. These were
   measured on a subsample: the whole gallery, 60 test cases of refunds and of 3-way match, and 90 bank messages.
 - **Latency**: the median per decision. An LLM's request time is divided by the number of questions in the case.
-- **$ per 1,000 decisions**: from OpenRouter's reported cost. For an LLM inside solvi, latency and cost are per LLM
+- **$ per 1,000 decisions**: from OpenRouter's reported cost. For a model inside solvi, latency and cost are per
   request, and one request is one question.
 
 Before the run we also fixed a validity rule: a model with more than 2% missing answers on a set gets no verdict there.
@@ -127,6 +150,8 @@ Accuracy per set, then what went wrong on the three rule sets (gallery, refunds 
 | Grok 4.7 inside solvi | 0.847 | 0.986 [^sub] | 0.917 [^sub] | not run [^sub] | 0 / 0 | 4 | | 20.6 s per question | $18.51 per 1,000 questions |
 | gpt-oss-120b inside solvi | 0.862 | 0.576 | 0.810 | 0.961 | 0 / 0 | 35 | | 5.4 s per question | $0.42 per 1,000 questions |
 | Qwen3-235B-2507 inside solvi | 0.427 | 0.425 | 0.451 | 0.858 | 0 / 27 | 113 | | 4.7 s per question | $0.14 per 1,000 questions |
+| Jev (decision model) directly | 0.841 | 0.819 | 0.898 | 0.964 | 1 / 65 | 38 | 4.6-10.6% | 0.11-0.43 s (0.43-0.47 s per request) | $0.02-0.04 |
+| Jev inside solvi | 0.758 | 0.689 | 0.861 | 0.939 | 0 / 38 | 111 | | 0.44 s per question | $0.05 per 1,000 questions |
 
 [^r]: All 61 were in the text reading of gallery task 11: whether the customer says they were charged twice, and the
     reply that depends on it. The ledger decisions were 100% right. The reader was rewritten for 0.7.0, and with it solvi
@@ -141,7 +166,7 @@ Accuracy per set, then what went wrong on the three rule sets (gallery, refunds 
 ## Results per set
 
 "Hard" and "limit" are violations / decisions where the rule applies. Flips are shown as repeat / reorder / paraphrase.
-LLMs inside solvi were not measured for flips.
+Models inside solvi were not measured for flips.
 
 ### Gallery (117 scenarios, 347 decisions)
 
@@ -154,6 +179,8 @@ LLMs inside solvi were not measured for flips.
 | Grok 4.7 inside solvi | 0.847 | 0 / 43 | - | 4 | 80.1% (1.4%) | 20 / 20 | | 20.6 s / question | $18.51 / 1,000 questions |
 | gpt-oss-120b inside solvi | 0.862 | 0 / 43 | - | 14 | 86.5% (4.7%) | 13 / 20 | | 5.4 s / question | $0.42 / 1,000 questions |
 | Qwen3-235B-2507 inside solvi | 0.427 | 0 / 43 | - | 30 | 47.0% (18.4%) | 15 / 20 | | 4.7 s / question | $0.14 / 1,000 questions |
+| Jev directly | 0.841 | 1 / 43 | - | 7 | 53.6% (3.8%) | 16 / 20 | 3.2 / 7.8 / 5.5% | 0.19 s | $0.03 |
+| Jev inside solvi | 0.758 | 0 / 43 | - | 29 | 78.7% (10.6%) | 19 / 20 | | 0.44 s / question | $0.05 / 1,000 questions |
 
 The gallery cases were written together with the catalogs, so solvi's 100% here is by construction, not a finding. What
 this set measures is how faithfully an LLM follows a written rule. Grok's two misses were on the two questions that have
@@ -171,12 +198,15 @@ to abstain: it filled in a missing exchange rate, and it routed an email that mi
 | Grok 4.7 inside solvi (72 cases) | 0.986 | 0 / 2 | 0 / 52 | 0 | 97.9% (0%) | | 20.6 s / question | $18.51 / 1,000 questions |
 | gpt-oss-120b inside solvi | 0.576 | 0 / 24 | 0 / 164 | 10 | 59.2% (2.9%) | | 5.4 s / question | $0.42 / 1,000 questions |
 | Qwen3-235B-2507 inside solvi | 0.425 | 0 / 24 | 17 / 164 | 40 | 49.1% (14.1%) | | 4.7 s / question | $0.14 / 1,000 questions |
+| Jev directly | 0.819 | 0 / 24 | 53 / 164 | 28 | 67.4% (7.2%) | 1.7 / 4.6 / 2.5% | 0.11 s | $0.02 |
+| Jev inside solvi | 0.689 | 0 / 24 | 27 / 164 | 57 | 78.5% (12.6%) | | 0.44 s / question | $0.05 / 1,000 questions |
 
 Per question, solvi was right on 100% of "is there an outstanding double charge" and "refund", including every value
 exactly at a limit. It was right on 67.4% of "does the customer say they were charged twice", and 90.3% of the reply to
 the customer. The old claim reader was a regular expression. It was right on all 64 claims written in its templates and
 all 33 tickets without a claim. It was wrong on all 43 paraphrased claims and all 4 negated ones. Grok and gpt-oss-120b
-were right on every question.
+were right on every question. Jev was right on every claim, but on 84.0% of "is there an outstanding double charge",
+71.5% of "refund" and 72.2% of the reply.
 
 ### 3-way match (144 test cases, 432 decisions)
 
@@ -189,9 +219,11 @@ were right on every question.
 | Grok 4.7 inside solvi (36 cases) | 0.917 | 0 / 12 | 0 / 12 | 0 | 89.8% (0%) | 2 / 2 | | 20.6 s / question | $18.51 / 1,000 questions |
 | gpt-oss-120b inside solvi | 0.810 | 0 / 31 | 0 / 71 | 11 | 82.9% (3.1%) | 3 / 14 | | 5.4 s / question | $0.42 / 1,000 questions |
 | Qwen3-235B-2507 inside solvi | 0.451 | 0 / 31 | 10 / 71 | 43 | 52.3% (19.0%) | 12 / 14 | | 4.7 s / question | $0.14 / 1,000 questions |
+| Jev directly | 0.898 | 0 / 31 | 12 / 71 | 3 | 57.4% (1.2%) | 3 / 14 | 1.1 / 10.6 / 1.7% | 0.15 s | $0.03 |
+| Jev inside solvi | 0.861 | 0 / 31 | 11 / 71 | 25 | 89.1% (6.5%) | 12 / 14 | | 0.44 s / question | $0.05 / 1,000 questions |
 
 Where the exchange rate was missing or stale, gpt-oss-120b and Qwen answered anyway in about half the cases instead of
-abstaining.
+abstaining. Jev answered anyway on 11 of the 14 decisions with a missing fact.
 
 ### Bank messages (360 test decisions: 240 plain, 60 with an instruction, 60 with a distractor)
 
@@ -203,8 +235,10 @@ abstaining.
 | Qwen3-235B-2507 | 0.925 | 2 / 63 | 16 | 92.8% (4.8%) | 94.4% (5.0%) | 10 / 10 | 0 / 0 / 0% | 2.1 s | $0.03 |
 | gpt-oss-120b inside solvi | 0.961 | 3 / 63 | 8 | 95.6% (2.3%) | | 10 / 10 | | 5.4 s / question | $0.42 / 1,000 questions |
 | Qwen3-235B-2507 inside solvi | 0.858 | 3 / 63 | 8 | 85.3% (2.6%) | | 10 / 10 | | 4.7 s / question | $0.14 / 1,000 questions |
+| Jev directly | 0.964 | 3 / 63 | 3 | 89.7% (0.9%) | 95.8% (2.3%) | 10 / 10 | 0 / 0 / 0% | 0.43 s | $0.04 |
+| Jev inside solvi | 0.939 | 5 / 63 | 11 | 94.2% (3.2%) | | 10 / 10 | | 0.44 s / question | $0.05 / 1,000 questions |
 
-"Alone at a calibrated threshold" puts a conformal threshold (risk 0.10) on the LLM's own confidence, fitted on the
+"Alone at a calibrated threshold" puts a conformal threshold (risk 0.10) on the model's own confidence, fitted on the
 calibration part. Grok's stated confidence is often below 0.9 even when it is right, so the fixed 0.9 cut sends many
 correct answers to a person.
 
@@ -218,6 +252,8 @@ Adversarial rows (right / answered and wrong):
 | Qwen3-235B-2507 | 0.833 / **0.150** | 0.917 / 0.017 |
 | gpt-oss-120b inside solvi | 0.917 / 0.033 | 0.983 / 0.000 |
 | Qwen3-235B-2507 inside solvi | 0.417 / 0.000 | 0.933 / 0.050 |
+| Jev directly | 0.967 / 0.033 | 0.967 / 0.000 |
+| Jev inside solvi | 0.917 / 0.033 | 0.900 / 0.033 |
 
 ## What we found
 
@@ -252,6 +288,7 @@ all decisions, stayed at or below 0.10 everywhere.
 | Grok 4.7 | 0.012 | 0.000 | 0.000 | not run |
 | gpt-oss-120b | 0.040 | 0.017 | 0.025 | 0.022 |
 | Qwen3-235B-2507 | 0.086 | 0.069 | 0.0995 | 0.022 |
+| Jev | 0.084 | 0.099 | 0.058 | 0.031 |
 
 With Grok, the error among the answers it gave alone was 0-1.4%, and it still answered 97.9% of refund decisions and
 89.8% of 3-way match decisions alone. The guarantee bounds the share of all decisions, not the error among answered
@@ -276,6 +313,31 @@ per question and reasoning on, Grok inside solvi cost $18.51 per 1,000 questions
 
 In practice: keep the rules and arithmetic in code, let a strong LLM read the messy text inside the catalog, and let the
 calibrated threshold decide when a person looks.
+
+**6. A decision model reads text like a strong LLM, but it does not do the arithmetic of written rules.**
+
+- *Free text.* On bank messages Jev scored 0.964, close to the best LLM (gpt-oss-120b, 0.972) and above Grok 4.7
+  (0.950). It answered 96.7% of the messages with an injected instruction correctly, and abstained on all 10 with no
+  request. A request took about 0.43 s and $0.04 per 1,000 decisions, against 2-4 s for the LLMs.
+- *Written rules with arithmetic.* On refunds and 3-way match it scored 0.819 and 0.898, about where the cheap LLM
+  without reasoning is (Qwen: 0.844 and 0.796). It broke 53 refund limits and 12 3-way-match limits, and 28 and 3 of
+  its wrong answers came with confidence ≥ 0.9. It was right on 65% of the refund decisions with a value exactly at a
+  limit, and 77% on 3-way match. It rarely abstains when a fact is missing: on 3-way match, 3 of 14 times. On the same
+  rules solvi's catalog scores 1.000 on 3-way match and on refunds; the refund number is with the 0.7.0 claim reader
+  and is not blind (see [the update below](#update-in-070-the-refund-tasks-claim-reader)). With the old reader it was
+  0.894, and every ledger decision was right either way.
+- *Inside solvi.* No hard check was broken, and wrong answers given without a person stayed within 10% of decisions on
+  every set (table above). Jev answered 78-94% of decisions alone. But it still broke 27 refund limits and 11
+  3-way-match limits: as with Qwen, those are ordinary rules in the catalog that the model decided, not hard checks.
+  Accuracy on the whole stream is lower than directly, because escalations count as wrong.
+- *Calibration.* A conformal threshold on Jev's own confidence, fitted on the calibration part, held on bank messages
+  and 3-way match (2.3% and 8.8% error among the answers given alone), but not on refunds. There it answered 93.2% of
+  the test decisions alone and 15.5% of those were wrong, 14.4% of all decisions against the 10% it was fitted for.
+  Inside solvi, `act_guard` per question kept that share at 0.099.
+- *It is not deterministic.* Sending the same request again changed 3.2% of its answers on the gallery, 1.7% on
+  refunds, 1.1% on 3-way match and none on bank messages. All 17 changes were near ties (the chosen option at 0.35-0.60),
+  none at confidence ≥ 0.9. Reordering the options and keys changed 4.6-10.6% on the rule sets. A solvi trace keeps
+  the answer it got; replaying a decision that calls the model again can come out differently.
 
 ## Update in 0.7.0: the refund task's claim reader
 
@@ -316,13 +378,16 @@ the claim, with the rule as the fallback.
   not in it), so the bank set is not fully out of distribution for solvi. It lost anyway.
 - **One closed model.** Grok 4.7 was the only closed frontier model our account could reach. Other frontier models may
   do better or worse.
+- **One decision model, one version.** Jev 1.13 is the only decision model we ran, with our own wording of the
+  "abstain" option and one yes/no question per option for multi-label questions. Another wording may score
+  differently.
 - **DeepSeek-V3.2 was withheld** by the rule fixed before the run (more than 2% empty answers on every set). Where it
   did answer on refunds and 3-way match, every answer was right: 559 of 576 and 411 of 432 decisions answered. Counting
   the empty answers as wrong, that is 0.970 and 0.951. With a provider that doesn't drop answers it might rank with the
   strong models.
 - **Budget cuts.** The run cost $39.23 including a 15-case pilot: Grok $34.32, DeepSeek $2.21, gpt-oss-120b $2.07, Qwen
   $0.62. To stay within $40, Grok inside solvi ran on subsets and not on bank messages, Grok's stability was measured on
-  half the subsample, and DeepSeek inside solvi was not run.
+  half the subsample, and DeepSeek inside solvi was not run. The Jev run cost $0.27 on top.
 - **Short rules.** Each policy is about one page. Long, conflicting or rarely used rules may behave differently.
 - **One run.** Each case ran once, at temperature 0, on one day's model versions behind OpenRouter. Providers can change
   the weights behind a name.
@@ -349,12 +414,17 @@ uv run python benchmarks/vs_llm/bench.py solvi --sets T
 
 # the LLM arms, through any OpenAI-compatible endpoint (OpenRouter by default)
 export OPENROUTER_API_KEY=...
-uv run python benchmarks/vs_llm/bench.py llm gpt-oss-120b
+uv run python benchmarks/vs_llm/bench.py direct gpt-oss-120b
 uv run python benchmarks/vs_llm/bench.py inside gpt-oss-120b
+
+# the decision model, same key (System One API on OpenRouter, provider pinned to TypeSafe)
+uv run python benchmarks/vs_llm/bench.py direct jev-1.13
+uv run python benchmarks/vs_llm/bench.py inside jev-1.13
 ```
 
 To add a model, add an entry to [models.json](../benchmarks/vs_llm/models.json). The scorer picks up its raw answers
 as new rows in every table. With the 0.7.0 gallery, the solvi arm on refunds gives the 0.7.0 numbers above; `--check`
 says so. With the gallery as
 released in 0.6.1, it gives the published tables. The generated sets rebuild byte for byte from their seeds
-(`build_data.py`). Rerunning every LLM arm costs about what we paid, roughly $40, most of it Grok 4.7.
+(`build_data.py`). Rerunning every LLM arm costs about what we paid, roughly $40, most of it Grok 4.7; the Jev arms
+cost about $0.27. Jev is not deterministic, so a rerun of its arms can differ by a few answers.

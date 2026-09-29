@@ -1,22 +1,23 @@
 # solvi vs asking an LLM: data, runner, raw answers
 
 This folder reproduces [docs/vs_llm.md](../../docs/vs_llm.md). It holds the four sets, the written policies the LLMs
-get, a runner for the three arms (solvi alone, an LLM answering directly, the same LLM inside solvi), a scorer, and
-every raw answer of the published run. The scorer recomputes every table from those answers without an API key or a
+get, a runner for the three arms (solvi alone, a model answering directly, the same model inside solvi), a scorer, and
+every raw answer of the published run. A model is an LLM over chat completions or a decision model over the System One
+API (Jev by TypeSafe). The scorer recomputes every table from those answers without an API key or a
 model.
 
 | File | What |
 |---|---|
-| `bench.py` | the runner (`solvi`, `llm`, `inside`), the scorer (`score`), the task 11 claim check (`claims`) |
-| `models.json` | the model registry: id, label, extra request fields, endpoint and key variable per model |
+| `bench.py` | the runner (`solvi`, `direct`, `inside`), the scorer (`score`), the task 11 claim check (`claims`) |
+| `models.json` | the model registry: id, label, API (chat or System One), extra request fields, endpoint and key variable per model |
 | `policies.py` | the written policy of each task, what the LLM gets instead of the catalog; question paraphrases |
 | `build_data.py` | how the sets were built (generators with their seeds, the Banking77 mapping); checks the shipped files |
 | `data/{G,R,P,T}.jsonl.gz` | the sets: gallery (117 cases), refunds (240), 3-way match (240), bank messages (520) |
 | `data/blind_claims.json` | 80 messages about double charges written blind, for the task 11 claim reader |
-| `raw/` | the raw answers of the published run: `a_solvi_*`, `b_<model>_*` (directly), `c_<model>_*` (inside solvi), `requests.jsonl.gz` (latency and cost of every request) |
+| `raw/` | the raw answers of the published run: `a_solvi_*`, `b_<model>_*` (directly), `c_<model>_*` (inside solvi), `requests.jsonl.gz` (latency and cost of every request); Jev's are `b_jev-1.13_*` and `c_jev-1.13_*` |
 | `expected.json` | every number of the published tables, and the task 11 numbers before and in 0.7.0 |
 
-The sets take 83 KB and the raw answers 0.8 MB, all compressed except the 11 KB of blind messages.
+The sets take 83 KB and the raw answers 1.1 MB, all compressed except the 11 KB of blind messages.
 
 ## Setup
 
@@ -39,7 +40,7 @@ uv run python benchmarks/vs_llm/bench.py score --check
 This prints the per-set tables from `raw/` and compares every number with `expected.json`. Expected output ends with:
 
 ```
-spent: $39.23 {"gpt-oss-120b": 2.07, "qwen3-235b-2507": 0.62, "deepseek-v3.2": 2.21, "grok-4.7": 34.32}
+spent: $39.50 {"grok-4.7": 34.32, "gpt-oss-120b": 2.07, "qwen3-235b-2507": 0.62, "deepseek-v3.2": 2.21, "jev-1.13": 0.27}
 
 check against expected.json: every number matches
 ```
@@ -90,20 +91,20 @@ uv run python benchmarks/vs_llm/bench.py claims                                 
 uv run python benchmarks/vs_llm/bench.py claims --gallery /tmp/solvi-0.6.1/gallery   # before: acc 0.425, alone 1.0, error 0.575
 ```
 
-## Run the LLM arms (costs money)
+## Run the model arms (costs money)
 
 Any OpenAI-compatible chat-completions endpoint works. By default the runner uses OpenRouter with the key in
-`$OPENROUTER_API_KEY`:
+`$OPENROUTER_API_KEY` (`llm` still works as another name for `direct`):
 
 ```
 export OPENROUTER_API_KEY=...
-uv run python benchmarks/vs_llm/bench.py llm gpt-oss-120b                   # directly, all four sets
+uv run python benchmarks/vs_llm/bench.py direct gpt-oss-120b                # directly, all four sets
 uv run python benchmarks/vs_llm/bench.py inside gpt-oss-120b --sets G,R,P   # inside solvi
 uv run python benchmarks/vs_llm/bench.py score --raw benchmarks/vs_llm/raw --raw benchmarks/vs_llm/out
 ```
 
-The registered models are in `models.json`: `grok-4.7`, `gpt-oss-120b`, `qwen3-235b-2507` and `deepseek-v3.2` (with
-reasoning on). To add a model for good, add an entry there (id, label, extra request fields, and optionally `base_url` and
+The registered models are in `models.json`: `grok-4.7`, `gpt-oss-120b`, `qwen3-235b-2507`, `deepseek-v3.2` (with
+reasoning on) and the decision model `jev-1.13`. To add a model for good, add an entry there (id, label, extra request fields, and optionally `base_url` and
 `key_env` for another endpoint). `score` finds every raw file named `<kind>_<model>_<set>.jsonl.gz` in the folders it
 reads and prints it as another row: `b` is the model answering directly, `c` is the model inside solvi. A new kind of arm
 is one line in `ARM_KINDS` in `bench.py` (its label and whether it is scored like an LLM with a stated confidence or like
@@ -111,9 +112,36 @@ solvi, which answers or escalates), plus the code that writes its raw files. `--
 published run and leaves them unchecked. For a one-off model or endpoint:
 
 ```
-uv run python benchmarks/vs_llm/bench.py llm my-model --model-id vendor/model-name \
+uv run python benchmarks/vs_llm/bench.py direct my-model --model-id vendor/model-name \
     --base-url http://127.0.0.1:8000/v1 --key-env MY_KEY [--extra-body '{"reasoning": {"effort": "high"}}']
 ```
+
+### A decision model (Jev)
+
+`jev-1.13` has `"api": "systemone"` in `models.json`: `typesafe/jev-1.13` on OpenRouter (base URL
+`https://openrouter.ai/api`, the same `$OPENROUTER_API_KEY`), with `{"provider": {"only": ["TypeSafe"],
+"allow_fallbacks": false}}` merged into every request. It costs $0.042 per million input tokens; output is free.
+
+```
+uv run python benchmarks/vs_llm/bench.py direct jev-1.13            # about $0.11 for all four sets with the stability variants
+uv run python benchmarks/vs_llm/bench.py inside jev-1.13            # about $0.14
+```
+
+A decision model writes no text: it picks one of the given options and returns a probability for each. So the questions
+are put to it differently from an LLM:
+
+- Directly, one request per case goes to OpenRouter's Decisions API (`direct_path` in `models.json`; it takes the same
+  request as the System One API at `/v1/systemone`). The state is `{"policy": ..., "input": ...}`. Every single-answer
+  question is a choice among its options plus an `abstain` option with a description, because the API has no "not
+  stated". A multi-label question becomes one yes/no question per option (an option applies at probability ≥ 0.5). The
+  confidence is the probability of the chosen option.
+- Inside solvi, each question is a `solvi.systemone` decision over the same text as for an LLM, with the same
+  `abstain` option; choosing it escalates. Multi-label questions always abstain (the API has none). The runner is the
+  `opener` of `solvi.systemone`: it adds the provider pin, retries, caches and logs cost and latency.
+
+Jev is not deterministic: the same request sent again changed 1-3% of its answers on the rule sets, all near ties. The
+published run marked its repeat requests with another `user` value than the runner's, so a rerun draws new repeats, and
+the scores can differ by a few answers.
 
 Every request is sent at temperature 0 with seed 0 and JSON mode. Responses are cached on disk in
 `out/cache_<model>.jsonl`, keyed by the request, so an interrupted run resumes without paying twice. `out/requests.jsonl`
@@ -130,9 +158,11 @@ Cost of the published run, per model, from `raw/requests.jsonl.gz` (OpenRouter's
 | gpt-oss-120b | $0.99 | $1.08 | $2.07 |
 | Qwen3-235B-2507 | $0.23 | $0.40 | $0.62 |
 | DeepSeek-V3.2 | $2.21 | not run | $2.21 |
+| Jev 1.13 (2026-09-29) | $0.13 | $0.14 | $0.27 |
 
 Grok inside solvi on the full sets, bank messages included, is about 2,550 questions: at $18.51 per 1,000 questions,
-roughly $47 instead of $23.64. Rerunning everything as published costs about $40, most of it Grok.
+roughly $47 instead of $23.64. Rerunning everything as published costs about $40, most of it Grok. Jev's numbers
+exclude a pilot of about $0.002.
 
 Rerunning the inside-solvi arm on the released 0.7.0 may not give exactly the published numbers. The prompts of
 `solvi.llm` are the same, but a quote that is not in the text no longer escalates a question that asks for no
@@ -169,9 +199,11 @@ Each row: `{"set", "id", "task", "state", "gold": {question: answer or "abstain"
 
 One JSON object per line, gzipped. Each has `id`, `variant` (`base`, `rep`, `order`, `para`), and `answers`
 (`{question: [answer, confidence]}`, or null when there was no usable reply). LLM records also carry `content` (the
-reply text), `finish`, `ms`, `cost`, `usage` and `provider`. solvi records carry `status` and `forced` per question and
+reply text), `finish`, `ms`, `cost`, `usage` and `provider`; Jev's direct records carry `raw` (the API's answers, with
+every option's probability) instead of `content`. solvi records carry `status` and `forced` per question and
 `replay_ok`. Inside-solvi files start with a `{"guards": ...}` line holding the calibrated thresholds, and each record
 keeps the LLM's raw decision (`raw`) and why an answer was escalated (`why`).
 
 The stability variants of the published run reordered options and keys with a per-process random seed. The runner now
 seeds the reordering from the case id, so a rerun is repeatable but draws different orders than the published run.
+Jev's run already seeded it from the case id.

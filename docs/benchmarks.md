@@ -145,7 +145,8 @@ The gallery, generated refund and 3-way-match sets with values exactly at limits
 instructions, and Banking77 routing, given to solvi and to four LLMs (directly, and inside solvi under `act_guard`).
 Strong reasoning models followed the short written rules as accurately as solvi. solvi's advantage there is cost,
 latency, repeatability, audit and hard checks that hold whatever the model says. On free text the LLMs were clearly
-better. Tables, caveats and the reproduction are on [solvi vs asking an LLM](vs_llm.md). Data, runner and raw answers
+better. A hosted decision model (Jev by TypeSafe) was close to the best LLM on free text and near the cheap LLM on
+the written rules. Tables, caveats and the reproduction are on [solvi vs asking an LLM](vs_llm.md). Data, runner and raw answers
 are in [benchmarks/vs_llm/](../benchmarks/vs_llm/).
 
 ## Known negative results

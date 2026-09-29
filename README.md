@@ -344,7 +344,9 @@ there. What differs is everything around accuracy:
 | $ per 1,000 decisions | $0 | $1.30 | $0.12 | $0.03 |
 
 Inside solvi, no LLM broke a hard check, and wrong answers given without a person stayed within the promised 10%. On free
-text the LLMs win: 0.925-0.972 on bank messages against 0.675 for solvi-large. Full tables, caveats and a reproducible
+text the LLMs win: 0.925-0.972 on bank messages against 0.675 for solvi-large. A hosted decision model, Jev by TypeSafe,
+read bank messages almost as well as the best LLM (0.964) but scored 0.819 on refunds with 53 limit violations; inside
+solvi it broke no hard check either. Full tables, caveats and a reproducible
 runner with every raw answer: [docs/vs_llm.md](docs/vs_llm.md), [benchmarks/vs_llm/](benchmarks/vs_llm/).
 
 ## Speed
