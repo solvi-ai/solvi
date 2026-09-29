@@ -553,6 +553,13 @@ This is retrieval by words: a question phrased with none of the section's words 
 "termination" clause) may miss it — `rerank=True` helps only among the candidates BM25 found, so raise `top_k` or phrase
 the task with the document's terms.
 
+**A larger budget.** The budget is the checkpoint's `max_len` (`DecideModel.load(path, max_len=1024)`) minus the question.
+Measured on 4–8k-token contracts and reports with solvi-large: `max_len` 1024 or 2048 did not raise accuracy over 512
+(73% either way; yes / no / not-stated questions gained 2–4 points, value questions lost 4–8) and made quotes slightly
+worse at 2048; CPU time grows with the tokens read — about 1.6× at 1024 and 3.2× at 2048. Keep 512 for solvi-large. A
+larger budget pays off only for a model trained on long inputs; when you raise `max_len`, raise `top_k` with it so
+sections stay around 150–200 tokens (e.g. `max_len=2048, top_k=12`).
+
 ### The output: probabilities, calibrated confidence, act or escalate
 
 Each decision has probabilities over its options, a calibrated confidence (the checkpoint's temperature per question kind,

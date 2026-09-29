@@ -37,7 +37,7 @@ jobs:
         if: matrix.python == '3.12'
         run: |
           uv sync --group dev --group lora
-          uv run pytest -q tests/test_lora.py
+          uv run pytest -q tests/test_lora.py tests/test_long_tokenizer.py
   lint:
     runs-on: ubuntu-latest
     steps:

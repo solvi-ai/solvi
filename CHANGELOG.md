@@ -7,6 +7,14 @@ output never grounds an argument that must come from the user) and your policies
 text is a heuristic second line. `System.learning` is experimental and off unless you call it. Three code reviews and
 three adversarial passes ran before this release; their fixes are listed under "Fixes before release".
 
+### Fixes before release (long documents)
+
+- **`long="retrieve"` crashed on every text longer than the checkpoint's `max_len`** with a real tokenizer ("Truncation
+  error: Second sequence not provided"): `DecideModel.count_tokens` counted with the encoder's truncating tokenizer. It
+  now counts with the untruncated one. The tests used models without a tokenizer and missed it; a new test builds a tiny
+  checkpoint with a real tokenizer and reads a text longer than its `max_len`. The guide now says what a larger budget
+  (`max_len`, `top_k`) costs and gains.
+
 ### Which record changed: `solvi.signature` (preview)
 
 - **A signature of a trace or a store** — two numbers, 64 bytes (`{"alg": "syndrome", "count", "root"}`, plain JSON) to

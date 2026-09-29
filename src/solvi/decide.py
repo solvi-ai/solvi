@@ -1256,7 +1256,8 @@ class DecideModel:
 
     def count_tokens(self, text):
         """Tokens of a text for this checkpoint: its tokenizer when it has one, else solvi.longdoc.approx_tokens."""
-        tok = getattr(getattr(self.scorer, "enc", None), "tok", None)
+        enc = getattr(self.scorer, "enc", None)
+        tok = getattr(enc, "raw", None) or getattr(enc, "tok", None)      # raw: no truncation at max_len
         if tok is not None:
             return len(tok.encode(text, add_special_tokens=False).ids)
         from .longdoc import approx_tokens
