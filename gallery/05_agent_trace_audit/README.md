@@ -105,5 +105,5 @@ Full per-case output of the run above: [compare_laya.out.txt](compare_laya.out.t
   hash, replay still names step 3 and every check that depended on it.
 
 Caveats: we wrote the 10 logs alongside the catalog. Pattern lists (destructive commands, secret formats) catch only what
-they list, so extend them for your tools. Laya was asked zero-shot, outside its presets. Reproduce from the new_kelly repo:
-`cd exps_v2 && uv run --with laya==0.3.20 --with transformers --with-editable ../solvi python ../solvi/gallery/05_agent_trace_audit/compare_laya.py`
+they list, so extend them for your tools. Laya was asked zero-shot, outside its presets. Reproduce from the repository root:
+`uv run --with laya==0.3.20 --with torch --with transformers python gallery/05_agent_trace_audit/compare_laya.py`

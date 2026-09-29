@@ -104,5 +104,5 @@ Full per-case output of the run above: [compare_laya.out.txt](compare_laya.out.t
   counts and names any step whose stored value does not match.
 
 Caveats: we wrote the 9 snapshots alongside the catalog. The thresholds (2% ceiling, +50% with z > 3, burn rates) are
-example policy, so set your own. Laya was asked zero-shot, outside its presets. Reproduce from the new_kelly repo:
-`cd exps_v2 && uv run --with laya==0.3.20 --with transformers --with-editable ../solvi python ../solvi/gallery/06_release_rollout/compare_laya.py`
+example policy, so set your own. Laya was asked zero-shot, outside its presets. Reproduce from the repository root:
+`uv run --with laya==0.3.20 --with torch --with transformers python gallery/06_release_rollout/compare_laya.py`

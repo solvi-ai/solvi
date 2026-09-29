@@ -114,6 +114,5 @@ What this shows for triage:
 
 Caveats: we wrote the 10 cases alongside the catalog, so solvi's 50/50 is not an unbiased accuracy. The learned intent rules score
 0.906 on 500 fresh synthetic tickets, and hand-written text outside their vocabulary falls through to the default. Laya ran
-zero-shot on its own preset, with no fine-tuning. To reproduce (needs the `laya` package and model; run from the new_kelly
-repo, whose env has torch):
-`cd exps_v2 && uv run --with laya==0.3.20 --with transformers --with-editable ../solvi python ../solvi/gallery/01_support_triage/compare_laya.py`
+zero-shot on its own preset, with no fine-tuning. To reproduce (needs the `laya` package and its model), from the repository root:
+`uv run --with laya==0.3.20 --with torch --with transformers python gallery/01_support_triage/compare_laya.py`

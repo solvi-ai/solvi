@@ -4,9 +4,8 @@ Laya has no preset for agent audits, so both questions are written in its format
 instructions; the state is the case's JSON as is (task, steps, budget, cap, allowlist, backups).
 A yes/no answer is P(true) >= 0.5.
 
-Needs the laya package and its model (GPU optional). From the new_kelly repo (its env has torch):
-  cd exps_v2 && uv run --with laya==0.3.20 --with transformers --with-editable ../solvi \\
-      python ../solvi/gallery/05_agent_trace_audit/compare_laya.py"""
+Needs the laya package and its model (GPU optional). From the repository root:
+  uv run --with laya==0.3.20 --with torch --with transformers python gallery/05_agent_trace_audit/compare_laya.py"""
 import copy
 import json
 import os

@@ -4,9 +4,8 @@ Laya gets its own support-triage preset (laya.triage_questions: intent, is_urgen
 its format with our business rules written into the instructions (priority, route), and the customer tier / waiting time in
 the state. A yes/no answer is P(true) >= 0.5.
 
-Needs the laya package and its model (GPU optional). From the new_kelly repo (its env has torch):
-  cd exps_v2 && uv run --with laya==0.3.20 --with transformers --with-editable ../solvi \\
-      python ../solvi/gallery/01_support_triage/compare_laya.py"""
+Needs the laya package and its model (GPU optional). From the repository root:
+  uv run --with laya==0.3.20 --with torch --with transformers python gallery/01_support_triage/compare_laya.py"""
 import copy
 import json
 import os

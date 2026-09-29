@@ -4,9 +4,8 @@ Laya gets its own email preset (laya.email_questions: category with billing / te
 is_phishing) plus a needs_human question we add in its format with our rules written into the instructions. Where solvi
 abstains on team, Laya's "other" counts as the matching answer. A yes/no answer is P(true) >= 0.5.
 
-Needs the laya package and its model (GPU optional). From the new_kelly repo (its env has torch):
-  cd exps_v2 && uv run --with laya==0.3.20 --with transformers --with-editable ../solvi \\
-      python ../solvi/gallery/02_email_routing/compare_laya.py"""
+Needs the laya package and its model (GPU optional). From the repository root:
+  uv run --with laya==0.3.20 --with torch --with transformers python gallery/02_email_routing/compare_laya.py"""
 import copy
 import json
 import os

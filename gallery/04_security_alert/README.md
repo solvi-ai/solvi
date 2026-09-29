@@ -97,5 +97,5 @@ Full per-case output of the run above: [compare_laya.out.txt](compare_laya.out.t
 
 Caveats: we wrote the 9 cases alongside the catalog. The comparison asks Laya zero-shot, outside its presets, so it is a
 measurement of an answer-only model asked to do arithmetic. It is not a claim about what Laya does after fine-tuning. Reproduce
-from the new_kelly repo:
-`cd exps_v2 && uv run --with laya==0.3.20 --with transformers --with-editable ../solvi python ../solvi/gallery/04_security_alert/compare_laya.py`
+from the repository root:
+`uv run --with laya==0.3.20 --with torch --with transformers python gallery/04_security_alert/compare_laya.py`

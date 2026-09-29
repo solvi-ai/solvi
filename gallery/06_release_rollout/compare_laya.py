@@ -4,9 +4,8 @@ Laya has no preset for canary analysis, so both questions are written in its for
 instructions; the state is the case's JSON as is (counts, histograms, SLO, thresholds).
 A yes/no answer is P(true) >= 0.5.
 
-Needs the laya package and its model (GPU optional). From the new_kelly repo (its env has torch):
-  cd exps_v2 && uv run --with laya==0.3.20 --with transformers --with-editable ../solvi \\
-      python ../solvi/gallery/06_release_rollout/compare_laya.py"""
+Needs the laya package and its model (GPU optional). From the repository root:
+  uv run --with laya==0.3.20 --with torch --with transformers python gallery/06_release_rollout/compare_laya.py"""
 import copy
 import json
 import os

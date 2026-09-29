@@ -132,6 +132,5 @@ Full per-case output of the run above: [compare_laya.out.txt](compare_laya.out.t
 
 Caveats: we wrote the 10 cases alongside the catalog, so 30/30 is not an unbiased accuracy. Regular expressions miss what
 they were not written for (obfuscated numbers, new token formats, injections in other languages). A model can generalize
-there, so the two combine well: a learned detector as a soft signal, with solvi's hard checks on top. Reproduce from the
-new_kelly repo:
-`cd exps_v2 && uv run --with laya==0.3.20 --with transformers --with-editable ../solvi python ../solvi/gallery/03_content_guard/compare_laya.py`
+there, so the two combine well: a learned detector as a soft signal, with solvi's hard checks on top. Reproduce from the repository root:
+`uv run --with laya==0.3.20 --with torch --with transformers python gallery/03_content_guard/compare_laya.py`

@@ -100,6 +100,5 @@ Full per-case output of the run above: [compare_laya.out.txt](compare_laya.out.t
   wrong. The answer-only model always picks a team.
 
 Caveats: we wrote the 9 cases alongside the catalog, so 18/18 is not an unbiased accuracy. The 500-email check uses the same
-generator as the training data. The table only knows the words its 200 examples contained. Reproduce the comparison from the
-new_kelly repo:
-`cd exps_v2 && uv run --with laya==0.3.20 --with transformers --with-editable ../solvi python ../solvi/gallery/02_email_routing/compare_laya.py`
+generator as the training data. The table only knows the words its 200 examples contained. Reproduce the comparison from the repository root:
+`uv run --with laya==0.3.20 --with torch --with transformers python gallery/02_email_routing/compare_laya.py`

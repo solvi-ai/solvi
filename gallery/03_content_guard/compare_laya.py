@@ -4,9 +4,8 @@ Laya gets its own guardrail preset (laya.guard_questions: sensitive_data, prompt
 in its format with our policy written into the instructions; the state is {"prompt": text, "surface": surface}.
 A yes/no answer is P(true) >= 0.5.
 
-Needs the laya package and its model (GPU optional). From the new_kelly repo (its env has torch):
-  cd exps_v2 && uv run --with laya==0.3.20 --with transformers --with-editable ../solvi \\
-      python ../solvi/gallery/03_content_guard/compare_laya.py"""
+Needs the laya package and its model (GPU optional). From the repository root:
+  uv run --with laya==0.3.20 --with torch --with transformers python gallery/03_content_guard/compare_laya.py"""
 import copy
 import json
 import os
