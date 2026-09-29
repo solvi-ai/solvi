@@ -34,7 +34,7 @@ Criteria and predictions were written down and hashed before any test number. Mo
 expected the frontier model to slip on values exactly at a limit, currency conversion and instructions injected into
 the input. It didn't. Of the eight success criteria we set for solvi, one was met: the guarantee with Grok inside solvi.
 Jev was added in a second run, with its own eight criteria and predictions written down first; six were met. Jeeves was
-added in a third run, with nine criteria written down first; six were met, two of them on subsets.
+added in a third run, with nine criteria written down first; seven were met, two of them on subsets.
 
 Everything needed to check these numbers is in [benchmarks/vs_llm/](../benchmarks/vs_llm/): the data, the written
 policies, the runner, and every raw answer we got. The solvi arm reruns offline for free. The LLM tables can be
