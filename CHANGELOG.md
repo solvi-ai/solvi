@@ -2,6 +2,11 @@
 
 ## 0.7.0 — 2026-09-29 — text in, agent guard (preview), several models with an LLM stage, memory and a learning loop (experimental), reports, docs site, trace signature and verified charts (preview)
 
+The agent guard (`solvi.agents`) ships as a **preview**: its hard line is provenance (a value found only in a tool's
+output never grounds an argument that must come from the user) and your policies; detecting injected instructions in
+text is a heuristic second line. `System.learning` is experimental and off unless you call it. Three code reviews and
+three adversarial passes ran before this release; their fixes are listed under "Fixes before release".
+
 ### Which record changed: `solvi.signature` (preview)
 
 - **A signature of a trace or a store** — two numbers, 64 bytes (`{"alg": "syndrome", "count", "root"}`, plain JSON) to
@@ -48,12 +53,6 @@
   labels do not fit, places line labels clear of other labels, points and the line, and pushes pie labels apart.
 - `examples/21_verified_chart.py`, a guide chapter, API pages for `solvi.specialist` and `solvi.charts`; sample SVGs in
   `docs/images/charts/`.
-
-
-The agent guard (`solvi.agents`) ships as a **preview**: its hard line is provenance (a value found only in a tool's
-output never grounds an argument that must come from the user) and your policies; detecting injected instructions in
-text is a heuristic second line. `System.learning` is experimental and off unless you call it. Three code reviews and
-three adversarial passes ran before this release; their fixes are listed under "Fixes before release".
 
 ### Fixes before release (gallery 11, "I was charged twice")
 
@@ -154,7 +153,6 @@ Found by a measurement run through OpenRouter, where most invalid replies were q
   longer raises TypeError when a recalibration has a non-zero error rate.
 - `perturb`: overlapping quoted and unquoted instruction spans are merged before cutting — the instruction after a
   quote could stay in the variant while `removed` said it was gone.
-
 
 ### Fixes before release
 
