@@ -20,6 +20,7 @@ from pydantic_core import to_jsonable_python
 class AnswerSpec(BaseModel):
     """An answer type: yes/no, one of options, ordered levels, any subset, a span of a text, a ranking or an estimate;
     `unknown`: "not stated" is a valid answer."""
+    model_config = ConfigDict(defer_build=True)       # validators built on first use: importing stays light
     kind: Literal["yes_no", "choice", "ordinal", "multi", "span", "rank", "estimate"]
     options: list[Any]
     descriptions: dict[str, str] = {}
@@ -33,6 +34,7 @@ class AnswerSpec(BaseModel):
 
 
 class QuestionSpec(BaseModel):
+    model_config = ConfigDict(defer_build=True)       # validators built on first use: importing stays light
     name: str
     text: str
     answer: Optional[AnswerSpec] = None
@@ -44,6 +46,7 @@ class QuestionSpec(BaseModel):
 
 class QuoteModel(BaseModel):
     """A supporting quote: text[start:end] of a given text fact."""
+    model_config = ConfigDict(defer_build=True)       # validators built on first use: importing stays light
     text: Any = None
     start: int
     end: int
@@ -53,6 +56,7 @@ class QuoteModel(BaseModel):
 
 class ResultModel(BaseModel):
     """The answer to one question."""
+    model_config = ConfigDict(defer_build=True)       # validators built on first use: importing stays light
     answer: Any = None
     confidence: float
     why: str
@@ -70,7 +74,7 @@ class ResultModel(BaseModel):
 
 class RecordModel(BaseModel):
     """One step of the hash-chained trace. `missing`: the step produced no value (failed or rejected; see `error`)."""
-    model_config = ConfigDict(protected_namespaces=())
+    model_config = ConfigDict(protected_namespaces=(), defer_build=True)
     step: int
     kind: str
     name: str
@@ -93,6 +97,7 @@ class RecordModel(BaseModel):
 
 
 class TraceModel(BaseModel):
+    model_config = ConfigDict(defer_build=True)       # validators built on first use: importing stays light
     init_hash: str
     init: dict[str, Any]
     records: list[RecordModel]
@@ -105,6 +110,7 @@ class TraceModel(BaseModel):
 
 
 class StepModel(BaseModel):
+    model_config = ConfigDict(defer_build=True)       # validators built on first use: importing stays light
     name: str
     kind: str
     inputs: list[str]
@@ -112,6 +118,7 @@ class StepModel(BaseModel):
 
 
 class FlowModel(BaseModel):
+    model_config = ConfigDict(defer_build=True)       # validators built on first use: importing stays light
     steps: list[StepModel]
     per_question: dict[str, list[str]] = {}
     skipped: dict[str, str] = {}
@@ -121,6 +128,7 @@ class FlowModel(BaseModel):
 
 
 class SafeguardEvent(BaseModel):
+    model_config = ConfigDict(defer_build=True)       # validators built on first use: importing stays light
     kind: str
     fact: str
     detail: str
@@ -129,7 +137,7 @@ class SafeguardEvent(BaseModel):
 
 class ResponseModel(BaseModel):
     """A response: answers, the flow, the trace, every fact's value, safeguards."""
-    model_config = ConfigDict(protected_namespaces=())
+    model_config = ConfigDict(protected_namespaces=(), defer_build=True)
     results: dict[str, ResultModel]
     flow: FlowModel
     trace: TraceModel

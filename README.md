@@ -139,6 +139,7 @@ solvi test . && solvi check catalog.py:system   # regression cases and the catal
 solvi ask catalog.py:system example.json --audit            # one decision and what it rests on (--json, --report html)
 solvi models pull solvi-ai/solvi-base           # the only command that downloads; `solvi models` lists, `check` measures
 solvi calibrate catalog.py:system route labels.csv --risk 0.1   # act_guard → route.calib.json, loaded by the catalog
+solvi hook install                              # Claude Code's edits checked against .claude/solvi-rules.toml
 ```
 
 Every command is in the [guide](docs/guide.md#command-line).
@@ -244,6 +245,12 @@ Every answer is a value and a confidence, and the types also declare answer prim
   person. Every decision is a stored, replayable trace. Adapters for PydanticAI, LangGraph and the OpenAI Agents SDK, and
   `solvi serve --guard catalog.py:guard --upstream CMD` in front of an MCP server
   ([guide](docs/guide.md#guarding-an-agents-tool-calls), [examples/19_agent_guard.py](examples/19_agent_guard.py)).
+- **Behind a coding agent's hooks (preview).** `solvi hook install` puts solvi in front of Claude Code's edits and prompts:
+  every Edit / Write is checked against a rules file (forbidden patterns, required functions, Python calls read from the
+  code; fuzzy questions for a model, which block only with a calibration) and denied with the rule and the lines, sent
+  to the user, or let through; a prompt gets the one project skill it needs, or nothing. Deterministic by default, about
+  0.1 s a call; every decision stored and verifiable; Codex as a preview
+  ([guide](docs/guide.md#solvi-behind-a-coding-agents-hooks), [examples/22_coding_agent_hooks.py](examples/22_coding_agent_hooks.py)).
 - **Text in.** `system.ask_text("please refund order A-10457, 1.5 million rubles, paid 12 September", decider)`: the
   decider picks which question the message asks (or escalates when unsure), each input field is read with a quote and a
   deterministic parser (numbers, dates, enums, yes / no), missing required fields are listed for a clarifying question,
@@ -383,6 +390,7 @@ receipt with the one-pass extractor on an A100).
 | [examples/19_agent_guard.py](examples/19_agent_guard.py) | An accounts-payable agent's tool calls through a `Guard`: grounded arguments, an invented IBAN denied, a budget escalation approved by a person, an instruction hidden in an invoice, an authorizer with `act_guard` and `perturb`; every decision stored and replayed (a scripted agent, no API keys) |
 | [examples/20_vote_across_families.py](examples/20_vote_across_families.py) | A vote of two model families behind the System One API (stand-in servers started in-process): each alone and the vote under one `act_guard` guarantee; a sure mistake of one family escalates; the audit and the replay |
 | [examples/21_verified_chart.py](examples/21_verified_chart.py) | A verified chart (`solvi.charts`, preview): every number quoted from the text and checked; a careless model's swapped digit, invented share and unquoted value dropped with reasons; a deterministic SVG that replays to identical bytes |
+| [examples/22_coding_agent_hooks.py](examples/22_coding_agent_hooks.py) | A coding agent's session behind `solvi hook`: the hooks installed in a temporary project, a clean edit allowed, an edit that takes an employee id from the browser denied with the rule and the line, a migration with an empty downgrade and a comment that tries to talk past the rules denied, a skill picked for one prompt and none for another; the store verified and one decision audited and replayed |
 | [examples/07_receipts_model.py](examples/07_receipts_model.py) | Expense check on a scanned receipt: a receipts-tuned extractor cites each field, rules and a hard check decide (needs `solvi[model]`) |
 | [examples/08_contracts_by_description.py](examples/08_contracts_by_description.py) | Contract review with fields defined only in words: the general extractor reads the whole contract, cites clauses or says "absent" (needs `solvi[model]`) |
 

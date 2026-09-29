@@ -1,0 +1,48 @@
+# solvi rules for a coding agent's edits (solvi hook pre-edit).
+# paths: globs relative to the project root — "*" stays inside a folder, "**" crosses folders, a leading "!" excludes.
+# Deterministic checks (forbid, require, forbid_calls, require_def) are exact and block (on_fail = "ask" to ask instead).
+# A question is fuzzy: it needs a model (--model); it blocks only with a calibration file, otherwise it asks a person.
+
+[[rule]]
+id = "no-secrets-in-source"
+paths = ["**", "!**/*.md", "!**/.env.example"]
+why = "Secrets come from the environment or the secret store, never from source."
+forbid = [
+  '''(?i)\b(api[_-]?key|secret|passw(or)?d|token)\b["']?\s*[:=]\s*["'][^"'\s]{12,}["']''',
+  '''\bAKIA[0-9A-Z]{16}\b''',
+  '''-----BEGIN [A-Z ]*PRIVATE KEY-----''',
+  '''\bsk-[A-Za-z0-9_-]{20,}''',
+  '''\bgh[pousr]_[A-Za-z0-9]{36}\b''',
+]
+redact = true       # reasons show a masked excerpt, not the secret
+
+[[rule]]
+id = "no-employee-data-from-browser"
+paths = ["app/api/**"]
+why = "Employee records are loaded on the server for the signed-in user; an id or a record the browser sends is never trusted."
+forbid = [
+  '''(?i)\b(req|request)\.(body|query|params|cookies|headers)\b.*\b(employee|salary|payroll|ssn)''',
+  '''(?i)\b(searchParams|formData|params|query)\.get\(\s*["'][^"']*(employee|salary|payroll|ssn)''',
+  '''(?i)\b(localStorage|sessionStorage|document\.cookie)\b.*\b(employee|salary|payroll)''',
+]
+question = "Does this change read employee data (ids, salaries, personal records) from what the browser sends, instead of from the server-side session?"
+when = ['''(?i)employee|salary|payroll|\bssn\b''']
+# calibration = "no_employee_data_from_browser.calib.json"   # solvi calibrate ... (see solvi hook --help)
+
+[[rule]]
+id = "migrations-reversible"
+paths = ["**/alembic/versions/*.py", "**/migrations/versions/*.py"]
+why = "Every migration can be rolled back: it defines downgrade() and the downgrade does something."
+require_def = ["upgrade", "downgrade"]
+
+[[rule]]
+id = "no-dynamic-code"
+paths = ["**/*.py"]
+why = "No eval, exec or shell strings: code that runs text is where injections become commands."
+forbid_calls = ["eval", "exec", "os.system", "subprocess.*(shell=True)"]
+
+[[rule]]
+id = "ci-workflows-need-a-person"
+paths = [".github/workflows/**"]
+why = "CI workflows hold deploy keys and permissions: a person looks at every change."
+on_fail = "ask"

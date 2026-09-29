@@ -18,7 +18,7 @@ authors = [
     { name = "mxkuzn", email = "hi@mxkuzn.dev" }
 ]
 requires-python = ">=3.10"
-dependencies = ["numpy", "scipy", "pydantic>=2"]
+dependencies = ["numpy", "scipy", "pydantic>=2", "tomli>=1.1; python_version < '3.11'"]   # tomli: rules files (solvi hook) on 3.10
 
 [project.optional-dependencies]
 model = ["torch", "transformers"]   # model-based extraction from text (solvi.extract_*), the decider (solvi.decide), the model strategist and name matcher (solvi.strategy_model, solvi.aliases) — torch backends

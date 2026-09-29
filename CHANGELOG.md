@@ -2,6 +2,41 @@
 
 ## 0.7.1 — unreleased
 
+### solvi behind a coding agent's hooks (preview)
+
+- `solvi hook pre-edit --rules rules.toml`: a PreToolUse hook for Claude Code's Edit, Write and MultiEdit. It reads the
+  proposed change from the hook's JSON, works out the added lines with their line numbers in the file after the edit,
+  and asks a small solvi System one question, `edit` ∈ {allow, deny, ask}, whose hard checks are the rules whose path
+  globs match: `forbid` (regular expressions over the added lines), `require` (over the file after the edit),
+  `forbid_calls` and `require_def` (Python, from the parsed code), a rule with no checks (any change to these paths), and
+  a fuzzy `question` a decider answers when an added line matches `when`. It answers "deny" with the rule, the lines and
+  the rule's reason (the agent reads it and can fix the change), "ask" (the user confirms), or nothing (Claude Code's own
+  permissions apply; `--approve` answers an explicit allow). A fuzzy rule blocks only with a calibration file
+  (`act_guard`: P(answered alone and wrong) ≤ risk on labelled changes); without one its "yes" asks, and without a model
+  a triggered question asks. A check that cannot run, instruction-like text addressed to a reviewer in the added lines,
+  and a hook that fails all ask — never a silent allow.
+- `solvi hook pick-skill --skills-dir .claude/skills`: a UserPromptSubmit hook that picks one skill from the skills'
+  names and descriptions (the words a prompt shares with each, weighted by rarity; or a decider's choice with `--model`)
+  and adds one line naming it as `additionalContext`; silent on "none", a near tie or a slash command.
+- `--model`: a local checkpoint (never downloaded), a System One service (`systemone:URL#model`; `solvi serve --decider
+  ... --model-name ...` keeps a local model loaded), an OpenAI-compatible endpoint (`llm:URL#model`, key from the
+  environment) or your own decider. Calibrate a rule's question with `solvi calibrate solvi.hooks:rules_system
+  RULE_answer labels.jsonl --risk 0.1` (`$SOLVI_HOOK_RULES`, `$SOLVI_HOOK_MODEL`) and name the file in the rule.
+- Every decision is stored with its trace (`.solvi/traces/hooks.jsonl` by default, any TraceStorage with `--store`),
+  so `solvi verify` and `solvi report` work on it; parallel hooks share one chain (a file lock), and the store opens from
+  its head, not by reading every record. `solvi hook audit [ID]` prints a stored decision's audit and replays it against
+  the current rules.
+- `solvi hook install` merges the hook entries into the project's `.claude/settings.json` (other hooks and settings
+  stay; its own are replaced, not doubled), writes the sample rules (`solvi hook sample-rules`: no secrets in source, no
+  employee data taken from the browser in app/api, reversible migrations, no eval or shell strings, a person for CI
+  workflows) and prints what it changed; `solvi hook uninstall` removes exactly its entries.
+- Codex (preview): `--agent codex` writes `.codex/hooks.json`, reads the `apply_patch` envelope, and answers in Codex's
+  dialect (no "ask": a deny that says a person must confirm).
+- Speed: without a model a hook call is one short process — 105–121 ms on a laptop (median), with a store of 3000
+  decisions.
+- [examples/22_coding_agent_hooks.py](examples/22_coding_agent_hooks.py): a session in a temporary project — a clean
+  edit, a rule broken, a comment that tries to talk past the rules, two prompts, the verified store and one audit.
+
 ### Gallery: helpers for coding agents
 
 Three new entries for decisions a coding agent (such as Claude Code or Codex) meets on every task. Each runs offline:
@@ -26,6 +61,12 @@ fallback, and says what the offline rules cannot read. All three are playground 
   confident "none", an abstention and a wrong pick are kept apart; a skill the user names is cited, one named inside an
   instruction-like passage of pasted text is not; a near tie (`min_margin`) escalates with the conformal candidates; a
   production deploy needs the user's own word "production" (a hard check). 16 cases.
+
+### Changes
+
+- `import solvi` no longer imports numpy: the answer heads load it on first use, and hashing a fingerprint only looks for
+  arrays when numpy is already loaded. The pydantic models of `solvi.schema` build their validators on first use.
+- `tomli` is a dependency on Python 3.10 (rules files are TOML).
 
 ### Fixes
 

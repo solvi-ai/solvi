@@ -3338,6 +3338,7 @@ dependencies = [
     { name = "scipy", version = "1.15.3", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
     { name = "scipy", version = "1.17.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version == '3.11.*'" },
     { name = "scipy", version = "1.18.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },
+    { name = "tomli", marker = "python_full_version < '3.11'" },
 ]
 
 [package.optional-dependencies]
@@ -3415,6 +3416,7 @@ requires-dist = [
     { name = "pydantic", specifier = ">=2" },
     { name = "scipy" },
     { name = "tokenizers", marker = "extra == 'onnx'" },
+    { name = "tomli", marker = "python_full_version < '3.11'", specifier = ">=1.1" },
     { name = "torch", marker = "extra == 'lora'" },
     { name = "torch", marker = "extra == 'model'" },
     { name = "transformers", marker = "extra == 'lora'" },

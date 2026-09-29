@@ -6,12 +6,15 @@ import dataclasses
 import math
 from dataclasses import dataclass
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from .core import Catalog, Serial
-from .heads import Head
 from .provenance import model_info
 from .runtime import MISSING, Record, Result, execute, now_ms, path_confidence, srepr, vhash
 from .strategist import computable, plan
+
+if TYPE_CHECKING:                                 # numpy loads with the heads, on first use: `import solvi` stays light
+    from .heads import Head
 
 
 @dataclass
@@ -763,6 +766,7 @@ class System:
         ans = [q.answer.normalize(a) for _, a in examples]
         keys = set(self._state(examples[0][0])[0].keys())
         cands = sorted(f for f in computable(self.catalog, keys) - keys)
+        from .heads import Head
         if q.answer.kind == "multi":
             self.heads[question] = MultiHead(q.answer.options, lambda: Head(["yes", "no"]),
                                              lambda h, ys: h.fit(rows, ys, cands)).fit(ans)

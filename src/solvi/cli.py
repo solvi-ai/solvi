@@ -18,6 +18,7 @@
     solvi calibrate myapp.decisions:system PART labels.csv --risk 0.1 [--groups a,b] [--method crc|ltt] [--out F]
                                                                                                      (solvi.calibfile)
     solvi models [list | pull ID | check MODEL --examples labels.jsonl --task Q]                       (solvi.models)
+    solvi hook [install | uninstall | pre-edit --rules rules.toml | pick-skill --skills-dir DIR]        (solvi.hooks)
 
 --system names a System: "package.module:attribute" or "path/to/file.py:attribute", where the attribute is a System or a
 function without arguments that returns one (`solvi serve` and `solvi check` take it as their first argument; check also
@@ -328,7 +329,8 @@ def ask_parser(sub):
 
 
 COMMANDS = {"test": ("solvi.testing", "decision regression tests from cases.json files"),
-            "honesty": ("solvi.honesty", "honesty numbers of a labelled set, gated against a baseline")}
+            "honesty": ("solvi.honesty", "honesty numbers of a labelled set, gated against a baseline"),
+            "hook": ("solvi.hooks", "a coding agent's hooks: check edits against rules, pick a skill, install them")}
 
 
 def main(argv=None):

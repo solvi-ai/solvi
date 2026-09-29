@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import hashlib
 import re
+import sys
 
 GIVEN, COMPUTED, QUOTED, DECIDED, LEARNED, PROPOSED = "given", "computed", "quoted", "decided", "learned", "proposed"
 KINDS = (GIVEN, COMPUTED, QUOTED, DECIDED, LEARNED, PROPOSED)
@@ -62,8 +63,8 @@ def classify(reason):
 # --- fingerprints
 def _feed(h, obj, depth=0):
     """Feed a value into a hash: arrays by dtype, shape and bytes; containers recursively; anything else by repr."""
-    try:
-        import numpy as np
+    np = sys.modules.get("numpy")             # not imported yet: no value can be an array (and hashing stays light)
+    if np is not None:
         if isinstance(obj, np.ndarray):
             a = np.ascontiguousarray(obj)
             h.update(f"nd{a.dtype}{a.shape}".encode())
@@ -72,8 +73,6 @@ def _feed(h, obj, depth=0):
         if isinstance(obj, np.generic):
             h.update(repr(obj.item()).encode())
             return
-    except ImportError:  # pragma: no cover
-        pass
     if depth > 8:
         h.update(repr(obj).encode())
     elif isinstance(obj, dict):

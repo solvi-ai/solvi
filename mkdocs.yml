@@ -64,6 +64,7 @@ nav:
       - solvi.learning: api/learning.md
       - solvi.serve: api/serve.md
       - solvi.agents: api/agents.md
+      - solvi.hooks: api/hooks.md
       - solvi.textin: api/textin.md
       - solvi.specialist: api/specialist.md
       - solvi.charts: api/charts.md
