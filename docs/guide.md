@@ -2125,7 +2125,9 @@ amounts with a policy.
 Token matching reads these as different strings, so `ground={"url": "url"}` compares addresses instead. Both sides are
 parsed with the standard URL parser. The host must be equal: lower case, IDNA-encoded, without a trailing dot and
 without one leading `www.`. So must the port (80 and 443 are the default), the path (a trailing `/` aside), the query and
-the fragment. `http://` and `https://` count as the same address. What never matches:
+the fragment. The scheme may be upgraded, never downgraded: when the user wrote `https://`, only an `https://` call
+matches (not `http://`, not a URL without a scheme); when they wrote `http://`, both `http://` and `https://` match;
+when they wrote no scheme (`example.com/page`), both match. What never matches:
 
 - a host that merely contains the name: `evil.com/good.com` is `evil.com`, and `good.com.evil.com`, `xgood.com` and
   `sub.good.com` are other hosts;

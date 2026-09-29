@@ -150,13 +150,14 @@ guarantee of the default. Each has tests (`tests/test_agents_next.py`).
     Without one, by nothing.
 - **URL matcher: `ground={"url": "url"}` and `"url_prefix"`.** URLs are compared by parsing, not as tokens:
   - equal host (lower case, IDNA, no trailing dot, one leading `www.` ignored), port (80 / 443 default), path (trailing
-    `/` ignored), query and fragment; http and https count as the same;
+    `/` ignored), query and fragment; the scheme is never downgraded (a written `https://` matches only an
+    `https://` call; a written `http://` or no scheme matches either);
   - never a match: userinfo (`good.com@evil.com`), a host that only contains the name (`evil.com/good.com`,
     `good.com.evil.com`), a backslash, other schemes, `.` / `..` segments, a look-alike IDN;
   - `"url_prefix"` lets the path continue a written one at a `/` (for reads only);
   - `solvi.agents.same_url` / `url_parts` for your own policies.
 
-  *What it relaxes:* the scheme, `www.`, a trailing slash, a default port and the letter case of the host, and a
+  *What it relaxes:* a missing scheme or an http → https upgrade, `www.`, a trailing slash, a default port and the letter case of the host, and a
   Unicode host equals its punycode form. With `url_prefix`, any sub-path of a written URL. In the run, web page reads
   refused because the model added `http://` went from 27 to 0.
 - **`guard.require_request(tools, intent, phrases=None, on_fail="escalate")`** is a policy for actions with no

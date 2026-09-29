@@ -731,14 +731,14 @@ _HOST_LABEL = re.compile(r"[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?")
 
 
 def url_parts(url):
-    """A URL → (host, port, path, query, fragment) as the "url" matcher compares them, or None when it is not a plain
+    """A URL → (host, port, path, query, fragment, scheme) as the "url" matcher compares them, or None when it is not a plain
     web address. Read with urllib's parser: "http://" / "https://" or no scheme (read as a web address: "www.x.com/a");
     any other scheme ("javascript:", "ftp://", "file:"), a protocol-relative "//x", userinfo ("good.com@evil.com",
     "user:pass@x"), a backslash, whitespace, control or format characters, a "." / ".." path segment (also
     percent-encoded) or a host that is not a valid DNS name or IP address → None. The host is lower case, IDNA-encoded
     (an internationalised name compares by its xn-- form), without a trailing dot and without one leading "www."; the
     default ports 80 and 443 are dropped; the path loses its trailing "/" (the root is ""); query and fragment are kept
-    as written. The scheme is not compared: http and https name the same address."""
+    as written; the scheme is "http", "https" or None (not written)."""
     import ipaddress
     from urllib.parse import urlsplit
     if not isinstance(url, str):
@@ -747,7 +747,8 @@ def url_parts(url):
     if not s or any(c.isspace() or ord(c) < 32 or ord(c) == 127 or c == "\\" for c in s) or _cf().search(s):
         return None
     low = s.lower()
-    if not low.startswith(("http://", "https://")):
+    scheme = "https" if low.startswith("https://") else "http" if low.startswith("http://") else None
+    if scheme is None:
         if s.startswith("//"):
             return None
         m = _URL_SCHEME.match(s)
@@ -779,13 +780,16 @@ def url_parts(url):
     path = sp.path
     if any(seg in (".", "..") or re.fullmatch(r"(\.|%2e){1,2}", seg, re.I) for seg in path.split("/")):
         return None
-    return host, (None if port in (None, 80, 443) else port), path.rstrip("/"), sp.query, sp.fragment
+    return host, (None if port in (None, 80, 443) else port), path.rstrip("/"), sp.query, sp.fragment, scheme
 
 
 def same_url(value, written, path="exact"):
     """Does the URL `value` (a call's argument) name the address `written` (in the conversation)? Both read with
     `url_parts`; the host must be equal (never a suffix or a prefix: "good.com" is not "evil.com/good.com",
     "good.com.evil.com", "good.com@evil.com" or "xgood.com"), and so must the port, the query and the fragment.
+    The scheme never downgrades: a written "https://" matches only an "https://" value (not "http://", not a value
+    without a scheme); a written "http://" matches "http://", "https://" (an upgrade) and no scheme; a URL written
+    without a scheme matches either.
     path="exact": the path is equal too (a trailing "/" aside); path="prefix": the value's path may continue the
     written one at a "/" ("x.com/docs" covers "x.com/docs/a", not "x.com/docsevil") — only for reading: a path can carry
     data out."""
@@ -793,6 +797,8 @@ def same_url(value, written, path="exact"):
         raise ValueError('path is "exact" or "prefix"')
     a, b = url_parts(value), url_parts(written)
     if a is None or b is None or a[0] != b[0] or a[1] != b[1] or a[3] != b[3] or a[4] != b[4]:
+        return False
+    if b[5] == "https" and a[5] != "https":                # never a downgrade of what was written
         return False
     return a[2] == b[2] or (path == "prefix" and a[2].startswith(b[2] + "/"))
 

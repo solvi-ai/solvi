@@ -20,12 +20,15 @@ def ctx(user, *tools):
 @pytest.mark.parametrize("value, written", [
     ("https://www.informations.com", "www.informations.com"),
     ("http://informations.com/", "www.informations.com"),
-    ("www.informations.com", "https://informations.com/"),
+    ("https://informations.com/", "https://www.informations.com"),
+    ("https://x.org", "http://x.org"),                    # an upgrade of what was written
+    ("x.org", "http://x.org"),
     ("HTTPS://Informations.COM/news", "informations.com/news/"),
     ("https://x.org:443/a", "x.org/a"),
-    ("http://x.org:80", "https://x.org"),
-    ("x.org/a?id=3", "https://x.org/a?id=3"),
+    ("http://x.org:80", "http://x.org"),
+    ("https://x.org/a?id=3", "x.org/a?id=3"),
     ("xn--c1aay4a.xn--p1ai", "гугл.рф"),
+    ("HTTPS://x.org", "https://X.org/"),
     ("good.com.", "good.com"),
 ])
 def test_same_url_honest_variants(value, written):
@@ -33,6 +36,12 @@ def test_same_url_honest_variants(value, written):
 
 
 @pytest.mark.parametrize("value, written", [
+    ("http://good.com", "https://good.com"),              # a downgrade of what was written
+    ("good.com", "https://good.com"),                      # no scheme: the tool may fetch http
+    ("x.org/a?id=3", "https://x.org/a?id=3"),
+    ("http://good.com/a", "https://www.good.com/a/"),
+    ("HTTP://good.com", "HTTPS://good.com"),
+    ("http://good.com:443", "https://good.com"),
     ("good.com", "evil.com/good.com"),                    # the host is evil.com
     ("evil.com/good.com", "good.com"),
     ("good.com", "good.com.evil.com"),                     # a suffix is another host
@@ -81,8 +90,9 @@ def test_url_prefix_only_at_a_segment_boundary_and_never_through_dot_segments():
 
 
 def test_url_parts_normalises():
-    assert url_parts("HTTPS://WWW.Example.COM:443/A/B/?q=1#f") == ("example.com", None, "/A/B", "q=1", "f")
-    assert url_parts("www.com") == ("www.com", None, "", "", "")          # "www." is kept when it is the name itself
+    assert url_parts("HTTPS://WWW.Example.COM:443/A/B/?q=1#f") == ("example.com", None, "/A/B", "q=1", "f", "https")
+    assert url_parts("www.com") == ("www.com", None, "", "", "", None)
+    assert url_parts("http://x.org")[5] == "http"          # "www." is kept when it is the name itself
     assert url_parts("mailto:bob@x.org") is None and url_parts(None) is None and url_parts("") is None
 
 
@@ -428,3 +438,19 @@ def test_tainted_hotel_in_a_json_tool_output_escalates():
                       "Hotel from the 13th to the 17th of May 2024."})
     d = g.check(hotel("Riverside View Hotel"), ctx("Check Le Marais Boutique and book it if rated above 4.", out))
     assert d.outcome == "escalate" and d.failed == ["no_injected_arguments"]
+
+
+def test_url_matcher_never_downgrades_a_written_https():
+    g = url_guard()
+    c = ctx("Read https://bank.example.com/statement please.")
+    for u, want in (("https://bank.example.com/statement", "allow"), ("https://www.bank.example.com/statement/", "allow"),
+                    ("http://bank.example.com/statement", "deny"), ("bank.example.com/statement", "deny"),
+                    ("www.bank.example.com/statement", "deny")):
+        assert g.check({"name": "get_webpage", "arguments": {"url": u}}, c).outcome == want, u
+    c = ctx("Read http://old.example.org and bank.example.com/x")
+    for u in ("http://old.example.org", "https://old.example.org", "old.example.org",
+              "http://bank.example.com/x", "https://bank.example.com/x"):
+        assert g.check({"name": "get_webpage", "arguments": {"url": u}}, c).outcome == "allow", u
+    # the https the user wrote is one occurrence; an http one elsewhere in their words still grounds http
+    c = ctx("Read https://a.example.com, or http://a.example.com if that fails.")
+    assert g.check({"name": "get_webpage", "arguments": {"url": "http://a.example.com"}}, c).outcome == "allow"
