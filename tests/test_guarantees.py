@@ -354,3 +354,17 @@ def test_ltt_and_calibrate_for_refuse_an_error_outside_0_1(error):
             part.calibrate_for(_labelled()[:20], error=error, method="empirical")
     with pytest.raises(ValueError, match="delta"):
         ltt_threshold([0.9, 0.8], [0, 1], error=0.1, delta=0)
+
+
+def test_ltt_default_grid_follows_the_scores_so_confidences_near_1_can_pass():
+    from solvi.calibration import ltt_grid
+    rng = np.random.default_rng(2)
+    v = rng.uniform(size=3000)
+    c, w = 1 - 10 ** -(3 + 4 * v), (rng.uniform(size=3000) > 0.6 + 0.39 * v).astype(float)     # an LLM: all ≥ 0.999
+    assert ltt_threshold(c, w, error=0.10, grid=np.linspace(0.2, 0.995, 32)) == float("inf")   # the grid before 0.7
+    t = ltt_threshold(c, w, error=0.10)
+    assert 0.999 < t < 1 and w[c >= t].mean() <= 0.10
+    g = ltt_grid(c)
+    assert len(g) == 64 and g[0] == c.min() and g[-1] == c.max()        # label-free: quantiles of the scores
+    assert list(ltt_grid([0.3, 0.3, 0.9, float("nan")])) == [0.3, 0.9]  # few distinct scores: all of them
+    assert ltt_threshold([], [], error=0.1) == float("inf")

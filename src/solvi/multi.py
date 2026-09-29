@@ -19,8 +19,11 @@ called for this decision. The parts must answer the same question (kind and opti
 may differ). Combinations nest: `Cascade([small, Vote([mid, large])])`.
 
 Thresholds. Uncalibrated, each part escalates by its own thresholds (act_threshold, escalate_below, min_margin). After
-`act_guard`, one threshold t applies to every part's signal (its act probability when its model gives one, else its
-calibrated confidence) — a one-dimensional family. A cascade's loss is not monotone in t (a higher t can pass a question
+`act_guard`, one threshold t applies to every part — a one-dimensional family — on each part's rank among the
+calibration examples (scale="rank", the default: the share of that part's calibration signals at or below its signal;
+the signal is its act probability when its model gives one, else its calibrated confidence), so a model whose
+confidence sits near 1 (an LLM) and one spread over [0, 1] share it fairly; scale="raw" puts t on the signals
+themselves, as before 0.7. A cascade's loss is not monotone in t (a higher t can pass a question
 from a wrong small model to a right large one, or back), so conformal risk control runs on the loss monotonized from
 above — the maximum over thresholds ≥ t — which keeps the guarantee (measured on the shipped deciders: the risk stayed ≤ 10% for every
 mode and data set; the cascade answered as much as the large model at half its cost where the small one is often sure;
@@ -37,7 +40,50 @@ from .core import Decision, Quote, Unknown
 from .decide import DecisionPart, Facts, GroupBy, _group_info, _group_promise, _single, group_record
 from .provenance import ESCALATED, code_fingerprint, digest
 
+_SIGNAL = {"rank": "shared threshold on each model's rank among the calibration examples",
+           "raw": "shared threshold on each model's signal"}
 RECORD_KEYS = ("stages", "answered_by", "votes", "route", "routed")      # what a replay compares with the recomputed
+MAX_RANKS = 1024        # calibration signals kept per model for scale="rank" (more examples: this many evenly spaced ones)
+SCALES = ("rank", "raw")
+STAGE_FLOOR = 0.05      # act_guard on a cascade warns when a stage answers alone on less than this share
+
+
+def _table(sigs):
+    """A model's calibration signals → the sorted values its rank is taken among (finite ones; at most MAX_RANKS, taken
+    evenly by order so the rank stays a monotone map of the signal)."""
+    s = np.sort(np.asarray([x for x in sigs if np.isfinite(x)], float))
+    if len(s) > MAX_RANKS:
+        s = s[np.round(np.linspace(0, len(s) - 1, MAX_RANKS)).astype(int)]
+    return s
+
+
+def _rank(tbl, s):
+    """A signal's rank among a model's calibration signals: the share of them ≤ s (0 below all, 1 at or above the
+    largest; a model no calibration example reached ranks 0 — it never answers alone)."""
+    if not len(tbl):
+        return 0.0 if not np.isnan(s) else s
+    if np.isnan(s):
+        return s
+    return int(np.searchsorted(tbl, s, "right")) / len(tbl)
+
+
+def _raw_t(tbl, t):
+    """The raw signal threshold equivalent to a rank threshold t for one model: rank(s) ≥ t ⟺ s ≥ this."""
+    if t is None or tbl is None or t == -math.inf:
+        return t
+    n = len(tbl)
+    if not n:
+        return -math.inf if t <= 0 else math.inf
+    if not t <= 1:                                   # also NaN
+        return math.inf
+    k = max(0, min(n, math.ceil(t * n)))
+    while k > 0 and (k - 1) / n >= t:
+        k -= 1
+    while k <= n and k / n < t:
+        k += 1
+    if k > n:
+        return math.inf
+    return -math.inf if k == 0 else float(tbl[k - 1])
 
 
 @dataclasses.dataclass
@@ -167,21 +213,27 @@ class _Leaf:
             hard, own = p._bind(hard, src.vals), p._bind(own, src.vals)
         return _LeafState(self, d0, a, hard, own, src, ctx)
 
-    def vec(self, st, ts):
+    def vec(self, st, ts, rk=None):
         """At each threshold of ts (NaN: the part's own thresholds) → (answers alone [G], value key [G], signal [G],
-        {key: value}, cost [G], calls [G])."""
+        {key: value}, cost [G], calls [G]). rk: {id(leaf): sorted calibration signals} — the threshold is on the rank
+        of the signal among them (scale="rank"); empty or None: on the signal itself."""
         own = np.isnan(ts)
+        tbl = rk.get(id(self)) if rk else None
+        sig = st.sig if tbl is None else _rank(tbl, st.sig)
         with np.errstate(invalid="ignore"):
-            auto = np.where(own, st.own.escalate is None, (st.hard.escalate is None) & (st.sig >= ts))
+            auto = np.where(own, st.own.escalate is None, (st.hard.escalate is None) & (sig >= ts))
         G = len(ts)
-        return (auto, np.full(G, st.key, dtype=object), np.full(G, st.sig), {st.key: st.hard.value},
+        return (auto, np.full(G, st.key, dtype=object), np.full(G, sig), {st.key: st.hard.value},
                 np.full(G, self.cost), np.ones(G))
 
-    def final(self, st, t):
-        """The part's decision at threshold t (None: its own thresholds)."""
+    def final(self, st, t, rk=None):
+        """The part's decision at threshold t (None: its own thresholds; on the rank scale with rk, as in vec)."""
         if t is None:
             return _copy(st.own)
         p = self.part
+        tbl = rk.get(id(self)) if rk else None
+        if tbl is not None:
+            t = _raw_t(tbl, t)
         d = p._finish(_copy(st.d0), st.act, threshold=t, ctx=st.ctx)
         return p._bind(d, st.src.vals) if st.src.vals is not None else d
 
@@ -267,6 +319,8 @@ class _Combination:
         self.costs = None if costs is None else [float(c) for c in costs]
         self.name = name or self.members[0].name
         self.threshold = None                   # the shared threshold (act_guard); None: each part's own
+        self.scale = None                       # what the shared threshold is on: "rank" or "raw" (act_guard)
+        self.ranks = None                       # scale="rank": each leaf's sorted calibration signals (leaves order)
         self.groups = None                      # thresholds per group (act_guard(groups=...)): {"by", "nodes"}
         self.guarantee = None
         self.conformal_set = None
@@ -351,6 +405,8 @@ class _Combination:
     def fingerprint(self):
         th = {k: v for k, v in (("threshold", self.threshold), ("guarantee", self.guarantee),
                                 ("conformal", self.conformal_set)) if v is not None}
+        if self.scale == "rank":                      # the raw scale keeps the fingerprint it always had
+            th["scale"] = ("rank", [np.asarray(r, float) for r in self.ranks or []])
         if self.groups is not None:
             th["groups"] = (self.groups["by"].describe(),
                             sorted((list(k), v["threshold"]) for k, v in self.groups["nodes"].items()))
@@ -400,12 +456,23 @@ class _Combination:
         g = self._group(src)
         return math.inf if g is None else g[2]["threshold"]
 
-    def _t(self, t, src=None):
-        return t if t is not None else self._own(src)
+    def _tables(self):
+        """{id(leaf): sorted calibration signals} when the shared threshold is on the rank scale, else {} (raw)."""
+        if self.scale != "rank" or self.ranks is None:
+            return {}
+        return {id(lf): r for lf, r in zip(self.leaves(), self.ranks)}
 
-    def _vt(self, ts, src=None):
+    def _t(self, t, src=None, rk=None):
+        """The threshold and its scale that apply: an outer one as given, else this combination's own."""
+        if t is None:
+            return self._own(src), self._tables()
+        return t, (self._tables() if rk is None else rk)
+
+    def _vt(self, ts, src=None, rk=None):
         own = self._own(src)
-        return ts if own is None else np.where(np.isnan(ts), own, ts)
+        if own is not None and np.isnan(ts).all():
+            rk = None                                 # this combination's own threshold: its own scale
+        return (ts if own is None else np.where(np.isnan(ts), own, ts)), (self._tables() if rk is None else rk)
 
     def _wrapup(self, d, t, src=None):
         """The combination's own threshold record, guarantee and conformal candidates (a nested combination under an
@@ -452,34 +519,58 @@ class _Combination:
             return v == y
         return (Unknown if v is Unknown else sp.label(v)) == (Unknown if y is Unknown else sp.label(y))
 
-    def act_guard(self, examples, risk=0.10, groups=None, min_group=100, delta=0.10):
+    def act_guard(self, examples, risk=0.10, groups=None, min_group=100, delta=0.10, scale="rank"):
         """Answer alone only as far as a guarantee allows, for the combination as a whole: on labelled examples of your
         stream [(input, correct)] (an input is what every part reads, or Facts(...) by name) every part is asked, and
-        one threshold t on every part's signal is chosen by conformal risk control so that P(answered alone AND wrong)
+        one threshold t shared by every part is chosen by conformal risk control so that P(answered alone AND wrong)
         ≤ risk for inputs like the examples — a share of all questions. A cascade's loss is not monotone in t, so it is
         monotonized from above (the maximum over the thresholds ≥ t) before the choice, which keeps the guarantee.
         Replaces the parts' own thresholds inside this combination (the parts themselves are not changed); changes the
         combination's fingerprint and clears its conformal sets (call conformal afterwards). Too few or too hard
         examples → everything escalates (threshold inf). → {"threshold", "answered", "error" (among the answered),
         "risk" (answered and wrong, on the examples), "n", "guarantee", "calls" (models called per question), "cost"
-        (with costs=), and for a cascade "answered_by" (the share each stage answered)}.
+        (with costs=), "scale", and for a cascade "answered_by" (the share each stage answered) and "warnings" when a
+        stage answers alone on less than 5% of the examples (the cascade is then no better than one model)}.
+
+        scale: what the shared threshold is on. "rank" (default): each part's signal (its act probability when its
+        model gives one, else its calibrated confidence) is replaced by its rank among that part's own signals on the
+        calibration examples (the share of them ≤ it), so models whose signals live on different scales — an act
+        probability spread over [0, 1] and an LLM's confidence near 1 — share one threshold fairly. The rank uses the
+        calibration inputs, not their labels (the guarantee then holds up to a term of order 1/n; the measured risk
+        stayed ≤ 0.10: a small-model → LLM cascade on one data set answered 44.8% alone instead of 33.7% on the raw
+        scale, where the small model never answered; votes were unchanged). The sorted calibration signals of each part
+        (at most MAX_RANKS = 1024, evenly spaced by order when there are more examples) are kept in the combination
+        and in its calibration file. "raw": the threshold is on the signals themselves, as before 0.7.
 
         groups, min_group, delta: one shared threshold per group, as DecisionPart.act_guard(groups=...) — on the same
         monotonized loss, so the promise holds within every group; the group facts join the combination's inputs.
         Adds "groups" to the result."""
         from .calibration import certify_groups
+        if scale not in SCALES:
+            raise ValueError(f"scale must be one of {SCALES}, not {scale!r}")
         srcs, gold = self._examples(examples)
         states = [self.state(s).force() for s in srcs]
-        sig = np.array([x for st in states for x in st.sigs()], float)
+        if scale == "rank":
+            per = {id(lf): [] for lf in self.leaves()}
+            for st in states:
+                for ls in st.walk():
+                    per[id(ls.leaf)].append(ls.sig)
+            ranks = [_table(per[id(lf)]) for lf in self.leaves()]
+            rk = {id(lf): r for lf, r in zip(self.leaves(), ranks)}
+            sig = np.array([_rank(rk[id(ls.leaf)], ls.sig) for st in states for ls in st.walk()], float)
+        else:
+            ranks, rk = None, {}
+            sig = np.array([x for st in states for x in st.sigs()], float)
         grid = np.concatenate([np.unique(sig[np.isfinite(sig)]), [np.inf]])
         n, G = len(states), len(grid)
         loss, auto_all, cost, calls, who = np.zeros((n, G)), np.zeros((n, G), bool), np.zeros((n, G)), np.zeros((n, G)), []
+        answering = getattr(self, "_answering", None)
         for i, st in enumerate(states):
-            auto, keys, _, vals, c, k = self.vec(st, grid)
+            auto, keys, _, vals, c, k = self.vec(st, grid, rk)
             right = {kk: self._right(v, gold[i]) for kk, v in vals.items()}
             ok = np.array([right[kk] for kk in keys])
             loss[i], auto_all[i], cost[i], calls[i] = auto & ~ok, auto, c, k
-            who.append(getattr(self, "_answering", lambda st_, ts: None)(st, grid))
+            who.append(None if answering is None else answering(st, grid, rk))
         mono = np.maximum.accumulate(loss[:, ::-1], axis=1)[:, ::-1]
         promise = f"P(answered alone and wrong) ≤ {risk:g} for inputs like the calibration examples"
         extra = {}
@@ -489,8 +580,7 @@ class _Combination:
             gi = np.full(n, int(good[0]) if len(good) else G - 1)
             t = float(grid[gi[0]]) if len(good) else math.inf
             self.groups = None
-            self.guarantee = {"method": "crc", "risk": risk, "n": n, "signal": "shared threshold on each model's signal",
-                              "promise": promise}
+            self.guarantee = {"method": "crc", "risk": risk, "n": n, "signal": _SIGNAL[scale], "promise": promise}
         else:
             by = GroupBy(groups)
             paths = [by.path(s.vals, s.raw) for s in srcs]
@@ -504,11 +594,12 @@ class _Combination:
             t = nodes[()]["threshold"]
             self.groups = {"by": by, "nodes": nodes}
             self.guarantee = {"method": "crc-groups" if delta is None else "group-bound", "risk": risk, "n": n,
-                              "signal": "shared threshold on each model's signal, per group", "groups": by.label(),
+                              "signal": _SIGNAL[scale] + ", per group", "groups": by.label(),
                               "min_group": min_group, "delta": delta, "promise": _group_promise(risk, delta, len(nodes))}
             a_ = auto_all[np.arange(n), gi] & np.array([got[o]["index"] is not None for o in owner])
             extra["groups"] = _group_info(nodes, owner, paths, a_, loss[np.arange(n), gi] > 0)
         self.threshold = t
+        self.scale, self.ranks = scale, ranks
         self.conformal_set = None
         self._setup()
         rows = np.arange(n)
@@ -521,13 +612,20 @@ class _Combination:
             a, lo = np.zeros(n, bool), np.zeros(n)
         out = {"threshold": t, "answered": float(a.mean()),
                "error": float(lo[a].sum() / a.sum()) if a.any() else 0.0, "risk": float(lo.mean()), "n": n,
-               "guarantee": self.guarantee["promise"], "calls": float(calls[rows, gi].mean())}
+               "guarantee": self.guarantee["promise"], "calls": float(calls[rows, gi].mean()), "scale": scale}
         if any(lf.cost != 1.0 for lf in self.leaves()):
             out["cost"] = float(cost[rows, gi].mean())
         if who[0] is not None:
             w = np.array([x[g] for x, g in zip(who, gi)])
             w = np.where(a, w, -1)
             out["answered_by"] = [float((w == j).mean()) for j in range(len(self.members))]
+            if a.any():
+                warn = [f"stage {j + 1} ({m.name}, {m.model_id}) answers alone on {b:.1%} of the calibration questions "
+                        f"(< {STAGE_FLOOR:.0%}): the cascade is then no better than a single model — compare it with "
+                        "each model alone (act_guard on each part) on the same examples"
+                        for j, (m, b) in enumerate(zip(self.members, out["answered_by"])) if b < STAGE_FLOOR]
+                if warn:
+                    out["warnings"] = warn
         out.update(extra)
         return out
 
@@ -647,15 +745,15 @@ class Cascade(_Combination):
     def state(self, src):
         return _State(self.members, src)
 
-    def vec(self, st, ts):
-        ts = self._vt(ts, st.src)
+    def vec(self, st, ts, rk=None):
+        ts, rk = self._vt(ts, st.src, rk)
         G = len(ts)
         auto, keys, sig = np.zeros(G, bool), np.empty(G, dtype=object), np.zeros(G)
         cost, calls, vals = np.zeros(G), np.zeros(G), {}
         for i, m in enumerate(self.members):
             if auto.all():
                 break
-            a, k, s, v, c, n = m.vec(st.get(i), ts)
+            a, k, s, v, c, n = m.vec(st.get(i), ts, rk)
             vals.update(v)
             asked = ~auto
             cost += np.where(asked, c, 0.0)
@@ -665,21 +763,21 @@ class Cascade(_Combination):
             auto |= a
         return auto, keys, sig, vals, cost, calls
 
-    def _answering(self, st, ts):
+    def _answering(self, st, ts, rk=None):
         """The stage that answers at each threshold (−1: every stage escalates)."""
-        ts = self._vt(ts, st.src)
+        ts, rk = self._vt(ts, st.src, rk)
         who = np.full(len(ts), -1)
         for i, m in enumerate(self.members):
-            a = m.vec(st.get(i), ts)[0]
+            a = m.vec(st.get(i), ts, rk)[0]
             who = np.where((who < 0) & a, i, who)
         return who
 
-    def final(self, st, t):
-        te = self._t(t, st.src)
+    def final(self, st, t, rk=None):
+        te, rk = self._t(t, st.src, rk)
         stages, ds, by = [], [], None
         for i, m in enumerate(self.members):
             s = st.get(i)
-            d = m.final(s, te)
+            d = m.final(s, te, rk)
             stages.append(m.entry(d, s))
             ds.append(d)
             if d.escalate is None:
@@ -771,9 +869,9 @@ class Vote(_Combination):
                     pre[i] = (z, a)
         return _State(self.members, src, pre).force()
 
-    def vec(self, st, ts):
-        ts = self._vt(ts, st.src)
-        outs = [m.vec(st.get(i), ts) for i, m in enumerate(self.members)]
+    def vec(self, st, ts, rk=None):
+        ts, rk = self._vt(ts, st.src, rk)
+        outs = [m.vec(st.get(i), ts, rk) for i, m in enumerate(self.members)]
         A = np.stack([o[0] for o in outs])
         K = np.stack([o[1] for o in outs])
         S = np.stack([o[2] for o in outs])
@@ -784,9 +882,9 @@ class Vote(_Combination):
             vals.update(o[3])
         return auto, vk, sig, vals, sum(o[4] for o in outs), sum(o[5] for o in outs)
 
-    def final(self, st, t):
-        te = self._t(t, st.src)
-        ds = [m.final(st.get(i), te) for i, m in enumerate(self.members)]
+    def final(self, st, t, rk=None):
+        te, rk = self._t(t, st.src, rk)
+        ds = [m.final(st.get(i), te, rk) for i, m in enumerate(self.members)]
         votes = [m.entry(d, st.get(i)) for i, (m, d) in enumerate(zip(self.members, ds))]
         K = np.array([[_key(d.value)] for d in ds], dtype=object)
         A = np.array([[d.escalate is None] for d in ds])
@@ -882,13 +980,13 @@ class Route(_Combination):
     def state(self, src):
         return _State(self.members, src, pick=self.pick(src))
 
-    def vec(self, st, ts):
-        return self.members[st.pick].vec(st.get(st.pick), self._vt(ts, st.src))
+    def vec(self, st, ts, rk=None):
+        return self.members[st.pick].vec(st.get(st.pick), *self._vt(ts, st.src, rk))
 
-    def final(self, st, t):
+    def final(self, st, t, rk=None):
         i, m = st.pick, self.members[st.pick]
         s = st.get(i)
-        d = m.final(s, self._t(t, st.src))
+        d = m.final(s, *self._t(t, st.src, rk))
         out = Decision(d.value, dict(d.probs), confidence=d.conf, evidence=list(d.evidence), escalate=d.escalate)
         out.extra = {"route": {"to": i, "part": m.name, "by": self._by(i)}, "routed": m.entry(d, s), "calls": st.calls()}
         return self._wrapup(out, t, st.src)

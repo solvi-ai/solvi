@@ -146,14 +146,32 @@ def check_rate(name, v, zero=False):
     return float(v)
 
 
+LTT_GRID = 64          # thresholds ltt_threshold tries by default (the Bonferroni correction grows with their number)
+
+
+def ltt_grid(score, size=LTT_GRID):
+    """The default learn-then-test grid: the distinct finite scores, or `size` of them at evenly spaced quantiles when
+    there are more. It reads the scores only, never the labels, so fixing it on the calibration examples keeps the
+    guarantee; it follows the scores' own scale (an LLM's confidence packed near 1 as well as an act probability)."""
+    u = np.unique(np.asarray(score, float))
+    u = u[np.isfinite(u)]
+    if len(u) > size:
+        u = np.unique(u[np.round(np.linspace(0, len(u) - 1, size)).astype(int)])
+    return u
+
+
 def ltt_threshold(score, wrong, error=0.10, delta=0.10, grid=None):
     """Learn-then-test: the lowest threshold t on a fixed grid such that the error AMONG the cases answered alone
     (score ≥ t) is ≤ error with probability ≥ 1 − delta over the calibration examples (binomial test, Bonferroni over the
-    grid). A stronger promise than crc_threshold, so it often allows no automatic answers at all (inf)."""
+    grid). A stronger promise than crc_threshold, so it often allows no automatic answers at all (inf). grid=None: at
+    most 64 quantiles of the distinct calibration scores (ltt_grid; before 0.7 a fixed linspace(0.2, 0.995, 32), which
+    let nothing through for a decider whose scores sit above 0.995)."""
     check_rate("error", error)
     check_rate("delta", delta)
-    grid = np.linspace(0.2, 0.995, 32) if grid is None else np.asarray(grid, float)
     s, w = _arrays(score, wrong)
+    grid = ltt_grid(s) if grid is None else np.asarray(grid, float)
+    if not len(grid):
+        return float("inf")
     for t in sorted(grid):
         auto = s >= t
         k = int(auto.sum())

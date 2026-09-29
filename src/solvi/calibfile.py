@@ -11,9 +11,10 @@ catalog calibrated once (on a few hundred labelled examples of your stream) load
     part.load_calibration("team.calib.json")
     part.question(cat)
 
-A file holds the escalation thresholds (`escalate_below`, `act_threshold`, per group), the guarantee record the trace
-shows, the conformal set, and what they were fitted for: the question (task, options, kind) and the fingerprint of the
-model behind it — the checkpoint and this question's adaptation for a DecisionPart, every member for a Cascade / Vote /
+A file holds the escalation thresholds (`escalate_below`, `act_threshold`, per group; for a combination the shared
+threshold, its `scale` and — on the rank scale — each member's sorted calibration signals, at most 1024 per member),
+the guarantee record the trace shows, the conformal set, and what they were fitted for: the question (task, options,
+kind) and the fingerprint of the model behind it — the checkpoint and this question's adaptation for a DecisionPart, every member for a Cascade / Vote /
 Route. `load_calibration` refuses a file made for another question or another model (a threshold on one model's
 confidence says nothing about another's); `strict=False` loads it anyway. After loading, the part's fingerprint is the
 one it had right after calibrating, so stored decisions replay against it.
@@ -121,6 +122,10 @@ def record(part):
         out.update(escalate_below=part.escalate_below, act_threshold=part.act_threshold)
     else:
         out["threshold"] = part.threshold
+        if part.scale is not None:
+            out["scale"] = part.scale
+        if part.scale == "rank":                    # each member's sorted calibration signals (at most multi.MAX_RANKS)
+            out["ranks"] = [[float(x) for x in r] for r in part.ranks]
     out.update(guarantee=part.guarantee, conformal=part.conformal_set, groups=_groups_record(part.groups))
     from . import __version__
     out["solvi"] = __version__
@@ -193,6 +198,18 @@ def load(part, path, groups=None, strict=True):
         part.conformal_set = rec.get("conformal")
     else:
         part.threshold, part.guarantee, part.groups = rec.get("threshold"), rec.get("guarantee"), grp
+        scale = rec.get("scale", "raw")             # a file from before 0.7 has no scale: raw, as it was made
+        if scale == "rank":
+            import numpy as np
+            ranks = rec.get("ranks")
+            if not isinstance(ranks, list) or len(ranks) != len(part.leaves()):
+                raise ValueError(f"{path}: a rank-scale calibration needs the calibration signals of each of the "
+                                 f"{len(part.leaves())} models (\"ranks\")")
+            part.scale, part.ranks = "rank", [np.asarray(r, float) for r in ranks]
+        elif scale == "raw":
+            part.scale, part.ranks = "raw", None
+        else:
+            raise ValueError(f"{path}: unknown scale {scale!r} (rank or raw)")
         part.conformal_set = rec.get("conformal")
         part._setup()
     return part
@@ -358,6 +375,8 @@ def cmd_calibrate(a):
                       f"{_pct(info['must_escalate_at_least'])}")
         print(f"  threshold           {thr:.4g}" if ok else "  threshold           inf — everything escalates")
         print(f"  guarantee           {info['guarantee']}")
+        for w in info.get("warnings", []):
+            print(f"  warning             {w}")
         if info.get("groups"):
             print("  per group:")
             print(f"    {'group':28s} {'n':>5s} {'threshold':>10s} {'answered':>9s} {'error':>7s} {'risk':>7s}  pooled")

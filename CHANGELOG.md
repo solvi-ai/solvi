@@ -63,6 +63,38 @@ three adversarial passes ran before this release; their fixes are listed under "
   ledger decisions are unchanged. Seven new cases (16 in all); the README lists what the rule still misreads, measured on
   80 messages it was not written on, and shows an LLM decider as the first producer with the rule as its fallback.
 
+### Several models with an LLM: one threshold on ranks, an LTT grid from the data
+
+- **`act_guard(..., scale="rank")` on `Cascade` / `Vote` / `Route`, the new default.** Before the shared threshold,
+  each part's signal is replaced by its rank among that part's own signals on the calibration examples
+  (`searchsorted(sorted_calibration, s, "right") / n`). One threshold on raw signals fitted only one model when their
+  scales differ — an act probability spread over [0, 1] against an LLM's confidence near 1 — and a cascade of
+  solvi-large and an LLM became "the LLM alone" (the first stage never answered). Measured on one data set: 33.7% of
+  the questions answered alone on the raw scale, 44.8% with the rank, the risk ≤ 10% in every mode; votes unchanged.
+  The rank reads the calibration inputs, not their labels. The sorted calibration signals of each part (at most 1024,
+  evenly spaced by order beyond that) are kept in the combination, its fingerprint and its calibration file (`"scale"`,
+  `"ranks"`); `guarantee["signal"]` reads "shared threshold on each model's rank among the calibration examples"; the
+  result has `"scale"`.
+- `scale="raw"` is the previous behaviour, exactly, and can answer more when the parts share one scale (two solvi
+  deciders: `examples/18_several_models.py` keeps it, 85% answered alone against 73% on the rank scale). A calibration
+  file without `"scale"` (written before 0.7) loads on the raw scale with the same threshold, decisions and fingerprint
+  as before; a raw-scale combination's fingerprint is unchanged. **Behaviour change:** calling `act_guard` again on a combination without `scale=` now gives a rank-scale
+  calibration (another threshold and fingerprint); pass `scale="raw"` to keep the old one.
+- `act_guard` on a `Cascade` adds `"warnings"` when a stage answers alone on less than 5% of the calibration questions:
+  the cascade is then no better than a single model. `solvi calibrate` prints them.
+- **`calibration.ltt_threshold(grid=None)`**, and so `calibrate_for(method="ltt")` and `solvi calibrate --method ltt`:
+  the default grid is now at most 64 quantiles of the distinct calibration scores (`calibration.ltt_grid`), not
+  `linspace(0.2, 0.995, 32)`. The grid reads the scores only, never the labels, so the promise holds; the Bonferroni
+  correction is over the grid's size. The old grid let nothing through for an LLM decider whose confidences sit above
+  0.999. **Behaviour change:** the same examples can give another LTT threshold than in 0.6; an explicit `grid=` is
+  unchanged.
+- The LLM decider's confidence is unchanged (no new transform): a threshold taken from the distinct values of the
+  signal, as `act_guard` does, separates confidences packed near 1 as they are.
+- Guide: with an LLM, start with the LLM alone under `act_guard`, or a vote of solvi-large and the LLM where the two
+  are about equally strong; "a small model first, the LLM second" is not a default — the stages' mistakes did not
+  complement each other by confidence, and a cascade with a threshold per stage came out 1–2 points below the better
+  model alone.
+
 ### Fixes before release (LLM decider)
 
 Found by a measurement run through OpenRouter, where most invalid replies were quotes the model had re-typed.

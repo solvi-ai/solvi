@@ -219,8 +219,8 @@ Every answer is a value and a confidence, and the types also declare answer prim
 - **Any decision model.** `solvi.systemone.systemone(url, model)` puts any `POST /v1/systemone` service (Jev, Kev, Von,
   Laya-serve, …) behind your rules, and `solvi.llm.llm(base_url, model)` any OpenAI-compatible LLM server (OpenAI,
   OpenRouter, vLLM, llama.cpp, Ollama) — its JSON replies validated, an invalid one escalated, never guessed;
-  `Cascade`, `Vote` and `Route` (`solvi.multi`) combine models — small first, a larger one or an LLM only when the
-  small one escalates, or answer only when models of different families agree — under one guarantee. On
+  `Cascade`, `Vote` and `Route` (`solvi.multi`) combine models — the next model only when one escalates, an answer
+  only when models of different families agree, or a model picked by code — under one guarantee. On
   typed-decisions a vote of solvi-large and Julia 1 answered 50% alone against 31% / 40% for each alone, at the same
   10% risk (Julia in-distribution there; [examples/20_vote_across_families.py](examples/20_vote_across_families.py)).
 - **Serving and operations.** `solvi serve module:system` exposes the questions over HTTP (OpenAPI from the same types),

@@ -2448,7 +2448,8 @@ class DecisionPart:
         [(input, correct)]. method="empirical": the lowest threshold at which the calibration decisions it lets through
         are wrong at most `error` of the time — no guarantee on new inputs (it was 3–5× off on other data sets in our
         measurements); method="ltt" (learn-then-test): the error among the answered is ≤ `error` with probability
-        ≥ 1 − delta for inputs like the examples — a strong promise, so it often lets nothing through. signal: "act"
+        ≥ 1 − delta for inputs like the examples — a strong promise, so it often lets nothing through (it tests at most 64
+        thresholds, quantiles of the calibration signals: calibration.ltt_grid). signal: "act"
         (the model's act probability → act_threshold), "confidence" (the calibrated confidence → escalate_below) or
         "auto" (act when the model has an act head). No threshold reaches the target → everything escalates (inf).
         Changes the part's fingerprint. → {"signal", "threshold", "coverage", "error", "n", "target_error", "method",

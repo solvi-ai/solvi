@@ -257,6 +257,106 @@ def test_act_guard_on_a_cascade_and_a_vote_keeps_the_risk_on_new_inputs():
         assert np.mean(rs) >= 0.05, key                  # not trivially conservative: it does answer alone
 
 
+def _scales_stream(rng, tag, n, S, L):
+    """The small model's confidence spread over (0.5, 1); the other's packed near 1, as an LLM's from log-probabilities
+    (1 − 10^−(3…7)) and weaker. Both informative: right with probability rising in the confidence's rank."""
+    out = []
+    for i in range(n):
+        t, y = f"{tag} {i}", ("a", "b")[rng.integers(2)]
+        u, v = rng.uniform(), rng.uniform()
+        for tab, c, p in ((S, 0.5 + 0.5 * u, 0.6 + 0.39 * u), (L, 1 - 10 ** -(3 + 4 * v), 0.45 + 0.45 * v)):
+            pred = y if rng.uniform() < p else ("b" if y == "a" else "a")
+            tab.table[t] = np.log(np.array([c, 1 - c]) if pred == "a" else np.array([1 - c, c]))
+        out.append((t, y))
+    return out
+
+
+def _scales_parts():
+    S, L = Table("S"), Table("L")
+    ms, ml = (DecideModel(x, meta={"format": "test", "temperature": 1.0}) for x in (S, L))
+    return S, L, ms.decision("q", "Q?", "doc", ["a", "b"]), ml.decision("q", "Q?", "doc", ["a", "b"])
+
+
+def test_rank_scale_lets_a_cascade_use_both_models_when_their_signals_differ_in_scale():
+    rng = np.random.default_rng(3)
+    S, L, s, l_ = _scales_parts()
+    cal, test = _scales_stream(rng, "c", 600, S, L), _scales_stream(rng, "t", 3000, S, L)
+    raw, rank = Cascade([s, l_]), Cascade([s, l_])
+    ir = raw.act_guard(cal, risk=0.10, scale="raw")
+    ik = rank.act_guard(cal, risk=0.10)                       # rank is the default
+    assert ir["scale"] == "raw" and ik["scale"] == "rank" and rank.scale == "rank" and len(rank.ranks) == 2
+    assert ir["answered_by"][0] < 0.05 and any("no better than a single model" in w for w in ir["warnings"])
+    assert ik["answered_by"][0] > 0.05 and "warnings" not in ik
+    assert ik["answered"] > ir["answered"] + 0.05
+    assert rank.guarantee["signal"] == "shared threshold on each model's rank among the calibration examples"
+    assert raw.guarantee["signal"] == "shared threshold on each model's signal"
+    risks = {"raw": [], "rank": []}                            # the promise holds on new inputs, over calibrations
+    for rep in range(10):
+        c2, t2 = _scales_stream(rng, f"c{rep}", 300, S, L), _scales_stream(rng, f"t{rep}", 1000, S, L)
+        for key in risks:
+            comb = Cascade([s, l_])
+            comb.act_guard(c2, risk=0.10, scale=key)
+            ds = comb.decide([t for t, _ in t2])
+            risks[key].append(np.mean([d.escalate is None and d.value != y for d, (_, y) in zip(ds, t2)]))
+    assert all(np.mean(r) <= 0.10 + 0.01 for r in risks.values()), risks
+    for t, _ in cal[:200] + test[:200]:                        # the runtime agrees with the vectorized calibration
+        st = rank.state(_src(t))
+        auto, keys, _, vals, _, _ = rank.vec(st, np.array([rank.threshold]))
+        d = rank.decide(t)
+        assert (d.escalate is None) == bool(auto[0]) and d.value == vals[keys[0]]
+    with pytest.raises(ValueError, match="scale"):
+        rank.act_guard(cal, scale="log")
+
+
+def test_the_rank_threshold_maps_to_the_same_raw_threshold_per_model():
+    from solvi.multi import _rank, _raw_t, _table
+    rng = np.random.default_rng(0)
+    tbl = _table(np.round(rng.uniform(size=300), 2))           # ties
+    assert len(_table(rng.uniform(size=5000))) == 1024 and np.all(np.diff(_table(rng.uniform(size=5000))) >= 0)
+    for t in [0.0, -np.inf, np.inf, 1.0, 1e-9] + [_rank(tbl, x) for x in tbl[::7]] + list(rng.uniform(size=50)):
+        r = _raw_t(tbl, t)
+        for s_ in np.concatenate([tbl, rng.uniform(-0.1, 1.1, 50), [-np.inf]]):   # signals are not +inf
+            assert (_rank(tbl, s_) >= t) == (s_ >= r), (t, s_, r)
+
+
+def test_old_calibration_files_load_on_the_raw_scale_bit_for_bit(tmp_path):
+    import json
+    from solvi.provenance import digest
+    rng = np.random.default_rng(5)
+    S, L, s, l_ = _scales_parts()
+    cal, test = _scales_stream(rng, "c", 300, S, L), _scales_stream(rng, "t", 300, S, L)
+    for make in (lambda: Cascade([s, l_]), lambda: Vote([s, l_])):
+        raw = make()
+        raw.act_guard(cal, risk=0.10, scale="raw")
+        # the fingerprint a combination had before scales existed: no scale in it
+        old_fp = digest(type(raw).__name__, raw._describe(), [m.fingerprint() for m in raw.members],
+                        {"threshold": raw.threshold, "guarantee": raw.guarantee})
+        assert raw.fingerprint() == old_fp
+        f = raw.save_calibration(tmp_path / "old.json")
+        rec = json.loads(f.read_text())
+        assert rec["scale"] == "raw" and "ranks" not in rec
+        del rec["scale"]                                       # as written before 0.7
+        f.write_text(json.dumps(rec))
+        old = make().load_calibration(f)
+        assert old.scale == "raw" and old.ranks is None and old.fingerprint() == old_fp
+        for a, b in zip(raw.decide([t for t, _ in test]), old.decide([t for t, _ in test])):
+            assert (a.value, a.escalate, a.conf, a.extra.get("threshold")) == (b.value, b.escalate, b.conf,
+                                                                               b.extra.get("threshold"))
+        ranked = make()                                        # a rank-scale file keeps the ranks and decides the same
+        ranked.act_guard(cal, risk=0.10)
+        f2 = ranked.save_calibration(tmp_path / "rank.json")
+        rec2 = json.loads(f2.read_text())
+        assert rec2["scale"] == "rank" and [len(r) for r in rec2["ranks"]] == [300, 300]
+        back = make().load_calibration(f2)
+        assert back.fingerprint() == ranked.fingerprint() and back.fingerprint() != old_fp
+        for a, b in zip(ranked.decide([t for t, _ in test]), back.decide([t for t, _ in test])):
+            assert (a.value, a.escalate) == (b.value, b.escalate)
+        del rec2["ranks"]
+        f2.write_text(json.dumps(rec2))
+        with pytest.raises(ValueError, match="ranks"):
+            make().load_calibration(f2)
+
+
 def test_act_guard_records_the_promise_and_reports_the_cost():
     small, large = _model("small", 3.0), _model("large", 1.0)
     c = Cascade([small.decision("team", "Which team?", "email", TEAMS),

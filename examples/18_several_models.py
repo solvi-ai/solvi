@@ -132,7 +132,9 @@ if __name__ == "__main__":
 
     print("\n=== 2. cascade small → large: the large model only when the small one escalates ===")
     cascade = Cascade([small, large], costs=[COST["small"], COST["large"]])
-    info = cascade.act_guard(calib, risk=0.10)
+    # scale="raw": the two stand-ins share one confidence scale, and here one threshold on it answers more (85% against
+    # 73% on the rank scale). With models of different scales — an LLM stage — keep the default, scale="rank".
+    info = cascade.act_guard(calib, risk=0.10, scale="raw")
     line("cascade small → large", info, risk_on(cascade, test), info["cost"])
     print(f"  answered by the small model {info['answered_by'][0]:.0%}, by the large {info['answered_by'][1]:.0%}; "
           f"{info['calls']:.2f} models called per question")

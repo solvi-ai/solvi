@@ -600,8 +600,11 @@ is at most `risk`. Measured on solvi-large with 300 examples per data set (200 r
 questions was 9.6–10.0% on every set, while the answered share depends on how hard the questions are (typed-decisions 32%,
 Taskmaster-2 50%, ContractNLI 97%, JSON questions 99.6%). When the model is wrong on a share μ of the examples, any rule
 must escalate at least (μ − risk) / (1 − risk) of them — `must_escalate_at_least` tells you before you tune anything.
-Every decision records the promise of its threshold (`decision.extra["guarantee"]`) and the audit shows it per answer.
-Recalibrate when the inputs change: the promise does not survive a shift of domain.
+`calibrate_for(method="ltt")` tests at most 64 thresholds: quantiles of the distinct signals on the calibration
+examples (the labels are not read, so the promise holds; the Bonferroni correction is over those thresholds). Before
+0.7 it tried a fixed grid from 0.2 to 0.995, which let nothing through for an LLM decider whose confidences sit above
+0.999. Every decision records the promise of its threshold (`decision.extra["guarantee"]`) and the audit shows it per
+answer. Recalibrate when the inputs change: the promise does not survive a shift of domain.
 
 #### Keeping a calibration: save_calibration, load_calibration
 
@@ -781,8 +784,9 @@ max_tokens, seed): those raise `ValueError`. It enters the fingerprint.
 description and the whole text, a few hundred tokens or more — and takes 0.3–5 s, where a local decider takes ~50 ms on
 a CPU and costs nothing per call. Several questions about one input are sent in parallel (`workers=4`), not in one
 request; answers are cached per (question, input) while the model object lives; `model.scorer.usage` counts the tokens.
-Put the LLM where it pays for itself: as the last stage of a `Cascade` after local deciders that answer the easy inputs
-(`act_guard` on the cascade keeps one guarantee for the whole), or in a `Vote` as a model of another family.
+Put the LLM where it pays for itself: alone with `act_guard`, or in a `Vote` with solvi-large where the two are about
+equally strong (see "Which combination with an LLM" below). A "small model first, LLM second" cascade is not a good
+default.
 
 ### Several questions in one pass
 
@@ -833,13 +837,26 @@ Vote([mid, large])])`.
 **Thresholds and the guarantee.** Before calibration each part escalates by its own thresholds (`escalate_below`,
 `act_threshold`, `min_margin`). `act_guard(examples, risk=0.10)` asks every part on labelled examples of your stream
 (`[(input, correct)]`; an input is what every part reads, or `solvi.multi.Facts(email=..., vip=...)` by name) and chooses
-**one threshold t for every part's signal** — its act probability when its model gives one, else its calibrated confidence
-— by conformal risk control, so that P(answered alone and wrong) ≤ risk for inputs like the examples. A cascade's loss is
+**one threshold t shared by every part** by conformal risk control, so that P(answered alone and wrong) ≤ risk for
+inputs like the examples. Each part's signal — its act probability when its model gives one, else its calibrated
+confidence — is first replaced by its **rank among that part's own signals on the calibration examples** (the share of
+them at or below it; `scale="rank"`, the default). The signals of different models live on different scales: an act
+probability spreads over [0, 1], an LLM's confidence from log-probabilities sits above 0.999 on almost every answer. One
+threshold on the raw values then fits only one of them — a cascade of solvi-large and an LLM became "the LLM alone",
+the first stage never answering (33.7% of the questions answered alone on one data set; with the rank, 44.8%, the risk
+still ≤ 10%; votes answered the same either way). The rank reads the calibration inputs, not their labels. The sorted
+calibration signals of each part (at most 1024 per part) are kept in the combination and in its calibration file.
+`scale="raw"` puts t on the signals themselves, as before 0.7 — worth comparing when the parts share one scale (two
+solvi deciders): in [`examples/18_several_models.py`](../examples/18_several_models.py) the raw scale lets the cascade
+answer 85% alone against 73% on the rank scale. A calibration file written before 0.7 loads on the raw
+scale and gives the same decisions and fingerprint as before. A cascade's loss is
 not monotone in t: a higher t can hand a question from a wrong small model to a right large one, or the other way. The
 loss of each example is therefore monotonized from above — the maximum over all thresholds ≥ t — before the choice;
 the actual loss is never above it, so the guarantee holds (the other safeguards of each part, such as `min_margin`, still
 apply). The result has `threshold`, `answered`, `error` (among the answered), `risk`, `calls` (models called per
-question), `cost` (with `costs=`) and, for a cascade, `answered_by` (the share each stage answered). `conformal(examples,
+question), `cost` (with `costs=`), `scale` and, for a cascade, `answered_by` (the share each stage answered) and
+`warnings` when a stage answers alone on less than 5% of the examples — the cascade is then no better than a single
+model, so compare it with each model alone on the same examples (`solvi calibrate` prints the warning). `conformal(examples,
 coverage=0.9)` gives answer sets from the probabilities the combination answers with — call it after `act_guard`, which
 clears it. `act_guard(examples, risk=0.10, groups="domain", min_group=100, delta=0.10)` chooses one shared
 threshold per group on the same monotonized loss, with the same rules as for one part (thresholds per group, above);
@@ -862,6 +879,18 @@ Julia's number there is in-distribution — it was trained on data like that set
 domain plus ours", not a general ranking of the two. [`examples/20_vote_across_families.py`](../examples/20_vote_across_families.py)
 runs the same comparison with two stand-in System One servers in-process: each alone, the vote, and the vote in a
 catalog with its audit.
+
+**Which combination with an LLM.** With an LLM decider, start with the LLM alone under `act_guard`. Where solvi-large
+and the LLM are about equally strong on your stream, a `Vote` of the two can answer more at the same risk (on
+typed-decisions: 49% of the questions alone against 46% for the LLM alone, at risk 0.10). Do not make "a small model
+first, the LLM second" the default: a cascade gains only where the stages' mistakes complement each other by
+confidence — where the first model is unsure exactly on the questions the second gets right. Measured on three data
+sets, they did not: where one model was clearly stronger, the second stage added almost nothing, and a cascade with a
+separately calibrated threshold per stage came out 1–2 points below the better model alone (splitting the calibration
+examples to choose two thresholds costs more than it gains). To choose, compare the candidates — each model alone, the
+vote, the cascade — on one part of your labelled examples, then calibrate the chosen one on another part (choosing and
+calibrating on the same examples weakens the guarantee); the `warnings` of a cascade's `act_guard` flag a stage that
+does nothing.
 
 **The trace.** The record of a combination names it as the model (`{"type": "Cascade", "id": "cascade(small → large)",
 "fp": ...}`; the fingerprint covers every part's, the rule and the threshold) and keeps every proposal in `extra`:
