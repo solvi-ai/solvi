@@ -33,11 +33,11 @@ jobs:
         run: |
           uv sync --group dev --group agents
           uv run pytest -q tests/test_agents_frameworks.py
-      - name: LoRA adapters (part.adapt_lora, CPU torch)
+      - name: LoRA adapters (part.adapt_lora, CPU torch), long texts with a real tokenizer (long="full", torch and ONNX)
         if: matrix.python == '3.12'
         run: |
           uv sync --group dev --group lora
-          uv run pytest -q tests/test_lora.py tests/test_long_tokenizer.py
+          uv run --with onnx --with onnxruntime pytest -q tests/test_lora.py tests/test_long_tokenizer.py tests/test_long_full.py
   lint:
     runs-on: ubuntu-latest
     steps:

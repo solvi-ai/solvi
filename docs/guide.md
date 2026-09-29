@@ -535,7 +535,7 @@ two sections escalates). The sections read — offsets, heading, score, and "bm2
 decision's `extra["long"]`: in the trace record, hashed and printed by the audit ("read 3 of 41 sections …"). A full
 replay (models re-run) re-checks it — the selection is deterministic, so the same sections must be read; a trusted replay
 (`trust_models=True`, the report's default `replay="trusted"`) verifies the recorded output and does not re-select. A text that fits is decided as before, with nothing recorded; `long`,
-`top_k` and `rerank` are part of the decision's fingerprint.
+`top_k` (resolved: see "A larger budget") and `rerank` are part of the decision's fingerprint.
 
 The same pieces work on their own (`solvi.longdoc`, standard library only):
 
@@ -554,11 +554,52 @@ This is retrieval by words: a question phrased with none of the section's words 
 the task with the document's terms.
 
 **A larger budget.** The budget is the checkpoint's `max_len` (`DecideModel.load(path, max_len=1024)`) minus the question.
-Measured on 4–8k-token contracts and reports with solvi-large: `max_len` 1024 or 2048 did not raise accuracy over 512
-(73% either way; yes / no / not-stated questions gained 2–4 points, value questions lost 4–8) and made quotes slightly
-worse at 2048; CPU time grows with the tokens read — about 1.6× at 1024 and 3.2× at 2048. Keep 512 for solvi-large. A
-larger budget pays off only for a model trained on long inputs; when you raise `max_len`, raise `top_k` with it so
-sections stay around 150–200 tokens (e.g. `max_len=2048, top_k=12`).
+By default (`top_k=None`) the number of sections follows the budget, so sections stay around 170 tokens: budget / 170, at
+least 3 — 3 at `max_len` 512, 6 at 1024, 12 at 2048; an explicit `top_k` wins. Measured on 4–8k-token contracts and
+reports with solvi-large: `max_len` 1024 or 2048 did not raise accuracy over 512 (73% either way; yes / no / not-stated
+questions gained 2–4 points, value questions lost 4–8) and made quotes slightly worse at 2048; CPU time grows with the
+tokens read — about 1.6× at 1024 and 3.2× at 2048. Keep 512 for solvi-large. A larger budget pays off only for a model
+trained on long inputs (next paragraph).
+
+**Reading whole: `long="full"`.** A checkpoint trained on long inputs declares how much it reads whole — `max_len_long`
+in its `solvi_decide.json` ([decide_format.md](decide_format.md)); `m.long_len` shows it. With `long="full"` a text that
+does not fit `max_len` is read whole, in one pass of up to `max_len_long` tokens; a longer text falls back to retrieve
+within `max_len_long` (sections of ≈ 170 tokens, `top_k` and `rerank` as above). A text that fits `max_len` is decided
+as before.
+
+```python
+m = DecideModel.load(path_of_a_long_input_checkpoint)          # its solvi_decide.json: "max_len": 512, "max_len_long": 8192
+part = m.decision("notice", "Notice period for termination?", "contract", Span[str], long="full")
+d = part(contract=contract)
+d.extra["long"]    # {"mode": "full", "tokens": 5234, "max_len": 8192}; past 8192: + "fallback": "retrieve" and the sections
+```
+
+Span answers and evidence quotes point into the whole text, as with retrieve. The decision's `extra["long"]` is in the
+trace and the audit ("read whole (5234 tokens, up to 8192)"); the mode, `max_len_long` and `top_k` are part of the
+fingerprint, and a full replay re-reads the text and re-checks the record.
+
+When to use which (measured on 4–8k-token contracts and reports, with solvi-large fine-tuned on inputs up to 8k tokens —
+not yet published):
+
+| | accuracy on 4–8k-token documents | CPU cost per question (× a 512-token pass) |
+|---|---|---|
+| truncate at 512 (`long=None`) | 45% | 1× |
+| `long="retrieve"`, `max_len` 512 | 78% | ≈ 1× |
+| `long="retrieve"`, `max_len=2048` (12 sections of ≈ 170 tokens) | 85% | ≈ 3× |
+| `long="full"` (whole, up to 8k tokens) | 85% | 12× at 4k tokens, 31× at 8k |
+
+- **On a GPU**, `long="full"` is the simplest: the whole text, one pass. It wins most on yes / no / not-stated questions
+  about a contract — to say "the contract does not say this" the model has to see all of it; on "find the value"
+  questions (a choice, a number) retrieve is as good, because the answer is in one place and BM25 finds it.
+- **On a CPU**, use `long="retrieve"` with a larger `max_len` — `DecideModel.load(path, max_len=2048)` — which matched
+  reading whole at about 3× a 512-token pass, about 0.45 s per question on a 4-thread laptop CPU (reading whole: about
+  1.6 s at 4k tokens and 4 s at 8k). `long="full"` warns once per model when it reads a text over 2k tokens on a CPU.
+- **Only for a model trained on long inputs.** A checkpoint without `max_len_long` refuses `long="full"` and points to
+  `long="retrieve"`: solvi-large (trained on 512-token inputs) read 4–8k-token documents whole no better than retrieve
+  (74% vs 73%) and quoted the right passage less often (35% vs 50%). `DecideModel.load(path, max_len_long=N)` forces it,
+  with a warning.
+- The published deciders read 512 tokens; none declares `max_len_long` yet. The ONNX backend reads any length (the export
+  has a dynamic sequence length); `adapt_lora` does not train on whole long texts (use `long="retrieve"` there).
 
 ### The output: probabilities, calibrated confidence, act or escalate
 
@@ -973,7 +1014,9 @@ kinds it was trained on, the head columns, the state serialization, the act head
 and thresholds: **[docs/decide_format.md](decide_format.md)** is the contract. The first, text-only checkpoints (`l14b_decider v1`)
 load and behave exactly as before: choose-one and multi-label natively, a score or yes/no asked as a choice among the levels
 or "yes" / "no", no act head (escalate by `escalate_below`), one question per pass. `load(..., multi_question=..., act=...)`
-overrides the declaration for experiments.
+overrides the declaration for experiments. `load(..., max_len=N)` sets the tokens of an ordinary pass (and retrieve's
+budget); `load(..., max_len_long=N)` the length `long="full"` reads whole (default: the checkpoint's `max_len_long`; see
+[Long documents](#long-documents-find-first-then-decide)).
 
 Published deciders are on [huggingface.co/solvi-ai](https://huggingface.co/solvi-ai) (`DecideModel.load("solvi-ai/solvi-base")`;
 `solvi models list / pull / check` from the [command line](#models-list-pull-check)).

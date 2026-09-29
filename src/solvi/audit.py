@@ -149,8 +149,11 @@ def _extra_line(x, lang=None):
     if x.get("candidates"):
         out.append(t("x.candidates", lang, x=", ".join(repr(c) for c in x["candidates"])))
     lg = x.get("long")
-    if isinstance(lg, dict):                          # a long text: the sections the decider read (solvi.longdoc)
-        out.append(f"read {lg.get('read')} of {lg.get('of')} sections ({lg.get('by')}): "
+    if isinstance(lg, dict) and lg.get("mode") == "full" and not lg.get("fallback"):   # long="full": read whole
+        out.append(f"read whole ({lg.get('tokens')} tokens, up to {lg.get('max_len')})")
+    elif isinstance(lg, dict):                        # a long text: the sections the decider read (solvi.longdoc)
+        out.append((f"longer than {lg.get('max_len')} tokens ({lg.get('tokens')}): " if lg.get("fallback") else "") +
+                   f"read {lg.get('read')} of {lg.get('of')} sections ({lg.get('by')}): "
                    + ", ".join(f"[{a}:{b}]" + (f" {h[:30]!r}" if h else "") for a, b, h, _ in lg.get("sections") or []))
     ps = x.get("pass")
     if isinstance(ps, dict):

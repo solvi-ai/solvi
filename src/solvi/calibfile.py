@@ -89,7 +89,7 @@ def base_fingerprint(part):
         a = part.adaptation
         signal = {k: v for k, v in (("option_order", None if part.option_order != "average" else
                                      (part.option_order, part.permutations)),
-                                    ("long", None if part.long is None else (part.long, part.top_k, part.rerank)),
+                                    ("long", part.long_key()),
                                     ("lora", None if part.lora is None else part.lora.hash))
                   if v is not None}
         if signal:                                  # a part with the default signal keeps the fingerprint it had

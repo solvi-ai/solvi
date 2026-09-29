@@ -7,6 +7,32 @@ output never grounds an argument that must come from the user) and your policies
 text is a heuristic second line. `System.learning` is experimental and off unless you call it. Three code reviews and
 three adversarial passes ran before this release; their fixes are listed under "Fixes before release".
 
+### Reading long documents whole: `long="full"`
+
+- **`long="full"`** for deciders trained on long inputs: a text that does not fit `max_len` is read whole, in one pass
+  of up to the checkpoint's long-input length; a longer text falls back to retrieve within that length. The decision's
+  `extra["long"]` records it — `{"mode": "full", "tokens", "max_len"}`, plus `"fallback": "retrieve"` and the sections
+  read when the text was longer — in the trace and the audit ("read whole (5234 tokens, up to 8192)"); span answers and
+  evidence quotes point into the whole text. The mode, the length and `top_k` are part of the decision's fingerprint;
+  a full replay re-reads and re-checks.
+- **A checkpoint declares it**: `"max_len_long": 8192` in `solvi_decide.json` (`max_len` stays the ordinary pass;
+  docs/decide_format.md). A checkpoint without it refuses `long="full"` and points to `long="retrieve"`;
+  `DecideModel.load(path, max_len_long=N)` forces a length, with a `LongInputWarning` that the model was not trained
+  on inputs that long (solvi-large read 4–8k-token documents whole no better than retrieve, 74% vs 73%, and quoted
+  the right passage less often, 35% vs 50%). `m.long_len`, `m.long_declared`.
+- **A GPU mode.** On a CPU a whole 4k-token text costs about 12× a 512-token pass and an 8k one about 31× (about 1.6 s
+  and 4 s per question on a 4-thread laptop CPU); `long="full"` warns once per model when it reads a text over 2k tokens
+  on a CPU. For a model trained on long inputs, `long="retrieve"` with `max_len=2048` matched reading whole on 4–8k-token
+  documents (85% both, against 78% at `max_len` 512) at about 3× a 512-token pass. The published deciders read 512
+  tokens and declare no long-input length yet.
+- **`top_k=None` is now the default**: sections of about 170 tokens, budget / 170 and at least 3 — 3 at `max_len` 512
+  (as before, the same fingerprint), 6 at 1024, 12 at 2048. More sections of the same size beat larger sections when
+  the budget grows. An explicit `top_k` wins.
+- Works with the torch and ONNX backends (the ONNX export has a dynamic sequence length). `part.adapt_lora` refuses a
+  `long="full"` decision (adapters train on ordinary passes). Tests: `tests/test_long_full.py`, a tiny checkpoint with
+  a real tokenizer and a pointer (whole reads, the fallback, quote offsets, refusal and warnings, fingerprint and replay,
+  ONNX).
+
 ### Fixes before release (long documents)
 
 - **`long="retrieve"` crashed on every text longer than the checkpoint's `max_len`** with a real tokenizer ("Truncation

@@ -135,6 +135,9 @@ def check(part, allow_large=False):
         import peft  # noqa: F401
     except ImportError:
         raise ImportError('adapt_lora needs peft: pip install "solvi[lora]"') from None
+    if getattr(part, "long", None) == "full":
+        raise ValueError(f'adapt_lora({part.__name__}): an adapter is trained on ordinary passes, not on whole long texts '
+                         '(long="full"); adapt this question with long="retrieve" (or long=None)')
     if part.spec.kind in ("rank", "number", "span"):
         raise ValueError(f"adapt_lora({part.__name__}): {part.spec.kind} questions are not adapted from labels (choice, "
                          "multi, score and yes/no questions are)")
@@ -312,7 +315,7 @@ def _texts(part, xs):
     """Inputs → the texts a decision reads (a long input: its retrieved window)."""
     ts = [part._input_text(x) for x in xs]
     if part.long is not None:
-        ts = [part._window(t)[2].text if part._too_long(t) else t for t in ts]
+        ts = [part.long_input(t) if part._too_long(t) else t for t in ts]
     return ts
 
 

@@ -258,6 +258,8 @@ class Item:
     kind: str = ""          # the mode on the wire when it is neither "single" nor "multi": "score", "noul", "rank", ...
     pointer: bool = False   # the question wants the pointer (a span answer, or evidence quotes): full layout only
     unknown: bool = False   # "not stated" is an answer to this question (scorers that ask in words, e.g. solvi.llm)
+    max_len: int = 0        # tokens of the sequence to read (question and input); 0: the scorer's max_len. long="full"
+    #                         sets the checkpoint's long-input length; scorers that read the whole text anyway ignore it
 
     @property
     def mode(self):
@@ -383,6 +385,14 @@ def pointer_evidence(ptr, threshold=0.15, max_spans=3):
 
 
 # ------------------------------------------------------------------------------------------------ backends
+class LongInputWarning(UserWarning):
+    """long="full": a checkpoint forced to read long inputs it was not trained on, or whole long texts read on a CPU."""
+
+
+LONG_CPU_TOKENS = 2048               # long="full" on a CPU warns (once per model) when it reads a text longer than this
+SECTION_TOKENS = 170                 # top_k=None: sections of about this many tokens (top_k = budget / 170, at least 3)
+
+
 class _Encoder:
     """Tokenization with the checkpoint's tokenizer.json (the `tokenizers` library).
 
@@ -401,6 +411,7 @@ class _Encoder:
         self.raw.no_padding()
         self.raw.no_truncation()
         self.max_len = max_len
+        self._path, self._at, self._at_lock = f, {max_len: self.tok}, threading.Lock()
         self.markers = {**MARKERS, **(markers or {})}
         self.opt_id = self.tok.token_to_id(self.markers["option"])
         pad = next((self.tok.token_to_id(t) for t in ("[PAD]", "<pad>") if self.tok.token_to_id(t) is not None), 0)
@@ -427,12 +438,27 @@ class _Encoder:
                              f"{self.max_len} tokens)")
         return groups
 
+    def tok_at(self, n):
+        """The tokenizer that truncates the input so that the sequence has at most n tokens (the default: max_len;
+        long="full" reads at the checkpoint's long-input length)."""
+        n = int(n or self.max_len)
+        with self._at_lock:
+            tok = self._at.get(n)
+            if tok is None:
+                from tokenizers import Tokenizer
+                tok = Tokenizer.from_file(self._path)
+                tok.no_padding()
+                tok.enable_truncation(max_length=n, strategy="only_second")
+                self._at[n] = tok
+            return tok
+
     def encode(self, items, text):
         p = pass_prompt(items, self.markers)
+        n = max((getattr(it, "max_len", 0) or 0) for it in items) or self.max_len
         try:
-            enc = self.tok.encode(p, text or " ")
+            enc = self.tok_at(n).encode(p, text or " ")
         except Exception as e:  # noqa: BLE001  (the questions alone are longer than max_len)
-            raise ValueError(f"task and options do not fit in {self.max_len} tokens: {e}") from None
+            raise ValueError(f"task and options do not fit in {n} tokens: {e}") from None
         seq = enc.sequence_ids
         groups = self._groups(enc.ids, lambda i: seq[i] == 0, items)
         if any(it.pointer for it in items):           # the input's tokens and their character offsets (for the pointer)
@@ -729,6 +755,18 @@ def _pointer_caps(v, columns):
             "evidence": {"threshold": float(ev.get("threshold", 0.15)), "max_spans": int(ev.get("max_spans", 3))}}
 
 
+def _max_len_long(v, max_len=512):
+    """The long-input length a checkpoint declares (or a caller forces): an int above its max_len."""
+    try:
+        n = int(v)
+    except (TypeError, ValueError):
+        raise ValueError(f"max_len_long must be a number of tokens, not {v!r}") from None
+    if isinstance(v, bool) or n <= int(max_len or 512):
+        raise ValueError(f"max_len_long ({v!r}) must be larger than max_len ({max_len}): it is the length the checkpoint "
+                         "reads whole with long=\"full\"")
+    return n
+
+
 def capabilities(meta, multi_question=None, act=None):
     """What a checkpoint can do, from its solvi_decide.json (see docs/decide_format.md): the fields it declares over the
     defaults of its format ('l14b_decider v1': the text-only deciders; 'l14f typed v1': the first typed ones; 'solvi_decide v2': the legacy defaults,
@@ -767,6 +805,8 @@ def capabilities(meta, multi_question=None, act=None):
             "noul_labels": [str(x) for x in (meta.get("noul_labels") or base["noul_labels"])],
             "serialization": ser, "state_format": known[0] if known else "paths", "act": a, "multi_question": mq,
             "max_questions": mq["max_questions"] if mq else 0}
+    if meta.get("max_len_long") is not None:      # trained to read long inputs whole (long="full"); absent: hashes as before
+        caps["max_len_long"] = _max_len_long(meta["max_len_long"], meta.get("max_len", 512))
     if v3:                                        # the answer-primitives contract (older formats: the dict above, as before)
         raw_mq = meta.get("multi_question") if multi_question is None else multi_question
         if mq is not None:
@@ -1083,14 +1123,19 @@ class DecideModel:
     deterministic = True
 
     def __init__(self, scorer, meta=None, model_id=None, path=None, backend=None, cache_size=4096, multi_question=None,
-                 act=None):
+                 act=None, max_len_long=None):
         self.scorer = scorer
         self.meta = dict(meta or {})
         self.model_id = model_id or getattr(scorer, "model_id", None) or type(scorer).__name__
         self.path = path
         self.backend = backend or getattr(scorer, "tag", type(scorer).__name__)
         self.caps = capabilities(self.meta, multi_question, act)
-        self._overrides = {k: v for k, v in (("multi_question", multi_question), ("act", act)) if v is not None}
+        if max_len_long is not None:
+            max_len_long = _max_len_long(max_len_long, getattr(getattr(scorer, "enc", None), "max_len", 0)
+                                         or self.meta.get("max_len", 512))
+        self._overrides = {k: v for k, v in (("multi_question", multi_question), ("act", act),
+                                             ("max_len_long", max_len_long)) if v is not None}
+        self._warned = set()                # the long-input warnings already given (once per model)
         fmt = self.meta.get("format", "")
         cal = self.meta.get("calibration", {}) if isinstance(self.meta.get("calibration"), dict) else {}
         T = self.meta.get("temperature", cal.get("temperature", DEFAULT_T.get(fmt, 1.0)))
@@ -1121,9 +1166,13 @@ class DecideModel:
 
     # --- loading and identity
     @classmethod
-    def load(cls, path_or_id, device=None, backend="auto", max_len=None, bs=16, multi_question=None, act=None):
+    def load(cls, path_or_id, device=None, backend="auto", max_len=None, bs=16, multi_question=None, act=None,
+             max_len_long=None):
         """multi_question / act: override what solvi_decide.json declares (for experiments, e.g. testing a checkpoint
-        in multi-question passes); both are part of the fingerprint."""
+        in multi-question passes); both are part of the fingerprint. max_len: the tokens of one ordinary pass (default:
+        the checkpoint's `max_len`); it also sets long="retrieve"'s budget. max_len_long: the length long="full" reads
+        whole (default: the checkpoint's `max_len_long`; a checkpoint that declares none refuses long="full" unless it is
+        given here — with a warning: it was not trained on long inputs). Part of the fingerprint."""
         path = str(path_or_id)
         if not os.path.isdir(path):
             from huggingface_hub import snapshot_download
@@ -1158,7 +1207,13 @@ class DecideModel:
             weights = os.path.join(path, "model.safetensors")
         else:
             raise ValueError('backend must be "torch", "onnx" or "auto"')
-        m = cls(scorer, meta, model_id=str(path_or_id), path=path, backend=scorer.tag, multi_question=multi_question, act=act)
+        m = cls(scorer, meta, model_id=str(path_or_id), path=path, backend=scorer.tag, multi_question=multi_question, act=act,
+                max_len_long=max_len_long)
+        cfg_file = os.path.join(path, "config.json")
+        pos = json.load(open(cfg_file)).get("max_position_embeddings") if os.path.isfile(cfg_file) else None
+        if m.long_len is not None and pos and m.long_len > int(pos):
+            raise ValueError(f"max_len_long {m.long_len} is beyond the encoder's max_position_embeddings ({pos}) in "
+                             f"{cfg_file}")
         m._wfp = _file_fingerprint([os.path.join(path, f) for f in ("config.json", "solvi_decide.json", "tokenizer.json")]
                                    + [weights])
         return m
@@ -1254,6 +1309,36 @@ class DecideModel:
         enc = getattr(self.scorer, "enc", None)
         return int(getattr(enc, "max_len", 0) or self.meta.get("max_len") or getattr(self.scorer, "max_len", 0) or 512)
 
+    @property
+    def long_len(self):
+        """The tokens long="full" reads whole (question and input): the load(max_len_long=...) override, else the
+        checkpoint's `max_len_long`, else None (the checkpoint was not trained on long inputs)."""
+        n = self._overrides.get("max_len_long", self.caps.get("max_len_long"))
+        return None if n is None else int(n)
+
+    @property
+    def long_declared(self):
+        """Does the checkpoint itself declare a long-input length (`max_len_long` in solvi_decide.json)?"""
+        return self.caps.get("max_len_long") is not None
+
+    def _warn_once(self, key, message):
+        if key not in self._warned:
+            self._warned.add(key)
+            import warnings
+            warnings.warn(message, LongInputWarning, stacklevel=4)
+
+    def on_cpu(self):
+        """Does the network run on a CPU (a torch scorer on "cpu", an ONNX session without CUDA)? None when unknown (a
+        stand-in or remote scorer)."""
+        sc = self.scorer
+        dev = getattr(sc, "device", None)
+        if isinstance(sc, TorchScorer) and dev is not None:
+            return str(dev).startswith("cpu")
+        sess = getattr(sc, "sess", None)
+        if isinstance(sc, OnnxScorer) and sess is not None:
+            return "CUDAExecutionProvider" not in sess.get_providers()
+        return None
+
     def count_tokens(self, text):
         """Tokens of a text for this checkpoint: its tokenizer when it has one, else solvi.longdoc.approx_tokens."""
         enc = getattr(self.scorer, "enc", None)
@@ -1299,8 +1384,9 @@ class DecideModel:
             lg.escalate, lg.info, lg.transient = (str(why) if why else None), info, transient
         return lg, (None if act is None else float(act))
 
-    def _item(self, sp, text):
-        return sp.item(text, self.wire(sp.kind), self.caps["noul_labels"])
+    def _item(self, sp, text, read_len=0):
+        it = sp.item(text, self.wire(sp.kind), self.caps["noul_labels"])
+        return dataclasses.replace(it, max_len=int(read_len)) if read_len else it
 
     @property
     def block(self):
@@ -1328,28 +1414,34 @@ class DecideModel:
             for k in [k for k in self._cache if lora_key(k[0]) == key]:
                 del self._cache[k]
 
-    def _score(self, pairs):
+    def _score(self, pairs, read_len=0):
         """[(spec, text)] → scorer outputs, in order; the questions with a LoRA adapter (solvi.lora) are scored with it
-        active, apart from the others."""
+        active, apart from the others. read_len: see _score_plain."""
         if not self.loras:
-            return self._score_plain(pairs)
+            return self._score_plain(pairs, read_len)
         groups = OrderedDict()
         for i, (sp, _) in enumerate(pairs):
             groups.setdefault(self._lora_name(sp), []).append(i)
         out, used = [None] * len(pairs), False
         for name, ix in groups.items():
             with self._using(name):
-                got, u = self._score_plain([pairs[i] for i in ix])
+                got, u = self._score_plain([pairs[i] for i in ix], read_len)
             used = used or u
             for i, o in zip(ix, got):
                 out[i] = o
         return out, used
 
-    def _score_plain(self, pairs):
+    def _score_plain(self, pairs, read_len=0):
         """[(spec, text)] → scorer outputs, in order: block passes (one per text, at most max_questions each) for a block
         model — questions that do not fit together go one per pass, and an export without the block layout falls back to
         one question per sequence — else one sequence per question. Questions that need the pointer (span answers,
-        evidence) always go one per sequence (the full layout: in the block layout the input does not see the question)."""
+        evidence) always go one per sequence (the full layout: in the block layout the input does not see the question).
+        read_len: a whole long text (long="full") — one sequence per question of up to read_len tokens."""
+        if read_len:
+            items = [self._item(sp, t, read_len) for sp, t in pairs]
+            out = self.scorer.logits(items)
+            self.passes += len(items)
+            return out, False
         if self.block and not self._block_failed and any(sp.pointer for sp, _ in pairs):
             ptr = [i for i, (sp, _) in enumerate(pairs) if sp.pointer]
             rest = [i for i, (sp, _) in enumerate(pairs) if not sp.pointer]
@@ -1389,20 +1481,24 @@ class DecideModel:
         self.passes += len(items)
         return out, False
 
-    def _raw_full(self, specs_texts, info=None):
+    def _raw_full(self, specs_texts, info=None, read_len=0):
         """[(spec, text)] → [(raw logits of the mode's column [K], act logit or None)] (cached by text and question).
-        info: a dict that receives "block": whether what was scored now went through block passes."""
+        info: a dict that receives "block": whether what was scored now went through block passes. read_len: read each
+        text whole up to that many tokens (long="full"; cached apart)."""
         out, todo = [None] * len(specs_texts), []
+
+        def key(sp, t):
+            return (sp.key, t, ("read", int(read_len))) if read_len else (sp.key, t)
         with self._lock:
             for i, (sp, t) in enumerate(specs_texts):
-                k = (sp.key, t)
+                k = key(sp, t)
                 if k in self._cache:
                     self._cache.move_to_end(k)
                     out[i] = self._cache[k]
                 else:
                     todo.append(i)
         if todo:
-            got, used_block = self._score([specs_texts[i] for i in todo])
+            got, used_block = self._score([specs_texts[i] for i in todo], read_len)
             if info is not None:
                 info["block"] = used_block
             with self._lock:
@@ -1410,7 +1506,7 @@ class DecideModel:
                     sp = specs_texts[i][0]
                     out[i] = self._pick(sp, o, specs_texts[i][1])
                     if not getattr(out[i][0], "transient", False):     # a server that did not answer: ask again
-                        self._cache[(sp.key, specs_texts[i][1])] = out[i]
+                        self._cache[key(sp, specs_texts[i][1])] = out[i]
                 while len(self._cache) > self._cache_size:
                     self._cache.popitem(last=False)
         return out
@@ -1844,7 +1940,7 @@ class DecideModel:
     def decision(self, name, task, text_fact="doc", options=(), descriptions=None, multi=False, other=None, *, kind=None,
                  type=None, escalate_below=None, act_threshold=None, use_act=None, target_error=None,
                  score_value="median", unknown=False, k=None, bins=None, unit=None, coverage=0.8, evidence=False,
-                 option_order="canonical", permutations=4, min_margin=None, long=None, top_k=3, rerank=False,
+                 option_order="canonical", permutations=4, min_margin=None, long=None, top_k=None, rerank=False,
                  perturb=0):
         """A catalog part: text_fact (a fact name, or a list of them) → Decision(value, probs).
 
@@ -1883,7 +1979,11 @@ class DecideModel:
         Long texts: long=None cuts a text beyond max_len (the tokenizer truncates it, as before); long="retrieve" splits
         it into sections, selects the top_k that bear on the question by BM25 (rerank=True: re-ordered by the decider's own
         relevance, one yes / no pass per candidate section) and decides on them; spans and evidence point into the whole
-        text, and the sections read are in the decision's extra["long"] (solvi.longdoc)."""
+        text, and the sections read are in the decision's extra["long"] (solvi.longdoc). top_k=None (the default): sections
+        of about 170 tokens — budget / 170, at least 3 (3 at max_len 512, 12 at 2048). long="full" (a checkpoint trained
+        on long inputs: `max_len_long` in its solvi_decide.json) reads a text that does not fit max_len whole, up to
+        max_len_long tokens, and retrieves within max_len_long beyond that (recorded in extra["long"]); a GPU mode — on a
+        CPU a whole 8k-token text takes seconds per question."""
         as_bool, extra = False, {}
         if type is None and _is_type(options):
             type, options = options, ()
@@ -1907,14 +2007,38 @@ class DecideModel:
                              "§9); drop Maybe[...] / unknown=True")
         if option_order not in ("given", "canonical", "average"):
             raise ValueError('option_order must be "given", "canonical" or "average"')
-        if long not in (None, "retrieve"):
-            raise ValueError('long must be None (truncate) or "retrieve"')
+        if long not in (None, "retrieve", "full"):
+            raise ValueError('long must be None (truncate), "retrieve" or "full"')
+        if long == "full":
+            self._check_full(name)
         return DecisionPart(self, name, task, text_fact, options, descriptions, multi, other, kind=kind, as_bool=as_bool,
                             escalate_below=escalate_below, act_threshold=act_threshold, use_act=use_act,
                             option_order=option_order, permutations=permutations, min_margin=min_margin,
                             long=long, top_k=top_k, rerank=rerank, perturb=perturb,
                             score_value=score_value, **{x: v for x, v in prim.items() if v not in (None, False, 0)
                                                          or x == "coverage"})
+
+    def _check_full(self, name):
+        """long="full" needs a long-input length: declared by the checkpoint, or forced at load (with a warning)."""
+        L = self.long_len
+        if L is None:
+            raise ValueError(
+                f'{name}: long="full" needs a checkpoint trained on long inputs — this one declares no "max_len_long" in its '
+                f'solvi_decide.json (it reads {self.max_len} tokens). Use long="retrieve": it finds the sections that bear on '
+                'the question and reads those. To read whole anyway, load with DecideModel.load(path, max_len_long=N) '
+                '(not recommended: a model trained on short inputs was measured no better than retrieve on long texts, '
+                'with worse quotes)')
+        if L <= self.max_len:
+            raise ValueError(f'{name}: long="full" reads up to max_len_long = {L} tokens, not more than max_len = '
+                             f'{self.max_len}: nothing to read whole')
+        declared = self.caps.get("max_len_long")
+        if declared is None or L > int(declared):
+            self._warn_once("untrained", (
+                f"{self.model_id}: long=\"full\" reads up to {L} tokens, but the checkpoint "
+                + ("declares no long-input length" if declared is None else f"was trained on up to {declared}")
+                + ": it was not trained on inputs that long. Measured on 4–8k-token documents, a model trained on "
+                "512-token inputs read them whole no better than long=\"retrieve\" (74% vs 73%) and quoted worse "
+                "(35% vs 50% of quotes on the right passage); prefer long=\"retrieve\"."))
 
     def decisions(self, schema, text_fact="doc", fields=None, **kw):
         """One decision part per field of a pydantic model class: the field's type is the question (bool, Literal[...],
@@ -2024,10 +2148,13 @@ class DecisionPart:
 
     def __init__(self, model, name, task, text_fact, options, descriptions=None, multi=False, other=None, *, kind=None,
                  as_bool=False, escalate_below=None, act_threshold=None, use_act=None, score_value="median",
-                 option_order="canonical", permutations=4, min_margin=None, long=None, top_k=3, rerank=False,
+                 option_order="canonical", permutations=4, min_margin=None, long=None, top_k=None, rerank=False,
                  perturb=0, **prim):
         self.model = model
-        self.long, self.top_k, self.rerank = long, max(1, int(top_k)), bool(rerank)
+        self.long, self.top_k, self.rerank = long, None if top_k is None else max(1, int(top_k)), bool(rerank)
+        self.long_len = getattr(model, "long_len", None) if long == "full" else None   # read whole up to (long="full")
+        if long == "full" and self.long_len is None:
+            raise ValueError('long="full" needs a checkpoint with a long-input length ("max_len_long"); use long="retrieve"')
         self.spec = _Spec(task, options, descriptions, multi, other, kind, as_bool, score_value, **prim)
         sp = self.spec
         self._shown = None if sp.values is None else list(sp.values)   # the caller's order, for options and probs
@@ -2119,7 +2246,7 @@ class DecisionPart:
                                                                        for k, v in self.groups["nodes"].items()))),
                                 ("option_order", None if self.option_order != "average" else
                                  (self.option_order, self.permutations)),
-                                ("long", None if self.long is None else (self.long, self.top_k, self.rerank)),
+                                ("long", self.long_key()),
                                 ("memory", None if self.correction_memory is None else self.correction_memory.fingerprint()),
                                 ("lora", None if self.lora is None else self.lora.hash))
               if v is not None}
@@ -2306,14 +2433,40 @@ class DecisionPart:
 
     def _raw(self, texts):
         """[text] → [(logits in the part's option order, act logit)], asked with each of the part's option orders and
-        averaged (the act logit too); the question's adaptation applies afterwards, to the part's own spec."""
+        averaged (the act logit too); the question's adaptation applies afterwards, to the part's own spec. long="full":
+        a text that does not fit an ordinary pass is read whole, up to the checkpoint's long-input length."""
+        texts = list(texts)
+        if self.long_len and texts:
+            n = [self.model.count_tokens(t) for t in texts]
+            big = [i for i, x in enumerate(n) if x > self._pass_budget()]
+            if big:
+                self._cpu_warning(max(n))
+                out = [None] * len(texts)
+                small = [i for i in range(len(texts)) if i not in set(big)]
+                for ix, rl in ((big, self.long_len), (small, 0)):
+                    if ix:
+                        for i, r in zip(ix, self._raw_at([texts[i] for i in ix], rl)):
+                            out[i] = r
+                return out
+        return self._raw_at(texts, 0)
+
+    def _cpu_warning(self, tokens):
+        m = self.model
+        if tokens > LONG_CPU_TOKENS and callable(getattr(m, "on_cpu", None)) and m.on_cpu():
+            m._warn_once("cpu", (
+                f"{m.model_id}: long=\"full\" reads a {tokens}-token text whole on a CPU. Measured: a whole 4k-token "
+                "text costs about 12x and an 8k one about 31x a 512-token pass (about 1.6 s and 4 s per question on a "
+                "4-thread laptop CPU). Use a GPU, or long=\"retrieve\" with a larger max_len (e.g. max_len=2048: "
+                "about 3x a 512-token pass, and as accurate as reading whole for a model trained on long inputs)."))
+
+    def _raw_at(self, texts, read_len=0):
         if self.option_order != "average":           # given, or canonical (the spec itself is in sorted order)
-            return self.model._raw_full([(self.spec, t) for t in texts])
+            return self.model._raw_full([(self.spec, t) for t in texts], read_len=read_len)
         task, desc, multi, other, kind, as_bool, sv, prim = self._spec_args
         opts = (lambda o: o + [self.spec.other] if self.spec.other is not None and self.spec.other not in o else o)
         specs = [_Spec(task, opts(list(o)), desc, multi, other, kind, as_bool, sv, **prim) for o in self._orders]
         idx = {o: i for i, o in enumerate(self.spec.real)}
-        runs = [self.model._raw_full([(sp, t) for t in texts]) for sp in specs]
+        runs = [self.model._raw_full([(sp, t) for t in texts], read_len=read_len) for sp in specs]
         out = []
         for j in range(len(texts)):
             zs, us, acts = [], [], []
@@ -2345,31 +2498,58 @@ class DecisionPart:
         memory's features and the perturb re-asks see what a decision sees."""
         texts = list(texts)
         if self.long is not None:
-            texts = [self._window(t)[2].text if self._too_long(t) else t for t in texts]
+            texts = [self.long_input(t) if self._too_long(t) else t for t in texts]
         return self._raw(texts)
 
-    # --- long texts (long="retrieve", solvi.longdoc)
+    # --- long texts (long="retrieve" / "full", solvi.longdoc)
+    def long_key(self):
+        """How this part reads long texts, as its fingerprint records it: None, ("retrieve", top_k, rerank) or ("full",
+        max_len_long, top_k, rerank) — top_k resolved (top_k=None: from the budget)."""
+        if self.long is None:
+            return None
+        if self.long == "full":
+            return ("full", self.long_len, self.sections_k(), self.rerank)
+        return (self.long, self.sections_k(), self.rerank)
+
+    def sections_k(self):
+        """The sections retrieve reads: top_k, or with top_k=None budget / 170 (at least 3) — sections of ≈ 170 tokens."""
+        if self.top_k is not None:
+            return self.top_k
+        return max(3, round(self.budget() / SECTION_TOKENS))
+
+    def long_input(self, text):
+        """The text a decision reads for an input that does not fit an ordinary pass: the whole text (long="full", when
+        it fits max_len_long), else the window of its retrieved sections."""
+        if self.long == "full" and self.model.count_tokens(text) <= self.budget():
+            return text
+        return self._window(text)[2].text
     def _prompt_tokens(self):
         sp = self.spec
         return self.model.count_tokens(" ".join([sp.task] + [str(o) for o in sp.options] +
                                                 [str(v) for v in (sp.descriptions or {}).values() if v])) + len(sp.options) + 8
 
     def budget(self):
-        """The tokens of input this decision can read in one pass: max_len minus its question."""
+        """The tokens of input this decision can read in one pass: max_len (long="full": max_len_long) minus its
+        question."""
+        return max(32, (self.long_len or self.model.max_len) - self._prompt_tokens())
+
+    def _pass_budget(self):
         return max(32, self.model.max_len - self._prompt_tokens())
 
     def _too_long(self, text):
-        return self.model.count_tokens(text) > self.budget()
+        """Does the text not fit an ordinary pass (max_len minus the question)? Then long= decides how it is read."""
+        return self.model.count_tokens(text) > self._pass_budget()
 
     def _window(self, text):
         """The top_k sections of a long text → (the LongDocument, [(section, score)], the window read, reranked?)."""
         from .longdoc import LongDocument
         budget = self.budget()
-        doc = LongDocument(text, max_tokens=max(16, budget // self.top_k), count=self.model.count_tokens)
+        k = self.sections_k()
+        doc = LongDocument(text, max_tokens=max(16, budget // k), count=self.model.count_tokens)
         sp = self.spec
         query = " ".join([sp.task] + [str(o) for o in sp.real] + [str(v) for v in (sp.descriptions or {}).values() if v])
         rr = self._relevance if self.rerank else None
-        sel = doc.select(query, k=self.top_k, budget=budget, rerank=rr)
+        sel = doc.select(query, k=k, budget=budget, rerank=rr)
         return doc, sel, doc.window([s for s, _ in sel]), rr is not None
 
     def _retrieve(self, text, ctx=None):
@@ -2388,14 +2568,25 @@ class DecisionPart:
         return self.model._decision(self.spec, z), a
 
     def _windowed(self, text):
-        """The decision on a long text's window, before the safeguards → (Decision, act logit)."""
+        """The decision on a long text's window, before the safeguards → (Decision, act logit). long="full": the whole
+        text when it fits max_len_long (offsets are the text's own), else its window within max_len_long (the fallback
+        is recorded)."""
         sp = self.spec
+        if self.long == "full":
+            n = self.model.count_tokens(text)
+            if n <= self.budget():
+                z, a = self._raw([text])[0]
+                d = self.model._decision(sp, z)
+                d.extra["long"] = {"mode": "full", "tokens": n, "max_len": self.long_len}
+                return d, a
         doc, sel, win, rr = self._window(text)
         z, a = self._raw([win.text])[0]
         d = self.model._decision(sp, z)
         score = {s.index: sc for s, sc in sel}
         d.extra["long"] = {"read": len(sel), "of": len(doc), "by": "bm25+decider" if rr else "bm25",
                            "sections": [[s.start, s.end, s.heading, round(float(score[s.index]), 6)] for s in win.sections]}
+        if self.long == "full":                      # longer than max_len_long: retrieved within it
+            d.extra["long"].update(mode="full", fallback="retrieve", tokens=n, max_len=self.long_len)
         if isinstance(d.value, Quote):
             got = win.to_doc(d.value.start, d.value.end)
             if got is None:

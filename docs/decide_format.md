@@ -60,6 +60,7 @@ solvi_decide.json      format and capabilities (below)
 | Field | Meaning | Default |
 |---|---|---|
 | `max_len` | tokens per sequence in the full layout (only the input is truncated) | 512 |
+| `max_len_long` | optional: the tokens per sequence (question and input) the checkpoint was **trained** to read whole — declare it only for a checkpoint trained on inputs that long. It enables `long="full"` (§4): a text that does not fit `max_len` is read in one full-layout sequence of up to `max_len_long` tokens, a longer one by its retrieved sections within `max_len_long`. An integer above `max_len`, at most the encoder's `max_position_embeddings` (`config.json`). Absent: `long="full"` is refused (use `long="retrieve"`) unless the caller forces a length with `DecideModel.load(path, max_len_long=N)`, which warns | absent |
 | `modes` | question kinds the model was trained on natively: `single` (one option), `multi` (every option that applies), `score` (ordered levels), `noul` (yes / no). A kind that is not native is asked as `single`: a score as a choice among its levels, a yes/no as a choice between "yes" and "no" | per format |
 | `markers` | the mode marker of each kind and the option marker (tokens of `tokenizer.json`) | `[unused0]` option, `[unused1..4]` single, multi, score, noul |
 | `columns` | which head output column holds each kind's option logits, and `act` the act logit | per format |
@@ -94,6 +95,12 @@ An option with a description is `label: description`. Options by kind:
 
 The **full layout** (one question per sequence, the text-only deciders and the first typed checkpoints): `[CLS] segment [SEP] input [SEP]`, full attention, only the
 input truncated to `max_len`. The mode marker is at position 1.
+
+**Long inputs** (`long="full"`, a checkpoint with `max_len_long`): the same full layout, the input truncated to
+`max_len_long` instead of `max_len` — one question per sequence, also for a checkpoint with the block layout (§5), whose
+block sequences keep their own `multi_question.max_len`. Only inputs that do not fit `max_len` are read this way; shorter
+ones are encoded exactly as before. The ONNX export needs a dynamic sequence length (`input_ids` `[batch, length]`), and
+the encoder's positions must reach `max_len_long`.
 
 ## 5. Several questions: the block layout
 
