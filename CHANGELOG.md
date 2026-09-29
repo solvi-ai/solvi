@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.7.1 — unreleased
+## 0.7.1 — 2026-09-29 — solvi behind a coding agent's hooks (preview), gallery for coding agents, hosted decision services (System One) hardened, benchmark vs LLMs
 
 ### solvi behind a coding agent's hooks (preview)
 
@@ -36,6 +36,16 @@
   decisions.
 - [examples/22_coding_agent_hooks.py](examples/22_coding_agent_hooks.py): a session in a temporary project — a clean
   edit, a rule broken, a comment that tries to talk past the rules, two prompts, the verified store and one audit.
+
+### Benchmark: solvi vs asking an LLM
+
+- **[docs/vs_llm.md](docs/vs_llm.md)** — the same inputs and written policies given to solvi, four LLMs and a hosted
+  decision model, directly and inside solvi: refunds, 3-way invoice matching, the gallery and routing bank messages.
+  Strong reasoning LLMs followed the rules nearly perfectly and solvi was not more accurate there; the differences are
+  cost, latency, answers that do not change with option order, replay and hard checks. **`benchmarks/vs_llm/`** has the
+  data, the written policies, the runner (the solvi arm offline and free; any OpenAI-compatible or System One endpoint)
+  and every raw answer, so `bench.py score --check` recomputes the published tables without an API key. The
+  playground gains a "solvi vs LLM" tab on the same data.
 
 ### Gallery: helpers for coding agents
 
