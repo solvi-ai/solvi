@@ -1274,14 +1274,40 @@ the given facts (numbers, booleans, categories, and numeric vectors such as a do
 so middle classes and interactions can be expressed.
 
 Its main property is online learning: `system.teach(question, init_state, correct)` updates a fast head immediately with a
-rank-one Sherman–Morrison step (about 0.1–0.2 ms) and returns the time in ms. Nothing is retrained, other questions, rules and
-hard checks do not change, and the example still goes to the journal.
+rank-one Sherman–Morrison step (about 0.1–0.2 ms) and returns the time in ms. Other questions, rules and hard checks do not
+change, and the example still goes to the journal.
 
 ```python
 head = system.fit_fast("suspicious", history[:10])     # start small
 for state, label in reviewer_corrections:
     system.teach("suspicious", state, label)            # each one is absorbed at once
 ```
+
+**Refits as examples accumulate.** A rank-one step keeps what the first fit chose: the ridge strength, the featurizer
+(number scales and the known values of each category — a value first seen later counts as none of them) and whether
+pairwise products are used. Chosen on 10 examples these are often wrong for 300. So the head keeps its examples and,
+each time `teach` doubles their number (at 20, 40, 80, 160, … after a start on 10), fits again on all of them — exactly
+a fresh `fit_fast` on those examples — then goes on with rank-one steps. On eight tabular sets (three example tasks, five
+open datasets), a head started on 10 examples and taught up to 300 was 5.8 points less accurate than a fit on all 300
+without refits and 0.2 points more accurate with them; its share of answers under an `act_guard` guarantee rose from 67%
+to 86% (a full fit: 86%). The cost:
+
+- the update that triggers a refit takes as long as a fit on that many examples (on a 14-fact dataset: about 3 ms at
+  160, 11 ms at 640, 100 ms for a fit on 2000, with 40% of one core). An early refit that switches pairwise products on
+  (hundreds of columns from few examples) is the slowest, about 200 ms with 40% of one core — as long as the first
+  `fit_fast` on those examples would take. The other updates are unchanged, and in total a
+  run of updates was never more than about 0.6 ms per update slower — often faster, since a refit usually drops the
+  pairwise products a start on few examples switched on;
+- the kept examples: their fact rows, about 1 KB each for 14 plain facts (vector facts such as embeddings cost their
+  length), up to `refit_until` examples (2000). Past that no refit is due, the rows are dropped and the head goes on with
+  rank-one steps only;
+- a refit is a change like any update: `teach` makes it at once and it is not gated. The learning loop
+  (`System.learning`) manages decision parts, not fast heads: while it is attached with `gate_teach=True`, `teach` only
+  stores the correction and the fast head (and its refit schedule) does not move. The head depends only on its first
+  fit and the sequence of corrections, so replaying them gives the same head (the same fingerprint); keep a
+  `copy.deepcopy(head)` to go back.
+
+`fit_fast(..., refit=None)` turns it off (rank-one steps only, no examples kept); `refit=1.5` refits more often.
 
 On the example tasks (`benchmarks/fast_head.py`) `fit_fast` trains 15–70× faster than `fit` and is 1–4 points less accurate at
 200 examples; learning online from 10 to 200 corrections ends within a few points of fitting on all 200 at once. Use `fit` when accuracy on a fixed

@@ -770,10 +770,13 @@ class System:
             self.heads[question] = Head(q.answer.options).fit(rows, ans, cands)
         return self.heads[question]
 
-    def fit_fast(self, question, examples, features=None, lam=None):
+    def fit_fast(self, question, examples, features=None, lam=None, refit=2.0, refit_until=2000):
         """Fast answer head (closed-form ridge, milliseconds): examples — [(init_state, answer)]. Features: the given facts
         (numbers, booleans, categories or vectors such as a document embedding), by default every computed fact. Unlike fit it
-        keeps all features and learns online: every `teach` for this question updates it instantly."""
+        keeps all features and learns online: every `teach` for this question updates it instantly. refit: each time `teach`
+        doubles the number of examples (2.0), the head is fitted again on all of them, so the ridge strength and the features
+        chosen on the first few examples do not stay frozen; None — rank-one updates only, no examples kept. No refit past
+        `refit_until` examples (see solvi.fast.FastHead)."""
         from .fast import FastHead
         import time
         q = self.questions[question]
@@ -785,10 +788,10 @@ class System:
             features = sorted(f for f in computable(self.catalog, keys) - keys)
         ans = [q.answer.normalize(a) for _, a in examples]
         if q.answer.kind == "multi":
-            head = MultiHead(q.answer.options, lambda: FastHead(["yes", "no"], lam=lam),
+            head = MultiHead(q.answer.options, lambda: FastHead(["yes", "no"], lam=lam, refit=refit, refit_until=refit_until),
                              lambda h, ys: h.fit(rows, ys, list(features))).fit(ans)
         else:
-            head = FastHead(q.answer.options, lam=lam).fit(rows, ans, list(features))
+            head = FastHead(q.answer.options, lam=lam, refit=refit, refit_until=refit_until).fit(rows, ans, list(features))
         head.fit_ms = (time.perf_counter() - t0) * 1000
         dropped = getattr(head, "dropped", None) or {}
         if dropped and features is not None:           # features the caller asked for explicitly must not vanish silently

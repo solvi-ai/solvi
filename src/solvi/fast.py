@@ -4,7 +4,14 @@ Features come from computed facts (numbers with quantile steps, booleans, catego
 as a document embedding (see LongSpanExtractor.embedder). Answers are one-vs-rest ridge scores turned into probabilities.
 The head keeps the inverse of (XᵀX + λI), so `update` is a rank-one Sherman–Morrison step: a new labeled example is absorbed in
 about a millisecond without retraining and without touching the rest of the system. Leave-one-out accuracy is exact and free
-(the ridge hat matrix)."""
+(the ridge hat matrix).
+
+A rank-one step keeps what the first fit chose: the ridge strength, the featurizer (number scales, the known values of each
+category) and whether pairwise products are used. Chosen on a handful of rows they are often wrong for hundreds (on open
+tabular sets a head started on 10 rows and taught up to 300 was 5 points less accurate than one fitted on all 300). So the
+head keeps its examples and, each time their number doubles (`refit=2.0`), fits again on all of them — the same as a fresh
+fit on those rows — and goes on with rank-one steps. The amortised cost stays a constant per update; the update that
+triggers a refit is as slow as a fit. Past `refit_until` examples (2000) it stops refitting and drops the kept rows."""
 from __future__ import annotations
 
 import numpy as np
@@ -78,12 +85,24 @@ class VecFeaturizer(Featurizer):
 
 
 class FastHead:
-    def __init__(self, options, lam=None, pairs=None):
+    def __init__(self, options, lam=None, pairs=None, refit=2.0, refit_until=2000):
         """lam: ridge strength (None — chosen by exact leave-one-out accuracy); pairs: add pairwise products of the base features
-        (None — only when there are at most 40 of them, so interactions and middle classes can be expressed)."""
+        (None — only when there are at most 40 of them, so interactions and middle classes can be expressed). refit: when
+        `update` brings the number of examples to `refit` times the number of the last fit, fit again on all of them (the
+        ridge strength, the featurizer and the pairs decision are chosen again, as given here); None — never, and no rows are
+        kept. refit_until: no refit beyond this many examples; the kept rows are dropped once none is due."""
+        if refit is not None and refit and refit <= 1:
+            raise ValueError("refit must be a growth factor above 1 (2.0: refit when the examples double) or None")
         self.options = list(options)
         self.lam = lam
         self.pairs = pairs
+        self._lam0, self._pairs0 = lam, pairs         # as given: what a refit chooses again
+        self.refit = float(refit) if refit else None
+        self.refit_until = int(refit_until)
+        self._rows = None                             # the examples kept for the next refit (None: none due)
+        self._answers = None
+        self._requested = None
+        self.fitted_on = 0                            # number of examples at the last fit (or refit)
         self.features = []
         self.fz = None
         self.Ainv = None                  # (XᵀX + λI)⁻¹ over [features, bias]
@@ -113,6 +132,7 @@ class FastHead:
         return np.append(b, 1.0)
 
     def fit(self, rows, answers, features):
+        self.lam, self.pairs = getattr(self, "_lam0", self.lam), getattr(self, "_pairs0", self.pairs)
         self.fz = VecFeaturizer().fit(rows, features)
         self.features = [f for f in features if f in self.fz.spec]
         self.dropped = {f: _why_dropped(rows, f) for f in features if f not in self.fz.spec}   # asked for, but unusable
@@ -136,22 +156,40 @@ class FastHead:
         self.Ainv = (V * inv) @ V.T
         self.W = self.Ainv @ B
         self.B = B
-        self.n = len(rows)
+        self.n = self.fitted_on = len(rows)
         self._fp = None
+        refit = getattr(self, "refit", None)
+        if refit and self._next_refit() <= self.refit_until:
+            self._rows, self._answers, self._requested = [dict(r) for r in rows], list(answers), list(features)
+        else:
+            self._rows = self._answers = self._requested = None
         return self
 
+    def _next_refit(self):
+        import math
+        return max(self.fitted_on + 1, math.ceil(self.fitted_on * self.refit))
+
     def update(self, row, answer):
-        """Absorb one labeled example (rank-one update of the inverse); returns the time it took in ms."""
+        """Absorb one labeled example (rank-one update of the inverse; a refit on all kept examples when their number reaches
+        the refit schedule); returns the time it took in ms."""
         import time
         t0 = time.perf_counter()
+        k = self.options.index(answer)                # an unknown answer fails here, before anything changes
+        rows = getattr(self, "_rows", None)
+        if rows is not None and len(rows) + 1 >= self._next_refit():
+            self.fit(rows + [row], self._answers + [answer], self._requested)
+            return (time.perf_counter() - t0) * 1000
         x = self._x(row)
-        y = np.eye(len(self.options))[self.options.index(answer)]
+        y = np.eye(len(self.options))[k]
         Ax = self.Ainv @ x
         self.Ainv -= np.outer(Ax, Ax) / (1.0 + x @ Ax)
         self.B += np.outer(x, y)
         self.W = self.Ainv @ self.B
         self.n += 1
         self._fp = None
+        if rows is not None:
+            rows.append(dict(row))
+            self._answers.append(answer)
         return (time.perf_counter() - t0) * 1000
 
     def scores(self, row):

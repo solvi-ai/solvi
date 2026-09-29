@@ -421,6 +421,26 @@ framework cases run PydanticAI, LangGraph and the OpenAI Agents SDK for real).
   the exact type first — measured faster than 0.6.1's on the gallery's responses, which pays for the strict-JSON
   tagging.
 
+### Fast heads refit as corrections accumulate
+
+- **`fit_fast` heads refit on doubling.** A head taught through `System.teach` kept the ridge strength, the featurizer
+  (number scales, known category values) and the pairwise-products decision of its first fit; started on 10 examples and
+  taught up to 300, it was 5.8 points less accurate than a fit on all 300 (on eight tabular sets; up to 17 points on
+  one). A `FastHead` now keeps its examples and, each time their number doubles, fits again on all of them — the same
+  as a fresh `fit_fast` on those rows — then continues with rank-one steps. Measured: at 100 and 300 examples it is 0.3 /
+  0.2 points above a full fit (within noise), and the share answered under `act_guard` 82% / 86% instead
+  of 70% / 67%.
+- Cost: the triggering update is as slow as a fit on those rows (about 11 ms at 640 rows of 14 facts, 100 ms for 2000,
+  up to about 200 ms for an early refit that switches pairwise products on; 40% of one core); total update time was at most about 0.6 ms per update higher and often lower. Memory: the kept fact
+  rows (about 1 KB per row of 14 plain facts), up to `refit_until=2000` examples; past it no refit is due and the rows
+  are dropped. A refit is applied at once like any `teach` update and is not gated; the learning loop does not manage
+  fast heads (with `gate_teach=True` they do not move at all).
+- `fit_fast(..., refit=2.0, refit_until=2000)` and `FastHead(..., refit=, refit_until=)`; `refit=None` restores the old
+  behaviour (no rows kept). Heads pickled before 0.7 load and keep learning by rank-one steps only, with unchanged
+  fingerprints. `FastHead.fit` called again on a head now chooses the ridge strength and pairs again as given to the
+  constructor (it used to keep what the previous fit chose). The strategist's own online models
+  (`solvi.learned.Binary`) keep their fixed refit every 50 rows.
+
 ### Fixes
 
 - A model-backed rule whose quote is rejected for not being in the text (`quote outside the text` / `not grounded`)

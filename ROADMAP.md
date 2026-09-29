@@ -76,6 +76,7 @@ Status: `planned` · `in progress` · `research` (may not ship) · `done (versio
 
 | Item | Version |
 |---|---|
+| Fast heads taught by corrections refit on all kept examples each time they double (`fit_fast(refit=2.0)`), so the ridge strength and features chosen on the first few examples do not stay frozen | 0.7 |
 | `solvi serve` (HTTP, MCP, System One API), `solvi check`, Cascade / Vote / Route under one guarantee, `aask` with timeouts, costs from measurements | 0.6.0 |
 | Escalation with a guarantee (`act_guard`, learn-then-test, conformal sets), option order and near-tie safeguards, System One backend, honesty suite, `solvi test`, TraceStorage, `solvi diff` and shadow mode | 0.5.1 |
 | solvi-large / solvi-base (preview); learned strategist in realms | 0.5.0 |

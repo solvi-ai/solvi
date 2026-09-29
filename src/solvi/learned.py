@@ -79,7 +79,7 @@ class Binary:
         rows = [r for r, _ in self.rows]
         feats = sorted({k for r in rows for k in r})
         try:
-            self.head = FastHead(["yes", "no"], pairs=False).fit(rows, ["yes" if y else "no" for _, y in self.rows], feats)
+            self.head = FastHead(["yes", "no"], pairs=False, refit=None).fit(rows, ["yes" if y else "no" for _, y in self.rows], feats)
             if not self.head.features:
                 self.head = None
         except Exception:  # noqa: BLE001
