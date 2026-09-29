@@ -33,6 +33,11 @@ jobs:
         run: |
           uv sync --group dev --group agents
           uv run pytest -q tests/test_agents_frameworks.py
+      - name: LoRA adapters (part.adapt_lora, CPU torch)
+        if: matrix.python == '3.12'
+        run: |
+          uv sync --group dev --group lora
+          uv run pytest -q tests/test_lora.py
   lint:
     runs-on: ubuntu-latest
     steps:
