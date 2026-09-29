@@ -776,9 +776,26 @@ part = model.decision("team", "Which team should handle this?", "email", {"billi
 ```
 
 Any server of `POST /v1/systemone` (Jev, and open ones: Kev, Von, Laya-serve, Intern-Decision) proposes; solvi's checks,
-rules, thresholds (act_guard on the confidence: the API has no act signal) and trace decide. Choice and yes/no questions;
-multi-label questions, spans, evidence and "not stated" are not part of the API. The trace records the endpoint and model
-name, not the weights behind them — calibrate again when the service changes its model.
+rules, thresholds (act_guard on the confidence: the API has no act signal) and trace decide. Choice, yes/no and score
+questions are sent as they are. What the API has no type for is asked in its terms: "not stated" (`unknown=True`,
+`Maybe[...]`) is one more option with a description (a yes/no question that allows it becomes a choice over yes / no /
+not stated), and when it is the most probable the decision is `Unknown` and the question abstains; a multi-label
+question is one `noul` per option in the same request, chosen at 0.5, its confidence the least sure option's
+max(p, 1 − p). Spans and evidence quotes are not part of the API. The trace records the endpoint and model name, not the
+weights behind them — calibrate again when the service changes its model.
+
+Through OpenRouter, with one provider pinned and no fallback to another:
+
+```python
+model = systemone("https://openrouter.ai/api", "<model>", api_key=os.environ["OPENROUTER_API_KEY"],
+                  extra_body={"provider": {"only": ["<provider>"], "allow_fallbacks": False}})
+```
+
+`extra_body` fields (provider routing, `user`) go into every request; the fields solvi sets (`model`, `state`,
+`questions`) are refused, and extra_body is part of the fingerprint. Each decision's `extra["systemone"]` records the
+request's `ms` and, when the service reports them, its `usage` and `cost` (for the whole request: `questions` says how
+many questions it answered). A hosted model is not replayed (`deterministic=False`, the default): replay checks the
+recorded output; pass `deterministic=True` for a local server whose output is reproducible.
 
 #### Any LLM as a decider
 

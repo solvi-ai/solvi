@@ -67,6 +67,25 @@ fallback, and says what the offline rules cannot read. All three are playground 
 - `import solvi` no longer imports numpy: the answer heads load it on first use, and hashing a fingerprint only looks for
   arrays when numpy is already loaded. The pydantic models of `solvi.schema` build their validators on first use.
 - `tomli` is a dependency on Python 3.10 (rules files are TOML).
+- `solvi.systemone`: `systemone(..., extra_body=...)` (and `SystemOneScorer(..., extra_body=...)`) merges
+  server-specific fields into every request — OpenRouter's `provider` routing, `user` — with the rules of
+  `solvi.llm`'s: copied, merged under solvi's own fields, `model` / `state` / `questions` refused with ValueError, part
+  of the fingerprint (without it the fingerprint is unchanged).
+- `solvi.systemone` answers "not stated" (`unknown=True`, `Maybe[...]`): the question gets one more option, "not
+  stated", with a description; a yes/no question that allows it is asked as a choice over yes / no / not stated. Its
+  probability competes with the options' as with `solvi.llm` and the checkpoints with a "not stated" output: the
+  decision is `Unknown` and the question built on it abstains. Before, `decision(unknown=True)` raised ValueError.
+- `solvi.systemone` answers multi-label questions: one `noul` per option in the same request, an option chosen at the
+  model's multi threshold (0.5), the confidence the least sure option's max(p, 1 − p) — what act_guard calibrates on;
+  with "not stated" allowed, one more `noul` for it. `SystemOneScorer.questions(item)` gives an item's questions;
+  `question(item)` still gives the one question of a single-question item. Spans and evidence stay refused.
+- `solvi.systemone` records per decision, in `extra["systemone"]`, the endpoint, the model name (`served_by` when the
+  service names another), the request's `ms` and, when the service reports them, its `usage` tokens and `cost` — for
+  the whole request (`questions`: how many questions it answered); the scorer sums them in `usage` and `cost`.
+  `costs="measured"` already plans on each part's measured run time, the request included.
+- **Behaviour change:** a System One model is `deterministic=False` by default, as `solvi.llm`'s: replay checks the
+  recorded output instead of calling the service again. `systemone(..., deterministic=True)` keeps the old re-run for
+  a local server whose output is reproducible.
 
 ### Fixes
 

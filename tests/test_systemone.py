@@ -4,7 +4,8 @@ import json
 
 import pytest
 
-from solvi import Answer, Catalog, Question, System
+from solvi import Answer, Catalog, Question, System, Unknown
+from solvi.decide import Item
 from solvi.systemone import systemone
 
 TEAMS = {"billing": "Charges, invoices, refunds", "shipping": "Delivery, parcels, tracking"}
@@ -71,7 +72,142 @@ def test_a_system_one_decision_in_a_catalog_is_traced_and_guarded():
     assert s.ask({"email": "hello"})["route"].status == "abstain"
 
 
-def test_what_the_api_cannot_answer_is_refused_up_front():
+def test_what_the_api_cannot_point_at_is_refused():
     m = systemone("http://localhost:8009", "kev-latest", opener=FakeService())
-    with pytest.raises(ValueError, match="multi-label"):
-        m.decision("tags", "Tags?", "email", list(TEAMS), multi=True).decide("x")
+    with pytest.raises(ValueError):
+        m.decision("o", "Order number?", "email", kind="span")
+
+
+class PinnedService(FakeService):
+    """A FakeService that reports usage, cost and the served model, and answers "not stated" / multi-label questions."""
+
+    def __call__(self, req, timeout=None):
+        body = json.loads(req.data.decode())
+        self.bodies.append(body)
+        self.headers.append(dict(req.header_items()))
+        text = body["state"].lower()
+        answers = {}
+        for name, q in body["questions"].items():
+            ins = q["instructions"]
+            if q["type"] == "noul":
+                if "not stated" in ins:
+                    p = 0.9 if text.strip() == "hello" else 0.05
+                else:
+                    p = 0.95 if ("'billing'" in ins and "charged" in text) or ("'shipping'" in ins and "parcel" in text) \
+                        else 0.1
+                answers[name] = {"type": "noul", "noul": p}
+                continue
+            opts = list(q["criteria"])
+            if text.strip() == "hello" and "not stated" in opts:
+                raw = [8.0 if o == "not stated" else 1.0 for o in opts]
+            else:
+                raw = [1.0 + 8.0 * (o in ("billing", "yes") and "charged" in text)
+                       + 8.0 * (o in ("shipping", "no") and "parcel" in text) for o in opts]
+            z = sum(raw)
+            answers[name] = {"type": "choice", "choice": opts[raw.index(max(raw))], "confidence": 0.5,
+                             "probabilities": {o: round(r / z, 2) for o, r in zip(opts, raw)}}
+        resp = {"model": body["model"] + "-20260917", "answers": answers,
+                "usage": {"input_tokens": 100, "output_tokens": 10, "cost": 4.2e-06}, "provider": "Someone"}
+        return io.BytesIO(json.dumps(resp).encode())
+
+
+def test_extra_body_is_merged_copied_fingerprinted_and_cannot_override_the_request():
+    pin = {"provider": {"only": ["Someone"], "allow_fallbacks": False}, "user": "tenant-7"}
+    svc = PinnedService()
+    m = systemone("https://router.example/api", "vendor/model", api_key="k", opener=svc, extra_body=pin)
+    assert m.decision("team", "Which team?", "email", TEAMS).decide("I was charged twice").value == "billing"
+    body = svc.bodies[-1]
+    assert body["provider"] == pin["provider"] and body["user"] == "tenant-7" and body["model"] == "vendor/model"
+    assert set(body) == {"provider", "user", "model", "state", "questions"}
+    pin["provider"]["only"] = ["Other"]                                  # copied: a later edit changes nothing
+    m.decision("team", "Which team?", "email", TEAMS).decide("my parcel")
+    assert svc.bodies[-1]["provider"]["only"] == ["Someone"]
+    plain = systemone("https://router.example/api", "vendor/model", opener=svc)
+    assert m.fingerprint() != plain.fingerprint()
+    assert systemone("https://router.example/api", "vendor/model", opener=svc,
+                     extra_body={"user": "other"}).fingerprint() != m.fingerprint()
+    assert plain.scorer.fingerprint() == "systemone|https://router.example/api/v1/systemone|vendor/model"   # as in 0.7.0
+    for key in ("model", "state", "questions"):
+        with pytest.raises(ValueError, match="extra_body cannot set"):
+            systemone("http://localhost:8009", "m", extra_body={key: 1})
+    with pytest.raises(ValueError, match="dict"):
+        systemone("http://localhost:8009", "m", extra_body=[("provider", {})])
+    with pytest.raises(ValueError, match="not JSON"):
+        systemone("http://localhost:8009", "m", extra_body={"x": object()})
+    assert "k" not in repr(m.scorer).replace("kev", "")
+
+
+def test_not_stated_is_an_option_of_its_own_and_the_question_abstains():
+    svc = PinnedService()
+    m = systemone("http://localhost:8009", "kev-latest", opener=svc)
+    team = m.decision("team", "Which team?", "email", TEAMS, unknown=True)
+    d = team.decide("hello")
+    q = svc.bodies[-1]["questions"]["q0"]
+    assert q["type"] == "choice" and list(q["criteria"]) == ["billing", "shipping", "not stated"]
+    assert q["criteria"]["not stated"].startswith("The input does not state it")
+    assert d.value is Unknown and d.probs[Unknown] == pytest.approx(0.8, abs=1e-6)
+    assert team.decide("I was charged twice").value == "billing"
+    ref = m.decision("refund", "Does the customer want a refund?", "email", type=bool, unknown=True)
+    assert ref.decide("hello").value is Unknown
+    assert list(svc.bodies[-1]["questions"]["q0"]["criteria"]) == ["yes", "no", "not stated"]
+    assert ref.decide("I was charged twice").value is True
+    cat = Catalog()
+    team.question(cat, "route")
+    s = System(cat, [Question("route", "Route", Answer.choice(list(TEAMS)))])
+    assert s.ask({"email": "I was charged twice"})["route"].answer == "billing"
+    r = s.ask({"email": "hello"})["route"]
+    assert r.status == "abstain"
+
+
+def test_a_multi_label_question_is_one_noul_per_option_thresholded_and_guarded():
+    svc = PinnedService()
+    m = systemone("http://localhost:8009", "kev-latest", opener=svc)
+    tags = m.decision("tags", "Which topics?", "email", TEAMS, multi=True)
+    d = tags.decide("charged twice and my parcel is lost")
+    qs = svc.bodies[-1]["questions"]
+    assert list(qs) == ["q0__0", "q0__1"] and all(q["type"] == "noul" for q in qs.values())
+    assert qs["q0__0"]["instructions"] == "Which topics? Does the option 'billing' (Charges, invoices, refunds) apply?"
+    assert d.value == ("billing", "shipping") and d.probs["billing"] == pytest.approx(0.95, abs=1e-6)
+    assert d.conf == pytest.approx(0.95, abs=1e-6)
+    assert tags.decide("I was charged twice").value == ("billing",)
+    assert tags.decide("hi there").value == () and tags.decide("hi there").conf == pytest.approx(0.9, abs=1e-6)
+    ns = m.decision("tags2", "Which topics?", "email", TEAMS, multi=True, unknown=True)
+    assert ns.decide("hello").value is Unknown and "q0__ns" in svc.bodies[-1]["questions"]
+    info = tags.act_guard([("charged twice", ("billing",)), ("my parcel", ("shipping",))] * 30
+                          + [("hello", ("billing",))] * 10, risk=0.10)
+    assert info["signal"] == "confidence" and info["risk"] <= 0.10
+
+
+def test_cost_latency_and_the_served_model_are_recorded():
+    svc = PinnedService()
+    m = systemone("http://localhost:8009", "kev-latest", opener=svc)
+    x = m.decision("team", "Which team?", "email", TEAMS).decide("I was charged twice").extra["systemone"]
+    assert x["endpoint"] == "http://localhost:8009/v1/systemone" and x["model"] == "kev-latest"
+    assert x["served_by"] == "kev-latest-20260917" and x["cost"] == pytest.approx(4.2e-06)
+    assert x["usage"] == {"input_tokens": 100, "output_tokens": 10} and x["questions"] == 1 and x["ms"] >= 0
+    assert m.scorer.cost == pytest.approx(4.2e-06) and m.scorer.usage["input_tokens"] == 100
+    items = [Item("Which team?", tuple(TEAMS), None, "my parcel"), Item("Urgent?", ("yes", "no"), None, "my parcel")]
+    a, b = m.scorer.logits(items)                                      # one request answers both: its cost is shared
+    assert len(svc.bodies) == 2 and a["info"]["systemone"]["questions"] == 2 == b["info"]["systemone"]["questions"]
+    assert m.scorer.cost == pytest.approx(8.4e-06)
+    plain = systemone("http://localhost:8009", "kev-latest", opener=FakeService())
+    y = plain.decision("team", "Which team?", "email", TEAMS).decide("I was charged").extra["systemone"]
+    assert "cost" not in y and "usage" not in y and "served_by" not in y and y["ms"] >= 0
+
+
+def test_a_hosted_model_is_not_replayed_but_a_deterministic_local_one_is():
+    for deterministic, calls in ((False, 0), (True, 1)):
+        svc = FakeService()
+        m = systemone("http://localhost:8009", "kev-latest", opener=svc, deterministic=deterministic)
+        assert m.deterministic is deterministic
+        part = m.decision("team", "Which team?", "email", TEAMS)
+        cat = Catalog()
+        part.question(cat, "route")
+        s = System(cat, [Question("route", "Route", Answer.choice(list(TEAMS)))])
+        r = s.ask({"email": "I was charged twice"})
+        m._cache.clear()
+        n = len(svc.bodies)
+        rep = r.trace.replay(s.catalog, r.flow)
+        assert rep["ok"] and len(svc.bodies) - n == calls
+        if not deterministic:
+            assert [v for _, _, v in rep["models"]] == ["trusted"]
