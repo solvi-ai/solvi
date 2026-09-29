@@ -837,26 +837,28 @@ Vote([mid, large])])`.
 **Thresholds and the guarantee.** Before calibration each part escalates by its own thresholds (`escalate_below`,
 `act_threshold`, `min_margin`). `act_guard(examples, risk=0.10)` asks every part on labelled examples of your stream
 (`[(input, correct)]`; an input is what every part reads, or `solvi.multi.Facts(email=..., vip=...)` by name) and chooses
-**one threshold t shared by every part** by conformal risk control, so that P(answered alone and wrong) ≤ risk for
-inputs like the examples. Each part's signal — its act probability when its model gives one, else its calibrated
-confidence — is first replaced by its **rank among that part's own signals on the calibration examples** (the share of
-them at or below it; `scale="rank"`, the default). The signals of different models live on different scales: an act
-probability spreads over [0, 1], an LLM's confidence from log-probabilities sits above 0.999 on almost every answer. One
-threshold on the raw values then fits only one of them — a cascade of solvi-large and an LLM became "the LLM alone",
-the first stage never answering (33.7% of the questions answered alone on one data set; with the rank, 44.8%, the risk
-still ≤ 10%; votes answered the same either way). The rank reads the calibration inputs, not their labels. The sorted
-calibration signals of each part (at most 1024 per part) are kept in the combination and in its calibration file.
-`scale="raw"` puts t on the signals themselves, as before 0.7 — worth comparing when the parts share one scale (two
-solvi deciders): in [`examples/18_several_models.py`](../examples/18_several_models.py) the raw scale lets the cascade
-answer 85% alone against 73% on the rank scale. A calibration file written before 0.7 loads on the raw
-scale and gives the same decisions and fingerprint as before. A cascade's loss is
+**one threshold t for every part's signal** — its act probability when its model gives one, else its calibrated
+confidence — by conformal risk control, so that P(answered alone and wrong) ≤ risk for inputs like the examples.
+The signals of different models can live on different scales: an act probability spreads over [0, 1], an LLM's
+confidence from log-probabilities sits above 0.999 on almost every answer. One threshold on the raw values then
+effectively fits one model, and the combination behaves like that model alone — often the stronger one, which is often
+the right outcome. `act_guard(examples, risk=0.10, scale="rank")` (opt-in) replaces each part's signal by its **rank
+among that part's own signals on the calibration examples** (the share of them at or below it), so every part can take
+part. Measured on a cascade of solvi-large and an LLM over three data sets (risk 0.10; the risk stayed ≤ 10% in every
+mode), the rank helped on one set and hurt on two: 33.7% → 44.8% of the questions answered alone where the first
+stage never answered on the raw scale, but 45.8% → 41.3% and 96.7% → 79.1% on the others; votes answered the same
+either way. So compare both scales on held-out calibration data before choosing. The rank reads the calibration inputs,
+not their labels; the sorted calibration signals of each part (at most 1024 per part) are kept in the combination and
+in its calibration file. The default, `scale="raw"`, is the behaviour of earlier versions, and a calibration file
+written before 0.7 gives the same decisions and fingerprint as before. A cascade's loss is
 not monotone in t: a higher t can hand a question from a wrong small model to a right large one, or the other way. The
 loss of each example is therefore monotonized from above — the maximum over all thresholds ≥ t — before the choice;
 the actual loss is never above it, so the guarantee holds (the other safeguards of each part, such as `min_margin`, still
 apply). The result has `threshold`, `answered`, `error` (among the answered), `risk`, `calls` (models called per
 question), `cost` (with `costs=`), `scale` and, for a cascade, `answered_by` (the share each stage answered) and
 `warnings` when a stage answers alone on less than 5% of the examples — the cascade is then no better than a single
-model, so compare it with each model alone on the same examples (`solvi calibrate` prints the warning). `conformal(examples,
+model, so compare it with each model alone and, when the scales differ, try `scale="rank"` (`solvi calibrate` prints
+the warning). `conformal(examples,
 coverage=0.9)` gives answer sets from the probabilities the combination answers with — call it after `act_guard`, which
 clears it. `act_guard(examples, risk=0.10, groups="domain", min_group=100, delta=0.10)` chooses one shared
 threshold per group on the same monotonized loss, with the same rules as for one part (thresholds per group, above);

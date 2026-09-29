@@ -282,10 +282,11 @@ def test_rank_scale_lets_a_cascade_use_both_models_when_their_signals_differ_in_
     S, L, s, l_ = _scales_parts()
     cal, test = _scales_stream(rng, "c", 600, S, L), _scales_stream(rng, "t", 3000, S, L)
     raw, rank = Cascade([s, l_]), Cascade([s, l_])
-    ir = raw.act_guard(cal, risk=0.10, scale="raw")
-    ik = rank.act_guard(cal, risk=0.10)                       # rank is the default
+    ir = raw.act_guard(cal, risk=0.10)                        # raw is the default
+    ik = rank.act_guard(cal, risk=0.10, scale="rank")
     assert ir["scale"] == "raw" and ik["scale"] == "rank" and rank.scale == "rank" and len(rank.ranks) == 2
-    assert ir["answered_by"][0] < 0.05 and any("no better than a single model" in w for w in ir["warnings"])
+    assert ir["answered_by"][0] < 0.05 and raw.scale == "raw" and raw.ranks is None
+    assert any("no better than a single model" in w and 'scale="rank"' in w for w in ir["warnings"])
     assert ik["answered_by"][0] > 0.05 and "warnings" not in ik
     assert ik["answered"] > ir["answered"] + 0.05
     assert rank.guarantee["signal"] == "shared threshold on each model's rank among the calibration examples"
@@ -327,7 +328,7 @@ def test_old_calibration_files_load_on_the_raw_scale_bit_for_bit(tmp_path):
     cal, test = _scales_stream(rng, "c", 300, S, L), _scales_stream(rng, "t", 300, S, L)
     for make in (lambda: Cascade([s, l_]), lambda: Vote([s, l_])):
         raw = make()
-        raw.act_guard(cal, risk=0.10, scale="raw")
+        raw.act_guard(cal, risk=0.10)                          # the default scale
         # the fingerprint a combination had before scales existed: no scale in it
         old_fp = digest(type(raw).__name__, raw._describe(), [m.fingerprint() for m in raw.members],
                         {"threshold": raw.threshold, "guarantee": raw.guarantee})
@@ -343,7 +344,7 @@ def test_old_calibration_files_load_on_the_raw_scale_bit_for_bit(tmp_path):
             assert (a.value, a.escalate, a.conf, a.extra.get("threshold")) == (b.value, b.escalate, b.conf,
                                                                                b.extra.get("threshold"))
         ranked = make()                                        # a rank-scale file keeps the ranks and decides the same
-        ranked.act_guard(cal, risk=0.10)
+        ranked.act_guard(cal, risk=0.10, scale="rank")
         f2 = ranked.save_calibration(tmp_path / "rank.json")
         rec2 = json.loads(f2.read_text())
         assert rec2["scale"] == "rank" and [len(r) for r in rec2["ranks"]] == [300, 300]

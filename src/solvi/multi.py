@@ -19,11 +19,11 @@ called for this decision. The parts must answer the same question (kind and opti
 may differ). Combinations nest: `Cascade([small, Vote([mid, large])])`.
 
 Thresholds. Uncalibrated, each part escalates by its own thresholds (act_threshold, escalate_below, min_margin). After
-`act_guard`, one threshold t applies to every part — a one-dimensional family — on each part's rank among the
-calibration examples (scale="rank", the default: the share of that part's calibration signals at or below its signal;
-the signal is its act probability when its model gives one, else its calibrated confidence), so a model whose
-confidence sits near 1 (an LLM) and one spread over [0, 1] share it fairly; scale="raw" puts t on the signals
-themselves, as before 0.7. A cascade's loss is not monotone in t (a higher t can pass a question
+`act_guard`, one threshold t applies to every part's signal (its act probability when its model gives one, else its
+calibrated confidence) — a one-dimensional family (scale="raw", the default); scale="rank" puts t on each part's rank
+among its own calibration signals instead, for models whose signals live on different scales (an LLM's confidence
+near 1 and an act probability spread over [0, 1]) — measured, it helped on one data set of three and hurt on two, so
+compare both. A cascade's loss is not monotone in t (a higher t can pass a question
 from a wrong small model to a right large one, or back), so conformal risk control runs on the loss monotonized from
 above — the maximum over thresholds ≥ t — which keeps the guarantee (measured on the shipped deciders: the risk stayed ≤ 10% for every
 mode and data set; the cascade answered as much as the large model at half its cost where the small one is often sure;
@@ -519,7 +519,7 @@ class _Combination:
             return v == y
         return (Unknown if v is Unknown else sp.label(v)) == (Unknown if y is Unknown else sp.label(y))
 
-    def act_guard(self, examples, risk=0.10, groups=None, min_group=100, delta=0.10, scale="rank"):
+    def act_guard(self, examples, risk=0.10, groups=None, min_group=100, delta=0.10, scale="raw"):
         """Answer alone only as far as a guarantee allows, for the combination as a whole: on labelled examples of your
         stream [(input, correct)] (an input is what every part reads, or Facts(...) by name) every part is asked, and
         one threshold t shared by every part is chosen by conformal risk control so that P(answered alone AND wrong)
@@ -532,15 +532,17 @@ class _Combination:
         (with costs=), "scale", and for a cascade "answered_by" (the share each stage answered) and "warnings" when a
         stage answers alone on less than 5% of the examples (the cascade is then no better than one model)}.
 
-        scale: what the shared threshold is on. "rank" (default): each part's signal (its act probability when its
-        model gives one, else its calibrated confidence) is replaced by its rank among that part's own signals on the
-        calibration examples (the share of them ≤ it), so models whose signals live on different scales — an act
-        probability spread over [0, 1] and an LLM's confidence near 1 — share one threshold fairly. The rank uses the
-        calibration inputs, not their labels (the guarantee then holds up to a term of order 1/n; the measured risk
-        stayed ≤ 0.10: a small-model → LLM cascade on one data set answered 44.8% alone instead of 33.7% on the raw
-        scale, where the small model never answered; votes were unchanged). The sorted calibration signals of each part
-        (at most MAX_RANKS = 1024, evenly spaced by order when there are more examples) are kept in the combination
-        and in its calibration file. "raw": the threshold is on the signals themselves, as before 0.7.
+        scale: what the shared threshold is on. "raw" (default): the parts' signals themselves (the act probability
+        when the model gives one, else the calibrated confidence). When the scales differ — an act probability spread
+        over [0, 1], an LLM's confidence near 1 — one raw threshold effectively fits one model and the combination
+        behaves like that model alone, which is often the stronger one. "rank" (opt-in): each part's signal is replaced
+        by its rank among that part's own signals on the calibration examples (the share of them ≤ it), so every part
+        can take part. Measured on a solvi-large → LLM cascade over three data sets (risk 0.10, the risk ≤ 0.10 in every
+        mode): rank helped on one (33.7% → 44.8% answered alone, where the first stage never answered on the raw scale)
+        and hurt on two (45.8% → 41.3%, 96.7% → 79.1%); votes were unchanged. Compare both on held-out calibration
+        data. The rank uses the calibration inputs, not their labels (the guarantee then holds up to a term of order
+        1/n). The sorted calibration signals of each part (at most MAX_RANKS = 1024, evenly spaced by order when there
+        are more examples) are kept in the combination and in its calibration file.
 
         groups, min_group, delta: one shared threshold per group, as DecisionPart.act_guard(groups=...) — on the same
         monotonized loss, so the promise holds within every group; the group facts join the combination's inputs.
@@ -623,6 +625,8 @@ class _Combination:
                 warn = [f"stage {j + 1} ({m.name}, {m.model_id}) answers alone on {b:.1%} of the calibration questions "
                         f"(< {STAGE_FLOOR:.0%}): the cascade is then no better than a single model — compare it with "
                         "each model alone (act_guard on each part) on the same examples"
+                        + ("; if the models' signals differ in scale (an LLM's confidence near 1), try "
+                           "act_guard(..., scale=\"rank\")" if scale == "raw" else "")
                         for j, (m, b) in enumerate(zip(self.members, out["answered_by"])) if b < STAGE_FLOOR]
                 if warn:
                     out["warnings"] = warn
