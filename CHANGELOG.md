@@ -19,6 +19,13 @@
   numbers, attributed to its README). New tests run solvi against a stand-in Jeeves server that validates requests and
   shapes replies as Jeeves's own server does: every question type, "not stated", multi-label, a vote with another
   family, act_guard and replay.
+- Benchmark vs LLMs: Jeeves (PostHog, open weights, run on one A100) directly and inside solvi, with reasoning on and
+  off: `jeeves` and `jeeves-nothink` in `models.json`, their raw answers, the numbers in `expected.json`, and finding 7
+  on the page. With reasoning it scored 0.969 on bank messages and 0.863 / 0.912 on refunds / 3-way match.
+- Gallery task 10 (3-way match): the duplicate check is now a checkpoint of "already paid?" as well as of the payment.
+  The task's own answers do not change, because its rule for that question reads the same fact. With the rule replaced
+  by a model, as in the benchmark, the check no longer covered that question, and Jeeves without reasoning answered
+  "not paid" once for an invoice that was already paid. `solvi check` reports this case (`then_not_in_flow`).
 
 ## 0.7.1 — 2026-09-29 — solvi behind a coding agent's hooks (preview), gallery for coding agents, hosted decision services (System One) hardened, benchmark vs LLMs
 

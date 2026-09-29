@@ -245,6 +245,6 @@ def escalate_approval(within_approval_limit: bool) -> bool:
 QUESTIONS = [
     Question("payment", "Pay, hold or reject the invoice?", Answer.choice(["pay", "hold", "reject"]),
              checkpoints=["supplier_payable", "invoice_matches_po", "not_duplicate"]),
-    Question("duplicate", "Already paid (duplicate)?", Answer.yes_no()),
+    Question("duplicate", "Already paid (duplicate)?", Answer.yes_no(), checkpoints=["not_duplicate"]),
     Question("escalate_approval", "Needs a higher approver?", Answer.yes_no()),
 ]

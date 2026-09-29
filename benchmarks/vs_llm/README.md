@@ -3,7 +3,7 @@
 This folder reproduces [docs/vs_llm.md](../../docs/vs_llm.md). It holds the four sets, the written policies the LLMs
 get, a runner for the three arms (solvi alone, a model answering directly, the same model inside solvi), a scorer, and
 every raw answer of the published run. A model is an LLM over chat completions or a decision model over the System One
-API (Jev by TypeSafe). The scorer recomputes every table from those answers without an API key or a
+API (Jev by TypeSafe, hosted; Jeeves by PostHog, open weights on your own GPU). The scorer recomputes every table from those answers without an API key or a
 model.
 
 | File | What |
@@ -14,11 +14,11 @@ model.
 | `build_data.py` | how the sets were built (generators with their seeds, the Banking77 mapping); checks the shipped files |
 | `data/{G,R,P,T}.jsonl.gz` | the sets: gallery (117 cases), refunds (240), 3-way match (240), bank messages (520) |
 | `data/blind_claims.json` | 80 messages about double charges written blind, for the task 11 claim reader |
-| `raw/` | the raw answers of the published run: `a_solvi_*`, `b_<model>_*` (directly), `c_<model>_*` (inside solvi), `requests.jsonl.gz` (latency and cost of every request); Jev's are `b_jev-1.13_*` and `c_jev-1.13_*` |
+| `raw/` | the raw answers of the published run: `a_solvi_*`, `b_<model>_*` (directly), `c_<model>_*` (inside solvi), `requests.jsonl.gz` (latency and cost of every request); Jev's are `b_jev-1.13_*` and `c_jev-1.13_*`, Jeeves' `b_jeeves_*`, `c_jeeves_*` (reasoning on) and `b_jeeves-nothink_*`, `c_jeeves-nothink_*` |
 | `expected.json` | every number of the published tables, and the task 11 numbers before and in 0.7.0 |
 | `make_playground_bundle.py` | builds `spaces/playground/vs_llm.json`, the data of the playground's "solvi vs LLM" tab: curated refund and 3-way-match cases, every arm's saved answers on them, the summary table (`--check`: is it up to date) |
 
-The sets take 83 KB and the raw answers 1.1 MB, all compressed except the 11 KB of blind messages.
+The sets take 83 KB and the raw answers 1.5 MB, all compressed except the 11 KB of blind messages.
 
 ## Setup
 
@@ -41,7 +41,7 @@ uv run python benchmarks/vs_llm/bench.py score --check
 This prints the per-set tables from `raw/` and compares every number with `expected.json`. Expected output ends with:
 
 ```
-spent: $39.50 {"grok-4.7": 34.32, "gpt-oss-120b": 2.07, "qwen3-235b-2507": 0.62, "deepseek-v3.2": 2.21, "jev-1.13": 0.27}
+spent: $39.50 {"grok-4.7": 34.32, "gpt-oss-120b": 2.07, "qwen3-235b-2507": 0.62, "deepseek-v3.2": 2.21, "jev-1.13": 0.27, "jeeves": 0.0, "jeeves-nothink": 0.0}
 
 check against expected.json: every number matches
 ```
@@ -105,7 +105,7 @@ uv run python benchmarks/vs_llm/bench.py score --raw benchmarks/vs_llm/raw --raw
 ```
 
 The registered models are in `models.json`: `grok-4.7`, `gpt-oss-120b`, `qwen3-235b-2507`, `deepseek-v3.2` (with
-reasoning on) and the decision model `jev-1.13`. To add a model for good, add an entry there (id, label, extra request fields, and optionally `base_url` and
+reasoning on) and the decision models `jev-1.13`, `jeeves` and `jeeves-nothink`. To add a model for good, add an entry there (id, label, extra request fields, and optionally `base_url` and
 `key_env` for another endpoint). `score` finds every raw file named `<kind>_<model>_<set>.jsonl.gz` in the folders it
 reads and prints it as another row: `b` is the model answering directly, `c` is the model inside solvi. A new kind of arm
 is one line in `ARM_KINDS` in `bench.py` (its label and whether it is scored like an LLM with a stated confidence or like
@@ -144,6 +144,27 @@ Jev is not deterministic: the same request sent again changed 1-3% of its answer
 published run marked its repeat requests with another `user` value than the runner's, so a rerun draws new repeats, and
 the scores can differ by a few answers.
 
+### An open decision model on your own GPU (Jeeves)
+
+`jeeves` and `jeeves-nothink` are PostHog's [Jeeves](https://github.com/PostHog/jeeves) (weights
+[`PostHog/jeeves`](https://huggingface.co/PostHog/jeeves), Apache-2.0), served by its own `python -m inference.serve` at
+`http://127.0.0.1:8009` (no key, no price). It speaks the same System One API plus an `options` object: `jeeves` sends
+the authors' fast setting `{"max_think": 768, "nothink_threshold": 0.9}` (reasoning on), `jeeves-nothink` sends
+`{"think": false}`. It needs a CUDA GPU with about 21 GB for the bf16 weights.
+
+```
+uv run python benchmarks/vs_llm/bench.py direct jeeves --budget     # about 1,800 requests; ~2.5 h on one A100, 6 at a time
+uv run python benchmarks/vs_llm/bench.py inside jeeves --budget     # ~1 h
+uv run python benchmarks/vs_llm/bench.py direct jeeves-nothink      # every set in full, ~20 min; inside ~5 min
+uv run python benchmarks/vs_llm/bench.py inside jeeves-nothink
+```
+
+The published run used one Colab A100 40 GB (bf16; no FP8 on that GPU) and a small batching front-end over their
+engine, so that several requests share a forward pass; its answers matched their own server on 195 of 198 probe
+questions with reasoning and 198 of 198 without. Keep the number of concurrent requests at the server's batch size:
+with 32 requests against 6 rows, requests waited so long in the queue that they timed out and were sent again. The
+latency in `raw/` includes that queueing; the page quotes the latency of their own server, one request at a time.
+
 Every request is sent at temperature 0 with seed 0 and JSON mode. Responses are cached on disk in
 `out/cache_<model>.jsonl`, keyed by the request, so an interrupted run resumes without paying twice. `out/requests.jsonl`
 logs the latency and cost of each request. `--budget` repeats the published run's cuts for the expensive model: stability
@@ -160,6 +181,7 @@ Cost of the published run, per model, from `raw/requests.jsonl.gz` (OpenRouter's
 | Qwen3-235B-2507 | $0.23 | $0.40 | $0.62 |
 | DeepSeek-V3.2 | $2.21 | not run | $2.21 |
 | Jev 1.13 (2026-09-29) | $0.13 | $0.14 | $0.27 |
+| Jeeves, both settings (2026-09-29) | own GPU | own GPU | about 4.5 A100-hours (24 Colab compute units) |
 
 Grok inside solvi on the full sets, bank messages included, is about 2,550 questions: at $18.51 per 1,000 questions,
 roughly $47 instead of $23.64. Rerunning everything as published costs about $40, most of it Grok. Jev's numbers

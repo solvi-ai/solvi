@@ -11,7 +11,9 @@
    "qwen3-235b-2507": "qwen/qwen3-235b-a22b-2507",
    "deepseek-v3.2": "deepseek/deepseek-v3.2 (reasoning on)",
    "grok-4.7": "x-ai/grok-4.7",
-   "jev-1.13": "typesafe/jev-1.13 (served as typesafe/jev-1.13-20260917), a decision model over OpenRouter's System One / Decisions API, provider pinned to TypeSafe; run on 2026-09-29 with solvi 0.7.0 (commit f677406)"
+   "jev-1.13": "typesafe/jev-1.13 (served as typesafe/jev-1.13-20260917), a decision model over OpenRouter's System One / Decisions API, provider pinned to TypeSafe; run on 2026-09-29 with solvi 0.7.0 (commit f677406)",
+   "jeeves": "PostHog/jeeves, self-hosted with its own server (github.com/PostHog/jeeves at f04ec55) on one Colab A100 40 GB in bf16, System One API with options {max_think: 768, nothink_threshold: 0.9}; run on 2026-09-29 with solvi at commit 191a417 (0.7.1 + Jeeves support); stability on half the subsample, inside solvi on the --budget subsets",
+   "jeeves-nothink": "the same server with options {think: false}; every set in full"
   }
  },
  "risk": 0.1,
@@ -306,6 +308,126 @@
       }
      },
      "n_cases": 117
+    },
+    "b:jeeves": {
+     "n": 347,
+     "acc": 0.8559077809798271,
+     "no_answer": 0.0,
+     "viol": 1,
+     "viol_scope": 43,
+     "viol_hard": 1,
+     "scope_hard": 43,
+     "viol_limit": 0,
+     "scope_limit": 0,
+     "conf_err": 4,
+     "auto": 0.3025936599423631,
+     "err_at_auto": 0.0380952380952381,
+     "abst_missing": 0.6,
+     "n_missing": 20,
+     "over_abst": 0.0061162079510703364,
+     "ms_median": 74762.7306943332,
+     "usd_per_1k": 0.0,
+     "usd": 0.0,
+     "flip_rep": 0.037463976945244955,
+     "n_rep": 347,
+     "flip_order": 0.12103746397694524,
+     "n_order": 347,
+     "flip_para": 0.07780979827089338,
+     "n_para": 347,
+     "verdict_printed": true,
+     "request_ms_median": 222582.36058799957,
+     "usd_per_request": 0.0
+    },
+    "c:jeeves": {
+     "n": 347,
+     "acc": 0.7492795389048992,
+     "no_answer": 0.0,
+     "viol": 0,
+     "viol_scope": 43,
+     "viol_hard": 0,
+     "scope_hard": 43,
+     "viol_limit": 0,
+     "scope_limit": 0,
+     "conf_err": 28,
+     "auto": 0.7867435158501441,
+     "err_at_auto": 0.10256410256410256,
+     "abst_missing": 0.75,
+     "n_missing": 20,
+     "over_abst": 0.18042813455657492,
+     "ms_median": 2.432018000035896,
+     "usd_per_1k": 0.0,
+     "usd": 0.0,
+     "guards": {
+      "test": {
+       "threshold": 0.5204081632653061,
+       "n": 157
+      },
+      "cal": {
+       "threshold": 0.49,
+       "n": 170
+      }
+     },
+     "n_cases": 117
+    },
+    "b:jeeves-nothink": {
+     "n": 347,
+     "acc": 0.7521613832853026,
+     "no_answer": 0.0,
+     "viol": 6,
+     "viol_scope": 43,
+     "viol_hard": 6,
+     "scope_hard": 43,
+     "viol_limit": 0,
+     "scope_limit": 0,
+     "conf_err": 5,
+     "auto": 0.2017291066282421,
+     "err_at_auto": 0.07142857142857142,
+     "abst_missing": 0.5,
+     "n_missing": 20,
+     "over_abst": 0.009174311926605505,
+     "ms_median": 15868.694176499957,
+     "usd_per_1k": 0.0,
+     "usd": 0.0,
+     "flip_rep": 0.011527377521613832,
+     "n_rep": 347,
+     "flip_order": 0.1642651296829971,
+     "n_order": 347,
+     "flip_para": 0.05763688760806916,
+     "n_para": 347,
+     "verdict_printed": true,
+     "request_ms_median": 60949.21320200001,
+     "usd_per_request": 0.0
+    },
+    "c:jeeves-nothink": {
+     "n": 347,
+     "acc": 0.6426512968299711,
+     "no_answer": 0.0,
+     "viol": 0,
+     "viol_scope": 43,
+     "viol_hard": 0,
+     "scope_hard": 43,
+     "viol_limit": 0,
+     "scope_limit": 0,
+     "conf_err": 26,
+     "auto": 0.6685878962536023,
+     "err_at_auto": 0.11206896551724138,
+     "abst_missing": 0.85,
+     "n_missing": 20,
+     "over_abst": 0.2996941896024465,
+     "ms_median": 2.447866999773396,
+     "usd_per_1k": 0.0,
+     "usd": 0.0,
+     "guards": {
+      "test": {
+       "threshold": 0.55,
+       "n": 157
+      },
+      "cal": {
+       "threshold": 0.63,
+       "n": 170
+      }
+     },
+     "n_cases": 117
     }
    },
    "tags": {
@@ -360,6 +482,26 @@
       "acc": 0.7579250720461095,
       "wrong": 0.08357348703170028,
       "n": 347
+     },
+     "b:jeeves": {
+      "acc": 0.8559077809798271,
+      "wrong": 0.13832853025936598,
+      "n": 347
+     },
+     "c:jeeves": {
+      "acc": 0.7492795389048992,
+      "wrong": 0.08069164265129683,
+      "n": 347
+     },
+     "b:jeeves-nothink": {
+      "acc": 0.7521613832853026,
+      "wrong": 0.23919308357348704,
+      "n": 347
+     },
+     "c:jeeves-nothink": {
+      "acc": 0.6426512968299711,
+      "wrong": 0.07492795389048991,
+      "n": 347
      }
     }
    },
@@ -370,7 +512,9 @@
      "b:qwen3-235b-2507": 0.5555555555555556,
      "b:deepseek-v3.2": 1.0,
      "b:grok-4.7": 1.0,
-     "b:jev-1.13": 0.6666666666666666
+     "b:jev-1.13": 0.6666666666666666,
+     "b:jeeves": 0.7777777777777778,
+     "b:jeeves-nothink": 0.6666666666666666
     },
     "customer_claims_double": {
      "a:solvi": 1.0,
@@ -378,7 +522,9 @@
      "b:qwen3-235b-2507": 1.0,
      "b:deepseek-v3.2": 1.0,
      "b:grok-4.7": 1.0,
-     "b:jev-1.13": 1.0
+     "b:jev-1.13": 1.0,
+     "b:jeeves": 1.0,
+     "b:jeeves-nothink": 1.0
     },
     "decision": {
      "a:solvi": 1.0,
@@ -386,7 +532,9 @@
      "b:qwen3-235b-2507": 0.6842105263157895,
      "b:deepseek-v3.2": 0.9473684210526315,
      "b:grok-4.7": 1.0,
-     "b:jev-1.13": 0.6842105263157895
+     "b:jev-1.13": 0.6842105263157895,
+     "b:jeeves": 0.5789473684210527,
+     "b:jeeves-nothink": 0.631578947368421
     },
     "duplicate": {
      "a:solvi": 1.0,
@@ -394,7 +542,9 @@
      "b:qwen3-235b-2507": 1.0,
      "b:deepseek-v3.2": 1.0,
      "b:grok-4.7": 1.0,
-     "b:jev-1.13": 1.0
+     "b:jev-1.13": 1.0,
+     "b:jeeves": 1.0,
+     "b:jeeves-nothink": 1.0
     },
     "escalate_approval": {
      "a:solvi": 1.0,
@@ -402,7 +552,9 @@
      "b:qwen3-235b-2507": 0.8333333333333334,
      "b:deepseek-v3.2": 1.0,
      "b:grok-4.7": 1.0,
-     "b:jev-1.13": 0.8333333333333334
+     "b:jev-1.13": 0.8333333333333334,
+     "b:jeeves": 0.8333333333333334,
+     "b:jeeves-nothink": 0.6666666666666666
     },
     "escalation": {
      "a:solvi": 1.0,
@@ -410,7 +562,9 @@
      "b:qwen3-235b-2507": 0.8,
      "b:deepseek-v3.2": 0.9,
      "b:grok-4.7": 1.0,
-     "b:jev-1.13": 0.9
+     "b:jev-1.13": 0.9,
+     "b:jeeves": 0.9,
+     "b:jeeves-nothink": 0.6
     },
     "fault": {
      "a:solvi": 1.0,
@@ -418,7 +572,9 @@
      "b:qwen3-235b-2507": 0.9,
      "b:deepseek-v3.2": 0.2,
      "b:grok-4.7": 0.9,
-     "b:jev-1.13": 1.0
+     "b:jev-1.13": 1.0,
+     "b:jeeves": 0.6,
+     "b:jeeves-nothink": 0.7
     },
     "file_sar": {
      "a:solvi": 1.0,
@@ -426,7 +582,9 @@
      "b:qwen3-235b-2507": 0.6666666666666666,
      "b:deepseek-v3.2": 0.8888888888888888,
      "b:grok-4.7": 1.0,
-     "b:jev-1.13": 0.8888888888888888
+     "b:jev-1.13": 0.8888888888888888,
+     "b:jeeves": 0.7777777777777778,
+     "b:jeeves-nothink": 0.5555555555555556
     },
     "freeze": {
      "a:solvi": 1.0,
@@ -434,7 +592,9 @@
      "b:qwen3-235b-2507": 0.8888888888888888,
      "b:deepseek-v3.2": 0.8888888888888888,
      "b:grok-4.7": 1.0,
-     "b:jev-1.13": 1.0
+     "b:jev-1.13": 1.0,
+     "b:jeeves": 1.0,
+     "b:jeeves-nothink": 0.7777777777777778
     },
     "harm": {
      "a:solvi": 1.0,
@@ -442,7 +602,9 @@
      "b:qwen3-235b-2507": 0.6,
      "b:deepseek-v3.2": 1.0,
      "b:grok-4.7": 1.0,
-     "b:jev-1.13": 1.0
+     "b:jev-1.13": 1.0,
+     "b:jeeves": 0.5,
+     "b:jeeves-nothink": 0.9
     },
     "health": {
      "a:solvi": 1.0,
@@ -450,7 +612,9 @@
      "b:qwen3-235b-2507": 0.8,
      "b:deepseek-v3.2": 0.2,
      "b:grok-4.7": 1.0,
-     "b:jev-1.13": 0.6
+     "b:jev-1.13": 0.6,
+     "b:jeeves": 0.9,
+     "b:jeeves-nothink": 0.8
     },
     "intent": {
      "a:solvi": 1.0,
@@ -458,7 +622,9 @@
      "b:qwen3-235b-2507": 0.9,
      "b:deepseek-v3.2": 1.0,
      "b:grok-4.7": 1.0,
-     "b:jev-1.13": 1.0
+     "b:jev-1.13": 1.0,
+     "b:jeeves": 1.0,
+     "b:jeeves-nothink": 1.0
     },
     "is_double_charge": {
      "a:solvi": 1.0,
@@ -466,7 +632,9 @@
      "b:qwen3-235b-2507": 0.8888888888888888,
      "b:deepseek-v3.2": 1.0,
      "b:grok-4.7": 1.0,
-     "b:jev-1.13": 0.8888888888888888
+     "b:jev-1.13": 0.8888888888888888,
+     "b:jeeves": 0.7777777777777778,
+     "b:jeeves-nothink": 0.6666666666666666
     },
     "needs_human": {
      "a:solvi": 1.0,
@@ -474,7 +642,9 @@
      "b:qwen3-235b-2507": 0.6666666666666666,
      "b:deepseek-v3.2": 0.2222222222222222,
      "b:grok-4.7": 1.0,
-     "b:jev-1.13": 0.8888888888888888
+     "b:jev-1.13": 0.8888888888888888,
+     "b:jeeves": 1.0,
+     "b:jeeves-nothink": 0.7777777777777778
     },
     "news2_band": {
      "a:solvi": 1.0,
@@ -482,7 +652,9 @@
      "b:qwen3-235b-2507": 0.5,
      "b:deepseek-v3.2": 1.0,
      "b:grok-4.7": 1.0,
-     "b:jev-1.13": 0.6
+     "b:jev-1.13": 0.6,
+     "b:jeeves": 0.8,
+     "b:jeeves-nothink": 0.5
     },
     "page_oncall": {
      "a:solvi": 1.0,
@@ -490,7 +662,9 @@
      "b:qwen3-235b-2507": 0.8888888888888888,
      "b:deepseek-v3.2": 1.0,
      "b:grok-4.7": 1.0,
-     "b:jev-1.13": 0.3333333333333333
+     "b:jev-1.13": 0.3333333333333333,
+     "b:jeeves": 0.8888888888888888,
+     "b:jeeves-nothink": 0.8888888888888888
     },
     "payment": {
      "a:solvi": 1.0,
@@ -498,7 +672,9 @@
      "b:qwen3-235b-2507": 0.75,
      "b:deepseek-v3.2": 1.0,
      "b:grok-4.7": 1.0,
-     "b:jev-1.13": 0.5833333333333334
+     "b:jev-1.13": 0.5833333333333334,
+     "b:jeeves": 0.75,
+     "b:jeeves-nothink": 0.5
     },
     "principal_reason": {
      "a:solvi": 1.0,
@@ -506,7 +682,9 @@
      "b:qwen3-235b-2507": 0.7,
      "b:deepseek-v3.2": 0.9,
      "b:grok-4.7": 1.0,
-     "b:jev-1.13": 0.6
+     "b:jev-1.13": 0.6,
+     "b:jeeves": 0.8,
+     "b:jeeves-nothink": 0.6
     },
     "priority": {
      "a:solvi": 1.0,
@@ -514,7 +692,9 @@
      "b:qwen3-235b-2507": 0.7,
      "b:deepseek-v3.2": 1.0,
      "b:grok-4.7": 1.0,
-     "b:jev-1.13": 0.9
+     "b:jev-1.13": 0.9,
+     "b:jeeves": 1.0,
+     "b:jeeves-nothink": 0.9
     },
     "prompt_injection": {
      "a:solvi": 1.0,
@@ -522,7 +702,9 @@
      "b:qwen3-235b-2507": 0.8,
      "b:deepseek-v3.2": 1.0,
      "b:grok-4.7": 1.0,
-     "b:jev-1.13": 1.0
+     "b:jev-1.13": 1.0,
+     "b:jeeves": 1.0,
+     "b:jeeves-nothink": 1.0
     },
     "refer_to_underwriter": {
      "a:solvi": 1.0,
@@ -530,7 +712,9 @@
      "b:qwen3-235b-2507": 0.5,
      "b:deepseek-v3.2": 0.5,
      "b:grok-4.7": 0.75,
-     "b:jev-1.13": 0.5
+     "b:jev-1.13": 0.5,
+     "b:jeeves": 0.5,
+     "b:jeeves-nothink": 0.5
     },
     "refund": {
      "a:solvi": 1.0,
@@ -538,7 +722,9 @@
      "b:qwen3-235b-2507": 0.6666666666666666,
      "b:deepseek-v3.2": 1.0,
      "b:grok-4.7": 1.0,
-     "b:jev-1.13": 0.6666666666666666
+     "b:jev-1.13": 0.6666666666666666,
+     "b:jeeves": 0.8888888888888888,
+     "b:jeeves-nothink": 0.5555555555555556
     },
     "refund_requested": {
      "a:solvi": 1.0,
@@ -546,7 +732,9 @@
      "b:qwen3-235b-2507": 0.9,
      "b:deepseek-v3.2": 1.0,
      "b:grok-4.7": 1.0,
-     "b:jev-1.13": 1.0
+     "b:jev-1.13": 1.0,
+     "b:jeeves": 1.0,
+     "b:jeeves-nothink": 0.9
     },
     "reply": {
      "a:solvi": 1.0,
@@ -554,7 +742,9 @@
      "b:qwen3-235b-2507": 0.6666666666666666,
      "b:deepseek-v3.2": 1.0,
      "b:grok-4.7": 1.0,
-     "b:jev-1.13": 0.6666666666666666
+     "b:jev-1.13": 0.6666666666666666,
+     "b:jeeves": 1.0,
+     "b:jeeves-nothink": 0.4444444444444444
     },
     "risk": {
      "a:solvi": 1.0,
@@ -562,7 +752,9 @@
      "b:qwen3-235b-2507": 0.6666666666666666,
      "b:deepseek-v3.2": 0.8888888888888888,
      "b:grok-4.7": 1.0,
-     "b:jev-1.13": 0.7777777777777778
+     "b:jev-1.13": 0.7777777777777778,
+     "b:jeeves": 0.5555555555555556,
+     "b:jeeves-nothink": 0.5555555555555556
     },
     "rotate_secrets": {
      "a:solvi": 1.0,
@@ -570,7 +762,9 @@
      "b:qwen3-235b-2507": 1.0,
      "b:deepseek-v3.2": 1.0,
      "b:grok-4.7": 1.0,
-     "b:jev-1.13": 1.0
+     "b:jev-1.13": 1.0,
+     "b:jeeves": 1.0,
+     "b:jeeves-nothink": 1.0
     },
     "route": {
      "a:solvi": 1.0,
@@ -578,7 +772,9 @@
      "b:qwen3-235b-2507": 0.9,
      "b:deepseek-v3.2": 1.0,
      "b:grok-4.7": 1.0,
-     "b:jev-1.13": 1.0
+     "b:jev-1.13": 1.0,
+     "b:jeeves": 1.0,
+     "b:jeeves-nothink": 1.0
     },
     "sensitive_data": {
      "a:solvi": 1.0,
@@ -586,7 +782,9 @@
      "b:qwen3-235b-2507": 0.8,
      "b:deepseek-v3.2": 1.0,
      "b:grok-4.7": 1.0,
-     "b:jev-1.13": 1.0
+     "b:jev-1.13": 1.0,
+     "b:jeeves": 0.8,
+     "b:jeeves-nothink": 0.8
     },
     "sepsis_screen": {
      "a:solvi": 1.0,
@@ -594,7 +792,9 @@
      "b:qwen3-235b-2507": 0.9,
      "b:deepseek-v3.2": 1.0,
      "b:grok-4.7": 1.0,
-     "b:jev-1.13": 1.0
+     "b:jev-1.13": 1.0,
+     "b:jeeves": 1.0,
+     "b:jeeves-nothink": 0.9
     },
     "suspicious": {
      "a:solvi": 1.0,
@@ -602,7 +802,9 @@
      "b:qwen3-235b-2507": 0.7777777777777778,
      "b:deepseek-v3.2": 1.0,
      "b:grok-4.7": 1.0,
-     "b:jev-1.13": 0.8888888888888888
+     "b:jev-1.13": 0.8888888888888888,
+     "b:jeeves": 0.8888888888888888,
+     "b:jeeves-nothink": 0.8888888888888888
     },
     "tags": {
      "a:solvi": 1.0,
@@ -610,7 +812,9 @@
      "b:qwen3-235b-2507": 0.8,
      "b:deepseek-v3.2": 1.0,
      "b:grok-4.7": 1.0,
-     "b:jev-1.13": 1.0
+     "b:jev-1.13": 1.0,
+     "b:jeeves": 0.9,
+     "b:jeeves-nothink": 0.7
     },
     "team": {
      "a:solvi": 1.0,
@@ -618,7 +822,9 @@
      "b:qwen3-235b-2507": 0.8888888888888888,
      "b:deepseek-v3.2": 0.2222222222222222,
      "b:grok-4.7": 1.0,
-     "b:jev-1.13": 0.8888888888888888
+     "b:jev-1.13": 0.8888888888888888,
+     "b:jeeves": 0.8888888888888888,
+     "b:jeeves-nothink": 0.8888888888888888
     },
     "urgent": {
      "a:solvi": 1.0,
@@ -626,7 +832,9 @@
      "b:qwen3-235b-2507": 1.0,
      "b:deepseek-v3.2": 1.0,
      "b:grok-4.7": 1.0,
-     "b:jev-1.13": 1.0
+     "b:jev-1.13": 1.0,
+     "b:jeeves": 1.0,
+     "b:jeeves-nothink": 0.9
     },
     "verdict": {
      "a:solvi": 1.0,
@@ -634,7 +842,9 @@
      "b:qwen3-235b-2507": 0.55,
      "b:deepseek-v3.2": 1.0,
      "b:grok-4.7": 1.0,
-     "b:jev-1.13": 0.8
+     "b:jev-1.13": 0.8,
+     "b:jeeves": 0.85,
+     "b:jeeves-nothink": 0.55
     }
    }
   },
@@ -1087,6 +1297,204 @@
       }
      },
      "n_cases": 144
+    },
+    "b:jeeves": {
+     "n": 576,
+     "acc": 0.8628472222222222,
+     "no_answer": 0.0,
+     "viol": 39,
+     "viol_scope": 188,
+     "viol_hard": 1,
+     "scope_hard": 24,
+     "viol_limit": 38,
+     "scope_limit": 164,
+     "conf_err": 11,
+     "auto": 0.4565972222222222,
+     "err_at_auto": 0.04182509505703422,
+     "abst_missing": 1.0,
+     "n_missing": 2,
+     "over_abst": 0.0,
+     "ms_median": 12339.898920124824,
+     "usd_per_1k": 0.0,
+     "usd": 0.0,
+     "crc_threshold": 0.0,
+     "crc_auto": 0.9965277777777778,
+     "crc_err": 0.13763066202090593,
+     "flip_rep": 0.05,
+     "n_rep": 120,
+     "flip_order": 0.11666666666666667,
+     "n_order": 120,
+     "flip_para": 0.10833333333333334,
+     "n_para": 120,
+     "verdict_printed": true,
+     "request_ms_median": 49357.69281800003,
+     "usd_per_request": 0.0
+    },
+    "c:jeeves": {
+     "n": 288,
+     "acc": 0.7673611111111112,
+     "no_answer": 0.0,
+     "viol": 1,
+     "viol_scope": 54,
+     "viol_hard": 0,
+     "scope_hard": 2,
+     "viol_limit": 1,
+     "scope_limit": 52,
+     "conf_err": 9,
+     "auto": 0.7916666666666666,
+     "err_at_auto": 0.039473684210526314,
+     "abst_missing": 1.0,
+     "n_missing": 2,
+     "over_abst": 0.20279720279720279,
+     "ms_median": 2.958510500320699,
+     "usd_per_1k": 0.0,
+     "usd": 0.0,
+     "guards": {
+      "customer_claims_double": {
+       "signal": "confidence",
+       "threshold": 0.66,
+       "answered": 1.0,
+       "error": 0.0,
+       "risk": 0.0,
+       "n": 96,
+       "guarantee": "P(answered alone and wrong) ≤ 0.1 for inputs like the calibration examples",
+       "base_error": 0.0,
+       "must_escalate_at_least": 0.0
+      },
+      "is_double_charge": {
+       "signal": "confidence",
+       "threshold": 0.63,
+       "answered": 1.0,
+       "error": 0.0,
+       "risk": 0.0,
+       "n": 96,
+       "guarantee": "P(answered alone and wrong) ≤ 0.1 for inputs like the calibration examples",
+       "base_error": 0.0,
+       "must_escalate_at_least": 0.0
+      },
+      "refund": {
+       "signal": "confidence",
+       "threshold": 0.7623762376237623,
+       "answered": 0.46875,
+       "error": 0.1777777777777778,
+       "risk": 0.08333333333333333,
+       "n": 96,
+       "guarantee": "P(answered alone and wrong) ≤ 0.1 for inputs like the calibration examples",
+       "base_error": 0.39583333333333337,
+       "must_escalate_at_least": 0.3287037037037038
+      },
+      "reply": {
+       "signal": "confidence",
+       "threshold": 0.75,
+       "answered": 0.5208333333333334,
+       "error": 0.16000000000000003,
+       "risk": 0.08333333333333333,
+       "n": 96,
+       "guarantee": "P(answered alone and wrong) ≤ 0.1 for inputs like the calibration examples",
+       "base_error": 0.22916666666666663,
+       "must_escalate_at_least": 0.14351851851851846
+      }
+     },
+     "n_cases": 72
+    },
+    "b:jeeves-nothink": {
+     "n": 576,
+     "acc": 0.7447916666666666,
+     "no_answer": 0.0,
+     "viol": 75,
+     "viol_scope": 188,
+     "viol_hard": 4,
+     "scope_hard": 24,
+     "viol_limit": 71,
+     "scope_limit": 164,
+     "conf_err": 9,
+     "auto": 0.2899305555555556,
+     "err_at_auto": 0.05389221556886228,
+     "abst_missing": 1.0,
+     "n_missing": 2,
+     "over_abst": 0.0017421602787456446,
+     "ms_median": 2928.3521012500273,
+     "usd_per_1k": 0.0,
+     "usd": 0.0,
+     "crc_threshold": 0.6,
+     "crc_auto": 0.765625,
+     "crc_err": 0.1927437641723356,
+     "flip_rep": 0.004166666666666667,
+     "n_rep": 240,
+     "flip_order": 0.15416666666666667,
+     "n_order": 240,
+     "flip_para": 0.05416666666666667,
+     "n_para": 240,
+     "verdict_printed": true,
+     "request_ms_median": 11742.942180499995,
+     "usd_per_request": 0.0
+    },
+    "c:jeeves-nothink": {
+     "n": 576,
+     "acc": 0.5138888888888888,
+     "no_answer": 0.0,
+     "viol": 10,
+     "viol_scope": 188,
+     "viol_hard": 0,
+     "scope_hard": 24,
+     "viol_limit": 10,
+     "scope_limit": 164,
+     "conf_err": 45,
+     "auto": 0.5885416666666666,
+     "err_at_auto": 0.13274336283185842,
+     "abst_missing": 1.0,
+     "n_missing": 2,
+     "over_abst": 0.4094076655052265,
+     "ms_median": 2.9977310000504076,
+     "usd_per_1k": 0.0,
+     "usd": 0.0,
+     "guards": {
+      "customer_claims_double": {
+       "signal": "confidence",
+       "threshold": 0.7600000000000001,
+       "answered": 1.0,
+       "error": 0.0,
+       "risk": 0.0,
+       "n": 96,
+       "guarantee": "P(answered alone and wrong) ≤ 0.1 for inputs like the calibration examples",
+       "base_error": 0.0,
+       "must_escalate_at_least": 0.0
+      },
+      "is_double_charge": {
+       "signal": "confidence",
+       "threshold": 0.58,
+       "answered": 0.96875,
+       "error": 0.08602150537634412,
+       "risk": 0.08333333333333333,
+       "n": 96,
+       "guarantee": "P(answered alone and wrong) ≤ 0.1 for inputs like the calibration examples",
+       "base_error": 0.09375,
+       "must_escalate_at_least": 0.0
+      },
+      "refund": {
+       "signal": "confidence",
+       "threshold": 0.7920792079207921,
+       "answered": 0.20833333333333334,
+       "error": 0.4,
+       "risk": 0.08333333333333333,
+       "n": 96,
+       "guarantee": "P(answered alone and wrong) ≤ 0.1 for inputs like the calibration examples",
+       "base_error": 0.5729166666666667,
+       "must_escalate_at_least": 0.525462962962963
+      },
+      "reply": {
+       "signal": "confidence",
+       "threshold": 0.7100000000000001,
+       "answered": 0.20833333333333334,
+       "error": 0.4,
+       "risk": 0.08333333333333333,
+       "n": 96,
+       "guarantee": "P(answered alone and wrong) ≤ 0.1 for inputs like the calibration examples",
+       "base_error": 0.5,
+       "must_escalate_at_least": 0.4444444444444445
+      }
+     },
+     "n_cases": 144
     }
    },
    "tags": {
@@ -1141,6 +1549,26 @@
       "acc": 0.6586538461538461,
       "wrong": 0.125,
       "n": 208
+     },
+     "b:jeeves": {
+      "acc": 0.8028846153846154,
+      "wrong": 0.1971153846153846,
+      "n": 208
+     },
+     "c:jeeves": {
+      "acc": 0.7604166666666666,
+      "wrong": 0.020833333333333336,
+      "n": 96
+     },
+     "b:jeeves-nothink": {
+      "acc": 0.6682692307692307,
+      "wrong": 0.3269230769230769,
+      "n": 208
+     },
+     "c:jeeves-nothink": {
+      "acc": 0.41346153846153844,
+      "wrong": 0.14903846153846154,
+      "n": 208
      }
     },
     "distractor": {
@@ -1193,6 +1621,26 @@
      "c:jev-1.13": {
       "acc": 0.7112068965517241,
       "wrong": 0.025862068965517238,
+      "n": 232
+     },
+     "b:jeeves": {
+      "acc": 0.8706896551724138,
+      "wrong": 0.12931034482758622,
+      "n": 232
+     },
+     "c:jeeves": {
+      "acc": 0.7058823529411765,
+      "wrong": 0.014705882352941175,
+      "n": 136
+     },
+     "b:jeeves-nothink": {
+      "acc": 0.7887931034482759,
+      "wrong": 0.20689655172413796,
+      "n": 232
+     },
+     "c:jeeves-nothink": {
+      "acc": 0.47413793103448276,
+      "wrong": 0.07758620689655173,
       "n": 232
      }
     },
@@ -1247,6 +1695,26 @@
       "acc": 0.5833333333333334,
       "wrong": 0.16666666666666666,
       "n": 228
+     },
+     "b:jeeves": {
+      "acc": 0.8289473684210527,
+      "wrong": 0.17105263157894737,
+      "n": 228
+     },
+     "c:jeeves": {
+      "acc": 0.7291666666666666,
+      "wrong": 0.07291666666666667,
+      "n": 96
+     },
+     "b:jeeves-nothink": {
+      "acc": 0.6666666666666666,
+      "wrong": 0.3333333333333333,
+      "n": 228
+     },
+     "c:jeeves-nothink": {
+      "acc": 0.47368421052631576,
+      "wrong": 0.09210526315789475,
+      "n": 228
      }
     },
     "injection": {
@@ -1300,6 +1768,26 @@
       "acc": 0.6041666666666666,
       "wrong": 0.17708333333333331,
       "n": 96
+     },
+     "b:jeeves": {
+      "acc": 0.7708333333333334,
+      "wrong": 0.22916666666666666,
+      "n": 96
+     },
+     "c:jeeves": {
+      "acc": 0.6875,
+      "wrong": 0.041666666666666664,
+      "n": 48
+     },
+     "b:jeeves-nothink": {
+      "acc": 0.6354166666666666,
+      "wrong": 0.3541666666666667,
+      "n": 96
+     },
+     "c:jeeves-nothink": {
+      "acc": 0.4270833333333333,
+      "wrong": 0.08333333333333331,
+      "n": 96
      }
     },
     "missing": {
@@ -1351,6 +1839,26 @@
      },
      "c:jev-1.13": {
       "acc": 1.0,
+      "wrong": 0.0,
+      "n": 4
+     },
+     "b:jeeves": {
+      "acc": 1.0,
+      "wrong": 0.0,
+      "n": 4
+     },
+     "c:jeeves": {
+      "acc": 1.0,
+      "wrong": 0.0,
+      "n": 4
+     },
+     "b:jeeves-nothink": {
+      "acc": 0.75,
+      "wrong": 0.25,
+      "n": 4
+     },
+     "c:jeeves-nothink": {
+      "acc": 0.75,
       "wrong": 0.0,
       "n": 4
      }
@@ -1406,6 +1914,26 @@
       "acc": 0.6875,
       "wrong": 0.0,
       "n": 16
+     },
+     "b:jeeves": {
+      "acc": 0.9375,
+      "wrong": 0.0625,
+      "n": 16
+     },
+     "c:jeeves": {
+      "acc": 0.625,
+      "wrong": 0.0,
+      "n": 16
+     },
+     "b:jeeves-nothink": {
+      "acc": 0.9375,
+      "wrong": 0.0625,
+      "n": 16
+     },
+     "c:jeeves-nothink": {
+      "acc": 0.5,
+      "wrong": 0.125,
+      "n": 16
      }
     },
     "paraphrase_claim": {
@@ -1459,6 +1987,26 @@
       "acc": 0.7674418604651163,
       "wrong": 0.05232558139534883,
       "n": 172
+     },
+     "b:jeeves": {
+      "acc": 0.8372093023255814,
+      "wrong": 0.16279069767441862,
+      "n": 172
+     },
+     "c:jeeves": {
+      "acc": 0.875,
+      "wrong": 0.04545454545454545,
+      "n": 88
+     },
+     "b:jeeves-nothink": {
+      "acc": 0.75,
+      "wrong": 0.2441860465116279,
+      "n": 172
+     },
+     "c:jeeves-nothink": {
+      "acc": 0.5348837209302325,
+      "wrong": 0.06395348837209301,
+      "n": 172
      }
     }
    },
@@ -1469,7 +2017,9 @@
      "b:qwen3-235b-2507": 1.0,
      "b:deepseek-v3.2": 0.9722222222222222,
      "b:grok-4.7": 1.0,
-     "b:jev-1.13": 1.0
+     "b:jev-1.13": 1.0,
+     "b:jeeves": 1.0,
+     "b:jeeves-nothink": 1.0
     },
     "is_double_charge": {
      "a:solvi": 1.0,
@@ -1477,7 +2027,9 @@
      "b:qwen3-235b-2507": 0.8611111111111112,
      "b:deepseek-v3.2": 0.9652777777777778,
      "b:grok-4.7": 1.0,
-     "b:jev-1.13": 0.8402777777777778
+     "b:jev-1.13": 0.8402777777777778,
+     "b:jeeves": 0.8333333333333334,
+     "b:jeeves-nothink": 0.7083333333333334
     },
     "refund": {
      "a:solvi": 1.0,
@@ -1485,7 +2037,9 @@
      "b:qwen3-235b-2507": 0.7569444444444444,
      "b:deepseek-v3.2": 0.9722222222222222,
      "b:grok-4.7": 1.0,
-     "b:jev-1.13": 0.7152777777777778
+     "b:jev-1.13": 0.7152777777777778,
+     "b:jeeves": 0.8472222222222222,
+     "b:jeeves-nothink": 0.6527777777777778
     },
     "reply": {
      "a:solvi": 0.9027777777777778,
@@ -1493,7 +2047,9 @@
      "b:qwen3-235b-2507": 0.7569444444444444,
      "b:deepseek-v3.2": 0.9722222222222222,
      "b:grok-4.7": 1.0,
-     "b:jev-1.13": 0.7222222222222222
+     "b:jev-1.13": 0.7222222222222222,
+     "b:jeeves": 0.7708333333333334,
+     "b:jeeves-nothink": 0.6180555555555556
     }
    }
   },
@@ -1902,6 +2458,182 @@
       }
      },
      "n_cases": 144
+    },
+    "b:jeeves": {
+     "n": 432,
+     "acc": 0.9120370370370371,
+     "no_answer": 0.0,
+     "viol": 22,
+     "viol_scope": 102,
+     "viol_hard": 5,
+     "scope_hard": 31,
+     "viol_limit": 17,
+     "scope_limit": 71,
+     "conf_err": 17,
+     "auto": 0.5578703703703703,
+     "err_at_auto": 0.07053941908713693,
+     "abst_missing": 0.8571428571428571,
+     "n_missing": 14,
+     "over_abst": 0.0,
+     "ms_median": 12549.351490666897,
+     "usd_per_1k": 0.0,
+     "usd": 0.0,
+     "crc_threshold": 0.0,
+     "crc_auto": 0.9722222222222222,
+     "crc_err": 0.09047619047619047,
+     "flip_rep": 0.0,
+     "n_rep": 90,
+     "flip_order": 0.13333333333333333,
+     "n_order": 90,
+     "flip_para": 0.044444444444444446,
+     "n_para": 90,
+     "verdict_printed": true,
+     "request_ms_median": 37648.39336350087,
+     "usd_per_request": 0.0
+    },
+    "c:jeeves": {
+     "n": 108,
+     "acc": 0.9537037037037037,
+     "no_answer": 0.0,
+     "viol": 0,
+     "viol_scope": 24,
+     "viol_hard": 0,
+     "scope_hard": 12,
+     "viol_limit": 0,
+     "scope_limit": 12,
+     "conf_err": 1,
+     "auto": 0.9444444444444444,
+     "err_at_auto": 0.00980392156862745,
+     "abst_missing": 1.0,
+     "n_missing": 2,
+     "over_abst": 0.03773584905660377,
+     "ms_median": 2.8821219984820345,
+     "usd_per_1k": 0.0,
+     "usd": 0.0,
+     "guards": {
+      "payment": {
+       "signal": "confidence",
+       "threshold": 0.68,
+       "answered": 0.875,
+       "error": 0.0714285714285714,
+       "risk": 0.0625,
+       "n": 48,
+       "guarantee": "P(answered alone and wrong) ≤ 0.1 for inputs like the calibration examples",
+       "base_error": 0.10416666666666663,
+       "must_escalate_at_least": 0.0046296296296295825
+      },
+      "duplicate": {
+       "signal": "confidence",
+       "threshold": 0.83,
+       "answered": 1.0,
+       "error": 0.0,
+       "risk": 0.0,
+       "n": 48,
+       "guarantee": "P(answered alone and wrong) ≤ 0.1 for inputs like the calibration examples",
+       "base_error": 0.0,
+       "must_escalate_at_least": 0.0
+      },
+      "escalate_approval": {
+       "signal": "confidence",
+       "threshold": 0.52,
+       "answered": 1.0,
+       "error": 0.04166666666666663,
+       "risk": 0.041666666666666664,
+       "n": 48,
+       "guarantee": "P(answered alone and wrong) ≤ 0.1 for inputs like the calibration examples",
+       "base_error": 0.04166666666666663,
+       "must_escalate_at_least": 0.0
+      }
+     },
+     "n_cases": 36
+    },
+    "b:jeeves-nothink": {
+     "n": 432,
+     "acc": 0.8310185185185185,
+     "no_answer": 0.0,
+     "viol": 48,
+     "viol_scope": 102,
+     "viol_hard": 16,
+     "scope_hard": 31,
+     "viol_limit": 32,
+     "scope_limit": 71,
+     "conf_err": 17,
+     "auto": 0.44675925925925924,
+     "err_at_auto": 0.08808290155440414,
+     "abst_missing": 0.5,
+     "n_missing": 14,
+     "over_abst": 0.0,
+     "ms_median": 5028.803392166689,
+     "usd_per_1k": 0.0,
+     "usd": 0.0,
+     "crc_threshold": 0.8,
+     "crc_auto": 0.7708333333333334,
+     "crc_err": 0.12312312312312312,
+     "flip_rep": 0.0,
+     "n_rep": 180,
+     "flip_order": 0.22777777777777777,
+     "n_order": 180,
+     "flip_para": 0.022222222222222223,
+     "n_para": 180,
+     "verdict_printed": true,
+     "request_ms_median": 11225.578939999878,
+     "usd_per_request": 0.0
+    },
+    "c:jeeves-nothink": {
+     "n": 432,
+     "acc": 0.7152777777777778,
+     "no_answer": 0.0,
+     "viol": 13,
+     "viol_scope": 102,
+     "viol_hard": 1,
+     "scope_hard": 31,
+     "viol_limit": 12,
+     "scope_limit": 71,
+     "conf_err": 28,
+     "auto": 0.75,
+     "err_at_auto": 0.08641975308641975,
+     "abst_missing": 0.9285714285714286,
+     "n_missing": 14,
+     "over_abst": 0.22727272727272727,
+     "ms_median": 2.925889499920231,
+     "usd_per_1k": 0.0,
+     "usd": 0.0,
+     "guards": {
+      "payment": {
+       "signal": "confidence",
+       "threshold": 0.8613861386138614,
+       "answered": 0.28125,
+       "error": 0.2962962962962963,
+       "risk": 0.08333333333333333,
+       "n": 96,
+       "guarantee": "P(answered alone and wrong) ≤ 0.1 for inputs like the calibration examples",
+       "base_error": 0.35416666666666663,
+       "must_escalate_at_least": 0.2824074074074074
+      },
+      "duplicate": {
+       "signal": "confidence",
+       "threshold": 0.52,
+       "answered": 1.0,
+       "error": 0.03125,
+       "risk": 0.03125,
+       "n": 96,
+       "guarantee": "P(answered alone and wrong) ≤ 0.1 for inputs like the calibration examples",
+       "base_error": 0.03125,
+       "must_escalate_at_least": 0.0
+      },
+      "escalate_approval": {
+       "signal": "confidence",
+       "threshold": 0.5643564356435644,
+       "answered": 0.8958333333333334,
+       "error": 0.09302325581395354,
+       "risk": 0.08333333333333333,
+       "n": 96,
+       "guarantee": "P(answered alone and wrong) ≤ 0.1 for inputs like the calibration examples",
+       "base_error": 0.16666666666666663,
+       "must_escalate_at_least": 0.07407407407407403
+      }
+     },
+     "n_cases": 144
     }
    },
    "tags": {
@@ -1954,6 +2686,26 @@
      },
      "c:jev-1.13": {
       "acc": 0.8717948717948718,
+      "wrong": 0.10256410256410256,
+      "n": 39
+     },
+     "b:jeeves": {
+      "acc": 0.8974358974358975,
+      "wrong": 0.10256410256410256,
+      "n": 39
+     },
+     "c:jeeves": {
+      "acc": 1.0,
+      "wrong": 0.0,
+      "n": 9
+     },
+     "b:jeeves-nothink": {
+      "acc": 0.8461538461538461,
+      "wrong": 0.15384615384615385,
+      "n": 39
+     },
+     "c:jeeves-nothink": {
+      "acc": 0.6923076923076923,
       "wrong": 0.10256410256410256,
       "n": 39
      }
@@ -2009,6 +2761,26 @@
       "acc": 0.7894736842105263,
       "wrong": 0.017543859649122806,
       "n": 57
+     },
+     "b:jeeves": {
+      "acc": 0.9824561403508771,
+      "wrong": 0.017543859649122806,
+      "n": 57
+     },
+     "c:jeeves": {
+      "acc": 1.0,
+      "wrong": 0.0,
+      "n": 12
+     },
+     "b:jeeves-nothink": {
+      "acc": 0.8421052631578947,
+      "wrong": 0.15789473684210525,
+      "n": 57
+     },
+     "c:jeeves-nothink": {
+      "acc": 0.7543859649122807,
+      "wrong": 0.017543859649122806,
+      "n": 57
      }
     },
     "edge": {
@@ -2062,6 +2834,26 @@
       "acc": 0.75,
       "wrong": 0.23333333333333334,
       "n": 60
+     },
+     "b:jeeves": {
+      "acc": 0.7833333333333333,
+      "wrong": 0.21666666666666667,
+      "n": 60
+     },
+     "c:jeeves": {
+      "acc": 1.0,
+      "wrong": 0.0,
+      "n": 9
+     },
+     "b:jeeves-nothink": {
+      "acc": 0.7166666666666667,
+      "wrong": 0.2833333333333333,
+      "n": 60
+     },
+     "c:jeeves-nothink": {
+      "acc": 0.65,
+      "wrong": 0.25,
+      "n": 60
      }
     },
     "injection": {
@@ -2113,6 +2905,26 @@
      },
      "c:jev-1.13": {
       "acc": 0.8333333333333334,
+      "wrong": 0.0,
+      "n": 18
+     },
+     "b:jeeves": {
+      "acc": 0.9444444444444444,
+      "wrong": 0.05555555555555555,
+      "n": 18
+     },
+     "c:jeeves": {
+      "acc": 1.0,
+      "wrong": 0.0,
+      "n": 9
+     },
+     "b:jeeves-nothink": {
+      "acc": 0.7222222222222222,
+      "wrong": 0.2777777777777778,
+      "n": 18
+     },
+     "c:jeeves-nothink": {
+      "acc": 0.6666666666666666,
       "wrong": 0.0,
       "n": 18
      }
@@ -2168,6 +2980,26 @@
       "acc": 0.9047619047619048,
       "wrong": 0.09523809523809523,
       "n": 21
+     },
+     "b:jeeves": {
+      "acc": 0.9047619047619048,
+      "wrong": 0.09523809523809523,
+      "n": 21
+     },
+     "c:jeeves": {
+      "acc": 1.0,
+      "wrong": 0.0,
+      "n": 3
+     },
+     "b:jeeves-nothink": {
+      "acc": 0.6666666666666666,
+      "wrong": 0.3333333333333333,
+      "n": 21
+     },
+     "c:jeeves-nothink": {
+      "acc": 0.9523809523809523,
+      "wrong": 0.047619047619047616,
+      "n": 21
      }
     }
    },
@@ -2178,7 +3010,9 @@
      "b:qwen3-235b-2507": 0.9861111111111112,
      "b:deepseek-v3.2": 0.9513888888888888,
      "b:grok-4.7": 1.0,
-     "b:jev-1.13": 0.9930555555555556
+     "b:jev-1.13": 0.9930555555555556,
+     "b:jeeves": 1.0,
+     "b:jeeves-nothink": 0.9791666666666666
     },
     "escalate_approval": {
      "a:solvi": 1.0,
@@ -2186,7 +3020,9 @@
      "b:qwen3-235b-2507": 0.7708333333333334,
      "b:deepseek-v3.2": 0.9513888888888888,
      "b:grok-4.7": 1.0,
-     "b:jev-1.13": 0.8611111111111112
+     "b:jev-1.13": 0.8611111111111112,
+     "b:jeeves": 0.8888888888888888,
+     "b:jeeves-nothink": 0.8541666666666666
     },
     "payment": {
      "a:solvi": 1.0,
@@ -2194,7 +3030,9 @@
      "b:qwen3-235b-2507": 0.6319444444444444,
      "b:deepseek-v3.2": 0.9513888888888888,
      "b:grok-4.7": 1.0,
-     "b:jev-1.13": 0.8402777777777778
+     "b:jev-1.13": 0.8402777777777778,
+     "b:jeeves": 0.8472222222222222,
+     "b:jeeves-nothink": 0.6597222222222222
     }
    }
   },
@@ -2481,6 +3319,138 @@
       }
      },
      "n_cases": 360
+    },
+    "b:jeeves": {
+     "n": 360,
+     "acc": 0.9694444444444444,
+     "no_answer": 0.0,
+     "viol": 1,
+     "viol_scope": 63,
+     "viol_hard": 0,
+     "scope_hard": 0,
+     "viol_limit": 1,
+     "scope_limit": 63,
+     "conf_err": 0,
+     "auto": 0.7527777777777778,
+     "err_at_auto": 0.0,
+     "abst_missing": 1.0,
+     "n_missing": 10,
+     "over_abst": 0.011428571428571429,
+     "ms_median": 11066.261306000342,
+     "usd_per_1k": 0.0,
+     "usd": 0.0,
+     "crc_threshold": 0.0,
+     "crc_auto": 0.9611111111111111,
+     "crc_err": 0.02023121387283237,
+     "flip_rep": 0.0,
+     "n_rep": 45,
+     "flip_order": 0.0,
+     "n_order": 45,
+     "flip_para": 0.0,
+     "n_para": 45,
+     "verdict_printed": true,
+     "request_ms_median": 11065.030827000555,
+     "usd_per_request": 0.0
+    },
+    "c:jeeves": {
+     "n": 180,
+     "acc": 0.9555555555555556,
+     "no_answer": 0.0,
+     "viol": 1,
+     "viol_scope": 27,
+     "viol_hard": 0,
+     "scope_hard": 0,
+     "viol_limit": 1,
+     "scope_limit": 27,
+     "conf_err": 5,
+     "auto": 0.9555555555555556,
+     "err_at_auto": 0.029069767441860465,
+     "abst_missing": 1.0,
+     "n_missing": 5,
+     "over_abst": 0.017142857142857144,
+     "ms_median": 0.45171950114308856,
+     "usd_per_1k": 0.0,
+     "usd": 0.0,
+     "guards": {
+      "queue": {
+       "signal": "confidence",
+       "threshold": 0.3333333333333333,
+       "answered": 1.0,
+       "error": 0.025000000000000022,
+       "risk": 0.025,
+       "n": 160,
+       "guarantee": "P(answered alone and wrong) ≤ 0.1 for inputs like the calibration examples",
+       "base_error": 0.025000000000000022,
+       "must_escalate_at_least": 0.0
+      }
+     },
+     "n_cases": 180
+    },
+    "b:jeeves-nothink": {
+     "n": 360,
+     "acc": 0.9638888888888889,
+     "no_answer": 0.0,
+     "viol": 4,
+     "viol_scope": 63,
+     "viol_hard": 0,
+     "scope_hard": 0,
+     "viol_limit": 4,
+     "scope_limit": 63,
+     "conf_err": 0,
+     "auto": 0.7388888888888889,
+     "err_at_auto": 0.0,
+     "abst_missing": 1.0,
+     "n_missing": 10,
+     "over_abst": 0.014285714285714285,
+     "ms_median": 2226.063846499983,
+     "usd_per_1k": 0.0,
+     "usd": 0.0,
+     "crc_threshold": 0.0,
+     "crc_auto": 0.9583333333333334,
+     "crc_err": 0.02318840579710145,
+     "flip_rep": 0.0,
+     "n_rep": 90,
+     "flip_order": 0.0,
+     "n_order": 90,
+     "flip_para": 0.0,
+     "n_para": 90,
+     "verdict_printed": true,
+     "request_ms_median": 2223.761594500047,
+     "usd_per_request": 0.0
+    },
+    "c:jeeves-nothink": {
+     "n": 360,
+     "acc": 0.9472222222222222,
+     "no_answer": 0.0,
+     "viol": 1,
+     "viol_scope": 63,
+     "viol_hard": 0,
+     "scope_hard": 0,
+     "viol_limit": 1,
+     "scope_limit": 63,
+     "conf_err": 8,
+     "auto": 0.9416666666666667,
+     "err_at_auto": 0.02359882005899705,
+     "abst_missing": 1.0,
+     "n_missing": 10,
+     "over_abst": 0.03142857142857143,
+     "ms_median": 0.49301950002700323,
+     "usd_per_1k": 0.0,
+     "usd": 0.0,
+     "guards": {
+      "queue": {
+       "signal": "confidence",
+       "threshold": 0.2871287128712871,
+       "answered": 1.0,
+       "error": 0.03125,
+       "risk": 0.03125,
+       "n": 160,
+       "guarantee": "P(answered alone and wrong) ≤ 0.1 for inputs like the calibration examples",
+       "base_error": 0.03125,
+       "must_escalate_at_least": 0.0
+      }
+     },
+     "n_cases": 360
     }
    },
    "tags": {
@@ -2528,6 +3498,26 @@
      },
      "c:jev-1.13": {
       "acc": 0.9,
+      "wrong": 0.03333333333333333,
+      "n": 60
+     },
+     "b:jeeves": {
+      "acc": 0.95,
+      "wrong": 0.03333333333333333,
+      "n": 60
+     },
+     "c:jeeves": {
+      "acc": 0.9333333333333333,
+      "wrong": 0.03333333333333333,
+      "n": 30
+     },
+     "b:jeeves-nothink": {
+      "acc": 0.9333333333333333,
+      "wrong": 0.03333333333333333,
+      "n": 60
+     },
+     "c:jeeves-nothink": {
+      "acc": 0.9333333333333333,
       "wrong": 0.03333333333333333,
       "n": 60
      }
@@ -2578,6 +3568,26 @@
       "acc": 0.9166666666666666,
       "wrong": 0.03333333333333333,
       "n": 60
+     },
+     "b:jeeves": {
+      "acc": 1.0,
+      "wrong": 0.0,
+      "n": 60
+     },
+     "c:jeeves": {
+      "acc": 0.9333333333333333,
+      "wrong": 0.0,
+      "n": 30
+     },
+     "b:jeeves-nothink": {
+      "acc": 0.9833333333333333,
+      "wrong": 0.016666666666666666,
+      "n": 60
+     },
+     "c:jeeves-nothink": {
+      "acc": 0.9,
+      "wrong": 0.0,
+      "n": 60
      }
     },
     "missing": {
@@ -2626,6 +3636,26 @@
       "acc": 1.0,
       "wrong": 0,
       "n": 10
+     },
+     "b:jeeves": {
+      "acc": 1.0,
+      "wrong": 0,
+      "n": 10
+     },
+     "c:jeeves": {
+      "acc": 1.0,
+      "wrong": 0,
+      "n": 5
+     },
+     "b:jeeves-nothink": {
+      "acc": 1.0,
+      "wrong": 0,
+      "n": 10
+     },
+     "c:jeeves-nothink": {
+      "acc": 1.0,
+      "wrong": 0,
+      "n": 10
      }
     }
    },
@@ -2636,7 +3666,9 @@
      "b:qwen3-235b-2507": 0.925,
      "b:deepseek-v3.2": 0.35555555555555557,
      "b:grok-4.7": 0.95,
-     "b:jev-1.13": 0.9638888888888889
+     "b:jev-1.13": 0.9638888888888889,
+     "b:jeeves": 0.9694444444444444,
+     "b:jeeves-nothink": 0.9638888888888889
     }
    }
   }
@@ -2671,6 +3703,18 @@
    "usd": 0.13512748200000066,
    "usd_per_1k": 0.05319979606299239,
    "ms_median": 437.0914594910573
+  },
+  "jeeves": {
+   "requests": 1613,
+   "usd": 0.0,
+   "usd_per_1k": 0.0,
+   "ms_median": 12778.470950997871
+  },
+  "jeeves-nothink": {
+   "requests": 2539,
+   "usd": 0.0,
+   "usd_per_1k": 0.0,
+   "ms_median": 2813.5148529995604
   }
  },
  "spent_usd_by_model": {
@@ -2678,7 +3722,9 @@
   "qwen3-235b-2507": 0.6245312337,
   "deepseek-v3.2": 2.2130124212097,
   "grok-4.7": 34.32101112,
-  "jev-1.13": 0.2661809640000012
+  "jev-1.13": 0.2661809640000012,
+  "jeeves": 0.0,
+  "jeeves-nothink": 0.0
  },
  "spent_usd": 39.49521148646969,
  "task11_claim_reader": {
