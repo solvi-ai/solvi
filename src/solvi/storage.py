@@ -407,19 +407,33 @@ class TraceStorage:
     def replay_all(self, system, trust_models=False, **filters):
         """Replay every stored trace (or those matching query `filters`) against `system` (a System or a Catalog): each
         step is re-computed from its recorded inputs (see Trace.replay). → the ones that fail: [{"id", "seq", "time",
-        "mismatches": [(step, name, reason)], "models": [(step, name, verdict)]}] — empty when all replay."""
+        "mismatches": [(step, name, reason)], "models": [(step, name, verdict)], "catalog", "kinds", "summary"}] — empty
+        when all replay. Each mismatch has a `.kind`, and "summary" tells damaged data from a catalog or a model that
+        changed since (see solvi.runtime.Mismatch). A stored record that cannot be loaded is one mismatch (0, "load", ...),
+        a replay that raises is (0, "replay", ...): both of kind "error", no verdict on the data."""
+        from .runtime import Mismatch, mismatch_summary
         bad = []
+
+        def failed(s, stage, e):
+            ms = [Mismatch(0, stage, f"{type(e).__name__}: {e}", "error")]
+            bad.append({"id": s.id, "seq": s.seq, "time": s.time, "mismatches": ms, "models": [], "catalog": None,
+                        **mismatch_summary(ms)})
+
         for s in (self.query(**filters) if filters else self.iter()):
             try:
                 r = s.response(system)
+            except Exception as e:  # noqa: BLE001
+                failed(s, "load", e)
+                continue
+            try:
                 rep = r.trace.replay(system, r.flow, trust_models=trust_models)
             except Exception as e:  # noqa: BLE001
-                bad.append({"id": s.id, "seq": s.seq, "time": s.time, "mismatches": [(0, "load", f"{type(e).__name__}: {e}")],
-                            "models": []})
+                failed(s, "replay", e)
                 continue
             if not rep["ok"]:
                 bad.append({"id": s.id, "seq": s.seq, "time": s.time, "mismatches": rep["mismatches"],
-                            "models": rep["models"]})
+                            "models": rep["models"], "catalog": rep["catalog"], "kinds": rep["kinds"],
+                            "summary": rep["summary"]})
         return bad
 
     # --- provenance over the store

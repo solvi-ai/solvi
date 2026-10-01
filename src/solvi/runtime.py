@@ -62,6 +62,59 @@ def srepr(v):
 
 MISSING = object()
 
+MISMATCH_KINDS = ("integrity", "recompute", "model_changed", "missing_part", "missing_input", "flow", "error")
+
+
+class Mismatch(tuple):
+    """One replay mismatch: the triple (step, name, reason), as replay has always returned it, plus `.kind`:
+
+        integrity      the hash chain, a record's hash, the input's hash or a recorded input hash does not verify: the data
+                       was changed after the run
+        recompute      a step does not give the recorded value: its code, a declaration or what it reads changed
+        model_changed  the step's model has another fingerprint than the recorded one
+        missing_part   the part (or a producer) is no longer in the catalog: renamed or removed
+        missing_input  a part now reads an input the trace does not hold
+        flow           a planned step is not in the trace
+        error          the replay itself failed (the record could not be loaded, or replay raised): no verdict on the data
+
+    It compares, unpacks and serializes as the plain triple."""
+
+    def __new__(cls, step, name, reason, kind="recompute"):
+        m = tuple.__new__(cls, (step, name, reason))
+        m.kind = kind
+        return m
+
+    def __getnewargs__(self):
+        return (*self, self.kind)
+
+    def to_dict(self):
+        return {"step": self[0], "name": self[1], "reason": self[2], "kind": self.kind}
+
+
+def mismatch_summary(mismatches, catalog=None):
+    """Replay mismatches → {"kinds": {kind: count}, "summary": one line}. "data damaged" when anything of kind integrity;
+    else what the mismatches say about a trace whose data is intact: the catalog changed (parts missing, new inputs), the
+    model changed, steps do not recompute, or the replay itself failed. `catalog`: the replay's catalog verdict."""
+    kinds = {}
+    for m in mismatches:
+        k = getattr(m, "kind", "recompute")
+        kinds[k] = kinds.get(k, 0) + 1
+    if not kinds:
+        s = "ok"
+    elif "integrity" in kinds:
+        s = "data damaged: the hash chain or a record does not verify"
+    elif set(kinds) <= {"error"}:
+        s = "replay failed (no verdict on the data)"
+    elif "missing_part" in kinds:
+        s = "data intact, catalog changed (parts missing)"
+    elif catalog == "changed" or "missing_input" in kinds:
+        s = "data intact, catalog changed"
+    elif set(kinds) <= {"model_changed"}:
+        s = "data intact, model changed"
+    else:
+        s = "data intact, steps do not recompute"
+    return {"kinds": kinds, "summary": s}
+
 
 @dataclass
 class Record(Serial):
@@ -188,6 +241,11 @@ class Trace(Serial):
         "recomputed", "trusted", "unavailable" or "changed". "catalog": "same", "changed" (with "changed_parts": the parts of
         this trace whose code or declarations differ from when it was recorded) or "unrecorded" — for information: a
         changed part that still re-computes the recorded values is not a mismatch.
+        Each mismatch is a Mismatch: the triple, with `.kind` (see Mismatch). When there are mismatches the result also has
+        "kinds": {kind: count} and "summary": one line that tells damaged data ("data damaged: ...") from a catalog or a
+        model that changed since ("data intact, catalog changed", "data intact, model changed", ...). A part that is no
+        longer in the catalog (renamed or removed) is a mismatch of kind missing_part, not an exception; the steps after
+        it are still checked.
         Limits: a trace rebuilt honestly from a *different* input is internally consistent — compare `init_hash` with a
         receipt you published elsewhere to catch that."""
         heads = None
@@ -197,12 +255,12 @@ class Trace(Serial):
         prev = self.init_hash
         bad, models = [], []
         if vhash(self.init) != self.init_hash:
-            bad.append((0, "init", "init_hash does not match the recorded input"))
+            bad.append(Mismatch(0, "init", "init_hash does not match the recorded input", "integrity"))
         for r in self.records:
             if r.prev != prev:
-                bad.append((r.step, r.name, "hash chain broken"))
+                bad.append(Mismatch(r.step, r.name, "hash chain broken", "integrity"))
             if vhash(r.body()) != r.hash:
-                bad.append((r.step, r.name, "record modified after execution"))
+                bad.append(Mismatch(r.step, r.name, "record modified after execution", "integrity"))
             prev = r.hash
             if r.kind == "head":
                 bad += _replay_head(r, heads, vals, trust_models, models)
@@ -217,7 +275,12 @@ class Trace(Serial):
                 from .strategy import replay_plan
                 bad += replay_plan(r, catalog, self.init)
                 continue
-            part = catalog.rules[r.name[7:]] if r.kind == "rule" else catalog.parts[r.name]
+            part = catalog.rules.get(r.name[7:]) if r.kind == "rule" else catalog.parts.get(r.name)
+            if part is None:                              # renamed or removed since the run: a verdict, not a KeyError
+                bad.append(Mismatch(r.step, r.name, f"part {r.name} is not in the catalog (renamed or removed)",
+                                    "missing_part"))
+                vals[r.name] = r.value                    # the steps that read it are still checked, on the recorded value
+                continue
             if part.alternatives is not None and r.tried and set(part.inputs) - set(r.inputs):
                 from .strategy import narrowed            # a strategist kept only some producers of this fact
                 part = narrowed(part, r.tried)
@@ -225,12 +288,14 @@ class Trace(Serial):
             lost = [x for x, v in args.items() if v is MISSING]
             if lost:
                 if not (r.error or "").startswith("missing inputs") or r.value is not MISSING:
-                    bad.append((r.step, r.name, "input " + ", ".join(lost) + " missing from the trace"))
+                    bad.append(Mismatch(r.step, r.name, "input " + ", ".join(lost) + " missing from the trace",
+                                        "missing_input"))
                 vals[r.name] = r.value
                 continue
             for x, v in args.items():
                 if r.inputs.get(x) != vhash(v):
-                    bad.append((r.step, r.name, f"input {x} does not match the recorded one"))
+                    bad.append(Mismatch(r.step, r.name, f"input {x} does not match the recorded one",
+                                        "integrity" if x in r.inputs else "recompute"))
             vals[r.name] = r.value
             if r.value is MISSING and _timed_out(r):     # a call that did not finish in time (aask): nothing to re-run
                 continue
@@ -249,9 +314,12 @@ class Trace(Serial):
             seen = {r.name for r in self.records} | {n for n, _ in self.skipped}
             for st in flow.steps:
                 if st.part.name not in seen:
-                    bad.append((0, st.part.name, "planned step missing from the trace"))
+                    bad.append(Mismatch(0, st.part.name, "planned step missing from the trace", "flow"))
+        bad = [m if isinstance(m, Mismatch) else Mismatch(*m) for m in bad]
         out = {"ok": not bad, "steps": len(self.records), "mismatches": bad, "models": models}
         out.update(_catalog_verdict(self.fingerprint, catalog))
+        if bad:
+            out.update(mismatch_summary(bad, out["catalog"]))
         return out
 
 
@@ -349,8 +417,9 @@ def _model_check(model, r, trust_models):
         return "recomputed", []
     fp = fingerprint(model)
     if fp != rec.get("fp"):
-        return "changed", [(r.step, r.name, (f"model changed since this decision: {rec.get('id')} #{rec.get('fp')} "
-                                             f"was used, the catalog now has #{fp}"))]
+        return "changed", [Mismatch(r.step, r.name, (f"model changed since this decision: {rec.get('id')} "
+                                                     f"#{rec.get('fp')} was used, the catalog now has #{fp}"),
+                                    "model_changed")]
     if trust_models or getattr(model, "deterministic", True) is False:
         return "trusted", []
     return "recomputed", []
@@ -399,7 +468,7 @@ def _replay_head(r, heads, vals, trust_models, models):
     q = r.name[7:]
     for f, h in r.inputs.items():
         if f not in vals or vhash(vals[f]) != h:
-            bad.append((r.step, r.name, f"input {f} does not match the recorded one"))
+            bad.append(Mismatch(r.step, r.name, f"input {f} does not match the recorded one", "integrity"))
     p = r.probs or {}
     if p and r.value not in _head_answers(p):
         bad.append((r.step, r.name, f"answer {r.value!r} does not follow from the recorded probabilities"))
@@ -410,8 +479,9 @@ def _replay_head(r, heads, vals, trust_models, models):
     fp = fingerprint(head)
     if r.model is not None and fp != r.model.get("fp"):
         models.append((r.step, r.name, "changed"))
-        return bad + [(r.step, r.name, (f"model changed since this decision: {r.model.get('type')} #{r.model.get('fp')} "
-                                        f"was used, the system now has #{fp}"))]
+        return bad + [Mismatch(r.step, r.name, (f"model changed since this decision: {r.model.get('type')} "
+                                                f"#{r.model.get('fp')} was used, the system now has #{fp}"),
+                               "model_changed")]
     if trust_models:
         models.append((r.step, r.name, "trusted"))
         return bad
@@ -459,7 +529,8 @@ def _replay_group(group, r, args, init, trust_models=False, models=None):
         return [(r.step, r.name, "record of a fact with alternative producers has no 'tried' list")]
     for name, outcome in r.tried:
         if name not in alts:
-            bad.append((r.step, r.name, f"unknown producer {name}"))
+            bad.append(Mismatch(r.step, r.name, f"producer {name} is not in the catalog (renamed or removed)",
+                                "missing_part"))
             continue
         if outcome.startswith(("shadow", TIMED_OUT)):   # shadow runs, and producers that did not finish in time (aask)
             continue

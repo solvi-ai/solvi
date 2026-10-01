@@ -1621,6 +1621,17 @@ It returns `{"ok": bool, "steps": int, "mismatches": [(step, name, reason), ...]
 "catalog": "same" | "changed" | "unrecorded"}` (with `"changed_parts"` when the catalog changed since the trace was
 recorded — for information: a changed part that still re-computes the recorded value is not a mismatch).
 
+Each mismatch is the triple with a `.kind`, so a report can tell damaged data from a catalog that moved on:
+`integrity` (the hash chain, a record's hash, the input's hash or a recorded input hash does not verify), `recompute`
+(a step no longer gives the recorded value), `model_changed`, `missing_part` (the part or a producer was renamed or
+removed since: a mismatch, not an exception, and the steps after it are still checked), `missing_input` (a part now
+reads an input the trace does not hold), `flow` (a planned step is not recorded) and `error` (`replay_all`: a stored
+record could not be loaded, or the replay raised). When there are mismatches the result also has `"kinds"`, the count
+per kind, and `"summary"`, one line: `"data damaged: the hash chain or a record does not verify"`, `"data intact,
+catalog changed (parts missing)"`, `"data intact, catalog changed"`, `"data intact, model changed"`, `"data intact,
+steps do not recompute"` or `"replay failed (no verdict on the data)"`. `replay_all` gives the same two keys and the
+catalog verdict for every stored decision that does not replay, and `solvi replay` prints them.
+
 Continuing the README quickstart:
 
 ```python

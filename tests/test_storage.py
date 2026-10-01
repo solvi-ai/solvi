@@ -357,6 +357,97 @@ def test_replay_all_after_a_rule_change(filled):
     assert all("model changed" in b["mismatches"][0][2] for b in bad)
 
 
+def renamed_build():
+    """The catalog of build() after a refactoring: `words` was renamed to `tokens`."""
+    cat = Catalog()
+
+    @cat.fn
+    def tokens(text):
+        return set(text.lower().split())
+
+    @cat.check(hard=True, then={"approve": False})
+    def known_customer(customer):
+        return customer != "blocked"
+
+    @cat.fn(model=Scorer(), options=["low", "high"])
+    def risk(tokens):
+        return Decision("high", {"high": 0.9, "low": 0.1}) if "urgent" in tokens else Decision("low", {"high": 0.2, "low": 0.8})
+
+    @cat.rule("approve")
+    def approve(amount, risk) -> bool:
+        return amount < 100 and risk == "low"
+
+    @cat.rule("urgent")
+    def urgent(tokens) -> bool:
+        return "urgent" in tokens
+
+    return cat, [Question("approve", "Approve?", Answer.yes_no(), checkpoints=["known_customer"]),
+                 Question("urgent", "Urgent?", Answer.yes_no())]
+
+
+def test_a_renamed_part_is_a_replay_verdict_not_a_key_error(filled):
+    """A trace replayed against a catalog where a part was renamed: mismatches of kind missing_part / missing_input and a
+    summary that says the data is intact — not a KeyError, and not what a damaged record looks like."""
+    from solvi.runtime import Mismatch
+    _, store, _, resps = filled
+    cat, qs = renamed_build()
+    rep = resps[0].trace.replay(cat)                       # used to raise KeyError: 'words'
+    assert not rep["ok"] and rep["catalog"] == "changed"
+    kinds = {m.kind for m in rep["mismatches"]}
+    assert all(isinstance(m, Mismatch) for m in rep["mismatches"]) and kinds == {"missing_part", "missing_input"}
+    assert ("words", "missing_part") in {(m[1], m.kind) for m in rep["mismatches"]}
+    assert rep["kinds"]["missing_part"] == 1 and rep["summary"] == "data intact, catalog changed (parts missing)"
+    step, name, why = rep["mismatches"][0]                 # still the plain triple
+    assert rep["mismatches"][0] == (step, name, why) and "not in the catalog" in rep["mismatches"][0][2]
+    bad = store.replay_all(System(cat, qs))
+    assert len(bad) == len(STATES) and all(b["summary"] == "data intact, catalog changed (parts missing)" for b in bad)
+    assert all(m[1] not in ("load", "replay") for b in bad for m in b["mismatches"])
+
+
+def test_replay_summary_tells_damaged_data_from_a_changed_catalog_or_model(filled):
+    import copy
+    import pickle
+    from solvi.runtime import Mismatch
+    _, store, s, resps = filled
+    ok = resps[0].trace.replay(s)
+    assert ok["ok"] and "summary" not in ok and "kinds" not in ok          # nothing to summarize
+    cat, qs = build(threshold=40)                          # a rule changed: the data is intact, a step does not recompute
+    rep = resps[0].trace.replay(cat)
+    assert {m.kind for m in rep["mismatches"]} == {"recompute"} and rep["summary"] == "data intact, catalog changed"
+    cat, qs = build(version="2")                           # the model changed
+    rep = resps[0].trace.replay(cat)
+    assert {m.kind for m in rep["mismatches"]} == {"model_changed"} and rep["kinds"] == {"model_changed": 1}
+    assert rep["summary"] == "data intact, model changed"
+    bad = store.replay_all(System(cat, qs))
+    assert [b["kinds"] for b in bad] == [{"model_changed": 1}] * 3 and bad[0]["catalog"] == "same"   # the code is the same
+    tr = copy.deepcopy(resps[0].trace)                     # a value edited after the run, hashes left as they were
+    r = next(x for x in tr.records if x.name == "answer:approve")
+    r.value = not r.value
+    rep = tr.replay(s)
+    assert "integrity" in rep["kinds"] and rep["summary"].startswith("data damaged")
+    m = rep["mismatches"][0]
+    assert m.to_dict() == {"step": m[0], "name": m[1], "reason": m[2], "kind": m.kind}
+    assert json.loads(json.dumps(m)) == list(m)            # in JSON: the triple, as before
+    m2 = pickle.loads(pickle.dumps(m))
+    assert m2 == m and m2.kind == m.kind and copy.deepcopy(m).kind == m.kind
+    assert Mismatch(1, "x", "why").kind == "recompute"
+
+
+def test_replay_all_reports_a_record_it_cannot_load_as_an_error(filled):
+    kind, store, s, _ = filled
+    recs = _jsonl_lines(store) if kind == "jsonl" else None
+    if kind != "jsonl":
+        pytest.skip("the stored body is edited through the JSONL file")
+    del recs[1]["response"]["trace"]                       # a stored response without its trace
+    _rehash(recs, 1)
+    _jsonl_write(store, recs)
+    with open(store.head_path, "w") as fh:
+        json.dump({"count": len(recs), "hash": recs[-1]["hash"]}, fh)
+    bad = JSONLStorage(store.path).replay_all(s)
+    assert [b["seq"] for b in bad] == [1] and bad[0]["mismatches"][0][1] == "load"
+    assert bad[0]["kinds"] == {"error": 1} and bad[0]["summary"] == "replay failed (no verdict on the data)"
+
+
 def test_quarantine_and_forget(filled):
     _, store, _, resps = filled
     ids = [r.stored_id for r in resps]

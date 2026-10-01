@@ -2,6 +2,16 @@
 
 ## 0.7.2 — unreleased
 
+- Replay tells damaged data from a catalog that changed. A trace replayed against a catalog where a part (or a
+  producer) was renamed or removed used to raise `KeyError`, and `replay_all` reported it as `(0, "load", "KeyError:
+  ...")` — the same shape a damaged record has. Now it is a mismatch `part X is not in the catalog (renamed or
+  removed)`, and the steps after it are still checked on the recorded value. Every mismatch is a
+  `solvi.runtime.Mismatch`: the same `(step, name, reason)` triple (it compares, unpacks and serializes as before) with
+  a `.kind` — `integrity`, `recompute`, `model_changed`, `missing_part`, `missing_input`, `flow`, `error`. A replay with
+  mismatches also returns `"kinds"` and a one-line `"summary"` (`"data damaged: ..."`, `"data intact, catalog changed
+  (parts missing)"`, `"data intact, model changed"`, ...); `replay_all` carries them and the catalog verdict per stored
+  decision, tells a record that cannot be loaded (`"load"`) from a replay that raised (`"replay"`), and `solvi replay`
+  prints the summary and the kinds. A replay without mismatches returns exactly what it did.
 - Docs: a published long-input checkpoint for `long="full"` — [solvi-ai/solvi-large-long](https://huggingface.co/solvi-ai/solvi-large-long)
   (solvi-large fine-tuned to read up to 8,192 tokens whole; `max_len_long: 8192`); the guide's "Long documents" section
   names it.

@@ -155,9 +155,10 @@ def cmd_replay(a):
     else:
         print("every stored trace replays" if not bad else f"{len(bad)} stored trace(s) do not replay:")
         for b in bad:
-            print(f"- {b['id']} (#{b['seq']})")
-            for step, name, why in b["mismatches"][:5]:
-                print(f"    step {step} {name}: {why}")
+            print(f"- {b['id']} (#{b['seq']}): {b['summary']}")
+            for m in b["mismatches"][:5]:
+                step, name, why = m
+                print(f"    step {step} {name} [{m.kind}]: {why}")
     return 0 if not bad else 1
 
 
