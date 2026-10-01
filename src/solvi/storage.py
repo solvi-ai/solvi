@@ -26,12 +26,18 @@ PostgresStorage (psycopg 3; the same tables, several services writing) and DuckD
 DuckDB file, for analytics)."""
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import json
 import os
 import threading
 import time as _time
 from dataclasses import dataclass
+
+try:
+    import fcntl
+except ImportError:                           # Windows, the browser (Pyodide): no advisory file locks
+    fcntl = None
 
 GENESIS = ""                                  # prev of the first record
 FORMAT = 1                                    # the record format ("v")
@@ -64,6 +70,20 @@ def _cj(obj):
     """Canonical JSON: sorted keys, no spaces — what the record hash is taken over. New records hold no inf / nan (they are
     tagged, see entry); records written before 0.7 may, and still hash as they were written (Infinity / NaN)."""
     return json.dumps(obj, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+
+
+@contextlib.contextmanager
+def _flock(fh, shared=False):
+    """An advisory lock on an open file for the block (POSIX flock: exclusive, or shared for readers); where there is
+    none (Windows, the browser) the block runs unlocked."""
+    if fcntl is None:
+        yield
+        return
+    fcntl.flock(fh.fileno(), fcntl.LOCK_SH if shared else fcntl.LOCK_EX)
+    try:
+        yield
+    finally:
+        fcntl.flock(fh.fileno(), fcntl.LOCK_UN)
 
 
 def _body(rec):
@@ -246,9 +266,15 @@ class TraceStorage:
         """Add a record: assign seq, time, prev, hash and id atomically; → the record."""
         raise NotImplementedError
 
-    def _raw(self):
-        """Every chained record in stored order (for verify) → iterator of (position, dict or None when unreadable)."""
+    def _raw(self, snap=None):
+        """Every chained record in stored order (for verify) → iterator of (position, dict or None when unreadable).
+        `snap`: a _snapshot() — the records as they were then."""
         raise NotImplementedError
+
+    def _snapshot(self):
+        """What verify() reads before the records so that records appended while it runs are not taken for damage: the
+        stored head (and what else the backend needs) at one moment. None: the backend has nothing to pin."""
+        return None
 
     def _find(self, id):
         raise NotImplementedError
@@ -258,8 +284,9 @@ class TraceStorage:
         somewhere else (a ticket, a log, a signed message) to later catch a rewrite of the whole store: verify(anchor=...)."""
         raise NotImplementedError
 
-    def _backend_problems(self, rows):
-        """Checks specific to a backend (its stored head, index tables) → [(seq, id, reason)]."""
+    def _backend_problems(self, rows, snap=None):
+        """Checks specific to a backend (its stored head, index tables) → [(seq, id, reason)]. `snap`: verify's
+        _snapshot(), taken before `rows` were read."""
         return []
 
     def _legacy(self):
@@ -364,10 +391,13 @@ class TraceStorage:
         changed, its seq is named and `signature` in the result holds solvi.signature.check's answer (the original content
         hash; `candidates`: records, e.g. from a backup, one of which may be the original → its "match").
         → {"ok", "count", "head", "legacy", "problems": [(seq, id, reason)]} (+ "signature" when given). Records written
-        before the chain (0.5 journal lines) are counted in `legacy` and not checked."""
+        before the chain (0.5 journal lines) are counted in `legacy` and not checked.
+        A store that is being written to verifies as it stands at one moment: the stored head is read first and the
+        records are checked against it, so a record appended while verify runs is not reported as damage."""
         problems, rows = [], []
         prev, n = GENESIS, 0
-        for pos, d in self._raw():
+        snap = self._snapshot()
+        for pos, d in self._raw(snap):
             if d is None:
                 problems.append((n, None, f"record at position {pos} is not readable JSON (a record cut short by a crash "
                                           "while it was written, or an edit)"))
@@ -387,7 +417,7 @@ class TraceStorage:
                 problems += [(d.get("seq"), rid, p) for p in _summary_problems(d)]
             rows.append(d)
             prev, n = d.get("hash"), n + 1
-        problems += self._backend_problems(rows)
+        problems += self._backend_problems(rows, snap)
         if anchor is not None:
             k, h = int(anchor["count"]), anchor["hash"]
             if k > len(rows):
@@ -527,70 +557,134 @@ def _path(by, roots, fact, value_hash):
 # --- JSONL
 class JSONLStorage(TraceStorage):
     """Append-only JSON lines, one record per line (the file System(journal=...) writes). The head (count and last hash)
-    is kept in `<path>.head`. One writing process at a time (threads are fine); use SQLiteStorage for several.
+    is kept in `<path>.head`. Threads of a process may write; several processes may too where the system has advisory
+    file locks (POSIX: an append takes an exclusive flock on the file, reads what other processes appended since it
+    last looked, then writes its record and the head) — on Windows keep to one writing process, or use SQLiteStorage.
     Lines of a 0.5 journal at the start of the file are kept and skipped (verify reports them as `legacy`).
-    fsync=True: flush every record to disk before save returns (slower)."""
+    fsync=True: flush every record to disk before save returns (slower). index=False: open from the stored head (checked
+    against the file's last line) without reading every record — a long file opens at once, for a process that only
+    appends; get(id) then scans the file. A head that does not match the last line is not trusted: the file is read."""
 
-    def __init__(self, path, catalog=None, clock=None, fsync=False):
+    def __init__(self, path, catalog=None, clock=None, fsync=False, index=True):
         super().__init__(catalog, clock)
         self.path = os.fspath(path)
         self.head_path = self.path + ".head"
         self.fsync = fsync
         self._lock = threading.Lock()
-        self._offsets = {}
-        self._count, self._last, self._n_legacy = 0, GENESIS, 0
-        self._load()
+        self._reset()
+        with self._lock:
+            if index or not self._open_from_head():
+                self._refresh()
 
-    def _load(self):
-        if not os.path.exists(self.path):
+    def _open_from_head(self):
+        """Take the count and the last hash from the stored head when the file's last line is the record it names."""
+        try:
+            with open(self.path, "rb") as fh, _flock(fh, shared=True):
+                head, last = self._read_head(), json.loads(_last_line(fh))
+                if last.get("hash") != head["hash"] or last.get("seq") != head["count"] - 1:
+                    return False
+                self._count, self._last, self._size = head["count"], head["hash"], os.fstat(fh.fileno()).st_size
+                self._n_legacy = None                 # not counted yet (see _legacy)
+                return True
+        except (OSError, ValueError, KeyError, TypeError, AttributeError):
+            return False
+
+    def _reset(self):
+        self._offsets = {}
+        self._count, self._last, self._n_legacy, self._size = 0, GENESIS, 0, 0
+
+    def _refresh(self):
+        """Catch up with the file (another process, or another store object on the same path, may have appended): under
+        a shared lock, so no line is read half-written."""
+        if os.path.exists(self.path):
+            with open(self.path, "rb") as fh, _flock(fh, shared=True):
+                self._sync(fh)
+        elif self._size:
+            self._reset()
+
+    def _sync(self, fh):
+        """Read the lines appended since this store last looked (all of them the first time; again from the start when
+        the file got shorter: it was replaced). Called under the thread lock and the file's lock."""
+        size = os.fstat(fh.fileno()).st_size
+        if size == self._size:
             return
-        with open(self.path, "rb") as fh:
-            off = 0
-            for line in fh:
-                try:
-                    d = json.loads(line)
-                except ValueError:
-                    d = None
-                if isinstance(d, dict) and "hash" in d:
-                    self._offsets[d.get("id")] = off
-                    self._count, self._last = self._count + 1, d["hash"]
-                elif isinstance(d, dict) and self._count == 0:
-                    self._n_legacy += 1
-                off += len(line)
+        if size < self._size:
+            self._reset()
+        fh.seek(self._size)
+        off = self._size
+        for line in fh:
+            try:
+                d = json.loads(line)
+            except ValueError:
+                d = None
+            if isinstance(d, dict) and "hash" in d:
+                self._offsets[d.get("id")] = off
+                self._count, self._last = self._count + 1, d["hash"]
+            elif isinstance(d, dict) and self._count == 0 and self._n_legacy is not None:
+                self._n_legacy += 1
+            off += len(line)
+        self._size = off
 
     def _append(self, body):
-        with self._lock:
+        with self._lock, open(self.path, "a+b") as fh, _flock(fh):
+            self._sync(fh)                            # what other writers appended: the chain goes on from their last
             rec = dict(body, seq=self._count, time=float(self.clock()), prev=self._last)
             rec["hash"] = record_hash(rec)
             rec["id"] = rec["hash"][:16]
             line = (_body(rec) + "\n").encode()
-            with open(self.path, "a+b") as fh:
-                off = fh.seek(0, os.SEEK_END)
-                if off:                               # a crash cut the last line short: end it, never glue onto it
-                    fh.seek(off - 1)
-                    if fh.read(1) != b"\n":
-                        fh.write(b"\n")                # the fragment stays a line of its own: verify reports it
-                        off += 1
-                fh.write(line)
-                fh.flush()
-                if self.fsync:
-                    os.fsync(fh.fileno())
+            off = fh.seek(0, os.SEEK_END)
+            if off:                                   # a crash cut the last line short: end it, never glue onto it
+                fh.seek(off - 1)
+                if fh.read(1) != b"\n":
+                    fh.write(b"\n")                    # the fragment stays a line of its own: verify reports it
+                    off += 1
+            fh.write(line)
+            fh.flush()
+            if self.fsync:
+                os.fsync(fh.fileno())
             self._offsets[rec["id"]] = off
-            self._count, self._last = self._count + 1, rec["hash"]
-            tmp = self.head_path + ".tmp"
-            with open(tmp, "w") as fh:
-                json.dump({"count": self._count, "hash": self._last}, fh)
+            self._count, self._last, self._size = self._count + 1, rec["hash"], off + len(line)
+            tmp = self.head_path + ".tmp"             # still under the file's lock: one writer of the head at a time
+            with open(tmp, "w") as hf:
+                json.dump({"count": self._count, "hash": self._last}, hf)
             os.replace(tmp, self.head_path)
             return rec
 
     def head(self):
-        return {"count": self._count, "hash": self._last}
+        with self._lock:
+            self._refresh()
+            return {"count": self._count, "hash": self._last}
 
-    def _lines(self):
+    def _snapshot(self):
+        """The file's size and the stored head at one moment (under the locks an append holds while it writes both)."""
+        with self._lock:
+            if not os.path.exists(self.path):
+                return {"size": 0, "head": self._read_head()}
+            with open(self.path, "rb") as fh, _flock(fh, shared=True):
+                return {"size": os.fstat(fh.fileno()).st_size, "head": self._read_head()}
+
+    def _read_head(self):
+        """The stored head → {"count", "hash"}, or "missing" / "unreadable"."""
+        if not os.path.exists(self.head_path):
+            return "missing"
+        try:
+            with open(self.head_path) as fh:
+                h = json.load(fh)
+        except (OSError, ValueError):
+            return "unreadable"
+        return h if isinstance(h, dict) else "unreadable"
+
+    def _lines(self, limit=None):
+        """(line number, record or None when unreadable) for every line — with `limit`, for the lines that start before
+        that many bytes (the file as it was at a snapshot)."""
         if not os.path.exists(self.path):
             return
         with open(self.path, "rb") as fh:
+            off = 0
             for i, line in enumerate(fh):
+                if limit is not None and off >= limit:
+                    return
+                off += len(line)
                 if not line.strip():
                     continue
                 try:
@@ -599,9 +693,9 @@ class JSONLStorage(TraceStorage):
                     d = None
                 yield i, d if isinstance(d, dict) else None
 
-    def _raw(self):
+    def _raw(self, snap=None):
         chained = False
-        for i, d in self._lines():
+        for i, d in self._lines(None if snap is None else snap["size"]):
             if d is not None and "hash" not in d and not chained:
                 continue                                  # a 0.5 journal line before the chain
             if d is not None and "hash" not in d:
@@ -610,6 +704,13 @@ class JSONLStorage(TraceStorage):
             yield i, d
 
     def _legacy(self):
+        if self._n_legacy is None:                    # opened from the head: the 0.5 lines before the chain, counted now
+            n = 0
+            for _, d in self._lines():
+                if d is not None and "hash" in d:
+                    break
+                n += d is not None
+            self._n_legacy = n
         return self._n_legacy
 
     def _find(self, id):
@@ -628,18 +729,34 @@ class JSONLStorage(TraceStorage):
                 return d
         return None
 
-    def _backend_problems(self, rows):
-        if not os.path.exists(self.head_path):
+    def _backend_problems(self, rows, snap=None):
+        h = self._read_head() if snap is None else snap["head"]
+        if h == "missing":
             return [(len(rows) - 1, None, "the head file is missing")] if rows else []
-        try:
-            with open(self.head_path) as fh:
-                h = json.load(fh)
-        except (OSError, ValueError):
+        if h == "unreadable":
             return [(None, None, "the head file is not readable")]
         return _head_problems(h, rows)
 
 
-def _head_problems(h, rows):
+def _last_line(fh):
+    """The last line of an open binary file (without its line end), reading from the end."""
+    end = fh.seek(0, os.SEEK_END)
+    if not end:
+        return b""
+    size = min(end, 1 << 16)
+    while True:
+        fh.seek(end - size)
+        body = fh.read(size).rstrip(b"\n")
+        i = body.rfind(b"\n")
+        if i >= 0 or size == end:
+            return body[i + 1:]
+        size = min(end, size * 4)
+
+
+def _head_problems(h, rows, later=None):
+    """The stored head against the records. `later`: the head read again after the records (a backend whose head was read
+    before them, with writers going on): records beyond the first head are appends made meanwhile when the first head's
+    record is in its place and the later head counts them."""
     n = len(rows)
     last = rows[-1].get("hash") if rows else GENESIS
     if h.get("count") == n and h.get("hash") == last:
@@ -647,6 +764,10 @@ def _head_problems(h, rows):
     if isinstance(h.get("count"), int) and h["count"] > n:
         return [(n, None, f"the stored head says {h['count']} records, the log has {n}: records were removed from the end")]
     if isinstance(h.get("count"), int) and h["count"] < n:
+        k = h["count"]
+        if (later is not None and isinstance(later.get("count"), int) and later["count"] >= n
+                and (rows[k - 1].get("hash") if k else GENESIS) == h.get("hash")):
+            return []                                 # appended while verify was reading: the head has them by now
         return [(h["count"], None, f"the log has {n} records, the stored head says {h['count']}: records were appended "
                                    "outside the store (or it stopped between writing a record and its head)")]
     return [(n - 1, rows[-1].get("id") if rows else None, "the last record is not the one the stored head names: the end "
@@ -765,6 +886,9 @@ class _SQLStorage(TraceStorage):
         for m in ms:
             self._x("INSERT INTO {p}models (seq, fp, \"id\", \"type\") VALUES (?, ?, ?, ?)", (s, *m))
 
+    def _snapshot(self):
+        return {"head": self.head()}                  # before the records: what is appended meanwhile is beyond it
+
     def _rows(self, sql="SELECT seq, body FROM {p}records ORDER BY seq", args=()):
         with self._lock:
             rows = self._x(sql, args).fetchall()
@@ -775,7 +899,7 @@ class _SQLStorage(TraceStorage):
                 d = None
             yield seq, d if isinstance(d, dict) else None
 
-    def _raw(self):
+    def _raw(self, snap=None):
         return self._rows()
 
     def _find(self, id):
@@ -831,7 +955,7 @@ class _SQLStorage(TraceStorage):
         sql = f"SELECT r.seq, r.body FROM {{p}}records r WHERE {' AND '.join(where)} ORDER BY r.seq"  # noqa: S608
         return [_stored(d, self.catalog) for _, d in self._rows(sql, args) if d is not None]
 
-    def _backend_problems(self, rows):
+    def _backend_problems(self, rows, snap=None):
         out = []
         with self._lock:
             cols = {s: (i, k, t, ih, c, p, h) for s, i, k, t, ih, c, p, h in self._x(
@@ -853,13 +977,17 @@ class _SQLStorage(TraceStorage):
             for table, want in zip(("answers", "safeguards", "models"), _index_rows(d)):
                 if sorted(idx.get((table, s), []), key=repr) != sorted(want, key=repr):
                     out.append((s, d.get("id"), f"the {table} index differs from the stored record (queries would lie)"))
+        with self._lock:
+            now = self._head()                        # after everything was read
         seqs = {d.get("seq") for d in rows}
-        orphans = sorted({s for (_, s) in idx} - seqs, key=repr)
+        n = len(rows)                                 # index rows of records appended after `rows` were read (the head
+        meanwhile = range(n, now["count"]) if isinstance(now.get("count"), int) else ()   # has them by now) are not orphans
+        orphans = sorted({s for (_, s) in idx if s not in seqs and s not in meanwhile}, key=repr)
         if orphans:
             out.append((orphans[0], None, f"index rows without a record (seq {', '.join(map(str, orphans[:5]))})"))
-        with self._lock:
-            h = self._head()
-        return out + _head_problems(h, rows)
+        if snap is None:
+            return out + _head_problems(now, rows)
+        return out + _head_problems(snap["head"], rows, later=now)
 
 
 class SQLiteStorage(_SQLStorage):

@@ -2,6 +2,25 @@
 
 ## 0.7.2 — unreleased
 
+- `JSONLStorage` with several writers. Two processes (or two store objects in one process) on one file each kept their
+  own record count and last hash: the chain forked — sequence numbers twice, wrong `prev` — and `verify()` failed from
+  then on; appends made at the same time also raised `FileNotFoundError` on the head file after the record was already
+  written (76 of 200 appends in a two-process test). An append now takes an exclusive lock on the file (POSIX `flock`),
+  reads what was appended since this store last looked, and only then writes its record and the head; a file replaced
+  by a shorter one is read again from the start. Three processes appending at once: 900 records, no error, `verify()`
+  ok. Without advisory file locks (Windows) keep to one writing process; the catch-up still works for writers that
+  take turns. `head()` and `len(store)` see what other writers appended.
+  `JSONLStorage(path, index=False)` opens from the stored head, checked against the file's last line, without
+  reading every record (a long file opens at once for a process that only appends; `get(id)` then scans). The coding
+  agent hooks, which had their own lock file and fast open for this, now use the store's.
+- `verify()` on a store that is being written to. It read the records, the index tables and the head one after
+  another, so an append in between looked like damage: "the stored head says 1204 records, the log has 905: records
+  were removed from the end" (SQLite: 26 of 26 calls with a writer thread, 8 of 8 with a writer process), "records were
+  appended outside the store" (JSONL: 21 of 86). `verify()` now pins the stored head before it reads the records
+  (JSONL: with the file's size, under the lock an append holds) and checks the records against it; records appended
+  meanwhile are accepted once the head read again counts them, and index rows of such records are not orphans. The
+  same test: 0 false reports on SQLite, JSONL, PostgreSQL and DuckDB. A record appended outside the store, a cut-off
+  end and a replaced end are reported as before.
 - A stored trace keeps the order of dict keys, so its model steps replay. `JSONLStorage` and the SQL backends wrote
   each record's JSON with sorted keys. A decider reads a dict's keys in their order (`state_text`), so a dict input or
   a computed dict fact came back from the store in another order, the decider read another text, and a sound trace did

@@ -1674,8 +1674,8 @@ store.replay_all(system)                        # [] when every stored trace rep
 store.verify()                                  # the chain across stored records
 ```
 
-Two backends ship without dependencies: `JSONLStorage` (an append-only file, one record per line; one writing
-process) and `SQLiteStorage` (stdlib `sqlite3`; index tables by question, answer, status, safeguard kind, model and time;
+Two backends ship without dependencies: `JSONLStorage` (an append-only file, one record per line; several
+processes may append on POSIX systems, where each append holds a file lock — on Windows one writing process) and `SQLiteStorage` (stdlib `sqlite3`; index tables by question, answer, status, safeguard kind, model and time;
 several processes may write to one file). Two more take an optional dependency and keep the same tables:
 `PostgresStorage("postgresql://user@host/db")` (`pip install 'solvi[postgres]'`, psycopg 3; tables named `solvi_*` —
 `prefix=` to change; several services may write: each append locks the head table for its transaction, so the chain
@@ -1702,7 +1702,8 @@ and `verify()` names the record. Cutting records off the end leaves a shorter ch
 keeps its head (count and last hash) next to the log (`decisions.jsonl.head`, or a table in SQLite) and `verify()` checks
 it. Someone who can rewrite the whole store and its head can rebuild a consistent chain: publish `store.head()` somewhere
 else from time to time (a ticket, a log you do not control, a signed message) and check with `store.verify(anchor=head)`.
-`verify()` needs no catalog; `replay_all(system)` re-computes every stored step, which also catches a value changed inside
+`verify()` reads the stored head first and checks the records against it, so it can run while the store is written to:
+a record appended meanwhile is not reported as damage. `verify()` needs no catalog; `replay_all(system)` re-computes every stored step, which also catches a value changed inside
 a stored trace with every hash recomputed.
 
 **Which record changed: a signature.** The chain and the anchor tell that a store was rewritten, not where: an edited

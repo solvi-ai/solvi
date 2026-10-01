@@ -690,68 +690,20 @@ def rules_system():
 
 
 # --------------------------------------------------------------------------------------------------- the store
-def _lock(path):
-    """An exclusive lock next to a JSON-lines store (hooks may run in parallel); a no-op where fcntl is missing."""
-    try:
-        import fcntl
-    except ImportError:                                 # pragma: no cover - Windows: one writer at a time is the user's
-        return None
-    fh = open(path + ".lock", "a")
-    fcntl.flock(fh, fcntl.LOCK_EX)
-    return fh
-
-
-def _last_line(path):
-    with open(path, "rb") as fh:
-        end = fh.seek(0, os.SEEK_END)
-        if not end:
-            return b""
-        size = min(end, 1 << 16)
-        while True:
-            fh.seek(end - size)
-            chunk = fh.read(size)
-            body = chunk.rstrip(b"\n")
-            i = body.rfind(b"\n")
-            if i >= 0 or size == end:
-                return body[i + 1:]
-            size = min(end, size * 4)
-
-
 def open_store(where, root):
     """The hook's TraceStorage: a JSON-lines file opens from its head (the count and last hash, checked against the last
-    line) rather than by reading every record, so a long store stays fast; other kinds as open_storage opens them."""
-    from .storage import GENESIS, JSONLStorage, open_storage
+    line) rather than by reading every record, so a long store stays fast; other kinds as open_storage opens them. Hooks
+    may run in parallel: each append locks the file and continues the chain from what the others wrote (JSONLStorage)."""
+    from .storage import JSONLStorage, open_storage
     path = where if os.path.isabs(where) or "://" in where else os.path.join(root, where)
     if "://" in path or path.endswith((".db", ".sqlite", ".sqlite3", ".duckdb")):
         return open_storage(path)
     os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
-
-    class _Appending(JSONLStorage):
-        def _load(self):
-            try:
-                head = json.load(open(self.head_path))
-                last = json.loads(_last_line(self.path))
-                if last.get("hash") == head["hash"] and last.get("seq") == head["count"] - 1:
-                    self._count, self._last = head["count"], head["hash"]
-                    return
-            except (OSError, ValueError, KeyError, TypeError, AttributeError):
-                pass
-            self._offsets, self._count, self._last, self._n_legacy = {}, 0, GENESIS, 0     # read it all, from scratch
-            super()._load()
-    return _Appending(path)
+    return JSONLStorage(path, index=False)
 
 
 def _save(store, res, meta):
-    if store is None:
-        return None
-    lock = _lock(store.path) if hasattr(store, "head_path") else None
-    try:
-        if lock is not None:
-            store._load()                               # another hook may have written since this one opened it
-        return store.save(res, meta)
-    finally:
-        if lock is not None:
-            lock.close()
+    return None if store is None else store.save(res, meta)
 
 
 # --------------------------------------------------------------------------------------------------- pre-edit

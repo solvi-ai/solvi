@@ -494,6 +494,99 @@ def test_a_stored_trace_keeps_the_order_of_dict_keys_so_model_steps_replay(kind,
     assert reopened.head() == store.head()
 
 
+def test_verify_on_a_store_that_is_being_written_to(filled):
+    """A record appended between verify's reading of the head and of the records is not damage (it used to be: "the
+    stored head says 5 records, the log has 4" / "records were appended outside the store")."""
+    kind, store, s, _ = filled
+    snapshot = store._snapshot
+
+    def snapshot_then_a_writer_appends():
+        snap = snapshot()
+        s.ask(STATES[0])
+        s.ask(STATES[1])
+        return snap
+
+    store._snapshot = snapshot_then_a_writer_appends
+    v = store.verify()
+    assert v["ok"], v["problems"]
+    del store._snapshot
+    assert store.verify()["ok"] and len(store) == len(STATES) + 2
+
+
+def test_verify_still_reports_records_appended_outside_the_store(filled):
+    kind, store, s, _ = filled
+    last = (_jsonl_lines(store) if kind == "jsonl" else _sql_bodies(store))[-1]
+    extra = dict(last, seq=last["seq"] + 1, prev=last["hash"])              # a well-formed record the head does not know
+    extra["hash"] = record_hash(extra)
+    extra["id"] = extra["hash"][:16]
+    if kind == "jsonl":
+        with open(store.path, "a") as fh:
+            fh.write(json.dumps(extra) + "\n")
+    else:
+        store._insert(extra)
+    v = store.verify()
+    assert not v["ok"] and any("appended outside the store" in why for *_, why in v["problems"])
+
+
+def test_several_writers_of_one_jsonl_file(tmp_path):
+    """Two store objects on one path (two services, or a second System opened on the journal): each append continues the
+    chain from what the other wrote. It used to fork the chain without an error — both kept their own count and last hash."""
+    path = tmp_path / "shared.jsonl"
+    a, b = JSONLStorage(path), JSONLStorage(path)
+    ids = []
+    for i in range(5):
+        ids.append(a._append({"v": 1, "kind": "teach", "i": i})["id"])
+        ids.append(b._append({"v": 1, "kind": "teach", "i": i})["id"])
+    v = a.verify()
+    assert v["ok"] and v["count"] == 10 and len(a) == len(b) == 10 and a.head() == b.head()
+    assert [d["seq"] for d in _jsonl_lines(a)] == list(range(10)) and all(b.record(i) is not None for i in ids)
+    os.replace(path, tmp_path / "moved.jsonl")                              # the file replaced by a shorter one: reread
+    c = JSONLStorage(path)
+    c._append({"v": 1, "kind": "teach", "i": 0})
+    assert len(a) == 1 and a._append({"v": 1, "kind": "teach", "i": 1})["seq"] == 1
+
+
+def test_jsonl_opens_from_its_head_without_reading_every_record(tmp_path, monkeypatch):
+    path = tmp_path / "long.jsonl"
+    with open(path, "w") as fh:
+        fh.write(json.dumps({"old": "a 0.5 journal line"}) + "\n")            # before the chain: legacy
+    full = JSONLStorage(path)
+    ids = [full._append({"v": 1, "kind": "teach", "i": i})["id"] for i in range(20)]
+    read = []
+    monkeypatch.setattr(JSONLStorage, "_sync", lambda self, fh, _f=JSONLStorage._sync: (read.append(1), _f(self, fh))[1])
+    fast = JSONLStorage(path, index=False)
+    assert read == [] and fast.head() == full.head() and len(fast) == 20     # nothing read at open
+    assert fast._append({"v": 1, "kind": "teach", "i": 20})["seq"] == 20
+    assert fast.record(ids[3])["i"] == 3 and fast.verify() == full.verify() and fast.verify()["legacy"] == 1
+    assert full._append({"v": 1, "kind": "teach", "i": 21})["seq"] == 21     # the other object caught up with it
+    os.remove(str(path) + ".head")                                           # no head to trust: the file is read
+    again = JSONLStorage(path, index=False)
+    assert len(again) == 22 and again._append({"v": 1, "kind": "teach", "i": 22})["seq"] == 22
+    assert again.verify()["ok"] and again.verify()["legacy"] == 1
+
+
+def test_processes_writing_one_jsonl_file_at_once(tmp_path):
+    from solvi import storage
+    if storage.fcntl is None:
+        pytest.skip("no advisory file locks on this system: one writing process at a time")
+    path = tmp_path / "shared.jsonl"
+    code = ("import sys, time\nfrom solvi import JSONLStorage\nst = JSONLStorage(sys.argv[1])\n"
+            "while time.time() < float(sys.argv[3]):\n    time.sleep(0.001)\n"
+            "for i in range(150):\n    st._append({'v': 1, 'kind': 'teach', 'who': sys.argv[2], 'i': i})\n")
+    start = str(__import__("time").time() + 1.5)
+    env = dict(os.environ, PYTHONPATH=os.pathsep.join(sys.path))
+    procs = [subprocess.Popen([sys.executable, "-c", code, str(path), w, start], env=env, stderr=subprocess.PIPE)
+             for w in "abc"]
+    errs = [p.communicate()[1] for p in procs]
+    assert all(p.returncode == 0 for p in procs), errs
+    store = JSONLStorage(path)
+    v = store.verify()
+    assert v["ok"] and v["count"] == 450, v["problems"][:3]
+    who = [d["who"] for d in _jsonl_lines(store)]
+    assert {w: who.count(w) for w in "abc"} == {"a": 150, "b": 150, "c": 150}
+    assert len(set(who[:150])) > 1                                          # they did write at the same time
+
+
 def test_quarantine_and_forget(filled):
     _, store, _, resps = filled
     ids = [r.stored_id for r in resps]
