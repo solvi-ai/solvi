@@ -616,7 +616,7 @@ class OnnxScorer(_NetScorer):
     def __init__(self, path, max_len=512, device=None, onnx_file=None, bs=16, caps=None):
         import onnxruntime as ort
         self._setup(path, max_len, bs, caps)
-        self.file = onnx_file or _onnx_file(path)
+        self.file = onnx_file or _onnx_file(path, block=self.mq is not None and self.mq["layout"] == "block")
         if self.file is None:
             raise FileNotFoundError(f"no ONNX model in {path}/onnx")
         providers = ["CPUExecutionProvider"]
@@ -692,12 +692,15 @@ class TorchScorer(_NetScorer):
             return self.model(*self.inputs(ids, att, pids, masks)).float().cpu().numpy()
 
 
-def _onnx_file(path):
+def _onnx_file(path, block=False):
+    """The ONNX export to load. block: the checkpoint scores in the block layout (several questions per pass) — then the
+    export with the block layout's inputs (onnx/model_block*.onnx) when there is one; the plain export otherwise."""
     d = os.path.join(path, "onnx")
     if not os.path.isdir(d):
         return None
     files = sorted(f for f in os.listdir(d) if f.endswith(".onnx"))
-    for pref in ("model_fp16.onnx", "model.onnx", "model_fp32.onnx"):
+    plain = ("model_fp16.onnx", "model.onnx", "model_fp32.onnx")
+    for pref in (("model_block_fp16.onnx", "model_block.onnx", "model_block_fp32.onnx") if block else ()) + plain:
         if pref in files:
             return os.path.join(d, pref)
     return os.path.join(d, files[0]) if files else None
@@ -1219,7 +1222,8 @@ class DecideModel:
         meta_file = os.path.join(path, "solvi_decide.json")
         if not os.path.isfile(meta_file):
             raise FileNotFoundError(f"{path} has no solvi_decide.json: not a solvi-decide checkpoint")
-        meta = json.load(open(meta_file))
+        with open(meta_file) as fh:
+            meta = json.load(fh)
         fmt = str(meta.get("format", ""))
         if fmt and not (fmt.startswith("l14b_decider") or
                         re.match(r"^(l14f typed v1|l14g typed v2|solvi_decide v[23])(\.\d+)*$", fmt)):
@@ -1244,7 +1248,10 @@ class DecideModel:
         m = cls(scorer, meta, model_id=str(path_or_id), path=path, backend=scorer.tag, multi_question=multi_question, act=act,
                 max_len_long=max_len_long)
         cfg_file = os.path.join(path, "config.json")
-        pos = json.load(open(cfg_file)).get("max_position_embeddings") if os.path.isfile(cfg_file) else None
+        pos = None
+        if os.path.isfile(cfg_file):
+            with open(cfg_file) as fh:
+                pos = json.load(fh).get("max_position_embeddings")
         if m.long_len is not None and pos and m.long_len > int(pos):
             raise ValueError(f"max_len_long {m.long_len} is beyond the encoder's max_position_embeddings ({pos}) in "
                              f"{cfg_file}")
@@ -1355,11 +1362,11 @@ class DecideModel:
         """Does the checkpoint itself declare a long-input length (`max_len_long` in solvi_decide.json)?"""
         return self.caps.get("max_len_long") is not None
 
-    def _warn_once(self, key, message):
+    def _warn_once(self, key, message, category=LongInputWarning):
         if key not in self._warned:
             self._warned.add(key)
             import warnings
-            warnings.warn(message, LongInputWarning, stacklevel=4)
+            warnings.warn(message, category, stacklevel=4)
 
     def on_cpu(self):
         """Does the network run on a CPU (a torch scorer on "cpu", an ONNX session without CUDA)? None when unknown (a
@@ -1519,8 +1526,11 @@ class DecideModel:
                 try:
                     got = self.scorer.logits_pass([Pass(pairs[c[0]][1], tuple(self._item(*pairs[i]) for i in c))
                                                    for c in chunks])
-                except BlockUnsupported:
+                except BlockUnsupported as e:        # said once: several questions were asked for and are not shared
                     self._block_failed = True
+                    self._warn_once("block", f"several questions per pass are not available: {e} "
+                                             f"({getattr(self.scorer, 'tag', type(self.scorer).__name__)}); each question "
+                                             "is scored in a pass of its own", UserWarning)
                     break
                 except ValueError:                    # too long together: smaller passes, then one per sequence
                     continue

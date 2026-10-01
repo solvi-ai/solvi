@@ -902,7 +902,9 @@ and each question sees the input and itself only, so an answer does not depend o
 solvi then scores every question of that model in the block layout, alone or together, so fit / teach and the runtime see
 the same logits. The results have the same structure as one question per pass; each record's `extra["pass"]` names the
 steps it shared the pass with, and replay re-scores the pass. If the questions do not fit together, they go one per pass;
-an ONNX export without the block inputs falls back to one question per sequence (`extra["pass"]["shared"]` is then false).
+the ONNX backend loads the export with the block layout's inputs (`onnx/model_block*.onnx`) when the checkpoint has one;
+an export without them falls back to one question per sequence (`extra["pass"]["shared"]` is then false) and says so in
+a warning, once.
 `model.decide_pass(input, parts)` does the same outside a catalog. Catalogs without decisions do none of this work.
 
 ### Several models: cascade, vote, route
@@ -1074,7 +1076,9 @@ kinds it was trained on, the head columns, the state serialization, the act head
 and thresholds: **[docs/decide_format.md](decide_format.md)** is the contract. The first, text-only checkpoints (`l14b_decider v1`)
 load and behave exactly as before: choose-one and multi-label natively, a score or yes/no asked as a choice among the levels
 or "yes" / "no", no act head (escalate by `escalate_below`), one question per pass. `load(..., multi_question=..., act=...)`
-overrides the declaration for experiments. `load(..., max_len=N)` sets the tokens of an ordinary pass (and retrieve's
+overrides the declaration for experiments. The published solvi-base and solvi-large keep several questions per pass off:
+with `load("solvi-ai/solvi-base", backend="onnx", multi_question=True)` a pass over five questions is about 2.2 times
+faster on a CPU, and 88% of the answers are the ones a pass per question gives (600 typed-decision questions). `load(..., max_len=N)` sets the tokens of an ordinary pass (and retrieve's
 budget); `load(..., max_len_long=N)` the length `long="full"` reads whole (default: the checkpoint's `max_len_long`; see
 [Long documents](#long-documents-find-first-then-decide)).
 

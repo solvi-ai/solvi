@@ -2,6 +2,13 @@
 
 ## 0.7.2 — unreleased
 
+- `load(..., multi_question=True)` works on the ONNX backend. The loader always took `onnx/model_fp16.onnx`, which has
+  no inputs for the block layout, so every shared pass fell back to one question per sequence — without a word, and
+  with the same speed as before. A checkpoint that scores in the block layout now loads its block export
+  (`onnx/model_block_fp16.onnx`, ...) when it has one, and a fallback is said in a warning, once. Measured with
+  solvi-base on a CPU, five questions per state, 120 typed-decision states: 120 passes instead of 600, 2.2 times
+  faster, the same answer as one question per pass for 530 of 600 questions (88%) and the same act / escalate for 86%
+  — which is why the published checkpoints keep it off.
 - An input read cut is no longer silent. Without `long=`, a text that does not fit `max_len` (minus the question) was
   cut by the tokenizer and nothing said so: the model answered a question about a fact at the end of the text as sure
   as ever, and with many options the input was left a few dozen tokens. The decision now carries

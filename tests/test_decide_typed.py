@@ -417,6 +417,30 @@ def test_batched_trace_replays_detects_tampering_and_survives_json():
     assert not rep["ok"] and "model changed since this decision" in rep["mismatches"][0][2]
 
 
+def test_a_block_checkpoint_loads_its_block_export_and_a_fallback_is_said_once(tmp_path):
+    """multi_question (declared, or load(multi_question=True)) scores in the block layout. The ONNX loader took the plain
+    export, which has no block inputs, and every pass fell back to one question per sequence without a word."""
+    import warnings
+    from solvi.decide import _onnx_file
+    d = tmp_path / "onnx"
+    d.mkdir()
+    for f in ("model_fp16.onnx", "model_block_fp16.onnx"):
+        (d / f).write_bytes(b"")
+    assert _onnx_file(str(tmp_path)).endswith("/model_fp16.onnx")
+    assert _onnx_file(str(tmp_path), block=True).endswith("/model_block_fp16.onnx")
+    (d / "model_block_fp16.onnx").unlink()
+    assert _onnx_file(str(tmp_path), block=True).endswith("/model_fp16.onnx")       # no block export: the plain one
+    mu = v2(act=False, fail_pass="unsupported")                                  # ... and the fallback is said, once
+    _, s3 = ticket_system(mu)
+    with warnings.catch_warnings(record=True) as w:
+        warnings.simplefilter("always")
+        s3.ask({"email": "refund!"})
+        s3.ask({"email": "a crash"})
+    said = [str(x.message) for x in w if "several questions per pass are not available" in str(x.message)]
+    assert len(said) == 1 and "no block inputs" in said[0] and mu._block_failed
+
+
+
 def test_parallel_workers_share_one_pass():
     m = v2(act=False)
     cat = Catalog()
