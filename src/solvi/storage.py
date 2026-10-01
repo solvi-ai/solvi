@@ -12,7 +12,9 @@ Every stored decision is one record (a dict of plain JSON):
   kind "update"   a learning update (System.learning): what changed, the gates' results, the state to roll back to;
   every record    seq (0, 1, 2, ...), time (seconds since the epoch), meta (optional, yours), prev and hash.
 
-`hash` is the SHA-256 of the record's canonical JSON (keys sorted, without `id` and `hash`), which includes `prev`, the
+A record is written with every dict's keys in their own order (a decider reads a dict's keys in that order, so a
+stored trace gives its dicts back as they were). `hash` is the SHA-256 of the record's canonical JSON (keys sorted,
+without `id` and `hash`) — it does not depend on the order the record was written in — which includes `prev`, the
 hash of the record before it: editing, deleting, inserting or reordering a stored record breaks the chain at that point
 (verify()). Cutting records off the end leaves a shorter chain that is still valid, so the store keeps its head — the
 count and the last hash (head()) — next to the log and verify() checks it; a head you published elsewhere
@@ -62,6 +64,13 @@ def _cj(obj):
     """Canonical JSON: sorted keys, no spaces — what the record hash is taken over. New records hold no inf / nan (they are
     tagged, see entry); records written before 0.7 may, and still hash as they were written (Infinity / NaN)."""
     return json.dumps(obj, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+
+
+def _body(rec):
+    """A record as it is written: JSON with every dict's keys in their own order. The hash does not depend on that order
+    (it is taken over the canonical JSON, _cj); a decider does — the text it reads lists a dict's keys in their order
+    (solvi.decide.state_text) — so a stored trace must give back the dicts as they were for its model steps to replay."""
+    return json.dumps(rec, ensure_ascii=False, allow_nan=False)
 
 
 def record_hash(rec):
@@ -554,7 +563,7 @@ class JSONLStorage(TraceStorage):
             rec = dict(body, seq=self._count, time=float(self.clock()), prev=self._last)
             rec["hash"] = record_hash(rec)
             rec["id"] = rec["hash"][:16]
-            line = (json.dumps(rec, ensure_ascii=False, sort_keys=True, allow_nan=False) + "\n").encode()
+            line = (_body(rec) + "\n").encode()
             with open(self.path, "a+b") as fh:
                 off = fh.seek(0, os.SEEK_END)
                 if off:                               # a crash cut the last line short: end it, never glue onto it
@@ -680,7 +689,7 @@ def _index_rows(d):
 
 
 class _SQLStorage(TraceStorage):
-    """What the SQL backends share: one row per record with the record's JSON (the text that is hashed, kept verbatim),
+    """What the SQL backends share: one row per record with the record's JSON (as written: keys in their own order),
     plus index tables — answers (question, answer, status), safeguards (kind, question), models (fingerprint, id, type) —
     and the time; the head in the `meta` table. Every append reads the head and writes the record, its index rows and the
     new head in one transaction (a backend's `lock` statement keeps two writers from taking the same head). A backend
@@ -747,8 +756,7 @@ class _SQLStorage(TraceStorage):
         self._x("INSERT INTO {p}records (seq, \"id\", kind, \"time\", init_hash, \"catalog\", prev, hash, body) "
                 "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (s, rec["id"], rec.get("kind", "ask"), rec["time"], rec.get("init_hash"), rec.get("catalog"),
-                 rec["prev"], rec["hash"], json.dumps(rec, ensure_ascii=False, sort_keys=True,
-                                                        allow_nan=False)))
+                 rec["prev"], rec["hash"], _body(rec)))
         ans, sg, ms = _index_rows(rec)
         for a in ans:
             self._x("INSERT INTO {p}answers (seq, question, answer, status, guard) VALUES (?, ?, ?, ?, ?)", (s, *a))

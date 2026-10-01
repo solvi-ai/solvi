@@ -448,6 +448,52 @@ def test_replay_all_reports_a_record_it_cannot_load_as_an_error(filled):
     assert bad[0]["kinds"] == {"error": 1} and bad[0]["summary"] == "replay failed (no verdict on the data)"
 
 
+class FirstLine:
+    """A decider stand-in that votes for the option named on the first line it reads: sensitive to the order of the keys
+    of a dict input, as a real decider is (the text it reads lists them in their order)."""
+    model_id = "test/first-line"
+
+    def fingerprint(self):
+        return "first-line-1"
+
+    def logits(self, items):
+        import numpy as np
+        out = []
+        for it in items:
+            z = np.array([4.0 * (o == it.text.split("\n")[0].split(":")[0].strip()) for o in it.options])
+            out.append(np.stack([z, z - 1.0], 1))
+        return out
+
+
+@pytest.mark.parametrize("kind", ["jsonl", "sqlite"])
+def test_a_stored_trace_keeps_the_order_of_dict_keys_so_model_steps_replay(kind, tmp_path):
+    """The store wrote its JSON with sorted keys: a dict a decider had read came back in another order, the decider read
+    another text on replay and a sound trace did not replay ("value 'status' ≠ recomputed 'amount'")."""
+    from solvi.decide import DecideModel
+    store = make_store(kind, tmp_path)
+    m = DecideModel(FirstLine(), meta={"format": "test", "temperature": 1.0})
+    cat = Catalog()
+
+    @cat.fn
+    def situation(amount, status):
+        return {"status": status, "amount": amount, "nested": {"z": 1, "a": 2}}      # a computed dict, keys not sorted
+
+    opts = ["amount", "status", "zeta"]
+    qs = [m.decision("computed", "Which field comes first?", "situation", opts).question(cat),
+          m.decision("given", "Which field comes first?", "order", opts).question(cat)]     # reads a dict of the input
+    s = System(cat, qs, storage=store)
+    res = s.ask({"amount": 5, "status": "new", "order": {"zeta": 1, "amount": 2}})
+    assert res["computed"].answer == "status" and res["given"].answer == "zeta"
+    assert store.verify()["ok"] and store.replay_all(s) == []
+    back = store.get(res.stored_id)
+    assert list(back.trace.init["order"]) == ["zeta", "amount"]
+    sit = next(r.value for r in back.trace.records if r.name == "situation")
+    assert list(sit) == ["status", "amount", "nested"] and list(sit["nested"]) == ["z", "a"]
+    reopened = make_store(kind, tmp_path)                                           # and after a restart
+    assert reopened.verify()["ok"] and reopened.replay_all(s) == []
+    assert reopened.head() == store.head()
+
+
 def test_quarantine_and_forget(filled):
     _, store, _, resps = filled
     ids = [r.stored_id for r in resps]
