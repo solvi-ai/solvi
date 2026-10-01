@@ -64,7 +64,8 @@
   replay; now 0 (both backends). Records are written with the keys in their own order; hashes are taken over the
   canonical JSON as before, so chains, heads, signatures and existing stores verify unchanged. Records stored by
   earlier versions have already lost the order: where a model read a dict with unsorted keys, replay them with
-  `trust_models=True`.
+  `trust_models=True`. New records say so themselves — the record format `"v"` is now 2 — and when a model step of a
+  format-1 record does not recompute, `replay_all` adds a `"note"` that names this cause (`solvi replay` prints it).
   Sorting the keys in the decider's input instead was measured and rejected: on 1,013 questions over states written in
   a natural order solvi-base lost 3.6 points (95.9% → 92.3%; 41 answers broken, 5 fixed).
 - `perturb=k` reads Russian. The Russian wordings were read only by the guard (`actions=True`), so for a decider a

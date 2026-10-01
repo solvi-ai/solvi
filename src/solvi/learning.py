@@ -59,7 +59,7 @@ import json
 import warnings
 from dataclasses import asdict, dataclass, field
 
-from .storage import TRUSTED_SOURCES, UntrustedLabel, check_source, plain
+from .storage import FORMAT, TRUSTED_SOURCES, UntrustedLabel, check_source, plain
 
 LADDER = {"fit_below": 50, "memory_below": 1000, "adapter": None,
           "memory": {"k": 7, "radius": 0.15, "min_strength": 1.0, "min_agreement": 0.8, "mode": "check"}}
@@ -396,7 +396,7 @@ class Learning:
                        and part_fp in (d.get("parts") or {}).values()})
 
     def _record(self, body):
-        body = {"v": 1, "kind": "update", "experimental": True, **body}
+        body = {"v": FORMAT, "kind": "update", "experimental": True, **body}
         return self.changelog._append(json.loads(json.dumps(plain(body), default=str)))
 
     def _next_version(self):

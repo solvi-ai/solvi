@@ -492,6 +492,17 @@ def test_a_stored_trace_keeps_the_order_of_dict_keys_so_model_steps_replay(kind,
     reopened = make_store(kind, tmp_path)                                           # and after a restart
     assert reopened.verify()["ok"] and reopened.replay_all(s) == []
     assert reopened.head() == store.head()
+    assert store.record(res.stored_id)["v"] == 2
+    if kind == "jsonl":                             # the same record as solvi ≤ 0.7.1 stored it: format 1, keys sorted
+        recs = [dict(d, v=1) for d in _jsonl_lines(store)]
+        _jsonl_write(store, _rehash(recs))                                          # (_jsonl_write sorts the keys)
+        with open(store.head_path, "w") as fh:
+            json.dump({"count": len(recs), "hash": recs[-1]["hash"]}, fh)
+        old = JSONLStorage(store.path)
+        assert old.verify()["ok"]
+        (bad,) = old.replay_all(s)
+        assert bad["kinds"] == {"recompute": 2} and "wrote dict keys sorted" in bad["note"]
+        assert "trust_models=True" in bad["note"] and old.replay_all(s, trust_models=True) == []
 
 
 def test_verify_on_a_store_that_is_being_written_to(filled):

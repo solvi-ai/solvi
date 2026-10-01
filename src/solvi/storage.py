@@ -40,7 +40,10 @@ except ImportError:                           # Windows, the browser (Pyodide): 
     fcntl = None
 
 GENESIS = ""                                  # prev of the first record
-FORMAT = 1                                    # the record format ("v")
+FORMAT = 2                                    # the record format ("v"): 2 — dicts are written with their keys in their
+                                              # own order (1, solvi ≤ 0.7.1: sorted, the order a decider read is lost)
+LEGACY_ORDER = ("stored by solvi 0.7.1 or earlier, which wrote dict keys sorted: a model that read a dict may have read "
+                "its keys in another order than this replay gives it — replay such records with trust_models=True")
 
 
 TRUSTED_SOURCES = ("human", "outcome", "rule")   # where a label may come from: never the system's own answers
@@ -450,7 +453,8 @@ class TraceStorage:
         "mismatches": [(step, name, reason)], "models": [(step, name, verdict)], "catalog", "kinds", "summary"}] — empty
         when all replay. Each mismatch has a `.kind`, and "summary" tells damaged data from a catalog or a model that
         changed since (see solvi.runtime.Mismatch). A stored record that cannot be loaded is one mismatch (0, "load", ...),
-        a replay that raises is (0, "replay", ...): both of kind "error", no verdict on the data."""
+        a replay that raises is (0, "replay", ...): both of kind "error", no verdict on the data. "note" (a record of
+        format 1 whose model step does not recompute): it was stored with sorted dict keys, see LEGACY_ORDER."""
         from .runtime import Mismatch, mismatch_summary
         bad = []
 
@@ -471,9 +475,12 @@ class TraceStorage:
                 failed(s, "replay", e)
                 continue
             if not rep["ok"]:
-                bad.append({"id": s.id, "seq": s.seq, "time": s.time, "mismatches": rep["mismatches"],
-                            "models": rep["models"], "catalog": rep["catalog"], "kinds": rep["kinds"],
-                            "summary": rep["summary"]})
+                b = {"id": s.id, "seq": s.seq, "time": s.time, "mismatches": rep["mismatches"], "models": rep["models"],
+                     "catalog": rep["catalog"], "kinds": rep["kinds"], "summary": rep["summary"]}
+                rerun = {step for step, _, verdict in rep["models"] if verdict == "recomputed"}
+                if int(s.data.get("v") or 1) < 2 and any(m.kind == "recompute" and m[0] in rerun for m in rep["mismatches"]):
+                    b["note"] = LEGACY_ORDER          # a model step of an old record did not recompute: maybe only this
+                bad.append(b)
         return bad
 
     # --- provenance over the store
