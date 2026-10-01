@@ -129,6 +129,15 @@ _CUR = r"(?:[$€£₽¥]|usd|eur|rub|gbp)"
 _CUR_AFTER = re.compile(r"\s?(?:[$€£₽¥]|(?:usd|eur|rub|gbp|руб\w*|р\.|rubles?|roubles?|euros?|dollars?|pounds?)(?!\w))",
                         re.I)
 _PCT = r"\s?(?:%|percent(?!\w)|per\s+cent(?!\w)|процент\w*)"
+# words of a number spelled out: next to a number that was read they mean the number goes on ("two thousand three
+# hundred", "две тысячи триста", "one hundred fifty") — only a number with one scale word is read, the rest is refused
+_MORE = (r"(?:and\s+)?(?:one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|\w+teen|twenty|thirty|forty|fifty|"
+         r"sixty|seventy|eighty|ninety|hundred|thousand|million|billion|"
+         r"один|одна|одну|два|две|три|четыре|пять|шесть|семь|восемь|девять|десять|\w+надцать|двадцать|тридцать|сорок|"
+         r"пятьдесят|шестьдесят|семьдесят|восемьдесят|девяносто|сто|двести|триста|четыреста|\w+сот|тысяч\w*|"
+         r"миллион\w*|миллиард\w*)")
+_MORE_AFTER = re.compile(r"\s+" + _MORE + r"(?!\w)", re.I)
+_MORE_BEFORE = re.compile(r"(?<!\w)" + _MORE + r"\s+$", re.I)
 NUMBER_RE = re.compile(
     rf"(?<![\w.,\-/])(?P<cur>{_CUR}\s?)?(?:(?P<d>{_DIGITS})(?:(?P<sp>\s?)(?P<s1>{_SCALE_RE})\.?(?!\w))?|"
     rf"(?P<w>{_WORD_RE})\s+(?P<s2>{_SCALE_WORDS_RE})(?!\w))(?![\w]|[.,/\-]\d)(?P<pct>{_PCT})?", re.I)
@@ -175,6 +184,10 @@ def parse_number(s, spec=None):
     if len(found) != 1:
         raise ParseError(f"{'no number' if not found else 'more than one number'} in {s!r}")
     m = found[0]
+    more = _MORE_AFTER.match(s, m.end()) or _MORE_BEFORE.search(s[:m.start()])
+    if more and (m.group("w") is not None or m.group("s1")):      # a spelled-out number, or digits with a scale word
+        raise ParseError(f"{s.strip()!r} is a number in several words ({more.group().strip()!r} next to {m.group()!r}): "
+                         "a number with one scale word is read (\"2 thousand\", \"two million\"), a longer one is not")
     if m.group("d") is not None:
         d = m.group("d")
         if " " in d and not m.group("cur") and not m.group("s1") and not _CUR_AFTER.match(s, m.end()):

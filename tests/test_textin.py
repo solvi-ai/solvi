@@ -456,3 +456,17 @@ def test_two_digit_year_needs_today_and_a_window():
     assert parse_date("01.02.85", t) == "1985-02-01" and parse_date("01.02.30", t) == "2030-02-01"
     assert parse_date("01.02.46", t) == "2046-02-01" and parse_date("01.02.47", t) == "1947-02-01"
     assert parse_date("01.02.26", t) == "2026-02-01"
+
+
+def test_a_spelled_out_number_that_goes_on_is_refused_not_cut():
+    """Only a number with one scale word is read. "две тысячи триста" was read as 2000 and "one hundred fifty" as 100:
+    the words after the scale were dropped."""
+    from solvi.textin import ParseError, parse_number
+    for text in ("две тысячи триста", "one hundred fifty", "one hundred and fifty", "триста две тысячи",
+                 "ten thousand and one nights"):
+        with pytest.raises(ParseError, match="a number in several words"):
+            parse_number(text)
+    for text, want in (("две тысячи", "2000"), ("two thousand euros", "2000"), ("полтора миллиона", "1500000"),
+                       ("пять тысяч рублей", "5000"), ("twelve hundred", "1200"), ("1.5 million", "1500000"),
+                       ("2 thousand items for five people", "2000"), ("about three hundred people in two groups", "300")):
+        assert parse_number(text) == want, text

@@ -2,6 +2,9 @@
 
 ## 0.7.2 — unreleased
 
+- `solvi.textin.parse_number` refuses a spelled-out number that goes on instead of cutting it: "две тысячи триста" was
+  read as 2000 and "one hundred fifty" as 100 (the words after the scale were dropped). A number with one scale word
+  is read as before ("two thousand", "полтора миллиона", "1.5 million").
 - `long="retrieve"` can search by other words than the question: `decision(..., long="retrieve", retrieve_query="Invoice
   No Contract No Ref Счёт №")`. BM25 matches words, and a field written as a labelled line, or a document in another
   language than the question, shares none with it: then nothing matches and the first sections are read. The decider
