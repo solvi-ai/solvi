@@ -2369,7 +2369,8 @@ class DecisionPart:
         elif self.guarantee is not None:
             d.extra["guarantee"] = dict(self.guarantee) if grp is None else group_record(self.guarantee, *grp)
         if self.perturb and d.escalate is None and (ctx or {}).get("text") is not None:
-            self._perturbed(d, ctx["text"])
+            quiet = {**ctx, "text": None}             # a variant is gated like the input itself: same thresholds and
+            self._perturbed(d, ctx["text"], lambda dv, a: self._finish(dv, a, threshold, quiet))   # group, no re-asking
         if self.correction_memory is not None and (ctx or {}).get("text") is not None:
             self.correction_memory.apply(d, ctx["text"], alone=threshold is None and not ctx.get("combined"))
         if self.conformal_set is not None and d.probs:
@@ -2379,29 +2380,40 @@ class DecisionPart:
                 d.escalate += f"; candidates at {self.conformal_set['coverage']:.0%}: {cands!r}"
         return d
 
-    def _perturbed(self, d, text):
+    def _perturbed(self, d, text, gate=None):
         """The perturb=k safeguard: ask again on up to k variants of the input without its instruction-like sentences
-        (solvi.perturb.variants — deterministic rules); when an answer differs, escalate. Records extra["perturb"]:
-        {"variants", "calls" (extra forward passes), "removed" (per variant), "answers", "flipped"}. An input without
-        such sentences has no variants and costs nothing."""
+        (solvi.perturb.variants — deterministic rules); escalate when an answer differs, or when the answer is the same
+        but the model would not have given it alone without those sentences (`gate`: the part's own act / confidence
+        gate applied to a variant's decision — an instruction can leave the answer and lift the model's confidence in
+        it). Records extra["perturb"]: {"variants", "calls" (extra forward passes), "removed" (per variant), "answers",
+        "flipped", "unsure" (a variant escalated)}. An input without such sentences has no variants and costs nothing."""
         from .perturb import variants
         vs = variants(text, self.perturb)
         if not vs:
             return d
         outs = self._read([v.text for v in vs])
-        base, flip, answers = _vkey(d.value), None, []
-        for v, (z, _) in zip(vs, outs):
-            val = self.model._decision(self.spec, z).value
+        base, flip, unsure, answers = _vkey(d.value), None, None, []
+        for v, (z, a) in zip(vs, outs):
+            dv = self.model._decision(self.spec, z)
+            val = dv.value
             answers.append(val)
             if flip is None and _vkey(val) != base:
                 flip = (v, val)
+            elif gate is not None and flip is None and unsure is None:
+                why = gate(dv, a).escalate
+                if why:
+                    unsure = (v, why)
         d.extra["perturb"] = {"variants": len(vs), "calls": len(vs) * len(self._orders if self.option_order == "average"
                                                                             else [0]),
                               "removed": [v.removed for v in vs], "answers": [jsonable(_shown(a)) for a in answers],
-                              "flipped": flip is not None}
+                              "flipped": flip is not None, "unsure": flip is None and unsure is not None}
         if flip is not None:
             d.escalate = (f"{INSTRUCTION}: " + "; ".join(repr(r) for r in flip[0].removed)
                           + f" (without it: {_shown(flip[1])!r}); would have answered {_shown(d.value)!r}")
+        elif unsure is not None:
+            d.escalate = (f"{INSTRUCTION}: " + "; ".join(repr(r) for r in unsure[0].removed)
+                          + f" (without it the model does not answer alone: {unsure[1].split('; would have answered')[0]})"
+                          + f"; would have answered {_shown(d.value)!r}")
         return d
 
     def _signal(self, d):

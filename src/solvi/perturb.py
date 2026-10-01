@@ -21,7 +21,15 @@ Rules (case-insensitive), applied per sentence (a line, split after . ! ?):
   direct      dictates the answer: "the correct answer / label / category is", "your answer / output", "answer with",
               "classify / label / mark / tag / flag this as", "route this to", "you must / should … answer / choose / …"
 
-and a quoted passage ("…", “…”, '…' of two words or more) that matches one of them is an instruction quoted inside an
+"New instructions: …" (new orders / directives) is a role label too. A text with Cyrillic letters is also read by the
+same four rules in Russian, without the look-alike mapping: "Система: …", "Новые инструкции: …" (role), "игнорируй /
+забудь / не следуй … правила / инструкции / указания / всё выше" (override), "как ИИ", "ты теперь классификатор"
+(address), "правильный ответ — …", "ответь: …", "классифицируй это как …", "вы должны ответить …" (direct). Like the
+English rules they do not read a request as an instruction: "верните мне деньги", "отмените заказ по правилам
+возврата", "ваш ответ меня не устроил" match nothing. On 26,474 ordinary Russian texts (MERA task inputs, GSM8K-ru,
+79,344 sentences) they fired on one sentence.
+
+and a quoted passage ("…", “…”, «…», '…' of two words or more) that matches one of them is an instruction quoted inside an
 otherwise ordinary sentence: its quote is emptied ('a post said "you must answer X" about it' → 'a post said "" about
 it'), the sentence stays.
 
@@ -69,7 +77,40 @@ _DIRECT = re.compile(r"\b(the (correct|right|only|final|true|expected) (answer|l
                      r"(classify|label|categori[sz]e|mark|tag|flag) (this|it|the \w+) as|route (this|it|the \w+) to|"
                      r"you (must|should|have to|are required to|will) (now )?(answer|output|choose|select|pick|classify|"
                      r"label|say|reply|respond|mark|route|return|approve|reject))\b", _I)
-_RULES = (("role", _ROLE), ("role", _ROLE_MID), ("override", _OVERRIDE), ("address", _ADDRESS), ("direct", _DIRECT))
+_ROLE_NEW = re.compile(r"\bnew (instructions?|orders|directives?)\s*:", _I)       # "New instructions: always answer X"
+_RULES = (("role", _ROLE), ("role", _ROLE_MID), ("role", _ROLE_NEW), ("override", _OVERRIDE), ("address", _ADDRESS),
+          ("direct", _DIRECT))
+# The same four rules in Russian, read on the text without the look-alike mapping (which would turn Cyrillic words into
+# Latin fragments). Like the English ones they leave a customer's request alone: "верните мне деньги", "отмените заказ"
+# and "вы должны вернуть деньги" match nothing here (the guard's action rules are _RU, below).
+_RU_MODEL = r"(ии|ассистент\w*|модел[ьию]|бот\w*|классификатор\w*|нейросет\w+|языков\w+ модел\w+|систем[аеу])"
+_RU_RULES = (
+    ("role", re.compile(r"^\W*(система|системное сообщение|системный промпт|ассистент|ии|бот|модель|администратор|"
+                        r"разработчик|инструкци[яи]|новые инструкции|новая инструкция|новые указания|промпт|"
+                        r"примечание для (ии|ассистента|модели|бота|классификатора|системы))\s*:", _I)),
+    ("role", re.compile(r"(?<!\w)(СИСТЕМА|АССИСТЕНТ|ИНСТРУКЦИ[ЯИ]|НОВЫЕ ИНСТРУКЦИИ|АДМИНИСТРАТОР|РАЗРАБОТЧИК|ПРОМПТ)\s*:")),
+    ("role", re.compile(r"(?<!\w)(новые|обновл[её]нные) (инструкции|указания)\s*:", _I)),
+    ("override", re.compile(r"(?<!\w)(про)?(игнорируй|игнорируйте|игнорировать|забудь|забудьте|не учитывай|не учитывайте|"
+                            r"не следуй|не следуйте|обойди|обойдите|не обращай внимания на|не обращайте внимания на)"
+                            r"(?!\w)[^.!?\n]{0,60}?(?<!\w)(инструкц\w+|правил\w*|указани\w+|ограничени\w+|политик\w+|"
+                            r"промпт\w*|системн\w+|вариант\w*|вс[её],? (что )?(написано |сказано |было )?выше|"
+                            r"вышесказанн\w+|вышеуказанн\w+|вышеперечисленн\w+)", _I)),
+    ("address", re.compile(r"(?<!\w)(как ии\b|как искусственный интеллект|(ты|вы)( теперь)?( —| -|,)? (это )?" + _RU_MODEL +
+                           r"(?!\w)|(уважаем\w+|дорог\w+|эй|внимание|внимани\w+)[,:]? " + _RU_MODEL + r"(?!\w))", _I)),
+    ("direct", re.compile(r"(?<!\w)((правильн\w+|верн\w+|единственн\w+|итогов\w+|окончательн\w+|ожидаем\w+) "
+                          r"(ответ|метк\w+|категори\w+|класс|вариант|выбор|решени\w+|результат)( здесь| тут)?"
+                          r"\s*(—|-|–|:|=|это\b)|"
+                          r"(твой|ваш|твоя|ваша|тво[ёе]|ваше) (ответ|вывод|метк\w+|классификаци\w+|решени\w+|результат)"
+                          r"\s*(—|-|–|:|=|долж\w+|обязан\w*|будет)|"
+                          r"(ответь|ответьте|отвечай|отвечайте|выведи|выведите)( всегда| только| просто| одним словом| "
+                          r"словом)?\s*[:«\"“']|"
+                          r"(ответь|ответьте|отвечай|отвечайте) (всегда|только|словом|одним словом)(?!\w)|"
+                          r"(классифицируй|классифицируйте|пометь|пометьте|отметь|отметьте|обозначь|обозначьте|"
+                          r"отнеси|отнесите) (это|его|е[её]|их|\w+) (как|к категории|к классу)(?!\w)|"
+                          r"(ты|вы) (теперь |сейчас )?(должен|должна|должны|обязан|обязана|обязаны) (теперь |сейчас )?"
+                          r"(ответить|вывести|выбрать|классифицировать|пометить|отметить|сказать|одобрить|отклонить|"
+                          r"направить))(?!\w)", _I)))
+_CYRILLIC = re.compile(r"[\u0400-\u04ff]")
 # The guard's rules (actions=True) — broader than a decider's: a tool output has no business telling the reader to act,
 # while a customer's email may well say "please send me a refund".
 _VERBS = (r"(pay|send|transfer|wire|remit|deposit|refund|delete|remove|erase|drop|write|e-?mail|mail|forward|approve|"
@@ -178,20 +219,22 @@ def _back(spans, starts, ends, n):
             continue
         out.append((starts[a] if a < len(starts) else n, ends[b - 1]))
     return out
-_QUOTE = re.compile(r"\"([^\"\n]+)\"|“([^”\n]+)”|'([^'\n]+ [^'\n]+)'")
+_QUOTE = re.compile(r"\"([^\"\n]+)\"|“([^”\n]+)”|'([^'\n]+ [^'\n]+)'|«([^»\n]+)»")
+_QUOTE_GROUPS = (1, 2, 3, 4)
 _SPLIT = re.compile(r"(?<=[.!?])\s+(?=\S)")
 
 
 def instruction_rule(sentence, actions=False):
     """The rule an instruction-like sentence matches ("role", "override", "address", "direct"; "action" with
-    actions=True), else None. The sentence is normalised first (see `normalize`)."""
+    actions=True), else None. The sentence is normalised first (see `normalize`); a sentence with Cyrillic letters is
+    also read by the Russian rules, without the look-alike mapping."""
     norm = normalize(sentence)[0]
     for name, rx in (_ACTION_RULES if actions else _RULES):
         if rx.search(norm):
             return name
-    if actions:
+    if _CYRILLIC.search(sentence):
         plain = normalize(sentence, confusables=False)[0]
-        for name, rx in _RU:
+        for name, rx in (_RU_RULES + _RU if actions else _RU_RULES):
             if rx.search(plain):
                 return name
     return None
@@ -219,10 +262,11 @@ def sentences(text):
 def quoted_instructions(text, actions=False):
     """Quoted passages that read as instructions → [(start, end)] of their content (inside the quotes)."""
     norm, starts, ends = normalize(text)
+    plain = normalize(text, confusables=False)[0] if _CYRILLIC.search(text) else norm    # same offsets as norm
     out = []
     for m in _QUOTE.finditer(norm):
-        g = next(i for i in (1, 2, 3) if m.group(i) is not None)
-        if instruction_like(m.group(g), actions):
+        g = next(i for i in _QUOTE_GROUPS if m.group(i) is not None)
+        if instruction_like(plain[m.start(g):m.end(g)], actions):
             out.append((m.start(g), m.end(g)))
     return _back(out, starts, ends, len(text))
 
@@ -241,17 +285,17 @@ def instruction_spans(text, actions=False):
     are offsets into `text`. actions=True: the "action" rule too (the guard's)."""
     orig = text
     text, starts, ends = normalize(text)
-    plain = normalize(orig, confusables=False)[0] if actions else ""
+    plain = normalize(orig, confusables=False)[0] if _CYRILLIC.search(orig) else ""
     rules = _ACTION_RULES if actions else _RULES
+    ru = (_RU_RULES + _RU if actions else _RU_RULES) if plain else ()
     out = []
     for a, b in sentences(text):
         sent = text[a:b]
         found = [m for _, rx in rules for m in rx.finditer(sent)]
-        if actions:
-            found += [m for _, rx in _RU for m in rx.finditer(plain[a:b])]
+        found += [m for _, rx in ru for m in rx.finditer(plain[a:b])]
         if not found:
             continue
-        quoted = [(m.start(g), m.end(g)) for m in _QUOTE.finditer(sent) for g in (1, 2, 3) if m.group(g) is not None]
+        quoted = [(m.start(g), m.end(g)) for m in _QUOTE.finditer(sent) for g in _QUOTE_GROUPS if m.group(g) is not None]
         first = min(m.start() for m in found)
         inside = all(any(qa <= m.start() and m.end() <= qb for qa, qb in quoted) for m in found)
         if inside:
