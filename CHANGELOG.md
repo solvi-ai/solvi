@@ -2,6 +2,13 @@
 
 ## 0.7.2 — unreleased
 
+- `long="retrieve"` can search by other words than the question: `decision(..., long="retrieve", retrieve_query="Invoice
+  No Contract No Ref Счёт №")`. BM25 matches words, and a field written as a labelled line, or a document in another
+  language than the question, shares none with it: then nothing matches and the first sections are read. The decider
+  still reads the question as written; the query is in `extra["long"]["query"]` and in the part's fingerprint (a part
+  without it keeps its fingerprint). With solvi-base on 41 synthetic documents of 1,100–4,800 tokens and six fields:
+  the answer's line among the sections read 66% → 88% (Russian documents under English questions 25% → 92%), field
+  accuracy 62% → 69%.
 - A typed span no longer answers a piece of a number, and reads dates and amounts as people write them. `Span[float]`
   and `Span[date]` validated the quoted text with pydantic alone, and a decider's pointer was trimmed to the first
   piece of its best span that parsed: from `EUR 18,851.12` it answered **851.12**, from `GBP 200,071.22` it answered

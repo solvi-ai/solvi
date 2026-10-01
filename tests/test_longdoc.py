@@ -123,6 +123,34 @@ def test_retrieve_finds_the_clause_truncation_would_miss():
     assert "long" not in part(contract=short).extra and part(contract=short).value == "England"
 
 
+def test_retrieve_query_searches_by_other_words_than_the_question():
+    """The question shares no word with the line that answers it (a label the document writes, another language): BM25
+    then finds nothing and the first sections are read. retrieve_query gives the words to search by; the decider still
+    reads the question."""
+    m = model()
+    task = "Where must disputes be brought"                           # no word of the clause that answers it
+    lost = m.decision("where", task, "contract", Span[str], long="retrieve", top_k=1)
+    d = lost(contract=TEXT)
+    assert d.extra["long"]["sections"][0][2] != "13. GOVERNING LAW" and "query" not in d.extra["long"]
+    part = m.decision("where", task, "contract", Span[str], long="retrieve", top_k=1,
+                      retrieve_query="governing law courts jurisdiction")
+    d = part(contract=TEXT)
+    assert d.extra["long"]["sections"][0][2] == "13. GOVERNING LAW"
+    assert d.extra["long"]["query"] == "governing law courts jurisdiction"
+    assert "governed by the law of France" in m.scorer.texts[-1]         # what was read; the question is unchanged
+    assert part.spec.task == task and part.fingerprint() != lost.fingerprint()
+    assert part.long_key() == ("retrieve", 1, False, ("query", "governing law courts jurisdiction"))
+    assert lost.long_key() == ("retrieve", 1, False)                     # without it: the key it always had
+    cat = Catalog()
+    s = System(cat, [part.question(cat)])
+    res = s.ask({"contract": TEXT})
+    assert res.trace.replay(s)["ok"]
+    rec = next(x for x in res.trace.records if x.name == "answer:where")
+    assert rec.extra["long"]["query"] == "governing law courts jurisdiction"
+    with pytest.raises(ValueError, match="retrieve_query is what long="):
+        m.decision("where", task, "contract", Span[str], retrieve_query="governing law")
+
+
 def test_span_maps_back_into_the_whole_contract_and_the_trace_records_the_sections():
     m = model()
     cat = Catalog()

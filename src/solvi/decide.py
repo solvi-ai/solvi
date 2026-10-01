@@ -2024,7 +2024,7 @@ class DecideModel:
                  type=None, escalate_below=None, act_threshold=None, use_act=None, target_error=None,
                  score_value="median", unknown=False, k=None, bins=None, unit=None, coverage=0.8, evidence=False,
                  option_order="canonical", permutations=4, min_margin=None, long=None, top_k=None, rerank=False,
-                 perturb=0):
+                 perturb=0, retrieve_query=None):
         """A catalog part: text_fact (a fact name, or a list of them) → Decision(value, probs).
 
         The question: `options` (a list, or {option: description}) and `kind` ("choice", "multi", "score", "noul"; default
@@ -2063,7 +2063,10 @@ class DecideModel:
         it into sections, selects the top_k that bear on the question by BM25 (rerank=True: re-ordered by the decider's own
         relevance, one yes / no pass per candidate section) and decides on them; spans and evidence point into the whole
         text, and the sections read are in the decision's extra["long"] (solvi.longdoc). top_k=None (the default): sections
-        of about 170 tokens — budget / 170, at least 3 (3 at max_len 512, 12 at 2048). long="full" (a checkpoint trained
+        of about 170 tokens — budget / 170, at least 3 (3 at max_len 512, 12 at 2048). retrieve_query: the words the
+        sections are searched by, in place of the question's own (its task, options and descriptions) — the labels the
+        document writes next to the value ("Invoice No Contract No Ref"), or the document's language when the question
+        is asked in another one; the decider still reads the question as it is. long="full" (a checkpoint trained
         on long inputs: `max_len_long` in its solvi_decide.json) reads a text that does not fit max_len whole, up to
         max_len_long tokens, and retrieves within max_len_long beyond that (recorded in extra["long"]); a GPU mode — on a
         CPU a whole 8k-token text takes seconds per question."""
@@ -2097,7 +2100,7 @@ class DecideModel:
         return DecisionPart(self, name, task, text_fact, options, descriptions, multi, other, kind=kind, as_bool=as_bool,
                             escalate_below=escalate_below, act_threshold=act_threshold, use_act=use_act,
                             option_order=option_order, permutations=permutations, min_margin=min_margin,
-                            long=long, top_k=top_k, rerank=rerank, perturb=perturb,
+                            long=long, top_k=top_k, rerank=rerank, perturb=perturb, retrieve_query=retrieve_query,
                             score_value=score_value, **{x: v for x, v in prim.items() if v not in (None, False, 0)
                                                          or x == "coverage"})
 
@@ -2232,9 +2235,13 @@ class DecisionPart:
     def __init__(self, model, name, task, text_fact, options, descriptions=None, multi=False, other=None, *, kind=None,
                  as_bool=False, escalate_below=None, act_threshold=None, use_act=None, score_value="median",
                  option_order="canonical", permutations=4, min_margin=None, long=None, top_k=None, rerank=False,
-                 perturb=0, **prim):
+                 perturb=0, retrieve_query=None, **prim):
         self.model = model
         self.long, self.top_k, self.rerank = long, None if top_k is None else max(1, int(top_k)), bool(rerank)
+        self.retrieve_query = str(retrieve_query).strip() or None if retrieve_query is not None else None
+        if self.retrieve_query and long is None:
+            raise ValueError('retrieve_query is what long="retrieve" (or long="full" beyond its length) searches by: '
+                             "set long=")
         self.long_len = getattr(model, "long_len", None) if long == "full" else None   # read whole up to (long="full")
         if long == "full" and self.long_len is None:
             raise ValueError('long="full" needs a checkpoint with a long-input length ("max_len_long"); use long="retrieve"')
@@ -2619,9 +2626,10 @@ class DecisionPart:
         max_len_long, top_k, rerank) — top_k resolved (top_k=None: from the budget)."""
         if self.long is None:
             return None
+        q = (("query", self.retrieve_query),) if self.retrieve_query else ()     # absent: the key is what it was
         if self.long == "full":
-            return ("full", self.long_len, self.sections_k(), self.rerank)
-        return (self.long, self.sections_k(), self.rerank)
+            return ("full", self.long_len, self.sections_k(), self.rerank) + q
+        return (self.long, self.sections_k(), self.rerank) + q
 
     def sections_k(self):
         """The sections retrieve reads: top_k, or with top_k=None budget / 170 (at least 3) — sections of ≈ 170 tokens."""
@@ -2659,7 +2667,8 @@ class DecisionPart:
         k = self.sections_k()
         doc = LongDocument(text, max_tokens=max(16, budget // k), count=self.model.count_tokens)
         sp = self.spec
-        query = " ".join([sp.task] + [str(o) for o in sp.real] + [str(v) for v in (sp.descriptions or {}).values() if v])
+        query = self.retrieve_query or " ".join([sp.task] + [str(o) for o in sp.real] +
+                                                [str(v) for v in (sp.descriptions or {}).values() if v])
         rr = self._relevance if self.rerank else None
         sel = doc.select(query, k=k, budget=budget, rerank=rr)
         return doc, sel, doc.window([s for s, _ in sel]), rr is not None
@@ -2697,6 +2706,8 @@ class DecisionPart:
         score = {s.index: sc for s, sc in sel}
         d.extra["long"] = {"read": len(sel), "of": len(doc), "by": "bm25+decider" if rr else "bm25",
                            "sections": [[s.start, s.end, s.heading, round(float(score[s.index]), 6)] for s in win.sections]}
+        if self.retrieve_query:                      # what the sections were searched by, when not the question itself
+            d.extra["long"]["query"] = self.retrieve_query
         if self.long == "full":                      # longer than max_len_long: retrieved within it
             d.extra["long"].update(mode="full", fallback="retrieve", tokens=n, max_len=self.long_len)
         if isinstance(d.value, Quote):

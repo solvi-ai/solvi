@@ -550,6 +550,23 @@ replay (models re-run) re-checks it — the selection is deterministic, so the s
 (`trust_models=True`, the report's default `replay="trusted"`) verifies the recorded output and does not re-select. A text that fits is decided as before, with nothing recorded; `long`,
 `top_k` (resolved: see "A larger budget") and `rerank` are part of the decision's fingerprint.
 
+**What to search by: `retrieve_query`.** BM25 matches words. A field written as a labelled line — "Invoice No.:
+INV-2542" — shares almost no word with "What is the invoice, contract or request reference number?", and a question in
+English shares none with a Russian document: nothing matches, and the first sections are read. `retrieve_query` gives
+the words to search by in place of the question's own — the labels the documents use, in their languages — while the
+decider still reads the question as written:
+
+```python
+part = m.decision("number", "What is the invoice, contract or request reference number?", "doc", Maybe[Span[str]],
+                  long="retrieve", retrieve_query="Invoice No Contract No Request No Reference Ref Счёт № Договор №")
+d.extra["long"]["query"]      # what the sections were searched by; part of the fingerprint
+```
+
+Measured with solvi-base on 41 synthetic invoices, contracts and letters of 1,100–4,800 tokens (32 English, 9 Russian;
+six fields; English questions): the line that holds the answer was among the sections read for 66% of the fields
+without it and 88% with a few labels per field (Russian documents: 25% → 92%), and field accuracy went from 62% to 69%
+(English 75% → 80%, Russian 15% → 30% — there the limit is the checkpoint's Russian, not the search).
+
 The same pieces work on their own (`solvi.longdoc`, standard library only):
 
 ```python
