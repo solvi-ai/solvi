@@ -1033,6 +1033,10 @@ distance 0.15", "similar cases disagree: 'billing' 1.20, 'shipping' 0.90"). Ties
 proposes the same thing every time, whatever order the cases were added in. `calibrate(risk)` sets `min_strength` by
 conformal risk control, each case proposed for by the others (its twins — the same features and words, e.g. a correction
 stored twice — left out with it): P(the memory proposes and is wrong) ≤ risk for inputs like the stored corrections.
+Its result also says why a memory stays silent: `"nearest"` is each case's distance to its nearest other case (min,
+median, max) next to `"radius"`. When no case has another within the radius, nothing is proposed in that run, so no
+proposal has been checked: `min_strength` becomes inf (the memory does not propose) and `"note"` says so — on texts
+whose probability vectors lie far apart (another language than the checkpoint's, a hard question) widen `radius`.
 
 **What it does** (`mode`):
 

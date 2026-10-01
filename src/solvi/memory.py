@@ -266,7 +266,9 @@ class CorrectionMemory:
         are left out with it: a correction stored twice would otherwise vouch for itself. Recorded as the memory's
         promise; changes its fingerprint.
         → {"min_strength", "proposed" (share of the cases it would propose for), "error" (among them), "risk", "n",
-        "guarantee"}."""
+        "guarantee", "radius", "nearest": {"min", "median", "max"} (each case's distance to its nearest other case)} and,
+        when no case has another within the radius, "note": the memory then proposes for none of them, nothing can be
+        learned about its proposals, and min_strength is inf (it does not propose) — compare `nearest` with `radius`."""
         from .calibration import crc_threshold
         cases, _ = self._snapshot()
         if len(cases) < 2:
@@ -280,16 +282,42 @@ class CorrectionMemory:
                               min_strength=-math.inf)
             sig.append(p.strength if p.label is not None else -1e9)
             wrong.append(float(p.label is not None and _key(p.label) != _key(c.label)))
-        t = crc_threshold(sig, wrong, risk)
+        real = [x for x in sig if x > -1e9]       # the strengths of the proposals (-1e9 marks "no proposal")
+        if not real:
+            t = math.inf                          # nothing was proposed: no proposal has been checked, so none is made
+        else:
+            t = crc_threshold(sig, wrong, risk)
+            if t <= -1e9:                         # every proposal can stand: the floor is the weakest of them, not the mark
+                t = min(real)
         self.min_strength = t
         s, w = np.array(sig), np.array(wrong)
         auto = (s >= t) & (s > -1e9)              # an abstention (no label) is never a proposal, whatever the floor
         self.guarantee = {"method": "crc-loo", "risk": risk, "n": len(cases),
                           "promise": f"P(the memory answers and is wrong) ≤ {risk:g} for inputs like the stored "
                                      "corrections (leave-one-out)"}
-        return {"min_strength": t, "proposed": float(auto.mean()),
-                "error": float(w[auto].mean()) if auto.any() else 0.0, "risk": float((w * auto).mean()),
-                "n": len(cases), "guarantee": self.guarantee["promise"]}
+        out = {"min_strength": t, "proposed": float(auto.mean()),
+               "error": float(w[auto].mean()) if auto.any() else 0.0, "risk": float((w * auto).mean()),
+               "n": len(cases), "guarantee": self.guarantee["promise"], "radius": self.radius,
+               "nearest": self._nearest(twins)}
+        if not real:
+            out["note"] = (f"no stored case has another within the radius {self.radius:g} (the nearest are "
+                           f"{out['nearest']['min']:g} to {out['nearest']['max']:g} away): the memory proposes for none "
+                           "of them and will not propose (min_strength is inf) — a larger radius?")
+        return out
+
+    def _nearest(self, twins):
+        """Each stored case's distance to its nearest other case (its twins left out) → {"min", "median", "max"}; None
+        values when every case is a twin of every other."""
+        cases, F = self._snapshot()
+        near = []
+        for c in cases:
+            d = self._distances(c.features, c.words, cases, F)
+            other = [float(d[i]) for i, x in enumerate(cases) if x.id not in twins[(c.features, c.words)]]
+            if other:
+                near.append(min(other))
+        if not near:
+            return {"min": None, "median": None, "max": None}
+        return {"min": round(min(near), 6), "median": round(float(np.median(near)), 6), "max": round(max(near), 6)}
 
     # --- identity and state
     def settings(self):

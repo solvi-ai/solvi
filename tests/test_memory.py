@@ -180,6 +180,26 @@ def test_calibrate_sets_the_abstain_threshold_leave_one_out():
             noisy.add(t, rng.choice(TEAMS), source="human")
     g = noisy.calibrate(risk=0.05)
     assert g["risk"] <= 0.05
+    assert got["min_strength"] > -1e8 and got["radius"] == mem.radius and 0 <= got["nearest"]["min"] <= got["nearest"]["max"]
+    assert "note" not in got
+
+
+def test_calibrate_on_cases_that_are_all_out_of_each_others_reach_says_so(tmp_path):
+    """No case has another within the radius: the leave-one-out run proposes nothing. The threshold used to come back as
+    -1e9 (the mark of "no proposal") with a guarantee line, which let any later proposal through unchecked."""
+    _, _, part, _ = setup()
+    mem = CorrectionMemory(part, radius=1e-9)
+    for team in TEAMS:
+        for t in texts(team, 6):
+            mem.add(t, team, source="human")
+    got = mem.calibrate(risk=0.1)
+    assert got["min_strength"] == float("inf") and mem.min_strength == float("inf") and got["proposed"] == 0.0
+    assert "no stored case has another within the radius 1e-09" in got["note"] and got["nearest"]["min"] > 1e-9
+    assert mem.propose(texts("billing", 1)[0]).label is None
+    mem.save(tmp_path / "m.json")                                          # an infinite floor is saved and loaded
+    again = CorrectionMemory(part, radius=1e-9)
+    again.load(tmp_path / "m.json")
+    assert again.min_strength == float("inf") and again.fingerprint() == mem.fingerprint()
 
 
 def test_save_and_load_refuse_another_checkpoint(tmp_path):

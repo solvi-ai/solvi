@@ -2,6 +2,12 @@
 
 ## 0.7.2 — unreleased
 
+- `CorrectionMemory.calibrate()` no longer returns the mark of "no proposal" as the threshold. When no stored case had
+  another within the radius (Russian tickets: nearest cases 0.42–0.79 apart at the default radius 0.15), the
+  leave-one-out run proposed nothing, and `min_strength` came back as `-1e9` with a guarantee line: any later proposal
+  passed unchecked. It is now inf (the memory does not propose) with a `"note"` that says why, and the result carries
+  `"radius"` and `"nearest"` — each case's distance to its nearest other case (min, median, max) — so a silent memory
+  explains itself. When every leave-one-out proposal can stand, the floor is the weakest of them rather than `-1e9`.
 - A `validate` that cannot run is an error, not a silent rejection. `validate(value, ...)` gets, by name, inputs of
   the part (for an alternative producer: inputs of any producer of its fact). When it named anything else — say a
   threshold that is in the input but that no producer reads — the call raised `TypeError`, the trace said `validate
