@@ -2,6 +2,15 @@
 
 ## 0.7.2 — unreleased
 
+- A `validate` that cannot run is an error, not a silent rejection. `validate(value, ...)` gets, by name, inputs of
+  the part (for an alternative producer: inputs of any producer of its fact). When it named anything else — say a
+  threshold that is in the input but that no producer reads — the call raised `TypeError`, the trace said `validate
+  raised TypeError`, and every output of that producer was rejected: with a model-backed producer it looked as if the
+  rules had turned the model down every time. Now a part that is not an alternative producer is refused when it is
+  declared, `System(catalog, ...)` refuses a catalog with such a producer (the message names the producer, the
+  argument and the fact), `solvi check` reports it on a bare catalog (`validate_reads_unknown`), and a producer added
+  to the catalog after its System was built is rejected with `validate cannot run: it reads X, which is not an input
+  of F`. Arguments with a default, `*args` and `**kwargs` are not required.
 - `JSONLStorage` with several writers. Two processes (or two store objects in one process) on one file each kept their
   own record count and last hash: the chain forked — sequence numbers twice, wrong `prev` — and `verify()` failed from
   then on; appends made at the same time also raised `FileNotFoundError` on the head file after the record was already

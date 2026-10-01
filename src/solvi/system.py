@@ -201,6 +201,10 @@ class System:
         from .learned import CostBook, OrderModel, ProducerPolicy
         self.lang = i18n.check(lang)
         self.catalog = catalog
+        for fact, name, lost in catalog.unreadable_validates():
+            raise ValueError(f"validate of {name} reads {lost}, which no producer of {fact} takes as an input: validate "
+                             f"gets the value and, by name, inputs of the fact's producers — as it is, it cannot run and "
+                             f"every output of {name} would be rejected")
         self.inputs = inputs
         self.strategist = strategist              # None: the deterministic strategist (solvi.strategist.plan)
         self.questions = {q.name: self._typed_question(q) for q in questions}

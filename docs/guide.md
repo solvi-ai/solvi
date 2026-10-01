@@ -2792,7 +2792,9 @@ not list it in `checkpoints`, so when the check fails the question is answered a
 `checkpoints=[...]`); `then=` naming no question or an answer outside the question's options; facts that need each other
 (`cycle`); a question no input can answer (a fact nothing can compute, a missing checkpoint, a span / rank / estimate
 question without a rule); a producer's type its consumer cannot read, or a `System(inputs=...)` field its typed reader
-cannot read (`type_conflict`); constraints between answers that no combination satisfies — one alone or all together,
+cannot read (`type_conflict`); a producer's `validate` that requires an argument no producer of its fact takes as an
+input (`validate_reads_unknown`: it cannot run, so every output of that producer would be rejected — `System(...)`
+refuses such a catalog, and a part that is not an alternative producer is refused when it is declared); constraints between answers that no combination satisfies — one alone or all together,
 tried by brute force over the answers' finite domains (yes/no, choice, ordinal, multi-label up to 10 options; up to
 `--max-combos` combinations per group of constraints that share questions) — and a constraint reading a name that is not
 a question (it never applies). **Warnings**: a part no question's flow uses (a question without a rule, fit or `uses`

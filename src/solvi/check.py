@@ -19,6 +19,8 @@ Errors (a decision is, or can be, wrong or impossible):
   constraint_never_holds / constraints_conflict   constraints between answers that no combination of answers satisfies
                         (brute force over the answers' finite domains)
   constraint_unknown_question      a constraint that reads a name that is not a question: it never applies
+  validate_reads_unknown           a producer's `validate` requires an argument no producer of its fact takes as an input:
+                        it cannot run, so every output of that producer is rejected (a System refuses such a catalog)
 Warnings:
   unused_part           a part no question's flow uses (a question without a rule, fit or `uses` uses everything computable:
                         those are the candidate features of the head it will be fitted with)
@@ -124,6 +126,10 @@ def lint(obj, strict=False, max_combos=100_000):
             if name not in used and name not in in_cycle:
                 rep.add("warning", "unused_part", name, f"no question's flow uses this {p.kind}")
     _types(cat, system, given, rep)
+    for fact, name, lost in cat.unreadable_validates():
+        rep.add("error", "validate_reads_unknown", f"{fact} ({name})",
+                f"validate reads {', '.join(lost)}, which no producer of {fact} takes as an input: it cannot run, so every "
+                f"output of {name} is rejected")
     if questions:
         _constraints(cat, questions, rep, max_combos)
     elif cat.constraints:

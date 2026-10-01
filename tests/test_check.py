@@ -286,6 +286,57 @@ def warns():
 '''
 
 
+def test_a_validate_that_reads_what_no_producer_reads():
+    """validate gets the value and, by name, inputs of the fact's producers. One that requires anything else cannot run:
+    it raised TypeError on every call and every output of its producer was rejected ("validate raised TypeError")."""
+    import pytest
+    from solvi import Decision
+
+    def build(validate):
+        cat = Catalog()
+
+        @cat.fn(provides="pick", validate=validate)
+        def pick_by_model(amount):
+            return Decision("a", {"a": 0.9, "b": 0.1})
+
+        @cat.fn(provides="pick")
+        def pick_by_rule(amount, limit):
+            return "b"
+
+        @cat.rule("choice")
+        def choice(pick) -> str:
+            return pick
+
+        return cat, [Question("choice", "Which?", Answer.choice(["a", "b"]))]
+
+    cat, qs = build(lambda v, amount, dominance: dominance > 0.5)
+    rep = lint(cat)
+    assert rep.codes("error") == ["validate_reads_unknown"] and "dominance" in rep.errors[0].message
+    with pytest.raises(ValueError, match="validate of pick_by_model reads \\['dominance'\\], which no producer of pick"):
+        System(cat, qs)
+    for ok in (lambda v, amount, limit: v == "a" and amount < limit,       # an input of another producer of the fact
+               lambda v, amount, dominance=0.5: True, lambda v, **kw: True, lambda v, *a: True, lambda v: True):
+        cat, qs = build(ok)
+        assert lint(cat).ok
+        res = System(cat, qs).ask({"amount": 5, "limit": 10})
+        assert res["choice"].answer == "a"
+    cat, qs = build(lambda v: True)                                         # a producer added after the System was built
+    s = System(cat, qs)
+
+    @cat.fn(provides="pick", cost=0, validate=lambda v, dominance: True)
+    def pick_first(amount):
+        return "a"
+
+    from solvi.core import validated
+    assert s.ask({"amount": 5, "limit": 10})["choice"].answer == "a"
+    assert validated(cat.alternative("pick", "pick_first"), "a", {"amount": 5, "limit": 10}) == \
+        "validate cannot run: it reads dominance, which is not an input of pick"
+    with pytest.raises(ValueError, match="validate of amount_ok reads \\['limit'\\], which amount_ok does not take"):
+        @cat.fn(validate=lambda v, limit: v < limit)                        # not an alternative producer: refused at once
+        def amount_ok(amount):
+            return amount
+
+
 def test_solvi_check_exit_statuses(tmp_path, capsys):
     f = tmp_path / "refunds.py"
     f.write_text(CATALOG)

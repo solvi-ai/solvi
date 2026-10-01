@@ -528,11 +528,28 @@ def _short(v, n=60):
     return s if len(s) <= n else s[: n - 1] + "…"
 
 
+def validate_misses(part, inputs):
+    """The arguments a part's `validate` requires and cannot be given → [names]. `validate(value, ...)` gets, by name,
+    inputs of the part — for an alternative producer, inputs of any producer of its fact (`inputs`: those names). An
+    argument with a default, *args and **kwargs ask for nothing."""
+    if part.validate is None:
+        return []
+    try:
+        params = list(inspect.signature(part.validate).parameters.values())[1:]
+    except (TypeError, ValueError):                     # a callable without a signature: nothing to check
+        return []
+    return [p.name for p in params if p.kind in (p.POSITIONAL_OR_KEYWORD, p.KEYWORD_ONLY) and p.default is p.empty
+            and p.name not in inputs]
+
+
 def validated(part, value, args):
     """Run a part's `validate(value, [its inputs by name])` → None or the rejection reason."""
     from .provenance import VALIDATE
     if part.validate is None:
         return None
+    lost = validate_misses(part, args)
+    if lost:                                            # else every output would be rejected as "validate raised TypeError"
+        return f"validate cannot run: it reads {', '.join(lost)}, which is not an input of {part.provides or part.name}"
     names = list(inspect.signature(part.validate).parameters)[1:]
     try:
         ok = part.validate(value, **{x: (args[x].value if isinstance(args[x], Quote) else args[x]) for x in names if x in args})
@@ -609,6 +626,10 @@ class Catalog:
             if commit:
                 commit()
             return f
+        lost = validate_misses(p, p.inputs)
+        if lost:
+            raise ValueError(f"validate of {p.name} reads {lost}, which {p.name} does not take as an input: validate gets "
+                             "the value and, by name, the part's own inputs")
         if kind == "rule":
             p.name = "answer:" + p.question
             if self.readers and commit is None:
@@ -722,6 +743,13 @@ class Catalog:
         (e.g. `def unsafe_if_harm(verdict, harm): return harm == "none" or verdict == "unsafe"`). When learned answers break it,
         solvi picks the most probable combination that satisfies every constraint; answers from rules and hard checks stay."""
         return self._add("constraint", f)
+
+    def unreadable_validates(self):
+        """Producers whose `validate` requires an argument no producer of their fact takes as an input → [(fact, producer,
+        [names])]. Such a validate cannot run, so every output of that producer would be rejected. (A part that is not
+        an alternative producer is checked when it is declared; a fact's producers only once all of them are.)"""
+        return [(g.name, a.name, lost) for g in self.parts.values() for a in g.alternatives or ()
+                for lost in [validate_misses(a, g.inputs)] if lost]
 
     def producer(self, fact):
         return self.parts.get(fact)
