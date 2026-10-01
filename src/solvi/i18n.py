@@ -55,6 +55,7 @@ EN = {
     "au.none_fired": "none fired", "au.compact": "{q}: {support}; safeguards: {safeguards}",
     "x.act": "act {x}", "x.expected": "expected {x}", "x.margin": "margin {x}", "x.candidates": "candidates {x}",
     "x.pass": "one pass with {x}", "x.own_pass": "own pass (shared pass fell back)",
+    "x.truncated": "read {read} of {of} input tokens (the rest was cut)",
     # several models (solvi.multi) in the audit
     "m.cascade": "cascade     ", "m.stage_answered": "stage {i} answered", "m.every_stage": "every stage escalated",
     "m.calls": "; {n} model(s) called", "m.stage": "  stage {i}   ", "m.answered": "answered",
@@ -112,6 +113,7 @@ RU = {
     "au.none_fired": "не сработали", "au.compact": "{q}: {support}; защиты: {safeguards}",
     "x.act": "act {x}", "x.expected": "ожидаемое {x}", "x.margin": "разрыв {x}", "x.candidates": "кандидаты {x}",
     "x.pass": "один проход вместе с {x}", "x.own_pass": "свой проход (общий не удался)",
+    "x.truncated": "прочитано {read} из {of} токенов входа (остальное отрезано)",
     "m.cascade": "каскад        ", "m.stage_answered": "ответила ступень {i}", "m.every_stage": "все ступени передали человеку",
     "m.calls": "; вызвано моделей: {n}", "m.stage": "  ступень {i}   ", "m.answered": "ответила",
     "m.escalated": "передала человеку — {e}", "m.alone": "отвечает сама", "m.vote": "голосование   правило {rule}: ",

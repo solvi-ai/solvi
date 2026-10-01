@@ -519,7 +519,13 @@ model and the equal dict give the same text.
 ### Long documents: find first, then decide
 
 A decider reads `max_len` tokens (the question and the input together; `m.max_len`, `m.count_tokens(text)`). By default a
-longer text is cut at the end by the tokenizer. `long="retrieve"` finds the relevant parts first:
+longer text is cut at the end by the tokenizer, and the decision says so: `d.extra["truncated"]` is `{"input_tokens":
+1451, "read_tokens": 478, "question_tokens": 34, "max_len": 512}`, the audit prints "read 478 of 1451 input tokens (the
+rest was cut)", and a `LongInputWarning` is raised once per part. The answer stands — a category is often clear from the
+start of a message — but a fact beyond the cut was not read, and the model is no less sure for it. Many options with
+long descriptions crowd the input out the same way (`question_tokens`); a question that takes the whole of `max_len`
+is an error that says how many tokens it takes. `m.truncation(spec, text)` gives the same numbers without a decision.
+`long="retrieve"` finds the relevant parts first:
 
 ```python
 part = m.decision("notice", "Notice period for termination for convenience?", "contract", Span[str],

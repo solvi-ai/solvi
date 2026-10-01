@@ -73,3 +73,52 @@ def test_retrieve_reads_a_long_text(ckpt):
     assert 0 < part.budget() < 64
     r = part.decide(_long_text())
     assert r.value in TEAMS + [None]
+
+
+def test_an_input_read_cut_is_marked_in_the_decision_and_warned_once(ckpt):
+    """Without long=, an input that does not fit the pass is cut by the tokenizer. That was silent: the model answered as
+    sure as ever about a text whose end it had not read. The decision now says how much was read."""
+    import warnings
+    from solvi import Catalog, System
+    from solvi.decide import LongInputWarning, pass_prompt
+    m = DecideModel.load(ckpt, backend="torch", device="cpu")
+    part = m.decision("team", "Which team?", "email", TEAMS)
+    enc = m.scorer.enc
+    q = enc.question_tokens((m._item(part.spec, "x"),))
+    fits, over = " ".join(["help"] * (64 - q)), " ".join(["help"] * (64 - q + 1))
+    with warnings.catch_warnings(record=True) as w:
+        warnings.simplefilter("always")
+        d_fit, d_over, d_long = part.decide(fits), part.decide(over), part.decide(_long_text())
+    assert "truncated" not in d_fit.extra
+    assert d_over.extra["truncated"] == {"input_tokens": 64 - q + 1, "read_tokens": 64 - q, "question_tokens": q, "max_len": 64}
+    n = m.count_tokens(_long_text())
+    assert d_long.extra["truncated"]["input_tokens"] == n and d_long.extra["truncated"]["read_tokens"] == 64 - q
+    for text, cut in ((fits, False), (over, True)):          # the mark is what the encoder really did
+        e = enc.tok_at(64).encode(pass_prompt((m._item(part.spec, text),), enc.markers), text)
+        assert sum(1 for x in e.sequence_ids if x == 1) == 64 - q and (m.count_tokens(text) > 64 - q) is cut
+    mine = [x for x in w if issubclass(x.category, LongInputWarning)]
+    assert len(mine) == 1 and "the rest was cut" in str(mine[0].message)          # once per part, not per decision
+    retr = m.decision("team_r", "Which team?", "email", TEAMS, long="retrieve", top_k=2).decide(_long_text())
+    assert "truncated" not in retr.extra and "long" in retr.extra                 # read by its sections: nothing is cut
+    with warnings.catch_warnings(record=True) as w:
+        warnings.simplefilter("always")
+        plain = m.decide(_long_text(), "Which team?", TEAMS)                      # the model's own decide: marked as well
+        m.decide("help please", "Which team?", TEAMS)
+    assert plain.extra["truncated"]["input_tokens"] == n and len(w) == 1
+    cat = Catalog()
+    s = System(cat, [part.question(cat)])
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        res = s.ask({"email": over})
+    assert f"read {64 - q} of {64 - q + 1} input tokens (the rest was cut)" in str(res.audit("team"))
+    assert "остальное отрезано" in res.audit("team").render(lang="ru")
+    assert res.trace.replay(s)["ok"]
+
+
+def test_options_that_do_not_fit_say_how_many_tokens_they_take(ckpt):
+    m = DecideModel.load(ckpt, backend="torch", device="cpu")
+    with pytest.raises(ValueError) as e:
+        m.decide("help", "Which team?", [f"billing {i}" for i in range(40)])
+    msg = str(e.value)
+    assert "do not fit in 64 tokens" in msg and "40 option(s)" in msg and "nothing is left for the input" in msg
+    assert "Truncation error" not in msg

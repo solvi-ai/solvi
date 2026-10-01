@@ -155,6 +155,9 @@ def _extra_line(x, lang=None):
         out.append((f"longer than {lg.get('max_len')} tokens ({lg.get('tokens')}): " if lg.get("fallback") else "") +
                    f"read {lg.get('read')} of {lg.get('of')} sections ({lg.get('by')}): "
                    + ", ".join(f"[{a}:{b}]" + (f" {h[:30]!r}" if h else "") for a, b, h, _ in lg.get("sections") or []))
+    tr = x.get("truncated")
+    if isinstance(tr, dict):                          # an input that did not fit the pass: how much of it was read
+        out.append(t("x.truncated", lang, read=tr.get("read_tokens"), of=tr.get("input_tokens")))
     ps = x.get("pass")
     if isinstance(ps, dict):
         out.append(t("x.pass", lang, x=", ".join(n for n in ps.get("with", []) if n)) if ps.get("shared", True)

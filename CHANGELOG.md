@@ -2,6 +2,19 @@
 
 ## 0.7.2 — unreleased
 
+- An input read cut is no longer silent. Without `long=`, a text that does not fit `max_len` (minus the question) was
+  cut by the tokenizer and nothing said so: the model answered a question about a fact at the end of the text as sure
+  as ever, and with many options the input was left a few dozen tokens. The decision now carries
+  `extra["truncated"] = {"input_tokens", "read_tokens", "question_tokens", "max_len"}` — exactly what the encoder read,
+  for a question alone, a shared pass and the block layout — the audit prints "read 478 of 1451 input tokens (the rest
+  was cut)" (Russian too), and a `LongInputWarning` is raised once per part. The answer itself is unchanged; a text
+  shorter in bytes than the tokens left for it is not tokenized again (7 µs per decision; 1.8 ms on a 1,451-token
+  text). `DecideModel.truncation(spec, text)` gives the numbers without a decision. With `long="retrieve"` or
+  `long="full"` nothing is cut and nothing is marked.
+- Options that do not fit say so in their own words: instead of `task and options do not fit in 512 tokens: Truncation
+  error: Sequence to truncate too short to respect the provided max_length`, the error gives the number of options,
+  the tokens the question takes and the tokens a pass reads, and what to do (a shortlist first, shorter descriptions,
+  a larger `max_len`).
 - `CorrectionMemory.calibrate()` no longer returns the mark of "no proposal" as the threshold. When no stored case had
   another within the radius (Russian tickets: nearest cases 0.42–0.79 apart at the default radius 0.15), the
   leave-one-out run proposed nothing, and `min_strength` came back as `-1e9` with a guarantee line: any later proposal

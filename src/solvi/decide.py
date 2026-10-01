@@ -386,7 +386,8 @@ def pointer_evidence(ptr, threshold=0.15, max_spans=3):
 
 # ------------------------------------------------------------------------------------------------ backends
 class LongInputWarning(UserWarning):
-    """long="full": a checkpoint forced to read long inputs it was not trained on, or whole long texts read on a CPU."""
+    """long="full": a checkpoint forced to read long inputs it was not trained on, or whole long texts read on a CPU.
+    Without long=: an input that does not fit the pass was read cut (the decision's extra["truncated"] says how much)."""
 
 
 LONG_CPU_TOKENS = 2048               # long="full" on a CPU warns (once per model) when it reads a text longer than this
@@ -412,6 +413,7 @@ class _Encoder:
         self.raw.no_truncation()
         self.max_len = max_len
         self._path, self._at, self._at_lock = f, {max_len: self.tok}, threading.Lock()
+        self._qt = {}                                 # question segment → its tokens (see question_tokens)
         self.markers = {**MARKERS, **(markers or {})}
         self.opt_id = self.tok.token_to_id(self.markers["option"])
         pad = next((self.tok.token_to_id(t) for t in ("[PAD]", "<pad>") if self.tok.token_to_id(t) is not None), 0)
@@ -452,13 +454,45 @@ class _Encoder:
                 self._at[n] = tok
             return tok
 
+    def question_tokens(self, items):
+        """The tokens a pass spends before the input: the questions' segment and the special tokens around the pair."""
+        p = pass_prompt(items, self.markers)
+        with self._at_lock:
+            k = self._qt.get(p)
+        if k is None:
+            k = len(self.raw.encode(p, add_special_tokens=False).ids) + self.raw.num_special_tokens_to_add(True)
+            with self._at_lock:
+                if len(self._qt) > 4096:
+                    self._qt.clear()
+                self._qt[p] = k
+        return k
+
+    def read(self, items, text):
+        """How much of an input one sequence reads (the full layout: only the input is cut) → None when all of it, else
+        {"input_tokens", "read_tokens", "question_tokens", "max_len"}. A text of fewer bytes than the tokens left for it
+        fits whatever its tokens are (a token is at least one byte), so short inputs are not tokenized again."""
+        n = max((getattr(it, "max_len", 0) or 0) for it in items) or self.max_len
+        q = self.question_tokens(items)
+        left = n - q
+        text = text or " "
+        if len(text) <= left and len(text.encode()) <= left:
+            return None
+        total = len(self.raw.encode(text, add_special_tokens=False).ids)
+        if total <= left:
+            return None
+        return {"input_tokens": total, "read_tokens": max(0, left), "question_tokens": q, "max_len": n}
+
     def encode(self, items, text):
         p = pass_prompt(items, self.markers)
         n = max((getattr(it, "max_len", 0) or 0) for it in items) or self.max_len
         try:
             enc = self.tok_at(n).encode(p, text or " ")
-        except Exception as e:  # noqa: BLE001  (the questions alone are longer than max_len)
-            raise ValueError(f"task and options do not fit in {n} tokens: {e}") from None
+        except Exception:  # noqa: BLE001  (the questions alone are longer than max_len)
+            k, opts = self.question_tokens(items), sum(len(it.options) for it in items)
+            raise ValueError(f"task and options do not fit in {n} tokens: the question ({opts} option(s) with their "
+                             f"descriptions) takes {k} tokens and the checkpoint reads {n} per pass, so nothing is left "
+                             "for the input — fewer options (choose among a shortlist first), shorter descriptions, or a "
+                             "larger max_len") from None
         seq = enc.sequence_ids
         groups = self._groups(enc.ids, lambda i: seq[i] == 0, items)
         if any(it.pointer for it in items):           # the input's tokens and their character offsets (for the pointer)
@@ -1352,6 +1386,26 @@ class DecideModel:
         """An input (a text, a Quote, a scalar or a state) → the text this checkpoint reads."""
         return _text(v, self.caps["state_format"])
 
+    def truncation(self, specs, text, read_len=0):
+        """What one ordinary pass leaves unread of an input → None when it reads all of it, else {"input_tokens",
+        "read_tokens", "question_tokens", "max_len"}. `specs`: the question, or the questions of a shared pass. None for
+        a scorer that reads the text as it is (an LLM, a hosted decision model) and in the block layout when the input
+        fits its budget."""
+        enc = getattr(self.scorer, "enc", None)
+        if not isinstance(enc, _Encoder) or not isinstance(text, str):
+            return None
+        specs = [specs] if isinstance(specs, _Spec) else list(specs)
+        items = tuple(self._item(sp, text, read_len) for sp in specs)
+        mq = getattr(self.scorer, "mq", None)
+        if (not read_len and self.block and not self._block_failed and not any(sp.pointer for sp in specs)
+                and mq is not None and mq.get("layout") == "block"):     # the block layout budgets the input itself
+            q = sum(len(enc.raw.encode(prompt(it.task, it.options, it.descriptions, mode=it.mode, markers=enc.markers),
+                                       add_special_tokens=False).ids) + 1 for it in items) + 2
+            left, total = int(mq["max_len"]) - q, self.count_tokens(text or " ")
+            return None if total <= left else {"input_tokens": total, "read_tokens": max(0, left), "question_tokens": q,
+                                               "max_len": int(mq["max_len"])}
+        return enc.read(items, text)
+
     # --- raw logits
     def _pick(self, sp, o, text=None):
         """One scorer output → (the question's logits [K], the act logit or None). From an l14g checkpoint the logits also
@@ -1763,8 +1817,18 @@ class DecideModel:
         sp = _Spec(task, options, descriptions, multi, other, kind, **spec)
         one = _single(text)
         texts = [text] if one else list(text)
-        raws = self._raw_full([(sp, self.text(t)) for t in texts])
+        texts = [self.text(t) for t in texts]
+        raws = self._raw_full([(sp, t) for t in texts])
         out = [self._finish(sp, self._decision(sp, z), a, escalate_below) for z, a in raws]
+        for d, t in zip(out, texts):                  # an input read cut: marked, and a warning once per question
+            cut = self.truncation(sp, t)
+            if cut:
+                d.extra["truncated"] = cut
+                self._warn_once(("truncated", sp.key),
+                                f"the input has {cut['input_tokens']} tokens and one pass reads {cut['read_tokens']} of "
+                                f"them (max_len {cut['max_len']}, the question takes {cut['question_tokens']}): the rest "
+                                "was cut, and the decision's extra[\"truncated\"] says so. A decision part with "
+                                "long=\"retrieve\" reads a long input by its relevant sections.")
         return out[0] if one else out
 
     def score(self, text, task, options, descriptions=None, multi=False, other=None, kind=None):
@@ -1788,7 +1852,10 @@ class DecideModel:
         names = list(names) if names else [p.__name__ for p in parts]
         out = []
         for p, (d0, a, shared) in zip(parts, firsts):
-            d = p._finish(d0, a, ctx=p._ctx(t, vals=text if isinstance(text, Facts) else None, raw=text))
+            ctx = p._ctx(t, vals=text if isinstance(text, Facts) else None, raw=text)
+            if shared:
+                ctx["specs"] = [q.spec for q in parts]            # the pass read the input after all their questions
+            d = p._finish(d0, a, ctx=ctx)
             d.extra["pass"] = {"with": names, "shared": shared}
             out.append(d)
         return out
@@ -2314,6 +2381,8 @@ class DecisionPart:
             z, a, shared = m._raw_pass([s.spec for s in siblings], text)[siblings.index(self)]
         else:
             (z, a), shared = self._raw([text])[0], False
+        if shared:
+            ctx["specs"] = [s.spec for s in siblings]             # the pass read the input after all their questions
         d = self._bind(self._finish(m._decision(self.spec, z), a, ctx=ctx), args)
         d.extra["pass"] = {"with": list(names) if names else [s.__name__ for s in siblings], "shared": shared}
         return d
@@ -2368,6 +2437,8 @@ class DecisionPart:
                     f"{name} {s:.2f} < {threshold:.2f} (shared threshold); would have answered {d.value!r}"
         elif self.guarantee is not None:
             d.extra["guarantee"] = dict(self.guarantee) if grp is None else group_record(self.guarantee, *grp)
+        if self.long is None and (ctx or {}).get("text") is not None:
+            self._cut(d, self.model.truncation(ctx.get("specs") or self.spec, ctx["text"]))
         if self.perturb and d.escalate is None and (ctx or {}).get("text") is not None:
             quiet = {**ctx, "text": None}             # a variant is gated like the input itself: same thresholds and
             self._perturbed(d, ctx["text"], lambda dv, a: self._finish(dv, a, threshold, quiet))   # group, no re-asking
@@ -2379,6 +2450,19 @@ class DecisionPart:
             if d.escalate:
                 d.escalate += f"; candidates at {self.conformal_set['coverage']:.0%}: {cands!r}"
         return d
+
+    def _cut(self, d, cut):
+        """An input that did not fit the pass was read cut: say so in the decision (extra["truncated"]) and warn once per
+        part. The answer stands — a classification often needs only the start of a text — but a fact beyond the cut was
+        not read, and the trace now shows that it could not have been."""
+        if not cut:
+            return
+        d.extra["truncated"] = cut
+        self.model._warn_once(("truncated", self.__name__),
+                              f"{self.__name__}: the input has {cut['input_tokens']} tokens and one pass reads "
+                              f"{cut['read_tokens']} of them (max_len {cut['max_len']}, the question takes "
+                              f"{cut['question_tokens']}): the rest was cut, and the decision's extra[\"truncated\"] says "
+                              "so. long=\"retrieve\" reads a long input by its relevant sections.")
 
     def _perturbed(self, d, text, gate=None):
         """The perturb=k safeguard: ask again on up to k variants of the input without its instruction-like sentences
