@@ -329,7 +329,7 @@ layer before it is an answer:
 | `bool`, `Literal[...]`, `Enum`, `Scale[...]`, `list[Literal]` | `yes_no`, `choice`, `ordinal`, `multi` | an option (a tuple of options) | p(answer); multi: the least certain option's max(p, 1 − p) | the closed set; a typed rule's return type |
 | `Maybe[T]` | `T`'s kind, `unknown` | `solvi.Unknown` — "the text does not state it" | p(not stated) | allowed only when declared (else "outside the options") |
 | any, with `Claim(value, evidence=[...])` / a decision's `evidence` | any | the value; `result.evidence` = `[Quote(text, start, end, source)]` | the value's | every quote literally in its (given) text at its offsets, when the part runs ("grounding rejected"); `require_evidence=True` |
-| `Span[T]` | `span` | the quoted text coerced to `T` (pydantic); `result.span` the Quote | p(this span); a rule: 1 | literally in the text ("grounding"), parses as `T` ("type rejected") |
+| `Span[T]` | `span` | the quoted text read as `T` (pydantic, then the date / number parsers); `result.span` the Quote | p(this span); a rule: 1 | literally in the text ("grounding"), parses as `T` ("type rejected") |
 | `Rank[Literal[...], k]` | `rank` | a tuple: the top k options, best first; `result.scores` | Plackett–Luce p(this top k in this order); a rule: 1 | only the options, distinct, at least k ("outside the options") |
 | `Estimate[edges]` | `estimate` | a number: the middle of the median bin; `result.interval` | p(value in the interval) = the mass of its bins; a plain number: 1 | a distribution over the declared bins ("outside the options") |
 
@@ -382,8 +382,14 @@ def repair_days(doc: str) -> Estimate[0, 3, 7, 14]:
   a supporting quote abstains — safeguard **evidence missing** (`guard="evidence_missing"`, `system.stats`); a span is its
   own evidence, and "not stated" needs none.
 - **Span** (`Span[T]`, `Answer.span(source="doc", type=None)`): the rule returns a `Quote` (its text must be literally at its
-  offsets, whatever the part) or the text (located in `source`). The answer is the text coerced to `T` with pydantic
-  (`"149.90"` → 149.9; `"twenty"` or `"1,250.50"` for a float → abstain, **type rejected**); `result.span` is the Quote.
+  offsets, whatever the part) or the text (located in `source`). The answer is the text read as `T`: by pydantic
+  (`"149.90"` → 149.9, `"2026-07-21"`), and for a date or a number (`date`, `int`, `float`, `Decimal`) otherwise by the
+  deterministic parsers of `solvi.textin` — `"21 July 2026"`, `"18 октября 2026 г."`, `"21.07.2026"`; `"1,250.50"`,
+  `"41,908.56 USD"`, `"EUR 18,851.12"`, `"1.5 million"`. What would be a guess abstains, **type rejected**, with the
+  reason: `"twenty"`, a numeric date that reads both ways (`"03/04/2026"`, `"12.09.2026"`: day or month first?), a date
+  without a year, two dates or numbers in the quote, a percentage. A decider's pointer is trimmed to its value
+  (`"149.90 EUR"` → `"149.90"`) but never to a piece of it that states another number (`"851.12"` inside
+  `"EUR 18,851.12"`). `result.span` is the Quote, as it stands in the text.
 - **Rank** (`Rank[...]`, `Answer.rank(options, k=None)`): a rule returns `{option: score}` (sorted best first, ties in option
   order) or an ordered list; a model its probabilities. `result.scores` holds the scores; constraints see the tuple, and a
   model's ranking is repaired by joint decoding over the top-k orders (by Plackett–Luce probability).

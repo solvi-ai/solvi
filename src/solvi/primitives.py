@@ -180,8 +180,6 @@ def evidence_of(rec):
 
 def resolve(at, rec, init):
     """The rule's record → {"answer", "confidence" (the answer's own), "probs", "evidence", "extra"}; raises Rejected."""
-    from pydantic import TypeAdapter
-
     from .provenance import NOT_GROUNDED, QUOTE_OUTSIDE, matches
     v, probs = rec.value, dict(rec.probs) if rec.probs else None
     ev = evidence_of(rec)
@@ -212,11 +210,12 @@ def resolve(at, rec, init):
             raise Rejected(GROUNDING, f"{NOT_GROUNDED}: a span answer is a Quote or a text in {src}, not {_short(v)}")
         value = t
         if at.type is not None and at.type is not str:
+            from .typed import _msg, span_value, type_name
             try:
-                value = TypeAdapter(at.type).validate_python(t.strip())
+                value = span_value(at.type, t)        # the type's own reading, else textin's date / number parsers
             except ValueError as err:
-                from .typed import _msg, type_name
-                raise Rejected(TYPE_REJECTED, f"type rejected: span {_short(t)!r} is not {type_name(at.type)} ({_msg(err)})") \
+                why = _msg(err) if hasattr(err, "errors") else str(err)
+                raise Rejected(TYPE_REJECTED, f"type rejected: span {_short(t)!r} is not {type_name(at.type)} ({why})") \
                     from None
         span = Quote(t, s, e, src, conf)
         return {"answer": value, "confidence": conf, "probs": probs or {}, "evidence": [span] + ev, "extra": None}

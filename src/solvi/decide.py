@@ -343,28 +343,34 @@ def decode_pointer(ptr, text, max_span=40, top=20, temperature=1.0):
 def _typed_span(spans, vtype):
     """For a typed span (`Span[float]`): (index, probability mass) of the most probable span inside the best span whose
     text parses as `vtype` — the best span trimmed to its value ('149.90 EUR' → '149.90'); the mass is that of every span
-    between the two (they all give this value). Never a span outside the best one: when nothing inside it parses, the best
-    span is kept and the answer's type check rejects it. (0, None) for str / untyped spans or when the best span parses."""
+    between the two (they all give this value). Never a span outside the best one, and never a piece of the best span
+    that states another value ('851.12' inside 'EUR 18,851.12'): then the best span is kept and the answer's type check
+    reads it (solvi.typed.span_value: 18851.12) or rejects it. (0, None) for str / untyped spans or when the best span
+    parses."""
     if vtype is None or vtype is str:
         return 0, None
-    from .typed import adapter
+    from .typed import adapter, span_value
     try:
-        ta = adapter(vtype)
+        adapter(vtype)
     except Exception:  # noqa: BLE001
         return 0, None
+    none = object()
 
-    def parses(t):
+    def value(t, strict=True):
         try:
-            ta.validate_python(t.strip())
-            return True
+            return span_value(vtype, t, strict=strict)
         except ValueError:
-            return False
+            return none
 
     _, a0, b0, t0 = spans[0]
-    if parses(t0):
+    if value(t0) is not none:
         return 0, None
+    whole = value(t0, strict=False)                    # what the best span states, read as people write it ("EUR 18,851.12")
     for k, (_, a, b, t) in enumerate(spans):
-        if a0 <= a and b <= b0 and parses(t):
+        if a0 <= a and b <= b0:
+            v = value(t)
+            if v is none or (whole is not none and v != whole):
+                continue                               # a piece of the number ("851.12") is not its value: never trim to it
             return k, float(sum(q for q, x, y, _ in spans if a0 <= x <= a and b <= y <= b0))
     return 0, None
 

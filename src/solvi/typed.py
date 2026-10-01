@@ -143,6 +143,47 @@ def adapter(t):
     return ta
 
 
+def span_value(vtype, text, strict=False):
+    """The value a typed span states (`Span[float]`, `Span[date]`, ...) → the value; ValueError when the text is not one.
+    First the type's own reading of the text ("149.90", "2026-09-12"). When that fails and the type is a date or a number
+    (date, int, float, Decimal), the deterministic parsers of solvi.textin read what people write — "21 July 2026", "July
+    21, 2026", "18 октября 2026 г.", "21.07.2026"; "41,908.56 USD", "EUR 18,851.12", "1 500 000 руб", "1.5 million" —
+    and refuse what would be a guess: a numeric date that reads both ways ("03/04/2026", "12.09.2026": day or month
+    first?), a date without a year, two dates or two numbers, "1.000", a percentage. strict=True: the type's own
+    reading only."""
+    t = text.strip()
+    ta = adapter(vtype)
+    try:
+        return ta.validate_python(t)
+    except ValueError as err:
+        if strict:
+            raise
+        import datetime
+        from decimal import Decimal
+
+        from .textin import ParseError, parse_date, parse_number
+        try:
+            if vtype is datetime.date:
+                read = set()
+                for dayfirst in (True, False):
+                    try:
+                        read.add(parse_date(t, {"dayfirst": dayfirst}))
+                    except ParseError:
+                        pass
+                if len(read) > 1:
+                    raise ParseError(f"{t!r} reads as {' or '.join(sorted(read))}: day or month first?")
+                if not read:
+                    parse_date(t)                      # raises with the reason
+                canon = read.pop()
+            elif vtype in (int, float, Decimal):
+                canon = parse_number(t, {"integer": True} if vtype is int else None)
+            else:
+                raise err
+        except ParseError as why:
+            raise ValueError(f"{_msg(err)}; {why}") from None
+        return ta.validate_python(canon)
+
+
 def spec(t, where=""):
     """A Spec for type t, or None (with a warning) when pydantic cannot validate it."""
     try:

@@ -240,7 +240,7 @@ def test_span_answers_are_grounded_and_typed():
 
 
 def test_span_failures_abstain_with_their_safeguard():
-    cat, qs = _spans("1,250.50", "USD")          # the currency is not in the text; "1,250.50" is not a float for pydantic
+    cat, qs = _spans("EUR", "USD")               # the currency is not in the text; "EUR" is in it, and is not a float
     s = System(cat, qs)
     r = s.ask({"doc": DOC})
     assert r["currency"].status == "abstain" and r["currency"].guard == "grounding" and "not grounded" in r["currency"].why
@@ -599,6 +599,58 @@ def test_typed_span_trims_the_best_span_never_jumps_outside_it():
     assert k == 2 and mass == pytest.approx(0.7)                   # '149.90' and every span up to '149.90 EUR'
     assert _typed_span([(0.6, 0, 12, "twenty euros"), (0.3, 20, 23, "313")], float) == (0, None)   # → type rejected
     assert _typed_span(spans, str) == (0, None) and _typed_span([(0.9, 0, 2, "20")], float) == (0, None)
+    # a piece of the number is not its value: 'EUR 18,851.12' is never trimmed to '851.12' (it was, and answered 851.12)
+    money = [(0.5, 0, 13, "EUR 18,851.12"), (0.3, 7, 13, "851.12"), (0.1, 4, 6, "18"), (0.05, 11, 13, "12")]
+    assert _typed_span(money, float) == (0, None)
+    import datetime
+    dated = [(0.7, 0, 12, "21 July 2026"), (0.2, 0, 2, "21"), (0.1, 8, 12, "2026")]
+    assert _typed_span(dated, datetime.date) == (0, None) and _typed_span(dated, int) == (1, pytest.approx(0.9))
+
+
+def test_a_typed_span_reads_dates_and_numbers_as_people_write_them():
+    """Span[date] / Span[float] validated the quote with pydantic alone: '21 July 2026' and '41,908.56 USD' were "type
+    rejected". The type's own reading comes first; then solvi.textin's parsers, which refuse rather than guess."""
+    import datetime
+    from decimal import Decimal
+    from solvi.typed import span_value
+    d = datetime.date
+    for text, want in (("2026-07-21", d(2026, 7, 21)), ("21 July 2026", d(2026, 7, 21)), ("July 21, 2026", d(2026, 7, 21)),
+                       ("21.07.2026", d(2026, 7, 21)), ("12 сентября 2026", d(2026, 9, 12)),
+                       ("18 октября 2026 г.", d(2026, 10, 18))):
+        assert span_value(d, text) == want, text
+    for text, why in (("12.09.2026", "day or month first"), ("03/04/2026", "day or month first"), ("21 July", "no year"),
+                      ("21/07/26", "two-digit year"), ("between 1 May 2026 and 3 May 2026", "more than one date"),
+                      ("next week", "no date")):
+        with pytest.raises(ValueError, match=why):
+            span_value(d, text)
+    for typ, text, want in ((float, "149.90", 149.9), (float, "41,908.56 USD", 41908.56), (float, "EUR 18,851.12", 18851.12),
+                            (float, "1 500 000 руб", 1500000.0), (float, "1.5 million", 1500000.0), (float, "1.000", 1.0),
+                            (int, "1,200", 1200), (int, "2k", 2000), (Decimal, "€12,50", Decimal("12.5"))):
+        assert span_value(typ, text) == want, text
+    for typ, text in ((float, "5%"), (float, "3 100"), (float, "about 20 or 30"), (int, "12.5"), (int, "twelve"),
+                      (bool, "1,500"), (str, 5)):
+        with pytest.raises((ValueError, AttributeError)):
+            span_value(typ, text)
+    with pytest.raises(ValueError):
+        span_value(float, "41,908.56 USD", strict=True)                     # strict: the type's own reading only
+
+    def system(typ, text, at):
+        cat = Catalog()
+
+        def rule(doc):
+            return Quote(text, at, at + len(text), "doc")
+        rule.__annotations__ = {"return": Span[typ]}
+        cat.rule("value")(rule)
+        return System(cat, [Question("value", "What?")])
+
+    doc = "Invoice dated 21 July 2026. Total amount payable: EUR 18,851.12. Delivered 03/04/2026."
+    r = system(float, "EUR 18,851.12", doc.index("EUR")).ask({"doc": doc})
+    assert r["value"].answer == 18851.12 and r["value"].span.value == "EUR 18,851.12"
+    assert r.trace.replay(system(float, "EUR 18,851.12", doc.index("EUR")).catalog)["ok"]
+    r = system(d, "21 July 2026", doc.index("21 July")).ask({"doc": doc})
+    assert r["value"].answer == d(2026, 7, 21) and r["value"].span.value == "21 July 2026"
+    r = system(d, "03/04/2026", doc.index("03/04")).ask({"doc": doc})
+    assert r["value"].status == "abstain" and "type rejected" in r["value"].why and "day or month first" in r["value"].why
 
 
 def test_act_features_always_carry_the_l14g_features():

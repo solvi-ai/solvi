@@ -2,6 +2,19 @@
 
 ## 0.7.2 — unreleased
 
+- A typed span no longer answers a piece of a number, and reads dates and amounts as people write them. `Span[float]`
+  and `Span[date]` validated the quoted text with pydantic alone, and a decider's pointer was trimmed to the first
+  piece of its best span that parsed: from `EUR 18,851.12` it answered **851.12**, from `GBP 200,071.22` it answered
+  22 — alone, as a float — and `21 July 2026` or `41,908.56 USD` were "type rejected". Now (`solvi.typed.span_value`)
+  the type's own reading comes first (`"149.90"`, `"2026-07-21"`: as before), and for `date`, `int`, `float` and
+  `Decimal` the deterministic parsers of `solvi.textin` read the rest: `21 July 2026`, `July 21, 2026`, `18 октября
+  2026 г.`, `21.07.2026`; `1,250.50`, `41,908.56 USD`, `EUR 18,851.12`, `1 500 000 руб`, `1.5 million`. What would be
+  a guess is still rejected, with the reason: a numeric date that reads both ways (`03/04/2026`, `12.09.2026`), a date
+  without a year, two dates or numbers, a percentage, `twenty`. The pointer is still trimmed to its value (`149.90
+  EUR` → `149.90`), never to a piece that states another one. With solvi-base on 24 invoice-like documents: amount
+  as `Span[float]` 0 right, 17 wrong values, 5 rejected → 22 right; date as `Span[date]` 4 right, 14 rejected → 17
+  right (2 wrong dates and 3 "not stated" are the model's). This changes a documented case: `"1,250.50"` for a float is
+  now 1250.5, not "type rejected".
 - `load(..., multi_question=True)` works on the ONNX backend. The loader always took `onnx/model_fp16.onnx`, which has
   no inputs for the block layout, so every shared pass fell back to one question per sequence — without a word, and
   with the same speed as before. A checkpoint that scores in the block layout now loads its block export
