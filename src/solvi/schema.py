@@ -94,6 +94,7 @@ class RecordModel(BaseModel):
     model: Optional[dict[str, str]] = None
     probs: Optional[dict[str, float]] = None
     extra: Optional[dict[str, Any]] = None   # a model decision's details: act probability, expected level, shared pass
+    tried_models: Optional[dict[str, dict[str, Any]]] = None   # the model-backed producers that ran and were not used
 
 
 class TraceModel(BaseModel):
@@ -325,6 +326,8 @@ def _record(r):
             "tried": None if r.tried is None else [list(t) for t in r.tried], "provenance": r.provenance,
             "model": r.model, "probs": None if r.probs is None else {str(k): v for k, v in r.probs.items()},
             "extra": r.extra}
+    if r.tried_models is not None:
+        d["tried_models"] = r.tried_models
     if ns:
         d["not_stated"] = True
     return d
@@ -474,7 +477,7 @@ def _load_trace(m, catalog, system):
         recs.append(Record(r.step, r.kind, r.name, dict(r.inputs), v, None if r.quote is None else tuple(r.quote),
                            r.confidence, r.error, r.prev, r.hash, r.producer,
                            None if r.tried is None else [list(t) for t in r.tried], r.provenance, r.model,
-                           None if r.probs is None else _probs(r.probs), r.extra))
+                           None if r.probs is None else _probs(r.probs), r.extra, r.tried_models))
     return Trace(m.init_hash, recs, init, [tuple(s) for s in m.skipped], list(m.schedule), dict(m.timings),
                  [tuple(x) for x in m.rejected], dict(m.fingerprint))
 

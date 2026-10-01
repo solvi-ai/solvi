@@ -58,6 +58,17 @@ def _show(r):
     return (s if len(s) <= 60 else s[:59] + "…") + (f" by {r.producer}" if r.producer else "")
 
 
+def _model_of(r):
+    """The model behind a record: the one used, else the one model-backed producer that ran and was rejected (a fact with
+    alternative producers whose answer came from a later producer)."""
+    if r is None:
+        return {}
+    if r.model:
+        return r.model
+    tm = r.tried_models or {}
+    return dict(next(iter(tm.values()))) if len(tm) == 1 else {}
+
+
 def first_difference(old, new, question=None):
     """The first step (in the new flow's order) whose output differs between two responses to the same input, among the
     facts `question`'s answer rests on in either (all steps without a question) → {"step", "name", "old", "new", "why"} or
@@ -81,9 +92,12 @@ def first_difference(old, new, question=None):
         op, np_ = (ofp.get("parts") or {}).get(name), (nfp.get("parts") or {}).get(name)
         if op and np_ and op != np_:
             why.append("its code or declarations changed")
-        am, bm = (a.model or {}) if a is not None else {}, (b.model or {}) if b is not None else {}
+        am, bm = _model_of(a), _model_of(b)
         if am.get("fp") != bm.get("fp") and (am or bm):
             why.append(f"its model changed (#{am.get('fp', '—')} → #{bm.get('fp', '—')})")
+        elif am and a is not None and b is not None and (a.model is None) != (b.model is None):
+            why.append(f"its model (#{am.get('fp')}) was {'used' if a.model is not None else 'rejected'} and is now "
+                       f"{'used' if b.model is not None else 'rejected'}")
         if a is not None and b is not None:
             ch = sorted(x for x in set(a.inputs) | set(b.inputs) if a.inputs.get(x) != b.inputs.get(x))
             if ch:

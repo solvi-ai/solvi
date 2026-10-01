@@ -134,6 +134,9 @@ class Record(Serial):
     model: dict | None = None       # model-backed step: {"type", "id", "fp"} of the model that produced the value
     probs: dict | None = None       # a model decision (or a learned answer head): its probabilities
     extra: dict | None = None       # a model decision's details: act probability, expected level, the shared forward pass
+    tried_models: dict | None = None  # a fact with alternative producers: the model-backed producers that ran and were
+                                    # not used (rejected, or a shadow run): producer → {"type", "id", "fp"} (+ "probs"
+                                    # of the decision it proposed); the model that was used is in `model`
 
     @property
     def default_provenance(self):
@@ -157,6 +160,8 @@ class Record(Serial):
             b["probs"] = {str(k): round(float(v), 6) for k, v in self.probs.items()}
         if self.extra is not None:                    # records without details hash exactly as before
             b["extra"] = self.extra
+        if self.tried_models is not None:             # and so do records where no model's output was turned down
+            b["tried_models"] = self.tried_models
         return b
 
 
@@ -543,8 +548,20 @@ def _replay_group(group, r, args, init, trust_models=False, models=None):
             if verdict != "recomputed":
                 bad += _grounded(a, r, init) + _checked(a.model, r)
                 break
-        elif name != r.producer and a.model is not None and (trust_models or getattr(a.model, "available", True) is False):
-            continue                                  # a rejected model output is not re-run when models are trusted
+        elif name != r.producer and a.model is not None:
+            was = (r.tried_models or {}).get(name)    # a rejected model output: its recorded model against today's
+            if was is not None and getattr(a.model, "available", True) is not False:
+                from .provenance import fingerprint
+                fp = fingerprint(a.model)
+                if fp != was.get("fp"):
+                    bad.append(Mismatch(r.step, r.name, (f"model changed since this decision: {was.get('id')} "
+                                                         f"#{was.get('fp')} ran in {name} (rejected), the catalog now has "
+                                                         f"#{fp}"), "model_changed"))
+                    if models is not None:
+                        models.append((r.step, f"{r.name} ({name})", "changed"))
+                    continue
+            if trust_models or getattr(a.model, "available", True) is False:
+                continue                              # a rejected model output is not re-run when models are trusted
         try:
             v, val, (aargs, why) = None, None, _typed_args(a, _plain_args(args, a.inputs))
             ok = False
@@ -588,6 +605,7 @@ class StepOut:
     probs: dict | None = None         # a Decision's probabilities
     typed: Any = None                 # the type the value passed (typed parts)
     extra: dict | None = None         # a Decision's details (act probability, expected level, shared pass)
+    tried_models: dict | None = None  # producer → model_info (+ probs) of the model-backed producers not used
 
 
 class HashMemo(dict):
@@ -772,7 +790,7 @@ def _group(group, args, init_state, policy, costs, known=None):
     if policy is not None:
         row = group_features(group, args)
         order, notes, shadow = policy.plan(group, row, costs)
-    tried, outcomes, alt_ms, used = [], {}, {}, None
+    tried, outcomes, alt_ms, used, tried_models = [], {}, {}, None, {}
     plain = _plain_args(args, group.inputs)
     for a in order:
         if used is not None and not shadow:
@@ -790,6 +808,11 @@ def _group(group, args, init_state, policy, costs, known=None):
             v, ok, why = None, False, f"error: {type(e).__name__}: {str(e)[:80]}"
         alt_ms[a.name] = (time.perf_counter() - t) * 1000
         outcomes[a.name] = (ok, v)
+        if a.model is not None and not (ok and used is None):     # a model that ran and is not the one used: its
+            tm = dict(model_info(a.model))            # identity is recorded too, else a decision made by a later producer
+            if isinstance(v, Decision) and v.probs:   # leaves no trace of the model that was asked first
+                tm["probs"] = {str(k): round(float(p), 6) for k, p in v.probs.items()}
+            tried_models[a.name] = tm
         if used is None:
             tried.append([a.name, why])
             if ok:
@@ -799,11 +822,12 @@ def _group(group, args, init_state, policy, costs, known=None):
             tried.append([a.name, "shadow: " + ("agrees" if same else ("differs" if ok else why))])
     if used is None:
         return StepOut(MISSING, None, 1.0, "no producer accepted: " + "; ".join(f"{n} {w}" for n, w in tried), {},
-                       tried=tried, alt_ms=alt_ms, outcomes=outcomes, row=row, notes=notes)
+                       tried=tried, alt_ms=alt_ms, outcomes=outcomes, row=row, notes=notes, tried_models=tried_models or None)
     a, v, value = used
     _, quote, conf, probs = unwrap(v)
     return StepOut(value, quote, conf, None, {}, producer=a.name, tried=tried, alt_ms=alt_ms, outcomes=outcomes, row=row,
-                   notes=notes, probs=probs, typed=a.tout.type if a.tout is not None else None, extra=_extra(v))
+                   notes=notes, probs=probs, typed=a.tout.type if a.tout is not None else None, extra=_extra(v),
+                   tried_models=tried_models or None)
 
 
 def provenance_of(part, out):
@@ -1052,7 +1076,7 @@ class _Run:
             rec = Record(step=i, kind=part.kind, name=st.part.name, inputs=o.hashes, value=o.value, quote=o.quote,
                          confidence=o.confidence, error=o.error, prev=prev, producer=o.producer, tried=o.tried,
                          provenance=provenance_of(part, o), model=model_info(part.model) if part.model is not None else None,
-                         probs=o.probs, extra=o.extra)
+                         probs=o.probs, extra=o.extra, tried_models=o.tried_models)
             rec.hash = vhash(rec.body())
             prev = rec.hash
             recs.append(rec)

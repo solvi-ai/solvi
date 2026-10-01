@@ -1596,6 +1596,7 @@ Every step of the flow is a `Record` in `res.trace.records`:
 | `confidence`, `error` | extraction confidence; error text if the part failed or had missing inputs |
 | `prev`, `hash` | hash of the previous record (or of `init_state` for the first) and of this record |
 | `producer`, `tried` | for a fact with several producers: the one used, and every producer that ran with its outcome |
+| `tried_models` | for a fact with several producers: the model-backed producers that ran and were not used (rejected, or a shadow run) → `{"type", "id", "fp"}` and the `probs` they proposed; absent when no model was turned down |
 | `provenance`, `model`, `probs` | the value's provenance kind (`record.origin` gives the default when not stored), the model that produced it (`{"type", "id", "fp"}`), a decision's probabilities |
 
 Answers from a learned head are records too (`kind="head"`, after the flow's steps): the answer, its probabilities and the
@@ -1661,7 +1662,7 @@ res = system.ask(init_state)                   # saved; res.stored_id is its id
 store.get(res.stored_id)                        # the Response, loaded back (typed values restored)
 store.query(question="refund", answer="no", since="2026-09-01")
 store.query(safeguard="grounding")              # every decision where a model's quote was rejected
-store.query(model="solvi-base")                # ... a step was produced by this model (id, type or fingerprint)
+store.query(model="solvi-base")                # ... this model ran in a step (id, type or fingerprint), used or rejected
 store.replay_all(system)                        # [] when every stored trace replays against the current catalog
 store.verify()                                  # the chain across stored records
 ```

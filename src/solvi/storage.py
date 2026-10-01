@@ -115,10 +115,11 @@ def entry(resp, meta=None):
     e["guards"] = {q: r.guard for q, r in resp.results.items() if r.guard}
     e["safeguards"] = [[s["kind"], s["fact"], sorted(s.get("questions") or [])] for s in resp.safeguards or ()]
     models = {}
-    for r in tr.records:
-        if r.model is not None:
-            m = {k: str(r.model.get(k)) for k in ("type", "id", "fp")}
-            models[_cj(m)] = m
+    for r in tr.records:                              # the models that ran: the one used and, for a fact with
+        for rm in [r.model, *(r.tried_models or {}).values()]:    # alternative producers, the rejected ones too
+            if rm is not None:
+                m = {k: str(rm.get(k)) for k in ("type", "id", "fp")}
+                models[_cj(m)] = m
     e["models"] = [models[k] for k in sorted(models)]
     fp = getattr(tr, "fingerprint", None) or {}
     if fp.get("catalog"):

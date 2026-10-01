@@ -2,6 +2,14 @@
 
 ## 0.7.2 — unreleased
 
+- A model whose proposal was turned down stays in the trace. For a fact with alternative producers, the record kept the
+  identity of the producer that was used only: when a validator, a hard rule or the model's own escalation passed the
+  decision on to a rule, nothing in the trace said which model had run before it — `query(model=...)` did not find the
+  decision, `diff` printed `its model changed (#— → #b991…)`, and a replay could not tell that the model had changed.
+  A record now has `tried_models`: producer → `{"type", "id", "fp"}` and the probabilities it proposed, for every
+  model-backed producer that ran and was not used. The store indexes these models too, `diff` names the fingerprints
+  (and says `its model (#…) was rejected and is now used` when only that changed), and replay reports a changed
+  rejected model as a `model_changed` mismatch. Records where no model was turned down hash exactly as before.
 - Replay tells damaged data from a catalog that changed. A trace replayed against a catalog where a part (or a
   producer) was renamed or removed used to raise `KeyError`, and `replay_all` reported it as `(0, "load", "KeyError:
   ...")` — the same shape a damaged record has. Now it is a mismatch `part X is not in the catalog (renamed or

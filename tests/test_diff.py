@@ -149,6 +149,59 @@ def test_diff_after_a_model_change(tmp_path):
     assert "model changed" in fs["why"] and "code" not in fs["why"]
 
 
+def build_fallback(version="1", limit=100, storage=None):
+    """A fact with a model-backed producer whose proposal a validator turns down above `limit`, and a rule after it."""
+    cat = Catalog()
+    scorer = Scorer(version)
+
+    @cat.fn(provides="pick", model=scorer, options=["a", "b"], validate=lambda v, amount: amount < limit)
+    def pick_by_model(amount):
+        return Decision("a", {"a": 0.7, "b": 0.3}) if scorer.version == "1" else Decision("b", {"a": 0.4, "b": 0.6})
+
+    @cat.fn(provides="pick")
+    def pick_by_rule(amount):
+        return "b"
+
+    @cat.rule("choice")
+    def choice(pick) -> str:
+        return pick
+
+    return System(cat, [Question("choice", "Which?", Answer.choice(["a", "b"]))], storage=storage)
+
+
+def test_a_rejected_model_is_in_the_trace_the_index_and_the_diff(tmp_path):
+    """The decision came from the rule after the model's proposal was turned down: the trace still names the model that
+    ran, the store finds the decision by it, replay checks it, and diff says what happened to it."""
+    store = SQLiteStorage(tmp_path / "d.db")
+    s = build_fallback(storage=store)
+    used, fell = s.ask({"amount": 50}), s.ask({"amount": 500})
+    ru = next(r for r in used.trace.records if r.name == "pick")
+    rf = next(r for r in fell.trace.records if r.name == "pick")
+    assert ru.producer == "pick_by_model" and ru.model["id"] == "scorer" and ru.tried_models is None
+    assert "tried_models" not in ru.body() and "tried_models" not in used.trace.to_json()      # as before when it answers
+    assert "tried_models" in fell.trace.to_json()
+    assert rf.producer == "pick_by_rule" and rf.model is None
+    assert rf.tried_models == {"pick_by_model": {"type": "Scorer", "id": "scorer", "fp": ru.model["fp"],
+                                                 "probs": {"a": 0.7, "b": 0.3}}}
+    assert len(store.query(model="scorer")) == 2                    # the fallback decision too (it was 1 of 2)
+    back = store.get(store.query(model="scorer")[-1].id)
+    rb = next(r for r in back.trace.records if r.name == "pick")
+    assert rb.tried_models == rf.tried_models and back.trace.replay(s)["ok"] and store.replay_all(s) == []
+    v2 = build_fallback(version="2")                                # the rejected model changed: a model_changed mismatch
+    rep = fell.trace.replay(v2)
+    assert rep["kinds"] == {"model_changed": 1} and "pick_by_model (rejected)" in rep["mismatches"][0][2]
+    assert rep["models"] == [(rf.step, "pick (pick_by_model)", "changed")]
+    assert fell.trace.replay(v2, trust_models=True)["kinds"] == {"model_changed": 1}
+    rf.tried_models["pick_by_model"]["fp"] = "0" * 16                # edited after the run: the record's hash tells
+    assert fell.trace.replay(s)["mismatches"][0].kind == "integrity"
+    rf.tried_models["pick_by_model"]["fp"] = ru.model["fp"]
+    whys = [c["questions"]["choice"]["first_step"]["why"] for c in diff(store, v2).changed]
+    assert whys and all(f"its model changed (#{ru.model['fp']} → #" in w and "#—" not in w for w in whys)
+    ch = diff(store, build_fallback(limit=1000)).changed            # same model, now accepted where it was rejected
+    assert len(ch) == 1
+    assert f"its model (#{ru.model['fp']}) was rejected and is now used" in ch[0]["questions"]["choice"]["first_step"]["why"]
+
+
 def test_diff_after_a_question_change(tmp_path):
     store, resps = stored(tmp_path)
     rep = diff(store, build(min_confidence=0.9))            # approve answers at 0.8 now abstain
