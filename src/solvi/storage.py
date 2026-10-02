@@ -719,7 +719,8 @@ class JSONLStorage(TraceStorage):
     file locks (POSIX: an append takes an exclusive flock on the file, reads what other processes appended since it
     last looked, then writes its record and the head) — on Windows keep to one writing process, or use SQLiteStorage.
     Lines of a 0.5 journal at the start of the file are kept and skipped (verify reports them as `legacy`).
-    fsync=True: flush every record to disk before save returns (slower). index=False: open from the stored head (checked
+    fsync=True: flush every record to disk before save returns (slower; without it a power failure can lose the last
+    records, which the OS had not yet written). index=False: open from the stored head (checked
     against the file's last line) without reading every record — a long file opens at once, for a process that only
     appends; get(id) then scans the file. A head that does not match the last line is not trusted: the file is read."""
 
@@ -1193,7 +1194,8 @@ class _SQLStorage(TraceStorage):
 class SQLiteStorage(_SQLStorage):
     """SQLite (stdlib sqlite3): one row per record with the record's JSON, plus index tables — answers (question, answer,
     status), safeguards (kind, question), models (fingerprint, id, type) — and the time. The head is kept in the `meta`
-    table. Appends run in a write transaction, so several processes may write to one file."""
+    table. Appends run in a write transaction, so several processes may write to one file. Each record is one committed
+    transaction: durable once save returns (unlike JSONLStorage without fsync=True), at the cost of a disk sync."""
 
     begin = "BEGIN IMMEDIATE"
     types = {"INT": "INTEGER", "REAL": "REAL", "TEXT": "TEXT"}

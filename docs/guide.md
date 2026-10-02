@@ -1970,6 +1970,14 @@ corrections in the same chain (`store.corrections()`). `query(answer=...)` match
 redaction marks); `len(list(store.iter()))` the decisions. Every store has `close()` and is a context manager (`with
 SQLiteStorage("decisions.db") as store:`); the file extension is read in any case (`decisions.DB` is SQLite).
 
+What a stored decision costs and how durable it is depends on the backend. `JSONLStorage` appends one line and flushes
+it to the operating system: the cheapest, but by default not synced to disk, so a power failure can lose the last
+records (the chain stays verifiable up to them) — `JSONLStorage(path, fsync=True)` syncs every record before `save`
+returns, at the cost of one disk sync per decision. `SQLiteStorage` commits a transaction per record (the record, its
+index rows and the new head): durable once `save` returns, and slower than an unsynced JSON line (a disk sync per commit).
+`DuckDBStorage` and `PostgresStorage` commit per record too; with PostgreSQL the cost is mostly the round trip to the
+server. Measure on your machine before storing every decision of a high-volume stream.
+
 | Method | Returns |
 |---|---|
 | `save(res, meta=None)` | the id of the stored record (`System(storage=...)` calls it on every ask) |
