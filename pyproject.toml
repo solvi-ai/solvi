@@ -1,6 +1,6 @@
 [project]
 name = "solvi"
-version = "0.7.1"
+version = "0.7.2.dev0"
 description = "Decision systems from a catalog of Python functions and checks: a strategist plans the flow, every answer comes with a quote or formula and a verifiable trace"
 readme = "README.md"
 license = "Apache-2.0"
