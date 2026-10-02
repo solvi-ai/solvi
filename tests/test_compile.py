@@ -219,7 +219,7 @@ PARTS["zone_fee"] = {"kind": "fn", "clauses": ["c1"]}
 '''.replace('PARTS["zone_fee"] = ', "PARTS.update({\"zone_fee\": ").replace('"clauses": ["c1"]}\n', '"clauses": ["c1"]}})\n')
     c2 = recompile(c1, c1.spec.revise(V2), INPUTS, Writer([[sneaky], [sneaky]], tests=[]), rounds=1, tests=0)
     assert not c2.accepted
-    assert "zone_fee is added or replaced but cites no [changed] or [added] clause" in json.dumps(c2.record["rounds"])
+    assert "zone_fee is added or replaced but cites no [changed] or [added] clause: add the one" in json.dumps(c2.record["rounds"])
 
 
 def test_the_decision_diff_lists_the_decisions_a_change_moves_with_the_clauses_of_their_causes():
@@ -319,3 +319,19 @@ def test_a_draft_that_cannot_answer_some_inputs_is_not_accepted_even_when_both_d
     fragile = fragile.replace("def ship(zone_fee, free_shipping):", "def ship(zone_fee, free_shipping):  # reads zone_fee")
     c = compile_spec(Spec(POLICY), QS, INPUTS, Writer([[fragile], [fragile]]), rounds=1)
     assert not c.accepted and "abstained" in c.reason
+
+
+def test_a_new_clause_that_abolishes_an_old_rule_removes_its_part_and_the_old_clause_is_declared_superseded():
+    c1 = compile_spec(Spec(POLICY), QS, INPUTS, Writer([[GOOD], [GOOD]]))
+    v2 = POLICY + "- The weight limit for the world zone is abolished.\n"
+    patch = 'REMOVE = {"not_too_heavy": "c5"}\nNOT_NORMATIVE = {"c4": "superseded by c5", "c5": "removes a check"}\n' \
+            'PARTS = {}\n'
+    tests = [{"clause": "c5", "input": {"zone": "world", "total": 10, "weight": 40}, "expect": {"ship": "paid"},
+              "why": "no weight limit any more"}]
+    c2 = recompile(c1, c1.spec.revise(v2), INPUTS, Writer([[patch], [patch]], tests=tests))
+    assert c2.accepted and c2.changes["parts"]["removed"] == ["not_too_heavy"]
+    assert "not_too_heavy" not in c2.source and c2.not_normative["c4"] == "superseded by c5"
+    assert c2.system().ask({"zone": "world", "total": 10, "weight": 40})["ship"].answer == "paid"
+    stale = 'REMOVE = {"not_too_heavy": "c4"}\nNOT_NORMATIVE = {"c4": "gone", "c5": "x"}\nPARTS = {}\n'
+    c3 = recompile(c1, c1.spec.revise(v2), INPUTS, Writer([[stale], [stale]], tests=tests), rounds=1)
+    assert not c3.accepted and "name the [changed], [added] or removed clause of the change" in json.dumps(c3.record)

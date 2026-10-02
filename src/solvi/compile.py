@@ -28,8 +28,8 @@ temperature 0, the second at 0.7 with seed 1; pass two writers for two models). 
    and the tests' inputs. A disagreement is shown to both writers: the input, both answers, the clauses the deciding
    parts cite;
 3. both pass the tests a separate call derived from the specification — it never sees the code, and each test names
-   the clause it checks. A test both drafts fail with the same answer goes back once to the test writer, which keeps,
-   corrects or drops it (recorded);
+   the clause it checks. A test that every draft which runs fails goes back once to the test writer, which works
+   the answer out again and keeps, corrects or drops it (recorded). Every input of the pool must get an answer;
 4. both match the labelled `examples` and the `reference`, when you give them.
 A draft with failures is rewritten from its module and the failures, up to `rounds` rounds; then the compilation is not
 accepted, `Compiled.catalog()` refuses it, and `reason` says why. The record keeps the spec's hash and clauses, every
@@ -535,8 +535,12 @@ with ONLY what must change in the current module — everything you do not retur
   functions you do not change;
 - PARTS = {...}: a plain literal with entries for the parts you add or replace ONLY, each citing at least one
   [changed] or [added] clause it implements (it may cite unchanged clauses too);
-- REMOVE = {"part_name": "c12"} for each part to remove, with the [changed] or removed clause that removes it;
-- NOT_NORMATIVE = {...} for [added] clauses that need no code.
+- REMOVE = {"part_name": "c18"} for each part to remove, naming the clause OF THE CHANGE that removes it (a
+  [changed] or [added] clause, or a removed one) — not the clause the part implemented;
+- NOT_NORMATIVE = {...} for [added] clauses that need no code, and for clauses that no part implements any more
+  (for example an old rule a new clause abolishes: "superseded by c18"). After the change every clause must still be
+  cited by a part or be in NOT_NORMATIVE.
+- a replaced part cites the [changed] or [added] clause that changes it, besides the clauses it implemented.
 
 For example, when a new clause c9 makes gift cards ship free:
 ```python
@@ -583,8 +587,8 @@ REVIEW_PROMPT = """# Re-check one test against the specification
 ## The test
 {test}
 
-Two implementations of the specification, written independently, both fail this test: they answer {got} (None: the
-implementation could not answer) where the test expects {expect}. They may be wrong, or the test may be. Re-read clause
+The implementations of the specification written so far, independently, all fail this test: they answer {got}
+(None: the implementation could not answer) where the test expects {expect}. They may be wrong, or the test may be. Re-read clause
 {clause} and the clauses it interacts with, and work out the expected answer step by step from the clauses and the
 input before you decide. Answer with one ```json block:
 {{"verdict": "keep" | "fix" | "drop", "expect": {{...}} (the corrected answers, for "fix"), "why": "..."}}
@@ -1008,16 +1012,16 @@ def _loop(spec, questions, inputs, gens, *, rounds, tests, examples, reference, 
             else:
                 d.rows = rows
         ok = [d for d in drafts if d.rows is not None]
-        # a test both drafts fail (whatever they answer) goes back once to the test writer: keep, fix or drop
-        if len(ok) == 2:
+        # a test every running draft fails (whatever they answer) goes back once to the test writer: keep, fix or drop
+        if ok:
             for j, t in enumerate(test_list):
                 if t["id"] in reviewed:
                     continue
                 k = len(pool) + j
                 a = [{q: _norm(r) for q, r in d.rows[k]["answers"].items()} for d in ok]
-                fails = [any(a[i].get(q) != e for q, e in t["expect"].items()) for i in range(2)]
+                fails = [any(a[i].get(q) != e for q, e in t["expect"].items()) for i in range(len(ok))]
                 if all(fails):
-                    got = [{q: a[i].get(q) for q in t["expect"]} for i in range(2)]
+                    got = [{q: a[i].get(q) for q in t["expect"]} for i in range(len(ok))]
                     verdict, v = _review(spec, questions, t, got, review_gen, log)
                     reviewed[t["id"]] = {"verdict": verdict, "why": v.get("why"), "was": dict(t["expect"]),
                                          "drafts_gave": got}
@@ -1244,12 +1248,15 @@ def recompile(old: Compiled, spec: Spec, inputs: Inputs, writer=None, *, rounds:
                for n in pparts if n not in old.parts and n not in _funcs(patch)]
         for n, p in pparts.items():
             if not set(p.get("clauses") or []) & touched:
-                why.append(f"{n} is added or replaced but cites no [changed] or [added] clause")
+                why.append(f"{n} is added or replaced but cites no [changed] or [added] clause: add the one that makes "
+                           f"this change to its clauses ({', '.join(sorted(touched))})")
         for n, c in rm.items():
             if n not in old.parts:
                 why.append(f"REMOVE names {n!r}, which is not a part of the current module")
-            if c not in touched | gone:
-                why.append(f"REMOVE[{n!r}] gives {c!r}, which is not a changed, added or removed clause")
+            cs = c if isinstance(c, list) else [c]
+            if not set(cs) & (touched | gone):
+                why.append(f"REMOVE[{n!r}] gives {c!r}: name the [changed], [added] or removed clause of the change that "
+                           f"removes it ({', '.join(sorted(touched | gone))})")
         if why:
             return None, patch, why
         src, parts, nn = merge(old.source, old.parts, old.not_normative, patch, pparts, pnn, rm, spec)
