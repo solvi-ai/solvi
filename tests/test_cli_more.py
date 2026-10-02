@@ -683,3 +683,36 @@ def test_replay_and_diff_refuse_a_mistyped_filter_and_say_how_many_decisions_the
     with pytest.raises(SystemExit) as e:
         main(["diff", store, "--system", system, "--limit", "-5"])
     assert e.value.code == 2
+
+
+DATED_TASK = '''import datetime as dt
+from typing import Literal
+
+from solvi import Catalog, Question, System
+
+cat = Catalog()
+
+
+@cat.rule("late")
+def late(paid_on: dt.date) -> Literal["yes", "no"]:
+    return "yes" if paid_on < dt.date(2026, 9, 20) else "no"
+
+
+system = System(cat, [Question("late", "Was it paid late?")])
+'''
+
+
+def test_ask_text_takes_today_and_asks_the_end_user_in_their_words(tmp_path, capsys):
+    f = tmp_path / "dated.py"
+    f.write_text(DATED_TASK)
+    code, out = run(capsys, "ask", f"{f}:system", "--text", "paid on: 12 September", "--json")
+    read = json.loads(out)["textin"]
+    assert code == 1 and read["fields"]["paid_on"]["status"] == "unparsed"
+    code, out = run(capsys, "ask", f"{f}:system", "--text", "paid on: 12 September")
+    assert "today=" not in out and "the year is missing" in out                  # the clarifying question
+    code, out = run(capsys, "ask", f"{f}:system", "--text", "paid on: 12 September", "--today", "2026-09-28", "--json")
+    data = json.loads(out)
+    assert code == 0 and data["textin"]["state"] == {"paid_on": "2026-09-12"} and data["answers"]["late"]["answer"] == "yes"
+    assert run(capsys, "ask", f"{f}:system", "--text", "paid on: 12 September", "--today", "today", "--json")[0] == 0
+    assert run(capsys, "ask", f"{f}:system", "--text", "x", "--today", "soon")[0] == 2
+    assert run(capsys, "ask", f"{f}:system", "--state", "{}", "--today", "2026-09-28")[0] == 2

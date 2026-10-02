@@ -277,8 +277,17 @@ def cmd_ask(a):
             except ModelError as e:
                 _fail(str(e))
         from .llm import LLMError
+        tin = None
+        if a.today:                                    # as `solvi serve` reads a text: year-less and relative dates
+            import datetime as dt
+            from .textin import TextIn
+            try:
+                today = dt.date.today() if a.today == "today" else dt.date.fromisoformat(a.today)
+            except ValueError:
+                _fail(f"ask --today {a.today}: an ISO date (2026-09-28) or the word today")
+            tin = TextIn(system, decider, today=today)
         try:
-            res = system.ask_text(text, decider, question=names[0] if names else None)
+            res = system.ask_text(text, decider, textin=tin, question=names[0] if names else None)
         except (KeyError, ValueError) as e:
             _fail(f"ask --text: {e.args[0] if e.args else e}")
         except LLMError as e:                          # a wrong key, model or URL: said plainly, no traceback
@@ -286,6 +295,8 @@ def cmd_ask(a):
     else:
         if a.decider:
             _fail("ask: --decider routes a --text; a state is asked as it is")
+        if a.today:
+            _fail("ask: --today is the date a --text is read on; a state is asked as it is")
         if a.state is not None:
             try:
                 state = json.loads(a.state)
@@ -337,6 +348,9 @@ def ask_parser(sub):
                                   "'-' reads stdin")
     s.add_argument("--question", action="append", help="ask only these questions (repeat, or comma-separated); with "
                                                        "--text: the question, without routing")
+    s.add_argument("--today", metavar="DATE", help="with --text: the date it is read on — an ISO date, or the word today "
+                                                   "(as solvi serve does); without it a date with no year, a two-digit "
+                                                   "year or \"yesterday\" is not read")
     s.add_argument("--decider", help="with --text: the model that picks the question (a folder, a cached Hugging Face id, "
                                      "systemone:URL#model, llm:URL#model or module:attr; see solvi models)")
     s.add_argument("--backend", default="auto", choices=["auto", "onnx", "torch"], help="the decider's backend")

@@ -770,8 +770,8 @@ class TextRead:
             if r.status == "conflict":
                 parts.append(f"{what} (it was {r.was!r}, then I read {r.quote.value!r} and cannot read it)")
                 continue
-            parts.append(what + (f" (I read {r.quote.value!r} but {r.why})" if r.status in ("unparsed", "unsure")
-                                 and r.quote is not None else ""))
+            parts.append(what + (f" (I read {r.quote.value!r} but {_for_the_user(r.why)})"
+                                 if r.status in ("unparsed", "unsure") and r.quote is not None else ""))
         return "Please tell me the " + ", ".join(parts[:-1]) + (" and the " if len(parts) > 1 else "") + parts[-1] + "."
 
     def to_dict(self):
@@ -822,6 +822,16 @@ class TextRead:
                                provenance="given" if r.status == "given" else "quoted",
                                model=None if r.status == "given" else r.model, extra=ex))
         return recs
+
+
+def _for_the_user(why):
+    """A parser's reason in the words of a clarifying question: what the person who wrote the text can fix (the
+    developer's hint — "pass today=" — stays in the field's `why`)."""
+    for mark, said in (("has no year", "the year is missing"), ("two-digit year", "the year has only two digits"),
+                       ("is relative", "I need the date itself")):
+        if mark in (why or ""):
+            return said
+    return why
 
 
 # ------------------------------------------------------------------------------------------------ TextIn

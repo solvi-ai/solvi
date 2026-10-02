@@ -3455,6 +3455,7 @@ solvi ask catalog.py:system --state '{"amount": 120, "limit": 500}' --question a
 solvi ask catalog.py:system example.json --report html > decision.html
 solvi ask catalog.py:system example.json --store decisions.db              # then: solvi report decisions.db
 solvi ask app.py:system --text "please refund order A-10457, 1 500 rubles" --decider solvi-ai/solvi-base
+solvi ask app.py:system --text "refund A-10457, paid 12 September" --today today    # or an ISO date: reads year-less dates
 ```
 
 A state is JSON; when the module that defines the System also defines `prepare(state)` (turning ISO strings into dates,
