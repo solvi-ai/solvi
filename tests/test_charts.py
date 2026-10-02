@@ -444,3 +444,21 @@ def test_a_quote_without_a_start_must_verify_at_every_place_it_occurs():
     r = run(t2, spec([("Europe", 42, "42%"), ("Asia", 42, "42%"), ("Africa", 16, "16%")], kind="pie"))
     assert r.ok and not codes(r, DROPPED)                                              # two places, both verify: one each
     assert [p.start for p in r.checked.verified.series[0].points] == [7, 17, 29]
+
+
+def test_render_svg_draws_a_one_point_line_and_refuses_what_it_cannot_draw():
+    """render_svg is exported: a one-category line, a pie of zeros, a chart without categories or values raised
+    ZeroDivisionError / ValueError: max() arg is an empty sequence."""
+    from decimal import Decimal
+    from solvi.charts import render_svg
+    from solvi.charts.check import VerifiedChart, VerifiedPoint, VerifiedSeries
+
+    def chart_of(kind, cats, values):
+        pts = [None if v is None else VerifiedPoint(label=c, value=Decimal(v), start=0, end=1, as_written=str(v))
+               for c, v in zip(cats, values)]
+        return VerifiedChart(kind=kind, title="t", unit="", categories=cats, series=[VerifiedSeries(points=pts)])
+    assert "<svg" in render_svg(chart_of("line", ["2024"], [5])).svg
+    for kind, cats, values in (("pie", ["a", "b"], [0, 0]), ("pie", ["a", "b"], [5, -1]), ("bar", [], []),
+                               ("bar", ["a", "b"], [None, None])):
+        with pytest.raises(ValueError, match="render_svg"):
+            render_svg(chart_of(kind, cats, values))
