@@ -101,3 +101,18 @@ def test_a_given_value_is_canonicalised_and_hashed_once_per_ask_and_the_hashes_a
         assert r.prev == prev and r.hash == rt.vhash(r.body())
         prev = r.hash
     assert res["alert"].answer == "yes"
+
+
+def test_importing_solvi_does_not_import_pydantic_and_the_first_ask_does():
+    """The docs said untyped parts cost nothing and pydantic is imported only for typed parts; the first ask of any
+    catalog imports it (the trace's fingerprint). What the docs say now is what this pins."""
+    import subprocess
+    import sys
+    code = ("import sys, solvi\n"
+            "a = 'pydantic' in sys.modules\n"
+            "cat = solvi.Catalog()\n"
+            "cat.rule('q')(lambda x: 'yes')\n"
+            "solvi.System(cat, [solvi.Question('q', '', solvi.Answer.yes_no())]).ask({'x': 1})\n"
+            "print(a, 'pydantic' in sys.modules)\n")
+    out = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, check=True).stdout.split()
+    assert out == ["False", "True"]

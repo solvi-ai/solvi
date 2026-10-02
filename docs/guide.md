@@ -43,7 +43,7 @@ status.
 ## Installation
 
 ```bash
-pip install solvi              # core: numpy, scipy, pydantic (imported only for typed parts and serialization)
+pip install solvi              # core: numpy, scipy, pydantic (imported by the first ask, not by `import solvi`)
 pip install "solvi[model]"     # + torch, transformers, for the ModernBERT extractors (solvi.extract_*) and the decider
 pip install "solvi[onnx]"      # + onnxruntime, tokenizers: the decider (solvi.decide) on CPU without torch
 pip install "solvi[serve]"     # + fastapi, uvicorn: solvi serve over HTTP
@@ -303,7 +303,9 @@ what the trace records. A value that fails is **rejected**, like an ungrounded q
   `outside_options`), exactly like a model decision outside its options. An Enum answer is returned as its value.
 
 A producer's `validate` gets the coerced value. Replay re-runs the same validation, so typed steps replay like any other.
-Untyped parts are not touched: no validation, no pydantic import, and the same hashes as before.
+Untyped parts are not touched: no validation and the same hashes as before. (pydantic is imported once per process
+whatever the catalog — by the first `ask`, whose trace fingerprint uses the serialized form of the questions — so the
+first ask of a process is slower than the ones after it; warm up before timing.)
 
 ### Types declare questions
 

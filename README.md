@@ -151,7 +151,8 @@ Every command is in the [guide](docs/guide.md#command-line).
   reads, the function name is the fact it sets. Type hints are optional and become the facts' types
   (`def risk_score(risk_points: dict[str, float]) -> float`): producer and consumer types are checked when a part is
   registered, values are validated / coerced with pydantic at run time, and a value that fails is rejected like an
-  ungrounded quote (safeguard `type_rejected`). Untyped parts cost nothing.
+  ungrounded quote (safeguard `type_rejected`). Untyped parts are not validated (pydantic itself is imported once per
+  process, by the first `ask`: the trace's fingerprint uses the serialized form of the questions).
 - **Questions.** `Question(name, text, Answer.yes_no() | Answer.choice([...]), checkpoints=[...])`. Questions without a
   rule get a small answer head trained from labeled examples (`system.fit`) or a readable learned rule list
   (`system.learn_rule`).
