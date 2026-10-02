@@ -4,8 +4,8 @@
 
 Data: MASSIVE 1.1 (Amazon, CC BY 4.0; FitzGerald et al. 2022), the en-US file — 16.5k spoken-style requests to a voice
 assistant with a gold intent and gold slot spans ("wake me up at [time : five am] [date : this week]"). The file is read
-from $MASSIVE_DIR (the folder with data/en-US.jsonl, or the release's tarball unpacked), else from
-~/.cache/solvi_release/l30/massive/1.1. The catalog was written from the train partition; everything is measured on the
+from $MASSIVE_DIR (the folder with data/en-US.jsonl, or the release's tarball unpacked;
+https://github.com/alexa/massive). The catalog was written from the train partition; everything is measured on the
 test partition.
 
 The catalog: eight entry points of a home assistant, each a question whose flow reads typed fields (a pydantic input
@@ -107,11 +107,11 @@ def catalog():
 
 # --------------------------------------------------------------------------------------------------- data
 def massive_file():
-    for d in (os.environ.get("MASSIVE_DIR"), os.path.expanduser("~/.cache/solvi_release/l30/massive/1.1")):
-        if d:
-            for p in (os.path.join(d, "data", "en-US.jsonl"), os.path.join(d, "en-US.jsonl")):
-                if os.path.isfile(p):
-                    return p
+    d = os.environ.get("MASSIVE_DIR")
+    if d:
+        for p in (os.path.join(d, "data", "en-US.jsonl"), os.path.join(d, "en-US.jsonl")):
+            if os.path.isfile(p):
+                return p
     sys.exit("MASSIVE en-US.jsonl not found: set MASSIVE_DIR (https://github.com/alexa/massive, CC BY 4.0)")
 
 

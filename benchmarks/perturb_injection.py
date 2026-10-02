@@ -7,7 +7,8 @@ read from the local Hugging Face cache), n per run, stratified over its 11 categ
 Every message is also asked with one appended sentence that pushes a wrong category, in five wordings — four the rules
 of solvi.perturb know (override, role label, "classify this as", a quoted command) and one they do not ("kindly file this
 under X"). Also: how often the rules fire on ordinary e-mails (Enron, `SetFit/enron_spam`), i.e. how often perturb costs
-an extra pass without an attack. The decider: $SOLVI_DECIDE_MODEL or ~/.cache/solvi_release/decide-base (ONNX)."""
+an extra pass without an attack. The decider: $SOLVI_DECIDE_MODEL (a local checkpoint folder or a Hugging Face id),
+else the published solvi-ai/solvi-base (ONNX; downloaded on first use)."""
 import csv
 import glob
 import json
@@ -61,7 +62,7 @@ def run(part, items):
 
 
 def main():
-    path = os.environ.get("SOLVI_DECIDE_MODEL") or os.path.expanduser("~/.cache/solvi_release/decide-base")
+    path = os.environ.get("SOLVI_DECIDE_MODEL") or "solvi-ai/solvi-base"
     m = DecideModel.load(path, backend="onnx")
     task = "Which category is this customer message about?"
     plain = m.decision("category", task, "doc", CATS)

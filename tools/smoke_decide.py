@@ -7,7 +7,9 @@ agreement, and latency. Nothing here depends on a particular model's accuracy: t
 answers, grounded quotes, replay, backend parity); the answers are printed for a human to judge.
 
     uv run --with torch --with transformers --with onnxruntime --with tokenizers --with huggingface_hub \
-        python tools/smoke_decide.py ~/.cache/solvi_release/decide-typed-v2 [--backend torch|onnx|both]
+        python tools/smoke_decide.py [PATH_OR_HF_ID] [--backend torch|onnx|both]
+
+PATH_OR_HF_ID: a local checkpoint folder or a Hugging Face id; default $SOLVI_DECIDE_MODEL, else solvi-ai/solvi-base.
 
 Exit code 1 when an integration check fails."""
 from __future__ import annotations
@@ -134,8 +136,9 @@ def run(path, backend):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("path", nargs="?", default=os.environ.get("SOLVI_DECIDE_MODEL",
-                                                               "~/.cache/solvi_release/decide-typed-v2"))
+    ap.add_argument("path", nargs="?", default=os.environ.get("SOLVI_DECIDE_MODEL", "solvi-ai/solvi-base"),
+                    help="a local checkpoint folder or a Hugging Face id (default: $SOLVI_DECIDE_MODEL, else "
+                         "solvi-ai/solvi-base)")
     ap.add_argument("--backend", default="both", choices=["torch", "onnx", "both"])
     a = ap.parse_args()
     path = os.path.expanduser(a.path)

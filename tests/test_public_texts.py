@@ -22,6 +22,20 @@ def test_no_private_repo_paths_in_published_trees():
     assert not hits, "\n".join(hits)
 
 
+def test_no_author_only_default_paths_in_scripts():
+    """A benchmark or tool must not default to a folder that exists only on the author's machine (a release cache):
+    a published checkpoint id, an environment variable or an argument instead."""
+    hits = []
+    for tree in TREES + ["tools"]:
+        top = ROOT / tree
+        for p in [top] if top.is_file() else sorted(top.rglob("*")):
+            if p.is_file() and p.suffix in TEXT and "__pycache__" not in p.parts:
+                for n, line in enumerate(p.read_text(encoding="utf-8", errors="replace").splitlines(), 1):
+                    if "solvi_release" in line:
+                        hits.append(f"{p.relative_to(ROOT)}:{n}: {line.strip()[:100]}")
+    assert not hits, "\n".join(hits)
+
+
 # Research experiment codes (L14g, L25, ...) mean nothing to a reader. Allowed: math (L0 L1 L2, L2 regularization), model
 # names (MiniLM-L6), lowercase format strings ('l14g typed v2') and the alt text of an image that shows such a label.
 CODE = re.compile(r"\bL[0-9]{1,2}[a-z]?\b")
