@@ -772,16 +772,21 @@ class StepOut:
 class HashMemo(dict):
     """vhash of the values of one run, by object: a value read by several steps — and then recorded, and hashed as part
     of the input — is canonicalised and hashed once (each entry keeps its value alive, so an id is not reused within
-    the run). The hashes are vhash's own, byte for byte."""
+    the run). The hashes are vhash's own, byte for byte. seed: a HashSeed of values hashed before the run (the same
+    objects asked again and again, e.g. by solvi.search): a value found there is not hashed again."""
 
-    def __init__(self, init_state=None):
+    def __init__(self, init_state=None, seed=None):
         super().__init__()
         self.init_state = init_state
+        self.seed = seed
 
     def __call__(self, v):
         e = self.get(id(v))
         if e is None or e[0] is not v:
-            e = self[id(v)] = (v, vhash(v))
+            e = self.seed.get(id(v)) if self.seed is not None else None
+            if e is None or e[0] is not v:
+                e = (v, vhash(v))
+            self[id(v)] = e
         return e[1]
 
     def init_hash(self):
@@ -789,12 +794,30 @@ class HashMemo(dict):
         that read it record) is taken from the same text, and the input's JSON is put together from the values' texts —
         byte for byte what json.dumps writes for the whole canonical dict (sorted keys, ", " and ": ")."""
         texts = {}
+        seed = self.seed
         for k, v in self.init_state.items():
+            e = seed.get(id(v)) if seed is not None else None
+            if e is not None and e[0] is v:           # hashed before the run: its text and hash as they were then
+                texts[str(k)] = e[2]
+                self.setdefault(id(v), e)
+                continue
             s = texts[str(k)] = _ckey(_canon(v))     # as _canon of the dict: a later key of the same text wins
             e = self.get(id(v))
             if e is None or e[0] is not v:
                 self[id(v)] = (v, _shash(s))
         return _shash("{" + ", ".join(_jstr(k) + ": " + texts[k] for k in sorted(texts)) + "}")
+
+
+class HashSeed(dict):
+    """Values hashed once for many runs: id → (value, hash, canonical JSON text). For values that the runs read as the
+    same objects and that nothing changes in place (a given text asked with every candidate of a search, a fact held at
+    its value) — a value changed in place after it was added keeps its old hash. A catalog carrying one
+    (`catalog._hash_seed`) lends it to every run of its flows."""
+
+    def add(self, v):
+        s = _ckey(_canon(v))
+        self[id(v)] = (v, _shash(s), s)
+        return self
 
 
 def _extra(v):
@@ -1098,7 +1121,7 @@ class _Run:
         self.schedule = []
         self.timeout = None
         self.known = dict(known) if known else ({} if (catalog.readers or catalog.types) else None)
-        self.memo = HashMemo(init_state)
+        self.memo = HashMemo(init_state, getattr(catalog, "_hash_seed", None))
         self.init_hash = self.memo.init_hash()        # first: the steps then find every given value already hashed
         self.batch_of = {}                            # step name → (names, decision parts) of its shared forward pass
         for group in getattr(flow, "batches", None) or ():

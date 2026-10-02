@@ -1,4 +1,5 @@
 """Early exit on a failed hard check and parallel execution of independent steps: same answers, a valid trace, less work."""
+import copy
 import time
 
 from solvi import Answer, Catalog, Question, System
@@ -221,3 +222,34 @@ def test_vhash_and_the_input_hash_match_the_plain_canonical_json_on_random_value
         assert rt.vhash(v) == _reference_vhash(v), v
         state = {rng.choice(["x", "y", "z", "ä", 1, "1"]): value() for _ in range(rng.randint(0, 5))}
         assert rt.HashMemo(state).init_hash() == _reference_vhash(state) == rt.vhash(state), state
+
+
+def test_a_hash_seed_lends_its_hashes_and_the_trace_is_byte_for_byte_the_same():
+    """solvi.search asks the same given text and held facts with every candidate: a HashSeed on the catalog hashes them
+    once. The values it holds are not canonicalised again, and every hash of the trace is what an unseeded ask gives."""
+    import solvi.runtime as rt
+    cat = Catalog()
+
+    @cat.fn
+    def words(problem):
+        return problem.split()
+
+    @cat.rule("long")
+    def long(words, n):
+        return "yes" if len(words) > n else "no"
+    s = System(cat, [Question("long", "?", Answer.yes_no())])
+    problem = "a fairly long text " * 200
+    plain = s.ask({"problem": problem, "n": 3})
+    seeded_cat = copy.copy(cat)
+    seeded_cat._hash_seed = rt.HashSeed().add(problem)
+    seeded = System(seeded_cat, [Question("long", "?", Answer.yes_no())])
+    seen = []
+    canon = rt._canon
+    rt._canon = lambda v: (seen.append(v), canon(v))[1]
+    try:
+        res = seeded.ask({"problem": problem, "n": 3})
+    finally:
+        rt._canon = canon
+    assert not any(v is problem for v in seen)
+    assert res.trace.init_hash == plain.trace.init_hash
+    assert [(r.hash, r.inputs) for r in res.trace.records] == [(r.hash, r.inputs) for r in plain.trace.records]

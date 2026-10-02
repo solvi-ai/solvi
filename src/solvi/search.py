@@ -211,7 +211,7 @@ def _held_system(system, state, vals, keys):
 
     from .counterfactual import _pinned
     from .learned import CostBook
-    from .runtime import MISSING
+    from .runtime import MISSING, HashSeed
     dep = _depends(system.catalog, keys)
     cat = copy.copy(system.catalog)
     cat.parts = dict(cat.parts)
@@ -221,6 +221,9 @@ def _held_system(system, state, vals, keys):
             continue
         cat.parts[name] = _pinned(p, SimpleNamespace(value=vals[name], error=None))
         held.append(name)
+    cat._hash_seed = seed = HashSeed()                          # the given values and the held facts are the same
+    for v in [*state.values(), *(vals[n] for n in held)]:      # objects in every candidate's ask: hashed once here
+        seed.add(v)
     s = copy.copy(system)
     s.catalog, s.storage, s.learn, s.cost_policy = cat, None, False, None
     s.stats = {k: 0 for k in system.stats}
