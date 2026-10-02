@@ -30,8 +30,8 @@ A model's quote that is not literally the text at its offsets, or a choice outsi
 which safeguards fired, and how much of its support is deterministic. A decision without models and one with models are the
 same system ([examples/12_grounded_audit.py](examples/12_grounded_audit.py)).
 
-And it is fast. The strategist plans a flow over a 10 000-part catalog in about 6 ms and runs only the parts the questions
-need (2.4% of that catalog). Hard checks run first, so a failing one skips the expensive rest; independent slow parts (API
+And it is fast. The strategist plans a flow over a 10 000-part catalog in about 11 ms and runs only the parts the questions
+need (2.3% of that catalog). Hard checks run first, so a failing one skips the expensive rest; independent slow parts (API
 calls, model inference) run in parallel. On an insurance-claim desk with slow services
 ([examples/09_strategy_at_scale.py](examples/09_strategy_at_scale.py)) a full decision takes 463 ms instead of 1 122 ms for a
 script that computes everything, and 152 ms when an expired policy settles the claim first.
@@ -355,13 +355,16 @@ runner with every raw answer: [docs/vs_llm.md](docs/vs_llm.md), [benchmarks/vs_l
 
 ## Speed
 
-Strategist on random layered catalogs ([benchmarks/strategist_scale.py](benchmarks/strategist_scale.py), one CPU core):
+Strategist on random layered catalogs ([benchmarks/strategist_scale.py](benchmarks/strategist_scale.py), one CPU core;
+solvi 0.7.1 with the changes since, Python 3.10, Intel i7-12700H, medians of two runs). The parts are trivial
+arithmetic: running all of them ("run all") costs less than one ask, so the saving shows only when parts are slow
+(services, models), as in the insurance desk below.
 
-| catalog parts | plan | plan + run + trace | parts run | share of catalog |
-|---:|---:|---:|---:|---:|
-| 100 | 0.2 ms | 1.3 ms | 31 | 31% |
-| 1 000 | 0.7 ms | 2.6 ms | 115 | 12% |
-| 10 000 | 6 ms | 10 ms | 236 | 2.4% |
+| catalog parts | plan | plan + run + trace | parts run | share of catalog | run all, no plan |
+|---:|---:|---:|---:|---:|---:|
+| 100 | 0.14 ms | 1.1 ms | 31 | 31% | 0.03 ms |
+| 1 000 | 1.2 ms | 4.6 ms | 114 | 11% | 0.36 ms |
+| 10 000 | 11 ms | 25 ms | 232 | 2.3% | 4 ms |
 
 Insurance claim desk with six slow services of 100-300 ms ([examples/09_strategy_at_scale.py](examples/09_strategy_at_scale.py)):
 

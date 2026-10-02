@@ -120,3 +120,11 @@ def test_benchmarks_says_the_store_overhead_was_measured_in_memory_and_what_a_di
     page = (ROOT / "docs" / "benchmarks.md").read_text()
     assert "RAM disk (tmpfs)" in page and "NVMe disk" in page and "twelve gallery entries" not in page
     assert len([p for p in (ROOT / "gallery").iterdir() if (p / "cases.json").exists()]) == 15
+
+
+def test_the_readme_speed_table_names_its_version_and_machine_and_the_run_all_column():
+    """The table was the v0.1.0 measurement, never re-measured, without version or machine; the parts it runs are
+    trivial, which the reader could not see."""
+    speed = README.split("## Speed")[1].split("## ")[0]
+    assert "0.7.1" in speed and "i7-12700H" in speed and "run all, no plan" in speed
+    assert "| 10 000 | 6 ms |" not in speed and "about 6 ms" not in README
