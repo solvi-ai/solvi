@@ -2836,7 +2836,7 @@ make one toolset / node / tool list per conversation if the process-wide memory 
 
 **Which frameworks.** Each adapter has an extra — `pip install "solvi[pydantic-ai]"`, `"solvi[langgraph]"`,
 `"solvi[openai-agents]"` — and importing one without its framework says which. Supported and tested with real runs (`tests/test_agents_frameworks.py`,
-`tests/test_agents_recheck3.py`): PydanticAI (2.51), LangGraph (1.2.12 with langchain-core 1.6.5), the OpenAI Agents SDK
+`tests/test_agents_user_words_and_approvals.py`): PydanticAI (2.51), LangGraph (1.2.12 with langchain-core 1.6.5), the OpenAI Agents SDK
 (0.22.3) and MCP (the proxy). Other frameworks — LlamaIndex, AutoGen, smolagents, CrewAI — have no adapter; their
 histories can be passed to `guard.check` as messages, and shapes the guard does not recognise are read fail-closed
 (unknown blocks are tool outputs), but formats that merge the user's text with tool text (smolagents' "Observation:"
