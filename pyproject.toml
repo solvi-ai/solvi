@@ -58,7 +58,10 @@ lora = ["torch", "transformers", "peft>=0.13"]   # part.adapt_lora: tests/test_l
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-markers = ["model: needs a real model checkpoint and its runtime (skipped when they are missing)"]
+markers = [
+    "model: needs a real model checkpoint and its runtime (skipped when they are missing)",
+    "stand: the task stand's scorers on tiny fixtures (benchmarks/tasks; run with -m stand)",
+]
 # solvi's own code, docs examples and tests use the 0.8 names: an old name is an error unless a test expects its warning
 filterwarnings = ["error:.*the old name will be removed in solvi:DeprecationWarning"]
 
