@@ -9,7 +9,7 @@ import pytest
 
 from solvi import Answer, Catalog, Question, System
 from solvi.costs import MeasuredCosts
-from solvi.strategy import ModelStrategist
+from solvi.strategy import CostStrategist
 
 
 def rates(delay):
@@ -43,7 +43,7 @@ def plan_costs(res):
 def test_declared_costs_keep_the_declaration_order():
     cat, qs = rates({"live": 0.02, "table": 0.0})
     s = System(cat, qs, producers="equivalent")
-    assert isinstance(s.strategist, ModelStrategist) and s.cost_policy is None
+    assert isinstance(s.strategist, CostStrategist) and s.cost_policy is None
     got = [used(s.ask({"currency": "EUR"})) for _ in range(4)]
     assert got == ["rate_live"] * 4                                         # unit costs: a tie, the first declared
     assert "costs" not in next(r for r in s.ask({"currency": "EUR"}).trace.records if r.kind == "plan").extra
@@ -125,12 +125,12 @@ def test_settings_and_errors():
     with pytest.raises(ValueError, match="cost_policy must be"):
         System(cat, qs, producers="equivalent", cost_policy="fastest")
     with pytest.raises(ValueError, match="producers=\"equivalent\" too"):
-        System(cat, qs, producers="equivalent", strategist=ModelStrategist())
+        System(cat, qs, producers="equivalent", strategist=CostStrategist())
     with pytest.raises(ValueError):
         MeasuredCosts(min_samples=0)
     with pytest.raises(ValueError, match="freeze_costs"):
         System(cat, qs, producers="equivalent").freeze_costs()
-    s = System(cat, qs, strategist=ModelStrategist(producers="equivalent"), cost_policy=MeasuredCosts(alpha=0.5))
+    s = System(cat, qs, strategist=CostStrategist(producers="equivalent"), cost_policy=MeasuredCosts(alpha=0.5))
     assert s.cost_book.alpha == 0.5 and "MeasuredCosts" in repr(s.cost_policy)
     s.ask({"currency": "EUR"})
     frozen = s.freeze_costs()

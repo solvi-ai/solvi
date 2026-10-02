@@ -16,7 +16,7 @@ alternative producers (`provides=`), needs the inputs of ALL of them (a fallback
    available or made earlier in the segment, types fit); an accepted segment fixes those choices and the search completes
    the rest; the whole plan is checked again (inputs bound, acyclic, types, every mandatory hard check kept). A rejected
    segment falls back to the code choice for that fact; a plan that fails the final check falls back to the code plan
-   (`fallback="code"`), to the deterministic strategist (`"deterministic"`) or abstains (`"abstain"`).
+   (`on_failure="code"`), to the deterministic strategist (`"deterministic"`) or abstains (`"abstain"`).
 
 So a model error costs cost or coverage, never a silent wrong wiring: every candidate of a segment provides the same fact
 (that is what `provides=` declares) and runs its own validator at run time, names bind exactly, and only verified plans run.
@@ -24,9 +24,9 @@ The plan is recorded in the trace as one hashed record (kind "plan"; provenance 
 with the model's fingerprint and, per segment, what was proposed and why it was accepted or rejected); `trace.replay`
 re-verifies it against the catalog.
 
-    from solvi.strategy import ModelStrategist
-    system = System(cat, questions, strategist=ModelStrategist.load("path/to/strategist-checkpoint"))
-    system = System(cat, questions, strategist=ModelStrategist())      # code only: cheapest verified plan, no model
+    from solvi.strategy import CostStrategist, ModelStrategist
+    system = System(cat, questions, strategist=CostStrategist())      # code only: cheapest verified plan, no model
+    system = System(cat, questions, strategist=ModelStrategist.load("path/to/strategist-checkpoint"))   # experimental
 
 Experimental: see docs/strategist.md for what was measured and when the model helps at all."""
 from __future__ import annotations
@@ -34,6 +34,7 @@ from __future__ import annotations
 import dataclasses
 import time
 
+from . import _deprecate
 from .strategist import Flow, PlanError, plan as det_plan
 
 UNIT = 1.0
@@ -602,8 +603,9 @@ def check_segment(catalog, seg, nodes):
 
 
 # ---------------------------------------------------------------------------------------------------------------- strategists
-class ModelStrategist:
-    """A strategist for System(..., strategist=...).
+class CostStrategist:
+    """The code strategist for System(..., strategist=...): dead ends dropped, the cheapest verified plan by declared (or
+    measured) costs — no model. ModelStrategist is the same planner with a model that proposes segments.
 
     producers: how to treat the alternative producers of a fact (`provides=`):
       "declared" (default) — as the deterministic strategist does: a fallback chain in declaration order (the first is the
@@ -613,27 +615,29 @@ class ModelStrategist:
       "equivalent" — the producers of a fact are interchangeable (any accepted output is the same fact): one is chosen as
         the primary, the cheapest valid plan by declared `cost=` (unit when undeclared); where declared costs do not settle
         it, the model (if any) proposes the segment; the others stay as run-time fallbacks when their inputs are already
-        computed (fallbacks=True).
-    fallback: when the verified plan cannot be built — "code" (the code plan), "deterministic" (solvi.strategist.plan) or
-    "abstain" (every question abstains). record: write the plan record into the trace."""
+        computed (keep_alternatives=True).
+    on_failure: when the verified plan cannot be built — "code" (the code plan), "deterministic" (solvi.strategist.plan)
+    or "abstain" (every question abstains). keep_alternatives: keep the other producers of a fact as run-time fallbacks.
+    record: write the plan record into the trace. (0.7 names: fallback= for on_failure=, fallbacks= for
+    keep_alternatives=; they still work with a DeprecationWarning until 0.9.)"""
 
-    def __init__(self, model=None, producers="declared", fallback="code", costs=None, fallbacks=True, record=True):
-        if fallback not in ("code", "deterministic", "abstain"):
-            raise ValueError('fallback must be "code", "deterministic" or "abstain"')
+    model = None
+
+    @_deprecate.kwargs(fallback="on_failure", fallbacks="keep_alternatives")
+    def __init__(self, producers="declared", on_failure="code", costs=None, keep_alternatives=True, record=True):
+        self._setup(None, producers, on_failure, costs, keep_alternatives, record)
+
+    def _setup(self, model, producers, on_failure, costs, keep_alternatives, record):
+        if on_failure not in ("code", "deterministic", "abstain"):
+            raise ValueError('on_failure must be "code", "deterministic" or "abstain"')
         if producers not in ("declared", "equivalent"):
             raise ValueError('producers must be "declared" or "equivalent"')
-        self.model, self.producers, self.fallback, self.costs = model, producers, fallback, costs
-        self.fallbacks, self.record = fallbacks, record
+        self.model, self.producers, self.on_failure, self.costs = model, producers, on_failure, costs
+        self.keep_alternatives, self.record = keep_alternatives, record
         self.last = None
 
-    @classmethod
-    def load(cls, path, backend="auto", producers="equivalent", threads=None, quantized=False, **kw):
-        """A trained segment model (a directory or a Hugging Face id; docs/strategist.md) behind this strategist. The model
-        chooses among interchangeable producers, so `producers` defaults to "equivalent" here.
-
-        Experimental: no checkpoint is published — it reads one you trained yourself (docs/strategist.md has the format)."""
-        from .strategy_model import SegmentModel
-        return cls(SegmentModel.load(path, backend=backend, threads=threads, quantized=quantized), producers=producers, **kw)
+    fallback = _deprecate.attr("fallback", "on_failure", "CostStrategist")
+    fallbacks = _deprecate.attr("fallbacks", "keep_alternatives", "CostStrategist")
 
     @property
     def fingerprint(self):
@@ -675,7 +679,7 @@ class ModelStrategist:
             flow = det_plan(catalog, qs, init, heads)
             report["fallback"] = "no feasible selection: " + code.why
             return self._done(flow, report, t0, None)
-        sel, code_flow = code, build(catalog, qs, init, code, heads, self.fallbacks, gov)
+        sel, code_flow = code, build(catalog, qs, init, code, heads, self.keep_alternatives, gov)
         segs = segments(catalog, qs, init, code, costs) if self.model is not None else []
         fixed = {}
         if segs:
@@ -704,22 +708,22 @@ class ModelStrategist:
                 ignored = [f for f, n in fixed.items() if sel.choice.get(f) not in (None, n)]
                 if ignored:
                     report["overridden"] = ignored
-        flow = build(catalog, qs, init, sel, heads, self.fallbacks, gov) if sel is not code else code_flow
+        flow = build(catalog, qs, init, sel, heads, self.keep_alternatives, gov) if sel is not code else code_flow
         bad = validate(catalog, flow, qs, init, gov)
         if bad and sel is not code:
             report["fallback"] = "plan rejected: " + "; ".join(bad[:3])
             bad0 = validate(catalog, code_flow, qs, init, gov)
-            if self.fallback == "code" and not bad0:
+            if self.on_failure == "code" and not bad0:
                 flow, sel = code_flow, code
-            elif self.fallback == "deterministic":
+            elif self.on_failure == "deterministic":
                 flow, sel = det_plan(catalog, qs, init, heads), None
             else:
                 flow, sel = _abstain(qs, "strategist: " + report["fallback"]), None
         elif bad:
             report["fallback"] = "code plan rejected: " + "; ".join(bad[:3])
-            if self.fallback == "deterministic":
+            if self.on_failure == "deterministic":
                 flow, sel = det_plan(catalog, qs, init, heads), None
-            elif self.fallback == "abstain":
+            elif self.on_failure == "abstain":
                 flow, sel = _abstain(qs, "strategist: " + report["fallback"]), None
         report["cost"] = sel.cost if sel is not None else None
         return self._done(flow, report, t0, sel)
@@ -731,6 +735,29 @@ class ModelStrategist:
         flow.strategy = report
         self.last = report
         return flow
+
+
+
+class ModelStrategist(CostStrategist):
+    """CostStrategist with a model (experimental: no checkpoint is published) that proposes the producers where declared
+    costs do not settle the choice; code verifies every proposal (see the module docs). ModelStrategist() without a model
+    is CostStrategist() — that spelling of 0.7 still works, with a DeprecationWarning."""
+
+    @_deprecate.kwargs(fallback="on_failure", fallbacks="keep_alternatives")
+    def __init__(self, model=None, producers="declared", on_failure="code", costs=None, keep_alternatives=True,
+                 record=True):
+        if model is None:
+            _deprecate.renamed("ModelStrategist() without a model", "CostStrategist()")
+        self._setup(model, producers, on_failure, costs, keep_alternatives, record)
+
+    @classmethod
+    def load(cls, path, backend="auto", producers="equivalent", threads=None, quantized=False, **kw):
+        """A trained segment model (a directory or a Hugging Face id; docs/strategist.md) behind this strategist. The model
+        chooses among interchangeable producers, so `producers` defaults to "equivalent" here.
+
+        Experimental: no checkpoint is published — it reads one you trained yourself (docs/strategist.md has the format)."""
+        from .segment_model import SegmentModel
+        return cls(SegmentModel.load(path, backend=backend, threads=threads, quantized=quantized), producers=producers, **kw)
 
 
 def _abstain(questions, why):
@@ -790,6 +817,6 @@ def narrowed(group, tried):
     return g
 
 
-__all__ = ["ModelStrategist", "Selection", "search", "segments", "check_segment", "validate", "build", "view", "reachable",
+__all__ = ["CostStrategist", "ModelStrategist", "Selection", "search", "segments", "check_segment", "validate", "build", "view", "reachable",
            "plan_record", "replay_plan", "PlanError", "alternatives", "usable", "narrowed", "mandatory_checks", "governing",
            "producer"]

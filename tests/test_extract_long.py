@@ -158,7 +158,7 @@ def test_a_missing_optional_dependency_names_the_extra_to_install(monkeypatch):
 def test_the_model_loaders_check_the_backend_and_the_folder_first_and_name_both_runtimes(monkeypatch, tmp_path):
     import sys
     from solvi.aliases import NameMatcher
-    from solvi.strategy_model import SegmentModel
+    from solvi.segment_model import SegmentModel
     for load in (NameMatcher.load, SegmentModel.load):
         with pytest.raises(ValueError, match="backend must be"):
             load(str(tmp_path), backend="tensorflow")

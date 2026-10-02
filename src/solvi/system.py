@@ -232,7 +232,8 @@ class System:
         catalog (ask refuses such a key: the value would replace the part), so a model field named like a part is refused
         here.
         strategist: an object with plan(catalog, questions, init_keys, heads) → Flow used by ask instead of the deterministic
-        strategist (experimental: solvi.strategy.ModelStrategist; its plan is recorded in the trace, see docs/strategist.md).
+        strategist (solvi.strategy.CostStrategist, or the experimental ModelStrategist; its plan is recorded in the trace,
+        see docs/strategist.md).
         storage: a solvi.storage.TraceStorage (or a path: .db / .sqlite → SQLite, else JSON lines) — every ask saves its
         response (answers, flow, whole trace) there, hash-chained across responses, and teach saves the correction; the
         response's `stored_id` is its id in the store. journal=path (deprecated, removed in 0.9) is
@@ -240,7 +241,7 @@ class System:
         Every option after `questions` is keyword-only.
         timeout: seconds a part's call may take under `aask` when the part declares no `timeout=` (None: no limit).
         producers="equivalent": the producers of a fact are interchangeable — the cost-optimal planner
-        (solvi.strategy.ModelStrategist(producers="equivalent")) picks one per fact, the cheapest valid plan.
+        (solvi.strategy.CostStrategist(producers="equivalent")) picks one per fact, the cheapest valid plan.
         cost_policy: what that planner's costs are — "declared" (`cost=`, 1 when undeclared) or "measured" (the run times
         system.cost_book measures, after a warm-up; or a solvi.costs.MeasuredCosts with its settings; `costs=` in 0.7). freeze_costs() fixes
         them; the plan record in each trace says which cost decided each choice.
@@ -295,9 +296,9 @@ class System:
         if producers not in ("declared", "learned", "equivalent"):
             raise ValueError('producers must be "declared", "learned" or "equivalent"')
         if producers == "equivalent":
-            from .strategy import ModelStrategist
+            from .strategy import CostStrategist
             if strategist is None:
-                self.strategist = strategist = ModelStrategist(producers="equivalent")
+                self.strategist = strategist = CostStrategist(producers="equivalent")
             elif getattr(strategist, "producers", None) != "equivalent":
                 raise ValueError('producers="equivalent" with a strategist: give it producers="equivalent" too')
         from .costs import MeasuredCosts
@@ -312,7 +313,7 @@ class System:
             raise ValueError('cost_policy must be "declared", "measured" or a MeasuredCosts')
         if self.cost_policy is not None and getattr(self.strategist, "producers", None) != "equivalent":
             raise ValueError('cost_policy="measured" needs the cost-optimal planner: System(..., producers="equivalent") or '
-                             'strategist=ModelStrategist(producers="equivalent")')
+                             'strategist=CostStrategist(producers="equivalent")')
         # online learning of order / producer choice costs time inside ask (periodic refits), so it is on only when a learned
         # policy will use it (or when asked explicitly); plain systems keep flat, predictable decision times
         if learn is None:

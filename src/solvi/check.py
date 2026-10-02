@@ -226,7 +226,7 @@ def _cycles(cat, rep, strategist=None):
                 rep.add("error", "cycle", where,
                         "these facts are derived from each other; each has a producer outside the loop, but the "
                         "deterministic strategist needs the inputs of every producer of a fact, so none of them can be "
-                        "computed — plan with System(..., strategist=solvi.strategy.ModelStrategist()), which uses the "
+                        "computed — plan with System(..., strategist=solvi.strategy.CostStrategist()), which uses the "
                         "producers whose inputs are there")
             else:
                 rep.add("note", "mutual_producers", where,

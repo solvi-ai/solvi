@@ -10,25 +10,25 @@ producers (`provides=`) it needs the inputs of all of them — a fallback chain 
   **choose between interchangeable producers** by what they cost;
 - **wire parts whose parameter names match no fact** — parts written by different teams, each with its own naming.
 
-`solvi.strategy.ModelStrategist` and `solvi.aliases` add both. The principle is the same everywhere: **a model proposes,
+`solvi.strategy` (`CostStrategist`, and `ModelStrategist` with a model) and `solvi.aliases` add both. The principle is the same everywhere: **a model proposes,
 code verifies, answers come only from verified plans**. A model error costs cost or coverage (the question abstains, or
 code's own plan is used); it never becomes a silent wrong wiring — as far as the checks and your examples can tell.
 
-Status (0.8): the code strategist (`ModelStrategist()`, `producers="equivalent"`) is ready and needs no model. The segment
-model (`solvi.strategy_model`) and the name matcher (`solvi.aliases.NameMatcher`) are **experimental: no checkpoint is
+Status (0.8): the code strategist (`CostStrategist()`, `producers="equivalent"`) is ready and needs no model. The segment
+model (`solvi.segment_model`, `solvi.strategy_model` up to 0.7) and the name matcher (`solvi.aliases.NameMatcher`) are **experimental: no checkpoint is
 published**: `ModelStrategist.load` and
 `NameMatcher.load` read a checkpoint in the format below that you trained yourself (the research repository has the recipe); without one,
 examples/17 uses stand-ins with the same interfaces. The research behind it (the typed decomposer, name matching, the segment model) and what was measured are summarised
 [below](#what-was-measured).
 
-## Planning: `ModelStrategist`
+## Planning: `CostStrategist` and `ModelStrategist`
 
 ```python
 from solvi import System
-from solvi.strategy import ModelStrategist
+from solvi.strategy import CostStrategist, ModelStrategist
 
-System(cat, questions, strategist=ModelStrategist())                                   # 1. code only
-System(cat, questions, strategist=ModelStrategist(producers="equivalent"))             # 2. cheapest verified plan
+System(cat, questions, strategist=CostStrategist())                                   # 1. code only
+System(cat, questions, strategist=CostStrategist(producers="equivalent"))             # 2. cheapest verified plan
 System(cat, questions, strategist=ModelStrategist.load("path/to/strategist-checkpoint"))   # 3. + the model
 ```
 
@@ -49,6 +49,9 @@ any other fact — is not kept as a fallback, since the flow could not run it. `
 note `mutual_producers` for a System with a strategist (an error, `cycle`, only for the deterministic strategist, which
 cannot plan it).
 
+(`CostStrategist` was `ModelStrategist()` without a model up to 0.7; that spelling still works, with a
+DeprecationWarning, and so do its options `fallback=` / `fallbacks=`, now `on_failure=` / `keep_alternatives=`.)
+
 Everything that plans for a System uses its strategist, not only `ask`: `answers_of` / replay, `facts_for` and so the
 feature candidates of `fit`, `learn_order`, the input schemas of `solvi serve` and `solvi check`.
 3. **With a model** (`ModelStrategist(model, producers="equivalent")`, or `ModelStrategist.load(path)`, which implies
@@ -65,7 +68,7 @@ feature candidates of `fit`, `learn_order`, the input schemas of `solvi serve` a
 ### Costs from measurements
 
 With no `cost=` declared, interchangeable producers tie and the first declared wins. `System(cat, questions,
-producers="equivalent", cost_policy="measured")` (the same as `strategist=ModelStrategist(producers="equivalent")` plus
+producers="equivalent", cost_policy="measured")` (the same as `strategist=CostStrategist(producers="equivalent")` plus
 `cost_policy="measured"`) plans with the run times solvi measures anyway (`system.cost_book`, a moving average in ms per part):
 
 - **Warm-up.** A producer counts its measured time once it has run `min_samples` times (default 3); before that its
@@ -178,7 +181,7 @@ README.md                model card
 Per cell also: `depth` (0 goal / facts; 1 a producer of the segment's fact; 2 a producer of an input of one; …) and
 `ready` (0 not a part; 1 all its inputs are available; 2 not) — both computed by code. **Output**: 8 query slots; slot
 *i* → a node type (0 EMPTY, 1 STEP; the other 7 of the decomposer's plan language are unused) and a pointer over the candidate cells;
-the proposal is the slots up to the first EMPTY. `solvi.strategy_model.seg_cells`, `batch_arrays`, `decode` implement
+the proposal is the slots up to the first EMPTY. `solvi.segment_model.seg_cells`, `batch_arrays`, `decode` implement
 exactly this; the training side (in the research repository) uses the same functions.
 
 The fingerprint recorded in traces is a hash of `solvi_strategist.json`, `config.json`, `tokenizer.json` and the weights file
@@ -194,7 +197,7 @@ same value), 100 tasks per length bucket on training themes, 60 on held-out them
 | planner | goal reached, 65–128 steps | cost vs optimum (own / held-out themes) | CPU per plan, 65–128 |
 |---|---|---|---|
 | deterministic strategist | 0% (one dead end suffices; 23% even at 1–16) | — | 0.5 ms |
-| `ModelStrategist()` code, costs not declared | 100% | 1.48 / 1.48 | 9 ms |
+| `CostStrategist()` code, costs not declared | 100% | 1.48 / 1.48 | 9 ms |
 | code with costs from a 10-word keyword list of the training docstrings | 100% | 1.07 / 1.47 | 9 ms |
 | `ModelStrategist.load(...)` — the segment model | 100% | 1.07 / 1.44 | 420 ms cold (onnx, 4 threads); 51 ms for a catalog it has seen; 250 ms int8 |
 | code with declared costs (the model is never asked) | 100% | **1.000** | 9 ms |
@@ -209,5 +212,5 @@ same value), 100 tasks per length bucket on training themes, 60 on held-out them
   cases did not exercise. On long synthetic catalogs (1–64 steps) coverage is 0–75% and 4–8% of the answers of accepted
   wirings were wrong. Treat accepted aliases as a suggestion to review, not as proof.
 
-Status (0.8): `ModelStrategist()` (code only, the dead-end-aware plan) and `producers="equivalent"` with declared costs are
+Status (0.8): `CostStrategist()` (code only, the dead-end-aware plan) and `producers="equivalent"` with declared costs are
 ready; the segment model and the name matcher of `solvi.aliases` are **experimental** (no published checkpoint).

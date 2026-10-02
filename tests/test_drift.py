@@ -41,16 +41,16 @@ def test_a_stationary_stream_is_not_flagged_and_a_shift_is():
 
 def test_each_signal_needs_significance_and_a_minimum_effect():
     ref = stream(200, 1)
-    mon = DriftMonitor(window=200).calibrate([d for d, _ in ref], [y for _, y in ref])
+    mon = DriftMonitor(window=200).set_reference([d for d, _ in ref], [y for _, y in ref])
     for d, y in stream(200, 4, conf=0.6, wrong=0.3, escalate=0.4):                # less sure, wrong and escalating more
         rep = mon.observe(d, label=y)
     assert rep["drift"] and {"answered", "confidence", "act", "accuracy"} <= set(rep["flags"])
     assert rep["tests"]["accuracy"]["reference"] > rep["tests"]["accuracy"]["window"]
-    small = DriftMonitor(window=200, min_shift=0.05).calibrate([d for d, _ in ref])
+    small = DriftMonitor(window=200, min_shift=0.05).set_reference([d for d, _ in ref])
     for d, _ in stream(200, 5, conf=0.88):                                        # significant on 200, but 0.02: not drift
         rep = small.observe(d)
     assert not rep["drift"] and abs(rep["tests"]["confidence"]["window"] - rep["tests"]["confidence"]["reference"]) < 0.05
-    both = DriftMonitor(window=100, min_signals=2).calibrate([d for d, _ in ref])
+    both = DriftMonitor(window=100, min_signals=2).set_reference([d for d, _ in ref])
     for d, _ in stream(100, 6, weights=(1, 8, 1)):
         rep = both.observe(d)
     assert rep["flags"] == ["answers"] and not rep["drift"]                       # one signal where two are asked for
@@ -67,7 +67,7 @@ def test_observations_from_decisions_results_and_dicts():
     s = window_stats([Observation("a", 0.9, True, None, True), Observation("b", 0.6, False, None, False)])
     assert s["answered"] == 0.5 and s["answers"] == {"'a'": 1, "'b'": 1} and s["accuracy"] == 0.5 and "act" not in s
     with pytest.raises(ValueError):
-        DriftMonitor(window=10).calibrate([d], [None, None])
+        DriftMonitor(window=10).set_reference([d], [None, None])
     with pytest.raises(ValueError):
         DriftMonitor(window=1)
 
@@ -92,7 +92,7 @@ def test_stationary_streams_are_not_flagged_with_the_documented_defaults():
         for _ in range(6):
             mon = DriftMonitor(window=100)
             if ref:
-                mon.calibrate(iid(rng, ref, k))
+                mon.set_reference(iid(rng, ref, k))
             reps = [mon.observe(d) for d in iid(rng, 1000 + (0 if ref else 100), k)]
             flagged += [(k, ref, r["flags"]) for r in reps if r["drift"]][:1]
     assert flagged == []
@@ -104,17 +104,17 @@ def test_stationary_streams_are_not_flagged_with_the_documented_defaults():
 
 def test_answers_too_rare_for_the_window_are_pooled_or_the_signal_is_said_to_be_untested():
     rng = np.random.default_rng(1)
-    mon = DriftMonitor(window=100).calibrate(iid(rng, 1500, 57))         # each answer is expected 1.75 times in a window
+    mon = DriftMonitor(window=100).set_reference(iid(rng, 1500, 57))         # each answer is expected 1.75 times in a window
     for d in iid(rng, 100, 57):
         rep = mon.observe(d)
     assert "answers" not in rep["tests"] and "fewer than two answers are expected at least 5 times" in rep["not_tested"]["answers"]
     assert {"answered", "confidence", "act"} <= set(rep["tests"]) and rep["tests"]["act"]["level"] == pytest.approx(0.0075 / 3000)
-    mon = DriftMonitor(window=100).calibrate(iid(rng, 1500, 12))         # 8.3 each: tested, nothing pooled
+    mon = DriftMonitor(window=100).set_reference(iid(rng, 1500, 12))         # 8.3 each: tested, nothing pooled
     for d in iid(rng, 100, 12):
         rep = mon.observe(d)
     assert rep["tests"]["answers"]["df"] == 11 and rep["tests"]["answers"]["pooled"] == 0 and not rep["not_tested"]
     skew = [{"value": v, "confidence": 0.9} for v in ["a"] * 60 + ["b"] * 30 + list("cdefghijkl")]   # ten rare answers
-    mon = DriftMonitor(window=100).calibrate(skew * 3)
+    mon = DriftMonitor(window=100).set_reference(skew * 3)
     for d in skew:
         rep = mon.observe(d)
     assert rep["tests"]["answers"]["df"] == 2 and rep["tests"]["answers"]["pooled"] == 10 and not rep["drift"]
@@ -144,7 +144,7 @@ def test_a_response_gives_the_act_probability_and_a_bare_result_says_that_it_doe
     mon = DriftMonitor(window=20)
     with pytest.warns(UserWarning, match="carries no act probability"):  # … and the monitor says so, once
         mon.observe(res["team"])
-    two = DriftMonitor(window=20).calibrate([part("a billing question")] * 20)
+    two = DriftMonitor(window=20).set_reference([part("a billing question")] * 20)
     for _ in range(20):
         rep = two.observe(res, question="team")
     assert "act" in rep["tests"] and not rep["not_tested"]
@@ -167,7 +167,7 @@ def test_the_sequential_test_flags_a_fall_of_the_share_answered_alone_sooner_tha
         assert not any(r["drift"] for r in reps[:600])
         first[seq] = next(i for i, r in enumerate(reps) if r["drift"]) - 600
     assert first[True] < 40 and first[True] < first[False]
-    rep = DriftMonitor(window=100).calibrate(iid(rng, 200, 3)).observe(iid(rng, 1, 3)[0])
+    rep = DriftMonitor(window=100).set_reference(iid(rng, 200, 3)).observe(iid(rng, 1, 3)[0])
     assert rep["tests"]["sequential"]["h"] > 0
     with pytest.raises(ValueError, match="4e-4"):
         DriftMonitor(alpha=1e-5)

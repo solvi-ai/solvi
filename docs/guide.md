@@ -1568,7 +1568,7 @@ compares the last decisions of a question with a reference window and names what
 
 ```python
 from solvi.drift import DriftMonitor
-mon = DriftMonitor(window=100)            # the first 100 decisions are the reference (or mon.calibrate(decisions, labels))
+mon = DriftMonitor(window=100)            # the first 100 decisions are the reference (or mon.set_reference(decisions, labels))
 rep = mon.observe(part(text))             # or mon.observe(decision, label=truth) when the truth is known
 rep["drift"], rep["flags"], rep["why"]    # True, ["answers"], ["the answers are distributed differently (total variation 0.24, ...)"]
 ```
@@ -1808,9 +1808,9 @@ every request with the same keys.
 
 ### Other strategists: dead ends and costs
 
-`System(..., strategist=...)` takes another planner. `solvi.strategy.ModelStrategist()` builds the same plan with producers
+`System(..., strategist=...)` takes another planner. `solvi.strategy.CostStrategist()` builds the same plan with producers
 whose inputs are never given dropped (the deterministic strategist needs the inputs of every producer of a fact);
-`ModelStrategist(producers="equivalent")` treats the producers of a fact as interchangeable and picks the cheapest verified
+`CostStrategist(producers="equivalent")` treats the producers of a fact as interchangeable and picks the cheapest verified
 plan by declared `cost=`, keeping every hard check that governs a question (`System(..., producers="equivalent")` is a
 shortcut for it). Both are code only. A segment model (`ModelStrategist.load`) and the name matcher of `solvi.aliases` are
 experimental: no checkpoint is published for either. Details, the

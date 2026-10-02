@@ -280,14 +280,14 @@ Every answer is a value and a confidence, and the types also declare answer prim
 
 ## Planning around dead ends and costs (code strategist)
 
-The default strategist needs the inputs of every producer of a fact. `solvi.strategy.ModelStrategist()` plans around
+The default strategist needs the inputs of every producer of a fact. `solvi.strategy.CostStrategist()` plans around
 producers whose inputs are never given, and with `producers="equivalent"` picks the cheapest verified plan by declared
 `cost=` (an exact 0/1 program; hard checks that govern a question always stay in the plan). No model is involved; the plan
 is one hashed record in the trace and replay re-verifies it.
 
 ```python
-from solvi.strategy import ModelStrategist
-system = System(cat, questions, strategist=ModelStrategist(producers="equivalent"))
+from solvi.strategy import CostStrategist
+system = System(cat, questions, strategist=CostStrategist(producers="equivalent"))
 ```
 
 A segment model that proposes producers when costs are not declared, and `solvi.aliases` (wiring parameter names that match

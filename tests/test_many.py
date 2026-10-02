@@ -4,7 +4,7 @@ import numpy as np
 import pytest
 
 from solvi.decide import DecideModel
-from solvi.many import Many, bm25_scores, decide_many, fit
+from solvi.many import Many, bm25_scores, decide_many, fits
 
 
 class Overlap:
@@ -81,14 +81,14 @@ def test_auto_goes_direct_then_shortlist_then_tournament_and_is_deterministic():
     tight = model(limit=100)
     tight.max_len_override = None
     d = decide_many(tight, TEXT, TASK, ACTIONS, many=Many(min_input=10_000))          # the input would be left too little
-    assert d.extra["many"]["mode"] == "shortlist" and d.extra["many"]["fit"]["fits"] is False
+    assert d.extra["many"]["mode"] == "shortlist" and d.extra["many"]["fits"]["fits"] is False
     d = decide_many(model(), TEXT, TASK, ACTIONS, many=Many(min_input=10_000, selector=None))
     assert d.extra["many"]["mode"] == "tournament"
     d = decide_many(model(), TEXT, TASK, ACTIONS)                                    # direct does not fit after all
     assert d.extra["many"]["mode"] == "shortlist" and d.extra["many"]["requested"] == "auto"
     again = decide_many(model(), TEXT, TASK, ACTIONS)
     assert again.extra["many"] == d.extra["many"] and again.value == d.value
-    f = fit(model(), TEXT, TASK, ACTIONS)
+    f = fits(model(), TEXT, TASK, ACTIONS)
     assert f["question_tokens"] + f["input_budget"] == f["max_len"]
 
 

@@ -134,7 +134,7 @@ class NameMatcher:
     @classmethod
     def load(cls, path_or_id, backend="auto", threads=None):
         from .loader import optional
-        from .strategy_model import _auto_backend
+        from .segment_model import _auto_backend
         if backend not in ("auto", "torch", "onnx"):
             raise ValueError('backend must be "torch", "onnx" or "auto"')
         path = os.path.expanduser(str(path_or_id))
@@ -475,11 +475,11 @@ class Acceptance:
 
 class _Answers:
     def __init__(self, catalog, questions, strategist=None):
-        from .strategy import ModelStrategist
+        from .strategy import CostStrategist
         from .system import System
         self.catalog, self.questions, self.cache, self.systems = catalog, questions, {}, {}
         self.System = System
-        self.strategist = strategist if strategist is not None else ModelStrategist()   # dead ends do not block
+        self.strategist = strategist if strategist is not None else CostStrategist()   # dead ends do not block
 
     def system(self, al):
         key = tuple(sorted(al.items()))
@@ -565,7 +565,7 @@ def accept(catalog, questions, proposals, examples, probes=(), k=5, oracle=None,
     aliases that change no answer on the examples and probes (they stay unresolved). confirm (active mode): spend the whole
     question budget even when no neighbour disagrees any more (the extra questions go where the other proposals disagree
     most), so a wiring is never accepted on the k0 random labels alone. strategist: plans each candidate wiring
-    (default ModelStrategist(): the deterministic plan with dead ends dropped)."""
+    (default CostStrategist(): the deterministic plan with dead ends dropped)."""
     if not proposals:
         return Acceptance(None, "no proposal", 0)
     ans = _Answers(catalog, list(questions), strategist)

@@ -116,3 +116,18 @@ def test_heads_report_one_accuracy_each_and_learn_one_label_by_teach():
     assert not hasattr(h, "T") and h.cv_acc is not None
     with pytest.warns(DeprecationWarning, match="Head.loo_acc is deprecated: use cv_acc"):
         assert h.loo_acc == h.cv_acc
+
+
+def test_the_code_strategist_is_cost_strategist_and_model_strategist_takes_a_model():
+    from solvi.strategy import CostStrategist, ModelStrategist
+    c = CostStrategist(producers="equivalent", on_failure="abstain", keep_alternatives=False)
+    assert (c.on_failure, c.keep_alternatives, c.model) == ("abstain", False, None)
+    with pytest.warns(DeprecationWarning, match=r"ModelStrategist\(\) without a model is deprecated: use CostStrategist\(\)"):
+        m = ModelStrategist(producers="equivalent")
+    assert isinstance(m, CostStrategist)
+    with pytest.warns(DeprecationWarning, match=r"CostStrategist\(fallbacks=\) is deprecated: use keep_alternatives="):
+        assert CostStrategist(fallbacks=False).keep_alternatives is False
+    with pytest.warns(DeprecationWarning, match="solvi.strategy_model.SegmentModel is deprecated"):
+        from solvi.strategy_model import SegmentModel
+    from solvi.segment_model import SegmentModel as S2
+    assert SegmentModel is S2

@@ -85,7 +85,7 @@ def bm25_scores(query, labels, descriptions=None):
     return BM25([terms(t) for t in option_texts(labels, descriptions)]).score(terms(query))
 
 
-def fit(model, text, task, labels, descriptions=None, min_input=None):
+def fits(model, text, task, labels, descriptions=None, min_input=None):
     """Does the question with all its options fit one pass, and what is left for the input → {"question_tokens",
     "input_budget", "max_len", "min_input", "fits"} (token counts are the model's own, or approximate when the model has
     no tokenizer: an LLM, a hosted decision model)."""
@@ -131,10 +131,10 @@ def decide_many(model, text, task, options, descriptions=None, *, many=None, **s
                       "escalate": d.escalate})
         return d
 
-    info = {"requested": many.mode, "of": n, "fit": fit(model, text, task, labels, descs, many.min_input), "calls": calls}
+    info = {"requested": many.mode, "of": n, "fits": fits(model, text, task, labels, descs, many.min_input), "calls": calls}
     mode = many.mode
     if mode == "auto":
-        mode = "direct" if info["fit"]["fits"] else "shortlist" if many.selector is not None else "tournament"
+        mode = "direct" if info["fits"]["fits"] else "shortlist" if many.selector is not None else "tournament"
 
     if mode == "direct":
         try:

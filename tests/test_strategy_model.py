@@ -8,7 +8,7 @@ import pytest
 
 from solvi import Catalog, Question, System
 from solvi.strategist import plan as det_plan
-from solvi.strategy import ModelStrategist, check_segment, search, segments, mandatory_checks, validate
+from solvi.strategy import CostStrategist, ModelStrategist, check_segment, mandatory_checks, search, segments, validate
 
 
 def chain():
@@ -59,7 +59,7 @@ ST = {"g1": 3.0, "g2": 1.0}
 def test_dead_end_breaks_the_deterministic_strategist_not_this_one():
     cat, qs = chain()
     assert System(cat, qs).ask(ST)["ok"].status == "abstain"          # union of inputs: partner_feed is never given
-    s = System(cat, qs, strategist=ModelStrategist())
+    s = System(cat, qs, strategist=CostStrategist())
     r = s.ask(ST)
     assert r["ok"].answer == "approved"
     assert r.trace.replay(s, r.flow)["ok"]
@@ -87,13 +87,13 @@ def test_declared_mode_equals_deterministic_without_dead_ends():
     qs = [Question("q", "?", None)]
     for a in (1, 2, 5):
         d = System(cat, qs).ask({"a": a})["q"]
-        m = System(cat, qs, strategist=ModelStrategist()).ask({"a": a})["q"]
+        m = System(cat, qs, strategist=CostStrategist()).ask({"a": a})["q"]
         assert (d.answer, d.status) == (m.answer, m.status)
 
 
 def test_equivalent_mode_is_cheapest_and_keeps_mandatory_checks():
     cat, qs = chain()
-    ms = ModelStrategist(producers="equivalent", costs={"a3_std": 1.0})
+    ms = CostStrategist(producers="equivalent", costs={"a3_std": 1.0})
     flow = ms.plan(cat, qs, set(ST))
     assert ms.last["choice"]["a3"] == "a3_std" and ms.last["choice"]["a2"] == "a2_std"
     assert ms.last["mandatory"] == {"ok": ["policy"]}
@@ -251,11 +251,11 @@ def test_link_table_ranks_the_sources_of_each_unresolved_name_and_match_names_wi
 
 def test_model_strategist_record_false_keeps_the_plan_out_of_the_trace_and_fallbacks_false_keeps_one_producer():
     cat, qs = chain()
-    rec = System(cat, qs, strategist=ModelStrategist(producers="equivalent")).ask(ST)
+    rec = System(cat, qs, strategist=CostStrategist(producers="equivalent")).ask(ST)
     assert rec.trace.records[-1].kind == "plan"
-    off = System(cat, qs, strategist=ModelStrategist(producers="equivalent", record=False)).ask(ST)
+    off = System(cat, qs, strategist=CostStrategist(producers="equivalent", record=False)).ask(ST)
     assert all(r.kind != "plan" for r in off.trace.records) and off["ok"].answer == rec["ok"].answer
-    one = System(cat, qs, strategist=ModelStrategist(producers="equivalent", fallbacks=False)).ask(ST)
+    one = System(cat, qs, strategist=CostStrategist(producers="equivalent", keep_alternatives=False)).ask(ST)
     assert all(len(st.part.alternatives or [st.part]) == 1 for st in one.flow.steps) and one["ok"].answer == "approved"
 
 
@@ -314,7 +314,7 @@ def test_segment_model_save_load_propose(tmp_path):
     pytest.importorskip("transformers")
     tok_src = pytest.importorskip("huggingface_hub").snapshot_download
     import json
-    from solvi import strategy_model as SM
+    from solvi import segment_model as SM
     try:
         base = tok_src("answerdotai/ModernBERT-base", allow_patterns=["*.json"])
     except Exception:  # noqa: BLE001
@@ -364,8 +364,8 @@ def _net_gross():
 
 
 @pytest.mark.parametrize("strategist", [
-    lambda: ModelStrategist(), lambda: ModelStrategist(producers="equivalent"),
-    lambda: ModelStrategist(producers="equivalent", fallbacks=False)], ids=["declared", "equivalent", "no_fallbacks"])
+    lambda: CostStrategist(), lambda: CostStrategist(producers="equivalent"),
+    lambda: CostStrategist(producers="equivalent", keep_alternatives=False)], ids=["declared", "equivalent", "no_fallbacks"])
 @pytest.mark.parametrize("state, order, answer", [({"net_in": 100.0}, ["net", "gross"], "yes"),
                                                   ({"gross_in": 100.0}, ["gross", "net"], "no")])
 def test_facts_derivable_from_each_other_are_planned_run_and_replayed(strategist, state, order, answer):
@@ -383,7 +383,7 @@ def test_facts_derivable_from_each_other_are_planned_run_and_replayed(strategist
 
 def test_a_fallback_producer_is_dropped_only_when_it_would_read_its_own_fact():
     cat, qs = _net_gross()
-    st = ModelStrategist(producers="equivalent")
+    st = CostStrategist(producers="equivalent")
     res = System(cat, qs, strategist=st).ask({"net_in": 100.0, "gross_in": 130.0})
     alts = {s.part.name: [a.name for a in s.part.alternatives] for s in res.flow.steps[:2]}
     assert alts["net"][0] == "net_given" and alts["gross"][0] == "gross_given"   # both given: the cheap ones first,
@@ -394,17 +394,17 @@ def test_a_fallback_producer_is_dropped_only_when_it_would_read_its_own_fact():
 def test_path_confidence_follows_the_producer_that_ran_and_survives_a_ring_of_facts():
     from solvi.runtime import path_confidence
     cat, qs = _net_gross()
-    res = System(cat, qs, strategist=ModelStrategist(producers="equivalent", fallbacks=False)).ask({"net_in": 100.0})
+    res = System(cat, qs, strategist=CostStrategist(producers="equivalent", keep_alternatives=False)).ask({"net_in": 100.0})
     assert path_confidence(cat, res.trace, ["gross", "net"]) == 1.0            # the full catalog: net ⇄ gross
 
 
 def test_solvi_check_calls_facts_derived_from_each_other_a_cycle_only_for_the_deterministic_strategist():
     from solvi.check import lint
     cat, qs = _net_gross()
-    rep = lint(System(cat, qs, strategist=ModelStrategist()))
+    rep = lint(System(cat, qs, strategist=CostStrategist()))
     assert rep.ok and rep.codes() == ["mutual_producers"]
     rep = lint(System(cat, qs))                                     # the deterministic strategist cannot plan it
-    assert "cycle" in rep.codes("error") and "ModelStrategist" in str(rep)
+    assert "cycle" in rep.codes("error") and "CostStrategist" in str(rep)
     cat = Catalog()                                                 # a loop with no way in stays an error whatever plans
 
     @cat.fn
@@ -415,14 +415,14 @@ def test_solvi_check_calls_facts_derived_from_each_other_a_cycle_only_for_the_de
 
     @cat.rule("q")
     def q(a) -> bool: return True
-    assert "cycle" in lint(System(cat, [Question("q", "", None)], strategist=ModelStrategist())).codes("error")
+    assert "cycle" in lint(System(cat, [Question("q", "", None)], strategist=CostStrategist())).codes("error")
 
 
 def test_fit_serve_and_check_plan_with_the_systems_strategist_as_ask_does():
     from solvi.check import lint
     from solvi.serve import question_inputs
     cat, qs = chain()
-    s = System(cat, qs, strategist=ModelStrategist())
+    s = System(cat, qs, strategist=CostStrategist())
     assert s.ask(ST)["ok"].answer == "approved"
     assert {"a2", "a3"} <= set(s.facts_for(ST))                     # computed around the dead-end producer, as ask does
     info = question_inputs(s, "ok")

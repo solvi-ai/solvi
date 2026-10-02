@@ -5,7 +5,7 @@ here (a dead end), some are shortcuts that skip a step, some are slow. A second 
 names (`INV_TOTAL`, `FX_RATE`), so they match no fact.
 
   1. the deterministic strategist needs the inputs of EVERY producer of a fact: one dead end and the question abstains
-  2. ModelStrategist() — the same plan in declaration order, dead ends dropped: it answers; the plan is in the trace
+  2. CostStrategist() — the same plan in declaration order, dead ends dropped: it answers; the plan is in the trace
   3. producers="equivalent": the producers are interchangeable, so the cheapest verified plan (declared costs)
   4. undeclared costs: the segment model (or, without one, a stand-in reading the docstrings) proposes which producer to use
      — every proposal is checked; a bad one falls back to the code plan (see the rejected proposal)
@@ -25,7 +25,7 @@ import numpy as np
 
 from solvi import Catalog, Question, System
 from solvi.aliases import accept, apply, propose, unresolved
-from solvi.strategy import ModelStrategist
+from solvi.strategy import CostStrategist, ModelStrategist
 
 
 def catalog(costs=True):
@@ -96,7 +96,7 @@ class DocStandIn:
 def strategist_model():
     path = os.environ.get("SOLVI_STRATEGIST")
     if path:
-        from solvi.strategy_model import SegmentModel
+        from solvi.segment_model import SegmentModel
         return SegmentModel.load(path)
     return DocStandIn()
 
@@ -106,8 +106,8 @@ def main():
     r = System(catalog(), QUESTIONS).ask(STATE)
     print(f"   approve = {r['approve'].answer!r} ({r['approve'].status}): {r['approve'].why}")
 
-    print("\n2. ModelStrategist(): declaration order, dead ends dropped")
-    ms = ModelStrategist()
+    print("\n2. CostStrategist(): declaration order, dead ends dropped")
+    ms = CostStrategist()
     s = System(catalog(), QUESTIONS, strategist=ms)
     r = s.ask(STATE)
     print(f"   approve = {r['approve'].answer!r}; fx_rate from {next(x.producer for x in r.trace.records if x.name == 'fx_rate')}")
@@ -115,7 +115,7 @@ def main():
           r.trace.replay(s, r.flow)["ok"])
 
     print("\n3. producers='equivalent' with declared costs: the cheapest verified plan")
-    ms = ModelStrategist(producers="equivalent")
+    ms = CostStrategist(producers="equivalent")
     r = System(catalog(), QUESTIONS, strategist=ms).ask(STATE)
     print(f"   chosen: {ms.last['choice']['fx_rate']} (plan cost {ms.last['cost']:g}); mandatory checks {ms.last['mandatory']}")
 
@@ -145,7 +145,7 @@ def main():
     props = propose(cat, QUESTIONS, init, matcher, init_types=types)
     states = [{**STATE, "net": n, "currency": c} for n, c in [(1_000, "EUR"), (7_000, "GBP"), (9_000, "EUR"), (3_000, "GBP"),
                                                               (8_500, "GBP"), (500, "EUR")]]
-    truth = System(catalog(), QUESTIONS, strategist=ModelStrategist())
+    truth = System(catalog(), QUESTIONS, strategist=CostStrategist())
 
     def label(st):
         return {"approve": truth.ask(st)["approve"].answer}
@@ -153,7 +153,7 @@ def main():
     print(f"   accepted: {got.aliases} — {got.why} ({got.labels} labels)")
     if got.aliases:
         cat2 = apply(cat, got.aliases)
-        r = System(cat2, QUESTIONS, strategist=ModelStrategist()).ask(STATE)
+        r = System(cat2, QUESTIONS, strategist=CostStrategist()).ask(STATE)
         print(f"   approve = {r['approve'].answer!r}; catalog aliases {cat2.aliases}")
 
 

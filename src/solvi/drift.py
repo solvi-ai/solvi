@@ -12,7 +12,7 @@ compares the last `window` decisions of one question with a reference window and
         if rep["drift"]:
             ...                                    # rep["why"]: what moved; recalibrate (act_guard), ask for labels
 
-    mon = DriftMonitor(window=100).calibrate(decisions, labels)      # or: an explicit reference
+    mon = DriftMonitor(window=100).set_reference(decisions, labels)      # or: an explicit reference
 
 Without labels, four signals of any decision: the share answered alone (two-proportion z test, Fisher's exact test once
 it is small), the distribution of the answers (chi-square test of homogeneity, with the total-variation distance as its
@@ -255,8 +255,8 @@ class DriftMonitor:
         self.seen, self._ref = 0, None
 
     # --- the reference
-    def calibrate(self, decisions, labels=None):
-        """Set the reference explicitly: decisions (Decision / Result / dict) and, when known, their correct answers."""
+    def set_reference(self, decisions, labels=None):
+        """Set the reference explicitly (`calibrate` names the thresholds with a promise elsewhere in solvi): decisions (Decision / Result / dict) and, when known, their correct answers."""
         decisions = list(decisions)
         labels = [None] * len(decisions) if labels is None else list(labels)
         if len(labels) != len(decisions):
