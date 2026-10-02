@@ -128,7 +128,9 @@ class FastHead:
         b = np.array(self.fz.row(row, self.features))
         if self.pairs:
             c = np.array(self.fz.compact(row, self.features))
-            b = np.concatenate([b, np.outer(c, c)[np.triu_indices(len(c), 1)]])
+            k = np.triu_indices(len(c), 1)
+            pair = np.outer(c, c)[k] if np.isfinite(c).all() else np.full(len(k[0]), np.nan)   # inf · 0: no warning
+            b = np.concatenate([b, pair])
         return np.append(b, 1.0)
 
     def fit(self, rows, answers, features):

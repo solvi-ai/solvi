@@ -1678,7 +1678,9 @@ head = system.fit("risk", history)
 print(head.features, head.cv_acc)          # selected facts and their cross-validated accuracy
 ```
 
-- Features are all facts computable from the examples' `init_state` keys. Numbers are encoded as a value plus thresholds
+- Features are all facts computable from the examples' `init_state` keys, the given keys themselves included (a given
+  number is a feature as it is, without a function around it; a given value that cannot be encoded — a long text, a
+  dict — is left out and named in `head.dropped`). Numbers are encoded as a value plus thresholds
   at training quantiles, booleans as +/-1, and strings with at most 20 distinct values as categories.
 - The model is a multinomial logistic regression with L2 regularization. Training takes milliseconds to a few seconds.
 - Features are selected greedily by 5-fold cross-validated accuracy (a feature is kept if it adds at least 1 point).
@@ -1694,7 +1696,7 @@ print(head.features, head.cv_acc)          # selected facts and their cross-vali
 `system.fit_fast(question, examples, features=None)` fits a closed-form ridge head: one matrix decomposition, so it takes
 milliseconds instead of seconds, and the ridge strength is chosen by exact leave-one-out accuracy (`head.loo_acc`). Features are
 the given facts (numbers, booleans, categories, and numeric vectors such as a document embedding from
-`LongSpanExtractor.embedder()`), by default every computed fact; when there are few of them, their pairwise products are added
+`LongSpanExtractor.embedder()`), by default every fact — the given keys and every fact computed from them; when there are few of them, their pairwise products are added
 so middle classes and interactions can be expressed.
 
 Its main property is online learning: `system.teach(question, init_state, correct)` updates a fast head immediately with a

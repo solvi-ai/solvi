@@ -247,10 +247,30 @@ def test_a_head_left_without_features_warns_with_the_reason():
     rows = [{"x": rng.random(), "y": rng.random()} for _ in range(300)]
     ex2 = [(r, "yes" if r["x"] > 0.6 and r["y"] > 0.6 else "no") for r in rows]       # 16% yes, needs both facts
     s2 = System(cat2, [Question("q", "?", Answer.yes_no())])
-    with pytest.warns(UserWarning, match=r"fit\('q'\): the head has no features.*none of the 2 facts raised.*"
+    with pytest.warns(UserWarning, match=r"fit\('q'\): the head has no features.*none of the 4 facts raised.*"
                                          r"most frequent answer is 8\d% of the examples.*fit_fast keeps every feature"):
         assert s2.fit("q", ex2).features == []
     import warnings
     with warnings.catch_warnings():
         warnings.simplefilter("error")                                               # a head with features: silent
-        assert s2.fit_fast("q", ex2).features == ["half", "third"]
+        assert s2.fit_fast("q", ex2).features == ["half", "third", "x", "y"]      # the given keys too
+
+
+def test_a_given_number_is_a_feature_of_fit_and_fit_fast_as_the_guide_says():
+    """The guide: "Features are all facts computable from the examples' init_state keys"; the given keys themselves
+    were left out, so a given number needed a one-line function around it before a head could read it."""
+    cat = Catalog()
+
+    @cat.fn
+    def doubled(score: float) -> float:
+        return score * 2
+    s = System(cat, [Question("ok", "Is it ok?", Answer.choice(["yes", "no"]))])
+    rng = random.Random(0)
+    ex = [({"score": rng.random(), "count": c, "note": f"n{i}"}, "yes" if c >= 5 else "no")
+          for i, c in enumerate(rng.randint(0, 9) for _ in range(200))]
+    assert s.fit("ok", ex).features == ["count"]
+    r = s.ask({"score": 0.3, "count": 8, "note": "x"})
+    assert r["ok"].answer == "yes" and "count = 8" in r["ok"].why and r.trace.replay(s.catalog)["ok"]
+    head = s.fit_fast("ok", ex)
+    assert {"count", "score", "doubled"} <= set(head.features) and "note" not in head.features   # 200 distinct strings
+    assert s.ask({"score": 0.3, "count": 1, "note": "x"})["ok"].answer == "no"

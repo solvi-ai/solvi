@@ -818,13 +818,14 @@ class System:
         return vals
 
     def fit(self, question, examples):
-        """examples: [(init_state, answer)] → the answer head and its features (and hence the question's flow)."""
+        """examples: [(init_state, answer)] → the answer head and its features (and hence the question's flow). The
+        candidates are every fact computable from the examples' init_state keys, the given keys included."""
         q = self.questions[question]
         examples = _learnable(q, examples)
         rows = [self.facts_for(s) for s, _ in examples]
         ans = [q.answer.normalize(a) for _, a in examples]
         keys = set(self._state(examples[0][0])[0].keys())
-        cands = sorted(f for f in computable(self.catalog, keys) - keys)
+        cands = sorted(computable(self.catalog, keys))      # the given keys too: "all facts computable from" them
         from .heads import Head
         if q.answer.kind == "multi":
             self.heads[question] = MultiHead(q.answer.options, lambda: Head(["yes", "no"]),
@@ -841,7 +842,7 @@ class System:
         import inspect
         import warnings
         from collections import Counter
-        if not cands:
+        if not [c for c in cands if c not in keys]:     # the given keys alone did not do (see head.dropped)
             have, blocked = computable(self.catalog, keys), []
             for p in self.catalog.parts.values():
                 missing = [x for x in p.inputs if x not in have]
@@ -857,6 +858,10 @@ class System:
             why = (f"no fact can be computed from the examples' inputs {sorted(keys)}"
                    + (": " + "; ".join(blocked[:5]) + (f"; and {len(blocked) - 5} more" if len(blocked) > 5 else "")
                       if blocked else " (the catalog has no parts over them)"))
+            unusable = getattr(head, "dropped", None) or {}
+            if unusable:
+                why += "; the inputs themselves cannot be used — " + "; ".join(f"{f}: {w}" for f, w in
+                                                                              list(unusable.items())[:5])
         elif getattr(head, "dropped", None):
             why = "none of the facts can be used — " + "; ".join(f"{f}: {w}" for f, w in list(head.dropped.items())[:5])
         else:
@@ -869,7 +874,8 @@ class System:
 
     def fit_fast(self, question, examples, features=None, lam=None, refit=2.0, refit_until=2000):
         """Fast answer head (closed-form ridge, milliseconds): examples — [(init_state, answer)]. Features: the given facts
-        (numbers, booleans, categories or vectors such as a document embedding), by default every computed fact. Unlike fit it
+        (numbers, booleans, categories or vectors such as a document embedding), by default every fact: the given keys and
+        every fact computed from them. Unlike fit it
         keeps all features and learns online: every `teach` for this question updates it instantly. refit: each time `teach`
         doubles the number of examples (2.0), the head is fitted again on all of them, so the ridge strength and the features
         chosen on the first few examples do not stay frozen; None — rank-one updates only, no examples kept. No refit past
@@ -883,7 +889,7 @@ class System:
         explicit = features is not None
         if features is None:
             keys = set(self._state(examples[0][0])[0].keys())
-            features = sorted(f for f in computable(self.catalog, keys) - keys)
+            features = sorted(computable(self.catalog, keys))  # the given keys too, as fit
         ans = [q.answer.normalize(a) for _, a in examples]
         if q.answer.kind == "multi":
             head = MultiHead(q.answer.options, lambda: FastHead(["yes", "no"], lam=lam, refit=refit, refit_until=refit_until),
