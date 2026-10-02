@@ -25,20 +25,23 @@ def renamed(old, new, stacklevel=3):
 
 
 def kwargs(fn=None, /, **mapping):
-    """A function that also accepts the old keyword names in `mapping` (old → new), warning once per name. Giving the old
-    and the new name together is a TypeError."""
+    """A function that also accepts the old keyword names in `mapping` (old → "new", or old → ("new", convert, "how")
+    when the old value must be converted), warning once per name. The old names stay out of the signature. Giving the
+    old and the new name together is a TypeError."""
     if fn is None:
         return functools.partial(kwargs, **mapping)
-    where = getattr(fn, "__qualname__", fn.__name__)
+    where = getattr(fn, "__qualname__", fn.__name__).replace(".__init__", "")
 
     @functools.wraps(fn)
     def wrapper(*args, **kw):
-        for old, new in mapping.items():
+        for old, target in mapping.items():
             if old in kw:
+                new, convert, how = (target, None, f"{target}=") if isinstance(target, str) else target
                 if new in kw:
                     raise TypeError(f"{where}() got both {old}= and {new}=: {old}= is the old name of {new}=")
-                renamed(f"{where}({old}=)", f"{new}=", stacklevel=4)
-                kw[new] = kw.pop(old)
+                renamed(f"{where}({old}=)", how, stacklevel=3)
+                value = kw.pop(old)
+                kw[new] = value if convert is None else convert(value)
         return fn(*args, **kw)
     return wrapper
 
@@ -48,11 +51,11 @@ def attr(old, new, owner=""):
     label = f"{owner}.{old}" if owner else old
 
     def get(self):
-        renamed(label, new, stacklevel=4)
+        renamed(label, new, stacklevel=3)
         return getattr(self, new)
 
     def put(self, value):
-        renamed(label, new, stacklevel=4)
+        renamed(label, new, stacklevel=3)
         setattr(self, new, value)
     return property(get, put, doc=f"Deprecated: `{new}` (removed in {REMOVAL}).")
 
@@ -62,7 +65,7 @@ def method(old, new, owner=""):
     label = f"{owner}.{old}" if owner else old
 
     def call(self, *args, **kw):
-        renamed(f"{label}()", f"{new}()", stacklevel=4)
+        renamed(f"{label}()", f"{new}()", stacklevel=3)
         return getattr(self, new)(*args, **kw)
     call.__name__ = old
     call.__doc__ = f"Deprecated: `{new}()` (removed in {REMOVAL})."
@@ -76,6 +79,6 @@ def module_getattr(module, names):
         if target is None:
             raise AttributeError(f"module {module!r} has no attribute {name!r}")
         mod, _, new = target.rpartition(":")
-        renamed(f"{module}.{name}", f"{mod or module}.{new}", stacklevel=4)
+        renamed(f"{module}.{name}", f"{mod or module}.{new}", stacklevel=3)
         return getattr(importlib.import_module(mod or module), new)
     return __getattr__

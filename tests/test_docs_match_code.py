@@ -18,7 +18,9 @@ def _flat(text):
 
 
 def test_the_guide_gives_the_whole_signature_of_model_decision():
-    sig = str(inspect.signature(DecideModel.decision)).replace("(self, ", "(").replace("'", '"')
+    sig = inspect.signature(DecideModel.decision)
+    sig = sig.replace(parameters=[p for p in sig.parameters.values() if not p.name.startswith("_")])   # private: not shown
+    sig = str(sig).replace("(self, ", "(").replace("'", '"')
     assert f"`model.decision{sig}`" in _flat(GUIDE)
 
 

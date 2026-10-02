@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from . import _deprecate
 from .core import Catalog, Serial
 from .provenance import model_info
 from .runtime import MISSING, Record, Result, execute, now_ms, path_confidence, srepr, vhash
@@ -197,11 +198,16 @@ def _clash(catalog, names, head):
                f"after what it computes (e.g. {own[0]}_points), not after the input it reads" if own else ""))
 
 
+def _jsonl(path):
+    from .storage import JSONLStorage
+    return JSONLStorage(Path(path))
+
+
 class System:
+    @_deprecate.kwargs(journal=("storage", _jsonl, "storage=JSONLStorage(path)"))
     def __init__(self, catalog: Catalog, questions, *, workers: int = 1, order: str = "default",
                  producers: str = "declared", learn: bool | None = None, inputs=None, strategist=None, storage=None,
-                 timeout: float | None = None, costs="declared", lang: str = "en", early_exit: bool = True,
-                 journal: str | None = None):
+                 timeout: float | None = None, costs="declared", lang: str = "en", early_exit: bool = True):
         """order: "default" (hard checks and their inputs first, all together) or "learned" (hard checks one at a time, most
         expected saving first — see learn_order). producers: "declared" (alternative producers of a fact are tried in
         declaration order) or "learned" (a policy picks the order per input and learns from outcomes). learn: after every
@@ -217,7 +223,8 @@ class System:
         strategist (experimental: solvi.strategy.ModelStrategist; its plan is recorded in the trace, see docs/strategist.md).
         storage: a solvi.storage.TraceStorage (or a path: .db / .sqlite → SQLite, else JSON lines) — every ask saves its
         response (answers, flow, whole trace) there, hash-chained across responses, and teach saves the correction; the
-        response's `stored_id` is its id in the store. journal= (deprecated, removed in 0.9): storage=JSONLStorage(path).
+        response's `stored_id` is its id in the store. journal=path (deprecated, removed in 0.9) is
+        storage=JSONLStorage(path).
         Every option after `questions` is keyword-only.
         timeout: seconds a part's call may take under `aask` when the part declares no `timeout=` (None: no limit).
         producers="equivalent": the producers of a fact are interchangeable — the cost-optimal planner
@@ -261,12 +268,6 @@ class System:
                                  "applies only when all of them are asked")
         self.heads: dict[str, FastHead] = {}
         from .storage import JSONLStorage, open_storage
-        if journal is not None:
-            if storage is not None:
-                raise ValueError("pass journal= or storage=, not both (journal= is a JSONL storage)")
-            from . import _deprecate
-            _deprecate.renamed("System(journal=path)", "System(storage=JSONLStorage(path))")
-            storage = JSONLStorage(Path(journal))
         self.storage = open_storage(storage)
         if self.storage is not None and self.storage.catalog is None:
             self.storage.catalog = self               # typed values of stored responses are restored with this system

@@ -41,7 +41,7 @@ def test_calibrating_twice_on_the_same_examples_gives_the_same_parameters():
 
 
 def test_calibrate_does_not_store_or_count_its_held_out_examples(tmp_path):
-    s = _rule_system(journal=str(tmp_path / "j.jsonl"))
+    s = _rule_system(storage=str(tmp_path / "j.jsonl"))
     held, truth, _ = _held_out(0.7, 5, n=40)
     s.calibrate("q", held, truth)
     assert s.stats["asks"] == 0

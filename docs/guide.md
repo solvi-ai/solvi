@@ -605,14 +605,18 @@ q = urgency.question(cat, min_confidence=0.6)             # or: the answer of a 
 ```
 
 `model.decision(name, task, text_fact="doc", options=(), descriptions=None, multi=False, other=None, *, kind=None,
-type=None, escalate_below=None, act_threshold=None, use_act=None, target_error=None, score_value="median", unknown=False,
-k=None, bins=None, unit=None, coverage=0.8, evidence=False, option_order="canonical", permutations=4, min_margin=None,
+type=None, escalate_below=None, act_threshold=None, use_act=None, target_error=None, score_value=None, unknown=False,
+k=None, bins=None, unit=None, coverage=None, evidence=False, option_order="canonical", permutations=4, min_margin=None,
 long=None, top_k=None, rerank=False, perturb=0, retrieve_query=None)` returns a
 callable catalog function named `name` that returns `Decision(value, probs)`. The question is given by `options` (a list, or
 `{option: description}`) and `kind` (`"choice"`, `"multi"`, `"score"`, `"noul"`), or by a type (`type=`, or in place of the
 options; a dict of options is then read as descriptions). `model.decisions(Schema, text_fact)` gives one part per field of a
 pydantic model; a field's `json_schema_extra` may carry `"options"` (descriptions), `"escalate_below"`, `"act_threshold"`,
-`"target_error"`, `"use_act"`, `"other"`.
+`"target_error"`, `"use_act"`, `"other"`. An option the question's kind does not use raises `ValueError` rather than
+being ignored: `score_value=` (score questions; default `"median"`), `k=` (rank), `bins=` / `unit=` / `coverage=` (number;
+coverage default 0.8), `other=` (choice and multi), `min_margin=` (not multi-label), `top_k=` / `rerank=` (with `long=`),
+`act_threshold=` / `target_error=` (a checkpoint with an act head); an option given to `decisions(...)` for every field
+applies to the fields that use it.
 
 - the value is one of the options **by construction** — the network only scores the options it is given — and the options
   are the part's closed set (`part.options`: for a bool question `[True, False]`), so the safeguard would reject anything
