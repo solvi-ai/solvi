@@ -42,6 +42,55 @@ def test_refund_window_date():
     assert cf.held == [] and "refund = no [forced]" in str(cf)
 
 
+def test_a_date_change_is_sized_in_days_not_against_the_dates_ordinal():
+    """A date change cost days / 739,000, so any date shift — ten years too — ranked before any change of a number."""
+    cat = Catalog()
+
+    @cat.check(hard=True, then={"approve": "reject"})
+    def short_stay(start, end):
+        return (end - start).days <= 30
+
+    @cat.rule("approve")
+    def approve(balance):
+        return "approve" if balance >= 5 else "reject"
+    s = System(cat, [Question("approve", "Approve?", Answer.choice(["approve", "reject"]), checkpoints=["short_stay"])])
+    start = datetime.date(2026, 9, 1)
+    res = s.ask({"start": start, "end": datetime.date(2026, 10, 31), "balance": 9})       # 60 days: forced reject
+    cf = res.counterfactual("approve")
+    end = next(c for c in cf if c.changes[0].fact == "end")
+    assert str(end) == "approve if end ≤ 2026-10-01 (now 2026-10-31)" and end.cost == 1.0
+    res = s.ask({"start": start, "end": datetime.date(2026, 10, 3), "balance": 3})         # 32 days, low balance
+    cf = res.counterfactual("approve", max_changes=2)
+    assert str(cf.best) == "approve if balance ≥ 5 (now 3) and end ≤ 2026-10-01 (now 2026-10-03)"
+    assert cf.best.kind == cf.to_dict()["kind"] == "choice" and cf.to_dict()["found"][0]["kind"] == "choice"
+    ranked = s.ask({"start": start, "end": datetime.date(2026, 9, 20), "balance": 4}).counterfactual("approve")
+    assert str(ranked.best) == "approve if balance ≥ 5 (now 4)"                           # 25%, not "move a date"
+    assert ranked.not_searched == {}
+
+
+def test_inputs_read_only_by_a_part_that_did_not_run_are_listed_not_left_out():
+    cat = Catalog()
+
+    @cat.check(hard=True, then={"approve": "reject"})
+    def funded(balance) -> bool:
+        return balance >= 5
+
+    @cat.check
+    def enough_notice(start, today) -> bool:
+        return (start - today).days >= 14
+
+    @cat.rule("approve")
+    def approve(enough_notice):
+        return "approve" if enough_notice else "needs_manager"
+    s = System(cat, [Question("approve", "Approve?", Answer.choice(["approve", "needs_manager", "reject"]),
+                              checkpoints=["funded"])])
+    res = s.ask({"balance": 3, "start": datetime.date(2026, 10, 19), "today": datetime.date(2026, 9, 25)})
+    cf = res.counterfactual("approve")
+    assert str(cf.best) == "approve if balance ≥ 5 (now 3)"
+    assert cf.not_searched == {"start": "read only by a part that did not run in this decision",
+                               "today": "read only by a part that did not run in this decision"}
+
+
 def test_refund_bool_flip_and_target():
     s = refunds()
     res = s.ask({"purchase_date": datetime.date(2026, 9, 10), "today": datetime.date(2026, 9, 19), "opened": True})

@@ -3330,7 +3330,9 @@ What is searched (`over=`: default, the given facts the question's flow reads):
 `max_changes=2` (the default) tries two inputs together when no single input changes the answer ("approve if amount ≤ 1000
 (now 1200) and debt ≤ 1999 (now 2500)" — each bound holds with the other change made); `max_changes=1` does not.
 `target="approve"` looks only for that answer. Results are ranked by the number of changes, then their size (the relative
-change of a number; 1 for an enumerated value). `max_evals=5000` caps the re-runs (`cf.exhausted`). A response loaded from
+change of a number; for a date the days moved over 30, or over the width of its domain; 1 for an enumerated value).
+A given input read only by a part that did not run (a soft check skipped after a hard check failed) is listed in
+`cf.not_searched`. `max_evals=5000` caps the re-runs (`cf.exhausted`). A response loaded from
 a store with its System works the same; one loaded without it needs `system=`.
 
 ### Reports for people: res.report, store.report, solvi report

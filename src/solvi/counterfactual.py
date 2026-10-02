@@ -22,7 +22,7 @@ The search, per input:
   anything else — only with `domains={fact: [values]}`.
 Two inputs together only when no single one changes the answer: one input's candidates (its values, or probe points) with
 a search over the other, then each bound tightened with the other change made. Changes are ranked by count, then by size
-(relative change of a number, 1 for an enumerated value)."""
+(relative change of a number; days moved over 30 — or over the domain's width — for a date; 1 for an enumerated value)."""
 from __future__ import annotations
 
 import copy
@@ -64,7 +64,7 @@ class Counterfactual:
         return f"{_ans(self.answer, self.kind)} if " + " and ".join(str(c) for c in self.changes)
 
     def to_dict(self):
-        return {"answer": _plain(self.answer), "status": self.status, "why": self.why, "text": str(self),
+        return {"answer": _plain(self.answer), "status": self.status, "why": self.why, "text": str(self), "kind": self.kind,
                 "changes": [{"fact": c.fact, "now": _plain(c.now), "to": _plain(c.to), "op": c.op, "cost": c.cost}
                             for c in self.changes]}
 
@@ -123,7 +123,7 @@ class Counterfactuals:
     _numbers = False                               # a number was searched (the search cannot rule out a narrow band)
 
     def to_dict(self):
-        return {"question": self.question, "answer": _plain(self.answer), "status": self.status,
+        return {"question": self.question, "answer": _plain(self.answer), "status": self.status, "kind": self.kind,
                 "found": [c.to_dict() for c in self.found], "searched": list(self.searched),
                 "not_searched": dict(self.not_searched), "held": list(self.held), "unavailable": list(self.unavailable),
                 "evals": self.evals, "exhausted": self.exhausted, "inconclusive": self.inconclusive}
@@ -307,6 +307,19 @@ def _bounds(v, domain):
     return (0.0 if v >= 0 else -math.inf), math.inf
 
 
+DATE_SCALE = 30.0                                 # days: a date moved by a month counts as much as a number doubled
+
+
+def _size(v0, x, x0, domain=None):
+    """The size of a change of a number or a date (how results are ranked): the relative change of a number; for a date,
+    the days moved over the domain's width, else over DATE_SCALE (not over the date's ordinal, which made any date
+    change rank first)."""
+    if isinstance(v0, datetime.date):
+        width = abs(domain[1] - domain[0]) if domain is not None else DATE_SCALE
+        return abs(x - x0) / max(width, 1.0)
+    return abs(x - x0) / max(abs(x0), 1.0)
+
+
 def _nice(a, b):
     """The number with the fewest decimals in [min(a, b), max(a, b)]."""
     lo, hi = min(a, b), max(a, b)
@@ -321,9 +334,10 @@ class _Search:
     def __init__(self, rerun, res, question, target, max_evals):
         self.rerun, self.max_evals = rerun, max_evals
         a = res.results[question]
-        self.now, self.now_status = a.answer, a.status
+        self.now, self.now_status, self.kind = a.answer, a.status, a.kind
         self.target = target
         self.hits = {}
+        self.domains = {}                         # fact → (lo, hi) of a number or date (for the size of a change)
 
     def changed(self, changes):
         """Does the answer change (to the target) with these inputs? → the Result, or None."""
@@ -419,7 +433,7 @@ class _Search:
             else:
                 bad, strict = nice, True
         op = (">" if strict else "≥") if sign > 0 else ("<" if strict else "≤")
-        return Change(fact, v0, to(bad), op, abs(bad - x0) / max(abs(x0), 1.0)), r
+        return Change(fact, v0, to(bad), op, _size(v0, bad, x0, self.domains.get(fact))), r
 
     def values(self, fact, v0, vals, base):
         out = []
@@ -452,6 +466,9 @@ def search(res, question, max_changes=2, over=None, target=None, domains=None, s
     if over is None:
         from .audit import build
         over = [g["name"] for g in build(res, question)[question].given]
+        read = {x for st in res.flow.steps for x in st.part.inputs}    # given inputs only skipped parts read (a check
+        for f in sorted(read & set(init) - set(over)):                    # after a failed hard check): listed, not
+            out.not_searched[f] = "read only by a part that did not run in this decision"   # silently left out
     lost = {f: w for f, w in (getattr(res.trace, "unrestored", None) or {}).items() if f in init}
     if lost:                                          # a stored response whose input did not come back as it was: when
         from .runtime import vhash                    # the re-run of the unchanged input no longer gives the recorded
@@ -493,6 +510,7 @@ def search(res, question, max_changes=2, over=None, target=None, domains=None, s
             out.not_searched[f] = f"{type(v).__name__}: no domain (pass domains={{{f!r}: [...]}})"
     out.searched = list(kinds)
     s = _Search(rerun, res, question, target, max_evals)
+    s.domains = {f: d for f, (k, d) in kinds.items() if k == "number" and d is not None}
 
     def one(f, base, quick=False):
         k, d = kinds[f]
@@ -529,7 +547,7 @@ def _candidates(f, kind, v0, domain):
         for sign in (-1, 1):
             x = x0 + sign * step0 * 2 ** k
             if lo_b <= x <= hi_b:
-                out.append((to(x), abs(x - x0) / scale))
+                out.append((to(x), _size(v0, x, x0, domain)))
     return sorted(out, key=lambda t: t[1])
 
 
@@ -542,7 +560,7 @@ def _pairs(s, kinds, init, one):
         for y in names[i + 1:]:
             fa, fb = (y, x) if kinds[y][0] == "values" and kinds[x][0] == "number" else (x, y)
             ka, da = kinds[fa]
-            for va, ca in _candidates(fa, ka, init[fa], da):
+            for va, ca in _candidates(fa, ka, init[fa], da):   # (nearest first)
                 if ca >= best:
                     break
                 hits = one(fb, {fa: va}, True)
@@ -553,7 +571,7 @@ def _pairs(s, kinds, init, one):
                                  if (_num(c[0].to)[0] >= _num(init[fa])[0]) == (_num(va)[0] >= _num(init[fa])[0])]
                         if tight:
                             ch_a, r = tight[0]
-                    cf = Counterfactual(r.answer, [ch_a, cb], r.status, r.why)
+                    cf = Counterfactual(r.answer, [ch_a, cb], r.status, r.why, s.kind)
                     found.append(cf)
                     best = min(best, cf.cost)
                 if hits:
