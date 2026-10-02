@@ -391,6 +391,8 @@ def _recompute(part, r, args, init, catalog=None):
         if not why and part.tout is not None:
             from .typed import typed_out
             value, why = typed_out(part, value)
+        if not why:
+            value, why = check_value(part, value)
         why = why or validated(part, value, plain)
         if not why and r.error is None and (has_evidence(v) or (isinstance(r.extra, dict) and r.extra.get("evidence"))):
             got = evidence_rows(v) if has_evidence(v) else []
@@ -724,6 +726,18 @@ async def _adrive(g, timeout):
         return s.value
 
 
+def check_value(p, value):
+    """A check answers True or False → (value, why not). numpy's bool is taken as a bool; anything else — 0, None from a
+    forgotten return, a list, a string — rejects the step, so the fact is missing and whatever depends on it abstains: a
+    check that failed with a falsy non-bool would otherwise count as passed. A typed check (`-> bool`) is validated by its
+    type instead."""
+    if p.kind != "check" or p.tout is not None or isinstance(value, bool):
+        return value, None
+    if type(value).__module__ == "numpy" and type(value).__name__ in ("bool", "bool_"):    # amount <= limit over numpy
+        return bool(value), None                                                          # numbers; numpy is not imported
+    return value, f"a check returns True or False, not {type(value).__name__} ({str(value)[:40]!r}); declare it `-> bool`"
+
+
 def _step(p, vals, init_state, policy=None, costs=None, known=None, memo=None, batch=None):
     """Evaluate one part on the current facts → StepOut. A generator: every call of user code is yielded as (part, call) and
     made by the driver (_drive: sync, _adrive: async), which sends back its value or throws its exception in. batch: (step
@@ -757,6 +771,8 @@ def _step(p, vals, init_state, policy=None, costs=None, known=None, memo=None, b
     if not why and p.tout is not None:                # typed output: validated / coerced (a closed set: outside the options)
         from .typed import typed_out
         value, why = typed_out(p, value)
+    if not why:
+        value, why = check_value(p, value)
     why = why or validated(p, value, args)
     if why:                                           # rejected: the fact is missing, the claim stays visible in the error
         return StepOut(MISSING, quote, conf, why, hashes, ms, probs=probs, extra=_extra(v))

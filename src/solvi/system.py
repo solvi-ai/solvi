@@ -408,6 +408,11 @@ class System:
                 known = {k: t for k, t in ft.items() if k in init_state}   # rejected fields are not in init_state
         else:
             rejected = None
+        clash = sorted(k for k in init_state if k in self.catalog.parts)
+        if clash:                                     # the planner would take the given value for the part's own: a check
+            raise ValueError("the input has " + ", ".join(  # named in the input would never run
+                f"{k!r} (the catalog's {self.catalog.parts[k].kind} of that name)" for k in clash)
+                + ": a given fact cannot stand in for a part of the catalog — rename the input key or the part")
         qs = [self.questions[n] for n in (names or self.questions)]
         if self.cost_policy is not None:              # costs from measurements (see MeasuredCosts)
             c, src = self.cost_policy.costs(self.costs, _producers(self.catalog))

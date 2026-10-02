@@ -711,10 +711,8 @@ class Catalog:
                           timeout=timeout, blocking=blocking)
 
     def check(self, f=None, *, hard=False, then=None, cost=None, model=None, provenance=None, timeout=None, blocking=None):
-        if f is None:
-            return lambda g: self._add("check", g, hard=hard, then=then or {}, cost=cost, model=model, provenance=provenance,
-                                       timeout=timeout, blocking=blocking)
-        return self._add("check", f)
+        return self._deco("check", f, hard=hard, then=then or {}, cost=cost, model=model, provenance=provenance,
+                          timeout=timeout, blocking=blocking)
 
     def features(self, fact):
         """Cheap features of the input for choosing among a fact's alternative producers (the learned producer policy):

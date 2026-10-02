@@ -2,6 +2,18 @@
 
 ## 0.7.2 — unreleased
 
+- **A failed hard check always overrides — three ways it did not** (found by an independent audit):
+  - a check that returned a falsy value other than `False` — `0`, `None` from a forgotten return, `[]`, `""` — counted as
+    passed: the answer was `yes [ok]`, and in `solvi.agents.Guard` the call was allowed and made. A check's output is now
+    a bool (numpy's too); anything else rejects the step with the reason ("a check returns True or False, not NoneType"),
+    so the question abstains and the guard escalates. A check declared `-> bool` is validated by its type, as before.
+    **Behaviour change:** a check that passed by returning a truthy non-bool (a match object, a non-empty string) now
+    rejects its step too — return a bool.
+  - `cat.check(f, hard=True, then=...)` with the function passed directly registered a soft check without its options.
+  - an input key named like a part of the catalog replaced the part — a hard check named in the input never ran, over
+    `POST /ask`, the MCP question tools and `solvi ask --state` as well, and a fact given to the guard under a policy's
+    name switched the policy off. `ask` now raises `ValueError` for such a key (HTTP: 422); a given fact cannot stand in
+    for a check or a computed fact. **Behaviour change** for code that passed a computed fact in directly.
 - A typed input comes in the declared field order. With `System(inputs=Model)` a dict was validated but kept the
   order its caller built it in, so two clients sending the same input gave the trace — and a decider that reads the
   state — two different orders (a model instance already came in field order). The given facts are now the model's

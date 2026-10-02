@@ -361,6 +361,10 @@ class Service:
         bad = [n for n in names or () if n not in s.questions]
         if bad:
             raise NotFound(f"no such question: {', '.join(map(str, bad))}")
+        clash = sorted(k for k in state if k in s.catalog.parts)
+        if clash:                                     # a caller must not be able to stand in for a check or a computed fact
+            raise BadRequest(f"the state has {', '.join(map(repr, clash))}: not a given fact of this system (the system "
+                             "computes it)")
         return s
 
     @property
