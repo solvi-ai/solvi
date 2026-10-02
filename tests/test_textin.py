@@ -470,3 +470,43 @@ def test_a_spelled_out_number_that_goes_on_is_refused_not_cut():
                        ("пять тысяч рублей", "5000"), ("twelve hundred", "1200"), ("1.5 million", "1500000"),
                        ("2 thousand items for five people", "2000"), ("about three hundred people in two groups", "300")):
         assert parse_number(text) == want, text
+
+
+def test_fractions_of_a_scale_word_are_read_whole_or_refused_never_cut():
+    """"half a million" was read as 1,000,000 (the quote "a million") and "two and a half million" as 500,000 (the
+    quote "half million"), with status read."""
+    from solvi.textin import ParseError, parse_number
+    for text, want in (("half a million", "500000"), ("half a billion euros", "500000000"), ("half a thousand", "500"),
+                       ("a half million", "500000"), ("two and a half million", "2500000"),
+                       ("one and a half million", "1500000"), ("ten and a half thousand", "10500"),
+                       ("два с половиной миллиона", "2500000"), ("about a million", "1000000"),
+                       ("in the second half 300 were sold", "300")):
+        assert parse_number(text) == want, text
+    for text in ("quarter of a million", "three quarters of a million", "half of a million", "a third of a million",
+                 "sixty and a half million", "5 and a half thousand", "2 and a half", "2 с половиной миллиона"):
+        with pytest.raises(ParseError, match="several words|more than one number"):
+            parse_number(text)
+    _, s = shop()
+    tin = TextIn(s, patterns={"order_id": r"[A-Z]-\d+"}, today="2026-09-28",
+                 synonyms={"currency": {"EUR": ["euro", "euros"]}})
+    for said, want in (("half a million", 500000.0), ("two and a half million", 2500000.0)):
+        f = tin.read(f"refund order A-7: I paid {said} euros on 12 September 2026", question="request_refund").fields
+        assert (f["amount"].status, f["amount"].value, f["amount"].quote.value) == ("read", want, said)
+    for said in ("a quarter of a million", "three quarters of a million", "5 and a half thousand", "sixty and a half million"):
+        f = tin.read(f"refund order A-7: I paid {said} euros on 12 September 2026", question="request_refund").fields
+        assert f["amount"].status != "read", (said, f["amount"].value)
+
+
+def test_the_modal_verb_may_after_a_number_is_not_the_month():
+    from solvi.textin import ParseError, parse_date
+    t = {"today": "2026-09-28"}
+    for text in ("these 2 may be wrong", "the 3 may not arrive", "all 12 may have failed"):
+        with pytest.raises(ParseError, match="no date"):
+            parse_date(text, t)
+    assert parse_date("2 May", t) == "2026-05-02" and parse_date("on 2 may 2026", t) == "2026-05-02"
+    assert parse_date("paid on 2 may", t) == "2026-05-02" and parse_date("2 May be the day", t) == "2026-05-02"
+    _, s = shop()
+    tin = TextIn(s, patterns={"order_id": r"[A-Z]-\d+"}, today="2026-09-28",
+                 synonyms={"currency": {"EUR": ["euro", "euros"]}})
+    f = tin.read("refund order A-7: these 2 may be wrong but I paid 20 euros", question="request_refund").fields
+    assert f["purchase_date"].status != "read"

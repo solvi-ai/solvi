@@ -115,6 +115,12 @@ _NUM_WORDS = {"a": 1, "an": 1, "one": 1, "two": 2, "three": 3, "four": 4, "five"
               "один": 1, "одна": 1, "одну": 1, "два": 2, "две": 2, "три": 3, "четыре": 4, "пять": 5, "шесть": 6, "семь": 7,
               "восемь": 8, "девять": 9, "десять": 10, "двадцать": 20, "сто": 100, "полтора": Decimal("1.5"),
               "полторы": Decimal("1.5"), "пол": Decimal("0.5")}
+# "half a million" is half of one, "two and a half million" two and a half: one word group, never "a million" / "half
+# million" cut out of it
+_NUM_WORDS.update({"half a": Decimal("0.5"), "half an": Decimal("0.5")})
+_NUM_WORDS.update({f"{w} {half}": v + Decimal("0.5") for w, v in list(_NUM_WORDS.items())
+                   for half in (("and a half",) if w.isascii() else ("с половиной",))
+                   if isinstance(v, int) and v < 100 and w not in ("a", "an", "one")})
 _SCALES = {"hundred": 100, "thousand": 10 ** 3, "thousands": 10 ** 3, "k": 10 ** 3, "тыс": 10 ** 3, "тысяча": 10 ** 3,
            "тысячи": 10 ** 3, "тысяч": 10 ** 3, "million": 10 ** 6, "millions": 10 ** 6, "mln": 10 ** 6, "mn": 10 ** 6,
            "m": 10 ** 6, "млн": 10 ** 6, "миллион": 10 ** 6, "миллиона": 10 ** 6, "миллионов": 10 ** 6,
@@ -138,6 +144,26 @@ _MORE = (r"(?:and\s+)?(?:one|two|three|four|five|six|seven|eight|nine|ten|eleven
          r"миллион\w*|миллиард\w*)")
 _MORE_AFTER = re.compile(r"\s+" + _MORE + r"(?!\w)", re.I)
 _MORE_BEFORE = re.compile(r"(?<!\w)" + _MORE + r"\s+$", re.I)
+# a fraction around a number that was read: "quarter of [a million]", "three quarters of [a million]", "sixty and a
+# [half million]", "[5] and a half thousand", "[2] с половиной миллиона" — the number is not the one matched: refused
+_FRACTION_BEFORE = re.compile(r"(?<!\w)(?:\w+\s+)?(?:an?\s+)?(?:half|quarters?|thirds?|fifths?|tenths?|четверть|треть|"
+                              r"половина)(?:\s+of)?\s+$", re.I)
+_HALF_BEFORE = re.compile(r"(?<!\w)(?:[\w.,]+\s+)?and\s+an?\s+$", re.I)          # ... before a number that starts "half"
+_HALF_AFTER = re.compile(r"\s+(?:and\s+a\s+half|с\s+половиной)(?!\w)(?:\s+(?:" + _SCALE_WORDS_RE + r")(?!\w))?", re.I)
+
+
+def _fraction_around(text, m):
+    """The fraction words around a number match that make it part of a longer number → (start, end) of the whole
+    phrase, or None."""
+    before = _FRACTION_BEFORE.search(text[:m.start()])
+    if before is not None and m.group("d") is not None and not before.group().rstrip().lower().endswith("of"):
+        before = None                                 # "in the second half 300 were sold": no fraction of the digits
+    if before is None and (m.group("w") or "").lower().startswith("half"):
+        before = _HALF_BEFORE.search(text[:m.start()])
+    after = _HALF_AFTER.match(text, m.end())
+    if before is None and after is None:
+        return None
+    return (before.start() if before else m.start()), (after.end() if after else m.end())
 NUMBER_RE = re.compile(
     rf"(?<![\w.,\-/])(?P<cur>{_CUR}\s?)?(?:(?P<d>{_DIGITS})(?:(?P<sp>\s?)(?P<s1>{_SCALE_RE})\.?(?!\w))?|"
     rf"(?P<w>{_WORD_RE})\s+(?P<s2>{_SCALE_WORDS_RE})(?!\w))(?![\w]|[.,/\-]\d)(?P<pct>{_PCT})?", re.I)
@@ -173,7 +199,9 @@ def _digits(s, decimal=None):
 def parse_number(s, spec=None):
     """A quote → the number it states, as a canonical string ("1500000", "12.5"): digits with thousands separators, a
     decimal point or comma, a scale word ("1.5 million", "2k", "3 млн") or a number word with one ("a million", "полтора
-    миллиона"); a currency sign or code around it is allowed. Exactly one number: two numbers in the quote are an error.
+    миллиона", "half a million", "two and a half million"); a currency sign or code around it is allowed. Exactly one
+    number: two numbers in the quote are an error. A fraction the parser does not compute — "quarter of a million",
+    "three quarters of a million", "5 and a half thousand" — is refused, never read as the number next to it.
     Refused as ambiguous rather than guessed: a one-letter scale apart from the number ("5 m" — metres? "5m" and "$5 m"
     are read), a single ".ddd" group ("1.000"; spec {"decimal": "." | ","} decides), digits grouped by plain spaces
     without a currency next to them ("3 100" may be two numbers; "1 500 000 руб" is read), a percentage ("5%"; spec
@@ -184,6 +212,10 @@ def parse_number(s, spec=None):
     if len(found) != 1:
         raise ParseError(f"{'no number' if not found else 'more than one number'} in {s!r}")
     m = found[0]
+    whole = _fraction_around(s, m)
+    if whole is not None:
+        raise ParseError(f"{s[whole[0]:whole[1]].strip()!r} is a number in several words (a fraction next to "
+                         f"{m.group()!r}): write it in digits (\"250 thousand\", \"5.5 thousand\")")
     more = _MORE_AFTER.match(s, m.end()) or _MORE_BEFORE.search(s[:m.start()])
     if more and (m.group("w") is not None or m.group("s1")):      # a spelled-out number, or digits with a scale word
         raise ParseError(f"{s.strip()!r} is a number in several words ({more.group().strip()!r} next to {m.group()!r}): "
@@ -211,7 +243,11 @@ def parse_number(s, spec=None):
 
 def _number_span(text, m):
     """A number candidate's span, with the currency after a space-grouped number ("1 500 000 руб") so the parser sees
-    the context that makes it one number."""
+    the context that makes it one number — and with the fraction words around it ("quarter of a million", "5 and a
+    half thousand"), so the parser sees that it is a longer number and refuses it."""
+    whole = _fraction_around(text, m)
+    if whole is not None:
+        return whole
     e = m.end()
     if " " in (m.group("d") or "") and not m.group("pct"):
         c = _CUR_AFTER.match(text, e)
@@ -248,23 +284,40 @@ DATE_RES = [
 ]
 
 
+_MODAL_MAY = re.compile(r"\s+(?:be|have|has|not|also|still|well|need|want|or|i|we|you|they|he|she|it)(?!\w)", re.I)
+
+
+def _dates(text):
+    """Every date written in a text → [(kind, match)], by DATE_RES. The modal verb is not the month: a lower-case
+    "may" after a number, with no year and followed by a verb or a pronoun ("these 2 may be wrong", "3 may not
+    arrive") is not a date; "2 May", "2 may 2026", "on 2 may" are."""
+    out = []
+    for kind, rx in DATE_RES:
+        for m in rx.finditer(text):
+            if kind == "day_month" and m.group("mon") == "may" and m.group("y") is None \
+                    and _MODAL_MAY.match(text, m.end()):
+                continue
+            out.append((kind, m))
+    return out
+
+
 YEAR_AHEAD = 20                     # a two-digit year is read within (today - 80 years, today + 20 years]
 
 
 def parse_date(s, spec=None):
     """A quote → the date it states, ISO ("2026-09-12"): 2026-09-12; 12.09.2026 / 12/09/26 (day first; spec
     {"dayfirst": False}: month first); 12 September 2026, September 12, 2026, 12 Sep, 12 сентября; today / yesterday /
-    tomorrow. A date without a year, a two-digit year, or a relative date needs spec {"today": "YYYY-MM-DD"}
+    tomorrow. A lower-case "may" after a number, without a year and before a verb or a pronoun ("these 2 may be
+    wrong"), is the modal verb, not the month. A date without a year, a two-digit year, or a relative date needs spec {"today": "YYYY-MM-DD"}
     (TextIn(today=...)): without it it is an error, never a guessed year or century. A two-digit year is the one within
     (today − 80 years, today + 20 years]: with today 2026-09-28, "85" is 1985 and "30" is 2030. Exactly one date in the
     quote."""
     spec = spec or {}
     today = _dt.date.fromisoformat(spec["today"]) if spec.get("today") else None
     hits = []
-    for kind, rx in DATE_RES:
-        for m in rx.finditer(s):
-            if not any(a < m.end() and m.start() < b for a, b, _, _ in hits):
-                hits.append((m.start(), m.end(), kind, m))
+    for kind, m in _dates(s):
+        if not any(a < m.end() and m.start() < b for a, b, _, _ in hits):
+            hits.append((m.start(), m.end(), kind, m))
     if len(hits) != 1:
         raise ParseError(f"{'no date' if not hits else 'more than one date'} in {s!r}")
     _, _, kind, m = hits[0]
@@ -513,10 +566,10 @@ class CueExtractor:
         cues = self._cues(text, fs)
         if fs.kind in ("number", "integer"):
             spans = [_number_span(text, m) for m in NUMBER_RE.finditer(text)]
-            dates = [(m.start(), m.end()) for _, rx in DATE_RES for m in rx.finditer(text)]
+            dates = [(m.start(), m.end()) for _, m in _dates(text)]
             spans = [s for s in spans if not any(a < s[1] and s[0] < b for a, b in dates)]
         elif fs.kind == "date":
-            spans = [(m.start(), m.end()) for _, rx in DATE_RES for m in rx.finditer(text)]
+            spans = [(m.start(), m.end()) for _, m in _dates(text)]
         elif fs.kind == "enum":
             spans = []
             for lab, syn in fs.labels.items():
