@@ -1119,7 +1119,9 @@ def _q(s):
     return shlex.quote(s)
 
 
-MARK = re.compile(r"(^|[\s/\\])(solvi|-m\s+solvi)\s+hook\s+(pre-edit|pick-skill)\b")
+# solvi's own entries: "solvi hook pre-edit", ".../python -m solvi hook pick-skill" — also when the path needed quoting
+# ("'/opt/my tools/solvi' hook pre-edit": the closing quote sits between the command and "hook")
+MARK = re.compile(r"(^|[\s/\\'\"])(solvi|-m\s+solvi)['\"]?\s+hook\s+(pre-edit|pick-skill)\b")
 
 
 def _ours(handler):

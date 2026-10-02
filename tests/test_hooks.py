@@ -362,6 +362,21 @@ def test_install_merges_and_uninstall_restores(proj):
     assert "no solvi hooks" in solvi(proj, "hook", "uninstall", "--project", proj).stdout
 
 
+def test_install_and_uninstall_recognise_entries_whose_command_is_quoted(proj):
+    for command in ("'/opt/my tools/solvi'", "'/opt/my tools/python' -m solvi", '"/opt/my tools/solvi"'):
+        for _ in range(2):                                   # again: replaced, not doubled
+            r = solvi(proj, "hook", "install", "--project", proj, "--command", command)
+            assert r.returncode == 0, r.stderr
+        assert "replaced PreToolUse" in r.stdout and "replaced UserPromptSubmit" in r.stdout
+        hooks_ = json.loads((proj / ".claude" / "settings.json").read_text())["hooks"]
+        assert [len(hooks_[ev]) for ev in ("PreToolUse", "UserPromptSubmit")] == [1, 1], command
+        assert hooks_["PreToolUse"][0]["hooks"][0]["command"].startswith(command + " hook pre-edit")
+        r = solvi(proj, "hook", "uninstall", "--project", proj)
+        assert r.stdout.count("removed") == 2 and "hooks" not in json.loads((proj / ".claude" / "settings.json").read_text())
+    for other in ("resolvi hook pre-edit", "'/opt/tools/notsolvi' hook pre-edit", "'/opt/solvi tools/lint' hook pre-edit"):
+        assert not hooks._ours({"type": "command", "command": other})    # another tool's command stays
+
+
 def test_install_writes_the_sample_rules_and_codex_hooks(tmp_path):
     root = tmp_path / "fresh"
     root.mkdir()
