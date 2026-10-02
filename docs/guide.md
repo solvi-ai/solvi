@@ -1970,10 +1970,21 @@ functions, a database) changes nothing in it.
 from solvi.diff import diff
 
 rep = diff(store, new_system)              # re-runs every stored decision (or diff(store, s, question="refund", since=...))
-print(rep)                                 # per question: how many changed and how (yes → no: 12); per decision the first
-rep.changed                                # step whose output differs and why: its code changed, its model changed, its
-rep.ok                                     # inputs changed, or none of these (a non-deterministic or external source)
+print(rep)                                 # per question: how many changed and how (yes → no: 12); per decision the
+rep.changed                                # steps that changed the answer and why: the code changed, the model changed,
+rep.ok                                     # a new step, or none of these (a non-deterministic or external source)
 ```
+
+`rep.changed` is a list of `{"id", "seq", "time", "questions": {question: {"old", "new", "changed", "first_step",
+"causes"}}}`. `causes` are the steps that changed that answer, in flow order, each `{"step", "name", "old", "new",
+"why"}`; `first_step` is the first of them. They are found from the answer step (and a hard check that decided it)
+back through the recorded inputs, only through steps whose output differs: a step that gives the same output as
+before stops the walk, so a part that was added or edited and changes nothing downstream — a new rule that scores 0 —
+is not named, and a decision that changes because of a threshold is attributed to the rule that holds the threshold.
+Of the steps on such a path the causes are those where a difference starts (its own code, declarations or model
+changed, it is new or no longer runs, or nothing it reads differs); with several changes at once each is listed, and
+which of them alone would have changed the answer takes a `diff` against a system with only that change. The header
+lists the parts whose code changed since the decisions were stored and the parts that ran now and not then.
 
 Each stored decision's recorded input is asked again for the same questions (`store=False`: the new system's own storage
 is not written) and compared with the stored response: answer, status, the guard that settled it, the safeguard events
