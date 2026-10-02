@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.8.0 — unreleased
+## 0.8.0 — 2026-10-03 — one name per concept, any model first
 
 0.8 gives every concept one name, makes the surface smaller and the decider protocol one, puts any model first (an LLM
 through `solvi.llm`, a decision service, or a local checkpoint for offline use), and fixes what an independent audit of
@@ -490,7 +490,6 @@ Found by an independent audit of 0.7 and by solving real tasks with the library:
 - Every measured number in the README, the docs and the API reference names its source — a script in `benchmarks/`, an
   example, or a published model card; numbers measured with scripts that are not in this repository were removed and
   their advice kept in words. The README and the guide present the decider as any model, an LLM first.
-- The version is `0.8.0.dev0` until the release.
 - Gallery task 10 (3-way match): the duplicate check is now a checkpoint of "already paid?" as well as of the payment.
   The task's own answers do not change, because its rule for that question reads the same fact. With the rule replaced
   by a model, as in the benchmark, the check no longer covered that question, and Jeeves without reasoning answered
