@@ -148,3 +148,20 @@ def test_stale_sentences_of_the_docs_stay_corrected():
     for text in (README, GUIDE):
         assert all(f'"solvi[{e}]"' in text for e in extras)
     assert not re.search(r"^model = systemone\(", GUIDE, re.M)
+
+
+def test_the_guides_printed_samples_of_examples_12_and_21_are_what_they_print(tmp_path):
+    """The audit sample of example 12 lacked its guarantee line, and the chart sample's trace hash was stale."""
+    import subprocess
+    import sys
+
+    def run(name, *args):
+        return subprocess.run([sys.executable, str(ROOT / "examples" / name), *args], capture_output=True, text=True,
+                              check=True, cwd=tmp_path).stdout
+    out12 = run("12_grounded_audit.py")
+    start = GUIDE.index("approve = 'yes'  [ok]  confidence 0.60  ← computed by approve\n")
+    sample = GUIDE[start:GUIDE.index("```", start)]
+    assert sample in out12 + "\n"
+    out21 = run("21_verified_chart.py", str(tmp_path))
+    line = next(x for x in GUIDE.splitlines() if x.startswith("charts 1: rendered · trace "))
+    assert line in out21.splitlines()
