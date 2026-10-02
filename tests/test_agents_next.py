@@ -658,3 +658,23 @@ def test_small_guard_defects_replay_all_without_a_store_unknown_roles_context_ty
     assert extra.outcome == "allow" and extra.arguments == {"n": 3, "code": None, "tags": None, "note": "anything"}
     g.declare("strict", schema={"type": "object", "properties": {"n": {"type": "integer"}}})
     assert g.check({"name": "strict", "arguments": {"n": 1, "note": "x"}}).outcome == "deny"
+
+
+@pytest.mark.parametrize("module, framework, extra", [("pydantic_ai", "pydantic_ai", "pydantic-ai"),
+                                                      ("langgraph", "langchain_core.messages", "langgraph"),
+                                                      ("openai_agents", "agents", "openai-agents")])
+def test_an_adapter_without_its_framework_names_the_extra_to_install(monkeypatch, module, framework, extra):
+    import importlib
+    import sys
+    monkeypatch.setitem(sys.modules, framework, None)                     # as if the framework were not installed
+    monkeypatch.delitem(sys.modules, f"solvi.agents.{module}", raising=False)
+    with pytest.raises(ImportError, match=rf'pip install "solvi\[{extra}\]"'):
+        importlib.import_module(f"solvi.agents.{module}")
+
+
+def test_the_adapter_extras_are_declared():
+    import re
+    from pathlib import Path
+    text = (Path(__file__).parent.parent / "pyproject.toml").read_text()
+    extras = text.split("[project.optional-dependencies]")[1].split("\n[")[0]
+    assert {"pydantic-ai", "langgraph", "openai-agents"} <= set(re.findall(r"^([\w-]+) = ", extras, re.M))

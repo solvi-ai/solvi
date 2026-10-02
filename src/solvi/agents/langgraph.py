@@ -46,8 +46,11 @@ from __future__ import annotations
 import collections
 from typing import Callable
 
-from langchain_core.messages import ToolMessage
-from langgraph.prebuilt import ToolNode
+try:
+    from langchain_core.messages import ToolMessage
+    from langgraph.prebuilt import ToolNode
+except ImportError as e:
+    raise ImportError('solvi.agents.langgraph needs LangGraph: pip install "solvi[langgraph]"') from e
 
 from .guard import Guard, messages, proposal, with_calls_made
 

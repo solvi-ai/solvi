@@ -48,6 +48,7 @@ pip install "solvi[model]"     # + torch, transformers, for the ModernBERT extra
 pip install "solvi[onnx]"      # + onnxruntime, tokenizers: the decider (solvi.decide) on CPU without torch
 pip install "solvi[serve]"     # + fastapi, uvicorn: solvi serve over HTTP
 pip install "solvi[mcp]"       # + the official MCP SDK for solvi serve --mcp (without it, a built-in stdio server is used)
+pip install "solvi[langgraph]" # the solvi.agents adapters: also "solvi[pydantic-ai]", "solvi[openai-agents]"
 pip install "solvi[lora]"      # + torch, transformers, peft: part.adapt_lora, a LoRA adapter per question (experimental)
 ```
 
@@ -2671,7 +2672,8 @@ itself it is any object); a tool whose arguments collide with the guard's facts 
                                                        "--upstream", "npx -y @modelcontextprotocol/server-filesystem /work"]}}}
 ```
 
-**Which frameworks.** Supported and tested with real runs (`tests/test_agents_frameworks.py`,
+**Which frameworks.** Each adapter has an extra — `pip install "solvi[pydantic-ai]"`, `"solvi[langgraph]"`,
+`"solvi[openai-agents]"` — and importing one without its framework says which. Supported and tested with real runs (`tests/test_agents_frameworks.py`,
 `tests/test_agents_recheck3.py`): PydanticAI (2.51), LangGraph (1.2.12 with langchain-core 1.6.5), the OpenAI Agents SDK
 (0.22.3) and MCP (the proxy). Other frameworks — LlamaIndex, AutoGen, smolagents, CrewAI — have no adapter; their
 histories can be passed to `guard.check` as messages, and shapes the guard does not recognise are read fail-closed
