@@ -1,6 +1,9 @@
 # solvi guide
 
-This guide walks through the whole API. For a two-minute overview, see the [README](../README.md); for advice drawn from
+This guide walks through the whole API. Where a question needs judgement, a model proposes and solvi's checks decide; the
+model is whichever you have — an LLM through `solvi.llm`, a decision service, or a local checkpoint such as
+solvi-base for offline or cheap cases (see [the model proposes](#the-model-proposes-decisions-with-a-decider)). For a
+two-minute overview, see the [README](../README.md); for advice drawn from
 what we measured, see [best practices](best_practices.md). A measured number in this guide that names its script
 (`benchmarks/…`, an example) can be re-run from this repository; one that names none — the combinations of models on
 typed-decisions and other sets, long documents, option order, LoRA, episodes, the world map, many options, drift,
@@ -569,18 +572,35 @@ typed end to end.
 ### The model proposes: decisions with a decider
 
 A **decider** answers typed questions about a text or a state: "which team handles this email?", "how urgent is it?", "is
-the customer angry?", "which topics does it mention?". solvi's decider (solvi-decide, a ModernBERT cross-encoder) reads
-`[mode] task [opt] option 1 [opt] option 2 … [SEP] input` and scores every option in one pass. In solvi it is a catalog part
-like any other, so everything in [Grounded decisions](#grounded-decisions-provenance-audit-and-safeguards) applies
-unchanged: the closed set, `min_confidence`, constraints with joint decoding, hard checks, the audit, the stats.
+the customer angry?", "which topics does it mention?". It is whichever model you have, behind one interface
+(`DecideModel`):
+
+- an LLM — `solvi.llm.llm(base_url, model, api_key=...)`, any OpenAI-compatible chat-completions server
+  ([Any LLM as a decider](#any-llm-as-a-decider)); the core install is enough;
+- a decision service — `solvi.systemone.systemone(url, model)`
+  ([Any System One model as a decider](#any-system-one-model-as-a-decider));
+- a local checkpoint, for offline or cheap cases — `DecideModel.load("solvi-ai/solvi-base")` (`solvi[onnx]`;
+  [Loading a checkpoint](#loading-a-checkpoint)). solvi-base, a 150M ModernBERT-base cross-encoder distilled from
+  solvi-large, reads `[mode] task [opt] option 1 [opt] option 2 … [SEP] input` and scores every option in one pass, about
+  50 ms per question on a CPU (ONNX fp16, 4 threads). Its model card: 54.5% zero-shot on typed questions over JSON states
+  (as solvi-large), 56.3% on Fast Decisions dev — not better than earlier small models there — and 0.602 on the jabr
+  classifier benchmark (Jev: 0.966). A preview: fit it on 30–60 labelled examples of your task and calibrate its
+  escalation on your own stream (`act_guard`) before relying on it.
+
+In solvi a decider is a catalog part like any other, so everything in
+[Grounded decisions](#grounded-decisions-provenance-audit-and-safeguards) applies unchanged: the closed set,
+`min_confidence`, constraints with joint decoding, hard checks, the audit, the stats.
 
 ```python
+import os
 from typing import Literal
 from pydantic import BaseModel, Field
 from solvi import Scale
 from solvi.decide import DecideModel
+from solvi.llm import llm
 
-model = DecideModel.load("~/models/solvi-base")          # a checkpoint folder or a Hugging Face id
+model = llm("https://api.openai.com/v1", "gpt-4o-mini", api_key=os.environ["OPENAI_API_KEY"])
+model = DecideModel.load("~/models/solvi-base")          # or offline: a checkpoint folder or a Hugging Face id
 
 class Triage(BaseModel):                                  # one field = one question: its type is the kind, its description the task
     team: Literal["billing", "technical", "shipping"] = Field(description="Which team should handle this ticket?")
@@ -1039,8 +1059,8 @@ among the options, a probability per option (`ask="confidence"`: one number) and
 keeps what works: it steps down only before the first request that
 succeeds, and only on an HTTP 400 / 422 about the format — one that names `response_format`, `json_schema`, `logprobs`,
 structured outputs, or says nothing; a gateway's wrapped error counts too, such as OpenRouter's "Provider returned error"
-with the provider's own message in `error.metadata.raw`; another 400, 413 or 422 escalates that question, `invalid input
-for the endpoint: HTTP 400 — <the server's message and the provider's cause>`, and the format stays). When the server returns log-probabilities
+with the provider's own message in `error.metadata.raw`; another 400, 413 or 422 escalates that question, `the LLM
+server refused the request: HTTP 400 — <the server's message and the provider's cause>`, and the format stays). When the server returns log-probabilities
 (`logprobs="auto"`), the probabilities come from the answer's tokens — the chosen option's whole token sequence, the others
 from the alternatives at its first token — not from the numbers the model wrote (`extra["llm"]["probabilities"]` says
 which: "logprobs", "stated" or "confidence"). A gateway can mix the two in one stream (some providers return

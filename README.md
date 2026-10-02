@@ -138,7 +138,7 @@ With `"balance": 3` the hard check fails and the answer is `reject` with `status
 solvi init triage --with-model && cd triage     # a typed catalog, passing cases.json, README, CI workflow
 solvi test . && solvi check catalog.py:system   # regression cases and the catalog lint (what CI runs)
 solvi ask catalog.py:system example.json --audit            # one decision and what it rests on (--json, --report html)
-solvi models pull solvi-ai/solvi-base           # download it; `solvi models` lists, `check` measures
+solvi models pull solvi-ai/solvi-base           # a local decider for offline use; `solvi models` lists, `check` measures
 solvi calibrate catalog.py:system route labels.csv --risk 0.1   # act_guard → route.calib.json, loaded by the catalog
 solvi hook install                              # Claude Code's edits checked against .claude/solvi-rules.toml
 ```
@@ -168,19 +168,30 @@ Every command is in the [guide](docs/guide.md#command-line).
   `res.trace.replay(system)`, which recomputes every step from recorded inputs and reports mismatches, broken hash links
   and quotes outside the text — and, given the System, a stored answer that is not the one the trace gives.
 
-## Typed decisions with a model
+## Typed decisions with any model
 
-Types declare questions; the model proposes; checks decide. The fields of a pydantic model are the questions, their types
-the kinds (one option, several, an ordered score, yes/no); a decider (`solvi.decide`, `solvi[onnx]` or `solvi[model]`)
-answers them about a text or a JSON / pydantic state — one question per forward pass with the published checkpoints,
-several in one pass with `DecideModel.load(..., multi_question=True)` — with probabilities, a calibrated confidence and
-act / escalate. Hard checks, constraints and rules still decide.
+Types declare questions; a model proposes; checks decide. The fields of a pydantic model are the questions, their types
+the kinds (one option, several, an ordered score, yes/no); a **decider** answers them about a text or a JSON / pydantic
+state with probabilities, a calibrated confidence and act / escalate, and hard checks, constraints and rules still
+decide. The decider is whichever model you have:
+
+- **An LLM** — `solvi.llm.llm(base_url, model, api_key=...)`: any OpenAI-compatible chat-completions server (OpenAI,
+  OpenRouter, vLLM, llama.cpp, Ollama). Nothing to install beyond the core; its JSON replies are validated, and an invalid
+  one escalates, never a guess.
+- **A decision service** — `solvi.systemone.systemone(url, model)`: anything that speaks the System One API.
+- **A local checkpoint, for offline or cheap cases** — `DecideModel.load("solvi-ai/solvi-base")` (`solvi[onnx]`, no
+  GPU). solvi-base is a 150M ModernBERT-base cross-encoder distilled from solvi-large: about 50 ms per question on a CPU
+  (ONNX fp16, 4 threads). Its card is honest about where it stands: 54.5% zero-shot on typed questions over JSON states
+  (the same as solvi-large), 56.3% on Fast Decisions dev — not better than earlier small models there — and 0.602 on the
+  jabr classifier benchmark, where Jev reaches 0.966. A preview: fit it on 30–60 labelled examples of your task and
+  calibrate its escalation on your own stream before relying on it.
 
 ```python
+import os
 from typing import Literal
 from pydantic import BaseModel, Field
 from solvi import Catalog, Scale, System
-from solvi.decide import DecideModel
+from solvi.llm import llm
 
 class Triage(BaseModel):
     team: Literal["billing", "technical", "shipping"] = Field(description="Which team should handle this ticket?")
@@ -188,7 +199,8 @@ class Triage(BaseModel):
     angry: bool = Field(description="Is the customer angry?")
     topics: list[Literal["refund", "delay", "bug"]] = Field(description="What does the ticket mention?")
 
-model = DecideModel.load("solvi-ai/solvi-base")         # or a local folder; solvi_decide.json says what it can do
+model = llm("https://api.openai.com/v1", "gpt-4o-mini", api_key=os.environ["OPENAI_API_KEY"])
+# offline: model = solvi.decide.DecideModel.load("solvi-ai/solvi-base")   — the same questions, the same checks
 cat = Catalog()
 questions = model.questions(cat, Triage, text_fact="ticket", min_confidence=0.6)
 
@@ -200,15 +212,16 @@ questions[1].requires.append("no_legal_threat")
 res = System(cat, questions).ask({"ticket": {"subject": "Charged twice", "body": "Refund my double payment!",
                                              "customer": {"tier": "pro"}}})
 print({q: (r.answer, r.status) for q, r in res.results.items()})
-print(res.audit("team"))           # the act probability, the model's fingerprint, what escalated and why
+print(res.audit("team"))           # the probabilities, the model's fingerprint, what escalated and why
 ```
 
-A state is read as key paths (`customer.tier: pro`), the format the decider is trained on; an unsure or escalated answer
-abstains with the reason (`system.stats["model_escalated"]`, `["low_confidence"]`). The checkpoint contract is in
-[docs/decide_format.md](docs/decide_format.md); [examples/15_typed_decisions.py](examples/15_typed_decisions.py) runs the
-whole story with a stand-in model. Published deciders are previews: read the model card before relying on one, and fit
-it on 30–60 labelled examples of your task (`part.fit`, `part.calibrate_for`) — checks, constraints and escalation are what
-make the answers safe to act on, not the model alone.
+A state is read as key paths (`customer.tier: pro`); an unsure or escalated answer abstains with the reason
+(`system.stats["model_escalated"]`, `["low_confidence"]`). [examples/15_typed_decisions.py](examples/15_typed_decisions.py)
+runs the whole story with a stand-in model, without network. Whatever the model, read what it was measured on before
+relying on it, and calibrate it on your own labelled stream (`part.act_guard`, below): checks, constraints and
+escalation are what make the answers safe to act on, not the model alone. The checkpoint contract of a local decider is in
+[docs/decide_format.md](docs/decide_format.md); a local checkpoint answers one question per forward pass with the published checkpoints,
+several with `DecideModel.load(..., multi_question=True)`.
 
 Every answer is a value and a confidence, and the types also declare answer primitives: `Maybe[T]` ("not stated" —
 `solvi.Unknown` — is a real answer, unlike an abstention), `Span[float]` (an exact piece of the text, parsed), `Rank[...]`
@@ -225,10 +238,8 @@ Every answer is a value and a confidence, and the types also declare answer prim
   behind every answer, or says there is none. `part.conformal(examples)` gives the person who takes an escalation a short
   list of candidates. Near ties escalate (`min_margin=`), and the answer does not depend on the order the options are listed
   in (sorted by default).
-- **Any decision model.** `solvi.systemone.systemone(url, model)` puts any `POST /v1/systemone` service (Jev, Kev, Von,
-  Laya-serve, …) behind your rules, and `solvi.llm.llm(base_url, model)` any OpenAI-compatible LLM server (OpenAI,
-  OpenRouter, vLLM, llama.cpp, Ollama) — its JSON replies validated, an invalid one escalated, never guessed;
-  `Cascade`, `Vote` and `Route` (`solvi.multi`) combine models — the next model only when one escalates, an answer
+- **Several models.** Any decider above — an LLM, a System One service (Jev, Kev, Von, Laya-serve, …), a local
+  checkpoint — combines with the others: `Cascade`, `Vote` and `Route` (`solvi.multi`) combine models — the next model only when one escalates, an answer
   only when models of different families agree, or a model picked by code — under one guarantee. On
   typed-decisions a vote of solvi-large and Julia 1 answered 50% alone against 31% / 40% for each alone, at the same
   10% risk (Julia in-distribution there; measured with a script that is not in this repository —
