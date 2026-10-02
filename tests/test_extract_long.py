@@ -117,3 +117,26 @@ def test_a_field_is_quoted_with_its_span_score_and_not_found_below_the_threshold
     assert q.value == "" and 0.0 <= q.confidence < 0.5
     weak = extractor("TOTAL", "42", strength=0.1).field("total", "the total")(doc)
     assert weak.value == "" and 0.5 < weak.confidence <= 1.0
+
+
+def test_an_answer_in_a_late_window_of_a_long_document_comes_back_at_its_characters():
+    words = [f"w{i}" for i in range(200)]
+    doc = " ".join(words[:150]) + " TOTAL 15.50 EUR " + " ".join(words[150:])
+    ex = extractor("15.50", "EUR")
+    ex.tok(doc)                                        # fill the vocabulary before the head looks words up
+    w = ex._windows("the total", doc)
+    assert len(w["input_ids"]) > 5 and {len(x) for x in w["input_ids"]} == {32}
+    covered = {offs[j] for offs, ctx in zip(w["offset_mapping"], w["ctx"]) for j in ctx}
+    assert len(covered) == len(ex.tok(doc)["input_ids"])           # every token of the document is in some window
+    q = ex.field("total", "the total")(doc)
+    assert (q.value, doc[q.start:q.end]) == ("15.50 EUR", "15.50 EUR") and 0.5 < q.confidence <= 1.0
+    absent = extractor("nowhere", "nowhere")
+    absent.tok(doc)
+    assert absent.field("iban", "the IBAN")(doc).value == ""
+
+
+def test_a_labelled_span_maps_to_the_tokens_that_cover_it():
+    from solvi.extract_multi import MultiSpanExtractor
+    offs = [(0, 0), (0, 5), (6, 10), (11, 15), (0, 0)]             # [CLS], three tokens, [SEP]
+    assert MultiSpanExtractor._tok_span(offs, (11, 15)) == (3, 3)
+    assert MultiSpanExtractor._tok_span(offs, (0, 10)) == (1, 2) and MultiSpanExtractor._tok_span(offs, (7, 9)) == (2, 2)

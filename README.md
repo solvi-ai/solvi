@@ -426,7 +426,9 @@ Run them from a clone: `python examples/01_leave_request.py`.
 - [ROADMAP.md](ROADMAP.md), [CHANGELOG.md](CHANGELOG.md), [CONTRIBUTING.md](CONTRIBUTING.md), [SECURITY.md](SECURITY.md).
 - [docs/benchmarks.md](docs/benchmarks.md): setups, per-question numbers, caveats.
 - [docs/vs_llm.md](docs/vs_llm.md): solvi vs asking an LLM (Grok 4.7, gpt-oss-120b, Qwen3, DeepSeek), with raw answers.
-- [benchmarks/](benchmarks/): dataset loaders and benchmark scripts (SROIE, CORD, CUAD, Kleister-NDA).
+- [benchmarks/](benchmarks/): dataset loaders (SROIE, CORD, CUAD, Kleister-NDA) and the scripts that are in the
+  repository (`ask_overhead`, `strategist_scale`, `fast_head`, `trace_signature`, `vs_llm/`, …); the training scripts
+  behind the extraction table above are not in the repository.
 - Tests: `pytest`.
 
 ## License

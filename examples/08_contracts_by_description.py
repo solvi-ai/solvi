@@ -4,7 +4,7 @@ into typed answers. Needs `pip install "solvi[model]"`.
 
 Run:  uv run --extra model python examples/08_contracts_by_description.py
 Model: SOLVI_MODEL (a Hugging Face id or a local directory), default solvi-ai/extract-base.
-For production accuracy label ~100 documents and fine-tune (LongSpanExtractor.fit) — see benchmarks/."""
+For production accuracy label ~100 documents and fine-tune (LongSpanExtractor.fit); the dataset loaders are in benchmarks/datasets."""
 from __future__ import annotations
 
 import os

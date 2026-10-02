@@ -53,8 +53,8 @@ rows = receipts.laya_rows(docs)              # typed questions with ground truth
 
 Setups, per-question numbers and caveats are in [docs/benchmarks.md](../docs/benchmarks.md).
 
-The scripts that reproduce those numbers are being ported from the research repository and will land in this
-directory before the first release.
+The scripts that reproduce those numbers are in the research repository, not here: this directory holds the dataset
+loaders they use.
 
 ## Scripts
 
