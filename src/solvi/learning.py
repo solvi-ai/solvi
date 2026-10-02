@@ -240,7 +240,7 @@ class Learning:
             if q not in self.parts:
                 continue
             try:
-                check_source(c.get("source", "human"))
+                check_source(c.get("source", "human"), channel="learning")
                 ans = self._normalize(q, c["answer"])
             except (UntrustedLabel, ValueError) as e:
                 rejected.append((c["id"], f"{type(e).__name__}: {e}"))

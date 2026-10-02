@@ -170,9 +170,10 @@ class CorrectionMemory:
 
     def add(self, x, correct, source="human", by=None, time=None, stored_id=None):
         """Store one corrected case: an input (a text, a state, or Facts by name) and its right answer. source: "human",
-        "outcome" or "rule" — anything else raises UntrustedLabel (the system's own answers are never labels). → the
+        "outcome" or "rule" — anything else raises UntrustedLabel (the system's own answers are never labels; a
+        "verified" System 2 answer neither: fed such answers, a memory broke its system's promise on a contract task). → the
         Case (an identical case already stored is not added twice)."""
-        check_source(source)
+        check_source(source, channel="memory")
         text = self.part._input_text(x)
         f = self.features(text, learning=True)
         lab = self._label(correct)
@@ -200,7 +201,7 @@ class CorrectionMemory:
             if c["question"] != q:
                 continue
             try:
-                check_source(c.get("source", "human"))
+                check_source(c.get("source", "human"), channel="memory")
                 init = c["init"]
                 if not all(f in init for f in self.part.facts):
                     if system is None:
@@ -398,7 +399,7 @@ class CorrectionMemory:
                       c.get("stored_id"), None if c.get("words") is None else tuple(c["words"]))
                  for c in data.get("cases") or ()]
         for c in cases:
-            check_source(c.source)
+            check_source(c.source, channel="memory")
             try:
                 self._label(tuple(c.label) if isinstance(c.label, list) else c.label)
             except ValueError as e:

@@ -1128,7 +1128,8 @@ class System:
 
     def guarantee(self, question, examples=None, **kw):
         """A calibrated threshold with a stated promise on this question's answer, from labelled examples
-        [(init_state, correct answer)]: max_risk= (P(answered alone and wrong) ≤ it, conformal risk control), max_error= (the
+        [(init_state, correct answer)] (corrections=store, sources=: plus the store's corrections of the question —
+        the one place a "verified" System 2 answer is a label): max_risk= (P(answered alone and wrong) ≤ it, conformal risk control), max_error= (the
         error among the answers given alone ≤ it with probability ≥ 1 − delta, learn-then-test) or method="empirical";
         on the answer's confidence, a computed fact or any signal (signal=), one-sided (answer=), per group (groups=).
         Below the threshold the question abstains with the reason; the promise is recorded with every answer.
@@ -1154,21 +1155,30 @@ class System:
         (a solvi.decide decision part as the question's rule, or a rule passing a decided fact on): its per-option shift is
         updated. Any correction goes to the storage for the next fit. Returns the update time in ms when something learned
         at once, else None. label_source ("human", "outcome", "rule"; `source=` in 0.7), by (who) and of (the stored id of the decision it corrects)
-        are stored with it (TraceStorage.save_correction). With a learning loop (System.learning(..., gate_teach=True))
+        are stored with it (TraceStorage.save_correction). label_source="verified" (with of= the stored System 2 decision
+        that answered alone under a guarantee — save_correction checks it): the label is only stored, for
+        System.guarantee(..., corrections=, sources=); no head or decision learns from it (a head fed such labels gained
+        on one task of three), and a system without storage raises ValueError. With a learning loop (System.learning(..., gate_teach=True))
         nothing learns at once: the correction is only stored, and the loop's gates decide whether it is learned.
         An unknown question raises KeyError and an answer that is not one of the question's options ValueError, before
         anything is learned or stored; the answer is stored normalized (True → "yes"). When nothing learned at once and
         there is no storage, the correction is lost: a UserWarning says so."""
         from .decide import decision_of
         from .heads import FastHead
-        from .storage import check_source
+        from .storage import VERIFIED, check_source
         source = label_source
-        check_source(source)
+        check_source(source, accept=(VERIFIED,))
         if question not in self.questions:
             raise KeyError(f"teach: no question {question!r} in this system ({', '.join(self.questions)})")
         correct = self.questions[question].answer.normalize(correct)   # ValueError: not one of the options
         ms = None
         init_state = self._state(init_state)[0]
+        if source == VERIFIED:                        # stored for a guarantee, never learned at once (see above)
+            if self.storage is None:
+                raise ValueError("teach(label_source='verified') stores the label for System.guarantee(corrections=): "
+                                 "the system has no storage, and no head or decision learns from a verified label")
+            self.storage.save_correction(question, init_state, correct, label_source=source, by=by, of=of)
+            return None
         loop = getattr(self, "_learning", None)
         if loop is not None and loop.gate_teach:
             if self.storage is None:

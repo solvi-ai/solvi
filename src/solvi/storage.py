@@ -8,7 +8,8 @@ Every stored decision is one record (a dict of plain JSON):
                   [[step, name, hash]] (and producers) — plus index fields (guards, safeguards, models) and the whole
                   response (Response.to_dict(): answers, flow, trace), which get() loads back and replay_all() re-checks;
   kind "teach"    a correction (System.teach): {"teach": question, "init": ..., "answer": ...} and, when given, its
-                  "source" ("outcome", "rule"; none: a human), "by" and "of" (the stored id of the decision it corrects);
+                  "source" ("outcome", "rule", "verified"; none: a human), "by" and "of" (the stored id of the decision it
+                  corrects; for "verified", the System 2 decision the label is);
   kind "update"   a learning update (System.learning): what changed, the gates' results, the state to roll back to;
   every record    seq (0, 1, 2, ...), time (seconds since the epoch), meta (optional, yours), prev and hash.
 
@@ -49,18 +50,39 @@ LEGACY_ORDER = ("stored by solvi 0.7.1 or earlier, which wrote dict keys sorted:
 
 
 TRUSTED_SOURCES = ("human", "outcome", "rule")   # where a label may come from: never the system's own answers
+VERIFIED = "verified"         # a System 2 answer that passed the checks and a guarantee: a label only where accepted
+# What a channel says when it refuses a verified label: measured on three stand tasks replayed as a stream (Abt-Buy,
+# CUAD, Banking77; docs/best_practices.md), System 2's verified answers fed to it did not make System 1 answer more
+# within its promise on at least two of the three.
+VERIFIED_REFUSED = {
+    "memory": "a memory of corrections fed verified System 2 answers broke System 1's promise on a contract task (P(alone "
+              "and wrong) 3.1% against 3%) and helped on one task of three",
+    "head": "a head refitted on verified System 2 answers answered more within its promise on one task of three (contracts; "
+            "not on product matching, where it already answered 90%) — feed it human or outcome labels",
+    "learning": "the learning loop's ladder (fit, memory, adapter) was not shown to gain from verified System 2 answers on "
+                "two tasks of three; it learns from human, outcome and rule labels",
+}
 
 
 class UntrustedLabel(ValueError):
-    """A label from a source outside TRUSTED_SOURCES (the model, the system itself, an unknown process)."""
+    """A label from a source outside TRUSTED_SOURCES (the model, the system itself, an unknown process), or a
+    "verified" label offered to a channel that does not take it."""
 
 
-def check_source(source):
-    """A label's source → itself, when it is trusted: "human", "outcome" or "rule"; else UntrustedLabel."""
-    if source not in TRUSTED_SOURCES:
-        raise UntrustedLabel(f"label source {source!r} is not trusted: labels come only from outside the model "
-                             f"({', '.join(TRUSTED_SOURCES)}); the system's own answers are never labels")
-    return source
+def check_source(source, accept=(), channel=None):
+    """A label's source → itself, when it is trusted: "human", "outcome" or "rule" — or "verified" when the channel
+    lists it in `accept` (only System.guarantee(..., sources=) does: see VERIFIED); else UntrustedLabel, with the
+    measured reason when a channel (`channel`, a key of VERIFIED_REFUSED) refuses a verified label."""
+    if source in TRUSTED_SOURCES or (source == VERIFIED and VERIFIED in tuple(accept)):
+        return source
+    if source == VERIFIED:
+        why = VERIFIED_REFUSED.get(channel, "this channel does not take verified System 2 answers")
+        raise UntrustedLabel(f"label source {VERIFIED!r} is not taken here: {why}; a verified label is stored and can "
+                             "recalibrate a guarantee (System.guarantee(question, examples, corrections=store, "
+                             f"sources=TRUSTED_SOURCES + ({VERIFIED!r},)))")
+    raise UntrustedLabel(f"label source {source!r} is not trusted: labels come only from outside the model "
+                         f"({', '.join(TRUSTED_SOURCES)}; {VERIFIED!r} for a System 2 answer that passed the checks and "
+                         "a guarantee, where a channel takes it); the system's own answers are never labels")
 
 
 class _Any:
@@ -345,11 +367,17 @@ class TraceStorage:
         """Store a correction (what System.teach records) → its id. label_source (`source=` in 0.7; stored as the
         record's "source"): where the label comes from — "human" (a person
         corrected or confirmed the answer), "outcome" (what really happened: the parcel was lost, the loan defaulted) or
-        "rule" (code rejected a model's proposal and decided instead); anything else is refused (UntrustedLabel): the
-        system's own answers are never labels. by: who (a user, a reviewer, a process); of: the stored id of the decision
-        it corrects. Records of 0.6 have no source: they are human corrections."""
+        "rule" (code rejected a model's proposal and decided instead), or "verified" — a System 2 answer that passed
+        the checks and a guarantee: `of` must then name that decision, stored in this store, which answered `question`
+        alone (status "ok", not escalated or abstained) under a guarantee (System.guarantee) with this very answer;
+        anything else raises UntrustedLabel, and the label is not stored. Anything else is refused (UntrustedLabel):
+        the system's own unverified answers are never labels. by: who (a user, a reviewer, a process); of: the stored id
+        of the decision it corrects (for "verified", the one it is). Records of 0.6 have no source: they are human
+        corrections. Storing a verified label teaches nothing by itself: which channel may read it, see check_source."""
         source = label_source
-        check_source(source)
+        check_source(source, accept=(VERIFIED,))
+        if source == VERIFIED:
+            self._check_vouched(question, answer, of)
         body = {"v": FORMAT, "kind": "teach", "teach": question, "init": plain(dict(init_state)), "answer": plain(answer)}
         if source != "human":
             body["source"] = source
@@ -360,6 +388,29 @@ class TraceStorage:
         if meta is not None:
             body["meta"] = plain(meta)
         return self._append(body)["id"]
+
+    def _check_vouched(self, question, answer, of):
+        """A "verified" label: `of` is a decision in this store that answered `question` alone, under a guarantee, with
+        `answer` — else UntrustedLabel saying which of these fails."""
+        if of is None:
+            raise UntrustedLabel("a verified label names the System 2 decision it comes from: of=<its stored id>")
+        d = self._find(str(of))
+        if d is None or d.get("kind", "ask") != "ask":
+            raise UntrustedLabel(f"a verified label's decision {of!r} is not a stored decision of this store")
+        got = (d.get("answers") or {}).get(question)
+        if got is None:
+            raise UntrustedLabel(f"the stored decision {of!r} did not answer {question!r}")
+        if got[2] != "ok":
+            raise UntrustedLabel(f"the stored decision {of!r} did not answer {question!r} alone (status {got[2]!r}): "
+                                 "only an answer that passed the checks and its guarantee is a verified label")
+        guarded = (d.get("guards") or {}).get(question) or any(r[1] == f"guard:{question}" for r in d.get("records") or ())
+        if not guarded:                           # a decision part's act_guard, or a question's System.guarantee
+            raise UntrustedLabel(f"the stored decision {of!r} answered {question!r} without a guarantee "
+                                 "(System.guarantee): it is not verified")
+        from .schema import tag_floats
+        if tag_floats(plain(self._answer_key(question, answer))) != got[0]:
+            raise UntrustedLabel(f"the stored decision {of!r} answered {question!r} with {got[0]!r}, not {answer!r}: a "
+                                 "verified label is that decision's own answer")
 
     # --- reading
     def record(self, id):
@@ -422,8 +473,9 @@ class TraceStorage:
     def corrections(self):
         """The stored corrections → [{"id", "time", "question", "init", "answer", "source", "by", "of"}] (feed them to fit /
         learn_rule, a CorrectionMemory or System.learning). source: "human" (also every record without one), "outcome",
-        "rule" — or, for a record written around save_correction, whatever it says (solvi.memory and System.learning refuse
-        anything outside TRUSTED_SOURCES)."""
+        "rule", "verified" — or, for a record written around save_correction, whatever it says (solvi.memory and
+        System.learning refuse anything outside TRUSTED_SOURCES, "verified" included; System.guarantee takes "verified"
+        when told to)."""
         from .schema import untag_floats                # stored tagged ({"$float": "inf"}), read back as the float
         return [{"id": s.id, "time": s.time, "question": s.data["teach"], "init": untag_floats(s.data["init"]),
                  "answer": untag_floats(s.data["answer"]), "source": s.data.get("source", "human"), "by": s.data.get("by"),
@@ -1286,4 +1338,4 @@ def open_storage(where, system=None):
 
 __all__ = ["chained", "check_source", "DuckDBStorage", "entry", "FORMAT", "JSONLStorage", "open_storage", "plain",
            "PostgresStorage", "record_body", "record_hash", "SQLiteStorage", "Stored", "TraceStorage",
-           "TRUSTED_SOURCES", "UntrustedLabel"]
+           "TRUSTED_SOURCES", "UntrustedLabel", "VERIFIED", "VERIFIED_REFUSED"]
