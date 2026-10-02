@@ -461,10 +461,11 @@ class Dispatcher:
     decision's number). think: "s2" (default: the slow path's accepted answer is given) or "agree" (given only when it
     equals what System 1 would have answered; otherwise a person). on_disagree: what a check that disagrees does —
     "record" (default: System 1's answer stands, the disagreement is recorded), "human", or "s2" (the slow path's
-    accepted answer replaces it). same: a function (answer, answer) → bool that says when two answers are the same
+    accepted answer replaces it); in a check the slow path's answer is compared whether or not its own checks accepted
+    it, and only an accepted one replaces System 1's. same: a function (answer, answer) → bool that says when two answers are the same
     (default: equal values). unknown: what the slow path's "not stated" (solvi.Unknown) is — "answer" (default: a real
-    answer) or "human" (none of the options fits: a person decides). storage: a TraceStorage that keeps every decision (kind "dispatch"). asked: the
-    questions System 1 is asked together (default: all of its questions, so that constraints between them apply);
+    answer) or "human" (none of the options fits: a person decides). storage: a TraceStorage that keeps every decision
+    (kind "dispatch"). asked: the questions System 1 is asked together (default: all of its questions, so that constraints between them apply);
     store_responses: whether System 1's and the slow path's Systems store their responses in their own storage."""
 
     def __init__(self, system, slow=None, *, question=None, budget=None, total=None, price=None, wake=SIGNALS,
@@ -523,7 +524,7 @@ class Dispatcher:
         self.store_responses = bool(store_responses)
         self.n = 0
         self.spent = Cost()
-        self.runs = []                    # the slow path's costs so far (its expected cost is their mean)
+        self._runs = [0, 0.0, 0, 0.0, False]  # slow-path runs so far: count, dollars, calls, ms, a run without a price
         self.counts = {p: 0 for p in PATHS}
         self.drift = None
         self._lock = threading.Lock()
@@ -559,11 +560,10 @@ class Dispatcher:
 
     def expected(self):
         """The expected Cost of one slow-path run: the mean of the runs so far (None before the first)."""
-        if not self.runs:
+        k, usd, calls, ms, unpriced = self._runs
+        if not k:
             return None
-        k = len(self.runs)
-        usd = None if any(c.usd is None for c in self.runs) else sum(c.usd for c in self.runs) / k
-        return Cost(usd, round(sum(c.calls for c in self.runs) / k), sum(c.ms for c in self.runs) / k)
+        return Cost(None if unpriced else usd / k, round(calls / k), ms / k)
 
     def signals(self, res):
         """System 1's response → [(signal, reason)] that are up for it (before `wake` filters them)."""
@@ -668,7 +668,10 @@ class Dispatcher:
             if self.budget is not None:
                 over = self.budget.over(th.cost)
             with self._lock:
-                self.runs.append(th.cost)
+                r = self._runs
+                r[0], r[2], r[3] = r[0] + 1, r[2] + th.cost.calls, r[3] + th.cost.ms
+                r[1] += th.cost.usd or 0.0
+                r[4] = r[4] or th.cost.usd is None
         answer, by = self._outcome(action, r1, would1, th, reasons)
         if th is not None and action == "check" and not self.agrees(th.answer, would1):
             disagreement = {"s1": would1, "s2": th.answer, "s2_accepted": th.accepted}
@@ -815,7 +818,7 @@ class Dispatcher:
 
     def summary(self):
         """{"decisions", "by": {path: count}, "spent": Cost dict, "slow_runs"}."""
-        return {"decisions": self.n, "by": dict(self.counts), "spent": self.spent.to_dict(), "slow_runs": len(self.runs)}
+        return {"decisions": self.n, "by": dict(self.counts), "spent": self.spent.to_dict(), "slow_runs": self._runs[0]}
 
 
 def _per_round(expected, slow):
