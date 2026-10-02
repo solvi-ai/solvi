@@ -2575,6 +2575,7 @@ failed one is in `reasons`:
 | the tool is in the catalog | the agent names a tool the guard does not declare | deny |
 | `arguments_valid` | the arguments do not validate against the tool's types (pydantic, lax: `"250"` is 250.0; NaN and infinities are refused); an unknown argument is an error; a string (or a key) holding invisible format characters — Unicode Cf: zero-width spaces and joiners, soft hyphens, direction marks, tag characters U+E0000–E007F — is refused ("invisible characters in argument iban (U+200B)"): grounding reads text without them, so the value checked would not be the value executed. An emoji written with a zero-width joiner is refused too | deny |
 | `arguments_grounded` | a `ground=` argument is not literally in the conversation — a string as a token (not inside a longer word or address: "DE8937" is not found in "DE89370400…", "bob@x.org" not in "bob@x.org.evil"), a number as a number token (`250` matches "250.00", `1250.5` matches "1,250.50"; not a part of a longer identifier), a list item by item, an empty or whitespace-only string never — in a message of a role in `ground_from` (default user, tool and system: never the assistant's own words; `("user",)` for values only the user may give) | deny |
+| `user_confirmed` | only for tools with `guard.require_confirmation` (below): no message of the assistant that names the call's values was explicitly accepted by the user's next message | deny (`on_fail="escalate"`: escalate) |
 | your deny policies | a `@guard.policy` (`on_fail="deny"`, the default) returns False; its docstring's first line is the reason | deny |
 | `arguments_from_user` | only for tools with `tool_values="escalate"` (the middle mode, below): a user-only argument is not in the user's words but is in a tool output | escalate |
 | `no_injected_arguments` | a grounded argument is found only in tool outputs, and a tool output in the conversation — that one or any other — carries instruction-like text (`solvi.perturb.injection_spans`, below) | escalate |
@@ -2641,7 +2642,8 @@ a longer word on either side, nor be joined to one by `. @ - / : _` ("bob@x.org"
 make a boundary; a string of digits gets the same protection as a number ("0532" is not found in "DE89 3704 0044 0532"). `ground={"iban": "whole", "email": "whole"}` is stricter — the value must be delimited by
 whitespace, quotes, brackets or punctuation, so "x.org" is not found in "alice@x.org" and "alice@x.org" not in
 "bob.alice@x.org"; `"substring"` accepts any occurrence; `"nocase"` is the token matcher with letters compared without
-their case ("320 cedar avenue" is found in "320 Cedar Avenue" — for names and addresses); `"id"` is `"nocase"` where a
+their case and typographic dashes and quotes read as plain ones ("320 cedar avenue" is found in "320 Cedar Avenue",
+"5-ft" in "5‑ft" with a non-breaking hyphen, "o'brien" in "O’Brien" — for names and addresses); `"id"` is `"nocase"` where a
 leading "#" of the value may be missing in the text (the order "#W5442520" a customer wrote as "W5442520"); a callable
 `matcher(value, text) → [(start, end)]` decides itself (a normalised IBAN), and its code is part of the tool's
 fingerprint. Every Unicode space — the no-break and narrow no-break spaces a model or a phone keyboard writes between
@@ -2739,6 +2741,75 @@ a price cap). Being a policy, a standing approval can cover its escalations. On 
 `"url"` matcher and the wider detector cut the attacks that still passed the default in the travel and messaging tasks from
 4–5% to 1% of attacked runs, at no measurable cost in honest tasks (−2 and +2 points). What still passed: a calendar event
 with an attacker's title, when the user had asked for an event.
+
+**"The user confirmed this."** A rule like "list the details and get the user's explicit yes before you change their
+order" relates three things: the call's arguments, a message of the assistant that proposed them, and the user's next
+message that accepted it. `guard.require_confirmation` declares it for a tool:
+
+```python
+from solvi.agents import Guard
+
+guard = Guard()
+
+@guard.tool(ground={"order_id": "id"})
+def cancel_order(order_id: str, reason: str) -> str:
+    """Cancel a pending order."""
+    return f"cancelled {order_id}"
+
+guard.require_confirmation("cancel_order", match={"order_id": "id"})   # every argument must be in the proposal
+
+chat = [("user", "Please cancel W5442520, I no longer need it."),
+        ("assistant", "To confirm: cancel order #W5442520, reason “no longer needed”. Shall I go ahead?"),
+        ("user", "Yes, please go ahead.")]
+d = guard.call({"name": "cancel_order", "arguments": {"order_id": "#W5442520", "reason": "no longer needed"}}, chat)
+d.outcome                          # "allow"
+d.evidence[-2:]                    # [("(proposal)", "To confirm: cancel order #W5442520, ...", 64, 144, "assistant"),
+                                   #  ("(accepted)", "Yes, please go ahead.", 152, 173, "user")]
+guard.check({"name": "cancel_order", "arguments": {"order_id": "#W5442520", "reason": "ordered by mistake"}},
+            chat).reasons
+# ["not confirmed by the user: no message of yours that the user accepted names reason='ordered by mistake' (...)"]
+```
+
+The check `user_confirmed` (deny, or escalate with `on_fail="escalate"`) passes when some message of the assistant names
+every required value and the user's next message (tool outputs in between are skipped) accepts it explicitly; a value
+the user wrote in the accepting message itself counts too ("yes, refund it to my PayPal"). `arguments=` lists the
+arguments the proposal must name (default: every argument whose value is text, a number or a list of them); each is
+found like a `ground=` value — text by `"nocase"` (case, Unicode spaces, typographic dashes and quotes aside), an order
+id by `"id"`, numbers as number tokens, lists item by item — or by your matcher: `callable(value, text)` or, with
+`reads=["known"]`, `callable(value, text, facts)` for what only your app knows (that item "6342039236" is "the
+17-inch laptop"). `last=N` lets only the user's last N messages accept. An explicit acceptance is a yes word or phrase in
+English or Russian ("yes", "go ahead", "please proceed", "confirmed", "that's correct", "да", "подтверждаю",
+"оформляйте") not negated shortly before ("not correct", "don't proceed"), in a message that does not open with a
+refusal ("no", "wait", "нет") and takes nothing back ("actually", "instead", "hold on", "changed my mind", "вместо");
+the first sentence that says yes decides, and a reservation in it ("but", "though", "unless", "но") makes the yes
+conditional, so not an acceptance — while "Yes, please proceed... but could I also get a coupon?" is one (the
+reservation is about something else). `solvi.agents.accepts(text)` is the test; `accepted_proposals(conversation,
+roles)` gives the pairs. Narrow by design: "yes, but change the address" is not a yes, and a user who accepts in
+other words is asked again. The allowed decision's
+evidence quotes the proposal and the acceptance (checked literally at their offsets, replayable); the refusal's reason
+says what was missing. It checks the user's words, not the choice: a wrong variant the user approves is approved.
+
+**Back into the conversation.** A refused call has to reach the model, or the agent stalls or repeats it.
+`d.advice()` is `d.message()` plus what to do next for each failed check — propose the call and wait for the user's
+yes, use the value as it was written, do not repeat a call made, follow a policy's reason or tell the user what cannot
+be done, wait for a person — and `d.feedback()` gives the messages to append to the model's history: for a refused
+tool call (one with an id) the tool's answer, `{"role": "tool", "tool_call_id", "name", "content": advice}`; for a
+refused *reply* — the agent's own text, checked as a call without an id of a tool you declared for it
+(`guard.declare("respond", schema={...})`), and not sent — a note `{"role": "user", "content": "[solvi guard: this note
+is not from the user] Your last message was not sent — the user has not seen it: ..."}` that quotes the draft, says why
+and what to do, and asks the model not to mention it (`reply_role="system"` or `"developer"` where your API takes one
+mid-conversation). The draft itself is not added to the history: the user never saw it.
+
+Measured on τ-bench retail (30 test tasks, one run each, `openai/gpt-oss-120b` as the agent and a simulated customer):
+a guarded agent whose hand-written confirmation code — a yes detector, seven policies relating a call to the confirmed
+messages, a wrapper listing the checks in the tool descriptions and a note for refused replies, about 110 lines —
+was replaced by `require_confirmation` (its matchers wrapping the app's own "what is this item called" helpers),
+`described` and `feedback()` solved 14 tasks with 13 changes not in the gold actions (15 / 14 with a first acceptance
+test that refused any "but" in the message), against 17 / 15 for the hand-written guard and 18 / 14 for the agent
+without a guard. One run of 30 with a simulated customer cannot tell these apart (the arms differ on about 10 tasks),
+but the primitive did not win the solved count back: it checks the user's yes, and most wrong changes there are wrong
+choices the customer approves. All 435 decisions replay.
+
 
 **The authorizer.** Policies are code; whether the user asked for *this* call is a judgement. `guard.make_authorizer(decider)`
 adds a decider's yes / no question — "does the conversation authorize this tool call — did the user ask for this action,

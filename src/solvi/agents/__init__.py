@@ -12,7 +12,9 @@ plus needs_approval for escalations); `solvi serve --guard catalog.py:guard --up
 MCP server (solvi.agents.mcp)."""
 from .guard import (AUTHORIZE_TASK, VERDICTS, Guard, GuardDecision, Session, Tool, ToolCall, arguments_model,
                     conversation, messages, model_from_json_schema, same_url, url_parts)
+from .confirm import accepted_proposals, accepts
 from .intents import INTENTS
 
 __all__ = ["AUTHORIZE_TASK", "INTENTS", "VERDICTS", "Guard", "GuardDecision", "Session", "Tool", "ToolCall",
-           "arguments_model", "conversation", "messages", "model_from_json_schema", "same_url", "url_parts"]
+           "accepted_proposals", "accepts", "arguments_model", "conversation", "messages", "model_from_json_schema",
+           "same_url", "url_parts"]
