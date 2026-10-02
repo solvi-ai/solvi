@@ -43,6 +43,6 @@ def which(sleep_debt):
 
 
 QUESTIONS = [
-    Question("coffee", "Have a coffee now?", Answer.yes_no(), checkpoints=["not_too_late"]),
+    Question("coffee", "Have a coffee now?", Answer.yes_no(), requires=["not_too_late"]),
     Question("which", "Which one?", Answer.choice(["espresso", "flat white", "decaf"])),
 ]

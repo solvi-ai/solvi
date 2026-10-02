@@ -12,7 +12,7 @@ import re
 from datetime import datetime
 
 from solvi import Answer, Catalog, Question, Quote
-from solvi.rules import RuleList
+from solvi.rulelist import RuleList
 
 cat = Catalog()
 INTENTS = ["refund", "technical_help", "billing_question", "information", "cancellation", "other"]
@@ -204,9 +204,9 @@ QUESTIONS = [
     Question("urgent", "Is there time pressure?", Answer.yes_no()),
     Question("refund_requested", "Does the customer ask for money back?", Answer.yes_no()),
     Question("priority", "Priority", Answer.ordinal(["low", "normal", "high"]),
-             checkpoints=["no_legal_threat", "no_chargeback_threat", "vip_sla_ok"]),
+             requires=["no_legal_threat", "no_chargeback_threat", "vip_sla_ok"]),
     Question("route", "Which queue?", Answer.choice(["billing", "tech_support", "retention", "legal", "general"]),
-             checkpoints=["no_legal_threat"]),
+             requires=["no_legal_threat"]),
 ]
 
 

@@ -68,7 +68,7 @@ def move_to_shade(heat_stress, outdoors):
 
 
 QUESTIONS = [
-    Question("water", "Water today?", Answer.yes_no(), checkpoints=["drains"]),
-    Question("amount", "How much?", Answer.choice(["none", "sip", "soak"]), checkpoints=["drains"]),
+    Question("water", "Water today?", Answer.yes_no(), requires=["drains"]),
+    Question("amount", "How much?", Answer.choice(["none", "sip", "soak"]), requires=["drains"]),
     Question("move_to_shade", "Move it to the shade?", Answer.yes_no()),
 ]

@@ -106,7 +106,7 @@ def action(impossible_travel, new_device, failed_spike_pct, event):
 
 QUESTIONS = [
     Question("suspicious", "Is this login suspicious?", Answer.yes_no(),
-             checkpoints=["admin_travel_plausible", "ip_not_denylisted"]),
+             requires=["admin_travel_plausible", "ip_not_denylisted"]),
     Question("action", "What should happen to the session?", Answer.choice(["allow", "require_mfa", "lock_account"]),
-             checkpoints=["admin_travel_plausible", "ip_not_denylisted"]),
+             requires=["admin_travel_plausible", "ip_not_denylisted"]),
 ]

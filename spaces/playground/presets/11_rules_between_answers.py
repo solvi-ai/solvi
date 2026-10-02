@@ -1,7 +1,7 @@
 """Rules between answers: a content guard whose learned verdict is kept consistent by constraints (solvi 0.3+, example 11).
 
 `harm` is a multi-label answer from plain rules (which risks the text carries). `verdict` (allow < review < block, an ordinal
-answer) has no rule: `setup(system)` learns it with fit_fast from only 8 noisy labelled texts, so the head is weak. Two
+answer) has no rule: `setup(system)` learns it with fit from only 8 noisy labelled texts, so the head is weak. Two
 constraints tie the answers together: a prompt injection is always blocked, and a text with no harm is allowed. When the weak
 head contradicts them, joint decoding picks the most probable combination that satisfies every constraint and the reason says
 "changed from ... to satisfy ...". The Audit panel shows it as a "constraint repair"; `feasible` says whether the final
@@ -74,4 +74,4 @@ def labelled(rng):
 def setup(system):
     """optional hook, run once per code version: here, learn the verdict from 8 examples (a deliberately weak head)"""
     rng = random.Random(3)
-    system.fit_fast("verdict", [labelled(rng) for _ in range(8)])
+    system.fit("verdict", [labelled(rng) for _ in range(8)], select=False)   # every fact, as weak as it gets

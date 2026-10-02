@@ -192,7 +192,7 @@ def freeze(counterparty_screening):
 
 CHECK = ["customer_not_sanctioned"]
 QUESTIONS = [
-    Question("risk", "Customer risk level", Answer.choice(["low", "medium", "high"]), checkpoints=CHECK),
-    Question("file_sar", "File a suspicious activity report?", Answer.yes_no(), checkpoints=CHECK),
-    Question("freeze", "Freeze the account?", Answer.yes_no(), checkpoints=CHECK),
+    Question("risk", "Customer risk level", Answer.choice(["low", "medium", "high"]), requires=CHECK),
+    Question("file_sar", "File a suspicious activity report?", Answer.yes_no(), requires=CHECK),
+    Question("freeze", "Freeze the account?", Answer.yes_no(), requires=CHECK),
 ]

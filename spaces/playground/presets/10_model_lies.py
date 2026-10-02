@@ -130,7 +130,7 @@ def pay_fast(urgent):
 
 
 QUESTIONS = [
-    Question("approve", "Approve the claim (total within the limit)?", Answer.yes_no(), checkpoints=["amount_positive"]),
+    Question("approve", "Approve the claim (total within the limit)?", Answer.yes_no(), requires=["amount_positive"]),
     Question("category", "Expense category", Answer.choice(CATEGORIES), min_confidence=0.5),
     Question("pay_fast", "Pay out within 24 hours?", Answer.yes_no(), min_confidence=0.7),
 ]

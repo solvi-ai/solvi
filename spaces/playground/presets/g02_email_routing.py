@@ -9,7 +9,7 @@ import random
 import re
 
 from solvi import Answer, Catalog, Question, Quote
-from solvi.rules import RuleList, literals
+from solvi.rulelist import RuleList, literals
 
 cat = Catalog()
 TEAMS = ["billing", "technical", "sales", "security", "hr"]
@@ -117,9 +117,9 @@ def needs_human(clear_winner, payment_change_ask, credential_ask, sender_kind):
 
 
 QUESTIONS = [
-    Question("team", "Which team handles this email?", Answer.choice(TEAMS), checkpoints=["sender_not_lookalike"]),
+    Question("team", "Which team handles this email?", Answer.choice(TEAMS), requires=["sender_not_lookalike"]),
     Question("needs_human", "Does a person need to look before it is routed?", Answer.yes_no(),
-             checkpoints=["sender_not_lookalike"]),
+             requires=["sender_not_lookalike"]),
 ]
 
 

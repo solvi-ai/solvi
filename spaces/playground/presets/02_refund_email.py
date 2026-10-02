@@ -83,6 +83,6 @@ def tone(doc):
 
 
 QUESTIONS = [
-    Question("refund", "Approve the refund?", Answer.yes_no(), checkpoints=["within_30_days"]),
+    Question("refund", "Approve the refund?", Answer.yes_no(), requires=["within_30_days"]),
     Question("tone", "Tone of the reply?", Answer.choice(["friendly", "apologetic"])),
 ]

@@ -72,6 +72,6 @@ def needs_cosigner(credit_score, years_employed):
 
 QUESTIONS = [
     Question("preapprove", "Pre-approve the loan?", Answer.choice(["approve", "refer", "decline"]),
-             checkpoints=["adult", "income_positive"]),
-    Question("needs_cosigner", "Ask for a co-signer?", Answer.yes_no(), checkpoints=["adult"]),
+             requires=["adult", "income_positive"]),
+    Question("needs_cosigner", "Ask for a co-signer?", Answer.yes_no(), requires=["adult"]),
 ]

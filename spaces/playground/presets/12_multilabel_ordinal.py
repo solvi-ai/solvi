@@ -2,7 +2,7 @@
 
 - `tags` is an Answer.multi: any subset of the options, returned as a tuple in option order (empty = no tag). Here plain
   keyword rules give it, so every tag cites the words that triggered it.
-- `priority` is an Answer.ordinal: low < normal < high < urgent. It has no rule; `setup(system)` learns it with fit_fast from
+- `priority` is an Answer.ordinal: low < normal < high < urgent. It has no rule; `setup(system)` learns it with fit from
   60 synthetic tickets in a few milliseconds. An ordinal head answers with the MEDIAN of its distribution, not the most likely
   level, so a split between "normal" and "urgent" gives "high" instead of a jump. The Audit panel shows the probabilities.
 - A constraint ties the two: an outage is never low or normal priority. If the learned priority breaks it, joint decoding
@@ -70,5 +70,5 @@ def synthetic(rng):
 def setup(system):
     """optional hook, run once per code version: learn the priority from 60 labelled tickets"""
     rng = random.Random(7)
-    system.fit_fast("priority", [synthetic(rng) for _ in range(60)],
-                    features=["n_tags", "is_outage", "tier_rank", "hours_waiting"])
+    system.fit("priority", [synthetic(rng) for _ in range(60)],
+               features=["n_tags", "is_outage", "tier_rank", "hours_waiting"])

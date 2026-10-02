@@ -73,7 +73,7 @@ def suggest_window(outdoor_helps, window_closed, deviation):
 
 
 QUESTIONS = [
-    Question("mode", "Heat, cool or off?", Answer.choice(["heat", "cool", "off"]), checkpoints=["air_safe"]),
-    Question("fan", "Run the fan?", Answer.yes_no(), checkpoints=["air_safe"]),
+    Question("mode", "Heat, cool or off?", Answer.choice(["heat", "cool", "off"]), requires=["air_safe"]),
+    Question("fan", "Run the fan?", Answer.yes_no(), requires=["air_safe"]),
     Question("suggest_window", "Suggest opening a window instead?", Answer.yes_no()),
 ]
