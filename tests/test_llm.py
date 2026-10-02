@@ -141,7 +141,16 @@ def test_an_invalid_reply_escalates_and_is_never_guessed(reply, why):
     m = model(FakeLLM(reply=reply))
     d = m.decision("team", "Which team?", "email", TEAMS).decide("I was charged twice")
     assert d.escalate and d.escalate.startswith("model escalated: invalid LLM output") and why in d.escalate
-    assert d.conf <= 0.5 + 1e-9                                  # uniform: nothing proposed
+    assert d.value is None and d.probs == {} and d.conf == 0.0     # nothing proposed: no value, no probabilities
+
+
+def test_a_cut_off_yes_no_reply_has_no_value_rather_than_the_first_option():
+    """Uniform logits used to read as the first option: a cut-off reply to a yes/no question came back value True with
+    p(yes) 0.5, which code reading the value (or p >= 0.5) took for a "yes"."""
+    def cut(req, timeout=None):
+        return io.BytesIO(json.dumps({"choices": [{"message": {"content": '{"answer": "y'}, "finish_reason": "length"}]}).encode())
+    d = llm("http://llm.example/v1", "m", opener=cut).decision("same", "Same product?", "pair", bool).decide("a | b")
+    assert d.escalate and "cut off" in d.escalate and d.value is None and d.probs == {}
 
 
 class Shapeless(FakeLLM):
@@ -165,7 +174,7 @@ class Shapeless(FakeLLM):
 def test_a_200_response_of_an_unexpected_shape_escalates_instead_of_raising(shape, why):
     d = model(Shapeless(shape)).decision("team", "Which team?", "email", TEAMS).decide("I was charged twice")
     assert d.escalate and d.escalate.startswith("model escalated: invalid LLM output") and why in d.escalate
-    assert d.conf <= 0.5 + 1e-9
+    assert d.value is None and d.conf == 0.0
 
 
 def test_a_usage_or_logprobs_field_of_an_unexpected_shape_does_not_stop_the_answer():

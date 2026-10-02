@@ -31,7 +31,8 @@ letter case; what is recorded is the text's own spelling). A
 quote that is not in the text escalates when the question asks for evidence; otherwise it is dropped (the answer stands,
 `extra["llm"]["quote_dropped"]` records it); a span answer not in the text escalates, its passage in
 `extra["llm"]["rejected"]`. An invalid reply, a refusal, a cut-off reply or a server that does not answer
-(after `retries`) escalates — "model escalated: invalid LLM output — ..." — and is never turned into a guess. The
+(after `retries`) escalates — "model escalated: invalid LLM output — ..." — and is never turned into a guess: the
+decision has no value (None), no probabilities and confidence 0. The
 probabilities become the decider's logits (log p), so everything built on a DecideModel works unchanged: act_guard /
 conformal / calibrate_for on your labelled examples (on the confidence: an LLM gives no act signal), fit / teach / adapt,
 Cascade / Vote / Route, the audit and the trace.
