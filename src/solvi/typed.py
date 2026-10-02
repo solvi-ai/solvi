@@ -649,7 +649,8 @@ def answer_type_of(t, ordinal=False):
         return Answer.multi(vals)
     if ordinal:
         return Answer.ordinal(vals)
-    return Answer.yes_no() if sorted(vals) == ["no", "yes"] else Answer.choice(vals)
+    yes_no = len(vals) == 2 and all(isinstance(v, str) for v in vals) and set(vals) == {"yes", "no"}   # values of mixed
+    return Answer.yes_no() if yes_no else Answer.choice(vals)                                          # types do not sort
 
 
 def check_answer(rule, q):

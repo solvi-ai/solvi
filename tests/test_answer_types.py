@@ -181,3 +181,29 @@ def test_a_constraint_with_a_wrong_name_a_duplicate_or_an_exception_is_not_silen
     assert not res.feasible and res.violations == ["together"]
     assert all("constraint together raised AttributeError: 'str' object has no attribute 'no_such_attribute'" in r.why
                for r in res.results.values())
+
+
+def test_answer_factories_refuse_what_they_would_ignore_or_crash_on():
+    """estimate(lo=0, hi=10) returned an estimate with no bins; estimate([0, 5], lo=1, hi=2, step=1) ignored three
+    keywords; from_type(Literal[1, "a"]) raised TypeError: '<' not supported; choice([]) and duplicates were accepted."""
+    import enum
+    from typing import Literal
+    with pytest.raises(ValueError, match="needs step="):
+        Answer.estimate(lo=0, hi=10)
+    with pytest.raises(ValueError, match="not both"):
+        Answer.estimate([0, 5], lo=1, hi=2, step=1)
+    with pytest.raises(ValueError, match="lo < hi"):
+        Answer.estimate(lo=10, hi=0, step=1)
+    assert Answer.estimate(lo=0, hi=10, step=5).bins == [0, 5, 10]
+    with pytest.raises(ValueError, match="at least one option"):
+        Answer.choice([])
+    with pytest.raises(ValueError, match="'a' is given twice"):
+        Answer.multi(["a", "b", "a"])
+    with pytest.raises(ValueError, match="not the string"):
+        Answer.choice("ab")
+
+    class Mixed(enum.Enum):
+        ONE = 1
+        BEE = "b"
+    assert Answer.from_type(Literal[1, "a"]).options == [1, "a"] and Answer.from_type(Mixed).options == [1, "b"]
+    assert Answer.from_type(Literal["no", "yes"]).kind == "yes_no"

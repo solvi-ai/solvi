@@ -309,9 +309,17 @@ class AnswerType(Serial):
 
 
 def _opts(options):
-    if isinstance(options, dict):
-        return list(options), dict(options)
-    return list(options), {}
+    """options (a list, or a dict {option: description}) → (options, descriptions); no options, or an option twice, raises
+    ValueError (an answer type that can never answer, or a model scoring one option twice)."""
+    if isinstance(options, (str, bytes)):
+        raise ValueError(f"options are a list or a dict of options, not the string {options!r}")
+    opts, desc = (list(options), dict(options)) if isinstance(options, dict) else (list(options), {})
+    if not opts:
+        raise ValueError("an answer type needs at least one option")
+    dup = [o for i, o in enumerate(opts) if o in opts[:i]]
+    if dup:
+        raise ValueError(f"option {dup[0]!r} is given twice")
+    return opts, desc
 
 
 def _num(x):
@@ -372,9 +380,15 @@ class Answer:
         returns a plain number (interval [x, x], confidence 1) or a distribution ({bin label or index: p}, or a list of p per
         bin); a model its probabilities over the bins as ordered options. Without bins the estimate is a plain number (rules
         only). `Estimate[0, 7, 14]` in a type hint."""
+        if bins is not None and (lo, hi, step) != (None, None, None):
+            raise ValueError("estimate takes bins, or lo=, hi= and step= — not both")
+        if bins is None and (lo is not None or hi is not None) and step is None:
+            raise ValueError("estimate with lo= and hi= needs step= (the width of a bin)")
         if bins is None and step is not None:
             if lo is None or hi is None:
                 raise ValueError("estimate with step= needs lo= and hi=")
+            if not float(step) > 0 or not hi > lo:
+                raise ValueError("estimate needs lo < hi and step > 0")
             n = int(round((hi - lo) / step))
             bins = [lo + i * step for i in range(n + 1)]
         if bins is not None:
