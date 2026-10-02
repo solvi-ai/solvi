@@ -11,7 +11,9 @@ Errors (a decision is, or can be, wrong or impossible):
                         read it, through any fact, and the question does not list it in `checkpoints`): when the check
                         fails, the question is answered as if it had passed
   then_unknown / then_bad_answer   `then=` names no question / an answer that is not one of the question's options
-  cycle                 facts that need each other: none of them can be computed unless one is given
+  cycle                 facts that need each other: none of them can be computed unless one is given (facts derived
+                        from each other, each with a producer outside the loop, are a cycle for the deterministic
+                        strategist only; with System(strategist=...) they are the note `mutual_producers`)
   unanswerable          a question no input can answer (its flow needs a fact nothing can compute; a span / rank /
                         estimate question without a rule — a learned head cannot answer it; a missing checkpoint)
   type_conflict         a producer's return type that its consumer cannot read; a System(inputs=...) field that a typed
@@ -47,9 +49,12 @@ Warnings:
                         for None and abstain, or declare the default in System(inputs=...)); `# solvi: ok` on the line
                         accepts it
 Notes (never fail):
+  mutual_producers      facts derived from each other (net from gross and gross from net), each with a producer
+                        outside the loop: the system's strategist plans around it
   no_rule               a question without a rule answers only after fit / fit_fast (it abstains until then)
 
-The flows are planned with every given fact present (`solvi.strategist.given_facts`), as `solvi serve` does."""
+The flows are planned with every given fact present (`solvi.strategist.given_facts`), as `solvi serve` does, by the
+system's own strategist (System(strategist=)) — the deterministic one when none is set."""
 from __future__ import annotations
 
 import ast
@@ -130,8 +135,15 @@ def lint(obj, strict=False, max_combos=100_000):
     heads = system.heads if system is not None else {}
     rep = Report(strict=strict)
     given = given_facts(cat, questions.values())
-    in_cycle = _cycles(cat, rep)
-    flows, counted = _questions(cat, questions, heads, given, rep)
+    if system is not None:                            # planned as the system's ask plans (its strategist, if any)
+        planner = system._plan
+    else:
+        from .strategist import plan
+
+        def planner(qs, keys):
+            return plan(cat, qs, keys, heads)
+    in_cycle = _cycles(cat, rep, getattr(system, "strategist", None))
+    flows, counted = _questions(cat, questions, heads, given, rep, planner)
     _hard_checks(cat, questions, flows, rep)
     if questions:
         used = set().union(*counted.values()) if counted else set()
@@ -155,9 +167,11 @@ def lint(obj, strict=False, max_combos=100_000):
 
 
 # --- cycles
-def _cycles(cat, rep):
+def _cycles(cat, rep, strategist=None):
     """Strongly connected components of the fact graph (a part → the facts it reads) with more than one fact, or a part
-    that reads its own fact → the facts in them."""
+    that reads its own fact → the facts in them. Facts derivable from each other (net from gross, gross from net) where
+    each also has a producer that reads nothing inside the loop are a cycle only for the deterministic strategist, which
+    needs the inputs of every producer: with System(strategist=...) they are a note."""
     graph = {n: [x for x in p.inputs if x in cat.parts] for n, p in cat.parts.items()}
     index, low, stack, on, out, counter = {}, {}, [], set(), [], [0]
 
@@ -200,21 +214,48 @@ def _cycles(cat, rep):
         if len(comp) > 1 or comp[0] in graph[comp[0]]:
             comp = sorted(comp)
             found.update(comp)
-            rep.add("error", "cycle", " → ".join(comp + [comp[0]]),
-                    "these facts need each other: none of them can be computed unless one of them is given")
+            where = " → ".join(comp + [comp[0]])
+            if not _breakable(cat, set(comp)):
+                rep.add("error", "cycle", where,
+                        "these facts need each other: none of them can be computed unless one of them is given")
+            elif strategist is None:
+                rep.add("error", "cycle", where,
+                        "these facts are derived from each other; each has a producer outside the loop, but the "
+                        "deterministic strategist needs the inputs of every producer of a fact, so none of them can be "
+                        "computed — plan with System(..., strategist=solvi.strategy.ModelStrategist()), which uses the "
+                        "producers whose inputs are there")
+            else:
+                rep.add("note", "mutual_producers", where,
+                        "these facts are derived from each other; each has a producer outside the loop, which the "
+                        "system's strategist uses when its inputs are given")
     return found
 
 
+def _breakable(cat, comp):
+    """Can every fact of a loop be computed without going round it: some producer of it reads only facts outside the loop
+    or facts of the loop already settled that way?"""
+    from .strategy import alternatives
+    done, changed = set(), True
+    while changed:
+        changed = False
+        for f in comp - done:
+            if any(all(x not in comp or x in done for x in a.inputs) for a in alternatives(cat.parts[f])):
+                done.add(f)
+                changed = True
+    return done == comp
+
+
 # --- questions
-def _questions(cat, questions, heads, given, rep):
+def _questions(cat, questions, heads, given, rep, planner):
     """Plan each question with every given fact present → ({question: facts in its flow}, {question: the facts that count
-    as used}); unanswerable questions, rules reading question names, questions without a rule."""
+    as used}); unanswerable questions, rules reading question names, questions without a rule. planner(questions, given
+    facts) → Flow: the system's own (System._plan)."""
     from .core import PRIMITIVES
-    from .strategist import PlanError, plan
+    from .strategist import PlanError
     flows, counted = {}, {}
     for name, q in questions.items():
         try:
-            flow = plan(cat, [q], given, heads)
+            flow = planner([q], given)
         except PlanError as e:
             rep.add("error", "unanswerable", name, str(e))
             flows[name] = counted[name] = set()
@@ -225,7 +266,7 @@ def _questions(cat, questions, heads, given, rep):
                 and q.answer.kind in PRIMITIVES:
             # no rule, and no head can answer it: its flow (everything computable) runs for nothing — only the
             # checkpoints count as used. A question a head can answer uses everything computable: its candidate features
-            counted[name] = set(plan(cat, [replace(q, uses=list(q.checkpoints))], given, heads).per_question.get(name, ())) \
+            counted[name] = set(planner([replace(q, uses=list(q.checkpoints))], given).per_question.get(name, ())) \
                 if q.checkpoints else set()
         missing = flow.unresolved.get(name)
         if missing:

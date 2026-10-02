@@ -44,7 +44,12 @@ System(cat, questions, strategist=ModelStrategist.load("path/to/strategist-check
 
 Facts that can be derived from each other (`net` from `gross` and `gross` from `net`, each also given directly) work in
 both modes: the plan computes each fact from what is given, and a producer that would read its own fact back — through
-any other fact — is not kept as a fallback, since the flow could not run it.
+any other fact — is not kept as a fallback, since the flow could not run it. `solvi check` reports such a loop as the
+note `mutual_producers` for a System with a strategist (an error, `cycle`, only for the deterministic strategist, which
+cannot plan it).
+
+Everything that plans for a System uses its strategist, not only `ask`: `answers_of` / replay, `facts_for` and so the
+feature candidates of `fit` / `fit_fast`, `learn_order`, the input schemas of `solvi serve` and `solvi check`.
 3. **With a model** (`ModelStrategist(model, producers="equivalent")`, or `ModelStrategist.load(path)`, which implies
    `"equivalent"`): where declared costs do not settle the choice (a fact with ≥ 2 usable producers, not all with a declared
    cost), the fact becomes a **segment**: code narrows the catalog to the fact's producers and, up to 3 levels back, the

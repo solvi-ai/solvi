@@ -363,6 +363,41 @@ def test_path_confidence_follows_the_producer_that_ran_and_survives_a_ring_of_fa
     assert path_confidence(cat, res.trace, ["gross", "net"]) == 1.0            # the full catalog: net ⇄ gross
 
 
+def test_solvi_check_calls_facts_derived_from_each_other_a_cycle_only_for_the_deterministic_strategist():
+    from solvi.check import lint
+    cat, qs = _net_gross()
+    rep = lint(System(cat, qs, strategist=ModelStrategist()))
+    assert rep.ok and rep.codes() == ["mutual_producers"]
+    rep = lint(System(cat, qs))                                     # the deterministic strategist cannot plan it
+    assert "cycle" in rep.codes("error") and "ModelStrategist" in str(rep)
+    cat = Catalog()                                                 # a loop with no way in stays an error whatever plans
+
+    @cat.fn
+    def a(b): return b
+
+    @cat.fn
+    def b(a): return a
+
+    @cat.rule("q")
+    def q(a) -> bool: return True
+    assert "cycle" in lint(System(cat, [Question("q", "", None)], strategist=ModelStrategist())).codes("error")
+
+
+def test_fit_serve_and_check_plan_with_the_systems_strategist_as_ask_does():
+    from solvi.check import lint
+    from solvi.serve import question_inputs
+    cat, qs = chain()
+    s = System(cat, qs, strategist=ModelStrategist())
+    assert s.ask(ST)["ok"].answer == "approved"
+    assert {"a2", "a3"} <= set(s.facts_for(ST))                     # computed around the dead-end producer, as ask does
+    info = question_inputs(s, "ok")
+    assert "partner_feed" in info["properties"] and "partner_feed" not in info["required"]   # the dead end's input is
+    assert lint(s).ok                                                                         # optional, not required
+    det = System(*chain())
+    assert "a2" not in det.facts_for(ST)                            # the deterministic strategist: unchanged
+    assert "partner_feed" in question_inputs(det, "ok")["required"]
+
+
 # ---------------------------------------------------------------- aliases.apply keeps every declaration
 def _declared_catalog():
     from solvi import Quote

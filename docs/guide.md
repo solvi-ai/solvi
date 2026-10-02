@@ -3140,7 +3140,8 @@ Flows are planned with every given fact present. **Errors**: a hard check whose 
 whose flow never runs it (`then_not_in_flow`: the question's rule does not read it through any fact and the question does
 not list it in `checkpoints`, so when the check fails the question is answered as if it had passed — the fix is
 `checkpoints=[...]`); `then=` naming no question or an answer outside the question's options; facts that need each other
-(`cycle`); a question no input can answer (a fact nothing can compute, a missing checkpoint, a span / rank / estimate
+(`cycle`; facts derived from each other, each with a producer outside the loop, are only a note, `mutual_producers`, for
+a System with `strategist=` — the flows are planned by the system's own strategist); a question no input can answer (a fact nothing can compute, a missing checkpoint, a span / rank / estimate
 question without a rule); a producer's type its consumer cannot read, or a `System(inputs=...)` field its typed reader
 cannot read (`type_conflict`); a producer's `validate` that requires an argument no producer of its fact takes as an
 input (`validate_reads_unknown`: it cannot run, so every output of that producer would be rejected — `System(...)`

@@ -452,17 +452,33 @@ class System:
                 f"{k!r} (the catalog's {self.catalog.parts[k].kind} of that name)" for k in clash)
                 + ": a given fact cannot stand in for a part of the catalog — rename the input key or the part")
         qs = [self.questions[n] for n in (names or self.questions)]
-        if self.cost_policy is not None:              # costs from measurements (see MeasuredCosts)
-            c, src = self.cost_policy.costs(self.costs, _producers(self.catalog))
-            flow = self.strategist.plan(self.catalog, qs, init_state.keys(), self.heads, costs=c)
-            _why_costs(self.catalog, flow, init_state.keys(), c, src, self.cost_policy.frozen is not None)
-        else:
-            flow = (plan if self.strategist is None else self.strategist.plan)(self.catalog, qs, init_state.keys(),
-                                                                               self.heads)
+        flow = self._plan(qs, init_state.keys(), why_costs=True)
         mode = self.order if order is None else order
         om = None if mode == "default" else (self.order_model if mode == "learned" else mode)
         policy = self.producer_policy if self.producers == "learned" else None
         return _Prepared(init_state, known, rejected, qs, flow, om, policy)
+
+    def _plan(self, questions, init_keys, why_costs=False):
+        """The flow of these questions on these given facts, planned as `ask` plans it: by System(strategist=) (the
+        deterministic solvi.strategist.plan when none is set), with measured costs under System(costs="measured").
+        Everything that plans for this system goes through here — ask, answers_of, facts_for / fit, learn_order, the input
+        schemas of `solvi serve` and `solvi check` — so they all see the same flow. why_costs: note in the plan record
+        which cost decided each choice (ask)."""
+        if self.cost_policy is not None:              # costs from measurements (see MeasuredCosts)
+            c, src = self.cost_policy.costs(self.costs, _producers(self.catalog))
+            flow = self.strategist.plan(self.catalog, questions, init_keys, self.heads, costs=c)
+            if why_costs:
+                _why_costs(self.catalog, flow, init_keys, c, src, self.cost_policy.frozen is not None)
+            return flow
+        return (plan if self.strategist is None else self.strategist.plan)(self.catalog, questions, init_keys, self.heads)
+
+    def _computable(self, init_keys):
+        """The facts this system's strategist can compute from these given facts (with a strategist set, a fact needs one
+        usable producer; the deterministic strategist needs the inputs of every alternative)."""
+        if self.strategist is None:
+            return computable(self.catalog, init_keys)
+        from .strategy import reachable
+        return reachable(self.catalog, init_keys)
 
     def _respond(self, p, trace, vals, t0, store):
         """What ask and aask share after running: the trace's plan record and fingerprint, costs, answers, safeguards,
@@ -524,7 +540,7 @@ class System:
         import copy
         qs = [self.questions[n] for n in names]
         if flow is None:
-            flow = (plan if self.strategist is None else self.strategist.plan)(self.catalog, qs, trace.init.keys(), self.heads)
+            flow = self._plan(qs, trace.init.keys())
         t = copy.copy(trace)
         t.records = list(trace.records)                # an answer head appends its record: to the copy
         vals = dict(trace.init)
@@ -729,7 +745,7 @@ class System:
         if features is not None:
             self.order_model.features = list(features)
         for st in examples or ():
-            flow = plan(self.catalog, list(self.questions.values()), st.keys(), self.heads)
+            flow = self._plan(list(self.questions.values()), st.keys())
             names = {s.part.name: s for s in flow.steps}
             keep = set()
 
@@ -836,12 +852,12 @@ class System:
 
     # --- task-specific training
     def facts_for(self, init_state):
-        """All computable facts (for head training): a "compute everything" flow without rules."""
+        """All computable facts (for head training): a "compute everything" flow without rules, planned by the system's
+        strategist (so a fact `ask` computes around a dead-end producer is a feature candidate too)."""
         from .core import Question
-        from .strategist import plan as _plan
         init_state = self._state(init_state)[0]
         q = Question("__all__", "", None)
-        flow = _plan(self.catalog, [q], init_state.keys())
+        flow = self._plan([q], init_state.keys())
         flow.steps = [s for s in flow.steps if s.part.kind != "rule"]
         _, vals = execute(self.catalog, flow, init_state, early_exit=False)
         return vals
@@ -853,7 +869,7 @@ class System:
         rows = [self.facts_for(s) for s, _ in examples]
         ans = [q.answer.normalize(a) for _, a in examples]
         keys = set(self._state(examples[0][0])[0].keys())
-        cands = sorted(f for f in computable(self.catalog, keys) - keys)
+        cands = sorted(f for f in self._computable(keys) - keys)
         from .heads import Head
         if q.answer.kind == "multi":
             self.heads[question] = MultiHead(q.answer.options, lambda: Head(["yes", "no"]),
@@ -871,7 +887,7 @@ class System:
         import warnings
         from collections import Counter
         if not cands:
-            have, blocked = computable(self.catalog, keys), []
+            have, blocked = self._computable(keys), []
             for p in self.catalog.parts.values():
                 missing = [x for x in p.inputs if x not in have]
                 if p.name in have or not missing:
@@ -912,7 +928,7 @@ class System:
         explicit = features is not None
         if features is None:
             keys = set(self._state(examples[0][0])[0].keys())
-            features = sorted(f for f in computable(self.catalog, keys) - keys)
+            features = sorted(f for f in self._computable(keys) - keys)
         ans = [q.answer.normalize(a) for _, a in examples]
         if q.answer.kind == "multi":
             head = MultiHead(q.answer.options, lambda: FastHead(["yes", "no"], lam=lam, refit=refit, refit_until=refit_until),

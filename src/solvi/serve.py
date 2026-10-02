@@ -66,12 +66,13 @@ REF = "#/components/schemas/{model}"          # where the OpenAPI document keeps
 def question_inputs(system, name):
     """The given facts a question's flow reads → {"properties": [fact], "required": [fact]}. Planned with every given fact
     of the catalog present; a fact is required when the question cannot be answered without it (the strategist leaves it
-    unresolved), so the inputs of alternative producers are optional."""
-    from .strategist import PlanError, given_facts, plan
+    unresolved), so the inputs of alternative producers are optional. Planned by the system's own strategist
+    (System(strategist=)), as `ask` plans."""
+    from .strategist import PlanError, given_facts
     cat, q = system.catalog, system.questions[name]
     given = given_facts(cat, system.questions.values())
     try:
-        flow = plan(cat, [q], given, system.heads)
+        flow = system._plan([q], given)
     except PlanError:
         return {"properties": [], "required": []}
     used = {x for s in flow.steps for x in s.part.inputs if x in given}
@@ -82,7 +83,7 @@ def question_inputs(system, name):
     required = []
     for f in sorted(used):
         try:
-            if plan(cat, [q], given - {f}, system.heads).unresolved.get(name):
+            if system._plan([q], given - {f}).unresolved.get(name):
                 required.append(f)
         except PlanError:
             pass
