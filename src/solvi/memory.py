@@ -231,9 +231,6 @@ class CorrectionMemory:
                 self._F = np.array([c.features for c in self.cases], float) if self.cases else np.zeros((0, 0))
             return self.cases, self._F
 
-    def _matrix(self):
-        return self._snapshot()[1]
-
     def _distances(self, f, ws, cases=None, F=None):
         if cases is None:
             cases, F = self._snapshot()
