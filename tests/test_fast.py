@@ -2,9 +2,10 @@
 import random
 
 import numpy as np
+import pytest
 
 from examples_loader import load
-from solvi import System
+from solvi import Answer, Catalog, Question, System
 from solvi.fast import FastHead
 
 S = load("02_shop_order")
@@ -210,3 +211,45 @@ def test_a_candidate_head_learns_a_choice_among_candidates_that_change():
             CandidateHead(["distance"]).fit(bad)
     with pytest.raises(ValueError):
         head.choose([])
+
+
+def test_a_head_left_without_features_warns_with_the_reason():
+    """A head with no features answers the same for every input, with status ok. It used to be returned silently:
+    when a part's parameter with a default value was read as a fact nobody gives (so no fact could be computed), and
+    when fit's greedy selection kept nothing on an imbalanced question."""
+    cat = Catalog()
+
+    def mk(nm):
+        def fn(facts, _nm=nm):
+            return facts[_nm]
+        fn.__name__ = nm
+        return fn
+    cat.fn(mk("a"))
+    cat.fn(mk("b"))
+    s = System(cat, [Question("q", "?", Answer.yes_no())])
+    ex = [({"facts": {"a": float(i % 7), "b": float(i % 3)}}, "yes" if i % 7 > 3 else "no") for i in range(200)]
+    for fit in (s.fit_fast, s.fit):
+        with pytest.warns(UserWarning, match=r"the head has no features.*no fact can be computed from the examples' "
+                                             r"inputs \['facts'\].*a needs \['_nm'\].*a parameter with a default value"):
+            assert fit("q", ex).features == []
+    # an imbalanced question: no single fact beats the most frequent answer, so fit's greedy selection keeps nothing
+    cat2 = Catalog()
+
+    @cat2.fn
+    def half(x):
+        return x / 2
+
+    @cat2.fn
+    def third(y):
+        return y / 3
+    rng = random.Random(0)
+    rows = [{"x": rng.random(), "y": rng.random()} for _ in range(300)]
+    ex2 = [(r, "yes" if r["x"] > 0.6 and r["y"] > 0.6 else "no") for r in rows]       # 16% yes, needs both facts
+    s2 = System(cat2, [Question("q", "?", Answer.yes_no())])
+    with pytest.warns(UserWarning, match=r"fit\('q'\): the head has no features.*none of the 2 facts raised.*"
+                                         r"most frequent answer is 8\d% of the examples.*fit_fast keeps every feature"):
+        assert s2.fit("q", ex2).features == []
+    import warnings
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")                                               # a head with features: silent
+        assert s2.fit_fast("q", ex2).features == ["half", "third"]

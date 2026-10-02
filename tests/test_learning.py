@@ -302,3 +302,58 @@ def test_open_answers_are_left_out_of_the_loop(tmp_path):
         loop_of(s, parts=["route"])
     with pytest.raises(ValueError, match="nothing to learn"):
         loop_of(s)                                # chosen automatically: open questions are skipped
+
+
+class MarginHook:
+    """An adapter hook that changes something in the part's fingerprint; with state / restore it can be carried over."""
+
+    def __init__(self):
+        self.parts = []
+
+    def __call__(self, part, examples):
+        self.parts.append(part)
+        part.min_margin = 0.01
+        return {"set": "min_margin", "n": len(examples)}
+
+    def state(self, part):
+        return {"min_margin": part.min_margin}
+
+    def restore(self, part, state):
+        part.min_margin = state["min_margin"]
+
+
+def test_the_adapter_rung_runs_on_the_shadow_and_reaches_the_live_part_through_state_and_restore(tmp_path):
+    part, s, store = build(tmp_path)
+    hook = MarginHook()
+    loop = loop_of(s, ladder={"fit_below": 3, "memory_below": 6, "adapter": hook}, gates={"max_change": 0.95})
+    stream(s, 10)
+    rep = loop.run()
+    assert rep.promoted and rep.questions["route"]["rung"] == "adapter"
+    assert rep.questions["route"]["applied"]["adapter"]["set"] == "min_margin"
+    assert hook.parts and all(p is not part for p in hook.parts)        # the hook saw the shadow part only
+    assert part.min_margin == 0.01 and part.correction_memory is not None and loop.current == 1
+    loop.rollback(0)
+    assert part.min_margin != 0.01 and part.correction_memory is None and part.adaptation is None and loop.current == 0
+
+
+def test_a_promotion_that_cannot_be_carried_over_leaves_the_live_parts_as_they_were(tmp_path):
+    """An adapter hook without state / restore changed the shadow part: the candidate's fingerprint cannot be reached on
+    the live part. run() used to raise with the adaptation, thresholds and memory already copied onto the live part, no
+    record of the update and no version in force."""
+    part, s, store = build(tmp_path)
+
+    def hook(p, examples):
+        p.min_margin = 0.01
+        return {"set": "min_margin"}
+    loop = loop_of(s, ladder={"fit_below": 3, "memory_below": 6, "adapter": hook}, gates={"max_change": 0.95})
+    stream(s, 10)
+    fp0, base = part.fingerprint(), accuracy(s)
+    with pytest.raises(RuntimeError, match="put back as they were"):
+        loop.run()
+    assert part.fingerprint() == fp0 and part.adaptation is None and part.correction_memory is None
+    assert accuracy(s) == base and loop.current == 0                    # the answers did not change
+    rec = loop.history()[-1]
+    assert rec["action"] == "update" and not rec["promoted"] and rec["version"] is None
+    assert rec["gates"]["promotion"] == {"ok": False, "restored": True, "why": rec["gates"]["promotion"]["why"]}
+    assert "did not give its fingerprint" in rec["gates"]["promotion"]["why"]
+    assert [v["version"] for v in loop.versions()] == [0] and store.verify()["ok"]

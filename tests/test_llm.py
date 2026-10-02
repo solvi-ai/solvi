@@ -144,6 +144,38 @@ def test_an_invalid_reply_escalates_and_is_never_guessed(reply, why):
     assert d.conf <= 0.5 + 1e-9                                  # uniform: nothing proposed
 
 
+class Shapeless(FakeLLM):
+    """A 200 whose JSON is not a chat completion: `shape(completion)` → what the server sends instead."""
+
+    def __init__(self, shape):
+        super().__init__()
+        self.shape = shape
+
+    def __call__(self, req, timeout=None):
+        return io.BytesIO(json.dumps(self.shape(json.loads(super().__call__(req, timeout).read().decode()))).encode())
+
+
+@pytest.mark.parametrize("shape, why", [
+    (lambda c: [c], "not a JSON object but a list"),
+    (lambda c: "ok", "not a JSON object but a str"),
+    (lambda c: {**c, "choices": "none"}, "no choices"),
+    (lambda c: {**c, "choices": {"0": c["choices"][0]}}, "no choices"),
+    (lambda c: {**c, "choices": [{**c["choices"][0], "message": "text"}]}, "message is not an object"),
+])
+def test_a_200_response_of_an_unexpected_shape_escalates_instead_of_raising(shape, why):
+    d = model(Shapeless(shape)).decision("team", "Which team?", "email", TEAMS).decide("I was charged twice")
+    assert d.escalate and d.escalate.startswith("model escalated: invalid LLM output") and why in d.escalate
+    assert d.conf <= 0.5 + 1e-9
+
+
+def test_a_usage_or_logprobs_field_of_an_unexpected_shape_does_not_stop_the_answer():
+    def odd(c):
+        return {**c, "usage": "n/a", "choices": [{**c["choices"][0], "logprobs": {"content": [1, "x"]}}]}
+    m = model(Shapeless(odd))
+    d = m.decision("team", "Which team?", "email", TEAMS).decide("I was charged twice")
+    assert d.value == "billing" and d.escalate is None and m.scorer.usage["prompt_tokens"] == 0
+
+
 def test_a_catalog_answer_abstains_on_an_invalid_reply_and_the_audit_says_why():
     m = model(FakeLLM(reply='{"answer": "legal", "confidence": 0.99, "quote": ""}'))
     cat = Catalog()

@@ -272,3 +272,43 @@ def test_leave_one_out_leaves_out_the_cases_twins():
         mem.add(t, y, by="bob")               # the same correction stored twice: a twin, not independent evidence
     got = mem.calibrate(risk=0.3)
     assert got["proposed"] == 0.0                # each case's only neighbour is its twin: nothing left to propose
+
+
+def test_calibrate_when_one_input_was_corrected_twice_says_so_instead_of_raising():
+    """Every stored case has the same features: each is left out with its twins, so nothing is proposed and no case has
+    a nearest other case. The note used to format those missing distances (TypeError), after the threshold and the
+    guarantee had already been set."""
+    _, _, part, _ = setup()
+    mem = part.memory()
+    t = texts("billing", 1)[0]
+    mem.add(t, "shipping", stored_id="a")
+    mem.add(t, "shipping", stored_id="b")
+    got = mem.calibrate(risk=0.05)
+    assert got["min_strength"] == float("inf") and got["proposed"] == 0.0
+    assert got["nearest"] == {"min": None, "median": None, "max": None}
+    assert "every stored case has the same features" in got["note"] and "radius" not in got["note"]
+    assert mem.propose(t).label is None
+
+
+def test_a_memory_file_of_another_question_is_refused(tmp_path):
+    m, _, part, _ = setup()
+    mem = part.memory()
+    for i, t in enumerate(texts("billing", 3)):
+        mem.add(t, "shipping", stored_id=f"s{i}")
+    f = mem.save(tmp_path / "m.json")
+    assert CorrectionMemory(part).load(f).fingerprint() == mem.fingerprint()     # the same question: as before
+    product = m.decision("product", "Which product?", "email", ["phone", "laptop", "tablet"], option_order="given")
+    with pytest.raises(ValueError, match="another question"):                    # as many options, the same checkpoint
+        CorrectionMemory(product).load(f)
+    urgent = m.decision("urgent", "Urgent?", "email", ["yes", "no"], option_order="given")
+    with pytest.raises(ValueError, match="another question"):
+        CorrectionMemory(urgent).load(f)
+    # strict=False accepts another checkpoint and question, never a label the question cannot give
+    with pytest.raises(ValueError, match="not an answer of this question"):
+        CorrectionMemory(product).load(f, strict=False)
+    queue = m.decision("queue", "Which queue?", "email", TEAMS, option_order="given")
+    assert len(CorrectionMemory(queue).load(f, strict=False)) == 3
+    four = m.decision("team4", TASK, "email", TEAMS + ["sales"], option_order="given")
+    loose = four.memory(CorrectionMemory(four).load(f, strict=False))
+    with pytest.raises(ValueError, match="stored for another question"):         # not a numpy broadcast error
+        loose.propose(texts("billing", 1)[0])

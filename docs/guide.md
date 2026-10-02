@@ -1085,7 +1085,10 @@ info = team.act_guard(examples, risk=0.10)           # one guarantee for the com
   (other) 'billing'"`). The probabilities are the mean of the parts', the confidence the lowest agreeing one.
 - **Route**: `{predicate or fact name: part}` and a `default`; a predicate is a function of facts by name (its parameters
   join the route's inputs), a fact name picks its part when the fact is true. The first that holds picks; only that
-  part's model runs.
+  part's model runs. Several predicates may read the same fact (`mode == "strict"`, `mode == "stop"`). Outside a
+  catalog give the route's facts — `Facts(email=..., vip=True)` or a state with those keys, also in the examples of
+  `act_guard`: a bare text raises for a route keyed by a fact name (it would be read as the fact), as does a fact
+  that is not given.
 
 The parts must answer the same question — the same kind and options (and "not stated", rank `k`, number bins); the
 task and the facts they read may differ. A mismatch raises at construction. Combinations nest: `Cascade([small,
@@ -1212,7 +1215,8 @@ records `extra["memory"]` — `fp`, `n`, `mode`, `proposal`, `strength`, `agreem
 (`id`, `label`, `distance`, `weight`, `source`, `by`, `time`, `stored_id`); the audit prints them. The memory's
 fingerprint is part of the part's, so a replay of a decision made with another memory state reports "model changed", and
 a replay with the same state recomputes the proposal and compares it. `mem.save(path)` / `CorrectionMemory(part).load(path)`
-keep it with the checkpoint's fingerprint (another checkpoint is refused: build it again with `learn_from`);
+keep it with the checkpoint's fingerprint and the question (another checkpoint or another question is refused: build it
+again with `learn_from`);
 `mem.remove(ids)` forgets cases found to be wrong; `team.memory(False)` detaches it.
 
 ### Loading a checkpoint
@@ -1359,6 +1363,12 @@ ece(conf, correct)                    # expected calibration error; reliability(
 evaluate(system, "team", examples)    # ask on [(init_state, answer)] → accuracy, ece, coverage_at, answered, ...
 ```
 
+Equal confidences are taken or left together (an LLM that states 0.85 / 0.90 / 0.95 gives mostly ties), so the cases
+with confidence ≥ the threshold do reach the accuracy on the examples. `threshold_for` returns `None` when fewer than
+`min_n=10` examples stand at or above the threshold — one confident right answer is not a threshold. Both are empirical:
+no promise for new inputs; `solvi.calibration.ltt_threshold` and `crc_threshold` (behind `calibrate_for(method="ltt")`
+and `act_guard`) give one.
+
 [examples/13_decide_model.py](../examples/13_decide_model.py) routes support emails with a decision part: bias correction on
 60 unlabelled emails, S on 16 labelled ones, abstention, a constraint with a rule-based question, a hard check, the audit,
 `System.teach`, `calibrate_for` and a JSON ticket. [examples/15_typed_decisions.py](../examples/15_typed_decisions.py) is the
@@ -1382,12 +1392,20 @@ rep["drift"], rep["flags"], rep["why"]    # True, ["answers"], ["the answers are
 
 Without labels it tests the share answered alone, the distribution of the answers, the mean confidence and the mean act
 probability; with labels also the accuracy, and among the answers given alone the calibration error and
-`coverage_at`. A signal is flagged only when its test is significant (`alpha`, 0.01) and the change is large enough
-(`min_share`, `min_tv`, `min_shift`, ...), and `drift` needs `min_signals` of them. It takes a `Decision`, a result
-(`res["q"]`) or a dict, changes nothing and decides nothing: recalibrating or asking for labels is the caller's. Measured
-with solvi-base on support tickets whose wording and mix change at one point: with `window=100` the change is flagged 37
-decisions later, with no false flag on 200 decisions before it; `window=50` gave false flags (2–4 episodes), so keep
-the window at 100 or more.
+`coverage_at`. A signal is flagged only when its test is significant and the change is large enough
+(`min_share`, `min_tv`, `min_shift`, ...), and `drift` needs `min_signals` of them. The tests are repeated at every
+decision, so each is held to `alpha / (signals tested × horizon)`: on a stream that has not changed, the chance of a
+false flag within `horizon` decisions (1,000) is at most `alpha` (0.01). It takes a `Decision`, a `Response` with
+`question=` (`mon.observe(res, question="team")` — the act probability is read from the trace; a bare result `res["q"]`
+carries none, and the monitor warns that the act signal is then not tested) or a dict, changes nothing and decides
+nothing: recalibrating or asking for labels is the caller's. `rep["tests"]` holds each signal's numbers, its `p` and the
+`level` it had to be below; `rep["not_tested"]` says which signal could not be tested and why — the distribution of the
+answers needs each answer about 5 times in a window (rarer ones are pooled), so a question with 57 answers needs a
+window of a few hundred. Simulated on independent decisions: none of 1,200 stationary streams of 1,000 decisions was
+flagged (3 to 57 answers); with `window=100` a fall of the share answered alone from 66% to 12% is flagged about 60
+decisions later, a change of the mix of three answers from 1:1:1 to 1:8:1 about 80 decisions later (`window=50`: 40
+and 55; `window=200`: 90 and 105). Take the reference from the stream's own traffic (the default) unless your
+calibration set has the stream's mix of answers.
 
 ## Asking: System and Response
 
@@ -1624,6 +1642,10 @@ print(head.features, head.cv_acc)          # selected facts and their cross-vali
 - Features are selected greedily by 5-fold cross-validated accuracy (a feature is kept if it adds at least 1 point).
   **The selected facts become the question's flow**, so later requests compute only what the head uses.
 - The answer's `why` lists the largest feature contributions, `probs` gives all class probabilities.
+- A head left with no feature answers the same for every input; `fit` and `fit_fast` warn when that happens and say why:
+  on an imbalanced question no single fact may add a point over the most frequent answer, so the greedy selection keeps
+  nothing (`fit_fast` keeps every feature); or no fact could be computed from the examples' inputs — every parameter of
+  a part is a fact it reads, one with a default value too (`def fn(facts, _nm=nm)` waits for a fact `_nm`).
 
 ### fit_fast: learn in milliseconds, correct instantly
 
@@ -3538,12 +3560,13 @@ solvi calibrate catalog.py:system route labels.csv --risk 0.1 --conformal 0.9   
 PART is a question answered by a model decision (or the decision part's name; a `Cascade` / `Vote` / `Route` too).
 LABELS is a CSV or JSON-lines file with a `label` column and the input: the facts the part reads as columns
 (`message`), a `text` / `input` column, or else the other columns as a state; `--groups` columns are read as the group
-facts; a multi-label answer is a JSON list (or `a|b` in a CSV). It runs `part.act_guard(examples, risk=...)` (`--method
+facts; a multi-label answer is a JSON list (or `a|b` in a CSV); a CSV cell names an option that is not text by how it
+reads (`3` is the level 3 of `Scale[1, 2, 3, 4, 5]`). It runs `part.act_guard(examples, risk=...)` (`--method
 crc`, the default) or `part.calibrate_for(examples, error=..., method="ltt")`, prints the answered share, the error among
 the answered, the risk (answered alone and wrong, of all), `must_escalate_at_least` and the per-group table, and writes
 the calibration (`PART.calib.json` by default) — `part.load_calibration(path)` in the catalog applies it
 ([keeping a calibration](#keeping-a-calibration-save_calibration-load_calibration)). Exit status 1 when nothing can be
-answered alone at that risk.
+answered alone at that risk (with `--groups`: in no group).
 
 ### models: list, pull, check
 

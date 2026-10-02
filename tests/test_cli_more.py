@@ -398,6 +398,54 @@ def test_calibrate_command_groups_ltt_and_usage_errors(tmp_path, capsys):
     assert run(capsys, "calibrate", sysspec, "route", tmp_path / "nolabel.jsonl", "--out", out)[0] == 2
 
 
+def test_calibrate_with_groups_that_all_answer_alone_exits_0_and_does_not_print_everything_escalates(tmp_path, capsys):
+    d = scaffold(tmp_path, "support", with_model=True)
+    rows = [{"text": t, "domain": "a" if i % 2 else "b", "label": k} for i, (t, k) in enumerate(_labels(d))] * 5
+    jl = tmp_path / "labels.jsonl"
+    jl.write_text("\n".join(json.dumps(r) for r in rows) + "\n")
+    out = tmp_path / "g.json"
+    code, text = run(capsys, "calibrate", f"{d}/catalog.py:system", "route", jl, "--groups", "domain", "--min-group",
+                     "20", "--risk", "0.5", "--out", out)
+    # every group has its own threshold, so the rest-of-stream node is empty (threshold inf): that is not the verdict
+    nodes = dict((tuple(k), v) for k, v in json.loads(out.read_text())["groups"]["nodes"])
+    assert nodes[()]["threshold"] == {"$float": "inf"}
+    assert all(isinstance(nodes[(g,)]["threshold"], float) for g in ("a", "b"))
+    assert code == 0 and "everything escalates" not in text and "per group (below)" in text
+    # nothing can be answered alone in any group: exit 1, said so
+    code, text = run(capsys, "calibrate", f"{d}/catalog.py:system", "route", jl, "--groups", "domain", "--min-group",
+                     "20", "--risk", "0.0001", "--limit", "60", "--out", out)
+    assert code == 1 and "everything escalates" in text
+
+
+def test_calibrate_reads_csv_labels_of_integer_options(tmp_path):
+    m = model()
+    stars = m.decision("stars", "How many stars?", "email", [1, 2, 3, 4, 5], kind="score")
+    assert calibfile.label_of(stars, "3") == 3 and stars.spec.label(calibfile.label_of(stars, " 5 ")) == 5
+    code = m.decision("code", "Which code?", "email", [10, 20])
+    assert calibfile.label_of(code, "10") == 10
+    assert calibfile.label_of(code, "30") == "30"       # not an option: left as written, refused by the part
+    many = m.decision("codes", "Which codes?", "email", [10, 20, 30], kind="multi")
+    assert calibfile.label_of(many, "10|30") == [10, 30]
+    team = m.decision("team", TASK, "email", TEAMS)
+    assert calibfile.label_of(team, "billing") == "billing"
+    (tmp_path / "l.csv").write_text("email,label\nfive stars,5\none star,1\n")
+    ex = calibfile.examples_of(stars, calibfile.read_rows(str(tmp_path / "l.csv")))
+    assert [y for _, y in ex] == [5, 1]
+
+
+def test_load_calibration_without_a_guarantee_onto_a_part_made_with_escalate_below(tmp_path):
+    m = model(noise=3.0)
+    part = m.decision("team", TASK, "email", TEAMS, escalate_below=0.6)
+    part.conformal(_examples(), coverage=0.9)            # conformal sets only: the file holds no guarantee
+    f = part.save_calibration(tmp_path / "c.json")
+    assert json.loads(Path(f).read_text())["guarantee"] is None
+    fresh = m.decision("team", TASK, "email", TEAMS, escalate_below=0.6).load_calibration(f)
+    assert (fresh.escalate_below, fresh.act_threshold, fresh.guarantee) == (0.6, None, None)
+    assert fresh.conformal_set == part.conformal_set and fresh.fingerprint() == part.fingerprint()
+    other = m.decision("team", TASK, "email", TEAMS, escalate_below=0.9).load_calibration(f)
+    assert other.escalate_below == 0.6                   # the file's threshold, as saved
+
+
 def _labels(d):
     import csv
     with open(d / "labels.csv") as fh:

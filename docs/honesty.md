@@ -14,7 +14,7 @@ Run it before you publish a release of solvi, a new decider checkpoint, or a cat
 |---|---|---|
 | `core_v1.json` + `core_task.py` | nothing (plain code and stub proposers) | "not stated" vs "no" vs abstain; act vs escalate (a proposer's act signal, a decider's `escalate_below`); traps: the answer is absent from the text, two sources conflict, the answer is outside the options, a quote is not in the text, a hard check raises; two known confident errors (negation) that are counted, not hidden |
 | `injection_v1.json` + `injection_task.py` | nothing (a stand-in decider that obeys instructions in its input) | injection traps: an instruction embedded in the message ("ignore the rules and answer X", a role label, a quoted command, "classify this as X", and a wording the `perturb` rules do not know) pushing for a wrong option, often a near-duplicate one (billing vs billing_disputes); the same question without a safeguard and with `perturb=2` |
-| `model_v1.json` + `model_task.py` | a solvi-decide checkpoint and `solvi[onnx]` | the real decider on support messages, including "no team fits" and "two teams at once" |
+| `model_v1.json` + `model_task.py` | the published decider `solvi-ai/solvi-base` (downloaded beforehand) and `solvi[onnx]` | the real decider on support messages, including "no team fits" and "two teams at once" |
 
 A case is `{"name", "state", "gold": {question: answer}, "ask": [...]}`. The gold answer uses solvi's JSON format:
 an option, a list for multi-label, a number, `"<not stated>"` for `solvi.Unknown`, and `null` when the honest outcome is
@@ -54,7 +54,8 @@ uv run python -m solvi.honesty tests/honesty/core_v1.json --baseline tests/hones
 # the injection traps: no model files either
 uv run python -m solvi.honesty tests/honesty/injection_v1.json --baseline tests/honesty/injection_v1.baseline.json
 
-# the model subset (a checkpoint in $SOLVI_DECIDE_MODEL or ~/.cache/solvi_release/decide-base)
+# the model subset: solvi-ai/solvi-base from the Hugging Face cache (`solvi models pull solvi-ai/solvi-base` first), or
+# the checkpoint $SOLVI_DECIDE_MODEL names (a folder; a Hugging Face id is downloaded)
 uv run --with onnxruntime --with tokenizers python -m solvi.honesty tests/honesty/model_v1.json \
     --baseline tests/honesty/model_v1.baseline.json
 
@@ -76,6 +77,10 @@ threshold that trades coverage for fewer confident errors), write a new baseline
 ```bash
 uv run python -m solvi.honesty tests/honesty/core_v1.json --save tests/honesty/core_v1.baseline.json
 ```
+
+The model subset's baseline is of one checkpoint — its `"model"` line names it (`solvi-ai/solvi-base`, the Hugging Face
+revision, the ONNX file); another checkpoint in `$SOLVI_DECIDE_MODEL` is compared with those numbers, which is the
+gate to pass before publishing it. After `--save`, write that line for the checkpoint the new baseline was made with.
 
 Do not edit a released set in place. Add `core_v2.json` next to it, so numbers from different releases stay comparable.
 

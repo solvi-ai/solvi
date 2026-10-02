@@ -831,7 +831,41 @@ class System:
                                              lambda h, ys: h.fit(rows, ys, cands)).fit(ans)
         else:
             self.heads[question] = Head(q.answer.options).fit(rows, ans, cands)
+        self._warn_no_features("fit", question, self.heads[question], cands, keys, ans)
         return self.heads[question]
+
+    def _warn_no_features(self, method, question, head, cands, keys, answers):
+        """A head without features answers the same for every input: say so, with the reason (a UserWarning)."""
+        if head.features:
+            return
+        import inspect
+        import warnings
+        from collections import Counter
+        if not cands:
+            have, blocked = computable(self.catalog, keys), []
+            for p in self.catalog.parts.values():
+                missing = [x for x in p.inputs if x not in have]
+                if p.name in have or not missing:
+                    continue
+                try:
+                    defaults = [x for x in missing if inspect.signature(p.func).parameters[x].default is not inspect.Parameter.empty]
+                except (TypeError, ValueError, KeyError):
+                    defaults = []
+                blocked.append(f"{p.name} needs {missing}" + (f" ({defaults}: a parameter with a default value is still a "
+                                                              "fact the part reads — bind it in a closure instead)"
+                                                              if defaults else ""))
+            why = (f"no fact can be computed from the examples' inputs {sorted(keys)}"
+                   + (": " + "; ".join(blocked[:5]) + (f"; and {len(blocked) - 5} more" if len(blocked) > 5 else "")
+                      if blocked else " (the catalog has no parts over them)"))
+        elif getattr(head, "dropped", None):
+            why = "none of the facts can be used — " + "; ".join(f"{f}: {w}" for f, w in list(head.dropped.items())[:5])
+        else:
+            top = Counter(str(a) for a in answers).most_common(1)[0][1] / max(1, len(answers))
+            why = (f"none of the {len(cands)} facts raised the cross-validated accuracy on its own (the most frequent "
+                   f"answer is {top:.0%} of the examples): the greedy selection kept nothing — usual for an imbalanced "
+                   "question; fit_fast keeps every feature")
+        warnings.warn(f"{method}({question!r}): the head has no features — every input gets the same answer. {why}",
+                      stacklevel=3)
 
     def fit_fast(self, question, examples, features=None, lam=None, refit=2.0, refit_until=2000):
         """Fast answer head (closed-form ridge, milliseconds): examples — [(init_state, answer)]. Features: the given facts
@@ -862,6 +896,8 @@ class System:
             import warnings
             warnings.warn(f"fit_fast({question!r}): features not used — " +
                           "; ".join(f"{f}: {why}" for f, why in dropped.items()), stacklevel=2)
+        if not explicit:                   # and a head left without any feature says why
+            self._warn_no_features("fit_fast", question, head, list(features), keys, ans)
         self.heads[question] = head
         return head
 

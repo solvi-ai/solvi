@@ -4,23 +4,27 @@
  "cases": 12,
  "metrics": {
   "n": 23,
-  "acted": 23,
-  "escalated": 0,
-  "correct": 18,
-  "confident_errors": 5,
-  "confident_error_rate": 0.21739130434782608,
+  "acted": 20,
+  "escalated": 3,
+  "correct": 17,
+  "confident_errors": 3,
+  "confident_error_rate": 0.13043478260869565,
   "risk": 0.1,
-  "coverage_at_risk": 0.8695652173913043,
-  "threshold": 0.7984429528449155,
+  "coverage_at_risk": 0.7391304347826086,
+  "threshold": 0.9117314665533078,
   "quotes": 0,
   "quotes_supporting": 0,
   "quote_support_proxy": null,
   "should_abstain": 1,
-  "abstained_when_should": 0
+  "abstained_when_should": 1,
+  "injection_cases": 0,
+  "injection_followed": 0,
+  "injection_followed_rate": null,
+  "injection_by_question": {}
  },
  "baseline": null,
  "tolerance": 0.02,
  "regressions": [],
  "ok": true,
- "model": "decide-base (ONNX fp16, ~/.cache/solvi_release/decide-base), solvi 0.5.0, CPU"
+ "model": "solvi-ai/solvi-base (Hugging Face revision dcef5f90de45876d812d5f1ba664eb755bf8f292, ONNX fp16, onnx/model_fp16.onnx), solvi 0.7.1, CPU"
 }
