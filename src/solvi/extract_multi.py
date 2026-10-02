@@ -1,5 +1,9 @@
 """Single-pass @extract: ModernBERT reads the document once, with a pair of pointer heads (start / end) per field.
-For solvi: extractor.field(name) returns a function doc → Quote; all fields of a document come from one pass (cached by text)."""
+For solvi: extractor.field(name) returns a function doc → Quote; all fields of a document come from one pass (cached by text).
+
+The extractor protocol it shares with solvi.extract_long.LongSpanExtractor: fit(items), predict(text, field),
+field(name[, description]), save(path) / load(path), fingerprint(). items here are [(text, {field: (start, end) |
+None})]; 0.7's fit(docs, spans) and predict_doc(text) still work with a DeprecationWarning."""
 from __future__ import annotations
 
 import hashlib
@@ -9,7 +13,10 @@ import time
 
 import numpy as np
 
+from . import _deprecate
 from .core import Quote
+
+CACHE = 5000                                     # documents whose predictions are kept (then the cache starts again)
 
 
 class MultiSpanExtractor:
@@ -39,14 +46,23 @@ class MultiSpanExtractor:
 
     @staticmethod
     def _tok_span(offs, span):
+        """A character span → (first token, last token); None when the span starts past the encoded (truncated) text —
+        the window cannot point at it, and (first token, last token) would be a wrong target."""
         s_c, e_c = span
         idx = [j for j, (a, b) in enumerate(offs) if b > a]
+        if not idx or s_c >= offs[idx[-1]][1]:
+            return None
         st = next((j for j in idx if offs[j][1] > s_c), idx[0])
         en = next((j for j in reversed(idx) if offs[j][0] < e_c), st)
         return st, max(st, en)
 
-    def fit(self, docs, spans, epochs=4, lr=3e-5, bs=8, seed=0, log=print):
-        """docs: [text]; spans: [{field: (start, end) | None}]."""
+    def fit(self, items, spans=None, epochs=4, lr=3e-5, bs=8, seed=0, log=print):
+        """items: [(text, {field: (start, end) | None})]. (0.7: fit(docs, spans) — still read, with a warning.) A span past
+        the encoded text (max_len tokens) is left out of training."""
+        if spans is not None:
+            _deprecate.renamed("MultiSpanExtractor.fit(docs, spans)", "MultiSpanExtractor.fit([(text, spans), ...])")
+            items = list(zip(items, spans))
+        docs, spans = [t for t, _ in items], [dict(sp or {}) for _, sp in items]
         torch = self.torch
         random.seed(seed)
         torch.manual_seed(seed)
@@ -74,7 +90,10 @@ class MultiSpanExtractor:
                         sp = spans[i].get(f)
                         if sp is None:
                             continue
-                        s, e = self._tok_span(enc["offset_mapping"][r].tolist(), sp)
+                        ts = self._tok_span(enc["offset_mapping"][r].tolist(), sp)
+                        if ts is None:
+                            continue
+                        s, e = ts
                         tgt_s.append(s)
                         tgt_e.append(e)
                         rows.append(r)
@@ -101,8 +120,15 @@ class MultiSpanExtractor:
         return self
 
     def predict_doc(self, text, max_span=64):
-        """→ {field: (start, end, confidence)} in a single pass."""
-        key = hashlib.sha1(text.encode(), usedforsecurity=False).hexdigest()
+        """Deprecated (removed in 0.9): predict(text)."""
+        _deprecate.renamed("MultiSpanExtractor.predict_doc()", "MultiSpanExtractor.predict()")
+        return self.predict(text, max_span=max_span)
+
+    def predict(self, text, field=None, max_span=64):
+        """→ {field: (start, end, confidence)} in a single pass, or one field's (start, end, confidence)."""
+        if field is not None:
+            return self.predict(text, max_span=max_span)[field]
+        key = (hashlib.sha1(text.encode(), usedforsecurity=False).hexdigest(), max_span)
         if key in self._cache:
             return self._cache[key]
         torch = self.torch
@@ -125,7 +151,7 @@ class MultiSpanExtractor:
             sc = np.triu(np.outer(ps, pe)) - np.triu(np.outer(ps, pe), max_span)
             s, e = np.unravel_index(int(sc.argmax()), sc.shape)
             out[f] = (int(offs[s][0]), int(offs[e][1]), float(sc[s, e]))
-        if len(self._cache) > 5000:
+        if len(self._cache) >= CACHE:
             self._cache = {}
         self._cache[key] = out
         return out
@@ -141,7 +167,7 @@ class MultiSpanExtractor:
 
     def field(self, name):
         def f(doc):
-            s, e, c = self.predict_doc(doc)[name]
+            s, e, c = self.predict(doc, name)
             return Quote(doc[s:e], s, e, confidence=c)
         f.__name__ = name
         f.__solvi_model__ = self                 # cat.extract records this model (and its fingerprint) in the trace
@@ -158,7 +184,7 @@ class MultiSpanExtractor:
                 self._cache = {}
                 nll = 0.0
                 for i, d in enumerate(docs):
-                    s, e, c = self.predict_doc(d)[f]
+                    s, e, c = self.predict(d, f)
                     y = gold_ok(f, i, (s, e))
                     c = min(max(c, 1e-6), 1 - 1e-6)
                     nll -= math.log(c if y else 1 - c)
@@ -167,3 +193,43 @@ class MultiSpanExtractor:
             self.temp[f] = best[1]
         self._cache = {}
         return dict(self.temp)
+
+    def save(self, path):
+        """Encoder weights (bf16 safetensors), tokenizer, the span heads and the settings into a directory (load reads
+        it back) — as LongSpanExtractor.save."""
+        import json
+        from pathlib import Path
+        Path(path).mkdir(parents=True, exist_ok=True)
+        self.enc.to(self.torch.bfloat16).save_pretrained(path)
+        self.enc.to(self.torch.float32)
+        self._fp_weights = None                  # the weights in memory are now bf16-rounded
+        self._cache = {}
+        self.tok.save_pretrained(path)
+        self.torch.save(self.head.state_dict(), f"{path}/span_heads.pt")
+        with open(f"{path}/solvi_extract.json", "w") as fh:
+            json.dump({"kind": "multi", "fields": self.fields, "max_len": self.max_len, "temp": self.temp,
+                       "base_model": self.model_name}, fh, indent=1)
+
+    @classmethod
+    def load(cls, path, device=None):
+        """From a directory written by save(), or a Hugging Face model id (downloaded once and cached)."""
+        import json
+        import os
+        path_or_id = path
+        if not os.path.isdir(path):
+            from .loader import optional
+            path = optional("huggingface_hub", "model", "MultiSpanExtractor.load of a Hugging Face id").snapshot_download(path)
+        with open(f"{path}/solvi_extract.json") as fh:
+            cfg = json.load(fh)
+        if cfg.get("kind") != "multi":
+            raise ValueError(f"{path_or_id}: not a MultiSpanExtractor (solvi_extract.json has kind {cfg.get('kind')!r}; "
+                             "a LongSpanExtractor loads with solvi.extract_long.LongSpanExtractor.load)")
+        ex = cls(cfg["fields"], path, max_len=cfg["max_len"], device=device)
+        ex.enc.to(ex.torch.float32)
+        ex.head.load_state_dict(ex.torch.load(f"{path}/span_heads.pt", map_location=ex.device, weights_only=True))
+        ex.temp = {f: float(cfg.get("temp", {}).get(f, 1.0)) for f in ex.fields}
+        ex.model_id = path_or_id
+        return ex
+
+
+__all__ = ["MultiSpanExtractor"]

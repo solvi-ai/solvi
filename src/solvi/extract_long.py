@@ -1,4 +1,6 @@
-"""@extract for real-world, general-purpose documents: a field is defined by its DESCRIPTION, the document may be long
+"""@extract for real-world, general-purpose documents (the extractor protocol it shares with
+solvi.extract_multi.MultiSpanExtractor: fit(items), predict(text, description), field(name, description), save / load,
+fingerprint()): a field is defined by its DESCRIPTION, the document may be long
 (windows), and the field may be absent ("no answer"). ModernBERT: input "field description [SEP] document window", two pointer
 heads; "no answer" is position 0 (the special token). Prediction: the best span across all windows; an answer exists if its
 score is above the field's threshold (tuned on held-out examples). Also works for fields unseen in training, from the
@@ -12,6 +14,8 @@ import time
 import numpy as np
 
 from .core import Quote
+
+CACHE = 2000                                     # (text, description) predictions kept (then the cache starts again)
 
 
 class LongSpanExtractor:
@@ -135,7 +139,7 @@ class LongSpanExtractor:
 
     def predict(self, text, desc, bs=8):
         """→ (start, end, span score, "no answer" score) — the best span across all windows."""
-        key = (hash(text), desc)
+        key = (text, desc)                                 # the text itself: hash() collides and changes per process
         if key in self._cache:
             return self._cache[key]
         torch = self.torch
@@ -168,8 +172,13 @@ class LongSpanExtractor:
         while st < en and text[st].isspace():              # BPE offsets include the leading space
             st += 1
         out = (st, en, best[2], null)
-        self._cache[key] = out
+        self._keep(key, out)
         return out
+
+    def _keep(self, key, value):
+        if len(self._cache) >= CACHE:                      # bounded: a long stream of documents does not grow it
+            self._cache.clear()
+        self._cache[key] = value
 
     def tune_threshold(self, name, items, grid=(0.0003, 0.001, 0.003, 0.01, 0.02, 0.05, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8)):
         """Per-field "answer present" threshold from held-out examples: maximizes present/absent decision accuracy."""
@@ -201,7 +210,7 @@ class LongSpanExtractor:
         self._fp_weights = None                  # the weights in memory are now bf16-rounded
         self.tok.save_pretrained(path)
         self.torch.save(self.head.state_dict(), f"{path}/span_head.pt")
-        json.dump({"max_len": self.max_len, "stride": self.stride, "max_span": self.max_span, "thr_default": self.thr_default,
+        json.dump({"kind": "long", "max_len": self.max_len, "stride": self.stride, "max_span": self.max_span, "thr_default": self.thr_default,
                    "thr": self.thr, "base_model": self.model_name}, open(f"{path}/solvi_extract.json", "w"), indent=1)
 
     @classmethod
@@ -214,6 +223,9 @@ class LongSpanExtractor:
             from .loader import optional
             path = optional("huggingface_hub", "model", "LongSpanExtractor.load of a Hugging Face id").snapshot_download(path)
         cfg = json.load(open(f"{path}/solvi_extract.json"))
+        if cfg.get("kind", "long") != "long":                # files of 0.7 have no kind: they are LongSpanExtractor's
+            raise ValueError(f"{path_or_id}: not a LongSpanExtractor (solvi_extract.json has kind {cfg['kind']!r}; a "
+                             "MultiSpanExtractor loads with solvi.extract_multi.MultiSpanExtractor.load)")
         ex = cls(path, max_len=cfg["max_len"], stride=cfg["stride"], max_span=cfg["max_span"], device=device)
         ex.enc.to(ex.torch.float32)
         ex.head.load_state_dict(ex.torch.load(f"{path}/span_head.pt", map_location=ex.device, weights_only=True))
@@ -224,7 +236,7 @@ class LongSpanExtractor:
     def embed(self, text, bs=8):
         """Document embedding: the encoder's token states averaged over every window of the text (no field description)."""
         torch = self.torch
-        key = ("__embed__", hash(text))
+        key = ("__embed__", text)
         if key in self._cache:
             return self._cache[key]
         enc = self._windows("", text)
@@ -241,7 +253,7 @@ class LongSpanExtractor:
                 tot = s if tot is None else tot + s
                 cnt += int(m.sum())
         v = (tot / max(1, cnt)).cpu().numpy()
-        self._cache[key] = v
+        self._keep(key, v)
         return v
 
     def embedder(self, name="doc_embedding"):

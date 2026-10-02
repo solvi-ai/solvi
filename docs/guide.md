@@ -4358,8 +4358,9 @@ from solvi.extract_multi import MultiSpanExtractor
 
 ex = MultiSpanExtractor(["company", "date", "total"],
                         model_name="answerdotai/ModernBERT-large", max_len=1024)
-ex.fit(train_docs, train_spans, epochs=4, lr=3e-5, bs=8)
-# train_docs: [text]; train_spans: [{"company": (s, e), "date": (s, e), "total": (s, e) or None}]
+ex.fit(train, epochs=4, lr=3e-5, bs=8)
+# train: [(text, {"company": (s, e), "date": (s, e), "total": (s, e) or None})]
+ex.save("receipts-extractor")              # MultiSpanExtractor.load("receipts-extractor") reads it back
 
 ex.fit_temperature(calib_docs, lambda field, i, span: span == calib_spans[i][field])   # optional, per-field temperature
 
@@ -4373,8 +4374,11 @@ def total_value(total):
 
 - `ex.field(name)` returns a function named `name` with one argument `doc`, which returns
   `Quote(doc[s:e], s, e, confidence=c)`.
-- `ex.predict_doc(text)` returns `{field: (start, end, confidence)}`. Results are cached per text, so all fields of one
-  document cost a single forward pass.
+- `ex.predict(text)` returns `{field: (start, end, confidence)}` (`ex.predict(text, field)` one of them). Results are
+  cached per text, so all fields of one document cost a single forward pass. The two extractors share one protocol —
+  `fit(items)`, `predict(text, field)`, `field(name[, description])`, `save` / `load`, `fingerprint()`; 0.7's
+  `fit(docs, spans)` and `predict_doc(text)` still work with a deprecation warning. A labelled span past the encoded
+  text (`max_len` tokens) is left out of training.
 - `fit_temperature(docs, gold_ok)` picks a softmax temperature per field that minimizes log loss of "confidence vs.
   correct" on held-out documents; `gold_ok(field, doc_index, (start, end))` tells whether a prediction is correct.
 - The extractor always returns a span; this one does not model "field absent". Use `LongSpanExtractor` when fields may

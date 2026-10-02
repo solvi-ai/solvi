@@ -185,3 +185,18 @@ def test_extract_model_is_a_deprecated_alias_of_the_long_extractor_that_warns_on
     with pytest.warns(DeprecationWarning, match="solvi.extract_long.LongSpanExtractor"):
         mod = importlib.import_module("solvi.extract_model")
     assert mod.SpanExtractor is LongSpanExtractor
+
+
+def test_one_extractor_protocol_and_no_training_target_past_the_encoded_text():
+    """MultiSpanExtractor had fit(docs, spans), predict_doc and no save / load; a labelled span past the truncated window
+    became (first token, last token), a wrong target; LongSpanExtractor's cache never shrank and keyed by hash(text)."""
+    import inspect
+
+    from solvi.extract_long import LongSpanExtractor
+    from solvi.extract_multi import MultiSpanExtractor
+    offs = [(0, 0), (0, 5), (6, 10), (11, 15), (0, 0)]
+    assert MultiSpanExtractor._tok_span(offs, (40, 45)) is None and MultiSpanExtractor._tok_span(offs, (6, 10)) == (2, 2)
+    for cls in (MultiSpanExtractor, LongSpanExtractor):
+        for name in ("fit", "predict", "field", "save", "load", "fingerprint"):
+            assert callable(getattr(cls, name)), (cls, name)
+    assert list(inspect.signature(MultiSpanExtractor.predict).parameters)[1:3] == ["text", "field"]
