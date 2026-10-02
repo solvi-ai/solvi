@@ -813,7 +813,8 @@ def _max_len_long(v, max_len=512):
 def capabilities(meta, multi_question=None, act=None):
     """What a checkpoint can do, from its solvi_decide.json (see docs/decide_format.md): the fields it declares over the
     defaults of its format ('l14b_decider v1': the text-only deciders; 'l14f typed v1': the first typed ones; 'solvi_decide v2': the legacy defaults,
-    everything else declared). multi_question / act: overrides (experiments), part of the fingerprint."""
+    everything else declared; a bare 'solvi_decide v3' too — the answer-primitives defaults come with the l14g format
+    or subformat only). multi_question / act: overrides (experiments), part of the fingerprint."""
     meta = meta or {}
     fmt = str(meta.get("format", ""))
     v3 = _v3(meta)
