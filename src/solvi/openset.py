@@ -34,8 +34,8 @@ a small share. A share above the largest one any threshold can serve escalates e
 The flag. One-sided Bernoulli CUSUMs on the same indicator, one for each share in `design` (0.1, 0.3, 0.6), against q0,
 an upper bound of the share below c among known inputs; a flag when any of them reaches h. h is set by simulation at
 calibration: on streams of `horizon` decisions in which the indicator is Bernoulli(q0), the chance of a flag is at most
-`alpha` (at least 2,000 and 20 / alpha simulated streams, a fixed seed — the report gives h and the simulated rate;
-alpha below 1e-4 is refused). After a flag the share is
+`alpha` (solvi.drift.Cusum, the detector DriftMonitor uses too: at least 2,000 and 20 / alpha simulated streams, a
+fixed seed — the report gives h and the simulated rate; alpha below 1e-4 is refused). After a flag the share is
 also estimated from the decisions since that CUSUM last stood at zero (its estimate of the change point; at most the
 last `window`), and the largest estimate is used. A DriftMonitor (solvi.drift) can be passed as a second detector: its
 flag starts the same estimate (from its window); the flag and its reason are in every record's state. The flag tells;
@@ -106,26 +106,6 @@ def _ltt(s, w, known_s, error, delta, min_support, size=16):
     return math.inf
 
 
-def _cusum_h(q0, design, f_novel, alpha, horizon, seed=0):
-    """The flag level h of the CUSUMs: the (1 − alpha) quantile of their largest value over `horizon` decisions of
-    streams whose indicator is Bernoulli(q0), simulated (max(2,000, 20 / alpha) streams) → (h, the steps up and down per
-    design share, the simulated rate of flags at h)."""
-    sims = max(2000, int(math.ceil(20 / alpha)))
-    up = np.array([math.log(((1 - d) * q0 + d * f_novel) / q0) for d in design])
-    down = np.array([math.log(((1 - d) * (1 - q0) + d * (1 - f_novel)) / (1 - q0)) for d in design])
-    rng = np.random.default_rng(seed)
-    S = np.zeros((sims, len(design)))
-    top = np.zeros(sims)
-    for _ in range(int(horizon)):
-        x = rng.uniform(size=(sims, 1)) < q0
-        S = np.maximum(0.0, S + np.where(x, up, down))
-        top = np.maximum(top, S.max(1))
-    top = np.sort(top)
-    allowed = int(math.floor(alpha * sims))          # simulated streams that may reach h
-    h = float(np.nextafter(top[sims - allowed - 1], math.inf))
-    return h, up, down, float((top >= h).mean())
-
-
 def leave_out(examples, make, folds=3, seed=0, label=None):
     """The leave-options-out simulation: the options are split into `folds` groups; for each, a decider is made without
     that group (make(kept options) → a callable decider: a DecisionPart, or anything with decide(list) / __call__) and
@@ -158,16 +138,31 @@ def leave_out(examples, make, folds=3, seed=0, label=None):
     return {"known": (ks, kr), "novel": us, "groups": groups}
 
 
+def _detector(q0, f_novel, design, alpha, horizon, seed):
+    """The CUSUMs (solvi.drift.Cusum) on the indicator "signal below the cut", one per design share d: the
+    log-likelihood ratio of a stream with a share d of outside inputs (below the cut with probability
+    (1 − d)·q0 + d·f_novel) against known inputs only (q0); h simulated on streams whose indicator is Bernoulli(q0)."""
+    from .drift import Cusum
+    up = np.array([math.log(((1 - d) * q0 + d * f_novel) / q0) for d in design])
+    down = np.array([math.log(((1 - d) * (1 - q0) + d * (1 - f_novel)) / (1 - q0)) for d in design])
+
+    def make_null(rng, sims):
+        return lambda: np.where(rng.uniform(size=(sims, 1)) < q0, up, down)
+    c = Cusum.calibrate([f"share {d:g}" for d in design], make_null, alpha, horizon, seed=seed)
+    c.up, c.down = up, down
+    return c
+
+
 class OpenSetGate:
     """See the module docstring. Made by OpenSetGate.calibrate(...); stateful: observe(signal) after every decision
     it gated (System.guarantee does it), threshold_of() → the threshold for the next one."""
     stateful = True
 
-    def __init__(self, error, delta, shares, thresholds, cut, f_known, f_novel, q0, design, h, up, down, min_share,
+    def __init__(self, error, delta, shares, thresholds, cut, f_known, f_novel, q0, design, cusum, min_share,
                  window, report, monitor=None, track=(25, 200), min_track=50):
         self.error, self.delta, self.shares, self.thresholds = float(error), float(delta), list(shares), dict(thresholds)
-        self.cut, self.f_known, self.f_novel, self.q0, self.h = cut, f_known, f_novel, q0, h
-        self.design, self.up, self.down = tuple(design), np.asarray(up, float), np.asarray(down, float)
+        self.cut, self.f_known, self.f_novel, self.q0 = cut, f_known, f_novel, q0
+        self.design, self.cusum, self.h = tuple(design), cusum, cusum.h
         self.min_share, self.window, self.report, self.monitor = float(min_share), int(window), report, monitor
         self.track = tuple(int(x) for x in (track or ()))
         self.min_track = int(min_track)
@@ -245,15 +240,15 @@ class OpenSetGate:
                              "for them on it")
         q0 = _cp_upper(int(round(f_known * nk)), nk, delta)
         design = tuple(float(d) for d in design)
-        h, up, down, rate = _cusum_h(q0, design, max(f_novel, q0 + 1e-6), alpha, horizon, seed=seed)
+        cusum = _detector(q0, max(f_novel, q0 + 1e-6), design, alpha, horizon, seed)
         known_err = float((~kr).mean())
         report = {"n_known": nk, "n_outside": nu, "known_error": known_err, "error": error, "delta": delta,
                   "mixtures": {f"{k:g}": v for k, v in sizes.items()},
                   "thresholds": {f"{k:g}": v for k, v in thresholds.items()},
                   "max_share": max([k for k, v in thresholds.items() if math.isfinite(v)], default=None),
                   "cut": cut, "below_cut": {"known": f_known, "outside": f_novel, "q0": q0}, "separation_p": p_sep,
-                  "detector": {"design": list(design), "h": h, "alpha": alpha, "horizon": horizon,
-                               "simulated_false_flags": rate},
+                  "detector": {"design": list(design), "h": cusum.h, "alpha": alpha, "horizon": horizon,
+                               "simulated_false_flags": cusum.rate, "simulated_streams": cusum.sims},
                   "track": list(track or ()), "min_share": float(min_share)}
         for pi in (0.0, float(min_share)):
             t = thresholds.get(pi, math.inf)
@@ -264,7 +259,7 @@ class OpenSetGate:
         if not math.isfinite(thresholds[float(min_share)]):
             report["why"] = (f"no threshold keeps the error ≤ {error:g} with {min_share:g} of the inputs from outside: "
                              "everything escalates")
-        return cls(error, delta, shares, thresholds, cut, f_known, f_novel, q0, design, h, up, down, min_share, window,
+        return cls(error, delta, shares, thresholds, cut, f_known, f_novel, q0, design, cusum, min_share, window,
                    report, monitor, track, min_track)
 
     # --- the online state
@@ -272,8 +267,7 @@ class OpenSetGate:
         """Forget the stream (a new one starts): no flag, the threshold for min_share."""
         from collections import deque
         self.seen, self.flag_at = 0, None
-        self._S = np.zeros(len(self.design))           # the CUSUMs, one per design share
-        self._z = np.zeros(len(self.design), int)      # ... and the decisions since each last stood at zero
+        self.cusum.reset()
         self.S, self.zero_at = 0.0, 0
         self._recent = deque(maxlen=max([self.window, *self.track]))   # 1[signal < cut] of the last decisions
         self.since = []                  # ... and since the change point, after a flag
@@ -284,13 +278,11 @@ class OpenSetGate:
         """One decision's signal (after it was gated) → the state after it."""
         x = float(signal) < self.cut
         self.seen += 1
-        self._S = np.maximum(0.0, self._S + (self.up if x else self.down))
-        self._z = np.where(self._S == 0.0, 0, self._z + 1)
-        j = int(np.argmax(self._S))
-        self.S = float(self._S[j])
+        j = self.cusum.step(self.cusum.up if x else self.cusum.down)
+        _, self.S, since = self.cusum.top()
         self._recent.append(x)
         if self.flag_at is None:
-            self.zero_at = self.seen - int(self._z[j])
+            self.zero_at = self.seen - since
             flagged = self.S >= self.h
             why = None
             if flagged:
@@ -392,7 +384,7 @@ class OpenSetGate:
         level)] and the flag (decision number or None). For backtests on labelled data."""
         import copy
         g = copy.copy(self)
-        g.monitor = copy.deepcopy(self.monitor)
+        g.monitor, g.cusum = copy.deepcopy(self.monitor), copy.deepcopy(self.cusum)
         g.reset()
         out = []
         for s in signals:

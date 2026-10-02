@@ -25,17 +25,20 @@ noisy on a hundred cases). A signal is flagged when its test is significant AND 
 a large window a tiny shift is significant and is not drift. `drift` is true when at least `min_signals` signals are
 flagged.
 
-Significant at what level: the tests are repeated at every decision and there are several of them, so each is held to
-alpha / (signals tested × decisions in `horizon`) — a union bound: on a stream that has not changed, the chance of a
-false flag within `horizon` decisions (default 1,000) is at most alpha (default 1%), as far as each test's p-value is
-exact; a longer stream gets alpha per horizon.
+Two kinds of test. The window tests above compare the last `window` decisions with the reference at every decision;
+they are repeated and there are several of them, so each is held to ¾·alpha / (signals tested × decisions in
+`horizon`) — a union bound, which makes them slow on real streams. A sequential test runs beside them (sequential=True,
+the default): CUSUMs (Cusum) on the share answered alone, the mean confidence and the mean act probability, each in
+both directions — the increment of a decision is its shift from the mean of the reference and of every decision since,
+in the reference's standard deviations, minus `allowance` (0.25) — and a flag when one reaches h, set by simulation on
+streams drawn from the reference (with the reference's own error of its mean and spread): at most alpha / 4 of them
+flagged within `horizon` decisions. A CUSUM flag also needs the shift since its change point to be at least the signal's
+minimum. So on a stream that has not changed, the chance of a false flag within `horizon` decisions (default 1,000) is
+at most alpha (default 1%), as far as each test's p-value is exact and the reference stands for the stream; a longer
+stream gets alpha per horizon.
 
-It is a signal, not a verdict: what to do — recalibrate, escalate, ask for labels — is the caller's. Simulated
-(independent decisions; tests/test_drift.py runs a small part of it): 0 of 1,200 stationary streams of 1,000 decisions flagged with the
-defaults (3 to 57 answers, a reference of 1,500 or the stream's first 100, three shapes of confidence); a change of the
-share answered alone from 66% to 12% is flagged about 60 decisions after it with window=100 (40 with window=50, 90 with
-window=200), a change of the mix of three answers from 1:1:1 to 1:8:1 about 80 decisions after it. A smaller window
-answers sooner and sees less: it needs a larger change, and fewer answers per question."""
+It is a signal, not a verdict: what to do — recalibrate, escalate, ask for labels — is the caller's. Measured: docs/
+guide.md, "Drift" (simulated stationary streams, simulated shifts, Banking77 and support tickets)."""
 from __future__ import annotations
 
 import math
@@ -154,21 +157,87 @@ def _pooled(r, c, n1, n2):
     return np.array(rb, float), np.array(cb, float)
 
 
+class Cusum:
+    """One-sided CUSUMs over several channels at once: S_j = max(0, S_j + x_j) for each step's increments x (one per
+    channel; NaN leaves a channel as it is), a flag when any S_j reaches h. Each channel's increments are a
+    log-likelihood ratio or a standardized shift minus an allowance, so S_j stays near 0 while nothing changes and climbs
+    after a change. h is set by simulation (Cusum.calibrate): the (1 − alpha) quantile of the largest S over `horizon`
+    steps of `sims` streams drawn from the null — no union bound over the looks, which is what makes it faster than a
+    window test repeated at every decision. Used by DriftMonitor (shifts of the share answered alone, the mean
+    confidence and act probability) and by solvi.openset.OpenSetGate (the share of inputs from outside)."""
+
+    def __init__(self, names, h):
+        self.names, self.h = list(names), float(h)
+        self.reset()
+
+    def reset(self):
+        self.S = np.zeros(len(self.names))
+        self.since = np.zeros(len(self.names), int)      # the steps since each channel last stood at zero
+
+    def step(self, x):
+        """One step's increments → the channel with the largest S (its index)."""
+        x = np.asarray(x, float)
+        ok = ~np.isnan(x)
+        self.S[ok] = np.maximum(0.0, self.S[ok] + x[ok])
+        self.since[ok] = np.where(self.S[ok] == 0.0, 0, self.since[ok] + 1)
+        return int(np.argmax(self.S))
+
+    def top(self):
+        """→ (channel name, S, steps since it last stood at zero) of the largest S."""
+        j = int(np.argmax(self.S))
+        return self.names[j], float(self.S[j]), int(self.since[j])
+
+    @classmethod
+    def calibrate(cls, names, make_null, alpha=0.01, horizon=1000, sims=None, seed=0):
+        """make_null(rng, sims) → a function giving one step's increments of `sims` null streams, an array (sims,
+        channels). sims: at least 2,000 and 20 / alpha. → a Cusum with h such that at most alpha of the simulated
+        streams reach h within `horizon` steps; .rate is that share."""
+        if not 1e-4 <= float(alpha) < 1:
+            raise ValueError(f"alpha {alpha:g}: a level set by simulation needs alpha between 1e-4 and 1 (rarer false "
+                             "flags cannot be certified by it)")
+        sims = int(sims or max(2000, math.ceil(20 / alpha)))
+        rng = np.random.default_rng(seed)
+        nxt = make_null(rng, sims)
+        S = np.zeros((sims, len(names)))
+        top = np.zeros(sims)
+        for _ in range(int(horizon)):
+            S = np.maximum(0.0, S + np.nan_to_num(nxt(), nan=0.0))
+            top = np.maximum(top, S.max(1))
+        top = np.sort(top)
+        allowed = int(math.floor(alpha * sims))          # simulated streams that may reach h
+        c = cls(names, float(np.nextafter(top[sims - allowed - 1], math.inf)))
+        c.rate, c.sims, c.alpha, c.horizon = float((top >= c.h).mean()), sims, float(alpha), int(horizon)
+        return c
+
+
+SCALARS = ("answered", "confidence", "act")       # the signals the sequential test follows, one value per decision
+
+
+def _scalars(o):
+    return np.array([float(o.alone), o.confidence, np.nan if o.act is None else o.act], float)
+
+
 class DriftMonitor:
     """See the module docstring. window: the decisions compared with the reference (and the size of a reference taken
     from the stream). alpha, horizon: the chance of a false flag within `horizon` decisions of an unchanged stream is at
     most alpha. min_n: the window must hold this many decisions before anything is
     flagged (default: half the window, at least 20). The minimum effects: min_share (answered alone), min_tv (answers),
     min_shift (mean confidence / act probability), min_accuracy_drop, min_ece_rise, min_coverage_drop.
-    keep: the reports of the last `keep` observations are kept in `history` (0: none)."""
+    keep: the reports of the last `keep` observations are kept in `history` (0: none). sequential: also follow the
+    share answered alone, the mean confidence and the mean act probability with CUSUMs (a Cusum; it gets a quarter
+    of alpha, the window tests the rest); allowance: the shift (in the reference's standard deviations) below
+    which a CUSUM does not climb."""
 
     def __init__(self, window=100, *, alpha=0.01, horizon=1000, min_n=None, min_signals=1, min_share=0.10, min_tv=0.15,
                  min_shift=0.05, min_accuracy_drop=0.10, min_ece_rise=0.05, min_coverage_drop=0.15, min_labelled=30,
-                 accuracy=0.9, keep=1000, seed=0):
+                 accuracy=0.9, keep=1000, seed=0, sequential=True, allowance=0.25):
         if int(window) < 2:
             raise ValueError("window must be at least 2")
         if not 0 < float(alpha) < 1 or int(horizon) < 1:
             raise ValueError("alpha must be between 0 and 1 and horizon at least 1")
+        if sequential and float(alpha) < 4e-4:
+            raise ValueError(f"alpha {alpha:g} is below 4e-4: the sequential test's level is set by simulation, which "
+                             "cannot certify so rare a false flag (sequential=False keeps only the window tests)")
         self.window, self.horizon = int(window), int(horizon)
         self._perm = None                        # (seen, p-values) of the last permutation tests
         self._warned = False                     # said once: a Result has no act probability
@@ -177,6 +246,9 @@ class DriftMonitor:
         self.minimum = {"answered": min_share, "answers": min_tv, "confidence": min_shift, "act": min_shift,
                         "accuracy": min_accuracy_drop, "ece": min_ece_rise, "coverage_at": min_coverage_drop}
         self.min_labelled, self.accuracy, self.seed = int(min_labelled), accuracy, seed
+        self.sequential, self.allowance = bool(sequential), float(allowance)
+        self.cusum, self._mu, self._sd = None, None, None
+        self._raw: deque = deque(maxlen=self.horizon)     # the scalar signals of the decisions since the reference
         self.reference: list[Observation] = []
         self.recent: deque[Observation] = deque(maxlen=self.window)
         self.history: deque[dict] = deque(maxlen=max(0, int(keep)) or None) if keep else deque(maxlen=0)
@@ -193,7 +265,82 @@ class DriftMonitor:
             raise ValueError("the reference needs at least two decisions")
         self.reference = [Observation.of(d, y) for d, y in zip(decisions, labels)]
         self._ref = window_stats(self.reference, self.accuracy)
+        self._start_sequential()
         return self
+
+    def _start_sequential(self):
+        """The CUSUMs from the reference: for each scalar signal with a spread, one channel for a rise and one for a
+        fall, increments ±(x − mean) / sd − allowance, the mean that of the reference and every decision since (a
+        self-starting CUSUM: a reference of 100 is a noisy mean, a thousand decisions later it is not); h simulated on
+        streams drawn from the reference, its mean and spread re-drawn with their sampling error."""
+        self.cusum, self._raw = None, deque(maxlen=self.horizon)
+        if not self.sequential:
+            return
+        R = np.array([_scalars(o) for o in self.reference], float)
+        mu, sd, chans = np.full(3, np.nan), np.full(3, np.nan), []
+        for j, name in enumerate(SCALARS):
+            v = R[~np.isnan(R[:, j]), j]
+            if len(v) < 2:
+                continue
+            m = float(v.mean())
+            s = math.sqrt(m * (1 - m)) if name == "answered" else float(v.std())
+            if s <= 1e-9:
+                continue
+            mu[j], sd[j] = m, s
+            chans += [(j, +1), (j, -1)]
+        if not chans:
+            return
+        self._mu, self._sd, self._chans = mu, sd, chans
+        self._sum = np.nan_to_num(mu) * np.array([(~np.isnan(R[:, j])).sum() for j in range(3)], float)
+        self._cnt = np.array([(~np.isnan(R[:, j])).sum() for j in range(3)], float)
+        k, n = self.allowance, np.array([max(int((~np.isnan(R[:, j])).sum()), 1) for j in range(3)], float)
+
+        def make_null(rng, sims):
+            s = (mu + rng.standard_normal((sims, 3)) * sd / np.sqrt(n)) * n      # the reference's own error of the mean …
+            c = np.tile(n, (sims, 1))
+            g = np.sqrt((n - 1) / rng.chisquare(np.maximum(n - 1, 1), (sims, 3)))  # … and of the spread
+
+            def nxt():
+                x = mu + g * (R[rng.integers(len(R), size=sims)] - mu)
+                m = s / c                                                       # … shrinking as the stream adds to it
+                inc = np.stack([d * (x[:, j] - m[:, j]) / sd[j] - k for j, d in chans], 1)
+                ok = ~np.isnan(x)
+                s[ok] += x[ok]
+                c[ok] += 1
+                return inc
+            return nxt
+        names = [f"{SCALARS[j]}{'+' if d > 0 else '-'}" for j, d in chans]
+        self.cusum = Cusum.calibrate(names, make_null, self.alpha / 4, self.horizon, seed=self.seed)
+
+    def _sequential(self, o):
+        """One decision into the CUSUMs → [(signal, why)] of the channels at or above h whose shift since their change
+        point is at least the signal's minimum."""
+        if self.cusum is None:
+            return [], None
+        x = _scalars(o)
+        self._raw.append(x)
+        m = self._sum / np.maximum(self._cnt, 1)          # the mean so far: the reference and every decision since
+        inc = np.array([d * (x[j] - m[j]) / self._sd[j] - self.allowance for j, d in self._chans])
+        self.cusum.step(inc)
+        ok = ~np.isnan(x)
+        self._sum[ok] += x[ok]
+        self._cnt[ok] += 1
+        out = []
+        for c, (j, d) in enumerate(self._chans):
+            S, since = float(self.cusum.S[c]), int(self.cusum.since[c])
+            if S < self.cusum.h or not since:
+                continue
+            v = np.array([r[j] for r in list(self._raw)[-since:]], float)
+            v = v[~np.isnan(v)]
+            base = (self._sum[j] - v.sum()) / max(self._cnt[j] - len(v), 1)     # the mean before the change point
+            if not len(v) or abs(v.mean() - base) < self.minimum[SCALARS[j]]:
+                continue
+            what = {"answered": "answered alone", "confidence": "mean confidence", "act": "mean act probability"}[SCALARS[j]]
+            fmt = "{:.0%}" if SCALARS[j] == "answered" else "{:.2f}"
+            out.append((SCALARS[j], f"{what} {fmt.format(base)} → {fmt.format(v.mean())} over the last {since} "
+                                    f"decisions (sequential test: CUSUM {S:.1f} ≥ {self.cusum.h:.1f})"))
+        name, S, since = self.cusum.top()
+        return out, {"S": round(S, 3), "h": self.cusum.h, "channel": name, "since": since}
 
     @property
     def calibrated(self):
@@ -215,10 +362,19 @@ class DriftMonitor:
             self.reference.append(o)
             if len(self.reference) >= self.window:
                 self._ref = window_stats(self.reference, self.accuracy)
+                self._start_sequential()
             rep = {"phase": "reference", "drift": False, "flags": [], "why": [], "seen": self.seen}
         else:
             self.recent.append(o)
+            seq, state = self._sequential(o)
             rep = self.report()
+            if state is not None:
+                rep["tests"]["sequential"] = state
+            for name, why in seq:
+                if name not in rep["flags"]:
+                    rep["flags"].append(name)
+                    rep["why"].append(why)
+            rep["drift"] = len(rep["flags"]) >= self.min_signals
             rep["seen"] = self.seen
         self.history.append(rep)
         return rep
@@ -298,7 +454,7 @@ class DriftMonitor:
         if perm:
             ra, ca = perm
             looks = max(1.0, self.horizon / self.window)               # … a permutation test runs once per window
-            pe, pc = self._permutation_now(self.alpha / (m * looks))
+            pe, pc = self._permutation_now(self._window_alpha() / (m * looks))
             rep["tests"]["ece"] = {"reference": ra["ece"], "window": ca["ece"], "p": pe}
             found.append(("ece", pe, ca["ece"] - ra["ece"], f"calibration error among the answers given alone "
                                                            f"{ra['ece']:.3f} → {ca['ece']:.3f} (p = {pe:.1e})", looks))
@@ -307,13 +463,17 @@ class DriftMonitor:
                           f"coverage at accuracy {self.accuracy:g}: {ra['coverage_at']:.0%} → {ca['coverage_at']:.0%} "
                           f"(p = {pc:.1e})", looks))
         for name, p, effect, why, looks in found:    # … and among the looks of a horizon (a union bound)
-            level = self.alpha / (m * looks)
+            level = self._window_alpha() / (m * looks)
             rep["tests"][name]["level"] = level
             if p < level and effect >= self.minimum[name]:
                 rep["flags"].append(name)
                 rep["why"].append(why)
         rep["drift"] = len(rep["flags"]) >= self.min_signals
         return rep
+
+    def _window_alpha(self):
+        """The share of alpha the window tests have: three quarters of it when the CUSUMs run (they have the rest)."""
+        return self.alpha * 3 / 4 if self.cusum is not None else self.alpha
 
     def _permutation_now(self, level):
         """The permutation p-values, computed once per `window` observed decisions (and kept in between)."""
