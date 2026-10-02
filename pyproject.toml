@@ -28,6 +28,9 @@ mcp = ["mcp>=2"]   # solvi serve --mcp with the official MCP SDK (without it: a 
 otel = ["opentelemetry-api>=1.20", "opentelemetry-sdk>=1.20"]   # solvi.otel.export: traces as OpenTelemetry spans (without it: to_otlp_json)
 duckdb = ["duckdb>=1.0"]   # solvi.DuckDBStorage: decisions in a DuckDB file (analytics next to JSONL / Parquet)
 postgres = ["psycopg>=3.1"]   # solvi.PostgresStorage: decisions in PostgreSQL, several services writing
+pydantic-ai = ["pydantic-ai-slim>=1.0"]   # solvi.agents.pydantic_ai: GuardedToolset (tested with pydantic-ai 2.51)
+langgraph = ["langgraph>=1.0"]   # solvi.agents.langgraph: a guarded ToolNode (tested with langgraph 1.2.12, langchain-core 1.6.5)
+openai-agents = ["openai-agents>=0.22"]   # solvi.agents.openai_agents: a tool input guardrail (tested with openai-agents 0.22.3)
 lora = ["torch", "transformers", "peft>=0.13"]   # part.adapt_lora (experimental): a LoRA adapter on the decider for one question (torch backend)
 
 [project.scripts]

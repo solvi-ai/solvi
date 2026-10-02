@@ -94,6 +94,8 @@ def check(ex, out, items):
 
 
 if __name__ == "__main__":
+    if len(sys.argv) < 3:
+        sys.exit("usage: python tools/export_onnx.py <model dir or HF id> <out dir> [texts.jsonl]")
     ex = export(sys.argv[1], sys.argv[2])
     if len(sys.argv) > 3:
         items = [(r["text"], r["desc"]) for r in map(json.loads, open(sys.argv[3]))]

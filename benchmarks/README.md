@@ -49,12 +49,16 @@ docs = receipts.load("test")
 rows = receipts.laya_rows(docs)              # typed questions with ground truth
 ```
 
+The loaders need nothing beyond the standard library, except the parquet fallback of `receipts.py`, which needs
+`pandas` and `pyarrow` (neither is a dependency of solvi: install them yourself, or use the JSON-lines files).
+
 ## Results
 
 Setups, per-question numbers and caveats are in [docs/benchmarks.md](../docs/benchmarks.md).
 
-The scripts that reproduce those numbers are being ported from the research repository and will land in this
-directory before the first release.
+The extraction numbers (SROIE, CORD, CUAD, Kleister-NDA) cannot be reproduced from this repository: the scripts that
+produced them were not ported from the research repository, and the dataset loaders above have no caller here. They are
+kept as the exact reading of each dataset behind those numbers. What can be rerun is listed under Scripts.
 
 ## Scripts
 
@@ -62,5 +66,7 @@ directory before the first release.
 |---|---|
 | `perturb_injection.py` | `perturb=k` against instructions appended to Bitext support messages: how often they are followed, what it costs |
 | `fast_head.py`, `strategist_scale.py` | `fit_fast` and the strategist at scale |
+| `ask_overhead.py` | what solvi adds to one `ask` (every gallery entry and a decider project, no real model) |
+| `trace_signature.py` | what a signature (`solvi.signature`) adds over the hash chain when one stored record is edited |
 | `textin_massive.py` | text in on MASSIVE (en-US, CC BY 4.0; `$MASSIVE_DIR`): routing to eight entry points of a home assistant, and each field read by `CueExtractor` and by the decider's span pointer — right, overlapping, wrong, missed |
 | `vs_llm/` | solvi vs asking an LLM: the sets, the written policies, the runner for solvi / a model directly / a model inside solvi (LLMs and the decision models Jev and Jeeves), and every raw answer of the published run ([docs/vs_llm.md](../docs/vs_llm.md)) |

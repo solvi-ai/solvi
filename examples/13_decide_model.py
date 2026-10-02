@@ -24,6 +24,7 @@ Run:  uv run python examples/13_decide_model.py
       SOLVI_DECIDE_MODEL=<checkpoint folder> uv run --extra onnx python examples/13_decide_model.py"""
 from __future__ import annotations
 
+import json
 import os
 import random
 import re
@@ -123,9 +124,13 @@ def build(model):
     cat = Catalog()
     team = model.decision("team", TASK, text_fact="email", options=TEAMS)
 
+    def text(email):
+        """The email as text: a JSON ticket (section 10) is read through its JSON."""
+        return email if isinstance(email, str) else json.dumps(email, ensure_ascii=False)
+
     @cat.fn
     def mentions_refund(email):
-        return bool(re.search(r"\brefund|money back|charged twice\b", email, re.I))
+        return bool(re.search(r"\brefund|money back|charged twice\b", text(email), re.I))
 
     @cat.rule("refund")
     def refund(mentions_refund):
@@ -133,7 +138,7 @@ def build(model):
 
     @cat.fn
     def legal_threat(email):
-        return bool(re.search(r"\blawyer|legal action|court\b", email, re.I))
+        return bool(re.search(r"\blawyer|legal action|court\b", text(email), re.I))
 
     @cat.check(hard=True, then={"team": "other"})
     def no_legal_threat(legal_threat):
@@ -182,7 +187,8 @@ if __name__ == "__main__":
     res = system.ask({"email": email})
     print(res.audit("team"))
 
-    print("\n=== 5. the model and a rule disagree: joint decoding picks the most probable team the constraint allows ===")
+    print("\n=== 5. the model and a rule disagree: joint decoding moves the answer to the most probable team the "
+          "constraint allows (and the question abstains when that team is below min_confidence) ===")
     tricky = "Hi team, the app crashed with an error during checkout, can I get a refund? Cheers"
     r = system.ask({"email": tricky})
     was = f"the model said {r['team'].repaired[0]!r}, " if r["team"].repaired else "no repair needed, "
@@ -223,7 +229,7 @@ if __name__ == "__main__":
               "customer": {"tier": "pro", "since": "2023-04-01"}}
     print("  " + team.text_of({"email": ticket}).replace("\n", "\n  "))
     r = system.ask({"email": ticket}, ["team"])["team"]
-    print(f"  team = {r.answer!r} [{r.status}] confidence {r.confidence:.2f}")
+    print(f"  team = {r.answer!r} [{r.status}] confidence {r.confidence:.2f} — {r.why[:120]}")
 
     print("\n=== lifetime safeguard stats ===")
     print(system.safeguard_report())

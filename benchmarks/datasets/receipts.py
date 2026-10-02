@@ -37,7 +37,11 @@ def load(split, limit=None):
     if js.exists():
         out = [json.loads(line) for line in js.read_text().splitlines()]
         return out[:limit] if limit else out
-    import pandas as pd
+    try:
+        import pandas as pd
+    except ImportError:
+        raise ImportError(f"{js} is missing; reading {split}.parquet instead needs pandas and pyarrow (not solvi "
+                          "dependencies): pip install pandas pyarrow") from None
     d = pd.read_parquet(DATA / f"{split}.parquet", columns=["key", "entities", "words"])
     out = []
     for r in d.itertuples():

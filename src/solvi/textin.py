@@ -149,6 +149,7 @@ _MORE_BEFORE = re.compile(r"(?<!\w)" + _MORE + r"\s+$", re.I)
 _FRACTION_BEFORE = re.compile(r"(?<!\w)(?:\w+\s+)?(?:an?\s+)?(?:half|quarters?|thirds?|fifths?|tenths?|четверть|треть|"
                               r"половина)(?:\s+of)?\s+$", re.I)
 _HALF_BEFORE = re.compile(r"(?<!\w)(?:[\w.,]+\s+)?and\s+an?\s+$", re.I)          # ... before a number that starts "half"
+_PART_AFTER = re.compile(r"\s+(?:halves|thirds?|fifths?|tenths?)(?!\w)", re.I)   # "2 thirds" ("2 quarters" may be a count)
 _HALF_AFTER = re.compile(r"\s+(?:and\s+a\s+half|с\s+половиной)(?!\w)(?:\s+(?:" + _SCALE_WORDS_RE + r")(?!\w))?", re.I)
 
 
@@ -160,7 +161,18 @@ def _fraction_around(text, m):
         before = None                                 # "in the second half 300 were sold": no fraction of the digits
     if before is None and (m.group("w") or "").lower().startswith("half"):
         before = _HALF_BEFORE.search(text[:m.start()])
-    after = _HALF_AFTER.match(text, m.end())
+    after = _HALF_AFTER.match(text, m.end()) or (_PART_AFTER.match(text, m.end()) if m.group("d") is not None else None)
+    if before is None and after is None:
+        return None
+    return (before.start() if before else m.start()), (after.end() if after else m.end())
+
+
+def _more_around(text, m):
+    """The number words next to a spelled-out number (or digits with a scale word) that make it a longer one — "ten
+    thousand [and one]", "[two thousand] three hundred" → (start, end) of the whole phrase, or None."""
+    if m.group("w") is None and not m.group("s1"):
+        return None
+    before, after = _MORE_BEFORE.search(text[:m.start()]), _MORE_AFTER.match(text, m.end())
     if before is None and after is None:
         return None
     return (before.start() if before else m.start()), (after.end() if after else m.end())
@@ -243,9 +255,10 @@ def parse_number(s, spec=None):
 
 def _number_span(text, m):
     """A number candidate's span, with the currency after a space-grouped number ("1 500 000 руб") so the parser sees
-    the context that makes it one number — and with the fraction words around it ("quarter of a million", "5 and a
-    half thousand"), so the parser sees that it is a longer number and refuses it."""
-    whole = _fraction_around(text, m)
+    the context that makes it one number — and with the fraction or number words around it ("quarter of a million", "5
+    and a half thousand", "2 thirds", "ten thousand and one"), so the parser sees that it is a longer number and refuses
+    it instead of reading the part that was cut out."""
+    whole = _fraction_around(text, m) or _more_around(text, m)
     if whole is not None:
         return whole
     e = m.end()
@@ -309,7 +322,8 @@ def parse_date(s, spec=None):
     {"dayfirst": False}: month first); 12 September 2026, September 12, 2026, 12 Sep, 12 сентября; today / yesterday /
     tomorrow. A lower-case "may" after a number, without a year and before a verb or a pronoun ("these 2 may be
     wrong"), is the modal verb, not the month. A date without a year, a two-digit year, or a relative date needs spec {"today": "YYYY-MM-DD"}
-    (TextIn(today=...)): without it it is an error, never a guessed year or century. A two-digit year is the one within
+    (TextIn(today=...)): without it it is an error. With it a date without a year is read in today's year (an
+    assumption, not a reading: "28 December" read on 5 January is the December ahead). A two-digit year is the one within
     (today − 80 years, today + 20 years]: with today 2026-09-28, "85" is 1985 and "30" is 2030. Exactly one date in the
     quote."""
     spec = spec or {}
@@ -770,8 +784,8 @@ class TextRead:
             if r.status == "conflict":
                 parts.append(f"{what} (it was {r.was!r}, then I read {r.quote.value!r} and cannot read it)")
                 continue
-            parts.append(what + (f" (I read {r.quote.value!r} but {r.why})" if r.status in ("unparsed", "unsure")
-                                 and r.quote is not None else ""))
+            parts.append(what + (f" (I read {r.quote.value!r} but {_for_the_user(r.why)})"
+                                 if r.status in ("unparsed", "unsure") and r.quote is not None else ""))
         return "Please tell me the " + ", ".join(parts[:-1]) + (" and the " if len(parts) > 1 else "") + parts[-1] + "."
 
     def to_dict(self):
@@ -822,6 +836,16 @@ class TextRead:
                                provenance="given" if r.status == "given" else "quoted",
                                model=None if r.status == "given" else r.model, extra=ex))
         return recs
+
+
+def _for_the_user(why):
+    """A parser's reason in the words of a clarifying question: what the person who wrote the text can fix (the
+    developer's hint — "pass today=" — stays in the field's `why`)."""
+    for mark, said in (("has no year", "the year is missing"), ("two-digit year", "the year has only two digits"),
+                       ("is relative", "I need the date itself")):
+        if mark in (why or ""):
+            return said
+    return why
 
 
 # ------------------------------------------------------------------------------------------------ TextIn

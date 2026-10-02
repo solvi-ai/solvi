@@ -163,6 +163,16 @@ MESSAGES_RU = [
     ("low confidence {c} < {m}; would have answered {a:any} ({w:msg})",
      "низкая уверенность {c} < {m}; ответ был бы {a} ({w})"),
     ("not stated", "не указано"),
+    # text in (System.ask_text, solvi.textin)
+    ("not stated in the text: {fs}", "не указано в тексте: {fs}"),
+    ("not stated in the text", "не указано в тексте"),
+    ("the entry point is unsure, nothing was asked: {x:msg}", "вопрос по тексту не выбран, ничего не спрошено: {x}"),
+    ("entry point unsure — {a} {p} vs {b} {q} (margin < {m})", "вопрос не выбран уверенно — {a} {p} против {b} {q} (разрыв < {m})"),
+    ("entry point unsure — {a} {p} < {m}", "вопрос не выбран уверенно — {a} {p} < {m}"),
+    ("found with confidence {c} < {m}", "найдено с уверенностью {c} < {m}"),
+    ("no parser reads {t}", "нет разбора для типа {t}"),
+    ("cannot parse as {k}: {why:any}", "не читается как {k}: {why}"),
+    ("does not re-derive from its quote: {why:any}", "не восстанавливается из своей цитаты: {why}"),
     ("no supporting quote (require_evidence)", "нет подтверждающей цитаты (require_evidence)"),
     ("would have answered {a:any}", "ответ был бы {a}"),
     # rejections (accepts, primitives, typed facts, the executor)
@@ -297,6 +307,7 @@ def width(keys, lang=None, en=12):
 
 
 _compiled = {}
+_EXCEPTION = re.compile(r"[\w.]*(?:Error|Exception|Warning|Exit|Interrupt|Timeout)\b: ")
 
 
 def _compile(table):
@@ -333,6 +344,8 @@ def msg(text, lang=None, scope="msg", _depth=0):
     if "; " in text:
         pieces = text.split("; ")
         return "; ".join(msg(p, lang, scope, _depth + 1) for p in pieces)
+    if _EXCEPTION.match(text):                        # "<ExceptionType>: <its text>" came from you: never translated,
+        return text                                   # even when the text reads like one of solvi's messages
     got = _match([x for x in table if x[3]], text, lang, scope, _depth)     # "<who>: <reason>", one part only
     return text if got is None else got
 

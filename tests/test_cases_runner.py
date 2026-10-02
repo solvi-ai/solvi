@@ -5,6 +5,8 @@ import json
 from importlib.metadata import entry_points
 from pathlib import Path
 
+import pytest
+
 from solvi import cli, testing
 
 pytest_plugins = ["pytester"]
@@ -221,8 +223,67 @@ def test_a_case_that_cannot_fail_is_reported(tmp_path):
     ]
     (res,) = testing.run_path(_write(tmp_path, hollow))
     p = {c.name: c.problems for c in res.cases}
-    assert p["typo in the key"] == ["unknown key(s) 'expcted' (a case has: name, state, expected, status, safeguards, ask, note)"]
+    assert p["typo in the key"] == ["unknown key(s) 'expcted' (a case has: name, state, expected, gold, status, safeguards, ask, note)"]
     assert p["nothing expected"] == ['the case expects nothing: give "expected", "status" or "safeguards"']
     assert p["status of a question not asked"][0].startswith("status of rout: not asked")
     assert p["safeguards of a question not asked"][0].startswith("safeguards of rout: not asked")
     assert p["no safeguards at all is an expectation"] == [] and p["a note is allowed"] == []
+
+
+STORING_TASK = '''
+from pathlib import Path
+from typing import Literal
+
+from solvi import Catalog, Question, System
+
+cat = Catalog()
+
+
+@cat.rule("big")
+def big(amount: float) -> Literal["yes", "no"]:
+    return "yes" if amount > 100 else "no"
+
+
+def system():
+    return System(cat, [Question("big", "Is it big?")], storage=str(Path(__file__).parent / "decisions.jsonl"))
+'''
+
+
+def test_the_test_runners_do_not_write_their_inputs_into_the_systems_store(tmp_path, capsys):
+    (tmp_path / "task.py").write_text(STORING_TASK)
+    (tmp_path / "cases.json").write_text(json.dumps({"system": "task.py:system", "cases": [
+        {"name": "big", "state": {"amount": 500}, "expected": {"big": "yes"}}]}))
+    store = tmp_path / "decisions.jsonl"
+
+    def stored():
+        return len(store.read_text().splitlines()) if store.exists() else 0
+    assert testing.main([str(tmp_path), "-q"]) == 0 and stored() == 0
+    assert testing.main([str(tmp_path), "-q", "--fuzz", "20"]) == 0 and stored() == 0     # nor the fuzz mutations
+    (res,) = testing.run_path(tmp_path)
+    assert res.ok and stored() == 0
+    assert testing.main([str(tmp_path), "-q", "--store"]) == 0 and stored() == 1          # only when asked
+    (tmp_path / "honesty.json").write_text(json.dumps({"task": "task.py", "cases": [
+        {"name": "big", "state": {"amount": 500}, "gold": {"big": "yes"}}]}))
+    from solvi import honesty
+    assert honesty.report(tmp_path / "honesty.json")["cases"] == 1 and stored() == 1
+
+
+def test_one_case_format_for_solvi_test_and_solvi_honesty(tmp_path, capsys):
+    from solvi import honesty
+    gallery = Path(__file__).resolve().parents[1] / "gallery" / "01_support_triage" / "cases.json"
+    rep = honesty.report(gallery)                                    # a cases.json ("expected") is a honesty set
+    assert rep["cases"] == len(json.loads(gallery.read_text())) > 5 and rep["metrics"]
+    (tmp_path / "task.py").write_text(STORING_TASK)
+    (tmp_path / "cases.json").write_text(json.dumps({"system": "task.py:system", "cases": [
+        {"name": "big", "state": {"amount": 500}, "gold": {"big": "yes"}},              # a honesty case ("gold")
+        {"name": "small", "state": {"amount": 5}, "gold": {"big": "yes"}}]}))
+    (res,) = testing.run_path(tmp_path)
+    assert [c.ok for c in res.cases] == [True, False] and "big" in res.cases[1].problems[0]
+    with pytest.raises(ValueError, match='both "gold" and "expected"'):
+        honesty.load_set(_both(tmp_path))
+
+
+def _both(tmp_path):
+    p = tmp_path / "both.json"
+    p.write_text(json.dumps({"task": "task.py", "cases": [{"state": {}, "gold": {"big": "yes"}, "expected": {"big": "no"}}]}))
+    return p

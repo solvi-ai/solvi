@@ -12,6 +12,7 @@ builds it (paths relative to the cases file). A case:
      "safeguards": {"priority": ["hard_check"]},           # optional: the safeguard kinds that fire for a question (exactly)
      "ask": ["priority", "route"]}                         # optional: ask only these questions (default: all)
 
+("gold" — the key a honesty set uses — is read as "expected", so one file serves `solvi test` and `solvi honesty`.)
 An expected answer is written as in solvi's JSON: an option, a list for multi-label, a number, "<not stated>" for
 solvi.Unknown; null or "abstain" means the question must abstain. Every response's trace must also replay.
 
@@ -139,11 +140,21 @@ def _show(v):
     return _plain(v)
 
 
-CASE_KEYS = ("name", "state", "expected", "status", "safeguards", "ask", "note")
+def _store_kw(system, store):
+    """store= for System.ask (an object with a plain ask(state), as fuzz also takes, gets nothing)."""
+    import inspect
+    try:
+        return {"store": store} if "store" in inspect.signature(system.ask).parameters else {}
+    except (TypeError, ValueError):
+        return {}
 
 
-def check(system, case, state):
-    """Ask one case and compare → CaseResult. Exceptions from ask are reported as a crash, not raised. A case that cannot
+CASE_KEYS = ("name", "state", "expected", "gold", "status", "safeguards", "ask", "note")
+
+
+def check(system, case, state, store=False):
+    """Ask one case and compare → CaseResult. Nothing is written to the system's own storage (a test input is not a
+    decision) unless store=True. Exceptions from ask are reported as a crash, not raised. A case that cannot
     fail is a problem too: a key that is not one of CASE_KEYS (a misspelled "expcted"), a status or safeguards entry for
     a question that was not asked, a case that expects nothing."""
     name = case.get("name", "?")
@@ -151,16 +162,19 @@ def check(system, case, state):
     odd = sorted(k for k in case if k not in CASE_KEYS)
     if odd:
         out.problems.append(f"unknown key(s) {', '.join(map(repr, odd))} (a case has: {', '.join(CASE_KEYS)})")
-    if not (case.get("expected") or case.get("status") or case.get("safeguards") or isinstance(case.get("safeguards"), list)):
+    if "gold" in case and "expected" in case:
+        out.problems.append('both "gold" and "expected": they are one thing (a honesty set says "gold")')
+    expected = case.get("expected") if "expected" in case else case.get("gold")
+    if not (expected or case.get("status") or case.get("safeguards") or isinstance(case.get("safeguards"), list)):
         out.problems.append("the case expects nothing: give \"expected\", \"status\" or \"safeguards\"")
     try:
-        res = system.ask(state, case.get("ask"))
+        res = system.ask(state, case.get("ask"), **_store_kw(system, store))
     except Exception as e:  # noqa: BLE001
         out.problems.append(f"crash: {type(e).__name__}: {e}\n{traceback.format_exc(limit=-3)}")
         return out
     out.ms = res.ms
     out.answers = {q: [_show(r.answer), r.status] for q, r in res.results.items()}
-    for q, want in (case.get("expected") or {}).items():
+    for q, want in (expected or {}).items():
         if q not in res.results:
             out.problems.append(f"{q}: not asked (unknown question, or left out by \"ask\")")
             continue
@@ -200,8 +214,9 @@ def check(system, case, state):
     return out
 
 
-def run_file(path, fuzz_n=0, seed=0):
-    """Run every case of a cases file → FileResult (with fuzz_n > 0, each case is also fuzzed; crashes are problems)."""
+def run_file(path, fuzz_n=0, seed=0, store=False):
+    """Run every case of a cases file → FileResult (with fuzz_n > 0, each case is also fuzzed; crashes are problems).
+    store=True: the cases (never the fuzz mutations) are saved to the system's storage, when it has one."""
     path = Path(path)
     out = FileResult(path)
     try:
@@ -216,16 +231,16 @@ def run_file(path, fuzz_n=0, seed=0):
         except Exception as e:  # noqa: BLE001
             out.cases.append(CaseResult(case.get("name", f"#{i + 1}"), [f"prepare failed: {type(e).__name__}: {e}"]))
             continue
-        r = check(system, case, state)
+        r = check(system, case, state, store)
         if fuzz_n:
             r.problems += [f"fuzz {c}" for c in fuzz(system, state, fuzz_n, seed + i)]
         out.cases.append(r)
     return out
 
 
-def run_path(paths, fuzz_n=0, seed=0):
+def run_path(paths, fuzz_n=0, seed=0, store=False):
     """Every cases file under the paths → [FileResult]."""
-    return [run_file(f, fuzz_n, seed) for f in find(paths)]
+    return [run_file(f, fuzz_n, seed, store) for f in find(paths)]
 
 
 # --------------------------------------------------------------------------------------------------- fuzzing
@@ -290,7 +305,7 @@ def fuzz(system, state, n=50, seed=0):
         try:
             with warnings.catch_warnings():
                 warnings.simplefilter("ignore")
-                res = system.ask(st)
+                res = system.ask(st, **_store_kw(system, False))      # a mutated input is never a stored decision
         except Exception as e:  # noqa: BLE001
             out.append(f"crash — {what}: {type(e).__name__}: {e}")
             continue
@@ -311,11 +326,13 @@ def main(argv=None):
     ap.add_argument("--fuzz", type=int, default=0, metavar="N", help="also ask N mutated inputs per case; an exception "
                     "escaping solvi, or an answer with a NaN / out-of-range confidence, fails the case")
     ap.add_argument("--seed", type=int, default=0, help="fuzzing seed (default 0)")
+    ap.add_argument("--store", action="store_true", help="save the cases' decisions to the system's own storage "
+                                                         "(default: test inputs are not stored)")
     ap.add_argument("--json", action="store_true", help="print the results as JSON")
     ap.add_argument("-q", "--quiet", action="store_true", help="print failures and the summary only")
     a = ap.parse_args(argv)
     try:
-        files = run_path(a.paths, a.fuzz, a.seed)
+        files = run_path(a.paths, a.fuzz, a.seed, a.store)
     except FileNotFoundError as e:
         print(f"solvi test: {e}", file=sys.stderr)
         return 2
