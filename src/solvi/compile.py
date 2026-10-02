@@ -464,12 +464,67 @@ def unknown_reads(source: str, parts: dict, given) -> list[str]:
             args = [a.arg for a in node.args.posonlyargs + node.args.args + node.args.kwonlyargs]
             bad = [a for a in args if a not in given and a not in facts]
             if bad:
-                g = sorted(given)[0] if given else "x"
-                out.append(f"part {node.name} reads {', '.join(bad)}: neither an input field nor a fact set by a part "
-                           f"(the inputs are exactly {', '.join(sorted(given))}; to read something inside an input, "
-                           f"write a fn part for it — `def {bad[0]}({g}): return {g}[{bad[0]!r}]` — or work it out "
-                           f"inside the part from the input)")
+                near = {b: difflib.get_close_matches(b, sorted(given | facts), n=1, cutoff=0.6)
+                        or [f for f in sorted(given | facts) if b in f][:1] for b in bad}
+                hint = "; ".join(f"{b} — did you mean {m[0]}?" for b, m in near.items() if m)
+                out.append(f"part {node.name} reads {', '.join(bad)}: neither an input field nor a fact set by a part. "
+                           f"An argument of a part must be named exactly as an input ({', '.join(sorted(given))}) or "
+                           f"as the part that sets the fact" + (f" ({hint})" if hint else "")
+                           + "; a value inside an input is read through a fn part that takes the input, or worked "
+                             "out inside the part")
     return out
+
+
+def demote_helpers(source: str, parts: dict, given) -> tuple[dict, list[str]]:
+    """Parts that are really helpers → (parts without them, notes). A "fn" part (or a soft check) that reads a name
+    neither an input nor a part gives, and that other parts call as a plain function, is a helper the writer listed in
+    PARTS: it leaves PARTS, and the clauses it cited go to every part that calls it (directly or through helpers).
+    The decisions do not change — the callers computed with it anyway; only the record gets coarser. A hard check is
+    never demoted (that would drop its forcing), nor a part no other part calls."""
+    if given is None:
+        return parts, []
+    tree = ast.parse(source)
+    funcs = {n.name: n for n in tree.body if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))}
+    calls = {f: {c.func.id for c in ast.walk(n) if isinstance(c, ast.Call) and isinstance(c.func, ast.Name)
+                 and c.func.id in funcs and c.func.id != f} for f, n in funcs.items()}
+
+    def closure(f):
+        seen, todo = set(), [f]
+        while todo:
+            for g in calls.get(todo.pop(), ()):
+                if g not in seen:
+                    seen.add(g)
+                    todo.append(g)
+        return seen
+    parts = {k: dict(v) if isinstance(v, dict) else v for k, v in parts.items()}
+    notes = []
+    while True:
+        facts = {n for n, p in parts.items() if p.get("kind") in ("fn", "check")}
+        cand = None
+        for name, p in parts.items():
+            node = funcs.get(name)
+            if node is None or p.get("kind") not in ("fn", "check") or (p.get("kind") == "check" and p.get("hard")):
+                continue
+            args = [a.arg for a in node.args.posonlyargs + node.args.args + node.args.kwonlyargs]
+            if node.args.vararg or node.args.kwarg or any(a not in given and a not in facts for a in args):
+                users = [u for u in parts if u != name and u in funcs and name in closure(u)]
+                if users:
+                    cand = (name, users)
+                    break
+        if cand is None:
+            return parts, notes
+        name, users = cand
+        cl = parts.pop(name).get("clauses") or []
+        for u in users:
+            parts[u]["clauses"] = list(dict.fromkeys(list(parts[u].get("clauses") or []) + list(cl)))
+        notes.append(f"{name} reads names no input or part gives and is called by {', '.join(users)}: treated as a "
+                     f"helper, its clauses ({', '.join(cl) or 'none'}) go to {', '.join(users)}")
+
+
+def with_parts(source: str, parts: dict) -> str:
+    """The module with its PARTS literal (and PARTS.update calls) replaced by `parts`."""
+    keep = [t for k, t in _top(source) if k != "PARTS" and not (k is None and re.match(r"\s*PARTS\s*\.", t))]
+    return "\n\n".join(t.rstrip("\n") for t in keep) + "\n\n\n" + _literal("PARTS", parts)
 
 
 def build_catalog(ns: dict, parts: dict, questions) -> tuple[Catalog, list]:
@@ -534,7 +589,9 @@ CONTRACT = """## The module you write
 
 Plain top-level Python functions. Each catalog part is one function:
 - its NAME is the fact it sets, its ARGUMENT NAMES are what it reads: input fields (below) or facts set by other
-  parts. Never give a part the name of an input field or of a question.
+  parts, spelled exactly — `def member_fee(base_fee, member)` reads the fact the part `base_fee` sets and the input
+  `member` (it may not call them `base` or `is_member`). Never give a part the name of an input field or of a question.
+  The harness calls the parts and passes the facts; inside a part, call helper functions as you like.
 - kinds: "fn" computes a value; "check" returns True when its condition holds; "rule" returns the answer of one
   question (one of its options; a yes/no rule may return True / False).
 - a hard check that returns False forces the answer its "then" names, whatever the rule says (the first false hard check
@@ -985,6 +1042,7 @@ class _Draft:
     fresh: bool = False                   # the next write starts over (a replacement), not from this module
     stuck: int = 0                        # rounds in a row this draft did not run (contract, sandbox, no module)
     pitfalls: list = field(default_factory=list)   # what the replaced drafts were refused for (told to a fresh one)
+    notes: list = field(default_factory=list)      # parts treated as helpers (demote_helpers), this round
 
 
 def _run_draft(d, questions, inputs, mem_mb, item_s):
@@ -1024,6 +1082,7 @@ def _loop(spec, questions, inputs, gens, *, rounds, tests, examples, reference, 
     for rnd in range(1, rounds + 1):
         for d in drafts:
             if rnd > 1 and not d.feedback:
+                d.caught = []
                 continue
             src, patch, why = write(d, rnd)
             d.fresh = False
@@ -1031,8 +1090,13 @@ def _loop(spec, questions, inputs, gens, *, rounds, tests, examples, reference, 
             d.rows = None
             d.source, d.patch = src, patch
             d.problems = list(why)
+            d.notes = []
             if src is not None and not why:
                 parts, nn, _, problems = read_module(src, spec, questions)
+                if not problems:
+                    parts, d.notes = demote_helpers(src, parts, given_names(inputs))
+                    if d.notes:
+                        src = d.source = with_parts(src, parts)
                 d.parts, d.nn = parts, nn
                 d.problems += problems
                 if not problems:
@@ -1163,7 +1227,8 @@ def _loop(spec, questions, inputs, gens, *, rounds, tests, examples, reference, 
         for d in drafts:
             d.feedback = "\n\n".join(fb[d.index]) or None
             summary["drafts"].append({"draft": d.index, "generation": d.generation, "problems": d.problems[:5],
-                                      "caught": d.caught, "feedback": bool(d.feedback)})
+                                      "caught": list(d.caught), "feedback": bool(d.feedback),
+                                      **({"demoted": list(d.notes)} if d.notes else {})})
         summary["agreement"] = agree
         history.append(summary)
         if len(ok) == 2 and not any(d.feedback for d in drafts):

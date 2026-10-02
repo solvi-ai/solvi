@@ -511,3 +511,39 @@ def test_a_grouping_that_leaves_a_clause_out_or_puts_a_value_in_two_groups_is_re
                         "ship": {"values": ["ship", "refund"], "clauses": []}}, ["c1"])
     why = g.problems(Spec(SHOP))
     assert any("c3" in w for w in why) and any("'refund' is in groups refund and ship" in w for w in why)
+
+
+HELPER_LISTED = '''
+def fee_of(z):
+    return {"domestic": 5, "world": 20}[z]
+
+def free_shipping(total):
+    return total >= 50
+
+def not_too_heavy(zone, weight):
+    return not (zone == "world" and weight > 30) or Fail(f"{weight} kg to the world zone")
+
+def ship(zone, free_shipping):
+    fee_of(zone)
+    return "free" if free_shipping else "paid"
+
+PARTS = {
+    "fee_of": {"kind": "fn", "clauses": ["c1", "c2"]},
+    "free_shipping": {"kind": "fn", "clauses": ["c3"]},
+    "not_too_heavy": {"kind": "check", "hard": True, "then": {"ship": "refused"}, "clauses": ["c4"]},
+    "ship": {"kind": "rule", "question": "ship", "clauses": ["c3"]},
+}
+NOT_NORMATIVE = {}
+'''
+
+
+def test_a_part_that_is_really_a_helper_called_by_another_part_leaves_parts_and_its_clauses_go_to_the_caller():
+    c = compile_spec(Spec(POLICY), QS, INPUTS, Writer([[HELPER_LISTED], [GOOD]]))
+    assert c.accepted and c.reason == "accepted in round 1"
+    assert "fee_of" not in c.parts and c.parts["ship"]["clauses"] == ["c3", "c1", "c2"]
+    assert '"fee_of"' not in c.source and "def fee_of(z):" in c.source           # still in the module, as a helper
+    assert "treated as a helper" in c.record["rounds"][0]["drafts"][0]["demoted"][0]
+    # a part nobody calls stays a contract problem
+    lonely = HELPER_LISTED.replace("    fee_of(zone)\n", "")
+    c = compile_spec(Spec(POLICY), QS, INPUTS, Writer([[lonely], [GOOD]]), rounds=1)
+    assert not c.accepted and "part fee_of reads z" in c.record["rounds"][0]["drafts"][0]["problems"][0]
