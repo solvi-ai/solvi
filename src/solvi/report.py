@@ -17,6 +17,7 @@ import json
 import re
 
 from .audit import LABEL
+from .audit import build
 
 FORMATS = ("md", "html", "data")
 MAX_TEXT = 20_000                   # longer source texts are shown as excerpts around the highlighted quotes
@@ -315,7 +316,6 @@ def _audits(s, cat):
 
 
 def build_audit(res):
-    from .audit import build
     return build(res)
 
 

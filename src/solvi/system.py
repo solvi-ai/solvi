@@ -13,6 +13,10 @@ from .core import Catalog, Serial
 from .provenance import model_info
 from .runtime import MISSING, Record, Result, execute, now_ms, path_confidence, srepr, vhash
 from .strategist import computable, plan
+from .core import Part, Question, Unknown, plain_json, question_data
+from .strategist import OrderModel, ProducerPolicy
+from .runtime import aexecute, async_parts
+from .provenance import catalog_fingerprint, digest, fingerprint
 
 if TYPE_CHECKING:                                 # numpy loads with the heads, on first use: `import solvi` stays light
     from .heads import FastHead
@@ -255,7 +259,6 @@ class System:
         or "ru" (solvi.i18n). Only the rendering changes: traces, stored responses, hashes and `why` stay in English."""
         from . import i18n
         from .costs import CostBook
-        from .strategist import OrderModel, ProducerPolicy
         self.lang = i18n.check(lang)
         self.catalog = catalog
         for fact, name, lost in catalog.unreadable_validates():
@@ -440,7 +443,6 @@ class System:
     async def aask_text(self, text, decider=None, *, textin=None, question=None, store=True, timeout=None,
                         speculate=False, order=None, early_exit=None):
         """ask_text with aask (async parts awaited)."""
-        from .runtime import aexecute
         read = self._textin(text, decider, textin, question)
         t0 = now_ms()
         p = self._prepare_text(read, order)
@@ -480,7 +482,6 @@ class System:
     def is_async(self):
         """Does the catalog have parts that `aask` awaits (`async def`, or marked blocking=True)? `solvi serve` then
         answers with aask."""
-        from .runtime import async_parts
         return bool(async_parts(self.catalog))
 
     def freeze_costs(self):
@@ -637,7 +638,6 @@ class System:
         "parts": {part: fingerprint}, "models": {part or "answer:<question>": model fingerprint} for model-backed parts and
         answer heads}. Every trace records the catalog and question fingerprints and those of the parts in its flow
         (trace.fingerprint); the models it used are recorded with the steps they produced."""
-        from .provenance import catalog_fingerprint, fingerprint
         c = catalog_fingerprint(self.catalog)
         models = {}
         for n, p in list(self.catalog.parts.items()) + [(p.name, p) for p in self.catalog.rules.values()]:
@@ -652,8 +652,6 @@ class System:
         """The questions' fingerprint (answer types, min_confidence, required parts, calibration); cached while the questions'
         contents and the calibration are the same (a question changed in place — `q.min_confidence = 0.9` — changes
         it: the cache is keyed by what the questions hold, not by the objects)."""
-        from .core import plain_json, question_data
-        from .provenance import digest
 
         def data(q):                                  # as solvi.schema.dump(q, "json"); pydantic only for other values
             d = question_data(q)
@@ -960,7 +958,6 @@ class System:
     def facts_for(self, init_state):
         """All computable facts (for head training): a "compute everything" flow without rules, planned by the system's
         strategist (so a fact `ask` computes around a dead-end producer is a feature candidate too)."""
-        from .core import Question
         init_state = self._state(init_state)[0]
         q = Question("__all__", "", None)
         flow = self._plan([q], init_state.keys())
@@ -1070,7 +1067,6 @@ class System:
         catalog as a regular rule (deterministic, replayable). examples: [(init_state, answer)], at least one; features: the
         facts the list reads (`facts=` in 0.7) — parts of the catalog or given facts of the examples (a name that is neither raises, and
         nothing is installed)."""
-        from .core import Part
         from .rulelist import RuleList
         q = self.questions[question]
         facts = [features] if isinstance(features, str) else list(features)
@@ -1268,7 +1264,6 @@ def _caused_by(by, r):
 def _resolved(q, r, pc, why, src, init):
     """An answer primitive (not stated, span, rank, estimate) or an answer with evidence, from the rule's record (see
     solvi.primitives)."""
-    from .core import Unknown
     from .primitives import NO_EVIDENCE, Rejected, fmt, resolve
     try:
         out = resolve(q.answer, r, init)

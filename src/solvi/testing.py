@@ -32,6 +32,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from .honesty import gold_of, load_task, same, system_of
+from .honesty import _plain
+from . import _deprecate
 
 ABSTAIN_WORDS = ("abstain",)
 
@@ -140,7 +142,6 @@ def _abstains(want, answer_type):
 
 
 def _show(v):
-    from .honesty import _plain
     return _plain(v)
 
 
@@ -158,7 +159,6 @@ CASE_KEYS = ("name", "state", "expected", "gold", "status", "safeguards", "ask",
 
 def check(system, case, state, store=False):
     """Deprecated (removed in 0.9): run_case(system, case, state)."""
-    from . import _deprecate
     _deprecate.renamed("solvi.testing.check()", "solvi.testing.run_case()")
     return run_case(system, case, state, store)
 

@@ -62,6 +62,7 @@ import warnings
 from dataclasses import asdict, dataclass, field
 
 from .storage import FORMAT, TRUSTED_SOURCES, UntrustedLabel, check_source, plain
+from .storage import open_storage
 
 LADDER = {"fit_below": 50, "memory_below": 1000, "adapter": None,
           "memory": {"k": 7, "radius": 0.15, "min_strength": 1.0, "min_agreement": 0.8, "mode": "check"}}
@@ -184,7 +185,6 @@ class Learning:
     def __init__(self, system, storage=None, parts=None, ladder=None, gates=None, changelog=None, holdout=0.3,
                  calibration=0.2, gate_teach=True, harvest_rules=None):
         from .decide import DecisionPart, decision_of
-        from .storage import open_storage
         warnings.warn("System.learning is experimental: its API and gates may change", ExperimentalWarning, stacklevel=3)
         self.system = system
         self.storage = open_storage(storage, system) if storage is not None else system.storage

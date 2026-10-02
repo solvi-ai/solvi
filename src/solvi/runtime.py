@@ -15,6 +15,8 @@ from typing import Any
 from .core import Decision, Quote, Serial, Unknown, accept, evidence_rows, ground, has_evidence, locate, unwrap, validated
 from .core import Claim                                # Claim.extra is recorded (solvi.refine.Fail, solvi.generate)
 from .provenance import TIMED_OUT, model_info
+from .provenance import NOT_GROUNDED, OUTSIDE_OPTIONS, QUOTE_OUTSIDE, catalog_fingerprint, fingerprint, matches
+from . import _deprecate
 
 
 _FLOAT, _NONE = float, type(None)
@@ -311,7 +313,6 @@ class Trace(Serial):
 
     def value(self, name):
         """Deprecated (removed in 0.9): `res.values[name]` for a computed fact, `trace.init[name]` for a given one."""
-        from . import _deprecate
         _deprecate.renamed("Trace.value(name)", "res.values[name] (or trace.init[name] for a given fact)")
         for r in self.records:
             if r.name == name:
@@ -493,7 +494,6 @@ def _catalog_verdict(fp, catalog):
     """The recorded catalog fingerprint against the catalog replaying the trace."""
     if not fp or not fp.get("catalog") or catalog is None or not hasattr(catalog, "parts"):
         return {"catalog": "unrecorded"}
-    from .provenance import catalog_fingerprint
     now = catalog_fingerprint(catalog)
     if now["fp"] == fp["catalog"]:
         return {"catalog": "same"}
@@ -576,7 +576,6 @@ def _recompute(part, r, args, init, catalog=None):
 
 def _model_check(model, r, trust_models):
     """Compare the recorded model with the catalog's current one → (verdict, mismatches)."""
-    from .provenance import fingerprint
     rec = r.model
     if model is None or getattr(model, "available", True) is False:
         return "unavailable", []
@@ -595,7 +594,6 @@ def _model_check(model, r, trust_models):
 def _grounded(part, r, init):
     """Without re-running the model: is the recorded output still grounded? A quote literally at its offsets in the recorded
     input, a decision among the part's options (or its recorded probabilities)."""
-    from .provenance import NOT_GROUNDED, OUTSIDE_OPTIONS, QUOTE_OUTSIDE, matches
     if r.value is MISSING or r.error is not None:
         return []                                     # a rejected or failed output: the error is what was recorded
     if r.quote:

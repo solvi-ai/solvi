@@ -61,6 +61,7 @@ from pydantic import BaseModel, ConfigDict, Field, create_model
 
 from . import _deprecate
 from .command import fail as _fail, load_object, load_system
+from .schema import dump, dumps
 
 REF = "#/components/schemas/{model}"          # where the OpenAPI document keeps the models (see create_app)
 
@@ -146,7 +147,6 @@ def _camel(name):
 
 def questions_info(system):
     """GET /questions: [{name, text, answer, min_confidence, require_evidence, input_schema}]."""
-    from .schema import dump
     out = []
     for q in system.questions.values():
         d = dump(q, "json")
@@ -939,7 +939,6 @@ def run_builtin(svc, stdin=None, stdout=None):
     from concurrent.futures import TimeoutError as FutureTimeout
 
     from . import __version__
-    from .schema import dumps
     stdin, stdout = stdin or sys.stdin, stdout or sys.stdout
     lim = svc.limits
     pool = ThreadPoolExecutor(4, thread_name_prefix="solvi-mcp")

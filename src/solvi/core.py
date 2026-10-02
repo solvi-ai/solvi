@@ -310,7 +310,6 @@ class AnswerType(Serial):
 
     def rank(self, v):
         """Deprecated (removed in 0.9; the name is `Answer.rank`'s, a ranking question): `options.index(v)`."""
-        from . import _deprecate
         _deprecate.renamed("AnswerType.rank(v)", "answer_type.options.index(v)")
         return self.options.index(v)
 

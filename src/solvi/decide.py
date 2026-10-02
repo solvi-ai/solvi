@@ -58,6 +58,8 @@ import numpy as np
 from . import _deprecate
 from .core import Decision, Quote, Unknown
 from .provenance import ESCALATED, INSTRUCTION
+from .provenance import code_fingerprint, digest
+from .core import Answer, Question
 
 OPT, ONE, MANY = "[unused0]", "[unused1]", "[unused2]"
 MARKERS = {"option": OPT, "single": ONE, "multi": MANY, "score": "[unused3]", "noul": "[unused4]"}
@@ -1409,7 +1411,6 @@ class DecideModel:
         if self._wfp is None:
             fp = getattr(self.scorer, "fingerprint", None)
             self._wfp = str(fp()) if callable(fp) else f"unversioned:{type(self.scorer).__name__}"
-        from .provenance import digest
         parts = [self._wfp, self.backend, self.temperature, self.temperature_multi, self.other_threshold, self.multi_threshold]
         if self.caps["version"] >= 2 or self._overrides:        # the 'l14b_decider v1' format hashes exactly as before
             parts.append({"caps": {k: v for k, v in self.caps.items()}, "temperatures": self.temperatures,
@@ -2328,7 +2329,6 @@ class GroupBy:
         self.by = by
 
     def describe(self):
-        from .provenance import code_fingerprint
         return list(self.names) if self.fn is None else {"fn": code_fingerprint(self.fn), "reads": self.names}
 
     def label(self):
@@ -3266,7 +3266,6 @@ class DecisionPart:
         """Make this decision the answer of a question: registers it as the question's rule (`cat.rule(name)(self)`) and
         returns the Question — choice, multi, ordinal (score) or yes_no (noul), with the option descriptions. System.teach on
         that question teaches this decision."""
-        from .core import Answer, Question
         name = name or self.__name__
         cat.rule(name)(self)
         sp = self.spec

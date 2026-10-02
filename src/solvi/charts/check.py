@@ -10,6 +10,7 @@ from ..core import find_whole
 from ..specialist import BLOCKED, CHANGED, DROPPED, WARNING, Checked, Issue
 from ..textin import _CUR_AFTER, NUMBER_RE, _SCALES, ParseError, _digits
 from .spec import SCALES, ChartSpec, VerifiedChart, VerifiedPoint, VerifiedSeries
+from ..textin import _NUM_WORDS
 
 MAX_SLICES = 8
 
@@ -121,7 +122,6 @@ def _read(source, m, decimal=None):
 
 
 def _num_word(w):
-    from ..textin import _NUM_WORDS
     return _NUM_WORDS[w.lower()]
 
 

@@ -24,6 +24,7 @@ from typing import Any, Literal, Union, get_args, get_origin
 
 from .core import NotStated, Quote
 from .provenance import TYPE_REJECTED
+from .core import Answer
 
 _NOHINT = object()
 
@@ -570,7 +571,6 @@ def is_primitive(t):
 
 def primitive_answer(t):
     """A primitive type (without NotStated) → its AnswerType, or None for an ordinary type."""
-    from .core import Answer
     m = _marker(t, SpanOf)
     if m is not None:
         inner = _strip(_unoptional(t))

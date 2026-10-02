@@ -36,6 +36,7 @@ import time
 
 from . import _deprecate
 from .strategist import Flow, PlanError, plan as det_plan
+from .core import Catalog, _group_func
 
 UNIT = 1.0
 MAX_NODES = 4
@@ -358,7 +359,6 @@ def _widen(catalog, kept, ok):
 
 
 def _narrow(g, alts):
-    from .core import _group_func
     n = dataclasses.replace(g, alternatives=alts, inputs=list(dict.fromkeys(x for a in alts for x in a.inputs)))
     n.func = _group_func(n)
     return n
@@ -368,7 +368,6 @@ def view_usable(catalog, reach):
     """The catalog with every fact's producers narrowed to the usable ones (dead ends dropped), all kept as fallbacks —
     except a usable producer that would make its fact depend on itself (facts derivable from each other): of such a
     ring, the producers that make each fact computable from the given ones stay, in declaration order."""
-    from .core import Catalog
     v = Catalog.__new__(Catalog)
     v.__dict__.update(catalog.__dict__)
     v.parts = dict(catalog.parts)

@@ -49,6 +49,7 @@ from dataclasses import dataclass
 from .core import Claim, find_whole
 from .llm import InvalidOutput, LLMScorer
 from .remote import NoAnswer, Refused
+from .provenance import code_fingerprint, digest
 
 RESPONSE_FORMATS = ("prompt", "json_object", "json_schema")
 FEEDBACK = "Your answer was checked by a program, and it does not work:\n{reasons}\nGive a corrected answer."
@@ -542,7 +543,6 @@ class GenerationPart:
         return f"GenerationPart({self.gen!r}, k={self.k})"
 
     def fingerprint(self):
-        from .provenance import code_fingerprint, digest
         return digest(self.gen.fingerprint(), code_fingerprint(self.prompt),
                       code_fingerprint(self.parse) if self.parse is not None else None,
                       self.schema.fp if self.schema is not None else None, self.k, self.temperature, self.quotes,
