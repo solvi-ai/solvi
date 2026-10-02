@@ -5,7 +5,7 @@ import numpy as np
 import pytest
 
 from examples_loader import load
-from solvi import Answer, Catalog, Question, System
+from solvi import Answer, Catalog, Question, SolviDeprecationWarning, System
 from solvi.heads import FastHead
 
 S = load("02_shop_order")
@@ -318,7 +318,7 @@ def test_fit_fast_is_a_deprecated_alias_of_fit_without_selection():
     fit(..., select=False) builds."""
     train = data(0, 120)
     a = System(S.cat, S.QUESTIONS)
-    with pytest.warns(DeprecationWarning, match="fit_fast is deprecated: use fit"):
+    with pytest.warns(SolviDeprecationWarning, match="fit_fast is deprecated since 0.8 and will be removed in 0.9: use fit"):
         h1 = a.fit_fast("suspicious", train)
     h2 = System(S.cat, S.QUESTIONS).fit("suspicious", train, select=False)
     assert h1.features == h2.features and h1.fingerprint() == h2.fingerprint()

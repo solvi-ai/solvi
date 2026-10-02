@@ -4,7 +4,7 @@ This guide walks through the whole API. Where a question needs judgement, a mode
 model is whichever you have — an LLM through `solvi.llm`, a decision service, or a local checkpoint such as
 solvi-base for offline or cheap cases (see [the model proposes](#the-model-proposes-decisions-with-a-decider)). For a
 two-minute overview, see the [README](../README.md); for advice drawn from
-what we measured, see [best practices](best_practices.md). Every measured number in this guide names its source: a
+building on solvi, see [best practices](best_practices.md). Every measured number in this guide names its source: a
 script in `benchmarks/` or an example, which you can re-run from this repository, or the model card of a published
 model (solvi-base, solvi-large, solvi-large-long, extract-base, extract-receipts).
 
@@ -1026,9 +1026,9 @@ team = jeeves.decision("team", "Which team should handle this?", "email", TEAMS)
 that sure, `"think": False` skips thinking, and `"return_reasoning": True` records each question's chain in
 `extra["systemone"]["reasoning"]` (cut to 1,000 characters, for the audit: the answer still comes from the
 probabilities, and this option does not change the fingerprint). An option Jeeves does not know is refused with a 422,
-and the decision escalates with its message. The trade-off is speed: by the timings in Jeeves's own README, thinking
-makes a request several times slower, and `max_think` / `nothink_threshold` trade some of that back; its claims about
-accuracy are theirs as well. How it does inside solvi's checks is on the [benchmark page](vs_llm.md).
+and the decision escalates with its message. The trade-off is speed: thinking adds its reasoning tokens to every
+request, `max_think` / `nothink_threshold` cap them, and the time per request is worth measuring on your own hardware;
+claims about its accuracy are its authors'. How it does inside solvi's checks is on the [benchmark page](vs_llm.md).
 
 #### Any LLM as a decider
 
@@ -1331,6 +1331,17 @@ part, model, value, probabilities, signal and escalation reason — plus `calls`
 guarantee line. `replay` re-runs every stage and compares the proposals too, not only the answer; with
 `trust_models=True` (or a part's model unavailable) it checks instead that the recorded answer follows from the recorded
 proposals by the combination's rule. `System.teach` on a question a combination answers teaches every part.
+
+**The same methods as a part.** A combination has every public method of a decision part, with the same signature and
+result keys, so code written for one takes the other. `decide`, `score`, `act_guard`, `calibrate_for` (a shared
+threshold for a target error among the answered, `method="empirical"` or `"ltt"`), `conformal` and the calibration
+files act on the combination as a whole; `fit`, `adapt`, `teach`, `reset`, `memory()` (a memory for every part, which
+inside a combination only checks) and `remove_lora` go to every part and return one result per part; `calls()` counts
+the models called (a part's `calls()` counts its own decisions the same way). What belongs to one part raises
+`NotImplementedError` naming the part to call it on: `adapt_lora`, `save_lora` and `load_lora` (an adapter is trained
+on one checkpoint for one question, and its holdout recalibrates that part's own threshold), `budget`, `sections_k`,
+`long_key` and `long_input` (each part reads long texts by its own `long=`), and `in_pass` (a shared forward pass is
+for parts of one model). After changing a part, calibrate the combination again.
 
 ### A memory of corrections: part.memory
 
@@ -1923,7 +1934,7 @@ the ridge head on every feature. Accuracy is a poor guide when one answer is mos
 no fact. The selection by squared error keeps the facts that matter for a rare answer too. On very few examples (a few
 dozen) choosing among many facts overfits: pass `select=False` there. `benchmarks/fast_head.py` compares the selection
 with every fact on the example tasks — accuracy on fresh examples and the fitting time; re-run it on your own data.
-`fit_fast(...)` still works in 0.8, with a DeprecationWarning: it is `fit(..., select=False)`; it goes in 0.9.
+`fit_fast(...)` still works in 0.8, with a SolviDeprecationWarning: it is `fit(..., select=False)`; it goes in 0.9.
 
 Its other property is online learning: `system.teach(question, init_state, correct)` updates the head immediately with
 a rank-one Sherman–Morrison step (about 0.1–0.2 ms: `benchmarks/fast_head.py`, `examples/10_learn_in_milliseconds.py`) and returns the time in ms. Other questions, rules and hard checks
@@ -3471,8 +3482,8 @@ the decision rests on them: keep `.solvi/` out of version control (`install` say
 
 ### Speed
 
-Each hook is a whole process — Python start, the rules, the System, the stored trace — so its time is mostly Python's
-start-up, and the store opens from its head, so it does not grow with the number of stored decisions. Nothing heavy is
+Each hook is a whole process — Python start, the rules, the System, the stored trace. The store opens from its head,
+so a hook's time does not grow with the number of stored decisions. Nothing heavy is
 imported on this path (no numpy; pydantic only for the trace). A System One service adds its answer time; a local
 checkpoint adds its load on every call.
 
@@ -4294,8 +4305,8 @@ description)` returns one `(start, end, score, no_answer_score)`, and `field(nam
 ### Hardware notes
 
 - A GPU is recommended for training and for long documents.
-- On a CPU, use the fp32 ONNX export. We do not recommend dynamic int8 quantization yet: if you try it, check the
-  accuracy on your own fields first.
+- On a CPU, use the fp32 ONNX export; no int8 export is provided. If you quantize one yourself, compare its spans with
+  the fp32 export's on your own fields before using it.
 
 ## Command line
 

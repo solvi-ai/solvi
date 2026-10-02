@@ -1056,9 +1056,7 @@ class System:
     def fit_fast(self, question, examples, features=None, lam=None, refit=2.0, refit_until=2000):
         """Deprecated (0.8; removed in 0.9): `fit(question, examples, features, select=False, ...)` — the same ridge head
         on every feature, now built by fit."""
-        import warnings
-        warnings.warn("fit_fast is deprecated: use fit (fit_fast(...) is fit(..., select=False)); it will be removed in "
-                      "0.9", DeprecationWarning, stacklevel=2)
+        _deprecate.renamed("fit_fast", "fit (fit_fast(...) is fit(..., select=False))")
         return self.fit(question, examples, features, select=False, lam=lam, refit=refit, refit_until=refit_until)
 
     @_deprecate.kwargs(facts="features")
@@ -1090,7 +1088,7 @@ class System:
     def calibrate(self, question, examples, truth=None):
         """Calibrate answer confidence (Platt scaling) on held-out examples [(init_state, correct answer)], as `fit` takes
         them (the answer written as for `fit` and `teach`: True / False for a yes/no question, an Enum member, ...); the
-        0.7 form `calibrate(question, states, truth)` still works with a DeprecationWarning (removed in 0.9).
+        0.7 form `calibrate(question, states, truth)` still works with a SolviDeprecationWarning (removed in 0.9).
         → (a, b): confidence' = σ(a·logit(confidence) + b), applied to every later answer of the question.
         The held-out examples are run without the question's current calibration (so a second call fits the same thing
         again, not a correction of the first), are not saved to the storage and do not count in `stats`. Fewer than 10

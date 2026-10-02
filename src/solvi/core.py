@@ -437,6 +437,7 @@ class Answer:
         return answer_type_of(t, ordinal)
 
 
+@_deprecate.init_kwargs(checkpoints="requires")
 @dataclass
 class Question(Serial):
     """A question the System answers: its name, text and answer type (None: from its rule's return type), the parts
@@ -449,10 +450,7 @@ class Question(Serial):
     uses: list | None = None                          # hint to the strategist: which facts matter (when there is no rule or fit)
     min_confidence: float | None = None               # an answer below this confidence abstains (a low-confidence safeguard)
     require_evidence: bool = False                    # an answer without supporting quotes abstains ("evidence missing")
-
-
-Question.__init__ = _deprecate.kwargs(Question.__init__, checkpoints="requires")
-Question.checkpoints = _deprecate.attr("checkpoints", "requires", "Question")    # 0.7 name, removed in 0.9
+    checkpoints = _deprecate.attr("checkpoints", "requires", "Question")    # 0.7 name, removed in 0.9 (not a field)
 
 
 @dataclass

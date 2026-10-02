@@ -991,7 +991,7 @@ class DecideModel:
         head), and kind= that contradicts multi=True.
 
         Names (0.8): min_confidence= (0.7: escalate_below=), min_act= (act_threshold=), max_error= (target_error=),
-        not_stated= (unknown=) — the old ones work with a DeprecationWarning until 0.9; the part keeps the thresholds as
+        not_stated= (unknown=) — the old ones work with a SolviDeprecationWarning until 0.9; the part keeps the thresholds as
         `part.min_confidence` / `part.min_act`."""
         escalate_below, act_threshold, target_error, unknown = min_confidence, min_act, max_error, not_stated
         given = {"score_value": score_value, "k": k, "bins": bins, "unit": unit, "coverage": coverage, "other": other,
@@ -1044,8 +1044,8 @@ class DecideModel:
                 f'{name}: long="full" needs a checkpoint trained on long inputs — this one declares no "max_len_long" in its '
                 f'solvi_decide.json (it reads {self.max_len} tokens). Use long="retrieve": it finds the sections that bear on '
                 'the question and reads those. To read whole anyway, load with DecideModel.load(path, max_len_long=N) '
-                '(not recommended: a model trained on short inputs was measured no better than retrieve on long texts, '
-                'with worse quotes)')
+                '(a model trained on short inputs was not trained to read long texts: long="retrieve" is the safer '
+                'choice)')
         if L <= self.max_len:
             raise ValueError(f'{name}: long="full" reads up to max_len_long = {L} tokens, not more than max_len = '
                              f'{self.max_len}: nothing to read whole')
@@ -1054,16 +1054,15 @@ class DecideModel:
             self._warn_once("untrained", (
                 f"{self.model_id}: long=\"full\" reads up to {L} tokens, but the checkpoint "
                 + ("declares no long-input length" if declared is None else f"was trained on up to {declared}")
-                + ": it was not trained on inputs that long. Measured on 4–8k-token documents, a model trained on "
-                "512-token inputs read them whole no better than long=\"retrieve\" (74% vs 73%) and quoted worse "
-                "(35% vs 50% of quotes on the right passage); prefer long=\"retrieve\"."))
+                + ": it was not trained on inputs that long, so its answers and quotes on them are not what it learned; "
+                "prefer long=\"retrieve\", which reads the sections that bear on the question."))
 
     def decisions(self, schema, text_fact="doc", fields=None, **kw):
         """One decision part per field of a pydantic model class: the field's type is the question (bool, Literal[...],
         an Enum, Scale[...], list[Literal[...]]), its description the task (else its title, else its name), and
         `json_schema_extra` may carry "options" ({option: description}), "min_confidence", "min_act", "use_act",
         "max_error", "other", "score_value" (the 0.7 keys "escalate_below", "act_threshold", "target_error" still read,
-        with a DeprecationWarning). → {field: DecisionPart} in field order."""
+        with a SolviDeprecationWarning). → {field: DecisionPart} in field order."""
         import typing
 
         from ..typed import Bins, Ordinal, RankOf, SpanOf

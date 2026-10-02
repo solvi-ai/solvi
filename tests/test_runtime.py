@@ -4,7 +4,7 @@ import random
 
 import pytest
 
-from solvi import Answer, Catalog, Question, System
+from solvi import Answer, Catalog, Question, SolviDeprecationWarning, System
 from examples_loader import load
 from solvi.runtime import vhash
 
@@ -219,7 +219,7 @@ def test_trace_value_reads_a_computed_fact_then_a_given_one_then_missing():
     def big(double, broken):
         return "yes"
     t = System(cat, [Question("big", "Big?", Answer.yes_no())]).ask({"x": 21}).trace
-    with pytest.warns(DeprecationWarning, match=r"res.values\[name\]"):
+    with pytest.warns(SolviDeprecationWarning, match=r"res.values\[name\]"):
         assert t.value("double") == 42 and t.value("x") == 21
         assert t.value("broken") is MISSING and t.value("nothing") is MISSING
 

@@ -3,7 +3,7 @@ import asyncio
 
 import pytest
 
-from solvi import Answer, Catalog, Question, System
+from solvi import Answer, Catalog, Question, SolviDeprecationWarning, System
 
 
 def _shop():
@@ -77,9 +77,9 @@ def test_ask_options_after_the_questions_are_keyword_only_and_names_is_a_depreca
     with pytest.raises(TypeError):
         System(cat, [], None)
     assert list(s.ask({"x": 2}, questions="ship").results) == ["ship"]
-    with pytest.warns(DeprecationWarning, match=r"System.ask\(names=\) is deprecated: use questions="):
+    with pytest.warns(SolviDeprecationWarning, match=r"System.ask\(names=\) is deprecated since 0.8 and will be removed in 0.9: use questions="):
         assert list(s.ask({"x": 2}, names=["hold"]).results) == ["hold"]
-    with pytest.warns(DeprecationWarning, match=r"System.aask\(names=\)"):
+    with pytest.warns(SolviDeprecationWarning, match=r"System.aask\(names=\)"):
         assert list(asyncio.run(s.aask({"x": 2}, names=["hold"])).results) == ["hold"]
     with pytest.raises(TypeError, match="got both names= and questions="):
         s.ask({"x": 2}, names=["hold"], questions=["ship"])

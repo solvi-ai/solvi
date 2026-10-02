@@ -1,5 +1,5 @@
 """Deprecated (0.8; removed in 0.9): the segment model is solvi.segment_model (experimental; no checkpoint is published).
-Every name still reads from here, with a DeprecationWarning."""
+Every name still reads from here, with a SolviDeprecationWarning."""
 from . import _deprecate
 
 

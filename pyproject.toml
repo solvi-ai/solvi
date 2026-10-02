@@ -60,7 +60,7 @@ lora = ["torch", "transformers", "peft>=0.13"]   # part.adapt_lora: tests/test_l
 testpaths = ["tests"]
 markers = ["model: needs a real model checkpoint and its runtime (skipped when they are missing)"]
 # solvi's own code, docs examples and tests use the 0.8 names: an old name is an error unless a test expects its warning
-filterwarnings = ["error:.*the old name will be removed in solvi:DeprecationWarning"]
+filterwarnings = ["error::solvi.SolviDeprecationWarning"]   # an old name used in a test fails it, unless the test expects it
 
 [tool.ruff]
 line-length = 120

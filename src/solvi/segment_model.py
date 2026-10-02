@@ -430,7 +430,7 @@ class SegmentModel:
     @classmethod
     def load(cls, path_or_id, backend="auto", threads=None, quantized=False):
         """backend "torch", "onnx" or "auto"; quantized=True (onnx): the int8 cell encoder (onnx/encoder_int8.onnx) —
-        about 2× faster on CPU and 4× smaller, pooled states within ~0.1% (cosine) of fp32."""
+        a quarter of the fp32 file's size; check its outputs against fp32 on your own inputs before relying on it."""
         path = os.path.expanduser(str(path_or_id))
         from .loader import optional
         if backend not in ("auto", "torch", "onnx"):
@@ -625,7 +625,8 @@ def export_onnx(path, opset=18):
 
 
 def quantize_onnx(path):
-    """Dynamic int8 quantization of onnx/encoder.onnx → onnx/encoder_int8.onnx (optional, smaller and faster on CPU)."""
+    """Dynamic int8 quantization of onnx/encoder.onnx → onnx/encoder_int8.onnx (optional and smaller; check its outputs
+    against fp32 on your own inputs)."""
     from onnxruntime.quantization import QuantType, quantize_dynamic
     src = os.path.join(path, "onnx", "encoder.onnx")
     dst = os.path.join(path, "onnx", "encoder_int8.onnx")

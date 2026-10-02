@@ -618,7 +618,7 @@ class CostStrategist:
     on_failure: when the verified plan cannot be built — "code" (the code plan), "deterministic" (solvi.strategist.plan)
     or "abstain" (every question abstains). keep_alternatives: keep the other producers of a fact as run-time fallbacks.
     record: write the plan record into the trace. (0.7 names: fallback= for on_failure=, fallbacks= for
-    keep_alternatives=; they still work with a DeprecationWarning until 0.9.)"""
+    keep_alternatives=; they still work with a SolviDeprecationWarning until 0.9.)"""
 
     model = None
 
@@ -740,7 +740,7 @@ class CostStrategist:
 class ModelStrategist(CostStrategist):
     """CostStrategist with a model (experimental: no checkpoint is published) that proposes the producers where declared
     costs do not settle the choice; code verifies every proposal (see the module docs). ModelStrategist() without a model
-    is CostStrategist() — that spelling of 0.7 still works, with a DeprecationWarning."""
+    is CostStrategist() — that spelling of 0.7 still works, with a SolviDeprecationWarning."""
 
     @_deprecate.kwargs(fallback="on_failure", fallbacks="keep_alternatives")
     def __init__(self, model=None, producers="declared", on_failure="code", costs=None, keep_alternatives=True,
