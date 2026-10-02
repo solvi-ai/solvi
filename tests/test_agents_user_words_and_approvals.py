@@ -347,7 +347,7 @@ def test_pydantic_ai_approval_covers_only_the_reasons_it_was_asked_for():
         """Pay."""
         paid.append(amount)
         return "paid"
-    g = Guard(facts=["spent_today"])
+    g = Guard(fact_names=["spent_today"])
     g.tool(send_payment, ground=["iban"])
 
     @g.policy("send_payment", on_fail="escalate")
@@ -399,7 +399,7 @@ def langgraph_app(amounts, facts=None):
         """Pay."""
         paid.append(amount)
         return f"paid {amount}"
-    g = Guard(facts=["spent_today"] if facts is not None else None)
+    g = Guard(fact_names=["spent_today"] if facts is not None else None)
     g.tool(send_payment, ground=["iban"])
 
     @g.policy("send_payment", on_fail="escalate")
@@ -531,7 +531,7 @@ def oa_setup(outputs, script, injections="grounded", ground_from=("user", "tool"
         """Pay."""
         paid.append((iban, amount))
         return "paid"
-    g = Guard(facts=["spent_today"] if facts is not None else None)
+    g = Guard(fact_names=["spent_today"] if facts is not None else None)
     g.tool(fetch_invoice)
     g.tool(send_payment, ground=["iban"], ground_from=ground_from, injections=injections)
 

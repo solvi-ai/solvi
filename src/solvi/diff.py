@@ -369,6 +369,12 @@ class Shadow:
         return resp
 
     def report(self):
+        """Deprecated (removed in 0.9): summary()."""
+        _deprecate.renamed("Shadow.report()", "Shadow.summary()")
+        return self.summary()
+
+    def summary(self):
+        """What the shadow saw, as text: asks, agreements, differences per question and answer, failures."""
         st = self.stats
         lines = [f"shadow: {st['asks']} ask(s), candidate agrees on {st['agree']}, differs on {st['differ']}, "
                  f"failed on {st['errors']}"]

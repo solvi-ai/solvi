@@ -28,7 +28,7 @@ how PydanticAI sends `ToolReturn(content=...)` and MCP tool content), see `conte
 show_policies=True: the description of each tool the model is offered lists the reasons of the policies that check it
 (`Guard.described`), so the model can follow them instead of learning each one from a refusal; off by default.
 
-A tool the guard does not know is denied; with declare=True it is declared from its JSON schema on first use (the
+A tool the guard does not know is denied; with auto_declare=True (`declare=` in 0.7) it is declared from its JSON schema on first use (the
 guard then checks its types, and any policies that name it). The first parameter of a tool function typed as RunContext
 is not an argument (Guard.tool skips it).
 
@@ -49,6 +49,7 @@ try:
 except ImportError as e:
     raise ImportError('solvi.agents.pydantic_ai needs PydanticAI: pip install "solvi[pydantic-ai]"') from e
 
+from .. import _deprecate
 from .guard import Guard, _text, proposal, with_calls_made
 
 
@@ -89,7 +90,7 @@ class GuardedToolset(WrapperToolset):
     facts: Callable | dict | None = None
     on_deny: str = "retry"
     on_escalate: str = "approval"
-    declare: bool = False
+    auto_declare: bool = False
     show_policies: bool = False                                              # list each tool's policies in its description
     decisions: list = dataclasses.field(default_factory=list, repr=False)   # every GuardDecision, in order
     made: dict = dataclasses.field(default_factory=dict, repr=False)        # conversation id → its calls made (once=True)
@@ -117,7 +118,7 @@ class GuardedToolset(WrapperToolset):
 
     async def call_tool(self, name: str, tool_args: dict[str, Any], ctx, tool) -> Any:
         g = self.guard
-        if self.declare and name not in g.tools:
+        if self.auto_declare and name not in g.tools:
             td = tool.tool_def
             g.declare(name, schema=td.parameters_json_schema, description=td.description or "")
         conv = getattr(ctx, "conversation_id", None)
@@ -140,3 +141,6 @@ class GuardedToolset(WrapperToolset):
         if d.outcome == "deny" and self.on_deny == "retry":
             raise ModelRetry(d.message())
         raise ToolFailed(d.message())
+
+
+GuardedToolset.__init__ = _deprecate.kwargs(GuardedToolset.__init__, declare="auto_declare")   # 0.7 name, removed in 0.9

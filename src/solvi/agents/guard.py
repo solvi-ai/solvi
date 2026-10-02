@@ -1250,11 +1250,13 @@ class Guard:
     that read them apply to every tool without naming it (the types are for readers: a policy's own annotations are what
     solvi validates). scan_user, tool_values: the defaults of every tool's `scan_user` and `tool_values` (see `tool`)."""
 
-    def __init__(self, storage=None, authorizer=None, facts=None, lang="en", scan_user=False, tool_values="deny"):
+    @_deprecate.kwargs(facts="fact_names")
+    def __init__(self, storage=None, authorizer=None, fact_names=None, lang="en", scan_user=False, tool_values="deny"):
         from ..storage import open_storage
         self.storage = open_storage(storage)
         self.tools: dict[str, Tool] = {}
-        self.facts = dict(facts) if isinstance(facts, dict) else {f: Any for f in (facts or ())}
+        facts = fact_names                   # the names (and types) of the facts the app gives (`facts=` in 0.7); their
+        self.facts = dict(facts) if isinstance(facts, dict) else {f: Any for f in (facts or ())}   # values: check(facts=)
         self._policies = []                  # [(func, tools or None, on_fail)]
         self._fns = []                       # [(func, tools or None)]
         self._authorizer = authorizer
@@ -1413,7 +1415,7 @@ class Guard:
                 if lack:
                     raise ValueError(
                         f"{kind} {f.__name__} applies to every tool, but reads {lack}: neither a fact the guard "
-                        f"declares (Guard(facts=[...]): {sorted(self.facts)}) nor an argument of any tool — it would "
+                        f"declares (Guard(fact_names=[...]): {sorted(self.facts)}) nor an argument of any tool — it would "
                         f"check nothing. Declare the fact, or name the tools (guard.{kind}(\"tool_name\")), whose "
                         f"calls then escalate while the fact is not given")
 
@@ -1477,7 +1479,7 @@ class Guard:
         reads = [reads] if isinstance(reads, str) else list(reads)
         lack = [r for r in reads if r not in self.facts]
         if lack:
-            raise ValueError(f"require_confirmation reads {lack}: not facts the guard declares (Guard(facts=[...]): "
+            raise ValueError(f"require_confirmation reads {lack}: not facts the guard declares (Guard(fact_names=[...]): "
                              f"{sorted(self.facts)})")
         for n in sorted(_names(tools) or ()):
             if n not in self.tools:

@@ -163,7 +163,7 @@ def test_missing_required_fields_are_listed_not_guessed():
     res = s.ask_text(read)
     r = res["request_refund"]
     assert r.status == "abstain" and "not stated in the text: purchase_date" in r.why
-    assert res.textin is read
+    assert res.read is read
     # a year-less date without today= is not guessed either: unparsed, and the clarifying question says what was read
     read2 = TextIn(s, decider(), patterns={"order_id": r"[A-Z]-\d+"}).read("refund A-1: 20 EUR on 12 September")
     assert read2.fields["purchase_date"].status == "unparsed" and "the year is not stated" in read2.fields["purchase_date"].why
@@ -214,7 +214,7 @@ def test_answer_confidence_is_capped_by_the_reading():
     _, s = shop()
     res = s.ask_text("refund A-7: 20 EUR paid 2026-09-20", textin=textin(s))
     r = res["request_refund"]
-    assert r.answer == "approve" and r.confidence <= res.textin.route["confidence"] + 1e-12
+    assert r.answer == "approve" and r.confidence <= res.read.route["confidence"] + 1e-12
 
 
 def test_replay_catches_a_value_that_is_not_what_the_text_says():
@@ -232,29 +232,29 @@ def test_unsure_entry_point_escalates_and_nothing_runs():
     _, s = shop()
     tin = textin(s)
     res = s.ask_text("Cancel it, or maybe a refund instead?", textin=tin)
-    assert res.textin.question is None and "entry point unsure" in res.textin.escalated
+    assert res.read.question is None and "entry point unsure" in res.read.escalated
     assert set(res.results) == {"cancel_order", "request_refund"}
     assert all(r.status == "abstain" and r.guard == "escalated" for r in res.results.values())
     assert [r.kind for r in res.trace.records] == ["textin"]  # only the routing record: no part ran
     assert [e["kind"] for e in res.safeguards] == ["escalated"] and s.stats["model_escalated"] == 1
-    assert res.textin.clarify().startswith("Which of these")
+    assert res.read.clarify().startswith("Which of these")
     assert res.trace.replay(s)["ok"]
 
 
 def test_wrong_entry_point_escalates_instead_of_guessing():
     _, s = shop()
     res = s.ask_text("What will the weather be like tomorrow?", textin=textin(s))
-    assert res.textin.question is None and not res.complete
+    assert res.read.question is None and not res.complete
     assert all(r.guard == "escalated" for r in res.results.values())
 
 
 def test_question_given_skips_routing():
     _, s = shop()
     res = s.ask_text("A-12 cancel, it is urgent", textin=textin(s), question="cancel_order")
-    assert res["cancel_order"].answer == "cancelled" and res.textin.route["by"] == "given"
+    assert res["cancel_order"].answer == "cancelled" and res.read.route["by"] == "given"
     res = s.ask_text("A-12 cancel, not urgent", textin=textin(s, negatives={"urgent": ["not urgent"]}),
                      question="cancel_order")
-    assert res["cancel_order"].answer == "keep" and res.textin.fields["urgent"].value is False
+    assert res["cancel_order"].answer == "keep" and res.read.fields["urgent"].value is False
     with pytest.raises(KeyError):
         textin(s).read("x", question="nope")
 
@@ -309,12 +309,12 @@ def test_decider_pointer_as_the_extractor():
     tin = TextIn(s, m, extractor=ex)
     assert isinstance(tin.extractors[0], DeciderExtractor)
     res = s.ask_text("Invoice. Amount 1250.50 EUR due.", textin=tin)
-    assert res.textin.route["by"] == "single" and res["pay"].answer == "big"
+    assert res.read.route["by"] == "single" and res["pay"].answer == "big"
     rec = next(r for r in res.trace.records if r.name == "textin:amount")
     assert rec.model["type"] == "DeciderExtractor" and rec.extra["quoted"] == "1250.50"
     assert res.audit("pay").counts["quoted_by_model"] == 1 and res.trace.replay(s)["ok"]
     res2 = s.ask_text("unclear note", textin=tin)
-    assert res2.textin.fields["amount"].status == "not_stated" and res2["pay"].status == "abstain"
+    assert res2.read.fields["amount"].status == "not_stated" and res2["pay"].status == "abstain"
     with pytest.raises(ValueError, match="pointer"):
         DeciderExtractor(decider())
 
@@ -396,21 +396,21 @@ def test_ask_text_rederives_values_from_quotes():
     forged = dataclasses.replace(read, fields=dict(read.fields, amount=dataclasses.replace(read.fields["amount"],
                                                                                           value=5_000_000.0)))
     res = s.ask_text(forged)
-    f = res.textin.fields["amount"]
-    assert f.status == "unparsed" and "re-derive" in f.why and "amount" in res.textin.missing
+    f = res.read.fields["amount"]
+    assert f.status == "unparsed" and "re-derive" in f.why and "amount" in res.read.missing
     assert "amount" not in res.trace.init and res["request_refund"].status == "abstain"
     assert forged.fields["amount"].value == 5_000_000.0          # the caller's object is not changed
     assert res.trace.replay(s)["ok"]
     # a quote that is not in the text, or a canonical form the quote does not parse to
     moved = dataclasses.replace(read, fields=dict(read.fields, amount=dataclasses.replace(
         read.fields["amount"], quote=dataclasses.replace(read.fields["amount"].quote, value="900"))))
-    assert s.ask_text(moved).textin.fields["amount"].status == "unparsed"
+    assert s.ask_text(moved).read.fields["amount"].status == "unparsed"
     canon = dataclasses.replace(read, fields=dict(read.fields, amount=dataclasses.replace(
         read.fields["amount"], canonical="5000000", value=5_000_000.0)))
-    assert s.ask_text(canon).textin.fields["amount"].status == "unparsed"
+    assert s.ask_text(canon).read.fields["amount"].status == "unparsed"
     # an honest read goes through as it is
     res = s.ask_text(read)
-    assert res.textin is read and res.trace.init["amount"] == 500.0 and res["request_refund"].answer == "approve"
+    assert res.read is read and res.trace.init["amount"] == 500.0 and res["request_refund"].answer == "approve"
 
 
 def test_replay_rebuilds_the_typed_value_from_the_quote():

@@ -613,9 +613,9 @@ def test_quarantine_and_forget(filled):
     hc = store.quarantine("customer", "blocked")            # a hard check decided that answer
     assert [h["id"] for h in hc] == [ids[3]] and hc[0]["questions"]["approve"]["path"] == ["customer", "known_customer"]
     assert store.quarantine("nothing") == []
-    f = store.forget("amount", 500)
+    f = store.where_is("amount", 500)
     assert [d["id"] for d in f["dependent"]] == [ids[2]] and f["stored"] == [] and f["deleted"] == 0
-    f = store.forget("amount", 10)                          # the blocked customer: stored, but no answer rests on it
+    f = store.where_is("amount", 10)                          # the blocked customer: stored, but no answer rests on it
     assert f["dependent"] == [] and f["stored"] == [ids[3]]
     assert len(store) == 4 and store.verify()["ok"]         # a report only
 
@@ -677,7 +677,7 @@ def test_typed_values_come_back(tmp_path):
     store = JSONLStorage(tmp_path / "t.jsonl")
     s = System(cat, [Question("old", "Old?")], storage=store)
     r = s.ask({"opened": datetime.date(2024, 1, 1), "today": datetime.date(2024, 3, 1)})
-    back = JSONLStorage(tmp_path / "t.jsonl", catalog=s).get(r.stored_id)
+    back = JSONLStorage(tmp_path / "t.jsonl", system=s).get(r.stored_id)
     assert back.trace.init["opened"] == datetime.date(2024, 1, 1)
     assert store.replay_all(s) == []
     assert [h["id"] for h in store.quarantine("opened", datetime.date(2024, 1, 1))] == [r.stored_id]
@@ -728,7 +728,7 @@ def test_corrections_and_meta_read_back_non_finite_floats(tmp_path, kind):
     c = st.corrections()[0]
     assert c["init"] == {"limit": math.inf, "x": 1.0} and c["answer"] == -math.inf
     assert next(st.iter("teach")).meta == {"t": math.inf}
-    assert st.forget("limit", math.inf)["stored"] == [c["id"]]
+    assert st.where_is("limit", math.inf)["stored"] == [c["id"]]
     assert st.verify()["ok"]
 
 
@@ -897,7 +897,7 @@ def test_a_json_line_without_a_hash_inside_a_jsonl_chain_is_passed_over_and_repo
     for line in ({"note": "x"}, {"hash": 5, "id": "abc"}):
         with open(store.path, "a") as fh:
             fh.write(json.dumps(line) + "\n")
-    again = JSONLStorage(store.path, catalog=s, clock=Clock(2_000.0))
+    again = JSONLStorage(store.path, system=s, clock=Clock(2_000.0))
     assert [x.seq for x in again.iter(None)] == [0, 1] and len(again.query()) == 2 and len(again) == 2
     assert again.replay_all(s) == [] and "2" in again.report()
     v = again.verify(signature=sig)
@@ -907,7 +907,7 @@ def test_a_json_line_without_a_hash_inside_a_jsonl_chain_is_passed_over_and_repo
     System(cat, qs, storage=again).ask(STATES[2])                       # the chain goes on after the foreign lines
     v = JSONLStorage(store.path).verify()
     assert v["count"] == 3 and len(v["problems"]) == 2 and all("not a record of this store" in p[2] for p in v["problems"])
-    assert [x.seq for x in JSONLStorage(store.path, catalog=s).iter()] == [0, 1, 2]
+    assert [x.seq for x in JSONLStorage(store.path, system=s).iter()] == [0, 1, 2]
 
 
 def test_the_audit_of_a_stored_decision_without_its_catalog_knows_which_checks_are_hard(tmp_path):

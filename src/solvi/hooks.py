@@ -1,11 +1,11 @@
 """solvi behind a coding agent's hooks: Claude Code, and Codex (preview).
 
     solvi hook install   [--project DIR] [--agent claude|codex|both] [--rules PATH] [--skills-dir DIR] [--no-skills]
-                         [--no-edits] [--model MODEL] [--approve] [--command CMD] [--dry-run]
+                         [--no-edits] [--decider MODEL] [--approve] [--command CMD] [--dry-run]
     solvi hook uninstall [--project DIR] [--agent claude|codex|both] [--dry-run]
-    solvi hook pre-edit  --rules rules.toml [--model MODEL] [--store PATH | --no-store] [--approve] [--agent claude|codex]
+    solvi hook pre-edit  --rules rules.toml [--decider MODEL] [--store PATH | --no-store] [--approve] [--agent claude|codex]
                          [--no-instruction-check] [--project DIR]                       (PreToolUse: Edit|Write|MultiEdit)
-    solvi hook pick-skill --skills-dir .claude/skills [--model MODEL] [--min-score 1.5] [--margin 0.25] [--store PATH |
+    solvi hook pick-skill --skills-dir .claude/skills [--decider MODEL] [--min-score 1.5] [--margin 0.25] [--store PATH |
                          --no-store] [--project DIR]                                    (UserPromptSubmit)
     solvi hook audit [ID] [--rules rules.toml] [--store PATH]        (a stored decision: its audit; its replay on the rules)
     solvi hook sample-rules                                                             (print the sample rules file)
@@ -37,7 +37,7 @@ confirm), and for "allow" nothing — Claude Code's own permission rules still a
 
 `pick-skill` reads the skills (`<dir>/<skill>/SKILL.md`: `name` and `description` in the front matter) and the prompt, and
 picks one skill or none: deterministically by the words the prompt shares with each skill's name and description (weighted
-by how rare they are among the skills), or with --model by a decider's choice over the skills and "none". When it picks one
+by how rare they are among the skills), or with --decider by a decider's choice over the skills and "none". When it picks one
 it adds a short context line naming the skill (`additionalContext`); on "none", a near tie or a slash command it stays
 silent.
 
@@ -45,11 +45,11 @@ Every decision is stored with its trace in a TraceStorage — by default `.solvi
 `solvi verify`, `solvi report` and `TraceStorage.query` work on it. The store keeps the proposed change and the prompt
 (the decision rests on them): keep `.solvi/` out of version control.
 
---model takes what `solvi models` does: a local checkpoint folder or a cached Hugging Face id (never downloaded), an
+--decider (0.7: --model, still read) takes what `solvi models` does: a local checkpoint folder or a cached Hugging Face id (never downloaded), an
 OpenAI-compatible endpoint `llm:URL#model` (key in $SOLVI_LLM_API_KEY), a System One service `systemone:URL#model` (key in
 $SOLVI_SYSTEMONE_API_KEY) or `module:attr`. Calibrate a fuzzy rule with the same model:
 
-    SOLVI_HOOK_RULES=.claude/solvi-rules.toml SOLVI_HOOK_MODEL=MODEL \\
+    SOLVI_HOOK_RULES=.claude/solvi-rules.toml SOLVI_HOOK_DECIDER=MODEL \\
         solvi calibrate solvi.hooks:rules_system RULE_answer labels.jsonl --risk 0.1 --out .claude/RULE.calib.json
 
 and name the file in the rule (`calibration = "RULE.calib.json"`, relative to the rules file). RULE is the rule's id with
@@ -75,7 +75,7 @@ RULE_KEYS = {"id", "paths", "why", "forbid", "require", "forbid_calls", "require
 SAMPLE_RULES = r"""# solvi rules for a coding agent's edits (solvi hook pre-edit).
 # paths: globs relative to the project root — "*" stays inside a folder, "**" crosses folders, a leading "!" excludes.
 # Deterministic checks (forbid, require, forbid_calls, require_def) are exact and block (on_fail = "ask" to ask instead).
-# A question is fuzzy: it needs a model (--model); it blocks only with a calibration file, otherwise it asks a person.
+# A question is fuzzy: it needs a model (--decider); it blocks only with a calibration file, otherwise it asks a person.
 
 [[rule]]
 id = "no-secrets-in-source"
@@ -712,14 +712,14 @@ def edit_system(rules, change, model=None, instructions=True):
 
 def rules_system():
     """Every question of the rules file in $SOLVI_HOOK_RULES (default .claude/solvi-rules.toml) as decision parts of one
-    System, with the decider in $SOLVI_HOOK_MODEL: for `solvi calibrate solvi.hooks:rules_system RULE_answer ...`."""
+    System, with the decider in $SOLVI_HOOK_DECIDER ($SOLVI_HOOK_MODEL in 0.7, still read): for `solvi calibrate solvi.hooks:rules_system RULE_answer ...`."""
     from .core import Catalog
     from .models import load as load_model
     from .system import System
     from .loader import LoadError                      # the command prints it; a library caller gets an exception
-    spec = os.environ.get("SOLVI_HOOK_MODEL")
+    spec = os.environ.get("SOLVI_HOOK_DECIDER") or os.environ.get("SOLVI_HOOK_MODEL")
     if not spec:
-        raise LoadError("solvi.hooks:rules_system: set SOLVI_HOOK_MODEL to the model the hook uses (--model)")
+        raise LoadError("solvi.hooks:rules_system: set SOLVI_HOOK_DECIDER to the decider the hook uses (--decider)")
     model = load_model(spec)
     cat, qs = Catalog(), []
     for r in load_rules(os.environ.get("SOLVI_HOOK_RULES", DEFAULT_RULES)):
@@ -1238,7 +1238,7 @@ def install(root, agent="claude", rules=DEFAULT_RULES, skills_dirs=None, edits=T
     before = _count(settings)
     settings, removed = _strip(settings)
     exe = command or _solvi_command()
-    extra = (f" --model {_q(model)}" if model else "") + (" --agent codex" if agent == "codex" else "")
+    extra = (f" --decider {_q(model)}" if model else "") + (" --agent codex" if agent == "codex" else "")
     added = []
     hooks = settings.setdefault("hooks", {})
     if edits:
@@ -1338,9 +1338,11 @@ def parser():
 
     def common(s):
         s.add_argument("--project", help="the project root (default: $CLAUDE_PROJECT_DIR, else found from the hook's cwd)")
-        s.add_argument("--model", help="a decider: a local checkpoint folder or cached Hugging Face id, llm:URL#model, "
-                                       "systemone:URL#model or module:attr (keys from $SOLVI_LLM_API_KEY / "
-                                       "$SOLVI_SYSTEMONE_API_KEY); default: deterministic only")
+        s.add_argument("--decider", dest="model",
+                       help="a decider: a local checkpoint folder or cached Hugging Face id, llm:URL#model, "
+                            "systemone:URL#model or module:attr (keys from $SOLVI_LLM_API_KEY / "
+                            "$SOLVI_SYSTEMONE_API_KEY); default: deterministic only")
+        s.add_argument("--model", dest="model", help=argparse.SUPPRESS)   # 0.7 name: hooks installed then keep working
         s.add_argument("--store", default=HOOK_STORE, help=f"the TraceStorage for the decisions (default {HOOK_STORE}, "
                                                             "relative to the project)")
         s.add_argument("--no-store", action="store_true", help="do not store the decisions")
@@ -1357,9 +1359,9 @@ def parser():
     common(k)
     k.add_argument("--min-score", type=float, default=1.5, help="deterministic: the least score to pick a skill")
     k.add_argument("--margin", type=float, default=0.25,
-                   help="a near tie says nothing: the second within this share of the best (with --model: the decider's "
+                   help="a near tie says nothing: the second within this share of the best (with --decider: the decider's "
                         "min_margin between its top two probabilities)")
-    k.add_argument("--calibration", help="with --model: a calibration file for the skill decision")
+    k.add_argument("--calibration", help="with --decider: a calibration file for the skill decision")
     k.add_argument("--agent", choices=["claude", "codex"], default="claude", help=argparse.SUPPRESS)
     i = sub.add_parser("install", help="write the hook entries into the project's settings (merged; prints the changes)")
     i.add_argument("--project", help="the project root (default: the current folder)")
@@ -1370,7 +1372,8 @@ def parser():
     i.add_argument("--skills-dir", action="append", help=f"skill folders for pick-skill (default {DEFAULT_SKILLS})")
     i.add_argument("--no-skills", action="store_true", help="no UserPromptSubmit hook")
     i.add_argument("--no-edits", action="store_true", help="no PreToolUse hook")
-    i.add_argument("--model", help="pass --model to the hooks")
+    i.add_argument("--decider", dest="model", help="pass --decider to the hooks")
+    i.add_argument("--model", dest="model", help=argparse.SUPPRESS)
     i.add_argument("--approve", action="store_true", help="pass --approve to pre-edit")
     i.add_argument("--command", help="the command that runs solvi (default: the solvi on PATH, else this Python -m solvi)")
     i.add_argument("--dry-run", action="store_true", help="print what would change, write nothing")
@@ -1383,7 +1386,8 @@ def parser():
     au.add_argument("id", nargs="?", help="the stored decision's id")
     au.add_argument("--rules", default=DEFAULT_RULES, help=f"the rules file (default {DEFAULT_RULES})")
     au.add_argument("--store", default=HOOK_STORE, help=f"the store (default {HOOK_STORE})")
-    au.add_argument("--model", help="the model the decision used, if any")
+    au.add_argument("--decider", dest="model", help="the decider the decision used, if any")
+    au.add_argument("--model", dest="model", help=argparse.SUPPRESS)
     au.add_argument("--project", help="the project root (default: found from the current folder)")
     sub.add_parser("sample-rules", help="print the sample rules file")
     return p

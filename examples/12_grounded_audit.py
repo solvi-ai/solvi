@@ -162,4 +162,4 @@ if __name__ == "__main__":
     print("same model, trust_models=True:", res.trace.replay(cat, trust_models=True)["models"])
 
     print("\n=== lifetime safeguard stats ===")
-    print(system.safeguard_report())
+    print(system.safeguard_summary())

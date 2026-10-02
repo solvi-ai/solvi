@@ -116,17 +116,17 @@ def test_ask_text_rebuilds_parser_specs_instead_of_trusting_the_read():
     assert read.fields["urgent"].status == "not_stated"
     forged = forge_urgent(read, "banana", {"cues": ["banana"]})
     res = s.ask_text(forged)
-    f = res.textin.fields["urgent"]
+    f = res.read.fields["urgent"]
     assert f.status == "unparsed" and "not the field's own" in f.why and "urgent" not in res.trace.init
     assert res["cancel_order"].status == "abstain"
     bare = TextRead(forged.text, forged.question, forged.fields, forged.route)        # built by hand: no reader
-    assert s.ask_text(bare).textin.fields["urgent"].status == "unparsed"
+    assert s.ask_text(bare).read.fields["urgent"].status == "unparsed"
     # a read made with the app's own cues goes through, with them, and only with them
     tin = TextIn(s, cues={"urgent": ["asap"]})
     ok = tin.read("cancel A-12 placed 2026-09-01, asap", question="cancel_order")
     assert ok.fields["urgent"].value is True
     assert s.ask_text(ok)["cancel_order"].answer == "now"
-    assert s.ask_text(ok, textin=TextIn(s)).textin.fields["urgent"].status == "unparsed"
+    assert s.ask_text(ok, textin=TextIn(s)).read.fields["urgent"].status == "unparsed"
 
 
 def test_only_today_may_come_from_the_read():
@@ -140,7 +140,7 @@ def test_only_today_may_come_from_the_read():
     assert read.fields["placed"].value == dt.date(2026, 9, 12)
     other = dataclasses.replace(read, fields=dict(read.fields, placed=dataclasses.replace(
         read.fields["placed"], spec={**read.fields["placed"].spec, "dayfirst": False})))
-    assert s.ask_text(other).textin.fields["placed"].status == "unparsed"
+    assert s.ask_text(other).read.fields["placed"].status == "unparsed"
     bare = dataclasses.replace(read, reader=None)                                  # a TextIn without today= agrees
     assert s.ask_text(bare)["cancel_order"].answer == "now"
 

@@ -2368,7 +2368,7 @@ server. Measure on your machine before storing every decision of a high-volume s
 | `signature(alg="syndrome")` | 64 bytes that later name the one changed record (see below) |
 | `replay_all(system)` | the stored decisions whose trace no longer replays, with the mismatches |
 | `quarantine(fact, value=...)` | the stored decisions whose answers rest on this fact (with this value), and the path from the fact to each answer |
-| `forget(fact, value=...)` | a report: decisions resting on a given fact, and records that only hold it; nothing is deleted |
+| `where_is(fact, value=...)` (`forget` in 0.7) | a report: decisions resting on a given fact, and records that only hold it; nothing is deleted |
 | `redact(id, by=, note=)` | erase a stored record's content (the response, its input and trace, the meta) and keep the chain: the record keeps its place, hash and id, is marked `redacted`, and a record of kind `redaction` naming it is appended; `verify()` — also with an earlier anchor or signature — still passes, and iter / query / replay pass the record over. What is left (the answers, the time, the safeguards) is still covered by the record's hash, which is taken over the lasting fields and the digests of the answers and of the content: an answer edited in an erased record does not verify. `keep_answers=False` erases the answers too |
 
 **The chain across records.** Each record stores the hash of the record before it, and its own hash covers its content and
@@ -2432,7 +2432,7 @@ you keep the head.
 
 **Provenance over the store.** `store.quarantine("fx_rate", 1.37)` lists the stored decisions whose answer depends on that
 value of that fact — through the recorded inputs of each step, from the answer back to the fact (a hard check that decided
-an answer counts), with the path — so you can re-decide or review them. `store.forget("email", "a@b.c")` answers "what
+an answer counts), with the path — so you can re-decide or review them. `store.where_is("email", "a@b.c")` answers "what
 would removing this input touch": the decisions resting on it and the records that merely hold it. Neither changes the
 store: deleting a record would break the chain by design.
 
@@ -2447,7 +2447,7 @@ its members — and the type of its model) and its code: the function's syntax t
 or formatting, the simple values it closes over or reads as module constants, and the module's own functions it calls. A
 model's weights are not in the catalog's fingerprint: they are the model's own fingerprint, recorded with every step it
 produced. Every trace records the catalog's and the questions' fingerprints and those of its flow's parts;
-`store.query(catalog=fp)` finds the decisions made by one catalog. Limits: a module constant rebound after the first ask,
+`store.query(catalog_fp=fp)` finds the decisions made by one catalog. Limits: a module constant rebound after the first ask,
 or a part edited in place, is not noticed within the process; code the fingerprint does not reach (another module's
 functions, a database) changes nothing in it.
 
@@ -2493,7 +2493,7 @@ from solvi import Shadow, SQLiteStorage
 
 shadow = Shadow(current, candidate, storage=SQLiteStorage("shadow.db"))
 res = shadow.ask(state)                    # the current system's response, exactly as current.ask(state)
-print(shadow.report())                     # candidate agrees on 981, differs on 19; refund: 'no' → 'yes' ×12, ...
+print(shadow.summary())                     # candidate agrees on 981, differs on 19; refund: 'no' → 'yes' ×12, ...
 ```
 
 The candidate runs on the same input after the current system; its response is stored in the shadow store with `meta`
@@ -2806,7 +2806,7 @@ audit. Nothing in it is random: the same call in the same conversation gives the
 from typing import Literal
 from solvi.agents import Guard
 
-guard = Guard(storage="calls.db", facts={"role": str, "spent_today": float})   # facts your app gives with each call
+guard = Guard(storage="calls.db", fact_names={"role": str, "spent_today": float})   # facts your app gives with each call
 
 @guard.tool(ground=["iban", "amount"])       # these arguments must be quoted from the conversation
 def send_payment(iban: str, amount: float, currency: Literal["EUR", "USD"] = "EUR") -> str:
@@ -2924,7 +2924,7 @@ authorizer's own escalation. The facts of a call: given — `tool_name`, `tool_a
 arguments), one fact per argument a policy reads (named after it), `grounding`, `proposal`. A policy reads any of them
 by name; `@guard.fn` adds computations (`def amount_eur(amount, currency)`). `guard.policy(tools=None)` (or bare
 `@guard.policy`) applies to every tool whose arguments and the guard's declared `facts` provide what it reads; one that
-reads a name no tool can provide (a fact not declared in `Guard(facts=...)` and not an argument of any tool) raises
+reads a name no tool can provide (a fact not declared in `Guard(fact_names=...)` and not an argument of any tool) raises
 `ValueError` when a tool's checks are built, instead of silently checking nothing — declare the fact, or name the tools
 (`@guard.policy("send_payment")`: a fact it reads that a call does not give then escalates the call).
 `guard.catalog(name)` is a tool's Catalog and `guard.system(name)` its System; `solvi check module:guard` lints every
@@ -3539,10 +3539,11 @@ with the current rules", or the steps that no longer do after the rules changed.
 
 ### Fuzzy rules: a model and a calibration
 
-The default is deterministic: no model, nothing downloaded, and a triggered question asks a person. `--model` gives the
-questions a decider — the same specs as `solvi models` and `solvi ask --decider`:
+The default is deterministic: no model, nothing downloaded, and a triggered question asks a person. `--decider` (`--model` in 0.7,
+still read: hooks installed then keep working) gives the questions a decider — the same specs as `solvi models` and
+`solvi ask --decider`:
 
-| `--model` | What answers |
+| `--decider` | What answers |
 |---|---|
 | `solvi-ai/solvi-large`, `~/models/solvi-base` | a local checkpoint (`solvi models pull` downloads it once; the hook never downloads). It loads on every hook call — seconds on a laptop CPU — so for daily use serve it (next row) |
 | `systemone:http://127.0.0.1:8765#solvi-large` | a System One decision service: `solvi serve --decider solvi-ai/solvi-large --model-name solvi-large --port 8765` keeps the model loaded; any System One server works (key in `$SOLVI_SYSTEMONE_API_KEY` for a hosted one) |
@@ -3555,7 +3556,7 @@ few hundred changes (`text`: the change as the hook shows it to the model — th
 for a violation), calibrate with the model the hook uses, and name the file in the rule:
 
 ```bash
-SOLVI_HOOK_RULES=.claude/solvi-rules.toml SOLVI_HOOK_MODEL=systemone:http://127.0.0.1:8765#solvi-large \
+SOLVI_HOOK_RULES=.claude/solvi-rules.toml SOLVI_HOOK_DECIDER=systemone:http://127.0.0.1:8765#solvi-large \
   solvi calibrate solvi.hooks:rules_system no_employee_data_from_browser_answer labels.jsonl --risk 0.1 \
   --out .claude/no_employee_data_from_browser.calib.json
 # then in the rule: calibration = "no_employee_data_from_browser.calib.json"   (relative to the rules file)
@@ -3580,7 +3581,7 @@ downgrade steps, column renames, data backfills and rollbacks); shared words: co
 ```
 
 On "none", a near tie ("write the release notes for the new API route": release notes or API routes) or a slash
-command it says nothing. With `--model` a decider chooses among the skills and "none" (its descriptions are the
+command it says nothing. With `--decider` a decider chooses among the skills and "none" (its descriptions are the
 options' descriptions; a margin under `--margin` between its top two is a tie).
 
 ### The store
@@ -3622,8 +3623,8 @@ Codex does not take a bare allow, so `--approve` is ignored there.
   for Bash, or a PreToolUse hook on Bash of your own.
 - Regular expressions over added lines see one line at a time and the text as written: a secret split across lines or
   assembled at run time passes `forbid`. Rules are a floor, not a review.
-- A hook that times out is skipped by Claude Code (the edit goes to the normal permission flow): keep `--model` services
-  local or fast, and the timeout (30 s; 120 s with `--model`) above their answer time.
+- A hook that times out is skipped by Claude Code (the edit goes to the normal permission flow): keep `--decider` services
+  local or fast, and the timeout (30 s; 120 s with `--decider`) above their answer time.
 - Picking a skill is a hint in the context, not a command: the agent may still use another skill or none.
 
 [examples/22_coding_agent_hooks.py](../examples/22_coding_agent_hooks.py) installs the hooks in a temporary project and
@@ -4292,7 +4293,7 @@ parts, answer heads and learned rules), `grounding_rejected`, `type_rejected`, `
 `low_confidence`, `validator_rejected`,
 `forced_by_hard_check`, `constraint_repairs`, `fallbacks`, `model_escalated`, `evidence_missing`, `timeouts`,
 `instruction_flips` and `memory_disagreements`.
-`system.safeguard_report()` prints them (`evidence missing` once it has fired). Counting costs about
+`system.safeguard_summary()` prints them (`evidence missing` once it has fired). Counting costs about
 1% of a decision. [examples/12_grounded_audit.py](../examples/12_grounded_audit.py) runs one catalog with and without models,
 with a hallucinating extractor and a classifier answering outside its options.
 
@@ -4309,13 +4310,13 @@ show(res)                                   # without the catalog: no replay
 
 ### In Russian
 
-The audit, `solvi.show` and `safeguard_report()` can be printed in Russian; English is the default.
+The audit, `solvi.show` and `safeguard_summary()` can be printed in Russian; English is the default.
 
 ```python
 system = System(cat, QUESTIONS, lang="ru")  # everything this system renders
 print(res.audit(lang="ru"))                 # or per call
 show(res, cat, lang="ru")
-system.safeguard_report(lang="ru")
+system.safeguard_summary(lang="ru")
 ```
 
 ```

@@ -263,7 +263,7 @@ def test_the_test_runners_do_not_write_their_inputs_into_the_systems_store(tmp_p
     assert res.ok and stored() == 0
     assert testing.main([str(tmp_path), "-q", "--store"]) == 0 and stored() == 1          # only when asked
     (tmp_path / "honesty.json").write_text(json.dumps({"task": "task.py", "cases": [
-        {"name": "big", "state": {"amount": 500}, "gold": {"big": "yes"}}]}))
+        {"name": "big", "state": {"amount": 500}, "expected": {"big": "yes"}}]}))
     from solvi import honesty
     assert honesty.report(tmp_path / "honesty.json")["cases"] == 1 and stored() == 1
 

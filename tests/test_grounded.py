@@ -382,7 +382,7 @@ def test_stats_count_hard_checks_constraints_and_low_confidence():
     assert r3["b"].status == "abstain" and r3["b"].guard == "low_confidence"
     assert "would have answered" in r3["b"].why
     assert s.stats["low_confidence"] >= 1 and s.stats["asks"] == 3
-    assert "grounding rejected" in s.safeguard_report()
+    assert "grounding rejected" in s.safeguard_summary()
 
 
 def test_show_prints_the_compact_audit():

@@ -157,6 +157,13 @@ CASE_KEYS = ("name", "state", "expected", "gold", "status", "safeguards", "ask",
 
 
 def check(system, case, state, store=False):
+    """Deprecated (removed in 0.9): run_case(system, case, state)."""
+    from . import _deprecate
+    _deprecate.renamed("solvi.testing.check()", "solvi.testing.run_case()")
+    return run_case(system, case, state, store)
+
+
+def run_case(system, case, state, store=False):
     """Ask one case and compare → CaseResult. Nothing is written to the system's own storage (a test input is not a
     decision) unless store=True. Exceptions from ask are reported as a crash, not raised. A case that cannot
     fail is a problem too: a key that is not one of CASE_KEYS (a misspelled "expcted"), a status or safeguards entry for
@@ -235,7 +242,7 @@ def run_file(path, fuzz_n=0, seed=0, store=False):
         except Exception as e:  # noqa: BLE001
             out.cases.append(CaseResult(case.get("name", f"#{i + 1}"), [f"prepare failed: {type(e).__name__}: {e}"]))
             continue
-        r = check(system, case, state, store)
+        r = run_case(system, case, state, store)
         if fuzz_n:
             r.problems += [f"fuzz {c}" for c in fuzz(system, state, fuzz_n, seed + i)]
         out.cases.append(r)

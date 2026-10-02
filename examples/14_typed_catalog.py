@@ -134,7 +134,7 @@ if __name__ == "__main__":
                       "destination": "DE", "shipped": "2026-09-03"})
     print("  ", line(res))
     print("   " + res.audit("duty").safeguard_line() + ":", res.safeguards[0]["detail"].split(" is not ")[1])
-    print("  ", system.safeguard_report().splitlines()[2].strip(), "| lifetime:", system.stats["type_rejected"], "type rejected")
+    print("  ", system.safeguard_summary().splitlines()[2].strip(), "| lifetime:", system.stats["type_rejected"], "type rejected")
 
     print("\n4. JSON: the response, loaded back with the catalog, still replays")
     res = system.ask(PARCEL)

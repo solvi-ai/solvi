@@ -108,7 +108,7 @@ def test_over_http_the_key_is_a_bad_request():
 def test_a_fact_named_like_a_policy_does_not_switch_the_policy_off():
     from solvi.agents import Guard
     paid = []
-    g = Guard(facts={"role": str})
+    g = Guard(fact_names={"role": str})
 
     @g.tool
     def send_payment(amount: float) -> str:

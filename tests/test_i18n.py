@@ -67,9 +67,9 @@ def test_russian_audit_renders():
     assert res.audit(lang="en").render() == str(res.audit(lang="en"))
     assert str(res.audit(lang="en")).startswith("audit: ")              # per call, the other way round
     assert res.audit().compact().splitlines()[0].startswith("payment: элементов опоры ")
-    report = system.safeguard_report()
+    report = system.safeguard_summary()
     assert report.startswith("запросов ") and "решила жёсткая проверка" in report
-    assert system.safeguard_report(lang="en").startswith("asks ")
+    assert system.safeguard_summary(lang="en").startswith("asks ")
 
 
 def test_show_in_russian():

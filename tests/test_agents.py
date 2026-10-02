@@ -132,7 +132,7 @@ def test_numbers_and_lists_are_grounded_item_by_item():
 
 
 def test_policies_for_every_tool_and_helper_functions():
-    g = Guard(facts={"role": str})
+    g = Guard(fact_names={"role": str})
 
     @g.tool
     def read_file(path: str) -> str:
@@ -367,7 +367,7 @@ def test_solvi_check_lints_every_tool():
 
 
 def refund_guard_with_policies():
-    g = Guard(facts=["role"])
+    g = Guard(fact_names=["role"])
 
     @g.tool
     def refund(order_id: str, amount: float) -> str:

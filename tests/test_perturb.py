@@ -158,7 +158,7 @@ def test_in_a_system_the_answer_abstains_with_the_instruction_safeguard():
     s = System(cat, [q])
     r = s.ask({"email": INJECTED})["route"]
     assert r.status == "abstain" and r.guard == "instruction" and "instruction-like" in r.why
-    assert s.stats["instruction_flips"] == 1 and "answer depends on an instruction-like sentence" in s.safeguard_report()
+    assert s.stats["instruction_flips"] == 1 and "answer depends on an instruction-like sentence" in s.safeguard_summary()
     res = s.ask({"email": INJECTED})
     assert res.trace.replay(cat)["ok"]
     assert s.ask({"email": CLEAN})["route"].answer == "billing"

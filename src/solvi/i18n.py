@@ -1,8 +1,8 @@
 """Languages for what solvi renders for people: the audit, solvi.show, the safeguard report and the messages solvi writes
 itself (safeguard labels, the `why` of an answer, rejection and escalation reasons).
 
-    system = System(cat, QUESTIONS, lang="ru")      # res.audit(), show(res), system.safeguard_report() in Russian
-    print(res.audit(lang="ru"))                     # or per call; show(res, lang="ru"); system.safeguard_report(lang="ru")
+    system = System(cat, QUESTIONS, lang="ru")      # res.audit(), show(res), system.safeguard_summary() in Russian
+    print(res.audit(lang="ru"))                     # or per call; show(res, lang="ru"); system.safeguard_summary(lang="ru")
 
 English is the default and is what solvi records: every message that enters a trace, a stored response or a hash — a
 rejection reason, `Result.why`, an escalation message, the plan — is written in English, and a language other than English
@@ -76,7 +76,7 @@ EN = {
     "sh.time": "── time {ms} ms", "fl.not_taken": "not taken: ",
     # Response.computed_state
     "cs.quote": "   quote [{s}:{e}]", "cs.confidence": " confidence {c}", "cs.model": "   model {m}", "cs.error": "   ERROR: {err}",
-    # System.safeguard_report
+    # System.safeguard_summary
     "rp.head": "asks {asks}, answers {answers}, abstained {abstained}, model outputs {model_outputs}",
 }
 

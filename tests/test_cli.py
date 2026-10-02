@@ -180,15 +180,15 @@ def test_ask_text(tmp_path, capsys, monkeypatch):
     code, out = run(capsys, "ask", f"{f}:one", "--text", "Please refund the 80 I paid.", "--json")
     data = json.loads(out)
     assert code == 0 and data["answers"]["refund"]["answer"] == "yes"
-    assert data["textin"]["fields"]["amount"]["value"] == 80
+    assert data["read"]["fields"]["amount"]["value"] == 80
     monkeypatch.setattr(sys, "stdin", io.StringIO("refund 250 please"))
     code, out = run(capsys, "ask", f"{f}:one", "--text", "-", "--json")
     assert json.loads(out)["answers"]["refund"]["answer"] == "no"
     # two entry points: a decider routes (module:attr), or --question skips routing
     code, out = run(capsys, "ask", f"{f}:two", "--text", "please refund 80", "--decider", f"{f}:router", "--json")
-    assert code == 0 and json.loads(out)["textin"]["question"] == "refund"
+    assert code == 0 and json.loads(out)["read"]["question"] == "refund"
     code, out = run(capsys, "ask", f"{f}:two", "--text", "80", "--question", "refund", "--json")
-    assert json.loads(out)["textin"]["question"] == "refund"
+    assert json.loads(out)["read"]["question"] == "refund"
     # a Hugging Face id that is not downloaded is never fetched
     monkeypatch.setenv("HF_HUB_CACHE", str(tmp_path / "empty-cache"))
     assert run(capsys, "ask", f"{f}:two", "--text", "x", "--decider", "solvi-ai/not-there")[0] == 2
@@ -754,13 +754,13 @@ def test_ask_text_takes_today_and_asks_the_end_user_in_their_words(tmp_path, cap
     f = tmp_path / "dated.py"
     f.write_text(DATED_TASK)
     code, out = run(capsys, "ask", f"{f}:system", "--text", "paid on: 12 September", "--json")
-    read = json.loads(out)["textin"]
+    read = json.loads(out)["read"]
     assert code == 1 and read["fields"]["paid_on"]["status"] == "unparsed"
     code, out = run(capsys, "ask", f"{f}:system", "--text", "paid on: 12 September")
     assert "today=" not in out and "the year is not stated" in out                  # the clarifying question
     code, out = run(capsys, "ask", f"{f}:system", "--text", "paid on: 12 September", "--today", "2026-09-28", "--json")
     data = json.loads(out)
-    assert code == 0 and data["textin"]["state"] == {"paid_on": "2026-09-12"} and data["answers"]["late"]["answer"] == "yes"
+    assert code == 0 and data["read"]["state"] == {"paid_on": "2026-09-12"} and data["answers"]["late"]["answer"] == "yes"
     assert run(capsys, "ask", f"{f}:system", "--text", "paid on: 12 September", "--today", "today", "--json")[0] == 0
     assert run(capsys, "ask", f"{f}:system", "--text", "x", "--today", "soon")[0] == 2
     assert run(capsys, "ask", f"{f}:system", "--state", "{}", "--today", "2026-09-28")[0] == 2

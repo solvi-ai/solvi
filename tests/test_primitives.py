@@ -199,8 +199,8 @@ def test_require_evidence_abstains_without_a_quote():
     s = System(cat, [Question("paid", "Paid?", require_evidence=True)])
     r = s.ask({"doc": DOC})
     assert r["paid"].status == "abstain" and r["paid"].guard == "evidence_missing" and "would have answered 'yes'" in r["paid"].why
-    assert s.stats["evidence_missing"] == 1 and "evidence missing" in s.safeguard_report()
-    assert "evidence missing" not in System(cat, [Question("paid", "Paid?")]).safeguard_report()   # listed once it fires
+    assert s.stats["evidence_missing"] == 1 and "evidence missing" in s.safeguard_summary()
+    assert "evidence missing" not in System(cat, [Question("paid", "Paid?")]).safeguard_summary()   # listed once it fires
     assert System(cat, [Question("paid", "Paid?")]).ask({"doc": DOC})["paid"].answer == "yes"
 
 

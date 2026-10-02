@@ -37,8 +37,8 @@ The proxy speaks MCP over stdio (JSON-RPC, one message per line) to the client a
 
 Every decision goes to the guard's store (or --store) with the call's outcome; `_meta.solvi` on each result carries the
 outcome, the stored id and the trace hash. The proxy does not see the user's messages: an argument declared with ground=
-is found only in the tool outputs of this session (and denied otherwise). The session keeps the last `context_messages`
-tool outputs, at most `context_chars` characters in all (Session's max_messages / max_chars): each decision's trace
+is found only in the tool outputs of this session (and denied otherwise). The session keeps the last `max_messages`
+tool outputs, at most `max_chars` characters in all (as Session names them): each decision's trace
 records the context it was checked against, so the cap bounds what every stored decision holds — an output that has
 left the window no longer grounds values or taints calls.
 
@@ -53,6 +53,7 @@ import shlex
 import subprocess
 import sys
 
+from .. import _deprecate
 from .guard import Guard, ToolCall, _text, proposal
 
 CONTEXT_MESSAGES = 50            # the tool outputs the proxy's session keeps for checking
@@ -141,15 +142,16 @@ class Upstream:
 class Proxy:
     """The proxy's state: the guard, the upstream server, the session (tool outputs seen so far, the facts)."""
 
-    def __init__(self, guard, upstream, facts=None, escalate="elicit", context_messages=CONTEXT_MESSAGES,
-                 context_chars=CONTEXT_CHARS):
+    @_deprecate.kwargs(context_messages="max_messages", context_chars="max_chars")
+    def __init__(self, guard, upstream, facts=None, escalate="elicit", max_messages=CONTEXT_MESSAGES,
+                 max_chars=CONTEXT_CHARS):
         if not isinstance(guard, Guard):
             raise TypeError("--guard names a solvi.agents.Guard")
         if escalate not in ("elicit", "deny"):
             raise ValueError('escalate: "elicit" | "deny"')
         self.guard = guard
         self.upstream = upstream if isinstance(upstream, Upstream) else Upstream(upstream)
-        self.session = guard.session(facts=facts, max_messages=context_messages, max_chars=context_chars)
+        self.session = guard.session(facts=facts, max_messages=max_messages, max_chars=max_chars)
         self.escalate = escalate
         self.listed = None
         self.client_caps = {}
@@ -229,10 +231,12 @@ def _meta(d):
     return {"outcome": d.outcome, "stored_id": d.stored_id, "trace_hash": d.trace_hash}
 
 
+@_deprecate.kwargs(context_messages="max_messages", context_chars="max_chars")
 def run_proxy(guard, upstream, facts=None, escalate="elicit", stdin=None, stdout=None, limits=None,
-              context_messages=CONTEXT_MESSAGES, context_chars=CONTEXT_CHARS):
-    """The proxy over stdio (see the module docs). upstream: a command line (or an Upstream). context_messages /
-    context_chars: the session's context kept for checking (None: unbounded). limits: a
+              max_messages=CONTEXT_MESSAGES, max_chars=CONTEXT_CHARS):
+    """The proxy over stdio (see the module docs). upstream: a command line (or an Upstream). max_messages /
+    max_chars: the session's context kept for checking, as Session names them (None: unbounded; `context_messages` /
+    `context_chars` in 0.7). limits: a
     solvi.serve.Limits — a client message is at most max_body characters and max_depth levels of JSON; a failure of the
     proxy itself is logged (logger solvi.serve) and answered with an incident id, never the exception's text."""
     from .. import __version__
@@ -240,7 +244,7 @@ def run_proxy(guard, upstream, facts=None, escalate="elicit", stdin=None, stdout
     from ..serve import Limits, RequestError, _readline, internal_error, parse_json
     stdin, stdout = stdin or sys.stdin, stdout or sys.stdout
     lim = limits or Limits()
-    px = Proxy(guard, upstream, facts, escalate, context_messages, context_chars)
+    px = Proxy(guard, upstream, facts, escalate, max_messages, max_chars)
 
     def lines():
         while True:

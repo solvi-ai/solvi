@@ -200,4 +200,4 @@ if __name__ == "__main__":
     print(f"  replay of the first ticket now: {rep['mismatches'][0][2][:70]}…")
 
     print("\n=== lifetime safeguard stats ===")
-    print(system.safeguard_report())
+    print(system.safeguard_summary())

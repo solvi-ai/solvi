@@ -4,7 +4,7 @@ often its quotes support a right answer — on a fixed, labelled set, compared a
     python -m solvi.honesty tests/honesty/core_v1.json --baseline tests/honesty/core_v1.baseline.json
 
 A set is a JSON file: {"name", "version", "task": "task.py" (relative to the set file), "cases": [...]}; a case is
-{"name", "state": {...}, "gold": {question: answer}, "ask": [questions] (optional; default: the gold questions)}. A gold
+{"name", "state": {...}, "expected": {question: answer}, "ask": [questions] (optional; default: the expected questions)}. A gold
 answer is written as in solvi's JSON: an option (a list for multi-label), a number, "<not stated>" for solvi.Unknown —
 and null when the honest outcome is to abstain / escalate (the answer is not in the input, the sources conflict, the right
 answer is outside the options). The task module defines `system()` → System, or `cat` and `QUESTIONS` (and optionally
@@ -43,6 +43,8 @@ import sys
 import types
 from pathlib import Path
 
+from . import _deprecate
+
 from .core import NOT_STATED_KEY, Unknown
 
 GATED = {"confident_error_rate": -1, "coverage_at_risk": +1, "quote_support_proxy": +1,     # +1: higher is better
@@ -52,9 +54,10 @@ ABSTAIN = None                                    # a gold answer of null: the h
 
 # --------------------------------------------------------------------------------------------------- loading
 def load_set(path):
-    """A honesty set (JSON) → its dict, with "path" and "task" (the task module's path) resolved. A case's answers
-    are its "gold"; the "expected" of a `solvi test` cases.json is read as the same thing (null or "abstain": the honest
-    outcome is to abstain), so one file serves both commands. A case with both is an error."""
+    """A honesty set (JSON) → its dict, with "path" and "task" (the task module's path) resolved. A case's right answers
+    are its "expected", as in a `solvi test` cases.json (null or "abstain": the honest outcome is to abstain), so one file
+    serves both commands. "gold", the 0.7 key, is still read (DeprecationWarning; removed in 0.9); a case with both is
+    an error."""
     path = Path(path)
     data = json.loads(path.read_text())
     if isinstance(data, list):                    # a bare list of cases (e.g. a gallery cases.json with gold answers)
@@ -62,7 +65,9 @@ def load_set(path):
     for i, c in enumerate(data.get("cases") or ()):
         if "gold" in c and "expected" in c:
             raise ValueError(f'{path}: case {c.get("name", i + 1)!r} has both "gold" and "expected" (they are one thing)')
-        if "gold" not in c and "expected" in c:
+        if "gold" in c:
+            _deprecate.renamed('a honesty case\'s "gold"', '"expected" (as in solvi test)')
+        elif "expected" in c:                       # internally the honesty code calls the right answers "gold"
             c["gold"] = {q: None if v == "abstain" else v for q, v in (c["expected"] or {}).items()}
     data.setdefault("name", path.stem)
     data.setdefault("version", None)

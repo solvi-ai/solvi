@@ -17,7 +17,7 @@ STAT_KEYS = {"grounding": "grounding_rejected", "type_rejected": "type_rejected"
              "constraint_repair": "constraint_repairs", "fallback": "fallbacks", "escalated": "model_escalated",
              "evidence_missing": "evidence_missing", "timeout": "timeouts", "instruction": "instruction_flips",
              "memory": "memory_disagreements"}
-QUIET = {"evidence_missing", "timeout", "instruction", "memory"}      # listed in safeguard_report only once they fire
+QUIET = {"evidence_missing", "timeout", "instruction", "memory"}      # listed in safeguard_summary only once they fire
 STATS = ["asks", "answers", "abstained", "model_outputs"] + list(STAT_KEYS.values())
 
 LABEL = {k: i18n.label(k) for k in STAT_KEYS}      # safeguard → its English label (solvi.i18n has the other languages)

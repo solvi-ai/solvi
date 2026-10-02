@@ -35,7 +35,7 @@ that asked (it remembers the keys it asked with); after a restart, an answer nam
 The model sees the tools you bind to it, not the node: `with_policies(tools, guard)` gives copies whose descriptions
 list the reasons of the policies that check them, for `model.bind_tools(...)` (off unless you use it).
 
-A tool the guard does not know is denied (declare=True: declared from the tool's args_schema on first use). On resume
+A tool the guard does not know is denied (auto_declare=True, `declare=` in 0.7: declared from the tool's args_schema on first use). On resume
 LangGraph runs the node again, so the call is checked (and stored) again before the approval is recorded. A call of the
 same message that was already made — allowed at once, or approved while another call of the message still waited —
 is not made again on that re-run: the wrapper returns the result it had (per thread, node task, tool call id and
@@ -58,6 +58,7 @@ try:
 except ImportError as e:
     raise ImportError('solvi.agents.langgraph needs LangGraph: pip install "solvi[langgraph]"') from e
 
+from .. import _deprecate
 from .guard import Guard, messages, proposal, with_calls_made
 
 APPROVE = ("approve", "approved", "allow", "yes")      # the strings that approve (any case); else only True itself
@@ -244,19 +245,21 @@ def with_policies(tools, guard) -> list:
     return out
 
 
-def guard_wrappers(guard, facts: Callable | dict | None = None, on_escalate="interrupt", declare=False):
+@_deprecate.kwargs(declare="auto_declare")
+def guard_wrappers(guard, facts: Callable | dict | None = None, on_escalate="interrupt", auto_declare=False):
     """(wrap_tool_call, awrap_tool_call) for your own ToolNode (or a create_agent middleware); the first one's
     `.decisions` lists every GuardDecision."""
-    w = _Wrap(guard, facts, on_escalate, declare)
+    w = _Wrap(guard, facts, on_escalate, auto_declare)
     return w, w.acall
 
 
-def guarded_tool_node(tools, guard, facts: Callable | dict | None = None, on_escalate="interrupt", declare=False,
+@_deprecate.kwargs(declare="auto_declare")
+def guarded_tool_node(tools, guard, facts: Callable | dict | None = None, on_escalate="interrupt", auto_declare=False,
                       **kw) -> ToolNode:
     """A ToolNode over `tools` whose every call passes `guard` (see the module docs). facts: a dict, or a function of
     the graph state returning one. Other keyword arguments go to ToolNode. The node's `solvi_guard.decisions` lists every
     GuardDecision."""
-    w = _Wrap(guard, facts, on_escalate, declare)
+    w = _Wrap(guard, facts, on_escalate, auto_declare)
     node = ToolNode(tools, wrap_tool_call=w, awrap_tool_call=w.acall, **kw)
     node.solvi_guard = w
     return node

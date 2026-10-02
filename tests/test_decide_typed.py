@@ -277,7 +277,7 @@ def test_model_escalation_abstains_with_its_own_reason_in_audit_and_stats():
     au = res.audit("team")
     assert au.safeguard_line() == "model escalated ×1" and "act 0.05" in str(au)
     assert s.stats["model_escalated"] == 4 and s.stats["low_confidence"] == 0 and s.stats["abstained"] == 4
-    assert "model escalated" in s.safeguard_report()
+    assert "model escalated" in s.safeguard_summary()
     ok = s.ask({"email": "the parcel is late"})
     assert all(x.status == "ok" for x in ok.results.values()) and ok["team"].answer == "shipping"
     assert res.trace.replay(cat)["ok"] and ok.trace.replay(cat)["ok"]

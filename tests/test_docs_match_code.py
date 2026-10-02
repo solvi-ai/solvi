@@ -25,7 +25,7 @@ def test_the_guide_gives_the_whole_signature_of_model_decision():
 
 
 def test_the_guide_lists_every_lifetime_stat():
-    para = _flat(GUIDE[GUIDE.index("### Lifetime stats"):GUIDE.index("`system.safeguard_report()` prints them")])
+    para = _flat(GUIDE[GUIDE.index("### Lifetime stats"):GUIDE.index("`system.safeguard_summary()` prints them")])
     assert [k for k in STATS if f"`{k}`" not in para] == []
 
 

@@ -118,8 +118,8 @@ def test_every_trace_records_its_catalog(tmp_path):
     assert rep["catalog"] == "changed" and rep["changed_parts"] == ["answer:approve"]
     assert rep["ok"]                                         # a changed part that re-computes the same value is no mismatch
     store, resps = stored(tmp_path)
-    assert [x.id for x in store.query(catalog=fp["catalog"])] == [x.stored_id for x in resps]
-    assert store.query(catalog="other") == []
+    assert [x.id for x in store.query(catalog_fp=fp["catalog"])] == [x.stored_id for x in resps]
+    assert store.query(catalog_fp="other") == []
 
 
 # --- solvi diff
@@ -270,7 +270,7 @@ def test_shadow_answers_with_the_current_system(tmp_path):
     rec = shadow.storage.query(question="approve", answer="no")[0]
     assert rec.meta["shadow_of"] == first and rec.meta["diff"]["approve"]["new"]["answer"] == "no"
     assert shadow.changed[0]["stored_id"] == first and shadow.changed[0]["shadow_id"] == rec.id
-    assert "approve: 'yes' → 'no'  ×1" in shadow.report()
+    assert "approve: 'yes' → 'no'  ×1" in shadow.summary()
     assert shadow.storage.verify()["ok"] and current.storage.verify()["ok"]
 
 

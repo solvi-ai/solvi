@@ -50,7 +50,8 @@ class Response(Serial):
     safeguards: list | None = None      # safeguard events of this response (see solvi.audit.collect)
     model_outputs: int = 0              # outputs produced by models in this response
     stored_id = None                    # its id in a TraceStorage once saved (System(storage=...) saves every ask)
-    textin = None                       # ask_text: the solvi.textin.TextRead the question and state were read from
+    read = None                         # ask_text: the solvi.textin.TextRead the question and state were read from
+    textin = _deprecate.attr("textin", "read", "Response")                # 0.7 name, removed in 0.9
     _system = None                      # the System that answered (reports, counterfactuals; see the class docs)
     _heads = None                       # its answer heads (the audit)
 
@@ -250,7 +251,7 @@ class System:
         `requires` may not have run. False — every step of the flow runs anyway: the answers are the same (the failed
         hard check still decides), `res.values` and the trace hold every fact and rule value, and the trace says so
         (`trace.early_exit` is False). `ask(..., early_exit=...)` overrides it for one ask.
-        lang: the language of what solvi renders for people — res.audit(), solvi.show, safeguard_report() — "en" (default)
+        lang: the language of what solvi renders for people — res.audit(), solvi.show, safeguard_summary() — "en" (default)
         or "ru" (solvi.i18n). Only the rendering changes: traces, stored responses, hashes and `why` stay in English."""
         from . import i18n
         from .costs import CostBook
@@ -427,8 +428,8 @@ class System:
         The trace holds the text (init_state[read.source]), the entry-point decision and one record per field (kind
         "textin": quote, parser, the model that found it); the audit counts the fields as quoted by a model, not given.
         When the entry point escalates, nothing runs: the likely questions abstain (guard "escalated"). A required field the
-        text does not state is not guessed: the question abstains for lack of it. `res.textin` is the TextRead
-        (`res.textin.missing`, `res.textin.clarify()`). early_exit: as for `ask`."""
+        text does not state is not guessed: the question abstains for lack of it. `res.read` is the TextRead
+        (`res.read.missing`, `res.read.clarify()`; `res.read` in 0.7). early_exit: as for `ask`."""
         read = self._textin(text, decider, textin, question)
         t0 = now_ms()
         p = self._prepare_text(read, order)
@@ -578,7 +579,7 @@ class System:
         resp = Response(results, flow, trace, vals, now_ms() - t0, feasible, violations, self.catalog)
         resp._heads = self.heads                      # for the audit: which features a learned head could not use
         resp._system = self                           # for reports and counterfactuals (questions, answer heads, replay)
-        resp.textin = p.textin
+        resp.read = p.textin
         if self.lang != "en":
             resp.lang = self.lang                     # rendering only (audit, show): nothing recorded depends on it
         self._count(resp)
@@ -699,6 +700,12 @@ class System:
                 st[STAT_KEYS[e["kind"]]] += 1
 
     def safeguard_report(self, lang=None):
+        """Deprecated (removed in 0.9): safeguard_summary(lang) — `report` names the documents (Response.report,
+        TraceStorage.report); a text summary is a summary."""
+        _deprecate.renamed("System.safeguard_report()", "System.safeguard_summary()")
+        return self.safeguard_summary(lang)
+
+    def safeguard_summary(self, lang=None):
         """The lifetime stats as text: how many model outputs, and how many were caught by each safeguard.
         lang: solvi.i18n (default: the System's)."""
         from . import i18n

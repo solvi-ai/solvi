@@ -44,7 +44,7 @@ INVOICES = {"INV-7": f"INV-7 from ACME GmbH, IBAN {ACME}, 250.00 EUR, due 2026-1
 PAID = []
 
 store = Path(tempfile.mkdtemp()) / "calls.db"
-guard = Guard(storage=store, facts={"role": str, "spent_today": float})
+guard = Guard(storage=store, fact_names={"role": str, "spent_today": float})
 
 
 # ------------------------------------------------------------------------------------------------ the catalog of tools
@@ -197,7 +197,7 @@ def main():
     print()
     print(res.audit("verdict"))
     print()
-    print(guard.system("send_payment").safeguard_report())
+    print(guard.system("send_payment").safeguard_summary())
 
 
 if __name__ == "__main__":

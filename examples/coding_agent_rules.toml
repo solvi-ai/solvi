@@ -1,7 +1,7 @@
 # solvi rules for a coding agent's edits (solvi hook pre-edit).
 # paths: globs relative to the project root — "*" stays inside a folder, "**" crosses folders, a leading "!" excludes.
 # Deterministic checks (forbid, require, forbid_calls, require_def) are exact and block (on_fail = "ask" to ask instead).
-# A question is fuzzy: it needs a model (--model); it blocks only with a calibration file, otherwise it asks a person.
+# A question is fuzzy: it needs a model (--decider); it blocks only with a calibration file, otherwise it asks a person.
 
 [[rule]]
 id = "no-secrets-in-source"

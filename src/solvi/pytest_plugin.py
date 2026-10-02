@@ -94,7 +94,7 @@ class CaseItem(pytest.Item):
 
     def runtest(self):
         state = self.suite.state(self.case)
-        r = testing.check(self.system, self.case, state)
+        r = testing.run_case(self.system, self.case, state)
         n = self.config.getoption("--solvi-fuzz")
         if n:
             seed = self.config.getoption("--solvi-seed") + self.index

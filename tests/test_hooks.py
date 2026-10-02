@@ -199,7 +199,7 @@ def calibrate(proj):
         line = f'const id{i} = request.query.get("employeeId")' if bad else f"const e{i} = await loadEmployee(session.user.id)"
         rows.append({"text": f"File: app/api/r{i}.ts\nAdded lines:\n3: {line}", "label": bad})
     (proj / "labels.jsonl").write_text("\n".join(json.dumps(r) for r in rows) + "\n")
-    env = dict(env_for(proj), SOLVI_HOOK_RULES=".claude/solvi-rules.toml", SOLVI_HOOK_MODEL="standin.py:model")
+    env = dict(env_for(proj), SOLVI_HOOK_RULES=".claude/solvi-rules.toml", SOLVI_HOOK_DECIDER="standin.py:model")
     r = subprocess.run([sys.executable, "-m", "solvi", "calibrate", "solvi.hooks:rules_system",
                         "no_employee_data_from_browser_answer", "labels.jsonl", "--risk", "0.1", "--out",
                         ".claude/employee.calib.json"], capture_output=True, text=True, env=env, cwd=proj, timeout=120)
@@ -212,21 +212,21 @@ def calibrate(proj):
 def test_a_fuzzy_rule_blocks_only_with_a_calibration(proj):
     (proj / "standin.py").write_text(STANDIN)
     p = write(proj, "app/api/emp.ts", 'const e = await getEmployee(request.headers.get("x-emp"))\n')
-    d, why = decision(hook(proj, p, "pre-edit", "--model", "standin.py:model")[1])
+    d, why = decision(hook(proj, p, "pre-edit", "--decider", "standin.py:model")[1])
     assert d == "ask" and "the model says yes" in why and "without a calibration a person confirms" in why
     clean = write(proj, "app/api/emp.ts", "const employee = await loadEmployee(session.user.id)\n")
-    assert hook(proj, clean, "pre-edit", "--model", "standin.py:model")[1] is None
+    assert hook(proj, clean, "pre-edit", "--decider", "standin.py:model")[1] is None
     calibrate(proj)
-    d, why = decision(hook(proj, p, "pre-edit", "--model", "standin.py:model")[1])
+    d, why = decision(hook(proj, p, "pre-edit", "--decider", "standin.py:model")[1])
     assert d == "deny" and "P(yes) = 1.00" in why and "calibrated: P(answered alone and wrong) ≤ 0.1" in why
-    assert hook(proj, clean, "pre-edit", "--model", "standin.py:model")[1] is None
+    assert hook(proj, clean, "pre-edit", "--decider", "standin.py:model")[1] is None
 
 
 def test_a_calibration_for_another_model_is_refused(proj):
     calibrate(proj)
     (proj / "other.py").write_text(STANDIN.replace('"keyword-1"', '"keyword-2"'))
     p = write(proj, "app/api/emp.ts", 'const e = await getEmployee(request.headers.get("x-emp"))\n')
-    d, why = decision(hook(proj, p, "pre-edit", "--model", "other.py:model")[1])
+    d, why = decision(hook(proj, p, "pre-edit", "--decider", "other.py:model")[1])
     assert d == "ask" and "could not check" in why
 
 
@@ -323,10 +323,10 @@ def test_pick_skill_with_a_model(proj):
     skills(proj)
     (proj / "standin.py").write_text(STANDIN)
     code, out, err, _ = hook(proj, prompt_submit(proj, "add a migration for the salary column"), "pick-skill",
-                             "--model", "standin.py:model")
+                             "--decider", "standin.py:model")
     assert code == 0 and not err
     assert out["hookSpecificOutput"]["additionalContext"].startswith('The project skill "db-migrations"')
-    code, out, err, _ = hook(proj, prompt_submit(proj, "what time is it"), "pick-skill", "--model", "standin.py:model")
+    code, out, err, _ = hook(proj, prompt_submit(proj, "what time is it"), "pick-skill", "--decider", "standin.py:model")
     assert code == 0 and out is None and not err                   # the decider says "none"
     rec = json.loads((proj / ".solvi" / "traces" / "hooks.jsonl").read_text().splitlines()[0])
     assert rec["models"] and rec["models"][0]["id"] == "test/keyword-decider"
@@ -382,13 +382,13 @@ def test_install_writes_the_sample_rules_and_codex_hooks(tmp_path):
     root.mkdir()
     (tmp_path / "home").mkdir()
     (root / ".gitignore").write_text(".solvi/\n")
-    r = solvi(root, "hook", "install", "--project", root, "--agent", "both", "--command", "solvi", "--model", "llm:http://x/v1#m")
+    r = solvi(root, "hook", "install", "--project", root, "--agent", "both", "--command", "solvi", "--decider", "llm:http://x/v1#m")
     assert r.returncode == 0, r.stderr
     assert (root / ".claude" / "solvi-rules.toml").read_text() == hooks.SAMPLE_RULES
     assert "gitignore" not in r.stdout
     cx = json.loads((root / ".codex" / "hooks.json").read_text())
     h = cx["hooks"]["PreToolUse"][0]
-    assert h["matcher"] == "apply_patch|Edit|Write" and h["hooks"][0]["command"].endswith("--model 'llm:http://x/v1#m' --agent codex")
+    assert h["matcher"] == "apply_patch|Edit|Write" and h["hooks"][0]["command"].endswith("--decider 'llm:http://x/v1#m' --agent codex")
     assert "--agent" not in cx["hooks"]["UserPromptSubmit"][0]["hooks"][0]["command"]
     solvi(root, "hook", "uninstall", "--project", root, "--agent", "both")
     assert json.loads((root / ".codex" / "hooks.json").read_text()) == {}
@@ -525,11 +525,11 @@ def test_a_model_file_that_is_missing_or_exits_makes_the_hook_ask_not_exit(proj)
     (proj / "exits.py").write_text("raise SystemExit(2)\n")
     skills(proj)
     for spec in ("nofile.py:model", "os.path:nope", "exits.py:model"):
-        code, out, err, _ = hook(proj, p, "pre-edit", "--model", spec)
+        code, out, err, _ = hook(proj, p, "pre-edit", "--decider", spec)
         d, why = decision(out)
         assert code == 0 and d == "ask" and "could not check this edit" in why, (spec, code, err)
         code, out, err, _ = hook(proj, prompt_submit(proj, "add a migration for the salary column"),
-                                 "pick-skill", "--model", spec)
+                                 "pick-skill", "--decider", spec)
         assert code == 0 and out is None, (spec, code, err)          # never status 2: that would block the prompt
 
 
@@ -575,8 +575,9 @@ def test_a_secret_blocked_by_a_redacting_rule_is_not_written_to_the_store(proj):
 
 def test_library_functions_of_hooks_raise_ordinary_exceptions_not_system_exit(proj, monkeypatch):
     monkeypatch.delenv("SOLVI_HOOK_MODEL", raising=False)
+    monkeypatch.delenv("SOLVI_HOOK_DECIDER", raising=False)
     from solvi.loader import LoadError
-    with pytest.raises(LoadError, match="set SOLVI_HOOK_MODEL"):
+    with pytest.raises(LoadError, match="set SOLVI_HOOK_DECIDER"):
         hooks.rules_system()
     settings = proj / ".claude" / "settings.json"
     settings.write_text("{broken")
@@ -589,8 +590,8 @@ def test_library_functions_of_hooks_raise_ordinary_exceptions_not_system_exit(pr
     assert r.returncode != 0 and "not JSON" in r.stderr and "Traceback" not in r.stderr
     r = subprocess.run([sys.executable, "-m", "solvi", "calibrate", "solvi.hooks:rules_system", "x", "labels.csv"],
                        capture_output=True, text=True, cwd=proj, env={k: v for k, v in env_for(proj).items()
-                                                                      if k != "SOLVI_HOOK_MODEL"}, timeout=120)
-    assert r.returncode == 2 and "set SOLVI_HOOK_MODEL" in r.stderr and "Traceback" not in r.stderr
+                                                                      if k not in ("SOLVI_HOOK_MODEL", "SOLVI_HOOK_DECIDER")}, timeout=120)
+    assert r.returncode == 2 and "set SOLVI_HOOK_DECIDER" in r.stderr and "Traceback" not in r.stderr
 
 
 def test_install_leaves_alone_a_command_that_only_prints_solvis_words(proj):
@@ -606,3 +607,15 @@ def test_install_leaves_alone_a_command_that_only_prints_solvis_words(proj):
     assert s["PreToolUse"][0] == mine["hooks"]["PreToolUse"][0] and len(s["PreToolUse"]) == 2
     solvi(proj, "hook", "uninstall", "--project", proj)
     assert json.loads(settings.read_text()) == mine
+
+
+
+def test_the_0_7_spelling_of_the_decider_option_still_works_for_hooks_installed_then(tmp_path):
+    """--model was the option's name before 0.8 and is written in installed hooks: it is read as --decider."""
+    from solvi.hooks import main as hook_main
+    import io
+    import contextlib
+    out = io.StringIO()
+    with contextlib.redirect_stdout(out):
+        hook_main(["install", "--project", str(tmp_path), "--command", "solvi", "--model", "llm:http://x/v1#m", "--dry-run"])
+    assert "--decider 'llm:http://x/v1#m'" in out.getvalue()

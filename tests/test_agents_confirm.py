@@ -7,7 +7,7 @@ from solvi.agents import Guard, accepted_proposals, accepts, conversation
 
 
 def shop(**kw):
-    g = Guard(facts={"known": dict})
+    g = Guard(fact_names={"known": dict})
     made = []
 
     @g.tool(ground={"order_id": "id"})

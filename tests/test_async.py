@@ -166,7 +166,7 @@ def test_a_timeout_is_an_abstention_with_its_safeguard():
     rec = next(x for x in r.trace.records if x.name == "orders")
     assert rec.value is MISSING and rec.error == "timed out after 0.1 s"
     assert {(e["kind"], e["fact"]) for e in r.safeguards} >= {("timeout", "orders")}
-    assert s.stats["timeouts"] == 1 and "timed out" in s.safeguard_report()
+    assert s.stats["timeouts"] == 1 and "timed out" in s.safeguard_summary()
     assert "timed out" in str(r.audit("refund"))
     assert r.trace.replay(s)["ok"]                                         # a timeout is not re-run on replay
     ok = asyncio.run(s.aask({"customer_id": "b-1"}, timeout=5))            # per call: a longer limit

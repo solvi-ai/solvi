@@ -154,7 +154,7 @@ def test_the_learning_loop_runs_on_duckdb(tmp_path):
 
     from test_learning import TEAMS, build as build_learning, stream
     part, s, _ = build_learning(tmp_path)
-    store = DuckDBStorage(tmp_path / "l.duckdb", catalog=s)
+    store = DuckDBStorage(tmp_path / "l.duckdb", system=s)
     s.storage = store
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")

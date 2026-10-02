@@ -232,4 +232,4 @@ if __name__ == "__main__":
     print(f"  team = {r.answer!r} [{r.status}] confidence {r.confidence:.2f} — {r.why[:120]}")
 
     print("\n=== lifetime safeguard stats ===")
-    print(system.safeguard_report())
+    print(system.safeguard_summary())

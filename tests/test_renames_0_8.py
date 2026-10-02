@@ -131,3 +131,25 @@ def test_the_code_strategist_is_cost_strategist_and_model_strategist_takes_a_mod
         from solvi.strategy_model import SegmentModel
     from solvi.segment_model import SegmentModel as S2
     assert SegmentModel is S2
+
+
+def test_storage_tooling_and_agent_names_of_0_8(tmp_path):
+    from solvi import JSONLStorage, testing
+    from solvi.agents import Guard
+    with pytest.warns(DeprecationWarning, match=r"JSONLStorage\(catalog=\) is deprecated: use system="):
+        st = JSONLStorage(tmp_path / "a.jsonl", catalog=None)
+    s = _sys(storage=st)
+    s.ask({"x": 9})
+    with pytest.warns(DeprecationWarning, match=r"forget\(\) is deprecated: use TraceStorage.where_is\(\)"):
+        assert st.forget("x", 9) == st.where_is("x", 9)
+    with pytest.warns(DeprecationWarning, match=r"query\(catalog=\) is deprecated: use catalog_fp="):
+        assert len(st.query(catalog=s.fingerprint()["catalog"])) == 1
+    with pytest.warns(DeprecationWarning, match=r"safeguard_report\(\) is deprecated: use System.safeguard_summary\(\)"):
+        assert s.safeguard_report() == s.safeguard_summary()
+    assert callable(testing.run_case)
+    with pytest.warns(DeprecationWarning, match=r"Guard\(facts=\) is deprecated: use fact_names="):
+        g = Guard(facts=["user_id"])
+    assert "user_id" in g.facts
+    import solvi.serve as serve
+    with pytest.warns(DeprecationWarning, match="solvi.serve.Guard is deprecated: use solvi.serve.AccessGuard"):
+        assert serve.Guard is serve.AccessGuard

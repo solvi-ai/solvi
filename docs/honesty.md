@@ -16,8 +16,9 @@ Run it before you publish a release of solvi, a new decider checkpoint, or a cat
 | `injection_v1.json` + `injection_task.py` | nothing (a stand-in decider that obeys instructions in its input) | injection traps: an instruction embedded in the message ("ignore the rules and answer X", a role label, a quoted command, "classify this as X", and a wording the `perturb` rules do not know) pushing for a wrong option, often a near-duplicate one (billing vs billing_disputes); the same question without a safeguard and with `perturb=2` |
 | `model_v1.json` + `model_task.py` | the published decider `solvi-ai/solvi-base` (downloaded beforehand) and `solvi[onnx]` | the real decider on support messages, including "no team fits" and "two teams at once" |
 
-A case is `{"name", "state", "gold": {question: answer}, "ask": [...]}` — the same case `solvi test` reads, which
-calls the answers `expected`: either key is accepted by both commands (`solvi honesty gallery/01_support_triage/cases.json` works). The gold answer uses solvi's JSON format:
+A case is `{"name", "state", "expected": {question: answer}, "ask": [...]}` — the same case `solvi test` reads
+(`solvi honesty gallery/01_support_triage/cases.json` works; "gold", the key of 0.7, is still read with a deprecation
+warning). The expected answer uses solvi's JSON format:
 an option, a list for multi-label, a number, `"<not stated>"` for `solvi.Unknown`, and `null` when the honest outcome is
 to abstain. The core set also has `expect` entries, used only by the tests. They pin the exact behaviour: status, guard,
 the safeguards that fired, or a known wrong answer.

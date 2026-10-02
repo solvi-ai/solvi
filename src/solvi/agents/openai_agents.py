@@ -42,7 +42,7 @@ not be evaluated needs a person's approval of that very call, and is rejected ot
 `guard_tools(..., show_policies=True)`: each copy's description lists the reasons of the policies that check the tool,
 so the model reads them before it calls (off by default).
 
-A tool the guard does not know is denied (declare=True: declared from the tool's params_json_schema on first use). A
+A tool the guard does not know is denied (auto_declare=True, `declare=` in 0.7: declared from the tool's params_json_schema on first use). A
 tool's own needs_approval (True, or a function) still applies. The decision made for needs_approval is reused by the
 guardrail of the same call id with the same arguments in the same process (a call that reaches the guardrail with other
 arguments, or an escalation a person has answered since, is checked again); after a resume in another process it is
@@ -74,6 +74,7 @@ try:
 except ImportError as e:                               # "No module named 'agents'" reads like a broken solvi install
     raise ImportError('solvi.agents.openai_agents needs the OpenAI Agents SDK: pip install "solvi[openai-agents]"') from e
 
+from .. import _deprecate
 from .guard import Guard, messages, proposal, with_calls_made
 
 _MODEL_INPUT = contextvars.ContextVar("solvi_model_input", default=None)   # the run's latest model input (its task)
@@ -203,8 +204,9 @@ def _approval(ctx, name, call_id, per_call=False):
         return False
 
 
+@_deprecate.kwargs(declare="auto_declare")
 def guard_tool(tool: FunctionTool, guard: Guard, facts: Callable | dict | None = None, on_escalate="approval",
-               declare=False, made: list | None = None, show_policies=False) -> FunctionTool:
+               auto_declare=False, made: list | None = None, show_policies=False) -> FunctionTool:
     """A copy of a FunctionTool whose every call passes `guard` (see the module docs). facts: a dict, or a function of the
     RunContextWrapper returning one. The copy's `solvi_guard.decisions` lists every GuardDecision. made: a list the
     allowed calls are appended to (for once=True tools; `guard_tools` shares one among its tools). show_policies=True:
@@ -212,7 +214,7 @@ def guard_tool(tool: FunctionTool, guard: Guard, facts: Callable | dict | None =
     them before it calls; off by default (the description is the tool's own)."""
     if not isinstance(tool, FunctionTool):
         raise TypeError(f"guard_tool guards a FunctionTool (function_tool(...)), not {type(tool).__name__}")
-    g = _Guarded(tool, guard, facts, on_escalate, declare, made)
+    g = _Guarded(tool, guard, facts, on_escalate, auto_declare, made)
     rail = ToolInputGuardrail(guardrail_function=g.guardrail, name="solvi_guard")
     extra = {}
     if show_policies and tool.name in guard.tools and guard.tools[tool.name].model is not None:

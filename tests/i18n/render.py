@@ -39,7 +39,7 @@ def gallery(entry, lang=None):
         res = system.ask(suite.state(case))
         hashes.append([r.hash for r in res.trace.records])
         out += [f"### {case.get('name')}", str(res.audit()), res.audit().compact(), _show(res)]
-    out += ["### safeguard_report", system.safeguard_report()]
+    out += ["### safeguard_report", system.safeguard_summary()]
     return "\n".join(out) + "\n", hashes
 
 

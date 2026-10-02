@@ -317,8 +317,8 @@ def cmd_ask(a):
     lang = a.lang or getattr(system, "lang", None)
     if a.json:
         out = {"answers": _answers(res), "safeguards": res.safeguards or [], "ms": res.ms}
-        if a.text is not None and getattr(res, "textin", None) is not None:
-            out["textin"] = res.textin.to_dict()
+        if a.text is not None and res.read is not None:
+            out["read"] = res.read.to_dict()
         if a.audit:
             out["audit"] = res.audit().to_dict()
         if stored:
@@ -329,7 +329,7 @@ def cmd_ask(a):
     else:
         from .show import show
         show(res, flow=False, state=False, audit=False, lang=lang)
-        tin = getattr(res, "textin", None)
+        tin = res.read
         if tin is not None and tin.missing:
             print(tin.clarify())
         if a.audit:

@@ -464,7 +464,7 @@ class Service:
     @staticmethod
     def _text_result(resp):
         d = resp.to_dict()
-        read = resp.textin
+        read = resp.read
         d["read"] = {**read.to_dict(), "clarify": read.clarify(), "escalated": read.escalated}
         d["stored_id"], d["trace_hash"] = resp.stored_id, trace_hash(resp)
         return redact(d, "ask_text")
@@ -635,8 +635,8 @@ class AskTextRequest(BaseModel):
                                  "none — such a date is not read, the field is missing)")
 
 
-class Guard:
-    """ASGI middleware in front of the app: the bearer token (constant-time compare), the body size (Content-Length, and
+class AccessGuard:
+    """ASGI middleware in front of the app (`Guard` up to 0.7 — a second meaning of the agent guard's name): the bearer token (constant-time compare), the body size (Content-Length, and
     the bytes actually received) and the JSON depth of a request body — refused before FastAPI parses it."""
 
     def __init__(self, app, limits, token=None):
@@ -723,7 +723,7 @@ def create_app(system=None, decider=None, storage=None, model_name=None, title=N
     app = FastAPI(title=title or "solvi", version=__version__,
                   description="Decisions from a solvi catalog: the model proposes, code decides, everything is in the trace.")
     app.state.service = svc
-    app.add_middleware(Guard, limits=lim, token=token)
+    app.add_middleware(AccessGuard, limits=lim, token=token)
     if cors:                                          # added last: outermost, so preflight requests need no token
         from fastapi.middleware.cors import CORSMiddleware
         app.add_middleware(CORSMiddleware, allow_origins=list(cors), allow_methods=["GET", "POST"],
@@ -1175,7 +1175,7 @@ def _serve_guard(a, _fail, load_object):
         if getattr(a, k) < 0:
             _fail(f"serve --{k.replace('_', '-')}: must be at least 0 (0: no limit)")
     run_proxy(guard, a.upstream, facts=facts, escalate=a.escalate,
-              limits=_limits(a), context_messages=a.context_messages or None, context_chars=a.context_chars or None)
+              limits=_limits(a), max_messages=a.context_messages or None, max_chars=a.context_chars or None)
     return 0
 
 
@@ -1234,3 +1234,10 @@ def add_parser(sub):
     s.add_argument("--context-chars", type=int, default=CONTEXT_CHARS, metavar="N",
                    help=f"with --guard: their characters in all (default {CONTEXT_CHARS}; 0: no limit)")
     return s
+
+
+def __getattr__(name):                                # 0.7 names, removed in 0.9
+    if name == "Guard":
+        _deprecate.renamed("solvi.serve.Guard", "solvi.serve.AccessGuard")
+        return AccessGuard
+    raise AttributeError(f"module 'solvi.serve' has no attribute {name!r}")

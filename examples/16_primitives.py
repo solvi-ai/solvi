@@ -191,7 +191,7 @@ if __name__ == "__main__":
     print(f"  a span that is not a number:      amount  → {r['amount'].status} [{r['amount'].guard}]")
     r = system.ask({"doc": "Claim 314. Arrived. Amount: 5 EUR."})
     print(f"  an answer without evidence:       damaged → {r['damaged'].status} [{r['damaged'].guard}]")
-    print("  " + system.safeguard_report().replace("\n", "\n  "))
+    print("  " + system.safeguard_summary().replace("\n", "\n  "))
 
     print("\n=== 3. a decider answers the same types ===")
     model = load_model()
