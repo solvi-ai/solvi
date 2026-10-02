@@ -273,7 +273,75 @@ What to know about constraints:
   the answers as given), so nothing may be repaired: `res.feasible` is `False`, `res.violations` names the constraints
   and each answer's reason says `not repaired: … joint decoding tried only the 1 most probable answer(s) of each
   question (65,536 combinations of 16 answers exceed its limit of 50,000)`. Split such a request into groups of
-  questions that share constraints, or enforce the rule in code (an "at most one" needs no search).
+  questions that share constraints — or, when the answers are of many items (one request each) and the rule is a
+  count over groups of them, decide the set with `solvi.sets` (below).
+
+### Decisions over a set: solvi.sets
+
+A constraint between answers works inside one request. Many tasks need a rule across many requests: one counterpart
+per product when matching two catalogs, one owner per record when deduplicating, at most N tasks per shift. Ask each
+item as usual, then decide the set:
+
+```python
+from solvi import Answer, Catalog, Decision, Question, System
+from solvi.sets import AtMostOne, Item, decide_set
+
+cat = Catalog()
+
+@cat.rule("match")
+def match(p):                                   # any answer with probabilities: a head, a model, a Decision
+    return Decision("yes" if p >= 0.5 else "no", {"yes": p, "no": 1 - p})
+
+system = System(cat, [Question("match", "The same product?", Answer.yes_no())])
+pairs = [("a1", "b1", 0.95), ("a2", "b1", 0.90), ("a1", "b2", 0.90), ("a3", "b3", 0.80)]
+items = [Item.of(system.ask({"p": p}), "match", id=(a, b), keys={"a": a, "b": b}) for a, b, p in pairs]
+
+out = decide_set(items, [AtMostOne("a"), AtMostOne("b")])     # one counterpart per offer, on both sides
+print(out)
+# 4 items, 1 changed by at_most_one(a), at_most_one(b) (exact); 1 component(s) solved
+#   ('a1', 'b1'): changed from 'yes' to 'no' to satisfy at_most_one(a) on a=a1: ('a1', 'b2') holds 'yes' (0.90);
+#   at_most_one(b) on b=b1: ('a2', 'b1') holds 'yes' (0.90)
+out[("a2", "b1")].answer, out.changed, out.feasible, out.exact
+out.replay()                                     # {"ok": True, "mismatches": [], ...}
+```
+
+What is chosen is the most probable combination of answers that satisfies every constraint — the product of the
+items' probabilities, taken as independent, as joint decoding does inside a request. Above, keeping a1–b1 (0.95) alone
+is less probable than keeping a2–b1 and a1–b2 (0.90 each), so a1–b1 is the one that changes.
+
+- **Items.** `Item.of(response, question, id=, keys=, tie=)` takes a yes/no, choice or ordinal answer with
+  probabilities and status "ok" as free; anything else — a rule's answer without probabilities, a forced answer, an
+  abstention — is fixed: it never changes and counts as given (an abstention counts nowhere). `Item(id, probs, answer,
+  keys)` builds one from your own numbers. `tie=` settles combinations of equal probability: the one keeping the
+  items with the larger tie at their answer wins (a second model's probability, say).
+- **Constraints.** `AtMostOne(key)`, `ExactlyOne(key)`, `Capacity(key, max=, min=)` count the items of each group that
+  hold `answer` (default "yes"); `key` is a name in `Item.keys`, a function of the item, or None for one group of all;
+  `Exclusive([(id1, id2), ...])` is mutual exclusion between listed items; `answer=EACH` makes every answer value a group
+  of its own (`Capacity(max=3, answer=EACH)`: at most 3 items per shift).
+- **How, and when it is exact.** Groups that can bind link items into connected components; a component already
+  consistent as given keeps its answers, the others are solved. `method="exact"` (default) solves each by an integer
+  program (HiGHS through `scipy.optimize.milp`): a proven optimum unless `time_limit` (seconds per component, default
+  10) stops it — `out.exact` is then False and the component's status says "time limit". `method="greedy"` is the
+  stated approximation: from the surest item down, each takes its most probable answer whose groups have room, then
+  groups below their minimum take the item that loses least. In the example it keeps a1–b1 and drops the other two.
+- **What each answer says.** A changed item cites the group that changed it and the items that hold it (`cited`, and
+  the end of `why`): "changed from 'yes' to 'no' to satisfy at_most_one(a) on a=a1: ('a1', 'b2') holds 'yes' (0.90)".
+  A component that cannot be satisfied (fixed answers that conflict, a minimum nobody can meet) keeps its answers as
+  given: `out.feasible` is False, `out.violations` names each broken group and its items say "not repaired".
+- **Record and replay.** `out.to_dict()` / `SetDecision.from_dict(d)` hold every item's probabilities, the given and
+  final answers and the groups as evaluated. `out.replay()` checks that the final answers satisfy every group not
+  reported broken, fixed answers are unchanged, every change is cited, and re-solves: under "exact" a more probable
+  combination than the recorded one is a mismatch.
+
+**Measured** on Abt-Buy (1,916 eval pairs of offers; the pair graph has a component of 1,161 pairs), one counterpart per
+offer on both sides over the answers a hand-written solution had stored: F1 0.931 → 0.933 for a fitted head, 0.872 →
+0.909 for the LLM baseline (its matches ranked by the head's probability), 0.830 → 0.865 for the LLM inside solvi (ties
+by the head's probability) — the same answers, pair for pair, as the solution's own greedy code and its per-group
+catalogs, in 30–230 ms for the whole set with the 1,161-pair component solved exactly. On dev the exact method was
+as good as the greedy for the head (0.905 both) and better for the LLM (0.855 against 0.832).
+
+**Not done here:** rules that are not counts over groups — transitivity of matches (a~b and b~c → a~c), "if a then b",
+sums of weights; soft constraints with a cost; errors that are not independent (the objective treats them as such).
 
 ## Types, questions and model decisions
 
