@@ -29,9 +29,12 @@ A tool the guard does not know is denied; with declare=True it is declared from 
 guard then checks its types, and any policies that name it). The first parameter of a tool function typed as RunContext
 is not an argument (Guard.tool skips it).
 
-`once=True` tools: the toolset keeps the calls it made (`made`: a call counts when the tool returned without raising) for
-as long as it lives — across runs, in this process — and gives them as the fact `calls_made`, together with any
-`calls_made` your `facts` give (calls made earlier or elsewhere)."""
+`once=True` tools: the toolset keeps the calls it made per conversation — PydanticAI's `RunContext.conversation_id`,
+which runs continuing one `message_history` (and a resumed deferred call) share, and which a run without history gets
+fresh — and gives a call the ones made in its own conversation as the fact `calls_made`, together with any `calls_made`
+your `facts` give (calls made earlier or elsewhere). `made` maps a conversation id to its calls (a call counts when
+the tool returned without raising); a PydanticAI without conversation ids keys every call None, one memory for the
+process. The memory is this process's: after a restart, give the calls made before through `facts`."""
 from __future__ import annotations
 
 import dataclasses
@@ -85,7 +88,7 @@ class GuardedToolset(WrapperToolset):
     on_escalate: str = "approval"
     declare: bool = False
     decisions: list = dataclasses.field(default_factory=list, repr=False)   # every GuardDecision, in order
-    made: list = dataclasses.field(default_factory=list, repr=False)        # the calls made (for once=True tools)
+    made: dict = dataclasses.field(default_factory=dict, repr=False)        # conversation id → its calls made (once=True)
     _asked: dict = dataclasses.field(default_factory=dict, repr=False)      # call id → the approval key asked for
 
     def __post_init__(self):
@@ -99,7 +102,8 @@ class GuardedToolset(WrapperToolset):
         if self.declare and name not in g.tools:
             td = tool.tool_def
             g.declare(name, schema=td.parameters_json_schema, description=td.description or "")
-        facts = with_calls_made(self.facts(ctx) if callable(self.facts) else self.facts, self.made)
+        conv = getattr(ctx, "conversation_id", None)
+        facts = with_calls_made(self.facts(ctx) if callable(self.facts) else self.facts, self.made.get(conv, ()))
         d = await g.acheck({"name": name, "arguments": tool_args, "id": ctx.tool_call_id}, context_of(ctx.messages), facts)
         asked = self._asked.get(ctx.tool_call_id)
         if d.outcome == "escalate" and getattr(ctx, "tool_call_approved", False) and asked in (None, d.approval_key()):
@@ -108,7 +112,7 @@ class GuardedToolset(WrapperToolset):
         self.decisions.append(d)
         if d.outcome == "allow":
             out = await super().call_tool(name, tool_args, ctx, tool)
-            self.made.append(proposal(d.tool, d.arguments))       # it returned: made (a raised error is not)
+            self.made.setdefault(conv, []).append(proposal(d.tool, d.arguments))   # it returned: made (an error is not)
             return out
         if d.outcome == "escalate" and self.on_escalate == "approval":
             # the approval covers this call with these arguments and these reasons: a resumed call that escalates for

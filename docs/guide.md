@@ -2348,8 +2348,9 @@ in a long session a value the user named many requests ago, for another purpose,
 last message ground a value (2: the last two): the reason then says the value is from an earlier request. `once=True`
 escalates a call of the tool with exactly the arguments of a call already made — a second refund of the same order —
 unless the first one failed. The calls made are the given fact `calls_made`: a `Session`, the MCP proxy and the three
-framework adapters keep it (an adapter for as long as its toolset / node / tools live, in this process; add calls made
-earlier through `facts={"calls_made": [...]}`). For a tool the framework runs, `session.call` counts an allowed call as
+framework adapters keep it (PydanticAI and LangGraph per conversation, the OpenAI Agents SDK per process — see
+"`once=True` behind an adapter" below; add calls made earlier through
+`facts={"calls_made": [...]}`). For a tool the framework runs, `session.call` counts an allowed call as
 made and `session.record(decision, result)` (or `error=`: not made after all) reports how it went. With a bare
 `guard.check` / `guard.call` you give the fact yourself (`[]` when nothing was made); a `once=True` call checked without
 it escalates, since the check cannot be evaluated.
@@ -2799,14 +2800,19 @@ itself it is any object); a tool whose arguments collide with the guard's facts 
 ```
 
 **`once=True` behind an adapter.** An adapter has no `Session`, so it keeps the calls made itself and gives them as the
-fact `calls_made`: `GuardedToolset.made` (a call counts when the tool returned without raising), the guarded node's
-`solvi_guard.made` (the ToolNode ran the tool and its message is not an error), and one list shared by the tools of a
-`guard_tools(...)` call (`tool.solvi_guard.made`; the OpenAI guardrail sees a call before the SDK runs it, so an allowed
-call counts even when the tool then fails). The memory is that object's, for as long as it lives in this process:
-across runs, threads and users — not per conversation. A repeat of a call made for another user therefore escalates
-too, and nothing is remembered after a restart. For another scope, keep the calls yourself (a database row per
-conversation) and pass them as `facts=lambda ctx: {"calls_made": [...]}` — they are added to the adapter's own — and
-make one toolset / node / tool list per conversation if the process-wide memory is too wide.
+fact `calls_made` — per conversation where the framework names the conversation:
+
+| adapter | remembers per | `made` | a call counts when |
+|---|---|---|---|
+| PydanticAI `GuardedToolset` | `RunContext.conversation_id` (runs continuing one `message_history` and a resumed deferred call share it; a run without history starts a new one) | `{conversation id: [calls]}` | the tool returned without raising |
+| LangGraph `guarded_tool_node` | the run config's `thread_id` (calls run without one share the key `None`) | `solvi_guard.made`, `{thread id: [calls]}` | the ToolNode ran the tool and its message is not an error |
+| OpenAI Agents `guard_tools` | the process: the SDK gives `needs_approval`, where the guard first decides, no conversation id | `tool.solvi_guard.made`, one list shared by the tools of the call | the guardrail allowed it (it sees a call before the SDK runs it, so even when the tool then fails) |
+
+So with PydanticAI and LangGraph a repeat in another conversation (another user's thread) is not a repeat; with the
+OpenAI Agents SDK it is, unless you build the guarded tools per conversation (each `guard_tools(...)` call has its own
+memory). The memory lives in this process: nothing is remembered after a restart. For another scope keep the calls
+yourself (a database row per conversation) and pass them as `facts=lambda ctx: {"calls_made": [...]}` — they are added
+to the adapter's own.
 
 **Which frameworks.** Each adapter has an extra — `pip install "solvi[pydantic-ai]"`, `"solvi[langgraph]"`,
 `"solvi[openai-agents]"` — and importing one without its framework says which. Supported and tested with real runs (`tests/test_agents_frameworks.py`,

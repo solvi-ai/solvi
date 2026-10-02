@@ -38,9 +38,12 @@ same message that was already made — allowed at once, or approved while anothe
 is not made again on that re-run: the wrapper returns the result it had (per thread, node task, tool call id and
 arguments, in the process that made it; after a restart LangGraph's own re-run rule applies — keep such tools idempotent).
 
-`once=True` tools: the wrapper keeps the calls it made (`made`: a call counts when the ToolNode ran the tool and its
-ToolMessage is not an error) for as long as it lives — across threads, in this process — and gives them as the fact
-`calls_made`, together with any `calls_made` your `facts` give (calls made earlier or elsewhere)."""
+`once=True` tools: the wrapper keeps the calls it made per conversation — LangGraph's thread (`thread_id` of the run's
+config) — and gives a call the ones made in its own thread as the fact `calls_made`, together with any `calls_made`
+your `facts` give (calls made earlier or elsewhere). `made` maps a thread id to its calls (a call counts when the
+ToolNode ran the tool and its ToolMessage is not an error); calls run without a thread id (a graph without a
+checkpointer, invoked without one) share the key None. The memory is this process's: after a restart, give the calls
+made before through `facts`."""
 from __future__ import annotations
 
 import collections
@@ -86,6 +89,15 @@ def _args_hash(args):
                           ).hexdigest()[:16]
 
 
+def _thread():
+    """The conversation a call belongs to: the thread id of the graph run's config (None outside a run or without one)."""
+    try:
+        from langgraph.config import get_config
+        return (get_config().get("configurable") or {}).get("thread_id")
+    except Exception:  # noqa: BLE001 — not inside a graph run: no thread
+        return None
+
+
 def _calls_in_message(state, call_id):
     """How many tool calls the model's message that proposed `call_id` holds (1 when it cannot be found)."""
     for m in reversed(_messages_of(state)):
@@ -116,7 +128,7 @@ class _Wrap:
             raise ValueError('on_escalate: "interrupt" | "message"')
         self.guard, self.facts, self.on_escalate, self.declare = guard, facts, on_escalate, declare
         self.decisions = []
-        self.made = []                                   # the calls made (for once=True tools)
+        self.made = {}                                   # thread id → the calls made in it (for once=True tools)
         self._asked = {}                                 # tool call id → the approval keys interrupts showed, in order
         self._done = collections.OrderedDict()           # (thread, the node's task, tool call id, arguments hash) → its result
 
@@ -125,7 +137,8 @@ class _Wrap:
         if self.declare and tc["name"] not in self.guard.tools and request.tool is not None:
             schema = request.tool.get_input_schema().model_json_schema()
             self.guard.declare(tc["name"], schema=schema, description=request.tool.description or "")
-        facts = with_calls_made(self.facts(request.state) if callable(self.facts) else self.facts, self.made)
+        facts = with_calls_made(self.facts(request.state) if callable(self.facts) else self.facts,
+                                self.made.get(_thread(), ()))
         return {"name": tc["name"], "arguments": tc.get("args") or {}, "id": tc.get("id")}, \
             messages(_messages_of(request.state)), facts
 
@@ -189,8 +202,8 @@ class _Wrap:
         return k, self._done.get(k)
 
     def _keep(self, k, out, d):
-        if getattr(out, "status", None) != "error":      # the tool ran and did not fail: made
-            self.made.append(proposal(d.tool, d.arguments))
+        if getattr(out, "status", None) != "error":      # the tool ran and did not fail: made (in this thread)
+            self.made.setdefault(_thread(), []).append(proposal(d.tool, d.arguments))
         if k is not None:
             self._done[k] = out
             while len(self._done) > DONE_KEPT:

@@ -46,9 +46,13 @@ arguments, or an escalation a person has answered since, is checked again); afte
 checked again.
 
 `once=True` tools: the guarded tools of one `guard_tools(...)` call (or one `guard_tool`) keep the calls they allowed
-(`solvi_guard.made`) for as long as they live — across runs, in this process — and give them as the fact `calls_made`,
-together with any `calls_made` your `facts` give. The guardrail sees a call before the SDK runs it, not its result: an
-allowed call counts as made even when the tool then fails (a repeat asks a person).
+(`solvi_guard.made`) for as long as they live — across runs and conversations, in this process — and give them as the
+fact `calls_made`, together with any `calls_made` your `facts` give. The memory is not per conversation: the SDK hands
+a tool's `needs_approval` (where the guard first decides) no conversation identifier — `Runner.run(conversation_id=)` is
+OpenAI's server-side conversation and `RunConfig.group_id` a tracing label, neither in that context. For memory per
+conversation, build the guarded tools per conversation (each `guard_tools(...)` call has its own `made`), or pass
+the calls made in it as `facts={"calls_made": [...]}`. The guardrail sees a call before the SDK runs it, not its result: an allowed call counts as made even
+when the tool then fails (a repeat asks a person).
 
 Handoffs: the SDK may rewrite the history a handed-off agent gets (nested into one summary message by
 `nest_handoff_history`, or filtered by a handoff's `input_filter`); the guard reads what the run gives it and fails

@@ -218,8 +218,39 @@ def test_pydantic_ai_once_escalates_the_same_call_proposed_again():
     agent = Agent(FunctionModel(model), toolsets=[tools], output_type=[str, DeferredToolRequests])
     r = agent.run_sync("Refund order A-1.")
     assert [d.outcome for d in tools.decisions] == ["allow", "escalate"] and refunded == ["A-1"]
-    assert isinstance(r.output, DeferredToolRequests) and tools.made == ['refund({"order": "A-1"})']
+    assert isinstance(r.output, DeferredToolRequests)
+    assert list(tools.made.values()) == [['refund({"order": "A-1"})']]
     assert "already made" in " ".join(tools.decisions[-1].reasons)
+
+
+def test_pydantic_ai_once_remembers_per_conversation_not_per_process():
+    """A run without history is a new conversation: the same refund there is not a repeat; a run that continues the
+    first one's message_history is the same conversation, where it is."""
+    pytest.importorskip("pydantic_ai")
+    from pydantic_ai import Agent, DeferredToolRequests, FunctionToolset
+    from pydantic_ai.messages import ModelResponse, TextPart, ToolCallPart
+    from pydantic_ai.models.function import FunctionModel
+
+    from solvi.agents.pydantic_ai import GuardedToolset
+    g, refund, refunded = once_guard()
+    tools = GuardedToolset(FunctionToolset([refund]), g)
+    script = []
+
+    def model(messages, info):
+        if script and messages[-1].parts[-1].part_kind == "user-prompt":     # a new request: propose the refund
+            return ModelResponse(parts=[ToolCallPart("refund", {"order": "A-1"}, tool_call_id=script.pop(0))])
+        return ModelResponse(parts=[TextPart("done")])
+    agent = Agent(FunctionModel(model), toolsets=[tools], output_type=[str, DeferredToolRequests])
+    script[:] = ["c1"]
+    first = agent.run_sync("Refund order A-1.")
+    script[:] = ["c2"]
+    agent.run_sync("Refund order A-1.")                                   # another conversation
+    assert [d.outcome for d in tools.decisions] == ["allow", "allow"] and refunded == ["A-1", "A-1"]
+    assert len(tools.made) == 2 and all(v == ['refund({"order": "A-1"})'] for v in tools.made.values())
+    script[:] = ["c3"]
+    again = agent.run_sync("Refund order A-1 again.", message_history=first.all_messages())   # the first conversation
+    assert tools.decisions[-1].outcome == "escalate" and isinstance(again.output, DeferredToolRequests)
+    assert refunded == ["A-1", "A-1"] and "already made" in " ".join(tools.decisions[-1].reasons)
 
 
 def test_langgraph_once_escalates_the_same_call_proposed_again_and_not_one_that_failed():
@@ -252,7 +283,44 @@ def test_langgraph_once_escalates_the_same_call_proposed_again_and_not_one_that_
     last = [app.invoke({"messages": [HumanMessage("Refund order A-1 and order B-2.")]})["messages"][-1] for _ in range(4)]
     assert [d.outcome for d in node.solvi_guard.decisions] == ["allow", "escalate", "allow", "allow"]
     assert refunded == ["A-1"] and "already made" in last[1].content and last[3].status == "error"
-    assert node.solvi_guard.made == ['refund({"order": "A-1"})']        # the failed B-2 was not made: tried again
+    assert node.solvi_guard.made == {None: ['refund({"order": "A-1"})']}   # the failed B-2 was not made: tried again
+
+
+def test_langgraph_once_remembers_per_thread():
+    """The same refund in another thread (another conversation) is made; in the thread that made it, it escalates."""
+    pytest.importorskip("langgraph")
+    from typing import Annotated, TypedDict
+
+    from langchain_core.messages import AIMessage, HumanMessage
+    from langchain_core.tools import tool
+    from langgraph.checkpoint.memory import InMemorySaver
+    from langgraph.graph import END, START, StateGraph
+    from langgraph.graph.message import add_messages
+
+    from solvi.agents.langgraph import guarded_tool_node
+    g, refund, refunded = once_guard()
+
+    class State(TypedDict):
+        messages: Annotated[list, add_messages]
+
+    def agent(state):
+        return {"messages": [AIMessage("", tool_calls=[{"name": "refund", "args": {"order": "A-1"},
+                                                        "id": f"call-{len(state['messages'])}"}])]}
+    node = guarded_tool_node([tool(refund)], g, on_escalate="message")
+    b = StateGraph(State)
+    b.add_node("agent", agent)
+    b.add_node("tools", node)
+    b.add_edge(START, "agent")
+    b.add_edge("agent", "tools")
+    b.add_edge("tools", END)
+    app = b.compile(checkpointer=InMemorySaver())
+    ask = HumanMessage("Refund order A-1.")
+    app.invoke({"messages": [ask]}, {"configurable": {"thread_id": "alice"}})
+    app.invoke({"messages": [ask]}, {"configurable": {"thread_id": "bob"}})
+    last = app.invoke({"messages": [ask]}, {"configurable": {"thread_id": "alice"}})["messages"][-1]
+    assert [d.outcome for d in node.solvi_guard.decisions] == ["allow", "allow", "escalate"]
+    assert refunded == ["A-1", "A-1"] and "already made" in last.content
+    assert node.solvi_guard.made == {"alice": ['refund({"order": "A-1"})'], "bob": ['refund({"order": "A-1"})']}
 
 
 def test_openai_agents_once_rejects_the_same_call_proposed_again():
