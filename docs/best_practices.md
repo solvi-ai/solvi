@@ -74,8 +74,9 @@ while the mean act probability fell from 0.71 to 0.24: with the default threshol
 would have answered correctly. Calibrate per question, with the number of options production has.
 
 **Watch for drift.** A calibrated threshold keeps its promise under a shifted stream by escalating more (66% answered
-alone → 12%, with no error raised). `DriftMonitor(window=100)` flagged such a change 37 decisions in, with no false
-flag before; a window of 50 gave false flags.
+alone → 12%, with no error raised). In a simulation `DriftMonitor(window=100)` flags such a change about 60 decisions
+in, and none of 1,200 unchanged streams of 1,000 decisions; a question with many answers needs a window of about five
+decisions per answer for the distribution of the answers to be tested at all (`rep["not_tested"]` says when it is not).
 
 **`fit` and `teach` move the scores, not the reading.** They shift and scale the logits of one question; they help
 calibration and the mix of answers, and level off within a few dozen examples. When a question needs the model to read

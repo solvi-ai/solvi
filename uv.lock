@@ -3345,6 +3345,9 @@ dependencies = [
 duckdb = [
     { name = "duckdb" },
 ]
+langgraph = [
+    { name = "langgraph" },
+]
 lora = [
     { name = "peft" },
     { name = "torch" },
@@ -3363,12 +3366,18 @@ onnx = [
     { name = "onnxruntime", version = "1.30.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
     { name = "tokenizers" },
 ]
+openai-agents = [
+    { name = "openai-agents" },
+]
 otel = [
     { name = "opentelemetry-api" },
     { name = "opentelemetry-sdk" },
 ]
 postgres = [
     { name = "psycopg" },
+]
+pydantic-ai = [
+    { name = "pydantic-ai-slim" },
 ]
 serve = [
     { name = "fastapi" },
@@ -3406,14 +3415,17 @@ requires-dist = [
     { name = "duckdb", marker = "extra == 'duckdb'", specifier = ">=1.0" },
     { name = "fastapi", marker = "extra == 'serve'", specifier = ">=0.100" },
     { name = "huggingface-hub", marker = "extra == 'onnx'" },
+    { name = "langgraph", marker = "extra == 'langgraph'", specifier = ">=1.0" },
     { name = "mcp", marker = "extra == 'mcp'", specifier = ">=2" },
     { name = "numpy" },
     { name = "onnxruntime", marker = "extra == 'onnx'" },
+    { name = "openai-agents", marker = "extra == 'openai-agents'", specifier = ">=0.22" },
     { name = "opentelemetry-api", marker = "extra == 'otel'", specifier = ">=1.20" },
     { name = "opentelemetry-sdk", marker = "extra == 'otel'", specifier = ">=1.20" },
     { name = "peft", marker = "extra == 'lora'", specifier = ">=0.13" },
     { name = "psycopg", marker = "extra == 'postgres'", specifier = ">=3.1" },
     { name = "pydantic", specifier = ">=2" },
+    { name = "pydantic-ai-slim", marker = "extra == 'pydantic-ai'", specifier = ">=1.0" },
     { name = "scipy" },
     { name = "tokenizers", marker = "extra == 'onnx'" },
     { name = "tomli", marker = "python_full_version < '3.11'", specifier = ">=1.1" },
@@ -3423,7 +3435,7 @@ requires-dist = [
     { name = "transformers", marker = "extra == 'model'" },
     { name = "uvicorn", marker = "extra == 'serve'" },
 ]
-provides-extras = ["model", "onnx", "serve", "mcp", "otel", "duckdb", "postgres", "lora"]
+provides-extras = ["model", "onnx", "serve", "mcp", "otel", "duckdb", "postgres", "pydantic-ai", "langgraph", "openai-agents", "lora"]
 
 [package.metadata.requires-dev]
 agents = [

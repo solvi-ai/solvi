@@ -278,14 +278,23 @@ def label_of(part, y):
         if sp.kind == "noul" and s.lower() in ("true", "false", "yes", "no", "1", "0"):
             return s.lower() in ("true", "yes", "1")
         if sp.multi:
-            return [x.strip() for x in s.split("|") if x.strip()]
+            return [_option(sp, x.strip()) for x in s.split("|") if x.strip()]
         if sp.kind == "number":
             try:
                 return float(s)
             except ValueError:
                 return s
-        return s
+        return _option(sp, s)
     return y
+
+
+def _option(sp, s):
+    """A text cell → the option it names: itself, or the one option that is not text and reads the same (a CSV file has
+    only text: "3" is the level 3 of Scale[1, 2, 3, 4, 5])."""
+    if s in sp.options:
+        return s
+    same = [o for o in sp.options if not isinstance(o, str) and str(o) == s]
+    return same[0] if len(same) == 1 else s
 
 
 def examples_of(part, rows, group_cols=()):
@@ -379,7 +388,10 @@ def cmd_calibrate(a):
     if skipped:
         info["not_applied"] = skipped
     thr = info["threshold"]
-    ok = thr is not None and math.isfinite(thr)
+    if info.get("groups"):                         # per group: "threshold" is the rest of the stream's (inf when every
+        ok = any(math.isfinite(g["threshold"]) for g in info["groups"].values())   # group has its own), not the verdict
+    else:
+        ok = thr is not None and math.isfinite(thr)
     if a.json:
         _dump(_enc({k: ({"/".join(p) or "(rest)": v for p, v in val.items()} if k == "groups" else val)
                     for k, val in info.items()}))
@@ -395,7 +407,12 @@ def cmd_calibrate(a):
             if "must_escalate_at_least" in info:
                 print(f"  model wrong on      {_pct(info['base_error'])} of the examples → must escalate at least "
                       f"{_pct(info['must_escalate_at_least'])}")
-        print(f"  threshold           {thr:.4g}" if ok else "  threshold           inf — everything escalates")
+        if not ok:
+            print("  threshold           inf — everything escalates")
+        elif info.get("groups"):
+            print("  threshold           per group (below)")
+        else:
+            print(f"  threshold           {thr:.4g}")
         print(f"  guarantee           {info['guarantee']}")
         for w in info.get("warnings", []):
             print(f"  warning             {w}")

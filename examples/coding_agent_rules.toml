@@ -14,7 +14,7 @@ forbid = [
   '''\bsk-[A-Za-z0-9_-]{20,}''',
   '''\bgh[pousr]_[A-Za-z0-9]{36}\b''',
 ]
-redact = true       # reasons show a masked excerpt, not the secret
+redact = true       # reasons show a masked excerpt, not the secret; the stored decision's content is erased
 
 [[rule]]
 id = "no-employee-data-from-browser"

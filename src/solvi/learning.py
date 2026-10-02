@@ -43,7 +43,10 @@ and the model's adaptations; the checkpoint itself is shared) in a shallow copy 
 parts are not touched until the update is promoted, so asks that run meanwhile (another thread, the server) see the
 state in force, never an un-gated candidate. An `adapter` hook runs on the shadow part: its effect reaches the live part
 through its state(part) / restore(part, state); a hook without them only keeps what it changes in objects the shadow
-shares with the live part (the checkpoint), and such changes are not isolated.
+shares with the live part (the checkpoint), and such changes are not isolated. When a gated candidate cannot be carried
+over to the live parts (a hook without state / restore changed the shadow part itself, so the promoted fingerprint is
+not the candidate's), run() puts the live parts back as they were, records the update as not promoted (gate
+"promotion") and raises RuntimeError.
 
 A promoted update gets the next version number; every run that proposes an update is recorded in the changelog (a
 TraceStorage, by default the same store: kind "update", hash-chained with the decisions) with its gates' results, the
@@ -478,7 +481,22 @@ class Learning:
         fp_after = self._fingerprint_of(cand)
         train_ids = {q: sorted(lab.id for lab in by[q]["train"]) for q in self.parts if by[q]["train"]}
         if ok:
-            self._promote(cand, fp_after)
+            back = (self._snapshot(), self._live())
+            try:
+                self._promote(cand, fp_after)
+            except Exception as e:                  # half promoted: put the live parts back, record it, then say so
+                self._restore(*back)
+                same = self.fingerprint() == fp_before
+                gates["promotion"] = {"ok": False, "restored": same, "why": f"{type(e).__name__}: {e}"}
+                rec = self._record({"action": "update", "version": None, "promoted": False, "parent": cur,
+                                    "fp_before": fp_before, "fp_after": fp_after, "questions": plan, "labels": train_ids,
+                                    "gates": gates, "state": None})
+                raise RuntimeError(
+                    f"{e} — " + (f"the live parts were put back as they were (version {cur}) and the update is recorded "
+                                 f"as not promoted (#{rec['id']})" if same else
+                                 f"and the live parts could not be put back (now #{self.fingerprint()}, before "
+                                 f"#{fp_before}): restore them yourself; recorded as not promoted (#{rec['id']})")
+                ) from e
             version = self._next_version()
             self._states[version] = (self._snapshot(), self._live())
             rec = self._record({"action": "update", "version": version, "promoted": True, "parent": cur,

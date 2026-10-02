@@ -151,8 +151,7 @@ Every command is in the [guide](docs/guide.md#command-line).
   reads, the function name is the fact it sets. Type hints are optional and become the facts' types
   (`def risk_score(risk_points: dict[str, float]) -> float`): producer and consumer types are checked when a part is
   registered, values are validated / coerced with pydantic at run time, and a value that fails is rejected like an
-  ungrounded quote (safeguard `type_rejected`). Untyped parts are not validated (pydantic itself is imported once per
-  process, by the first `ask`: the trace's fingerprint uses the serialized form of the questions).
+  ungrounded quote (safeguard `type_rejected`). Untyped parts cost nothing.
 - **Questions.** `Question(name, text, Answer.yes_no() | Answer.choice([...]), checkpoints=[...])`. Questions without a
   rule get a small answer head trained from labeled examples (`system.fit`) or a readable learned rule list
   (`system.learn_rule`).
@@ -253,7 +252,8 @@ Every answer is a value and a confidence, and the types also declare answer prim
   0.1 s a call; every decision stored and verifiable; Codex as a preview
   ([guide](docs/guide.md#solvi-behind-a-coding-agents-hooks), [examples/22_coding_agent_hooks.py](examples/22_coding_agent_hooks.py)).
 - **Text in.** `system.ask_text("please refund order A-10457, 1.5 million rubles, paid 12 September", decider)`: the
-  decider picks which question the message asks (or escalates when unsure), each input field is read with a quote and a
+  decider picks which question the message asks (or escalates when unsure), each input field is read with a quote
+  (found by the checkpoint's span pointer, or by a deterministic cue finder — `TextIn(extractor=...)` chooses) and a
   deterministic parser (numbers, dates, enums, yes / no), missing required fields are listed for a clarifying question,
   and the trace says those values were read by a model, not given. `solvi serve` answers texts at `POST /ask_text`
   and as the MCP tool `ask_text`.
@@ -427,9 +427,8 @@ Run them from a clone: `python examples/01_leave_request.py`.
 - [ROADMAP.md](ROADMAP.md), [CHANGELOG.md](CHANGELOG.md), [CONTRIBUTING.md](CONTRIBUTING.md), [SECURITY.md](SECURITY.md).
 - [docs/benchmarks.md](docs/benchmarks.md): setups, per-question numbers, caveats.
 - [docs/vs_llm.md](docs/vs_llm.md): solvi vs asking an LLM (Grok 4.7, gpt-oss-120b, Qwen3, DeepSeek), with raw answers.
-- [benchmarks/](benchmarks/): dataset loaders (SROIE, CORD, CUAD, Kleister-NDA) and the scripts that are in the
-  repository (`ask_overhead`, `strategist_scale`, `fast_head`, `trace_signature`, `vs_llm/`, …); the training scripts
-  behind the extraction table above are not in the repository.
+- [benchmarks/](benchmarks/): the benchmark scripts that can be rerun, and the dataset loaders behind the extraction
+  numbers (SROIE, CORD, CUAD, Kleister-NDA — their scripts are not in the repository).
 - Tests: `pytest`.
 
 ## License

@@ -211,6 +211,9 @@ class CorrectionMemory:
     def _distances(self, f, ws, cases=None, F=None):
         if cases is None:
             cases, F = self._snapshot()
+        if F.shape[0] and F.shape[1] != len(f):     # loaded with strict=False from another question's file
+            raise ValueError(f"the memory's cases have {F.shape[1]} features, this question gives {len(f)}: they were "
+                             "stored for another question")
         d = 0.5 * np.abs(F - np.asarray(f, float)).sum(1)
         if self.part.spec.multi:
             d = d / max(1, F.shape[1]) * 2        # sigmoids: the mean difference per option, in [0, 1]
@@ -272,7 +275,8 @@ class CorrectionMemory:
         → {"min_strength", "proposed" (share of the cases it would propose for), "error" (among them), "risk", "n",
         "guarantee", "radius", "nearest": {"min", "median", "max"} (each case's distance to its nearest other case)} and,
         when no case has another within the radius, "note": the memory then proposes for none of them, nothing can be
-        learned about its proposals, and min_strength is inf (it does not propose) — compare `nearest` with `radius`."""
+        learned about its proposals, and min_strength is inf (it does not propose) — compare `nearest` with `radius`
+        (its values are None, and the note says so, when every stored case is a twin of every other)."""
         from .calibration import crc_threshold
         cases, _ = self._snapshot()
         if len(cases) < 2:
@@ -303,7 +307,11 @@ class CorrectionMemory:
                "error": float(w[auto].mean()) if auto.any() else 0.0, "risk": float((w * auto).mean()),
                "n": len(cases), "guarantee": self.guarantee["promise"], "radius": self.radius,
                "nearest": self._nearest(twins)}
-        if not real:
+        if not real and out["nearest"]["min"] is None:
+            out["note"] = ("every stored case has the same features (one input corrected more than once?): each is left "
+                           "out together with its twins, so no case is left to propose for another — nothing can be "
+                           "learned about the memory's proposals and it will not propose (min_strength is inf)")
+        elif not real:
             out["note"] = (f"no stored case has another within the radius {self.radius:g} (the nearest are "
                            f"{out['nearest']['min']:g} to {out['nearest']['max']:g} away): the memory proposes for none "
                            "of them and will not propose (min_strength is inf) — a larger radius?")
@@ -338,10 +346,18 @@ class CorrectionMemory:
                 "cases": [c.to_dict() for c in self.cases]}
 
     def load_dict(self, data, strict=True):
-        """Replace the settings and cases with a to_dict() (strict: refuse cases from another checkpoint)."""
+        """Replace the settings and cases with a to_dict() (strict: refuse cases from another checkpoint or of another
+        question). A label this question cannot give, or cases whose features differ in length, are refused always."""
         if strict and data.get("weights") != self.weights:
             raise ValueError(f"the memory's cases were scored by checkpoint #{data.get('weights')}, this part's is "
                              f"#{self.weights}: build it again from the corrections (learn_from)")
+        if strict:
+            from .calibfile import _norm           # as it reads back from a file: tuples as lists
+            mine, theirs = _norm(self.part.spec.describe()), _norm(data.get("question"))
+            if theirs != mine:
+                raise ValueError(f"the memory was made for another question ({theirs}); this part asks {mine}: its "
+                                 "cases say nothing about this question — build it from this question's corrections "
+                                 "(learn_from)")
         s = data.get("settings") or {}
         for k in ("k", "radius", "min_strength", "min_agreement", "text", "mode", "guarantee"):
             if k in s:
@@ -353,6 +369,13 @@ class CorrectionMemory:
                  for c in data.get("cases") or ()]
         for c in cases:
             check_source(c.source)
+            try:
+                self._label(tuple(c.label) if isinstance(c.label, list) else c.label)
+            except ValueError as e:
+                raise ValueError(f"case {c.id}: its label is not an answer of this question ({e}) — a memory of "
+                                 "another question?") from None
+        if len({len(c.features) for c in cases}) > 1:
+            raise ValueError("the cases' features differ in length: they are not of one question")
         with self._lock:
             self.cases = cases
             self._ids = {c.id for c in cases}

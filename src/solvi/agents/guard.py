@@ -39,15 +39,16 @@ catalog, in this order (a failed hard check decides; when several fail, the firs
   no_injected_arguments        ... and not only in tool outputs when any tool output in the conversation carries
                                instruction-like text (solvi.perturb.injection_spans) → escalate
   no_instructions_in_tool_outputs   tools with injections="any": no tool output in the conversation carries such text → escalate
+  not_made_before              tools with once=True: a call with these arguments was already made → escalate
+  your policies                ordinary solvi hard checks over the arguments and the facts your app gives (deny first,
+                               then escalate); `guard.fn` adds computations they read
+  request_authorizes           with an authorizer (a decider's yes / no, act_guard, perturb): "does the conversation
+                               authorize this call?" — no → escalate; an escalated or unsure decider → escalate
 
 The hard guarantee is provenance: an argument grounded only from the user (`ground_from=("user",)`) is never taken from
 a tool output, whatever the output says. Recognising instruction-like text is a heuristic second line (patterns: a
 paraphrase, base64, spaced-out letters pass it) — not sufficient on its own: declare high-impact arguments as
 user-grounded and add policies.
-  your policies                ordinary solvi hard checks over the arguments and the facts your app gives (deny first,
-                               then escalate); `guard.fn` adds computations they read
-  request_authorizes           with an authorizer (a decider's yes / no, act_guard, perturb): "does the conversation
-                               authorize this call?" — no → escalate; an escalated or unsure decider → escalate
 
 The rule `verdict` answers "allow" with the grounded arguments as its evidence (each quote is checked again by solvi's
 grounding: literally at its offsets). A question that abstains (a check could not be evaluated, a fact the policies
@@ -345,10 +346,13 @@ def conversation(context):
 
 # ------------------------------------------------------------------------------------------------ tools
 def _is_context_param(p):
-    """A framework's context argument (RunContext, ToolContext, RunContextWrapper, ...): not an argument of the call."""
+    """A framework's context argument (RunContext, ToolContext, RunContextWrapper, ...): not an argument of the call.
+    By the type's name: it ends in "Context" or "ContextWrapper" (with or without type parameters) — "ContextualQuery"
+    is an argument like any other."""
     a = p.annotation
     name = getattr(a, "__name__", None) or (a if isinstance(a, str) else str(a))
-    return "Context" in str(name) and p.kind in (p.POSITIONAL_ONLY, p.POSITIONAL_OR_KEYWORD)
+    return bool(re.search(r"Context(?:Wrapper)?(?:\[.*\])?$", str(name).strip())) \
+        and p.kind in (p.POSITIONAL_ONLY, p.POSITIONAL_OR_KEYWORD)
 
 
 def arguments_model(name, func):
@@ -373,12 +377,22 @@ def arguments_model(name, func):
                                                                           allow_inf_nan=False), **fields)
 
 
+# a property's JSON-schema constraints → pydantic's Field arguments
+_CONSTRAINTS = {"minimum": "ge", "maximum": "le", "exclusiveMinimum": "gt", "exclusiveMaximum": "lt",
+                "minLength": "min_length", "maxLength": "max_length", "pattern": "pattern",
+                "minItems": "min_length", "maxItems": "max_length"}
+
+
 def model_from_json_schema(name, schema):
     """A JSON schema of an object (an MCP tool's inputSchema, an OpenAI function's parameters) → a pydantic model: string,
     integer, number (finite: NaN and infinities are refused), boolean, null, array (items), object (properties → a
     nested model, else a dict), enum / const (Literal), anyOf / oneOf / type lists (a Union), $ref to $defs /
-    definitions, defaults and required. A recursive $ref is followed once: inside itself it is any object (a dict) — the
-    model stays finite. Anything else is Any. Unknown arguments are forbidden."""
+    definitions, defaults and required; of a property's own constraints: minimum / maximum / exclusiveMinimum /
+    exclusiveMaximum, minLength / maxLength / pattern, minItems / maxItems (a pattern pydantic cannot compile raises:
+    `adopt` then escalates every call of the tool). A recursive $ref is followed once: inside itself it is any object
+    (a dict) — the model stays finite. Anything else (allOf, not, if / then, format, constraints inside array items)
+    is not checked: Any, or the bare type. Unknown arguments are forbidden unless the object says
+    "additionalProperties": true (or gives a schema for them: they are then accepted as they are)."""
     import typing
 
     from pydantic import ConfigDict, Field, create_model
@@ -437,9 +451,12 @@ def model_from_json_schema(name, schema):
         for k, p in (s.get("properties") or {}).items():
             r, _ = resolve(p, seen)
             default = ... if k in req else (r or {}).get("default", None)
-            fields[k] = (typ(p, path + [k], seen), Field(default, description=(r or {}).get("description")))
+            limits = {kw: (r or {})[js] for js, kw in _CONSTRAINTS.items()
+                      if isinstance((r or {}).get(js), (int, float, str)) and not isinstance((r or {}).get(js), bool)}
+            fields[k] = (typ(p, path + [k], seen), Field(default, description=(r or {}).get("description"), **limits))
+        extra = "allow" if s.get("additionalProperties") not in (None, False) else "forbid"
         return create_model(_camel("_".join([name] + path)) + ("Arguments" if not path else ""),
-                            __config__=ConfigDict(extra="forbid", allow_inf_nan=False), **fields)
+                            __config__=ConfigDict(extra=extra, allow_inf_nan=False), **fields)
     top, seen = resolve(schema, frozenset())
     return obj(top or {}, [], seen)
 
@@ -559,7 +576,8 @@ def _grounding(spec, matchers=None):
         """Where each argument that must come from the conversation is quoted: {"found": {argument: [[text, start, end,
         role]]}, "missing": [...], "injected": [...]}. A string is found as a token (not inside a longer word or
         address; see MATCHERS), a number as a number token of exactly its value (a lone "1,500" only under a locale), a
-        list item by item; an empty or whitespace-only string is never grounded. The first occurrence in a message of
+        list item by item; an empty or whitespace-only string is never grounded (an optional argument left at its ""
+        default is not asked for). The first occurrence in a message of
         an allowed role wins (an untainted one before a tainted one). Taint is context-wide: when any tool output in the
         conversation carries instruction-like text (solvi.perturb.injection_spans), a value found only in tool outputs
         is injected. With scan_user, a value the user wrote only within NEAR characters of an override in their own
@@ -603,6 +621,8 @@ def _grounding(spec, matchers=None):
             quotes = []
             for item in items:
                 if isinstance(item, str) and not _visible(item).strip():
+                    if item == "" and "empty_default" in rules and arg in rules["empty_default"]:
+                        continue                      # an optional argument left at its "" default: nothing was given
                     missing.append(f"{arg}={_short(item)} (empty)")
                     continue
                 best, stale = None, False
@@ -1224,6 +1244,10 @@ class Guard:
                 model = schema
             desc = description if description is not None else ((inspect.getdoc(f) or "") if f is not None else "")
             roles = tuple(ROLES.get(r, r) for r in ((ground_from,) if isinstance(ground_from, str) else ground_from))
+            unknown = [r for r in roles if r not in ROLES.values()]
+            if unknown:                               # a role no message has: the argument could never be grounded
+                raise ValueError(f"tool {n}: ground_from roles are {', '.join(sorted(set(ROLES.values())))}, not "
+                                 f"{unknown}")
             spec = {ground: "token"} if isinstance(ground, str) else dict(ground) if isinstance(ground, dict) \
                 else {a: "token" for a in ground}
             bad = {a: m for a, m in spec.items() if not callable(m) and m not in MATCHERS}
@@ -1260,7 +1284,7 @@ class Guard:
         return self.tools[name]
 
     def adopt(self, name, json_schema, description=""):
-        """Give a declared tool without a schema (`guard.tool(name=...)`) its arguments' JSON schema — the MCP proxy
+        """Give a declared tool without a schema (`guard.declare(name)`) its arguments' JSON schema — the MCP proxy
         does this from the server's tools/list. A tool that has a schema keeps it."""
         t = self.tools[name]
         if t.model is None:
@@ -1420,7 +1444,7 @@ class Guard:
         from ..provenance import code_fingerprint
         from ..system import System
         if t.model is None:
-            raise ValueError(f"tool {t.name} has no argument schema yet (guard.tool(..., schema=...) or guard.adopt)")
+            raise ValueError(f"tool {t.name} has no argument schema yet (guard.declare(name, schema=...) or guard.adopt)")
         if t.authorize is True and self.authorizer is None:
             raise ValueError(f"tool {t.name} is declared with authorize=True, but the guard has no authorizer "
                              "(guard.make_authorizer(decider)): its calls would go unauthorized")
@@ -1470,6 +1494,9 @@ class Guard:
                 spec["tool_values"] = "escalate"
             if t.ground_last:
                 spec["last"] = int(t.ground_last)
+            empty = sorted(a for a in t.ground if t.model.model_fields[a].default == "")
+            if empty:                                 # optional arguments whose default is "": the default grounds itself
+                spec["empty_default"] = empty
             cat.fn(_grounding(json.dumps(spec, sort_keys=True), {a: m for a, m in t.match.items() if callable(m)}))
             check(arguments_grounded, "deny")
             if middle:
@@ -1722,6 +1749,8 @@ class Guard:
 
     def replay_all(self):
         """replay every stored decision → [{"id", "tool", "mismatches"}] of those that do not replay."""
+        if self.storage is None:
+            raise ValueError("the guard has no storage")
         bad = []
         for st in self.storage.iter():
             v = self.replay(st.id)

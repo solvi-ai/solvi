@@ -346,7 +346,8 @@ def logprob_probs(content, logprobs, answer, labs):
     i, s = first
     prefix = content[s:a0]                             # what the first token carries before the answer (a quote mark)
     head = pieces[i][len(prefix):]
-    for alt in toks[i].get("top_logprobs") or []:
+    top = toks[i].get("top_logprobs") if isinstance(toks[i], dict) else None
+    for alt in top if isinstance(top, list) else []:
         try:
             tok, alp = str(alt["token"]), float(alt["logprob"])
         except (KeyError, TypeError, ValueError):
@@ -641,10 +642,15 @@ class LLMScorer:
             return {**blank, "escalate": f"invalid input for the endpoint: {e}", "info": {"llm": base}}
         info = {**base, "format": fmt}
         try:
-            ch = (resp.get("choices") or [None])[0]
+            if not isinstance(resp, dict):          # a 200 that is not a chat completion (a list, a string, a number)
+                raise InvalidOutput(f"the response is not a JSON object but a {type(resp).__name__}")
+            chs = resp.get("choices")
+            ch = chs[0] if isinstance(chs, list) and chs else None
             if not isinstance(ch, dict):
                 raise InvalidOutput("the response has no choices")
-            u = resp.get("usage") or {}
+            u = resp.get("usage")
+            if not isinstance(u, dict):             # "usage": "n/a": not counted, the answer is still read
+                u = {}
             with self._lock:
                 for key in self.usage:
                     if isinstance(u.get(key), int):
@@ -654,6 +660,8 @@ class LLMScorer:
             if resp.get("model") and resp.get("model") != self.model:
                 info["served_by"] = str(resp["model"])
             msg = ch.get("message") or {}
+            if not isinstance(msg, dict):
+                raise InvalidOutput(f"the response's message is not an object but a {type(msg).__name__}")
             if msg.get("refusal"):
                 raise InvalidOutput(f"the model refused: {str(msg['refusal'])[:120]}")
             if ch.get("finish_reason") == "length":

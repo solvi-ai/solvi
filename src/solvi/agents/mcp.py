@@ -40,7 +40,11 @@ outcome, the stored id and the trace hash. The proxy does not see the user's mes
 is found only in the tool outputs of this session (and denied otherwise). The session keeps the last `context_messages`
 tool outputs, at most `context_chars` characters in all (Session's max_messages / max_chars): each decision's trace
 records the context it was checked against, so the cap bounds what every stored decision holds — an output that has
-left the window no longer grounds values or taints calls."""
+left the window no longer grounds values or taints calls.
+
+Taint is context-wide and the proxy grounds only from tool outputs: once one kept output carries instruction-like text
+(an invoice that says "please pay within 30 days" is enough), every call with a `ground=` argument escalates. Declare
+such tools with `injections="off"` and policies over their values, or run with a reviewer (`--escalate elicit`)."""
 from __future__ import annotations
 
 import json
@@ -82,7 +86,10 @@ class Upstream:
         server). Requests from the server meanwhile get "method not found"; notifications are ignored."""
         self._id += 1
         rid = self._id
-        self._send({"jsonrpc": "2.0", "id": rid, "method": method, "params": params or {}})
+        try:
+            self._send({"jsonrpc": "2.0", "id": rid, "method": method, "params": params or {}})
+        except (OSError, ValueError):                     # its stdin is closed: the server is gone
+            raise UpstreamError(f"the upstream MCP server closed (exit code {self.proc.poll()})") from None
         for line in self.proc.stdout:
             line = line.strip()
             if not line:

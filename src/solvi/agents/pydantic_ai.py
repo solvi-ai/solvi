@@ -37,8 +37,11 @@ from __future__ import annotations
 import dataclasses
 from typing import Any, Callable
 
-from pydantic_ai import ApprovalRequired, ModelRetry, ToolFailed
-from pydantic_ai.toolsets import WrapperToolset
+try:
+    from pydantic_ai import ApprovalRequired, ModelRetry, ToolFailed
+    from pydantic_ai.toolsets import WrapperToolset
+except ImportError as e:
+    raise ImportError('solvi.agents.pydantic_ai needs PydanticAI: pip install "solvi[pydantic-ai]"') from e
 
 from .guard import Guard, _text, proposal, with_calls_made
 

@@ -26,6 +26,7 @@ from pathlib import Path
 PUBLISHED = {
     "solvi-ai/solvi-base": "typed decisions on a CPU / in ONNX (150M, preview)",
     "solvi-ai/solvi-large": "typed decisions (396M, preview)",
+    "solvi-ai/solvi-large-long": "solvi-large for inputs up to 8k tokens (preview)",
 }
 PULL_PATTERNS = {"onnx": ["*.json", "*.md", "onnx/*"], "torch": ["*.json", "*.md", "*.safetensors"], "all": None}
 
@@ -66,7 +67,8 @@ def _size(path):
 
 
 def cached():
-    """Every decider in the local cache (a snapshot with solvi_decide.json) → [{"id", "path", "files", "bytes"}]."""
+    """Every decider in the local cache (a snapshot with solvi_decide.json) → [{"id", "path", "bytes", "onnx", "torch"}]
+    (onnx / torch: whether the snapshot holds that backend's weights)."""
     root = cache_dir()
     out = []
     if not root.is_dir():
@@ -98,7 +100,8 @@ def kind_of(spec):
 
 def resolve(spec):
     """A MODEL spec → (kind, where): a folder for "folder" and a cached "hub" id, (url, model) for "systemone" and "llm",
-    the spec for "code". A Hugging Face id that is not in the cache raises ModelError (run `solvi models pull ID`)."""
+    the spec for "code". A Hugging Face id that is not in the cache raises ModelError (run `solvi models pull ID`); so
+    does a spec written as a path ("./x", "../x", "/x", "~/x") that is not a folder — "no such folder", never "pull"."""
     k = kind_of(spec)
     if k in ("systemone", "llm"):
         rest = spec[len(k) + 1:]
@@ -112,6 +115,10 @@ def resolve(spec):
         return k, spec
     if k == "code":
         return k, spec
+    if spec.startswith(("./", "../", "/", "~")) or spec in (".", ".."):
+        if os.path.isdir(os.path.expanduser(spec)):
+            return "folder", os.path.expanduser(spec)
+        raise ModelError(f"no such folder: {spec}")
     if spec.count("/") != 1:
         raise ModelError(f"{spec!r}: not a folder, a Hugging Face id (org/name), systemone:URL#model, llm:URL#model or "
                          "module:attr")
@@ -300,8 +307,9 @@ def cmd_check(a):
         out["error"] = f"cannot load: {type(e).__name__}: {e}"
         _report(out, a.json)
         return 1
-    out.update(id=m.model_id, backend=getattr(m, "backend", None), fingerprint=m.weights_fingerprint(),
-               capabilities=getattr(m, "caps", None))
+    fp = getattr(m, "weights_fingerprint", None)      # a module:attr decider may be any object with decision(...)
+    out.update(id=getattr(m, "model_id", type(m).__name__), backend=getattr(m, "backend", None),
+               fingerprint=fp() if callable(fp) else None, capabilities=getattr(m, "caps", None))
     status = 0
     if rows:
         try:

@@ -510,3 +510,22 @@ def test_the_modal_verb_may_after_a_number_is_not_the_month():
                  synonyms={"currency": {"EUR": ["euro", "euros"]}})
     f = tin.read("refund order A-7: these 2 may be wrong but I paid 20 euros", question="request_refund").fields
     assert f["purchase_date"].status != "read"
+
+
+def test_a_number_cut_out_of_a_longer_one_in_a_text_is_not_read():
+    """In a text the extractor quoted "ten thousand" out of "ten thousand and one" and read 10000, and "2" out of
+    "2 thirds": parse_number refused the whole phrase, but only saw the cut quote."""
+    from solvi.textin import ParseError, parse_number
+    _, s = shop()
+    tin = TextIn(s, patterns={"order_id": r"[A-Z]-\d+"}, today="2026-09-28",
+                 synonyms={"currency": {"EUR": ["euro", "euros"]}})
+    for said in ("ten thousand and one", "two thousand three hundred", "2 thirds of 900", "two hundred fifty"):
+        f = tin.read(f"refund order A-7: I paid {said} euros on 12 September 2026", question="request_refund").fields
+        assert f["amount"].status != "read", (said, f["amount"].value)
+    for said, want in (("two thousand", 2000.0), ("2 thousand", 2000.0), ("300", 300.0)):
+        f = tin.read(f"refund order A-7: I paid {said} euros on 12 September 2026", question="request_refund").fields
+        assert (f["amount"].status, f["amount"].value) == ("read", want), said
+    for text in ("2 thirds", "5 tenths of it", "3 fifths"):
+        with pytest.raises(ParseError, match="several words"):
+            parse_number(text)
+    assert parse_number("the last 2 quarters") == "2" and parse_number("2 half days") == "2"     # counts, not fractions

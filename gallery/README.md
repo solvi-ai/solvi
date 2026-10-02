@@ -1,6 +1,6 @@
 # solvi gallery
 
-Decision tasks from twenty directions, each a small, runnable solvi catalog: Python functions and checks, typed questions,
+Decision tasks from fifteen directions, each a small, runnable solvi catalog: Python functions and checks, typed questions,
 and rules or learned heads. Every entry here has a `task.py` (the catalog), `state.json` (a default input), `cases.json`
 (9–16 scenarios with the expected answers), `run.py` (runs them, prints the strategist's plan, verifies the trace and audits
 every answer) and a README that shows what solvi does that an answer-only model cannot. All fifteen entries also open in the
@@ -77,5 +77,5 @@ asked — 01's `tags` and 03's `harm`, added with solvi 0.4, are not scored):
 Read this as a demonstration, not a benchmark: the cases were written together with the catalogs, and the answer-only model saw
 the rules only as text. The structural differences hold regardless of the numbers — solvi's hard rules cannot be overridden,
 numbers are computed instead of guessed, every extracted value is quoted with its offsets, the trace re-verifies, and the
-system abstains instead of guessing. Each entry's `compare_laya.py` and `compare_laya.out.txt` reproduce and record the run;
+system abstains instead of guessing. For entries 01–06, `compare_laya.py` and `compare_laya.out.txt` reproduce and record the run;
 measured document benchmarks are in [docs/benchmarks.md](../docs/benchmarks.md).

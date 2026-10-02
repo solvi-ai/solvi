@@ -88,7 +88,7 @@ forbid = [
   '''\bsk-[A-Za-z0-9_-]{20,}''',
   '''\bgh[pousr]_[A-Za-z0-9]{36}\b''',
 ]
-redact = true       # reasons show a masked excerpt, not the secret
+redact = true       # reasons show a masked excerpt, not the secret; the stored decision's content is erased
 
 [[rule]]
 id = "no-employee-data-from-browser"
@@ -125,6 +125,10 @@ on_fail = "ask"
 
 class RulesError(ValueError):
     """A rules file that cannot be read: its path, the rule and what is wrong."""
+
+
+class SettingsError(ValueError):
+    """An agent's settings file (.claude/settings.json, .codex/hooks.json) that install / uninstall cannot read."""
 
 
 # --------------------------------------------------------------------------------------------------- paths
@@ -167,9 +171,10 @@ def project_root(payload=None, explicit=None):
 
 
 def relpath(path, root):
-    """A file path → project-relative with "/" (an absolute path outside the project stays absolute)."""
-    p = os.path.abspath(os.path.join(root, path.replace("\\", "/")))
-    r = os.path.relpath(p, root)
+    """A file path → project-relative with "/" (an absolute path outside the project stays absolute). Symbolic links
+    are resolved, so a file reached through a linked folder is matched by the rules of where it really is."""
+    p = os.path.realpath(os.path.join(root, path.replace("\\", "/")))
+    r = os.path.relpath(p, os.path.realpath(root))
     return p.replace(os.sep, "/") if r.startswith("..") else r.replace(os.sep, "/")
 
 
@@ -517,7 +522,10 @@ def _call_name(node):
 
 def _call_hits(patterns, added, result, path):
     """Added lines that call a forbidden Python function (dotted names with globs; "name(shell=True)" only when that
-    keyword is passed as True) → [[line, text, call]]; ValueError when the code does not parse."""
+    keyword is passed as a true constant: True, 1) → [[line, text, call]]; SyntaxError when the code does not parse.
+    A name is also read through the module's own imports (`import subprocess as sp` → sp.run is subprocess.run, `from
+    os import system` → system is os.system), and a call is reported when any of its lines is an added line (at the
+    first of them)."""
     import ast
     from fnmatch import fnmatchcase
     specs = []
@@ -527,6 +535,12 @@ def _call_hits(patterns, added, result, path):
     lines = {n: t for n, t in added}
     text = result if result is not None else "\n".join(t for _, t in added)
     tree = ast.parse(text, filename=path)
+    alias = {}                                         # a local name → the dotted name it was imported as
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            alias.update({a.asname: a.name for a in node.names if a.asname})
+        elif isinstance(node, ast.ImportFrom) and node.module and not node.level:
+            alias.update({a.asname or a.name: f"{node.module}.{a.name}" for a in node.names if a.name != "*"})
     out = []
     for node in ast.walk(tree):
         if not isinstance(node, ast.Call):
@@ -534,12 +548,18 @@ def _call_hits(patterns, added, result, path):
         name = _call_name(node.func)
         if name is None:
             continue
+        head, dot, rest = name.partition(".")
+        names = [name] + ([alias[head] + dot + rest] if head in alias else [])
         for pat, kw in specs:
-            if fnmatchcase(name, pat) and (kw is None or any(k.arg == kw and isinstance(k.value, ast.Constant)
-                                                               and k.value.value is True for k in node.keywords)):
-                n = node.lineno if result is not None else added[node.lineno - 1][0]
-                if n in lines:
-                    out.append([n, lines[n], name + (f"({kw}=True)" if kw else "")])
+            hit = next((x for x in names if fnmatchcase(x, pat)), None)
+            if hit is not None and (kw is None or any(k.arg == kw and isinstance(k.value, ast.Constant)
+                                                      and bool(k.value.value) for k in node.keywords)):
+                span = range(node.lineno, (node.end_lineno or node.lineno) + 1)
+                at = [n if result is not None else added[n - 1][0] for n in span]
+                n = next((x for x in at if x in lines), None)
+                if n is not None:
+                    out.append([n, lines[n], hit + (f"({kw}=True)" if kw else "")])
+                    break
     return sorted(out)
 
 
@@ -568,13 +588,18 @@ def _rule_lines(spec):
             try:
                 out += [[n, t, f"calls {c}"] for n, t, c in _call_hits(rule["forbid_calls"], added_lines, result_text,
                                                                        path)]
-            except SyntaxError:
+            except SyntaxError as e:                   # not parsed: plain names by their text; nothing found → a
+                found = []                             # person (a glob or a keyword cannot be checked without the AST)
                 for n, t in added_lines:
                     for p in rule["forbid_calls"]:
                         name = re.sub(r"\(.*", "", p).strip()
                         if "*" not in name and re.search(r"(?<![\w.])" + re.escape(name) + r"\s*\(", t):
-                            out.append([n, t, f"calls {name}"])
+                            found.append([n, t, f"calls {name}"])
                             break
+                if not found:
+                    raise ValueError(f"the Python code does not parse ({e.msg}, line {e.lineno}), so the calls it "
+                                     "makes cannot be checked") from None
+                out += found
         if rule["require"] or rule["require_def"]:
             if result_text is None:
                 raise ValueError("the file after the edit is not known (its old text is not in the file, or the file "
@@ -691,16 +716,17 @@ def rules_system():
     from .core import Catalog
     from .models import load as load_model
     from .system import System
+    from .loader import LoadError                      # the command prints it; a library caller gets an exception
     spec = os.environ.get("SOLVI_HOOK_MODEL")
     if not spec:
-        raise SystemExit("solvi.hooks:rules_system: set SOLVI_HOOK_MODEL to the model the hook uses (--model)")
+        raise LoadError("solvi.hooks:rules_system: set SOLVI_HOOK_MODEL to the model the hook uses (--model)")
     model = load_model(spec)
     cat, qs = Catalog(), []
     for r in load_rules(os.environ.get("SOLVI_HOOK_RULES", DEFAULT_RULES)):
         if r.question is not None:
             qs.append(fuzzy_part(model, r).question(cat))
     if not qs:
-        raise SystemExit("solvi.hooks:rules_system: no rule with a question")
+        raise LoadError("solvi.hooks:rules_system: no rule with a question")
     return System(cat, qs)
 
 
@@ -817,6 +843,11 @@ def decide_change(rules, change, model=None, instructions=True, store=None, meta
         extra["instruction_check"] = False
     sid = _save(store, res, dict(meta or {}, hook="pre-edit", tool=change.tool, path=change.path, outcome=outcome,
                                  reasons=[t for _, _, t in found], rules=used, **extra))
+    masked = sorted({rid for _, rid, _ in found if rid and any(r.id == rid and r.redact for r in rules)})
+    if sid is not None and masked:
+        # a rule with redact = true matched: the change holds what must not be kept (a secret), and the stored input
+        # state is the change — erase the record's content (its place, hash and answer stay; the chain verifies)
+        store.redact(sid, by="solvi hook", note=f"redact = true: {', '.join(masked)}")
     return outcome, why, used, sid
 
 
@@ -1124,8 +1155,26 @@ def _q(s):
 MARK = re.compile(r"(^|[\s/\\'\"])(solvi|-m\s+solvi)['\"]?\s+hook\s+(pre-edit|pick-skill)\b")
 
 
+_PRINTS = {"echo", "printf", "grep", "cat", "true", "false", "test", ":"}   # commands that only mention solvi's words
+
+
 def _ours(handler):
-    return isinstance(handler, dict) and isinstance(handler.get("command"), str) and bool(MARK.search(handler["command"]))
+    """Is a hook handler one that solvi installed? Its command runs `solvi hook pre-edit | pick-skill` — as words of
+    the command line (`solvi`, a path to it, `python -m solvi`, behind a launcher such as `uv run`), not inside a
+    quoted argument, and not as the arguments of a command that only prints or searches ("echo solvi hook pre-edit")."""
+    cmd = handler.get("command") if isinstance(handler, dict) else None
+    if not isinstance(cmd, str) or not MARK.search(cmd):
+        return False
+    import shlex
+    try:
+        toks = shlex.split(cmd)
+    except ValueError:                                 # an unbalanced quote: by the pattern alone
+        return True
+    for i, tok in enumerate(toks[:-2]):
+        runs = os.path.basename(tok) in ("solvi", "solvi.exe")        # also the "solvi" of "python -m solvi"
+        if runs and toks[i + 1] == "hook" and toks[i + 2] in ("pre-edit", "pick-skill"):
+            return os.path.basename(toks[0]) not in _PRINTS
+    return False
 
 
 def _settings_path(root, agent):
@@ -1138,9 +1187,9 @@ def _load_json(path):
     try:
         d = json.load(open(path, encoding="utf-8"))
     except ValueError as e:
-        raise SystemExit(f"solvi: {path} is not JSON ({e}); fix it or move it away, nothing was changed") from None
+        raise SettingsError(f"{path} is not JSON ({e}); fix it or move it away, nothing was changed") from None
     if not isinstance(d, dict):
-        raise SystemExit(f"solvi: {path} is not a JSON object; nothing was changed")
+        raise SettingsError(f"{path} is not a JSON object; nothing was changed")
     return d
 
 
@@ -1349,8 +1398,12 @@ def main(argv=None):
     if a.cmd == "sample-rules":
         print(SAMPLE_RULES, end="")
         return 0
-    return {"pre-edit": cmd_pre_edit, "pick-skill": cmd_pick_skill, "install": cmd_install,
-            "uninstall": cmd_uninstall, "audit": cmd_audit}[a.cmd](a)
+    try:
+        return {"pre-edit": cmd_pre_edit, "pick-skill": cmd_pick_skill, "install": cmd_install,
+                "uninstall": cmd_uninstall, "audit": cmd_audit}[a.cmd](a)
+    except SettingsError as e:                         # install / uninstall: said in one line, nothing was changed
+        print(f"solvi: {e}", file=sys.stderr)
+        return 1
 
 
 if __name__ == "__main__":

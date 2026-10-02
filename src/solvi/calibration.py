@@ -3,7 +3,8 @@ question (solvi answers, a decider, a head).
 
     from solvi.calibration import coverage_at, ece, reliability, threshold_for
     coverage_at(conf, correct, 0.9)     # share of cases you can answer automatically at ≥ 90% accuracy
-    threshold_for(conf, correct, 0.9)   # the confidence threshold that gives it (e.g. for Question(min_confidence=...))
+    threshold_for(conf, correct, 0.9)   # the confidence threshold that gives it (e.g. for Question(min_confidence=...));
+                                        # None when fewer than min_n=10 cases stand behind it
 
 `conf` — confidences in [0, 1]; `correct` — whether each answer was right (booleans or 0/1). `evaluate(system, question,
 examples)` collects both from a System on labelled examples (abstentions count as not covered).
@@ -49,27 +50,40 @@ def ece(conf, correct, bins=15):
     return float(sum(b["n"] / len(c) * abs(b["confidence"] - b["accuracy"]) for b in reliability(conf, correct, bins)))
 
 
+def _levels(c, o):
+    """The distinct confidences, highest first → (values, how many cases have at least that confidence, their accuracy).
+    Equal confidences stay together: a threshold cannot let a part of a tie through."""
+    order = np.argsort(-c, kind="stable")
+    cs, cum = c[order], np.cumsum(o[order])
+    last = np.flatnonzero(np.r_[cs[1:] != cs[:-1], True])      # the last case of each group of equal confidences
+    return cs[last], last + 1, cum[last] / (last + 1)
+
+
 def coverage_at(conf, correct, accuracy=0.9):
-    """The largest share of cases, taken from the most confident down, whose accuracy is at least `accuracy` (0 if even
-    the most confident case alone does not reach it)."""
+    """The largest share of cases a confidence threshold can let through with accuracy at least `accuracy`: the cases
+    with confidence ≥ t for the best t (equal confidences are taken or left together, so the result does not depend on
+    the order of the rows); 0 if no threshold reaches it."""
     c, o = _arrays(conf, correct)
     if len(c) == 0:
         return 0.0
-    o = o[np.argsort(-c, kind="stable")]
-    cum = np.cumsum(o) / np.arange(1, len(o) + 1)
-    good = np.where(cum >= accuracy - 1e-12)[0]
-    return float((good.max() + 1) / len(o)) if len(good) else 0.0
+    _, n, acc = _levels(c, o)
+    good = n[acc >= accuracy - 1e-12]
+    return float(good.max() / len(o)) if len(good) else 0.0
 
 
-def threshold_for(conf, correct, accuracy=0.9):
-    """The confidence threshold that achieves coverage_at(conf, correct, accuracy): answer when confidence ≥ it.
-    None if no threshold reaches the accuracy."""
+def threshold_for(conf, correct, accuracy=0.9, min_n=10):
+    """The lowest confidence threshold t (an observed confidence) such that the cases with confidence ≥ t — all of them,
+    ties included — are right at least `accuracy` of the time: answer when confidence ≥ it. min_n: at least so many
+    cases must be at or above the threshold (default 10); a threshold that rests on fewer says nothing about new inputs.
+    None if no threshold reaches the accuracy on at least min_n cases (so it can be None while coverage_at is above 0:
+    pass min_n=1 for the threshold of coverage_at whatever its support). Empirical — no guarantee on new inputs; see
+    ltt_threshold for one."""
     c, o = _arrays(conf, correct)
-    cov = coverage_at(c, o, accuracy)
-    if cov == 0.0:
+    if len(c) == 0:
         return None
-    k = int(round(cov * len(c)))
-    return float(np.sort(c)[::-1][k - 1])
+    t, n, acc = _levels(c, o)
+    good = t[(acc >= accuracy - 1e-12) & (n >= min_n)]
+    return float(good[-1]) if len(good) else None
 
 
 def accuracy_at(conf, correct, threshold):
@@ -79,11 +93,12 @@ def accuracy_at(conf, correct, threshold):
     return (float(o[m].mean()) if m.any() else float("nan")), float(m.mean()) if len(c) else 0.0
 
 
-def summary(conf, correct, accuracy=0.9, bins=15):
-    """{"n", "accuracy", "ece", "coverage_at", "threshold"} in one call."""
+def summary(conf, correct, accuracy=0.9, bins=15, min_n=10):
+    """{"n", "accuracy", "ece", "coverage_at", "threshold"} in one call ("threshold": threshold_for with min_n — None
+    when fewer than min_n cases support it, whatever "coverage_at" says)."""
     c, o = _arrays(conf, correct)
     return {"n": int(len(c)), "accuracy": float(o.mean()) if len(o) else float("nan"), "ece": ece(c, o, bins),
-            "coverage_at": coverage_at(c, o, accuracy), "threshold": threshold_for(c, o, accuracy)}
+            "coverage_at": coverage_at(c, o, accuracy), "threshold": threshold_for(c, o, accuracy, min_n)}
 
 
 def evaluate(system, question, examples, accuracy=0.9):

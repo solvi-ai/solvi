@@ -48,6 +48,7 @@ pip install "solvi[model]"     # + torch, transformers, for the ModernBERT extra
 pip install "solvi[onnx]"      # + onnxruntime, tokenizers: the decider (solvi.decide) on CPU without torch
 pip install "solvi[serve]"     # + fastapi, uvicorn: solvi serve over HTTP
 pip install "solvi[mcp]"       # + the official MCP SDK for solvi serve --mcp (without it, a built-in stdio server is used)
+pip install "solvi[langgraph]" # the solvi.agents adapters: also "solvi[pydantic-ai]", "solvi[openai-agents]"
 pip install "solvi[lora]"      # + torch, transformers, peft: part.adapt_lora, a LoRA adapter per question (experimental)
 ```
 
@@ -1107,7 +1108,10 @@ info = team.act_guard(examples, risk=0.10)           # one guarantee for the com
   (other) 'billing'"`). The probabilities are the mean of the parts', the confidence the lowest agreeing one.
 - **Route**: `{predicate or fact name: part}` and a `default`; a predicate is a function of facts by name (its parameters
   join the route's inputs), a fact name picks its part when the fact is true. The first that holds picks; only that
-  part's model runs.
+  part's model runs. Several predicates may read the same fact (`mode == "strict"`, `mode == "stop"`). Outside a
+  catalog give the route's facts — `Facts(email=..., vip=True)` or a state with those keys, also in the examples of
+  `act_guard`: a bare text raises for a route keyed by a fact name (it would be read as the fact), as does a fact
+  that is not given.
 
 The parts must answer the same question — the same kind and options (and "not stated", rank `k`, number bins); the
 task and the facts they read may differ. A mismatch raises at construction. Combinations nest: `Cascade([small,
@@ -1234,7 +1238,8 @@ records `extra["memory"]` — `fp`, `n`, `mode`, `proposal`, `strength`, `agreem
 (`id`, `label`, `distance`, `weight`, `source`, `by`, `time`, `stored_id`); the audit prints them. The memory's
 fingerprint is part of the part's, so a replay of a decision made with another memory state reports "model changed", and
 a replay with the same state recomputes the proposal and compares it. `mem.save(path)` / `CorrectionMemory(part).load(path)`
-keep it with the checkpoint's fingerprint (another checkpoint is refused: build it again with `learn_from`);
+keep it with the checkpoint's fingerprint and the question (another checkpoint or another question is refused: build it
+again with `learn_from`);
 `mem.remove(ids)` forgets cases found to be wrong; `team.memory(False)` detaches it.
 
 ### Loading a checkpoint
@@ -1381,6 +1386,12 @@ ece(conf, correct)                    # expected calibration error; reliability(
 evaluate(system, "team", examples)    # ask on [(init_state, answer)] → accuracy, ece, coverage_at, answered, ...
 ```
 
+Equal confidences are taken or left together (an LLM that states 0.85 / 0.90 / 0.95 gives mostly ties), so the cases
+with confidence ≥ the threshold do reach the accuracy on the examples. `threshold_for` returns `None` when fewer than
+`min_n=10` examples stand at or above the threshold — one confident right answer is not a threshold. Both are empirical:
+no promise for new inputs; `solvi.calibration.ltt_threshold` and `crc_threshold` (behind `calibrate_for(method="ltt")`
+and `act_guard`) give one.
+
 [examples/13_decide_model.py](../examples/13_decide_model.py) routes support emails with a decision part: bias correction on
 60 unlabelled emails, S on 16 labelled ones, abstention, a constraint with a rule-based question, a hard check, the audit,
 `System.teach`, `calibrate_for` and a JSON ticket. [examples/15_typed_decisions.py](../examples/15_typed_decisions.py) is the
@@ -1404,12 +1415,20 @@ rep["drift"], rep["flags"], rep["why"]    # True, ["answers"], ["the answers are
 
 Without labels it tests the share answered alone, the distribution of the answers, the mean confidence and the mean act
 probability; with labels also the accuracy, and among the answers given alone the calibration error and
-`coverage_at`. A signal is flagged only when its test is significant (`alpha`, 0.01) and the change is large enough
-(`min_share`, `min_tv`, `min_shift`, ...), and `drift` needs `min_signals` of them. It takes a `Decision`, a result
-(`res["q"]`) or a dict, changes nothing and decides nothing: recalibrating or asking for labels is the caller's. Measured
-with solvi-base on support tickets whose wording and mix change at one point: with `window=100` the change is flagged 37
-decisions later, with no false flag on 200 decisions before it; `window=50` gave false flags (2–4 episodes), so keep
-the window at 100 or more.
+`coverage_at`. A signal is flagged only when its test is significant and the change is large enough
+(`min_share`, `min_tv`, `min_shift`, ...), and `drift` needs `min_signals` of them. The tests are repeated at every
+decision, so each is held to `alpha / (signals tested × horizon)`: on a stream that has not changed, the chance of a
+false flag within `horizon` decisions (1,000) is at most `alpha` (0.01). It takes a `Decision`, a `Response` with
+`question=` (`mon.observe(res, question="team")` — the act probability is read from the trace; a bare result `res["q"]`
+carries none, and the monitor warns that the act signal is then not tested) or a dict, changes nothing and decides
+nothing: recalibrating or asking for labels is the caller's. `rep["tests"]` holds each signal's numbers, its `p` and the
+`level` it had to be below; `rep["not_tested"]` says which signal could not be tested and why — the distribution of the
+answers needs each answer about 5 times in a window (rarer ones are pooled), so a question with 57 answers needs a
+window of a few hundred. Simulated on independent decisions: none of 1,200 stationary streams of 1,000 decisions was
+flagged (3 to 57 answers); with `window=100` a fall of the share answered alone from 66% to 12% is flagged about 60
+decisions later, a change of the mix of three answers from 1:1:1 to 1:8:1 about 80 decisions later (`window=50`: 40
+and 55; `window=200`: 90 and 105). Take the reference from the stream's own traffic (the default) unless your
+calibration set has the stream's mix of answers.
 
 ## Asking: System and Response
 
@@ -1648,6 +1667,10 @@ print(head.features, head.cv_acc)          # selected facts and their cross-vali
 - Features are selected greedily by 5-fold cross-validated accuracy (a feature is kept if it adds at least 1 point).
   **The selected facts become the question's flow**, so later requests compute only what the head uses.
 - The answer's `why` lists the largest feature contributions, `probs` gives all class probabilities.
+- A head left with no feature answers the same for every input; `fit` and `fit_fast` warn when that happens and say why:
+  on an imbalanced question no single fact may add a point over the most frequent answer, so the greedy selection keeps
+  nothing (`fit_fast` keeps every feature); or no fact could be computed from the examples' inputs — every parameter of
+  a part is a fact it reads, one with a default value too (`def fn(facts, _nm=nm)` waits for a fact `_nm`).
 
 ### fit_fast: learn in milliseconds, correct instantly
 
@@ -2126,7 +2149,10 @@ and `trace_hash`, as JSON text and as structured content. One more tool, `ask_te
 that name), takes `{"text", "question"?}` and returns what `POST /ask_text` does, so an agent can pass a user's message
 as it is. An abstention is a result, not an error; an exception is a tool
 error (`isError`). The official `mcp` SDK (2.x, `solvi[mcp]`) serves it when installed; otherwise solvi's built-in stdio
-JSON-RPC server answers `initialize`, `ping`, `tools/list` and `tools/call` (`--mcp-impl sdk|builtin` chooses). For an
+JSON-RPC server answers `initialize`, `ping`, `tools/list` and `tools/call` (`--mcp-impl sdk|builtin` chooses). The two
+answer alike — an unknown tool is a JSON-RPC error (-32602) in both — except for what the SDK decides itself:
+arguments that are not an object are its protocol error (the built-in server returns a tool error), and a call still
+running when stdin closes is not answered. For an
 MCP client:
 
 ```json
@@ -2205,13 +2231,13 @@ million rubles on 12 September". `solvi.textin` turns such a text into the quest
 state, reads every value with a quote, and leaves the decision to the catalog as before.
 
 ```python
-from solvi.textin import TextIn
+from solvi.textin import CueExtractor, TextIn
 
 eps = system.entry_points()          # the questions with the typed input state each one reads
 eps[0].fields["amount"]              # EntryField(name="amount", type=float, description=..., required=True)
 eps[0].tool()                        # the same as a function-calling tool: {"type": "function", "function": {...}}
 
-tin = TextIn(system, decider, today=date(2026, 9, 28),
+tin = TextIn(system, decider, extractor=CueExtractor(), today=date(2026, 9, 28),   # fields by the cue finder
              synonyms={"currency": {"RUB": ["rubles", "руб", "₽"], "EUR": ["euro", "€"]}},
              patterns={"order_id": r"[A-Z]-\d+"})
 read = tin.read("Please refund order A-10457: I paid 1.5 million rubles on 12 September.")
@@ -2239,6 +2265,15 @@ nearest after a cue word (the field's name, plus `cues={field: [...]}`; its desc
 `find(text, FieldSpec) → [Quote]` works, and a list of extractors is tried in order. Code does the rest: a deterministic
 parser per type turns the quote into the value.
 
+The default is one or the other, not both: with a pointer checkpoint (solvi-base, solvi-large) only the pointer reads the
+fields, and where it answers "not stated" the field is missing even when the cue finder would have found it — on the
+sentence above solvi-base read the order id and the date and left the amount and the currency "not stated" (one run, no
+rate measured). The example therefore names its extractor. `extractor=[DeciderExtractor(decider), CueExtractor()]`
+tries the pointer first and falls back to the cue finder; the trace records which one read each field. Routing has no
+"none of these" option: a text that asks none of the questions is escalated only when the decider is unsure
+(`min_confidence`, `min_margin`), so a confident wrong route is possible — add an entry point for "something else" if
+your texts can be about anything.
+
 | Type | Reads |
 |---|---|
 | `int`, `float`, `Decimal` | `1500`, `1,500.50`, `1 500 000 руб`, `12,5`, `2k`, `5m`, `$5 m`, `1.5 million`, `3 млн`, `a million`, `half a million`, `two and a half million`, `полтора миллиона` (an `int` must be whole). Not guessed, so `unparsed`: a fraction the parser does not compute (`quarter of a million`, `three quarters of a million`, `5 and a half thousand` — never read as the number next to it), `5 m` / `2 b` (a one-letter scale apart from the number may be a unit), `1.000` (a thousand or one? `TextIn(decimal="," or ".")` says), `3 100` (digits grouped by plain spaces with no currency next to them may be two numbers), `5%` (unless the field is declared in percent: `TextIn(percent=[field])` or `json_schema_extra={"percent": True}`) |
@@ -2247,8 +2282,11 @@ parser per type turns the quote into the value.
 | `bool` | yes / no words; the field's name or a `cues=` word ("urgent") → True; a phrase declared in `negatives={field: [...]}` (or `json_schema_extra={"negative_cues": ...}`) → False. Description words only rank candidates. A cue answered by a yes / no word ("Urgent: no", "urgent = false", "Is it urgent? No.") is that answer. A cue with a negation near it, before or after it in the sentence ("isn't urgent", "far from urgent", "anything but urgent", "urgent? not at all", "was urgent yesterday, not anymore", "urgent but cancelling isn't", "не срочно") is `unparsed` — never True, and False only through a declared negative |
 | `str` | the quote, trimmed; `patterns={field: regex}` must match it whole |
 
-A date without a year, or a relative one, is read only with `TextIn(today=...)`: without it the field is `unparsed`, never
-a guessed year. Every field ends in one state: `read`, `not_stated`, `unparsed` (the quote does not parse), `unsure` (found
+A date without a year, or a relative one, is read only with `TextIn(today=...)`: without it the field is `unparsed`.
+With it, a date without a year is given **today's year** — an assumption, recorded in the trace with `today`, and
+wrong around the turn of a year: "paid 28 December" read on 5 January becomes 28 December of the new year, almost a
+year ahead (`solvi serve` always supplies today's date). Where a rule compares such a date with today (a refund
+window), add a check that the date is not in the future, or ask for the year. Every field ends in one state: `read`, `not_stated`, `unparsed` (the quote does not parse), `unsure` (found
 with confidence below `min_field_confidence`, 0.5) or `unsupported` (no parser for the type). A required field that is not
 `read` is in `read.missing`: the question is asked anyway (a hard check may already decide it), and without that field it
 abstains — "not stated in the text: purchase_date; cannot compute: ..." — instead of guessing.
@@ -2411,7 +2449,9 @@ the user's (allowed), and user messages are not scanned for instructions by defa
 all the time, and scanning them would escalate ordinary requests. `Guard(scan_user=True)` (or `tool(scan_user=True)`
 for high-impact tools) escalates a call whose user-grounded value the user wrote *only* within 200 characters of an
 override in their own message ("ignore previous instructions", "SYSTEM:", role tags — the narrower rules, not "pay
-… now"): the pasted-injection case. A value the user also wrote plainly elsewhere is taken from there.
+… now"): the pasted-injection case. The role-tag rule is a sentence that starts with a label such as `System:`,
+`Model:`, `Assistant:`, `Admin:`, `Prompt:` or `Instructions:` in any letter case, so a user who writes "Model: XPS 13
+9310. Please refund order A-10457." is escalated too: turn `scan_user` on only where that cost is acceptable. A value the user also wrote plainly elsewhere is taken from there.
 
 **What the guard guarantees, and what it only tries.** The hard guarantee is *provenance*: an argument declared as
 the user's (`ground_from=("user",)`) is allowed only when its value is in a message the user wrote — a value that
@@ -2484,7 +2524,16 @@ taken from tool outputs that is a person's time. Tune per tool: `injections="gro
 calls whose grounded values come from tool outputs in a flagged context; `injections="off"` turns the detector off for
 the tool — provenance still holds: a user-grounded argument is still never taken from a tool output.
 
-**How a value is found.** `ground=["iban", "amount"]` finds each string as a *token*: the occurrence must not continue
+Two things make the flags add up. A field label at the start of a sentence is read as a role tag ("Model: XPS 13
+9310.", "System: Windows 11." in an order or a ticket), and the taint is context-wide: one flagged output anywhere in
+the conversation escalates every call whose grounded value is found only in tool outputs — a clean order lookup next to
+a newsletter that says "Please send us your feedback". The longer the context, the likelier one output is flagged. The
+MCP proxy grounds only from tool outputs and keeps the last 50, so there a `ground=` argument will usually escalate:
+declare such tools with `injections="off"` (and policies over the values), or run the proxy with a reviewer
+(`--escalate elicit`). The detector is the second line; what stops an attacker's value is `ground_from=("user",)`.
+
+**How a value is found.** An argument that is `None` is not looked for, nor is an optional argument left at its `""`
+default; any other empty string is never grounded. `ground=["iban", "amount"]` finds each string as a *token*: the occurrence must not continue
 a longer word on either side, nor be joined to one by `. @ - / : _` ("bob@x.org" is not found in "bob@x.org.evil" or
 "evil.bob@x.org", "acct" not in "acct-12"); zero-width and other format characters are read as absent, so they cannot
 make a boundary; a string of digits gets the same protection as a number ("0532" is not found in "DE89 3704 0044 0532"). `ground={"iban": "whole", "email": "whole"}` is stricter — the value must be delimited by
@@ -2596,7 +2645,7 @@ without the instruction-like sentences of its input, and a changed answer escala
 user authorized this payment" cannot talk it into a yes. Calibrate it on labelled calls of your own stream:
 
 ```python
-guard.make_authorizer(DecideModel.load("solvi-ai/solvi-base"))       # reads="user_request": the user's messages only
+guard.make_authorizer(DecideModel.load("solvi-ai/solvi-base"))       # reads the whole conversation; reads="user_request": the user's messages only
 rep = guard.calibrate_authorizer([(call, context, True), ...], risk=0.10)
 # act_guard: P(allowed by the authorizer alone and wrong) ≤ 10% for calls like these; the trace records the promise
 ```
@@ -2753,7 +2802,18 @@ itself it is any object); a tool whose arguments collide with the guard's facts 
                                                        "--upstream", "npx -y @modelcontextprotocol/server-filesystem /work"]}}}
 ```
 
-**Which frameworks.** Supported and tested with real runs (`tests/test_agents_frameworks.py`,
+**`once=True` behind an adapter.** An adapter has no `Session`, so it keeps the calls made itself and gives them as the
+fact `calls_made`: `GuardedToolset.made` (a call counts when the tool returned without raising), the guarded node's
+`solvi_guard.made` (the ToolNode ran the tool and its message is not an error), and one list shared by the tools of a
+`guard_tools(...)` call (`tool.solvi_guard.made`; the OpenAI guardrail sees a call before the SDK runs it, so an allowed
+call counts even when the tool then fails). The memory is that object's, for as long as it lives in this process:
+across runs, threads and users — not per conversation. A repeat of a call made for another user therefore escalates
+too, and nothing is remembered after a restart. For another scope, keep the calls yourself (a database row per
+conversation) and pass them as `facts=lambda ctx: {"calls_made": [...]}` — they are added to the adapter's own — and
+make one toolset / node / tool list per conversation if the process-wide memory is too wide.
+
+**Which frameworks.** Each adapter has an extra — `pip install "solvi[pydantic-ai]"`, `"solvi[langgraph]"`,
+`"solvi[openai-agents]"` — and importing one without its framework says which. Supported and tested with real runs (`tests/test_agents_frameworks.py`,
 `tests/test_agents_recheck3.py`): PydanticAI (2.51), LangGraph (1.2.12 with langchain-core 1.6.5), the OpenAI Agents SDK
 (0.22.3) and MCP (the proxy). Other frameworks — LlamaIndex, AutoGen, smolagents, CrewAI — have no adapter; their
 histories can be passed to `guard.check` as messages, and shapes the guard does not recognise are read fail-closed
@@ -2812,13 +2872,15 @@ inside a folder, `**` crosses folders (`**/x.py` also matches `x.py` at the root
 |---|---|---|
 | `forbid` | deterministic | regular expressions no added line may match |
 | `require` | deterministic | regular expressions the file after the edit must match |
-| `forbid_calls` | deterministic (Python AST) | calls no added line may make: dotted names with globs (`subprocess.*`), `name(kw=True)` only when that keyword is passed as `True` |
+| `forbid_calls` | deterministic (Python AST) | calls no added line may make: dotted names with globs (`subprocess.*`), `name(kw=True)` only when that keyword is passed as a true constant (`True`, `1`); names are read through the file's own imports (`import subprocess as sp`, `from os import system`) |
 | `require_def` | deterministic (Python AST) | functions the file after the edit must define with a body that does something (not only `pass` or a docstring) |
 | none of these, no `question` | deterministic | any change to these paths |
 | `question`, `when` | fuzzy | a yes / no question a decider answers ("yes" is a violation), asked when an added line matches a `when` pattern (always, without `when`) |
 
 `why` is the reason the agent reads; `on_fail = "ask"` makes a deterministic rule ask instead of deny; `redact = true`
-shows a masked excerpt (`"sk-p…"`) instead of the matching text; `calibration` names a calibration file for the
+shows a masked excerpt (`"sk-p…"`) instead of the matching text, and the stored decision of such a hit is erased
+(`store.redact`: its place, hash and outcome stay and the store still verifies, but the change itself — the secret —
+is not kept, so that decision cannot be replayed or audited); `calibration` names a calibration file for the
 question (below). The sample, printed by `solvi hook sample-rules` and in
 [examples/coding_agent_rules.toml](../examples/coding_agent_rules.toml):
 
@@ -2948,6 +3010,10 @@ Codex does not take a bare allow, so `--approve` is ignored there.
 
 - A deterministic rule is exact: an added line that matches a `forbid` pattern, a forbidden call in the parsed Python, a
   missing or empty required function is denied every time, with the line, whatever the change's comments say.
+- `forbid_calls` reads names as the file writes them, through its own `import ... as` / `from ... import`: a call
+  reached another way passes — `getattr(os, "system")`, a name assigned to a variable, a wrapper in another module, a
+  keyword given as a variable (`shell=flag`). A Python file that does not parse cannot be checked: a plain forbidden
+  name on an added line is still denied, anything else asks. Paths are matched after symbolic links are resolved.
 - A fuzzy rule is as good as its model and its calibration. Without a calibration it never blocks; with one, the promise
   is P(answered alone and wrong) ≤ risk for changes like the labelled ones — not for a new kind of code.
 - The hook sees what the agent proposes through Edit, Write and MultiEdit (and Codex's apply_patch). A file changed by a
@@ -3289,7 +3355,9 @@ store.report(question="refund", format="html", examples=5)               # one q
 A period report counts per question: the answers, the statuses, the escalation rate (abstentions — handed to a person — by
 the safeguard that caused them), the safeguards that fired, and the **guarantee coverage**: of the answers a model decided
 or took part in, how many rest only on calibrated thresholds (answers from code alone are counted apart). It lists the
-catalog and model fingerprints in use and every change of them over the period (from which stored decision on), and up
+catalog and model fingerprints in use, how many decisions of the period were erased (`store.redact`: they are not in
+the counts) and how many corrections were recorded in it (`"erased"` and `"corrections"` in the data; store-wide for
+the period, whatever the other filters), and every change of the fingerprints over the period (from which stored decision on), and up
 to `examples` stored ids per answer, escalation reason and safeguard — `res = store.get(id)` and `res.report()` give the
 page of one. From the shell:
 
@@ -3541,6 +3609,7 @@ solvi ask catalog.py:system --state '{"amount": 120, "limit": 500}' --question a
 solvi ask catalog.py:system example.json --report html > decision.html
 solvi ask catalog.py:system example.json --store decisions.db              # then: solvi report decisions.db
 solvi ask app.py:system --text "please refund order A-10457, 1 500 rubles" --decider solvi-ai/solvi-base
+solvi ask app.py:system --text "refund A-10457, paid 12 September" --today today    # or an ISO date: reads year-less dates
 ```
 
 A state is JSON; when the module that defines the System also defines `prepare(state)` (turning ISO strings into dates,
@@ -3562,12 +3631,13 @@ solvi calibrate catalog.py:system route labels.csv --risk 0.1 --conformal 0.9   
 PART is a question answered by a model decision (or the decision part's name; a `Cascade` / `Vote` / `Route` too).
 LABELS is a CSV or JSON-lines file with a `label` column and the input: the facts the part reads as columns
 (`message`), a `text` / `input` column, or else the other columns as a state; `--groups` columns are read as the group
-facts; a multi-label answer is a JSON list (or `a|b` in a CSV). It runs `part.act_guard(examples, risk=...)` (`--method
+facts; a multi-label answer is a JSON list (or `a|b` in a CSV); a CSV cell names an option that is not text by how it
+reads (`3` is the level 3 of `Scale[1, 2, 3, 4, 5]`). It runs `part.act_guard(examples, risk=...)` (`--method
 crc`, the default) or `part.calibrate_for(examples, error=..., method="ltt")`, prints the answered share, the error among
 the answered, the risk (answered alone and wrong, of all), `must_escalate_at_least` and the per-group table, and writes
 the calibration (`PART.calib.json` by default) — `part.load_calibration(path)` in the catalog applies it
 ([keeping a calibration](#keeping-a-calibration-save_calibration-load_calibration)). Exit status 1 when nothing can be
-answered alone at that risk.
+answered alone at that risk (with `--groups`: in no group).
 
 ### models: list, pull, check
 

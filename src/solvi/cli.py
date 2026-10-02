@@ -65,7 +65,7 @@ def load_system(spec):
     """"module:attr" or "file.py:attr" → the System (calling attr when it is a function)."""
     obj = load_object(spec)
     if not hasattr(obj, "ask") or not hasattr(obj, "catalog"):
-        _fail(f"--system {spec}: not a solvi System")
+        _fail(f"{spec}: not a solvi System (module:attr or file.py:attr — a System or a function returning one)")
     return obj
 
 
@@ -87,7 +87,20 @@ def _filters(a):
         v = getattr(a, k, None)
         if v is not None:
             f[k] = v
+    _check_when(a)
     return f
+
+
+def _check_when(a):
+    """--since / --until that cannot be read as a time are usage errors."""
+    from .storage import _when
+    for k in ("since", "until"):
+        v = getattr(a, k, None)
+        if v is not None:
+            try:
+                _when(v)
+            except (ValueError, TypeError) as e:
+                _fail(f"--{k} {v}: not a time ({e}); write an ISO date or time (2026-09-01, 2026-09-01T12:00)")
 
 
 def _dump(obj):
@@ -99,6 +112,8 @@ def cmd_verify(a):
     anchor = None
     if a.anchor:
         n, _, h = a.anchor.partition(":")
+        if not n.isdigit() or not h:
+            _fail(f"--anchor {a.anchor}: expected COUNT:HASH (a head() kept elsewhere)")
         anchor = {"count": int(n), "hash": h}
     store = _store(a.store)
     sig = None
@@ -132,13 +147,30 @@ def cmd_verify(a):
     return 0 if v["ok"] else 1
 
 
+def _checked_filters(a, system, store):
+    """The query filters of replay / diff, checked: a --question the system does not have or a --status that is none
+    is a usage error (a mistyped filter would match nothing and pass forever) → (filters, how many decisions match)."""
+    f = _filters(a)
+    q = f.get("question")
+    if q is not None and q not in system.questions:
+        _fail(f"--question {q}: no such question (the system has: {', '.join(system.questions)})")
+    if f.get("status") is not None and f["status"] not in ("ok", "forced", "abstain"):
+        _fail(f"--status {f['status']}: one of ok, forced, abstain")
+    n = len(store.query(**f))
+    if n == 0:
+        print(f"solvi: no stored decision matches in {a.store}: nothing was checked", file=sys.stderr)
+    return f, n
+
+
 def cmd_replay(a):
     system = load_system(a.system)
-    bad = _store(a.store, system).replay_all(system, trust_models=a.trust_models, **_filters(a))
+    store = _store(a.store, system)
+    filters, n = _checked_filters(a, system, store)
+    bad = store.replay_all(system, trust_models=a.trust_models, **filters)
     if a.json:
         _dump(bad)
     else:
-        print("every stored trace replays" if not bad else f"{len(bad)} stored trace(s) do not replay:")
+        print(f"every stored trace replays ({n})" if not bad else f"{len(bad)} of {n} stored trace(s) do not replay:")
         for b in bad:
             print(f"- {b['id']} (#{b['seq']}): {b['summary']}" + (f" — {b['note']}" if b.get("note") else ""))
             for m in b["mismatches"][:5]:
@@ -150,8 +182,11 @@ def cmd_replay(a):
 def cmd_diff(a):
     from .diff import diff
     system = load_system(a.system)
-    rep = diff(_store(a.store, system), system, confidence=None if a.confidence < 0 else a.confidence, limit=a.limit,
-               **_filters(a))
+    if a.limit is not None and a.limit < 1:
+        _fail(f"--limit {a.limit}: at least 1")
+    store = _store(a.store, system)
+    filters, _ = _checked_filters(a, system, store)
+    rep = diff(store, system, confidence=None if a.confidence < 0 else a.confidence, limit=a.limit, **filters)
     if a.json:
         _dump(rep.to_dict())
     else:
@@ -170,6 +205,7 @@ def cmd_report(a):
             _fail(str(e.args[0]))
         data = decision(res, system=system, replay="trusted" if system is not None else False)
     else:
+        _check_when(a)
         f = {k: getattr(a, k) for k in ("status", "safeguard", "model") if getattr(a, k, None) is not None}
         data = period(store, a.since, a.until, a.question, a.examples, system, **f)
     if a.json:
@@ -241,8 +277,17 @@ def cmd_ask(a):
             except ModelError as e:
                 _fail(str(e))
         from .llm import LLMError
+        tin = None
+        if a.today:                                    # as `solvi serve` reads a text: year-less and relative dates
+            import datetime as dt
+            from .textin import TextIn
+            try:
+                today = dt.date.today() if a.today == "today" else dt.date.fromisoformat(a.today)
+            except ValueError:
+                _fail(f"ask --today {a.today}: an ISO date (2026-09-28) or the word today")
+            tin = TextIn(system, decider, today=today)
         try:
-            res = system.ask_text(text, decider, question=names[0] if names else None)
+            res = system.ask_text(text, decider, textin=tin, question=names[0] if names else None)
         except (KeyError, ValueError) as e:
             _fail(f"ask --text: {e.args[0] if e.args else e}")
         except LLMError as e:                          # a wrong key, model or URL: said plainly, no traceback
@@ -250,6 +295,8 @@ def cmd_ask(a):
     else:
         if a.decider:
             _fail("ask: --decider routes a --text; a state is asked as it is")
+        if a.today:
+            _fail("ask: --today is the date a --text is read on; a state is asked as it is")
         if a.state is not None:
             try:
                 state = json.loads(a.state)
@@ -301,6 +348,9 @@ def ask_parser(sub):
                                   "'-' reads stdin")
     s.add_argument("--question", action="append", help="ask only these questions (repeat, or comma-separated); with "
                                                        "--text: the question, without routing")
+    s.add_argument("--today", metavar="DATE", help="with --text: the date it is read on — an ISO date, or the word today "
+                                                   "(as solvi serve does); without it a date with no year, a two-digit "
+                                                   "year or \"yesterday\" is not read")
     s.add_argument("--decider", help="with --text: the model that picks the question (a folder, a cached Hugging Face id, "
                                      "systemone:URL#model, llm:URL#model or module:attr; see solvi models)")
     s.add_argument("--backend", default="auto", choices=["auto", "onnx", "torch"], help="the decider's backend")
@@ -330,8 +380,10 @@ def main(argv=None):
     p = argparse.ArgumentParser(prog="solvi", description="solvi: init a project; ask, check, serve a system; test, "
                                                           "honesty; calibrate a model decision; models; verify, replay, "
                                                           "diff and report stored decisions",
-                                epilog="also: " + "; ".join(f"solvi {k} — {w}" for k, (_, w) in COMMANDS.items()))
+                                epilog="solvi COMMAND --help shows a command's options")
     sub = p.add_subparsers(dest="cmd", required=True)
+    for k, (_, w) in COMMANDS.items():                # listed here; dispatched above, to their own option parsers
+        sub.add_parser(k, help=w, add_help=False)
 
     def common(sp, system=True, filters=True):
         sp.add_argument("store", help=STORE_HELP)
@@ -382,9 +434,13 @@ def main(argv=None):
         a = p.parse_args(argv)
     except SystemExit as e:                            # --help: 0; usage errors: 2 — returned, not raised
         return e.code if isinstance(e.code, int) else 2
-    return {"verify": cmd_verify, "replay": cmd_replay, "diff": cmd_diff, "serve": cmd_serve,
-            "check": cmd_check, "report": cmd_report, "ask": cmd_ask, "calibrate": cmd_calibrate, "models": cmd_models,
-            "init": cmd_init}[a.cmd](a)
+    try:
+        return {"verify": cmd_verify, "replay": cmd_replay, "diff": cmd_diff, "serve": cmd_serve,
+                "check": cmd_check, "report": cmd_report, "ask": cmd_ask, "calibrate": cmd_calibrate,
+                "models": cmd_models, "init": cmd_init}[a.cmd](a)
+    except OSError as e:                               # a path that cannot be read or written: usage, not a finding
+        print(f"solvi: {e.filename}: {e.strerror}" if e.filename and e.strerror else f"solvi: {e}", file=sys.stderr)
+        return 2
 
 
 if __name__ == "__main__":
