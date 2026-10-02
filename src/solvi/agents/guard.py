@@ -1451,17 +1451,7 @@ class Guard:
         self._check_policies()
         cat = Catalog()
         schema = json.dumps(t.model.model_json_schema(), sort_keys=True, default=str)
-        have = set(GIVEN) | set(self.facts) | set(t.arguments) | {"argument_errors", "call_arguments", "grounding",
-                                                                  "proposal"}
-        fns = []                                  # the helper computations and policies this tool gets
-        for f, tools in self._fns:
-            ins = set(inspect.signature(f).parameters)
-            if (tools is None and ins <= have) or (tools is not None and t.name in tools):
-                fns.append(f)
-                have.add(f.__name__)
-        policies = [(f, of) for of in ("deny", "escalate") for f, tools, o in self._policies if o == of
-                    and ((tools is None and set(inspect.signature(f).parameters) <= have)
-                         or (tools is not None and t.name in tools))]
+        fns, policies = self._parts_of(t)
         read = {x for f in fns + [f for f, _ in policies] for x in inspect.signature(f).parameters}
         cat.fn(_argument_errors(t.model, schema))
         cat.fn(_call_arguments(t.model, schema))
@@ -1526,6 +1516,51 @@ class Guard:
         q = Question("verdict", f"May the agent call {t.name} with these arguments?", Answer.choice(list(VERDICTS)),
                      checkpoints=checks)
         return System(cat, [q], lang=self.lang)
+
+    def _parts_of(self, t):
+        """The helper computations and the policies [(func, on_fail)] a tool gets, deny policies first."""
+        have = set(GIVEN) | set(self.facts) | set(t.arguments) | {"argument_errors", "call_arguments", "grounding",
+                                                                  "proposal"}
+        fns = []
+        for f, tools in self._fns:
+            ins = set(inspect.signature(f).parameters)
+            if (tools is None and ins <= have) or (tools is not None and t.name in tools):
+                fns.append(f)
+                have.add(f.__name__)
+        policies = [(f, of) for of in ("deny", "escalate") for f, tools, o in self._policies if o == of
+                    and ((tools is None and set(inspect.signature(f).parameters) <= have)
+                         or (tools is not None and t.name in tools))]
+        return fns, policies
+
+    def policies_of(self, name):
+        """The policies that check calls of a tool → [(policy name, reason, on_fail)]: those that name it and those for
+        every tool whose inputs it provides, deny ones first (the order they decide in); the reason is the policy's
+        docstring's first line (its name when it has none) — what a refusal says."""
+        t = self.tools[name]
+        if t.model is None:
+            raise ValueError(f"tool {name} has no argument schema yet (guard.declare(name, schema=...) or guard.adopt)")
+        return [(f.__name__, _reason(f), on_fail) for f, on_fail in self._parts_of(t)[1]]
+
+    def definition(self, name, policies=False):
+        """A tool as a function-calling definition {"name", "description", "parameters"} — the same as
+        `guard.tools[name].definition()`. policies=True: the description also lists the reasons of the policies that
+        check the tool (`policies_of`), so the model can follow them before it is refused ("A guard checks this call:
+        it is refused unless ..."); a policy that escalates is marked so. Off by default: the reasons are your rules'
+        wording, written for refusals, and every listed line costs tokens in each request."""
+        d = self.tools[name].definition()
+        if policies:
+            d["description"] = self.described(name, d["description"])
+        return d
+
+    def described(self, name, description):
+        """`description` (a tool's description as a framework shows it) with the reasons of the policies that check the
+        tool appended, as `definition(name, policies=True)` writes them; unchanged when no policy checks it. The
+        adapters' `show_policies=True` use it."""
+        lines = [f"- {r}" + (" (else a person decides)" if of == "escalate" else "") for _, r, of in self.policies_of(name)]
+        if not lines:
+            return description
+        return (description + "\n\n" if description else "") + "A guard checks this call: it is refused unless\n" \
+            + "\n".join(lines)
 
     def _unknown_system(self):
         if self._unknown is None:
@@ -1777,6 +1812,12 @@ def _outcome_meta(d):
         return {"result_hash": vhash(d.result)}
     except Exception:  # noqa: BLE001 — a result that cannot be hashed as data
         return {"result_hash": None}
+
+
+def _reason(f):
+    """A policy's reason: its docstring's first line (its name when it has no docstring)."""
+    doc = (inspect.getdoc(f) or "").strip().splitlines()
+    return doc[0] if doc else f.__name__
 
 
 def with_calls_made(facts, made):

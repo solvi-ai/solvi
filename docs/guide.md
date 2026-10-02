@@ -2685,7 +2685,45 @@ for any store.
 
 **Declared tools.** `guard.declare(name, schema=Model or a JSON schema, ground=..., ...)` declares a tool solvi does not
 run (a framework or an MCP server does); `guard.adopt(name, json_schema)` gives a declared tool its schema later.
-`guard.tools[name].definition()` is the function-calling definition to give the model.
+`guard.tools[name].definition()` (or `guard.definition(name)`) is the function-calling definition to give the model.
+
+**Showing the policies to the model.** By default a tool's definition is its own description: the model learns a
+policy when a call is refused with its reason. To tell it the rules up front, ask for them —
+`guard.definition(name, policies=True)` appends the reasons of the policies that check the tool (each policy's
+docstring's first line, deny ones first; one that escalates says "else a person decides"), and `guard.policies_of(name)`
+lists them as `(policy, reason, on_fail)`:
+
+```python
+g = Guard()
+
+@g.tool
+def refund(order_id: str, amount: float) -> str:
+    """Refund an order."""
+    ...
+
+@g.policy("refund")
+def under_cap(amount: float) -> bool:
+    """A refund is at most 500."""
+    return amount <= 500
+
+@g.policy("refund", on_fail="escalate")
+def small_enough(amount: float) -> bool:
+    """A refund is at most 100."""
+    return amount <= 100
+
+g.definition("refund")["description"]                 # 'Refund an order.' (the default: unchanged)
+print(g.definition("refund", policies=True)["description"])
+# Refund an order.
+#
+# A guard checks this call: it is refused unless
+# - A refund is at most 500.
+# - A refund is at most 100. (else a person decides)
+```
+
+The adapters take the same flag for the tools they offer the model: `GuardedToolset(..., show_policies=True)`
+(PydanticAI), `guard_tools(..., show_policies=True)` (OpenAI Agents SDK), and for LangGraph, whose node does not choose
+what the model sees, `model.bind_tools(with_policies(tools, guard))`. The reasons are written for refusals and every
+line goes into each request, so it stays off unless you turn it on; the checks themselves are the same either way.
 
 ### PydanticAI
 

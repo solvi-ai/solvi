@@ -341,3 +341,38 @@ def test_openai_agents_once_rejects_the_same_call_proposed_again():
     sg = asyncio.run(run())
     assert [d.outcome for d in sg.decisions] == ["allow", "escalate"] and refunded == ["A-1"]
     assert "already made" in " ".join(sg.decisions[-1].reasons) and sg.made == ['refund({"order": "A-1"})']
+
+
+def test_adapters_show_the_policies_in_tool_descriptions_only_when_asked():
+    pytest.importorskip("pydantic_ai")
+    pytest.importorskip("agents")
+    pytest.importorskip("langgraph")
+    from agents import function_tool
+    from langchain_core.tools import tool
+    from pydantic_ai import Agent, FunctionToolset
+    from pydantic_ai.messages import ModelResponse, TextPart
+    from pydantic_ai.models.function import FunctionModel
+
+    from solvi.agents.langgraph import with_policies
+    from solvi.agents.openai_agents import guard_tools
+    from solvi.agents.pydantic_ai import GuardedToolset
+    g, refund, _ = once_guard()
+
+    @g.policy("refund")
+    def known_order(order: str) -> bool:
+        """The order id starts with A-."""
+        return order.startswith("A-")
+    note = "A guard checks this call: it is refused unless\n- The order id starts with A-."
+    seen = []
+
+    def model(messages, info):
+        seen.append({t.name: t.description for t in info.function_tools})
+        return ModelResponse(parts=[TextPart("done")])
+    for show in (False, True):
+        Agent(FunctionModel(model), toolsets=[GuardedToolset(FunctionToolset([refund]), g, show_policies=show)]
+              ).run_sync("hi")
+    assert seen[0]["refund"] == "Refund an order." and seen[1]["refund"] == "Refund an order.\n\n" + note
+    plain, shown = guard_tools([function_tool(refund)], g)[0], guard_tools([function_tool(refund)], g, show_policies=True)[0]
+    assert plain.description == "Refund an order." and shown.description == "Refund an order.\n\n" + note
+    lc = tool(refund)
+    assert with_policies([lc], g)[0].description == lc.description + "\n\n" + note and lc.description == "Refund an order."

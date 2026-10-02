@@ -25,6 +25,9 @@ against the conversation so far (`ctx.messages`: system prompts, user prompts, t
 The conversation is `ctx.messages`; a user prompt sent in the same request as a tool return is a tool output (that is
 how PydanticAI sends `ToolReturn(content=...)` and MCP tool content), see `context_of`.
 
+show_policies=True: the description of each tool the model is offered lists the reasons of the policies that check it
+(`Guard.described`), so the model can follow them instead of learning each one from a refusal; off by default.
+
 A tool the guard does not know is denied; with declare=True it is declared from its JSON schema on first use (the
 guard then checks its types, and any policies that name it). The first parameter of a tool function typed as RunContext
 is not an argument (Guard.tool skips it).
@@ -87,6 +90,7 @@ class GuardedToolset(WrapperToolset):
     on_deny: str = "retry"
     on_escalate: str = "approval"
     declare: bool = False
+    show_policies: bool = False                                              # list each tool's policies in its description
     decisions: list = dataclasses.field(default_factory=list, repr=False)   # every GuardDecision, in order
     made: dict = dataclasses.field(default_factory=dict, repr=False)        # conversation id → its calls made (once=True)
     _asked: dict = dataclasses.field(default_factory=dict, repr=False)      # call id → the approval key asked for
@@ -96,6 +100,20 @@ class GuardedToolset(WrapperToolset):
             raise TypeError("GuardedToolset(toolset, guard): guard is a solvi.agents.Guard")
         if self.on_deny not in ("retry", "fail") or self.on_escalate not in ("approval", "fail"):
             raise ValueError('on_deny: "retry" | "fail"; on_escalate: "approval" | "fail"')
+
+    async def get_tools(self, ctx) -> dict:
+        """The wrapped toolset's tools; with show_policies=True each one the guard knows gets the reasons of its
+        policies appended to its description (Guard.described), so the model reads them before it calls."""
+        tools = await super().get_tools(ctx)
+        if not self.show_policies:
+            return tools
+        out = {}
+        for name, t in tools.items():
+            if name in self.guard.tools and self.guard.tools[name].model is not None:
+                td = dataclasses.replace(t.tool_def, description=self.guard.described(name, t.tool_def.description or ""))
+                t = dataclasses.replace(t, tool_def=td)
+            out[name] = t
+        return out
 
     async def call_tool(self, name: str, tool_args: dict[str, Any], ctx, tool) -> Any:
         g = self.guard

@@ -364,3 +364,52 @@ def test_solvi_check_lints_every_tool():
     def lenient(spent_today: float) -> bool:
         return (spent_today or 0) < 50_000                      # a silent default: flagged, with the tool's name
     assert [f.where.split(":")[0] for f in lint(g).findings if f.code == "silent_default"] == ["send_payment"]
+
+
+def refund_guard_with_policies():
+    g = Guard(facts=["role"])
+
+    @g.tool
+    def refund(order_id: str, amount: float) -> str:
+        """Refund an order."""
+        return "ok"
+
+    @g.tool
+    def lookup(order_id: str) -> str:
+        """Look an order up."""
+        return "ok"
+
+    @g.policy("refund", on_fail="escalate")
+    def small_enough(amount: float) -> bool:
+        """A refund is at most 100."""
+        return amount <= 100
+
+    @g.policy("refund")
+    def under_cap(amount: float) -> bool:
+        """A refund is at most 500."""
+        return amount <= 500
+
+    @g.policy                                        # every tool: it reads only a declared fact
+    def staff_only(role: str) -> bool:
+        return role == "staff"
+    return g
+
+
+def test_definitions_show_the_policies_only_when_asked():
+    g = refund_guard_with_policies()
+    assert g.definition("refund") == g.tools["refund"].definition()
+    assert g.definition("refund")["description"] == "Refund an order."                     # the default is unchanged
+    assert g.policies_of("refund") == [("under_cap", "A refund is at most 500.", "deny"),
+                                       ("staff_only", "staff_only", "deny"),
+                                       ("small_enough", "A refund is at most 100.", "escalate")]
+    d = g.definition("refund", policies=True)
+    assert d["parameters"] == g.tools["refund"].json_schema() and d["name"] == "refund"
+    assert d["description"] == ("Refund an order.\n\nA guard checks this call: it is refused unless\n"
+                                "- A refund is at most 500.\n- staff_only\n- A refund is at most 100. (else a person decides)")
+    assert g.policies_of("lookup") == [("staff_only", "staff_only", "deny")]
+    assert g.described("lookup", "") == "A guard checks this call: it is refused unless\n- staff_only"
+    g2 = Guard()
+    g2.tool(name="ping", schema={"type": "object", "properties": {}})
+    assert g2.definition("ping", policies=True) == g2.definition("ping")                  # no policy: nothing added
+    with pytest.raises(KeyError):
+        g.definition("nope", policies=True)

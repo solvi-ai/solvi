@@ -32,6 +32,9 @@ on resume and escalates for other reasons (a changed fact, other arguments), an 
 cover it: the node interrupts again with the new reasons. Without "key" in the answer this binding holds in the process
 that asked (it remembers the keys it asked with); after a restart, an answer naming the call approves it as it now is.
 
+The model sees the tools you bind to it, not the node: `with_policies(tools, guard)` gives copies whose descriptions
+list the reasons of the policies that check them, for `model.bind_tools(...)` (off unless you use it).
+
 A tool the guard does not know is denied (declare=True: declared from the tool's args_schema on first use). On resume
 LangGraph runs the node again, so the call is checked (and stored) again before the approval is recorded. A call of the
 same message that was already made — allowed at once, or approved while another call of the message still waited —
@@ -225,6 +228,20 @@ class _Wrap:
         call, ctx, facts = self._pre(request)
         what, out = self._post(request, await self.guard.acheck(call, ctx, facts))
         return self._keep(k, await execute(request), out) if what == "run" else out
+
+
+def with_policies(tools, guard) -> list:
+    """Copies of LangChain tools for the model (`model.bind_tools(with_policies(tools, guard))`) whose descriptions list
+    the reasons of the policies that check them (Guard.described), so the model reads them before it calls; a tool the
+    guard does not know is returned as it is. The ToolNode runs the tools as given (the node does not show the model
+    anything): pass the originals to `guarded_tool_node`."""
+    out = []
+    for t in tools:
+        name = getattr(t, "name", None)
+        if name in guard.tools and guard.tools[name].model is not None:
+            t = t.model_copy(update={"description": guard.described(name, t.description or "")})
+        out.append(t)
+    return out
 
 
 def guard_wrappers(guard, facts: Callable | dict | None = None, on_escalate="interrupt", declare=False):
