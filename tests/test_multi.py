@@ -514,3 +514,17 @@ def test_act_guard_per_group_on_a_combination_holds_inside_every_group(make):
     rec = next(r for r in res.trace.records if r.name == "q")
     assert rec.extra["guarantee"]["group"] == [test[5][0]["domain"]] and res.trace.replay(cat)["ok"]
     assert "within every group at once" in str(res.audit("answer"))
+
+
+def test_a_cost_for_a_nested_combination_is_refused_and_costs_of_one_are_still_reported():
+    """costs=[2, 10] with a Vote as the second member was dropped silently (leaf costs [2, 1, 1]); costs=[1, 10] then
+    reported no cost at all."""
+    small, mid, large = _model("small", 3.0), _model("mid", 2.0), _model("large", 1.0)
+    p = [m.decision("team", "Which team?", "email", TEAMS) for m in (small, mid, large)]
+    with pytest.raises(ValueError, match=r"costs: \['team'\] is itself a combination"):
+        Cascade([p[0], Vote([p[1], p[2]])], costs=[2, 10])
+    c = Cascade([p[0], Vote([p[1], p[2]], costs=[5, 20])])
+    assert [lf.cost for lf in c.leaves()] == [1.0, 5.0, 20.0]
+    assert "cost" in c.act_guard(_labelled(), risk=0.10)
+    ones = Cascade([p[0], p[2]], costs=[1, 1])                 # given, even if 1: reported
+    assert ones.act_guard(_labelled(), risk=0.10)["cost"] >= 1

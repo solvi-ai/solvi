@@ -174,6 +174,7 @@ class _Leaf:
         self.part = part
         self.name = part.__name__
         self.cost = 1.0
+        self.cost_given = False                   # costs= named it: act_guard and usage report the expected cost
         self.calls = 0
 
     @property
@@ -315,9 +316,12 @@ class _Combination:
         if costs is not None:
             if len(costs) != len(self.members):
                 raise ValueError(f"costs: one per part ({len(self.members)}), not {len(costs)}")
+            nested = [m.name for m in self.members if not isinstance(m, _Leaf)]
+            if nested:                            # its cost depends on which of its parts it asks: give theirs to it
+                raise ValueError(f"costs: {nested} is itself a combination — give the costs of its parts to it "
+                                 "(Vote([...], costs=[...])), and none here (costs=None)")
             for m, c in zip(self.members, costs):
-                if isinstance(m, _Leaf):
-                    m.cost = float(c)
+                m.cost, m.cost_given = float(c), True
         self.costs = None if costs is None else [float(c) for c in costs]
         self.name = name or self.members[0].name
         self.threshold = None                   # the shared threshold (act_guard); None: each part's own
@@ -638,7 +642,7 @@ class _Combination:
                           [self._right(ls.hard.value, y) for st, y in zip(states, gold) for ls in st.walk()
                            if ls.leaf is lf], "part's", None, None, f"part {lf.name!r}: ") for lf in self.leaves()]
         flat = [w for w in flat if w]
-        if any(lf.cost != 1.0 for lf in self.leaves()):
+        if any(lf.cost_given for lf in self.leaves()):
             out["cost"] = float(cost[rows, gi].mean())
         if who[0] is not None:
             w = np.array([x[g] for x, g in zip(who, gi)])
@@ -707,7 +711,7 @@ class _Combination:
         calls = [lf.calls for lf in lv]
         out = {"asked": self.asked, "calls": {f"{i}:{lf.name}": c for i, (lf, c) in enumerate(zip(lv, calls))},
                "per_question": sum(calls) / self.asked if self.asked else 0.0}
-        if any(lf.cost != 1.0 for lf in lv):
+        if any(lf.cost_given for lf in lv):
             out["cost"] = sum(lf.cost * c for lf, c in zip(lv, calls)) / self.asked if self.asked else 0.0
         return out
 
@@ -768,7 +772,8 @@ class Cascade(_Combination):
     """Ask the parts in order; answer with the first whose decision does not escalate; escalate when all do (with the
     last part's answer as "would have answered"). The next model is asked only when the one before escalates, so a
     cheap model that is often sure saves the large model's calls — `usage()` and `extra["calls"]` count them;
-    `costs=[45, 137]` (ms, per part) makes act_guard and usage report the expected cost."""
+    `costs=[45, 137]` (ms, per part) makes act_guard and usage report the expected cost; a member that is itself a
+    combination takes its parts' costs itself (Vote([...], costs=[...])), so costs= with one raises."""
 
     kind_name = "cascade"
 
