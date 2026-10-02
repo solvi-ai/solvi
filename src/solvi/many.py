@@ -39,7 +39,6 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Callable
 
-from .core import Decision
 from .longdoc import BM25, terms
 
 MODES = ("auto", "direct", "shortlist", "tournament")
