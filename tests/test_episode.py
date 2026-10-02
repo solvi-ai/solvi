@@ -127,3 +127,14 @@ def test_long_memory_refuses_a_json_file_that_is_not_a_memory_file_when_it_is_op
     with pytest.raises(ValueError, match="is not a LongMemory file"):
         LongMemory(p)
     assert p.read_text(encoding="utf-8") == content                 # nothing was overwritten
+
+
+def test_the_chooser_refuses_a_rule_outside_the_options_and_says_when_it_abstains():
+    """A rule naming something outside the options came back as action None with who "rule"; with no usable producer
+    who was "abstain", a value the docstring did not list."""
+    m = DecideModel(Stubborn(), meta={"format": "test", "temperature": 1.0})
+    ch = Chooser(m, escalate_below=0.0, check=lambda v, q, episode: False)     # every model choice is turned down
+    with pytest.raises(ValueError, match="rule 'reboot' is not one of the options"):
+        ch.choose("next", "?", ACTIONS, rule="reboot", episode=Episode())
+    action, who, info = ch.choose("next", "?", ACTIONS, episode=Episode())
+    assert (action, who) == (None, "abstain") and "abstain" in Chooser.__doc__
