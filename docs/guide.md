@@ -1190,7 +1190,8 @@ records `extra["memory"]` — `fp`, `n`, `mode`, `proposal`, `strength`, `agreem
 (`id`, `label`, `distance`, `weight`, `source`, `by`, `time`, `stored_id`); the audit prints them. The memory's
 fingerprint is part of the part's, so a replay of a decision made with another memory state reports "model changed", and
 a replay with the same state recomputes the proposal and compares it. `mem.save(path)` / `CorrectionMemory(part).load(path)`
-keep it with the checkpoint's fingerprint (another checkpoint is refused: build it again with `learn_from`);
+keep it with the checkpoint's fingerprint and the question (another checkpoint or another question is refused: build it
+again with `learn_from`);
 `mem.remove(ids)` forgets cases found to be wrong; `team.memory(False)` detaches it.
 
 ### Loading a checkpoint
