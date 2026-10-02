@@ -85,3 +85,32 @@ def test_journal_snapshot_and_file(tmp_path):
         WorldMap().save()
     empty = WorldMap()
     assert empty.explore("home") is None and empty.frontier() == [] and empty.snapshot("home")["actions"] == {}
+
+
+@pytest.mark.parametrize("a, b, c", [(("room", 3), ("room", 4), ("room", 5)), (1, 2, 3), ("a", "b", "c"), (1.5, 2, "x")],
+                         ids=["tuples", "integers", "strings", "mixed"])
+def test_a_map_with_states_that_are_not_strings_is_the_same_after_save_and_load(tmp_path, a, b, c):
+    """Tuple states used to work in memory and raise at save(), at the end of the task; integer states saved, and after
+    load() the visit counts were gone and visited states were reported unvisited."""
+    m = WorldMap(tmp_path / "m.json")
+    m.visit(a, title="start").see(a, "next", b)
+    m.arrive(a, "next", b)
+    m.visit(b).see(b, ("go", 2), c)
+    m.save()
+    again = WorldMap(tmp_path / "m.json")
+    assert again.states == m.states and again.edges == m.edges and again.verify()
+    assert again.unvisited() == m.unvisited() == [c] and again.snapshot(a)["visits"] == 1
+    assert again.next(a, {c}) == "next" and again.path(a, {c}) == [(a, "next"), (b, ("go", 2))]
+    assert again.snapshot(a, {c}) == m.snapshot(a, {c}) and json.dumps(again.to_dict()) == json.dumps(m.to_dict())
+
+
+def test_a_map_of_string_states_is_written_as_before_and_an_unusable_state_is_refused_when_reported(tmp_path):
+    m = WorldMap()
+    m.visit("home").see("home", "Billing", "billing")
+    assert m.to_dict()["states"] == {"home": {"visits": 1, "facts": {}}}
+    for bad in (["room", 3], {"room": 3}, ("room", [3]), object()):
+        with pytest.raises(TypeError):
+            m.visit(bad)
+        with pytest.raises(TypeError):
+            m.arrive("home", "Billing", bad)
+    assert m.stats()["states"] == 1 and m.claim("home", "Billing")["to"] == "billing"

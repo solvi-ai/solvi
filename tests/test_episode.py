@@ -107,3 +107,12 @@ def test_long_memory_scores_decay_and_persist(tmp_path):
     assert again.scores(("customer", "c17")) == lm.scores(("customer", "c17")) and again.stats()["episodes"] == 2
     assert again.data["items"]["customer|c17"]["restart"]["last"] == "2:t2"
     assert again.forget(("customer", "c17")) == 2 and again.scores(("customer", "c17")) == {} and again.forget() == 1
+
+
+def test_long_memory_keeps_a_key_that_is_not_a_string_and_saves_it(tmp_path):
+    """record(context, ("tool", "ping"), +1) used to work until save(), which raised TypeError."""
+    lm = LongMemory(tmp_path / "memory.json")
+    lm.begin("t1").record("ctx", ("tool", "ping"), +1).record("ctx", ("tool", "ping"), +1).record("ctx", {"b": 1, "a": 2}, -1)
+    assert lm.scores("ctx") == {'["tool", "ping"]': 2.0, '{"a": 2, "b": 1}': -1.0}
+    lm.save()
+    assert LongMemory(tmp_path / "memory.json").scores("ctx") == lm.scores("ctx")

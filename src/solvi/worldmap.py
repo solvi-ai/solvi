@@ -43,9 +43,26 @@ SOURCES = ("seen", "observed", "told", "human")
 HYPOTHESIS_COST = 3                  # a claim nobody has walked counts as this many confirmed steps when planning
 
 
+def _name(x, what="a state"):
+    """A state or an action as the map keeps it: a string, a number, or a tuple of those (("room", 3)) — what a JSON
+    file gives back unchanged (a tuple is written as a list and read back as a tuple). Anything else is refused here,
+    when it is reported, not at save()."""
+    if x is None or isinstance(x, (str, int, float, bool)):
+        return x
+    if isinstance(x, tuple):
+        return tuple(_name(y, what) for y in x)
+    raise TypeError(f"{what} is a string, a number or a tuple of those, not {type(x).__name__} ({x!r})")
+
+
+def _thaw(x):
+    """A state or an action read from JSON: a list is the tuple it was written from."""
+    return tuple(_thaw(y) for y in x) if isinstance(x, list) else x
+
+
 class WorldMap:
     """See the module docstring. path: a JSON file the map is loaded from when it exists (save() writes it).
-    hypothesis_cost: how many confirmed steps an unchecked claim with a destination counts as in `distances`."""
+    hypothesis_cost: how many confirmed steps an unchecked claim with a destination counts as in `distances`.
+    A state or an action is a string, a number or a tuple of those; save / load keep them as they are."""
 
     def __init__(self, path=None, hypothesis_cost=HYPOTHESIS_COST):
         self.file = Path(path) if path else None
@@ -78,7 +95,7 @@ class WorldMap:
     # --- what the agent reports
     def visit(self, state, step=None, **facts):
         """The agent is in this state (facts: what it noticed here — a title, a service; kept on the state)."""
-        s = self.states.setdefault(state, {"visits": 0, "facts": {}})
+        s = self.states.setdefault(_name(state), {"visits": 0, "facts": {}})
         s["visits"] += 1
         if facts:
             s["facts"].update(facts)
@@ -89,6 +106,7 @@ class WorldMap:
         """An action is on offer in this state. `to`: where it leads when the environment shows that before acting (a
         link's address, a directory entry) — then a hypothesis with a destination, source "seen"; else the destination
         is unknown until someone takes it. A confirmed claim is not touched."""
+        state, action, to = _name(state), _name(action, "an action"), _name(to)
         e = self.edges.get((state, action))
         if e is None or (e["status"] != "confirmed" and e["to"] is None and to is not None):
             self.edges[(state, action)] = {"to": to, "status": "hypothesis", "source": "seen", "evidence": [[step, None]],
@@ -102,6 +120,7 @@ class WorldMap:
         observation refutes it — use `arrive` for what was observed."""
         if source not in SOURCES or source == "observed":
             raise ValueError(f'source is one of "seen", "told", "human" (an observation is arrive()), not {source!r}')
+        state, action, to = _name(state), _name(action, "an action"), _name(to)
         e = self.edges.get((state, action))
         if e is not None and e["status"] == "confirmed":
             self._write("told_ignored", state=state, action=action, to=to, source=source, quote=quote, step=step,
@@ -119,6 +138,7 @@ class WorldMap:
     def arrive(self, state, action, to, step=None):
         """The action was taken in `state` and led to `to`: the claim is confirmed. → True when this refuted what was
         believed (another destination, whoever claimed it); the refutation is in the journal."""
+        state, action, to = _name(state), _name(action, "an action"), _name(to)
         e = self.edges.setdefault((state, action), {"to": None, "status": "hypothesis", "source": "seen", "evidence": [],
                                                     "taken": 0})
         refuted = e["to"] is not None and e["to"] != to
@@ -204,7 +224,11 @@ class WorldMap:
 
     # --- keeping it
     def to_dict(self):
-        return {"format": "solvi.worldmap v1", "hypothesis_cost": self.hypothesis_cost, "states": self.states,
+        """The map as JSON data. States that are all strings are written as an object (as before); otherwise as a list
+        of {"state", "visits", "facts"}, since a JSON object's keys are strings only."""
+        states = self.states if all(isinstance(k, str) for k in self.states) else \
+            [{"state": k, **v} for k, v in self.states.items()]
+        return {"format": "solvi.worldmap v1", "hypothesis_cost": self.hypothesis_cost, "states": states,
                 "edges": [{"state": s, "action": a, **e} for (s, a), e in self.edges.items()], "journal": self.journal}
 
     def save(self, path=None):
@@ -220,9 +244,11 @@ class WorldMap:
         if data.get("format") != "solvi.worldmap v1":
             raise ValueError(f"{path} is not a solvi.worldmap v1 file")
         self.hypothesis_cost = int(data.get("hypothesis_cost", self.hypothesis_cost))
-        self.states = data["states"]
-        self.edges = {(e["state"], e["action"]): {k: e[k] for k in ("to", "status", "source", "evidence", "taken")}
-                      for e in data["edges"]}
+        st = data["states"]
+        self.states = dict(st) if isinstance(st, dict) else \
+            {_thaw(x["state"]): {"visits": x["visits"], "facts": x["facts"]} for x in st}
+        self.edges = {(_thaw(e["state"]), _thaw(e["action"])): {"to": _thaw(e["to"]), **{
+            k: e[k] for k in ("status", "source", "evidence", "taken")}} for e in data["edges"]}
         self.journal = data["journal"]
         self._prev = self.journal[-1]["hash"] if self.journal else ""
         return self

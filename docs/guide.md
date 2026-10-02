@@ -941,7 +941,8 @@ repetition). `Chooser(model, storage=...).choose(name, task, {option: action}, c
 the step built from these: the model proposes an option, a validator turns down what was already done without
 progress (and what your `check` refuses), the rule's option answers otherwise; `chooser.replay()` re-checks every
 stored step. `LongMemory` keeps outcomes across episodes — `record(context, key, +1 / −1)`, decayed per episode —
-and `scores(context)` is given to the decision as a fact.
+and `scores(context)` is given to the decision as a fact (a key that is not a string — a tuple, a dict — is kept as
+its JSON text, like an event's key).
 
 Say what progress is — a sub-goal reached — and not "something changed": a wrong action changes the page too, and then
 erases the memory of itself. Measured with solvi-base on simulated support tickets and incidents (synthetic, one seed):
@@ -968,7 +969,9 @@ m.human(page, "Reports", "/audit", note="Anna")    # a person's or a document's 
 m.snapshot(page, targets)                     # the part a decision needs, as a given fact
 ```
 
-The adapter — list a state's actions, take one — is yours; the map only knows what these calls told it. On real
+The adapter — list a state's actions, take one — is yours; the map only knows what these calls told it. A state or an
+action is a string, a number or a tuple of those (`("room", 3)`); `save()` and a later load keep them as they are, and
+anything else is refused when it is reported. On real
 environments (40 "get to X" tasks each, 25 targets, steps per task): commands of uv, docker and git 34.7 without a map,
 28.2 with a map per task, 11.1 with one map kept across the tasks (35 of 40 reached against 19); the files of a
 repository 0 of 40 reached without a kept map, 23 of 40 with it (the last ten tasks: 4 steps); docs.python.org 13.1 →
