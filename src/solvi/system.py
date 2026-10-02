@@ -53,6 +53,10 @@ class Response(Serial):
     _system = None                      # the System that answered (reports, counterfactuals; see the class docs)
     _heads = None                       # its answer heads (the audit)
 
+    def __post_init__(self):
+        if hasattr(self.trace, "records") and isinstance(self.results, dict):
+            self.trace.answers = self.results      # replay(system) checks that these are the answers the trace gives
+
     def __getitem__(self, q):
         return self.results[q]
 
@@ -478,6 +482,22 @@ class System:
                                          f"would have answered {r.answer!r} ({r.why})", "abstain", r.probs, r.provenance,
                                          r.source, "low_confidence", r.repaired, r.kind, r.evidence, r.extra)
         return results, feasible, violations
+
+    def answers_of(self, trace, names, flow=None):
+        """The answers a recorded trace gives under this system: nothing is re-run — the facts are the trace's, the hard
+        checks, rules, heads, constraints and the low-confidence safeguard are applied to them as `ask` does → {question:
+        Result}. names: the questions to answer; flow: the response's flow (planned again when not given)."""
+        import copy
+        qs = [self.questions[n] for n in names]
+        if flow is None:
+            flow = (plan if self.strategist is None else self.strategist.plan)(self.catalog, qs, trace.init.keys(), self.heads)
+        t = copy.copy(trace)
+        t.records = list(trace.records)                # an answer head appends its record: to the copy
+        vals = dict(trace.init)
+        for r in trace.records:
+            if r.value is not MISSING:
+                vals[r.name] = r.value
+        return self._results(qs, flow, t, vals)[0]
 
     def fingerprint(self):
         """What makes this system's decisions: {"catalog": the catalog's fingerprint (every part's code and declarations,

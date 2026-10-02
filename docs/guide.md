@@ -1782,16 +1782,19 @@ not part of the hash chain (a stored response is covered by the store's chain).
 `res.trace.to_json()` / `Trace.from_json(text, catalog=cat)` store and load a trace (typed values are restored, see
 [Types](#types-questions-and-model-decisions)); the loaded trace replays like the original.
 
-`res.trace.replay(catalog)` independently re-executes every step from the recorded `init_state`, and checks:
+`res.trace.replay(system)` independently re-executes every step from the recorded `init_state`, and checks (pass the
+System: a bare catalog replays the steps but cannot check the answers, and the result says `"answers": "unchecked"`):
 
 - that each record still hashes to its stored hash and links to the previous one;
 - that each step's inputs match the recorded input hashes;
 - that recomputing the part gives the recorded value (and the same quote offsets);
 - that quotes lie within the source text (and, for model-backed parts, are literally the quoted text);
-- for model-backed steps, that the recorded model fingerprint matches the catalog's current model (see below).
+- for model-backed steps, that the recorded model fingerprint matches the catalog's current model (see below);
+- with the System: that each stored answer and its status are the ones the trace gives — the hard checks, rules, heads
+  and constraints applied again to the recorded facts. An answer edited after the run is a mismatch of kind `answer`.
 
 It returns `{"ok": bool, "steps": int, "mismatches": [(step, name, reason), ...], "models": [(step, name, verdict), ...],
-"catalog": "same" | "changed" | "unrecorded"}` (with `"changed_parts"` when the catalog changed since the trace was
+"answers": "same" | "differ" | "unchecked", "catalog": "same" | "changed" | "unrecorded"}` (with `"changed_parts"` when the catalog changed since the trace was
 recorded — for information: a changed part that still re-computes the recorded value is not a mismatch).
 
 Each mismatch is the triple with a `.kind`, so a report can tell damaged data from a catalog that moved on:
@@ -1860,7 +1863,7 @@ corrections in the same chain (`store.corrections()`).
 | `replay_all(system)` | the stored decisions whose trace no longer replays, with the mismatches |
 | `quarantine(fact, value=...)` | the stored decisions whose answers rest on this fact (with this value), and the path from the fact to each answer |
 | `forget(fact, value=...)` | a report: decisions resting on a given fact, and records that only hold it; nothing is deleted |
-| `redact(id, by=, note=)` | erase a stored record's content (the response, its input and trace, the meta) and keep the chain: the record keeps its place, hash and id, is marked `redacted`, and a record of kind `redaction` naming it is appended; `verify()` — also with an earlier anchor or signature — still passes, and iter / query / replay pass the record over |
+| `redact(id, by=, note=)` | erase a stored record's content (the response, its input and trace, the meta) and keep the chain: the record keeps its place, hash and id, is marked `redacted`, and a record of kind `redaction` naming it is appended; `verify()` — also with an earlier anchor or signature — still passes, and iter / query / replay pass the record over. What is left (the answers, the time, the safeguards) is still covered by the record's hash, which is taken over the lasting fields and the digests of the answers and of the content: an answer edited in an erased record does not verify. `keep_answers=False` erases the answers too |
 
 **The chain across records.** Each record stores the hash of the record before it, and its own hash covers its content and
 that link. Editing a stored decision, deleting one, inserting one or changing their order breaks the chain at that point,

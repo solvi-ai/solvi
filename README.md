@@ -114,7 +114,7 @@ res = system.ask({"start": date(2026, 10, 19), "end": date(2026, 10, 23),
                   "today": date(2026, 9, 25), "balance": 14})
 print(res["approve"].answer, res["approve"].confidence, res["approve"].why)
 print(res.computed_state)
-print(res.trace.replay(cat))
+print(res.trace.replay(system))
 ```
 
 Output:
@@ -125,7 +125,7 @@ days_requested           = 5
 remaining_after          = 9
 enough_balance           = True
 enough_notice            = True
-{'ok': True, 'steps': 5, 'mismatches': [], 'models': [], 'catalog': 'same'}
+{'ok': True, 'steps': 5, 'mismatches': [], 'models': [], 'answers': 'same', 'catalog': 'same'}
 ```
 
 With `"balance": 3` the hard check fails and the answer is `reject` with `status == "forced"`, whatever the rule says.
@@ -164,8 +164,8 @@ Every command is in the [guide](docs/guide.md#command-line).
   provenance; extracted values keep their quote. Each step record is hashed and chained to the previous one in flow order,
   so the trace does not depend on scheduling.
 - **Answers and trace.** `res[q].answer / .confidence / .why / .status` (`ok`, `forced`, `abstain`), plus
-  `res.trace.replay(catalog)`, which recomputes every step from recorded inputs and reports mismatches, broken hash links
-  and quotes outside the text.
+  `res.trace.replay(system)`, which recomputes every step from recorded inputs and reports mismatches, broken hash links
+  and quotes outside the text — and, given the System, a stored answer that is not the one the trace gives.
 
 ## Typed decisions with a model
 

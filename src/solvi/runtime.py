@@ -75,6 +75,8 @@ class Mismatch(tuple):
         missing_part   the part (or a producer) is no longer in the catalog: renamed or removed
         missing_input  a part now reads an input the trace does not hold
         flow           a planned step is not in the trace
+        answer         a stored answer is not the one the trace gives under the same questions and catalog: the answer
+                       was changed after the run (replay with the System; a bare Catalog cannot check answers)
         error          the replay itself failed (the record could not be loaded, or replay raised): no verdict on the data
 
     It compares, unpacks and serializes as the plain triple."""
@@ -103,6 +105,8 @@ def mismatch_summary(mismatches, catalog=None):
         s = "ok"
     elif "integrity" in kinds:
         s = "data damaged: the hash chain or a record does not verify"
+    elif "answer" in kinds:
+        s = "data damaged: a stored answer is not the one its trace gives"
     elif set(kinds) <= {"error"}:
         s = "replay failed (no verdict on the data)"
     elif "missing_part" in kinds:
@@ -253,9 +257,9 @@ class Trace(Serial):
         it are still checked.
         Limits: a trace rebuilt honestly from a *different* input is internally consistent — compare `init_hash` with a
         receipt you published elsewhere to catch that."""
-        heads = None
+        heads = system = None
         if hasattr(catalog, "catalog") and hasattr(catalog, "heads"):          # a System: its catalog and answer heads
-            heads, catalog = catalog.heads, catalog.catalog
+            system, heads, catalog = catalog, catalog.heads, catalog.catalog
         vals = dict(self.init)
         prev = self.init_hash
         bad, models = [], []
@@ -321,11 +325,42 @@ class Trace(Serial):
                 if st.part.name not in seen:
                     bad.append(Mismatch(0, st.part.name, "planned step missing from the trace", "flow"))
         bad = [m if isinstance(m, Mismatch) else Mismatch(*m) for m in bad]
-        out = {"ok": not bad, "steps": len(self.records), "mismatches": bad, "models": models}
+        answers = "unchecked"                          # needs the System (its questions) and the response's answers
+        if system is not None and getattr(self, "answers", None) is not None:
+            answers = "skipped: the trace does not replay"
+            if not bad:
+                wrong = _answers_differ(self, system, flow)
+                bad += wrong
+                answers = "differ" if wrong else "same"
+        out = {"ok": not bad, "steps": len(self.records), "mismatches": bad, "models": models, "answers": answers}
         out.update(_catalog_verdict(self.fingerprint, catalog))
         if bad:
             out.update(mismatch_summary(bad, out["catalog"]))
         return out
+
+
+def _answers_differ(trace, system, flow):
+    """The answers stored with a trace against the ones the trace gives under `system` (System.answers_of) → mismatches.
+    Kind "answer" when the system's questions and catalog are the recorded ones — then a stored answer that differs was
+    edited after the run; else "recompute": the questions or the catalog changed since. Compared: the answer and its
+    status. Not compared: an abstention ask_text made before any flow ran (the entry point escalated)."""
+    stored = {q: r for q, r in trace.answers.items() if not (getattr(r, "source", None) == "textin" and r.status == "abstain")}
+    gone = [q for q in stored if q not in system.questions]
+    try:
+        now = system.answers_of(trace, [q for q in stored if q not in gone], flow)
+    except Exception as e:  # noqa: BLE001 — a flow that cannot be planned any more, a head that raises
+        return [Mismatch(0, "answers", f"the answers could not be derived from the trace: {type(e).__name__}: {str(e)[:120]}",
+                         "error")]
+    fp = trace.fingerprint or {}
+    same_system = bool(fp.get("questions")) and fp.get("questions") == system._questions_fp() \
+        and _catalog_verdict(fp, system.catalog)["catalog"] == "same"
+    out = [Mismatch(0, f"answer:{q}", "the question is not in the system (renamed or removed)", "missing_part") for q in gone]
+    for q, a in now.items():
+        was = stored[q]
+        if vhash(was.answer) != vhash(a.answer) or was.status != a.status:
+            out.append(Mismatch(0, f"answer:{q}", f"stored answer {was.answer!r} [{was.status}] is not the one the trace "
+                                f"gives: {a.answer!r} [{a.status}]", "answer" if same_system else "recompute"))
+    return out
 
 
 def _timed_out(r):

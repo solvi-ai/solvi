@@ -96,9 +96,34 @@ def _body(rec):
     return json.dumps(rec, ensure_ascii=False, allow_nan=False)
 
 
+KEPT = ("v", "kind", "seq", "time", "prev", "init_hash", "catalog", "records", "flow", "producers", "models", "guards",
+        "safeguards", "teach", "source", "of", "of_hash", "by", "note")
+"""The fields of a record that are never erased (redact leaves them; a redaction record is made of them)."""
+
+
+def _digest(x):
+    return hashlib.sha256(_cj(x).encode()).hexdigest()
+
+
+def record_body(rec):
+    """What a record's hash is taken over. Format 1 (solvi ≤ 0.7.1): the record without `id` and `hash`. Format 2: the
+    fields that stay for ever (KEPT), the digest of its answers and the digest of everything else (its content: the
+    response, the input, the meta) — three parts, so that redact can remove the content, or the answers too, leave their
+    digests in the record's mark, and the hash still recomputes: what is left of a redacted record is verified like any
+    other record, and a record cannot be passed off as redacted with other answers."""
+    if int(rec.get("v") or 1) < 2:
+        return {k: v for k, v in rec.items() if k not in ("id", "hash")}
+    mark = rec.get("redacted") if isinstance(rec.get("redacted"), dict) else {}
+    body = {k: rec[k] for k in KEPT if k in rec}
+    body["#answers"] = mark["answers"] if "answers" in mark else _digest(rec.get("answers"))
+    body["#content"] = mark["content"] if "content" in mark else _digest(
+        {k: v for k, v in rec.items() if k not in KEPT and k not in ("answers", "id", "hash", "redacted")})
+    return body
+
+
 def record_hash(rec):
-    """The hash of a stored record: SHA-256 of its canonical JSON without `id` and `hash` (so it covers `prev`)."""
-    return hashlib.sha256(_cj({k: v for k, v in rec.items() if k not in ("id", "hash")}).encode()).hexdigest()
+    """The hash of a stored record: SHA-256 of the canonical JSON of its body (record_body; it covers `prev`)."""
+    return _digest(record_body(rec))
 
 
 def plain(v):
@@ -391,28 +416,40 @@ class TraceStorage:
 
         The record keeps its place, its time, its hash and its id, so every link after it still verifies; its content
         (the response with its trace and input, the meta; a correction's input and answer) is removed and it is marked
-        `redacted` with who, when and why. A record of kind "redaction" is appended that names the erased record and its
-        hash: the erasure is itself in the chain. verify() accepts a redacted record only with such a record after it,
-        and a signature taken before still verifies (the mark keeps the original content digest). keep_answers=False
-        also removes the answers from the summary (their statuses stay). The record no longer replays and is passed
-        over by iter / query / replay_all / reports; record(id) returns what is left. → the redaction record's id.
+        `redacted` with who and why and the digest of what was removed. A record of kind "redaction" is appended that
+        names the erased record and its hash: the erasure is itself in the chain, with its time. keep_answers=False
+        removes the answers too (their digest stays in the mark). The record no longer replays and is passed over by
+        iter / query / replay_all / reports; record(id) returns what is left. → the redaction record's id.
+
+        What is left stays verified: a record's hash is taken over its lasting fields, the digest of its answers and the
+        digest of its content (record_body), so verify() recomputes the hash of a redacted record like any other — an
+        answer edited in it afterwards, or a record passed off as redacted with other answers, does not verify — and a
+        signature taken before the erasure still holds. A record written by solvi ≤ 0.7.1 (format 1) has one flat hash:
+        redacting it leaves its kept fields unverifiable, which verify() lists under "unverified".
         What it cannot do: copies made before (a backup, an exported report, a published anchor's holder) are not
         touched, and derived state (a correction memory, a fitted head) keeps what it learned — rebuild those."""
-        from .signature import record_digest
         rec = self.record(id)
         if rec.get("redacted"):
             raise ValueError(f"record {id} is already redacted")
         if rec.get("kind") == "redaction":
             raise ValueError("a redaction record cannot be redacted")
-        keep = ("v", "kind", "seq", "time", "prev", "hash", "id", "init_hash", "catalog", "records", "flow", "producers",
-                "models", "guards", "safeguards", "teach", "source")
-        new = {k: rec[k] for k in keep if k in rec}
-        if "answers" in rec:
-            new["answers"] = rec["answers"] if keep_answers else {q: [None, 0.0, a[2]] for q, a in rec["answers"].items()}
-        new["redacted"] = {"time": float(self.clock()), "by": None if by is None else str(by),
-                           "note": None if note is None else str(note), "digest": record_digest(rec).hex()}
+        new = {k: rec[k] for k in KEPT + ("hash", "id") if k in rec}
+        mark = {"by": None if by is None else str(by), "note": None if note is None else str(note)}
+        if int(rec.get("v") or 1) < 2:                # one flat hash: only the digest of the whole record can be kept
+            from .signature import record_digest
+            mark["digest"] = record_digest(rec).hex()
+            if "answers" in rec and keep_answers:
+                new["answers"] = rec["answers"]
+        else:
+            body = record_body(rec)
+            mark["content"] = body["#content"]
+            if "answers" in rec and keep_answers:
+                new["answers"] = rec["answers"]
+            else:
+                mark["answers"] = body["#answers"]
+        new["redacted"] = mark
         out = self._append({"v": FORMAT, "kind": "redaction", "of": rec["id"], "of_hash": rec["hash"],
-                            "by": new["redacted"]["by"], "note": new["redacted"]["note"]})
+                            "by": mark["by"], "note": mark["note"]})
         self._rewrite(new)
         return out["id"]
 
@@ -432,26 +469,41 @@ class TraceStorage:
         `signature`: a signature() taken earlier and kept elsewhere — the records it covers must be the ones signed; when one
         changed, its seq is named and `signature` in the result holds solvi.signature.check's answer (the original content
         hash; `candidates`: records, e.g. from a backup, one of which may be the original → its "match").
-        → {"ok", "count", "head", "legacy", "problems": [(seq, id, reason)]} (+ "signature" when given). Records written
-        before the chain (0.5 journal lines) are counted in `legacy` and not checked.
+        → {"ok", "count", "head", "legacy", "problems": [(seq, id, reason)]} (+ "signature" when given; + "unverified":
+        [(seq, id, reason)] — redacted records of format 1, whose kept fields no hash covers). Records written before the
+        chain (0.5 journal lines) are counted in `legacy` and not checked.
         A store that is being written to verifies as it stands at one moment: the stored head is read first and the
         records are checked against it, so a record appended while verify runs is not reported as damage."""
         problems, rows = [], []
         prev, n = GENESIS, 0
         snap = self._snapshot()
-        erased, named = {}, set()                     # redacted records, and the redaction records that name them
+        erased, named = {}, {}                        # redacted records, and the redaction records that name them
+        unverified, newest = [], 1                    # format-1 redactions; the highest format seen so far
         for pos, d in self._raw(snap):
             if d is None:
                 problems.append((n, None, f"record at position {pos} is not readable JSON (a record cut short by a crash "
                                           "while it was written, or an edit)"))
                 continue
             rid = d.get("id")
+            v = int(d.get("v") or 1)
+            if v < newest:                            # formats only go up: a record cannot claim an older one to escape
+                problems.append((d.get("seq"), rid, f"record of format {v} after a record of format {newest}"))   # its checks
+            newest = max(newest, v)
             if d.get("kind") == "redaction":
-                named.add((d.get("of"), d.get("of_hash")))
-            if d.get("redacted"):                     # its content is gone: its hash stands by the redaction record
-                erased[rid] = (d.get("seq"), d.get("hash"))
-                if "response" in d or "init" in d or "meta" in d:
-                    problems.append((d.get("seq"), rid, "record marked redacted still holds content"))
+                named[(d.get("of"), d.get("of_hash"))] = (d.get("by"), d.get("note"))
+            mark = d.get("redacted")
+            if mark:                                  # its content is gone
+                mark = mark if isinstance(mark, dict) else {}
+                erased[rid] = (d.get("seq"), d.get("hash"), mark.get("by"), mark.get("note"))
+                extra = sorted(k for k in d if k not in KEPT and k not in ("answers", "id", "hash", "redacted"))
+                if extra:
+                    problems.append((d.get("seq"), rid, "record marked redacted still holds content: " + ", ".join(extra)))
+                if v < 2:                             # one flat hash over content that is gone: nothing to recompute
+                    unverified.append((d.get("seq"), rid, "redacted record of format 1: no hash covers what is left of it"))
+                elif "content" not in mark or ("answers" in mark and "answers" in d):
+                    problems.append((d.get("seq"), rid, "the redaction mark does not hold the digests of what was removed"))
+                elif d.get("hash") != record_hash(d):
+                    problems.append((d.get("seq"), rid, "redacted record edited after it was stored (its hash does not match)"))
             elif d.get("hash") != record_hash(d):
                 problems.append((d.get("seq"), rid, "record edited after it was stored (its hash does not match)"))
             if not isinstance(d.get("hash"), str) or rid != d["hash"][:16]:
@@ -466,10 +518,12 @@ class TraceStorage:
                 problems += [(d.get("seq"), rid, p) for p in _summary_problems(d)]
             rows.append(d)
             prev, n = d.get("hash"), n + 1
-        for rid, (seq, h) in erased.items():
+        for rid, (seq, h, by, note) in erased.items():
             if (rid, h) not in named:
                 problems.append((seq, rid, "record marked redacted without a redaction record that names it and its hash "
                                            "(content removed outside redact)"))
+            elif named[(rid, h)] != (by, note):
+                problems.append((seq, rid, "the redaction mark differs from its redaction record (who, why)"))
         problems += self._backend_problems(rows, snap)
         if anchor is not None:
             k, h = int(anchor["count"]), anchor["hash"]
@@ -480,6 +534,8 @@ class TraceStorage:
                 problems.append((k - 1, rows[k - 1].get("id"), "the record at the anchor differs from the anchored one: "
                                                                "the store was rewritten"))
         out = {"ok": not problems, "count": len(rows), "head": {"count": len(rows), "hash": prev}, "legacy": self._legacy()}
+        if unverified:
+            out["unverified"] = unverified
         if signature is not None:
             from .signature import check
             sc = check(self, signature, candidates)

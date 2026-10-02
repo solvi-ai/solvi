@@ -2,6 +2,14 @@
 
 ## 0.7.2 — unreleased
 
+- **Replay checks the answers.** A replay re-computed the steps of a trace and never looked at the answers stored with
+  it: a response whose `no [forced]` was edited to `yes [ok]` replayed ok, and so did a store with the answer edited and
+  every hash recomputed (`replay_all` → `[]`, `solvi replay` exit 0, the report "Replay: ok"). `trace.replay(system)` now
+  derives the answers the trace gives (`System.answers_of`: nothing is re-run) and compares answer and status; a
+  difference is a mismatch of the new kind `answer` — "data damaged: a stored answer is not the one its trace gives" —
+  when the questions and the catalog are the recorded ones, else `recompute`. The result has `"answers": "same" |
+  "differ" | "unchecked"`; a bare `Catalog` cannot check answers (`"unchecked"`), so the README and the guide now replay
+  with the System. Not covered yet: an answer's confidence.
 - **A failed hard check always overrides — three ways it did not** (found by an independent audit):
   - a check that returned a falsy value other than `False` — `0`, `None` from a forgotten return, `[]`, `""` — counted as
     passed: the answer was `yes [ok]`, and in `solvi.agents.Guard` the call was allowed and made. A check's output is now
@@ -35,11 +43,18 @@
 - `store.redact(id, by=, note=)`: erasure that keeps the chain. A person's data in a stored decision could only be
   found (`forget` is a report): deleting or editing the record breaks the hash chain, and rewriting the hashes after
   it looks exactly like tampering. `redact` removes the record's content — the response with its input and trace, the
-  meta; a correction's input and answer — and keeps its place, time, hash and id, marks it `redacted` (who, when,
-  why) and appends a record of kind `redaction` that names it. `verify()` passes, also against a head or a signature
-  taken before the erasure, and reports a record whose content was removed without a redaction record. The record is
-  passed over by `iter`, `query`, `replay_all` and reports. JSONL, SQLite, PostgreSQL, DuckDB. Copies made earlier
-  and state learned from the record (a memory, a head) are not touched.
+  meta; a correction's input and answer — and keeps its place, time, hash and id, marks it `redacted` (who, why, the
+  digest of what was removed) and appends a record of kind `redaction` that names it. `verify()` passes, also against
+  a head or a signature taken before the erasure, and reports a record whose content was removed without a redaction
+  record. The record is passed over by `iter`, `query`, `replay_all` and reports. JSONL, SQLite, PostgreSQL, DuckDB.
+  Copies made earlier and state learned from the record (a memory, a head) are not touched.
+  What is left of an erased record stays verified. A record of format 2 is hashed in three parts — its lasting fields,
+  the digest of its answers, the digest of its content (`solvi.storage.record_body`) — so the hash of a redacted
+  record recomputes like any other: an answer edited in it afterwards, its time or its mark changed, or a record
+  passed off as redacted with other answers does not verify (the audit found all three passed, with an earlier anchor
+  and signature too). `keep_answers=False` removes the answers and keeps their digest. A record of format 1 (written by
+  0.7.1) has one flat hash: redacting it works, and `verify()` lists it under `"unverified"`; a format-1 record after a
+  format-2 one is a problem, so a record cannot claim the old format to escape the check.
 - `solvi.fast.CandidateHead`: a choice among candidates that change with every decision, learned from the candidates'
   features (a `FastHead` asked "is this the one to take?" per candidate; `fit(steps)`, `choose(candidates)`,
   `teach(candidates, chosen)` in about a millisecond). Heads, `fit` and `teach` need fixed options; an agent's

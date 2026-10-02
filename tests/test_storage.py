@@ -784,7 +784,9 @@ def test_redact_erases_a_records_content_and_the_chain_still_verifies(filled):
     s.ask(STATES[0])                                                          # the store goes on
     assert store.verify()["ok"] and len(store) == len(STATES) + 2
     rid2 = store.redact(resps[2].stored_id, keep_answers=False)
-    assert store.record(resps[2].stored_id)["answers"]["approve"][0] is None and store.verify()["ok"] and rid2
+    left2 = store.record(resps[2].stored_id)
+    assert "answers" not in left2 and set(left2["redacted"]) == {"by", "note", "content", "answers"}     # their digests stay
+    assert store.verify(anchor=head, signature=sig)["ok"] and rid2
 
 
 def test_content_removed_outside_redact_is_reported(filled):
@@ -793,7 +795,89 @@ def test_content_removed_outside_redact_is_reported(filled):
         pytest.skip("the stored body is edited through the JSONL file")
     recs = _jsonl_lines(store)
     recs[1] = {k: v for k, v in recs[1].items() if k not in ("response", "meta")}
-    recs[1]["redacted"] = {"time": 0, "by": "nobody", "note": None, "digest": "00" * 32}     # no redaction record
+    recs[1]["redacted"] = {"by": "nobody", "note": None, "content": "00" * 32}     # no redaction record
     _jsonl_write(store, recs)
     v = JSONLStorage(store.path).verify()
     assert not v["ok"] and any("without a redaction record" in why for *_, why in v["problems"])
+
+
+def _forge(store, recs):
+    _jsonl_write(store, recs)
+    return JSONLStorage(store.path)
+
+
+def test_what_is_left_of_a_redacted_record_is_still_verified(filled):
+    """The hash of a record covers its lasting fields, the digest of its answers and the digest of its content, so an
+    erased record verifies like any other. Its kept answer edited by hand, its time changed, another "who" in the mark,
+    a record passed off as redacted with other answers: each is reported — with nothing kept elsewhere."""
+    from solvi.storage import record_body
+    kind, store, s, resps = filled
+    if kind != "jsonl":
+        pytest.skip("the stored body is edited through the JSONL file")
+    head, sig = store.head(), store.signature()
+    target = resps[1].stored_id
+    store.redact(target, by="dpo", note="request 17")
+    assert store.verify(anchor=head, signature=sig)["ok"]
+    good = _jsonl_lines(store)
+    q = next(iter(good[1]["answers"]))
+
+    recs = json.loads(json.dumps(good))
+    recs[1]["answers"][q][0] = "forged"
+    v = _forge(store, recs).verify()
+    assert not v["ok"] and any("redacted record edited" in why for *_, why in v["problems"])
+    assert not _forge(store, recs).verify(anchor=head, signature=sig)["ok"]
+
+    recs = json.loads(json.dumps(good))
+    recs[1]["time"] = 5.0
+    assert not _forge(store, recs).verify()["ok"]
+
+    recs = json.loads(json.dumps(good))
+    recs[1]["redacted"]["by"] = "nobody"
+    v = _forge(store, recs).verify()
+    assert not v["ok"] and any("differs from its redaction record" in why for *_, why in v["problems"])
+
+    # another record made to look redacted: content dropped, other answers written, a redaction record appended by hand
+    recs = json.loads(json.dumps(good))
+    victim = recs[0]
+    digests = record_body(victim)
+    recs[0] = {k: v for k, v in victim.items() if k in ("v", "kind", "seq", "time", "prev", "hash", "id", "init_hash", "catalog",
+                                                         "records", "flow", "producers", "models", "guards", "safeguards")}
+    recs[0]["answers"] = {q: ["forged", 1.0, "ok"]}
+    recs[0]["redacted"] = {"by": None, "note": None, "content": digests["#content"]}
+    fake = {"v": 2, "kind": "redaction", "of": victim["id"], "of_hash": victim["hash"], "by": None, "note": None,
+            "seq": len(recs), "time": 9.0, "prev": recs[-1]["hash"]}
+    fake["hash"] = record_hash(fake)
+    fake["id"] = fake["hash"][:16]
+    recs.append(fake)
+    _jsonl_write(store, recs)
+    json.dump({"count": len(recs), "hash": fake["hash"]}, open(str(store.path) + ".head", "w"))
+    v = JSONLStorage(store.path).verify()
+    assert not v["ok"] and any(seq == 0 and "redacted record edited" in why for seq, _, why in v["problems"])
+
+    recs = json.loads(json.dumps(good))               # ... or by claiming the old format, whose hash cannot be recomputed
+    recs[1]["v"] = 1
+    v = _forge(store, recs).verify()
+    assert not v["ok"] and any("format 1 after a record of format 2" in why for *_, why in v["problems"])
+
+
+def test_a_format_1_record_redacted_is_listed_as_unverified(tmp_path):
+    """A record written by solvi 0.7.1 has one flat hash over content that redact removes: what is left cannot be
+    recomputed, and verify says so instead of calling it verified."""
+    cat, qs = build()
+    p = tmp_path / "old.jsonl"
+    st = JSONLStorage(p, clock=Clock())
+    s = System(cat, qs, storage=st)
+    rs = [s.ask(dict(x)) for x in STATES]
+    recs, prev = [json.loads(x) for x in p.read_text().splitlines()], ""
+    for r in recs:                                     # the same records as 0.7.1 wrote them: format 1, one flat hash
+        r["v"], r["prev"] = 1, prev
+        r["hash"] = record_hash(r)
+        r["id"] = r["hash"][:16]
+        prev = r["hash"]
+    p.write_text("".join(json.dumps(r, ensure_ascii=False) + "\n" for r in recs))
+    json.dump({"count": len(recs), "hash": prev}, open(str(p) + ".head", "w"))
+    old = JSONLStorage(p, clock=Clock())
+    assert old.verify()["ok"] and "unverified" not in old.verify()
+    old.redact(recs[1]["id"], by="dpo")
+    v = JSONLStorage(p).verify()
+    assert v["ok"] and [seq for seq, *_ in v["unverified"]] == [1] and len(rs) == len(STATES)

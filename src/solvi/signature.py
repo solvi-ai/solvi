@@ -151,8 +151,11 @@ def record_digest(rec):
     if isinstance(rec, Record):
         b = {k: v for k, v in rec.body().items() if k != "prev"}
         return hashlib.sha256(_cj(_canon(b)).encode()).digest()
+    if isinstance(rec, dict) and int(rec.get("v") or 1) >= 2 and "seq" in rec:
+        from .storage import record_body               # a stored record of format 2: computed the same before and after
+        return hashlib.sha256(_cj({k: v for k, v in record_body(rec).items() if k != "prev"}).encode()).digest()   # redact
     if isinstance(rec, dict) and isinstance(rec.get("redacted"), dict) and rec["redacted"].get("digest"):
-        return bytes.fromhex(rec["redacted"]["digest"])       # a redacted record: the digest of what it held (its mark)
+        return bytes.fromhex(rec["redacted"]["digest"])       # format 1, redacted: the digest it reports of what it held
     if isinstance(rec, dict):
         return hashlib.sha256(_cj({k: v for k, v in rec.items() if k not in ("id", "hash", "prev")}).encode()).digest()
     if isinstance(rec, str):
