@@ -1,5 +1,7 @@
 # Changelog
 
+## 0.9.0 — unreleased
+
 ## 0.8.0 — 2026-10-03 — one name per concept, any model first
 
 0.8 gives every concept one name, makes the surface smaller and the decider protocol one, puts any model first (an LLM
