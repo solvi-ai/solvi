@@ -592,3 +592,24 @@ def test_a_text_tag_inside_the_input_cannot_close_the_data_block():
     fake = FakeLLM(reply=json.dumps({"answer": "billing", "confidence": 0.9, "quote": "Hi."}))
     d = model(fake, ask="confidence").decision("team", "Which team?", "email", TEAMS).decide(evil)
     assert d.extra["llm"]["quote"] == ["Hi.", 0, 3]           # the quote is still looked up in the input as given
+
+
+def test_a_maybe_span_answer_from_an_llm_replays_and_a_changed_one_does_not():
+    """The record's probabilities of a Maybe[Span] decision hold only "not stated", and a trusted replay read them as
+    the options: "recorded decision '...' is outside the options [Unknown]" right after the ask."""
+    doc = "This Agreement is governed by the laws of the State of New York."
+    for answer, want in (("the laws of the State of New York", "the laws of the State of New York"), (None, Unknown)):
+        m = model(FakeLLM(reply=json.dumps({"answer": answer, "confidence": 0.9, "quote": ""})))
+        cat = Catalog()
+        q = m.decision("law", "Which law governs?", "doc", Maybe[Span[str]]).question(cat)
+        res = System(cat, [q]).ask({"doc": doc})
+        assert res["law"].answer == want
+        rep = res.trace.replay(cat)
+        assert rep["ok"] and rep["mismatches"] == [], rep
+    m = model(FakeLLM(reply=json.dumps({"answer": "the State of New York", "confidence": 0.9, "quote": ""})))
+    cat = Catalog()
+    q = m.decision("law", "Which law governs?", "doc", Maybe[Span[str]]).question(cat)
+    res = System(cat, [q]).ask({"doc": doc})
+    rec = next(x for x in res.trace.records if x.model)
+    rec.value = "the laws of the State of Texas"                 # edited after the fact: the quote no longer matches
+    assert not res.trace.replay(cat)["ok"]

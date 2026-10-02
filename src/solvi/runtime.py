@@ -534,6 +534,8 @@ def _grounded(part, r, init):
     opts = part.options if part.options is not None else (list(r.probs) if r.probs else None)
     if part.options is None and isinstance(r.extra, dict) and "interval" in r.extra:
         opts = None                                   # a number decision: a summary of its distribution over the bins
+    if part.options is None and r.quote and r.value is not Unknown:
+        opts = None                                   # a span: its probabilities hold only "not stated"; the quote is checked
     if opts:
         vs = list(r.value) if isinstance(r.value, (list, tuple, set)) else [r.value]
         if any(x not in opts for x in vs):
