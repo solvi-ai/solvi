@@ -31,6 +31,9 @@ _TIME = re.compile(r"^(?:(?:q[1-4]|h[12]|fy)\s?'?\d{2,4}|\d{4}|(?:q[1-4]|h[12])|
                    r"jan\w*|feb\w*|mar\w*|apr\w*|may|jun\w*|jul\w*|aug\w*|sep\w*|oct\w*|nov\w*|dec\w*"
                    r"|янв\w*|фев\w*|мар\w*|апр\w*|ма[йя]|июн\w*|июл\w*|авг\w*|сен\w*|окт\w*|ноя\w*|дек\w*)"
                    r"(?:\s+\d{4})?$", re.I)
+# what comes before a year that is followed by a word ("In 2023 and 2024 things happened": "things" is not its unit)
+_YEAR_BEFORE = re.compile(r"(?:(?<!\w)(?:in|since|from|until|till|through|during|before|after|between|в|с|до|к)"
+                          r"|(?<!\d)\d{4}\s*(?:and|or|,|-|–|—|to|и|или|по))\s*$", re.I)
 _UNWRAP = re.compile(r"\n(?![ \t]*(?:\n|[-*•\dA-ZА-ЯЁ]))")
 _BOUND = re.compile(r"[;:!?\n(]|[.,](?=\s)|(?<!\w)(?:and|while|whereas|but|и|а|но)(?!\w)|—|–", re.I)
 
@@ -67,8 +70,9 @@ class RuleProposer:
                 continue
             word = r.words[0] if r.words and r.words[0] not in _NOT_UNIT else ""
             u = r.unit or word
-            if not u and r.value == r.value.to_integral_value() and 1900 <= r.value <= 2100:
-                continue                                     # a year, not a value
+            if not r.unit and r.value == r.value.to_integral_value() and 1900 <= r.value <= 2100 \
+                    and re.fullmatch(r"\d{4}", r.as_written) and (not u or _YEAR_BEFORE.search(flat[max(0, r.start - 24):r.start])):
+                continue                                     # a year, not a value (also before a word: "in 2024 things")
             label = self._label(flat, r, "" if r.unit else word)
             if label:
                 cands.append((canon_unit(u), label, r, self._sentence(source, r.start)))

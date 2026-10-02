@@ -77,6 +77,19 @@ def test_rule_proposer_labels_after_the_number_and_total():
     assert "Tonnes" in r.output and "total_mismatch" not in codes(r)
 
 
+@pytest.mark.parametrize("text", ["In 2023 and 2024 things happened.", "Since 2019 offices opened in Lyon.",
+                                  "From 2020 to 2024 stores closed."])
+def test_rule_proposer_does_not_chart_a_year_followed_by_a_word(text):
+    r = chart(text)
+    assert not r.ok and r.checked.verified is None and r.proposal.series[0].points == []
+
+
+def test_rule_proposer_still_charts_a_four_digit_count_that_is_not_a_year():
+    r = chart("In 2023 the plant had 2000 employees and the office 1950 employees.")
+    v = r.checked.verified
+    assert r.ok and v.unit == "employee" and sorted(p.as_written for p in v.series[0].points) == ["1950", "2000"]
+
+
 def test_russian_currency_space_grouped():
     r = chart(RU)
     v = r.checked.verified
