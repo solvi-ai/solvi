@@ -491,3 +491,65 @@ def test_a_failed_deny_policy_wins_over_the_middle_mode():
                 context=ctx("Pay the invoice in the attachment.", "Invoice: IBAN DE89370400440532013000, 5000 EUR"))
     assert d.outcome == "deny"
     assert any("under_cap" in r for r in d.reasons)
+
+
+# ------------------------------------------------------------------------------------------------ stale grounding, repeats
+def _files_guard(**kw):
+    g = Guard()
+    deleted, refunds = [], []
+
+    @g.tool(ground={"path": "whole"}, ground_from=("user",), **kw)
+    def delete_file(path: str) -> str:
+        deleted.append(path)
+        return f"deleted {path}"
+
+    @g.tool(ground=["order_id"], ground_from=("user",), **kw)
+    def refund(order_id: int) -> str:
+        if order_id == 9999:
+            raise RuntimeError("HTTP 500")
+        refunds.append(order_id)
+        return f"refunded {order_id}"
+
+    return g, deleted, refunds
+
+
+def test_ground_last_a_value_from_an_earlier_request_grounds_nothing():
+    """The user named notes.txt many requests ago, to read it. Later a call deletes it: with every user message
+    counted, the old mention grounds the call. ground_last=1: the value must be in the current request."""
+    msgs = [("user", "Read notes.txt for me."), ("assistant", "Done."), ("user", "Now delete draft.txt.")]
+    call = {"name": "delete_file", "arguments": {"path": "notes.txt"}}
+    g, deleted, _ = _files_guard()
+    assert g.session(msgs).call(call).outcome == "allow" and deleted == ["notes.txt"]      # as it was: the stale mention
+    g, deleted, _ = _files_guard(ground_last=1)
+    s = g.session(msgs)
+    d = s.call(call)
+    assert d.outcome == "deny" and deleted == []
+    assert "the user wrote it only in an earlier request, not in the last 1" in " ".join(map(str, d.reasons))
+    assert s.call({"name": "delete_file", "arguments": {"path": "draft.txt"}}).outcome == "allow" and deleted == ["draft.txt"]
+    g2, deleted2, _ = _files_guard(ground_last=2)                                         # the last two requests count
+    assert g2.session(msgs).call(call).outcome == "allow"
+    assert g.system("delete_file").fingerprint != _files_guard()[0].system("delete_file").fingerprint
+    for bad in (0, -1, True, "1"):
+        with pytest.raises(ValueError, match="ground_last"):
+            _files_guard(ground_last=bad)
+
+
+def test_once_a_call_already_made_with_the_same_arguments_escalates():
+    g, _, refunds = _files_guard(once=True)
+    s = g.session([("user", "Refund order 1001 and order 9999.")])
+    assert s.call({"name": "refund", "arguments": {"order_id": 1001}}).outcome == "allow"
+    again = s.call({"name": "refund", "arguments": {"order_id": 1001}})
+    assert again.outcome == "escalate" and refunds == [1001] and not again.executed
+    assert "already made" in " ".join(map(str, again.reasons))
+    failed = s.call({"name": "refund", "arguments": {"order_id": 9999}})                  # the tool raised: not "made"
+    assert failed.outcome == "allow" and failed.error and "refund(" + '{"order_id": 9999})' not in s.made
+    assert s.call({"name": "refund", "arguments": {"order_id": 9999}}).outcome == "allow"   # so it may be tried again
+    assert s.made == ['refund({"order_id": 1001})']
+    d = g.check({"name": "refund", "arguments": {"order_id": 1001}}, [("user", "Refund order 1001.")],
+                facts={"calls_made": s.made})                                              # without a Session: a given fact
+    assert d.outcome == "escalate"
+    assert g.check({"name": "refund", "arguments": {"order_id": 1001}}, [("user", "Refund order 1001.")]).outcome == "allow"
+    plain, _, refunds2 = _files_guard()                                                    # without once: as before
+    s2 = plain.session([("user", "Refund order 1001.")])
+    assert [s2.call({"name": "refund", "arguments": {"order_id": 1001}}).outcome for _ in range(2)] == ["allow", "allow"]
+    assert plain.replay_all() == [] if plain.storage is not None else True

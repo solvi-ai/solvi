@@ -2,6 +2,13 @@
 
 ## 0.7.2 — unreleased
 
+- Agent guard (preview): `guard.tool(..., ground_last=N)` — only the user's last N messages ground a value, so a file
+  the user asked to read twenty requests ago does not ground deleting it now — and `once=True` — a call with exactly
+  the arguments of a call already made escalates (a `Session` keeps the calls made and does not count one that
+  failed; without a session: the given fact `calls_made`). Both are off by default. On a scripted 51-step session
+  over files and a shop: calls made that should not be 2 of 15 → 1, repeated irreversible calls made 6 of 6 → 1, none
+  of the 18 legitimate calls blocked. What is left needs the role of an argument (a destination path reused as a
+  source), which grounding does not know.
 - `solvi.many`: a choice among more options than one pass reads. `decide_many(model, text, task, options,
   many=Many(...))` works with any decider and returns an ordinary Decision: `direct` when the options fit, `shortlist`
   (BM25 or your selector ranks the options against a query, the decider chooses among the best k, and a close cut

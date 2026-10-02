@@ -72,7 +72,7 @@ GIVEN = ("tool_name", "tool_arguments", "conversation", "conversation_roles", "u
 BUILTIN = ("argument_errors", "call_arguments", "grounding", "proposal", "arguments_valid", "arguments_grounded",
            "arguments_from_user", "schema_error", "schema_readable",
            "no_injected_arguments", "no_instructions_in_tool_outputs", "request_authorizes", "verdict", "tools_known",
-           "known_tool")
+           "known_tool", "not_made_before")
 ROLES = {"user": "user", "human": "user", "assistant": "assistant", "ai": "assistant", "model": "assistant",
          "tool": "tool", "function": "tool", "function_call_output": "tool", "tool_result": "tool", "system": "system",
          "developer": "system"}
@@ -471,6 +471,8 @@ class Tool:
     locale: str | None = None                                  # how a lone "1,500" reads (LOCALES); None: it grounds nothing
     scan_user: bool = False                                    # a value the user wrote next to instruction-like text escalates
     tool_values: str = "deny"                                  # a user-only value found only in tool outputs: deny | escalate
+    ground_last: int | None = None                             # the user's last N messages ground a value (None: all)
+    once: bool = False                                         # a call already made with these arguments escalates
 
     @property
     def arguments(self):
@@ -568,6 +570,8 @@ def _grounding(spec, matchers=None):
         taints = _taints(conversation, conversation_roles)
         anywhere = [t for ts in taints.values() for t in ts]
         scan_user, locale, user_spans = bool(rules.get("scan_user")), rules.get("locale"), {}
+        users = [i for i, x in enumerate(roles) if x[2] == "user"]
+        recent = set(users[-int(rules["last"]):]) if rules.get("last") else None      # None: every user message counts
 
         def taint(i, a, b):
             """→ (the instruction-like passages that taint an occurrence at [a, b) of message i, how)."""
@@ -600,11 +604,14 @@ def _grounding(spec, matchers=None):
                 if isinstance(item, str) and not _visible(item).strip():
                     missing.append(f"{arg}={_short(item)} (empty)")
                     continue
-                best = None
+                best, stale = None, False
                 occ = _occurrences(item, conversation, match, locale)
                 for a, b in occ:
                     i = where(a, b)
                     if i is None or roles[i][2] not in allowed:
+                        continue
+                    if recent is not None and roles[i][2] == "user" and i not in recent:
+                        stale = True                  # the user said it, but in an earlier request: it grounds nothing now
                         continue
                     said, how = taint(i, a, b)
                     cand = [conversation[a:b], a, b, roles[i][2], said, how]
@@ -633,7 +640,8 @@ def _grounding(spec, matchers=None):
                         outside.setdefault(arg, []).append(alt[:4])
                         continue
                 if best is None:
-                    missing.append(f"{arg}={_short(item)}")
+                    missing.append(f"{arg}={_short(item)}" + (" (the user wrote it only in an earlier request, not in the "
+                                                                f"last {rules['last']})" if stale else ""))
                     continue
                 if best[4]:
                     says = "; ".join(_short(x, 80) for x in best[4])
@@ -988,6 +996,11 @@ def request_authorizes(authorized) -> bool:
     return authorized is True
 
 
+def not_made_before(tool_name, call_arguments, calls_made) -> bool:
+    """This call — the tool with exactly these arguments — was already made (once=True: a repeat needs a person)."""
+    return proposal(tool_name, call_arguments) not in set(calls_made or ())
+
+
 def proposal(tool_name, call_arguments) -> str:
     """The call as the authorizer reads it: the tool's name and its arguments as JSON."""
     from ..decide import jsonable
@@ -1129,7 +1142,8 @@ class Guard:
 
     # --- the catalog
     def tool(self, func=None, *, name=None, schema=None, description=None, ground=(), ground_from=("user", "tool", "system"),
-             injections="grounded", authorize=None, locale=None, scan_user=None, tool_values=None):
+             injections="grounded", authorize=None, locale=None, scan_user=None, tool_values=None, ground_last=None,
+             once=False):
         """Declare a tool the agent may call. As a decorator on a typed function (`@guard.tool`, `@guard.tool(ground=[...])`),
         or `guard.tool(name="refund", schema=RefundArgs)` (a pydantic model or a JSON schema) for a tool the framework or
         an MCP server runs. The function is returned unchanged.
@@ -1155,7 +1169,14 @@ class Guard:
         tool_values: what happens to an argument whose `ground_from` leaves out tool outputs (a user-only value) when
         its value is not in the allowed messages but is in a tool output — "deny" (the default) or "escalate" (the
         check `arguments_from_user`: a person decides, with the reason and the quote; never allowed on its own). A value
-        found nowhere is denied either way; default: the guard's `tool_values`."""
+        found nowhere is denied either way; default: the guard's `tool_values`.
+        ground_last: only the user's last N messages ground a value (None: all of them). In a long conversation a value
+        the user named many requests ago for another purpose otherwise grounds a call nobody asked for; with
+        ground_last=1 the call must rest on the current request (a call the user confirms with "yes, go ahead" then
+        finds nothing and is denied: the agent restates the value, or use a larger N).
+        once: a call of this tool with exactly the arguments of a call already made escalates (a second refund of the
+        same order, a file deleted twice). The calls made are the given fact `calls_made` — a Session keeps it; with
+        guard.check / guard.call pass facts={"calls_made": [...]} (strings from solvi.agents.guard.proposal)."""
         def add(f):
             n = name or (f.__name__ if f is not None else None)
             if not n:
@@ -1182,9 +1203,13 @@ class Guard:
                 raise ValueError('tool_values must be "deny" or "escalate"')
             if locale is not None and locale not in LOCALES:
                 raise ValueError(f"tool {n}: locale is one of {', '.join(LOCALES)} or None, not {locale!r}")
+            if ground_last is not None and (isinstance(ground_last, bool) or not isinstance(ground_last, int)
+                                            or ground_last < 1):
+                raise ValueError(f"tool {n}: ground_last is a number of the user's last messages (1, 2, ...) or None")
             t = Tool(n, f, model, desc.strip(), {a: roles for a in spec}, injections, authorize,
                      {a: m for a, m in spec.items() if m != "token"}, locale=locale,
-                     scan_user=self.scan_user if scan_user is None else bool(scan_user), tool_values=tv)
+                     scan_user=self.scan_user if scan_user is None else bool(scan_user), tool_values=tv,
+                     ground_last=ground_last, once=bool(once))
             self._check_tool(t)
             self.tools[n] = t
             self._systems.pop(n, None)
@@ -1399,6 +1424,8 @@ class Guard:
             middle = t.tool_values == "escalate" and any("tool" not in r for r in t.ground.values())
             if middle:
                 spec["tool_values"] = "escalate"
+            if t.ground_last:
+                spec["last"] = int(t.ground_last)
             cat.fn(_grounding(json.dumps(spec, sort_keys=True), {a: m for a, m in t.match.items() if callable(m)}))
             check(arguments_grounded, "deny")
             if middle:
@@ -1407,6 +1434,8 @@ class Guard:
                 check(no_injected_arguments, "escalate")
         if t.injections == "any":
             check(no_instructions_in_tool_outputs, "escalate")
+        if t.once:
+            check(not_made_before, "escalate")
         for f in fns:
             cat.fn(f)
         for f, on_fail in policies:
@@ -1444,6 +1473,10 @@ class Guard:
         text, roles, request = conversation(context)
         state = {"tool_name": c.name, "tool_arguments": c.arguments, "conversation": text, "conversation_roles": roles,
                  "user_request": request}
+        if c.name in self.tools and self.tools[c.name].once:
+            state["calls_made"] = sorted(str(x) for x in facts.pop("calls_made", None) or ())
+        else:
+            facts.pop("calls_made", None)             # a Session gives it with every call: only a once=True tool reads it
         clash = [k for k in facts if k in state or k in BUILTIN
                  or (c.name in self.tools and k in self.tools[c.name].arguments)]
         if clash:
@@ -1695,6 +1728,18 @@ class Session:
             self._append(r, t, tainted)
         self.facts = dict(facts or {})
         self.decisions = []
+        self.made = []                                # the calls that were made and did not fail (for once=True tools)
+
+    def _facts(self):
+        return {**self.facts, "calls_made": list(self.made)}
+
+    def _done(self, d):
+        self.decisions.append(d)
+        if d.executed:
+            if not d.error:
+                self.made.append(proposal(d.tool, d.arguments))
+            self.add("tool", f"{d.tool}: {d.error if d.error else _text(d.result)}")
+        return d
 
     def _append(self, role, text, tainted=False):
         if self.max_chars is not None and len(text) > self.max_chars:
@@ -1714,23 +1759,15 @@ class Session:
         return self
 
     def check(self, call):
-        d = self.guard.check(call, self.context, self.facts)
+        d = self.guard.check(call, self.context, self._facts())
         self.decisions.append(d)
         return d
 
     def call(self, call):
-        d = self.guard.call(call, self.context, self.facts)
-        self.decisions.append(d)
-        if d.executed:
-            self.add("tool", f"{d.tool}: {d.error if d.error else _text(d.result)}")
-        return d
+        return self._done(self.guard.call(call, self.context, self._facts()))
 
     async def acall(self, call):
-        d = await self.guard.acall(call, self.context, self.facts)
-        self.decisions.append(d)
-        if d.executed:
-            self.add("tool", f"{d.tool}: {d.error if d.error else _text(d.result)}")
-        return d
+        return self._done(await self.guard.acall(call, self.context, self._facts()))
 
 
 def _clip(text, n):

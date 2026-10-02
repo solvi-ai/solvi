@@ -2133,6 +2133,16 @@ in it is executed, and the functions that run are the catalog's, planned by the 
 > the protection. Still passing: a calendar event with an attacker's title when the user did ask for an event, and
 > instructions pasted into the user's own message (`scan_user=True` catches these).
 
+**A long conversation: `ground_last` and `once`.** Grounding looks for a value in every message of the allowed roles, so
+in a long session a value the user named many requests ago, for another purpose, grounds a call nobody asked for now
+("read notes.txt" earlier, a `delete_file("notes.txt")` later). `guard.tool(..., ground_last=1)` lets only the user's
+last message ground a value (2: the last two): the reason then says the value is from an earlier request. `once=True`
+escalates a call of the tool with exactly the arguments of a call already made — a second refund of the same order —
+unless the first one failed; a `Session` keeps the calls made, and without one they are the given fact `calls_made`.
+On a scripted session of 51 steps over files and a shop (15 calls that must not be made, 18 that must, 6 repeats):
+calls made that should not be 2 → 1, repeats made 6 → 1, no call that should be made blocked. The one left takes a
+path the user gave as a destination and uses it as a source: grounding does not know an argument's role.
+
 An LLM agent calls tools: it pays invoices, writes files, sends e-mails. With `solvi.agents` the agent does not call
 them: it **proposes** a call — `{"name": "send_payment", "arguments": {...}}`, data and never code — and a `Guard` checks
 the proposal like any other model output, then decides: **allow** (solvi runs the registered function and returns its
