@@ -97,20 +97,43 @@ class Proposal:
                 "abstain": self.abstain, "neighbours": self.neighbours}
 
 
+def _settings(**kw):
+    """A memory's settings, checked (the constructor's and load_dict's): k, radius, text_weight and the thresholds
+    numbers (k made an integer ≥ 1), text True / False, mode one of MODES → {name: value}; ValueError naming the
+    setting otherwise."""
+    out = {}
+    for name, v in kw.items():
+        if name == "mode":
+            if v not in MODES:
+                raise ValueError(f"mode must be one of {MODES}, not {v!r}")
+            out[name] = v
+        elif name == "text":
+            if not isinstance(v, bool):
+                raise ValueError(f"text must be True or False, not {v!r}")
+            out[name] = v
+        else:
+            try:
+                x = float(v) if not isinstance(v, bool) else None
+            except (TypeError, ValueError):
+                x = None
+            if x is None or math.isnan(x) or (name == "k" and not math.isfinite(x)):
+                raise ValueError(f"{name} must be a number, not {v!r}")
+            out[name] = max(1, int(x)) if name == "k" else x
+    return out
+
+
 class CorrectionMemory:
     """Corrected cases of one decision part and their nearest neighbours (see the module docstring). Usually made by
     `part.memory(...)`, which also attaches it to the part."""
 
     def __init__(self, part, k=7, radius=0.15, min_strength=1.0, min_agreement=0.8, text=False, text_weight=0.5,
                  mode="check"):
-        if mode not in MODES:
-            raise ValueError(f"mode must be one of {MODES}, not {mode!r}")
         if part.spec.kind in ("span", "rank", "number"):
             raise ValueError(f"a memory of corrections needs a question with options; not for {part.spec.kind!r}")
         self.part = part
-        self.k, self.radius = max(1, int(k)), float(radius)
-        self.min_strength, self.min_agreement = float(min_strength), float(min_agreement)
-        self.text, self.text_weight, self.mode = bool(text), float(text_weight), mode
+        for name, v in _settings(k=k, radius=radius, min_strength=min_strength, min_agreement=min_agreement, text=bool(text),
+                                 text_weight=text_weight, mode=mode).items():
+            setattr(self, name, v)
         self.guarantee = None                     # what calibrate promises for the memory's own answers
         self.cases = []                           # replaced, never changed in place (a proposal reads a snapshot)
         self._ids = set()
@@ -365,11 +388,12 @@ class CorrectionMemory:
                                  "cases say nothing about this question — build it from this question's corrections "
                                  "(learn_from)")
         s = data.get("settings") or {}
-        for k in ("k", "radius", "min_strength", "min_agreement", "text", "mode", "guarantee"):
-            if k in s:
-                setattr(self, k, s[k])
-        if s.get("text_weight") is not None:
-            self.text_weight = s["text_weight"]
+        known = ("k", "radius", "min_strength", "min_agreement", "text", "mode")
+        got = _settings(**{k: s[k] for k in known if k in s},
+                        **({"text_weight": s["text_weight"]} if s.get("text_weight") is not None else {}))
+        g = s.get("guarantee")
+        if g is not None and not isinstance(g, dict):
+            raise ValueError(f"the memory's guarantee is not a record: {g!r}")
         cases = [Case(c["id"], tuple(c["features"]), c["label"], c["source"], c.get("by"), c.get("time"),
                       c.get("stored_id"), None if c.get("words") is None else tuple(c["words"]))
                  for c in data.get("cases") or ()]
@@ -382,6 +406,10 @@ class CorrectionMemory:
                                  "another question?") from None
         if len({len(c.features) for c in cases}) > 1:
             raise ValueError("the cases' features differ in length: they are not of one question")
+        for name, v in got.items():               # every check passed: now the memory changes
+            setattr(self, name, v)
+        if "guarantee" in s:
+            self.guarantee = g
         with self._lock:
             self.cases = cases
             self._ids = {c.id for c in cases}

@@ -336,3 +336,21 @@ def test_a_memory_given_answer_keeps_the_models_probability_as_its_confidence():
     cat2 = Catalog()
     r2 = System(cat2, [part.question(cat2, "route")]).ask({"email": t})["route"]
     assert r2.status == "ok" and r2.answer == "shipping"
+
+
+@pytest.mark.parametrize("bad, why", [({"mode": "overwrite"}, "mode must be one of"), ({"k": "seven"}, "k must be"),
+                                      ({"radius": None}, "radius must be"), ({"text": "yes"}, "text must be"),
+                                      ({"guarantee": "always"}, "guarantee is not a record")])
+def test_a_memory_file_with_a_bad_setting_is_refused_and_the_memory_left_as_it_was(bad, why):
+    """load_dict copied settings without the constructor's checks: "mode": "overwrite" or "k": "seven" loaded, and every
+    later decision failed (TypeError: slice indices must be integers)."""
+    _, _, part, _ = setup()
+    mem = part.memory(k=5, radius=0.2)
+    for t in texts("billing", 3):
+        mem.add(t, "billing", source="human", by="ann", time=1.0)
+    data = mem.to_dict()
+    data["settings"] = {**data["settings"], **bad}
+    fresh = CorrectionMemory(part, k=3)
+    with pytest.raises(ValueError, match=why):
+        fresh.load_dict(data)
+    assert fresh.k == 3 and fresh.mode == "check" and len(fresh) == 0 and fresh.guarantee is None
