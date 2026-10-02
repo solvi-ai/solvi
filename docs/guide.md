@@ -1499,6 +1499,23 @@ decisions later, a change of the mix of three answers from 1:1:1 to 1:8:1 about 
 and 55; `window=200`: 90 and 105). Take the reference from the stream's own traffic (the default) unless your
 calibration set has the stream's mix of answers.
 
+On real streams it is slower than in the simulation. Banking77 (2,000 requests, 20 intents the decider never saw make
+up the stream from request 1,000 on; four deciders: a TF-IDF classifier with its confidence, the same with an act head,
+solvi-base, and a vote of the two), the monitor watching the calibrated part's decisions:
+
+| monitor | false flags before the shift | flagged after the shift |
+|---|---|---|
+| `window=100`, the calibration set as the reference | none for three deciders; solvi-base from request 774 (its calibration set is not the stream's mix: it answers alone 78% of the stream against 65% of calib) | +76 to +223 |
+| `DriftMonitor()` (the stream's first 100 as the reference) | none | +86 (solvi-base), +287 (vote); **not flagged** within 1,000 requests for the two classifiers |
+| `window=200, alpha=0.001, min_signals=2`, reference: the first 300 requests (or calib) | none | +210 to +290; +935 for the vote |
+
+Before the union bound the same monitors raised false flags from request 276–732 with the calibration set as the
+reference (73–132 flagged decisions of 1,000) and flagged the shift 35–147 requests in. With solvi-base on support
+tickets whose wording and mix change at one point (150 reference, 200 unchanged, 150 changed decisions), `window=100`
+flags the change after 92 decisions (37 before the rework), `window=50` after 96 (14 before, with 23 false flags on the
+200 unchanged decisions; none now). A monitor that is quiet on an unchanged stream needs a large change or a long wait:
+size the window on your own stream, and do not read "no flag" as "no drift".
+
 ## Asking: System and Response
 
 ```python

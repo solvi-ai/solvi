@@ -85,6 +85,10 @@ of the time — `groups="answer"` puts the promise inside each answer.
 alone → 12%, with no error raised). In a simulation `DriftMonitor(window=100)` flags such a change about 60 decisions
 in, and none of 1,200 unchanged streams of 1,000 decisions; a question with many answers needs a window of about five
 decisions per answer for the distribution of the answers to be tested at all (`rep["not_tested"]` says when it is not).
+Real streams are slower: on Banking77 with 20 unseen intents arriving at request 1,000 it flagged 76–935 requests
+later (mostly 100–300), with the defaults it did not flag the shift at all for two of four deciders, and the one false
+flag left came from a reference that was not the stream's mix (solvi-base's calibration set); on support tickets with
+solvi-base, 92 decisions in. Treat a quiet monitor as "no large change", not as "no change".
 
 **`fit` and `teach` move the scores, not the reading.** They shift and scale the logits of one question; they help
 calibration and the mix of answers, and level off within a few dozen examples. When a question needs the model to read
