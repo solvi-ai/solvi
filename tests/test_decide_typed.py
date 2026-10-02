@@ -1,8 +1,8 @@
 """solvi.decide, the typed decider contract: questions declared by types (choice, multi, score, noul), text or JSON / pydantic
 state (state_text, "kv1"), probabilities + calibrated confidence + act / escalate per question, several questions in one
 forward pass (flow.batches), adapt / fit / teach per question type, the checkpoint capability fields and backward
-compatibility with the 'l14b_decider v1' format; also the quote source of hand-written extract parts. Stub scorers stand in for the network; a slow test runs the real L14d
-checkpoint when it is present."""
+compatibility with the 'l14b_decider v1' format; also the quote source of hand-written extract parts. Stub scorers stand in for the network; a slow test runs the published
+checkpoint (solvi-ai/solvi-base) when it is already downloaded."""
 import copy
 import json
 import os
@@ -686,56 +686,70 @@ def test_example_15_runs_with_the_stand_in(monkeypatch):
 
 
 # --------------------------------------------------------------------------------------------------- the real checkpoint
-def _real_dir():
-    for p in (os.environ.get("SOLVI_DECIDE_MODEL"), os.path.expanduser("~/.cache/solvi_release/decide-base-clean"),
-              os.path.expanduser("~/.cache/solvi_release/decide-base")):
-        if p and os.path.isfile(os.path.join(p, "solvi_decide.json")):
-            return p
-    return None
-
-
+@pytest.mark.model
 @pytest.mark.parametrize("backend", ["onnx", "torch"])
-def test_real_l14d_checkpoint_typed_questions_if_present(backend):
+def test_the_published_checkpoint_answers_typed_questions_as_the_readme_shows_if_present(backend):
+    """solvi-ai/solvi-base (see test_decide.published_checkpoint: nothing is downloaded by a default run): the README's
+    typed-decisions story — a pydantic model's fields as questions over a state, the act head, a hard check, "not
+    stated", replay — and the checkpoint's declared multi-question pass."""
+    import gc
+
+    from solvi import Maybe, Unknown
+    from test_decide import PUBLISHED, published_checkpoint
     pytest.importorskip("tokenizers")
     pytest.importorskip("onnxruntime" if backend == "onnx" else "torch")
     if backend == "torch":
         pytest.importorskip("transformers")
-    path = _real_dir()
-    if path is None or (backend == "onnx" and not os.path.isdir(os.path.join(path, "onnx"))):
-        pytest.skip("no solvi-decide checkpoint (set SOLVI_DECIDE_MODEL)")
+    path = published_checkpoint()
+    if path is None or (os.path.isdir(path) and not os.path.exists(
+            os.path.join(path, "onnx" if backend == "onnx" else "model.safetensors"))):
+        pytest.skip(f"{PUBLISHED} is not downloaded (solvi models pull {PUBLISHED}, or set SOLVI_DECIDE_MODEL)")
     m = DecideModel.load(path, backend=backend, device="cpu")
-    assert m.caps["version"] == 1 and not m.batchable and not m.has_act                # the L14d format, unchanged
-    assert m.weights_fingerprint() == digest("DecideModel", m._wfp, m.backend, m.temperature, m.temperature_multi,
-                                             m.other_threshold, m.multi_threshold)
+    assert m.caps["version"] == 3 and m.caps["subformat"] == "l14g typed v2" and m.has_act    # what solvi_decide.json says
+    assert {"single", "multi", "score", "noul", "span"} <= set(m.caps["modes"]) and m.caps["unknown"]["label"] == "not stated"
+    assert not m.batchable                              # its multi-question pass is declared, and off by default
     cat = Catalog()
-    qs = m.questions(cat, Ticket, text_fact="email", other=False)
+    qs = m.questions(cat, Ticket, text_fact="ticket", escalate_below=0.6)
+
+    @cat.check(hard=True, then={"urgency": "critical"})
+    def no_legal_threat(ticket) -> bool:
+        return "lawyer" not in str(ticket).lower()
+    qs[1].checkpoints.append("no_legal_threat")
     s = System(cat, qs)
+    ticket = {"subject": "Charged twice", "body": "Refund my double payment!", "customer": {"tier": "pro"}}
+    res = s.ask({"ticket": ticket})
+    assert res["team"].answer == "billing" and res["angry"].answer == "yes" and res["topics"].answer == ("refund",)
+    assert all(r.status in ("ok", "abstain") for r in res.results.values())
+    if res["urgency"].status == "abstain":              # an unsure answer abstains with the reason, it is not guessed
+        assert res["urgency"].why.startswith("model escalated")
+    decided = [r for r in res.trace.records if r.name.startswith("answer:")]
+    assert len(decided) == 4 and all(0 <= r.extra["act"] <= 1 for r in decided)
+    assert res.trace.replay(cat)["ok"] and "act " in str(res.audit("team"))
+    res = s.ask({"ticket": dict(ticket, body="Refund my double payment or my lawyer will call you!")})
+    assert (res["urgency"].answer, res["urgency"].status) == ("critical", "forced") and res["team"].answer == "billing"
+    paid = m.decision("paid", "Has the customer already paid?", "email", Maybe[bool])
+    assert paid(email="I paid yesterday by card.").value is True
+    assert paid(email="Where is your office?").value is Unknown        # "not stated" is an answer, not an abstention
+    # the multi-question pass the checkpoint declares (block layout), switched on: one pass for the four questions,
+    # valid answers, replay ok; ONNX reads it from the block file
+    fp = m.weights_fingerprint()
+    del m, s, cat, qs, paid, res, decided
+    gc.collect()                                        # one network in memory at a time
+    mq = DecideModel.load(path, backend=backend, device="cpu", multi_question={"layout": "block", "max_questions": 4})
+    cat2 = Catalog()
+    s2 = System(cat2, mq.questions(cat2, Ticket, text_fact="email", other=False))
     text = "I was charged twice for my order and nobody answers. This is terrible, fix it today!"
-    res = s.ask({"email": text})
-    assert res["team"].answer == "billing" and res["angry"].answer == "yes"
-    assert res["urgency"].answer in LEVELS and set(res["urgency"].probs) == set(LEVELS)
-    assert res.flow.batches == [] and res.trace.replay(cat)["ok"]
-    state = {"ticket": {"subject": "Double charge", "body": "Charged twice for order 5521, please refund.", "tier": "gold"}}
-    d = m.decision("team", "Which team should handle this ticket?", "ticket", TEAMS)
-    assert d(ticket=state["ticket"]).value == "billing"
-    # forced multi-question passes (the L14f contract) run on the L14d weights too: valid answers, replay ok. torch: the
-    # block layout (an answer does not depend on the other questions of its pass); ONNX without block inputs: one question
-    # per pass (fallback); the concat layout: one pass
-    layout = {"layout": "block", "max_questions": 4} if backend == "torch" else {"layout": "concat", "max_questions": 4}
-    for mqc in ([layout, 4] if backend == "onnx" else [layout]):
-        mq = DecideModel.load(path, backend=backend, device="cpu", multi_question=mqc)
-        cat2 = Catalog()
-        s2 = System(cat2, mq.questions(cat2, Ticket, text_fact="email", other=False))
-        before = mq.passes
-        r2 = s2.ask({"email": text})
-        shared = next(r for r in r2.trace.records if r.name == "answer:team").extra["pass"]["shared"]
-        assert mq.passes == before + (1 if shared else 4) and shared == (mqc is layout)
-        assert r2.flow.batches and all(r.status == "ok" for r in r2.results.values())
-        assert r2.trace.replay(cat2)["ok"] and mq.weights_fingerprint() != m.weights_fingerprint()
-        if backend == "torch":
-            specs = [cat2.rules[q].func.spec for q in ("team", "urgency", "angry")]
-            mq._cache.clear()
-            alone = mq._raw_pass(specs[:1], text)[0][0]
-            mq._cache.clear()
-            together = mq._raw_pass(specs, text)[0][0]
-            assert np.max(np.abs(alone - together)) < 1e-3
+    before = mq.passes
+    r2 = s2.ask({"email": text})
+    assert mq.batchable and mq.passes == before + 1 and len(r2.flow.batches) == 1
+    assert next(r for r in r2.trace.records if r.name == "answer:team").extra["pass"]["shared"]
+    assert r2["team"].answer == "billing" and r2["angry"].answer == "yes"
+    assert all(r.status in ("ok", "abstain") for r in r2.results.values())
+    assert r2.trace.replay(cat2)["ok"] and mq.weights_fingerprint() != fp
+    if backend == "torch":                              # block layout: an answer does not depend on the others in its pass
+        specs = [cat2.rules[q].func.spec for q in ("team", "urgency", "angry")]
+        mq._cache.clear()
+        alone = mq._raw_pass(specs[:1], text)[0][0]
+        mq._cache.clear()
+        together = mq._raw_pass(specs, text)[0][0]
+        assert np.max(np.abs(alone - together)) < 1e-3

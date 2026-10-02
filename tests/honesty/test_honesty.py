@@ -159,7 +159,10 @@ def test_model_subset_does_not_get_less_honest():
     pytest.importorskip("onnxruntime")
     pytest.importorskip("tokenizers")
     if honesty.load_task(HERE / "model_task.py").model_dir() is None:
-        pytest.skip("no solvi-decide checkpoint (set SOLVI_DECIDE_MODEL)")
+        pytest.skip("solvi-ai/solvi-base is not downloaded (solvi models pull solvi-ai/solvi-base, or set "
+                    "SOLVI_DECIDE_MODEL)")
+    base = json.loads(MODEL_BASE.read_text())
+    assert base["model"].startswith("solvi-ai/solvi-base ")           # the baseline says which checkpoint it is of
     out = honesty.report(MODEL, MODEL_BASE)
-    assert out["metrics"]["n"] == json.loads(MODEL_BASE.read_text())["metrics"]["n"]
-    assert out["ok"], out["regressions"]
+    assert out["metrics"]["n"] == base["metrics"]["n"]
+    assert out["ok"], (out["regressions"], f"against the baseline of {base['model']}")

@@ -360,19 +360,32 @@ def test_load_expands_the_home_folder_and_does_not_ask_the_hub_for_a_path(tmp_pa
             DecideModel.load(missing, backend="onnx")
 
 
-def _real_model_dir():
-    for p in (os.environ.get("SOLVI_DECIDE_MODEL"), os.path.expanduser("~/.cache/solvi_release/decide-base")):
-        if p and os.path.isfile(os.path.join(p, "solvi_decide.json")) and os.path.isdir(os.path.join(p, "onnx")):
-            return p
-    return None
+PUBLISHED = "solvi-ai/solvi-base"
 
 
-def test_real_onnx_decider_if_present():
+def published_checkpoint():
+    """Where the "real checkpoint" tests find the published decider (solvi-ai/solvi-base): $SOLVI_DECIDE_MODEL — a
+    checkpoint folder, or a Hugging Face id (read from the cache when it is there, else downloaded: the opt-in) — else
+    solvi-ai/solvi-base when it is already in the Hugging Face cache (`solvi models pull solvi-ai/solvi-base`). None: the
+    tests skip — a default run downloads nothing. Their assertions are the published checkpoint's."""
+    from solvi import models
+    src = os.environ.get("SOLVI_DECIDE_MODEL")
+    if src and os.path.isdir(os.path.expanduser(src)):
+        path = os.path.expanduser(src)
+    elif src:
+        return str(models.cached_path(src) or src)
+    else:
+        path = models.cached_path(PUBLISHED)
+    return str(path) if path is not None and os.path.isfile(os.path.join(path, "solvi_decide.json")) else None
+
+
+@pytest.mark.model
+def test_the_published_onnx_decider_if_present():
     pytest.importorskip("onnxruntime")
     pytest.importorskip("tokenizers")
-    path = _real_model_dir()
+    path = published_checkpoint()
     if path is None:
-        pytest.skip("no solvi-decide checkpoint (set SOLVI_DECIDE_MODEL)")
+        pytest.skip(f"{PUBLISHED} is not downloaded (solvi models pull {PUBLISHED}, or set SOLVI_DECIDE_MODEL)")
     m = DecideModel.load(path, backend="onnx")
     assert m.backend.startswith("onnx") and m.temperature > 0 and len(m.fingerprint()) == 16
     opts = {"billing": "payments, refunds", "technical": "bugs, crashes", "shipping": "delivery, parcels", "other": "anything else"}
