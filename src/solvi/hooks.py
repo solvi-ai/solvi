@@ -127,6 +127,10 @@ class RulesError(ValueError):
     """A rules file that cannot be read: its path, the rule and what is wrong."""
 
 
+class SettingsError(ValueError):
+    """An agent's settings file (.claude/settings.json, .codex/hooks.json) that install / uninstall cannot read."""
+
+
 # --------------------------------------------------------------------------------------------------- paths
 def glob_regex(pattern):
     """A path glob → a compiled regex over project-relative POSIX paths: "*" and "?" stay inside a folder, "**" crosses
@@ -712,16 +716,17 @@ def rules_system():
     from .core import Catalog
     from .models import load as load_model
     from .system import System
+    from .loader import LoadError                      # the command prints it; a library caller gets an exception
     spec = os.environ.get("SOLVI_HOOK_MODEL")
     if not spec:
-        raise SystemExit("solvi.hooks:rules_system: set SOLVI_HOOK_MODEL to the model the hook uses (--model)")
+        raise LoadError("solvi.hooks:rules_system: set SOLVI_HOOK_MODEL to the model the hook uses (--model)")
     model = load_model(spec)
     cat, qs = Catalog(), []
     for r in load_rules(os.environ.get("SOLVI_HOOK_RULES", DEFAULT_RULES)):
         if r.question is not None:
             qs.append(fuzzy_part(model, r).question(cat))
     if not qs:
-        raise SystemExit("solvi.hooks:rules_system: no rule with a question")
+        raise LoadError("solvi.hooks:rules_system: no rule with a question")
     return System(cat, qs)
 
 
@@ -1150,8 +1155,26 @@ def _q(s):
 MARK = re.compile(r"(^|[\s/\\'\"])(solvi|-m\s+solvi)['\"]?\s+hook\s+(pre-edit|pick-skill)\b")
 
 
+_PRINTS = {"echo", "printf", "grep", "cat", "true", "false", "test", ":"}   # commands that only mention solvi's words
+
+
 def _ours(handler):
-    return isinstance(handler, dict) and isinstance(handler.get("command"), str) and bool(MARK.search(handler["command"]))
+    """Is a hook handler one that solvi installed? Its command runs `solvi hook pre-edit | pick-skill` — as words of
+    the command line (`solvi`, a path to it, `python -m solvi`, behind a launcher such as `uv run`), not inside a
+    quoted argument, and not as the arguments of a command that only prints or searches ("echo solvi hook pre-edit")."""
+    cmd = handler.get("command") if isinstance(handler, dict) else None
+    if not isinstance(cmd, str) or not MARK.search(cmd):
+        return False
+    import shlex
+    try:
+        toks = shlex.split(cmd)
+    except ValueError:                                 # an unbalanced quote: by the pattern alone
+        return True
+    for i, tok in enumerate(toks[:-2]):
+        runs = os.path.basename(tok) in ("solvi", "solvi.exe")        # also the "solvi" of "python -m solvi"
+        if runs and toks[i + 1] == "hook" and toks[i + 2] in ("pre-edit", "pick-skill"):
+            return os.path.basename(toks[0]) not in _PRINTS
+    return False
 
 
 def _settings_path(root, agent):
@@ -1164,9 +1187,9 @@ def _load_json(path):
     try:
         d = json.load(open(path, encoding="utf-8"))
     except ValueError as e:
-        raise SystemExit(f"solvi: {path} is not JSON ({e}); fix it or move it away, nothing was changed") from None
+        raise SettingsError(f"{path} is not JSON ({e}); fix it or move it away, nothing was changed") from None
     if not isinstance(d, dict):
-        raise SystemExit(f"solvi: {path} is not a JSON object; nothing was changed")
+        raise SettingsError(f"{path} is not a JSON object; nothing was changed")
     return d
 
 
@@ -1375,8 +1398,12 @@ def main(argv=None):
     if a.cmd == "sample-rules":
         print(SAMPLE_RULES, end="")
         return 0
-    return {"pre-edit": cmd_pre_edit, "pick-skill": cmd_pick_skill, "install": cmd_install,
-            "uninstall": cmd_uninstall, "audit": cmd_audit}[a.cmd](a)
+    try:
+        return {"pre-edit": cmd_pre_edit, "pick-skill": cmd_pick_skill, "install": cmd_install,
+                "uninstall": cmd_uninstall, "audit": cmd_audit}[a.cmd](a)
+    except SettingsError as e:                         # install / uninstall: said in one line, nothing was changed
+        print(f"solvi: {e}", file=sys.stderr)
+        return 1
 
 
 if __name__ == "__main__":

@@ -571,3 +571,38 @@ def test_a_secret_blocked_by_a_redacting_rule_is_not_written_to_the_store(proj):
     assert open_storage(str(store)).verify()["ok"]
     hook(proj, write(proj, "tools/x.py", "eval('1')\n"), "pre-edit")    # a rule that does not redact: stored whole
     assert "eval('1')" in store.read_text()
+
+
+def test_library_functions_of_hooks_raise_ordinary_exceptions_not_system_exit(proj, monkeypatch):
+    monkeypatch.delenv("SOLVI_HOOK_MODEL", raising=False)
+    from solvi.loader import LoadError
+    with pytest.raises(LoadError, match="set SOLVI_HOOK_MODEL"):
+        hooks.rules_system()
+    settings = proj / ".claude" / "settings.json"
+    settings.write_text("{broken")
+    with pytest.raises(ValueError, match="is not JSON"):
+        hooks.install(str(proj))
+    with pytest.raises(ValueError, match="is not JSON"):
+        hooks.uninstall(str(proj))
+    assert settings.read_text() == "{broken"
+    r = solvi(proj, "hook", "install", "--project", proj)              # the command: one line, no traceback
+    assert r.returncode != 0 and "not JSON" in r.stderr and "Traceback" not in r.stderr
+    r = subprocess.run([sys.executable, "-m", "solvi", "calibrate", "solvi.hooks:rules_system", "x", "labels.csv"],
+                       capture_output=True, text=True, cwd=proj, env={k: v for k, v in env_for(proj).items()
+                                                                      if k != "SOLVI_HOOK_MODEL"}, timeout=120)
+    assert r.returncode == 2 and "set SOLVI_HOOK_MODEL" in r.stderr and "Traceback" not in r.stderr
+
+
+def test_install_leaves_alone_a_command_that_only_prints_solvis_words(proj):
+    settings = proj / ".claude" / "settings.json"
+    mine = {"hooks": {"PreToolUse": [{"matcher": "Edit", "hooks": [
+        {"type": "command", "command": "echo solvi hook pre-edit is slow today"},
+        {"type": "command", "command": "grep -c 'solvi hook pre-edit' notes.txt"}]}]}}
+    settings.write_text(json.dumps(mine))
+    assert "no solvi hooks" in solvi(proj, "hook", "uninstall", "--project", proj).stdout
+    solvi(proj, "hook", "install", "--project", proj, "--command", "uv run solvi")
+    solvi(proj, "hook", "install", "--project", proj, "--command", "uv run solvi")         # replaced, not doubled
+    s = json.loads(settings.read_text())["hooks"]
+    assert s["PreToolUse"][0] == mine["hooks"]["PreToolUse"][0] and len(s["PreToolUse"]) == 2
+    solvi(proj, "hook", "uninstall", "--project", proj)
+    assert json.loads(settings.read_text()) == mine
