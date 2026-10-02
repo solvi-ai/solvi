@@ -33,7 +33,20 @@ def _canon(v):
         return {"not_stated": True}
     if v is MISSING:                              # a failed step: repr(object()) carries a memory address
         return {"missing": True}
-    return repr(v)
+    np = sys.modules.get("numpy")                 # not imported: no value can be an array
+    if np is not None and isinstance(v, (np.ndarray, np.generic)):
+        return _canon(v.tolist())                 # element by element, as the list it is stored as: repr elides a long
+    r = repr(v)                                   # array ("...") and writes np.int64(5) or 5 by numpy's version
+    if " at 0x" in r:                             # the default repr: a memory address, another one in every run
+        t = type(v)
+        if callable(v) and hasattr(v, "__qualname__"):
+            return {"object": "function", "name": f"{getattr(v, '__module__', '')}.{v.__qualname__}"}
+        if hasattr(v, "__dict__"):                # a plain object: by its class and attributes, so it recomputes
+            try:
+                return {"object": f"{t.__module__}.{t.__qualname__}", "state": _canon(vars(v))}
+            except RecursionError:                # attributes that point back at it
+                return r
+    return r
 
 
 def _ckey(c):
