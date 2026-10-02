@@ -152,6 +152,34 @@ def test_domain_bounds_the_search():
         "approve if amount ≤ 1000 (now 1200)"
 
 
+def _alert(center, band):
+    cat = Catalog()
+
+    @cat.rule("alert")
+    def alert(value):
+        return abs(value - center) > band
+    return System(cat, [Question("alert", "Alert?", Answer.yes_no())])
+
+
+def test_a_domain_that_does_not_hold_the_current_value_is_refused_not_searched_both_ways():
+    """value 2.656 with domains={"value": (1.8, 2.3)} used to print "no if value ≤ 2.5" and "no if value ≥ 2.5"."""
+    res = _alert(2.0, 0.5).ask({"value": 2.656})
+    assert str(res.counterfactual("alert").best) == "no if value ≤ 2.5 (now 2.656)"
+    cf = res.counterfactual("alert", domains={"value": (1.8, 2.3)})
+    assert not cf and cf.searched == [] and "outside the domain given for it (1.8, 2.3)" in cf.not_searched["value"]
+
+
+def test_the_band_of_a_two_sided_rule_is_found_and_a_miss_is_not_a_flat_no_change():
+    """abs(value + 20) > 5 at 40: the doubling probes stepped over the band [-25, -15] and the result said "no change of
+    value changes the answer"."""
+    res = _alert(-20.0, 5).ask({"value": 40.0})
+    cf = res.counterfactual("alert", domains={"value": (-100.0, 100.0)})
+    assert str(cf.best) == "no if value ≤ -15 (now 40)"
+    cf = res.counterfactual("alert")                                 # non-negative by default: the band is out of reach
+    assert not cf and "was found that changes the answer" in str(cf) and "narrower band can be missed" in str(cf)
+    assert "can be missed" not in str(lending().ask({**STATE, "amount": 900}).counterfactual("approve", over=["opened"]))
+
+
 def test_model_part_that_did_not_run_has_no_proposal():
     s = lending()
     res = s.ask({**STATE, "amount": 500.0, "age": 16})               # the hard check failed first: risk never ran

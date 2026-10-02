@@ -3317,9 +3317,13 @@ What is searched (`over=`: default, the given facts the question's flow reads):
 
 - numbers and dates — outward from the current value in both directions with doubling steps, then bisection between the
   last unchanged and the first changed value: the nearest threshold crossing, exact for inputs the answer is monotone in
-  (a non-monotone input can hide a nearer crossing between two probes). Integers and dates give exact bounds
+  (a non-monotone input can hide a nearer crossing between two probes). A direction where no probe changes the answer
+  is tried again on an even grid up to the farthest probe, which finds the band of a two-sided rule (`abs(value + 20) >
+  5` at 40 → `no if value ≤ -15`); a narrower band can still be missed, so when nothing is found the result says "no
+  change ... was found", not that none exists. Integers and dates give exact bounds
   (`debt ≤ 1999`, `purchase_date ≥ 2026-08-20`); floats are shown at the shortest decimal that holds, `≤` or `<` as the
-  rule has it. A non-negative input stays non-negative;
+  rule has it. A non-negative input stays non-negative; a domain `(lo, hi)` that does not contain the current value is
+  refused for that input (`cf.not_searched` says why);
 - booleans, Enums and `Literal` fields of `System(inputs=...)` — every other value;
 - anything else only with `domains={"history": ["on time", "late"]}`; a tuple bounds a number: `domains={"amount": (0, 5000)}`.
 

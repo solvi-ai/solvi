@@ -12,8 +12,12 @@ and such inputs are not counted as changing the answer. Learned rule lists (lear
 The search, per input:
   numbers (int, float) and dates — probe outward from the current value in both directions with doubling steps, then
      bisect between the last unchanged and the first changed value: the nearest threshold crossing for inputs the answer
-     is monotone in (a non-monotone input may hide a nearer crossing between two probes). Non-negative inputs stay
-     non-negative unless a domain says otherwise; float bounds are shown at the shortest decimal that still holds;
+     is monotone in. A direction where no probe changes the answer is tried again on an even grid between the current
+     value and the farthest probe within the range, which finds a band of a non-monotone input ("alert unless within 5
+     of -20") — a band narrower than the grid can still be missed, so "no change was found" is what the result says.
+     Non-negative inputs stay non-negative unless a domain says otherwise; a domain (lo, hi) that does not contain the
+     current value is refused for that input (listed as not searched); float bounds are shown at the shortest decimal
+     that still holds;
   booleans, Enums and Literal-typed inputs (System(inputs=...)) — every other value;
   anything else — only with `domains={fact: [values]}`.
 Two inputs together only when no single one changes the answer: one input's candidates (its values, or probe points) with
@@ -102,7 +106,9 @@ class Counterfactuals:
             lines.append(f"  no conclusion: {self.inconclusive}")
         else:
             lines.append("  no change of " + (", ".join(self.searched) or "any input")
-                         + " (one at a time" + (" or two together" if self._two else "") + ") changes the answer")
+                         + " (one at a time" + (" or two together" if self._two else "") + ") was found that changes "
+                         "the answer" + ("; numbers are probed outward from the current value and on an even grid, so "
+                                         "a change inside a narrower band can be missed" if self._numbers else ""))
         if self.held:
             lines.append("  held at their recorded proposals (no model called): " + ", ".join(self.held))
         if self.unavailable:
@@ -114,6 +120,7 @@ class Counterfactuals:
         return "\n".join(lines)
 
     _two = False
+    _numbers = False                               # a number was searched (the search cannot rule out a narrow band)
 
     def to_dict(self):
         return {"question": self.question, "answer": _plain(self.answer), "status": self.status,
@@ -346,7 +353,7 @@ class _Search:
                 far = min(max(x0 + sign * (scale * 1e6 + 1e6), lo_b), hi_b)
                 if far == x0 or self.changed({**base, fact: to(far)}) is None:
                     continue
-            last, k = x0, 0
+            last, k, hit = x0, 0, False
             while True:
                 x = x0 + sign * step0 * 2 ** k
                 k += 1
@@ -359,11 +366,31 @@ class _Search:
                 r = self.changed({**base, fact: to(x)})
                 if r is not None:
                     out.append(self._bisect(fact, v0, x0, last, x, to, integer, base, sign))
-                    break
-                if x in (lo_b, hi_b):
+                    hit = True
                     break
                 last = x
+                if x in (lo_b, hi_b):
+                    break
+            if not hit and not quick and not base and last != x0:
+                out.append(self._grid(fact, v0, x0, last, to, integer, sign))   # a band between two probes
         return [c for c in out if c is not None]
+
+    GRID = 64
+
+    def _grid(self, fact, v0, x0, far, to, integer, sign):
+        """No crossing at the probes up to `far`: try an even grid between x0 and far, nearest first (an input the answer
+        is not monotone in — "alert unless the value is within 5 of -20" — has a band the doubling probes step over)."""
+        good = x0
+        for i in range(1, self.GRID + 1):
+            x = x0 + (far - x0) * i / self.GRID
+            if integer:
+                x = float(round(x))
+                if x == good:
+                    continue
+            if self.changed({fact: to(x)}) is not None:
+                return self._bisect(fact, v0, x0, good, x, to, integer, {}, sign)
+            good = x
+        return None
 
     def _bisect(self, fact, v0, x0, good, bad, to, integer, base, sign):
         """good: unchanged, bad: changed; → (Change at the boundary, Result there)."""
@@ -449,7 +476,13 @@ def search(res, question, max_changes=2, over=None, target=None, domains=None, s
         if isinstance(d, (list, set, frozenset)) or (isinstance(d, tuple) and _num(v) is None):
             kinds[f] = ("values", list(d))
         elif _num(v) is not None:
-            kinds[f] = ("number", tuple(float(_num(x)[0]) for x in d) if isinstance(d, tuple) else None)
+            rng = tuple(float(_num(x)[0]) for x in d) if isinstance(d, tuple) else None
+            if rng is not None and not min(rng) <= _num(v)[0] <= max(rng):   # the bounds found would lie outside it
+                out.not_searched[f] = (f"its value {_val(v)} is outside the domain given for it "
+                                       f"({_val(d[0])}, {_val(d[1])})")
+                continue
+            kinds[f] = ("number", rng)
+            out._numbers = True
         elif isinstance(v, bool):
             kinds[f] = ("values", [not v])
         elif isinstance(v, enum.Enum):
