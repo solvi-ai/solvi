@@ -6,7 +6,8 @@ the LLM proposes, solvi's checks, rules and thresholds decide.
     part = model.decision("team", "Which team should handle this?", "email", {"billing": "Charges", "shipping": "Delivery"})
     team = Cascade([small, large, model.decision(...)])                      # the LLM as the last, most expensive stage
 
-One question is one request (`POST {base_url}/chat/completions`, temperature 0), with a JSON schema for the reply:
+One question is one request (`POST {base_url}/chat/completions`, temperature 0), the input between <text> and </text>
+(a tag of that name inside it written as &lt;text&gt;, so it cannot close the block), with a JSON schema for the reply:
 
     {"answer": <one of the options>, "probabilities": {<option>: p, ...}, "quote": "<the passage that supports it>"}
 
@@ -102,11 +103,15 @@ _NULL_CONF = {"span": "; with null: your probability that the text does not stat
               "choice": f'; with "{NOT_STATED}": your probability that the text does not say it',
               "multi": f'; with ["{NOT_STATED}"]: your probability that the text does not say it'}
 FORMATS = ("json_schema", "json_object", "prompt")
+# the input goes between <text> and </text>: a tag of that name inside it would close the block early and let the rest
+# read as the prompt's own lines, so it is written with &lt; / &gt; (the quote is still looked up in the input as given)
+_TAG = re.compile(r"<(\s*/?\s*text\s*)>", re.IGNORECASE)
+_ESCAPE = "<text> tags inside the input written as &lt;text&gt;"
 
 
 def template_hash():
     """The hash of the prompt templates and reply forms (part of every LLM decision's fingerprint)."""
-    blob = json.dumps([TEMPLATE_VERSION, SYSTEM_PROMPT, USER_PROMPT, _FORMS, _FORMS_CONF, _NULL_CONF], sort_keys=True)
+    blob = json.dumps([TEMPLATE_VERSION, SYSTEM_PROMPT, USER_PROMPT, _FORMS, _FORMS_CONF, _NULL_CONF, _ESCAPE], sort_keys=True)
     return hashlib.sha256(blob.encode()).hexdigest()[:16]
 
 
@@ -234,7 +239,7 @@ def messages(it, ask="probabilities"):
         if getattr(it, "unknown", False):
             lines.append(f"- {NOT_STATED}: the text does not say")
         opts = "Options:\n" + "\n".join(lines)
-    user = USER_PROMPT.format(task=it.task, options=opts, text=it.text)
+    user = USER_PROMPT.format(task=it.task, options=opts, text=_TAG.sub(r"&lt;\1&gt;", it.text))
     return [{"role": "system", "content": sysmsg}, {"role": "user", "content": user}]
 
 
