@@ -1455,7 +1455,10 @@ class Guard:
         its values and the user's next message explicitly accepted it (solvi.agents.confirm: "yes", "go ahead",
         "please proceed", "да", "подтверждаю", ...; "yes, but ..." and "no" do not). The check `user_confirmed`
         (deny; on_fail="escalate": a person decides) runs after grounding and once, before your policies; its reason
-        says what was missing, and an allowed call carries the accepted proposal and the acceptance as evidence.
+        says what was missing, and an allowed call carries the accepted proposal and the acceptance as evidence. For
+        actions that must be the user's own decision: a value grounded in a tool output (their order, listed by a
+        lookup) passes grounding, while nothing in a tool output can write the user's yes. It costs turns, and it does
+        not judge the choice — a proposal the user accepts is allowed.
 
         arguments: the arguments the proposal must name (default: every argument whose value is text, a number or a
         list of them — a bool or an empty value is not named). match: {argument: matcher} — a ground= matcher name
