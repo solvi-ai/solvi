@@ -1,4 +1,4 @@
-"""The "New in 0.7" tab: escalation with a guarantee (act_guard), a vote of two model families under one guarantee, text
+"""The demos of the "New in 0.8" tab (features that came with 0.7 and run on 0.8): escalation with a guarantee (act_guard), a vote of two model families under one guarantee, text
 in (a message → the question it asks and its fields, each with a quote), the agent guard (preview), a verified chart
 (preview), the trace signature (preview), learning from corrections with fit's refit, and reports for people.
 

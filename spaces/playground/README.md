@@ -44,7 +44,9 @@ Tabs:
   trace, and a tampered copy fails. Below, the benchmark's main table. An honest summary on top: strong LLMs follow
   these rules nearly perfectly and solvi is not more accurate there; the differences are cost, speed, repeatability,
   replay and the guarantee.
-- **New in 0.7**: small live demos, with keyword stand-ins in place of models and a scripted agent (no model runs in
+- **New in 0.8**: the 0.8 highlights (one name per concept, any model as the decider, `System.guarantee`, `Fail` and
+  `solvi.refine`, `decide_set`, `solvi.openset`, `store.redact`, the audit fixes) with a link to the CHANGELOG, then
+  small live demos, with keyword stand-ins in place of models and a scripted agent (no model runs in
   the browser): escalation with a guarantee (`act_guard` on 300 labelled emails: the answered share, the error, the risk
   on new emails, `must_escalate_at_least`, and the guarantee line of the audit; a slider sets the risk), a vote of two
   model families under one guarantee (`solvi.multi.Vote` with `act_guard`: disagreement escalates with both proposals;
@@ -78,7 +80,7 @@ Another Space: [solvi arcade](https://huggingface.co/spaces/solvi-ai/arcade).
   up without a code change.
 - `vs_llm.json`: that tab's data (curated cases, the saved answers of every arm on them, the summary table), built by
   `benchmarks/vs_llm/make_playground_bundle.py` (rerun it after the benchmark changes; `--check` says whether it is stale).
-- `new07.py`: the "New in 0.7" demos (pure Python, no gradio; each feature detected before use; `run(name, text, risk)`
+- `new07.py`: the "New in 0.8" tab's demos (pure Python, no gradio; each feature detected before use; `run(name, text, risk)`
   returns the markdown, the audit, the report as Markdown and HTML, and a picture).
 - `audit_view.py`: renders the audit panel from `Response.audit().to_dict()`.
 - `app.py` (entrypoint), `sandbox.py`, `demos.py`, `strategy_demo.py`, `presets/`: the app, ported from the Gradio 6 server

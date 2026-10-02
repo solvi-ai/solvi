@@ -726,7 +726,7 @@ def solvi_version():
 ABOUT = """
 **solvi vs LLM** (its own tab): cases from the public benchmark side by side — the saved answers of LLMs asked directly and inside solvi, next to solvi deciding live in this tab; reorder the options, replay the trace, and the benchmark's main table. Strong LLMs follow these short rules nearly perfectly; the differences are cost, speed, repeatability, replay and the guarantee.
 
-**New in 0.7** (the "New in 0.7" tab; this Space pins solvi 0.8.0): escalation with a guarantee you set (`act_guard`: P(answered alone and wrong) ≤ risk, and the audit's guarantee line), a vote of two model families under one guarantee, text in (a message → the question it asks and its fields, each with a quote), the agent guard (preview: allow / deny / escalate a proposed tool call, the URL matcher), a verified chart from a text with numbers (preview, SVG), the trace signature that names the one changed record (preview), learning from corrections with `fit`'s refit, and reports for people (`res.report()`, also under the Playground's answers). The deciders there are keyword stand-ins and the agent is scripted: no model runs.
+**New in 0.8** (the "New in 0.8" tab; this Space pins solvi 0.8.0): the 0.8 highlights with a link to the CHANGELOG — one name for every concept, any model as the decider, a guarantee on any question, checks that say why and a re-ask loop, consistent answers across many items, erasure that keeps the chain — and live demos: escalation with a guarantee you set (`act_guard`: P(answered alone and wrong) ≤ risk, and the audit's guarantee line), a vote of two model families under one guarantee, text in (a message → the question it asks and its fields, each with a quote), the agent guard (preview), a verified chart from a text with numbers (preview, SVG), the trace signature that names the one changed record (preview), learning from corrections with `fit`'s refit, and reports for people (`res.report()`, also under the Playground's answers). The deciders there are keyword stand-ins and the agent is scripted: no model runs.
 
 **New in 0.4: grounded decisions.** Fuzzy proposes, deterministic decides, everything is in the trace: a model may quote, pick a category or learn an answer, but plain code checks its output (grounding, closed options, confidence, hard checks, constraints between answers) before anything uses it.
 `res.audit()` shows what every answer rests on and which safeguards fired, and replay reports "model changed since this decision" when a model is swapped; try the three "New in 0.4" presets and the Audit panel.
@@ -836,12 +836,22 @@ with gr.Blocks(title="solvi playground", theme=THEME, css=CSS + vs_llm.CSS) as d
         v_reorder.click(vs_llm.reorder, [v_set, v_case], v_extra)
         v_replay.click(vs_llm.replay, [v_set, v_case], v_extra)
 
-    with gr.Tab("New in 0.7"):
-        gr.Markdown("Features of solvi 0.7, each a small live demo. **No model runs here:** the deciders are keyword "
-                    "stand-ins with a decider's contract and the agent is scripted, so the numbers show the mechanics, "
-                    "not a model's quality. The agent guard, verified charts and the trace signature are **previews**; "
-                    "the gated learning loop and LoRA adapters are **experimental** and not shown (LoRA needs torch). A "
-                    "demo that needs a newer solvi than the one this tab loaded says so.", elem_classes="note")
+    with gr.Tab("New in 0.8"):
+        gr.Markdown("**New in solvi 0.8** (the [CHANGELOG](https://github.com/solvi-ai/solvi/blob/main/CHANGELOG.md) has "
+                    "the full list): one name for every concept (the 0.7 names still work, with a warning, until 0.9); "
+                    "any model as the decider (an LLM through `solvi.llm`, a System One service, or a local checkpoint); "
+                    "a calibrated guarantee with a stated promise on any question (`System.guarantee`); checks that say "
+                    "why (`Fail`) and a propose → check → re-ask loop (`solvi.refine`); the answers of many items made "
+                    "consistent under set rules (`solvi.sets.decide_set`); inputs from outside the calibration set "
+                    "(`solvi.openset`); erasure that keeps the hash chain verifiable (`store.redact`); and the fixes of "
+                    "an independent audit (a failed hard check always overrides; replay checks the stored answers).",
+                    elem_classes="note")
+        gr.Markdown("The demos below run live on the solvi this tab loaded. **No model runs here:** the deciders are "
+                    "keyword stand-ins with a decider's contract and the agent is scripted, so the numbers show the "
+                    "mechanics, not a model's quality. The agent guard, verified charts and the trace signature are "
+                    "**previews**; the gated learning loop and LoRA adapters are **experimental** and not shown (LoRA "
+                    "needs torch). A demo that needs a newer solvi than the one this tab loaded says so.",
+                    elem_classes="note")
         with gr.Row():
             with gr.Column(scale=4):
                 n_demo = gr.Dropdown(list(new07.DEMOS), value=next(iter(new07.DEMOS)), label="Demo")
