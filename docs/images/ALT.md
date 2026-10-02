@@ -67,14 +67,14 @@ Numbers come from the model cards (solvi-ai/solvi-large, solvi-ai/solvi-base) an
   на 999, атакующий пересчитал все хеши, и итог «Caught»: повтор находит расхождение ровно на изменённом шаге 1 —
   значение 999 ≠ пересчитанное True.
 
-## realms_l17.png
+## realms_policy_net.png
 
 - EN: Screenshot of solvi realms after 100 turns with the policy-net faction: the strategy map with four factions'
-  territories, cities and units, and the decision card of archer #156: order_military = attack, confidence 0.97; why: "L17
-  policy net: attack +0.06, move +0.03, fortify -0.00, defend -0.08; laws removed: none; check: ok → attack"; the answer
-  check (laws re-verified after the net) ok; hard check keeps_capital_defender passed.
+  territories, cities and units, and the decision card of archer #156: order_military = attack, confidence 0.97; why: "policy
+  net: attack +0.06, move +0.03, fortify -0.00, defend -0.08; laws removed: none; check: ok → attack"; the answer
+  check of the policy net (laws re-verified after the net) ok; hard check keeps_capital_defender passed.
 - RU: Снимок solvi realms после 100 ходов с фракцией policy net: карта с территориями четырёх фракций, городами и отрядами, и
-  карточка решения лучника #156: order_military = attack, уверенность 0.97; почему: «L17 policy net: attack +0.06,
+  карточка решения лучника #156: order_military = attack, уверенность 0.97; почему: «policy net: attack +0.06,
   move +0.03, fortify -0.00, defend -0.08; laws removed: none; check: ok → attack»; повторная проверка законов после
   сети — ok; жёсткая проверка keeps_capital_defender пройдена.
 
