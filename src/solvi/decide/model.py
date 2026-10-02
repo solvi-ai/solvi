@@ -928,7 +928,7 @@ class DecideModel:
             k = d.pop("key")
             ex = [(list(z), tuple(y) if isinstance(y, list) else y) for z, y in d.pop("examples", [])]
             self.adaptations[(k[0], tuple(k[1]), tuple(k[2]), k[3] if isinstance(k[3], str) else bool(k[3]), *k[4:])] = \
-                Adaptation(**d, examples=ex)             # k[4:]: "pointer" / "evidence" questions (files before 0.7.2 lost it)
+                Adaptation(**d, examples=ex)             # k[4:]: "pointer" / "evidence" questions (files before 0.8 lost it)
         return self
 
     # --- catalog parts
