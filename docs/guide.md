@@ -2466,16 +2466,27 @@ does not state):
 
 | extractor | right | wrong | missed |
 |---|---|---|---|
-| `CueExtractor` | 282 | 1 | 23 |
-| solvi-base's span pointer (`DeciderExtractor`) | 111 | 11 | 184 |
-| the pointer, then the cue finder | 220 | 12 | 74 |
-| the cue finder, then the pointer | 282 | 1 | 23 |
+| extractor | right | wrong | missed | strings without a pattern: right | wrong | missed |
+|---|---|---|---|---|---|---|
+| `CueExtractor` | 282 | 1 | 23 | 42 | 1 | 14 |
+| solvi-base's span pointer (`DeciderExtractor`) | 111 | 11 | 184 | 36 | 2 | 18 |
+| the pointer, then the cue finder | 271 | 12 | 23 | 46 | 3 | 8 |
+| the cue finder, then the pointer | 282 | 1 | 23 | 48 | 1 | 8 |
 
-The pointer answers "not stated" or a confidence below `min_field_confidence` for most fields it is asked about (the
-amount and the currency of "please refund order A-10457, 1.5 million rubles, paid 12 September"), and the cue finder
-never needed it as a fallback. A string field without a pattern is the cue finder's weak spot: it reads the words after
-"order id:" or "address is", up to the end of the clause, so give an identifier its pattern (`patterns=` or the
-field's `json_schema_extra={"pattern": ...}`) and an enum its synonyms. Routing has no
+The last three columns are a set written for the benchmark before the cue finder's reading of strings was last changed
+(30 texts, 57 stated values: order ids, addresses, names, vendors and invoice numbers with no pattern, in "key: value"
+lists and in sentences; "wrong" counts a value read where the text states none). The pointer answers "not stated" or a
+confidence below `min_field_confidence` for most fields it is asked about (the amount and the currency of "please
+refund order A-10457, 1.5 million rubles, paid 12 September"); a field one extractor reads below that confidence, or
+not at all, is passed to the next one in the list. A string without a pattern is read after one of its own cue words
+(the field's name, `cues=` — never its description's words): what follows a connector ("address: …", "address is …")
+up to the end of the clause, cut before the next "key:" of a list, another field's cue word, a new clause ("and my …",
+", please …") or after an identifier followed by a comma; or an identifier right after the cue ("order A-10457"). A
+field named as an identifier (`…_id`, `…_number`, `…_code`, `…_ref`) takes one token with a digit, or nothing. Before
+this, "order: A-10457, amount: 1" read the order id as "A-10457, amount: 1" and the set scored 20 right, 17 wrong, 20
+missed (the cue finder then the pointer: 27, 19, 11). It is still a guess — "The vendor will be confirmed later" reads
+the vendor as "confirmed later" — so give an identifier its pattern (`patterns=` or the field's
+`json_schema_extra={"pattern": ...}`) and an enum its synonyms. Routing has no
 "none of these" option: a text that asks none of the questions is escalated only when the decider is unsure
 (`min_confidence`, `min_margin`), so a confident wrong route is possible — add an entry point for "something else" if
 your texts can be about anything.
