@@ -421,8 +421,10 @@ stated" output and its pointer; see [decide_format.md §9](decide_format.md#9-an
 
 `system.ask(model_instance)` accepts a pydantic `BaseModel`: its fields (nested models included, as they are) are the given
 facts. `System(cat, questions, inputs=Request)` validates every dict passed to `ask` against `Request`: its fields, with
-defaults, become the given facts (other keys pass through), and a field that fails is left out — the fact is missing, the
-answers that need it abstain, and a `type_rejected` event names the field (`res.trace.rejected`). Values that already
+defaults, become the given facts, and a field that fails is left out — the fact is missing, the answers that need it
+abstain, and a `type_rejected` event names the field (`res.trace.rejected`). Keys the model does not declare pass
+through as given facts; to keep them out, give the model `model_config = ConfigDict(extra="forbid")`: each undeclared
+key is then left out and reported in `res.trace.rejected` (a `type_rejected` event names it), like a field that failed. Values that already
 passed a type in this run (a validated input, a typed producer's output) are not validated again by parts that read them
 with the same type.
 

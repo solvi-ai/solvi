@@ -381,3 +381,34 @@ def test_a_typed_input_comes_in_the_declared_field_order():
     assert list(bad.trace.init) == ["customer", "note"] and bad["ok"].status == "abstain"
     plain = System(cat, [Question("ok", "Ok?")])
     assert list(plain.ask({"note": "x", "amount": 5, "customer": "ann"}).trace.init) == ["note", "amount", "customer"]
+
+
+def test_a_key_the_input_model_forbids_is_reported_as_rejected_not_dropped_without_a_word():
+    """With extra="forbid" on System(inputs=Model) undeclared keys vanished from the state and nothing said so
+    (trace.rejected was empty), while the guide said other keys pass through."""
+    from pydantic import BaseModel, ConfigDict
+
+    class Open(BaseModel):
+        id: str
+        months: int
+
+    class Closed(Open):
+        model_config = ConfigDict(extra="forbid")
+    cat = Catalog()
+
+    @cat.rule("long")
+    def long(months: int) -> bool:
+        return months > 24
+    qs = [Question("long", "Long?")]
+    application = {"id": "a1", "months": 36, "age": 19, "purpose": "car"}
+    res = System(cat, qs, inputs=Open).ask(application)
+    assert list(res.trace.init) == ["id", "months", "age", "purpose"] and not res.trace.rejected    # they pass through
+    res = System(cat, qs, inputs=Closed).ask(application)
+    assert list(res.trace.init) == ["id", "months"] and res["long"].answer == "yes"
+    assert [k for k, _ in res.trace.rejected] == ["age", "purpose"]
+    assert res.trace.rejected[0][1].startswith("type rejected: given age = 19 is not a field of Closed, which forbids extra keys")
+    assert sorted((e["kind"], e["fact"]) for e in res.safeguards) == [("type_rejected", "age"), ("type_rejected", "purpose")]
+    assert res.trace.replay(cat)["ok"]
+    res = System(cat, qs, inputs=Closed).ask({"id": "a1", "months": "many", "age": 19})        # with a field that fails too
+    assert [k for k, _ in res.trace.rejected] == ["months", "age"] and res["long"].status == "abstain"
+    assert not System(cat, qs, inputs=Closed).ask({"id": "a1", "months": 3}).trace.rejected
