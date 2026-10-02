@@ -203,7 +203,7 @@ def test_cpu_cost_warning_once_per_model(ckpt, monkeypatch):
     with warnings.catch_warnings():
         warnings.simplefilter("error", LongInputWarning)
         part(email=doc(10))                                  # ~260 tokens: under the 2k-token line, no warning
-    monkeypatch.setattr(sd, "LONG_CPU_TOKENS", 100)
+    monkeypatch.setattr(sd.part, "LONG_CPU_TOKENS", 100)          # where the gate reads it
     with pytest.warns(LongInputWarning, match="31x"):
         part(email=doc(11))
     with warnings.catch_warnings():
