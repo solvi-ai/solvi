@@ -49,6 +49,8 @@ pip install "solvi[model]"     # + torch, transformers, for the ModernBERT extra
 pip install "solvi[onnx]"      # + onnxruntime, tokenizers: the decider (solvi.decide) on CPU without torch
 pip install "solvi[serve]"     # + fastapi, uvicorn: solvi serve over HTTP
 pip install "solvi[mcp]"       # + the official MCP SDK for solvi serve --mcp (without it, a built-in stdio server is used)
+pip install "solvi[otel]"      # + opentelemetry: decisions as OpenTelemetry spans (solvi.otel)
+pip install "solvi[duckdb]"    # + duckdb: stored decisions in a DuckDB file; "solvi[postgres]" for PostgreSQL
 pip install "solvi[langgraph]" # the solvi.agents adapters: also "solvi[pydantic-ai]", "solvi[openai-agents]"
 pip install "solvi[lora]"      # + torch, transformers, peft: part.adapt_lora, a LoRA adapter per question (experimental)
 ```
@@ -416,7 +418,7 @@ def repair_days(doc: str) -> Estimate[0, 3, 7, 14]:
 heads (`fit`, `fit_fast`) answer the four classic kinds only (examples answered `Unknown` are left out). All of it
 round-trips through JSON (`result.not_stated`, `evidence`, `extra`) and replays. From a decider — `model.decision(name,
 task, fact, Maybe[...] / Span[T] / Rank[...] / Estimate[...], evidence=True)` — these need an answer-primitives checkpoint (its "not
-stated" output and its pointer; see [decide_format.md §9](decide_format.md#9-answer-primitives-l14g-typed-v2-proposed-solvi_decide-v3)).
+stated" output and its pointer; see [decide_format.md §9](decide_format.md#9-answer-primitives-l14g-typed-v2)).
 A decider's `Span[T]` without `Maybe` has no way to say that the text does not state the answer: when its pointer finds
 "no span" at least as probable as the best span, the decision escalates ("the text may not state it …") instead of
 answering with that span — declare `Maybe[Span[T]]` to get "not stated" as an answer.
@@ -858,8 +860,8 @@ promise still holds; a combination calibrates with it (a cascade's next model ge
 
 ```python
 from solvi.systemone import systemone
-model = systemone("http://127.0.0.1:8009", "kev-latest")        # api_key="..." for a hosted service such as Jev
-part = model.decision("team", "Which team should handle this?", "email", {"billing": "Charges", "shipping": "Delivery"})
+kev = systemone("http://127.0.0.1:8009", "kev-latest")          # api_key="..." for a hosted service such as Jev
+part = kev.decision("team", "Which team should handle this?", "email", {"billing": "Charges", "shipping": "Delivery"})
 ```
 
 Any server of `POST /v1/systemone` (Jev, and open ones: Kev, Jeeves, Von, Laya-serve, Intern-Decision) proposes; solvi's checks,
@@ -874,8 +876,8 @@ weights behind them — calibrate again when the service changes its model.
 Through OpenRouter, with one provider pinned and no fallback to another:
 
 ```python
-model = systemone("https://openrouter.ai/api", "<model>", api_key=os.environ["OPENROUTER_API_KEY"],
-                  extra_body={"provider": {"only": ["<provider>"], "allow_fallbacks": False}})
+hosted = systemone("https://openrouter.ai/api", "<model>", api_key=os.environ["OPENROUTER_API_KEY"],
+                   extra_body={"provider": {"only": ["<provider>"], "allow_fallbacks": False}})
 ```
 
 `extra_body` fields (provider routing, `user`, a thinking model's `options`) go into every request; the fields solvi
@@ -1413,7 +1415,7 @@ no promise for new inputs; `solvi.calibration.ltt_threshold` and `crc_threshold`
 and `act_guard`) give one.
 
 [examples/13_decide_model.py](../examples/13_decide_model.py) routes support emails with a decision part: bias correction on
-60 unlabelled emails, S on 16 labelled ones, abstention, a constraint with a rule-based question, a hard check, the audit,
+60 unlabelled emails, `fit` of S on 16 labelled ones, abstention, a constraint with a rule-based question, a hard check, the audit,
 `System.teach`, `calibrate_for` and a JSON ticket. [examples/15_typed_decisions.py](../examples/15_typed_decisions.py) is the
 whole story: a pydantic ticket, the questions as the fields of a pydantic model, four answers (in one forward pass when the model shares passes), a hard
 check, a constraint and a rule over the model, an escalation, the audit. Both run the real decider when
@@ -1460,7 +1462,10 @@ res = system.ask(init_state)                   # all questions
 res = system.ask(init_state, ["ship"])         # a subset
 ```
 
-`System(catalog, questions, journal=None, inputs=None, storage=None)`. `storage` (a `TraceStorage` or a path) saves every
+`System(catalog, questions, journal=None, workers=1, order="default", producers="declared", learn=None, inputs=None,
+strategist=None, storage=None, timeout=None, costs="declared", lang="en", early_exit=True)`; `learn`: after every ask,
+update the parts' measured costs and the learned order / producer policies from what happened (default: on when
+`order` or `producers` is "learned"); the others are described where they matter. `storage` (a `TraceStorage` or a path) saves every
 response with its whole trace, hash-chained across responses (see [Storing decisions](#storing-decisions-tracestorage)).
 `journal="file.jsonl"` is the same as `storage=JSONLStorage("file.jsonl")`: every `ask` appends one JSON line with the hash
 of `init_state`, the answers, the flow and the hash of every trace record (the keys of 0.5's journal line), plus the whole
@@ -1736,8 +1741,9 @@ to 86% (a full fit: 86%). The cost:
 
 `fit_fast(..., refit=None)` turns it off (rank-one steps only, no examples kept); `refit=1.5` refits more often.
 
-On the example tasks (`benchmarks/fast_head.py`) `fit_fast` trains 15–70× faster than `fit` and is 1–4 points less accurate at
-200 examples; learning online from 10 to 200 corrections ends within a few points of fitting on all 200 at once. Use `fit` when accuracy on a fixed
+On the example tasks (`benchmarks/fast_head.py`, one run on this version) `fit_fast` trained 11–32× faster than `fit`; at
+200 examples it was 5.8 points more accurate on one task (0.955 against 0.897) and 0.8 points less on the other (0.960
+against 0.968); learning online from 10 to 200 corrections ends within a few points of fitting on all 200 at once. Use `fit` when accuracy on a fixed
 dataset matters most, `fit_fast` when labels arrive one by one or you need to retrain on every request.
 
 ### learn_rule: a readable rule list
@@ -3681,7 +3687,7 @@ answered alone at that risk (with `--groups`: in no group).
 
 ```
 solvi models                                             # solvi-ai/solvi-base, solvi-ai/solvi-large, and every cached decider
-solvi models pull solvi-ai/solvi-base [--backend onnx|torch|all]       # the only command that downloads
+solvi models pull solvi-ai/solvi-base [--backend onnx|torch|all]       # download (so do serve --pull and DecideModel.load(<id>))
 solvi models check solvi-ai/solvi-base --examples labels.jsonl --task "Which team should handle this?"
 solvi models check ./my-decider | systemone:http://127.0.0.1:8009#kev-latest | mymodels.py:decider
 ```
@@ -3720,7 +3726,8 @@ What it does not guarantee:
   labels. Learned rules reproduce labeling errors (which is also what makes those errors visible).
 - The strategist plans from signatures. For a question with no rule, no trained head and no `uses`, it computes
   everything reachable.
-- solvi answers yes/no and choice questions. It does not generate free text.
+- solvi answers closed questions — yes/no, a choice, ordered levels, several labels, "not stated", a span of the text, a
+  ranking, an estimate. It does not generate free text.
 - New fields need labeled examples, roughly 100 documents per task.
 
 Research note: in our experiments, an LLM could write a working catalog from a plain-language task description when every

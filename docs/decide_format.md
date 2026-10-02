@@ -14,7 +14,7 @@ format is in [strategist.md](strategist.md).
 | `l14b_decider v1` | the first, text-only deciders | modes `single`, `multi`; columns `single` 0, `multi` 1; text input; no act head; one question per pass |
 | `l14f typed v1` | the first typed checkpoints | modes `single`, `multi`, `score`, `noul`; columns `single` / `score` / `noul` 0, `multi` 1, `act` 2; states `paths`, `tree`, `json`; act head in column 2; noul labels `true` / `false`; one question per pass unless `multi_question` is declared |
 | `solvi_decide v2` | any other model | the `l14b_decider v1` defaults; everything else declared |
-| `solvi_decide v2` with `"subformat": "l14g typed v2"` (also `format` `l14g typed v2`) | the answer-primitives checkpoints and later (the published decide-* previews) | the answer primitives, §9: the `l14f typed v1` defaults plus modes `rank`, `number`, `span`, "not stated" (column 3), a pointer (columns 4 / 5) |
+| `solvi_decide v2` with `"subformat": "l14g typed v2"` (also `format` `l14g typed v2`) | the answer-primitives checkpoints and later (the published solvi-base, solvi-large and solvi-large-long) | the answer primitives, §9: the `l14f typed v1` defaults plus modes `rank`, `number`, `span`, "not stated" (column 3), a pointer (columns 4 / 5) |
 | `solvi_decide v3` (without that subformat) | none published; what `solvi.llm` and `solvi.systemone` declare for themselves | the answer-primitives fields are read (§9), but the defaults are the `l14b_decider v1` ones: no "not stated", no pointer, no act head unless declared — declare `modes`, `unknown`, `pointer`, `act`, or add `"subformat": "l14g typed v2"` for the row above |
 
 `l14f typed v1.N`, `l14g typed v2.N` and `solvi_decide v2.N` / `v3.N` (a minor version) load the same way; any other format is refused
@@ -28,6 +28,8 @@ config.json            the encoder's transformers config (ModernBERT)
 tokenizer.json         the tokenizer (`tokenizers`); must contain the marker tokens
 model.safetensors      encoder + head: head = Linear(h, h) → GELU → LayerNorm → Linear(h, C)  ("head.3.weight": [C, h])
 onnx/model_fp16.onnx   optional; inputs input_ids, attention_mask [B, L] int64 → logits [B, L, C]
+onnx/model_block*.onnx optional; the block layout's export (several questions in one pass): also position_ids,
+                       full_attention_mask, sliding_attention_mask; loaded instead of the plain one when present
 solvi_decide.json      format and capabilities (below)
 ```
 
@@ -213,12 +215,12 @@ several text facts are joined by new lines. A scalar fact (a number, a date) is 
 `meta` is the content of `solvi_decide.json`; a meta whose `format` is none of §1 (a stand-in) gets the `l14b_decider v1`
 defaults and hashes as in solvi 0.4.
 
-## 9. Answer primitives: `l14g typed v2` (proposed `solvi_decide v3`)
+## 9. Answer primitives: `l14g typed v2`
 
 The contract for a decider that answers every answer primitive of solvi (see the
 [guide](guide.md#answer-primitives-not-stated-evidence-spans-rankings-estimates)): "not stated", evidence quotes, spans,
 rankings and numbers. It is the training format of the answer-primitives checkpoints — their training code (in the research repository)
-writes it and is the reference for the network side — and solvi 0.5 reads it. Where that format left a choice open, solvi's choice is marked **(solvi)**.
+writes it and is the reference for the network side — and solvi reads it (since 0.5). Where that format left a choice open, solvi's choice is marked **(solvi)**.
 
 A checkpoint is read with this contract when its `solvi_decide.json` has `"subformat": "l14g typed v2"` (their training code writes
 `"format": "solvi_decide v2"` with it), or `"format": "l14g typed v2"` / `"solvi_decide v3"` — a bare `"solvi_decide v3"`

@@ -33,7 +33,7 @@ same system ([examples/12_grounded_audit.py](examples/12_grounded_audit.py)).
 And it is fast. The strategist plans a flow over a 10 000-part catalog in about 11 ms and runs only the parts the questions
 need (2.3% of that catalog). Hard checks run first, so a failing one skips the expensive rest; independent slow parts (API
 calls, model inference) run in parallel. On an insurance-claim desk with slow services
-([examples/09_strategy_at_scale.py](examples/09_strategy_at_scale.py)) a full decision takes 463 ms instead of 1 122 ms for a
+([examples/09_strategy_at_scale.py](examples/09_strategy_at_scale.py)) a full decision takes 461 ms instead of 1 122 ms for a
 script that computes everything, and 152 ms when an expired policy settles the claim first.
 
 ## Try it
@@ -69,13 +69,14 @@ pip install solvi              # core: rules, checks, learned answer heads (nump
 pip install "solvi[model]"     # + torch, transformers: ModernBERT field extractors for documents and the decider
 pip install "solvi[onnx]"      # + onnxruntime, tokenizers: the decider (solvi.decide) on CPU without torch
 pip install "solvi[serve]"     # + fastapi, uvicorn: `solvi serve app.py:system` — the questions over HTTP (also --mcp)
+pip install "solvi[mcp]"       # + the official MCP SDK for solvi serve --mcp (without it, a built-in stdio server)
 pip install "solvi[otel]"      # + opentelemetry: decisions as OpenTelemetry spans (solvi.otel)
 pip install "solvi[duckdb]"    # + duckdb: stored decisions in a DuckDB file (solvi.DuckDBStorage); [postgres] for PostgreSQL
 pip install "solvi[lora]"      # + torch, transformers, peft: part.adapt_lora, a LoRA adapter per question (experimental)
 ```
 
 `solvi.agents` (guarding an agent's tool calls) needs only the core; its adapters use the PydanticAI, LangGraph or OpenAI
-Agents SDK you already have.
+Agents SDK you already have ("solvi[pydantic-ai]", "solvi[langgraph]", "solvi[openai-agents]" install them).
 
 Requires Python 3.10+.
 
@@ -137,7 +138,7 @@ With `"balance": 3` the hard check fails and the answer is `reject` with `status
 solvi init triage --with-model && cd triage     # a typed catalog, passing cases.json, README, CI workflow
 solvi test . && solvi check catalog.py:system   # regression cases and the catalog lint (what CI runs)
 solvi ask catalog.py:system example.json --audit            # one decision and what it rests on (--json, --report html)
-solvi models pull solvi-ai/solvi-base           # the only command that downloads; `solvi models` lists, `check` measures
+solvi models pull solvi-ai/solvi-base           # download it; `solvi models` lists, `check` measures
 solvi calibrate catalog.py:system route labels.csv --risk 0.1   # act_guard → route.calib.json, loaded by the catalog
 solvi hook install                              # Claude Code's edits checked against .claude/solvi-rules.toml
 ```

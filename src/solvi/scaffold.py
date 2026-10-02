@@ -457,7 +457,7 @@ def readme_md(name, template, with_model):
                 (f"The question `{q}` is answered by a decider. Without `SOLVI_DECIDE_MODEL` a keyword stand-in answers "
                  "(tests and CI need no model); with it, a real one:"), "", "```bash",
                 "solvi models list                                    # published and downloaded deciders",
-                "solvi models pull solvi-ai/solvi-base                # the only command that downloads",
+                "solvi models pull solvi-ai/solvi-base                # download it once",
                 f"solvi models check solvi-ai/solvi-base --examples labels.csv --task \"{_task(template)}\"",
                 "export SOLVI_DECIDE_MODEL=solvi-ai/solvi-base",
                 f"solvi calibrate catalog.py:system {q} labels.csv --risk 0.1 --out {q}.calib.json",

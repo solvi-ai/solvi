@@ -128,3 +128,23 @@ def test_the_readme_speed_table_names_its_version_and_machine_and_the_run_all_co
     speed = README.split("## Speed")[1].split("## ")[0]
     assert "0.7.1" in speed and "i7-12700H" in speed and "run all, no plan" in speed
     assert "| 10 000 | 6 ms |" not in speed and "about 6 ms" not in README
+
+
+def test_stale_sentences_of_the_docs_stay_corrected():
+    """A batch of stale sentences (each checked against the code): "solvi answers yes/no and choice questions",
+    "the only command that downloads", decide-* ids, the guide's System signature, the install lists, and `model`
+    rebound to a hosted service in the middle of a chapter."""
+    import inspect as _inspect
+
+    from solvi import System
+    fmt = (ROOT / "docs" / "decide_format.md").read_text()
+    assert "solvi answers yes/no and choice questions" not in GUIDE and "decide-*" not in fmt
+    assert "proposed `solvi_decide v3`" not in fmt and "model_block*.onnx" in fmt
+    for text in (README, GUIDE, (ROOT / "src" / "solvi" / "scaffold.py").read_text()):
+        assert "the only command that downloads" not in text
+    sig = _flat(GUIDE.split("`System(catalog, questions,")[1].split(")`")[0])
+    assert all(f"{p}=" in sig for p in list(_inspect.signature(System).parameters)[2:]), sig
+    extras = ["model", "onnx", "serve", "mcp", "otel", "duckdb", "lora"]
+    for text in (README, GUIDE):
+        assert all(f'"solvi[{e}]"' in text for e in extras)
+    assert not re.search(r"^model = systemone\(", GUIDE, re.M)
