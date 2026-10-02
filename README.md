@@ -252,7 +252,8 @@ Every answer is a value and a confidence, and the types also declare answer prim
   0.1 s a call; every decision stored and verifiable; Codex as a preview
   ([guide](docs/guide.md#solvi-behind-a-coding-agents-hooks), [examples/22_coding_agent_hooks.py](examples/22_coding_agent_hooks.py)).
 - **Text in.** `system.ask_text("please refund order A-10457, 1.5 million rubles, paid 12 September", decider)`: the
-  decider picks which question the message asks (or escalates when unsure), each input field is read with a quote and a
+  decider picks which question the message asks (or escalates when unsure), each input field is read with a quote
+  (found by the checkpoint's span pointer, or by a deterministic cue finder — `TextIn(extractor=...)` chooses) and a
   deterministic parser (numbers, dates, enums, yes / no), missing required fields are listed for a clarifying question,
   and the trace says those values were read by a model, not given. `solvi serve` answers texts at `POST /ask_text`
   and as the MCP tool `ask_text`.

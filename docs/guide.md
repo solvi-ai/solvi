@@ -2111,13 +2111,13 @@ million rubles on 12 September". `solvi.textin` turns such a text into the quest
 state, reads every value with a quote, and leaves the decision to the catalog as before.
 
 ```python
-from solvi.textin import TextIn
+from solvi.textin import CueExtractor, TextIn
 
 eps = system.entry_points()          # the questions with the typed input state each one reads
 eps[0].fields["amount"]              # EntryField(name="amount", type=float, description=..., required=True)
 eps[0].tool()                        # the same as a function-calling tool: {"type": "function", "function": {...}}
 
-tin = TextIn(system, decider, today=date(2026, 9, 28),
+tin = TextIn(system, decider, extractor=CueExtractor(), today=date(2026, 9, 28),   # fields by the cue finder
              synonyms={"currency": {"RUB": ["rubles", "руб", "₽"], "EUR": ["euro", "€"]}},
              patterns={"order_id": r"[A-Z]-\d+"})
 read = tin.read("Please refund order A-10457: I paid 1.5 million rubles on 12 September.")
@@ -2144,6 +2144,15 @@ deterministic finder of candidates of the field's type (numbers, dates, enum lab
 nearest after a cue word (the field's name, plus `cues={field: [...]}`; its description's words rank candidates too); any object with
 `find(text, FieldSpec) → [Quote]` works, and a list of extractors is tried in order. Code does the rest: a deterministic
 parser per type turns the quote into the value.
+
+The default is one or the other, not both: with a pointer checkpoint (solvi-base, solvi-large) only the pointer reads the
+fields, and where it answers "not stated" the field is missing even when the cue finder would have found it — on the
+sentence above solvi-base read the order id and the date and left the amount and the currency "not stated" (one run, no
+rate measured). The example therefore names its extractor. `extractor=[DeciderExtractor(decider), CueExtractor()]`
+tries the pointer first and falls back to the cue finder; the trace records which one read each field. Routing has no
+"none of these" option: a text that asks none of the questions is escalated only when the decider is unsure
+(`min_confidence`, `min_margin`), so a confident wrong route is possible — add an entry point for "something else" if
+your texts can be about anything.
 
 | Type | Reads |
 |---|---|
