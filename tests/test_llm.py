@@ -628,3 +628,37 @@ def test_max_len_widens_what_an_llm_reads_under_retrieve_and_the_default_stays_5
     assert a.fingerprint() != b.fingerprint() and "max_len" not in model(FakeLLM()).meta
     with pytest.raises(ValueError, match="max_len"):
         model(FakeLLM(), max_len="3000")
+
+
+class SomeLogprobs(FakeLLM):
+    """A gateway whose providers differ: log-probabilities only for the texts that mention "card"."""
+
+    def __call__(self, req, timeout=None):
+        self.logprobs = "card" in _text(json.loads(req.data.decode()))
+        return super().__call__(req, timeout)
+
+
+def test_a_calibration_refuses_log_probabilities_mixed_with_written_numbers_and_a_part_escalates_the_other_source():
+    """logprobs="auto" through a gateway answered some requests from log-probabilities (0.99...) and some from the
+    numbers the model wrote (0.85-0.95); one threshold over both answered alone by which provider replied."""
+    mixed = [("I was charged twice on my card", "billing"), ("my parcel is late", "shipping")] * 20
+    part = model(SomeLogprobs()).decision("team", "Which team?", "email", TEAMS)
+    with pytest.raises(ValueError, match="two sources: 20 from log-probabilities, 20 from the numbers the model wrote"):
+        part.act_guard(mixed, risk=0.10)
+    with pytest.raises(ValueError, match="two sources"):
+        part.calibrate_for(mixed, error=0.10)
+    other = model(SomeLogprobs()).decision("team", "Which team?", "email", TEAMS)
+    with pytest.raises(ValueError, match="part 'team'"):
+        Vote([model(SomeLogprobs()).decision("team", "Which team?", "email", TEAMS), other]).act_guard(mixed, risk=0.10)
+    clean = model(SomeLogprobs()).decision("team", "Which team?", "email", TEAMS)
+    clean.act_guard([("charged twice on my card", "billing"), ("card lost in the parcel", "shipping")] * 20, risk=0.5)
+    assert clean.guarantee["probabilities"] == "logprobs"
+    clean.escalate_below = 0.5                                 # so that the threshold itself lets both through
+    d = clean.decide("I was charged twice")                    # no "card": the written numbers
+    assert d.extra["llm"]["probabilities"] == "stated"
+    assert d.escalate.startswith("probabilities from the numbers the model wrote, but the threshold was calibrated on "
+                                 "log-probabilities")
+    assert clean.decide("charged on my card").escalate is None
+    plain = model(FakeLLM()).decision("team", "Which team?", "email", TEAMS)   # no logprobs at all: as before
+    plain.act_guard(mixed, risk=0.10)
+    assert plain.guarantee["probabilities"] == "stated"

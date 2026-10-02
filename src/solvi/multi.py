@@ -38,7 +38,7 @@ from collections.abc import Mapping
 import numpy as np
 
 from .core import Decision, Quote, Unknown
-from .decide import DecisionPart, Facts, GroupBy, _group_info, _group_promise, _single, group_record
+from .decide import DecisionPart, Facts, GroupBy, _group_info, _group_promise, _single, group_record, one_source
 from .provenance import ESCALATED, code_fingerprint, digest
 
 _SIGNAL = {"rank": "shared threshold on each model's rank among the calibration examples",
@@ -510,6 +510,13 @@ class _Combination:
             raise ValueError("calibration needs labelled examples")
         return [_src(x) for x, _ in ex], [y for _, y in ex]
 
+    def _one_source(self, states):
+        """Every part's probabilities on the calibration examples come from one source (solvi.decide.one_source: an LLM
+        that answered some from log-probabilities and some from the numbers it wrote is refused)."""
+        for lf in self.leaves():
+            one_source([ls.d0 for st in states for ls in st.walk() if ls.leaf is lf],
+                       f"the calibration examples of part {lf.name!r}")
+
     def _right(self, v, y):
         sp = self.spec
         if isinstance(v, Quote):
@@ -553,6 +560,7 @@ class _Combination:
             raise ValueError(f"scale must be one of {SCALES}, not {scale!r}")
         srcs, gold = self._examples(examples)
         states = [self.state(s).force() for s in srcs]
+        self._one_source(states)
         if scale == "rank":
             per = {id(lf): [] for lf in self.leaves()}
             for st in states:

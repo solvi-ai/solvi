@@ -15,7 +15,9 @@ One question is one request (`POST {base_url}/chat/completions`, temperature 0),
 confidence; "not stated" is an option only when the question allows it). The schema goes as `response_format`
 json_schema when the server takes it, else the same contract is in the prompt and the reply is parsed. When the server
 returns log-probabilities for the answer's tokens, the probabilities come from them (the chosen option: the product of
-its tokens' probabilities; the others: the alternatives at its first token), not from the numbers the model wrote.
+its tokens' probabilities; the others: the alternatives at its first token), not from the numbers the model wrote;
+`extra["llm"]["probabilities"]` records which, and a calibration refuses examples that mix the two (two scales; see
+solvi.decide.one_source).
 
 Everything is validated: the answer is one of the options, the probabilities are numbers in [0, 1] that agree with the
 answer, the quote is in the text (literally, up to typographic quotes and apostrophes, dashes, runs of whitespace and
@@ -724,7 +726,8 @@ def llm(base_url, model, api_key=None, *, timeout=60.0, retries=2, backoff=1.0, 
     then the contract in the prompt only, as far as the server accepts — stepped down only before the first successful
 request and on a 400 about the format; any other 400 / 413 / 422 escalates that question: "invalid input for the
 endpoint"), or one of them. logprobs: "auto" (ask for them;
-    drop them when the server refuses), True, False. ask: "probabilities" (one per option) or "confidence" (one number,
+    drop them when the server refuses; a gateway whose providers differ answers some requests from them and some from
+    the written numbers — a calibration then refuses the mix), True, False. ask: "probabilities" (one per option) or "confidence" (one number,
     fewer tokens; the rest shared evenly). retries / backoff: for network errors, timeouts, 408 / 409 / 429 / 5xx.
     seed: sent only when set (default None: not sent; some providers reject seed 0, and at temperature 0 it rarely
     matters). headers: extra HTTP headers (OpenRouter's HTTP-Referer, X-Title). extra_body: server-specific request

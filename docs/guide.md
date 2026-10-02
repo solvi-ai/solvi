@@ -916,7 +916,11 @@ with the provider's own message in `error.metadata.raw`; another 400, 413 or 422
 for the endpoint: HTTP 400 — <the server's message and the provider's cause>`, and the format stays). When the server returns log-probabilities
 (`logprobs="auto"`), the probabilities come from the answer's tokens — the chosen option's whole token sequence, the others
 from the alternatives at its first token — not from the numbers the model wrote (`extra["llm"]["probabilities"]` says
-which). Yes/no, scores, multi-label questions, spans (`kind="span"`: the passage must be in the text), "not stated"
+which: "logprobs", "stated" or "confidence"). A gateway can mix the two in one stream (some providers return
+log-probabilities, some do not), and they are two scales: `act_guard` / `calibrate_for` / `conformal` refuse
+calibration examples that mix them (ValueError naming the counts — make the model with `logprobs=False`, or pin the
+provider), and a part calibrated on one source records it in its guarantee (`"probabilities"`) and escalates a later
+decision whose probabilities came from the other. Yes/no, scores, multi-label questions, spans (`kind="span"`: the passage must be in the text), "not stated"
 (`Maybe[...]`) and `evidence=True` work; rankings and numbers are asked as a choice over the options / bins. Where the
 reply has one number (a span, `ask="confidence"`), the prompt says what it means for "not stated" — the model's
 probability that the text does not say it — and solvi reads it as p(not stated): a "not stated" at 0.2 is an unsure one.

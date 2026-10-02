@@ -2491,6 +2491,12 @@ class DecisionPart:
                     f"{name} {s:.2f} < {threshold:.2f} (shared threshold); would have answered {d.value!r}"
         elif self.guarantee is not None:
             d.extra["guarantee"] = dict(self.guarantee) if grp is None else group_record(self.guarantee, *grp)
+            want, got = self.guarantee.get("probabilities"), confidence_source(d)
+            if want is not None and got is not None and d.escalate is None and (got == "logprobs") != (want == "logprobs"):
+                d.escalate = (f"probabilities from {'log-probabilities' if got == 'logprobs' else 'the numbers the model wrote'}"
+                              f", but the threshold was calibrated on "
+                              f"{'log-probabilities' if want == 'logprobs' else 'the numbers the model wrote'}: the "
+                              f"guarantee does not cover it; would have answered {_shown(d.value)!r}")
         if self.long is None and (ctx or {}).get("text") is not None:
             self._cut(d, self.model.truncation(ctx.get("specs") or self.spec, ctx["text"]))
         if self.perturb and d.escalate is None and (ctx or {}).get("text") is not None:
@@ -2904,6 +2910,7 @@ class DecisionPart:
             ok.append(float((Unknown if d.value is Unknown else self.spec.label(d.value)) == y))
             conf.append(d.conf)
             act.append(None if a is None else self.model.act_probability(self.spec, d, a))
+        self._source = one_source(ds)                 # mixed log-probabilities and written numbers: refused
         has_act = all(a is not None for a in act)
         if signal == "act" and not has_act:
             raise ValueError("the model gives no act signal: use signal='confidence'")
@@ -2919,6 +2926,12 @@ class DecisionPart:
             gate = self.model.act_threshold
             conf = [c if a >= gate else -1.0 for c, a in zip(conf, act)]
         return (act if use_act else conf), ok, ("act" if use_act else "confidence"), ds
+
+    def _sourced(self, g):
+        """A guarantee record with the source of the calibration's probabilities when the model names one (an LLM:
+        "logprobs" or "stated"): a decision whose probabilities come from the other source escalates."""
+        src = getattr(self, "_source", None)
+        return g if src is None else {**g, "probabilities": src}
 
     def _set_threshold(self, sig, thr, guarantee, groups=None):
         """Set the calibrated threshold on its signal and clear the other signal's (an earlier calibration's threshold on
@@ -2971,7 +2984,7 @@ class DecisionPart:
             g = {"method": "empirical", "error": error, "n": len(ok), "signal": name,
                  "promise": "none: the error was measured on the calibration examples only"}
         thr = max(thr, 0.0) if name == "confidence" else thr      # −1 marks an example the act gate escalates
-        self._set_threshold(name, thr, g)
+        self._set_threshold(name, thr, self._sourced(g))
         acc, cov = accuracy_at(sig, ok, thr)
         return {"signal": name, "threshold": thr, "coverage": cov, "error": (1 - acc) if cov else 0.0, "n": len(ok),
                 "target_error": error, "method": method, "guarantee": g["promise"]}
@@ -3010,7 +3023,7 @@ class DecisionPart:
             thr = max(thr, 0.0) if name == "confidence" else thr  # −1 marks an example the act gate escalates
             g = {"method": "crc", "risk": risk, "n": len(ok), "signal": name,
                  "promise": f"P(answered alone and wrong) ≤ {risk:g} for inputs like the calibration examples"}
-            self._set_threshold(name, thr, g)
+            self._set_threshold(name, thr, self._sourced(g))
             auto = s >= thr
             out = {}
         else:
@@ -3024,7 +3037,7 @@ class DecisionPart:
             g = {"method": "crc-groups" if delta is None else "group-bound", "risk": risk, "n": len(ok), "signal": name,
                  "groups": by.label(), "min_group": min_group, "delta": delta,
                  "promise": _group_promise(risk, delta, len(nodes))}
-            self._set_threshold(name, nodes[()]["threshold"], g, {"by": by, "nodes": nodes, "signal": name})
+            self._set_threshold(name, nodes[()]["threshold"], self._sourced(g), {"by": by, "nodes": nodes, "signal": name})
             thr = nodes[()]["threshold"]
             out = {"groups": info}
         out = {"signal": name, "threshold": thr, "answered": float(auto.mean()),
@@ -3118,6 +3131,28 @@ class DecisionPart:
             at = Answer.maybe(at)
         return Question(name, text or sp.task, at, checkpoints=list(checkpoints or []), min_confidence=min_confidence,
                         require_evidence=require_evidence)
+
+
+def confidence_source(d):
+    """Where a decision's probabilities came from when its model says so (an LLM decider: extra["llm"]["probabilities"]
+    — "logprobs" from the answer's tokens, "stated" / "confidence" from the numbers the model wrote), else None."""
+    info = d.extra.get("llm") if isinstance(getattr(d, "extra", None), dict) else None
+    return info.get("probabilities") if isinstance(info, dict) else None
+
+
+def one_source(ds, who="the calibration examples"):
+    """The one source of the decisions' probabilities (see confidence_source; None when no decision names one). Raises
+    ValueError when log-probabilities and written numbers are mixed: they are two scales (a token probability near 1
+    against a stated 0.85-0.95), and one threshold over both answers alone by which server happened to reply."""
+    from collections import Counter
+    n = Counter(x for x in map(confidence_source, ds) if x is not None)
+    if "logprobs" in n and len(n) > 1:
+        raise ValueError(f"the probabilities of {who} come from two sources: {n['logprobs']} from log-probabilities, "
+                         f"{sum(n.values()) - n['logprobs']} from the numbers the model wrote (extra['llm']"
+                         "['probabilities']) — one threshold over both is not one signal. Make the model with "
+                         "logprobs=False (or True, for a server that always returns them), or pin the provider "
+                         "(extra_body={'provider': {...}}), and calibrate again")
+    return "logprobs" if "logprobs" in n else ("stated" if n else None)
 
 
 def _group_promise(risk, delta, n_groups):
