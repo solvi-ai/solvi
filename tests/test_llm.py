@@ -12,7 +12,7 @@ import urllib.error
 import numpy as np
 import pytest
 
-from solvi import Answer, Catalog, Question, System, Unknown
+from solvi import Answer, Catalog, Maybe, Question, Span, System, Unknown
 from solvi.decide import DecideModel
 from solvi.llm import LLMError, llm, locate, template_hash
 from solvi.multi import Cascade, Vote
@@ -512,3 +512,18 @@ def test_a_connection_cut_mid_reply_is_retried_like_a_5xx():
     dead = Truncating(cut=10)
     d = model(dead, retries=1).decision("team", "Which team?", "email", TEAMS).decide("my parcel is late")
     assert d.escalate and "did not answer" in d.escalate and "IncompleteRead" in d.escalate and len(dead.bodies) == 2
+
+
+def test_a_span_answer_not_in_the_text_escalates_with_the_llms_reason_and_keeps_the_rejected_passage():
+    """The span decision used to say "the checkpoint gave no pointer output for this span question" for an LLM's
+    passage that is not in the text and for a server that did not answer alike, and the passage was nowhere."""
+    doc = 'This Consulting Agreement ("Agreement") dated June 1, 2020 is made by A and B.'
+    reply = json.dumps({"answer": "Agreement dated June 1, 2020", "confidence": 0.9, "quote": ""})
+    for typ in (Span[str], Maybe[Span[str]]):
+        d = model(FakeLLM(reply=reply)).decision("date", "When was it signed?", "doc", typ).decide(doc)
+        assert d.escalate == ("model escalated: invalid LLM output — the answer 'Agreement dated June 1, 2020' is not "
+                              "literally in the text")
+        assert d.extra["llm"]["rejected"] == "Agreement dated June 1, 2020" and "checkpoint" not in d.escalate
+    down = model(FakeLLM(fail=[503] * 10), retries=0).decision("date", "When was it signed?", "doc", Span[str])
+    d = down.decide(doc)
+    assert d.escalate.startswith("model escalated: the LLM server did not answer") and "rejected" not in d.extra["llm"]

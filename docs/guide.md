@@ -921,7 +921,9 @@ into a guess: an answer that is not one of the options, probabilities that are n
 the answer, a reply that is not JSON, is cut off or refused. The quote is looked up literally, up to typographic quotes
 and apostrophes (’ ‘ “ ” as ' "), dashes (– — as -) and runs of whitespace; a quote still not found escalates when the
 question asks for evidence (`evidence=True`), and otherwise is dropped — the answer stands and
-`extra["llm"]["quote_dropped"]` records the quote. A server that does not answer (network, timeout, a connection cut
+`extra["llm"]["quote_dropped"]` records the quote. A span answer that is not in the text escalates with that reason
+(`invalid LLM output — the answer '...' is not literally in the text`), and the passage the model wrote is in
+`extra["llm"]["rejected"]`. A server that does not answer (network, timeout, a connection cut
 mid-reply, 408 / 409 / 429 / 5xx) is retried
 (`retries=2`, exponential `backoff`) and then escalates too, without being cached, so the next ask tries again; a wrong
 key, model or URL (401, 403, 404) raises `solvi.llm.LLMError`. There is no act signal: `act_guard` runs on the

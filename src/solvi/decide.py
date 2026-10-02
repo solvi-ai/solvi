@@ -1675,7 +1675,7 @@ class DecideModel:
         question asking for evidence gets the pointer's quotes."""
         u, ptr = getattr(z, "unknown", None), getattr(z, "pointer", None)
         if sp.kind == "span":
-            d = self._span_decision(sp, ptr)
+            d = self._span_decision(sp, ptr, getattr(z, "escalate", None))
         else:
             if (sp.unknown and u is not None) or sp.kind in ("rank", "number"):
                 d = self._decision_v3(sp, z, u if sp.unknown else None)
@@ -1747,13 +1747,16 @@ class DecideModel:
         value = {"median": med, "mode": levels[int(cond.argmax())], "expected": levels[int(round(rank))]}[sp.score_value]
         return Decision(value, probs, confidence=float(q[levels.index(value)]), extra={"expected": expected, "median": med})
 
-    def _span_decision(self, sp, ptr):
+    def _span_decision(self, sp, ptr, why=None):
         """The pointer's best span (its text literally from the input), or "not stated" when the null span is at least as
-        probable and the question allows it; when it does not (a Span without Maybe), such a span escalates. Confidence: p(span) among the null span and every span (renormalized without
-        the null span when "not stated" is not allowed)."""
+        probable and the question allows it; when it does not (a Span without Maybe), such a span escalates. Confidence:
+        p(span) among the null span and every span (renormalized without the null span when "not stated" is not
+        allowed). why: the scorer's own reason when it gave no usable output (an LLM's passage not in the text, a server
+        that did not answer) — the escalation says that, not that the checkpoint has no pointer."""
         if ptr is None:
             return Decision(Quote("", 0, 0, NULL_SOURCE), {}, confidence=0.0,
-                            escalate="the checkpoint gave no pointer output for this span question")
+                            escalate=f"{ESCALATED}: {why}" if why else
+                            "the checkpoint gave no pointer output for this span question")
         spans, pn = ptr["spans"], float(ptr["null"])
         if sp.unknown and (not spans or pn >= spans[0][0]):
             return Decision(Unknown, {Unknown: pn}, confidence=pn, extra={"p_null": pn})

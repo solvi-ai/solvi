@@ -19,7 +19,8 @@ its tokens' probabilities; the others: the alternatives at its first token), not
 Everything is validated: the answer is one of the options, the probabilities are numbers in [0, 1] that agree with the
 answer, the quote is in the text (literally, up to typographic quotes and apostrophes, dashes and runs of whitespace). A
 quote that is not in the text escalates when the question asks for evidence; otherwise it is dropped (the answer stands,
-`extra["llm"]["quote_dropped"]` records it). An invalid reply, a refusal, a cut-off reply or a server that does not answer
+`extra["llm"]["quote_dropped"]` records it); a span answer not in the text escalates, its passage in
+`extra["llm"]["rejected"]`. An invalid reply, a refusal, a cut-off reply or a server that does not answer
 (after `retries`) escalates — "model escalated: invalid LLM output — ..." — and is never turned into a guess. The
 probabilities become the decider's logits (log p), so everything built on a DecideModel works unchanged: act_guard /
 conformal / calibrate_for on your labelled examples (on the confidence: an LLM gives no act signal), fit / teach / adapt,
@@ -112,7 +113,12 @@ def endpoint(url):
 
 
 class InvalidOutput(ValueError):
-    """The LLM's reply broke the contract (not JSON, an answer outside the options, a quote not in the text, ...)."""
+    """The LLM's reply broke the contract (not JSON, an answer outside the options, a quote not in the text, ...).
+    `answer`: the rejected answer when there is one (a span answer not in the text), recorded in extra["llm"]["rejected"]."""
+
+    def __init__(self, msg, answer=None):
+        super().__init__(msg)
+        self.answer = answer
 
 
 class LLMError(RuntimeError):
@@ -411,7 +417,7 @@ def read_reply(it, content, logprobs=None, ask="probabilities"):
             raise InvalidOutput(f"the answer is not a passage: {ans!r}")
         sp = locate(ans.strip(), text)
         if sp is None:
-            raise InvalidOutput(f"the answer {ans.strip()[:80]!r} is not in the text")
+            raise InvalidOutput(f"the answer {ans.strip()[:80]!r} is not literally in the text", answer=ans.strip()[:1000])
         a, b = sp
         return {"logits": np.zeros(0), "pointer": {"null": (1 - c) if unknown_ok else 0.0,
                                                    "spans": [(c, a, b, text[a:b])]}, "info": info}
@@ -671,6 +677,8 @@ class LLMScorer:
                 raise InvalidOutput("the reply is empty")
             out = read_reply(it, content, ch.get("logprobs"), self.ask)
         except InvalidOutput as e:
+            if e.answer is not None:                   # what the model answered, for the person taking the escalation
+                info["rejected"] = e.answer
             return {**blank, "escalate": f"invalid LLM output — {e}", "info": {"llm": info}}
         out["info"] = {"llm": {**info, **out.get("info", {})}}
         return out
