@@ -74,6 +74,13 @@ makes the number a promise.
 while the mean act probability fell from 0.71 to 0.24: with the default threshold the model escalated 87% of cases it
 would have answered correctly. Calibrate per question, with the number of options production has.
 
+**Put the promise where the decision is made.** When a head, a rule or a trust score answers, calibrate the question
+itself (`system.guarantee`), not only the model under it — and on the signal that separates right from wrong: on
+contract clauses a trust score built from three facts (AUROC 0.79) answered 54.5% alone at a 3% risk, while the LLM's
+own confidence (AUROC 0.51) is refused. Use `error=` for "≤ e of what we answer is wrong" and `risk=` for "≤ r of all
+inputs": with 89% easy non-matches, risk 2% held overall while predicted matches given alone by an LLM were wrong 12.5%
+of the time — `groups="answer"` puts the promise inside each answer.
+
 **Watch for drift.** A calibrated threshold keeps its promise under a shifted stream by escalating more (66% answered
 alone → 12%, with no error raised). In a simulation `DriftMonitor(window=100)` flags such a change about 60 decisions
 in, and none of 1,200 unchanged streams of 1,000 decisions; a question with many answers needs a window of about five

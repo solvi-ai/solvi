@@ -13,7 +13,7 @@ on any scalar outside a System.
 examples: [(init_state, correct answer)] held out from whatever fitted the answer (or folds=k for a fast head fitted
 on them). The question is asked on each (nothing stored, nothing counted), the signal and right / wrong are collected,
 and the threshold is chosen by one of three methods — each makes a different promise, for inputs like the calibration
-examples (exchangeable with them: the same stream, not a new domain; solvi.openset for inputs from outside it):
+examples (exchangeable with them: the same stream, not a new domain):
 
     method       parameter  promise
     "crc"        risk=r     P(answered alone and wrong) ≤ r — a share of ALL inputs, answered or escalated; on average
@@ -289,7 +289,7 @@ def _path(p):
 
 # ------------------------------------------------------------------------------------------------ on a System's question
 class QuestionGuard:
-    """A Promise (or a solvi.openset.OpenSetGate) bound to a question of a System: which signal it reads, which answer it
+    """A Promise (or another object with its interface) bound to a question of a System: which signal it reads, which answer it
     lets through (answer=: one-sided), how groups are read. Applied to every answer of the question by System.ask."""
 
     def __init__(self, question, promise, signal=None, answer=None, groups=None):
@@ -460,7 +460,7 @@ def guard_question(system, question, examples=None, *, error=None, risk=None, me
     P(answer)) ≥ the threshold, whatever the most probable answer is, and abstains otherwise ("return the query when
     P(right) ≥ 0.43"). correct: a function (result, label) → bool for answers judged otherwise than by equality (a quote
     that overlaps the gold one). groups: a fact name, a hierarchy of fact names, a function of facts, or "answer".
-    promise: an already calibrated Promise or solvi.openset.OpenSetGate to attach instead of calibrating here.
+    promise: an already calibrated Promise to attach instead of calibrating here.
     The other arguments, the methods and their promises: calibrate() and the module docstring.
     → the calibration report ({"threshold", "n", "answered", "error", "risk", "support", "separation", "promise", ...};
     for an attached promise, its report)."""

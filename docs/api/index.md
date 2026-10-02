@@ -8,6 +8,7 @@ this reference lists what each module exports and the signatures.
 | [`solvi`](solvi.md) | the catalog, questions and answers, `System` and `Response`, typed facts, storage and shadow mode |
 | [`solvi.decide`](decide.md) | the decider: typed questions about a text or a state answered by a model |
 | [`solvi.calibration`](calibration.md) | reliability, expected calibration error, coverage at a target accuracy |
+| [`solvi.guarantee`](guarantee.md) | a calibrated threshold with a stated promise on a question (`System.guarantee`), a computed fact or any scalar |
 | [`solvi.systemone`](systemone.md) | a model behind the System One HTTP API as a decider |
 | [`solvi.llm`](llm.md) | an OpenAI-compatible chat-completions server (an LLM) as a decider |
 | [`solvi.multi`](multi.md) | cascade, vote and route over several models |
