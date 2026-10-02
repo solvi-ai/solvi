@@ -2889,7 +2889,7 @@ class DecisionPart:
             self.act_threshold = thr
         else:
             self.escalate_below = thr
-        if old is not None:
+        if old is not None and guarantee is not None:   # no guarantee (a calibration file with none): nothing to note
             guarantee = {**guarantee, "cleared": {other: old}}
         self.guarantee = guarantee
         self.groups = groups
@@ -2952,7 +2952,8 @@ class DecisionPart:
         group (each group on average). Every decision records its group and the group whose threshold applied; an
         input that does not give its group escalates. The group facts join the part's inputs: register the part in a
         catalog after act_guard. Adds "groups" ({path: {"threshold", "n", "answered", "error", "risk", "pooled"}}) to
-        the result."""
+        the result; "threshold" is then the rest of the stream's — inf when every example is in a group with its own
+        threshold, whatever "answered" says: read the thresholds per group."""
         from .calibration import crc_threshold
         examples = list(examples)
         sig, ok, name, _ = self._labelled(examples, signal)

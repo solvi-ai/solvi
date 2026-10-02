@@ -3444,12 +3444,13 @@ solvi calibrate catalog.py:system route labels.csv --risk 0.1 --conformal 0.9   
 PART is a question answered by a model decision (or the decision part's name; a `Cascade` / `Vote` / `Route` too).
 LABELS is a CSV or JSON-lines file with a `label` column and the input: the facts the part reads as columns
 (`message`), a `text` / `input` column, or else the other columns as a state; `--groups` columns are read as the group
-facts; a multi-label answer is a JSON list (or `a|b` in a CSV). It runs `part.act_guard(examples, risk=...)` (`--method
+facts; a multi-label answer is a JSON list (or `a|b` in a CSV); a CSV cell names an option that is not text by how it
+reads (`3` is the level 3 of `Scale[1, 2, 3, 4, 5]`). It runs `part.act_guard(examples, risk=...)` (`--method
 crc`, the default) or `part.calibrate_for(examples, error=..., method="ltt")`, prints the answered share, the error among
 the answered, the risk (answered alone and wrong, of all), `must_escalate_at_least` and the per-group table, and writes
 the calibration (`PART.calib.json` by default) — `part.load_calibration(path)` in the catalog applies it
 ([keeping a calibration](#keeping-a-calibration-save_calibration-load_calibration)). Exit status 1 when nothing can be
-answered alone at that risk.
+answered alone at that risk (with `--groups`: in no group).
 
 ### models: list, pull, check
 
