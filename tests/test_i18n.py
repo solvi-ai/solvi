@@ -158,6 +158,6 @@ def test_an_exceptions_text_is_never_translated_and_text_in_messages_are():
              "модель передала человеку: вопрос не выбран уверенно — refund 0.48 против cancel 0.45 (разрыв < 0.1)"),
             ("found with confidence 0.30 < 0.50", "найдено с уверенностью 0.30 < 0.50"),
             ("no parser reads list[str]", "нет разбора для типа list[str]"),
-            ("cannot parse as date: '12 September' has no year: pass today= to read it",
-             "не читается как date: '12 September' has no year: pass today= to read it")):
+            ("cannot parse as date: '12 September': the year is not stated (pass today= to read it in today's year)",
+             "не читается как date: '12 September': the year is not stated (pass today= to read it in today's year)")):
         assert ru(en) == want, en

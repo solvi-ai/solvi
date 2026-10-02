@@ -2113,8 +2113,10 @@ updates its measured costs and stats in place. A System with `async def` (or `bl
 point (any decider: a checkpoint, `systemone:URL#model`, `llm:URL#model`), and the deterministic `CueExtractor` reads
 the fields (`TextIn(extractor=DeciderExtractor(decider))` uses the decider's span pointer); `create_app(..., textin=TextIn(...))` or
 `Service(..., textin=...)` sets synonyms, patterns and cues. Without a decider a text can only go to a named `question`
-(or to the one question of a System with one), else the request is a 422. Dates without a year and relative dates are
-read against `today` — the request's, else the server's date — which the trace records. A text that does not say which
+(or to the one question of a System with one), else the request is a 422. Dates without a year, two-digit years and
+relative dates are read against `today` — the request's (`"today": "2026-09-28"`; the MCP tool takes it too), else the
+`TextIn`'s — which the trace records; the server never supplies its own date, so without one "paid 12 September" is
+not read (the field is missing, "the year is not stated") rather than given this year. A text that does not say which
 question it asks is not an error: `read.question` is null, `read.escalated` says why, the likely questions abstain, and
 `read.clarify` asks which one is meant; a required field the text does not give is listed in `read.missing` and the
 question abstains for lack of it — nothing is guessed.
@@ -2122,7 +2124,7 @@ question abstains for lack of it — nothing is guessed.
 **MCP.** With `--mcp`, each question is a tool: its input schema is the question's input state schema, and a call returns
 the question's result — answer, confidence, status, why, guard, evidence, the safeguards that fired — with `stored_id`
 and `trace_hash`, as JSON text and as structured content. One more tool, `ask_text` (`solvi_ask_text` if a question has
-that name), takes `{"text", "question"?}` and returns what `POST /ask_text` does, so an agent can pass a user's message
+that name), takes `{"text", "question"?, "today"?}` and returns what `POST /ask_text` does, so an agent can pass a user's message
 as it is. An abstention is a result, not an error; an exception is a tool
 error (`isError`). The official `mcp` SDK (2.x, `solvi[mcp]`) serves it when installed; otherwise solvi's built-in stdio
 JSON-RPC server answers `initialize`, `ping`, `tools/list` and `tools/call` (`--mcp-impl sdk|builtin` chooses). The two
@@ -2273,11 +2275,14 @@ your texts can be about anything.
 | `bool` | yes / no words; the field's name or a `cues=` word ("urgent") → True; a phrase declared in `negatives={field: [...]}` (or `json_schema_extra={"negative_cues": ...}`) → False. Description words only rank candidates. A cue answered by a yes / no word ("Urgent: no", "urgent = false", "Is it urgent? No.") is that answer. A cue with a negation near it, before or after it in the sentence ("isn't urgent", "far from urgent", "anything but urgent", "urgent? not at all", "was urgent yesterday, not anymore", "urgent but cancelling isn't", "не срочно") is `unparsed` — never True, and False only through a declared negative |
 | `str` | the quote, trimmed; `patterns={field: regex}` must match it whole |
 
-A date without a year, or a relative one, is read only with `TextIn(today=...)`: without it the field is `unparsed`.
-With it, a date without a year is given **today's year** — an assumption, recorded in the trace with `today`, and
-wrong around the turn of a year: "paid 28 December" read on 5 January becomes 28 December of the new year, almost a
-year ahead (`solvi serve` always supplies today's date). Where a rule compares such a date with today (a refund
-window), add a check that the date is not in the future, or ask for the year. Every field ends in one state: `read`, `not_stated`, `unparsed` (the quote does not parse), `unsure` (found
+A date without a year is not guessed. Without `TextIn(today=...)` it is not read: the field is `unparsed` with the
+reason "the year is not stated", a required one is in `read.missing`, and `read.clarify()` asks "Please tell me the
+purchase date (I read '12 September' but the year is not stated)." The same holds for a relative date and a two-digit
+year. With `today=` you take the assumption on: a date without a year is given **today's year**, recorded in the trace
+with `today` — wrong around the turn of a year ("paid 28 December" read on 5 January becomes 28 December of the new
+year, almost a year ahead). Where a rule compares such a date with today (a refund window), add a check that the date
+is not in the future, or leave `today` out and ask for the year. `solvi serve` and `solvi ask --text` pass a `today`
+only when the request (`"today"`) or the command line (`--today`) gives one. Every field ends in one state: `read`, `not_stated`, `unparsed` (the quote does not parse), `unsure` (found
 with confidence below `min_field_confidence`, 0.5) or `unsupported` (no parser for the type). A required field that is not
 `read` is in `read.missing`: the question is asked anyway (a hard check may already decide it), and without that field it
 abstains — "not stated in the text: purchase_date; cannot compute: ..." — instead of guessing.

@@ -757,7 +757,7 @@ def test_ask_text_takes_today_and_asks_the_end_user_in_their_words(tmp_path, cap
     read = json.loads(out)["textin"]
     assert code == 1 and read["fields"]["paid_on"]["status"] == "unparsed"
     code, out = run(capsys, "ask", f"{f}:system", "--text", "paid on: 12 September")
-    assert "today=" not in out and "the year is missing" in out                  # the clarifying question
+    assert "today=" not in out and "the year is not stated" in out                  # the clarifying question
     code, out = run(capsys, "ask", f"{f}:system", "--text", "paid on: 12 September", "--today", "2026-09-28", "--json")
     data = json.loads(out)
     assert code == 0 and data["textin"]["state"] == {"paid_on": "2026-09-12"} and data["answers"]["late"]["answer"] == "yes"

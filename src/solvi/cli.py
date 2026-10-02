@@ -349,7 +349,7 @@ def ask_parser(sub):
     s.add_argument("--question", action="append", help="ask only these questions (repeat, or comma-separated); with "
                                                        "--text: the question, without routing")
     s.add_argument("--today", metavar="DATE", help="with --text: the date it is read on — an ISO date, or the word today "
-                                                   "(as solvi serve does); without it a date with no year, a two-digit "
+                                                   "(as a request's \"today\" to solvi serve); without it a date with no year, a two-digit "
                                                    "year or \"yesterday\" is not read")
     s.add_argument("--decider", help="with --text: the model that picks the question (a folder, a cached Hugging Face id, "
                                      "systemone:URL#model, llm:URL#model or module:attr; see solvi models)")

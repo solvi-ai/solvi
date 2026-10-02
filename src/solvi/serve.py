@@ -28,7 +28,7 @@ whole trace in a TraceStorage (hash-chained), and `solvi verify` / `replay` / `d
 
 MCP (`--mcp`): each question is a tool whose input schema is the question's input state schema; a call answers that
 question and returns its result (answer, confidence, status, why, safeguards) with the stored id and trace hash; the tool
-`ask_text` takes a free text (as POST /ask_text). It uses
+`ask_text` takes a free text and, optionally, the date it is read on (as POST /ask_text). It uses
 the official `mcp` SDK (2.x, `solvi[mcp]`) when it is installed, else a built-in stdio JSON-RPC server with the subset of
 the protocol that tools need (initialize, ping, tools/list, tools/call).
 
@@ -418,7 +418,9 @@ class Service:
     # --- a free text (System.ask_text)
     def textin(self, today=None):
         """The TextIn that reads texts for this server: the one given, else TextIn(system, decider) — made once; `today`
-        (a date or ISO string; default: the server's date at the request, recorded in the trace) on a copy per request."""
+        (a date or ISO string, recorded in the trace) on a copy per request. Without the request's `today` the TextIn's
+        own applies (None by default): the server's date is never supplied, so a date without a year is not read ("the
+        year is not stated") rather than given this year."""
         import copy
         import datetime as dt
 
@@ -433,8 +435,6 @@ class Service:
                 tin.today = dt.date.fromisoformat(today) if isinstance(today, str) else today
             except ValueError:
                 raise BadRequest(f"today: not an ISO date: {str(today)[:32]!r}") from None
-        elif tin.today is None:
-            tin.today = dt.date.today()
         return tin
 
     def _reader(self, text, question, today):
@@ -630,7 +630,8 @@ class AskTextRequest(BaseModel):
     question: Optional[str] = Field(None, description="the question it asks (default: the decider picks the entry point)")
     store: bool = Field(True, description="save the response to the server's store (if it has one); false is honoured only "
                                           "when the server was started with --allow-client-no-store")
-    today: Optional[str] = Field(None, description="ISO date for year-less and relative dates (default: the server's date)")
+    today: Optional[str] = Field(None, description="ISO date for year-less, two-digit-year and relative dates (default: "
+                                 "none — such a date is not read, the field is missing)")
 
 
 class Guard:
@@ -839,7 +840,9 @@ def mcp_tools(svc):
                   "inputSchema": {"type": "object", "properties": {
                       "text": {"type": "string", "description": "the text"},
                       "question": {"type": "string", "enum": names,
-                                   "description": "the question it asks, when known (skips routing)"}},
+                                   "description": "the question it asks, when known (skips routing)"},
+                      "today": {"type": "string", "description": "ISO date the text is read on: dates without a year, "
+                                                                 "two-digit years and relative dates need it"}},
                       "required": ["text"]}})
     return tools
 
@@ -863,7 +866,7 @@ def call_tool(svc, name, arguments):
     try:
         if name == text_tool_name(svc):
             a = _arguments(svc, arguments)
-            return svc.ask_text(a.get("text"), a.get("question")), False
+            return svc.ask_text(a.get("text"), a.get("question"), today=a.get("today")), False
         return svc.tool(names[name], _arguments(svc, arguments)), False
     except RequestError as e:
         return {"error": str(e)}, True
@@ -893,7 +896,8 @@ async def acall_tool(svc, name, arguments):
         try:
             if name == text_tool_name(svc):
                 a = _arguments(svc, arguments)
-                return await asyncio.wait_for(svc.aask_text(a.get("text"), a.get("question")), t), False
+                return await asyncio.wait_for(svc.aask_text(a.get("text"), a.get("question"), today=a.get("today")),
+                                              t), False
             return await asyncio.wait_for(svc.atool(names[name], _arguments(svc, arguments)), t), False
         except RequestError as e:
             return {"error": str(e)}, True
