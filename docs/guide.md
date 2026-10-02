@@ -934,8 +934,8 @@ max_tokens, seed): those raise `ValueError`. It enters the fingerprint.
 
 **Cost and latency.** Each question about each input is a paid request — the question, every option with its
 description and the whole text, a few hundred tokens or more — and takes 0.3–5 s, where a local decider takes ~50 ms on
-a CPU and costs nothing per call. Several questions about one input are sent in parallel (`workers=4`), not in one
-request; answers are cached per (question, input) while the model object lives; `model.scorer.usage` counts the tokens.
+a CPU and costs nothing per call. The questions of one `system.ask` go one after another, one request each; `workers=4` sends the inputs
+of one `part.decide([...])` call — a batch, the examples of a calibration — in parallel; answers are cached per (question, input) while the model object lives; `model.scorer.usage` counts the tokens.
 Put the LLM where it pays for itself: alone with `act_guard`, or in a `Vote` with solvi-large where the two are about
 equally strong (see "Which combination with an LLM" below). A "small model first, LLM second" cascade is not a good
 default.

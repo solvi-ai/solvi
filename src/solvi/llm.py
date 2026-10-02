@@ -709,7 +709,8 @@ endpoint"), or one of them. logprobs: "auto" (ask for them;
             extra_body={"provider": {"order": ["groq"], "allow_fallbacks": False},
                         "reasoning": {"effort": "low"}})
 
-    workers: parallel requests for several questions. opener: a replacement for urllib's urlopen
+    workers: parallel requests for the inputs of one part.decide([...]) / calibration call (the questions of one
+    System.ask go one after another). opener: a replacement for urllib's urlopen
     (tests, proxies); sleep: for the backoff (tests)."""
     sc = LLMScorer(base_url, model, api_key, timeout=timeout, retries=retries, backoff=backoff,
                    response_format=response_format, logprobs=logprobs, ask=ask, max_tokens=max_tokens, seed=seed,

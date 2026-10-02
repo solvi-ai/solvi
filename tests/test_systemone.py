@@ -38,7 +38,7 @@ class FakeService:
         return io.BytesIO(json.dumps({"model": body["model"], "answers": answers}).encode())
 
 
-def test_questions_about_one_input_go_in_one_request_and_become_decisions():
+def test_each_question_is_one_request_and_becomes_a_decision():
     svc = FakeService()
     m = systemone("http://localhost:8009/", "kev-latest", api_key="k", opener=svc)
     team = m.decision("team", "Which team should handle this?", "email", TEAMS)
@@ -54,7 +54,12 @@ def test_questions_about_one_input_go_in_one_request_and_become_decisions():
     n = len(svc.bodies)
     both = m.decide_pass("urgent, I was charged twice", [team, urgent])
     assert [x.value for x in both] == ["billing", True]
-    assert len(svc.bodies) <= n + 2
+    assert len(svc.bodies) == n + 2 and all(len(b["questions"]) == 1 for b in svc.bodies[n:])   # one question, one request
+    cat = Catalog()
+    s = System(cat, [team.question(cat), urgent.question(cat)])
+    n = len(svc.bodies)
+    s.ask({"email": "urgent: I was charged twice, again"})
+    assert len(svc.bodies) == n + 2                                 # a System asks them one after another too
 
 
 def test_a_system_one_decision_in_a_catalog_is_traced_and_guarded():

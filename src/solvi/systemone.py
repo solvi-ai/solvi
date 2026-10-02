@@ -6,7 +6,9 @@ decide.
     model = systemone("http://127.0.0.1:8009", "kev-latest")            # api_key= for a hosted service
     part = model.decision("team", "Which team should handle this?", "email", {"billing": "Charges", "shipping": "Delivery"})
 
-The questions of one input go in one request. Choice questions are sent as `choice` (criteria: option → description),
+One question is one request: a System and decide_pass ask a remote model their questions about an input one after
+another (the scorer's own `logits(items)` does put the items it is handed about one text into one request — that is
+how a multi-label question's options travel). Choice questions are sent as `choice` (criteria: option → description),
 yes/no questions as `noul`, scores as `choice` over their levels (the probability of each level is what solvi needs).
 The returned probabilities become the decider's logits (log p), so everything built on a DecideModel works unchanged:
 act_guard / conformal / calibrate_for on your labelled examples (the service gives no act signal: solvi uses the
