@@ -881,3 +881,28 @@ def test_a_format_1_record_redacted_is_listed_as_unverified(tmp_path):
     old.redact(recs[1]["id"], by="dpo")
     v = JSONLStorage(p).verify()
     assert v["ok"] and [seq for seq, *_ in v["unverified"]] == [1] and len(rs) == len(STATES)
+
+
+def test_a_json_line_without_a_hash_inside_a_jsonl_chain_is_passed_over_and_reported_once(tmp_path):
+    """A line another tool appended to the file (or a hand edit) used to make iter / query / report / replay_all raise a
+    bare KeyError: 'id'; verify listed it as five problems with an empty id and every record after it as "chain broken"."""
+    store = make_store("jsonl", tmp_path, Clock())
+    cat, qs = build()
+    s = System(cat, qs, storage=store)
+    for st in STATES[:2]:
+        s.ask(st)
+    sig = store.signature()
+    for line in ({"note": "x"}, {"hash": 5, "id": "abc"}):
+        with open(store.path, "a") as fh:
+            fh.write(json.dumps(line) + "\n")
+    again = JSONLStorage(store.path, catalog=s, clock=Clock(2_000.0))
+    assert [x.seq for x in again.iter(None)] == [0, 1] and len(again.query()) == 2 and len(again) == 2
+    assert again.replay_all(s) == [] and "2" in again.report()
+    v = again.verify(signature=sig)
+    assert len(v["problems"]) == 2 and all(p[2].startswith(f"record at position {i} is not a record of this store:")
+                                           for i, p in zip((2, 3), v["problems"]))
+    assert v["count"] == 2 and not v["ok"] and v["signature"]["ok"]
+    System(cat, qs, storage=again).ask(STATES[2])                       # the chain goes on after the foreign lines
+    v = JSONLStorage(store.path).verify()
+    assert v["count"] == 3 and len(v["problems"]) == 2 and all("not a record of this store" in p[2] for p in v["problems"])
+    assert [x.seq for x in JSONLStorage(store.path, catalog=s).iter()] == [0, 1, 2]

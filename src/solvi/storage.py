@@ -223,6 +223,12 @@ class Stored:
         return r
 
 
+def chained(d):
+    """Is this a record of the chain (a dict with its hash)? A JSON object without one — a line another tool appended to
+    the file, a hand edit — is not: it is passed over by iter / query / replay_all, and verify reports it."""
+    return isinstance(d, dict) and isinstance(d.get("hash"), str)
+
+
 def _stored(d, catalog=None):
     return Stored(d["id"], d["seq"], d["time"], d.get("kind", "ask"), d, catalog)
 
@@ -364,8 +370,7 @@ class TraceStorage:
         """Stored records in order (kind "ask": responses; "teach": corrections; None: all) → iterator of Stored. A
         redacted record (see redact) has no content left and is passed over; redacted=True: it is yielded too."""
         for _, d in self._raw():
-            if d is not None and "hash" in d and (kind is None or d.get("kind", "ask") == kind) \
-                    and (redacted or not d.get("redacted")):
+            if chained(d) and (kind is None or d.get("kind", "ask") == kind) and (redacted or not d.get("redacted")):
                 yield _stored(d, self.catalog)
 
     def __iter__(self):
@@ -484,6 +489,10 @@ class TraceStorage:
                 problems.append((n, None, f"record at position {pos} is not readable JSON (a record cut short by a crash "
                                           "while it was written, or an edit)"))
                 continue
+            if not chained(d):                        # passed over like an unreadable line: the chain goes on after it
+                problems.append((n, None, f"record at position {pos} is not a record of this store: a JSON object "
+                                          "without a hash (a line appended by another tool, or an edit)"))
+                continue
             rid = d.get("id")
             v = int(d.get("v") or 1)
             if v < newest:                            # formats only go up: a record cannot claim an older one to escape
@@ -506,7 +515,7 @@ class TraceStorage:
                     problems.append((d.get("seq"), rid, "redacted record edited after it was stored (its hash does not match)"))
             elif d.get("hash") != record_hash(d):
                 problems.append((d.get("seq"), rid, "record edited after it was stored (its hash does not match)"))
-            if not isinstance(d.get("hash"), str) or rid != d["hash"][:16]:
+            if rid != d["hash"][:16]:
                 problems.append((d.get("seq"), rid, "record id does not match its hash"))
             if d.get("prev") != prev:
                 problems.append((d.get("seq"), rid, "chain broken: a record before this one was deleted, inserted, "
@@ -731,7 +740,7 @@ class JSONLStorage(TraceStorage):
                 d = json.loads(line)
             except ValueError:
                 d = None
-            if isinstance(d, dict) and "hash" in d:
+            if chained(d):
                 self._offsets[d.get("id")] = off
                 self._count, self._last = self._count + 1, d["hash"]
             elif isinstance(d, dict) and self._count == 0 and self._n_legacy is not None:
@@ -835,20 +844,18 @@ class JSONLStorage(TraceStorage):
                 yield i, d if isinstance(d, dict) else None
 
     def _raw(self, snap=None):
-        chained = False
+        started = False
         for i, d in self._lines(None if snap is None else snap["size"]):
-            if d is not None and "hash" not in d and not chained:
+            if d is not None and not chained(d) and not started:
                 continue                                  # a 0.5 journal line before the chain
-            if d is not None and "hash" not in d:
-                d = dict(d, hash=None)                    # an unchained line inside the chain: verify reports it
-            chained = True
+            started = True                                # an unchained line inside the chain: verify reports it
             yield i, d
 
     def _legacy(self):
         if self._n_legacy is None:                    # opened from the head: the 0.5 lines before the chain, counted now
             n = 0
             for _, d in self._lines():
-                if d is not None and "hash" in d:
+                if chained(d):
                     break
                 n += d is not None
             self._n_legacy = n
@@ -1070,7 +1077,7 @@ class _SQLStorage(TraceStorage):
         else:
             rows = self._rows("SELECT seq, body FROM {p}records WHERE kind = ? ORDER BY seq", (kind,))
         for _, d in rows:
-            if d is not None and (redacted or not d.get("redacted")):
+            if chained(d) and (redacted or not d.get("redacted")):
                 yield _stored(d, self.catalog)
 
     def query(self, question=None, answer=ANY, status=None, safeguard=None, model=None, since=None, until=None,
@@ -1110,7 +1117,7 @@ class _SQLStorage(TraceStorage):
             where.append("r.\"time\" < ?")
             args.append(until)
         sql = f"SELECT r.seq, r.body FROM {{p}}records r WHERE {' AND '.join(where)} ORDER BY r.seq"  # noqa: S608
-        return [_stored(d, self.catalog) for _, d in self._rows(sql, args) if d is not None and not d.get("redacted")]
+        return [_stored(d, self.catalog) for _, d in self._rows(sql, args) if chained(d) and not d.get("redacted")]
 
     def _backend_problems(self, rows, snap=None):
         out = []

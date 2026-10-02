@@ -1873,7 +1873,9 @@ corrections in the same chain (`store.corrections()`).
 
 **The chain across records.** Each record stores the hash of the record before it, and its own hash covers its content and
 that link. Editing a stored decision, deleting one, inserting one or changing their order breaks the chain at that point,
-and `verify()` names the record. Cutting records off the end leaves a shorter chain that is still consistent, so the store
+and `verify()` names the record. A line of a JSONL store that is not a record of the chain — unreadable JSON, or a JSON
+object without a hash that another tool appended — is reported by `verify()` as one problem and passed over by `iter`,
+`query`, `report` and `replay_all`; the records after it still verify. Cutting records off the end leaves a shorter chain that is still consistent, so the store
 keeps its head (count and last hash) next to the log (`decisions.jsonl.head`, or a table in SQLite) and `verify()` checks
 it. Someone who can rewrite the whole store and its head can rebuild a consistent chain: publish `store.head()` somewhere
 else from time to time (a ticket, a log you do not control, a signed message) and check with `store.verify(anchor=head)`.
