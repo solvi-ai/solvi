@@ -1230,7 +1230,9 @@ def _learned_hard_checks(run):
 
 
 def path_confidence(catalog, trace, facts):
-    """A fact's confidence is the minimum confidence of the extractions it depends on."""
+    """A fact's confidence is the minimum confidence of the extractions it depends on. A fact with alternative producers
+    depends on what the producer that was used reads (the record's `producer`), not on the inputs of producers that
+    did not give the value."""
     by = {r.name: r for r in trace.records}
     memo = {}
 
@@ -1241,10 +1243,14 @@ def path_confidence(catalog, trace, facts):
         if r is None:
             memo[f] = 1.0
             return 1.0
+        memo[f] = 1.0                     # being walked: a fact is never an input of itself (guards a ring of facts)
         part = catalog.parts.get(f)
         c = r.confidence                  # 1.0 for plain computations; a quote's or a decision's confidence otherwise
         if part is not None:
-            for x in part.inputs:
+            ins = part.inputs
+            if r.producer is not None and part.alternatives is not None:
+                ins = next((a.inputs for a in part.alternatives if a.name == r.producer), ins)
+            for x in ins:
                 c = min(c, conf(x))
         memo[f] = c
         return c
