@@ -44,9 +44,9 @@ def guard(tmp_path):
     return g
 
 
-def run(g, lines, **kw):
+def run(g, lines, upstream=UPSTREAM, **kw):
     out = io.StringIO()
-    run_proxy(g, UPSTREAM, stdin=io.StringIO("\n".join(lines) + "\n"), stdout=out, **kw)
+    run_proxy(g, upstream, stdin=io.StringIO("\n".join(lines) + "\n"), stdout=out, **kw)
     return {m["id"]: m for m in map(json.loads, out.getvalue().splitlines()) if "id" in m}, out.getvalue()
 
 
@@ -132,3 +132,14 @@ def test_proxy_escalates_the_repeat_of_a_once_tool_and_not_a_call_that_failed(tm
     assert [out[i]["result"]["_meta"]["solvi"]["outcome"] for i in (3, 4, 5, 6, 7)] == \
         ["allow", "escalate", "allow", "allow", "allow"]
     assert "already made" in out[4]["result"]["content"][0]["text"]
+
+
+def test_proxy_reports_a_dead_upstream_as_an_upstream_error():
+    from solvi.agents import Guard
+    g = Guard()
+    g.declare("read_file")
+    dead = f"{sys.executable} -c pass"                       # a server that exits at once
+    out, _ = run(g, [rpc(1, "initialize", {"protocolVersion": "2025-06-18", "capabilities": {}}), rpc(2, "tools/list"),
+                     call(3, "read_file", path="/work/notes.txt")], upstream=dead)
+    for i in (1, 2, 3):
+        assert out[i]["error"]["message"].startswith("upstream: the upstream MCP server closed"), out[i]

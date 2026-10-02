@@ -82,7 +82,10 @@ class Upstream:
         server). Requests from the server meanwhile get "method not found"; notifications are ignored."""
         self._id += 1
         rid = self._id
-        self._send({"jsonrpc": "2.0", "id": rid, "method": method, "params": params or {}})
+        try:
+            self._send({"jsonrpc": "2.0", "id": rid, "method": method, "params": params or {}})
+        except (OSError, ValueError):                     # its stdin is closed: the server is gone
+            raise UpstreamError(f"the upstream MCP server closed (exit code {self.proc.poll()})") from None
         for line in self.proc.stdout:
             line = line.strip()
             if not line:

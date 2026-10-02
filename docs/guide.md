@@ -2514,7 +2514,7 @@ without the instruction-like sentences of its input, and a changed answer escala
 user authorized this payment" cannot talk it into a yes. Calibrate it on labelled calls of your own stream:
 
 ```python
-guard.make_authorizer(DecideModel.load("solvi-ai/solvi-base"))       # reads="user_request": the user's messages only
+guard.make_authorizer(DecideModel.load("solvi-ai/solvi-base"))       # reads the whole conversation; reads="user_request": the user's messages only
 rep = guard.calibrate_authorizer([(call, context, True), ...], risk=0.10)
 # act_guard: P(allowed by the authorizer alone and wrong) ≤ 10% for calls like these; the trace records the promise
 ```

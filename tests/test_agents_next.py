@@ -622,3 +622,39 @@ def test_nocase_and_id_matchers_are_opt_in_and_token_stays_literal():
     assert _occurrences("W1", "İİ w1", "nocase") == [(3, 5)]      # "İ".lower() is two characters: offsets do not shift
     with pytest.raises(ValueError, match="nocase, id"):
         g.tool(lambda x: x, name="t", ground={"x": "lower"})
+
+
+def test_small_guard_defects_replay_all_without_a_store_unknown_roles_context_types_and_schema_constraints():
+    g = Guard()
+    with pytest.raises(ValueError, match="no storage"):
+        g.replay_all()
+    with pytest.raises(ValueError, match="ground_from"):
+        g.tool(lambda order: 1, name="t", ground=["order"], ground_from=("usr",))
+
+    class ContextualQuery(str):
+        pass
+
+    class RunContext:
+        pass
+
+    def search(query: ContextualQuery, limit: int = 5) -> str:
+        return "x"
+
+    def lookup(ctx: RunContext, order: str) -> str:
+        return "x"
+    assert g.tool(search) and g.tools["search"].arguments == ["query", "limit"]     # not a framework's context
+    assert g.tool(lookup) and g.tools["lookup"].arguments == ["order"]
+    g.declare("big", schema={"type": "object", "additionalProperties": True, "required": ["n"], "properties": {
+        "n": {"type": "integer", "minimum": 1, "maximum": 5}, "code": {"type": "string", "pattern": "^[A-Z]{2}$"},
+        "tags": {"type": "array", "items": {"type": "string"}, "maxItems": 2}}})
+
+    def big(**args):
+        return g.check({"name": "big", "arguments": args})
+    assert big(n=3, code="AB", tags=["a"]).outcome == "allow"
+    for bad in ({"n": 99}, {"n": 0}, {"n": 3, "code": "abc"}, {"n": 3, "tags": ["a", "b", "c"]}):
+        d = big(**bad)
+        assert d.outcome == "deny" and "invalid arguments" in d.reasons[0], bad
+    extra = big(n=3, note="anything")                       # additionalProperties: true — the schema allows it
+    assert extra.outcome == "allow" and extra.arguments == {"n": 3, "code": None, "tags": None, "note": "anything"}
+    g.declare("strict", schema={"type": "object", "properties": {"n": {"type": "integer"}}})
+    assert g.check({"name": "strict", "arguments": {"n": 1, "note": "x"}}).outcome == "deny"
