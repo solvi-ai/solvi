@@ -1,7 +1,10 @@
 # solvi guide
 
 This guide walks through the whole API. For a two-minute overview, see the [README](../README.md); for advice drawn from
-what we measured, see [best practices](best_practices.md).
+what we measured, see [best practices](best_practices.md). A measured number in this guide that names its script
+(`benchmarks/…`, an example) can be re-run from this repository; one that names none — the combinations of models on
+typed-decisions and other sets, long documents, option order, LoRA, episodes, the world map, many options, drift,
+AgentDojo, hook latency — was measured with a script that is not in this repository and cannot be reproduced from it.
 
 Contents:
 

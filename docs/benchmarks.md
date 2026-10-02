@@ -1,8 +1,12 @@
 # Benchmarks
 
-This page gives the setups, per-question numbers and caveats behind the results in the [README](../README.md). All
+This page gives the setups, per-question numbers and caveats behind the results in the [README](../README.md). The
 numbers come from pre-registered experiments: success criteria were written down before each run, and results are
-reported whether or not the criteria were met. Dataset loaders are in [benchmarks/datasets/](../benchmarks/datasets/).
+reported whether or not the criteria were met. A section that names a script in [benchmarks/](../benchmarks/) can be
+re-run from this repository; the others — the extraction results (SROIE, CORD, CUAD, Kleister-NDA), the rule-only
+timings, the catalogs written by an LLM, the trace-substitution counts — were measured with scripts that are not in
+this repository, so they cannot be reproduced from it. Dataset loaders are in
+[benchmarks/datasets/](../benchmarks/datasets/).
 
 How solvi compares to giving the same rules to an LLM (Grok 4.7, gpt-oss-120b, Qwen3-235B, DeepSeek-V3.2), answering
 directly or inside solvi, is on its own page: [solvi vs asking an LLM](vs_llm.md).

@@ -231,7 +231,8 @@ Every answer is a value and a confidence, and the types also declare answer prim
   `Cascade`, `Vote` and `Route` (`solvi.multi`) combine models — the next model only when one escalates, an answer
   only when models of different families agree, or a model picked by code — under one guarantee. On
   typed-decisions a vote of solvi-large and Julia 1 answered 50% alone against 31% / 40% for each alone, at the same
-  10% risk (Julia in-distribution there; [examples/20_vote_across_families.py](examples/20_vote_across_families.py)).
+  10% risk (Julia in-distribution there; measured with a script that is not in this repository —
+  [examples/20_vote_across_families.py](examples/20_vote_across_families.py) shows the setup with stand-in servers).
 - **Serving and operations.** `solvi serve module:system` exposes the questions over HTTP (OpenAPI from the same types),
   MCP and the System One API; `await system.aask(...)` runs async parts concurrently with timeouts; `costs="measured"`
   lets the planner pick the fastest equivalent source and switch when it slows down. `TraceStorage` keeps decisions with a
@@ -324,7 +325,9 @@ behind the receipt numbers below; it has no save / load. See
 ## Results
 
 Same training documents for both sides. The baseline, Laya, is a ModernBERT-large model that answers the typed questions
-directly, fine-tuned with its authors' recipe. Details and caveats: [docs/benchmarks.md](docs/benchmarks.md).
+directly, fine-tuned with its authors' recipe. Details and caveats: [docs/benchmarks.md](docs/benchmarks.md). These were
+measured with scripts that are not in this repository (only the dataset loaders are), so they cannot be reproduced from
+it; the solvi-vs-LLM tables below can ([benchmarks/vs_llm/](benchmarks/vs_llm/)).
 
 | Task (test set) | solvi | Baseline |
 |---|---|---|

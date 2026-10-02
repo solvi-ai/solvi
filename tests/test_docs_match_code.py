@@ -176,3 +176,13 @@ def test_the_readme_shows_the_published_extractor_and_says_what_it_does_without_
     assert "does not work yet" not in README
     from solvi.extract_long import LongSpanExtractor
     assert all(hasattr(LongSpanExtractor, n) for n in ("load", "save", "fit", "field", "tune_threshold"))
+
+
+def test_numbers_without_a_script_in_the_repository_say_so():
+    """benchmarks.md said "All numbers come from pre-registered experiments" while most numbers in the README and the
+    docs have no script here; a reader could not tell which ones can be re-run."""
+    bench = (ROOT / "docs" / "benchmarks.md").read_text()
+    assert "All\nnumbers come from" not in bench and "cannot be reproduced from it" in bench
+    results = README.split("## Results")[1].split("## ")[0]
+    assert "not in this repository" in results
+    assert "measured with a script that is not in this repository" in _flat(GUIDE.split("## Concepts")[0])
