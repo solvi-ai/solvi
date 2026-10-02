@@ -66,6 +66,7 @@ kept as the exact reading of each dataset behind those numbers. What can be reru
 |---|---|
 | `perturb_injection.py` | `perturb=k` against instructions appended to Bitext support messages: how often they are followed, what it costs |
 | `fast_head.py`, `strategist_scale.py` | `fit_fast` and the strategist at scale |
+| `ask_speed.py` | milliseconds per `ask` on small and large inputs (the README quickstart, the gallery, random catalogs of 50 and 1 000 parts, a 3.7k-float stream input): the README's Speed table |
 | `ask_overhead.py` | what solvi adds to one `ask` (every gallery entry and a decider project, no real model) |
 | `trace_signature.py` | what a signature (`solvi.signature`) adds over the hash chain when one stored record is edited |
 | `textin_extractors.py` | text in on the repository's own texts with typed fields (the shop requests of the guide, the e-mails of `examples/04`, the invoices of `examples/03`, the tickets of gallery 11, the claims of `examples/16`): each field read by `CueExtractor`, by the decider's span pointer and by the two in either order — right, wrong, missed against the values the hand-written code reads; no download beyond the decider (the numbers behind `TextIn`'s default extractor) |

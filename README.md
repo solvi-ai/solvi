@@ -367,6 +367,21 @@ runner with every raw answer: [docs/vs_llm.md](docs/vs_llm.md), [benchmarks/vs_l
 
 ## Speed
 
+One `ask` without a model ([benchmarks/ask_speed.py](benchmarks/ask_speed.py): planning, running the parts and hashing
+the trace; Python 3.10, Intel i7-12700H shared with other jobs, medians of three runs of 15 passes):
+
+| case | steps | per ask |
+|---|---:|---:|
+| README quickstart (leave request) | 5 | 0.29 ms |
+| 15 gallery entries (median entry; range) | 4-23 | 0.88 ms (0.64-5.6 ms) |
+| random catalog of 50 parts, 5 questions | 19 | 0.95 ms |
+| random catalog of 1 000 parts, 5 questions | 114 | 6.1 ms |
+| stream alert over an input of 3 712 floats (the NAB task's catalog) | 7 | 3.7 ms |
+
+A large input costs its hashing: every given value is written as canonical JSON and hashed once per ask (about 0.25 µs
+per float). The slowest gallery entry checks its texts for instruction-like sentences (`perturb`), which takes most of
+its time. Saving each response to a store adds its own cost (the whole response is written as JSON).
+
 Strategist on random layered catalogs ([benchmarks/strategist_scale.py](benchmarks/strategist_scale.py), one CPU core;
 solvi 0.7.1 with the changes since, Python 3.10, Intel i7-12700H, medians of two runs). The parts are trivial
 arithmetic: running all of them ("run all") costs less than one ask, so the saving shows only when parts are slow

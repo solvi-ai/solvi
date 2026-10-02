@@ -566,9 +566,11 @@ class System:
         """The answers from an executed flow: rules / hard checks / heads, calibration, constraints, the low-confidence
         safeguard → (results, feasible, violations). No side effects besides an answer head's record in the trace."""
         by = {r.name: r for r in trace.records}
+        hard = [(n, p) for n, p in self.catalog.parts.items() if p.kind == "check" and p.hard]   # in catalog order
+        pcache = {}                                   # the questions share one walk of path_confidence
         results = {}
         for q in qs:
-            r = self._answer(q, flow, trace, vals, by)
+            r = self._answer(q, flow, trace, vals, by, hard, pcache)
             r.kind = q.answer.kind
             if q.name in self.calib and r.status == "ok":
                 r.confidence = _platt(r.confidence, *self.calib[q.name])
@@ -686,16 +688,16 @@ class System:
                 lines.append(f"  {i18n.label(k, lang):{w}s} {st[key]}")
         return "\n".join(lines)
 
-    def _answer(self, q, flow, trace, vals, by):
+    def _answer(self, q, flow, trace, vals, by, hard, pcache=None):
         facts = flow.per_question.get(q.name, [])
         # hard checks: a false hard check in the question's flow decides the answer (the model cannot override it).
         # A hard check with `then` governs only the questions listed there (and those that name it as a checkpoint);
-        # for other questions it is an ordinary failed check.
+        # for other questions it is an ordinary failed check. hard: the catalog's hard checks, in catalog order.
         in_flow = set(facts)
-        for f in [n for n in self.catalog.parts if n in in_flow]:        # several failed: the first declared in the catalog decides
-            part = self.catalog.parts.get(f)
+        hard = [(f, part) for f, part in hard if f in in_flow]
+        for f, part in hard:                          # several failed: the first declared in the catalog decides
             r = by.get(f)
-            if part is not None and part.kind == "check" and part.hard and r is not None and r.value is False:
+            if r is not None and r.value is False:
                 if not governs(part, q):
                     continue
                 if q.name in part.then:
@@ -710,10 +712,9 @@ class System:
                                   provenance=r.origin, source=f, guard="hard_check")
                 return Result(None, 0.0, f"hard check {f} is false and no answer is set for it", "abstain", source=f,
                               guard="hard_check")
-        for f in [n for n in self.catalog.parts if n in in_flow]:        # a governing hard check that could not be evaluated:
-            part, r = self.catalog.parts.get(f), by.get(f)                # the answer is unknown, never "passed"
-            if part is not None and part.kind == "check" and part.hard and r is not None and r.value is MISSING \
-                    and governs(part, q):
+        for f, part in hard:                          # a governing hard check that could not be evaluated: the answer
+            r = by.get(f)                             # is unknown, never "passed"
+            if r is not None and r.value is MISSING and governs(part, q):
                 return Result(None, 0.0, f"hard check {f} could not be evaluated: {r.error or 'no value'}"
                               + _caused_by(by, r), "abstain", source=f, guard="hard_check")
         missing =[f for f in facts if f in by and by[f].value is MISSING]
@@ -743,7 +744,7 @@ class System:
                 return Result(None, 0.0, "rule not computed: " + (r.error if r else "no step") +
                               (f"; missing {', '.join(missing)}" if missing else "") + _caused_by(by, r), "abstain",
                               guard="timeout" if late else "grounding" if grounding else None)
-            pc = path_confidence(self.catalog, trace, rule.inputs)
+            pc = path_confidence(self.catalog, trace, rule.inputs, pcache)
             conf = min(pc, r.confidence)
             why = "; ".join(f"{x} = {srepr(vals.get(x))}" for x in rule.inputs)
             src = rule.func.__name__ if rule.func is not None else rule.name
@@ -787,7 +788,7 @@ class System:
         why = ", ".join(f"{f} = {srepr(vals.get(f))} ({c:+.2f})" for f, c in sorted(contrib.items(), key=lambda t: -abs(t[1]))[:4])
         if soft_failed:
             why += "; failed checks: " + ", ".join(soft_failed)
-        conf = base * path_confidence(self.catalog, trace, head.features)
+        conf = base * path_confidence(self.catalog, trace, head.features, pcache)
         _append(trace, Record(step=0, kind="head", name="answer:" + q.name, inputs={f: vhash(vals[f]) for f in head.features},
                               value=a, confidence=base, provenance="learned", model=model_info(head), probs=dict(p)),
                 len(flow.steps))
