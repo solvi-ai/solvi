@@ -25,13 +25,14 @@ Contents:
 13. [Guarding an agent's tool calls (preview)](#guarding-an-agents-tool-calls)
 14. [solvi behind a coding agent's hooks (preview)](#solvi-behind-a-coding-agents-hooks)
 15. [A model that writes: generation, agreement and the re-ask loop](#a-model-that-writes-generation-agreement-and-the-re-ask-loop)
-16. [Verified charts: a specialist that checks every number (preview)](#verified-charts-a-specialist-that-checks-every-number)
-17. [Checking a catalog: solvi check](#checking-a-catalog-solvi-check)
-18. [Grounded decisions: provenance, audit and safeguards](#grounded-decisions-provenance-audit-and-safeguards)
-19. [Printing results: solvi.show](#printing-results-solvishow)
-20. [Extracting fields from documents](#extracting-fields-from-documents)
-21. [Command line](#command-line)
-22. [Guarantees and limitations](#guarantees-and-limitations)
+16. [A specification compiled into the catalog: solvi.compile (experimental)](#a-specification-compiled-into-the-catalog-solvicompile)
+17. [Verified charts: a specialist that checks every number (preview)](#verified-charts-a-specialist-that-checks-every-number)
+18. [Checking a catalog: solvi check](#checking-a-catalog-solvi-check)
+19. [Grounded decisions: provenance, audit and safeguards](#grounded-decisions-provenance-audit-and-safeguards)
+20. [Printing results: solvi.show](#printing-results-solvishow)
+21. [Extracting fields from documents](#extracting-fields-from-documents)
+22. [Command line](#command-line)
+23. [Guarantees and limitations](#guarantees-and-limitations)
 
 ## Concepts
 
@@ -3777,6 +3778,152 @@ every candidate is a full ask, so a search runs far more asks than a hand-writte
 **Not done here:** no proposals by a model, no bisection over numbers (`res.counterfactual` does that), no parallel
 asks, no proof of the prune and bound promises. Each candidate is a full ask with the trace hashed (see the README's
 Speed table, `benchmarks/ask_speed.py`), so a space of millions is for code, not for this search.
+
+## A specification compiled into the catalog: solvi.compile
+
+> **Experimental.** The API may change. What it promises is the procedure below, not correctness: a compiled part is
+> as right as the drafts and the tests that agreed on it.
+
+A policy, a regulation or a constraint description says what to decide; solvi decides with catalog parts. `solvi.compile`
+lets an LLM write those parts from the text and accepts them only after checks that need no labelled examples:
+
+1. the text is split into numbered **clauses** (`Spec`); every part the writer returns names the clauses it implements,
+   and every clause is cited by a part or declared not normative with a reason;
+2. the module is **pure functions** checked by `solvi.sandbox` (an `ast` allowlist of standard-library imports, no
+   files, reflection or dunders) and run there — in a subprocess with memory and time limits — before anything of it
+   enters your process;
+3. **two drafts are written independently** and must give the same answer to every question on every input of a pool:
+   inputs drawn from the values you declare (`Inputs`), boundary values around every number of the text and of both
+   drafts, your unlabelled samples, and the tests' inputs. Every input must get an answer: a draft that abstains or
+   raises on one has a bug. A disagreement goes back to both writers with the input, both answers and the clauses
+   their deciding parts cite;
+4. **tests derived from the text**, written by a separate call that never sees the code, each naming the clause it
+   checks; both drafts must pass them. A test that every draft which runs fails goes back once to the test writer,
+   which works the answer out again and keeps, corrects or drops it — recorded, since a test can be wrong as well;
+5. labelled examples or a reference function, when you have them (`examples=`, `reference=`), as further checks.
+
+A draft that fails is rewritten from its module and the failures, for up to `rounds` rounds. Acceptance is automatic
+when everything passes; otherwise `c.accepted` is False, `c.reason` says why, and `c.system()` raises `Rejected`.
+
+```python
+import json
+
+from solvi import Answer, Question
+from solvi.compile import Inputs, Spec, compile_spec
+
+POLICY = """# Shipping
+- An order of 50 or more ships free; otherwise shipping costs 5.
+- Orders to the world zone heavier than 30 kg are refused.
+"""
+
+MODULE = '''
+def free_shipping(total):
+    return total >= 50
+
+def small_enough(zone, weight):
+    return not (zone == "world" and weight > 30) or Fail(f"{weight} kg to the world zone")
+
+def ship(free_shipping):
+    return "free" if free_shipping else "paid"
+
+PARTS = {
+    "free_shipping": {"kind": "fn", "clauses": ["c1"]},
+    "small_enough": {"kind": "check", "hard": True, "then": {"ship": "refused"}, "clauses": ["c2"]},
+    "ship": {"kind": "rule", "question": "ship", "clauses": ["c1"]},
+}
+NOT_NORMATIVE = {}
+'''
+
+
+class StandIn:                       # a stand-in for the writer: generator(URL, "openai/gpt-oss-120b", ...)
+    model_id = "stand-in"
+
+    def fingerprint(self):
+        return "stand-in"
+
+    def generate(self, messages, parse=None, **kw):
+        tests = [{"clause": "c1", "input": {"zone": "home", "total": 50, "weight": 1}, "expect": {"ship": "free"},
+                  "why": "50 or more ships free"}]
+        fence = "`" * 3                 # the writer answers in a fenced block
+        text = (f"{fence}json\n{json.dumps(tests)}\n{fence}" if messages[-1]["content"].startswith("# Write tests")
+                else f"{fence}python\n{MODULE}{fence}")
+        return type("G", (), {"value": parse(text) if parse else text, "meta": {"text": text}})()
+
+
+spec = Spec(POLICY)
+inputs = Inputs({"zone": ["home", "world"], "total": (0, 200), "weight": (0, 50)}, n=300)
+c = compile_spec(spec, [Question("ship", "Ship free, paid or refused?", Answer.choice(["free", "paid", "refused"]))],
+                 inputs, StandIn())
+print(c.accepted, c.reason, c.record["rounds"][0]["agreement"])
+print(c.parts["small_enough"]["clauses"], spec.clauses["c2"].text)
+print(c.system().ask({"zone": "world", "total": 80, "weight": 40})["ship"].answer)
+```
+
+```
+True accepted in round 1 {'inputs': 318, 'disagree': 0}
+['c2'] Orders to the world zone heavier than 30 kg are refused.
+refused
+```
+
+With a model the stand-in is `generator(base_url, "openai/gpt-oss-120b", max_tokens=24000, extra_body={"reasoning":
+{"effort": "medium"}})` (or a base URL string, which builds that). Two drafts by default are two samples of one model —
+the first at temperature 0, the second at 0.7 with seed 1; `writer=[a, b]` takes two models.
+
+**What the writer is asked for.** A module of plain functions — a part's name is the fact it sets, its argument names
+are the inputs or facts it reads (a part that reads a name nothing gives is refused before it runs) — and two
+literal dicts: `PARTS` (kind `fn` / `check` / `rule`, for a hard check its `then`, for a rule its question, the clauses)
+and `NOT_NORMATIVE`. A hard check that names a question is required in that question's flow. A check may return
+`Fail("why")`. The prompts ask for one part per quantity a clause defines, so a stored decision shows each.
+
+**The record.** `c.record` keeps the spec's hash, the writer, every prompt and reply, the tests (and the invalid ones
+with why), the reviews of tests, and per round each draft's problems, which check caught it ("contract", "sandbox",
+"abstained", "tests", "disagreement", "labelled examples", "the reference") and the agreement. `c.save(folder)` writes
+`module.py` and `compiled.json`; `Compiled.load(folder)` reads them back and refuses a module that was edited.
+
+### A changed specification: recompile and the decisions it moves
+
+```python
+spec2 = c.spec.revise(new_text)            # unchanged clauses keep their ids; spec2.changes: changed / added / removed
+c2 = recompile(c, spec2, inputs, writer)    # the writer returns only the parts it adds, replaces or removes
+c2.changes["parts"]                         # {"added", "replaced", "removed", "kept"}; the kept ones are byte-identical
+print(decision_diff(c, c2, store=store))    # which stored decisions change, and the clauses of their causes
+```
+
+The writer sees the new text with its changed and added clauses marked and the removed ones listed, and the current
+module; it returns a patch. Each added or replaced part must cite a changed or added clause, each removed part the
+clause that removes it, and no part may still cite a removed clause — otherwise the patch goes back with the reasons.
+Then the same acceptance runs on the merged module, with tests written for the new text. `decision_diff` re-runs
+stored decisions (or `inputs=`, decided by the old version first) through `solvi.diff` and maps each cause step to the
+clauses its part cites — as fine as the parts are: a rule that cites every clause names every clause.
+
+### Versions and replay
+
+```python
+from solvi.compile import Versions
+versions = Versions("policy_versions")      # v1/, v2/ ... each module.py + compiled.json + version.json
+n = versions.add(c2, "after the change")    # accepted compilations only
+system = versions.system()                  # the latest; versions.system(1) the first
+versions.replay_all(store)                  # every stored decision against the version that made it ([] — all replay)
+```
+
+A stored decision records the fingerprint of the catalog that made it; `replay_all` replays each against that
+version, so old decisions keep verifying after the rules changed, and a decision made by a catalog that is no version
+here is reported.
+
+### Into an agent guard
+
+`to_guard(c, guard, tools)` registers each compiled hard check as a policy of a `solvi.agents.Guard`: the policy reads
+the compiled catalog's inputs (they must be facts the guard gives — `tool_name`, `tool_arguments`, `conversation`,
+`conversation_roles` or your declared facts), runs the compiled System and refuses with the clause the check
+implements as the reason.
+
+**Not done here.** Agreement is not correctness: two samples of one model can share a misreading, and the tests come
+from the same model — a wrong reading that both drafts and the tests share is accepted. Coverage is by citation, not by
+meaning. "Agree" covers the pool only: inputs nobody generates are not compared, so declare the domains and give
+samples of the real inputs. The parts read structured inputs: nothing here writes extractors from text, a search, or
+features for a head. Once loaded, a compiled module runs in your process with restricted builtins; the subprocess
+limits hold only during compilation (see `solvi.sandbox`). Labels, when you have them, are the stronger check —
+pass them.
 
 ## Verified charts: a specialist that checks every number
 
