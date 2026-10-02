@@ -345,6 +345,27 @@ models' cards ([solvi-base](https://huggingface.co/solvi-ai/solvi-base), [solvi-
 theirs. On the gallery, the rules, quotes and checks are the answer: every answer is backed by a quote at stated offsets,
 a computed fact, or the system abstains. Details: [docs/benchmarks.md](docs/benchmarks.md).
 
+### Nine public tasks
+
+Real tasks on public data, each with a baseline that does not use solvi and one solution with solvi, chosen on dev and
+scored on a held-out split ([benchmarks/tasks/](benchmarks/tasks/), solvi 0.8.0, gpt-oss-120b where an LLM is used):
+
+| Task | Baseline (no solvi) | solvi |
+|---|---|---|
+| CUAD contracts, 1,025 questions: accuracy; answered alone, wrong among them | 0.882; 100%, 11.8% | 0.899; 67.6%, 4.0% |
+| Banking77 stream, 20 unseen intents from request 1,000, promise ≤ 5% wrong: wrong after the shift | 22.5% (broken) | 0.7% (kept), at 13.7% answered alone |
+| Abt-Buy, 1,916 product pairs: F1 | 0.872 (LLM per pair) | 0.933 (code reads the offers; a head fitted on 5,743 labelled pairs) |
+| NATURAL PLAN, right of 100: calendar / meetings / trips | 92 / 75 / 43 (LLM plans) | 95 / 100 / 98 (`solvi.search`, no LLM) |
+| BIRD mini-dev, 150 questions: right; wrong among answered | 78; 48.0% | 73; 34.8% at 74.7% answered |
+| RAGTruth, 600 responses: F1 | 0.784 | 0.766 |
+| τ-bench retail, 30 tasks: solved; calls the environment refused | 18; 10 | 14; 0 |
+| NAB, 33 series: F1 | 0.391 | 0.361 |
+
+solvi does not make a model more accurate: on RAGTruth, BIRD, τ-bench and NAB it did not beat the baseline. What it
+added is the promise on what is answered alone, consistency across items, a search where a model guessed, and a stored,
+replayable record of every decision. German Credit (rules and an audit of a rule change) decides exactly as plain code
+does and adds the audit. Every number, its caveats and the cost of a run: [benchmarks/tasks/README.md](benchmarks/tasks/README.md).
+
 ### How it compares to asking an LLM
 
 We gave the same inputs and written rules to solvi and to four LLMs: Grok 4.7, gpt-oss-120b, Qwen3-235B-2507 and
