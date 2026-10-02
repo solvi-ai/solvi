@@ -219,6 +219,13 @@ class System:
         self.inputs = inputs
         self.strategist = strategist              # None: the deterministic strategist (solvi.strategist.plan)
         self.questions = {q.name: self._typed_question(q) for q in questions}
+        for c in catalog.constraints.values():        # argument names are question names: one that is not (a typo) means
+            lost = [x for x in c.inputs if x not in self.questions]   # the constraint would never apply, without a word
+            if lost:
+                raise ValueError(f"constraint {c.name} reads {', '.join(lost)}, which "
+                                 f"{'is not a question' if len(lost) == 1 else 'are not questions'} of this system "
+                                 f"({', '.join(self.questions)}): a constraint's arguments are question names, and it "
+                                 "applies only when all of them are asked")
         self.heads: dict[str, Head] = {}
         from .storage import JSONLStorage, open_storage
         if journal and storage is not None:
@@ -752,16 +759,24 @@ class System:
         if not cons:
             return True, []
 
-        def ok(assign, c):
+        raised = {}                                   # constraint → the exception it raised on the answers as given
+
+        def ok(assign, c, note=False):
             if any(assign.get(q) is None for q in c.inputs):
                 return True                           # an abstained answer: nothing to check
             try:
                 return bool(c.func(**{q: assign[q] for q in c.inputs}))
-            except Exception:  # noqa: BLE001
+            except Exception as e:  # noqa: BLE001 — a constraint that raises counts as broken, and says so (below)
+                if note:
+                    raised[c.name] = f"{type(e).__name__}: {str(e)[:120]}"
                 return False
         current = {q: r.answer for q, r in results.items()}
-        if all(ok(current, c) for c in cons):
+        if all([ok(current, c, True) for c in cons]):
             return True, []
+        for c in cons:                                # the error is in the reason of every answer the constraint reads
+            if c.name in raised:
+                for q in c.inputs:
+                    results[q].why += f"; constraint {c.name} raised {raised[c.name]} (it counts as broken)"
         # candidates: learned answers may change (their distribution), rule / forced / abstained answers are fixed
         qs = sorted({q for c in cons for q in c.inputs})
         cands = {}
@@ -797,7 +812,15 @@ class System:
                 if best is None or score > best[0]:
                     best = (score, assign)
         if best is None:
-            return False, [c.name for c in cons if not ok(current, c)]
+            broken = [c.name for c in cons if not ok(current, c)]
+            total = math.prod(len(v) for v in cands.values())
+            if total > max_combos:                    # not every combination was tried: say so, the answers stand as given
+                for q in qs:
+                    if len(cands[q]) > 1 and any(q in c.inputs for c in cons if c.name in broken):
+                        results[q].why += (f"; not repaired: {', '.join(broken)} broken, and joint decoding tried only the "
+                                           f"{k} most probable answer(s) of each question ({total:,} combinations of "
+                                           f"{len(qs)} answers exceed its limit of {max_combos:,})")
+            return False, broken
         for q in qs:
             r = results[q]
             if best[1][q] != r.answer:

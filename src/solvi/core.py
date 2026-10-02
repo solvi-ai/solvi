@@ -659,6 +659,8 @@ class Catalog:
                 forget_rule(self, p.question)
             self.rules[p.question] = p
         elif kind == "constraint":
+            if p.name in self.constraints:            # as for parts: a second one of the same name replaced the first
+                raise ValueError(f"constraint {p.name} is already in the catalog")
             self.constraints[p.name] = p
         else:
             if p.name in self.parts:

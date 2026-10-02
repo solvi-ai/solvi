@@ -178,10 +178,12 @@ def test_constraints_that_cannot_hold():
     def impossible(verdict):
         return verdict == "maybe"
 
-    @cat.constraint
+    s = System(cat, qs)
+
+    @cat.constraint                                    # added after the System was built (System(...) refuses it)
     def ghost(verdict, mood):
         return True
-    rep = lint(System(cat, qs))
+    rep = lint(s)
     assert ("constraint_never_holds", "impossible") in {(f.code, f.where) for f in rep.findings}
     assert ("constraint_unknown_question", "ghost") in {(f.code, f.where) for f in rep.findings}
 

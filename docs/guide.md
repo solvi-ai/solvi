@@ -113,8 +113,9 @@ def ship_rule(big_order):
 
   No rule and no model confidence can override a failed hard check. To make sure a hard check is always in a question's
   flow, list it in the question's `checkpoints`. When several hard checks fail, the first one declared in the catalog decides:
-  declare the most important first. A question's flow and answer do not depend on which other questions are asked in the
-  same request.
+  declare the most important first. A question's flow does not depend on which other questions are asked in the same
+  request, and neither does its answer — except through a constraint between answers, which applies only when all its
+  questions are asked.
 
   A hard check that could not be evaluated (it raised, or a fact it reads is missing) never counts as passed: the
   questions it governs abstain. The reason names the check and, when the check could not run for lack of an input, the
@@ -243,6 +244,22 @@ searches for the most probable combination of learned answers (from their distri
 satisfies every constraint, and appends "changed from … to satisfy …" to the reason. Answers from rules, hard checks and
 abstentions never change. `res.feasible` says whether the final answers satisfy every constraint; if fixed answers conflict,
 it is `False` and `res.violations` names the constraints.
+
+What to know about constraints:
+
+- A constraint applies only when **all** its questions are asked in the request: `ask(state, ["verdict"])` does not
+  apply a constraint between `verdict` and `harm`, so a learned answer may differ from the one `ask(state)` gives.
+- Its argument names are question names. `System(...)` raises `ValueError` for a constraint that reads a name that is
+  not one of its questions (a typo would otherwise mean the constraint never applies), and a second constraint with
+  the name of an earlier one raises when it is declared.
+- A constraint that raises counts as broken; the exception is in the reason of every answer it reads (`constraint
+  one_owner raised TypeError: …`).
+- The search is exhaustive only up to 50,000 combinations of the candidate answers — 15 yes/no answers under one
+  constraint. Above that only the most probable answers of each question are tried (with 16 or more yes/no answers:
+  the answers as given), so nothing may be repaired: `res.feasible` is `False`, `res.violations` names the constraints
+  and each answer's reason says `not repaired: … joint decoding tried only the 1 most probable answer(s) of each
+  question (65,536 combinations of 16 answers exceed its limit of 50,000)`. Split such a request into groups of
+  questions that share constraints, or enforce the rule in code (an "at most one" needs no search).
 
 ## Types, questions and model decisions
 
