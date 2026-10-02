@@ -117,3 +117,28 @@ def test_answers_do_not_depend_on_which_other_questions_are_asked():
     assert together["state"].answer == "stop" and together["state"].status == "forced"
     assert together["cause"].answer == alone["cause"].answer == "high"       # the hard check governs only "state"
     assert together["cause"].status == alone["cause"].status == "ok" and together["cause"].why == alone["cause"].why
+
+
+def test_a_cycle_in_the_catalog_leaves_its_question_unresolved_and_the_strategist_has_no_dead_helpers():
+    """The guide said a cycle raises PlanError; the branch could not be reached (a fact on a cycle is never computable)."""
+    from solvi import Answer, Catalog, Question, System
+    from solvi import strategy
+    cat = Catalog()
+
+    @cat.fn
+    def a(b):
+        return b
+
+    @cat.fn
+    def b(a):
+        return a
+
+    @cat.rule("q")
+    def q(a):
+        return True
+    res = System(cat, [Question("q", "Q?", Answer.yes_no())]).ask({})
+    assert res.results["q"].status == "abstain"
+    assert not hasattr(cat, "producer") and not hasattr(strategy, "fact_of")
+    assert "expanded" not in strategy.Selection.__dataclass_fields__
+    import inspect
+    assert "max_expand" not in inspect.signature(strategy.ModelStrategist).parameters

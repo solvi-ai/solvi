@@ -307,7 +307,9 @@ class AnswerType(Serial):
         return v
 
     def rank(self, v):
-        """Position of an ordinal (or choice) answer: 0 for the first option."""
+        """Deprecated (removed in 0.9; the name is `Answer.rank`'s, a ranking question): `options.index(v)`."""
+        from . import _deprecate
+        _deprecate.renamed("AnswerType.rank(v)", "answer_type.options.index(v)")
         return self.options.index(v)
 
 
@@ -871,9 +873,6 @@ class Catalog:
         an alternative producer is checked when it is declared; a fact's producers only once all of them are.)"""
         return [(g.name, a.name, lost) for g in self.parts.values() for a in g.alternatives or ()
                 for lost in [validate_misses(a, g.inputs)] if lost]
-
-    def producer(self, fact):
-        return self.parts.get(fact)
 
     def alternative(self, fact, name):
         """One alternative producer of a fact, by its function name."""

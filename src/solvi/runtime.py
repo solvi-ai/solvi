@@ -310,6 +310,9 @@ class Trace(Serial):
         return "\n".join(out)
 
     def value(self, name):
+        """Deprecated (removed in 0.9): `res.values[name]` for a computed fact, `trace.init[name]` for a given one."""
+        from . import _deprecate
+        _deprecate.renamed("Trace.value(name)", "res.values[name] (or trace.init[name] for a given fact)")
         for r in self.records:
             if r.name == name:
                 return r.value

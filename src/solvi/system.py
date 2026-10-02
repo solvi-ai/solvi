@@ -1,5 +1,5 @@
 """System: catalog + questions → ask(init_state) → answers with confidence, flow, computed_state, trace; fit / teach; storage
-of responses and corrections (solvi.storage; journal= is a JSONL store)."""
+of responses and corrections (solvi.storage)."""
 from __future__ import annotations
 
 import dataclasses
@@ -198,9 +198,10 @@ def _clash(catalog, names, head):
 
 
 class System:
-    def __init__(self, catalog: Catalog, questions, journal: str | None = None, workers: int = 1, order: str = "default",
+    def __init__(self, catalog: Catalog, questions, *, workers: int = 1, order: str = "default",
                  producers: str = "declared", learn: bool | None = None, inputs=None, strategist=None, storage=None,
-                 timeout: float | None = None, costs="declared", lang: str = "en", early_exit: bool = True):
+                 timeout: float | None = None, costs="declared", lang: str = "en", early_exit: bool = True,
+                 journal: str | None = None):
         """order: "default" (hard checks and their inputs first, all together) or "learned" (hard checks one at a time, most
         expected saving first — see learn_order). producers: "declared" (alternative producers of a fact are tried in
         declaration order) or "learned" (a policy picks the order per input and learns from outcomes). learn: after every
@@ -216,7 +217,8 @@ class System:
         strategist (experimental: solvi.strategy.ModelStrategist; its plan is recorded in the trace, see docs/strategist.md).
         storage: a solvi.storage.TraceStorage (or a path: .db / .sqlite → SQLite, else JSON lines) — every ask saves its
         response (answers, flow, whole trace) there, hash-chained across responses, and teach saves the correction; the
-        response's `stored_id` is its id in the store. journal="file.jsonl" is the same as storage=JSONLStorage("file.jsonl").
+        response's `stored_id` is its id in the store. journal= (deprecated, removed in 0.9): storage=JSONLStorage(path).
+        Every option after `questions` is keyword-only.
         timeout: seconds a part's call may take under `aask` when the part declares no `timeout=` (None: no limit).
         producers="equivalent": the producers of a fact are interchangeable — the cost-optimal planner
         (solvi.strategy.ModelStrategist(producers="equivalent")) picks one per fact, the cheapest valid plan.
@@ -259,10 +261,13 @@ class System:
                                  "applies only when all of them are asked")
         self.heads: dict[str, FastHead] = {}
         from .storage import JSONLStorage, open_storage
-        if journal and storage is not None:
-            raise ValueError("pass journal= or storage=, not both (journal= is a JSONL storage)")
-        self.journal = Path(journal) if journal else None
-        self.storage = JSONLStorage(self.journal) if journal else open_storage(storage)
+        if journal is not None:
+            if storage is not None:
+                raise ValueError("pass journal= or storage=, not both (journal= is a JSONL storage)")
+            from . import _deprecate
+            _deprecate.renamed("System(journal=path)", "System(storage=JSONLStorage(path))")
+            storage = JSONLStorage(Path(journal))
+        self.storage = open_storage(storage)
         if self.storage is not None and self.storage.catalog is None:
             self.storage.catalog = self               # typed values of stored responses are restored with this system
         self.workers = workers                    # >1: independent steps run in parallel threads
@@ -1109,14 +1114,14 @@ class System:
         the gates (gates=: min_gain, min_holdout, tolerance, risk, max_change, shadow_limit, max_conflict,
         min_calibration, honesty) and promotes it only when all pass; loop.rollback(version) restores any promoted
         version. options: changelog= (another TraceStorage for the update records), holdout=0.3, calibration=0.2,
-        gate_teach=True (teach only stores corrections while the loop is attached), harvest_rules=False."""
+        gate_teach=True (teach only stores corrections while the loop is attached)."""
         from .learning import Learning
         return Learning(self, storage, parts, ladder, gates, **options)
 
     def teach(self, question, init_state, correct, *, source="human", by=None, of=None):
         """Human correction. A fast head (fit_fast) absorbs it at once; so does a model decision that answers the question
         (a solvi.decide decision part as the question's rule, or a rule passing a decided fact on): its per-option shift is
-        updated. Any correction goes to the storage (journal) for the next fit. Returns the update time in ms when something learned
+        updated. Any correction goes to the storage for the next fit. Returns the update time in ms when something learned
         at once, else None. source ("human", "outcome", "rule"), by (who) and of (the stored id of the decision it corrects)
         are stored with it (TraceStorage.save_correction). With a learning loop (System.learning(..., gate_teach=True))
         nothing learns at once: the correction is only stored, and the loop's gates decide whether it is learned.

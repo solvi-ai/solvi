@@ -49,7 +49,8 @@ def test_ordinal_answers_with_the_median():
     from solvi.system import System as S
     at = Answer.ordinal({"low": "no action", "medium": "watch", "high": "act now"})
     assert at.options == ["low", "medium", "high"] and at.descriptions["high"] == "act now"
-    assert at.rank("medium") == 1
+    with pytest.warns(DeprecationWarning, match=r"options.index"):
+        assert at.rank("medium") == 1
 
     class FakeHead:                          # bimodal distribution: argmax would say "high", the median is "medium"
         features = []

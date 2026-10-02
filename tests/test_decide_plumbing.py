@@ -102,3 +102,28 @@ def test_the_adaptation_of_an_evidence_question_survives_save_and_load(tmp_path)
     plain2 = m2.decision("team_plain", "Which team?", "email", opts)
     assert ev2.adaptation is not None and plain2.adaptation is None
     assert ev2.fingerprint() == ev.fingerprint() and plain2.fingerprint() == plain.fingerprint()
+
+
+def test_an_option_the_question_kind_does_not_use_is_refused_instead_of_ignored():
+    """`k=` on a choice question was accepted and changed the part's fingerprint; `top_k=` without long=, `min_margin=` on
+    a multi-label question, `other=` on a score question and `act_threshold=` on a model without an act head did nothing."""
+    from pydantic import BaseModel
+    m = DecideModel(Words(), {**V2, "act": False})
+    for kw, msg in (({"k": 3}, "k= is for rank"), ({"score_value": "mean"}, "score_value= is for score"),
+                    ({"coverage": 0.9}, "coverage= is for number"), ({"top_k": 3}, "needs long="),
+                    ({"rerank": True}, "needs long="), ({"act_threshold": 0.9}, "no act head"),
+                    ({"kind": "choice", "multi": True}, "contradict")):
+        with pytest.raises(ValueError, match=msg):
+            m.decision("p", "Which?", "doc", ["a", "b"], **kw)
+    with pytest.raises(ValueError, match="min_margin= is for"):
+        m.decision("p", "Which?", "doc", ["a", "b"], multi=True, min_margin=0.1)
+    with pytest.raises(ValueError, match="other= is for choice / multi"):
+        m.decision("p", "How bad?", "doc", ["low", "high"], kind="score", other="low")
+    m.decision("p", "Which?", "doc", ["a", "b"], min_margin=0.1)          # an option the kind uses: accepted
+
+    class Ticket(BaseModel):
+        team: bool
+        urgent: bool
+    assert set(m.decisions(Ticket, fields=["team"])) == {"team"}
+    with pytest.raises(ValueError, match=r"\['tema'\] are not fields of Ticket"):
+        m.decisions(Ticket, fields=["tema"])

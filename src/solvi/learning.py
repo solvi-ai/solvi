@@ -6,8 +6,7 @@
     loop.versions()                            # every promoted state; loop.rollback(2) restores one
 
 Labels come only from outside the model, read from a TraceStorage: human corrections (System.teach, save_correction),
-known outcomes (source="outcome") and your rules' rejections (source="rule"; with harvest_rules=True also the stored
-decisions where a hard check forced another answer than the model proposed). A correction from any other source is
+known outcomes (source="outcome") and your rules' rejections (source="rule"). A correction from any other source is
 refused and listed in `labels()["rejected"]`; the stored decisions — the system's own answers — are never read as labels,
 so self-training is impossible by construction, not by a setting.
 
@@ -183,7 +182,7 @@ class Learning:
     experimental = True
 
     def __init__(self, system, storage=None, parts=None, ladder=None, gates=None, changelog=None, holdout=0.3,
-                 calibration=0.2, gate_teach=True, harvest_rules=False):
+                 calibration=0.2, gate_teach=True, harvest_rules=None):
         from .decide import DecisionPart, decision_of
         from .storage import open_storage
         warnings.warn("System.learning is experimental: its API and gates may change", ExperimentalWarning, stacklevel=3)
@@ -218,7 +217,11 @@ class Learning:
         self.ladder["memory"] = {**LADDER["memory"], **((ladder or {}).get("memory") or {})}
         self.gates = {**GATES, **(gates or {})}
         self.holdout, self.calibration = float(holdout), float(calibration)
-        self.gate_teach, self.harvest_rules = bool(gate_teach), bool(harvest_rules)
+        self.gate_teach = bool(gate_teach)
+        if harvest_rules is not None:                  # 0.7: it harvested nothing in the usual wiring (a failed hard check
+            from . import _deprecate                  # answers before the model is asked) and what it did harvest failed
+            _deprecate.renamed("System.learning(harvest_rules=)",   # the held-out gate
+                               "corrections with source=\"rule\" (system.teach(..., source=\"rule\")); it is ignored")
         self._states = {}                              # version → in-process snapshot (keeps objects JSON cannot hold)
         system._learning = self
 
@@ -230,9 +233,8 @@ class Learning:
     # --- labels
     def labels(self):
         """The trusted labels of the loop's questions → {"labels": [Label], "rejected": [(id, why)]}. Only corrections
-        (teach records) from TRUSTED_SOURCES, with an answer the question and its decision can take; with
-        harvest_rules=True also the stored decisions where a hard check forced another answer than the model's."""
-        out, rejected, seen = [], [], set()
+        (teach records) from TRUSTED_SOURCES, with an answer the question and its decision can take."""
+        out, rejected = [], []
         for c in self.storage.corrections():
             q = c["question"]
             if q not in self.parts:
@@ -245,14 +247,6 @@ class Learning:
                 continue
             out.append(Label(c["id"], q, dict(c["init"]), ans, c.get("source", "human"), c.get("by"), c.get("of"),
                              c.get("time"), split_of(content_key(q, c["init"]), self.holdout, self.calibration)))
-            seen.add((c.get("of"), q))
-        if self.harvest_rules:
-            for s in self.storage.iter():
-                resp = s.data.get("response") or {}
-                for q in self.parts:
-                    lab = self._rule_label(s, resp, q)
-                    if lab is not None and (s.id, q) not in seen:
-                        out.append(lab)
         return {"labels": out, "rejected": rejected}
 
     def _normalize(self, q, answer):
@@ -262,28 +256,6 @@ class Learning:
         if ans is not Unknown:
             self.parts[q].spec.label(ans)              # the decision can give it (a bool question: yes / no)
         return ans
-
-    def _rule_label(self, s, resp, q):
-        """A stored decision where a hard check forced an answer that differs from the model's proposal → Label (source
-        "rule") or None."""
-        res = (resp.get("results") or {}).get(q) or {}
-        if res.get("guard") != "hard_check" or res.get("status") != "forced":
-            return None
-        part = self.parts[q]
-        prop = None
-        for r in (resp.get("trace") or {}).get("records") or ():
-            if r.get("name") in ("answer:" + q, part.__name__) and r.get("model") is not None:
-                prop = r.get("value")
-        try:
-            ans = self._normalize(q, res.get("answer"))
-            if prop is None or part.spec.label(self._normalize(q, prop)) == part.spec.label(ans):
-                return None
-        except (ValueError, TypeError):
-            return None
-        init = (resp.get("trace") or {}).get("init") or {}
-        lid = f"{s.id}:{q}"
-        return Label(lid, q, dict(init), ans, "rule", None, s.id, s.time,
-                     split_of(content_key(q, init), self.holdout, self.calibration))
 
     def _text(self, q, init):
         part = self.parts[q]

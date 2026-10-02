@@ -40,22 +40,22 @@ def show(res, catalog=None, flow=True, state=True, audit=True, lang=None):
         print(head("sh.flow", 35))
         for line in _flow(res.flow, lang).splitlines():
             print("  " + line)
-    if flow and getattr(res.trace, "skipped", None):
+    if flow and res.trace.skipped:
         print(t("sh.skipped", lang) + ", ".join(f"{n} ({m(why)})" for n, why in res.trace.skipped))
-    if flow and getattr(res.trace, "schedule", None):
+    if flow and res.trace.schedule:
         print(t("sh.learned_order", lang))
         for line in res.trace.explain_order().splitlines():
             print("    " + i18n.msg(line, lang, scope="flow"))
     if state:
         print(head("sh.state", 52))
-        text = res.computed_state_text(lang) if hasattr(res, "computed_state_text") else res.computed_state
+        text = res.computed_state_text(lang)
         for line in text.splitlines():
             print("  " + line)
         for r in res.trace.records:
             if r.tried:
                 print(t("sh.tried", lang, name=r.name, used=r.producer or "—",
                         tried=", ".join(f"{n} ({m(w)})" for n, w in r.tried)))
-    if audit and hasattr(res, "audit"):
+    if audit:
         print(head("sh.audit", 24))
         for line in res.audit(lang=lang).compact().splitlines():
             print("  " + line)

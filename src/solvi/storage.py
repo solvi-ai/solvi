@@ -20,7 +20,7 @@ hash of the record before it: editing, deleting, inserting or reordering a store
 count and the last hash (head()) — next to the log and verify() checks it; a head you published elsewhere
 (verify(anchor=head)) also catches a rewrite of the whole chain together with the stored head.
 
-Backends: JSONLStorage (append-only file, one record per line; what System(journal=...) writes), SQLiteStorage (stdlib
+Backends: JSONLStorage (append-only file, one record per line; what System(storage="file.jsonl") writes), SQLiteStorage (stdlib
 sqlite3; indexed by question, answer, status, safeguard, model fingerprint and time; several processes may write),
 PostgresStorage (psycopg 3; the same tables, several services writing) and DuckDBStorage (duckdb; the same tables in a
 DuckDB file, for analytics)."""
@@ -714,7 +714,7 @@ def _path(by, roots, fact, value_hash):
 
 # --- JSONL
 class JSONLStorage(TraceStorage):
-    """Append-only JSON lines, one record per line (the file System(journal=...) writes). The head (count and last hash)
+    """Append-only JSON lines, one record per line (the file System(storage="file.jsonl") writes). The head (count and last hash)
     is kept in `<path>.head`. Threads of a process may write; several processes may too where the system has advisory
     file locks (POSIX: an append takes an exclusive flock on the file, reads what other processes appended since it
     last looked, then writes its record and the head) — on Windows keep to one writing process, or use SQLiteStorage.

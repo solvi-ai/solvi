@@ -196,10 +196,6 @@ class BadRequest(RequestError, ValueError, TypeError):
     status = 422
 
 
-class RequestTimeout(RequestError, TimeoutError):
-    status = 504
-
-
 class Busy(RequestError):
     """The server is answering as many requests as it may (Limits.max_inflight), or the System stayed busy longer than
     Limits.queue_timeout: try again later."""

@@ -176,14 +176,6 @@ class SystemOneScorer:
             criteria[NOT_STATED] = NOT_STATED_DESCRIPTION
         return {"": {"type": "choice", "instructions": it.task, "criteria": criteria}}
 
-    @classmethod
-    def question(cls, it):
-        """An Item that is one System One question → that question (a multi-label one is several: see questions)."""
-        qs = cls.questions(it)
-        if len(qs) != 1:
-            raise ValueError("a multi-label question is one noul per option: use SystemOneScorer.questions")
-        return qs[""]
-
     @staticmethod
     def answer_logits(it, ans):
         """An answer to a single (not multi-label) question → log-probabilities in the item's option order."""

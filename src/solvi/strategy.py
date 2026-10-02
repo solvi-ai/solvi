@@ -6,8 +6,8 @@ alternative producers (`provides=`), needs the inputs of ALL of them (a fallback
 1. **Points — code.** A branch-and-bound search picks ONE producer per needed fact so that the plan is valid and cheapest
    (declared `cost=`; a part without a declared cost counts as `unit`). A producer whose inputs cannot be computed from the
    given facts (a dead end) is never chosen. Hard checks that govern a question (its `then` names the question, it has no
-   `then`, or the question names it as a checkpoint) and that the cheapest plan contains are **mandatory milestones**:
-   every later plan must keep them.
+   `then`, or the question names it as a checkpoint) and that the deterministic flow over the usable producers contains
+   are **mandatory milestones**: every plan must keep them.
 2. **Segments — the model.** Where the choice is not settled by declared costs (a fact with several usable producers, not
    all of them with a declared cost), the model gets a short task — "produce this fact from these available facts; these are
    the candidate parts (narrowed by code)" — and proposes 1–4 parts, in order. All segments of a plan go through the model in
@@ -38,17 +38,13 @@ from .strategist import Flow, PlanError, plan as det_plan
 
 UNIT = 1.0
 MAX_NODES = 4
+MAX_EXPAND = 20000               # branch and bound (search(method="bnb"), or no scipy milp): nodes before it stops
 
 
 # ---------------------------------------------------------------------------------------------------------------- catalog
 def alternatives(p):
     """The producers of a part's fact: its alternatives, or the part itself."""
     return list(p.alternatives) if p.alternatives is not None else [p]
-
-
-def fact_of(a):
-    """The fact a producer sets (its `provides`, else its name)."""
-    return a.provides or a.name
 
 
 def reachable(catalog, init_keys):
@@ -114,16 +110,15 @@ class Selection:
     needed: set
     cost: float
     proven: bool = True
-    expanded: int = 0
     feasible: bool = True
     why: str = ""
 
 
-def search(catalog, questions, init_keys, costs=None, heads=None, fixed=None, extra=(), max_expand=20000, unit=UNIT,
+def search(catalog, questions, init_keys, costs=None, heads=None, fixed=None, extra=(), unit=UNIT,
            method="auto"):
     """Cheapest valid selection for the questions' targets, their checkpoints and `extra` parts (e.g. mandatory checks).
     fixed: {fact: producer name} choices that must be kept (a model's accepted segments).
-    method: "milp" (exact: a 0/1 program solved by scipy's HiGHS), "bnb" (branch and bound, capped at max_expand nodes)
+    method: "milp" (exact: a 0/1 program solved by scipy's HiGHS), "bnb" (branch and bound, capped at MAX_EXPAND nodes)
     or "auto" (milp when scipy has it). Ties go to the producer declared first.
     → Selection (feasible=False when a target cannot be computed; `why` says which)."""
     if method in ("auto", "milp"):
@@ -133,7 +128,7 @@ def search(catalog, questions, init_keys, costs=None, heads=None, fixed=None, ex
         except ImportError:
             if method == "milp":
                 raise
-    return _search_bnb(catalog, questions, init_keys, costs, heads, fixed, extra, max_expand, unit)
+    return _search_bnb(catalog, questions, init_keys, costs, heads, fixed, extra, unit)
 
 
 def _start(catalog, questions, init, reach, heads, extra):
@@ -158,7 +153,7 @@ def _search_milp(catalog, questions, init_keys, costs, heads, fixed, extra, unit
     fixed = dict(fixed or {})
     start, missing = _start(catalog, questions, init, reach, heads, extra)
     if not start:
-        return Selection({}, set(), float("inf") if missing else 0.0, True, 0, not missing,
+        return Selection({}, set(), float("inf") if missing else 0.0, True, not missing,
                          ("cannot compute: " + ", ".join(sorted(set(missing)))) if missing else "")
     facts = [f for f in catalog.parts if f in reach and f not in init]
     fi = {f: j for j, f in enumerate(facts)}
@@ -201,15 +196,15 @@ def _search_milp(catalog, questions, init_keys, costs, heads, fixed, extra, unit
                constraints=LinearConstraint(A.tocsr(), [a for a, _ in rows], [b for _, b in rows]),
                options={"time_limit": 10.0})
     if res.x is None and res.status == 1:           # time limit without a solution: branch and bound instead
-        return _search_bnb(catalog, questions, init_keys, costs, heads, fixed, extra, 20000, unit)
+        return _search_bnb(catalog, questions, init_keys, costs, heads, fixed, extra, unit)
     if res.x is None:
-        return Selection({}, set(), float("inf"), False, 0, False, "no valid plan: " + str(res.message))
+        return Selection({}, set(), float("inf"), False, False, "no valid plan: " + str(res.message))
     x = res.x
     choice = {f: a.name for k, (f, a) in enumerate(alts) if x[nf + k] > 0.5}
     cost = sum(c(a) for k, (f, a) in enumerate(alts) if x[nf + k] > 0.5)
     if not _acyclic(catalog, choice, init):
-        return _search_bnb(catalog, questions, init_keys, costs, heads, fixed, extra, 20000, unit)
-    sel = Selection(choice, set(choice) | (init & _inputs_closure(catalog, choice, init)), cost, res.status == 0, 0)
+        return _search_bnb(catalog, questions, init_keys, costs, heads, fixed, extra, unit)
+    sel = Selection(choice, set(choice) | (init & _inputs_closure(catalog, choice, init)), cost, res.status == 0)
     if missing:
         sel.why = "not computable (left to the questions to abstain): " + ", ".join(sorted(set(missing)))
     return sel
@@ -231,7 +226,7 @@ def _acyclic(catalog, choice, init):
     return all(color.get(f, 0) == 2 or dfs(f) for f in choice)
 
 
-def _search_bnb(catalog, questions, init_keys, costs, heads, fixed, extra, max_expand, unit):
+def _search_bnb(catalog, questions, init_keys, costs, heads, fixed, extra, unit):
     init = set(init_keys)
     reach = reachable(catalog, init)
     c = cost_fn(costs, unit)
@@ -296,7 +291,7 @@ def _search_bnb(catalog, questions, init_keys, costs, heads, fixed, extra, max_e
                 agenda.extend(a_s[0].inputs)
                 continue
             for a in a_s:
-                if stats["n"] >= max_expand:
+                if stats["n"] >= MAX_EXPAND:
                     stats["cut"] = True
                     if best["choice"] is not None:
                         return
@@ -308,10 +303,10 @@ def _search_bnb(catalog, questions, init_keys, costs, heads, fixed, extra, max_e
         alts(f)
     rec(tuple(dict.fromkeys(start)), {}, 0.0)
     if best["choice"] is None:
-        return Selection({}, set(), float("inf"), False, stats["n"], False,
+        return Selection({}, set(), float("inf"), False, False,
                          "cannot compute: " + ", ".join(sorted(set(missing) or set(start))))
     ch = best["choice"]
-    sel = Selection(ch, set(ch) | (init & _inputs_closure(catalog, ch, init)), best["cost"], not stats["cut"], stats["n"])
+    sel = Selection(ch, set(ch) | (init & _inputs_closure(catalog, ch, init)), best["cost"], not stats["cut"])
     if missing:
         sel.why = "not computable (left to the questions to abstain): " + ", ".join(sorted(set(missing)))
     return sel
@@ -622,14 +617,13 @@ class ModelStrategist:
     fallback: when the verified plan cannot be built — "code" (the code plan), "deterministic" (solvi.strategist.plan) or
     "abstain" (every question abstains). record: write the plan record into the trace."""
 
-    def __init__(self, model=None, producers="declared", fallback="code", costs=None, fallbacks=True, record=True,
-                 max_expand=20000):
+    def __init__(self, model=None, producers="declared", fallback="code", costs=None, fallbacks=True, record=True):
         if fallback not in ("code", "deterministic", "abstain"):
             raise ValueError('fallback must be "code", "deterministic" or "abstain"')
         if producers not in ("declared", "equivalent"):
             raise ValueError('producers must be "declared" or "equivalent"')
         self.model, self.producers, self.fallback, self.costs = model, producers, fallback, costs
-        self.fallbacks, self.record, self.max_expand = fallbacks, record, max_expand
+        self.fallbacks, self.record = fallbacks, record
         self.last = None
 
     @classmethod
@@ -674,7 +668,7 @@ class ModelStrategist:
             return self._done(flow, report, t0, sel)
         gov = mandatory_checks(catalog, qs, init, heads)
         must = [c for cs in gov.values() for c in cs]
-        code = search(catalog, qs, init, costs, heads, extra=must, max_expand=self.max_expand)
+        code = search(catalog, qs, init, costs, heads, extra=must)
         report = {"strategist": "model" if self.model is not None else "code", "segments": [], "fallback": None,
                   "code_cost": code.cost, "proven": code.proven, "mandatory": gov}
         if not code.feasible:
@@ -706,7 +700,7 @@ class ModelStrategist:
                     row["by"] = "code"
                 report["segments"].append(row)
             if fixed:
-                sel = search(catalog, qs, init, costs, heads, fixed=fixed, extra=must, max_expand=self.max_expand)
+                sel = search(catalog, qs, init, costs, heads, fixed=fixed, extra=must)
                 ignored = [f for f, n in fixed.items() if sel.choice.get(f) not in (None, n)]
                 if ignored:
                     report["overridden"] = ignored
@@ -765,8 +759,8 @@ def plan_record(flow):
 
 
 def replay_plan(r, catalog, init_keys):
-    """Re-verify a plan record against the catalog: every chosen producer exists and provides its fact, its inputs are given
-    or chosen facts, and the choice is acyclic → [(step, name, reason)]."""
+    """Re-verify a plan record against the catalog: every chosen producer exists and provides its fact, and its inputs are
+    given or chosen facts → [(step, name, reason)]."""
     bad = []
     v = r.value if isinstance(r.value, dict) else {}
     ch = v.get("choice") or {}
@@ -797,4 +791,5 @@ def narrowed(group, tried):
 
 
 __all__ = ["ModelStrategist", "Selection", "search", "segments", "check_segment", "validate", "build", "view", "reachable",
-           "plan_record", "replay_plan", "PlanError"]
+           "plan_record", "replay_plan", "PlanError", "alternatives", "usable", "narrowed", "mandatory_checks", "governing",
+           "producer"]

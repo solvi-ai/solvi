@@ -219,8 +219,9 @@ def test_trace_value_reads_a_computed_fact_then_a_given_one_then_missing():
     def big(double, broken):
         return "yes"
     t = System(cat, [Question("big", "Big?", Answer.yes_no())]).ask({"x": 21}).trace
-    assert t.value("double") == 42 and t.value("x") == 21
-    assert t.value("broken") is MISSING and t.value("nothing") is MISSING
+    with pytest.warns(DeprecationWarning, match=r"res.values\[name\]"):
+        assert t.value("double") == 42 and t.value("x") == 21
+        assert t.value("broken") is MISSING and t.value("nothing") is MISSING
 
 
 def test_a_question_changed_in_place_changes_the_questions_fingerprint():

@@ -240,7 +240,7 @@ An answer outside the options is never returned: a rule that produces one makes 
 
 - `Answer.ordinal(["low", "medium", "high"])` — ordered levels, lowest first. A learned head answers with the median of its
   distribution rather than the most likely level, so a split between "low" and "high" gives "medium", not a jump.
-  `answer_type.rank(v)` gives the position.
+  `answer_type.options.index(v)` gives the position.
 - `Answer.multi(["pii", "abuse", "prompt_injection"])` — any subset, returned as a tuple in option order (empty tuple for none).
   A rule may return a list or set. `fit` learns one yes/no head per option; `teach` updates all of them.
 - Any option list may be a dict `{option: description}`; descriptions are kept in `answer_type.descriptions`.
@@ -1713,19 +1713,19 @@ familiar to the decider than the left-out ones, the error after the change is ab
 ```python
 from solvi import System
 
-system = System(cat, questions, journal=None)
+system = System(cat, questions)
 res = system.ask(init_state)                   # all questions
 res = system.ask(init_state, ["ship"])         # a subset
 ```
 
-`System(catalog, questions, journal=None, workers=1, order="default", producers="declared", learn=None, inputs=None,
+`System(catalog, questions, *, workers=1, order="default", producers="declared", learn=None, inputs=None,
 strategist=None, storage=None, timeout=None, costs="declared", lang="en", early_exit=True)`; `learn`: after every ask,
 update the parts' measured costs and the learned order / producer policies from what happened (default: on when
 `order` or `producers` is "learned"); the others are described where they matter. `storage` (a `TraceStorage` or a path) saves every
 response with its whole trace, hash-chained across responses (see [Storing decisions](#storing-decisions-tracestorage)).
-`journal="file.jsonl"` is the same as `storage=JSONLStorage("file.jsonl")`: every `ask` appends one JSON line with the hash
-of `init_state`, the answers, the flow and the hash of every trace record (the keys of 0.5's journal line), plus the whole
-response and the chain fields. `ask(..., store=False)` skips saving one response. `inputs`: a pydantic model of
+Every option after `questions` is keyword-only. With a JSON-lines store every `ask` appends one line with the hash of
+`init_state`, the answers, the flow and the hash of every trace record, plus the whole response and the chain fields
+(`journal="file.jsonl"`, the older spelling of `storage="file.jsonl"`, is deprecated and goes in 0.9). `ask(..., store=False)` skips saving one response. `inputs`: a pydantic model of
 `init_state` (see [Types](#types-questions-and-model-decisions)); `ask` also takes a `BaseModel` instance.
 
 ### Response
@@ -1790,7 +1790,8 @@ It then walks backwards from the targets through the catalog signatures to the k
 
 Each part runs once per request, even if several questions need it. Steps are executed in topological order, rules
 last; hard checks and the facts they read are ordered first. Catalog parts that are not needed, or cannot run because their inputs are missing, are not executed, and
-`res.flow.skipped` says which case applies. A cycle in the catalog raises `PlanError`.
+`res.flow.skipped` says which case applies. A fact on a cycle of the catalog can never be computed: the questions that
+need it abstain (`solvi check` reports the cycle). `PlanError` is raised for a checkpoint that names no part.
 
 The flow depends only on which keys `init_state` has, the catalog, the questions and the trained heads. It is the same for
 every request with the same keys.
@@ -2044,7 +2045,7 @@ and fix the labels or the catalog.
 ### teach: record corrections
 
 ```python
-system = System(cat, questions, journal="decisions.jsonl")
+system = System(cat, questions, storage="decisions.jsonl")
 system.teach("risk", init_state, "high")
 ```
 
@@ -2074,7 +2075,6 @@ loop.rollback(2)                  # any promoted version, in this process or ano
 ```
 
 **Labels** come only from outside the model: the store's corrections from `"human"`, `"outcome"` and `"rule"` sources
-(`harvest_rules=True` also takes the stored decisions where a hard check forced another answer than the model proposed).
 A correction from any other source is refused and listed (`loop.labels()["rejected"]`); the stored decisions — the
 system's own answers — are never read as labels, so self-training is impossible by construction. Each label goes, by a
 hash of its id, to `"train"`, `"calibration"` or `"holdout"` (50 / 20 / 30% by default): a held-out label is never trained
@@ -2255,7 +2255,7 @@ the "about 0.3 ms" of a small one (README, Speed). A part should not change a gi
 in the flow (see [Catalog fingerprint, solvi diff and shadow mode](#catalog-fingerprint-solvi-diff-and-shadow-mode)); it is
 not part of the hash chain (a stored response is covered by the store's chain).
 
-`res.trace.init` keeps `init_state` and `res.trace.init_hash` its hash. `res.trace.value(name)` returns a recorded value.
+`res.trace.init` keeps `init_state` and `res.trace.init_hash` its hash; `res.values[name]` is a computed value.
 `res.trace.to_json()` / `Trace.from_json(text, catalog=cat)` store and load a trace (typed values are restored, see
 [Types](#types-questions-and-model-decisions)); the loaded trace replays like the original.
 

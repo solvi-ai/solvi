@@ -80,12 +80,10 @@ def plan(catalog, questions, init_keys, heads=None):
     def need(fact, why, q, trail=()):
         if fact in init_keys:
             return True
-        p = catalog.producer(fact)
-        if p is None or fact not in reach:
+        p = catalog.parts.get(fact)
+        if p is None or fact not in reach:          # a fact on a cycle is never reachable: its question abstains
             unresolved.setdefault(q, set()).add(fact)
             return False
-        if fact in trail:
-            raise PlanError(f"cycle in catalog: {' → '.join(trail + (fact,))}")
         if (fact, q) in done:                       # already walked for this question: same result (a fact reachable by
             st = chosen[fact]                       # several routes is walked once — without this, exponential time)
             if why not in st.reasons:

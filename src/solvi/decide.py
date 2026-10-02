@@ -77,6 +77,27 @@ _KIND = {"choice": "choice", "single": "choice", "one": "choice", "multi": "mult
 NULL_SOURCE = "text"                            # the source of a pointer quote before it is bound to its fact
 
 
+_OPTION_KINDS = {"score_value": ("score",), "k": ("rank",), "bins": ("number",), "unit": ("number",),
+                 "coverage": ("number",), "other": ("choice", "multi"), "min_margin": ("choice", "score", "noul", "rank")}
+
+
+def _unused_options(name, k_, kind, multi, long, has_act, given):
+    """An option that does nothing for this question raises (it used to be accepted, and some still changed the part's
+    fingerprint, so a calibration file stopped loading)."""
+    for opt, kinds in _OPTION_KINDS.items():
+        if given.get(opt) is not None and k_ not in kinds:
+            raise ValueError(f"{name}: {opt}= is for {' / '.join(kinds)} questions; this one is {k_} — drop it")
+    if kind is not None and multi and k_ != "multi":
+        raise ValueError(f"{name}: kind={kind!r} and multi=True contradict each other — drop one")
+    for opt in ("top_k", "rerank"):
+        if given.get(opt) is not None and long is None:
+            raise ValueError(f'{name}: {opt}= selects sections of a long text: it needs long="retrieve" or "full"')
+    for opt in ("act_threshold", "target_error"):
+        if given.get(opt) is not None and not has_act:
+            raise ValueError(f"{name}: {opt}= sets the act threshold, and this checkpoint has no act head — use "
+                             "escalate_below= (a calibrated confidence) instead")
+
+
 def _kind(kind, multi=False):
     if kind is None:
         return "multi" if multi else "choice"
@@ -2077,9 +2098,9 @@ class DecideModel:
     # --- catalog parts
     def decision(self, name, task, text_fact="doc", options=(), descriptions=None, multi=False, other=None, *, kind=None,
                  type=None, escalate_below=None, act_threshold=None, use_act=None, target_error=None,
-                 score_value="median", unknown=False, k=None, bins=None, unit=None, coverage=0.8, evidence=False,
+                 score_value=None, unknown=False, k=None, bins=None, unit=None, coverage=None, evidence=False,
                  option_order="canonical", permutations=4, min_margin=None, long=None, top_k=None, rerank=False,
-                 perturb=0, retrieve_query=None):
+                 perturb=0, retrieve_query=None, _shared=frozenset()):
         """A catalog part: text_fact (a fact name, or a list of them) → Decision(value, probs).
 
         The question: `options` (a list, or {option: description}) and `kind` ("choice", "multi", "score", "noul"; default
@@ -2124,7 +2145,15 @@ class DecideModel:
         is asked in another one; the decider still reads the question as it is. long="full" (a checkpoint trained
         on long inputs: `max_len_long` in its solvi_decide.json) reads a text that does not fit max_len whole, up to
         max_len_long tokens, and retrieves within max_len_long beyond that (recorded in extra["long"]); a GPU mode — on a
-        CPU a whole 8k-token text takes seconds per question."""
+        CPU a whole 8k-token text takes seconds per question.
+
+        An option the question's kind does not use is a ValueError, not ignored: score_value= (score questions; default
+        "median"), k= (rank), bins= / unit= / coverage= (number; coverage default 0.8), other= (choice and multi),
+        min_margin= (not multi), top_k= / rerank= (with long=), act_threshold= / target_error= (a checkpoint with an act
+        head), and kind= that contradicts multi=True."""
+        given = {"score_value": score_value, "k": k, "bins": bins, "unit": unit, "coverage": coverage, "other": other,
+                 "min_margin": min_margin, "top_k": top_k, "rerank": rerank or None, "act_threshold": act_threshold,
+                 "target_error": target_error}
         as_bool, extra = False, {}
         if type is None and _is_type(options):
             type, options = options, ()
@@ -2140,6 +2169,11 @@ class DecideModel:
         pc = self.caps.get("pointer") or {}
         prim["evidence"] = (int((pc.get("evidence") or {}).get("max_spans", 3)) if evidence is True else int(evidence or 0))
         k_ = _kind(kind, multi)
+        _unused_options(name, k_, kind, multi, long, self.has_act, {x: v for x, v in given.items() if x not in _shared})
+        if prim["coverage"] is None:
+            prim["coverage"] = 0.8
+        if score_value is None:
+            score_value = "median"
         if (k_ == "span" or prim["evidence"]) and not self.has_pointer:
             raise ValueError(f"{name}: this checkpoint cannot point at its input (span answers, evidence): it declares no "
                              "'pointer' / 'span' mode (docs/decide_format.md §9)")
@@ -2204,7 +2238,11 @@ class DecideModel:
                 if k in extra:
                     args[k] = extra[k]
             task = fi.description or fi.title or name.replace("_", " ").capitalize() + "?"
-            out[name] = self.decision(name, task, text_fact, options=extra.get("options") or (), type=t, **args)
+            out[name] = self.decision(name, task, text_fact, options=extra.get("options") or (), type=t, **args,
+                                      _shared=frozenset(kw))      # an option given to every field applies where it can
+        if fields is not None and set(fields) - set(out):
+            raise ValueError(f"fields {sorted(set(fields) - set(out))} are not fields of {schema.__name__} "
+                             f"({', '.join(schema.model_fields)})")
         return out
 
     def questions(self, cat, schema, text_fact="doc", fields=None, min_confidence=None, **kw):
