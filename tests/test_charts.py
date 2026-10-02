@@ -418,3 +418,16 @@ def test_replay_compares_the_records_own_issues_and_output_hash_with_the_trace()
     rec = blocked.to_dict()
     assert not blocked.ok and ChartSpecialist().replay(rec, t).ok
     assert not ChartSpecialist().replay({**rec, "issues": []}, t).ok
+
+
+def test_a_quote_without_a_start_must_verify_at_every_place_it_occurs():
+    """"Europe grew 42 percent. Asia shipped 42 units.": the point labelled Asia, in %, verified at '42 percent'."""
+    t = "Europe grew 42 percent. Asia shipped 42 units."
+    r = run(t, spec([("Asia", 42, "42")]))
+    assert not r.ok and codes(r, DROPPED) == ["unit_mismatch"] and "occurs 2 times: give its start" in r.issues[0].message
+    r = run(t, spec([("Europe", 42, {"text": "42", "start": t.index("42")})]))          # with its start: that place
+    assert r.ok and not codes(r, DROPPED)
+    t2 = "Europe 42%, Asia 42%, Africa 16%."
+    r = run(t2, spec([("Europe", 42, "42%"), ("Asia", 42, "42%"), ("Africa", 16, "16%")], kind="pie"))
+    assert r.ok and not codes(r, DROPPED)                                              # two places, both verify: one each
+    assert [p.start for p in r.checked.verified.series[0].points] == [7, 17, 29]
