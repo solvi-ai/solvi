@@ -340,6 +340,10 @@ def test_example_13_runs_with_the_stand_in(monkeypatch):
     assert "stand-in" in text and "+ bias correction" in text and "+ S on 16 labelled" in text
     assert "decided" in text and "[forced]" in text and "model changed since this decision" in text
     assert "System.teach(team" in text and "low confidence" in text
+    five = text.split("=== 5.")[1].split("=== 6.")[0]            # the constraint moved the model's answer, and it says so
+    assert "the model said 'technical'" in five and "to satisfy refunds_go_to_billing" in five
+    ten = text.split("=== 10.")[1].split("=== lifetime")[0]      # a JSON ticket is decided, not abstained
+    assert "team = 'billing' [ok]" in ten, ten
 
 
 def _real_model_dir():
