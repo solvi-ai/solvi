@@ -415,6 +415,9 @@ heads (`fit`, `fit_fast`) answer the four classic kinds only (examples answered 
 round-trips through JSON (`result.not_stated`, `evidence`, `extra`) and replays. From a decider — `model.decision(name,
 task, fact, Maybe[...] / Span[T] / Rank[...] / Estimate[...], evidence=True)` — these need an answer-primitives checkpoint (its "not
 stated" output and its pointer; see [decide_format.md §9](decide_format.md#9-answer-primitives-l14g-typed-v2-proposed-solvi_decide-v3)).
+A decider's `Span[T]` without `Maybe` has no way to say that the text does not state the answer: when its pointer finds
+"no span" at least as probable as the best span, the decision escalates ("the text may not state it …") instead of
+answering with that span — declare `Maybe[Span[T]]` to get "not stated" as an answer.
 [examples/16_primitives.py](../examples/16_primitives.py) answers all five from rules and from a decider.
 
 ### Typed input state and serialization

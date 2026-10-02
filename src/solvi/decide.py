@@ -1748,7 +1748,7 @@ class DecideModel:
 
     def _span_decision(self, sp, ptr):
         """The pointer's best span (its text literally from the input), or "not stated" when the null span is at least as
-        probable and the question allows it. Confidence: p(span) among the null span and every span (renormalized without
+        probable and the question allows it; when it does not (a Span without Maybe), such a span escalates. Confidence: p(span) among the null span and every span (renormalized without
         the null span when "not stated" is not allowed)."""
         if ptr is None:
             return Decision(Quote("", 0, 0, NULL_SOURCE), {}, confidence=0.0,
@@ -1765,8 +1765,11 @@ class DecideModel:
         extra = {"p_null": pn}
         if k:
             extra["trimmed"] = spans[0][3]            # the best span did not parse as the type; its part that did
-        return Decision(Quote(t, a, b, NULL_SOURCE, conf), {Unknown: pn} if sp.unknown else {}, confidence=conf,
-                        extra=extra)
+        d = Decision(Quote(t, a, b, NULL_SOURCE, conf), {Unknown: pn} if sp.unknown else {}, confidence=conf, extra=extra)
+        if not sp.unknown and pn >= spans[0][0]:      # the model itself says "no span": not an answer to give alone
+            d.escalate = (f"{ESCALATED}: the text may not state it — no span (p {pn:.2f}) is at least as probable as the "
+                          f"best span (p {spans[0][0]:.2f}); would have answered {t!r}")
+        return d
 
     def _decision_v1(self, sp, z):
         s = self._scores(sp, z)

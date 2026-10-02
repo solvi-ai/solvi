@@ -537,7 +537,12 @@ def test_decider_not_stated_and_the_null_span():
     for q in ("channel", "days", "paid", "topics"):
         assert r[q].answer is Unknown and r[q].status == "ok" and r[q].confidence > 0.9, q
     assert r["channel"].evidence == []                            # "not stated" needs no quote (require_evidence holds)
-    assert r["total"].status == "abstain" and r["total"].guard == "type_rejected"   # not Maybe: the best real span, "???"
+    # not Maybe: the best real span is "???", and the pointer itself prefers "no span" — escalated, never answered alone
+    assert r["total"].status == "abstain" and r["total"].guard == "escalated" and "the text may not state it" in r["total"].why
+    d = m.decision("who", "Who signed for the total?", "doc", Span[str])("unclear note, Total ??? whatever")
+    assert d.value.value == "???" and d.extra["p_null"] > 0.8 and d.escalate.startswith("model escalated: the text may not")
+    sure = m.decision("who", "Who signed for the total?", "doc", Span[str])("the Total 45 EUR")
+    assert sure.value.value == "45" and sure.escalate is None
     assert set(r.not_stated) == {"channel", "days", "paid", "topics"} and r.trace.replay(s)["ok"]
     m2 = l14g()
     cat2 = Catalog()
