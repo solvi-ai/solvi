@@ -542,3 +542,20 @@ def test_a_span_or_quote_that_differs_only_in_case_is_located_and_kept_in_the_te
     ns = json.dumps({"answer": "not stated", "confidence": 0.9, "quote": ""})
     d = model(FakeLLM(reply=ns)).decision("c", "Code?", "offer", Maybe[Span[str]]).decide("Status: Not Stated yet")
     assert d.value is Unknown                     # "not stated" as an answer is not looked up regardless of case
+
+
+def test_a_span_over_two_neighbouring_retrieved_sections_maps_to_the_documents_text():
+    """long="retrieve" joins the sections it reads with a blank line; a passage that runs over two neighbouring sections
+    used to escalate ("the span crosses two sections of the long text") although it is one stretch of the document."""
+    filler = "\n\n".join(f"# Part {i}\n" + " ".join(f"word{i}x{j}" for j in range(120)) for i in range(12))
+    clause = ("\n\n# Payment\n" + " ".join(f"pay{j}" for j in range(60)) + " The fee is payable within thirty days\n\n"
+              "of the date of the invoice, " + " ".join(f"bank{j}" for j in range(60)) + ".\n\n")
+    doc = filler + clause + filler.replace("Part", "Annex")
+    reply = json.dumps({"answer": "payable within thirty days of the date of the invoice", "confidence": 0.9, "quote": ""})
+    part = model(FakeLLM(reply=reply)).decision("due", "When is the fee payable?", "doc", Span[str], long="retrieve",
+                                                top_k=4, retrieve_query="fee payable thirty days invoice date")
+    d = part.decide(doc)
+    read = [s for s in d.extra["long"]["sections"] if s[2] == "# Payment"]
+    assert len(read) == 2 and read[0][0] < d.value.start < read[0][1] < read[1][0] < d.value.end < read[1][1]   # over both
+    assert d.escalate is None and d.value.value == doc[d.value.start:d.value.end]
+    assert d.value.value == "payable within thirty days\n\nof the date of the invoice"

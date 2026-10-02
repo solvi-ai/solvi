@@ -340,6 +340,13 @@ def decode_pointer(ptr, text, max_span=40, top=20, temperature=1.0):
     return {"null": math.exp(null - mx) / Z, "spans": spans}
 
 
+def _respan(value, read, own):
+    """A span's value after mapping it from a long text's window to the document: the document's own text when the value
+    was the window's text (a span over neighbouring sections has the document's whitespace between them, not the
+    window's separator), else the value as it was."""
+    return own if isinstance(value, str) and value == read else value
+
+
 def _typed_span(spans, vtype):
     """For a typed span (`Span[float]`): (index, probability mass) of the most probable span inside the best span whose
     text parses as `vtype` — the best span trimmed to its value ('149.90 EUR' → '149.90'); the mass is that of every span
@@ -2752,15 +2759,18 @@ class DecisionPart:
         if isinstance(d.value, Quote):
             got = win.to_doc(d.value.start, d.value.end)
             if got is None:
-                d.escalate = d.escalate or "the span crosses two sections of the long text"
-            else:
-                d.value = dataclasses.replace(d.value, start=got[0], end=got[1])
+                d.escalate = d.escalate or "the span crosses two sections of the long text that are not neighbours"
+            else:                                    # over neighbouring sections: the document's own text between them
+                d.value = dataclasses.replace(d.value, start=got[0], end=got[1],
+                                              value=_respan(d.value.value, win.text[d.value.start:d.value.end],
+                                                            text[got[0]:got[1]]))
         ev = []
         for e in d.evidence:
             if isinstance(e, Quote):
                 got = win.to_doc(e.start, e.end)
                 if got is not None:
-                    ev.append(dataclasses.replace(e, start=got[0], end=got[1]))
+                    ev.append(dataclasses.replace(e, start=got[0], end=got[1],
+                                                  value=_respan(e.value, win.text[e.start:e.end], text[got[0]:got[1]])))
             else:
                 ev.append(e)
         d.evidence = ev

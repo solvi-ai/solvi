@@ -91,7 +91,15 @@ def test_bm25_and_selection():
     i = win.text.index("France")
     a, b = win.to_doc(i, i + 6)
     assert TEXT[a:b] == "France"
-    assert win.to_doc(0, len(win.text)) is None               # a range across two sections does not map back
+    s0, s1 = win.sections                                      # neighbours: the whole window is one stretch of the text
+    assert s1.index == s0.index + 1 and win.to_doc(0, len(win.text)) == (s0.start, s1.end)
+    a, b = doc.sections[3], doc.sections[4]                   # neighbours: a range over both maps to the document's text
+    nb = doc.window([b, a])
+    i, j = nb.text.index(TEXT[a.end - 5:a.end]), nb.text.index(TEXT[b.start:b.start + 5]) + 5
+    assert nb.to_doc(i, j) == (a.end - 5, b.start + 5)
+    assert nb.to_doc(len(doc.section_text(a)), j) is None        # starting in the separator does not
+    gap = doc.window([a, doc.sections[5]])                    # a section not read lies between: no text to map to
+    assert gap.to_doc(i, gap.text.index(doc.section_text(doc.sections[5])) + 5) is None
     rr = doc.select("law", k=1, rerank=lambda xs: [1.0 if "Paris" in x else 0.0 for x in xs])
     assert "Paris" in doc.section_text(rr[0][0])
     tight = doc.select("law agreement", k=5, budget=150)

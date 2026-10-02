@@ -66,12 +66,22 @@ class Window:
     sections: list = field(default_factory=list)
 
     def to_doc(self, start, end):
-        """A range of the window → the same characters' range in the document, or None when it spans two sections (or
-        a separator between them)."""
+        """A range of the window → the same characters' range in the document, or None when it starts or ends in a
+        separator, or runs over sections that are not neighbours in the document. A range over neighbouring sections
+        maps to the document's text from its start to its end (the whitespace between them as the document has it, not
+        the window's separator)."""
         for w, d, n in self.pieces:
-            if w <= start and end <= w + n:
+            if w <= start and end <= w + n:            # inside one section
                 return d + (start - w), d + (end - w)
-        return None
+        first = next((j for j, (w, _, n) in enumerate(self.pieces) if w <= start < w + n), None)
+        last = next((j for j, (w, _, n) in enumerate(self.pieces) if w < end <= w + n), None)
+        if first is None or last is None or last <= first:
+            return None
+        idx = [s.index for s in self.sections[first:last + 1]]
+        if len(self.sections) != len(self.pieces) or idx != list(range(idx[0], idx[0] + len(idx))):
+            return None                                # a section not read lies between: the window skipped text
+        (w0, d0, _), (w1, d1, _) = self.pieces[first], self.pieces[last]
+        return d0 + (start - w0), d1 + (end - w1)
 
 
 class BM25:

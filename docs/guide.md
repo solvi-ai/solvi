@@ -568,8 +568,10 @@ When the text does not fit (`part.budget()`: max_len minus the question), code s
 ALL-CAPS line), then blank lines, sentence ends and spaces — scores them with BM25 against the question, its options and
 their descriptions, and the decider reads the best `top_k` that fit together, joined in document order. `rerank=True`
 re-orders the best 3·top_k by the decider's own relevance (one yes / no question per candidate section: "does this passage
-help answer …?"; BM25 breaks ties). A span answer and evidence quotes point into the whole text (a span that would cross
-two sections escalates). The sections read — offsets, heading, score, and "bm25" or "bm25+decider" — are in the
+help answer …?"; BM25 breaks ties). A span answer and evidence quotes point into the whole text; a span that runs over
+two sections that are neighbours in the document is the document's text between its ends (with the document's own
+whitespace, not the blank line that joins them in the window), and one over sections that are not neighbours
+escalates. The sections read — offsets, heading, score, and "bm25" or "bm25+decider" — are in the
 decision's `extra["long"]`: in the trace record, hashed and printed by the audit ("read 3 of 41 sections …"). A full
 replay (models re-run) re-checks it — the selection is deterministic, so the same sections must be read; a trusted replay
 (`trust_models=True`, the report's default `replay="trusted"`) verifies the recorded output and does not re-select. A text that fits is decided as before, with nothing recorded; `long`,
