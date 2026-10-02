@@ -1604,6 +1604,10 @@ print(head.features, head.cv_acc)          # selected facts and their cross-vali
 - Features are selected greedily by 5-fold cross-validated accuracy (a feature is kept if it adds at least 1 point).
   **The selected facts become the question's flow**, so later requests compute only what the head uses.
 - The answer's `why` lists the largest feature contributions, `probs` gives all class probabilities.
+- A head left with no feature answers the same for every input; `fit` and `fit_fast` warn when that happens and say why:
+  on an imbalanced question no single fact may add a point over the most frequent answer, so the greedy selection keeps
+  nothing (`fit_fast` keeps every feature); or no fact could be computed from the examples' inputs — every parameter of
+  a part is a fact it reads, one with a default value too (`def fn(facts, _nm=nm)` waits for a fact `_nm`).
 
 ### fit_fast: learn in milliseconds, correct instantly
 
