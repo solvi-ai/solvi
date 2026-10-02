@@ -65,6 +65,8 @@ import itertools
 import textwrap
 from dataclasses import asdict, dataclass, field, replace
 
+from .command import fail as _fail, load_object
+
 LEVELS = ("error", "warning", "note")
 
 
@@ -623,7 +625,6 @@ def cmd_check(a):
     `task.system()`, else System(task.cat, task.QUESTIONS))."""
     obj = _target(a.target)
     if not (hasattr(obj, "parts") and hasattr(obj, "rules")) and not hasattr(obj, "catalog"):
-        from .cli import _fail
         _fail(f"check {a.target}: not a solvi System, Catalog or Guard")
     rep = lint(obj, strict=a.strict, max_combos=a.max_combos)
     if a.json:
@@ -642,10 +643,8 @@ def _target(spec):
         from .honesty import load_task, system_of
         mod = load_task(task)
         if not callable(getattr(mod, "system", None)) and not (hasattr(mod, "cat") and hasattr(mod, "QUESTIONS")):
-            from .cli import _fail
             _fail(f"check {spec}: a task module defines system() or cat and QUESTIONS (else give module:attr)")
         return system_of(mod)
-    from .cli import load_object
     return load_object(spec)
 
 

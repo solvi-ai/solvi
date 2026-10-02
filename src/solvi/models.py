@@ -23,6 +23,8 @@ import statistics
 import time
 from pathlib import Path
 
+from .command import dump as _dump, fail as _fail
+
 PUBLISHED = {
     "solvi-ai/solvi-base": "typed decisions on a CPU / in ONNX (150M, preview)",
     "solvi-ai/solvi-large": "typed decisions (396M, preview)",
@@ -254,7 +256,6 @@ def _mb(n):
 
 
 def cmd_list(a):
-    from .cli import _dump
     got = {c["id"]: c for c in cached()}
     rows = [{"id": i, "published": True, "about": about, "cached": i in got, **({"path": got[i]["path"],
              "bytes": got[i]["bytes"]} if i in got else {})} for i, about in PUBLISHED.items()]
@@ -274,14 +275,12 @@ def cmd_pull(a):
     try:
         path = pull(a.id, a.backend, a.revision)
     except ModelError as e:
-        from .cli import _fail
         _fail(str(e))
     print(path)
     return 0
 
 
 def cmd_check(a):
-    from .cli import _dump, _fail
     out = {"model": a.model}
     try:
         k, where = resolve(a.model)
@@ -329,7 +328,6 @@ def cmd_check(a):
 
 
 def _report(out, as_json):
-    from .cli import _dump
     if as_json:
         _dump(out)
         return

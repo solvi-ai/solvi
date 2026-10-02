@@ -39,34 +39,7 @@ import json
 import os
 import sys
 
-
-def _fail(msg):
-    print(f"solvi: {msg}", file=sys.stderr)
-    raise SystemExit(2)
-
-
-def load_object(spec):
-    """"module:attr" or "file.py:attr" → the attribute (called when it is a function: a System factory)."""
-    return load_module(spec)[1]
-
-
-def load_module(spec):
-    """"module:attr" or "file.py:attr" → (the module, the attribute — called when it is a function: a System factory).
-    For the command: a name that cannot be read ends it with status 2 (library code uses solvi.loader, which raises
-    LoadError)."""
-    from .loader import LoadError, load_module as load
-    try:
-        return load(spec)
-    except LoadError as e:
-        _fail(str(e))
-
-
-def load_system(spec):
-    """"module:attr" or "file.py:attr" → the System (calling attr when it is a function)."""
-    obj = load_object(spec)
-    if not hasattr(obj, "ask") or not hasattr(obj, "catalog"):
-        _fail(f"{spec}: not a solvi System (module:attr or file.py:attr — a System or a function returning one)")
-    return obj
+from .command import dump as _dump, fail as _fail, load_module, load_object, load_system  # noqa: F401
 
 
 STORE_KINDS = (".db / .sqlite / .sqlite3 (SQLite), .duckdb (DuckDB), a postgresql:// URL (PostgreSQL), else a "
@@ -102,10 +75,6 @@ def _check_when(a):
             except (ValueError, TypeError) as e:
                 _fail(f"--{k} {v}: not a time ({e}); write an ISO date or time (2026-09-01, 2026-09-01T12:00)")
 
-
-def _dump(obj):
-    from .schema import dumps
-    print(dumps(obj, ensure_ascii=False, indent=2, default=repr))
 
 
 def cmd_verify(a):
@@ -199,6 +168,10 @@ def cmd_report(a):
     system = load_system(a.system) if a.system else None
     store = _store(a.store, system)
     if a.id:
+        used = [k for k in ("question", "status", "safeguard", "model", "since", "until") if getattr(a, k, None) is not None]
+        if used:
+            _fail("report --id: one decision's report — the filters (" + ", ".join("--" + k for k in used)
+                  + ") select a period; drop them")
         try:
             res = store.get(a.id, system)
         except KeyError as e:
@@ -248,6 +221,11 @@ def _answers(res):
 def cmd_ask(a):
     """`solvi ask` → 0: every asked question answered; 1: at least one abstained (a person should look); 2: usage."""
     from . import i18n
+    if a.report and (a.json or a.audit or a.lang):
+        _fail("ask --report: a report is one document — drop " + ", ".join(
+            f for f, on in (("--json", a.json), ("--audit", a.audit), ("--lang", a.lang)) if on))
+    if not a.decider and (a.api_key or a.backend != "auto"):
+        _fail("ask: --backend / --api-key are for --decider")
     mod, system = load_module(a.system)
     if not hasattr(system, "ask") or not hasattr(system, "catalog"):
         _fail(f"ask {a.system}: not a solvi System")

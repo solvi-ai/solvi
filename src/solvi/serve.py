@@ -60,6 +60,7 @@ from typing import Any, Literal, Optional
 from pydantic import BaseModel, ConfigDict, Field, create_model
 
 from . import _deprecate
+from .command import fail as _fail, load_object, load_system
 
 REF = "#/components/schemas/{model}"          # where the OpenAPI document keeps the models (see create_app)
 
@@ -620,6 +621,7 @@ class SystemOneResponse(BaseModel):
 
 # ------------------------------------------------------------------------------------------------ HTTP
 class AskRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")        # a misspelled key ("question") is a 422, not "ask everything"
     state: dict[str, Any] = Field(description="the given facts")
     questions: Optional[list[str]] = Field(None, description="ask only these questions (default: all)")
     store: bool = Field(True, description="save the response to the server's store (if it has one); false is honoured only "
@@ -627,6 +629,7 @@ class AskRequest(BaseModel):
 
 
 class AskTextRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
     text: str = Field(description="a free text: a message, an e-mail, a chat turn")
     question: Optional[str] = Field(None, description="the question it asks (default: the decider picks the entry point)")
     store: bool = Field(True, description="save the response to the server's store (if it has one); false is honoured only "
@@ -636,8 +639,9 @@ class AskTextRequest(BaseModel):
 
 
 class AccessGuard:
-    """ASGI middleware in front of the app (`Guard` up to 0.7 — a second meaning of the agent guard's name): the bearer token (constant-time compare), the body size (Content-Length, and
-    the bytes actually received) and the JSON depth of a request body — refused before FastAPI parses it."""
+    """ASGI middleware in front of the app (`Guard` up to 0.7 — a second meaning of the agent guard's name): the bearer
+    token (constant-time compare), the body size (Content-Length, and the bytes actually received) and the JSON depth of a
+    request body — refused before FastAPI parses it."""
 
     def __init__(self, app, limits, token=None):
         self.app, self.limits = app, limits
@@ -1091,10 +1095,31 @@ def load_decider(spec, backend="auto", pull=False, api_key=None):
         raise ModelError(f"{e} (or start with --pull)" if "solvi models pull" in str(e) else str(e)) from None
 
 
+# the options each mode of `solvi serve` reads; another option given there is an error, not ignored
+_COMMON = {"max_body", "max_depth", "timeout"}
+_SYSTEM = {"system", "decider", "pull", "api_key", "backend", "store", "max_questions", "max_options", "max_inflight",
+           "queue_timeout", "allow_client_no_store"}
+_MODES = {"guard": _COMMON | {"guard", "upstream", "facts", "escalate", "context_messages", "context_chars", "store"},
+          "mcp": _COMMON | _SYSTEM | {"mcp", "mcp_impl"},
+          "http": _COMMON | _SYSTEM | {"model_name", "host", "port", "log_level", "token", "cors"}}
+SERVE_DEFAULTS = {}                                    # dest → default, filled by add_parser
+
+
+def _refuse_others(a, mode, _fail):
+    given = [k for k, d in SERVE_DEFAULTS.items() if k not in _MODES[mode] and getattr(a, k, d) != d]
+    if given:
+        _fail(f"serve ({'--guard' if mode == 'guard' else '--mcp' if mode == 'mcp' else 'HTTP'}): "
+              + ", ".join("--" + k.replace("_", "-") for k in given) + " do" + ("es" if len(given) == 1 else "")
+              + " nothing in this mode — drop " + ("it" if len(given) == 1 else "them"))
+
+
 def cmd_serve(a):
     """`solvi serve` (see solvi.cli) → exit status."""
-    from .cli import _fail, load_object, load_system
-    if getattr(a, "guard", None) or getattr(a, "upstream", None):
+    mode = "guard" if getattr(a, "guard", None) or getattr(a, "upstream", None) else "mcp" if a.mcp else "http"
+    if mode == "guard" and (a.system or a.decider):
+        _fail("serve --guard: a proxy serves the upstream server's tools; drop the System / --decider")
+    _refuse_others(a, mode, _fail)
+    if mode == "guard":
         return _serve_guard(a, _fail, load_object)
     system = load_system(a.system) if a.system else None
     decider = None
@@ -1233,6 +1258,7 @@ def add_parser(sub):
                    help=f"with --guard: the tool outputs the session keeps for checking (default {CONTEXT_MESSAGES}; 0: all)")
     s.add_argument("--context-chars", type=int, default=CONTEXT_CHARS, metavar="N",
                    help=f"with --guard: their characters in all (default {CONTEXT_CHARS}; 0: no limit)")
+    SERVE_DEFAULTS.update({x.dest: x.default for x in s._actions if x.dest != "help"})
     return s
 
 

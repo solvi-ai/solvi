@@ -779,3 +779,25 @@ def test_help_and_the_unknown_command_error_list_every_command(capsys):
     with pytest.raises(SystemExit):
         main(["replay", "x.db", "--system", "os:getcwd"])
     assert "os:getcwd: not a solvi System" in capsys.readouterr().err   # no "--system" for commands that have none
+
+
+def test_options_a_mode_does_not_read_are_refused_not_ignored(tmp_path, capsys):
+    """`solvi serve S --mcp --token x --port 9` started; `--facts` without --guard was read by nothing; `ask --report md
+    --audit --lang ru` dropped the audit and the language; `report --id ID --status x` dropped the filters."""
+    from solvi.cli import main
+    from solvi.serve import SERVE_DEFAULTS, _refuse_others, add_parser
+    import argparse
+    sub = argparse.ArgumentParser().add_subparsers()
+    p = add_parser(sub)
+    assert SERVE_DEFAULTS["port"] == 8000
+
+    def fails(argv, mode):
+        with pytest.raises(SystemExit):
+            _refuse_others(p.parse_args(argv), mode, lambda m: (_ for _ in ()).throw(SystemExit(m)))
+    fails(["x:s", "--mcp", "--port", "9"], "mcp")
+    fails(["x:s", "--facts", "{}"], "http")
+    fails(["--guard", "g:g", "--upstream", "u", "--token", "t"], "guard")
+    _refuse_others(p.parse_args(["x:s", "--mcp", "--store", "s.db"]), "mcp", lambda m: pytest.fail(m))
+    with pytest.raises(SystemExit):
+        main(["ask", "nomodule:system", "--state", "{}", "--report", "md", "--audit"])
+    assert "a report is one document — drop --audit" in capsys.readouterr().err

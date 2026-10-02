@@ -37,6 +37,8 @@ import json
 import math
 import sys
 
+from .command import dump as _dump, fail as _fail, load_object
+
 FORMAT = "solvi calibration v1"
 _recalibrating = None           # `solvi calibrate` loads the catalog with calibration files skipped (listed here)
 
@@ -341,7 +343,6 @@ def _pct(x):
 def cmd_calibrate(a):
     """`solvi calibrate` (see solvi.cli) → exit status."""
     global _recalibrating
-    from .cli import _dump, _fail, load_object
     _recalibrating = []
     try:                                           # calibration files the catalog loads are skipped: a file made for
         obj = load_object(a.system)                # another model must not stop it from being calibrated again
