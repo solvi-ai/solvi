@@ -42,6 +42,7 @@ theme:
 nav:
   - Home: index.md
   - Guide: guide/index.md          # expanded into one page per chapter by the hook
+  - Best practices: best_practices.md
   - Formats and tools:
       - Decider checkpoint and input format: decide_format.md
       - Model strategist and name matching: strategist.md

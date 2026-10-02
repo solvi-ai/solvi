@@ -2,6 +2,10 @@
 
 ## 0.7.2 — unreleased
 
+- Docs: [Best practices](docs/best_practices.md) — what the measurements behind this release say to do: keep a
+  state's keys in one order (a decision model's answers depend on it — solvi-base and Jev alike), narrow many options
+  by code before asking, calibrate on your own stream, keep an agent's memory in the decision's input, and more, each
+  with its number.
 - `store.redact(id, by=, note=)`: erasure that keeps the chain. A person's data in a stored decision could only be
   found (`forget` is a report): deleting or editing the record breaks the hash chain, and rewriting the hashes after
   it looks exactly like tampering. `redact` removes the record's content — the response with its input and trace, the
