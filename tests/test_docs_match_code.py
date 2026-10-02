@@ -165,3 +165,14 @@ def test_the_guides_printed_samples_of_examples_12_and_21_are_what_they_print(tm
     out21 = run("21_verified_chart.py", str(tmp_path))
     line = next(x for x in GUIDE.splitlines() if x.startswith("charts 1: rendered · trace "))
     assert line in out21.splitlines()
+
+
+def test_the_readme_shows_the_published_extractor_and_says_what_it_does_without_labels():
+    """The README advertised extraction "by description" and said it "does not work yet" without relating the two,
+    and its code block used MultiSpanExtractor, which cannot be saved and is used by nothing."""
+    block = README.split("## Extract from documents")[1].split("## ")[0]
+    assert "LongSpanExtractor.load(\"solvi-ai/extract-base\")" in block and "ex.save(" in block
+    assert "from solvi.extract_multi import MultiSpanExtractor" not in block and "46.5%" in block
+    assert "does not work yet" not in README
+    from solvi.extract_long import LongSpanExtractor
+    assert all(hasattr(LongSpanExtractor, n) for n in ("load", "save", "fit", "field", "tune_threshold"))

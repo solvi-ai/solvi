@@ -298,21 +298,28 @@ With `solvi[model]`, fields are found by a fine-tuned ModernBERT extractor. The 
 document, so every answer built on it can be cited.
 
 ```python
-from solvi.extract_multi import MultiSpanExtractor
+from solvi.extract_long import LongSpanExtractor
 
-ex = MultiSpanExtractor(["total", "date"])          # ModernBERT-large, one pass per document for all fields
-ex.fit(train_docs, train_spans, epochs=4)           # train_spans: [{"total": (start, end), "date": (start, end) | None}]
-cat.extract(ex.field("total"))                      # doc -> Quote(text, start, end, confidence)
-cat.extract(ex.field("date"))
+ex = LongSpanExtractor.load("solvi-ai/extract-base")      # a field is a description; long texts in 1024-token windows
+ex.fit([(text, "the total amount paid", (start, end)), ...], epochs=3)   # a few dozen labeled documents of your task
+ex.save("my-extractor")
+cat.extract(ex.field("total", "the total amount paid"))   # doc -> Quote(text, start, end, confidence), or no answer
+cat.extract(ex.field("date", "the date of the purchase"))
 
 @cat.fn
-def amount(total):                                  # extracted values are strings; parse them in ordinary functions
+def amount(total):                                        # extracted values are strings; parse them in ordinary functions
     return float(total.replace(",", ""))
 ```
 
-For long documents (contracts), `solvi.extract_long.LongSpanExtractor` reads the whole text in overlapping 1024-token
-windows, takes a field description instead of a fixed field list, and supports "no answer" with a per-field threshold.
-See [docs/guide.md](docs/guide.md#extracting-fields-from-documents).
+`LongSpanExtractor` reads the whole text in overlapping windows and supports "no answer" with a per-field threshold
+(`ex.tune_threshold(name, held_out)`). What the published `solvi-ai/extract-base` does without labels of your task,
+from its model card (held-out fields and data sets, one seed): CORD receipt fields it was never trained on, 46.5% and
+67.9%; five never-trained CUAD clause types, 73.1%; Kleister-NDA and SROIE, never seen, 2–95% by field (addresses
+2%). With per-field thresholds from 40 labeled contracts it reached 85.5% on CUAD; fine-tuned on 25–100 SROIE
+receipts, 86–89%. So describing a field is a start, not a finished extractor: label 25–100 documents and fine-tune.
+`solvi.extract_multi.MultiSpanExtractor` (a fixed field list, one pass per document for all fields) is the extractor
+behind the receipt numbers below; it has no save / load. See
+[docs/guide.md](docs/guide.md#extracting-fields-from-documents).
 
 ## Results
 
@@ -390,8 +397,9 @@ receipt with the one-pass extractor on an A100).
 
 - Open-ended free-text questions or generated answers. solvi answers typed questions only: yes/no, choices, scores,
   multi-label, "not stated", exact spans of the text, rankings and number ranges.
-- New fields with no labeled examples. Extracting a field from its description alone does not work yet (14% and 66% on
-  two held-out fields); a universal extractor is coming.
+- New fields with no labeled examples. Extracting a field from its description alone is not reliable yet: the
+  published extract-base gets 2–95% by field on data sets it never saw (see "Extract from documents"); label 25–100
+  documents and fine-tune.
 - No labels at all. Plan on roughly 100 labeled documents (field positions) per task.
 - CPU-only deployment with a quantized model: the int8 ONNX extractor loses up to 12 points on amounts, company
   names and addresses. fp32 on CPU keeps accuracy but takes about 0.7 s per receipt on 2 cores.
