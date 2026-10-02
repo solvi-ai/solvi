@@ -11,6 +11,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from .core import Decision, Quote, Serial, Unknown, accept, evidence_rows, ground, has_evidence, locate, unwrap, validated
+from .core import Claim                                # Claim.extra is recorded (solvi.refine.Fail, solvi.generate)
 from .provenance import TIMED_OUT, model_info
 
 
@@ -719,7 +720,7 @@ class HashMemo(dict):
 
 
 def _extra(v):
-    x = v.extra or None if isinstance(v, Decision) else None
+    x = v.extra or None if isinstance(v, (Decision, Claim)) else None     # Claim.extra: a check's reasons, a generation
     if has_evidence(v):                               # located supporting quotes (outputs without evidence: as before)
         x = {**(x or {}), "evidence": evidence_rows(v)}
     return x
