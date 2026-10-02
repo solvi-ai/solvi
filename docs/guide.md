@@ -77,7 +77,10 @@ cat = Catalog()
 
 Part names must be unique in a catalog (a duplicate raises `ValueError`). A rule is registered per question; registering
 a second rule for the same question replaces the first. The decorators return the original function, so parts stay
-ordinary, testable Python.
+ordinary, testable Python. A part and a key of `init_state` cannot share a name: `ask` raises `ValueError` for an input
+key named like a part (the given value would replace the part — a hard check included), and `System(inputs=Model)`
+refuses a model with such a field when it is built. Name a part after what it computes (`savings_points`), not after the
+input it reads (`def savings(savings)` reads its own name).
 
 A part may be an `async def` function (a database or HTTP lookup): `system.aask` awaits it, concurrently with the other
 steps; `timeout=` (seconds) and `blocking=True` (a sync function that waits: run in a worker thread) on any decorator

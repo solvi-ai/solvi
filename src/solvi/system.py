@@ -177,6 +177,16 @@ class Response(Serial):
         return render(decision(self, question, system, replay), format)
 
 
+def _clash(catalog, names, head):
+    """The message for given facts named like parts of the catalog (a given value would replace the part)."""
+    parts = catalog.parts
+    own = [k for k in names if k in parts[k].inputs]  # `def savings(savings)`: the part reads the field it is named after
+    return (head + " " + ", ".join(f"{k!r} (the catalog's {parts[k].kind} of that name)" for k in names)
+            + ": a given fact cannot stand in for a part of the catalog — rename the input key or the part"
+            + (f"; {', '.join(own)} {'reads its own name' if len(own) == 1 else 'read their own names'}: name a part "
+               f"after what it computes (e.g. {own[0]}_points), not after the input it reads" if own else ""))
+
+
 class System:
     def __init__(self, catalog: Catalog, questions, journal: str | None = None, workers: int = 1, order: str = "default",
                  producers: str = "declared", learn: bool | None = None, inputs=None, strategist=None, storage=None,
@@ -189,7 +199,9 @@ class System:
         measured either way). learn_order() turns it on.
         inputs: a pydantic model of init_state (optional): a dict passed to ask is validated against it — its fields (with
         defaults) are the given facts, a field that fails is left out and reported (safeguard type_rejected). ask also takes
-        a BaseModel instance directly, with or without `inputs`.
+        a BaseModel instance directly, with or without `inputs`. A given fact cannot share a name with a part of the
+        catalog (ask refuses such a key: the value would replace the part), so a model field named like a part is refused
+        here.
         strategist: an object with plan(catalog, questions, init_keys, heads) → Flow used by ask instead of the deterministic
         strategist (experimental: solvi.strategy.ModelStrategist; its plan is recorded in the trace, see docs/strategist.md).
         storage: a solvi.storage.TraceStorage (or a path: .db / .sqlite → SQLite, else JSON lines) — every ask saves its
@@ -217,6 +229,11 @@ class System:
                              f"gets the value and, by name, inputs of the fact's producers — as it is, it cannot run and "
                              f"every output of {name} would be rejected")
         self.inputs = inputs
+        if inputs is not None:                        # a declared field named like a part could never be given (ask refuses
+            from .typed import field_types           # the key): say it now, not at the first ask
+            clash = sorted(k for k in field_types(inputs) if k in catalog.parts)
+            if clash:
+                raise ValueError(_clash(catalog, clash, f"System(inputs={getattr(inputs, '__name__', inputs)}) declares"))
         self.strategist = strategist              # None: the deterministic strategist (solvi.strategist.plan)
         self.questions = {q.name: self._typed_question(q) for q in questions}
         for c in catalog.constraints.values():        # argument names are question names: one that is not (a typo) means
@@ -448,9 +465,7 @@ class System:
             rejected = None
         clash = sorted(k for k in init_state if k in self.catalog.parts)
         if clash:                                     # the planner would take the given value for the part's own: a check
-            raise ValueError("the input has " + ", ".join(  # named in the input would never run
-                f"{k!r} (the catalog's {self.catalog.parts[k].kind} of that name)" for k in clash)
-                + ": a given fact cannot stand in for a part of the catalog — rename the input key or the part")
+            raise ValueError(_clash(self.catalog, clash, "the input has"))   # named in the input would never run
         qs = [self.questions[n] for n in (names or self.questions)]
         flow = self._plan(qs, init_state.keys(), why_costs=True)
         mode = self.order if order is None else order
