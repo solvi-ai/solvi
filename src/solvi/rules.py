@@ -6,7 +6,26 @@ frequent among the rest)."""
 from __future__ import annotations
 
 import re
+import unicodedata
 from collections import Counter, defaultdict
+
+
+def words(text):
+    """The upper-cased words and numbers of a text, in any script: runs of letters, digits, combining marks and
+    apostrophes ("ул. Северная, 12" → УЛ, СЕВЕРНАЯ, 12; "Zürich" → ZÜRICH)."""
+    text = unicodedata.normalize("NFC", text).upper()
+    if text.isascii():
+        return re.findall(r"[A-Z0-9']+", text)
+    out, cur = [], []
+    for c in text:
+        if c == "'" or unicodedata.category(c)[0] in "LNM":
+            cur.append(c)
+        elif cur:
+            out.append("".join(cur))
+            cur = []
+    if cur:
+        out.append("".join(cur))
+    return out
 
 
 def literals(row, facts):
@@ -20,8 +39,7 @@ def literals(row, facts):
         elif isinstance(v, (int, float)):
             out.add(f"{f} ≈ {round(float(v), 0):g}")
         elif isinstance(v, str):
-            toks = re.findall(r"[A-Z0-9']+", v.upper())
-            for t in toks:
+            for t in words(v):
                 out.add(f"{f} has '{t}'")
                 if t.isdigit() and len(t) >= 5:
                     out.add(f"{f} has number starting '{t[:2]}'")
@@ -36,6 +54,11 @@ class RuleList:
         self.rules, self.default = [], None
 
     def fit(self, rows, answers):
+        """Learn the list from rows of facts and their answers; a second fit starts over (it replaces the list)."""
+        if not rows or len(rows) != len(answers):
+            raise ValueError(f"a rule list is fitted on examples, one answer for each: got {len(rows)} rows and "
+                             f"{len(answers)} answers")
+        self.rules, self.default = [], None
         L = [literals(r, self.facts) for r in rows]
         remaining = list(range(len(rows)))
         while remaining and len(self.rules) < self.max_rules:

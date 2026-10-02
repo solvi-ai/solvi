@@ -736,6 +736,17 @@ class Catalog:
         return lambda f: self._add("rule", f, question=question, model=model, provenance=provenance, timeout=timeout,
                                    blocking=blocking)
 
+    def replace_rule(self, part):
+        """Install a ready rule Part (System.learn_rule: a learned rule list) as its question's rule, in place of the one
+        registered before; what the catalog recorded about the replaced rule's typed arguments is dropped with it."""
+        if part.kind != "rule" or not part.question:
+            raise ValueError("replace_rule takes a rule part with its question")
+        if self.readers:
+            from .typed import forget_rule
+            forget_rule(self, part.question)
+        self.rules[part.question] = part
+        return part
+
     def constraint(self, f):
         """A rule between answers: argument names are question names, it returns True when the answers fit together
         (e.g. `def unsafe_if_harm(verdict, harm): return harm == "none" or verdict == "unsafe"`). When learned answers break it,

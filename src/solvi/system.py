@@ -851,18 +851,27 @@ class System:
 
     def learn_rule(self, question, examples, facts, **kw):
         """An answer rule learned from examples (solvi.rules.RuleList): a readable "if feature then answer" list, installed in the
-        catalog as a regular rule (deterministic, replayable)."""
+        catalog as a regular rule (deterministic, replayable). examples: [(init_state, answer)], at least one; facts: the
+        facts the list reads — parts of the catalog or given facts of the examples (a name that is neither raises, and
+        nothing is installed)."""
         from .core import Part
         from .rules import RuleList
         q = self.questions[question]
+        facts = [facts] if isinstance(facts, str) else list(facts)
+        if not examples:
+            raise ValueError(f"learn_rule({question!r}): no examples to learn from")
         rows = [self.facts_for(s) for s, _ in examples]
+        lost = [f for f in facts if f not in self.catalog.parts and not any(f in r for r in rows)]
+        if lost or not facts:
+            raise ValueError(f"learn_rule({question!r}): " + (f"{', '.join(lost)} is not a part of the catalog or a given "
+                             "fact of the examples" if lost else "facts is empty") + " — the rule could never be computed")
         rl = RuleList(facts, **kw).fit(rows, [q.answer.normalize(a) for _, a in examples])
 
         def learned(**args):
             return rl.predict(args)[0]
         learned.__name__ = f"learned_{question}"
-        self.catalog.rules[question] = Part(kind="rule", name="answer:" + question, inputs=list(facts), func=learned,
-                                            doc=str(rl), question=question, model=rl, provenance="learned")
+        self.catalog.replace_rule(Part(kind="rule", name="answer:" + question, inputs=list(facts), func=learned,
+                                       doc=str(rl), question=question, model=rl, provenance="learned"))
         self.learned_rules[question] = rl
         return rl
 

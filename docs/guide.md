@@ -1647,8 +1647,10 @@ catalog as the question's rule. From then on it behaves like a hand-written rule
 and re-checkable by `replay`.
 
 - `facts`: the computed facts to build literals from. Booleans give `fact is True/False`, numbers `fact ≈ rounded value`,
-  strings give one literal per upper-cased word or number, plus `has number starting 'NN'` for numbers of 5 or more
-  digits (postcodes, codes). Other values are compared for equality.
+  strings give one literal per upper-cased word or number (in any script: `"ул. Северная, 12"` gives `УЛ`, `СЕВЕРНАЯ`,
+  `12`), plus `has number starting 'NN'` for numbers of 5 or more digits (postcodes, codes). Other values are compared
+  for equality. A name that is neither a part of the catalog nor a given fact of the examples raises `ValueError`, and
+  so does an empty list of examples; nothing is installed then.
 - Each step adds the literal with the best smoothed precision on still-uncovered examples, with at least `min_support`
   examples, while precision stays at or above `min_precision`; at most `max_rules` rules.
 - `system.learned_rules[question]` keeps the `RuleList`; `print` shows each rule with its support.
