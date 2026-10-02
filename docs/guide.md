@@ -1835,6 +1835,7 @@ corrections in the same chain (`store.corrections()`).
 | `replay_all(system)` | the stored decisions whose trace no longer replays, with the mismatches |
 | `quarantine(fact, value=...)` | the stored decisions whose answers rest on this fact (with this value), and the path from the fact to each answer |
 | `forget(fact, value=...)` | a report: decisions resting on a given fact, and records that only hold it; nothing is deleted |
+| `redact(id, by=, note=)` | erase a stored record's content (the response, its input and trace, the meta) and keep the chain: the record keeps its place, hash and id, is marked `redacted`, and a record of kind `redaction` naming it is appended; `verify()` — also with an earlier anchor or signature — still passes, and iter / query / replay pass the record over |
 
 **The chain across records.** Each record stores the hash of the record before it, and its own hash covers its content and
 that link. Editing a stored decision, deleting one, inserting one or changing their order breaks the chain at that point,

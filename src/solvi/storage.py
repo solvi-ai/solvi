@@ -191,6 +191,8 @@ class Stored:
         from .system import Response
         if self.kind != "ask":
             raise ValueError(f"record {self.id} is a {self.kind} record, not a response")
+        if self.data.get("redacted"):
+            raise ValueError(f"record {self.id} was redacted: its response is gone")
         r = Response.model_validate(self.data["response"], catalog=catalog if catalog is not None else self.catalog)
         r.stored_id = self.id
         return r
@@ -333,10 +335,12 @@ class TraceStorage:
         """The stored response with this id, loaded back (see Stored.response)."""
         return _stored(self.record(id), self.catalog).response(catalog)
 
-    def iter(self, kind="ask"):
-        """Stored records in order (kind "ask": responses; "teach": corrections; None: all) → iterator of Stored."""
+    def iter(self, kind="ask", redacted=False):
+        """Stored records in order (kind "ask": responses; "teach": corrections; None: all) → iterator of Stored. A
+        redacted record (see redact) has no content left and is passed over; redacted=True: it is yielded too."""
         for _, d in self._raw():
-            if d is not None and "hash" in d and (kind is None or d.get("kind", "ask") == kind):
+            if d is not None and "hash" in d and (kind is None or d.get("kind", "ask") == kind) \
+                    and (redacted or not d.get("redacted")):
                 yield _stored(d, self.catalog)
 
     def __iter__(self):
@@ -377,6 +381,41 @@ class TraceStorage:
         from .report import period, render
         return render(period(self, since, until, question, examples, system, **filters), format)
 
+    # --- erasure
+    def _rewrite(self, rec):
+        """Replace the stored record with this seq by `rec` (same seq, prev, hash and id)."""
+        raise NotImplementedError
+
+    def redact(self, id, by=None, note=None, keep_answers=True):
+        """Erase a stored record's content — a person's data that must go — and keep the chain whole.
+
+        The record keeps its place, its time, its hash and its id, so every link after it still verifies; its content
+        (the response with its trace and input, the meta; a correction's input and answer) is removed and it is marked
+        `redacted` with who, when and why. A record of kind "redaction" is appended that names the erased record and its
+        hash: the erasure is itself in the chain. verify() accepts a redacted record only with such a record after it,
+        and a signature taken before still verifies (the mark keeps the original content digest). keep_answers=False
+        also removes the answers from the summary (their statuses stay). The record no longer replays and is passed
+        over by iter / query / replay_all / reports; record(id) returns what is left. → the redaction record's id.
+        What it cannot do: copies made before (a backup, an exported report, a published anchor's holder) are not
+        touched, and derived state (a correction memory, a fitted head) keeps what it learned — rebuild those."""
+        from .signature import record_digest
+        rec = self.record(id)
+        if rec.get("redacted"):
+            raise ValueError(f"record {id} is already redacted")
+        if rec.get("kind") == "redaction":
+            raise ValueError("a redaction record cannot be redacted")
+        keep = ("v", "kind", "seq", "time", "prev", "hash", "id", "init_hash", "catalog", "records", "flow", "producers",
+                "models", "guards", "safeguards", "teach", "source")
+        new = {k: rec[k] for k in keep if k in rec}
+        if "answers" in rec:
+            new["answers"] = rec["answers"] if keep_answers else {q: [None, 0.0, a[2]] for q, a in rec["answers"].items()}
+        new["redacted"] = {"time": float(self.clock()), "by": None if by is None else str(by),
+                           "note": None if note is None else str(note), "digest": record_digest(rec).hex()}
+        out = self._append({"v": FORMAT, "kind": "redaction", "of": rec["id"], "of_hash": rec["hash"],
+                            "by": new["redacted"]["by"], "note": new["redacted"]["note"]})
+        self._rewrite(new)
+        return out["id"]
+
     # --- integrity
     def signature(self, alg="syndrome"):
         """The signature of the chained records (solvi.signature.sign): {"alg", "count", "root"} — with the default
@@ -400,15 +439,22 @@ class TraceStorage:
         problems, rows = [], []
         prev, n = GENESIS, 0
         snap = self._snapshot()
+        erased, named = {}, set()                     # redacted records, and the redaction records that name them
         for pos, d in self._raw(snap):
             if d is None:
                 problems.append((n, None, f"record at position {pos} is not readable JSON (a record cut short by a crash "
                                           "while it was written, or an edit)"))
                 continue
             rid = d.get("id")
-            if d.get("hash") != record_hash(d):
+            if d.get("kind") == "redaction":
+                named.add((d.get("of"), d.get("of_hash")))
+            if d.get("redacted"):                     # its content is gone: its hash stands by the redaction record
+                erased[rid] = (d.get("seq"), d.get("hash"))
+                if "response" in d or "init" in d or "meta" in d:
+                    problems.append((d.get("seq"), rid, "record marked redacted still holds content"))
+            elif d.get("hash") != record_hash(d):
                 problems.append((d.get("seq"), rid, "record edited after it was stored (its hash does not match)"))
-            elif rid != d["hash"][:16]:
+            if not isinstance(d.get("hash"), str) or rid != d["hash"][:16]:
                 problems.append((d.get("seq"), rid, "record id does not match its hash"))
             if d.get("prev") != prev:
                 problems.append((d.get("seq"), rid, "chain broken: a record before this one was deleted, inserted, "
@@ -416,10 +462,14 @@ class TraceStorage:
             if d.get("seq") != n:
                 problems.append((d.get("seq"), rid, f"sequence number {d.get('seq')} where {n} was expected (records "
                                                     "deleted, inserted or reordered)"))
-            if d.get("kind", "ask") == "ask":
+            if d.get("kind", "ask") == "ask" and not d.get("redacted"):
                 problems += [(d.get("seq"), rid, p) for p in _summary_problems(d)]
             rows.append(d)
             prev, n = d.get("hash"), n + 1
+        for rid, (seq, h) in erased.items():
+            if (rid, h) not in named:
+                problems.append((seq, rid, "record marked redacted without a redaction record that names it and its hash "
+                                           "(content removed outside redact)"))
         problems += self._backend_problems(rows, snap)
         if anchor is not None:
             k, h = int(anchor["count"]), anchor["hash"]
@@ -501,7 +551,8 @@ class TraceStorage:
 
     def forget(self, fact, value=ANY):
         """What removing a given fact (e.g. a person's data) would touch — a report only: nothing is deleted (deleting a
-        stored record breaks the chain by design; keep the report as the record of the request).
+        stored record breaks the chain by design; keep the report as the record of the request, and erase the records it
+        lists with redact).
         → {"fact", "value", "dependent": the stored decisions whose answers rest on it (as quarantine), "stored": ids of the
         stored records that hold it without an answer resting on it (responses and corrections), "deleted": 0}."""
         from .runtime import vhash
@@ -661,6 +712,33 @@ class JSONLStorage(TraceStorage):
         with self._lock:
             self._refresh()
             return {"count": self._count, "hash": self._last}
+
+    def _rewrite(self, rec):
+        """In place, under the append lock: other writers hold this very file open, so it is not swapped for a new one.
+        The new content is first written whole to `<path>.rewrite` (a crash while copying it back leaves that file)."""
+        with self._lock, open(self.path, "r+b") as fh, _flock(fh):
+            tmp = self.path + ".rewrite"
+            with open(tmp, "wb") as out:
+                for line in fh:
+                    try:
+                        d = json.loads(line)
+                    except ValueError:
+                        d = None
+                    if isinstance(d, dict) and d.get("id") == rec["id"] and d.get("hash") == rec["hash"]:
+                        line = (_body(rec) + "\n").encode()
+                    out.write(line)
+                out.flush()
+                os.fsync(out.fileno())
+            with open(tmp, "rb") as src:
+                fh.seek(0)
+                fh.truncate()
+                for chunk in iter(lambda: src.read(1 << 20), b""):
+                    fh.write(chunk)
+                fh.flush()
+                os.fsync(fh.fileno())
+            os.remove(tmp)
+            self._reset()
+            self._sync(fh)
 
     def _snapshot(self):
         """The file's size and the stored head at one moment (under the locks an append holds while it writes both)."""
@@ -896,6 +974,22 @@ class _SQLStorage(TraceStorage):
     def _snapshot(self):
         return {"head": self.head()}                  # before the records: what is appended meanwhile is beyond it
 
+    def _rewrite(self, rec):
+        with self._lock:
+            self._x(self.begin)
+            try:
+                if self.lock:
+                    self._x(self.lock)
+                s = rec["seq"]
+                for t in ("answers", "safeguards", "models"):
+                    self._x(f"DELETE FROM {{p}}{t} WHERE seq = ?", (s,))        # noqa: S608 — a fixed table name
+                self._x("DELETE FROM {p}records WHERE seq = ? AND \"id\" = ?", (s, rec["id"]))
+                self._insert(rec)
+                self._x("COMMIT")
+            except BaseException:
+                self._x("ROLLBACK")
+                raise
+
     def _rows(self, sql="SELECT seq, body FROM {p}records ORDER BY seq", args=()):
         with self._lock:
             rows = self._x(sql, args).fetchall()
@@ -914,13 +1008,13 @@ class _SQLStorage(TraceStorage):
             return d
         return None
 
-    def iter(self, kind="ask"):
+    def iter(self, kind="ask", redacted=False):
         if kind is None:
             rows = self._rows()
         else:
             rows = self._rows("SELECT seq, body FROM {p}records WHERE kind = ? ORDER BY seq", (kind,))
         for _, d in rows:
-            if d is not None:
+            if d is not None and (redacted or not d.get("redacted")):
                 yield _stored(d, self.catalog)
 
     def query(self, question=None, answer=ANY, status=None, safeguard=None, model=None, since=None, until=None,
@@ -960,7 +1054,7 @@ class _SQLStorage(TraceStorage):
             where.append("r.\"time\" < ?")
             args.append(until)
         sql = f"SELECT r.seq, r.body FROM {{p}}records r WHERE {' AND '.join(where)} ORDER BY r.seq"  # noqa: S608
-        return [_stored(d, self.catalog) for _, d in self._rows(sql, args) if d is not None]
+        return [_stored(d, self.catalog) for _, d in self._rows(sql, args) if d is not None and not d.get("redacted")]
 
     def _backend_problems(self, rows, snap=None):
         out = []

@@ -151,6 +151,8 @@ def record_digest(rec):
     if isinstance(rec, Record):
         b = {k: v for k, v in rec.body().items() if k != "prev"}
         return hashlib.sha256(_cj(_canon(b)).encode()).digest()
+    if isinstance(rec, dict) and isinstance(rec.get("redacted"), dict) and rec["redacted"].get("digest"):
+        return bytes.fromhex(rec["redacted"]["digest"])       # a redacted record: the digest of what it held (its mark)
     if isinstance(rec, dict):
         return hashlib.sha256(_cj({k: v for k, v in rec.items() if k not in ("id", "hash", "prev")}).encode()).digest()
     if isinstance(rec, str):

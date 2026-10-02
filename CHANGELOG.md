@@ -2,6 +2,14 @@
 
 ## 0.7.2 — unreleased
 
+- `store.redact(id, by=, note=)`: erasure that keeps the chain. A person's data in a stored decision could only be
+  found (`forget` is a report): deleting or editing the record breaks the hash chain, and rewriting the hashes after
+  it looks exactly like tampering. `redact` removes the record's content — the response with its input and trace, the
+  meta; a correction's input and answer — and keeps its place, time, hash and id, marks it `redacted` (who, when,
+  why) and appends a record of kind `redaction` that names it. `verify()` passes, also against a head or a signature
+  taken before the erasure, and reports a record whose content was removed without a redaction record. The record is
+  passed over by `iter`, `query`, `replay_all` and reports. JSONL, SQLite, PostgreSQL, DuckDB. Copies made earlier
+  and state learned from the record (a memory, a head) are not touched.
 - `solvi.fast.CandidateHead`: a choice among candidates that change with every decision, learned from the candidates'
   features (a `FastHead` asked "is this the one to take?" per candidate; `fit(steps)`, `choose(candidates)`,
   `teach(candidates, chosen)` in about a millisecond). Heads, `fit` and `teach` need fixed options; an agent's

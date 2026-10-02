@@ -750,3 +750,50 @@ def test_jsonl_append_after_a_cut_short_last_line_does_not_glue(tmp_path):
     v = again.verify()
     assert not v["ok"] and any("not readable JSON" in why for *_, why in v["problems"])
     assert v["count"] == 2
+
+
+def test_redact_erases_a_records_content_and_the_chain_still_verifies(filled):
+    """A person's data must go. Deleting or editing a stored record breaks the chain; redact() removes the content, keeps
+    the record's place and hash, and writes the erasure into the chain."""
+    kind, store, s, resps = filled
+    sig, head = store.signature(), store.head()
+    target = resps[1].stored_id
+    before = store.record(target)
+    assert "urgent pay now" in json.dumps(before)
+    rid = store.redact(target, by="dpo", note="erasure request 17")
+    left = store.record(target)
+    assert "urgent pay now" not in json.dumps(left) and "response" not in left and "meta" not in left
+    assert (left["id"], left["hash"], left["seq"], left["prev"]) == (before["id"], before["hash"], before["seq"], before["prev"])
+    assert left["redacted"]["by"] == "dpo" and left["answers"] == before["answers"]
+    red = store.record(rid)
+    assert red["kind"] == "redaction" and red["of"] == target and red["of_hash"] == before["hash"] and red["note"] == "erasure request 17"
+    v = store.verify(anchor=head, signature=sig)                              # the head and signature taken before
+    assert v["ok"], v["problems"]
+    assert v["count"] == len(STATES) + 1 and len(store) == len(STATES) + 1
+    assert [x.id for x in store.iter()] == [r.stored_id for i, r in enumerate(resps) if i != 1]      # passed over
+    assert [x.id for x in store.iter(redacted=True)][1] == target and store.replay_all(s) == []
+    assert target not in [x.id for x in store.query(question="approve")]
+    with pytest.raises(ValueError, match="was redacted"):
+        store.get(target)
+    with pytest.raises(ValueError, match="already redacted"):
+        store.redact(target)
+    with pytest.raises(ValueError, match="cannot be redacted"):
+        store.redact(rid)
+    reopened = make_store(kind, store.path.parent if hasattr(store.path, "parent") else __import__("pathlib").Path(store.path).parent)
+    assert reopened.verify()["ok"] and len(reopened) == len(STATES) + 1
+    s.ask(STATES[0])                                                          # the store goes on
+    assert store.verify()["ok"] and len(store) == len(STATES) + 2
+    rid2 = store.redact(resps[2].stored_id, keep_answers=False)
+    assert store.record(resps[2].stored_id)["answers"]["approve"][0] is None and store.verify()["ok"] and rid2
+
+
+def test_content_removed_outside_redact_is_reported(filled):
+    kind, store, s, resps = filled
+    if kind != "jsonl":
+        pytest.skip("the stored body is edited through the JSONL file")
+    recs = _jsonl_lines(store)
+    recs[1] = {k: v for k, v in recs[1].items() if k not in ("response", "meta")}
+    recs[1]["redacted"] = {"time": 0, "by": "nobody", "note": None, "digest": "00" * 32}     # no redaction record
+    _jsonl_write(store, recs)
+    v = JSONLStorage(store.path).verify()
+    assert not v["ok"] and any("without a redaction record" in why for *_, why in v["problems"])
