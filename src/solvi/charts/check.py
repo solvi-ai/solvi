@@ -24,7 +24,7 @@ _PP_AFTER = re.compile(r"\s?(?:pp\.?|p\.p\.|percentage[\s\-]points?|п\.\s?п\.?
 # list, a table); a line break inside a hard-wrapped sentence is not an end
 SENT_END = re.compile(r"[.!?](?=\s|$)|\n(?=[ \t]*(?:\n|[-*•\dA-ZА-ЯЁ]))")
 _WORD = re.compile(r"[^\W\d_][\w\-]*", re.U)
-_STOP_AFTER = re.compile(r"[.,;:!?()\[\]]|\n[ \t]*\n")
+_STOP_AFTER = re.compile(r"[.,;:!?()\[\]$€£₽¥\d]|\n[ \t]*\n")     # the words after a number end at the next number
 
 
 def canon_unit(u):
@@ -65,13 +65,29 @@ class Reading:
     ambiguous: str = ""   # why the number cannot be read without a guess
 
 
+_NEXT_NUMBER = re.compile(r"\s?[-−]?\d")
+_SIGNED_CUR = re.compile(r"(?<![\w.,/])[-−]\s?(?P<cur>[$€£₽¥])\s?$")
+
+
+def _cur_after(source, e):
+    """A currency right after a number — unless a digit follows it: in "2023 $120 million" the sign belongs to 120, and
+    2023 is not an amount."""
+    c = _CUR_AFTER.match(source, e)
+    return None if c is not None and _NEXT_NUMBER.match(source, c.end()) else c
+
+
 def _read(source, m, decimal=None):
     s, e = m.start(), m.end()
     cur = m.group("cur")
     unit, amb = "", ""
+    neg = None if cur else _SIGNED_CUR.search(source, max(0, s - 4), s)     # "-$45 million": a negative amount
+    if neg is not None and m.group("d") is not None and m.group("d")[:1] not in "-−+":
+        cur, s = neg.group("cur"), neg.start()
+    else:
+        neg = None
     if m.group("d") is not None:
         d = m.group("d")
-        after_cur = _CUR_AFTER.match(source, e)
+        after_cur = _cur_after(source, e)
         try:
             v = _digits(d, decimal)
         except ParseError as err:
@@ -83,9 +99,11 @@ def _read(source, m, decimal=None):
             amb = f"{m.group()!r}: a one-letter scale apart from the number may be a unit (metres? millions?)"
     else:
         v, sc = Decimal(_num_word(m.group("w"))), m.group("s2")
-        after_cur = _CUR_AFTER.match(source, e)
+        after_cur = _cur_after(source, e)
     if v is not None and sc:
         v = v * _SCALES[sc.lower()]
+    if v is not None and neg is not None:
+        v = -v
     if m.group("pct"):
         unit = "%"
     elif (pp := _PP_AFTER.match(source, e)):
@@ -291,9 +309,9 @@ class ChartChecker:
             if why:
                 best = ("unit_mismatch", why)
                 continue
-            if (r.start, r.end) in used:
-                best = ("quote_reused", f"the number {r.as_written!r} at {r.start} is already drawn as "
-                        f"{used[(r.start, r.end)]}")
+            taken = next((k for k in used if k[0] < r.end and r.start < k[1]), None)    # the same number, or one that
+            if taken is not None:                                                       # shares characters with it
+                best = ("quote_reused", f"the number {r.as_written!r} at {r.start} is already drawn as {used[taken]}")
                 continue
             return VerifiedPoint(label=pt.label, value=pt.value, start=r.start, end=r.end, as_written=r.as_written), None
         return None, best

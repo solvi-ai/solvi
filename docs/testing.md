@@ -46,8 +46,12 @@ pytest gallery/                           # the pytest plugin: one test item per
 pytest gallery/ --solvi-fuzz 30
 ```
 
-The plugin is registered under the `pytest11` entry point as `solvi`. It collects only case files that have a task module,
-and leaves other JSON files alone. Turn it off with `-p no:solvi`. From Python, use
+The plugin is registered under the `pytest11` entry point as `solvi`, so it loads in every pytest session of an
+environment where solvi is installed. It decides what is its own by reading, without running anything: a file is
+collected only when its cases are solvi cases (a list of objects, each with a `"state"` object) and the source of its
+task module imports solvi. Other JSON files are left alone, and a `task.py` of another project next to a `cases.json`
+is not executed. Cases that look like solvi's next to a task module that does not import solvi are not collected, with
+a warning that says so (`solvi test` runs them). Turn the plugin off with `-p no:solvi`. From Python, use
 `solvi.testing.run_path(paths)` to get a `FileResult` per file and a `CaseResult` per case (`ok`, `problems`,
 `answers`).
 

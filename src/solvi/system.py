@@ -180,7 +180,7 @@ class Response(Serial):
 class System:
     def __init__(self, catalog: Catalog, questions, journal: str | None = None, workers: int = 1, order: str = "default",
                  producers: str = "declared", learn: bool | None = None, inputs=None, strategist=None, storage=None,
-                 timeout: float | None = None, costs="declared", lang: str = "en"):
+                 timeout: float | None = None, costs="declared", lang: str = "en", early_exit: bool = True):
         """order: "default" (hard checks and their inputs first, all together) or "learned" (hard checks one at a time, most
         expected saving first — see learn_order). producers: "declared" (alternative producers of a fact are tried in
         declaration order) or "learned" (a policy picks the order per input and learns from outcomes). learn: after every
@@ -199,6 +199,11 @@ class System:
         costs: what that planner's costs are — "declared" (`cost=`, 1 when undeclared) or "measured" (the run times
         system.costs measures, after a warm-up; or a solvi.learned.MeasuredCosts with its settings). freeze_costs() fixes
         them; the plan record in each trace says which cost decided each choice.
+        early_exit: True (default) — when a hard check fails, the steps only the questions it settles needed are skipped
+        (the expensive rest is not paid for); the decision's record then holds no values for them, and a part listed in
+        `checkpoints` may not have run. False — every step of the flow runs anyway: the answers are the same (the failed
+        hard check still decides), `res.values` and the trace hold every fact and rule value, and the trace says so
+        (`trace.early_exit` is False). `ask(..., early_exit=...)` overrides it for one ask.
         lang: the language of what solvi renders for people — res.audit(), solvi.show, safeguard_report() — "en" (default)
         or "ru" (solvi.i18n). Only the rendering changes: traces, stored responses, hashes and `why` stay in English."""
         from . import i18n
@@ -222,6 +227,7 @@ class System:
             self.storage.catalog = self               # typed values of stored responses are restored with this system
         self.workers = workers                    # >1: independent steps run in parallel threads
         self.timeout = timeout                    # aask: default seconds per call of a part
+        self.early_exit = bool(early_exit)        # False: the whole flow runs although a hard check failed
         self.calib: dict[str, tuple] = {}         # question → (a, b): confidence' = σ(a·logit(confidence) + b)
         self.learned_rules = {}                   # question → RuleList (readable rules learned from examples)
         if order not in ("default", "learned"):
@@ -297,16 +303,23 @@ class System:
         return response_schema(self)
 
     # --- answers
-    def ask(self, init_state, names=None, workers=None, order=None, store=True):
+    def ask(self, init_state, names=None, workers=None, order=None, store=True, early_exit=None):
         """init_state: a dict of given facts, or a pydantic BaseModel instance (its fields). order: override the system's
         order for this ask — "default", "learned", or an object with p_fail(check, row) and row(vals, init_keys) (e.g. an
         oracle for experiments). store=False: do not save this response to the system's storage.
+        early_exit: None — the system's (System(early_exit=), True by default: after a failed hard check the steps only
+        the settled questions needed are skipped). False — compute the whole flow anyway: the answers are the same, and
+        `res.values` and the trace hold every fact and rule value of a decision a hard check forced (and every part
+        listed in `checkpoints`); the trace records it (`res.trace.early_exit`), and replay checks no step is missing.
         An `async def` part is awaited in an event loop of its own, one call at a time: use `aask` for such catalogs."""
         t0 = now_ms()
         p = self._prepare(init_state, names, order)
         trace, vals = execute(self.catalog, p.flow, p.state, workers=workers or self.workers, order=p.order,
-                              costs=self.costs, policy=p.policy, known=p.known)
+                              costs=self.costs, policy=p.policy, known=p.known, early_exit=self._early(early_exit))
         return self._respond(p, trace, vals, t0, store)
+
+    def _early(self, early_exit):
+        return self.early_exit if early_exit is None else bool(early_exit)
 
     # --- text in
     def entry_points(self, names=None):
@@ -337,7 +350,8 @@ class System:
         p.textin = read
         return p
 
-    def ask_text(self, text, decider=None, *, textin=None, question=None, store=True, workers=None, order=None):
+    def ask_text(self, text, decider=None, *, textin=None, question=None, store=True, workers=None, order=None,
+                 early_exit=None):
         """A free text → the answer of the question it asks, in one trace: a solvi.textin.TextIn (made from `decider`, or
         `textin=`) picks the entry point and reads its input fields with quotes, then the question is asked on that state.
         `text` may be a TextRead already (TextIn.read / update): each field is re-derived from its quote with the field's
@@ -347,16 +361,16 @@ class System:
         "textin": quote, parser, the model that found it); the audit counts the fields as quoted by a model, not given.
         When the entry point escalates, nothing runs: the likely questions abstain (guard "escalated"). A required field the
         text does not state is not guessed: the question abstains for lack of it. `res.textin` is the TextRead
-        (`res.textin.missing`, `res.textin.clarify()`)."""
+        (`res.textin.missing`, `res.textin.clarify()`). early_exit: as for `ask`."""
         read = self._textin(text, decider, textin, question)
         t0 = now_ms()
         p = self._prepare_text(read, order)
         trace, vals = execute(self.catalog, p.flow, p.state, workers=workers or self.workers, order=p.order,
-                              costs=self.costs, policy=p.policy, known=p.known)
+                              costs=self.costs, policy=p.policy, known=p.known, early_exit=self._early(early_exit))
         return self._respond(p, trace, vals, t0, store)
 
     async def aask_text(self, text, decider=None, *, textin=None, question=None, store=True, timeout=None,
-                        speculate=False, order=None):
+                        speculate=False, order=None, early_exit=None):
         """ask_text with aask (async parts awaited)."""
         from .runtime import aexecute
         read = self._textin(text, decider, textin, question)
@@ -364,10 +378,11 @@ class System:
         p = self._prepare_text(read, order)
         trace, vals = await aexecute(self.catalog, p.flow, p.state, order=p.order, costs=self.costs, policy=p.policy,
                                      known=p.known, timeout=self.timeout if timeout is None else timeout,
-                                     speculate=speculate)
+                                     speculate=speculate, early_exit=self._early(early_exit))
         return self._respond(p, trace, vals, t0, store)
 
-    async def aask(self, init_state, names=None, order=None, store=True, timeout=None, speculate=False):
+    async def aask(self, init_state, names=None, order=None, store=True, timeout=None, speculate=False,
+                   early_exit=None):
         """`ask` on an event loop: `async def` parts (database lookups, HTTP APIs, model servers) are awaited, parts marked
         `blocking=True` run in worker threads (asyncio.to_thread), plain sync parts inline; steps whose inputs are ready run
         concurrently. The answers, records and hashes are those of `ask` on the same input: records are written in flow
@@ -379,13 +394,14 @@ class System:
         speculate=False: hard checks and the steps they read first, then what the open questions need (as `ask`: no call
         starts that `ask` would not make). speculate=True: every step starts once its inputs are ready, and a failed hard
         check cancels the pending calls that only the questions it settles needed (lower latency; some paid calls may start
-        and be cancelled). Cancelling `aask` itself cancels every pending call."""
+        and be cancelled). Cancelling `aask` itself cancels every pending call. early_exit: as for `ask` (False: every
+        step runs, whatever the hard checks say)."""
         from .runtime import aexecute
         t0 = now_ms()
         p = self._prepare(init_state, names, order)
         trace, vals = await aexecute(self.catalog, p.flow, p.state, order=p.order, costs=self.costs, policy=p.policy,
                                      known=p.known, timeout=self.timeout if timeout is None else timeout,
-                                     speculate=speculate)
+                                     speculate=speculate, early_exit=self._early(early_exit))
         return self._respond(p, trace, vals, t0, store)
 
     @property
@@ -599,8 +615,8 @@ class System:
             part, r = self.catalog.parts.get(f), by.get(f)                # the answer is unknown, never "passed"
             if part is not None and part.kind == "check" and part.hard and r is not None and r.value is MISSING \
                     and governs(part, q):
-                return Result(None, 0.0, f"hard check {f} could not be evaluated: {r.error or 'no value'}", "abstain",
-                              source=f, guard="hard_check")
+                return Result(None, 0.0, f"hard check {f} could not be evaluated: {r.error or 'no value'}"
+                              + _caused_by(by, r), "abstain", source=f, guard="hard_check")
         missing =[f for f in facts if f in by and by[f].value is MISSING]
         if flow.unresolved.get(q.name):
             return Result(None, 0.0, "cannot compute: " + ", ".join(flow.unresolved[q.name]), "abstain")
@@ -626,7 +642,7 @@ class System:
                 from .provenance import classify
                 grounding = r is not None and classify(r.error) == "grounding"     # a model rule's quote not in the text
                 return Result(None, 0.0, "rule not computed: " + (r.error if r else "no step") +
-                              (f"; missing {', '.join(missing)}" if missing else ""), "abstain",
+                              (f"; missing {', '.join(missing)}" if missing else "") + _caused_by(by, r), "abstain",
                               guard="timeout" if late else "grounding" if grounding else None)
             pc = path_confidence(self.catalog, trace, rule.inputs)
             conf = min(pc, r.confidence)
@@ -851,42 +867,60 @@ class System:
 
     def learn_rule(self, question, examples, facts, **kw):
         """An answer rule learned from examples (solvi.rules.RuleList): a readable "if feature then answer" list, installed in the
-        catalog as a regular rule (deterministic, replayable)."""
+        catalog as a regular rule (deterministic, replayable). examples: [(init_state, answer)], at least one; facts: the
+        facts the list reads — parts of the catalog or given facts of the examples (a name that is neither raises, and
+        nothing is installed)."""
         from .core import Part
         from .rules import RuleList
         q = self.questions[question]
+        facts = [facts] if isinstance(facts, str) else list(facts)
+        if not examples:
+            raise ValueError(f"learn_rule({question!r}): no examples to learn from")
         rows = [self.facts_for(s) for s, _ in examples]
+        lost = [f for f in facts if f not in self.catalog.parts and not any(f in r for r in rows)]
+        if lost or not facts:
+            raise ValueError(f"learn_rule({question!r}): " + (f"{', '.join(lost)} is not a part of the catalog or a given "
+                             "fact of the examples" if lost else "facts is empty") + " — the rule could never be computed")
         rl = RuleList(facts, **kw).fit(rows, [q.answer.normalize(a) for _, a in examples])
 
         def learned(**args):
             return rl.predict(args)[0]
         learned.__name__ = f"learned_{question}"
-        self.catalog.rules[question] = Part(kind="rule", name="answer:" + question, inputs=list(facts), func=learned,
-                                            doc=str(rl), question=question, model=rl, provenance="learned")
+        self.catalog.replace_rule(Part(kind="rule", name="answer:" + question, inputs=list(facts), func=learned,
+                                       doc=str(rl), question=question, model=rl, provenance="learned"))
         self.learned_rules[question] = rl
         return rl
 
     def calibrate(self, question, examples, truth):
-        """Calibrate answer confidence (Platt scaling) on held-out examples: examples is [init_state], truth is [correct answer]."""
+        """Calibrate answer confidence (Platt scaling) on held-out examples: examples is [init_state], truth is [correct
+        answer] (written as for `fit` and `teach`: True / False for a yes/no question, an Enum member, ...).
+        → (a, b): confidence' = σ(a·logit(confidence) + b), applied to every later answer of the question.
+        The held-out examples are run without the question's current calibration (so a second call fits the same thing
+        again, not a correction of the first), are not saved to the storage and do not count in `stats`. Fewer than 10
+        answered examples, all of them right (or wrong), or confidences that do not vary (a rule's answers: 1.0): only
+        the shift b is fitted (a = 1) — the calibrated confidence is then the share of right answers."""
         import numpy as np
+        q = self.questions[question]
+        truth = [q.answer.normalize(y) for y in truth]
+        if len(truth) != len(examples):
+            raise ValueError(f"calibrate: {len(examples)} examples and {len(truth)} correct answers")
+        was = self.calib.pop(question, None)          # raw confidences: not the previously calibrated ones
         xs, ys = [], []
-        for st, y in zip(examples, truth):
-            r = self.ask(st, [question])[question]
-            if r.status != "ok":
-                continue
-            c = min(max(r.confidence, 1e-4), 1 - 1e-4)
-            xs.append(np.log(c / (1 - c)))
-            ys.append(float(r.answer == y))
-        xs, ys = np.array(xs), np.array(ys)
-        if len(xs) < 10 or ys.min() == ys.max():
-            self.calib[question] = (1.0, float(np.log((ys.mean() + 1e-3) / (1 - ys.mean() + 1e-3))) if len(xs) else 0.0)
-            return self.calib[question]
-        a, b = 1.0, 0.0
-        for _ in range(500):
-            p = 1 / (1 + np.exp(-(a * xs + b)))
-            ga, gb = ((p - ys) * xs).mean(), (p - ys).mean()
-            a, b = a - 0.5 * ga, b - 0.5 * gb
-        self.calib[question] = (float(a), float(b))
+        try:
+            for st, y in zip(examples, truth):
+                p = self._prepare(st, [question], None)
+                trace, vals = execute(self.catalog, p.flow, p.state, workers=self.workers, order=p.order, costs=self.costs,
+                                      policy=p.policy, known=p.known)
+                r = self._results(p.questions, p.flow, trace, vals)[0][question]
+                if r.status != "ok":
+                    continue
+                xs.append(_logit(r.confidence))
+                ys.append(float(vhash(r.answer) == vhash(y)))
+        except BaseException:
+            if was is not None:
+                self.calib[question] = was
+            raise
+        self.calib[question] = _platt_fit(np.array(xs), np.array(ys))
         return self.calib[question]
 
     def learning(self, storage=None, parts=None, ladder=None, gates=None, **options):
@@ -981,6 +1015,29 @@ def _append(trace, rec, n_steps):
     trace.records.append(rec)
 
 
+MISSING_INPUTS = "missing inputs: "
+
+
+def _caused_by(by, r):
+    """A step that could not run for lack of an input → "; caused by <part>: <its error>": the part further up whose
+    own failure (it raised, its output was rejected) left the facts missing — else the reason would name only the
+    last link, a check or a rule that never ran. "" when the step failed by itself, or nothing above it has an error."""
+    roots, seen = {}, set()
+    todo = [r] if r is not None and (r.error or "").startswith(MISSING_INPUTS) else []
+    while todo:
+        rec = todo.pop(0)
+        for x in rec.error[len(MISSING_INPUTS):].split(", "):
+            up = by.get(x)
+            if up is None or x in seen or up.value is not MISSING or not up.error:
+                continue
+            seen.add(x)
+            if up.error.startswith(MISSING_INPUTS):
+                todo.append(up)
+            else:
+                roots[x] = up.error
+    return "; caused by " + " and ".join(f"{x}: {e}" for x, e in roots.items()) if roots else ""
+
+
 def _resolved(q, r, pc, why, src, init):
     """An answer primitive (not stated, span, rank, estimate) or an answer with evidence, from the rule's record (see
     solvi.primitives)."""
@@ -1037,10 +1094,66 @@ def _learnable(q, examples):
     return [(s, a) for s, a in examples if a is not Unknown] if q.answer.unknown else examples
 
 
-def _platt(c, a, b):
-    import math
+def _logit(c):
     c = min(max(c, 1e-4), 1 - 1e-4)
-    return 1 / (1 + math.exp(-(a * math.log(c / (1 - c)) + b)))
+    return math.log(c / (1 - c))
+
+
+def _platt(c, a, b):
+    return 1 / (1 + math.exp(-(a * _logit(c) + b)))
+
+
+def _platt_shift(xs, ys):
+    """Platt scaling with the slope fixed at 1: the shift b at which the mean calibrated confidence is the share of
+    right answers (kept inside [0.001, 0.999]) — the maximum-likelihood b; found by bisection."""
+    import numpy as np
+    target = min(max(float(ys.mean()), 1e-3), 1 - 1e-3)
+    lo, hi = -40.0, 40.0
+    for _ in range(80):
+        b = (lo + hi) / 2
+        if float((1 / (1 + np.exp(-(xs + b)))).mean()) < target:
+            lo = b
+        else:
+            hi = b
+    return 1.0, (lo + hi) / 2
+
+
+def _platt_fit(xs, ys):
+    """(a, b) of confidence' = σ(a·logit(confidence) + b) by maximum likelihood (Newton steps, halved until the loss
+    falls). Only the shift is fitted — see _platt_shift — when the slope cannot be told from the data: fewer than 10
+    examples, every answer right (or wrong), confidences that do not vary, or a fit that does not settle."""
+    import numpy as np
+    if not len(xs):
+        return 1.0, 0.0
+    if len(xs) < 10 or ys.min() == ys.max() or float(xs.std()) < 1e-6:
+        return _platt_shift(xs, ys)
+
+    def nll(a, b):
+        z = a * xs + b
+        return float((np.logaddexp(0.0, z) - ys * z).mean())
+    a, b = _platt_shift(xs, ys)
+    loss = nll(a, b)
+    for _ in range(100):
+        p = 1 / (1 + np.exp(-(a * xs + b)))
+        w = p * (1 - p)
+        g = np.array([((p - ys) * xs).mean(), (p - ys).mean()])
+        h = np.array([[(w * xs * xs).mean(), (w * xs).mean()], [(w * xs).mean(), w.mean()]]) + 1e-9 * np.eye(2)
+        try:
+            da, db = np.linalg.solve(h, g)
+        except np.linalg.LinAlgError:
+            return _platt_shift(xs, ys)
+        t = 1.0
+        while t > 1e-6 and not nll(a - t * da, b - t * db) < loss:
+            t /= 2
+        if t <= 1e-6:
+            break
+        a, b = a - t * da, b - t * db
+        was, loss = loss, nll(a, b)
+        if was - loss < 1e-12:
+            break
+    if not (math.isfinite(a) and math.isfinite(b)) or abs(a) > 1e3 or abs(b) > 1e3:   # separable data: no finite optimum
+        return _platt_shift(xs, ys)
+    return float(a), float(b)
 
 
 def _producers(catalog):

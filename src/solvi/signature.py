@@ -169,7 +169,8 @@ def items(obj):
     from .runtime import Trace
     from .storage import TraceStorage
     if isinstance(obj, TraceStorage):
-        return [d if isinstance(d, dict) and "hash" in d else None for _, d in obj._raw()]
+        from .storage import chained
+        return [d if chained(d) else None for _, d in obj._raw()]
     tr = getattr(obj, "trace", None)
     if isinstance(tr, Trace):
         obj = tr

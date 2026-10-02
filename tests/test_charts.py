@@ -360,3 +360,44 @@ def test_example_21(tmp_path, capsys):
     assert sorted(p.name for p in tmp_path.iterdir()) == ["21_careless_model.svg", "21_quarters_line.svg",
                                                           "21_region_pie.svg"]
     assert (tmp_path / "21_careless_model.svg").read_text() == r3.output
+
+
+# ------------------------------------------------------------------------------------------------ years next to amounts
+YEARS = "Net income: 2023 $120 million, 2024 -$45 million, 2025 $80 million."
+
+
+def test_a_currency_sign_before_the_next_number_is_not_the_unit_of_the_year_before_it():
+    from solvi.charts.check import SourceIndex
+    got = [(r.as_written, str(r.value), r.unit) for r in SourceIndex(YEARS).readings]
+    assert got == [("2023", "2023", ""), ("$120 million", "120000000", "USD"), ("2024", "2024", ""),
+                   ("-$45 million", "-45000000", "USD"), ("2025", "2025", ""), ("$80 million.", "80000000", "USD")]
+    assert [r.words for r in SourceIndex(YEARS).readings if r.unit == ""] == [(), (), ()]
+    assert SourceIndex("Paid 1 500 000 $ in 2024.").readings[0].unit == "USD"        # a sign after the number: still read
+
+
+def test_a_year_is_not_verified_as_a_currency_amount():
+    r = run(YEARS, spec([("Net income", 2023, "2023 $"), ("2025", 2025, "2025 $")], unit="USD"))
+    assert not r.ok and codes(r, DROPPED) == ["unit_mismatch", "unit_mismatch"]
+
+
+def test_the_rule_proposer_charts_the_amounts_by_year_and_a_negative_amount_with_its_sign():
+    r = chart(YEARS)
+    v = r.checked.verified
+    assert r.ok and not r.issues and v.unit == "USD" and v.scale == "million"
+    assert [(p.label, str(p.value), p.as_written) for p in v.series[0].points] == [
+        ("2023", "120", "$120 million"), ("2024", "-45", "-$45 million"), ("2025", "80", "$80 million.")]
+    r = run(YEARS, spec([("2024", -45, "-$45 million")], unit="USD", scale="million"))
+    assert r.ok and not codes(r, DROPPED)
+    r = run(YEARS, spec([("2024", 45, "$45 million")], unit="USD", scale="million"))    # the sign is part of the number
+    assert codes(r, DROPPED) == ["value_mismatch"]
+
+
+def test_a_number_that_shares_characters_with_a_drawn_one_is_not_drawn_again():
+    from decimal import Decimal
+    from solvi.charts.check import ChartChecker, Reading, SourceIndex
+    from solvi.charts.spec import ChartSpec
+    idx = SourceIndex("a 10 $20 b")
+    idx.readings[0] = Reading(2, 6, "10 $", Decimal(10), "USD", ())                     # as the checker once read it
+    pt = ChartSpec.model_validate(spec([("a", 10, "10 $")], unit="USD")).series[0].points[0]
+    vp, why = ChartChecker()._verify_at(pt, idx, 2, 6, "USD", Decimal(1), {(5, 8): "series[0].points[0] ('b')"})
+    assert vp is None and why[0] == "quote_reused"

@@ -41,6 +41,10 @@ System(cat, questions, strategist=ModelStrategist.load("path/to/strategist-check
    **Mandatory milestones**: every hard check that governs a question in the plan the deterministic strategist would build
    stays in every plan, so a shortcut that skips the fact such a check reads cannot drop the check. The other producers
    stay as run-time fallbacks when their inputs are computed anyway.
+
+Facts that can be derived from each other (`net` from `gross` and `gross` from `net`, each also given directly) work in
+both modes: the plan computes each fact from what is given, and a producer that would read its own fact back — through
+any other fact — is not kept as a fallback, since the flow could not run it.
 3. **With a model** (`ModelStrategist(model, producers="equivalent")`, or `ModelStrategist.load(path)`, which implies
    `"equivalent"`): where declared costs do not settle the choice (a fact with ≥ 2 usable producers, not all with a declared
    cost), the fact becomes a **segment**: code narrows the catalog to the fact's producers and, up to 3 levels back, the

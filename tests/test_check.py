@@ -360,3 +360,117 @@ def test_solvi_check_exit_statuses(tmp_path, capsys):
         except SystemExit as e:
             code = e.code
         assert code == 2
+
+
+def _approve(**kw):
+    return [Question("approve", "Approve?", Answer.choice(["approve", "reject"]), **kw)]
+
+
+def test_a_rule_that_returns_a_literal_outside_its_questions_options():
+    cat = Catalog()
+
+    @cat.rule("approve")
+    def approve(amount, vip):
+        if vip:
+            return "approve"
+        if amount is None:
+            return None                                      # abstains on purpose: not a finding
+        label = "aprove"
+
+        def helper():
+            return "whatever"                                # a function inside the rule: not the rule's return
+        return "aprove" if amount < 10 else label if amount < 20 else "reject"
+    s = System(cat, _approve())
+    rep = lint(s)
+    assert rep.codes() == ["rule_returns_non_option"] and not rep.ok
+    assert "returns 'aprove'" in rep.errors[0].message and "(approve)" in rep.errors[0].where
+    assert s.ask({"amount": 5, "vip": False})["approve"].guard == "outside_options"   # the abstention it warns of
+
+    typed = Catalog()
+
+    @typed.rule("ok")
+    def ok(amount) -> bool:
+        return "yes" if amount else False
+    multi = Catalog()
+
+    @multi.rule("tags")
+    def tags(amount):
+        return "a" if amount else "z"
+    assert lint(System(typed, [Question("ok", "OK?")])).findings == []
+    rep = lint(System(multi, [Question("tags", "Tags?", Answer.multi(["a", "b"]))]))
+    assert rep.codes() == ["rule_returns_non_option"] and "'z'" in rep.errors[0].message
+
+
+def test_a_hard_check_without_a_bool_type_that_plainly_returns_a_non_bool():
+    cat = Catalog()
+
+    @cat.check(hard=True, then={"approve": "reject"})
+    def enough(balance):
+        if balance is None:
+            return                                           # rejected at run time: the question abstains
+        return 0 if balance < 0 else True
+
+    @cat.check(hard=True)
+    def known(customer):
+        return customer != "blocked"                         # not a literal: nothing to say
+
+    @cat.check
+    def soft(balance):
+        return None                                          # a soft check: not this finding
+
+    @cat.rule("approve")
+    def approve(balance, customer, soft):
+        return "approve"
+    s = System(cat, _approve(checkpoints=["enough", "known"]))
+    rep = lint(s)
+    assert rep.codes() == ["hard_check_untyped", "hard_check_untyped"] and not rep.ok
+    assert ["returns None" in f.message or "returns 0" in f.message for f in rep.errors] == [True, True]
+    r = s.ask({"balance": -5, "customer": "ann"})["approve"]
+    assert (r.status, r.guard) == ("abstain", "hard_check")
+
+
+def test_a_rule_for_a_question_the_system_does_not_ask():
+    cat = Catalog()
+
+    @cat.rule("approve")
+    def approve(amount):
+        return "approve"
+
+    @cat.rule("ghost")
+    def ghost(amount):
+        return "x"
+    rep = lint(System(cat, _approve()))
+    assert [(f.level, f.code, f.where) for f in rep.findings] == [("warning", "unused_rule", "ghost")]
+    assert lint(cat).findings == []                           # a bare catalog has no questions to compare with
+
+
+def test_names_that_nothing_computes_and_the_input_model_does_not_declare():
+    from pydantic import BaseModel, ConfigDict
+
+    class Inputs(BaseModel):
+        amount: float
+        balance: float
+
+    class Closed(Inputs):
+        model_config = ConfigDict(extra="forbid")
+
+    def build(inputs, **kw):
+        cat = Catalog()
+
+        @cat.fn
+        def left(balance: float, amout: float) -> float:      # a typo: `amout`
+            return balance - amout
+
+        @cat.rule("approve")
+        def approve(left: float):
+            return "approve" if left >= 0 else "reject"
+        return System(cat, _approve(**kw) + [Question("later", "Later?", Answer.yes_no(), uses=["left", "balance", "nope"])],
+                      inputs=inputs)
+    rep = lint(build(Inputs))
+    got = {(f.code, f.where): f.message for f in rep.warnings}
+    assert set(got) == {("input_not_declared", "amout"), ("uses_unknown", "later")} and rep.ok
+    assert "left reads amout" in got[("input_not_declared", "amout")] and "extra key" in got[("input_not_declared", "amout")]
+    assert "'nope'" in got[("uses_unknown", "later")]
+    rep = lint(build(Closed))
+    assert all("forbids extra keys, so it can never be given" in f.message for f in rep.warnings) and len(rep.warnings) == 2
+    assert [f.code for f in lint(build(None)).warnings] == []  # no input model: every such name is a given fact

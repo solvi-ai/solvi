@@ -189,6 +189,25 @@ def test_pytest_plugin_collects_cases_as_items(pytester):
     r.assert_outcomes(passed=1, deselected=2)
 
 
+def test_pytest_plugin_does_not_run_or_collect_another_projects_files(pytester):
+    """The plugin loads wherever solvi is installed: a cases.json next to an unrelated project's task.py used to get that
+    task.py executed during collection, and a *.cases.json with a "task" key aborted the session."""
+    jobs = pytester.mkdir("jobs")
+    (jobs / "task.py").write_text("import pathlib\npathlib.Path(__file__).with_name('RAN.txt').write_text('x')\n")
+    (jobs / "cases.json").write_text(json.dumps([{"id": 1, "input": "a", "output": "b"}]))
+    fixtures = pytester.mkdir("fixtures")
+    (fixtures / "eval.cases.json").write_text(json.dumps({"task": "sentiment", "cases": [{"text": "great", "label": "pos"}]}))
+    lookalike = pytester.mkdir("lookalike")                           # solvi-shaped cases, a module that is not solvi's
+    (lookalike / "task.py").write_text("import pathlib\npathlib.Path(__file__).with_name('RAN.txt').write_text('x')\n")
+    (lookalike / "cases.json").write_text(json.dumps(CASES[:1]))
+    pytester.makepyfile(test_own="def test_ok():\n    assert True\n")
+    registered = any(ep.name == "solvi" and ep.value == "solvi.pytest_plugin" for ep in entry_points(group="pytest11"))
+    r = pytester.runpytest(*([] if registered else ["-p", "solvi.pytest_plugin"]), "-q")
+    r.assert_outcomes(passed=1, warnings=1)
+    assert not (jobs / "RAN.txt").exists() and not (lookalike / "RAN.txt").exists()
+    r.stdout.fnmatch_lines(["*lookalike/cases.json: the cases look like solvi cases, but task.py does not import solvi*"])
+
+
 def test_a_case_that_cannot_fail_is_reported(tmp_path):
     """A misspelled key, a status or safeguards entry for a question that was not asked, a case with only a state: each
     used to pass (6 of 7 such cases), so a regression case that checked nothing looked like a passing one."""

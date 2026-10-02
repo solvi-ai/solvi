@@ -334,21 +334,65 @@ def producer(catalog, fact, name):
 
 
 # ---------------------------------------------------------------------------------------------------------------- flows
+def _reads(kept, fact, inputs):
+    """Does any of `inputs` depend on `fact` through the producers kept so far (kept: fact → its producers)?"""
+    todo, seen = list(inputs), set()
+    while todo:
+        x = todo.pop()
+        if x == fact:
+            return True
+        if x in seen:
+            continue
+        seen.add(x)
+        for a in kept.get(x, ()):
+            todo.extend(a.inputs)
+    return False
+
+
+def _widen(catalog, kept, ok):
+    """Add to each fact's kept producers its other producers that pass `ok` and do not make the fact depend on itself
+    (facts derivable from each other — net from gross, gross from net: only one direction can stay) → kept, each fact's
+    producers in declaration order after those it already had."""
+    for f, alts in kept.items():
+        g = catalog.parts[f]
+        for a in g.alternatives or ():
+            if not any(a is k for k in alts) and ok(a) and not _reads(kept, f, a.inputs):
+                alts.append(a)
+    return kept
+
+
+def _narrow(g, alts):
+    from .core import _group_func
+    n = dataclasses.replace(g, alternatives=alts, inputs=list(dict.fromkeys(x for a in alts for x in a.inputs)))
+    n.func = _group_func(n)
+    return n
+
+
 def view_usable(catalog, reach):
-    """The catalog with every fact's producers narrowed to the usable ones (dead ends dropped), all kept as fallbacks."""
-    from .core import Catalog, _group_func
+    """The catalog with every fact's producers narrowed to the usable ones (dead ends dropped), all kept as fallbacks —
+    except a usable producer that would make its fact depend on itself (facts derivable from each other): of such a
+    ring, the producers that make each fact computable from the given ones stay, in declaration order."""
+    from .core import Catalog
     v = Catalog.__new__(Catalog)
     v.__dict__.update(catalog.__dict__)
     v.parts = dict(catalog.parts)
-    for f, g in catalog.parts.items():
-        if g.alternatives is None or f not in reach:
+    have = {x for x in reach if x not in catalog.parts}          # the given facts
+    kept, changed = {}, True
+    while changed:                                    # each fact's first producer whose inputs are already computable:
+        changed = False                               # an acyclic skeleton, then widened with the rest
+        for f, g in catalog.parts.items():
+            if f in kept or f not in reach:
+                continue
+            a = next((a for a in alternatives(g) if all(x in have or x in kept for x in a.inputs)), None)
+            if a is not None:
+                kept[f] = [a]
+                changed = True
+    _widen(catalog, kept, lambda a: all(x in reach for x in a.inputs))
+    for f, alts in kept.items():
+        g = catalog.parts[f]
+        if g.alternatives is None or len(alts) == len(g.alternatives):
             continue
-        alts = [a for a in g.alternatives if all(x in reach for x in a.inputs)]
-        if len(alts) == len(g.alternatives):
-            continue
-        n = dataclasses.replace(g, alternatives=alts, inputs=list(dict.fromkeys(x for a in alts for x in a.inputs)))
-        n.func = _group_func(n)
-        v.parts[f] = n
+        v.parts[f] = _narrow(g, [a for a in g.alternatives if any(a is k for k in alts)])
     return v
 
 
@@ -363,22 +407,20 @@ def mandatory_checks(catalog, questions, init_keys, heads=None):
 
 def view(catalog, choice, fallbacks=True, reach=None):
     """A shallow copy of the catalog in which every fact with alternative producers keeps only the chosen one (first) and,
-    with fallbacks, the other producers whose inputs the plan already computes (after it, in declaration order)."""
-    from .core import Catalog, _group_func
+    with fallbacks, the other producers whose inputs the plan already computes (after it, in declaration order) — unless
+    such a producer reads, through any fact, the fact it would produce (then the plan could not run)."""
+    from .core import Catalog
     v = Catalog.__new__(Catalog)
     v.__dict__.update(catalog.__dict__)
     v.parts = dict(catalog.parts)
     have = set(choice) | set(reach or ())
-    for f, name in choice.items():
+    kept = {f: [producer(catalog, f, name)] for f, name in choice.items()}
+    if fallbacks:
+        _widen(catalog, kept, lambda a: all(x in have for x in a.inputs))
+    for f, alts in kept.items():
         g = catalog.parts[f]
-        if g.alternatives is None:
-            continue
-        first = producer(catalog, f, name)
-        rest = [a for a in g.alternatives if a is not first and all(x in have for x in a.inputs)] if fallbacks else []
-        alts = [first] + rest
-        n = dataclasses.replace(g, alternatives=alts, inputs=list(dict.fromkeys(x for a in alts for x in a.inputs)))
-        n.func = _group_func(n)
-        v.parts[f] = n
+        if g.alternatives is not None:
+            v.parts[f] = _narrow(g, alts)
     return v
 
 

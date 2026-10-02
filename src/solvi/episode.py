@@ -268,7 +268,8 @@ class LongMemory:
 
     A score is the sum of the outcomes recorded for (context, key), each decayed once per episode since, within ±cap.
     Labels come from outcomes — progress, a dead end — never from what the model answered. Every item keeps the episode
-    it was last recorded in and why. The scores are given to a decision as a fact, so the trace shows what the memory
+    it was last recorded in and why. A key that is not a string (a tuple, a dict: ("tool", "ping")) is kept as its JSON
+    text, like an Episode event's key, and `scores` gives it back in that form. The scores are given to a decision as a fact, so the trace shows what the memory
     said; nothing is applied behind the decision's back."""
 
     def __init__(self, path=None, decay=0.8, cap=5.0):
@@ -293,7 +294,7 @@ class LongMemory:
         return self
 
     def record(self, context, key, outcome, why=""):
-        it = self.data["items"].setdefault(self._ctx(context), {}).setdefault(key, {"score": 0.0, "n": 0})
+        it = self.data["items"].setdefault(self._ctx(context), {}).setdefault(_key(key), {"score": 0.0, "n": 0})
         it["score"] = round(max(-self.cap, min(self.cap, it["score"] + outcome)), 4)
         it["n"] += 1
         it["last"], it["why"] = self.episode, why

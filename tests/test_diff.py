@@ -282,3 +282,62 @@ def test_shadow_survives_a_failing_candidate():
     r = shadow.ask(STATES[0])
     assert r["approve"].answer == "yes"
     assert shadow.stats["errors"] == 1 and "candidate down" in shadow.errors[0]["error"]
+
+
+# --- which step changed the answer
+def scorecard(version=1, refuse_at=5):
+    """v2 adds a rule (guarantor_points: 0 for most applicants) and lowers the threshold."""
+    cat = Catalog()
+
+    @cat.fn
+    def duration_points(months):
+        return 3 if months > 24 else 1
+
+    @cat.fn
+    def amount_points(amount):
+        return 2 if amount > 5000 else 0
+
+    if version == 1:
+        @cat.fn
+        def points(duration_points, amount_points):
+            return duration_points + amount_points
+    else:
+        @cat.fn
+        def guarantor_points(guarantor):
+            return 0 if guarantor else 2
+
+        @cat.fn
+        def points(duration_points, amount_points, guarantor_points):
+            return duration_points + amount_points + guarantor_points
+
+    @cat.rule("decision")
+    def decision(points):
+        return "refuse" if points >= refuse_at else "approve"
+    return System(cat, [Question("decision", "Decide", Answer.choice(["approve", "refuse"]))])
+
+
+def test_diff_names_the_step_that_changed_the_answer_not_an_added_step_that_changed_nothing(tmp_path):
+    """Every change used to be blamed on the first differing step in flow order, and an added step always differs: a new
+    rule that scored 0 was named for decisions that changed because of the threshold alone."""
+    store = JSONLStorage(tmp_path / "d.jsonl")
+    v1 = scorecard(1)
+    v1.storage, store.catalog = store, v1
+    apps = [{"months": 12, "amount": 9000, "guarantor": True},      # 3 points under both versions
+            {"months": 36, "amount": 100, "guarantor": True},       # 3 points under both versions
+            {"months": 12, "amount": 9000, "guarantor": False},     # 3 points, 5 with the new rule
+            {"months": 36, "amount": 9000, "guarantor": True}]      # 5 points: refused under both
+    for a in apps:
+        v1.ask(a)
+    rep = diff(store, scorecard(2, refuse_at=3))
+    by = {c["seq"]: c["questions"]["decision"] for c in rep.changed}
+    assert sorted(by) == [0, 1, 2]
+    for seq in (0, 1):                                              # the total is the same: only the rule's threshold
+        assert [c["name"] for c in by[seq]["causes"]] == ["answer:decision"]
+        assert by[seq]["first_step"]["why"] == "its code or declarations changed"
+    assert [c["name"] for c in by[2]["causes"]] == ["guarantor_points", "points", "answer:decision"]
+    assert by[2]["first_step"]["name"] == "guarantor_points" and "new step" in by[2]["first_step"]["why"]
+    text = str(rep)
+    assert "parts that ran now and not then: guarantor_points" in text and "and: points: 3 → 5" in text
+    only_rule = diff(store, scorecard(2, refuse_at=5))             # the new rule alone: one decision changes, by it
+    (c,) = only_rule.changed
+    assert c["seq"] == 2 and [x["name"] for x in c["questions"]["decision"]["causes"]] == ["guarantor_points", "points"]

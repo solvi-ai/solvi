@@ -116,6 +116,12 @@ def ship_rule(big_order):
   declare the most important first. A question's flow and answer do not depend on which other questions are asked in the
   same request.
 
+  A hard check that could not be evaluated (it raised, or a fact it reads is missing) never counts as passed: the
+  questions it governs abstain. The reason names the check and, when the check could not run for lack of an input, the
+  part further up that failed: `hard check day_allowed could not be evaluated: missing inputs: violations; caused by
+  spec: ValueError: no slot in the plan`. A rule that could not run says the same (`rule not computed: ...; caused by
+  ...`).
+
 ### Extractors and Quote
 
 An extractor reads text from `init_state` and returns a `Quote`:
@@ -203,7 +209,9 @@ Question("route", "Which team?", Answer.choice(["a", "b"]), uses=["country", "to
 - `answer`: `Answer.yes_no()` (options `["yes", "no"]`) or `Answer.choice(options)` (and the types below); leave it out
   when the question's rule has a return type — the answer type then comes from it (see [Types](#types-questions-and-model-decisions));
 - `checkpoints`: parts that must be in this question's flow in every request (a missing name raises
-  `solvi.strategist.PlanError`);
+  `solvi.strategist.PlanError`). In the flow is not the same as run: when a hard check settles the question first, a
+  checkpoint part after it is skipped — `ask(state, early_exit=False)` runs it anyway (see
+  [Early exit](#early-exit-and-parallel-execution));
 - `uses`: a hint for the strategist, the facts that matter when the question has neither a rule nor a trained head;
 - `min_confidence`: an answer below this confidence abstains (status `abstain`, the reason says what it would have answered);
 - `require_evidence`: an answer without a supporting quote abstains (safeguard "evidence missing"; see
@@ -373,8 +381,10 @@ def repair_days(doc: str) -> Estimate[0, 3, 7, 14]:
 
 - **Evidence.** Any part may return `Claim(value, evidence=[...], confidence=1.0, source=None)`; a model decision carries
   `Decision(..., evidence=[...])`. An item is a `Quote(text, start, end, source)` — checked to be literally that text at those
-  offsets — or a string, located at its first occurrence in `source` (default: the part's only given text input, else
-  `doc`). Evidence must point into **given** text facts. An output whose evidence is not in its text is **rejected** like an
+  offsets — or a string, located in `source` (default: the part's only given text input, else `doc`) at its first
+  occurrence as whole words and numbers: `"3"` is not evidence when the text says `30`, `3.5` or `1,300`, nor `"cat"`
+  when it says `category` (`"30"` is found in `30.` and `30%`); to quote a part of a word, give a `Quote` with its
+  offsets. Evidence must point into **given** text facts. An output whose evidence is not in its text is **rejected** like an
   ungrounded quote (not downgraded): the fact is missing, the next producer runs (a fallback), else the answer abstains —
   safeguard **grounding rejected**. Accepted evidence is recorded in the trace (`record.extra["evidence"]`, hashed and
   replayed), returned as `result.evidence`, shown in the audit (`evidence  doc[37:44] 'cracked'  verified`) and counted in
@@ -411,8 +421,10 @@ stated" output and its pointer; see [decide_format.md §9](decide_format.md#9-an
 
 `system.ask(model_instance)` accepts a pydantic `BaseModel`: its fields (nested models included, as they are) are the given
 facts. `System(cat, questions, inputs=Request)` validates every dict passed to `ask` against `Request`: its fields, with
-defaults, become the given facts (other keys pass through), and a field that fails is left out — the fact is missing, the
-answers that need it abstain, and a `type_rejected` event names the field (`res.trace.rejected`). Values that already
+defaults, become the given facts, and a field that fails is left out — the fact is missing, the answers that need it
+abstain, and a `type_rejected` event names the field (`res.trace.rejected`). Keys the model does not declare pass
+through as given facts; to keep them out, give the model `model_config = ConfigDict(extra="forbid")`: each undeclared
+key is then left out and reported in `res.trace.rejected` (a `type_rejected` event names it), like a field that failed. Values that already
 passed a type in this run (a validated input, a typed producer's output) are not validated again by parts that read them
 with the same type.
 
@@ -427,10 +439,17 @@ system.response_schema()           # ... with each question's answer as its clos
 Question.from_json(q.to_json()) == q
 ```
 
-JSON has no dates or enums: the dump marks values that are not plain JSON, and on load `catalog=` (a Catalog, or the
-System, which also knows `inputs=`) restores them from the producer's return type, the type the fact's readers expect, or the
-input model — so the restored trace hashes and replays exactly. Untyped non-JSON values come back as strings (their steps
-then no longer replay). The classes stay plain dataclasses; the pydantic models are in `solvi.schema`.
+JSON has no dates, sets or enums. The dump writes the type of every value of the stdlib types it flattens — `date`,
+`datetime`, `time`, `Decimal`, `UUID`, `set`, `frozenset`, `tuple`, also inside lists and dicts — next to the value, and
+a load gives them back as they were, declared or not: the README quickstart, whose parts read untyped dates, replays
+from a store. For the rest (an enum, a pydantic model, a dataclass) `catalog=` (a Catalog, or the System, which also
+knows `inputs=`) restores them from the producer's return type, the type the fact's readers expect, or the input model —
+so the restored trace hashes and replays exactly. A value that is neither — an untyped enum or object, an aware
+datetime whose zone its text does not carry, an untyped date in a record stored by solvi 0.7.1 or earlier — comes back
+as JSON gave it and is named in the loaded trace's `unrestored`: replay reports the steps that rest on it as
+`not_restored` ("no verdict on the data"), `solvi diff` lists the decision under "could not be re-run", and
+`counterfactual` draws no conclusion from it. The classes stay plain dataclasses; the pydantic models are in
+`solvi.schema`.
 
 Notes: types are resolved with `typing.get_type_hints`; a name that cannot be resolved (a class defined inside a function
 under `from __future__ import annotations`) is skipped with a warning. A pydantic model in a module loaded without an entry
@@ -941,7 +960,8 @@ repetition). `Chooser(model, storage=...).choose(name, task, {option: action}, c
 the step built from these: the model proposes an option, a validator turns down what was already done without
 progress (and what your `check` refuses), the rule's option answers otherwise; `chooser.replay()` re-checks every
 stored step. `LongMemory` keeps outcomes across episodes — `record(context, key, +1 / −1)`, decayed per episode —
-and `scores(context)` is given to the decision as a fact.
+and `scores(context)` is given to the decision as a fact (a key that is not a string — a tuple, a dict — is kept as
+its JSON text, like an event's key).
 
 Say what progress is — a sub-goal reached — and not "something changed": a wrong action changes the page too, and then
 erases the memory of itself. Measured with solvi-base on simulated support tickets and incidents (synthetic, one seed):
@@ -968,7 +988,9 @@ m.human(page, "Reports", "/audit", note="Anna")    # a person's or a document's 
 m.snapshot(page, targets)                     # the part a decision needs, as a given fact
 ```
 
-The adapter — list a state's actions, take one — is yours; the map only knows what these calls told it. On real
+The adapter — list a state's actions, take one — is yours; the map only knows what these calls told it. A state or an
+action is a string, a number or a tuple of those (`("room", 3)`); `save()` and a later load keep them as they are, and
+anything else is refused when it is reported. On real
 environments (40 "get to X" tasks each, 25 targets, steps per task): commands of uv, docker and git 34.7 without a map,
 28.2 with a map per task, 11.1 with one map kept across the tasks (35 of 40 reached against 19); the files of a
 repository 0 of 40 reached without a kept map, 23 of 40 with it (the last ten tasks: 4 steps); docs.python.org 13.1 →
@@ -1473,8 +1495,24 @@ trace says, per fact, which cost decided and where it came from (declared, warm-
 
 At run time the executor first computes the hard checks and what they depend on. If a hard check fails, every question whose
 flow contains it is settled (forced by `then`, or abstained), and the steps that only those questions needed are not run.
-They are listed in `res.trace.skipped` with the check that made them unnecessary. Pass `early_exit=False` to
-`solvi.runtime.execute` to compute the whole flow anyway (`System.facts_for` does this for training).
+They are listed in `res.trace.skipped` with the check that made them unnecessary. This is the default, because the
+skipped rest is often the expensive part (a model, an API). Its price: a decision forced by a hard check has no rule
+values or downstream facts in its record, and a part listed in `checkpoints` — it is in the flow, but the question was
+settled before it ran — is missing from `res.values`.
+
+When the record must hold everything — a scorecard whose points you want for every stored decision, a proposal to hand
+to a person when it is rejected — compute the whole flow anyway:
+
+```python
+res = system.ask(state, early_exit=False)     # this ask;  System(cat, questions, early_exit=False): every ask
+res["approve"].status                          # "forced": the failed hard check still decides
+res.values["points"], res.trace.skipped        # every fact and rule value is there; nothing was skipped
+res.trace.early_exit                           # False: recorded in the trace (and in a stored response)
+```
+
+The answers are the same either way; only the steps that run differ. The trace records the switch, and a replay with
+the flow checks that no planned step is missing from such a trace. `aask`, `ask_text` and `aask_text` take the same
+argument; `System.facts_for` computes the whole flow for training.
 
 `System(catalog, questions, workers=8)` (or `system.ask(state, workers=8)`) runs independent steps in parallel threads: a step
 starts as soon as the steps it reads have finished. This pays off when parts wait on I/O — HTTP APIs, databases, model
@@ -1647,8 +1685,10 @@ catalog as the question's rule. From then on it behaves like a hand-written rule
 and re-checkable by `replay`.
 
 - `facts`: the computed facts to build literals from. Booleans give `fact is True/False`, numbers `fact ≈ rounded value`,
-  strings give one literal per upper-cased word or number, plus `has number starting 'NN'` for numbers of 5 or more
-  digits (postcodes, codes). Other values are compared for equality.
+  strings give one literal per upper-cased word or number (in any script: `"ул. Северная, 12"` gives `УЛ`, `СЕВЕРНАЯ`,
+  `12`), plus `has number starting 'NN'` for numbers of 5 or more digits (postcodes, codes). Other values are compared
+  for equality. A name that is neither a part of the catalog nor a given fact of the examples raises `ValueError`, and
+  so does an empty list of examples; nothing is installed then.
 - Each step adds the literal with the best smoothed precision on still-uncovered examples, with at least `min_support`
   examples, while precision stays at or above `min_precision`; at most `max_rules` rules.
 - `system.learned_rules[question]` keeps the `RuleList`; `print` shows each rule with its support.
@@ -1743,8 +1783,12 @@ Calibrate a question on held-out examples (Platt scaling on the confidence logit
 system.calibrate("total_band", heldout_states, heldout_answers)   # lists of init_state and correct answers
 ```
 
-After calibration, `ok` answers of that question carry the calibrated confidence. With fewer than 10 usable examples, or
-when all held-out answers are right (or all wrong), only a constant shift is fitted.
+After calibration, `ok` answers of that question carry the calibrated confidence. With fewer than 10 usable examples,
+when all held-out answers are right (or all wrong), or when the confidences do not vary (a rule over plain inputs: always
+1.0), only a constant shift is fitted: the calibrated confidence is then the share of right answers. The correct answers
+are written as for `fit` (`True` / `False` for a yes/no question). The held-out examples are run without the question's
+previous calibration, are not saved to the storage and do not count in `system.stats`, so calling `calibrate` again
+replaces the parameters with a fit of the same kind.
 
 solvi does not pick an abstention threshold for you. With calibrated confidence you choose one per question from
 held-out data, for example "answer automatically at confidence >= 0.95, send the rest to a person":
@@ -1774,6 +1818,11 @@ Every step of the flow is a `Record` in `res.trace.records`:
 Answers from a learned head are records too (`kind="head"`, after the flow's steps): the answer, its probabilities and the
 head's fingerprint.
 
+What hashing costs: every given value and every computed value is put in canonical form and hashed once per ask,
+however many steps read it; the input's hash is taken when the ask starts. The time grows with the size of the values —
+about 0.4 ms per thousand floats of a list — so a decision over a large input is slower than the "about 0.4 ms" of a
+small one. A part should not change a given value in place: the hashes describe the input as it was given.
+
 `res.trace.fingerprint` records what decided: the catalog's fingerprint, the questions' and the fingerprint of every part
 in the flow (see [Catalog fingerprint, solvi diff and shadow mode](#catalog-fingerprint-solvi-diff-and-shadow-mode)); it is
 not part of the hash chain (a stored response is covered by the store's chain).
@@ -1801,11 +1850,14 @@ Each mismatch is the triple with a `.kind`, so a report can tell damaged data fr
 `integrity` (the hash chain, a record's hash, the input's hash or a recorded input hash does not verify), `recompute`
 (a step no longer gives the recorded value), `model_changed`, `missing_part` (the part or a producer was renamed or
 removed since: a mismatch, not an exception, and the steps after it are still checked), `missing_input` (a part now
-reads an input the trace does not hold), `flow` (a planned step is not recorded) and `error` (`replay_all`: a stored
-record could not be loaded, or the replay raised). When there are mismatches the result also has `"kinds"`, the count
+reads an input the trace does not hold), `flow` (a planned step is not recorded), `not_restored` (a hash or a step does
+not verify because a value it rests on did not come back from storage as it was — its type is neither one the dump
+restores nor declared: no verdict on the data, see [serialization](#typed-input-state-and-serialization)) and `error`
+(`replay_all`: a stored record could not be loaded, or the replay raised). When there are mismatches the result also has `"kinds"`, the count
 per kind, and `"summary"`, one line: `"data damaged: the hash chain or a record does not verify"`, `"data intact,
 catalog changed (parts missing)"`, `"data intact, catalog changed"`, `"data intact, model changed"`, `"data intact,
-steps do not recompute"` or `"replay failed (no verdict on the data)"`. `replay_all` gives the same two keys and the
+steps do not recompute"`, `"not verified: values stored without their type did not come back as they were (no verdict
+on the data)"` or `"replay failed (no verdict on the data)"`. `replay_all` gives the same two keys and the
 catalog verdict for every stored decision that does not replay, and `solvi replay` prints them.
 
 Continuing the README quickstart:
@@ -1842,6 +1894,11 @@ store.replay_all(system)                        # [] when every stored trace rep
 store.verify()                                  # the chain across stored records
 ```
 
+A stored response loaded without a catalog (`store.get(id)` on a store opened with no `catalog=`, or
+`Stored.response()`) still audits and reports: its flow keeps each part's name, kind and inputs and, for a check,
+whether it is a hard one — a record stored before that was kept shows such a check as "hard or soft: not recorded".
+Replay, diff and counterfactuals need the System.
+
 Two backends ship without dependencies: `JSONLStorage` (an append-only file, one record per line; several
 processes may append on POSIX systems, where each append holds a file lock — on Windows one writing process) and `SQLiteStorage` (stdlib `sqlite3`; index tables by question, answer, status, safeguard kind, model and time;
 several processes may write to one file). Two more take an optional dependency and keep the same tables:
@@ -1867,7 +1924,9 @@ corrections in the same chain (`store.corrections()`).
 
 **The chain across records.** Each record stores the hash of the record before it, and its own hash covers its content and
 that link. Editing a stored decision, deleting one, inserting one or changing their order breaks the chain at that point,
-and `verify()` names the record. Cutting records off the end leaves a shorter chain that is still consistent, so the store
+and `verify()` names the record. A line of a JSONL store that is not a record of the chain — unreadable JSON, or a JSON
+object without a hash that another tool appended — is reported by `verify()` as one problem and passed over by `iter`,
+`query`, `report` and `replay_all`; the records after it still verify. Cutting records off the end leaves a shorter chain that is still consistent, so the store
 keeps its head (count and last hash) next to the log (`decisions.jsonl.head`, or a table in SQLite) and `verify()` checks
 it. Someone who can rewrite the whole store and its head can rebuild a consistent chain: publish `store.head()` somewhere
 else from time to time (a ticket, a log you do not control, a signed message) and check with `store.verify(anchor=head)`.
@@ -1949,10 +2008,21 @@ functions, a database) changes nothing in it.
 from solvi.diff import diff
 
 rep = diff(store, new_system)              # re-runs every stored decision (or diff(store, s, question="refund", since=...))
-print(rep)                                 # per question: how many changed and how (yes → no: 12); per decision the first
-rep.changed                                # step whose output differs and why: its code changed, its model changed, its
-rep.ok                                     # inputs changed, or none of these (a non-deterministic or external source)
+print(rep)                                 # per question: how many changed and how (yes → no: 12); per decision the
+rep.changed                                # steps that changed the answer and why: the code changed, the model changed,
+rep.ok                                     # a new step, or none of these (a non-deterministic or external source)
 ```
+
+`rep.changed` is a list of `{"id", "seq", "time", "questions": {question: {"old", "new", "changed", "first_step",
+"causes"}}}`. `causes` are the steps that changed that answer, in flow order, each `{"step", "name", "old", "new",
+"why"}`; `first_step` is the first of them. They are found from the answer step (and a hard check that decided it)
+back through the recorded inputs, only through steps whose output differs: a step that gives the same output as
+before stops the walk, so a part that was added or edited and changes nothing downstream — a new rule that scores 0 —
+is not named, and a decision that changes because of a threshold is attributed to the rule that holds the threshold.
+Of the steps on such a path the causes are those where a difference starts (its own code, declarations or model
+changed, it is new or no longer runs, or nothing it reads differs); with several changes at once each is listed, and
+which of them alone would have changed the answer takes a `diff` against a system with only that change. The header
+lists the parts whose code changed since the decisions were stored and the parts that ran now and not then.
 
 Each stored decision's recorded input is asked again for the same questions (`store=False`: the new system's own storage
 is not written) and compared with the stored response: answer, status, the guard that settled it, the safeguard events
@@ -2987,7 +3057,16 @@ input (`validate_reads_unknown`: it cannot run, so every output of that producer
 refuses such a catalog, and a part that is not an alternative producer is refused when it is declared); constraints between answers that no combination satisfies — one alone or all together,
 tried by brute force over the answers' finite domains (yes/no, choice, ordinal, multi-label up to 10 options; up to
 `--max-combos` combinations per group of constraints that share questions) — and a constraint reading a name that is not
-a question (it never applies). **Warnings**: a part no question's flow uses (a question without a rule, fit or `uses`
+a question (it never applies); a rule with a `return <literal>` that is not one of its question's options
+(`rule_returns_non_option`: `return "aprove"` — on that path the question abstains); a hard check without `-> bool`
+with a `return` that is plainly not `True` or `False` (`hard_check_untyped`: `return 0`, `return None`, a bare
+`return` — on that path the check is rejected and the questions it governs abstain). Both read the function's source:
+only literals in `return` statements (also in `a if c else b`) are judged, a returned variable or call is not.
+**Warnings**: a rule registered for a question the system does not ask (`unused_rule`); with `System(inputs=Model)`, an
+argument that no part computes and the model does not declare (`input_not_declared`: `amout` for `amount` — it could
+only arrive as an extra key, and never when the model forbids extra keys), and a `uses` hint naming neither a part nor
+a field of the model (`uses_unknown`; without an input model any such name is taken for a given fact, so a typo in
+`uses` cannot be told there); a part no question's flow uses (a question without a rule, fit or `uses`
 counts as using everything computable: its future head's candidate features); `then=` on a soft check (ignored); a rule
 reading a question's name (answers are not facts); typed readers of a given fact, or alternative producers, whose types no
 value satisfies together; an option the constraints always rule out (`dead_option`); a constraint that raises on some

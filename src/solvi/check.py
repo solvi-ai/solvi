@@ -21,6 +21,11 @@ Errors (a decision is, or can be, wrong or impossible):
   constraint_unknown_question      a constraint that reads a name that is not a question: it never applies
   validate_reads_unknown           a producer's `validate` requires an argument no producer of its fact takes as an input:
                         it cannot run, so every output of that producer is rejected (a System refuses such a catalog)
+  hard_check_untyped    a hard check without `-> bool` with a `return` that is plainly not True or False (`return 0`,
+                        `return None`, a bare `return`, a string): on that path the check is rejected and every
+                        question it governs abstains — return a bool and declare it `-> bool`
+  rule_returns_non_option   a rule with `return <literal>` (also in `a if c else b`) that is not one of its question's
+                        options (`return "aprove"`): on that path the question abstains
 Warnings:
   unused_part           a part no question's flow uses (a question without a rule, fit or `uses` uses everything computable:
                         those are the candidate features of the head it will be fitted with)
@@ -29,6 +34,14 @@ Warnings:
   reader_types_differ   typed readers of a given fact, or alternative producers of a fact, that no value can satisfy both
   dead_option           an option the constraints rule out whatever the other answers are
   constraint_raises     a constraint that raises on some combination of answers (it counts as broken)
+  unused_rule           a rule registered for a question that is not among the System's questions: it never runs
+  input_not_declared    with System(inputs=Model): a part or a rule reads a name that is neither computed by a part nor
+                        a field of the model (`amout` for `amount`) — it can only arrive as an extra key of the input;
+                        when the model forbids extra keys it can never arrive
+  uses_unknown          with System(inputs=Model): a question's `uses` hint names something that is neither a part nor
+                        a field of the model. (Without an input model a `uses` name that is not a part is taken for a
+                        given fact — a learned head may read given facts directly — so a typo there cannot be told;
+                        a misspelled `checkpoints` entry is an error: `unanswerable`)
   silent_default        in a function that reads the input (a given fact): `x or <literal>` or `.get(k, <literal>)`,
                         which turns a missing, empty or null input into a value nobody gave — say so explicitly (check
                         for None and abstain, or declare the default in System(inputs=...)); `# solvi: ok` on the line
@@ -125,6 +138,8 @@ def lint(obj, strict=False, max_combos=100_000):
         for name, p in cat.parts.items():
             if name not in used and name not in in_cycle:
                 rep.add("warning", "unused_part", name, f"no question's flow uses this {p.kind}")
+        _rules(cat, questions, rep)
+        _names(cat, system, questions, rep)
     _types(cat, system, given, rep)
     for fact, name, lost in cat.unreadable_validates():
         rep.add("error", "validate_reads_unknown", f"{fact} ({name})",
@@ -234,6 +249,13 @@ def _questions(cat, questions, heads, given, rep):
 
 def _hard_checks(cat, questions, flows, rep):
     for name, p in cat.parts.items():
+        if p.kind == "check" and p.hard and p.returns is None and p.func is not None:
+            for line, vals in _returns(p.func) or ():
+                bad = [v for v in vals if not isinstance(v, bool)]
+                if bad:
+                    rep.add("error", "hard_check_untyped", _where(p.func, line),
+                            f"hard check {name} returns {bad[0]!r}: a check answers True or False — on that path it is "
+                            "rejected and every question it governs abstains (return a bool and declare it `-> bool`)")
         if p.kind != "check" or not p.then:
             continue
         if not p.hard:
@@ -255,6 +277,96 @@ def _hard_checks(cat, questions, flows, rep):
                         f"`then=` sets {qn!r}, but {qn!r}'s flow never runs this check (its rule does not read it through "
                         f"any fact and it is not in the question's checkpoints): when it fails, {qn!r} is answered as if "
                         f"it had passed — add checkpoints=[{name!r}] to the question")
+
+
+# --- what a function plainly returns
+def _returns(func):
+    """The `return` statements of a function's own body (not of functions defined inside it) → [(line, the returned
+    literals)] where a literal is a constant, also in the branches of `a if c else b`; a bare `return` is the literal
+    None; a return of anything else gives no literal. None when the source is not available."""
+    f = inspect.unwrap(func)
+    try:
+        lines, start = inspect.getsourcelines(f)
+        tree = ast.parse(textwrap.dedent("".join(lines)))
+    except (OSError, TypeError, SyntaxError, IndentationError):
+        return None
+    if not tree.body or not isinstance(tree.body[0], (ast.FunctionDef, ast.AsyncFunctionDef)):
+        return None
+
+    def literals(e):
+        if e is None:
+            return [None]
+        if isinstance(e, ast.Constant):
+            return [e.value]
+        if isinstance(e, ast.IfExp):
+            return literals(e.body) + literals(e.orelse)
+        return []
+    out, todo = [], list(tree.body[0].body)
+    while todo:
+        node = todo.pop()
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda, ast.ClassDef)):
+            continue
+        if isinstance(node, ast.Return):
+            out.append((start + node.lineno - 1, literals(node.value)))
+        todo.extend(ast.iter_child_nodes(node))
+    return sorted(out, key=lambda t: t[0])
+
+
+def _where(func, line):
+    f = inspect.unwrap(func)
+    return f"{_short_path(getattr(getattr(f, '__code__', None), 'co_filename', '?'))}:{line} ({getattr(f, '__name__', '?')})"
+
+
+def _rules(cat, questions, rep):
+    """Rules nobody asks; rules that plainly return an answer outside their question's options."""
+    for qn, rule in cat.rules.items():
+        q = questions.get(qn)
+        if q is None:
+            rep.add("warning", "unused_rule", qn, f"a rule is registered for {qn!r}, which is not among the system's "
+                                                  "questions: it never runs")
+            continue
+        at = q.answer
+        if at is None or at.kind not in ("yes_no", "choice", "ordinal", "multi") or rule.func is None \
+                or getattr(rule.func, "__solvi_decision__", None) is not None:
+            continue
+        for line, vals in _returns(rule.func) or ():
+            for v in vals:
+                if v is None or v is Ellipsis:           # None: the rule abstains on purpose
+                    continue
+                try:
+                    at.normalize(v)
+                except (ValueError, TypeError):
+                    rep.add("error", "rule_returns_non_option", _where(rule.func, line),
+                            f"returns {v!r}, which is not one of {qn!r}'s options {list(at.options)}: on that path the "
+                            "question abstains")
+
+
+def _names(cat, system, questions, rep):
+    """With System(inputs=Model), names only a typo (or an extra key) explains: an argument, or a `uses` hint, that
+    nothing computes and the model does not declare. Without a model every such name is a given fact: nothing to tell."""
+    m = getattr(system, "inputs", None)
+    fields = getattr(m, "model_fields", None)
+    readers = {}
+    for p in list(cat.parts.values()) + list(cat.rules.values()):
+        for a in (p.alternatives or [p]):
+            for x in a.inputs:
+                readers.setdefault(x, []).append(getattr(a.func, "__name__", a.name) if a.func is not None else a.name)
+    if fields is None:
+        return
+    forbid = (getattr(m, "model_config", None) or {}).get("extra") == "forbid"
+    how = ": the model forbids extra keys, so it can never be given" if forbid else \
+        ": it can only arrive as an extra key of the input"
+    for x, by in readers.items():
+        if x in cat.parts or x in fields or x in questions:
+            continue
+        rep.add("warning", "input_not_declared", x,
+                f"{', '.join(dict.fromkeys(by))} read{'s' if len(set(by)) == 1 else ''} {x}, which no part computes and "
+                f"which is not a field of System(inputs={m.__name__})" + how)
+    for qn, q in questions.items():
+        for x in q.uses or ():
+            if x not in cat.parts and x not in fields:
+                rep.add("warning", "uses_unknown", qn, f"`uses` names {x!r}, which is neither a part of the catalog nor a "
+                                                       f"field of System(inputs={m.__name__})" + how)
 
 
 # --- types

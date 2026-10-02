@@ -300,3 +300,136 @@ def test_segment_model_save_load_propose(tmp_path):
         mo = SM.SegmentModel.load(str(tmp_path), backend="onnx")
         segs = segments(cat, qs, set(ST), search(cat, qs, set(ST)), all_facts=True)
         assert [p["nodes"] for p in mo.propose(segs)] == [p["nodes"] for p in m.propose(segs)]
+
+
+# ---------------------------------------------------------------- facts derivable from each other
+def _net_gross():
+    cat = Catalog()
+
+    @cat.fn(provides="net", cost=1)
+    def net_given(net_in: float) -> float:
+        return net_in
+
+    @cat.fn(provides="net", cost=2)
+    def net_from_gross(gross: float) -> float:
+        return gross / 1.25
+
+    @cat.fn(provides="gross", cost=1)
+    def gross_given(gross_in: float) -> float:
+        return gross_in
+
+    @cat.fn(provides="gross", cost=2)
+    def gross_from_net(net: float) -> float:
+        return net * 1.25
+
+    @cat.rule("big")
+    def big(gross: float, net: float) -> bool:
+        return gross > 100 and net > 0
+    return cat, [Question("big", "", None)]
+
+
+@pytest.mark.parametrize("strategist", [
+    lambda: ModelStrategist(), lambda: ModelStrategist(producers="equivalent"),
+    lambda: ModelStrategist(producers="equivalent", fallbacks=False)], ids=["declared", "equivalent", "no_fallbacks"])
+@pytest.mark.parametrize("state, order, answer", [({"net_in": 100.0}, ["net", "gross"], "yes"),
+                                                  ({"gross_in": 100.0}, ["gross", "net"], "no")])
+def test_facts_derivable_from_each_other_are_planned_run_and_replayed(strategist, state, order, answer):
+    cat, qs = _net_gross()
+    st = strategist()
+    s = System(cat, qs, strategist=st)
+    res = s.ask(dict(state))
+    assert st.last["fallback"] is None
+    assert [x.part.name for x in res.flow.steps] == order + ["answer:big"]
+    assert (res["big"].answer, res["big"].status, res["big"].confidence) == (answer, "ok", 1.0)
+    for step in res.flow.steps[:2]:                                # no producer kept in the flow reads its own fact back
+        assert len(step.part.alternatives) == 1
+    assert res.trace.replay(s, res.flow)["ok"]
+
+
+def test_a_fallback_producer_is_dropped_only_when_it_would_read_its_own_fact():
+    cat, qs = _net_gross()
+    st = ModelStrategist(producers="equivalent")
+    res = System(cat, qs, strategist=st).ask({"net_in": 100.0, "gross_in": 130.0})
+    alts = {s.part.name: [a.name for a in s.part.alternatives] for s in res.flow.steps[:2]}
+    assert alts["net"][0] == "net_given" and alts["gross"][0] == "gross_given"   # both given: the cheap ones first,
+    assert sorted(len(v) for v in alts.values()) == [1, 2]                       # and one derived fallback, not both
+    assert res["big"].answer == "yes"
+
+
+def test_path_confidence_follows_the_producer_that_ran_and_survives_a_ring_of_facts():
+    from solvi.runtime import path_confidence
+    cat, qs = _net_gross()
+    res = System(cat, qs, strategist=ModelStrategist(producers="equivalent", fallbacks=False)).ask({"net_in": 100.0})
+    assert path_confidence(cat, res.trace, ["gross", "net"]) == 1.0            # the full catalog: net ⇄ gross
+
+
+# ---------------------------------------------------------------- aliases.apply keeps every declaration
+def _declared_catalog():
+    from solvi import Quote
+    cat = Catalog()
+
+    @cat.extract(timeout=2.0, blocking=True, cost=5, source="mail", min_confidence=0.3, exact=False)
+    def total(mail):
+        "the total"
+        return Quote(mail[:3], 0, 3, confidence=0.9)
+
+    @cat.fn(timeout=1.5, blocking=True, cost=7, validate=lambda v: v > 0)
+    def amount(total) -> float:
+        return 1.0
+
+    @cat.fn(provides="vat", timeout=0.5, blocking=True)
+    def vat_fast(amount: float) -> float:
+        return amount / 5
+
+    @cat.fn(provides="vat", cost=3)
+    def vat_slow(amount: float) -> float:
+        return amount / 5
+
+    @cat.check(hard=True, then={"ok": "no"}, timeout=3.0, blocking=True, cost=2)
+    def small(amount) -> bool:
+        return amount < 10
+
+    @cat.rule("ok", timeout=4.0, blocking=True)
+    def ok(amount, vat) -> bool:
+        return True
+    return cat
+
+
+@pytest.mark.parametrize("aliases", [{}, {"mail": "message"}], ids=["no_aliases", "one_alias"])
+def test_apply_keeps_every_declaration_of_every_part_and_rule(aliases):
+    import dataclasses
+    from solvi.aliases import apply
+    cat = _declared_catalog()
+    new = apply(cat, aliases)
+    rewired = {"func", "tin", "tout", "alternatives", "validate", "doc", "inputs", "source"}   # compared below or by behaviour
+    pairs = [(p, new.parts[n]) for n, p in cat.parts.items()] + [(r, new.rules[q]) for q, r in cat.rules.items()]
+    pairs += [(a, b) for n, p in cat.parts.items() if p.alternatives
+              for a, b in zip(p.alternatives, new.parts[n].alternatives)]
+    assert len(pairs) == 7
+    for was, now in pairs:
+        diff = {f.name: (getattr(was, f.name), getattr(now, f.name)) for f in dataclasses.fields(was)
+                if f.name not in rewired and getattr(was, f.name) != getattr(now, f.name)}
+        assert not diff, (was.name, diff)
+        assert [aliases.get(x, x) for x in was.inputs] == now.inputs
+        assert (was.validate is None) == (now.validate is None)
+    assert new.parts["total"].source == aliases.get("mail", "mail")
+    assert (new.parts["amount"].timeout, new.parts["amount"].blocking) == (1.5, True)
+    assert (new.rules["ok"].timeout, new.rules["ok"].blocking) == (4.0, True)
+
+
+def test_a_part_that_times_out_still_times_out_after_apply():
+    import asyncio
+    from solvi.aliases import apply
+    cat = Catalog()
+
+    @cat.fn(timeout=0.05, blocking=True)
+    def slow(x):
+        time.sleep(0.3)
+        return x
+
+    @cat.rule("q")
+    def q(slow) -> bool:
+        return True
+    for c in (cat, apply(cat, {})):
+        r = asyncio.run(System(c, [Question("q", "", None)]).aask({"x": 1}))["q"]
+        assert (r.answer, r.status, r.guard) == (None, "abstain", "timeout")

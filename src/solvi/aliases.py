@@ -392,7 +392,8 @@ def _validate_rewired(v, aliases):
 def apply(catalog, aliases):
     """A new catalog in which every part reads the aliased facts under their own names (`name → fact`): the result is the
     catalog as if the teams had used one naming — planning, checks on computed facts, quotes into given texts, types and
-    the trace behave exactly as they would. The accepted aliases are listed in `catalog.aliases` (name → fact) and in the
+    the trace behave exactly as they would, and every declaration of a part (cost, timeout, blocking, validate, …) is
+    kept. The accepted aliases are listed in `catalog.aliases` (name → fact) and in the
     rewired parts' docstrings."""
     from .core import Catalog
     from .strategy import alternatives
@@ -407,9 +408,11 @@ def apply(catalog, aliases):
             if got and w is not fn:
                 w.__doc__ = ((a.doc or "") + " [aliases: " + ", ".join(f"{x} = {aliases[x]}" for x in got) + "]").strip()
             kw = {}
-            for k in ("cost", "model", "min_confidence"):
+            for k in ("cost", "model", "min_confidence", "timeout"):
                 if getattr(a, k) is not None:
                     kw[k] = getattr(a, k)
+            if a.blocking:
+                kw["blocking"] = True
             if a.provenance is not None and a.kind != "check":
                 kw["provenance"] = a.provenance
             if p.alternatives is not None:
@@ -436,7 +439,8 @@ def apply(catalog, aliases):
             new.features(f)(_rewired(p.features, _FakePart(p.features), aliases))
     for q, r in catalog.rules.items():
         w = _rewired(r.func, r, aliases)
-        new.rule(q, **{k: getattr(r, k) for k in ("model", "provenance") if getattr(r, k) is not None})(w)
+        new.rule(q, **{k: getattr(r, k) for k in ("model", "provenance", "timeout") if getattr(r, k) is not None},
+                 blocking=r.blocking or None)(w)
     for c in catalog.constraints.values():
         new.constraint(c.func)
     return new

@@ -40,8 +40,13 @@ def _ckey(c):
     return json.dumps(c, ensure_ascii=False, sort_keys=True)
 
 
+def _chash(c) -> str:
+    """The hash of a canonical form (_canon): what vhash returns for the value it came from."""
+    return hashlib.sha256(json.dumps(c, ensure_ascii=False, sort_keys=True).encode()).hexdigest()[:16]
+
+
 def vhash(v) -> str:
-    return hashlib.sha256(json.dumps(_canon(v), ensure_ascii=False, sort_keys=True).encode()).hexdigest()[:16]
+    return _chash(_canon(v))
 
 
 def srepr(v):
@@ -62,7 +67,8 @@ def srepr(v):
 
 MISSING = object()
 
-MISMATCH_KINDS = ("integrity", "recompute", "model_changed", "missing_part", "missing_input", "flow", "error")
+MISMATCH_KINDS = ("integrity", "recompute", "model_changed", "missing_part", "missing_input", "flow", "answer",
+                  "not_restored", "error")
 
 
 class Mismatch(tuple):
@@ -77,6 +83,9 @@ class Mismatch(tuple):
         flow           a planned step is not in the trace
         answer         a stored answer is not the one the trace gives under the same questions and catalog: the answer
                        was changed after the run (replay with the System; a bare Catalog cannot check answers)
+        not_restored   a hash or a step does not verify because a value it rests on did not come back from storage as it
+                       was: its type is neither one the dump restores (date, Decimal, set, ...) nor declared (an untyped
+                       enum or object; an untyped date in a record stored by solvi ≤ 0.7.1) — no verdict on the data
         error          the replay itself failed (the record could not be loaded, or replay raised): no verdict on the data
 
     It compares, unpacks and serializes as the plain triple."""
@@ -109,6 +118,8 @@ def mismatch_summary(mismatches, catalog=None):
         s = "data damaged: a stored answer is not the one its trace gives"
     elif set(kinds) <= {"error"}:
         s = "replay failed (no verdict on the data)"
+    elif "not_restored" in kinds:
+        s = "not verified: values stored without their type did not come back as they were (no verdict on the data)"
     elif "missing_part" in kinds:
         s = "data intact, catalog changed (parts missing)"
     elif catalog == "changed" or "missing_input" in kinds:
@@ -151,8 +162,10 @@ class Record(Serial):
         """The provenance kind of this record's value."""
         return self.provenance or self.default_provenance
 
-    def body(self):
-        b = {"step": self.step, "kind": self.kind, "name": self.name, "inputs": self.inputs, "value": vhash(self.value),
+    def body(self, h=vhash):
+        """What the record's hash is taken over. h: the hash of a value (vhash; the executor passes its memo, so a value
+        already hashed in this run is not hashed again)."""
+        b = {"step": self.step, "kind": self.kind, "name": self.name, "inputs": self.inputs, "value": h(self.value),
              "quote": self.quote, "error": self.error, "prev": self.prev}
         if self.tried is not None:                    # single-producer records hash exactly as before
             b["producer"], b["tried"] = self.producer, self.tried
@@ -216,6 +229,7 @@ class Trace(Serial):
     timings: dict = field(default_factory=dict)     # part (and producer) → run time in ms (not hashed)
     rejected: list = field(default_factory=list)    # [(given fact, why)] inputs that failed System(inputs=...) (not facts)
     fingerprint: dict = field(default_factory=dict)  # which catalog / questions / models decided (System.fingerprint; not hashed)
+    early_exit: bool = True                         # False: the whole flow ran although a hard check failed (ask(early_exit=False))
 
     def explain_order(self):
         """The learned schedule as text: which hard check ran first and why."""
@@ -263,11 +277,21 @@ class Trace(Serial):
         vals = dict(self.init)
         prev = self.init_hash
         bad, models = [], []
+        lossy = getattr(self, "unrestored", None) or {}   # loaded from JSON: values that did not come back as they were
         if vhash(self.init) != self.init_hash:
-            bad.append(Mismatch(0, "init", "init_hash does not match the recorded input", "integrity"))
+            lost = sorted(k for k in lossy if k in self.init)
+            if lost:
+                bad.append(Mismatch(0, "init", "the recorded input cannot be checked: " + _lost_text(lossy, lost),
+                                    "not_restored"))
+            else:
+                bad.append(Mismatch(0, "init", "init_hash does not match the recorded input", "integrity"))
+        n0, cur = len(bad), None
         for r in self.records:
-            if r.prev != prev:
+            if lossy and cur is not None:             # what the record before added: explained by a lost value, or not
+                _not_restored(bad, n0, lossy, cur)
+            if r.prev != prev:                        # a broken link is damage whatever the values are
                 bad.append(Mismatch(r.step, r.name, "hash chain broken", "integrity"))
+            n0, cur = len(bad), r
             if vhash(r.body()) != r.hash:
                 bad.append(Mismatch(r.step, r.name, "record modified after execution", "integrity"))
             prev = r.hash
@@ -319,11 +343,17 @@ class Trace(Serial):
                     bad += _grounded(part, r, self.init) + _checked(part.model, r)
                     continue
             bad += _recompute(part, r, args, self.init, catalog)
+        if lossy and cur is not None:
+            _not_restored(bad, n0, lossy, cur)
         if flow is not None:
             seen = {r.name for r in self.records} | {n for n, _ in self.skipped}
+            ran = {r.name for r in self.records}
             for st in flow.steps:
                 if st.part.name not in seen:
                     bad.append(Mismatch(0, st.part.name, "planned step missing from the trace", "flow"))
+                elif not self.early_exit and st.part.name not in ran:
+                    bad.append(Mismatch(0, st.part.name, "planned step not recorded, though the trace says the whole flow "
+                                                         "was computed (early_exit=False)", "flow"))
         bad = [m if isinstance(m, Mismatch) else Mismatch(*m) for m in bad]
         answers = "unchecked"                          # needs the System (its questions) and the response's answers
         if system is not None and getattr(self, "answers", None) is not None:
@@ -337,6 +367,22 @@ class Trace(Serial):
         if bad:
             out.update(mismatch_summary(bad, out["catalog"]))
         return out
+
+
+def _lost_text(lossy, names):
+    return "; ".join(f"{k} came back from storage as JSON gave it — {lossy[k]}" for k in names)
+
+
+def _not_restored(bad, n0, lossy, r):
+    """The mismatches of one record (bad[n0:]) that a value lost in storage explains — the record's own value, or a
+    fact it read — become kind "not_restored": the step cannot be checked, which is no verdict on the data."""
+    lost = ([r.name] if r.name in lossy else []) + [x for x in r.inputs if x in lossy]
+    if not lost:
+        return
+    for i in range(n0, len(bad)):
+        m = bad[i] if isinstance(bad[i], Mismatch) else Mismatch(*bad[i])
+        if m.kind in ("integrity", "recompute"):
+            bad[i] = Mismatch(m[0], m[1], f"{m[2]} — not checked: {_lost_text(lossy, lost)}", "not_restored")
 
 
 def _answers_differ(trace, system, flow):
@@ -646,19 +692,30 @@ class StepOut:
 
 
 class HashMemo(dict):
-    """vhash of the values of one run, by object: a value read by several steps is hashed once (only non-scalar values;
-    each entry keeps its value alive, so an id is not reused within the run)."""
+    """vhash of the values of one run, by object: a value read by several steps — and then recorded, and hashed as part
+    of the input — is canonicalised and hashed once (each entry keeps its value alive, so an id is not reused within
+    the run). The hashes are vhash's own, byte for byte."""
+
+    def __init__(self, init_state=None):
+        super().__init__()
+        self.init_state = init_state
 
     def __call__(self, v):
-        if v is None or type(v) in (str, int, float, bool):
-            return vhash(v) if type(v) is not str or len(v) < 256 else self._get(v)
-        return self._get(v)
-
-    def _get(self, v):
         e = self.get(id(v))
-        if e is None:
+        if e is None or e[0] is not v:
             e = self[id(v)] = (v, vhash(v))
         return e[1]
+
+    def init_hash(self):
+        """vhash(init_state), with each given value canonicalised once: its own hash (what the steps that read it
+        record) is taken from the same canonical form and kept for them."""
+        canon = {}
+        for k, v in self.init_state.items():
+            c = canon[str(k)] = _canon(v)             # as _canon of the dict: a later key of the same text wins
+            e = self.get(id(v))
+            if e is None or e[0] is not v:
+                self[id(v)] = (v, _chash(c))
+        return _chash(canon)
 
 
 def _extra(v):
@@ -910,7 +967,9 @@ def execute(catalog, flow, init_state, workers=1, early_exit=True, order=None, c
     as soon as the failed ones settle every question they govern; answers are the same as with the default order.
     costs: a CostBook (ms per part) for the learned order and the producer policy. policy: a ProducerPolicy for facts with
     alternative producers (without one they are tried in declaration order). known: given fact → the type its value was
-    already validated against (System(inputs=...)), so typed parts reading it with that type skip re-validation."""
+    already validated against (System(inputs=...)), so typed parts reading it with that type skip re-validation.
+    early_exit=False: every step of the flow runs, whatever the hard checks say (the answers are the same: a failed hard
+    check still decides); the trace records it (`trace.early_exit`)."""
     run = _Run(catalog, flow, init_state, early_exit, order, costs, policy, known)
     for idxs in run.phases():
         run.run_sync(idxs, workers)
@@ -954,7 +1013,8 @@ class _Run:
         self.schedule = []
         self.timeout = None
         self.known = dict(known) if known else ({} if (catalog.readers or catalog.types) else None)
-        self.memo = HashMemo()
+        self.memo = HashMemo(init_state)
+        self.init_hash = self.memo.init_hash()        # first: the steps then find every given value already hashed
         self.batch_of = {}                            # step name → (names, decision parts) of its shared forward pass
         for group in getattr(flow, "batches", None) or ():
             group = [n for n in group if n in index]
@@ -1108,8 +1168,7 @@ class _Run:
     def finish(self):
         """The records in flow order (hash-chained), the skipped steps and why → (trace, values)."""
         steps, done, catalog, flow = self.steps, self.done, self.catalog, self.flow
-        init_hash = vhash(self.init_state)
-        self.memo.clear()
+        init_hash = self.init_hash
         prev, recs, skipped, timings = init_hash, [], [], {}
         for i, st in enumerate(steps, 1):
             if i - 1 not in done:
@@ -1128,11 +1187,13 @@ class _Run:
                          confidence=o.confidence, error=o.error, prev=prev, producer=o.producer, tried=o.tried,
                          provenance=provenance_of(part, o), model=model_info(part.model) if part.model is not None else None,
                          probs=o.probs, extra=o.extra, tried_models=o.tried_models)
-            rec.hash = vhash(rec.body())
+            rec.hash = vhash(rec.body(self.memo))
             prev = rec.hash
             recs.append(rec)
+        self.memo.clear()
         final = {k: v for k, v in self.vals.items()}
-        trace = Trace(init_hash, recs, dict(self.init_state), skipped, self.schedule, timings)
+        trace = Trace(init_hash, recs, dict(self.init_state), skipped, self.schedule, timings,
+                      early_exit=bool(self.early_exit))
         trace._outs = {self.names[i]: o for i, o in done.items() if o.outcomes is not None}   # for the producer policy
         return trace, final
 
@@ -1230,7 +1291,9 @@ def _learned_hard_checks(run):
 
 
 def path_confidence(catalog, trace, facts):
-    """A fact's confidence is the minimum confidence of the extractions it depends on."""
+    """A fact's confidence is the minimum confidence of the extractions it depends on. A fact with alternative producers
+    depends on what the producer that was used reads (the record's `producer`), not on the inputs of producers that
+    did not give the value."""
     by = {r.name: r for r in trace.records}
     memo = {}
 
@@ -1241,10 +1304,14 @@ def path_confidence(catalog, trace, facts):
         if r is None:
             memo[f] = 1.0
             return 1.0
+        memo[f] = 1.0                     # being walked: a fact is never an input of itself (guards a ring of facts)
         part = catalog.parts.get(f)
         c = r.confidence                  # 1.0 for plain computations; a quote's or a decision's confidence otherwise
         if part is not None:
-            for x in part.inputs:
+            ins = part.inputs
+            if r.producer is not None and part.alternatives is not None:
+                ins = next((a.inputs for a in part.alternatives if a.name == r.producer), ins)
+            for x in ins:
                 c = min(c, conf(x))
         memo[f] = c
         return c
