@@ -696,7 +696,9 @@ def model_facts(m):
 def state_of(obj, model=None):
     """init_state as a dict of given facts → (state, [(fact, rejection reason)]). A BaseModel instance gives its fields; with
     `model` (System(inputs=...)) a dict is validated against it: the model's fields (with defaults) become given facts, a field
-    that fails validation is left out (the fact is missing) and reported; other keys pass through."""
+    that fails validation is left out (the fact is missing) and reported; other keys pass through.
+    With `model` the facts come in the model's field order, then the other keys as they were given: the order is declared
+    once, in the type, and does not depend on who built the dict (a decider reads a state's keys in their order)."""
     if is_model(obj):
         return model_facts(obj), []
     state = obj if isinstance(obj, dict) else dict(obj)
@@ -706,7 +708,13 @@ def state_of(obj, model=None):
         m = model.model_validate(state)
     except ValueError as e:
         return _partial(model, state, e)
-    return {**state, **model_facts(m)}, []
+    return _in_field_order(model, {**state, **model_facts(m)}), []
+
+
+def _in_field_order(model, state):
+    """The state with the model's fields first, in their declared order, then the remaining keys as given."""
+    first = [k for k in model.model_fields if k in state]
+    return {**{k: state[k] for k in first}, **{k: v for k, v in state.items() if k not in model.model_fields}}
 
 
 def field_types(model):
@@ -745,4 +753,4 @@ def _partial(model, state, e):
                     rejected.append((k, f"{TYPE_REJECTED}: given {k} = {_short(state[k])} is not {s.name} ({err})"))
         elif not fi.is_required():
             out[k] = fi.get_default(call_default_factory=True)
-    return out, rejected
+    return _in_field_order(model, out), rejected

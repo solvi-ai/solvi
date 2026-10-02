@@ -345,3 +345,35 @@ def test_example_14():
     assert (r["duty"].answer, r["flags"].answer, r["release"].answer) == ("standard", (), "yes")
     r = s.ask(E.PARCEL.model_copy(update={"label": "Weight: 12 kg", "declared_weight_kg": 41.0}))
     assert r["flags"].answer == ("heavy",) and s.stats["type_rejected"] == 1 and s.stats["fallbacks"] == 1
+
+
+def test_a_typed_input_comes_in_the_declared_field_order():
+    """A decider reads a state's keys in their order, and answers depend on it. With System(inputs=Model) the order is
+    the model's, whoever built the dict; without a model the dict is taken as it comes."""
+    from pydantic import BaseModel
+
+    from solvi.decide import state_text
+
+    class Order(BaseModel):
+        customer: str
+        amount: float
+        note: str = ""
+
+    cat = Catalog()
+
+    @cat.rule("ok")
+    def ok(amount, extra=None) -> bool:
+        return amount < 100
+
+    s = System(cat, [Question("ok", "Ok?")], inputs=Order)
+    a = s.ask({"note": "x", "zeta": 1, "amount": 5, "customer": "ann", "alpha": 2})
+    b = s.ask({"customer": "ann", "alpha": 2, "amount": 5, "zeta": 1, "note": "x"})
+    assert list(a.trace.init) == ["customer", "amount", "note", "zeta", "alpha"]       # fields, then the rest as given
+    assert list(b.trace.init)[:3] == ["customer", "amount", "note"]
+    assert state_text({k: a.trace.init[k] for k in Order.model_fields}) == state_text(Order(customer="ann", amount=5, note="x"))
+    assert a.trace.init_hash == b.trace.init_hash and a.trace.replay(s)["ok"]
+    assert list(s.ask({"amount": 5, "customer": "ann"}).trace.init) == ["customer", "amount", "note"]    # the default too
+    bad = s.ask({"note": "x", "amount": "many", "customer": "ann"})                    # a rejected field: the order holds
+    assert list(bad.trace.init) == ["customer", "note"] and bad["ok"].status == "abstain"
+    plain = System(cat, [Question("ok", "Ok?")])
+    assert list(plain.ask({"note": "x", "amount": 5, "customer": "ann"}).trace.init) == ["note", "amount", "customer"]

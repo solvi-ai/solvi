@@ -19,7 +19,8 @@ in the dict's order, and the order changes answers. This is not one model's quir
 Every model changes some answers when only the order of the keys changes — a quarter of them for the LLM on judgement
 questions — and for some the accuracy moves with it (Jev on judgements, the solvi checkpoints on fact questions).
 
-So: build the state the same way every time (a pydantic model gives a fixed field order), put what matters first, and
+So: build the state the same way every time — declare it as a pydantic model (`System(inputs=Model)`: the facts then
+come in the model's field order whoever built the dict) — put what matters first, and
 when you calibrate a threshold or fit a question, use states in the order production will send. solvi keeps the order
 through its stores, so a stored decision replays on the text the model read.
 

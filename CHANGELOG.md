@@ -2,6 +2,12 @@
 
 ## 0.7.2 — unreleased
 
+- A typed input comes in the declared field order. With `System(inputs=Model)` a dict was validated but kept the
+  order its caller built it in, so two clients sending the same input gave the trace — and a decider that reads the
+  state — two different orders (a model instance already came in field order). The given facts are now the model's
+  fields in their declared order, then any other keys as given; nested models were already in field order, and a plain
+  `dict` field keeps its own. Hashes do not change (they are taken over sorted keys). Without `inputs=` a dict is
+  taken as it comes.
 - `solvi.worldmap.WorldMap`: a map of an environment that an agent builds by acting. Edges are claims "(state, action)
   leads to state" with a status, a source (seen, observed, told, human) and evidence; an observation refutes a claim
   whoever made it — a person, an outdated document; every write is in a hash-chained journal; `next` gives the action
