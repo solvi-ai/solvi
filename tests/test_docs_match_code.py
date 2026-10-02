@@ -104,3 +104,11 @@ def test_every_python_block_in_the_docs_is_python():
                 bad.append(f"{path.name}:{text[:m.start()].count(chr(10)) + 1}: {e}")
     assert not bad, "\n".join(bad)
     assert 'res.model_dump("json") / res.to_json()' not in GUIDE
+
+
+def test_best_practices_says_where_its_numbers_come_from_and_is_linked():
+    """The page said its scripts "are named in the changelog entries" (one script was, for a number the page does not
+    quote) and was reachable only from the site's navigation."""
+    page = (ROOT / "docs" / "best_practices.md").read_text()
+    assert "named in the changelog" not in page and "not in this repository" in page
+    assert "docs/best_practices.md" in README and "best_practices.md" in GUIDE

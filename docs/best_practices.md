@@ -2,7 +2,8 @@
 
 What we measured while building on solvi, as advice. Each item says what to do, why, and the number behind it. The
 numbers come from small synthetic or semi-synthetic sets (30–2,000 cases) with solvi-base unless said otherwise, so read
-them as directions, not as benchmarks; the scripts are named in the changelog entries of the release that added them.
+them as directions, not as benchmarks. They were measured with scripts that are not in this repository, so they cannot
+be re-run from it.
 
 ## The input a model reads
 

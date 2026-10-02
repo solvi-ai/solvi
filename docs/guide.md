@@ -1,6 +1,7 @@
 # solvi guide
 
-This guide walks through the whole API. For a two-minute overview, see the [README](../README.md).
+This guide walks through the whole API. For a two-minute overview, see the [README](../README.md); for advice drawn from
+what we measured, see [best practices](best_practices.md).
 
 Contents:
 
