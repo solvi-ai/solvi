@@ -3019,7 +3019,10 @@ class DecisionPart:
         catalog after act_guard. Adds "groups" ({path: {"threshold", "n", "answered", "error", "risk", "pooled"}}) to
         the result; "threshold" is then the rest of the stream's — inf when every example is in a group with its own
         threshold, whatever "answered" says: read the thresholds per group."""
-        from .calibration import crc_threshold
+        from .calibration import check_rate, crc_threshold
+        check_rate("risk", risk)                      # risk=10 (a percent) or 1.5 would be recorded as a promise
+        if groups is not None and delta is not None:
+            check_rate("delta", delta)
         examples = list(examples)
         sig, ok, name, _ = self._labelled(examples, signal)
         s, o = np.asarray(sig, float), np.asarray(ok, float)
@@ -3063,7 +3066,8 @@ class DecisionPart:
         ≥ coverage for inputs like the examples (score and number questions: one contiguous interval) — and an
         escalation's message lists them for the person who takes over. It does not change what is answered alone
         (see act_guard). Choice, yes/no, score and number questions. → {"coverage", "quantile", "n", "mean_size"}."""
-        from .calibration import conformal_quantile, set_scores
+        from .calibration import check_rate, conformal_quantile, set_scores
+        check_rate("coverage", coverage)
         if self.spec.multi or self.kind in ("rank", "span"):
             raise ValueError(f"conformal sets need a single answer from a closed list; not for {self.kind!r} questions")
         examples = list(examples)                    # an iterator (zip, a generator) is read twice below

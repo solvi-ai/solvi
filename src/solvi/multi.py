@@ -560,7 +560,10 @@ class _Combination:
         groups, min_group, delta: one shared threshold per group, as DecisionPart.act_guard(groups=...) — on the same
         monotonized loss, so the promise holds within every group; the group facts join the combination's inputs.
         Adds "groups" to the result."""
-        from .calibration import certify_groups
+        from .calibration import certify_groups, check_rate
+        check_rate("risk", risk)
+        if groups is not None and delta is not None:
+            check_rate("delta", delta)
         if scale not in SCALES:
             raise ValueError(f"scale must be one of {SCALES}, not {scale!r}")
         srcs, gold = self._examples(examples)
@@ -674,7 +677,8 @@ class _Combination:
         stage's for a cascade, the mean of the parts' for a vote), from labelled examples at its current threshold —
         so call it after act_guard. Every decision then carries extra["candidates"]; an escalation lists them.
         Choice, yes/no, score and number questions. → {"coverage", "quantile", "n", "mean_size"}."""
-        from .calibration import conformal_quantile, set_scores
+        from .calibration import check_rate, conformal_quantile, set_scores
+        check_rate("coverage", coverage)
         if self.spec.multi or self.kind in ("rank", "span"):
             raise ValueError(f"conformal sets need a single answer from a closed list; not for {self.kind!r} questions")
         srcs, gold = self._examples(examples)

@@ -280,7 +280,8 @@ class CorrectionMemory:
         when no case has another within the radius, "note": the memory then proposes for none of them, nothing can be
         learned about its proposals, and min_strength is inf (it does not propose) — compare `nearest` with `radius`
         (its values are None, and the note says so, when every stored case is a twin of every other)."""
-        from .calibration import crc_threshold
+        from .calibration import check_rate, crc_threshold
+        check_rate("risk", risk)
         cases, _ = self._snapshot()
         if len(cases) < 2:
             raise ValueError("calibration needs at least two stored cases")

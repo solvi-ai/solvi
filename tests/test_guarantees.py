@@ -502,3 +502,19 @@ def test_act_guard_states_its_promise_with_the_error_among_the_answered_and_warn
         warnings.simplefilter("error")                # a signal that separates: no warning
         info = good.act_guard(_labelled(), risk=0.10)
     assert "warnings" not in info
+
+
+@pytest.mark.parametrize("bad", [1.5, 10, 1.0, 0, -0.1, "x", None])
+def test_a_risk_or_coverage_outside_0_1_is_refused_everywhere_not_recorded_as_a_promise(bad):
+    """Only calibrate_for checked its rate: act_guard(risk=1.5) was recorded as the promise "≤ 1.5" in every decision,
+    risk=1.0 divided by zero, coverage=-1 raised IndexError."""
+    from solvi.memory import CorrectionMemory
+    from solvi.multi import Cascade
+    part = model(noise=2.0).decision("team", "Which team?", "email", TEAMS)
+    for call in (lambda: part.act_guard(_labelled(), risk=bad), lambda: part.conformal(_labelled(), coverage=bad),
+                 lambda: Cascade([part]).act_guard(_labelled(), risk=bad),
+                 lambda: Cascade([part]).conformal(_labelled(), coverage=bad),
+                 lambda: CorrectionMemory(part).calibrate(risk=bad)):
+        with pytest.raises(ValueError, match="(risk|coverage) must be a number strictly between 0 and 1"):
+            call()
+    assert part.guarantee is None
