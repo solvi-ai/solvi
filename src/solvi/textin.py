@@ -469,6 +469,7 @@ class FieldSpec:
     hints: list = field(default_factory=list)       # description words: they rank candidates, never decide a value
     percent: bool = False                           # number: the field is in percent ("5%" → 5)
     negatives: list = field(default_factory=list)   # bool: declared phrases that mean False ("not urgent", "no rush")
+    stops: list = field(default_factory=list)       # string: the other fields' cue words — a value ends where one starts
 
     def parser_spec(self, today=None, dayfirst=True, decimal=None):
         """The parser's arguments, recorded in the trace so a replay parses the quote the same way."""
@@ -563,15 +564,80 @@ def field_spec(ef, synonyms=None, cues=None, pattern=None, extra=None, negatives
                      percent=bool(percent or extra.get("percent")))
 
 
+# ------------------------------------------------------------------------------------------------ a string after a cue
+# A string field without a pattern is read after one of its cue words: the words after a connector ("address: ...",
+# "address is ...", "address to ...") up to the end of the clause, or an identifier right after the cue ("order
+# A-10457"). The clause is cut before what plainly is not the value: the next "key:" of a list ("order: A-10457, amount:
+# 1"), another field's cue word after a separator ("Anna Smith, order A-12"), a new clause ("Tom Baker and my order is
+# ...", ", please ..."), and the rest after an identifier followed by a separator ("A-5, 20 EUR, bought yesterday"). A
+# field whose name says it is an identifier (order_id, invoice_number, tracking_code ...) takes one token with a digit
+# in it, or nothing.
+_CONNECT = re.compile(r"\s*[:=\-–—]\s*|\s+(?:is|are|to|as|was|should be|will be|будет|на)\s+", re.I)
+_TOKEN = re.compile(r"#?[^\s,;:.!?()\[\]{}\"'«»“”]+")
+_LETTER_WORD = r"[^\W\d_][^\W\d_'’-]*"
+_NEXT_KEY = re.compile(rf"(?:\s*[,;/(|]\s*|\s+)(?={_LETTER_WORD}(?:[ \t]+{_LETTER_WORD}){{0,2}}\s*[:=](?!//))")
+_NEW_CLAUSE = re.compile(r"\s+(?:and|but)\s+(?:i|we|my|our|it|this|that|the|please|they|he|she)\b|"
+                         r"\s*,\s*(?:please|thanks|thank you|but|because|since|which|so)\b", re.I)
+_AFTER_ID = re.compile(r"\s*(?:[,;/(]|(?:and|but|or)\b)", re.I)
+_ID_WORDS = {"id", "number", "no", "nr", "num", "code", "ref", "reference"}
+
+
+def _id_like(tok):
+    """A token that reads as an identifier: a digit in it, and a letter, a "-" / "/" / "#", or at least four characters."""
+    return (len(tok) <= 40 and any(ch.isdigit() for ch in tok)
+            and (any(ch.isalpha() for ch in tok) or any(ch in "-/#" for ch in tok) or len(tok) >= 4))
+
+
+def _identifier_field(fs):
+    return bool(_ID_WORDS & set(re.split(r"[_\W]+", fs.name.lower())))
+
+
+def _string_after(text, b, fs):
+    """The span of a string field's value after a cue that ends at `b`, or None (see the comment above)."""
+    m = _CONNECT.match(text, b)
+    if m is None or m.end() >= len(text):            # no connector: an identifier right after the cue, or nothing
+        t = re.compile(r"[ \t]+").match(text, b)
+        tok = _TOKEN.match(text, t.end()) if t else None
+        return (tok.start(), tok.end()) if tok and _id_like(tok.group()) else None
+    s = m.end()
+    tok = _TOKEN.match(text, s)
+    if _identifier_field(fs):
+        return (s, tok.end()) if tok and _id_like(tok.group()) else None
+    e = s + len(re.match(r"[^.;\n]*", text[s:]).group())
+    cuts = [e]
+    if tok and _id_like(tok.group()) and _AFTER_ID.match(text, tok.end(), e):
+        cuts.append(tok.end())
+    for rx in (_NEXT_KEY, _NEW_CLAUSE):
+        k = rx.search(text, s + 1, e)
+        if k:
+            cuts.append(k.start())
+    own = {c.lower() for c in fs.cues}
+    for w in fs.stops:
+        if w in own:
+            continue
+        k = re.compile(rf"(?:\s*[,;/(|]\s*|\s+(?:and|but|or)\s+)(?:(?:my|our|your|the|his|her|their|its)\s+)?"
+                       rf"{re.escape(w)}(?!\w)", re.I).search(text, s + 1, e)
+        if k:
+            cuts.append(k.start())
+    e = min(cuts)
+    while e > s and text[e - 1] in " ,(-–—/":
+        e -= 1
+    return (s, e) if e > s else None
+
+
 # ------------------------------------------------------------------------------------------------ extractors
 class CueExtractor:
     """A deterministic extractor: candidates of the field's type in the text (numbers, dates, enum labels and synonyms,
-    cue words for a yes / no, a pattern — or, for a string, the words after a cue and a connector: "address: ...", "address
-    is ..." — up to the end of the clause), the one nearest after a cue word of the
-    field (its name, its description's words, `cues=`) first. It never calls a model, but the choice of the span is still
-    a guess, so a value it reads is recorded as quoted by it (its identity in the trace) and counted with model outputs."""
+    cue words for a yes / no, a pattern), the one nearest after a cue word of the field (its name, its description's
+    words, `cues=`) first. A string without a pattern is read only after one of the field's own cue words (its name,
+    `cues=`; never its description's words): the words after a connector ("address: ...", "address is ...") up to the end
+    of the clause, cut before the next "key:" of a list, another field's cue word after a separator, a new clause ("and
+    my ...", ", please ..."), or after an identifier followed by a separator; or an identifier right after the cue
+    ("order A-10457"). A field named as an identifier (…_id, …_number, …_code, …_ref) takes one token with a digit in
+    it, or nothing. It never calls a model, but the choice of the span is still a guess, so a value it reads is recorded
+    as quoted by it (its identity in the trace) and counted with model outputs."""
     model_id = "solvi.textin.CueExtractor"
-    version = "1"
+    version = "2"                    # 2: strings end before the next key / another field's cue; hints never anchor them
 
     def fingerprint(self):
         return digest("CueExtractor", self.version)
@@ -602,25 +668,17 @@ class CueExtractor:
         elif fs.kind == "text":
             if fs.pattern:
                 spans = [(m.start(), m.end()) for m in re.finditer(fs.pattern, text)]
-            else:
-                spans = []
-                for a, b in cues:
-                    m = re.match(r"(?:\s*[:=\-–—]\s*|\s+(?:is|are|to|as|was|should be|will be|будет|на)\s+)([^.;\n]+)", text[b:])
-                    if m and m.group(1).strip():
-                        s = b + m.start(1)
-                        e = b + m.end(1)
-                        while e > s and text[e - 1] in " ,":
-                            e -= 1
-                        spans.append((s, e))
+            else:                                    # only the field's own cues anchor a string (hints never do)
+                spans = [s for a, b in self._cues(text, fs, cues_only=True) if (s := _string_after(text, b, fs))]
                 return [Quote(text[s:e], s, e, SOURCE, 0.7) for s, e in spans[:1]]
         else:
             return []
         return self._rank(text, spans, cues)
 
     @staticmethod
-    def _cues(text, fs, hints_only=False):
+    def _cues(text, fs, hints_only=False, cues_only=False):
         out = []
-        for c in (fs.hints if hints_only else [*fs.cues, *fs.hints]):
+        for c in (fs.hints if hints_only else fs.cues if cues_only else [*fs.cues, *fs.hints]):
             out += [(m.start(), m.end()) for m in re.finditer(rf"(?<!\w){re.escape(c)}\w*", text, re.I)]
         return sorted(out)
 
@@ -858,7 +916,8 @@ class TextIn:
     field's span — an object with find(text, FieldSpec) → [Quote] (best first), or a list of them tried in order; default:
     CueExtractor, whatever the decider (measured: benchmarks/textin_extractors.py — on the repository's texts with typed
     fields the cue finder read 282 of 306 stated values right and 1 wrong, solvi-base's span pointer 111 right and 11
-    wrong; the pointer is used only when named, DeciderExtractor(decider)).
+    wrong; the pointer is used only when named, DeciderExtractor(decider)). In a list, a field the first extractor does
+    not read — nothing found, nothing that parses, or found below min_field_confidence ("unsure") — goes to the next.
 
     entry_points: the question names to choose from (default: every question). descriptions: {question: text} for the
     router (default: the question's text). synonyms: {field: {label: [synonym]}} for enum fields; cues: {field: [word]}
@@ -934,18 +993,34 @@ class TextIn:
             m = getattr(self.system, "inputs", None)
             if m is not None and name in m.model_fields and isinstance(m.model_fields[name].json_schema_extra, dict):
                 extra = m.model_fields[name].json_schema_extra
-            self._specs[key] = field_spec(ef, self.synonyms.get(name), self.cues.get(name), self.patterns.get(name), extra,
-                                          self.negatives.get(name), name in self.percent)
+            fs = field_spec(ef, self.synonyms.get(name), self.cues.get(name), self.patterns.get(name), extra,
+                            self.negatives.get(name), name in self.percent)
+            if fs.kind == "text" and not fs.pattern:          # a string's value ends where another field's cue starts
+                fs.stops = list(dict.fromkeys(c for other in self.entry_points[question].fields if other != name
+                                              for c in self._own_cues(question, other)))
+            self._specs[key] = fs
         return self._specs[key]
 
+    def _own_cues(self, question, name):
+        """A field's cue words (its name's, cues=, json_schema_extra "cues") without building its spec's stops."""
+        ef = self.entry_points[question].fields[name]
+        extra = {}
+        m = getattr(self.system, "inputs", None)
+        if m is not None and name in m.model_fields and isinstance(m.model_fields[name].json_schema_extra, dict):
+            extra = m.model_fields[name].json_schema_extra
+        return field_spec(ef, cues=self.cues.get(name), extra={"cues": extra.get("cues")}).cues
+
     def _field(self, text, fs, avoid=None):
-        """Read one field: the first candidate (of the first extractor that finds any) that parses; with `avoid` (the
-        value before a dialogue turn) a candidate with another value is preferred ("not A-10457 but A-10475")."""
+        """Read one field: the first candidate that parses, of the first extractor that finds one with at least
+        min_field_confidence — an extractor that finds nothing, nothing that parses, or only a candidate below it
+        passes the field on to the next; with `avoid` (the value before a dialogue turn) a candidate with another value
+        is preferred ("not A-10457 but A-10475"). When no extractor reads it: the first "unsure" one, else the first
+        "unparsed", else "not_stated"."""
         if fs.kind == "unsupported":
             from .typed import type_name
             return FieldRead(fs.name, "unsupported", why=f"no parser reads {type_name(fs.type)}", required=fs.required)
         parser, spec = fs.kind, fs.parser_spec(self.today, self.dayfirst, self.decimal)
-        first_bad = None
+        first_bad = first_unsure = None
         for ex in self.extractors:
             cands = ex.find(text, fs)
             got = []
@@ -964,11 +1039,15 @@ class TextIn:
                     got = other + got
             q, c = got[0]
             mi = model_info(ex)
-            if q.confidence < self.min_field_confidence:
-                return FieldRead(fs.name, "unsure", quote=q, confidence=q.confidence, parser=parser, spec=spec,
-                                 why=f"found with confidence {q.confidence:.2f} < {self.min_field_confidence:.2f}",
-                                 required=fs.required, model=mi)
+            if q.confidence < self.min_field_confidence:     # not used: the next extractor may read it
+                first_unsure = first_unsure or FieldRead(
+                    fs.name, "unsure", quote=q, confidence=q.confidence, parser=parser, spec=spec,
+                    why=f"found with confidence {q.confidence:.2f} < {self.min_field_confidence:.2f}",
+                    required=fs.required, model=mi)
+                continue
             return FieldRead(fs.name, "read", fs.value(c), q, q.confidence, c, parser, spec, required=fs.required, model=mi)
+        if first_unsure is not None:
+            return first_unsure
         if first_bad is not None:
             q, why, ex = first_bad
             return FieldRead(fs.name, "unparsed", quote=q, confidence=q.confidence, parser=parser, spec=spec,

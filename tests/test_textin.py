@@ -557,3 +557,90 @@ def test_a_number_cut_out_of_a_longer_one_in_a_text_is_not_read():
         with pytest.raises(ParseError, match="several words"):
             parse_number(text)
     assert parse_number("the last 2 quarters") == "2" and parse_number("2 half days") == "2"     # counts, not fractions
+
+
+# --------------------------------------------------------------------------------------------------- strings, fallbacks
+def strings_system():
+    from pydantic import BaseModel, Field
+
+    from solvi import Question
+
+    class Inputs(BaseModel):
+        order_id: str = Field(description="The order number")
+        new_address: str = Field(description="The new delivery address")
+        customer_name: str = Field(description="The customer's name")
+        vendor: str = Field(description="Who issued the invoice")
+        invoice_number: str = Field(description="The invoice's number")
+
+    cat = Catalog()
+
+    @cat.rule("change_order")
+    def change(order_id: str, new_address: str, customer_name: str) -> Literal["ok"]:
+        return "ok"
+
+    @cat.rule("register_invoice")
+    def register(vendor: str, invoice_number: str) -> Literal["ok"]:
+        return "ok"
+
+    return System(cat, [Question("change_order", "Change an order"), Question("register_invoice", "Register an invoice")],
+                  inputs=Inputs)
+
+
+@pytest.mark.parametrize("text, want", [
+    ("order: A-10457, amount: 1", {"order_id": "A-10457"}),
+    ("order_id: A-5, 20 EUR, bought yesterday", {"order_id": "A-5"}),
+    ("order: A-10457 amount: 15 EUR", {"order_id": "A-10457"}),
+    ("name: Ivan Petrov, order: A-1001, new address: Nevsky 28, St Petersburg",
+     {"order_id": "A-1001", "new_address": "Nevsky 28, St Petersburg", "customer_name": "Ivan Petrov"}),
+    ("Customer: Anna Smith, order A-12, address: Hauptstrasse 3, Berlin",
+     {"order_id": "A-12", "new_address": "Hauptstrasse 3, Berlin", "customer_name": "Anna Smith"}),
+    ("Hi, my name is Tom Baker and my order is A-4471.", {"order_id": "A-4471", "customer_name": "Tom Baker"}),
+    ("The order is A-555 and the customer is Maria Lopez.", {"order_id": "A-555", "customer_name": "Maria Lopez"}),
+    ("order A-10457, please change the address to 14 Baker Street, London",
+     {"order_id": "A-10457", "new_address": "14 Baker Street, London"}),
+])
+def test_a_string_without_a_pattern_ends_before_the_next_key_another_fields_cue_or_a_new_clause(text, want):
+    """CueExtractor read a string field as everything after its cue up to the end of the clause: "order: A-10457,
+    amount: 1" gave the order id "A-10457, amount: 1"."""
+    tin = TextIn(strings_system())
+    state = tin.read(text, question="change_order").state
+    assert state == want
+
+
+def test_description_words_never_anchor_a_string_and_an_identifier_needs_a_digit():
+    """A string field's description words ("Who issued the invoice") once anchored its value like a cue: "Invoice: 5521,
+    supplier: ..." read the vendor as "5521, supplier: ...". An identifier field (order_id, invoice_number) takes one
+    token with a digit in it, or nothing."""
+    tin = TextIn(strings_system())
+    f = tin.read("Invoice: 5521, supplier: Wayne Enterprises", question="register_invoice").fields
+    assert f["vendor"].status == "not_stated" and f["invoice_number"].value == "5521"
+    f = tin.read("Vendor is Stark Industries, invoice number is SI-0042.", question="register_invoice").fields
+    assert (f["vendor"].value, f["invoice_number"].value) == ("Stark Industries", "SI-0042")
+    f = tin.read("My order is late, and the address is wrong.", question="change_order").fields
+    assert f["order_id"].status == "not_stated"
+    assert tin.read("Please send order A-77 soon.", question="change_order").state == {"order_id": "A-77"}
+
+
+class _Unsure:
+    """An extractor that always finds the first number of the text, with a low confidence."""
+    model_id = "test/unsure"
+
+    def fingerprint(self):
+        return "unsure-1"
+
+    def find(self, text, fs):
+        from solvi.core import Quote
+        import re
+        m = re.search(r"\d+", text)
+        return [Quote(m.group(), m.start(), m.end(), "request_text", 0.2)] if m else []
+
+
+def test_an_unsure_read_passes_the_field_to_the_next_extractor():
+    """An "unsure" result of the first extractor ended the chain, so a fallback extractor was never tried."""
+    _, s = shop()
+    tin = TextIn(s, extractor=[_Unsure(), CueExtractor()], patterns={"order_id": r"[A-Z]-\d+"}, today=TODAY)
+    f = tin.read("refund order A-7: 3 items, amount 250 EUR, paid on 12 September 2026", question="request_refund").fields
+    assert (f["amount"].status, f["amount"].value, f["amount"].model["type"]) == ("read", 250.0, "CueExtractor")
+    alone = TextIn(s, extractor=[_Unsure(), _Unsure()], today=TODAY)
+    f = alone.read("refund order A-7: amount 250 EUR", question="request_refund").fields
+    assert f["amount"].status == "unsure" and f["amount"].quote.value == "7"
