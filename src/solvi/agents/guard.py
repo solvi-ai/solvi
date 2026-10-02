@@ -32,7 +32,8 @@ catalog, in this order (a failed hard check decides; when several fail, the firs
   arguments_valid              the arguments validate against the tool's types (pydantic; unknown arguments are errors)
                                and hold no invisible (format, Unicode Cf) characters → deny
   arguments_grounded           every `ground=` argument is in the conversation as a token or number token (a quote
-                               with offsets; an empty string never is), in a message of a role in `ground_from` → deny
+                               with offsets; an empty string never is; Unicode spaces are read as plain spaces), in a
+                               message of a role in `ground_from` → deny
   arguments_from_user          tools with tool_values="escalate": a user-only argument written only in a tool output
                                (not by the user) → escalate instead of deny (a person decides; never allowed on its own)
   no_injected_arguments        ... and not only in tool outputs when any tool output in the conversation carries
@@ -728,7 +729,21 @@ def _same_number(v, x):
 
 _WHOLE_EDGE = set(" \t\r\n\"'`()[]{}<>,;:!?")
 _JOIN = set(".@-/:_")                                    # joins two tokens into one identifier ("x.org", "INV-250")
-MATCHERS = ("token", "whole", "substring", "spaced", "url", "url_prefix")
+MATCHERS = ("token", "whole", "substring", "spaced", "nocase", "id", "url", "url_prefix")
+# every Unicode space separator (category Zs: the no-break space U+00A0, the narrow no-break space U+202F, the thin
+# space, ...) is read as a plain space — one character for one, so offsets stay those of the text as written
+_ZS = {ord(c): " " for c in "\u00a0\u1680\u2000\u2001\u2002\u2003\u2004\u2005\u2006\u2007\u2008\u2009\u200a"
+                             "\u202f\u205f\u3000"}
+
+
+def _plain_spaces(text):
+    return text.translate(_ZS)
+
+
+def _lower(text):
+    """The text in lower case, character by character (a character whose lower case is not one character stays), so
+    offsets stay those of the text as written."""
+    return "".join(lc if len(lc := c.lower()) == 1 else c for c in text)
 
 
 # ------------------------------------------------------------------------------------------------ URLs
@@ -897,7 +912,9 @@ def _occurrences(v, text, match="token", locale=None):
     longer word, nor joined to one by ". @ - / : _" — "DE8937" is not found in "DE89370400…", "bob@x.org" not in
     "bob@x.org.evil", "acct" not in "acct-12", a digit string not as a group of a spaced IBAN; "whole": delimited by
     whitespace, quotes, brackets or punctuation — "x.org" is not found in "alice@x.org"; "substring": anywhere; a
-    callable(value, text) → [(start, end)] decides itself; "url" / "url_prefix": a web address by `same_url`); a number
+    "nocase": as "token", letters compared without their case — "320 cedar avenue" is found in "320 Cedar Avenue";
+    "id": as "nocase", and a leading "#" of the value is optional in the text — "#W5442520" is found in "W5442520";
+    a callable(value, text) → [(start, end)] decides itself; "url" / "url_prefix": a web address by `same_url`); a number
     as a number token of exactly its value (not inside
     a word; thousands separators "1,250.50", "1'250" allowed — "1 250" only with the "spaced" matcher; 250 matches
     "250.00"; an int is compared exactly and a float by its shortest decimal form, never with a tolerance — the ID
@@ -905,7 +922,10 @@ def _occurrences(v, text, match="token", locale=None):
     identifier — 3704 is not found in "DE89 3704 0044", 250 not in "INV-250", 30 not in "12:30"; a lone "1,500" or
     "1.500" is 1500 or 1.5 only under a `locale` — LOCALES: "en" 1,500.5, "de" 1.500,5, "fr" 1 500,5 with "spaced",
     "ch" 1'500.5 — and neither without one); an Enum by its value; anything else by str(). Format characters (zero-width spaces, ...) are
-    read as absent, so one cannot make a boundary. An empty or whitespace-only string is found nowhere."""
+    read as absent, so one cannot make a boundary, and every Unicode space (a no-break space, a narrow no-break space,
+    a thin space, ...) as a plain space, in the text and in the value — "320 Cedar Avenue" is found where the text has
+    a no-break space between the words (a callable matcher gets the text as written). The offsets returned are those
+    of the text as written. An empty or whitespace-only string is found nowhere."""
     import enum
     if isinstance(v, enum.Enum):
         v = v.value
@@ -919,6 +939,7 @@ def _occurrences(v, text, match="token", locale=None):
     if _cf().search(text):                                # read the text without format characters, map back
         keep = [i for i, ch in enumerate(text) if not _cf().match(ch)]
         text = "".join(text[i] for i in keep)
+    text = _plain_spaces(text)
     out = []
     from decimal import Decimal
     if match in ("url", "url_prefix"):
@@ -932,14 +953,22 @@ def _occurrences(v, text, match="token", locale=None):
             if _same_number(v, _number_at(tok, thousands, dec)) and not _glued(text, m.start(), m.end()):
                 out.append((m.start(), m.end()))
     else:
-        s = _visible(str(v))
+        s = _plain_spaces(_visible(str(v)))
         if not s.strip():
             return []
-        i = text.find(s)
-        while i >= 0:
-            if _bounded(text, i, i + len(s), s, match):
-                out.append((i, i + len(s)))
-            i = text.find(s, i + 1)
+        needles = [s]
+        if match in ("nocase", "id"):
+            text, needles = _lower(text), [_lower(s)]
+            if match == "id" and s.startswith("#") and s[1:].strip():
+                needles.append(needles[0][1:])            # written without the "#"
+            match = "token"
+        for n in needles:
+            i = text.find(n)
+            while i >= 0:
+                if _bounded(text, i, i + len(n), n, match) and not any(a <= i and i + len(n) <= b for a, b in out):
+                    out.append((i, i + len(n)))
+                i = text.find(n, i + 1)
+        out.sort()
     if keep is not None:
         out = [(keep[a], keep[b - 1] + 1) for a, b in out]
     return out
@@ -1152,10 +1181,12 @@ class Guard:
         a list item by item; an empty string never) — a list of names, or {name: matcher}: "token" (the default: not
         inside a longer word, nor joined to one by ". @ - / : _"), "whole" (delimited by whitespace, quotes, brackets or
         punctuation: for IBANs, e-mails, paths), "spaced" (as "token", and a number may group its thousands with spaces:
-        "1 250"), "url" (a web address: the same host, port, path, query and fragment as a URL written in the
+        "1 250"), "nocase" (as "token", letters compared without their case: names, addresses), "id" (as "nocase", and
+        a leading "#" of the value may be missing in the text: an order "#W5442520" the user wrote as "W5442520"), "url" (a web address: the same host, port, path, query and fragment as a URL written in the
         conversation, with or without "http(s)://", a leading "www." or a trailing "/" — see `same_url`), "url_prefix"
         (as "url", and the path may continue the written one at a "/": only for reading, a path can carry data out),
-        "substring" (anywhere), or a callable(value, text) → [(start, end)] of the value's occurrences;
+        "substring" (anywhere), or a callable(value, text) → [(start, end)] of the value's occurrences. Every
+        Unicode space in the conversation or the value (a no-break space, a narrow one) is read as a plain space;
         ground_from: the roles of the messages they may be quoted from (default: the user's, tool outputs and system
         messages — never the assistant's own words; ("user",) for values only the user may give, like a payee).
         injections: "grounded" (default: a grounded argument found only in tool outputs escalates when any tool

@@ -2395,8 +2395,14 @@ a longer word on either side, nor be joined to one by `. @ - / : _` ("bob@x.org"
 "evil.bob@x.org", "acct" not in "acct-12"); zero-width and other format characters are read as absent, so they cannot
 make a boundary; a string of digits gets the same protection as a number ("0532" is not found in "DE89 3704 0044 0532"). `ground={"iban": "whole", "email": "whole"}` is stricter — the value must be delimited by
 whitespace, quotes, brackets or punctuation, so "x.org" is not found in "alice@x.org" and "alice@x.org" not in
-"bob.alice@x.org"; `"substring"` accepts any occurrence; a callable `matcher(value, text) → [(start, end)]` decides
-itself (a case-insensitive match, a normalised IBAN), and its code is part of the tool's fingerprint. Numbers are always
+"bob.alice@x.org"; `"substring"` accepts any occurrence; `"nocase"` is the token matcher with letters compared without
+their case ("320 cedar avenue" is found in "320 Cedar Avenue" — for names and addresses); `"id"` is `"nocase"` where a
+leading "#" of the value may be missing in the text (the order "#W5442520" a customer wrote as "W5442520"); a callable
+`matcher(value, text) → [(start, end)]` decides itself (a normalised IBAN), and its code is part of the tool's
+fingerprint. Every Unicode space — the no-break and narrow no-break spaces a model or a phone keyboard writes between
+words — is read as a plain space, in the conversation and in the value, under every built-in matcher (a callable gets
+the text as written, and so do your policies: the `conversation` fact is the raw text); the quote in the evidence is
+the text as written, at its offsets. Numbers are always
 found as number tokens of exactly their value: an integer is compared exactly (the account 1234567890123456 is not
 found in "1234567890123457"), a float by its shortest decimal form (250.0 is "250" and "250.00", 0.1 is "0.10") — no
 tolerance; a float too long for its digits (a 19-digit ID declared as `float`) matches nothing: declare IDs as `int` or

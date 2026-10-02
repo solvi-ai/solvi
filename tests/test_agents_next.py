@@ -581,3 +581,44 @@ def test_once_counts_a_call_of_a_declared_tool_that_the_framework_runs():
     assert s2.check(call).outcome == "escalate"
     with pytest.raises(ValueError, match="only an allowed call"):
         s2.record(s2.check(call), "x")
+
+
+def test_grounding_reads_unicode_spaces_as_plain_spaces_and_keeps_the_offsets_of_the_text():
+    g = Guard()
+
+    @g.tool(ground=["address"])
+    def set_address(address: str) -> str:
+        return "ok"
+    call = {"name": "set_address", "arguments": {"address": "320 Cedar Avenue"}}
+    text = "Ship it to 320\u202fCedar\u00a0Avenue, please."          # what a model or a phone keyboard writes
+    d = g.check(call, [("user", text)])
+    assert d.outcome == "allow" and d.evidence == [("address", "320\u202fCedar\u00a0Avenue", 18, 34, "user")]
+    assert d.replay()["ok"]
+    spaced = {"name": "set_address", "arguments": {"address": "320\u00a0Cedar Avenue"}}     # ... or in the value
+    assert g.check(spaced, [("user", "Ship it to 320 Cedar Avenue.")]).outcome == "allow"
+    assert g.check(call, [("user", "Ship it to 320 Cedar Avenues.")]).outcome == "deny"      # still a token
+    assert _occurrences(3704, "IBAN DE89\u00a03704\u00a00044") == []        # a group of a spaced identifier, any space
+    assert _occurrences("0532", "DE89\u202f3704\u202f0044\u202f0532") == []
+
+
+def test_nocase_and_id_matchers_are_opt_in_and_token_stays_literal():
+    g = Guard()
+
+    @g.tool(ground={"address": "nocase", "order_id": "id", "name": "token"})
+    def update(address: str | None = None, order_id: str | None = None, name: str | None = None) -> str:
+        return "ok"
+    said = [("user", "It is order w5442520, send it to 320 CEDAR Avenue. I am Mei.")]
+
+    def check(**args):
+        return g.check({"name": "update", "arguments": args}, said)
+    d = check(address="320 Cedar avenue", order_id="#W5442520")
+    assert d.outcome == "allow"
+    assert sorted(d.evidence) == [("address", "320 CEDAR Avenue", 40, 56, "user"), ("order_id", "w5442520", 19, 27, "user")]
+    assert check(order_id="#W544252").outcome == "deny" and check(order_id="W54425200").outcome == "deny"   # a token
+    assert check(address="20 Cedar Avenue").outcome == "deny"
+    assert check(name="mei").outcome == "deny" and check(name="Mei").outcome == "allow"      # "token": the case counts
+    assert _occurrences("#W5442520", "orders #W5442520 and W5442520", "id") == [(7, 16), (21, 29)]
+    assert _occurrences("#W5442520", "order W5442520") == [] and _occurrences("#", "a # b", "id") == [(2, 3)]
+    assert _occurrences("W1", "İİ w1", "nocase") == [(3, 5)]      # "İ".lower() is two characters: offsets do not shift
+    with pytest.raises(ValueError, match="nocase, id"):
+        g.tool(lambda x: x, name="t", ground={"x": "lower"})
