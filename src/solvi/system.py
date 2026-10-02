@@ -867,26 +867,35 @@ class System:
         return rl
 
     def calibrate(self, question, examples, truth):
-        """Calibrate answer confidence (Platt scaling) on held-out examples: examples is [init_state], truth is [correct answer]."""
+        """Calibrate answer confidence (Platt scaling) on held-out examples: examples is [init_state], truth is [correct
+        answer] (written as for `fit` and `teach`: True / False for a yes/no question, an Enum member, ...).
+        → (a, b): confidence' = σ(a·logit(confidence) + b), applied to every later answer of the question.
+        The held-out examples are run without the question's current calibration (so a second call fits the same thing
+        again, not a correction of the first), are not saved to the storage and do not count in `stats`. Fewer than 10
+        answered examples, all of them right (or wrong), or confidences that do not vary (a rule's answers: 1.0): only
+        the shift b is fitted (a = 1) — the calibrated confidence is then the share of right answers."""
         import numpy as np
+        q = self.questions[question]
+        truth = [q.answer.normalize(y) for y in truth]
+        if len(truth) != len(examples):
+            raise ValueError(f"calibrate: {len(examples)} examples and {len(truth)} correct answers")
+        was = self.calib.pop(question, None)          # raw confidences: not the previously calibrated ones
         xs, ys = [], []
-        for st, y in zip(examples, truth):
-            r = self.ask(st, [question])[question]
-            if r.status != "ok":
-                continue
-            c = min(max(r.confidence, 1e-4), 1 - 1e-4)
-            xs.append(np.log(c / (1 - c)))
-            ys.append(float(r.answer == y))
-        xs, ys = np.array(xs), np.array(ys)
-        if len(xs) < 10 or ys.min() == ys.max():
-            self.calib[question] = (1.0, float(np.log((ys.mean() + 1e-3) / (1 - ys.mean() + 1e-3))) if len(xs) else 0.0)
-            return self.calib[question]
-        a, b = 1.0, 0.0
-        for _ in range(500):
-            p = 1 / (1 + np.exp(-(a * xs + b)))
-            ga, gb = ((p - ys) * xs).mean(), (p - ys).mean()
-            a, b = a - 0.5 * ga, b - 0.5 * gb
-        self.calib[question] = (float(a), float(b))
+        try:
+            for st, y in zip(examples, truth):
+                p = self._prepare(st, [question], None)
+                trace, vals = execute(self.catalog, p.flow, p.state, workers=self.workers, order=p.order, costs=self.costs,
+                                      policy=p.policy, known=p.known)
+                r = self._results(p.questions, p.flow, trace, vals)[0][question]
+                if r.status != "ok":
+                    continue
+                xs.append(_logit(r.confidence))
+                ys.append(float(vhash(r.answer) == vhash(y)))
+        except BaseException:
+            if was is not None:
+                self.calib[question] = was
+            raise
+        self.calib[question] = _platt_fit(np.array(xs), np.array(ys))
         return self.calib[question]
 
     def learning(self, storage=None, parts=None, ladder=None, gates=None, **options):
@@ -1037,10 +1046,66 @@ def _learnable(q, examples):
     return [(s, a) for s, a in examples if a is not Unknown] if q.answer.unknown else examples
 
 
-def _platt(c, a, b):
-    import math
+def _logit(c):
     c = min(max(c, 1e-4), 1 - 1e-4)
-    return 1 / (1 + math.exp(-(a * math.log(c / (1 - c)) + b)))
+    return math.log(c / (1 - c))
+
+
+def _platt(c, a, b):
+    return 1 / (1 + math.exp(-(a * _logit(c) + b)))
+
+
+def _platt_shift(xs, ys):
+    """Platt scaling with the slope fixed at 1: the shift b at which the mean calibrated confidence is the share of
+    right answers (kept inside [0.001, 0.999]) — the maximum-likelihood b; found by bisection."""
+    import numpy as np
+    target = min(max(float(ys.mean()), 1e-3), 1 - 1e-3)
+    lo, hi = -40.0, 40.0
+    for _ in range(80):
+        b = (lo + hi) / 2
+        if float((1 / (1 + np.exp(-(xs + b)))).mean()) < target:
+            lo = b
+        else:
+            hi = b
+    return 1.0, (lo + hi) / 2
+
+
+def _platt_fit(xs, ys):
+    """(a, b) of confidence' = σ(a·logit(confidence) + b) by maximum likelihood (Newton steps, halved until the loss
+    falls). Only the shift is fitted — see _platt_shift — when the slope cannot be told from the data: fewer than 10
+    examples, every answer right (or wrong), confidences that do not vary, or a fit that does not settle."""
+    import numpy as np
+    if not len(xs):
+        return 1.0, 0.0
+    if len(xs) < 10 or ys.min() == ys.max() or float(xs.std()) < 1e-6:
+        return _platt_shift(xs, ys)
+
+    def nll(a, b):
+        z = a * xs + b
+        return float((np.logaddexp(0.0, z) - ys * z).mean())
+    a, b = _platt_shift(xs, ys)
+    loss = nll(a, b)
+    for _ in range(100):
+        p = 1 / (1 + np.exp(-(a * xs + b)))
+        w = p * (1 - p)
+        g = np.array([((p - ys) * xs).mean(), (p - ys).mean()])
+        h = np.array([[(w * xs * xs).mean(), (w * xs).mean()], [(w * xs).mean(), w.mean()]]) + 1e-9 * np.eye(2)
+        try:
+            da, db = np.linalg.solve(h, g)
+        except np.linalg.LinAlgError:
+            return _platt_shift(xs, ys)
+        t = 1.0
+        while t > 1e-6 and not nll(a - t * da, b - t * db) < loss:
+            t /= 2
+        if t <= 1e-6:
+            break
+        a, b = a - t * da, b - t * db
+        was, loss = loss, nll(a, b)
+        if was - loss < 1e-12:
+            break
+    if not (math.isfinite(a) and math.isfinite(b)) or abs(a) > 1e3 or abs(b) > 1e3:   # separable data: no finite optimum
+        return _platt_shift(xs, ys)
+    return float(a), float(b)
 
 
 def _producers(catalog):

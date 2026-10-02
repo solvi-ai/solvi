@@ -1743,8 +1743,12 @@ Calibrate a question on held-out examples (Platt scaling on the confidence logit
 system.calibrate("total_band", heldout_states, heldout_answers)   # lists of init_state and correct answers
 ```
 
-After calibration, `ok` answers of that question carry the calibrated confidence. With fewer than 10 usable examples, or
-when all held-out answers are right (or all wrong), only a constant shift is fitted.
+After calibration, `ok` answers of that question carry the calibrated confidence. With fewer than 10 usable examples,
+when all held-out answers are right (or all wrong), or when the confidences do not vary (a rule over plain inputs: always
+1.0), only a constant shift is fitted: the calibrated confidence is then the share of right answers. The correct answers
+are written as for `fit` (`True` / `False` for a yes/no question). The held-out examples are run without the question's
+previous calibration, are not saved to the storage and do not count in `system.stats`, so calling `calibrate` again
+replaces the parameters with a fit of the same kind.
 
 solvi does not pick an abstention threshold for you. With calibrated confidence you choose one per question from
 held-out data, for example "answer automatically at confidence >= 0.95, send the rest to a person":
