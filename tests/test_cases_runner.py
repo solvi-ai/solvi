@@ -207,3 +207,41 @@ def test_a_case_that_cannot_fail_is_reported(tmp_path):
     assert p["status of a question not asked"][0].startswith("status of rout: not asked")
     assert p["safeguards of a question not asked"][0].startswith("safeguards of rout: not asked")
     assert p["no safeguards at all is an expectation"] == [] and p["a note is allowed"] == []
+
+
+STORING_TASK = '''
+from pathlib import Path
+from typing import Literal
+
+from solvi import Catalog, Question, System
+
+cat = Catalog()
+
+
+@cat.rule("big")
+def big(amount: float) -> Literal["yes", "no"]:
+    return "yes" if amount > 100 else "no"
+
+
+def system():
+    return System(cat, [Question("big", "Is it big?")], storage=str(Path(__file__).parent / "decisions.jsonl"))
+'''
+
+
+def test_the_test_runners_do_not_write_their_inputs_into_the_systems_store(tmp_path, capsys):
+    (tmp_path / "task.py").write_text(STORING_TASK)
+    (tmp_path / "cases.json").write_text(json.dumps({"system": "task.py:system", "cases": [
+        {"name": "big", "state": {"amount": 500}, "expected": {"big": "yes"}}]}))
+    store = tmp_path / "decisions.jsonl"
+
+    def stored():
+        return len(store.read_text().splitlines()) if store.exists() else 0
+    assert testing.main([str(tmp_path), "-q"]) == 0 and stored() == 0
+    assert testing.main([str(tmp_path), "-q", "--fuzz", "20"]) == 0 and stored() == 0     # nor the fuzz mutations
+    (res,) = testing.run_path(tmp_path)
+    assert res.ok and stored() == 0
+    assert testing.main([str(tmp_path), "-q", "--store"]) == 0 and stored() == 1          # only when asked
+    (tmp_path / "honesty.json").write_text(json.dumps({"task": "task.py", "cases": [
+        {"name": "big", "state": {"amount": 500}, "gold": {"big": "yes"}}]}))
+    from solvi import honesty
+    assert honesty.report(tmp_path / "honesty.json")["cases"] == 1 and stored() == 1

@@ -229,7 +229,7 @@ def report(set_path, baseline=None, tolerance=0.02, risk=0.10, rows=False):
         raise ValueError(f"{set_path}: no task (set \"task\" to the task module's path, relative to the set)")
     task = load_task(hs["task"])
     system = system_of(task)
-    out_rows = run(system, hs["cases"], getattr(task, "prepare", None))
+    out_rows = run(system, hs["cases"], getattr(task, "prepare", None), store=False)   # a labelled set is not decisions
     m = metrics(out_rows, risk)
     regressions = []
     if baseline is not None:

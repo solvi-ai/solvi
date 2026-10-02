@@ -41,6 +41,7 @@ solvi test gallery/                       # every cases.json under a directory; 
 solvi test gallery/07_kyc_aml/cases.json -q
 solvi test gallery/ --json                # results as data
 solvi test gallery/ --fuzz 30             # also 30 mutated inputs per case (see below)
+solvi test . --store                      # also save the cases' decisions to the system's own store
 
 pytest gallery/                           # the pytest plugin: one test item per case
 pytest gallery/ --solvi-fuzz 30
@@ -50,6 +51,10 @@ The plugin is registered under the `pytest11` entry point as `solvi`. It collect
 and leaves other JSON files alone. Turn it off with `-p no:solvi`. From Python, use
 `solvi.testing.run_path(paths)` to get a `FileResult` per file and a `CaseResult` per case (`ok`, `problems`,
 `answers`).
+
+A test input is not a decision: when the System has a store (`System(storage=...)`), `solvi test`, the pytest plugin,
+`--fuzz` and `solvi honesty` write nothing to it. `solvi test --store` (`run_path(paths, store=True)`) saves the cases'
+decisions — never the fuzz mutations.
 
 ## Fuzzing
 
