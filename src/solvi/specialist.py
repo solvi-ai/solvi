@@ -253,7 +253,9 @@ class Specialist:
 
     def replay(self, record, source=None):
         """Re-check the recorded proposal against the source and re-render it: the trace chain intact, the same source,
-        the same issues, identical output bytes. record: a Run or its to_dict(); source: the text (or in the record)."""
+        the same issues — in the trace and in the record's own `issues` — identical output bytes. A run that was blocked
+        before any spec (a failed proposer, an invalid proposal) has nothing to re-check: its chain and its record's
+        copies are verified. record: a Run or its to_dict(); source: the text (or in the record)."""
         if isinstance(record, Run):
             source = record.source if source is None else source
             record = record.to_dict()
@@ -269,13 +271,17 @@ class Specialist:
             problems.append(f"recorded by {inp.get('specialist')!r}, replayed by {self.name!r}")
         if inp.get("version") != self.version:
             problems.append(f"recorded by version {inp.get('version')!r}, replayed by {self.version!r}")
+        chk = trace.step("check") or {}
+        if canonical(record.get("issues") or []) != canonical(chk.get("issues") or []):   # the record's own copies of
+            problems.append("the record's issues are not the ones in the trace")           # what the trace holds
+        if record.get("output_sha256") != (trace.step("render") or {}).get("output_sha256"):
+            problems.append("the record's output hash is not the one in the trace")
         prop = trace.step("propose") or {}
         if "spec" not in prop:
             return Replay(not problems, problems + (["the run had no valid proposal"] if "error" not in prop else []))
         if canonical(prop["spec"]) != canonical(record.get("proposal")):
             problems.append("the record's proposal is not the one in the trace")
         again = self._finish(source, record.get("question"), self.parse(prop["spec"]), Trace())
-        chk = trace.step("check") or {}
         if canonical(again.checked.issues) != canonical(chk.get("issues")):
             problems.append("the check gives other issues now")
         if canonical(again.checked.verified) != canonical(chk.get("verified")):

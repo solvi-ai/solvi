@@ -401,3 +401,20 @@ def test_a_number_that_shares_characters_with_a_drawn_one_is_not_drawn_again():
     pt = ChartSpec.model_validate(spec([("a", 10, "10 $")], unit="USD")).series[0].points[0]
     vp, why = ChartChecker()._verify_at(pt, idx, 2, 6, "USD", Decimal(1), {(5, 8): "series[0].points[0] ('b')"})
     assert vp is None and why[0] == "quote_reused"
+
+
+def test_replay_compares_the_records_own_issues_and_output_hash_with_the_trace():
+    """A stored record whose `issues` were emptied replayed ok; for a blocked run nothing but the chain was checked."""
+    t = "Revenue by region: Europe 42%, North America 35%, Asia 30%."
+    sp = ChartSpecialist(FixedProposer(spec([("Europe", 42, "42%"), ("Asia", 23, "30%")])))
+    r = sp.run(t)
+    rec = r.to_dict()
+    assert rec["issues"] and sp.replay(rec, t).ok
+    for edit in ({"issues": []}, {"issues": rec["issues"][:-1] + [dict(rec["issues"][-1], message="fine")]},
+                 {"output_sha256": "0" * 64}):
+        got = sp.replay({**rec, **edit}, t)
+        assert not got.ok and any("the record's" in p for p in got.problems), edit
+    blocked = ChartSpecialist(FixedProposer("not json")).run(t)
+    rec = blocked.to_dict()
+    assert not blocked.ok and ChartSpecialist().replay(rec, t).ok
+    assert not ChartSpecialist().replay({**rec, "issues": []}, t).ok
