@@ -273,7 +273,75 @@ What to know about constraints:
   the answers as given), so nothing may be repaired: `res.feasible` is `False`, `res.violations` names the constraints
   and each answer's reason says `not repaired: … joint decoding tried only the 1 most probable answer(s) of each
   question (65,536 combinations of 16 answers exceed its limit of 50,000)`. Split such a request into groups of
-  questions that share constraints, or enforce the rule in code (an "at most one" needs no search).
+  questions that share constraints — or, when the answers are of many items (one request each) and the rule is a
+  count over groups of them, decide the set with `solvi.sets` (below).
+
+### Decisions over a set: solvi.sets
+
+A constraint between answers works inside one request. Many tasks need a rule across many requests: one counterpart
+per product when matching two catalogs, one owner per record when deduplicating, at most N tasks per shift. Ask each
+item as usual, then decide the set:
+
+```python
+from solvi import Answer, Catalog, Decision, Question, System
+from solvi.sets import AtMostOne, Item, decide_set
+
+cat = Catalog()
+
+@cat.rule("match")
+def match(p):                                   # any answer with probabilities: a head, a model, a Decision
+    return Decision("yes" if p >= 0.5 else "no", {"yes": p, "no": 1 - p})
+
+system = System(cat, [Question("match", "The same product?", Answer.yes_no())])
+pairs = [("a1", "b1", 0.95), ("a2", "b1", 0.90), ("a1", "b2", 0.90), ("a3", "b3", 0.80)]
+items = [Item.of(system.ask({"p": p}), "match", id=(a, b), keys={"a": a, "b": b}) for a, b, p in pairs]
+
+out = decide_set(items, [AtMostOne("a"), AtMostOne("b")])     # one counterpart per offer, on both sides
+print(out)
+# 4 items, 1 changed by at_most_one(a), at_most_one(b) (exact); 1 component(s) solved
+#   ('a1', 'b1'): changed from 'yes' to 'no' to satisfy at_most_one(a) on a=a1: ('a1', 'b2') holds 'yes' (0.90);
+#   at_most_one(b) on b=b1: ('a2', 'b1') holds 'yes' (0.90)
+out[("a2", "b1")].answer, out.changed, out.feasible, out.exact
+out.replay()                                     # {"ok": True, "mismatches": [], ...}
+```
+
+What is chosen is the most probable combination of answers that satisfies every constraint — the product of the
+items' probabilities, taken as independent, as joint decoding does inside a request. Above, keeping a1–b1 (0.95) alone
+is less probable than keeping a2–b1 and a1–b2 (0.90 each), so a1–b1 is the one that changes.
+
+- **Items.** `Item.of(response, question, id=, keys=, tie=)` takes a yes/no, choice or ordinal answer with
+  probabilities and status "ok" as free; anything else — a rule's answer without probabilities, a forced answer, an
+  abstention — is fixed: it never changes and counts as given (an abstention counts nowhere). `Item(id, probs, answer,
+  keys)` builds one from your own numbers. `tie=` settles combinations of equal probability: the one keeping the
+  items with the larger tie at their answer wins (a second model's probability, say).
+- **Constraints.** `AtMostOne(key)`, `ExactlyOne(key)`, `Capacity(key, max=, min=)` count the items of each group that
+  hold `answer` (default "yes"); `key` is a name in `Item.keys`, a function of the item, or None for one group of all;
+  `Exclusive([(id1, id2), ...])` is mutual exclusion between listed items; `answer=EACH` makes every answer value a group
+  of its own (`Capacity(max=3, answer=EACH)`: at most 3 items per shift).
+- **How, and when it is exact.** Groups that can bind link items into connected components; a component already
+  consistent as given keeps its answers, the others are solved. `method="exact"` (default) solves each by an integer
+  program (HiGHS through `scipy.optimize.milp`): a proven optimum unless `time_limit` (seconds per component, default
+  10) stops it — `out.exact` is then False and the component's status says "time limit". `method="greedy"` is the
+  stated approximation: from the surest item down, each takes its most probable answer whose groups have room, then
+  groups below their minimum take the item that loses least. In the example it keeps a1–b1 and drops the other two.
+- **What each answer says.** A changed item cites the group that changed it and the items that hold it (`cited`, and
+  the end of `why`): "changed from 'yes' to 'no' to satisfy at_most_one(a) on a=a1: ('a1', 'b2') holds 'yes' (0.90)".
+  A component that cannot be satisfied (fixed answers that conflict, a minimum nobody can meet) keeps its answers as
+  given: `out.feasible` is False, `out.violations` names each broken group and its items say "not repaired".
+- **Record and replay.** `out.to_dict()` / `SetDecision.from_dict(d)` hold every item's probabilities, the given and
+  final answers and the groups as evaluated. `out.replay()` checks that the final answers satisfy every group not
+  reported broken, fixed answers are unchanged, every change is cited, and re-solves: under "exact" a more probable
+  combination than the recorded one is a mismatch.
+
+**Measured** on Abt-Buy (1,916 eval pairs of offers; the pair graph has a component of 1,161 pairs), one counterpart per
+offer on both sides over the answers a hand-written solution had stored: F1 0.931 → 0.933 for a fitted head, 0.872 →
+0.909 for the LLM baseline (its matches ranked by the head's probability), 0.830 → 0.865 for the LLM inside solvi (ties
+by the head's probability) — the same answers, pair for pair, as the solution's own greedy code and its per-group
+catalogs, in 30–230 ms for the whole set with the 1,161-pair component solved exactly. On dev the exact method was
+as good as the greedy for the head (0.905 both) and better for the LLM (0.855 against 0.832).
+
+**Not done here:** rules that are not counts over groups — transitivity of matches (a~b and b~c → a~c), "if a then b",
+sums of weights; soft constraints with a cost; errors that are not independent (the objective treats them as such).
 
 ## Types, questions and model decisions
 
@@ -3459,9 +3527,99 @@ same as theirs, so the model's answers came from their cache):
   answers were wrong, the three samples agreeing on one convention of the question that is not the reference's.
 
 **Not done here.** No search: a loop re-asks one proposer, it does not enumerate alternatives or keep the best of two
-valid ones (on these plans a 50-line search over orders solved 95 / 100 / 98). No promise that re-asks converge. The
+valid ones — that is `solvi.search` (below; on these plans a search over orders solved 95 / 100 / 98). No promise that
+re-asks converge. The
 share of agreement is a signal; calibrate it on labelled examples before you trust a threshold. No streaming, no tool
 calls, no caching of replies (put a caching proxy in front of the server).
+
+### Search over alternatives: solvi.search
+
+When the candidates can be enumerated — the slots of a week, the orders of a few cities, the friends to meet — a
+search through the System's own checks beats asking a model to propose: run each candidate through the checks, keep
+the accepted ones, take the best.
+
+```python
+from solvi import Answer, Catalog, Question, System
+from solvi.refine import Fail
+from solvi.search import Tree, search
+
+cat = Catalog()
+FLIGHTS = {("Oslo", "Rome"), ("Rome", "Paris"), ("Paris", "Oslo"), ("Rome", "Vienna")}
+
+@cat.fn
+def cities(problem: str) -> list:                 # the problem read into facts: computed once for the whole search
+    return problem.split(", ")
+
+@cat.check(hard=True, then={"ok": "no"})
+def direct_flights(order: list) -> bool:          # false on a prefix → false on every order that starts with it
+    bad = [f"no flight {a} - {b}" for a, b in zip(order, order[1:]) if (a, b) not in FLIGHTS and (b, a) not in FLIGHTS]
+    return Fail(*bad) if bad else True
+
+@cat.check(hard=True, then={"ok": "no"})
+def every_city(cities: list, order: list) -> bool:
+    return sorted(order) == sorted(cities)
+
+@cat.rule("ok")
+def ok(direct_flights, every_city) -> bool:
+    return True
+
+system = System(cat, [Question("ok", "A valid trip?", Answer.yes_no(), checkpoints=["direct_flights", "every_city"])])
+
+def orders(facts):                                # the space, read from the facts: one more city per step
+    cs = facts["cities"]
+    return Tree([], lambda o: [o + [c] for c in cs if c not in o], complete=lambda o: len(o) == len(cs))
+
+run = search(system, {"problem": "Oslo, Rome, Paris, Vienna"}, "ok", orders, into="order",
+             prune=["direct_flights"], keep=2)
+print(run)
+# search ok: 28 asked, 2 accepted
+#   best: ['Oslo', 'Paris', 'Rome', 'Vienna']
+#   exact: every candidate was asked or cut — pruned by direct_flights (10); the first accepted in the space's order
+#   (and not the only one), given that the prune checks direct_flights stay false below a node
+#   rejected by: direct_flights (4)
+#   computed once: cities
+run.response["ok"].answer, run.kept, run.replay(system)["ok"]
+```
+
+`search(system, state, question, space, *, into=, objective=, maximize=True, prune=(), keep=1, budget=10_000,
+accept="checks", store=True, hold=True)`:
+
+- **The space**: a list or any iterable of candidates (given as the fact `into`); a dict `{fact: [values]}` (every
+  combination, the first fact outermost, given as those facts); a `Tree(root, children, complete=, bound=)` walked depth
+  first; or a function of the facts computed from `state` that returns one of these — the space read from the problem.
+- **Accepted**: as in `refine` (`accept="checks"`: every hard check governing the question passed), and the question
+  did not abstain — a candidate the System could not decide is never chosen. `run.rejected` counts the rejections by
+  deciding check.
+- **The best**: with `objective` (a function of the candidate, or the name of a fact the question computes) the `keep`
+  best accepted; without one the first `keep` in the space's order, and the search stops there (`keep=2` says whether
+  the first is the only one).
+- **Cuts**: `prune` names hard checks that, false on a partial node, stay false on every node below it; such a node is
+  not expanded. A Tree's `bound(node)` is the best objective any candidate below can reach; a node that cannot beat what
+  is kept is not expanded. `budget` caps the asks.
+- **When it is exact**: `run.exact` is True when the search ended by itself — every candidate was asked or cut — and
+  `run.why_exact` names what that rests on: that the prune checks are monotone and the bound optimistic. Neither is
+  checked by solvi; a wrong promise can cut the best candidate. When the budget stops it, `exact` is False and the best
+  is the best of what was asked; when nothing is accepted, `run.escalation` says why (and a `refine` with a proposer can
+  take over a space too big to search).
+- **Facts computed once**: parts that do not read the candidate (the problem read into typed facts — by rules or by a
+  model) run once and are held for every candidate (`run.held`); a model reading the problem is called once, not per
+  candidate. The searched asks are not stored or counted; the winner is asked again in full with the System
+  (`run.response`, stored when the System stores), and if that full ask does not accept it the search escalates instead.
+  `run.to_dict()` / `SearchRun.from_dict(d, catalog=cat)`; `run.replay(system)` replays the winner's trace and checks it
+  is accepted and its objective recomputes (pass a function objective again).
+
+**Measured** on NATURAL PLAN (100 eval problems of each kind, facts read by the solution's rule-based readers, its
+constraint checks and renderers reused): right 95 / 100 / 98 (meeting slot / day of meetings / multi-city trip),
+the same plan text as a hand-written depth-first search on 300 of 300, against 92 / 75 / 43 for the LLM's own plans and
+95 / 92 / 58 for the check-and-re-ask loop. Every search ended by itself (`exact`) and every winner replays. What stays
+problem-specific: the space of each kind (3 lines each) and, for trips, a walk of a partial order so the checks can judge
+a prefix (24 lines) — in place of 55 lines of search. The price is speed: 1,295 / 227,352 / 73,543 asks, 2 s / 246 s /
+40 s for the 100 problems of each kind on a laptop CPU (1–3 ms an ask), where the plain search took about a second for
+all 300.
+
+**Not done here:** no proposals by a model, no bisection over numbers (`res.counterfactual` does that), no parallel
+asks, no proof of the prune and bound promises. Each candidate is a full ask — about 1–3 ms with the trace hashed — so a
+space of millions is for code, not for this search.
 
 ## Verified charts: a specialist that checks every number
 

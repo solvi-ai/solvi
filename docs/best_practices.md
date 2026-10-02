@@ -64,6 +64,21 @@ so for an agent's ever-new candidates they learn nothing. A `CandidateHead` over
 was it a dead end) reached 0.93 on a hidden rule after 300 steps and 0.81 after 30, in a millisecond per correction.
 It learns the rule it is shown; it will not find a better one.
 
+## Rules across many decisions
+
+**A rule across items belongs after the items' decisions, not inside each one.** "One counterpart per product" over
+Abt-Buy pairs, enforced with `solvi.sets.decide_set` on the answers as given: F1 0.830 → 0.865 for an LLM, 0.872 →
+0.909 for the LLM without solvi, 0.931 → 0.933 for a fitted head — it helps a weak solver most. Giving each request the
+other candidates as facts instead (how the pair ranks among them) lowered F1 to 0.895. Prefer the exact method: on dev
+it matched the greedy for the head and beat it for the LLM (0.855 against 0.832), and it solved a 1,161-pair component
+in well under a second.
+
+**When the alternatives can be enumerated, search them instead of asking a model to propose.** On NATURAL PLAN a
+`solvi.search` through the same checks found the right plan for 95 / 100 / 98 of 100 problems of each kind, against
+92 / 75 / 43 for an LLM's plans and 95 / 92 / 58 after up to three rounds of re-asks. Make the checks that rule out a
+prefix (a missing flight, a meeting out of reach) usable on partial candidates and list them in `prune=`: on 10-city
+trips it kept the largest search at 11,414 asks, where the orders of 10 cities number 3.6 million.
+
 ## Guarantees and calibration
 
 **Calibrate on your own stream.** A threshold shipped with a checkpoint holds on the checkpoint's data. On other data
