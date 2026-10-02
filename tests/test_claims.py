@@ -35,3 +35,19 @@ def test_no_measured_number_or_claim_in_the_packages_texts_without_its_script():
                 if m and not SOURCE.search(text):
                     bad.append(f"{p.relative_to(SRC)}:{line}: {m.group(0)!r}")
     assert bad == []
+
+
+def test_the_readme_and_docs_give_advice_not_measurements_without_a_script():
+    # a paragraph that reports a measurement names its script (benchmarks/...) or a model card; these phrases were
+    # left from measurements that are not in the repository
+    root = SRC.parents[1]
+    phrases = re.compile(r"in our measurements|we measured|what we measured|not recommend|several times slower|"
+                         r"mostly Python's\s+start-up|with the old 0\.7 sets", re.I)
+    bad = []
+    # vs_llm.md is one measurement throughout, re-run by benchmarks/vs_llm/ (the page says so at the top)
+    for p in [root / "README.md", *sorted(d for d in (root / "docs").glob("*.md") if d.name != "vs_llm.md")]:
+        for i, para in enumerate(p.read_text().split("\n\n")):
+            m = phrases.search(para)
+            if m and not re.search(r"benchmarks/|model card|\bcard\)", para):
+                bad.append(f"{p.name} paragraph {i}: {m.group(0)!r}")
+    assert bad == []

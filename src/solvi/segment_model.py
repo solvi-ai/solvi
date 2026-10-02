@@ -625,7 +625,8 @@ def export_onnx(path, opset=18):
 
 
 def quantize_onnx(path):
-    """Dynamic int8 quantization of onnx/encoder.onnx → onnx/encoder_int8.onnx (optional, smaller and faster on CPU)."""
+    """Dynamic int8 quantization of onnx/encoder.onnx → onnx/encoder_int8.onnx (optional and smaller; check its outputs
+    against fp32 on your own inputs)."""
     from onnxruntime.quantization import QuantType, quantize_dynamic
     src = os.path.join(path, "onnx", "encoder.onnx")
     dst = os.path.join(path, "onnx", "encoder_int8.onnx")

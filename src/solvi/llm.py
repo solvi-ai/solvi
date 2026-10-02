@@ -44,7 +44,7 @@ again when it does. An LLM is not replayed (its output is not reproducible bit f
 output instead (trust_models).
 
 Cost and latency: every question about every input is a paid request of hundreds of tokens (the options, their
-descriptions and the text) and a network round trip, far slower than a local decider on a CPU; decisions are cached by (question,
+descriptions and the text) and a network round trip, which a local decider does not pay; decisions are cached by (question,
 input) for the life of the model object. Start with it alone under act_guard; where a local decider (solvi-large) is
 about as strong on your stream, a Vote of the two can answer more at the same risk. "A small model first, the LLM
 second" is not a good default: where one model is clearly stronger, a cascade adds almost nothing over it alone (the

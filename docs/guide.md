@@ -4,7 +4,7 @@ This guide walks through the whole API. Where a question needs judgement, a mode
 model is whichever you have — an LLM through `solvi.llm`, a decision service, or a local checkpoint such as
 solvi-base for offline or cheap cases (see [the model proposes](#the-model-proposes-decisions-with-a-decider)). For a
 two-minute overview, see the [README](../README.md); for advice drawn from
-what we measured, see [best practices](best_practices.md). Every measured number in this guide names its source: a
+building on solvi, see [best practices](best_practices.md). Every measured number in this guide names its source: a
 script in `benchmarks/` or an example, which you can re-run from this repository, or the model card of a published
 model (solvi-base, solvi-large, solvi-large-long, extract-base, extract-receipts).
 
@@ -1026,9 +1026,9 @@ team = jeeves.decision("team", "Which team should handle this?", "email", TEAMS)
 that sure, `"think": False` skips thinking, and `"return_reasoning": True` records each question's chain in
 `extra["systemone"]["reasoning"]` (cut to 1,000 characters, for the audit: the answer still comes from the
 probabilities, and this option does not change the fingerprint). An option Jeeves does not know is refused with a 422,
-and the decision escalates with its message. The trade-off is speed: by the timings in Jeeves's own README, thinking
-makes a request several times slower, and `max_think` / `nothink_threshold` trade some of that back; its claims about
-accuracy are theirs as well. How it does inside solvi's checks is on the [benchmark page](vs_llm.md).
+and the decision escalates with its message. The trade-off is speed: thinking adds its reasoning tokens to every
+request, `max_think` / `nothink_threshold` cap them, and the time per request is worth measuring on your own hardware;
+claims about its accuracy are its authors'. How it does inside solvi's checks is on the [benchmark page](vs_llm.md).
 
 #### Any LLM as a decider
 
@@ -3482,8 +3482,8 @@ the decision rests on them: keep `.solvi/` out of version control (`install` say
 
 ### Speed
 
-Each hook is a whole process — Python start, the rules, the System, the stored trace — so its time is mostly Python's
-start-up, and the store opens from its head, so it does not grow with the number of stored decisions. Nothing heavy is
+Each hook is a whole process — Python start, the rules, the System, the stored trace. The store opens from its head,
+so a hook's time does not grow with the number of stored decisions. Nothing heavy is
 imported on this path (no numpy; pydantic only for the trace). A System One service adds its answer time; a local
 checkpoint adds its load on every call.
 
@@ -4305,8 +4305,8 @@ description)` returns one `(start, end, score, no_answer_score)`, and `field(nam
 ### Hardware notes
 
 - A GPU is recommended for training and for long documents.
-- On a CPU, use the fp32 ONNX export. We do not recommend dynamic int8 quantization yet: if you try it, check the
-  accuracy on your own fields first.
+- On a CPU, use the fp32 ONNX export; no int8 export is provided. If you quantize one yourself, compare its spans with
+  the fp32 export's on your own fields before using it.
 
 ## Command line
 

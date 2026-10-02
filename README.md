@@ -459,7 +459,7 @@ Run them from a clone: `python examples/01_leave_request.py`.
 ## More
 
 - [docs/guide.md](docs/guide.md): full API walkthrough.
-- [docs/best_practices.md](docs/best_practices.md): what we measured while building on solvi, as advice.
+- [docs/best_practices.md](docs/best_practices.md): what we learned while building on solvi, as advice.
 - [docs/decide_format.md](docs/decide_format.md): the decider checkpoint contract (for training your own).
 - [docs/strategist.md](docs/strategist.md): the code strategist and the experimental model strategist and name matching.
 - [ROADMAP.md](ROADMAP.md), [CHANGELOG.md](CHANGELOG.md), [CONTRIBUTING.md](CONTRIBUTING.md), [SECURITY.md](SECURITY.md).

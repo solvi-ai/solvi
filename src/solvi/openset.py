@@ -5,7 +5,7 @@ stream changes.
 Every promise of act_guard / calibrate_for / System.guarantee holds "for inputs like the calibration examples". An
 input whose right answer is not among the options is outside that: whatever the decider answers is wrong, and a
 threshold calibrated without such inputs lets a share of them through, and the error among the answers given alone can
-end up several times the promised rate. The gate sizes the threshold for a share of such inputs and follows the share
+end up well above the promised rate. The gate sizes the threshold for a share of such inputs and follows the share
 as the stream goes:
 
     from solvi.openset import OpenSetGate, leave_out

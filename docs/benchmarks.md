@@ -74,18 +74,18 @@ are in [benchmarks/vs_llm/](../benchmarks/vs_llm/).
   labelled; one trained on a broad mix does better. The [extract-base](https://huggingface.co/solvi-ai/extract-base)
   card gives both on CORD's tax and change (a model trained on 7 fields only: 14% / 66%; extract-base: 46.5% / 67.9%).
   For production, label some documents and fine-tune.
-- **int8 on CPU.** A ModernBERT-large extractor exported to ONNX and dynamically quantized to int8 lost accuracy on
-  most fields; fp32 ONNX on CPU keeps it, at a slower speed.
+- **int8 on CPU.** Dynamic int8 quantization changed the spans of the published extractor (the
+  [extract-base](https://huggingface.co/solvi-ai/extract-base) card), so no int8 export is provided: use fp32 ONNX on
+  a CPU, and compare a quantized export of your own with it on your fields before using it.
 
 ## Writing catalogs with an LLM
 
-Not a library feature, but a workflow we tried: an LLM receives a plain-language task description and writes the solvi
-module (`@cat.fn`, `@cat.check`, `@cat.extract`, `@cat.rule`). The module is executed on examples with known answers,
-and errors are returned for a couple of fix rounds; the result is compared with a reference catalog on new examples, in
-domains such as leave requests, shop orders, invoices and receipts. A strong model wrote catalogs that agreed with the
-reference almost everywhere; a smaller one did on simple domains and failed on regex parsing. Executing drafts against
-labelled examples is essential: a first module can load fine and answer nothing right. The reference is our own
-catalogs, so this measures agreement with them, not the correctness of the policy.
+Not a library feature, and no script for it is in this repository — a workflow, as advice: an LLM receives a
+plain-language task description and writes the solvi module (`@cat.fn`, `@cat.check`, `@cat.extract`, `@cat.rule`).
+Execute the module on examples with known answers and return the errors for a couple of fix rounds, then compare the
+result with a catalog you trust on new examples. Executing drafts against labelled examples is essential: a first
+module can load fine and answer nothing right. Text parsing (regular expressions) is where a draft most needs those
+examples. Agreement with a reference catalog says the draft matches it, not that the policy is right.
 
 ## Caveats
 
