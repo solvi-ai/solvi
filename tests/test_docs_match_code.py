@@ -112,3 +112,11 @@ def test_best_practices_says_where_its_numbers_come_from_and_is_linked():
     page = (ROOT / "docs" / "best_practices.md").read_text()
     assert "named in the changelog" not in page and "not in this repository" in page
     assert "docs/best_practices.md" in README and "best_practices.md" in GUIDE
+
+
+def test_benchmarks_says_the_store_overhead_was_measured_in_memory_and_what_a_disk_costs():
+    """The documented 2.45 ms per ask with SQLite holds only for a store on tmpfs (the script's temporary folder); on a
+    disk it is 15-19 ms. The page also counted twelve gallery entries where the script runs fifteen."""
+    page = (ROOT / "docs" / "benchmarks.md").read_text()
+    assert "RAM disk (tmpfs)" in page and "NVMe disk" in page and "twelve gallery entries" not in page
+    assert len([p for p in (ROOT / "gallery").iterdir() if (p / "cases.json").exists()]) == 15
