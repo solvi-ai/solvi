@@ -909,7 +909,7 @@ from solvi.llm import llm
 gpt = llm("https://openrouter.ai/api/v1", "qwen/qwen-2.5-72b-instruct", api_key=os.environ["OPENROUTER_API_KEY"])
 local = llm("http://127.0.0.1:8080/v1", "qwen2.5-7b-instruct")      # llama.cpp; vLLM :8000/v1, Ollama :11434/v1
 part = gpt.decision("team", "Which team should handle this?", "email", TEAMS)
-team = Cascade([small, large, part])      # the LLM only for what both local deciders escalate
+part.act_guard(examples, risk=0.10)       # start with the LLM alone; then compare a Vote with solvi-large (below)
 ```
 
 Any server of the OpenAI chat-completions API (OpenAI, OpenRouter, vLLM, llama.cpp, Ollama, LM Studio) proposes; solvi

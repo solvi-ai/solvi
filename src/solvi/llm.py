@@ -4,7 +4,7 @@ the LLM proposes, solvi's checks, rules and thresholds decide.
     from solvi.llm import llm
     model = llm("http://127.0.0.1:8080/v1", "qwen2.5-7b-instruct")          # api_key="..." for a hosted service
     part = model.decision("team", "Which team should handle this?", "email", {"billing": "Charges", "shipping": "Delivery"})
-    team = Cascade([small, large, model.decision(...)])                      # the LLM as the last, most expensive stage
+    part.act_guard(examples, risk=0.10)                                      # start with the LLM alone, calibrated
 
 One question is one request (`POST {base_url}/chat/completions`, temperature 0), the input between <text> and </text>
 (a tag of that name inside it written as &lt;text&gt;, so it cannot close the block), with a JSON schema for the reply:
@@ -39,8 +39,10 @@ output instead (trust_models).
 
 Cost and latency: every question about every input is a paid request of hundreds of tokens (the options, their
 descriptions and the text) and 0.3–5 s, against ~50 ms on a CPU for a local decider; decisions are cached by (question,
-input) for the life of the model object. Use it where it pays: as the last stage of a Cascade after local deciders that
-answer the easy inputs, or in a Vote with a model of another family."""
+input) for the life of the model object. Start with it alone under act_guard; where a local decider (solvi-large) is
+about as strong on your stream, a Vote of the two can answer more at the same risk. "A small model first, the LLM
+second" is not a good default: measured on three data sets, a cascade came out no better than the stronger model alone
+(the guide's "Which combination with an LLM")."""
 from __future__ import annotations
 
 import hashlib

@@ -80,3 +80,11 @@ def test_the_api_pages_render_what_the_guide_tells_users_to_call_on_combinations
     from solvi.memory import CorrectionMemory
     for name in ("save", "load", "load_dict", "to_dict", "apply"):
         assert getattr(CorrectionMemory, name).__doc__, name
+
+
+def test_the_llm_docs_give_the_measured_advice_not_the_llm_as_the_last_stage_of_a_cascade():
+    """solvi.llm's docstring and the guide's first LLM sample recommended "the LLM as the last, most expensive stage"
+    of a Cascade, against the guide's own measurement ("Do not make 'a small model first, the LLM second' the default")."""
+    import solvi.llm
+    assert "last" not in solvi.llm.__doc__.split("Cost and latency")[1] and "most expensive stage" not in solvi.llm.__doc__
+    assert "Cascade([small, large, part])" not in GUIDE
