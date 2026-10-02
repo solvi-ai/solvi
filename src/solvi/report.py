@@ -427,7 +427,7 @@ def _period_md(d):
     if d["changes"]:
         L += ["", "Changes:", ""]
         for c in d["changes"]:
-            L.append(f"- {md(c['what'])} {md(str(c['from'])[:16])} → {md(str(c['to'])[:16])} from #{c['seq']} "
+            L.append(f"- {md(c['what'])} {md(str(c['from'])[:16])} → {md(str(c['to'])[:16])} from #{md(c['seq'])} "
                      f"({md(c['id'])}, {md(c['time'])})")
     else:
         L.append("- no change of the catalog or of a model over the period")
@@ -601,6 +601,6 @@ def _period_html(d):
              + "".join(f"<li>model <code>{h(m)}</code>: {n} decision(s)</li>" for m, n in d["in_use"]["models"].items())
              + "</ul>")
     B.append("<ul>" + "".join(f"<li>{h(c['what'])} <code>{h(str(c['from'])[:16])}</code> → <code>{h(str(c['to'])[:16])}</code>"
-                              f" from #{c['seq']} (<code>{h(c['id'])}</code>, {h(c['time'])})</li>" for c in d["changes"])
+                              f" from #{h(c['seq'])} (<code>{h(c['id'])}</code>, {h(c['time'])})</li>" for c in d["changes"])
              + "</ul>" if d["changes"] else "<p>No change of the catalog or of a model over the period.</p>")
     return "\n".join(B)

@@ -289,3 +289,12 @@ def test_report_stays_english_for_a_system_in_another_language():
     d = res.report(format="data")
     assert not re.search("[а-яА-Я]", json.dumps(d, ensure_ascii=False))
     assert not re.search("[а-яА-Я]", res.report()) and not re.search("[а-яА-Я]", res.report(format="html"))
+
+
+def test_period_report_escapes_a_stored_seq_that_is_not_a_number(store):
+    from solvi.report import period, render
+    data = period(store)
+    evil = "<img src=x onerror=alert(2)>"
+    data["changes"] = [{"what": "catalog", "from": "a" * 16, "to": "b" * 16, "id": "r1", "seq": evil, "time": "t"}]
+    assert evil not in render(data, "html") and "&lt;img src=x" in render(data, "html")
+    assert evil not in render(data, "md")
