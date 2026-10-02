@@ -278,7 +278,31 @@ class LongMemory:
         self.data = {"episodes": 0, "items": {}}      # context → key → {"score", "n", "last", "why"}
         self.episode = None
         if self.path and self.path.exists():
-            self.data = json.loads(self.path.read_text(encoding="utf-8"))
+            self.data = self._read(self.path)
+
+    @staticmethod
+    def _read(path):
+        """The memory file at path, checked: a JSON file of another kind is refused here (ValueError), not later as a
+        KeyError deep in `scores` or `begin`."""
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except (ValueError, UnicodeDecodeError) as e:
+            raise ValueError(f"{path} is not a LongMemory file: it is not JSON ({e})") from None
+        why = None
+        if not isinstance(data, dict) or not isinstance(data.get("items"), dict) \
+                or type(data.get("episodes")) is not int:
+            why = 'it has no "episodes" count and "items" table'
+        else:
+            for ctx, keys in data["items"].items():
+                bad = next((k for k, v in keys.items() if not isinstance(v, dict) or type(v.get("n")) is not int
+                            or type(v.get("score")) not in (int, float)), None) if isinstance(keys, dict) else ctx
+                if bad is not None:
+                    why = f"item {bad!r} of context {ctx!r} has no numeric score and count"
+                    break
+        if why:
+            raise ValueError(f"{path} is not a LongMemory file: {why} (written by LongMemory.save: "
+                             '{"episodes": n, "items": {context: {key: {"score", "n", "last", "why"}}}})')
+        return data
 
     @staticmethod
     def _ctx(c):
