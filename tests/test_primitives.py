@@ -729,8 +729,32 @@ def test_a_wrong_number_is_not_verified_by_a_longer_number_that_contains_it():
     ok = build(30, "30").ask(doc)
     assert (ok["short"].answer, ok["short"].status) == ("no", "ok")
     assert ok.trace.records[0].extra["evidence"] == [[26, 28, "doc", "30"]] and ok.trace.replay(build(30, "30"))["ok"]
-    by_offsets = build(3, Quote("3", 26, 27)).ask(doc)             # a Quote says where it points: checked literally there
-    assert by_offsets["short"].answer == "yes"
+    by_offsets = build(3, Quote("3", 26, 27)).ask(doc)             # a Quote's offsets inside the number 30: not "3"
+    assert (by_offsets["short"].status, by_offsets["short"].answer) == ("abstain", None)
+    assert "not grounded: evidence '3' is not the text at doc[26:27] ('30')" in by_offsets.trace.records[0].error
+    assert build(30, Quote("30", 26, 28)).ask(doc)["short"].answer == "no"
+
+
+def test_a_model_quote_with_offsets_inside_a_number_is_rejected():
+    from solvi.core import cuts_number
+    t = "Fee 3.5, total 1,300 and 30 or 3; Chinatown"
+    assert cuts_number(t, 4, 5) and cuts_number(t, 6, 7) and cuts_number(t, 17, 20) and cuts_number(t, 25, 26)
+    assert not cuts_number(t, 4, 7) and not cuts_number(t, 15, 20) and not cuts_number(t, 25, 27) \
+        and not cuts_number(t, 31, 32) and not cuts_number(t, 34, 39)                # a word may be cut: only numbers
+
+    class M:
+        model_id, version, deterministic = "m", "1", False
+    cat = Catalog()
+
+    @cat.extract(model=M())
+    def minutes(doc: str):
+        return Quote(3, 26, 27)
+
+    @cat.rule("short")
+    def short(minutes) -> bool:
+        return minutes < 10
+    res = System(cat, [Question("short", "short?", Answer.yes_no())]).ask({"doc": "North Beach to Chinatown: 30."})
+    assert res["short"].status == "abstain" and "is not the text at [26:27] ('30')" in res.trace.records[0].error
 
 
 def test_a_typed_span_does_not_read_an_ambiguous_number():

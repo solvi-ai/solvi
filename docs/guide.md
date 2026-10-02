@@ -407,7 +407,8 @@ def repair_days(doc: str) -> Estimate[0, 3, 7, 14]:
   offsets — or a string, located in `source` (default: the part's only given text input, else `doc`) at its first
   occurrence as whole words and numbers: `"3"` is not evidence when the text says `30`, `3.5` or `1,300`, nor `"cat"`
   when it says `category` (`"30"` is found in `30.` and `30%`); to quote a part of a word, give a `Quote` with its
-  offsets. Evidence must point into **given** text facts. An output whose evidence is not in its text is **rejected** like an
+  offsets. A `Quote` whose offsets begin or end inside a number (`Quote("3", 26, 27)` over `30`) is not that number
+  and is rejected — the same holds for a model-backed part's own quote. Evidence must point into **given** text facts. An output whose evidence is not in its text is **rejected** like an
   ungrounded quote (not downgraded): the fact is missing, the next producer runs (a fallback), else the answer abstains —
   safeguard **grounding rejected**. Accepted evidence is recorded in the trace (`record.extra["evidence"]`, hashed and
   replayed), returned as `result.evidence`, shown in the audit (`evidence  doc[37:44] 'cracked'  verified`) and counted in

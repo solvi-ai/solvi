@@ -187,6 +187,17 @@ def find_whole(text, t):
     return -1
 
 
+def cuts_number(t, i, j):
+    """Does t[i:j] begin or end inside a longer number written in t? A quote [26:27] of "30" is the "3" of "30", one of
+    "3.5" or "1,300" is part of that number. (Words are not held to this: a quote with offsets may end inside a word.)"""
+    if not 0 <= i < j <= len(t):
+        return False
+    left = t[i].isdigit() and i > 0 and (t[i - 1].isdigit() or (t[i - 1] in ".," and i > 1 and t[i - 2].isdigit()))
+    right = t[j - 1].isdigit() and j < len(t) and (
+        t[j].isdigit() or (t[j] in ".," and j + 1 < len(t) and t[j + 1].isdigit()))
+    return left or right
+
+
 def locate(part, v, init_state):
     """A Claim's / Decision's evidence with every item as a Quote: a string is located in the output's source text —
     Claim.source, else the part's `source`, else "doc" if the part reads it, else its only given text input, else "doc" —
@@ -234,7 +245,19 @@ def check_evidence(evidence, init_state):
         if matches(str(e.value), src[e.start:e.end]) is False:
             return (f"{NOT_GROUNDED}: evidence {_short(e.value)!r} is not the text at {e.source}[{e.start}:{e.end}] "
                     f"({_short(src[e.start:e.end])!r})")
+        if cuts_number(src, e.start, e.end):          # Quote("3", 26, 27) over "30": the text there is "3", but the
+            return (f"{NOT_GROUNDED}: evidence {_short(e.value)!r} is not the text at {e.source}[{e.start}:{e.end}] "   # number
+                    f"({_short(_number_around(src, e.start, e.end))!r})")                                               # is 30
     return None
+
+
+def _number_around(t, i, j):
+    """t[i:j] widened to the whole number it cuts (for the rejection message)."""
+    while i > 0 and (t[i - 1].isdigit() or (t[i - 1] in ".," and i > 1 and t[i - 2].isdigit())):
+        i -= 1
+    while j < len(t) and (t[j].isdigit() or (t[j] in ".," and j + 1 < len(t) and t[j + 1].isdigit())):
+        j += 1
+    return t[i:j]
 
 
 PRIMITIVES = ("span", "rank", "estimate")         # answer kinds resolved by solvi.primitives (with their value's details)
@@ -526,8 +549,10 @@ def ground(part, v, init_state=None):
             src = init_state.get(v.source, "")
             if not (isinstance(src, str) and 0 <= v.start <= v.end <= len(src)):
                 return QUOTE_OUTSIDE
-            if part.strict() and v.value is not None and matches(v.value, src[v.start:v.end]) is False:
-                return f"{NOT_GROUNDED}: {_short(v.value)!r} is not the text at [{v.start}:{v.end}] ({_short(src[v.start:v.end])!r})"
+            if part.strict() and v.value is not None and (matches(v.value, src[v.start:v.end]) is False
+                                                           or cuts_number(src, v.start, v.end)):
+                return (f"{NOT_GROUNDED}: {_short(v.value)!r} is not the text at [{v.start}:{v.end}] "
+                        f"({_short(_number_around(src, v.start, v.end))!r})")
     elif isinstance(v, Decision) or part.options is not None:
         value = v.value if isinstance(v, Decision) else v
         opts = part.options if part.options is not None else list(v.probs)
