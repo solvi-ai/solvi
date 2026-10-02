@@ -436,7 +436,7 @@ Results, records, traces, questions, answer types and responses have a pydantic-
 
 ```python
 res.model_dump()                   # Python data (dates, enums, models as they are)
-res.model_dump("json") / res.to_json()
+res.model_dump("json")             # JSON-ready data; res.to_json() gives the text
 Response.from_json(text, catalog=system)     # typed values restored from the facts' types; the trace still replays
 Response.model_json_schema()       # the JSON schema of any response
 system.response_schema()           # ... with each question's answer as its closed set of options
@@ -2736,14 +2736,31 @@ parameter is not an argument. Tested with pydantic-ai 2.51.
 ### LangGraph
 
 ```python
+from langchain_core.messages import HumanMessage
+from langchain_core.tools import tool
 from langgraph.checkpoint.memory import InMemorySaver
+from langgraph.graph import START, MessagesState, StateGraph
+from langgraph.prebuilt import tools_condition
 from langgraph.types import Command
 from solvi.agents.langgraph import guarded_tool_node
 
+
+class State(MessagesState):
+    role: str
+    spent: float
+
+
 tools = guarded_tool_node([tool(send_payment), tool(search_invoices)], guard,
                           facts=lambda state: {"role": state["role"], "spent_today": state["spent"]})
-graph = builder.add_node("tools", tools)...compile(checkpointer=InMemorySaver())
-out = graph.invoke({"messages": [HumanMessage("Please pay INV-7.")]}, cfg)
+builder = StateGraph(State)
+builder.add_node("agent", agent)                             # your model node, which proposes the tool calls
+builder.add_node("tools", tools)
+builder.add_edge(START, "agent")
+builder.add_conditional_edges("agent", tools_condition)
+builder.add_edge("tools", "agent")
+graph = builder.compile(checkpointer=InMemorySaver())        # escalate → interrupt: it needs a checkpointer
+cfg = {"configurable": {"thread_id": "inv-7"}}
+out = graph.invoke({"messages": [HumanMessage("Please pay INV-7.")], "role": "clerk", "spent": 0.0}, cfg)
 if "__interrupt__" in out:                                   # an escalated call: out["__interrupt__"][0].value["solvi"]
     ask = out["__interrupt__"][0].value                      # {"solvi", "id", "args_hash", "key", "reasons"}
     out = graph.invoke(Command(resume={"approved": True, "id": ask["id"], "key": ask["key"]}), cfg)

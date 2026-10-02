@@ -88,3 +88,19 @@ def test_the_llm_docs_give_the_measured_advice_not_the_llm_as_the_last_stage_of_
     import solvi.llm
     assert "last" not in solvi.llm.__doc__.split("Cost and latency")[1] and "most expensive stage" not in solvi.llm.__doc__
     assert "Cascade([small, large, part])" not in GUIDE
+
+
+def test_every_python_block_in_the_docs_is_python():
+    """Two guide blocks were not Python: `res.model_dump("json") / res.to_json()` (a TypeError when pasted) and the
+    LangGraph `...compile(` line (a SyntaxError)."""
+    import ast
+    bad = []
+    for path in [ROOT / "README.md", *sorted((ROOT / "docs").glob("*.md"))]:
+        text = path.read_text()
+        for m in re.finditer(r"```python\n(.*?)```", text, re.S):
+            try:
+                ast.parse(m.group(1))
+            except SyntaxError as e:
+                bad.append(f"{path.name}:{text[:m.start()].count(chr(10)) + 1}: {e}")
+    assert not bad, "\n".join(bad)
+    assert 'res.model_dump("json") / res.to_json()' not in GUIDE
