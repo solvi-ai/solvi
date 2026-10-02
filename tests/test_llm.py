@@ -613,3 +613,18 @@ def test_a_maybe_span_answer_from_an_llm_replays_and_a_changed_one_does_not():
     rec = next(x for x in res.trace.records if x.model)
     rec.value = "the laws of the State of Texas"                 # edited after the fact: the quote no longer matches
     assert not res.trace.replay(cat)["ok"]
+
+
+def test_max_len_widens_what_an_llm_reads_under_retrieve_and_the_default_stays_512():
+    """llm() had no documented way to read more than 512 tokens per request under long="retrieve"."""
+    doc = "\n\n".join(f"# Part {i}\n" + " ".join(f"word{i}x{j}" for j in range(100)) for i in range(20))
+    reply = json.dumps({"answer": "word3x5", "confidence": 0.9, "quote": ""})
+    narrow, wide = FakeLLM(reply=reply), FakeLLM(reply=reply)
+    a = model(narrow).decision("w", "Which word?", "doc", Span[str], long="retrieve")
+    b = model(wide, max_len=3000).decision("w", "Which word?", "doc", Span[str], long="retrieve")
+    assert a.model.max_len == 512 and b.model.max_len == 3000 and b.budget() > 5 * a.budget()
+    a.decide(doc), b.decide(doc)
+    assert len(_text(wide.bodies[-1])) > 5 * len(_text(narrow.bodies[-1]))
+    assert a.fingerprint() != b.fingerprint() and "max_len" not in model(FakeLLM()).meta
+    with pytest.raises(ValueError, match="max_len"):
+        model(FakeLLM(), max_len="3000")

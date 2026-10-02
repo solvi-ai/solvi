@@ -714,7 +714,8 @@ MODES = ["single", "multi", "score", "noul", "span"]
 
 
 def llm(base_url, model, api_key=None, *, timeout=60.0, retries=2, backoff=1.0, response_format="auto", logprobs="auto",
-        ask="probabilities", max_tokens=512, seed=None, headers=None, extra_body=None, workers=4, opener=None, sleep=None):
+        ask="probabilities", max_tokens=512, seed=None, headers=None, extra_body=None, workers=4, opener=None, sleep=None,
+        max_len=None):
     """A DecideModel over an OpenAI-compatible chat-completions server (see the module docs).
 
     base_url: the API root ("https://api.openai.com/v1", "https://openrouter.ai/api/v1", "http://127.0.0.1:8000/v1" for
@@ -738,7 +739,15 @@ endpoint"), or one of them. logprobs: "auto" (ask for them;
 
     workers: parallel requests for the inputs of one part.decide([...]) / calibration call (the questions of one
     System.ask go one after another). opener: a replacement for urllib's urlopen
-    (tests, proxies); sleep: for the backoff (tests)."""
+    (tests, proxies); sleep: for the backoff (tests).
+
+    max_tokens: the reply's limit (default 512). A reasoning model's thinking counts against it on most servers, and a
+    reply cut off at the limit escalates ("the reply was cut off (max_tokens)"): with reasoning on, raise it (1,500-4,000)
+    and the timeout. max_len: the tokens one request reads under long="retrieve" (words and punctuation × 1.3, the
+    question included; default None: 512, as for a local decider). A text up to that length is sent whole; a longer
+    one, with long="retrieve", is read by its best sections within it — max_len=3000 reads about six times more of a
+    contract per request (and pays for it). Without long= the whole text is always sent. It enters the fingerprint
+    (through the part's long-text settings)."""
     sc = LLMScorer(base_url, model, api_key, timeout=timeout, retries=retries, backoff=backoff,
                    response_format=response_format, logprobs=logprobs, ask=ask, max_tokens=max_tokens, seed=seed,
                    headers=headers, extra_body=extra_body, workers=workers, opener=opener, sleep=sleep)
@@ -746,6 +755,10 @@ endpoint"), or one of them. logprobs: "auto" (ask for them;
             "noul_labels": ["yes", "no"], "state_serialization": ["paths", "tree", "json"], "act": None,
             "unknown": {"label": NOT_STATED}, "pointer": {"evidence": {"threshold": 0.0, "max_spans": 1}},
             "llm": {"endpoint": sc.endpoint, "model": model, "template": sc.template}}
+    if max_len is not None:                           # absent: 512, and the meta hashes as before
+        if isinstance(max_len, bool) or not isinstance(max_len, int) or max_len < 64:
+            raise ValueError(f"max_len must be a number of tokens of at least 64, not {max_len!r}")
+        meta["max_len"] = max_len
     m = DecideModel(sc, meta=meta, model_id=sc.model_id, backend="llm")
     m.deterministic = False                           # replay checks the recorded output instead of calling the LLM again
     return m

@@ -616,7 +616,8 @@ least 3 — 3 at `max_len` 512, 6 at 1024, 12 at 2048; an explicit `top_k` wins.
 reports with solvi-large: `max_len` 1024 or 2048 did not raise accuracy over 512 (73% either way; yes / no / not-stated
 questions gained 2–4 points, value questions lost 4–8) and made quotes slightly worse at 2048; CPU time grows with the
 tokens read — about 1.6× at 1024 and 3.2× at 2048. Keep 512 for solvi-large. A larger budget pays off only for a model
-trained on long inputs (next paragraph).
+trained on long inputs (next paragraph), or for an LLM: `llm(..., max_len=3000)` reads up to 3,000 tokens per request
+under `long="retrieve"` (counted as words × 1.3; default 512, as for a local decider).
 
 **Reading whole: `long="full"`.** A checkpoint trained on long inputs declares how much it reads whole — `max_len_long`
 in its `solvi_decide.json` ([decide_format.md](decide_format.md)); `m.long_len` shows it. With `long="full"` a text that
@@ -948,7 +949,10 @@ error. An LLM's output is not reproducible bit for bit, so `replay` does not cal
 every request — on OpenRouter, `{"provider": {"order": ["groq"], "allow_fallbacks": False}}` pins the provider (the
 same name can be served by several, with different quantization and behaviour) and `{"reasoning": {"effort": "low"}}`
 sets reasoning. It cannot set what solvi sets itself (the messages, the reply format, logprobs, the model, temperature,
-max_tokens, seed): those raise `ValueError`. It enters the fingerprint.
+max_tokens, seed): those raise `ValueError`. It enters the fingerprint. With reasoning on, raise `max_tokens` (default
+512) and `timeout` (default 60 s): the thinking counts against `max_tokens` on most servers, and a reply cut off there
+escalates ("the reply was cut off (max_tokens)"). Under `long="retrieve"` an LLM reads 512 tokens per request by
+default; `max_len=` widens that (see "A larger budget").
 
 **Cost and latency.** Each question about each input is a paid request — the question, every option with its
 description and the whole text, a few hundred tokens or more — and takes 0.3–5 s, where a local decider takes ~50 ms on
