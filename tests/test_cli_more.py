@@ -634,3 +634,34 @@ def test_models_check_names_a_missing_folder_and_takes_a_decider_with_only_decis
     assert code == 0 and data["id"] == "OnlyDecision" and data["fingerprint"] is None
     assert "solvi-ai/solvi-large-long" in models.PUBLISHED
     assert "files" not in (models.cached.__doc__ or "")
+
+
+def _stored_project(tmp_path, capsys):
+    d = scaffold(tmp_path, "minimal")
+    code, _ = run(capsys, "ask", f"{d}/catalog.py:system", d / "example.json", "--store", d / "decisions.db")
+    assert code == 0
+    return d, f"{d}/catalog.py:system", str(d / "decisions.db")
+
+
+def test_usage_errors_exit_with_status_2_and_a_message_not_a_traceback(tmp_path, capsys, monkeypatch):
+    d, system, store = _stored_project(tmp_path, capsys)
+    monkeypatch.chdir(d)
+    (d / "adir").mkdir()
+    for argv, said in ((["ask", "no_such_module_zz:system", "example.json"], "no module named"),
+                       (["verify", store, "--anchor", "abc"], "--anchor"),
+                       (["replay", store, "--system", system, "--since", "garbage"], "--since"),
+                       (["diff", store, "--system", system, "--until", "garbage"], "--until"),
+                       (["report", store, "--html", "no/such/dir/out.html"], "out.html"),
+                       (["verify", store, "--sign", "no/such/dir/sig.json"], "sig.json"),
+                       (["verify", "adir"], "adir"),
+                       (["serve", system, "--log-level", "bogus"], "--log-level")):
+        capsys.readouterr()
+        try:
+            code = main(argv)
+        except SystemExit as e:
+            code = e.code
+        err = capsys.readouterr().err
+        assert code == 2 and said in err and "Traceback" not in err, (argv, code, err)
+    (d / "broken.py").write_text("import nothing_like_this_zz\n")       # an error inside the user's module is theirs
+    with pytest.raises(ModuleNotFoundError):
+        main(["check", "broken.py:system"])

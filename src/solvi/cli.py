@@ -87,7 +87,20 @@ def _filters(a):
         v = getattr(a, k, None)
         if v is not None:
             f[k] = v
+    _check_when(a)
     return f
+
+
+def _check_when(a):
+    """--since / --until that cannot be read as a time are usage errors."""
+    from .storage import _when
+    for k in ("since", "until"):
+        v = getattr(a, k, None)
+        if v is not None:
+            try:
+                _when(v)
+            except (ValueError, TypeError) as e:
+                _fail(f"--{k} {v}: not a time ({e}); write an ISO date or time (2026-09-01, 2026-09-01T12:00)")
 
 
 def _dump(obj):
@@ -99,6 +112,8 @@ def cmd_verify(a):
     anchor = None
     if a.anchor:
         n, _, h = a.anchor.partition(":")
+        if not n.isdigit() or not h:
+            _fail(f"--anchor {a.anchor}: expected COUNT:HASH (a head() kept elsewhere)")
         anchor = {"count": int(n), "hash": h}
     store = _store(a.store)
     sig = None
@@ -170,6 +185,7 @@ def cmd_report(a):
             _fail(str(e.args[0]))
         data = decision(res, system=system, replay="trusted" if system is not None else False)
     else:
+        _check_when(a)
         f = {k: getattr(a, k) for k in ("status", "safeguard", "model") if getattr(a, k, None) is not None}
         data = period(store, a.since, a.until, a.question, a.examples, system, **f)
     if a.json:
@@ -382,9 +398,13 @@ def main(argv=None):
         a = p.parse_args(argv)
     except SystemExit as e:                            # --help: 0; usage errors: 2 — returned, not raised
         return e.code if isinstance(e.code, int) else 2
-    return {"verify": cmd_verify, "replay": cmd_replay, "diff": cmd_diff, "serve": cmd_serve,
-            "check": cmd_check, "report": cmd_report, "ask": cmd_ask, "calibrate": cmd_calibrate, "models": cmd_models,
-            "init": cmd_init}[a.cmd](a)
+    try:
+        return {"verify": cmd_verify, "replay": cmd_replay, "diff": cmd_diff, "serve": cmd_serve,
+                "check": cmd_check, "report": cmd_report, "ask": cmd_ask, "calibrate": cmd_calibrate,
+                "models": cmd_models, "init": cmd_init}[a.cmd](a)
+    except OSError as e:                               # a path that cannot be read or written: usage, not a finding
+        print(f"solvi: {e.filename}: {e.strerror}" if e.filename and e.strerror else f"solvi: {e}", file=sys.stderr)
+        return 2
 
 
 if __name__ == "__main__":

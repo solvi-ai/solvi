@@ -1181,7 +1181,8 @@ def add_parser(sub):
     s.add_argument("--model-name", help="the model name System One answers carry (default: the decider's id)")
     s.add_argument("--host", default="127.0.0.1")
     s.add_argument("--port", type=int, default=8000)
-    s.add_argument("--log-level", default="info")
+    s.add_argument("--log-level", default="info", choices=["critical", "error", "warning", "info", "debug", "trace"],
+                   help="uvicorn's log level (default info)")
     d = Limits()
     s.add_argument("--token", help="require `Authorization: Bearer TOKEN` on every HTTP request (default: "
                                    "$SOLVI_SERVE_TOKEN; prefer the variable: arguments are visible to other local users)")

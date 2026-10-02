@@ -39,7 +39,13 @@ def load_module(spec):
         s.loader.exec_module(mod)
     else:
         sys.path.insert(0, os.getcwd())
-        mod = importlib.import_module(mod_name)
+        try:
+            mod = importlib.import_module(mod_name)
+        except ModuleNotFoundError as e:               # the named module itself (an import inside it passes through)
+            if e.name and (mod_name == e.name or mod_name.startswith(e.name + ".")):
+                raise LoadError(f"no module named {mod_name!r} (looked in the current folder and on the Python "
+                                "path)") from None
+            raise
     if not hasattr(mod, attr):
         raise LoadError(f"{mod_name} has no attribute {attr!r}")
     obj = getattr(mod, attr)
