@@ -1923,7 +1923,7 @@ the ridge head on every feature. Accuracy is a poor guide when one answer is mos
 no fact. The selection by squared error keeps the facts that matter for a rare answer too. On very few examples (a few
 dozen) choosing among many facts overfits: pass `select=False` there. `benchmarks/fast_head.py` compares the selection
 with every fact on the example tasks — accuracy on fresh examples and the fitting time; re-run it on your own data.
-`fit_fast(...)` still works in 0.8, with a DeprecationWarning: it is `fit(..., select=False)`; it goes in 0.9.
+`fit_fast(...)` still works in 0.8, with a SolviDeprecationWarning: it is `fit(..., select=False)`; it goes in 0.9.
 
 Its other property is online learning: `system.teach(question, init_state, correct)` updates the head immediately with
 a rank-one Sherman–Morrison step (about 0.1–0.2 ms: `benchmarks/fast_head.py`, `examples/10_learn_in_milliseconds.py`) and returns the time in ms. Other questions, rules and hard checks

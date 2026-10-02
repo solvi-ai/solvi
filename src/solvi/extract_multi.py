@@ -3,7 +3,7 @@ For solvi: extractor.field(name) returns a function doc → Quote; all fields of
 
 The extractor protocol it shares with solvi.extract_long.LongSpanExtractor: fit(items), predict(text, field),
 field(name[, description]), save(path) / load(path), fingerprint(). items here are [(text, {field: (start, end) |
-None})]; 0.7's fit(docs, spans) and predict_doc(text) still work with a DeprecationWarning."""
+None})]; 0.7's fit(docs, spans) and predict_doc(text) still work with a SolviDeprecationWarning."""
 from __future__ import annotations
 
 import hashlib

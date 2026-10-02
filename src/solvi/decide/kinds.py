@@ -55,7 +55,7 @@ NULL_SOURCE = "text"                            # the source of a pointer quote 
 
 
 def _spec_names(fn):
-    """`not_stated=` is the name; `unknown=` (0.7) still works with a DeprecationWarning. The internal spec keeps
+    """`not_stated=` is the name; `unknown=` (0.7) still works with a SolviDeprecationWarning. The internal spec keeps
     `unknown` (stored adaptations and calibration files carry that key)."""
     where = fn.__qualname__
 

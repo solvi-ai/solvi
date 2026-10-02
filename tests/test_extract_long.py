@@ -7,7 +7,7 @@ import types
 import numpy as np
 import pytest
 
-from solvi import Catalog, Question, System
+from solvi import Catalog, Question, SolviDeprecationWarning, System
 from solvi.extract_long import LongSpanExtractor
 
 
@@ -182,7 +182,7 @@ def test_extract_model_is_a_deprecated_alias_of_the_long_extractor_that_warns_on
     from solvi.extract_long import LongSpanExtractor
     sys.modules.pop("solvi.extract_model", None)
     _deprecate._seen.discard("solvi.extract_model.SpanExtractor")
-    with pytest.warns(DeprecationWarning, match="solvi.extract_long.LongSpanExtractor"):
+    with pytest.warns(SolviDeprecationWarning, match="solvi.extract_long.LongSpanExtractor"):
         mod = importlib.import_module("solvi.extract_model")
     assert mod.SpanExtractor is LongSpanExtractor
 

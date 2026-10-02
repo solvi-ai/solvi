@@ -50,7 +50,7 @@ note `mutual_producers` for a System with a strategist (an error, `cycle`, only 
 cannot plan it).
 
 (`CostStrategist` was `ModelStrategist()` without a model up to 0.7; that spelling still works, with a
-DeprecationWarning, and so do its options `fallback=` / `fallbacks=`, now `on_failure=` / `keep_alternatives=`.)
+SolviDeprecationWarning, and so do its options `fallback=` / `fallbacks=`, now `on_failure=` / `keep_alternatives=`.)
 
 Everything that plans for a System uses its strategist, not only `ask`: `answers_of` / replay, `facts_for` and so the
 feature candidates of `fit`, `learn_order`, the input schemas of `solvi serve` and `solvi check`.

@@ -9,7 +9,7 @@ import sys
 
 import pytest
 
-from solvi import Answer, Catalog, Decision, JSONLStorage, Question, SQLiteStorage, System
+from solvi import Answer, Catalog, Decision, JSONLStorage, Question, SQLiteStorage, SolviDeprecationWarning, System
 from solvi.storage import record_hash
 
 
@@ -625,7 +625,7 @@ def test_journal_is_a_jsonl_store(tmp_path):
     with open(path, "w") as fh:                           # a line written by solvi 0.5 before the chain
         fh.write(json.dumps({"init_hash": "x", "answers": {"approve": [True, 1.0, "ok"]}, "flow": [], "records": []}) + "\n")
     cat, qs = build()
-    with pytest.warns(DeprecationWarning, match=r"System\(journal=\) is deprecated: use storage=JSONLStorage\(path\)"):
+    with pytest.warns(SolviDeprecationWarning, match=r"System\(journal=\) is deprecated since 0.8 and will be removed in 0.9: use storage=JSONLStorage\(path\)"):
         s = System(cat, qs, journal=str(path))
     assert isinstance(s.storage, JSONLStorage) and s.storage.path == str(path)
     r = s.ask(STATES[0])

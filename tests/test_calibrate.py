@@ -4,7 +4,7 @@ import random
 
 import pytest
 
-from solvi import Answer, Catalog, Question, System
+from solvi import Answer, Catalog, Question, SolviDeprecationWarning, System
 
 
 def _rule_system(**kw):
@@ -66,7 +66,7 @@ def test_calibrate_takes_examples_as_fit_does_and_the_0_7_form_with_a_warning():
     [(state, answer)]; the 0.7 form still works for one release."""
     held, truth, _ = _held_out(0.8, 7)
     new = _rule_system().calibrate("q", list(zip(held, truth)))
-    with pytest.warns(DeprecationWarning, match=r"calibrate\(question, \[\(state, answer\), \.\.\.\]\)"):
+    with pytest.warns(SolviDeprecationWarning, match=r"calibrate\(question, \[\(state, answer\), \.\.\.\]\)"):
         assert _rule_system().calibrate("q", held, truth) == pytest.approx(new)
     with pytest.raises(ValueError, match="300 examples and 2 correct answers"):
         _rule_system().calibrate("q", held, truth[:2])                  # warned once already

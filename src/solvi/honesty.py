@@ -56,7 +56,7 @@ ABSTAIN = None                                    # a gold answer of null: the h
 def load_set(path):
     """A honesty set (JSON) → its dict, with "path" and "task" (the task module's path) resolved. A case's right answers
     are its "expected", as in a `solvi test` cases.json (null or "abstain": the honest outcome is to abstain), so one file
-    serves both commands. "gold", the 0.7 key, is still read (DeprecationWarning; removed in 0.9); a case with both is
+    serves both commands. "gold", the 0.7 key, is still read (SolviDeprecationWarning; removed in 0.9); a case with both is
     an error."""
     path = Path(path)
     data = json.loads(path.read_text())

@@ -991,7 +991,7 @@ class DecideModel:
         head), and kind= that contradicts multi=True.
 
         Names (0.8): min_confidence= (0.7: escalate_below=), min_act= (act_threshold=), max_error= (target_error=),
-        not_stated= (unknown=) — the old ones work with a DeprecationWarning until 0.9; the part keeps the thresholds as
+        not_stated= (unknown=) — the old ones work with a SolviDeprecationWarning until 0.9; the part keeps the thresholds as
         `part.min_confidence` / `part.min_act`."""
         escalate_below, act_threshold, target_error, unknown = min_confidence, min_act, max_error, not_stated
         given = {"score_value": score_value, "k": k, "bins": bins, "unit": unit, "coverage": coverage, "other": other,
@@ -1063,7 +1063,7 @@ class DecideModel:
         an Enum, Scale[...], list[Literal[...]]), its description the task (else its title, else its name), and
         `json_schema_extra` may carry "options" ({option: description}), "min_confidence", "min_act", "use_act",
         "max_error", "other", "score_value" (the 0.7 keys "escalate_below", "act_threshold", "target_error" still read,
-        with a DeprecationWarning). → {field: DecisionPart} in field order."""
+        with a SolviDeprecationWarning). → {field: DecisionPart} in field order."""
         import typing
 
         from ..typed import Bins, Ordinal, RankOf, SpanOf

@@ -399,7 +399,7 @@ def cmd_calibrate(a):
     else:
         print(f"{a.part}: {len(examples)} labelled examples, method {a.method}, {info.get('signal', 'shared')} signal")
         if a.method == "ltt":
-            print(f"  answered alone      {_pct(info['coverage'])}")
+            print(f"  answered alone      {_pct(info['answered'])}")
             print(f"  error among them    {_pct(info['error'])}   (target ≤ {_pct(a.risk)})")
         else:
             print(f"  answered alone      {_pct(info['answered'])}")

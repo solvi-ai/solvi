@@ -390,6 +390,9 @@ def test_calibrate_command_groups_ltt_and_usage_errors(tmp_path, capsys):
     code, text = run(capsys, "calibrate", f"{d}/catalog.py:system", "route", jl, "--method", "ltt", "--risk", "0.2",
                      "--out", out, "--json")
     assert code in (0, 1) and "answered" in json.loads(text)
+    code, text = run(capsys, "calibrate", f"{d}/catalog.py:system", "route", jl, "--method", "ltt", "--risk", "0.2",
+                     "--out", out)                  # the printed summary reads the 0.8 keys (no deprecation warning)
+    assert code in (0, 1) and "answered alone" in text
     sysspec = f"{d}/catalog.py:system"
     for argv in (["priority", jl], ["nope", jl], ["route", tmp_path / "missing.csv"],
                  ["route", jl, "--method", "ltt", "--groups", "domain"]):

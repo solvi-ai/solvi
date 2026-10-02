@@ -4,7 +4,9 @@
 
 0.8 gives every concept one name, makes the surface smaller and the decider protocol one, puts any model first (an LLM
 through `solvi.llm`, a decision service, or a local checkpoint for offline use), and fixes what an independent audit of
-0.7 found. Most renamed names still work in 0.8 with a `DeprecationWarning` that names the new one; they go in 0.9.
+0.7 found. Most renamed names still work in 0.8 with a warning that names the new one; they go in 0.9. The warning is
+`solvi.SolviDeprecationWarning`, a `FutureWarning`, so Python shows it to you (once per old name per process) in your
+own code too, not only in tests and `__main__` as it would a `DeprecationWarning`.
 Stores, calibration files and fingerprints written by 0.7.1 load, verify and replay unchanged (a test replays stores
 written by 0.7.1).
 
@@ -48,7 +50,10 @@ Removed or changed without a working alias:
   `min_confidence=`; `System.guarantee`, `solvi.guarantee.calibrate` and `OpenSetGate.calibrate` take `max_risk=` /
   `max_error=` only.
 
-Renamed, the old name works in 0.8 with a warning (old → new):
+Renamed, the old name works in 0.8 with a warning (old → new). Every old name warns once per process with
+`solvi.SolviDeprecationWarning` (a `FutureWarning`, shown by Python's default filters): "X is deprecated since 0.8 and
+will be removed in 0.9: use Y". To find them all at once, run your tests with `-W error::solvi.SolviDeprecationWarning`;
+to silence them, `warnings.filterwarnings("ignore", category=solvi.SolviDeprecationWarning)`.
 
 | 0.7 | 0.8 |
 |---|---|
@@ -147,7 +152,7 @@ notice).
   stream are bounded by `alpha` within `horizon` decisions. `DriftMonitor.set_reference(...)`.
 - **`System.fit` is one entry point**: the closed-form ridge head (`FastHead`, taught at once by `teach`, refitted as
   corrections accumulate) with facts selected by the exact leave-one-out error; `select=False` keeps every computable
-  fact. `fit_fast(...)` still works with a DeprecationWarning (it is `fit(..., select=False)`). The given keys are
+  fact. `fit_fast(...)` still works with a SolviDeprecationWarning (it is `fit(..., select=False)`). The given keys are
   feature candidates too, as the guide says.
 - **`ask(early_exit=False)`** (also `aask`, `ask_text`, `aask_text`, and `System(early_exit=)`): compute the whole flow
   although a hard check failed — the answers are the same, and `res.values` and the trace hold every value.
