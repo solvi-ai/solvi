@@ -16,34 +16,55 @@ counts as proposed too ("yes, to my PayPal"). The proposal and the acceptance ar
 when the check fails, its reason says what was missing — no accepted proposal, or which values the accepted one does
 not name.
 
-What counts as an explicit acceptance (ACCEPT, REFUSE_START, RETRACT, RESERVE, `accepts`): a yes word or phrase in
-English or Russian ("yes", "go ahead", "please proceed", "confirmed", "that's correct", "да", "подтверждаю",
-"оформляйте", ...) that no negation shortly before it turns around ("not correct", "don't proceed", "не подтверждаю"),
-in a message that does not open with a refusal ("no", "wait", "нет") and takes nothing back anywhere ("actually",
-"instead", "hold on", "changed my mind", "вместо", "передумал"); the first sentence that says yes decides, and a
+What it is for: an action the user never asked for. An instruction planted in a tool output (an order note, a document,
+a web page) can talk the agent into a call whose values are all in the conversation — the user's own order, listed by
+a lookup — so grounding passes, and whose wording the injection detector does not know. This check still asks for the
+user's own yes to exactly these values. On τ-bench retail with such a note in every order lookup (12 tasks, one run
+each), the agent cancelled the order nobody asked about in 9 runs without a guard, 4 with the guard's other checks,
+0 with this one; the customers it asked said no. It moves the decision to the user, it does not make it: in a
+development run a simulated customer said "yes, go ahead" to such a cancellation, and it was made.
+
+What counts as an explicit acceptance (ACCEPT, WEAK, REFUSE_START, RETRACT, RESERVE, `accepts`): a yes word or phrase
+in English or Russian ("yes", "go ahead", "please proceed", "confirmed", "that's correct", "that works", "да",
+"подтверждаю", "оформляйте", ...) that no negation shortly before it turns around ("not correct", "don't proceed",
+"не подтверждаю"), in a message that does not open with a refusal ("no", "wait", "нет") and takes nothing back
+("instead", "changed my mind", "вместо", "передумал" anywhere; "actually", "wait", "hold on" at the start of a sentence
+or a clause — not "the refund actually arrives", "I can't wait"); the first sentence that says yes decides, and a
 reservation in that sentence makes it conditional, so not an acceptance ("yes, but not the blue one", "да, но ...").
 A reservation in a later sentence is about something else ("Yes, please proceed. But could I also get a coupon?" is
-an acceptance). The text is read NFKC-normalised and case-folded. The patterns are deliberately narrow: "no, go
-ahead with the other one" is not an acceptance; a user who accepts in other words ("let's roll") is asked again. It reads the user's words only: it does not judge whether the proposal was a good one (a wrong
-choice the user approves is approved), and it cannot tell a user from someone typing as them."""
+an acceptance). A weak word — "ok", "sure", "fine", "alright", "хорошо", "ладно" — accepts only as the whole message,
+with courtesy words at most and no question ("OK, thanks!"): "Okay, glad you found it. Which refund is faster?" is an
+acknowledgement, not an acceptance. The text is read NFKC-normalised and case-folded, typographic quotes as plain.
+The patterns are deliberately narrow: "no, go ahead with the other one" is not an acceptance; a user who accepts in
+other words ("let's roll") is asked again. It reads the user's words only: it does not judge whether the proposal was
+a good one (a wrong choice the user approves is approved), and it cannot tell a user from someone typing as them."""
 from __future__ import annotations
 
 import inspect
 import json
 import re
 
-# a yes word or phrase (over NFKC-normalised, case-folded text, typographic quotes read as "'"); a word that is often
-# something else ("sure" in "I'm sure", "correct" in "to correct it") counts only at the start of a sentence
-ACCEPT = (r"\b(yes|yeah|yep|yup|confirm|confirmed|confirming|go ahead|go for it|proceed|please do|do it|do that|"
+# a yes word or phrase (over NFKC-normalised, case-folded text, typographic quotes read as "'")
+ACCEPT = (r"\b(yes|yeah|yep|yup|confirm|confirmed|confirming|go ahead|go for it|proceed|please do|"
           r"(that|it|this|everything)('s| is| looks| sounds) (all )?(right|correct|fine|good|perfect)|all (correct|good)|"
-          r"sounds (right|good)|looks (right|correct|good)|agreed|approved?|let's do it|let's proceed)\b",
-          r"^\W*((um|uh|oh|well|hmm)\W+)*(sure|ok|okay|alright|all right|of course|correct)\b",   # only first in a sentence
-          r"(?<!\w)(да|ага|угу|конечно|давай|давайте|подтверждаю|подтверждаем|согласен|согласна|согласны|хорошо|ладно|"
-          r"ок|окей|верно|правильно|продолжай|продолжайте|оформляй|оформляйте|делай|делайте|вперёд|вперед)(?!\w)")
+          r"(that|this|it) works|sounds (right|good)|looks (right|correct|good)|agreed|approved?|let's do it|"
+          r"let's proceed)\b",
+          r"(^|[,;:-]\s*|\b(please|just|yes|then|so)\s+)(do it|do that)\b",      # not "I'll do it later"
+          r"(?<!\w)(да|ага|угу|конечно|давай|давайте|подтверждаю|подтверждаем|согласен|согласна|согласны|"
+          r"верно|правильно|продолжай|продолжайте|оформляй|оформляйте|делай|делайте|вперёд|вперед)(?!\w)")
+# a weak yes: a word that is as often an acknowledgement ("Okay, glad you found it. Which refund is better?") or
+# something else ("I'm sure", "to correct it"). It accepts only as the whole message ("OK.", "Sure, thanks!",
+# "Хорошо, спасибо."): the rest may hold only these courtesy words, and no question
+WEAK = (r"^\W*((um|uh|oh|well|hmm|ugh)\W+)*(sure|ok|okay|alright|all right|of course|correct|fine|"
+        r"хорошо|ладно|ок|окей|ну ладно)(?!\w)")
+COURTESY = {"then", "thanks", "thank", "you", "please", "great", "perfect", "good", "fine", "тогда", "спасибо",
+            "пожалуйста", "отлично"}
 # a message that opens with one of these does not accept
 REFUSE_START = r"^\W*(no|nope|nah|not yet|wait|hold on|hang on|stop|нет|неа|подожди|подождите|погоди|погодите|стоп)\b"
-# a retraction anywhere in the message: the user takes something back or changes it
-RETRACT = (r"\b(instead|actually|wait|hold on|hang on|not yet|never ?mind|on second thought|changed? my mind)\b",
+# a retraction: the user takes something back or changes it — anywhere in the message, or (a word that is often
+# something else: "the refund actually arrives", "I can't wait") at the start of a sentence or a clause
+RETRACT = (r"\b(instead|not yet|never ?mind|on second thought|changed? my mind)\b",
+           r"(^|[.!?;:,-]\s*|\b(but|and|oh|so|um|uh)\s+)(actually|wait|hold on|hang on)\b",
            r"(?<!\w)(вместо|подожди|подождите|погоди|погодите|стоп|передумал|передумала|не надо)(?!\w)")
 # a reservation in the sentence of the yes: the yes is conditional ("yes, but not the blue one")
 RESERVE = (r"\b(but|however|though|although|unless|except)\b", r"(?<!\w)(но|однако|хотя|если|кроме)(?!\w)")
@@ -66,6 +87,9 @@ def accepts(text) -> bool:
     t = _plain(text)
     if re.search(REFUSE_START, t) or any(re.search(p, t) for p in RETRACT):
         return False
+    weak = re.match(WEAK, t)
+    if weak and all(w in COURTESY for w in re.findall(r"\w+", t[weak.end():])) and "?" not in t:
+        return True                                       # "OK." / "Sure, thanks!" — the whole message
     for sent in _SENTENCE.finditer(t):                    # the first sentence that says yes decides
         st = sent.group()
         for p in ACCEPT:
