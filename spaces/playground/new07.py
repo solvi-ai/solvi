@@ -1,6 +1,6 @@
-"""The "New in 0.7" tab: escalation with a guarantee (act_guard), a vote of two model families under one guarantee, text
+"""The demos of the "New in 0.8" tab (features that came with 0.7 and run on 0.8): escalation with a guarantee (act_guard), a vote of two model families under one guarantee, text
 in (a message → the question it asks and its fields, each with a quote), the agent guard (preview), a verified chart
-(preview), the trace signature (preview), learning from corrections with fit_fast's refit, and reports for people.
+(preview), the trace signature (preview), learning from corrections with fit's refit, and reports for people.
 
 NO MODEL RUNS HERE. Every decider is a keyword stand-in with the decider's contract (one logit per option); the numbers
 show the mechanics, not the quality of any model. With a real checkpoint, `DecideModel.load("<folder or HF id>")` takes
@@ -89,7 +89,7 @@ def has_signature():
 
 
 def has_refit():
-    return "refit" in inspect.signature(System.fit_fast).parameters
+    return "refit" in inspect.signature(System.fit).parameters
 
 
 def needs(feature, version):
@@ -206,9 +206,9 @@ def demo_guard(email, risk=0.10):
     model = stand_in("small", **SMALL)
     part = model.decision("team", TASK, "email", TEAMS)
     calib, test = dataset(1, 300), dataset(2, 1200)
-    info = part.act_guard(calib, risk=risk)
+    info = part.act_guard(calib, max_risk=risk)
     a, e, r = _on_new(part, test)
-    lines = [f"**Escalation with a guarantee** — `part.act_guard(examples, risk={risk:g})` on {info['n']} labelled emails "
+    lines = [f"**Escalation with a guarantee** — `part.act_guard(examples, max_risk={risk:g})` on {info['n']} labelled emails "
              f"(synthetic; one in four mixes two teams' words). The promise: P(answered alone **and** wrong) ≤ {risk:g}, as a "
              "share of all emails, for emails like the examples.",
              "",
@@ -254,12 +254,12 @@ def demo_vote(email, risk=0.10):
     for name, p in (("family A alone", a_part), ("family B alone", b_part)):
         one = Vote([p], rule="all")
         if hasattr(one, "act_guard"):
-            one.act_guard(calib, risk=risk)
+            one.act_guard(calib, max_risk=risk)
         rows.append((name, *_on_new(one, test)))
     if hasattr(vote, "act_guard"):
-        vote.act_guard(calib, risk=risk)
+        vote.act_guard(calib, max_risk=risk)
     rows.append(("vote A + B", *_on_new(vote, test)))
-    lines += [f"Each calibrated with `act_guard(risk={risk:g})` on 300 labelled emails, measured on 600 new ones:", "",
+    lines += [f"Each calibrated with `act_guard(max_risk={risk:g})` on 300 labelled emails, measured on 600 new ones:", "",
               "| | answered alone | error among them | answered and wrong |", "|---|---|---|---|"]
     lines += [f"| {n} | {_pct(a)} | {_pct(e)} | {_pct(r)} |" for n, a, e, r in rows]
     d = vote.decide(email)
@@ -612,7 +612,7 @@ def demo_signature(which, risk=None):
     return "\n".join(lines), json.dumps(detail, indent=1, default=str), "", ""
 
 
-# ---------------------------------------------------------------------------------------------- 8. learning (fit_fast)
+# ---------------------------------------------------------------------------------------------- 8. learning (fit)
 PLANS = ("free", "pro", "enterprise")
 LEARN_FEATURES = ["plan", "hours_waiting", "outage", "users_affected", "waiting_over_a_day"]
 
@@ -667,10 +667,10 @@ def _parse_ticket(text):
 
 
 def demo_learning(ticket_text, risk=None):
-    """fit_fast on the first 10 labelled tickets (all from small outages), then 290 corrections one at a time through
+    """fit on the first 10 labelled tickets (all from small outages), then 290 corrections one at a time through
     teach — with 0.7's refit on doubling and without it — measured on 300 new tickets."""
     if not has_refit():
-        return needs("fit_fast(..., refit=)", "0.7"), "", "", ""
+        return needs("fit(..., refit=)", "0.8"), "", "", ""
     import time
     test = tickets(99, 300)
     first = [t for t in tickets(50, 400) if t[0]["users_affected"] < 50][:10]
@@ -683,10 +683,10 @@ def demo_learning(ticket_text, risk=None):
     curves, refits, systems, times = {}, [], {}, []
     for refit in (2.0, None):
         s = _ticket_desk()
-        s.fit_fast("priority", first, features=LEARN_FEATURES, refit=refit)
+        s.fit("priority", first, features=LEARN_FEATURES, select=False, refit=refit)
         curve, last = [acc(s)], s.heads["priority"].fitted_on
         for i, (x, y) in enumerate(stream, len(first) + 1):
-            ms = s.teach("priority", x, y, source="human", by="desk lead")
+            ms = s.teach("priority", x, y, label_source="human", by="desk lead")
             h = s.heads["priority"]
             if h.fitted_on != last:
                 refits.append((i, ms))
@@ -697,7 +697,7 @@ def demo_learning(ticket_text, risk=None):
                 curve.append(acc(s))
         curves[refit], systems[refit] = curve, s
     times.sort()
-    lines = ["**Learning from corrections** — `system.fit_fast(\"priority\", first_10)` then `system.teach(...)` for each "
+    lines = ["**Learning from corrections** — `system.fit(\"priority\", first_10)` then `system.teach(...)` for each "
              "correction: the head absorbs it at once (a rank-one update), and new in 0.7, each time the number of "
              "examples doubles it fits again on all of them (`refit=2.0`, the default), so the number scales, the "
              "category values and the ridge strength chosen on the first 10 do not stay frozen.", "",
@@ -713,10 +713,10 @@ def demo_learning(ticket_text, risk=None):
     r = res["priority"]
     lines += ["", f"**Your ticket** {ticket}: priority = **{r.answer}** ({r.status}, confidence {r.confidence:.2f}) — "
                   "answered by the head taught above."]
-    lines += ["", "_Synthetic tickets, one run. On this small set the two curves differ by a few points either way; "
-                  "measured on eight tabular sets, a head started on 10 examples and taught to 300 was 5.8 points "
-                  "less accurate than a fresh fit without refit, and within noise of it with refit. The gated learning "
-                  "loop (`System.learning`) and LoRA adapters are experimental and not shown here (LoRA needs torch)._"]
+    lines += ["", "_Synthetic tickets, one run. On this small set the two curves differ by a few points either way. "
+                  "Without refit, what the head chose on the first 10 examples stays frozen however many corrections "
+                  "arrive; with it, the head is fitted again on all of them. The gated learning loop "
+                  "(`System.learning`) and LoRA adapters are experimental and not shown here (LoRA needs torch)._"]
     return "\n".join(lines), str(res.audit("priority")), "", ""
 
 
@@ -733,7 +733,7 @@ DEMOS = {
                     "By region, Europe accounted for 42% of revenue, North America for 35% and Asia-Pacific for 23%. "
                     "Operating margin improved by 3 percentage points to 18%."),
     "Which record changed: trace signature (preview)": (demo_signature, "Rewrite record 4"),
-    "Learning from corrections: fit_fast + teach, refit": (
+    "Learning from corrections: fit + teach, refit": (
         demo_learning, "plan=enterprise, hours_waiting=30, outage=no, users_affected=12"),
     "Report for people (res.report)": (demo_report, "The app crashed while I paid, and now I was charged twice for order 8812."),
 }

@@ -31,7 +31,7 @@ from collections import deque
 
 import numpy as np
 from solvi import System
-from solvi.fast import FastHead, VecFeaturizer
+from solvi.heads import FastHead, VecFeaturizer
 
 from . import econ
 from .brains import (DERIVED, MIL_OPTS, STANCE_OPTS, _arr, _rng_from, _rng_to, _unarr, make_catalog, random_city_state)
@@ -130,7 +130,7 @@ class ValueHead(FastHead):
         self.A = DECAY * self.A + (1 - DECAY) * LAM * np.eye(d)
         self.b = DECAY * self.b
 
-    def update(self, row, answer):
+    def teach(self, row, answer):
         """System.teach: a human says `answer` is right here → observed with reward TEACH_R, used at the next refresh."""
         t0 = time.perf_counter()
         self.observe(self._x(row), answer, TEACH_R)

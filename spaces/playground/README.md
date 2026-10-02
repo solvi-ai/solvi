@@ -17,7 +17,7 @@ from a catalog of Python functions, checks and rules, with a strategist that pla
 hash-chained trace that can be replayed.
 
 This is a **static Space**: [Gradio-Lite](https://www.gradio.app/guides/gradio-lite) (`@gradio/lite` 5.45.0) loads Python
-(Pyodide) into the visitor's browser and installs `solvi==0.7.0` from PyPI there (pinned in `index.html`). There is no server: every decision, including
+(Pyodide) into the visitor's browser and installs `solvi==0.8.0` from PyPI there (pinned in `index.html`). There is no server: every decision, including
 code typed in the Playground, runs on the visitor's machine. The first visit downloads about 35-40 MB (Pyodide, Gradio, pandas,
 numpy/scipy) once; later visits come from the browser cache.
 
@@ -31,7 +31,7 @@ Tabs:
   checked by pydantic; answer primitives — "not stated", a span, evidence quotes, a ranking, an estimate), three for 0.4 (a
   lying model caught by grounding, rules between answers, multi-label + ordinal), nine small tasks and the fifteen gallery
   tasks (13–15: helpers for coding agents, with keyword stand-ins for the deciders). The
-  System is kept while the code is unchanged, so `setup` (e.g. `fit_fast`) runs once and the stats accumulate. The code runs in-process (`sandbox.py`: `exec` in a fresh
+  System is kept while the code is unchanged, so `setup` (e.g. `fit`) runs once and the stats accumulate. The code runs in-process (`sandbox.py`: `exec` in a fresh
   module) with a 5 s time guard (`sys.settrace` on the visitor's own frames), so an infinite loop is stopped.
 - **solvi vs LLM**: cases from the public benchmark ([docs/vs_llm.md](../../docs/vs_llm.md),
   [benchmarks/vs_llm](../../benchmarks/vs_llm)), 15 refund and 15 3-way-match cases picked to be instructive (values at
@@ -44,7 +44,9 @@ Tabs:
   trace, and a tampered copy fails. Below, the benchmark's main table. An honest summary on top: strong LLMs follow
   these rules nearly perfectly and solvi is not more accurate there; the differences are cost, speed, repeatability,
   replay and the guarantee.
-- **New in 0.7**: small live demos, with keyword stand-ins in place of models and a scripted agent (no model runs in
+- **New in 0.8**: the 0.8 highlights (one name per concept, any model as the decider, `System.guarantee`, `Fail` and
+  `solvi.refine`, `decide_set`, `solvi.openset`, `store.redact`, the audit fixes) with a link to the CHANGELOG, then
+  small live demos, with keyword stand-ins in place of models and a scripted agent (no model runs in
   the browser): escalation with a guarantee (`act_guard` on 300 labelled emails: the answered share, the error, the risk
   on new emails, `must_escalate_at_least`, and the guarantee line of the audit; a slider sets the risk), a vote of two
   model families under one guarantee (`solvi.multi.Vote` with `act_guard`: disagreement escalates with both proposals;
@@ -55,7 +57,7 @@ Tabs:
   verified chart (preview: `solvi.charts.chart(text)` → an SVG where every number is quoted from the text; a careless
   proposal checked value by value; replay and an edited record), which record changed (preview: `store.signature()`
   names the one rewritten decision of six after every hash and the head were recomputed), learning from corrections
-  (`fit_fast` on 10 tickets, then 290 `teach` corrections, with 0.7's refit on doubling and without it) and a report for
+  (`fit` on 10 tickets, then 290 `teach` corrections, with 0.7's refit on doubling and without it) and a report for
   people (`res.report()` as Markdown and as the self-contained HTML page). The Playground tab also shows the report of
   every run. Each feature is detected before use: with an older solvi a demo says which version it needs instead of
   failing. The gated learning loop, LoRA adapters and `long="full"` are not shown (experimental, or they need torch or
@@ -78,7 +80,7 @@ Another Space: [solvi arcade](https://huggingface.co/spaces/solvi-ai/arcade).
   up without a code change.
 - `vs_llm.json`: that tab's data (curated cases, the saved answers of every arm on them, the summary table), built by
   `benchmarks/vs_llm/make_playground_bundle.py` (rerun it after the benchmark changes; `--check` says whether it is stale).
-- `new07.py`: the "New in 0.7" demos (pure Python, no gradio; each feature detected before use; `run(name, text, risk)`
+- `new07.py`: the "New in 0.8" tab's demos (pure Python, no gradio; each feature detected before use; `run(name, text, risk)`
   returns the markdown, the audit, the report as Markdown and HTML, and a picture).
 - `audit_view.py`: renders the audit panel from `Response.audit().to_dict()`.
 - `app.py` (entrypoint), `sandbox.py`, `demos.py`, `strategy_demo.py`, `presets/`: the app, ported from the Gradio 6 server

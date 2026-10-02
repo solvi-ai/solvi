@@ -280,7 +280,7 @@ def fuzzy_rule(rule, name):
     """three producers of one fact, tried in order: out of scope → the decider (act_guard, perturb=2) → a person"""
     part = reviewer.decision(f"{name}_decider", f"Does this change break the rule: {RULES[rule]['text']}?",
                              f"{name}_view", OPTIONS, perturb=2)
-    CALIBRATION[rule] = part.act_guard(labelled(rule), risk=RISK)
+    CALIBRATION[rule] = part.act_guard(labelled(rule), max_risk=RISK)
 
     def scope(path):
         return "not in scope" if not applies(rule, path) else None     # None: rejected, the next producer runs
@@ -348,6 +348,6 @@ def broken_rules(secret_lines, browser_storage_lines, migration_problems, requir
 CHECKS = ["no_secrets", "no_browser_storage_in_api", "migration_reversible", "migration_readable", "not_a_protected_path"]
 QUESTIONS = [
     Question("decision", "May the agent write this change?", Answer.choice(["allow", "block", "escalate"]),
-             checkpoints=CHECKS),
+             requires=CHECKS),
     Question("broken_rules", "Which project rules does the change break?", Answer.multi(BLOCKING)),
 ]

@@ -40,14 +40,14 @@ STANCE_OPTS = ["war", "peace"]
 
 QUESTIONS = [
     Question("build", "What should this city build next?", Answer.choice(econ.BUILD_OPTIONS),
-             checkpoints=["treasury_ok", "not_under_siege"]),
+             requires=["treasury_ok", "not_under_siege"]),
     Question("order_military", "What should this warrior/archer do?", Answer.choice(MIL_OPTS),
-             checkpoints=["keeps_capital_defender"]),
+             requires=["keeps_capital_defender"]),
     Question("order_settler", "Where should this settler go?", Answer.choice(SETTLER_OPTS),
-             checkpoints=["settles_away_from_enemies"]),
-    Question("order_worker", "What should this worker do?", Answer.choice(WORKER_OPTS), checkpoints=["worker_upkeep_ok"]),
+             requires=["settles_away_from_enemies"]),
+    Question("order_worker", "What should this worker do?", Answer.choice(WORKER_OPTS), requires=["worker_upkeep_ok"]),
     Question("order_caravan", "What should this caravan do?", Answer.choice(CARAVAN_OPTS)),
-    Question("stance", "War or peace with this neighbour?", Answer.choice(STANCE_OPTS), checkpoints=["war_needs_strength"]),
+    Question("stance", "War or peace with this neighbour?", Answer.choice(STANCE_OPTS), requires=["war_needs_strength"]),
 ]
 
 #                 growth infra  mil   expand trade  gold  aggr   site: food  gold  far
@@ -500,7 +500,7 @@ def head_to_dict(h):
 
 
 def head_from_dict(d):
-    from solvi.fast import FastHead, VecFeaturizer
+    from solvi.heads import FastHead, VecFeaturizer
     h = FastHead(d["options"], lam=d["lam"], pairs=d["pairs"])
     h.features, h.n, h.loo_acc = d["features"], d["n"], d["loo_acc"]
     h.fz = VecFeaturizer()

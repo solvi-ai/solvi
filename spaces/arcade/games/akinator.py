@@ -413,7 +413,7 @@ def guess(top_candidate, top_prob, live_candidates, shortlist):
 
 GUESS_OPTIONS = [n for n, _, _ in ANIMALS]           # grows when a new animal is learned
 QUESTIONS = [
-    Question("move", "Ask another question or guess?", Answer.choice(["ask", "guess"]), checkpoints=["confident_enough"]),
+    Question("move", "Ask another question or guess?", Answer.choice(["ask", "guess"]), requires=["confident_enough"]),
     Question("ask_about", "Which question has the highest expected information gain?", Answer.choice(ATTR_KEYS + ["none"])),
     Question("guess", "Which animal is the most likely?", Answer.choice(GUESS_OPTIONS)),
 ]

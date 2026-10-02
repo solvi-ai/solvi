@@ -159,7 +159,7 @@ def urgent_rule(days_to_due, due_in_future):
 
 
 INV_QUESTIONS = [
-    Question("approve", "Approve the invoice?", Answer.choice(["approve", "reject", "escalate"]), checkpoints=["not_duplicate"]),
+    Question("approve", "Approve the invoice?", Answer.choice(["approve", "reject", "escalate"]), requires=["not_duplicate"]),
     Question("duplicate", "Is it a duplicate of a paid invoice?", Answer.yes_no()),
     Question("urgent", "Is payment urgent?", Answer.yes_no()),
     Question("risk", "Risk level (learned from 300 examples)", Answer.choice(["low", "medium", "high"])),

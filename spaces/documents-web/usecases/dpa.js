@@ -35,7 +35,7 @@ def transfers_safeguarded(transfer_mechanism):
 
 QUESTIONS = [
     Question("approve", "Approve the vendor?", Answer.choice(["approve", "review", "reject"]),
-             checkpoints=["breach_within_72h"]),
+             requires=["breach_within_72h"]),
     Question("transfers_safeguarded", "Transfers outside the EEA safeguarded?", Answer.yes_no()),
 ]
 `,

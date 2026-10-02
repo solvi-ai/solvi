@@ -212,8 +212,8 @@ def run(payload_json):
         res = system.ask(init)
     except Exception as e:  # noqa: BLE001
         return json.dumps({"error": f"{type(e).__name__}: {e}", "traceback": traceback.format_exc(limit=4)})
-    rep = res.trace.replay(cat)
-    _last.update(cat=cat, res=res)
+    rep = res.trace.replay(system)                            # with the System, replay also checks the stored answers
+    _last.update(cat=cat, res=res, system=system)
     by = {r.name: r for r in res.trace.records}
     kinds = {n: part.kind for n, part in cat.parts.items()}
     answers = []
@@ -234,7 +234,7 @@ def run(payload_json):
     return json.dumps({
         "answers": answers, "records": records, "flow": flow, "flow_text": str(res.flow),
         "not_taken": sorted(res.flow.skipped.items()), "skipped_at_run": [list(x) for x in res.trace.skipped],
-        "computed_state": res.computed_state, "init_hash": res.trace.init_hash,
+        "computed_state": res.state_text(), "init_hash": res.trace.init_hash,
         "replay": {"ok": rep["ok"], "steps": rep["steps"], "mismatches": [[str(x) for x in m] for m in rep["mismatches"]]},
         "ms": res.ms, "n_parts": len(cat.parts) + len(cat.rules), "auto": auto,
     }, default=str)
@@ -256,7 +256,7 @@ def tamper():
     """Simulate a careful forger: change one computed fact in a copy of the trace and re-hash that record, then replay."""
     if not _last:
         return json.dumps({"error": "run the use case first"})
-    cat, res = _last["cat"], _last["res"]
+    res, system = _last["res"], _last["system"]
     tr = copy.deepcopy(res.trace)
     target = None
     for kind in ("fn", "extract", "check"):
@@ -272,7 +272,7 @@ def tamper():
     old = target.value
     target.value = _tampered(old)
     target.hash = vhash(target.body())                        # re-hash the edited record so it looks self-consistent
-    rep = tr.replay(cat)
+    rep = tr.replay(system)
     return json.dumps({"name": target.name, "step": target.step, "from": _r(old), "to": _r(target.value),
                        "replay": {"ok": rep["ok"], "steps": rep["steps"],
                                   "mismatches": [[str(x) for x in m] for m in rep["mismatches"]]}}, default=str)

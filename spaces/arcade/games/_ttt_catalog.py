@@ -104,5 +104,5 @@ def outcome(winner, free_cells, me):
     return "won" if winner == me else "lost"
 
 
-QUESTIONS = [Question("move", "Which cell to play?", Answer.choice(CELLS + ["none"]), checkpoints=["board_valid"]),
+QUESTIONS = [Question("move", "Which cell to play?", Answer.choice(CELLS + ["none"]), requires=["board_valid"]),
              Question("outcome", "State of the game for me?", Answer.choice(["ongoing", "won", "lost", "draw"]))]

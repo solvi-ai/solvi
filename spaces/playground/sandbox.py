@@ -255,7 +255,7 @@ _LOADED = {}     # sha256 of the catalog code -> (module, cat, questions, System
 
 def _load(code):
     """Exec the visitor's catalog module and build its System, once per code version: while the code is unchanged the same
-    System answers every run, so System.stats counts over its lifetime (and an optional setup(system), e.g. fit_fast, runs
+    System answers every run, so System.stats counts over its lifetime (and an optional setup(system), e.g. fit, runs
     only once). Called inside the time guard."""
     from solvi import System
     key = hashlib.sha256(code.encode()).hexdigest()

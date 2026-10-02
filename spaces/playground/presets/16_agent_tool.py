@@ -89,4 +89,4 @@ def action(email: str, proposed_action: str, proposed_quotes: list, proposed_con
 
 
 QUESTIONS = [Question("action", "What to do with the return request?", require_evidence=True,
-                      checkpoints=["return_window_open", "under_auto_limit"])]
+                      requires=["return_window_open", "under_auto_limit"])]

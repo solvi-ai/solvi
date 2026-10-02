@@ -104,6 +104,6 @@ def outcome(winner, free_cells, me):
 
 QUESTIONS = [
     Question("move", "Which cell to play?", Answer.choice([str(i) for i in range(9)] + ["none"]),
-             checkpoints=["board_valid"]),
+             requires=["board_valid"]),
     Question("outcome", "State of the game for me?", Answer.choice(["ongoing", "won", "lost", "draw"])),
 ]

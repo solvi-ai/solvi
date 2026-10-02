@@ -222,10 +222,10 @@ async function loadPython() {
     $("py-line").textContent = "Python (Pyodide) + solvi: installing numpy and solvi…";
     await py.loadPackage(["numpy", "micropip"]);
     try {                         // solvi's own code needs only numpy at import time: skip scipy (another ~10 MB)
-      await py.runPythonAsync("import micropip\nawait micropip.install('solvi>=0.2.1', deps=False)\nimport solvi");
+      await py.runPythonAsync("import micropip\nawait micropip.install('solvi==0.8.0', deps=False)\nimport solvi");
     } catch (e) {
       console.warn("solvi without dependencies failed, installing with dependencies", e);
-      await py.runPythonAsync("import micropip\nawait micropip.install('solvi>=0.2.1')\nimport solvi");
+      await py.runPythonAsync("import micropip\nawait micropip.install('solvi==0.8.0')\nimport solvi");
     }
     const src = await (await fetch(new URL("solvi_docs.py", import.meta.url))).text();
     py.FS.writeFile("/home/pyodide/solvi_docs.py", src);

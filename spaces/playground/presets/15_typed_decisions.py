@@ -88,4 +88,4 @@ def no_account_takeover(account_takeover: bool) -> bool:
 
 for q in QUESTIONS:
     if q.name in ("category", "urgency"):
-        q.checkpoints.append("no_account_takeover")
+        q.requires.append("no_account_takeover")

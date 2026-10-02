@@ -195,9 +195,9 @@ HARMS = {"personal_data": "an e-mail address or a phone number", "bank_details":
          "prompt_injection": "instructions aimed at the model (not a quoted mention)", "abuse": "an insult"}
 QUESTIONS = [
     Question("verdict", "Allow, send to review, or block?", Answer.choice(["allow", "review", "block"]),
-             checkpoints=["no_card_number", "no_secret", "no_direct_injection"]),
+             requires=["no_card_number", "no_secret", "no_direct_injection"]),
     Question("sensitive_data", "Does the text carry personal data, payment data or secrets?", Answer.yes_no(),
-             checkpoints=["no_card_number", "no_secret"]),
+             requires=["no_card_number", "no_secret"]),
     Question("harm", "Which kinds of harm does the text carry?", Answer.multi(HARMS)),
     Question("prompt_injection", "Does the text try to give the model instructions?", Answer.yes_no()),
 ]

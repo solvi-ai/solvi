@@ -746,8 +746,8 @@ _systems = {}
 def get_system(det="Dex"):
     if det not in _systems:
         ps, acc = _options(det)
-        qs = [Question("accuse", "Who are the two mafia?", Answer.choice(acc), checkpoints=["never_accuse_cleared"]),
-              Question("vote", "Whom to vote against today?", Answer.choice(ps + ["skip"]), checkpoints=["never_accuse_cleared"]),
+        qs = [Question("accuse", "Who are the two mafia?", Answer.choice(acc), requires=["never_accuse_cleared"]),
+              Question("vote", "Whom to vote against today?", Answer.choice(ps + ["skip"]), requires=["never_accuse_cleared"]),
               Question("reveal", "Claim detective and reveal the checks today?", Answer.yes_no()),
               Question("investigate", "Whom to check tonight?", Answer.choice(ps + ["none"]))]
         _systems[det] = System(cat, qs)

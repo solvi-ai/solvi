@@ -176,9 +176,9 @@ def card_html(g, key):
            f"<div class='sv-ans'><b>{esc(q)}</b> = <code>{esc(r.answer)}</code> <span class='sv-badge {badge[1]}'>"
            f"{badge[0]}</span> <span class='sv-dim'>confidence {r.confidence:.2f} · {res.ms:.2f} ms</span>"
            f"<div class='sv-why'>why: {esc(r.why)}</div></div>"]
-    if isinstance(r.why, str) and r.why.startswith("L17"):      # realms/l17.py: the net chose, not the value head
+    if isinstance(r.why, str) and r.why.startswith("policy net"):      # realms/policy.py: the net chose, not the value head
         bad = "check: ok" not in r.why
-        out.append(f"<div class='sv-hc'>L17 answer check (laws re-verified after the net): <span class='sv-badge "
+        out.append(f"<div class='sv-hc'>policy net's answer check (laws re-verified after the net): <span class='sv-badge "
                    f"{'sv-forced' if bad else 'sv-ok'}'>{'VIOLATION' if bad else 'ok'}</span></div>")
     elif r.probs:
         top = sorted(r.probs.items(), key=lambda t: -t[1])[:5]

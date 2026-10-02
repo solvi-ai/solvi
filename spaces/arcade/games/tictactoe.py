@@ -45,7 +45,7 @@ def move_reason(winning_moves, blocking_moves, fork_moves, opponent_forks, forci
 
 
 QUESTIONS = list(_mod.QUESTIONS) + [
-    Question("reason", "Why this move?", Answer.choice(list(REASONS)), checkpoints=["board_valid"])]
+    Question("reason", "Why this move?", Answer.choice(list(REASONS)), requires=["board_valid"])]
 system = System(cat, QUESTIONS)
 
 

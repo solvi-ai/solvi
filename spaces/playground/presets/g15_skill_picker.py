@@ -141,7 +141,7 @@ def synthetic_prompts(n=400, seed=0):
 EXAMPLES = synthetic_prompts()
 skill_decider = reader.decision("skill_decider", "Which of the agent's skills does this prompt need, if any?", "prompt",
                                 OPTIONS, other=False, min_margin=0.15, perturb=2)
-CALIBRATION = skill_decider.act_guard(EXAMPLES, risk=RISK)
+CALIBRATION = skill_decider.act_guard(EXAMPLES, max_risk=RISK)
 CANDIDATES = skill_decider.conformal(EXAMPLES, coverage=0.97)
 cat.fn(provides="picked")(skill_decider)
 
@@ -175,7 +175,7 @@ def outcome(picked):
 
 QUESTIONS = [
     Question("skill", "Which skill should the agent use?", Answer.choice(list(OPTIONS)),
-             checkpoints=["production_deploy_asked_for"]),
+             requires=["production_deploy_asked_for"]),
     Question("outcome", "Use a skill, answer without one, or ask a person?",
-             Answer.choice(["use a skill", "no skill", "ask a person"]), checkpoints=["production_deploy_asked_for"]),
+             Answer.choice(["use a skill", "no skill", "ask a person"]), requires=["production_deploy_asked_for"]),
 ]

@@ -89,7 +89,7 @@ def delivery(hot_on_arrival, distance_km):
 
 
 QUESTIONS = [
-    Question("place_order", "Place the order?", Answer.yes_no(), checkpoints=["within_budget"]),
+    Question("place_order", "Place the order?", Answer.yes_no(), requires=["within_budget"]),
     Question("pineapple_verdict", "Pineapple policy verdict?",
              Answer.choice(["no pineapple, no drama", "tolerated", "diplomatic incident"])),
     Question("delivery", "Deliver or pick up?", Answer.choice(["deliver", "pick up", "cook at home"])),

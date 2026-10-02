@@ -45,7 +45,7 @@ numbers.
 
 ## Layout
 
-- `index.html`: loads `@gradio/lite@5.45.0` from jsDelivr, lists the requirement (`solvi>=0.1.1`) and mounts `app.py`
+- `index.html`: loads `@gradio/lite@5.45.0` from jsDelivr, lists the requirement (`solvi==0.8.0`, bumped with each release) and mounts `app.py`
   and `games/*.py` by URL.
 - `app.py`: the Gradio 5 UI (theme and CSS in `gr.Blocks(...)`).
 - `games/tictactoe.py`, `games/maze.py`, `games/fusion.py`: pure game logic and solvi catalogs, the same as in the

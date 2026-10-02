@@ -10,8 +10,8 @@ What is checked, per Space (the direct *.static.hf.space page, not the huggingfa
 
 - playground: the first preset runs on load and prints "Trace replay: OK"; the Run button runs it again; the "solvi vs
   LLM" tab, when the deployed page has it, decides its second case and then its first one live, reorders the options
-  (solvi's answers stay the same) and replays the trace ("replay ok"); the "New in 0.7" tab, when the deployed page has
-  it, runs its first demo (its output, or a note that the solvi it loaded is too old);
+  (solvi's answers stay the same) and replays the trace ("replay ok"); the "New in 0.8" tab ("New in 0.7" on a page deployed
+  before 0.8), when the deployed page has it, runs its first demo (its output, or a note that the solvi it loaded is too old);
 - arcade: tic-tac-toe loads; "O (solvi starts)" makes solvi move and explain the move ("solvi plays …");
 - realms: a world is generated ("Turn 0 · N factions alive"); "Next turn" advances it;
 - documents: Python and solvi load in the page ("+ solvi <version>: ready"). The extractor model (790 MB) is not
@@ -71,16 +71,19 @@ def check_playground(page, timeout_s, with_model=False):
     _wait_text(page, r"Trace replay: OK", 120)
     notes.append("Run pressed: Trace replay OK")
     notes.append(_check_vs_llm(page))
-    tab = page.get_by_role("tab", name="New in 0.7")
-    if tab.count():
-        tab.first.click()
-        panel = page.get_by_role("tabpanel").filter(has_text="New in 0.7")
-        (panel if panel.count() else page).get_by_role("button", name="Run", exact=True).last.click()
-        m = _wait_text(page, r"Escalation with a guarantee —|This demo needs solvi [\d.]+ or newer", 120)
-        notes.append("New in 0.7 tab: " + ("act_guard demo ran" if m.group(0).startswith("Escalation")
-                                            else m.group(0).rstrip()))
+    # the demo tab: "New in 0.8" (its panel opens with "New in solvi 0.8"); a page deployed before 0.8 calls it "New in 0.7"
+    for name, marker in (("New in 0.8", "New in solvi 0.8"), ("New in 0.7", "Features of solvi 0.7")):
+        tab = page.get_by_role("tab", name=name)
+        if tab.count():
+            tab.first.click()
+            panel = page.get_by_role("tabpanel").filter(has_text=marker)
+            (panel if panel.count() else page).get_by_role("button", name="Run", exact=True).last.click()
+            m = _wait_text(page, r"Escalation with a guarantee —|This demo needs solvi [\d.]+ or newer", 120)
+            notes.append(f"{name} tab: " + ("act_guard demo ran" if m.group(0).startswith("Escalation")
+                                             else m.group(0).rstrip()))
+            break
     else:
-        notes.append("no 'New in 0.7' tab on the deployed page")
+        notes.append("no 'New in 0.8' (or 'New in 0.7') tab on the deployed page")
     page.get_by_role("tab", name="About").first.click()
     return notes, _gradio_solvi_version(page)
 

@@ -34,7 +34,7 @@ def release(consignee, containers):
     return "release" if found(containers) else "hold"
 
 QUESTIONS = [
-    Question("release", "Release the shipment?", Answer.choice(["release", "hold"]), checkpoints=["port_allowed"]),
+    Question("release", "Release the shipment?", Answer.choice(["release", "hold"]), requires=["port_allowed"]),
     Question("insurance_by", "Who arranges cargo insurance?", Answer.choice(["buyer", "seller"])),
 ]
 `,

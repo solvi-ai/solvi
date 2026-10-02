@@ -57,7 +57,7 @@ CI runs on every pull request: a broken link, a missing anchor or a docstring th
 4. After the upload to PyPI, the `smoke-spaces` workflow runs `tools/smoke_spaces.py` against the public Spaces (it can
    also be started by hand from the Actions tab). It opens each Space in headless Chromium, waits for Pyodide to install
    solvi (a cold load takes one to several minutes), runs one preset and checks its output: the playground's
-   "Trace replay: OK" and its "New in 0.7" tab, a tic-tac-toe move in the arcade, a turn in realms, and Python + solvi
+   "Trace replay: OK" and its "New in 0.8" tab, a tic-tac-toe move in the arcade, a turn in realms, and Python + solvi
    ready in documents (`--with-model` also downloads the 790 MB extractor and runs a use case). It prints the solvi
    version each Space loaded; the results and a screenshot of every failing Space are kept as the run's artifact.
    Without Playwright the script skips (exit 0; `--require` makes it exit 2). A cold load now and then stalls on a CDN,

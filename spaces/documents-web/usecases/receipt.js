@@ -39,7 +39,7 @@ def weekend(purchase_date):
     return purchase_date.weekday() >= 5
 
 QUESTIONS = [
-    Question("reimburse", "Reimburse this receipt?", Answer.yes_no(), checkpoints=["not_too_old"]),
+    Question("reimburse", "Reimburse this receipt?", Answer.yes_no(), requires=["not_too_old"]),
     Question("change_correct", "Is the change right (cash - total)?", Answer.yes_no()),
     Question("weekend", "Bought on a weekend?", Answer.yes_no()),
 ]

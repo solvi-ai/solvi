@@ -104,7 +104,7 @@ def _module(stem):
 
 def _build(mod, S, questions=None):
     from solvi import System
-    kw = {"inputs": getattr(mod, S["inputs"])} if S.get("inputs") else {}
+    kw = {"input_model": getattr(mod, S["inputs"])} if S.get("inputs") else {}
     return System(mod.cat, questions or mod.QUESTIONS, **kw)
 
 

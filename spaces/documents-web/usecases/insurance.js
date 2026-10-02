@@ -36,8 +36,8 @@ def payout_band(payout, claim_amount):
     return "full" if payout >= money(claim_amount) else "partial"
 
 QUESTIONS = [
-    Question("covered", "Is the claim covered?", Answer.yes_no(), checkpoints=["cause_not_excluded"]),
-    Question("payout_band", "Payout", Answer.choice(["full", "partial", "none"]), checkpoints=["cause_not_excluded"]),
+    Question("covered", "Is the claim covered?", Answer.yes_no(), requires=["cause_not_excluded"]),
+    Question("payout_band", "Payout", Answer.choice(["full", "partial", "none"]), requires=["cause_not_excluded"]),
 ]
 `,
   docs: [

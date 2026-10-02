@@ -38,7 +38,7 @@ def starts_within_60_days(start_date, today):
     return (parse_date(start_date) - today).days <= 60
 
 QUESTIONS = [
-    Question("send", "Send the offer as is?", Answer.choice(["send", "revise"]), checkpoints=["probation_legal"]),
+    Question("send", "Send the offer as is?", Answer.choice(["send", "revise"]), requires=["probation_legal"]),
     Question("band", "Salary vs approved band", Answer.choice(["below", "in band", "above"])),
     Question("starts_within_60_days", "Starts within 60 days?", Answer.yes_no()),
 ]

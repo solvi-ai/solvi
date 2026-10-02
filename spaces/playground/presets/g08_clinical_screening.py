@@ -161,7 +161,7 @@ def escalation_covers_band(escalation, news2_band):
 ESCALATION = ["routine", "urgent review", "emergency"]          # ordered levels, lowest first
 QUESTIONS = [
     Question("escalation", "Escalation level", Answer.ordinal(ESCALATION),
-             checkpoints=["spo2_not_critical", "not_shocked"]),
+             requires=["spo2_not_critical", "not_shocked"]),
     Question("news2_band", "NEWS2 clinical risk band", Answer.ordinal(["low", "low-medium", "medium", "high"])),
     Question("sepsis_screen", "Sepsis screen positive?", Answer.yes_no()),
 ]

@@ -27,7 +27,7 @@ every run.
   looks for it across the whole contract (overlapping windows), returning a quote or "absent". Fixed typed questions:
   governing law (Delaware / New York / California / other), termination notice of at least 30 days, liability capped,
   non-compete.
-- **Compare**: benchmark numbers against a model that answers directly, and when to fine-tune.
+- **Compare**: what the two models were measured on (from their model cards), and when to fine-tune.
 
 All sample documents are synthetic.
 
