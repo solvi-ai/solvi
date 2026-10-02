@@ -213,11 +213,20 @@ def test_silent_defaults_in_functions_that_read_the_input():
 
     @cat.fn
     def limit(customer):
-        return TABLE.get(customer, 100)
+        return TABLE.get(customer, 100)                # a lookup in a constant table: not a default for the input
 
     @cat.fn
     def note_text(note):
         return note or ""
+
+    @cat.fn
+    def total(order):
+        return order.get("total", 0) + (order["tax"] or 0)
+
+    @cat.fn
+    def spread(order):
+        import math
+        return math.sqrt(len(order)) or 1e-9           # a default on a computed value
 
     @cat.fn
     def ok_default(note):
@@ -232,11 +241,11 @@ def test_silent_defaults_in_functions_that_read_the_input():
         return {"x": limit}.get("y", 5)                # reads a computed fact only: not an input parser
 
     @cat.rule("big")
-    def big(limit, note_text, ok_default, accepted, computed) -> bool:
+    def big(limit, note_text, ok_default, accepted, computed, total, spread) -> bool:
         return limit > 10
     rep = lint(System(cat, [Question("big", "?")]))
     found = sorted(f.where.rsplit("(", 1)[1].rstrip(")") for f in rep.findings if f.code == "silent_default")
-    assert found == ["limit", "note_text"]
+    assert found == ["note_text", "total", "total"]
     assert all(f.where.startswith("tests/") or "test_check.py" in f.where for f in rep.findings
                if f.code == "silent_default")
     assert silent_defaults(len) == []
@@ -476,3 +485,11 @@ def test_names_that_nothing_computes_and_the_input_model_does_not_declare():
     rep = lint(build(Closed))
     assert all("forbids extra keys, so it can never be given" in f.message for f in rep.warnings) and len(rep.warnings) == 2
     assert [f.code for f in lint(build(None)).warnings] == []  # no input model: every such name is a given fact
+
+
+def test_solvi_check_takes_a_task_directory_or_file_as_solvi_test_does(capsys):
+    """`solvi check gallery/01_support_triage/task.py:system` exited 2 (the task has no `system`), and task.py:cat skipped
+    every question check."""
+    assert main(["check", "gallery/01_support_triage"]) == 0
+    assert main(["check", "gallery/09_credit_adverse_action/task.py"]) == 0
+    assert "no_rule" in capsys.readouterr().out                    # its questions were checked

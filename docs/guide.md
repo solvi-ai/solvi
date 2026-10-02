@@ -3150,6 +3150,7 @@ See [examples/21_verified_chart.py](../examples/21_verified_chart.py).
 ```
 solvi check myapp.decisions:system            # exit 0: no errors; 1: errors; 2: usage errors
 solvi check myapp.decisions:system --strict   # warnings fail too;  --json for data
+solvi check gallery/01_support_triage         # a task file or a directory with task.py, as for solvi test
 ```
 
 ```python
@@ -3184,8 +3185,9 @@ counts as using everything computable: its future head's candidate features); `t
 reading a question's name (answers are not facts); typed readers of a given fact, or alternative producers, whose types no
 value satisfies together; an option the constraints always rule out (`dead_option`); a constraint that raises on some
 answers; and **silent defaults**: in a function that reads the input (a given fact), `x or <literal>` and
-`d.get(k, <literal>)` turn a missing, empty or null input into a value nobody gave — the answer looks decided while it
-rests on a guess. Say what a missing input means (check for `None` and abstain, or declare the default in
+`d.get(k, <literal>)` on that input (`amount or 0`, `order.get("total", 0)`, `order["tax"] or 0`) turn a missing,
+empty or null input into a value nobody gave — the answer looks decided while it rests on a guess. A lookup in a
+constant table (`{...}.get(kind, 1)`) or a default on a computed value is not flagged. Say what a missing input means (check for `None` and abstain, or declare the default in
 `System(inputs=...)`), or mark the line `# solvi: ok`. **Notes** never fail: a question without a rule abstains until
 an answer head is fitted.
 

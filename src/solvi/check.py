@@ -44,8 +44,10 @@ Warnings:
                         a field of the model. (Without an input model a `uses` name that is not a part is taken for a
                         given fact — a learned head may read given facts directly — so a typo there cannot be told;
                         a misspelled `checkpoints` entry is an error: `unanswerable`)
-  silent_default        in a function that reads the input (a given fact): `x or <literal>` or `.get(k, <literal>)`,
-                        which turns a missing, empty or null input into a value nobody gave — say so explicitly (check
+  silent_default        in a function that reads the input (a given fact): `x or <literal>` or `.get(k, <literal>)` on
+                        that input (`amount or 0`, `order.get("total", 0)`; not a lookup in a constant table or a
+                        default on a computed value), which turns a missing, empty or null input into a value nobody
+                        gave — say so explicitly (check
                         for None and abstain, or declare the default in System(inputs=...)); `# solvi: ok` on the line
                         accepts it
 Notes (never fail):
@@ -543,9 +545,12 @@ def _literal(node):
     return False
 
 
-def silent_defaults(func):
+def silent_defaults(func, names=None):
     """[(line, snippet, why)] in a function's source: `x or <literal>` and `.get(k, <literal>)` (the literal not None),
-    except on lines marked `# solvi: ok`. [] when the source is not available."""
+    except on lines marked `# solvi: ok`. [] when the source is not available. names: the function's arguments that are
+    given inputs — then only a default on one of them counts (`amount or 0`, `order.get("total", 0)`, `order["x"] or
+    0`), not one on a constant table (`{...}.get(kind, 1)`), a computed value (`math.sqrt(v) or 1e-9`) or an
+    exception's attribute (`e.lineno or 0`)."""
     f = inspect.unwrap(func)
     try:
         lines, start = inspect.getsourcelines(f)
@@ -557,12 +562,24 @@ def silent_defaults(func):
     except SyntaxError:                               # a lambda in the middle of an expression
         return []
     out = []
+
+    def given(expr):                                  # is the value an input's own (the input, or a field / key of it)?
+        if names is None:
+            return True
+        while True:
+            if isinstance(expr, (ast.Attribute, ast.Subscript)):
+                expr = expr.value
+            elif isinstance(expr, ast.Call) and isinstance(expr.func, ast.Attribute) and expr.func.attr == "get":
+                expr = expr.func.value                # order.get("x") or 0
+            else:
+                return isinstance(expr, ast.Name) and expr.id in names
     for node in ast.walk(tree):
         hit = None
-        if isinstance(node, ast.BoolOp) and isinstance(node.op, ast.Or) and _literal(node.values[-1]):
+        if isinstance(node, ast.BoolOp) and isinstance(node.op, ast.Or) and _literal(node.values[-1]) \
+                and any(given(v) for v in node.values[:-1]):
             hit = f"`{ast.unparse(node)}` gives {ast.unparse(node.values[-1])} for a missing, empty or null value"
         elif isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute) and node.func.attr == "get" \
-                and len(node.args) == 2 and _literal(node.args[1]):
+                and len(node.args) == 2 and _literal(node.args[1]) and given(node.func.value):
             hit = f"`{ast.unparse(node)}` gives {ast.unparse(node.args[1])} for a missing key"
         if hit:
             line = start + node.lineno - 1
@@ -582,7 +599,7 @@ def _silent_defaults(cat, given, rep):
             seen.add(id(a.func))
             f = inspect.unwrap(a.func)
             path = _short_path(getattr(getattr(f, "__code__", None), "co_filename", "?"))
-            for line, _, why in silent_defaults(a.func):
+            for line, _, why in silent_defaults(a.func, set(a.inputs) & given):
                 rep.add("warning", "silent_default", f"{path}:{line} ({getattr(f, '__name__', a.name)})",
                         why + ": say what a missing input means (check for None and abstain, or declare the default in "
                               "System(inputs=...)); `# solvi: ok` accepts it")
@@ -599,9 +616,10 @@ def _short_path(p):
 
 # --- the command
 def cmd_check(a):
-    """`solvi check` (see solvi.cli) → 0: no errors (with --strict: no warnings either); 1: problems."""
-    from .cli import load_object
-    obj = load_object(a.target)
+    """`solvi check` (see solvi.cli) → 0: no errors (with --strict: no warnings either); 1: problems. The target is
+    module:attr / file.py:attr, or — as for `solvi test` — a task file or a directory holding task.py (its System:
+    `task.system()`, else System(task.cat, task.QUESTIONS))."""
+    obj = _target(a.target)
     if not (hasattr(obj, "parts") and hasattr(obj, "rules")) and not hasattr(obj, "catalog"):
         from .cli import _fail
         _fail(f"check {a.target}: not a solvi System, Catalog or Guard")
@@ -614,11 +632,27 @@ def cmd_check(a):
     return 0 if rep.ok else 1
 
 
+def _target(spec):
+    from pathlib import Path
+    p = Path(spec)
+    task = p / "task.py" if p.is_dir() else p if p.is_file() and p.suffix == ".py" else None
+    if task is not None and task.is_file():
+        from .honesty import load_task, system_of
+        mod = load_task(task)
+        if not callable(getattr(mod, "system", None)) and not (hasattr(mod, "cat") and hasattr(mod, "QUESTIONS")):
+            from .cli import _fail
+            _fail(f"check {spec}: a task module defines system() or cat and QUESTIONS (else give module:attr)")
+        return system_of(mod)
+    from .cli import load_object
+    return load_object(spec)
+
+
 def add_parser(sub):
     c = sub.add_parser("check", help="lint a catalog: hard checks outside their question's flow, unused parts, cycles, "
                                      "type conflicts, constraints that cannot hold, silent defaults")
     c.add_argument("target", help="module:attr or file.py:attr — a System (or a function returning one), a Catalog, or a "
-                                  "solvi.agents.Guard (each tool's checks)")
+                                  "solvi.agents.Guard (each tool's checks); or a task file / a directory with task.py, "
+                                  "as for solvi test")
     c.add_argument("--strict", action="store_true", help="warnings fail too (exit status 1)")
     c.add_argument("--max-combos", type=int, default=100_000,
                    help="the most answer combinations tried per group of constraints (default 100000)")
