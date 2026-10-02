@@ -472,7 +472,11 @@ so the restored trace hashes and replays exactly. A value that is neither — an
 datetime whose zone its text does not carry, an untyped date in a record stored by solvi 0.7.1 or earlier — comes back
 as JSON gave it and is named in the loaded trace's `unrestored`: replay reports the steps that rest on it as
 `not_restored` ("no verdict on the data"), `solvi diff` lists the decision under "could not be re-run", and
-`counterfactual` draws no conclusion from it. The classes stay plain dataclasses; the pydantic models are in
+`counterfactual` draws no conclusion from it. A span answer's value type is written by name — a built-in one (`str`,
+`int`, `float`, `bool`, `date`, `datetime`, `Decimal`) as such, any other class as `module:qualname` — and a name that
+cannot be imported again (a class defined inside a function) makes `from_json` raise `ValueError`. Option descriptions
+are keyed by the option's text in JSON and come back on the options themselves (`Answer.ordinal({1: "bad", 2: "ok"})`).
+The classes stay plain dataclasses; the pydantic models are in
 `solvi.schema`.
 
 Notes: types are resolved with `typing.get_type_hints`; a name that cannot be resolved (a class defined inside a function

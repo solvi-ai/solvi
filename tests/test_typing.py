@@ -412,3 +412,24 @@ def test_a_key_the_input_model_forbids_is_reported_as_rejected_not_dropped_witho
     res = System(cat, qs, inputs=Closed).ask({"id": "a1", "months": "many", "age": 19})        # with a field that fails too
     assert [k for k, _ in res.trace.rejected] == ["months", "age"] and res["long"].status == "abstain"
     assert not System(cat, qs, inputs=Closed).ask({"id": "a1", "months": 3}).trace.rejected
+
+
+class _Tier(Enum):
+    GOLD = "gold"
+    BASIC = "basic"
+
+
+def test_a_question_comes_back_from_json_equal_with_described_int_options_and_a_class_span_type():
+    """Question.from_json(q.to_json()) == q failed for Answer.ordinal({1: "bad", 2: "ok"}) (the keys came back as
+    strings) and for a span of an Enum (it loaded with type None: a span of any text)."""
+    import datetime
+    from solvi import AnswerType
+    for at in (Answer.ordinal({1: "bad", 2: "ok"}), Answer.span(type=_Tier), Answer.span(type=datetime.date),
+               Answer.choice({"a": "the first", "b": "the second"})):
+        q = Question("q", "?", at)
+        assert Question.from_json(q.to_json()) == q, at
+    at = Answer.ordinal({1: "bad", 2: "ok"})
+    assert AnswerType.model_validate(at.model_dump()) == at                   # python mode too
+    assert '"type": "test_typing:_Tier"' in Question("q", "?", Answer.span(type=_Tier)).to_json()
+    with pytest.raises(ValueError, match="cannot be restored from its name"):
+        Question.from_json('{"name": "q", "text": "?", "answer": {"kind": "span", "options": [], "type": "Color"}}')
