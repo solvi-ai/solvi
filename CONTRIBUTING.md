@@ -15,6 +15,8 @@ for f in gallery/*/run.py; do uv run python "$f" > /dev/null || echo "FAIL $f"; 
 ```
 
 With the model extras: `uv run --with torch --with transformers --with onnxruntime --with tokenizers --with huggingface_hub pytest -q`.
+The tests that load a published checkpoint are marked `model`: `uv run solvi models pull solvi-ai/solvi-base`, then
+`uv run --with onnxruntime --with tokenizers pytest -q -m model` (the `model` workflow runs them weekly in CI).
 A decider checkpoint end to end, both backends: `uv run --with ... python tools/smoke_decide.py <checkpoint folder>`.
 The documentation site: `uv sync --group docs`, then `uv run mkdocs serve` (preview) or `uv run mkdocs build --strict` (what
 CI runs on every pull request: a broken link, a missing anchor or a docstring the API reference cannot render fails it).

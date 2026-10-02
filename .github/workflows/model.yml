@@ -1,0 +1,24 @@
+name: model
+
+# The tests marked `model` (pytest -m model) load a real, published checkpoint: the honesty gate's model set, the
+# decider's "real checkpoint" tests and `solvi models check`. The default CI run never downloads one, so they skip
+# there; this workflow pulls solvi-ai/solvi-base (ONNX) once a week, and on demand, and runs them.
+on:
+  schedule:
+    - cron: "0 5 * * 1"
+  workflow_dispatch:
+
+jobs:
+  model:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: "3.12"
+      - run: uv sync --group dev --extra onnx
+      - name: pull the published decider
+        run: uv run solvi models pull solvi-ai/solvi-base
+      - name: the model-marked tests
+        run: uv run pytest -q -m model -rs

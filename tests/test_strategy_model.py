@@ -307,6 +307,7 @@ def test_example_17_runs(capsys, monkeypatch):
     assert "accepted: {'INV_TOTAL': 'invoice_amount', 'FX': 'fx_rate'}" in out
 
 
+@pytest.mark.model
 def test_segment_model_save_load_propose(tmp_path):
     """A tiny random segment network: save → load (torch) → propose; ONNX parity when onnxruntime is there."""
     pytest.importorskip("torch")
