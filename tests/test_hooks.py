@@ -531,3 +531,28 @@ def test_a_model_file_that_is_missing_or_exits_makes_the_hook_ask_not_exit(proj)
         code, out, err, _ = hook(proj, prompt_submit(proj, "add a migration for the salary column"),
                                  "pick-skill", "--model", spec)
         assert code == 0 and out is None, (spec, code, err)          # never status 2: that would block the prompt
+
+
+def test_forbid_calls_sees_aliases_changed_keyword_lines_symlinks_and_asks_when_the_file_does_not_parse(proj):
+    def says(payload):
+        out = hook(proj, payload, "pre-edit")[1]
+        return decision(out) if out else ("allow", "")
+    d, why = says(write(proj, "tools/a.py", "import subprocess as sp\n\nsp.run('ls', shell=True)\n"))
+    assert d == "deny" and "calls subprocess.run(shell=True)" in why                    # import x as y
+    d, why = says(write(proj, "tools/b.py", "from os import system\n\nsystem('ls')\n"))
+    assert d == "deny" and "calls os.system" in why                                     # from x import f
+    assert says(write(proj, "tools/c.py", "import subprocess\n\nsubprocess.run('ls', shell=1)\n"))[0] == "deny"
+    (proj / "tools").mkdir(exist_ok=True)
+    (proj / "tools" / "run.py").write_text("import subprocess\n\nsubprocess.run(\n    'ls',\n    shell=False,\n)\n")
+    d, why = says(edit(proj, "tools/run.py", "    shell=False,", "    shell=True,"))   # only the keyword's line changes
+    assert d == "deny" and "no-dynamic-code" in why
+    d, why = says(write(proj, "tools/broken.py", "import subprocess\n\nsubprocess.run('ls', shell=True)\ndef (:\n"))
+    assert d == "ask" and "does not parse" in why                                       # cannot be checked: a person
+    d, why = says(write(proj, "tools/broken2.py", "eval('1')\ndef (:\n"))
+    assert d == "deny" and "calls eval" in why                                          # a plain name is still found
+    (proj / "alias").symlink_to(proj / "tools", target_is_directory=True)
+    assert says(write(proj, "alias/d.py", "eval('1')\n"))[0] == "deny"
+    (proj / ".github" / "workflows").mkdir(parents=True, exist_ok=True)
+    (proj / "wf").symlink_to(proj / ".github" / "workflows", target_is_directory=True)
+    d, why = says(write(proj, "wf/deploy.yml", "on: push\n"))                           # a rule on .github/workflows/**
+    assert d != "allow" and "ci-workflows-need-a-person" in why

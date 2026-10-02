@@ -167,9 +167,10 @@ def project_root(payload=None, explicit=None):
 
 
 def relpath(path, root):
-    """A file path → project-relative with "/" (an absolute path outside the project stays absolute)."""
-    p = os.path.abspath(os.path.join(root, path.replace("\\", "/")))
-    r = os.path.relpath(p, root)
+    """A file path → project-relative with "/" (an absolute path outside the project stays absolute). Symbolic links
+    are resolved, so a file reached through a linked folder is matched by the rules of where it really is."""
+    p = os.path.realpath(os.path.join(root, path.replace("\\", "/")))
+    r = os.path.relpath(p, os.path.realpath(root))
     return p.replace(os.sep, "/") if r.startswith("..") else r.replace(os.sep, "/")
 
 
@@ -517,7 +518,10 @@ def _call_name(node):
 
 def _call_hits(patterns, added, result, path):
     """Added lines that call a forbidden Python function (dotted names with globs; "name(shell=True)" only when that
-    keyword is passed as True) → [[line, text, call]]; ValueError when the code does not parse."""
+    keyword is passed as a true constant: True, 1) → [[line, text, call]]; SyntaxError when the code does not parse.
+    A name is also read through the module's own imports (`import subprocess as sp` → sp.run is subprocess.run, `from
+    os import system` → system is os.system), and a call is reported when any of its lines is an added line (at the
+    first of them)."""
     import ast
     from fnmatch import fnmatchcase
     specs = []
@@ -527,6 +531,12 @@ def _call_hits(patterns, added, result, path):
     lines = {n: t for n, t in added}
     text = result if result is not None else "\n".join(t for _, t in added)
     tree = ast.parse(text, filename=path)
+    alias = {}                                         # a local name → the dotted name it was imported as
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            alias.update({a.asname: a.name for a in node.names if a.asname})
+        elif isinstance(node, ast.ImportFrom) and node.module and not node.level:
+            alias.update({a.asname or a.name: f"{node.module}.{a.name}" for a in node.names if a.name != "*"})
     out = []
     for node in ast.walk(tree):
         if not isinstance(node, ast.Call):
@@ -534,12 +544,18 @@ def _call_hits(patterns, added, result, path):
         name = _call_name(node.func)
         if name is None:
             continue
+        head, dot, rest = name.partition(".")
+        names = [name] + ([alias[head] + dot + rest] if head in alias else [])
         for pat, kw in specs:
-            if fnmatchcase(name, pat) and (kw is None or any(k.arg == kw and isinstance(k.value, ast.Constant)
-                                                               and k.value.value is True for k in node.keywords)):
-                n = node.lineno if result is not None else added[node.lineno - 1][0]
-                if n in lines:
-                    out.append([n, lines[n], name + (f"({kw}=True)" if kw else "")])
+            hit = next((x for x in names if fnmatchcase(x, pat)), None)
+            if hit is not None and (kw is None or any(k.arg == kw and isinstance(k.value, ast.Constant)
+                                                      and bool(k.value.value) for k in node.keywords)):
+                span = range(node.lineno, (node.end_lineno or node.lineno) + 1)
+                at = [n if result is not None else added[n - 1][0] for n in span]
+                n = next((x for x in at if x in lines), None)
+                if n is not None:
+                    out.append([n, lines[n], hit + (f"({kw}=True)" if kw else "")])
+                    break
     return sorted(out)
 
 
@@ -568,13 +584,18 @@ def _rule_lines(spec):
             try:
                 out += [[n, t, f"calls {c}"] for n, t, c in _call_hits(rule["forbid_calls"], added_lines, result_text,
                                                                        path)]
-            except SyntaxError:
+            except SyntaxError as e:                   # not parsed: plain names by their text; nothing found → a
+                found = []                             # person (a glob or a keyword cannot be checked without the AST)
                 for n, t in added_lines:
                     for p in rule["forbid_calls"]:
                         name = re.sub(r"\(.*", "", p).strip()
                         if "*" not in name and re.search(r"(?<![\w.])" + re.escape(name) + r"\s*\(", t):
-                            out.append([n, t, f"calls {name}"])
+                            found.append([n, t, f"calls {name}"])
                             break
+                if not found:
+                    raise ValueError(f"the Python code does not parse ({e.msg}, line {e.lineno}), so the calls it "
+                                     "makes cannot be checked") from None
+                out += found
         if rule["require"] or rule["require_def"]:
             if result_text is None:
                 raise ValueError("the file after the edit is not known (its old text is not in the file, or the file "

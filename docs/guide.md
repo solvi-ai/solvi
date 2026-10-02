@@ -2727,7 +2727,7 @@ inside a folder, `**` crosses folders (`**/x.py` also matches `x.py` at the root
 |---|---|---|
 | `forbid` | deterministic | regular expressions no added line may match |
 | `require` | deterministic | regular expressions the file after the edit must match |
-| `forbid_calls` | deterministic (Python AST) | calls no added line may make: dotted names with globs (`subprocess.*`), `name(kw=True)` only when that keyword is passed as `True` |
+| `forbid_calls` | deterministic (Python AST) | calls no added line may make: dotted names with globs (`subprocess.*`), `name(kw=True)` only when that keyword is passed as a true constant (`True`, `1`); names are read through the file's own imports (`import subprocess as sp`, `from os import system`) |
 | `require_def` | deterministic (Python AST) | functions the file after the edit must define with a body that does something (not only `pass` or a docstring) |
 | none of these, no `question` | deterministic | any change to these paths |
 | `question`, `when` | fuzzy | a yes / no question a decider answers ("yes" is a violation), asked when an added line matches a `when` pattern (always, without `when`) |
@@ -2863,6 +2863,10 @@ Codex does not take a bare allow, so `--approve` is ignored there.
 
 - A deterministic rule is exact: an added line that matches a `forbid` pattern, a forbidden call in the parsed Python, a
   missing or empty required function is denied every time, with the line, whatever the change's comments say.
+- `forbid_calls` reads names as the file writes them, through its own `import ... as` / `from ... import`: a call
+  reached another way passes — `getattr(os, "system")`, a name assigned to a variable, a wrapper in another module, a
+  keyword given as a variable (`shell=flag`). A Python file that does not parse cannot be checked: a plain forbidden
+  name on an added line is still denied, anything else asks. Paths are matched after symbolic links are resolved.
 - A fuzzy rule is as good as its model and its calibration. Without a calibration it never blocks; with one, the promise
   is P(answered alone and wrong) ≤ risk for changes like the labelled ones — not for a new kind of code.
 - The hook sees what the agent proposes through Edit, Write and MultiEdit (and Codex's apply_patch). A file changed by a
