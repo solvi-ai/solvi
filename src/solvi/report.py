@@ -80,7 +80,8 @@ def _rests_on(au):
                      "note": (f"({p}) " if p else "") + (f"[{x['model']}]" if x.get("model") else "")})
     for c in au.checks:
         rows.append({"kind": "check", "name": c["name"], "value": repr(c["value"]),
-                     "note": ("hard" if c["hard"] else "soft") + (", decided the answer" if c["decides"] else "")
+                     "note": ("hard" if c["hard"] else "hard or soft: not recorded" if c["hard"] is None else "soft")
+                     + (", decided the answer" if c["decides"] else "")
                      + (f"; {c['error']}" if c.get("error") else "")})
     if au.rule:
         rows.append({"kind": "rule", "name": au.rule["name"], "value": "", "note": au.rule["provenance"]

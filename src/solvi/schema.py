@@ -123,6 +123,7 @@ class StepModel(BaseModel):
     kind: str
     inputs: list[str]
     reasons: list[str] = []
+    hard: Optional[bool] = None         # a check: is it a hard check? (None: not recorded — stored by solvi ≤ 0.7.1)
 
 
 class FlowModel(BaseModel):
@@ -477,8 +478,9 @@ def _result(r):
 
 def _flow(f):
     from .typed import type_name
-    return {"steps": [{"name": s.part.name, "kind": s.part.kind, "inputs": list(s.part.inputs), "reasons": list(s.reasons)}
-                      for s in f.steps],
+    return {"steps": [{"name": s.part.name, "kind": s.part.kind, "inputs": list(s.part.inputs), "reasons": list(s.reasons),
+                       **({"hard": None if getattr(s.part, "hard_unknown", False) else bool(s.part.hard)}
+                          if s.part.kind == "check" else {})} for s in f.steps],
             "per_question": {q: list(v) for q, v in f.per_question.items()}, "skipped": dict(f.skipped),
             "unresolved": {q: list(v) for q, v in f.unresolved.items()},
             "types": {k: type_name(t) if not isinstance(t, str) else t for k, t in (getattr(f, "types", None) or {}).items()},
@@ -632,13 +634,19 @@ def _load_trace(m, catalog, system):
     return tr
 
 
-def _stub(name, kind, inputs):
+def _stub(name, kind, inputs, hard=None):
+    """A part of a flow loaded from data without its catalog: its name, kind, inputs and — for a check — whether it is
+    a hard one, as the flow recorded it (`hard_unknown`: it did not, so nothing may call it soft)."""
     from .core import Part
 
     def f(**_):
         raise RuntimeError("a part of a flow loaded from data: its function is not available")
     f.__name__ = name[7:] if name.startswith("answer:") else name
-    return Part(kind=kind, name=name, inputs=list(inputs), func=f, question=name[7:] if kind == "rule" else None)
+    p = Part(kind=kind, name=name, inputs=list(inputs), func=f, question=name[7:] if kind == "rule" else None,
+             hard=bool(hard))
+    if kind == "check" and hard is None:
+        p.hard_unknown = True
+    return p
 
 
 def _load_flow(m, catalog):
@@ -648,7 +656,7 @@ def _load_flow(m, catalog):
         p = None
         if catalog is not None:
             p = catalog.rules.get(s.name[7:]) if s.name.startswith("answer:") else catalog.parts.get(s.name)
-        steps.append(Step(p if p is not None else _stub(s.name, s.kind, s.inputs), list(s.reasons)))
+        steps.append(Step(p if p is not None else _stub(s.name, s.kind, s.inputs, s.hard), list(s.reasons)))
     return Flow(steps, {q: list(v) for q, v in m.per_question.items()}, dict(m.skipped),
                 {q: list(v) for q, v in m.unresolved.items()}, dict(m.types), [list(b) for b in m.batches])
 

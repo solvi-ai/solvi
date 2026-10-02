@@ -1887,6 +1887,11 @@ store.replay_all(system)                        # [] when every stored trace rep
 store.verify()                                  # the chain across stored records
 ```
 
+A stored response loaded without a catalog (`store.get(id)` on a store opened with no `catalog=`, or
+`Stored.response()`) still audits and reports: its flow keeps each part's name, kind and inputs and, for a check,
+whether it is a hard one — a record stored before that was kept shows such a check as "hard or soft: not recorded".
+Replay, diff and counterfactuals need the System.
+
 Two backends ship without dependencies: `JSONLStorage` (an append-only file, one record per line; several
 processes may append on POSIX systems, where each append holds a file lock — on Windows one writing process) and `SQLiteStorage` (stdlib `sqlite3`; index tables by question, answer, status, safeguard kind, model and time;
 several processes may write to one file). Two more take an optional dependency and keep the same tables:
