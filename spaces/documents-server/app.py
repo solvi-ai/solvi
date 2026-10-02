@@ -162,7 +162,7 @@ RECEIPT_FIELDS = {"company": "the name of the company that issued the receipt",
 
 RECEIPT_QUESTIONS = [
     Question("reimburse", "Reimbursable? (total within the limit, not older than N days)", Answer.yes_no(),
-             checkpoints=["not_too_old", "vendor_named"]),
+             requires=["not_too_old", "vendor_named"]),
     Question("weekend", "Bought on a weekend?", Answer.yes_no()),
     Question("change_correct", "Change correct? (cash - total = change)", Answer.yes_no()),
     Question("tax_shown", "Tax shown on the receipt?", Answer.yes_no()),
@@ -327,14 +327,14 @@ def execute(cat, questions, init_state) -> dict:
     """ask + replay; returns plain data (ZeroGPU sends it back from a worker process, so nothing unpicklable)."""
     system = System(cat, questions)
     res = system.ask(init_state)
-    rep = res.trace.replay(cat)
+    rep = res.trace.replay(system)                 # with the System, replay also checks the stored answers
     answers = [dict(name=q.name, text=q.text, answer=res[q.name].answer, confidence=res[q.name].confidence,
                     status=res[q.name].status, why=res[q.name].why) for q in questions]
     extracts = [dict(name=r.name, value=r.value if isinstance(r.value, str) else None,
                      start=r.quote[0] if r.quote else 0, end=r.quote[1] if r.quote else 0,
                      confidence=r.confidence, error=r.error)
                 for r in res.trace.records if r.kind == "extract"]
-    return dict(answers=answers, extracts=extracts, state=res.computed_state, flow=str(res.flow),
+    return dict(answers=answers, extracts=extracts, state=res.state_text(), flow=str(res.flow),
                 replay=dict(ok=rep["ok"], steps=rep["steps"], mismatches=[list(map(str, m)) for m in rep["mismatches"]]),
                 ms=res.ms, hash=res.trace.records[-1].hash if res.trace.records else "")
 
@@ -483,28 +483,23 @@ the general extractor looks for each one across the whole contract, reading it i
 Fields close to what the model saw in training (common contract clauses) work best. For a new kind of field, treat the
 result as a hint and check the highlighted quote. For production accuracy, fine-tune on about 100 labeled documents."""
 
-COMPARE = f"""## solvi vs. a model that answers directly
+COMPARE = f"""## What the models were measured on
 
-Both sides trained on the same documents. The baseline, Laya, is a ModernBERT-large model fine-tuned to answer the typed
-questions directly (its authors' recipe). solvi uses a ModernBERT extractor for the fields and Python rules for the answers.
+Every number here comes from the models' published cards, as the solvi README quotes them.
 
-| Task (test set) | solvi | Baseline |
-|---|---|---|
-| SROIE receipts, 6 questions (361 receipts) | **97.8%** | 92.6% |
-| SROIE, only 100 labeled training receipts | **95.9%** | 80.0% |
-| CORD receipts, 4 questions (100 receipts) | **98.5%** | 96.0% |
-| CORD, share of questions answered at >= 99% precision | **99.7%** | 14.2% |
-| CUAD contracts, 5 questions (102 contracts, median 33k chars) | **94.8%** | 77.5% (sees first 1024 tokens only) |
-
-- Calibrated confidence: ECE 0.008 (SROIE), 0.011 (CORD), 0.027 (CUAD).
-- On the document benchmarks, 100% of answers are backed by a quote at stated offsets, or the system abstains.
-- About 0.4 ms per decision without a model; about 39 ms per receipt with the one-pass extractor on an A100.
+- **extract-receipts** ([card](https://huggingface.co/solvi-ai/extract-receipts)): 97.3% on typed questions over CORD
+  receipts (100 test receipts), with ECE 0.011 and 98.6% of questions answered at ≥ 99% precision.
+- **extract-base** ([card](https://huggingface.co/solvi-ai/extract-base)), without labels of your task: CORD receipt
+  fields it was never trained on, 46.5% and 67.9%; five never-trained CUAD clause types, 73.1%; Kleister-NDA and SROIE,
+  never seen, 2–95% by field. With per-field thresholds from 40 labeled contracts it reached 85.5% on CUAD; fine-tuned
+  on 25–100 SROIE receipts, 86–89%.
+- Every answer is backed by a quote at stated offsets or a computed fact, or the system abstains.
 
 ## An honest note
 
 The models in this demo are a starting point. They show how solvi works on your documents, but they are not tuned to
 them. For production accuracy, label about 100 of your documents (the character span of each field) and fine-tune the
-extractor with `LongSpanExtractor.fit`; the numbers above come from such task-specific training. solvi answers yes/no and
+extractor with `LongSpanExtractor.fit` (the fine-tuned numbers above come from such task-specific training). solvi answers yes/no and
 choice questions only; it does not generate free text.
 
 ## Links
