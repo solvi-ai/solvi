@@ -350,7 +350,7 @@ population equal the evaluation's at every checkpoint; 0 violations, save/load e
 
 ## Layout
 
-- `index.html`: loads `@gradio/lite@5.45.0` from jsDelivr, requires `solvi>=0.2.1`, and mounts `app.py` and `realms/*.py`.
+- `index.html`: loads `@gradio/lite@5.45.0` from jsDelivr, requires `solvi==0.8.0` (bumped with each release), and mounts `app.py` and `realms/*.py`.
   It keeps the arcade's PyPI "time machine" (the simple index is filtered to files uploaded before the Gradio-Lite release,
   solvi exempt), without which micropip cannot resolve gradio 5.45.
 - `app.py`: the Gradio 5 UI.
