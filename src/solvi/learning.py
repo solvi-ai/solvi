@@ -61,6 +61,7 @@ import json
 import warnings
 from dataclasses import asdict, dataclass, field
 
+from . import core
 from .storage import FORMAT, TRUSTED_SOURCES, UntrustedLabel, check_source, plain
 from .storage import open_storage
 
@@ -108,8 +109,7 @@ def _check_settings(ladder, gates, holdout, calibration):
                          "be below 1")
 
 
-class ExperimentalWarning(UserWarning):
-    """A feature whose API and behaviour may still change."""
+ExperimentalWarning = core.ExperimentalWarning          # defined in solvi.core since 0.8 (the same class)
 
 
 OPEN_KINDS = ("span", "rank", "number")        # answers not from a closed list: the loop leaves them alone

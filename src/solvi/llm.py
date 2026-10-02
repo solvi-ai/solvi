@@ -60,11 +60,12 @@ from concurrent.futures import ThreadPoolExecutor
 
 import numpy as np
 
+from . import core
 from .decide import DecideModel
 from .remote import WHY_CHARS, NoAnswer, Refused, RemoteClient, RemoteError, endpoint, error_text  # noqa: F401 (endpoint: 0.7 import path)
 
 EPS = 1e-6
-NOT_STATED = "not stated"
+NOT_STATED = core.NOT_STATED                  # one definition, in solvi.core
 TEMPLATE_VERSION = "solvi llm v1"
 
 SYSTEM_PROMPT = """You answer one question about a text for a decision system. Code checks every reply.

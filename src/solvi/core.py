@@ -46,6 +46,11 @@ class Serial:
 
 
 NOT_STATED_KEY = "<not stated>"          # how solvi.Unknown is written as a key (probabilities) and in JSON
+NOT_STATED = "not stated"                # how a remote model is asked for it: an option of its own (llm, systemone)
+
+
+class ExperimentalWarning(UserWarning):
+    """A feature whose API and behaviour may still change (solvi.learning, solvi.lora)."""
 
 
 class NotStated:
@@ -888,7 +893,7 @@ class Catalog:
         raise KeyError(f"{name} is not a producer of {fact}")
 
 
-__all__ = ["accept", "accepts", "Answer", "AnswerType", "bin_labels", "Catalog", "check_evidence", "Claim",
+__all__ = ["ExperimentalWarning", "NOT_STATED", "accept", "accepts", "Answer", "AnswerType", "bin_labels", "Catalog", "check_evidence", "Claim",
            "cuts_number", "Decision", "evidence_rows", "find_whole", "ground", "has_evidence", "locate",
            "NOT_STATED_KEY", "NotStated", "Part", "plain_json", "PRIMITIVES", "Question", "question_data", "Quote",
            "Serial", "Unknown", "unknown_key", "unwrap", "validated"]

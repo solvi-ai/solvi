@@ -52,13 +52,14 @@ import time
 
 import numpy as np
 
+from . import core
 from .decide import DecideModel, _unknown_caps
 from .remote import NoAnswer, Refused, RemoteClient, RemoteError
 from .remote import tokens as remote_tokens
 
 EPS = 1e-6
 REASONING_CHARS = 1000          # the most characters of a question's reasoning text kept in a decision's extra
-NOT_STATED = "not stated"
+NOT_STATED = core.NOT_STATED                  # one definition, in solvi.core
 NOT_STATED_DESCRIPTION = ("The input does not state it: the facts this question needs are missing (absent, empty or "
                           "unknown), and nothing that is given decides it.")
 # the request fields solvi sets itself: the questions, their names and the reply's reading depend on them
