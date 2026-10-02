@@ -96,7 +96,8 @@ _ADDRESS = re.compile(r"\b(as an ai\b(?!\s+(researcher|engineer|developer|compan
                       r"you are (now )?(an? |the )?(ai|assistant|model|classifier|bot|language model|llm)\b"
                       r"(?!\s+((who|that|which)\s+)?(i|we)\b)|"
                       r"(dear|hey|attention) (ai|assistant|model|bot|classifier|system|llm)\b|"
-                      r"to the (ai|assistant|model|bot|classifier|system|llm)\s*:)", _I)
+                      r"(note|message|instructions?) to the (ai|assistant|model|bot|classifier|system|llm)\b|"
+                      r"to the (ai|assistant|model|bot|classifier|system|llm)(\s+\w+){0,2}\s*:)", _I)
 _DIRECT = re.compile(r"\b(the (correct|right|only|final|true|expected) (answer|label|category|class|option|choice|"
                      r"decision|output|team)( here)? (is\b|should be\b|must be\b|=)"
                      r"(?!\s+(that|to|up|not|in|on|for|what|why|how|when|if|whether)\b)|"
