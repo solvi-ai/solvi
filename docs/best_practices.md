@@ -82,6 +82,25 @@ decisions per answer for the distribution of the answers to be tested at all (`r
 calibration and the mix of answers, and level off within a few dozen examples. When a question needs the model to read
 the input differently, use a LoRA adapter (`adapt_lora`), a head over computed facts, or a rule.
 
+## A model that writes
+
+**Ask for table rows copied as written, and parse them in code.** An extraction that asked for a travel-time table as
+`[from, to, minutes]` rows was accepted and wrong in 15 of 150 problems, every wrong number standing elsewhere in the
+text; asking for each row as the text writes it ("North Beach to Chinatown: 6"), checked literally (`quotes=`) and
+parsed in code, in 0 of 150 (gpt-oss-120b, NATURAL PLAN dev). What a quote check cannot see is a row left out: 2 of 300
+on eval.
+
+**In a re-ask, quote what is false, and count the rounds.** Feedback that said where a plan stops working got the same
+plan back three times; quoting the plan's own false sentence ("you meet Betty from 11:48AM, but Betty is there only
+from 2:45PM") fixed it at once (a pilot of a few problems). Even so, on multi-city trips 94 re-asks rescued 10 of 50
+rejected plans — the model traded one violation for another — and on days of meetings half of the repaired plans met
+fewer friends than possible. Cap the rounds and measure what each one buys.
+
+**Agreement of samples lowers the error of what is answered; it does not make it small.** Three queries per question,
+compared by the rows they return: answering only when all three agree cut the wrong answers from 48% to 28% at 63%
+answered (BIRD mini-dev, 150 questions). The other 28% were three samples agreeing on a reading of the question that
+was not the reference's. Treat the share as a signal to calibrate on labelled examples, not as a proof.
+
 ## Instructions in the input
 
 **Turn `perturb` on where the text comes from outside.** It re-asks without instruction-like sentences and escalates

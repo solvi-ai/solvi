@@ -383,7 +383,9 @@ receipt with the one-pass extractor on an A100).
 ## When not to use it
 
 - Open-ended free-text questions or generated answers. solvi answers typed questions only: yes/no, choices, scores,
-  multi-label, "not stated", exact spans of the text, rankings and number ranges.
+  multi-label, "not stated", exact spans of the text, rankings and number ranges. Around a model that writes (a query,
+  a plan, a JSON extraction) it checks, compares and re-asks — `solvi.generate`, `solvi.agree`, `solvi.refine` — but
+  does not make the writing better, and it does not search for a plan.
 - New fields with no labeled examples. Extracting a field from its description alone does not work yet (14% and 66% on
   two held-out fields); a universal extractor is coming.
 - No labels at all. Plan on roughly 100 labeled documents (field positions) per task.
