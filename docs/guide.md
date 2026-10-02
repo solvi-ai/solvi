@@ -3150,7 +3150,7 @@ Hashes: a record hashes its provenance only when it differs from the default (`q
 
 | Safeguard | Fires when | Effect |
 |---|---|---|
-| grounding | a quote lies outside its text, or a model's quote is not literally `doc[start:end]` (strings up to whitespace, numbers as written, e.g. `1250.0` ↔ `"1,250.00"`); an evidence quote or a span is not literally in its text | the output is rejected: the fact is missing, the claim stays in the error; the next alternative producer runs, else dependent answers abstain |
+| grounding | a quote lies outside its text, or a model's quote is not literally `doc[start:end]` (strings up to whitespace; numbers as written, e.g. `1250.0` ↔ `"1,250.00"` — `int`, `float`, `Decimal`, `Fraction` and numpy scalars; a `date` when the text reads as that date; a `bool`, a `datetime` or a list cannot be compared and is not checked); an evidence quote or a span is not literally in its text | the output is rejected: the fact is missing, the claim stays in the error; the next alternative producer runs, else dependent answers abstain |
 | closed set | a `Decision` (or a value of a part with `options=`) is not one of the options; a rule's answer is not one of the question's options | rejected / the question abstains |
 | low confidence | a `Quote` / `Decision` is below the part's `min_confidence` or a decision's `escalate_below`; an answer is below the question's `min_confidence` | rejected / the question abstains, saying what it would have answered |
 | model escalated | a decider's act / escalate signal is below its threshold (see [the output](#the-output-probabilities-calibrated-confidence-act-or-escalate)) | rejected: the fact is missing, next producer, else the question abstains, saying what it would have answered |

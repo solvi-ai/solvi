@@ -342,26 +342,65 @@ def catalog_fingerprint(catalog):
 # --- grounding
 _WS = re.compile(r"\s+")
 _NUM = re.compile(r"-?\d[\d,  ']*(?:\.\d+)?|-?\.\d+")
+_DATEISH = re.compile(r"\d|today|tomorrow|yesterday|сегодня|завтра|вчера", re.I)
 
 
 def _norm(s):
     return _WS.sub(" ", s).strip()
 
 
+def _number(value):
+    """A value that is a number (int, float, Decimal, Fraction, a numpy scalar; not a bool) → it as a Fraction or float,
+    else None."""
+    import decimal
+    import fractions
+    if isinstance(value, bool):
+        return None
+    if hasattr(value, "item") and getattr(value, "ndim", None) == 0 and not isinstance(value, (str, bytes)):
+        value = value.item()                              # a numpy scalar
+        if isinstance(value, bool):
+            return None
+    if isinstance(value, (int, decimal.Decimal, fractions.Fraction)):
+        try:
+            return fractions.Fraction(value)
+        except (ValueError, OverflowError):               # Decimal("NaN"), an infinity: nothing in a text equals it
+            return float("nan")
+    return value if isinstance(value, float) else None
+
+
 def matches(value, snippet):
-    """Is `value` literally the quoted text? Strings: equal up to whitespace. Numbers: a number in the snippet equals it
-    (thousands separators allowed). Other types (dates, lists, booleans) cannot be compared → None (not checked)."""
+    """Is `value` literally the quoted text? Strings: equal up to whitespace. Numbers (int, float, Decimal, Fraction, numpy
+    scalars): a number in the snippet equals it (thousands separators allowed; a Decimal or a Fraction exactly, a float
+    up to rounding). A date: the snippet reads as that date (solvi.textin.parse_date) or holds it in ISO form; a snippet
+    with no date in it is not the date, one whose date needs a year or "today" to be read is not compared (None). Other
+    types (datetimes, lists, booleans) cannot be compared → None (not checked)."""
+    import datetime
     if isinstance(value, str):
         return _norm(value) == _norm(snippet)
-    if isinstance(value, (int, float)) and not isinstance(value, bool):
+    n = _number(value)
+    if n is not None:
         for m in _NUM.finditer(snippet):
-            t = re.sub(r"[,  ']", "", m.group())
+            t = re.sub(r"[,   ']", "", m.group())
             try:
-                if abs(float(t) - float(value)) <= 1e-9 * max(1.0, abs(float(value))):
-                    return True
-            except ValueError:
+                if isinstance(n, float):
+                    if abs(float(t) - n) <= 1e-9 * max(1.0, abs(n)):
+                        return True
+                else:
+                    import fractions
+                    if fractions.Fraction(t) == n:
+                        return True
+            except (ValueError, ZeroDivisionError):
                 continue
         return False
+    if type(value) is datetime.date:
+        if value.isoformat() in snippet:
+            return True
+        from .textin import ParseError, parse_date
+        try:
+            got = parse_date(snippet)
+        except ParseError:                                # no date there at all → not the text; a date that needs a
+            return None if _DATEISH.search(snippet) else False   # year or "today" to be read → cannot be compared
+        return (got if isinstance(got, datetime.date) else datetime.date.fromisoformat(str(got))) == value
     return None
 
 
