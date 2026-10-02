@@ -615,8 +615,8 @@ class System:
             part, r = self.catalog.parts.get(f), by.get(f)                # the answer is unknown, never "passed"
             if part is not None and part.kind == "check" and part.hard and r is not None and r.value is MISSING \
                     and governs(part, q):
-                return Result(None, 0.0, f"hard check {f} could not be evaluated: {r.error or 'no value'}", "abstain",
-                              source=f, guard="hard_check")
+                return Result(None, 0.0, f"hard check {f} could not be evaluated: {r.error or 'no value'}"
+                              + _caused_by(by, r), "abstain", source=f, guard="hard_check")
         missing =[f for f in facts if f in by and by[f].value is MISSING]
         if flow.unresolved.get(q.name):
             return Result(None, 0.0, "cannot compute: " + ", ".join(flow.unresolved[q.name]), "abstain")
@@ -642,7 +642,7 @@ class System:
                 from .provenance import classify
                 grounding = r is not None and classify(r.error) == "grounding"     # a model rule's quote not in the text
                 return Result(None, 0.0, "rule not computed: " + (r.error if r else "no step") +
-                              (f"; missing {', '.join(missing)}" if missing else ""), "abstain",
+                              (f"; missing {', '.join(missing)}" if missing else "") + _caused_by(by, r), "abstain",
                               guard="timeout" if late else "grounding" if grounding else None)
             pc = path_confidence(self.catalog, trace, rule.inputs)
             conf = min(pc, r.confidence)
@@ -1013,6 +1013,29 @@ def _append(trace, rec, n_steps):
     rec.prev = last.hash if last else trace.init_hash
     rec.hash = vhash(rec.body())
     trace.records.append(rec)
+
+
+MISSING_INPUTS = "missing inputs: "
+
+
+def _caused_by(by, r):
+    """A step that could not run for lack of an input → "; caused by <part>: <its error>": the part further up whose
+    own failure (it raised, its output was rejected) left the facts missing — else the reason would name only the
+    last link, a check or a rule that never ran. "" when the step failed by itself, or nothing above it has an error."""
+    roots, seen = {}, set()
+    todo = [r] if r is not None and (r.error or "").startswith(MISSING_INPUTS) else []
+    while todo:
+        rec = todo.pop(0)
+        for x in rec.error[len(MISSING_INPUTS):].split(", "):
+            up = by.get(x)
+            if up is None or x in seen or up.value is not MISSING or not up.error:
+                continue
+            seen.add(x)
+            if up.error.startswith(MISSING_INPUTS):
+                todo.append(up)
+            else:
+                roots[x] = up.error
+    return "; caused by " + " and ".join(f"{x}: {e}" for x, e in roots.items()) if roots else ""
 
 
 def _resolved(q, r, pc, why, src, init):

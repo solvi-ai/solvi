@@ -116,6 +116,12 @@ def ship_rule(big_order):
   declare the most important first. A question's flow and answer do not depend on which other questions are asked in the
   same request.
 
+  A hard check that could not be evaluated (it raised, or a fact it reads is missing) never counts as passed: the
+  questions it governs abstain. The reason names the check and, when the check could not run for lack of an input, the
+  part further up that failed: `hard check day_allowed could not be evaluated: missing inputs: violations; caused by
+  spec: ValueError: no slot in the plan`. A rule that could not run says the same (`rule not computed: ...; caused by
+  ...`).
+
 ### Extractors and Quote
 
 An extractor reads text from `init_state` and returns a `Quote`:
