@@ -918,8 +918,10 @@ which). Yes/no, scores, multi-label questions, spans (`kind="span"`: the passage
 
 Everything is checked, and what fails escalates — `model escalated: invalid LLM output — ...` — instead of being turned
 into a guess: an answer that is not one of the options, probabilities that are not numbers in [0, 1] or disagree with
-the answer, a reply that is not JSON, is cut off or refused. The quote is looked up literally, up to typographic quotes
-and apostrophes (’ ‘ “ ” as ' "), dashes (– — as -) and runs of whitespace; a quote still not found escalates when the
+the answer, a reply that is not JSON, is cut off or refused. The quote (and a span answer) is looked up literally, up
+to typographic quotes and apostrophes (’ ‘ “ ” as ' "), dashes (– — as -), runs of whitespace and — when nothing matches
+with the case kept — letter case; the value and the quote are then the text's own spelling at those offsets, never the
+model's. A quote still not found escalates when the
 question asks for evidence (`evidence=True`), and otherwise is dropped — the answer stands and
 `extra["llm"]["quote_dropped"]` records the quote. A span answer that is not in the text escalates with that reason
 (`invalid LLM output — the answer '...' is not literally in the text`), and the passage the model wrote is in

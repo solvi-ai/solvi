@@ -17,7 +17,8 @@ returns log-probabilities for the answer's tokens, the probabilities come from t
 its tokens' probabilities; the others: the alternatives at its first token), not from the numbers the model wrote.
 
 Everything is validated: the answer is one of the options, the probabilities are numbers in [0, 1] that agree with the
-answer, the quote is in the text (literally, up to typographic quotes and apostrophes, dashes and runs of whitespace). A
+answer, the quote is in the text (literally, up to typographic quotes and apostrophes, dashes, runs of whitespace and
+letter case; what is recorded is the text's own spelling). A
 quote that is not in the text escalates when the question asks for evidence; otherwise it is dropped (the answer stands,
 `extra["llm"]["quote_dropped"]` records it); a span answer not in the text escalates, its passage in
 `extra["llm"]["rejected"]`. An invalid reply, a refusal, a cut-off reply or a server that does not answer
@@ -251,10 +252,11 @@ _TYPO = str.maketrans({"\u2018": "'", "\u2019": "'", "\u201a": "'", "\u201b": "'
                        "\u2010": "-", "\u2011": "-", "\u2012": "-", "\u2013": "-", "\u2014": "-", "\u2212": "-"})
 
 
-def locate(passage, text):
+def locate(passage, text, ignore_case=True):
     """A passage → (start, end) of its first occurrence in the text. Literal up to typographic quotes and apostrophes
-    (’ ‘ “ ” as ' "), dashes (– — ‑ − as -) and runs of whitespace (a new line written as a space); nothing else. The
-    offsets are into the text as given. None when it is not there."""
+    (’ ‘ “ ” as ' "), dashes (– — ‑ − as -), runs of whitespace (a new line written as a space) and, when nothing matches
+    with the case kept, letter case ("wre54g" for "WRE54G"; ignore_case=False: not); nothing else. The offsets are into
+    the text as given, so text[start:end] is the text's own spelling, never the passage's. None when it is not there."""
     if not passage:
         return None
     i = text.find(passage)
@@ -267,7 +269,8 @@ def locate(passage, text):
     words = p.split()
     if not words:
         return None
-    m = re.search(r"\s+".join(re.escape(w) for w in words), t)
+    rx = r"\s+".join(re.escape(w) for w in words)
+    m = re.search(rx, t) or (re.search(rx, t, re.IGNORECASE) if ignore_case else None)
     return (m.start(), m.end()) if m else None
 
 
@@ -409,7 +412,7 @@ def read_reply(it, content, logprobs=None, ask="probabilities"):
         c = reply.get("confidence")
         c = 1.0 if c is None else _prob(c, "the confidence")
         info["probabilities"] = "stated"
-        if ans is None or (isinstance(ans, str) and ans.strip() == NOT_STATED and locate(NOT_STATED, text) is None):
+        if ans is None or (isinstance(ans, str) and ans.strip() == NOT_STATED and locate(NOT_STATED, text, ignore_case=False) is None):
             if not unknown_ok:
                 raise InvalidOutput("the reply says the text does not state it; the question needs a passage")
             return {"logits": np.zeros(0), "pointer": {"null": c, "spans": []}, "info": info}

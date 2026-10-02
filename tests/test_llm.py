@@ -527,3 +527,18 @@ def test_a_span_answer_not_in_the_text_escalates_with_the_llms_reason_and_keeps_
     down = model(FakeLLM(fail=[503] * 10), retries=0).decision("date", "When was it signed?", "doc", Span[str])
     d = down.decide(doc)
     assert d.escalate.startswith("model escalated: the LLM server did not answer") and "rejected" not in d.extra["llm"]
+
+
+def test_a_span_or_quote_that_differs_only_in_case_is_located_and_kept_in_the_texts_spelling():
+    """An answer "WRE54G" for a text that says "wre54g" was rejected whole ("not in the text") although the reply's own
+    quote was literal; the case is now forgiven after an exact match fails, and the value is the text's own."""
+    text = "Linksys wre54g wireless-G range expander, white"
+    assert locate("WRE54G", text) == (8, 14) and locate("WRE54G", text, ignore_case=False) is None
+    assert locate("Linksys  WRE54G", text) == (0, 14) and locate("wre54g", "a WRE54G and a wre54g") == (15, 21)
+    reply = json.dumps({"answer": "WRE54G", "confidence": 0.97, "quote": "Linksys WRE54G"})
+    d = model(FakeLLM(reply=reply)).decision("code", "Model code?", "offer", Span[str]).decide(text)
+    assert d.escalate is None and d.value.value == "wre54g" and (d.value.start, d.value.end) == (8, 14)
+    assert d.extra["llm"]["quote"] == ["Linksys wre54g", 0, 14]
+    ns = json.dumps({"answer": "not stated", "confidence": 0.9, "quote": ""})
+    d = model(FakeLLM(reply=ns)).decision("c", "Code?", "offer", Maybe[Span[str]]).decide("Status: Not Stated yet")
+    assert d.value is Unknown                     # "not stated" as an answer is not looked up regardless of case
