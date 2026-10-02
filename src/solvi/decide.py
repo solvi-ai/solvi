@@ -2516,10 +2516,19 @@ class DecisionPart:
         but the model would not have given it alone without those sentences (`gate`: the part's own act / confidence
         gate applied to a variant's decision — an instruction can leave the answer and lift the model's confidence in
         it). Records extra["perturb"]: {"variants", "calls" (extra forward passes), "removed" (per variant), "answers",
-        "flipped", "unsure" (a variant escalated)}. An input without such sentences has no variants and costs nothing."""
+        "flipped", "unsure" (a variant escalated)}. An input without such sentences has no variants and costs nothing;
+        an input that is nothing but such sentences has no variant to compare with and escalates
+        (extra["perturb"]["only_instruction"])."""
         from .perturb import variants
         vs = variants(text, self.perturb)
         if not vs:
+            from .perturb import instruction_spans
+            only = [text[a:b] for a, b in instruction_spans(text)] if isinstance(text, str) else []
+            if only:                                  # nothing is left without them: no answer to compare with
+                d.extra["perturb"] = {"variants": 0, "calls": 0, "removed": [only], "answers": [], "flipped": False,
+                                      "unsure": False, "only_instruction": True}
+                d.escalate = (f"{INSTRUCTION}: " + "; ".join(repr(r) for r in only) + " (the input is nothing else: no "
+                              f"answer without it to compare with); would have answered {_shown(d.value)!r}")
             return d
         outs = self._read([v.text for v in vs])
         base, flip, unsure, answers = _vkey(d.value), None, None, []

@@ -825,7 +825,8 @@ removed; each sentence alone; only the quoted ones — and escalates at the firs
 **instruction**. A variant with the same answer goes through the part's own gate (its act threshold, `escalate_below`,
 the guarantee's threshold): when the model would escalate without the sentence, the instruction did not change the
 answer but made the model sure of it, and the decision escalates too ("without it the model does not answer alone",
-`"unsure": True`). An instruction that changes neither is harmless: the answer stands (and `extra["perturb"]` records
+`"unsure": True`). An input that is nothing but such sentences leaves no variant to ask about and escalates naming
+them (`extra["perturb"]["only_instruction"]`). An instruction that changes neither is harmless: the answer stands (and `extra["perturb"]` records
 the check). Rules catch common wordings, not every injection: a paraphrase they do not know ("kindly file this
 under X") passes.
 
