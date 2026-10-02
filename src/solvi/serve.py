@@ -916,6 +916,10 @@ def _readline(stdin, limit):
             return "", True
 
 
+MCP_INSTRUCTIONS = ("Each tool is a question of a solvi decision system: pass the input state, get the answer with its "
+                    "confidence, why, safeguards and the id of the stored trace.")
+
+
 def run_builtin(svc, stdin=None, stdout=None):
     """A stdio MCP server without the SDK: JSON-RPC 2.0, one message per line; initialize, ping, tools/list, tools/call
     (notifications are read and ignored). A message is at most `svc.limits.max_body` characters and max_depth deep; a
@@ -970,9 +974,7 @@ def run_builtin(svc, stdin=None, stdout=None):
                     send({"jsonrpc": "2.0", "id": id_, "result": {
                         "protocolVersion": v if v in PROTOCOL_VERSIONS else PROTOCOL_VERSIONS[-1],
                         "capabilities": {"tools": {"listChanged": False}},
-                        "serverInfo": {"name": "solvi", "version": __version__},
-                        "instructions": "Each tool is a question of a solvi decision system: pass the input state, get the "
-                                        "answer with its confidence, why, safeguards and the id of the stored trace."}})
+                        "serverInfo": {"name": "solvi", "version": __version__}, "instructions": MCP_INSTRUCTIONS}})
                 elif method == "ping":
                     send({"jsonrpc": "2.0", "id": id_, "result": {}})
                 elif method == "tools/list":
@@ -1002,11 +1004,16 @@ def run_builtin(svc, stdin=None, stdout=None):
 
 def run_sdk(svc):
     """A stdio MCP server with the official SDK (mcp 2.x: handlers passed to the low-level Server). The SDK reads the
-    messages; the arguments of a tools/call are held to the same size and depth limits, the call to the timeout."""
+    messages; the arguments of a tools/call are held to the same size and depth limits, the call to the timeout. It
+    answers as the built-in server does: the same instructions at initialize, and an unknown tool is a JSON-RPC error
+    (-32602), not a tool result. Two differences are the SDK's own: arguments that are not an object are its
+    "invalid request parameters" error (the built-in server answers with a tool error), and a call still running when
+    stdin closes gets no answer."""
     import anyio
     from mcp import types
     from mcp.server.lowlevel import Server
     from mcp.server.stdio import stdio_server
+    from mcp.shared.exceptions import MCPError
 
     from . import __version__
     from .schema import dumps
@@ -1020,13 +1027,14 @@ def run_sdk(svc):
             parse_json(json.dumps(params.arguments or {}), svc.limits)    # the size and depth limits
             out, bad = await acall_tool(svc, params.name, params.arguments)
         except KeyError:
-            out, bad = {"error": f"unknown tool: {str(params.name)[:64]}"}, True
+            raise MCPError(types.INVALID_PARAMS, f"unknown tool: {str(params.name)[:64]}") from None
         except RequestError as e:
             out, bad = {"error": str(e)}, True
         return types.CallToolResult(content=[types.TextContent(type="text", text=dumps(out, ensure_ascii=False,
                                                                                        default=repr))],
                                     structured_content=out, is_error=bad)
-    server = Server("solvi", version=__version__, on_list_tools=list_tools, on_call_tool=on_call)
+    server = Server("solvi", version=__version__, instructions=MCP_INSTRUCTIONS, on_list_tools=list_tools,
+                    on_call_tool=on_call)
 
     async def main():
         async with stdio_server() as (r, w):

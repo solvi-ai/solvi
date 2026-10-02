@@ -2033,7 +2033,10 @@ and `trace_hash`, as JSON text and as structured content. One more tool, `ask_te
 that name), takes `{"text", "question"?}` and returns what `POST /ask_text` does, so an agent can pass a user's message
 as it is. An abstention is a result, not an error; an exception is a tool
 error (`isError`). The official `mcp` SDK (2.x, `solvi[mcp]`) serves it when installed; otherwise solvi's built-in stdio
-JSON-RPC server answers `initialize`, `ping`, `tools/list` and `tools/call` (`--mcp-impl sdk|builtin` chooses). For an
+JSON-RPC server answers `initialize`, `ping`, `tools/list` and `tools/call` (`--mcp-impl sdk|builtin` chooses). The two
+answer alike — an unknown tool is a JSON-RPC error (-32602) in both — except for what the SDK decides itself:
+arguments that are not an object are its protocol error (the built-in server returns a tool error), and a call still
+running when stdin closes is not answered. For an
 MCP client:
 
 ```json
