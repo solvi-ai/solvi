@@ -399,7 +399,10 @@ def published_checkpoint():
     checkpoint folder, or a Hugging Face id (read from the cache when it is there, else downloaded: the opt-in) — else
     solvi-ai/solvi-base when it is already in the Hugging Face cache (`solvi models pull solvi-ai/solvi-base`). None: the
     tests skip — a default run downloads nothing. Their assertions are the published checkpoint's."""
+    import gc
+
     from solvi import models
+    gc.collect()                                     # an earlier test's network is freed first: one in memory at a time
     src = os.environ.get("SOLVI_DECIDE_MODEL")
     if src and os.path.isdir(os.path.expanduser(src)):
         path = os.path.expanduser(src)
