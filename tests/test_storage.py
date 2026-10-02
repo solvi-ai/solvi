@@ -947,3 +947,26 @@ def test_the_audit_of_a_stored_decision_without_its_catalog_knows_which_checks_a
     for st in old_failed["flow"]["steps"]:
         st.pop("hard", None)
     assert "enough_history = False (hard, decides the answer)" in str(Response.model_validate(old_failed).audit("alert"))
+
+
+def test_query_finds_a_yes_no_answer_given_as_a_bool_on_every_backend(filled):
+    """query(question="approve", answer=True) found 0 records where answer="yes" found them."""
+    _, store, s, _ = filled
+    by_text = [x.seq for x in store.query(question="approve", answer="yes")]
+    assert by_text and [x.seq for x in store.query(question="approve", answer=True)] == by_text
+    assert [x.seq for x in store.query(answer=False)] == [x.seq for x in store.query(answer="no")]
+    store.catalog = None                                            # without the System: a bool is "yes" / "no" too
+    assert [x.seq for x in store.query(question="approve", answer=True)] == by_text
+
+
+def test_every_store_closes_and_is_a_context_manager_and_the_extension_is_read_in_any_case(tmp_path):
+    from solvi.storage import open_storage
+    with open_storage(tmp_path / "a.DB") as store:
+        assert isinstance(store, SQLiteStorage)
+        System(*build(), storage=store).ask(STATES[0])
+    with pytest.raises(Exception):                                  # closed: the connection is gone
+        store.head()
+    with JSONLStorage(tmp_path / "a.jsonl") as js:
+        System(*build(), storage=js).ask(STATES[0])
+    js.close()                                                      # nothing held open: closing twice is fine
+    assert len(JSONLStorage(tmp_path / "a.jsonl")) == 1

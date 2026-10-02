@@ -1965,7 +1965,10 @@ several processes may write to one file). Two more take an optional dependency a
 cannot fork) and `DuckDBStorage("decisions.duckdb")` (`pip install 'solvi[duckdb]'`; one writing process; query the tables
 with DuckDB next to JSONL or Parquet files). `storage="decisions.duckdb"` or a `postgresql://` URL work too. A stored record holds the answers, the safeguards, the models, the whole
 response (`res.to_dict()`), the time and your own `meta` (`store.save(res, meta={"ticket": 42})`). `teach` stores its
-corrections in the same chain (`store.corrections()`).
+corrections in the same chain (`store.corrections()`). `query(answer=...)` matches the stored form of an answer:
+`answer=True` finds a yes/no question's "yes". `len(store)` counts every chained record (decisions, corrections,
+redaction marks); `len(list(store.iter()))` the decisions. Every store has `close()` and is a context manager (`with
+SQLiteStorage("decisions.db") as store:`); the file extension is read in any case (`decisions.DB` is SQLite).
 
 | Method | Returns |
 |---|---|

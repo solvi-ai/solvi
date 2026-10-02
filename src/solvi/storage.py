@@ -191,7 +191,8 @@ def entry(resp, meta=None):
 
 @dataclass
 class Stored:
-    """One stored record: its id, position, time (seconds since the epoch), kind ("ask" or "teach") and the record itself."""
+    """One stored record: its id, position, time (seconds since the epoch), kind ("ask": a decision; "teach": a
+    correction; "redaction": the mark of an erasure, see TraceStorage.redact) and the record itself."""
     id: str
     seq: int
     time: float
@@ -377,7 +378,39 @@ class TraceStorage:
         return self.iter()
 
     def __len__(self):
+        """The number of chained records — decisions, corrections and redaction marks (head()["count"]); the decisions
+        alone: len(list(store.iter()))."""
         return self.head()["count"]
+
+    def close(self):
+        """Release what the store holds open (a database connection; nothing for a JSON-lines file). A store is also a
+        context manager: `with SQLiteStorage("decisions.db") as store: ...` closes it at the end."""
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        self.close()
+        return False
+
+    def _answer_key(self, question, answer):
+        """query's `answer=` in the form answers are stored: through the question's answer type when the store knows the
+        System (True → "yes" for a yes/no question, an Enum → its value), else a bool as "yes" / "no" (a yes/no answer
+        is stored as text) — so answer=True finds what answer="yes" finds."""
+        if answer is ANY or answer is None:
+            return answer
+        qs = getattr(self.catalog, "questions", None) or {}
+        names = [question] if question is not None else list(qs)
+        for n in names:
+            at = getattr(qs.get(n), "answer", None)
+            if at is not None:
+                try:
+                    return at.normalize(answer)
+                except ValueError:
+                    continue
+        if isinstance(answer, bool):
+            return "yes" if answer else "no"
+        return answer
 
     def corrections(self):
         """The stored corrections → [{"id", "time", "question", "init", "answer", "source", "by", "of"}] (feed them to fit /
@@ -398,8 +431,10 @@ class TraceStorage:
         kind fired ("grounding", "hard_check", "low_confidence", ...; with question: one that concerns it); model: a model
         with this fingerprint, id or type produced a step; since / until: stored in [since, until) — seconds since the
         epoch, a datetime, a date or an ISO string; catalog: decided by the catalog with this fingerprint
-        (System.fingerprint()["catalog"])."""
+        (System.fingerprint()["catalog"]). An answer is matched in its stored form: answer=True finds a yes/no "yes"
+        (see _answer_key)."""
         since, until = _when(since), _when(until)
+        answer = self._answer_key(question, answer)
         return [s for s in self.iter() if _matches(s.data, question, answer, status, safeguard, model, since, until, catalog)]
 
     def report(self, since=None, until=None, question=None, format="md", examples=3, system=None, **filters):
@@ -1083,6 +1118,7 @@ class _SQLStorage(TraceStorage):
     def query(self, question=None, answer=ANY, status=None, safeguard=None, model=None, since=None, until=None,
               catalog=None):
         since, until = _when(since), _when(until)
+        answer = self._answer_key(question, answer)
         where, args = ["r.kind = 'ask'"], []
         if catalog is not None:
             where.append("r.\"catalog\" = ?")
@@ -1212,7 +1248,7 @@ class DuckDBStorage(_SQLStorage):
 
 
 def open_storage(where, catalog=None):
-    """A TraceStorage from a path: .db / .sqlite / .sqlite3 → SQLiteStorage, .duckdb → DuckDBStorage, a
+    """A TraceStorage from a path: .db / .sqlite / .sqlite3 → SQLiteStorage, .duckdb → DuckDBStorage (in any case), a
     postgresql:// (or postgres://) URL → PostgresStorage, anything else → JSONLStorage; a TraceStorage is returned as
     it is."""
     if where is None or isinstance(where, TraceStorage):
@@ -1220,8 +1256,9 @@ def open_storage(where, catalog=None):
     p = os.fspath(where)
     if p.startswith(("postgresql://", "postgres://")):
         return PostgresStorage(p, catalog)
-    if p.endswith(".duckdb"):
+    ext = p.lower()                                   # "decisions.DB" is a database too, not a JSON-lines file
+    if ext.endswith(".duckdb"):
         return DuckDBStorage(p, catalog)
-    if p.endswith((".db", ".sqlite", ".sqlite3")):
+    if ext.endswith((".db", ".sqlite", ".sqlite3")):
         return SQLiteStorage(p, catalog)
     return JSONLStorage(p, catalog)
