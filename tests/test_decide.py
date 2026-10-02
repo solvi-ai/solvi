@@ -318,9 +318,9 @@ def test_calibration_helpers():
     conf = [0.95, 0.9, 0.8, 0.7, 0.6, 0.5]
     ok = [1, 1, 1, 0, 1, 0]
     assert coverage_at(conf, ok, 0.9) == pytest.approx(0.5)
-    assert threshold_for(conf, ok, 0.9) == pytest.approx(0.8)
+    assert threshold_for(conf, ok, 0.9, min_n=1) == pytest.approx(0.8)
     assert coverage_at(conf, ok, 1.0) == pytest.approx(0.5) and coverage_at([0.9], [0], 0.9) == 0.0
-    assert threshold_for([0.9], [0], 0.9) is None
+    assert threshold_for([0.9], [0], 0.9, min_n=1) is None and threshold_for([], [], 0.9) is None
     acc, cov = accuracy_at(conf, ok, 0.75)
     assert acc == 1.0 and cov == pytest.approx(0.5)
     assert ece([1.0, 1.0], [1, 1]) == 0.0 and ece([0.9] * 10, [1] * 9 + [0]) == pytest.approx(0.0)
@@ -358,6 +358,37 @@ def test_load_expands_the_home_folder_and_does_not_ask_the_hub_for_a_path(tmp_pa
     for missing in ("~/models/nope", str(tmp_path / "nope"), "./nope/solvi-base"):
         with pytest.raises(FileNotFoundError, match="no such folder"):
             DecideModel.load(missing, backend="onnx")
+
+
+def test_threshold_for_keeps_equal_confidences_together_and_needs_support():
+    """An LLM states 0.85 / 0.90 / 0.95, so ties are the normal case. The threshold used to be cut inside a tie (the
+    first two of ten 0.9s happen to be right) — and "answer when confidence ≥ it" then let the whole tie in: 60% right
+    for a 90% target; the result also depended on the order of the rows."""
+    conf = [0.95] * 10 + [0.9] * 10
+    ok = [1] * 10 + [1, 1] + [0] * 8
+    t = threshold_for(conf, ok, 0.9)
+    assert t == 0.95 and accuracy_at(conf, ok, t) == (1.0, 0.5) and coverage_at(conf, ok, 0.9) == 0.5
+    assert accuracy_at(conf, ok, threshold_for(conf, ok, 0.6))[0] >= 0.6 and threshold_for(conf, ok, 0.6) == 0.9
+    for c, o in (([0.9, 0.9, 0.9, 0.5], [1, 0, 0, 1]), ([0.9, 0.9, 0.9, 0.5], [0, 0, 1, 1])):   # the same cases, two orders
+        assert coverage_at(c, o, 0.9) == 0.0 and threshold_for(c, o, 0.9, min_n=1) is None
+    rng = np.random.default_rng(0)
+    for _ in range(200):                             # whatever it returns reaches the target on the examples
+        c = rng.choice([0.6, 0.7, 0.8, 0.9, 0.95], 60)
+        o = (rng.random(60) < c - 0.1).astype(float)
+        t = threshold_for(c, o, 0.8, min_n=1)
+        if t is None:
+            assert coverage_at(c, o, 0.8) == 0.0
+        else:
+            acc, cov = accuracy_at(c, o, t)
+            assert acc >= 0.8 - 1e-12 and cov == pytest.approx(coverage_at(c, o, 0.8))
+            assert cov == pytest.approx(coverage_at(c[::-1], o[::-1], 0.8))
+    # a threshold that rests on one example says nothing: None by default, the old answer on request
+    conf, ok = [0.99, 0.6, 0.6, 0.6, 0.5], [True, False, False, True, False]
+    assert threshold_for(conf, ok, 0.75) is None and threshold_for(conf, ok, 0.75, min_n=1) == 0.99
+    assert coverage_at(conf, ok, 0.75) == pytest.approx(0.2)
+    conf, ok = [0.99] + [0.8] * 30 + [0.5] * 9, [1] + [1] * 27 + [0] * 3 + [0] * 9
+    assert threshold_for(conf, ok, 0.9) == 0.8 and summary(conf, ok, 0.9)["threshold"] == 0.8
+    assert threshold_for(conf, ok, 0.9, min_n=40) is None and summary(conf, ok, 0.95)["threshold"] is None
 
 
 PUBLISHED = "solvi-ai/solvi-base"

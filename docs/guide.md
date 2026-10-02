@@ -1341,6 +1341,12 @@ ece(conf, correct)                    # expected calibration error; reliability(
 evaluate(system, "team", examples)    # ask on [(init_state, answer)] → accuracy, ece, coverage_at, answered, ...
 ```
 
+Equal confidences are taken or left together (an LLM that states 0.85 / 0.90 / 0.95 gives mostly ties), so the cases
+with confidence ≥ the threshold do reach the accuracy on the examples. `threshold_for` returns `None` when fewer than
+`min_n=10` examples stand at or above the threshold — one confident right answer is not a threshold. Both are empirical:
+no promise for new inputs; `solvi.calibration.ltt_threshold` and `crc_threshold` (behind `calibrate_for(method="ltt")`
+and `act_guard`) give one.
+
 [examples/13_decide_model.py](../examples/13_decide_model.py) routes support emails with a decision part: bias correction on
 60 unlabelled emails, S on 16 labelled ones, abstention, a constraint with a rule-based question, a hard check, the audit,
 `System.teach`, `calibrate_for` and a JSON ticket. [examples/15_typed_decisions.py](../examples/15_typed_decisions.py) is the

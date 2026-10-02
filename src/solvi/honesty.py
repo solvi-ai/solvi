@@ -198,7 +198,7 @@ def metrics(rows, risk=0.10):
             "confident_error_rate": len(wrong) / n if n else 0.0,
             "risk": risk,
             "coverage_at_risk": cov * len(acted) / n if n else 0.0,
-            "threshold": threshold_for(conf, ok, 1 - risk) if acted else None,
+            "threshold": threshold_for(conf, ok, 1 - risk, min_n=1) if acted else None,
             "quotes": len(quotes), "quotes_supporting": supported,
             "quote_support_proxy": supported / len(quotes) if quotes else None,
             "should_abstain": len(should_abstain),
