@@ -357,3 +357,30 @@ def test_a_promotion_that_cannot_be_carried_over_leaves_the_live_parts_as_they_w
     assert rec["gates"]["promotion"] == {"ok": False, "restored": True, "why": rec["gates"]["promotion"]["why"]}
     assert "did not give its fingerprint" in rec["gates"]["promotion"]["why"]
     assert [v["version"] for v in loop.versions()] == [0] and store.verify()["ok"]
+
+
+@pytest.mark.parametrize("kw, why", [
+    ({"ladder": {"fit_bellow": 10}}, "unknown ladder settings: \\['fit_bellow'\\]"),
+    ({"ladder": {"memory": {"mode": "overwrite"}}}, "mode must be one of"),
+    ({"ladder": {"memory": {"kk": 3}}}, "unknown memory settings"),
+    ({"holdout": 0.9, "calibration": 0.5}, "leave no label to train on"),
+    ({"holdout": -1}, "holdout must be a share"),
+    ({"gates": {"risk": 7}}, "gate risk must be a number strictly between 0 and 1"),
+    ({"gates": {"max_change": 2}}, "gate max_change must be a share"),
+])
+def test_a_learning_setting_that_would_be_ignored_or_leave_nothing_to_train_is_refused(tmp_path, kw, why):
+    """Only gate names were checked: a misspelt ladder key was ignored, holdout=0.9 with calibration=0.5 left no
+    training label, and holdout=-1, a gate risk of 7 or a bad memory mode were accepted."""
+    _, s, _ = build(tmp_path)
+    with pytest.raises(ValueError, match=why):
+        loop_of(s, **kw)
+
+
+def test_a_combination_question_is_left_out_by_default_instead_of_making_learning_raise(tmp_path):
+    from solvi.multi import Cascade
+    m = DecideModel(FakeScorer(bias=BIAS, noise=0.3), meta={"format": "test", "temperature": 1.0})
+    cat = Catalog()
+    q = m.decision("team", TASK, "email", TEAMS).question(cat, "route")
+    q2 = Cascade([m.decision("team", TASK, "email", TEAMS)], name="team2").question(cat, "route2")
+    s = System(cat, [q, q2], storage=SQLiteStorage(tmp_path / "d.db"))
+    assert list(loop_of(s).parts) == ["route"]

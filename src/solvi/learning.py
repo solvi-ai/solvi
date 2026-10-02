@@ -70,6 +70,44 @@ GATES = {"min_gain": 0.01, "min_holdout": 5, "tolerance": 0.02, "risk": 0.10, "m
          "max_conflict": 0.20, "min_calibration": 30, "honesty": None}
 
 
+def _check_settings(ladder, gates, holdout, calibration):
+    """System.learning's settings → ValueError naming the first that is wrong: an unknown ladder, memory or gate key
+    (a typo would be ignored), a memory mode that does not exist, a gate rate outside [0, 1] (risk strictly inside),
+    a negative count, or holdout / calibration shares that leave no label to train on."""
+    from .calibration import check_rate
+    from .memory import _settings
+    unknown = set(ladder or ()) - set(LADDER)
+    if unknown:
+        raise ValueError(f"unknown ladder settings: {sorted(unknown)} (known: {sorted(LADDER)})")
+    mem = (ladder or {}).get("memory") or {}
+    if not isinstance(mem, dict) or set(mem) - set(LADDER["memory"]):
+        raise ValueError(f"unknown memory settings: {sorted(set(mem) - set(LADDER['memory'])) if isinstance(mem, dict) else mem!r} "
+                         f"(known: {sorted(LADDER['memory'])})")
+    _settings(**mem)
+    for k in ("fit_below", "memory_below"):
+        v = (ladder or {}).get(k)
+        if v is not None and (isinstance(v, bool) or not isinstance(v, (int, float)) or v < 0):
+            raise ValueError(f"ladder {k} must be a number of labels ≥ 0, not {v!r}")
+    unknown = set(gates or ()) - set(GATES)
+    if unknown:
+        raise ValueError(f"unknown gate settings: {sorted(unknown)} (known: {sorted(GATES)})")
+    for k, v in (gates or {}).items():
+        if k == "risk":
+            check_rate("gate risk", v)
+        elif k in ("min_gain", "tolerance", "max_change", "max_conflict"):
+            if isinstance(v, bool) or not isinstance(v, (int, float)) or not 0 <= v <= 1:
+                raise ValueError(f"gate {k} must be a share in [0, 1], not {v!r}")
+        elif k in ("min_holdout", "shadow_limit", "min_calibration"):
+            if isinstance(v, bool) or not isinstance(v, (int, float)) or v < 0:
+                raise ValueError(f"gate {k} must be a count ≥ 0, not {v!r}")
+    for name, v in (("holdout", holdout), ("calibration", calibration)):
+        if isinstance(v, bool) or not isinstance(v, (int, float)) or not 0 <= v < 1:
+            raise ValueError(f"{name} must be a share in [0, 1), not {v!r}")
+    if holdout + calibration >= 1:
+        raise ValueError(f"holdout ({holdout}) + calibration ({calibration}) leave no label to train on: their sum must "
+                         "be below 1")
+
+
 class ExperimentalWarning(UserWarning):
     """A feature whose API and behaviour may still change."""
 
@@ -159,9 +197,9 @@ class Learning:
         else:
             names = list(system.questions) if parts is None else list(parts)
             chosen = {q: decision_of(system.catalog, q) for q in names}
-            if parts is None:                          # closed-list questions only (see below)
+            if parts is None:                          # closed-list decision parts only (see below; not combinations)
                 chosen = {q: p for q, p in chosen.items()
-                          if p is not None and not (isinstance(p, DecisionPart) and p.spec.kind in OPEN_KINDS)}
+                          if isinstance(p, DecisionPart) and p.spec.kind not in OPEN_KINDS}
         for q, p in chosen.items():
             if q not in system.questions:
                 raise ValueError(f"{q!r} is not a question of this system")
@@ -175,12 +213,10 @@ class Learning:
         if not chosen:
             raise ValueError("no question of this system is answered by a decision part: nothing to learn")
         self.parts = chosen
+        _check_settings(ladder, gates, holdout, calibration)
         self.ladder = {**LADDER, **(ladder or {})}
         self.ladder["memory"] = {**LADDER["memory"], **((ladder or {}).get("memory") or {})}
         self.gates = {**GATES, **(gates or {})}
-        unknown = set(gates or ()) - set(GATES)
-        if unknown:
-            raise ValueError(f"unknown gate settings: {sorted(unknown)} (known: {sorted(GATES)})")
         self.holdout, self.calibration = float(holdout), float(calibration)
         self.gate_teach, self.harvest_rules = bool(gate_teach), bool(harvest_rules)
         self._states = {}                              # version → in-process snapshot (keeps objects JSON cannot hold)
