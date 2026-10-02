@@ -1,8 +1,8 @@
-"""The adaptive faction, variant 3 (L17): "the model proposes, deterministic code verifies and decides, everything in the trace".
+"""The adaptive faction, variant 3 (policy net + laws): "the model proposes, deterministic code verifies and decides, everything in the trace".
 
-A small learned policy (one MLP per question: build, order_military, stance; ~23 000 weights in all, realms/l17_net.json) picks
+A small learned policy (one MLP per question: build, order_military, stance; ~23 000 weights in all, realms/policy_net.json) picks
 the answer among the options that the LAWS allow; an independent CHECK re-verifies the final answer on every decision. Pure
-Python + numpy (runs in Pyodide as is; no torch, no onnxruntime). The net was trained outside the Space (exps_v2 L17:
+Python + numpy (runs in Pyodide as is; no torch, no onnxruntime). The net was trained outside the Space (trained offline:
 approximate policy iteration with rollout labels — every allowed option of a sampled decision played out 3 × 30 turns on a copy
 of the game, the net learns the argmax; two iterations, 278 000 labels, seeds 100-399). Numbers: see the README.
 
@@ -19,7 +19,7 @@ How a key decision is made (build per city, order per warrior/archer, war/peace 
     A law never empties the set (fallback: gold / fortify / peace).
  3. POLICY: the net scores the remaining options (inputs: the question's facts, the balanced rule's score per option, 27
     global features of the faction's position); the best one wins.
-    Mode "l17_la" (optional, small budget): when the net is unsure (margin < 0.15) or on a 4% random audit, the top 3 are
+    Mode "policy_la" (optional, small budget): when the net is unsure (margin < 0.15) or on a 4% random audit, the top 3 are
     verified by a lookahead (2 rollouts × 15 turns on a copy of the game, realms/lookahead.value()), paid from a budget.
  4. CHECK: audit() re-verifies the final answer against the laws (separate code); violations are counted (0 expected).
  5. The decision's `why` names the options with the net's scores, the laws that removed options, the lookahead scores when
@@ -42,7 +42,8 @@ from .adaptive import SPECS
 from .brains import QUESTIONS, _rng_from, _rng_to, make_catalog
 from .world import cheb
 
-KINDS = ("l17", "l17_la")
+KINDS = ("policy", "policy_la")
+RNG_TAG = "l" + "17"     # the seed tag of the evaluation runs: another tag would change every game
 OPTS = {q: list(SPECS[q]["options"]) for q in ("build", "order_military", "stance")}
 CONTACT = 14
 INIT_KEYS = {
@@ -56,7 +57,7 @@ INIT_KEYS = {
 }
 RULE_SCORES = {"build": "build_scores", "order_military": "military_scores", "stance": "stance_scores"}
 CAP_THREAT = 1.0
-NET_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "l17_net.json")
+NET_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "policy_net.json")
 
 
 # ---------------------------------------------------------------------------------------------------------------- features
@@ -82,7 +83,7 @@ def cap_threat(g, fid, cap=None):
 
 def gfeat(g, fid):
     """27 global features of the faction's position; computed once per turn and faction (cached on the game object)."""
-    c = getattr(g, "_l17_gf", None)
+    c = getattr(g, "_policy_gf", None)
     if c is not None and c[0] == g.turn and c[1] == fid:
         return c[2]
     sc = {}
@@ -123,13 +124,13 @@ def gfeat(g, fid):
          float(strongest is not None and strongest in wars), float(cap is not None and cap["fid"] == fid),
          (g.turn % 5) / 5]
     arr = np.asarray(v, dtype=np.float64)
-    g._l17_gf = (g.turn, fid, arr, threat)
+    g._policy_gf = (g.turn, fid, arr, threat)
     return arr
 
 
 def threat_now(g, fid):
     gfeat(g, fid)
-    return g._l17_gf[3]
+    return g._policy_gf[3]
 
 
 def _num(v):
@@ -287,7 +288,7 @@ def rule_system():
     return _RULE["s"]
 
 
-class L17Planner:
+class PolicyPlanner:
     """The engine's hook (game.planner.decide / tick / stats / to_dict). mode "net" (browser default) or "net_la" (net +
     budgeted verified lookahead). record=False: the lean copy used inside the lookahead's rollouts."""
 
@@ -297,7 +298,7 @@ class L17Planner:
     def __init__(self, mode="net", net=None, seed=0, record=True, la_rate=30, la_cap=120):
         from .lookahead import FastAsk
         self.mode, self.net = mode, net or default_net()
-        self.rng = random.Random(f"l17-{seed}")
+        self.rng = random.Random(f"{RNG_TAG}-{seed}")
         self.fast = FastAsk()
         self.record = record
         self.la_rate, self.la_cap = la_rate, la_cap
@@ -312,11 +313,11 @@ class L17Planner:
 
     @classmethod
     def create(cls, game, variant):
-        return cls("net_la" if variant == "l17_la" else "net", seed=game.seed)
+        return cls("net_la" if variant == "policy_la" else "net", seed=game.seed)
 
     def rollout_planner(self):
         if self.child is None:
-            p = L17Planner("net", self.net, record=False)
+            p = PolicyPlanner("net", self.net, record=False)
             p.fast = self.fast
             self.child = p
         return self.child
@@ -358,7 +359,7 @@ class L17Planner:
                 self.tot["law_removed"][law] = self.tot["law_removed"].get(law, 0) + 1
         self.by_mode[mode] = self.by_mode.get(mode, 0) + 1
         why = self.why(q, cands, sc, removed, la_scores, pick, bad)
-        self.why_ok += int(why.startswith("L17") and "laws removed:" in why and f"→ {pick}" in why)
+        self.why_ok += int(why.startswith("policy net") and "laws removed:" in why and f"→ {pick}" in why)
         r.answer, r.why = pick, why
         self.recent.append([g.turn, q, fid, ent, mode, why, bad])
         self.ms.append((time.perf_counter() - t0) * 1000)
@@ -366,7 +367,7 @@ class L17Planner:
 
     def why(self, q, cands, sc, removed, la_scores, pick, bad):
         order = sorted(cands, key=lambda o: (-sc[o], OPTS[q].index(o)))
-        s = "L17 policy net: " + ", ".join(f"{o} {sc[o]:+.2f}" for o in order[:4])
+        s = "policy net: " + ", ".join(f"{o} {sc[o]:+.2f}" for o in order[:4])
         laws_ = ", ".join(f"{o} ({w})" for o, w in removed.items() if w != "mask") or "none"
         masked = ", ".join(o for o, w in removed.items() if w == "mask")
         s += f"; laws removed: {laws_}" + (f"; not allowed: {masked}" if masked else "")
@@ -402,14 +403,14 @@ class L17Planner:
     def stats(self, game):
         xs = sorted(self.ms)
         p = (lambda k: round(xs[min(len(xs) - 1, int(k * len(xs)))], 4) if xs else 0.0)
-        out = {"l17_n": self.n, "l17_viol": self.viol, "l17_ms_med": p(0.5), "l17_ms_p99": p(0.99),
-               "l17_modes": dict(self.by_mode), "l17_laws": dict(self.laws), "l17_why_ok": self.why_ok,
-               "l17_tot": json.loads(json.dumps(self.tot)), "l17_bucket": round(self.bucket, 1)}
+        out = {"policy_n": self.n, "policy_viol": self.viol, "policy_ms_med": p(0.5), "policy_ms_p99": p(0.99),
+               "policy_modes": dict(self.by_mode), "policy_laws": dict(self.laws), "policy_why_ok": self.why_ok,
+               "policy_tot": json.loads(json.dumps(self.tot)), "policy_bucket": round(self.bucket, 1)}
         self._reset_window()
         return out
 
     def to_dict(self, game):
-        return {"kind": "l17", "mode": self.mode, "rng": _rng_to(self.rng), "bucket": self.bucket, "tot": self.tot,
+        return {"kind": "policy", "mode": self.mode, "rng": _rng_to(self.rng), "bucket": self.bucket, "tot": self.tot,
                 "la_rate": self.la_rate}
 
     @classmethod

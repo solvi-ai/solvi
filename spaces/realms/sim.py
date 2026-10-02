@@ -490,9 +490,9 @@ if __name__ == "__main__":
     ap.add_argument("--checkpoint-every", type=int, default=500)
     ap.add_argument("--resume", default="", help="continue bit-for-bit from a checkpoint written by --checkpoint")
     ap.add_argument("--max-wall", type=float, default=0, help="pause (exit 3) at the first checkpoint after this many s")
-    ap.add_argument("--variant", default="value", choices=["value", "lookahead", "l17", "l17_la"],
+    ap.add_argument("--variant", default="value", choices=["value", "lookahead", "policy", "policy_la"],
                     help="adaptive faction: value heads (realms/adaptive.py), proposer + laws + lookahead (realms/lookahead.py), "
-                         "or the L17 policy net + laws + answer check (realms/l17.py; l17_la: + budgeted lookahead)")
+                         "or the policy net + laws + answer check (realms/policy.py; policy_la: + budgeted lookahead)")
     a = ap.parse_args()
     os.makedirs(RESULTS, exist_ok=True)
     if a.charts:

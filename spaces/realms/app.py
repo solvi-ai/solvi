@@ -20,25 +20,25 @@ REPO = "https://github.com/solvi-ai/solvi"
 RECORD_EVERY = 25          # turns per health checkpoint in the browser
 MAX_RECS = 240             # ring buffer of checkpoints shown in the health panel
 SPEEDS = {"1 turn / tick": 1, "5 turns / tick": 5, "20 turns / tick": 20}
-VARIANTS = {"learning value heads": "value", "L17 policy net + laws": "l17"}
-LA_RATE_BROWSER = 10       # L17 + verified lookahead in the browser: a third of the headless budget (rollout-turns per turn)
+VARIANTS = {"learning value heads": "value", "policy net + laws": "policy"}
+LA_RATE_BROWSER = 10       # policy net + verified lookahead in the browser: a third of the headless budget (rollout-turns per turn)
 
 
 def variant_of(label, la):
     v = VARIANTS.get(label, "value")
-    return "l17_la" if v == "l17" and la else v
+    return "policy_la" if v == "policy" and la else v
 
 
 def new_ui(seed, label="learning value heads", la=False):
     v = variant_of(label, la)
     g = Game(seed=int(seed or 0), variant=v)
-    if v == "l17_la":
+    if v == "policy_la":
         g.planner.la_rate = LA_RATE_BROWSER         # smaller lookahead budget than headless (saved with the game)
     return {"g": g, "recs": [], "alive_min": 99, "sel": None, "perf": "", "since": 0, "t_turns": [], "neg": 0}
 
 
-def is_l17(p):
-    return p is not None and getattr(p, "tot", None) is not None and "violations" in p.tot    # realms/l17.py
+def is_policy(p):
+    return p is not None and getattr(p, "tot", None) is not None and "violations" in p.tot    # realms/policy.py
 
 
 def play(ui, n):
@@ -52,8 +52,8 @@ def play(ui, n):
         if ui["since"] >= RECORD_EVERY:
             ui["recs"].append(health.record(g, ui["alive_min"], negative_treasury=ui["neg"]))
             ui["recs"] = ui["recs"][-MAX_RECS:]
-            if is_l17(g.planner):
-                ui["l17w"] = g.planner.stats(g)     # closes the planner's timing window (keeps it bounded)
+            if is_policy(g.planner):
+                ui["policyw"] = g.planner.stats(g)     # closes the planner's timing window (keeps it bounded)
             ui["alive_min"], ui["since"], ui["neg"] = 99, 0, 0
             g.m.reset()
     dt = (time.perf_counter() - t0) * 1000
@@ -74,18 +74,18 @@ def turn_md(ui):
 
 def learn_md(g, ui=None):
     p = g.planner
-    if is_l17(p):
+    if is_policy(p):
         t = p.tot
         laws = ", ".join(f"{k} {v:,}" for k, v in sorted(t["law_removed"].items())) or "none yet"
-        w = (ui or {}).get("l17w")
+        w = (ui or {}).get("policyw")
         xs = sorted(p.ms)
-        if w and w["l17_n"]:
-            ms = f"{w['l17_ms_med']:.2f} ms median, {w['l17_ms_p99']:.2f} ms p99 (last {RECORD_EVERY} turns)"
+        if w and w["policy_n"]:
+            ms = f"{w['policy_ms_med']:.2f} ms median, {w['policy_ms_p99']:.2f} ms p99 (last {RECORD_EVERY} turns)"
         else:
             ms = f"{xs[len(xs) // 2]:.2f} ms median, {xs[int(0.99 * (len(xs) - 1))]:.2f} ms p99" if xs else "—"
         la = (f" Verified lookahead (small budget, {p.la_rate} rollout-turns per turn): {t['lookaheads']:,} so far."
               if p.mode == "net_la" else "")
-        return (f"**Adaptive faction = L17 policy net** (a small MLP per question, trained offline by policy iteration on "
+        return (f"**Adaptive faction = policy net** (a small MLP per question, trained offline by policy iteration on "
                 f"rollouts; the model proposes, deterministic code decides): laws filter the options before the net "
                 f"(capital_guard, no_starve, upkeep_ok, war_min_length), an independent check re-verifies every answer "
                 f"after it, hard checks still force. {t['decisions']:,} decisions, **{t['violations']} check violations**; "
@@ -292,7 +292,7 @@ with gr.Blocks(title="solvi realms", theme=THEME, css=CSS) as demo:
             with gr.Row():
                 variant = gr.Radio(list(VARIANTS), value="learning value heads", label="adaptive faction (applies to a new world)",
                                    scale=3)
-                la_box = gr.Checkbox(False, label="L17 + verified lookahead (small budget, slower)", scale=2)
+                la_box = gr.Checkbox(False, label="policy net + verified lookahead (small budget, slower)", scale=2)
             factions = gr.HTML()
             learn = gr.Markdown()
         with gr.Column(scale=5, min_width=360):
