@@ -143,6 +143,13 @@ def test_highlight_overlaps_and_long_text():
 
 def test_md_escape():
     assert md("a|b*c_<d>\nnew") == "a\\|b\\*c\\_\\<d\\> new"
+    # only where Markdown would act: a word with "_" inside, brackets, a date and a sentence stay as written
+    for plain in ("known_customer", "0 mismatch(es)", "1970-01-01", "ok: 3 + 4 = 7!", "a {b}"):
+        assert md(plain) == plain
+    for text, want in (("_em_", "\\_em\\_"), ("- item", "\\- item"), ("1. one", "1\\. one"), ("+ x", "\\+ x"),
+                       ("=== ", "\\=== "), ("![x](y)", "\\!\\[x\\](y)"), ("a `b` ~c~ #d", "a \\`b\\` \\~c\\~ \\#d"),
+                       ("2) two", "2\\) two"), ("back\\slash", "back\\\\slash")):
+        assert md(text) == want, text
 
 
 def test_forced_answer_and_stored_response(tmp_path):
@@ -298,3 +305,14 @@ def test_period_report_escapes_a_stored_seq_that_is_not_a_number(store):
     data["changes"] = [{"what": "catalog", "from": "a" * 16, "to": "b" * 16, "id": "r1", "seq": evil, "time": "t"}]
     assert evil not in render(data, "html") and "&lt;img src=x" in render(data, "html")
     assert evil not in render(data, "md")
+
+
+def test_period_report_counts_what_was_erased_and_corrected(store):
+    first, second = [s.id for s in store.iter()][:2]
+    store.redact(first, by="dpo", note="a request to erase")
+    store.save_correction("pay", {"vendor": "Acme"}, "no", by="ann", of=second)
+    d = store.report(format="data")
+    assert d["decisions"] == 3 and d["erased"] == 1 and d["corrections"] == 1
+    for out in (store.report(), store.report(format="html")):
+        assert "3 stored decision(s)" in out and "1 erased" in out and "1 correction(s)" in out
+    assert store.report(format="data", until=5.0)["erased"] == 0          # outside the period

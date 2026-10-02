@@ -3201,7 +3201,9 @@ store.report(question="refund", format="html", examples=5)               # one q
 A period report counts per question: the answers, the statuses, the escalation rate (abstentions — handed to a person — by
 the safeguard that caused them), the safeguards that fired, and the **guarantee coverage**: of the answers a model decided
 or took part in, how many rest only on calibrated thresholds (answers from code alone are counted apart). It lists the
-catalog and model fingerprints in use and every change of them over the period (from which stored decision on), and up
+catalog and model fingerprints in use, how many decisions of the period were erased (`store.redact`: they are not in
+the counts) and how many corrections were recorded in it (`"erased"` and `"corrections"` in the data; store-wide for
+the period, whatever the other filters), and every change of the fingerprints over the period (from which stored decision on), and up
 to `examples` stored ids per answer, escalation reason and safeguard — `res = store.get(id)` and `res.report()` give the
 page of one. From the shell:
 
