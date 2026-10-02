@@ -2162,8 +2162,11 @@ your texts can be about anything.
 | `bool` | yes / no words; the field's name or a `cues=` word ("urgent") → True; a phrase declared in `negatives={field: [...]}` (or `json_schema_extra={"negative_cues": ...}`) → False. Description words only rank candidates. A cue answered by a yes / no word ("Urgent: no", "urgent = false", "Is it urgent? No.") is that answer. A cue with a negation near it, before or after it in the sentence ("isn't urgent", "far from urgent", "anything but urgent", "urgent? not at all", "was urgent yesterday, not anymore", "urgent but cancelling isn't", "не срочно") is `unparsed` — never True, and False only through a declared negative |
 | `str` | the quote, trimmed; `patterns={field: regex}` must match it whole |
 
-A date without a year, or a relative one, is read only with `TextIn(today=...)`: without it the field is `unparsed`, never
-a guessed year. Every field ends in one state: `read`, `not_stated`, `unparsed` (the quote does not parse), `unsure` (found
+A date without a year, or a relative one, is read only with `TextIn(today=...)`: without it the field is `unparsed`.
+With it, a date without a year is given **today's year** — an assumption, recorded in the trace with `today`, and
+wrong around the turn of a year: "paid 28 December" read on 5 January becomes 28 December of the new year, almost a
+year ahead (`solvi serve` always supplies today's date). Where a rule compares such a date with today (a refund
+window), add a check that the date is not in the future, or ask for the year. Every field ends in one state: `read`, `not_stated`, `unparsed` (the quote does not parse), `unsure` (found
 with confidence below `min_field_confidence`, 0.5) or `unsupported` (no parser for the type). A required field that is not
 `read` is in `read.missing`: the question is asked anyway (a hard check may already decide it), and without that field it
 abstains — "not stated in the text: purchase_date; cannot compute: ..." — instead of guessing.

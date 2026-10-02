@@ -309,7 +309,8 @@ def parse_date(s, spec=None):
     {"dayfirst": False}: month first); 12 September 2026, September 12, 2026, 12 Sep, 12 сентября; today / yesterday /
     tomorrow. A lower-case "may" after a number, without a year and before a verb or a pronoun ("these 2 may be
     wrong"), is the modal verb, not the month. A date without a year, a two-digit year, or a relative date needs spec {"today": "YYYY-MM-DD"}
-    (TextIn(today=...)): without it it is an error, never a guessed year or century. A two-digit year is the one within
+    (TextIn(today=...)): without it it is an error. With it a date without a year is read in today's year (an
+    assumption, not a reading: "28 December" read on 5 January is the December ahead). A two-digit year is the one within
     (today − 80 years, today + 20 years]: with today 2026-09-28, "85" is 1985 and "30" is 2030. Exactly one date in the
     quote."""
     spec = spec or {}
