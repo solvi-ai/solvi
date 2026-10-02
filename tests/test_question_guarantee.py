@@ -189,3 +189,28 @@ def test_the_promise_is_given_as_one_of_risk_or_error():
         s.guarantee("label", _draw(rng, 100))
     with pytest.raises(ValueError, match="takes max_risk="):
         s.guarantee("label", _draw(rng, 100), max_error=0.1, method="crc")
+
+
+def test_the_audit_shows_the_promise_of_a_question_guarantee():
+    """After System.guarantee the audit and report said "Guarantee: none" for the answer: they looked only at the
+    thresholds of the model decisions behind it."""
+    import random
+
+    from solvi import Catalog, Question, System
+    cat = Catalog()
+
+    @cat.fn
+    def score(x: float) -> float:
+        return x
+
+    @cat.rule("ok")
+    def ok(score) -> bool:
+        return score > 0.5
+
+    s = System(cat, [Question("ok", "Ok?")])
+    rng = random.Random(0)
+    ex = [({"x": x}, x > 0.5) for x in (rng.random() for _ in range(300))]
+    s.guarantee("ok", ex, max_risk=0.2, signal="score", weak="warn")
+    text = str(s.ask({"x": 0.9}).audit())
+    line = next(x for x in text.splitlines() if "guarantee" in x)
+    assert "≤ 0.2" in line and "System.guarantee" in line and "none" not in line

@@ -579,7 +579,9 @@ def _one(res, q, events, catalog):
                                 "by_model": by_model, "span": a.kind == "span" and i == 0})
             count("quoted_by_model" if by_model else "quoted")
     au.safeguards = [e for e in events if q in e["questions"]]
-    au.guarantee = _guarantee(au)
+    qg = (a.extra or {}).get("guarantee") if isinstance(a.extra, dict) else None
+    au.guarantee = (f"{qg['promise']} ({qg.get('method')}, n = {qg.get('n')}) — on the question (System.guarantee)"
+                    if isinstance(qg, dict) and qg.get("promise") else _guarantee(au))
     au.counts = counts
     return au
 
