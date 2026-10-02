@@ -61,7 +61,7 @@ def main(argv=None):
     examples = examples_of(part, read_rows(a.labels))
     t0 = time.time()
     rep = adapt(part, examples, r=a.r, epochs=a.epochs, holdout=a.holdout or None, seed=a.seed, device=device,
-                lr=a.lr, risk=a.risk, max_updates=a.max_updates, allow_large=True)   # warnings: the estimate, few examples
+                lr=a.lr, max_risk=a.risk, max_updates=a.max_updates, allow_large=True)   # warnings: the estimate, few examples
     out = a.out or f"{a.fact}.lora.safetensors"
     part.save_lora(out)
     print(f"adapter #{rep['adapter']}: {rep['k']} examples, {rep['updates']} updates on {rep['device']} in "
