@@ -28,7 +28,7 @@ re-verifies it against the catalog.
     system = System(cat, questions, strategist=CostStrategist())      # code only: cheapest verified plan, no model
     system = System(cat, questions, strategist=ModelStrategist.load("path/to/strategist-checkpoint"))   # experimental
 
-Experimental: see docs/strategist.md for what was measured and when the model helps at all."""
+Experimental: no strategist checkpoint is published; see docs/strategist.md for its status and when the model helps at all."""
 from __future__ import annotations
 
 import dataclasses

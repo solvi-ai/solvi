@@ -4,9 +4,9 @@ stream changes.
 
 Every promise of act_guard / calibrate_for / System.guarantee holds "for inputs like the calibration examples". An
 input whose right answer is not among the options is outside that: whatever the decider answers is wrong, and a
-threshold calibrated without such inputs lets a share of them through. Measured on a 57-intent stream where 40% of the
-requests became new intents: 7.5–27% error among the answers given alone, against 5% promised. The gate sizes the
-threshold for a share of such inputs and follows the share as the stream goes:
+threshold calibrated without such inputs lets a share of them through, and the error among the answers given alone can
+end up several times the promised rate. The gate sizes the threshold for a share of such inputs and follows the share
+as the stream goes:
 
     from solvi.openset import OpenSetGate, leave_out
     sim = leave_out(calib, make)                 # make(kept options) → a decider without the others: the left-out
@@ -43,11 +43,11 @@ the estimate keeps the promise — it moves the threshold before any flag.
 
 What it does not do: it does not know what the new inputs are and does not learn them (labels, a new option and a
 recalibration are the caller's). The left-out inputs stand in for the real outside ones; when those look more familiar
-to the decider than the stand-ins did, the bound is optimistic — in a simulation on Banking77 one held-out third of the
-intents was harder than every left-out fold, and most simulated streams that broke the promise were its. Between a
-sudden change and the moment the short window sees it the threshold is the one for the share seen before: a stream
-that jumps to 60% outside inputs gets a few wrong answers in that time, which matter when little is answered after it.
-Measured: docs/guide.md, "Inputs from outside the calibration set"."""
+to the decider than the stand-ins did, the bound is optimistic — a group of new intents can be harder to tell from the
+known ones than every left-out fold. Between a sudden change and the moment the short window sees it the threshold is
+the one for the share seen before: a stream that jumps to a large share of outside inputs gets a few wrong answers in
+that time, which matter when little is answered after it. How to use it: docs/guide.md, "Inputs from outside the
+calibration set"."""
 from __future__ import annotations
 
 import math

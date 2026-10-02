@@ -15,10 +15,9 @@ One question is one request (`POST {base_url}/chat/completions`, temperature 0),
 confidence; "not stated" is an option only when the question allows it). The schema goes as `response_format`
 json_schema when the server takes it, else the same contract is in the prompt and the reply is parsed. A request that
 asks the model to reason (`extra_body` with `reasoning` / `reasoning_effort` ...) puts the contract in the prompt from
-the start: a server that enforces a reply format by constrained decoding can skip the thinking altogether (measured on
-OpenRouter's gpt-oss-120b: one provider, which served about a fifth of the requests, answered with no reasoning at all
-under json_schema and under json_object; a yes/no judge on RAGTruth dev scored F1 0.744 that way and 0.790 with the
-contract in the prompt). A reply that shows no reasoning when it was asked for is marked
+the start: a server that enforces a reply format by constrained decoding can skip the thinking altogether (some
+providers behind one model name do, under json_schema and under json_object alike), and the answers are then worse.
+A reply that shows no reasoning when it was asked for is marked
 `extra["llm"]["reasoning"] = "none"`, with a warning once. When the server
 returns log-probabilities for the answer's tokens, the probabilities come from them (the chosen option: the product of
 its tokens' probabilities; the others: the alternatives at its first token), not from the numbers the model wrote;
@@ -45,11 +44,11 @@ again when it does. An LLM is not replayed (its output is not reproducible bit f
 output instead (trust_models).
 
 Cost and latency: every question about every input is a paid request of hundreds of tokens (the options, their
-descriptions and the text) and 0.3–5 s, against ~50 ms on a CPU for a local decider; decisions are cached by (question,
+descriptions and the text) and a network round trip, far slower than a local decider on a CPU; decisions are cached by (question,
 input) for the life of the model object. Start with it alone under act_guard; where a local decider (solvi-large) is
 about as strong on your stream, a Vote of the two can answer more at the same risk. "A small model first, the LLM
-second" is not a good default: measured on three data sets, a cascade came out no better than the stronger model alone
-(the guide's "Which combination with an LLM")."""
+second" is not a good default: where one model is clearly stronger, a cascade adds almost nothing over it alone (the
+guide's "Which combination with an LLM")."""
 from __future__ import annotations
 
 import hashlib
@@ -742,8 +741,7 @@ answers — see the module docs), or one of them. logprobs: "auto" (ask for them
 
     max_tokens: the reply's limit (default 512; 2,048 when extra_body asks for reasoning). A reasoning model's thinking
     counts against it on most servers, and a reply cut off at the limit escalates ("the reply was cut off (max_tokens)"):
-    measured with gpt-oss-120b at reasoning effort low, 6 of 600 short product-pair questions were cut off at 400, none
-    at 800. With reasoning on, raise the timeout too. max_len: the tokens one request reads under long="retrieve" (words
+    with reasoning on, keep the limit well above what a short answer needs, and raise the timeout too. max_len: the tokens one request reads under long="retrieve" (words
     and punctuation × 1.3, the question included; default None: 512, as for a local decider). A text up to that length is sent whole; a longer
     one, with long="retrieve", is read by its best sections within it — max_len=3000 reads about six times more of a
     contract per request (and pays for it). Without long= the whole text is always sent. It enters the fingerprint

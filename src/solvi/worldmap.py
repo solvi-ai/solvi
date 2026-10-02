@@ -21,19 +21,10 @@ What the map knows is what it was told through these calls: it does not know wha
 adapter — list the actions of a state, take one — is yours. `snapshot(state, targets)` gives a decision the part of
 the map it needs as a plain fact (the known way, what is unexplored here), so decisions that use it replay.
 
-Measured on real environments, a stream of 40 "get to <target>" tasks with 25 targets, one step per action; "by words":
-the offered action whose label shares most words with the target's name, no map.
-
-    environment                                   by words            a map per task      one map kept across tasks
-    commands of uv, docker, git (254)             19 of 40, 34.7      23 of 40, 28.2      35 of 40, 11.1 (last ten: 5.7)
-    files of a repository (1,020 entries)          0 of 40             0 of 40            23 of 40, 36.2 (last ten: 4.0)
-    docs.python.org (targets two clicks deep)     32 of 40, 13.1      32 of 40,  9.8      38 of 40,  4.2
-    docs.astral.sh/uv (every page one click away) 40 of 40,  1.0      40 of 40,  1.0      40 of 40,  1.0
-
-So: the gain is the map carried from one task to the next, in an environment that is deep and met again. It does not
-make a first exploration shorter, it gives nothing where everything is one step away, and it does not tell which state
-a task needs — only how to get to one that is named. In a game without the game's own map, an agent's second episode
-took 275 decisions where the first took 1,305."""
+Where it helps: the gain is the map carried from one task to the next, in an environment that is deep and met again
+(a command tree, a file tree, a documentation site several clicks deep) — later tasks take fewer steps than the first.
+It does not make a first exploration shorter, it gives nothing where everything is one step away, and it does not tell
+which state a task needs — only how to get to one that is named."""
 from __future__ import annotations
 
 import json

@@ -30,11 +30,10 @@ and the model are deterministic. The decision's `probs` cover the options of the
 What it does not do. A guarantee calibrated on one set of options (act_guard, conformal) does not carry over to
 options that change: a threshold holds for the question it was calibrated on. In shortlist mode the right option may
 not be among the k (the selector's recall bounds the accuracy), which `unconsidered` and the gap escalation make
-visible, not impossible. Measured with solvi-base on a text game with 20–45 actions per situation (30 situations):
-direct 0.70 where the options fit, shortlist (BM25, k=8, the goal as the query) 0.63, tournament (blocks of 10) 0.57
-in 5 calls; scoring each option alone was no better than chance and is not offered. On a catalog of 240 products the
-shortlist found the product among its top 3 in 0.40 of the requests and the model picked it in almost none: there the
-facts decide (price within budget, the category), and code should narrow the candidates before the model is asked."""
+visible, not impossible. Expect direct, where the options fit, to be the most accurate, then shortlist, then the
+tournament (more calls, more chances to drop the right option); scoring each option alone is not offered. Where facts
+decide (price within budget, the category), code should narrow the candidates before the model is asked: a model
+choosing among many similar catalog rows by their text alone does poorly."""
 from __future__ import annotations
 
 from dataclasses import dataclass

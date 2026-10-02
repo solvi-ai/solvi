@@ -29,14 +29,11 @@ re-checks every stored decision.
 `LongMemory` carries outcomes across episodes: what led to the goal in a context and what was a dead end, with decay,
 as scores that are given to the decision as a fact (not a hidden bias).
 
-Measured with solvi-base on two simulated tasks (60 support tickets, 50 incidents; synthetic, one seed): a model that
-sees only the last message solved 37% of the tickets and handed 48% to a person; with the episode in its input and
-repeats turned down, 68% and 10% — in 65% of its turns the model proposed what had already failed — and with the long
-memory 77% (repeat customers: 2.9 → 1.2 replies). Incidents: 0% → 26% → 42%. In a browser-form agent the stored
-decisions replayed 0 of 40 with the state in the harness and 101 of 101 with it in the input. A hand-written script
-does as well on the tickets (77%) and far better on the incidents (a runbook: 98%): the memory makes a model-driven
-agent sound and auditable, it does not make the model better than rules. Where the bottleneck is skill rather than memory (a game agent that loses fights) it
-changed nothing."""
+What to expect: a model that sees only the last message proposes again what has already failed; with the episode in
+its input and repeats turned down it stops doing that, and with the state in the input instead of the harness the
+stored decisions replay. The memory makes a model-driven agent sound and auditable, it does not make the model better
+than rules: where a hand-written script or a runbook exists, it can do as well or better. Where the bottleneck is skill
+rather than memory, it changes nothing."""
 from __future__ import annotations
 
 import collections

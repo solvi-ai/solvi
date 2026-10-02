@@ -19,9 +19,8 @@ about a millisecond without retraining and without touching the rest of the syst
 (the ridge hat matrix).
 
 A rank-one step keeps what the first fit chose: the ridge strength, the featurizer (number scales, the known values of each
-category) and whether pairwise products are used. Chosen on a handful of rows they are often wrong for hundreds (on open
-tabular sets a head started on 10 rows and taught up to 300 was 5 points less accurate than one fitted on all 300). So the
-head keeps its examples and, each time their number doubles (`refit=2.0`), fits again on all of them — the same as a fresh
+category) and whether pairwise products are used. Chosen on a handful of rows they are often wrong for hundreds: a head
+started on a few rows and taught one at a time ends up less accurate than one fitted on all of them. So the head keeps its examples and, each time their number doubles (`refit=2.0`), fits again on all of them — the same as a fresh
 fit on those rows — and goes on with rank-one steps. The amortised cost stays a constant per update; the update that
 triggers a refit is as slow as a fit. Past `refit_until` examples (2000) it stops refitting and drops the kept rows."""
 from __future__ import annotations
@@ -460,13 +459,9 @@ class CandidateHead:
     criterion of the sub-goal the step served (progress towards the goal for "go on", a level gained for "train"): one
     global measure teaches the head to ignore every step that does not move it.
 
-    Measured on two tasks. Candidates scored by a hidden formula over four features (4–8 per step, 200 test steps):
-    0.81 after 30 steps and 0.93 after 300, against 0.51–0.55 for "nearest that is open" / "largest reward"; taught
-    one step at a time from 30 to 300: 0.89, 1 ms per step; with 20% of the labels wrong: 0.85. Where to train in a
-    game, on its real data (16 features of a place, 180 test situations): 0.81 after 420 situations (0.67 after 100)
-    against 0.23 for the nearest place. relative=True changed these by −5 and +2 points: off by default. The head
-    learns the rule it is shown — in the game it reproduced the navigation rule and replaced the model there; it did
-    not beat the rule."""
+    relative=True is off by default: whether the gaps help depends on the task, so compare both on held-out steps.
+    The head learns the rule it is shown: trained on a rule's choices it reproduces the rule and can replace a model
+    there, it does not beat the rule."""
 
     def __init__(self, features, relative=False, pairs=None, refit=2.0):
         self.features = list(features)

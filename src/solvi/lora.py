@@ -3,10 +3,9 @@
 When a question has a hundred labelled answers or more, a shift and a scale on the logits (`part.fit`) stop improving: they
 cannot change what the model reads in the input. A LoRA adapter can: low-rank updates (rank 8) of the encoder's attention
 and MLP weights in every layer, plus the last layer of the output head, trained on this question's examples with the
-rest of the checkpoint frozen. Measured on solvi-base (typed decisions of four processes, the adapter against `fit` on
-the same examples, per process): +2.9 / +4.2 / +6.0 / +9.2 points at 32 / 100 / 300 / 1000 examples — `fit` levels off
-near 63% accuracy, the adapter reaches 72.6% at 1000. The adapter is 3.2 MB (bf16); training on a CPU takes minutes
-(about 4 at 100 examples and 13 at 300 on 4 server cores; a laptop is slower), on a GPU about 20 seconds.
+rest of the checkpoint frozen. Expect the gain over `fit` to grow with the examples: small at a few dozen (where `fit`
+is about as good and takes milliseconds), larger at hundreds. The adapter is 3.2 MB (bf16); training on a CPU takes
+minutes (adapt_lora estimates the time after its first update and says so before training), on a GPU seconds.
 
     part = model.decision("team", "Which team?", "email", TEAMS)      # DecideModel.load(..., backend="torch")
     report = part.adapt_lora(labelled, holdout=300)                   # 300 of the examples calibrate act_guard
@@ -19,10 +18,9 @@ What changes and what does not:
 - The adapter is active only while this question is scored; every other question of the same model is scored by the
   checkpoint as it was (to the bit). Its hash is part of the part's fingerprint (and the model's), and every decision
   records it in extra["lora"], so a replay knows which weights answered.
-- Confidences after LoRA are overconfident (calibration error 1.5–3× that of `fit` in the measurements above), so the
-  escalation must be recalibrated on labels not used for training: `holdout=` runs act_guard on them (the risk guarantee
-  held at 0.10, and the adapter answered alone 53% of the time against 45% for `fit`, at 300 examples). The question's
-  earlier adaptation and thresholds are cleared: they were fitted on the model without the adapter.
+- Confidences after LoRA tend to be overconfident (more than after `fit`), so the escalation must be recalibrated on
+  labels not used for training: `holdout=` runs act_guard on them. The question's earlier adaptation and thresholds are
+  cleared: they were fitted on the model without the adapter.
 - Deterministic for a fixed seed on a CPU (the same examples, seed, torch version and thread count give the same adapter,
   and the same hash).
 - solvi-base-sized checkpoints only; for solvi-large or thousands of examples, tools/adapt_lora_gpu.py (in the solvi

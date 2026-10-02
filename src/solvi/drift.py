@@ -37,8 +37,11 @@ minimum. So on a stream that has not changed, the chance of a false flag within 
 at most alpha (default 1%), as far as each test's p-value is exact and the reference stands for the stream; a longer
 stream gets alpha per horizon.
 
-It is a signal, not a verdict: what to do — recalibrate, escalate, ask for labels — is the caller's. Measured: docs/
-guide.md, "Drift" (simulated stationary streams, simulated shifts, Banking77 and support tickets)."""
+It is a signal, not a verdict: what to do — recalibrate, escalate, ask for labels — is the caller's. Simulated on
+independent decisions (benchmarks/drift_simulation.py): 6 of 1,152 unchanged streams were flagged within 1,000
+decisions; a fall of the share answered alone from 73% to 13% was flagged 23–27 decisions later whatever the window; a
+change of the mix of three answers from 1:1:1 to 1:8:1, which only the window tests see, 67 / 80 / 110 decisions later
+with window 50 / 100 / 200. More in docs/guide.md, "Drift"."""
 from __future__ import annotations
 
 import math

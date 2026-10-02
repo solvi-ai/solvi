@@ -25,7 +25,7 @@ fact is missing, the answer abstains, and the audit and stats say "model escalat
 
 On top of the raw logits, per question (task, options, kind):
   - label-bias correction without labels (`adapt`): the mean logit of each option over unlabelled inputs of the domain is
-    subtracted before the softmax (the decider likes some labels regardless of the text; +7 points in research);
+    subtracted before the softmax (the decider likes some labels regardless of the text);
   - few-shot adaptation "S" (`fit`, `teach`): a shift and a shared scale fitted on k labelled examples (L-BFGS), with a
     temperature fitted on out-of-fold predictions, so confidences are calibrated; `teach` updates the shift at once. The
     shift is per option (choice, multi), a tilt / spread over the levels (score) or one yes−no bias (noul);

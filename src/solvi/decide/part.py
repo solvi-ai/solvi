@@ -617,12 +617,11 @@ class DecisionPart:
                    signal="confidence", max_updates=400):
         """Experimental: train a small LoRA adapter on the decider's encoder for this question, from labelled examples
         [(input, correct)] — for solvi-base (the torch backend, `pip install "solvi[lora]"`) and about 100 examples or
-        more. Below that, `fit` (and `System.fit` for questions without a model) are as good and take milliseconds; in our
-        measurements on solvi-base the adapter beat `fit` by about 3 / 4 / 6 / 9 points at 32 / 100 / 300 / 1000 examples
-        per process, where `fit` levels off.
+        more. Below that, `fit` (and `System.fit` for questions without a model) are about as good and take milliseconds;
+        the adapter can keep improving where `fit` levels off.
 
-        Cost: minutes on a CPU (about 13 minutes for 300 examples on 4 server cores; a laptop is slower); the time is
-        measured on the first update and reported (a LoraWarning) before training. r: the adapter's rank (alpha = 2r);
+        Cost: minutes on a CPU; the time is estimated from the first update and reported (a LoraWarning) before
+        training. r: the adapter's rank (alpha = 2r);
         epochs: passes over the examples (updates of 8 examples, between 40 and max_updates); lr: the learning rate;
         seed: the adapter's initialization and the order of the examples — the same seed gives the same adapter on a
         CPU; device: None — the device the decider runs on.
@@ -739,8 +738,8 @@ class DecisionPart:
     def calibrate_for(self, examples, *, max_error=0.05, signal="auto", method="empirical", delta=0.10):
         """Choose the escalation threshold for a target error rate among the answers given alone, on labelled examples
         [(input, correct)]. method="empirical": the lowest threshold at which the calibration decisions it lets through
-        are wrong at most `error` of the time — no guarantee on new inputs (it was 3–5× off on other data sets in our
-        measurements); method="ltt" (learn-then-test): the error among the answered is ≤ `error` with probability
+        are wrong at most `error` of the time — no guarantee on new inputs (on another data set the error can be several
+        times the target); method="ltt" (learn-then-test): the error among the answered is ≤ `error` with probability
         ≥ 1 − delta for inputs like the examples — a strong promise, so it often lets nothing through (it tests at most 64
         thresholds, quantiles of the calibration signals: calibration.ltt_grid). signal: "act"
         (the model's act probability → act_threshold), "confidence" (the calibrated confidence → escalate_below) or

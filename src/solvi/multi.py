@@ -22,12 +22,11 @@ Thresholds. Uncalibrated, each part escalates by its own thresholds (act_thresho
 `act_guard`, one threshold t applies to every part's signal (its act probability when its model gives one, else its
 calibrated confidence) — a one-dimensional family (scale="raw", the default); scale="rank" puts t on each part's rank
 among its own calibration signals instead, for models whose signals live on different scales (an LLM's confidence
-near 1 and an act probability spread over [0, 1]) — measured, it helped on one data set of three and hurt on two, so
-compare both. A cascade's loss is not monotone in t (a higher t can pass a question
-from a wrong small model to a right large one, or back), so conformal risk control runs on the loss monotonized from
-above — the maximum over thresholds ≥ t — which keeps the guarantee (measured on the shipped deciders: the risk stayed ≤ 10% for every
-mode and data set; the cascade answered as much as the large model at half its cost where the small one is often sure;
-voting of two models lowered the error among the automatic answers from 2.1% to 0.4% on JSON questions)."""
+near 1 and an act probability spread over [0, 1]) — it can help or hurt depending on the data, so compare both. A
+cascade's loss is not monotone in t (a higher t can pass a question from a wrong small model to a right large one, or
+back), so conformal risk control runs on the loss monotonized from above — the maximum over thresholds ≥ t — which
+keeps the guarantee. A cascade saves cost where the small model is often sure; a vote lowers the error among the
+automatic answers at the price of answering less."""
 from __future__ import annotations
 
 import dataclasses
@@ -563,10 +562,8 @@ class Combination:
         over [0, 1], an LLM's confidence near 1 — one raw threshold effectively fits one model and the combination
         behaves like that model alone, which is often the stronger one. "rank" (opt-in): each part's signal is replaced
         by its rank among that part's own signals on the calibration examples (the share of them ≤ it), so every part
-        can take part. Measured on a solvi-large → LLM cascade over three data sets (risk 0.10, the risk ≤ 0.10 in every
-        mode): rank helped on one (33.7% → 44.8% answered alone, where the first stage never answered on the raw scale)
-        and hurt on two (45.8% → 41.3%, 96.7% → 79.1%); votes were unchanged. Compare both on held-out calibration
-        data. The rank uses the calibration inputs, not their labels (the guarantee then holds up to a term of order
+        can take part. It helps where a stage never answers on the raw scale and can lower the share answered alone
+        elsewhere; the guarantee holds either way. Compare both on held-out calibration data. The rank uses the calibration inputs, not their labels (the guarantee then holds up to a term of order
         1/n). The sorted calibration signals of each part (at most MAX_RANKS = 1024, evenly spaced by order when there
         are more examples) are kept in the combination and in its calibration file.
 
@@ -907,8 +904,8 @@ class Vote(Combination):
     """Ask every part; answer when the rule holds — "all": every part proposes the same value, "majority": more than
     half do — and every agreeing part answers alone (its signal ≥ the threshold); otherwise escalate, listing the
     proposals. Parts of one model that can share a forward pass are asked in one pass. The probabilities are the mean
-    of the parts'; the confidence the lowest among the agreeing parts'. Models of different families disagree more
-    usefully than a student and its teacher (measured on the shipped deciders)."""
+    of the parts'; the confidence the lowest among the agreeing parts'. Models of different families tend to disagree
+    more usefully than a student and its teacher, which often make the same mistakes."""
 
     kind_name = "vote"
 
