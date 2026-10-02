@@ -1370,12 +1370,20 @@ rep["drift"], rep["flags"], rep["why"]    # True, ["answers"], ["the answers are
 
 Without labels it tests the share answered alone, the distribution of the answers, the mean confidence and the mean act
 probability; with labels also the accuracy, and among the answers given alone the calibration error and
-`coverage_at`. A signal is flagged only when its test is significant (`alpha`, 0.01) and the change is large enough
-(`min_share`, `min_tv`, `min_shift`, ...), and `drift` needs `min_signals` of them. It takes a `Decision`, a result
-(`res["q"]`) or a dict, changes nothing and decides nothing: recalibrating or asking for labels is the caller's. Measured
-with solvi-base on support tickets whose wording and mix change at one point: with `window=100` the change is flagged 37
-decisions later, with no false flag on 200 decisions before it; `window=50` gave false flags (2–4 episodes), so keep
-the window at 100 or more.
+`coverage_at`. A signal is flagged only when its test is significant and the change is large enough
+(`min_share`, `min_tv`, `min_shift`, ...), and `drift` needs `min_signals` of them. The tests are repeated at every
+decision, so each is held to `alpha / (signals tested × horizon)`: on a stream that has not changed, the chance of a
+false flag within `horizon` decisions (1,000) is at most `alpha` (0.01). It takes a `Decision`, a `Response` with
+`question=` (`mon.observe(res, question="team")` — the act probability is read from the trace; a bare result `res["q"]`
+carries none, and the monitor warns that the act signal is then not tested) or a dict, changes nothing and decides
+nothing: recalibrating or asking for labels is the caller's. `rep["tests"]` holds each signal's numbers, its `p` and the
+`level` it had to be below; `rep["not_tested"]` says which signal could not be tested and why — the distribution of the
+answers needs each answer about 5 times in a window (rarer ones are pooled), so a question with 57 answers needs a
+window of a few hundred. Simulated on independent decisions: none of 1,200 stationary streams of 1,000 decisions was
+flagged (3 to 57 answers); with `window=100` a fall of the share answered alone from 66% to 12% is flagged about 60
+decisions later, a change of the mix of three answers from 1:1:1 to 1:8:1 about 80 decisions later (`window=50`: 40
+and 55; `window=200`: 90 and 105). Take the reference from the stream's own traffic (the default) unless your
+calibration set has the stream's mix of answers.
 
 ## Asking: System and Response
 
