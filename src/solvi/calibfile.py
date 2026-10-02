@@ -373,8 +373,6 @@ def cmd_calibrate(a):
         if a.method == "ltt":
             if groups:
                 _fail("calibrate --method ltt: no thresholds per group (use --method crc)")
-            if not hasattr(part, "calibrate_for"):
-                _fail("calibrate --method ltt: a combination calibrates with act_guard (--method crc)")
             info = part.calibrate_for(examples, max_error=a.risk, method="ltt", delta=a.delta)
         else:
             info = part.act_guard(examples, max_risk=a.risk, groups=groups, min_group=a.min_group,

@@ -69,6 +69,7 @@ class DecisionPart:
         self.conformal_set = None               # the answer-set quantile (conformal)
         self.groups = None                      # thresholds per group (act_guard(groups=...)): {"by", "nodes", "signal"}
         self.correction_memory = None           # a solvi.memory.CorrectionMemory consulted on every decision (memory())
+        self.asked = 0                          # decisions made by this part on its own (calls())
         self.__name__ = name
         self.__qualname__ = name
         self.__doc__ = task
@@ -161,6 +162,7 @@ class DecisionPart:
         vals = dict(zip(self.__signature__.parameters, args))
         vals.update(kw)
         text = self.text_of(vals)
+        self.asked += 1
         return self._bind(self._one(text, self._ctx(text, vals=vals)), vals)
 
     def _ctx(self, text, vals=None, raw=None):
@@ -197,6 +199,7 @@ class DecisionPart:
         text = self.text_of(args)
         ctx = self._ctx(text, vals=args)
         m = self.model
+        self.asked += 1
         if self.long is not None and self._too_long(text):   # a long text: this part retrieves and decides on its own
             d = self._bind(self._one(text, ctx), args)
             d.extra["pass"] = {"with": list(names) if names else [s.__name__ for s in siblings], "shared": False}
@@ -565,6 +568,7 @@ class DecisionPart:
         one = isinstance(text, Facts) or _single(text)
         xs = [text] if one else list(text)
         ts = [self._input_text(x) for x in xs]
+        self.asked += len(xs)
         if self.long is not None and any(self._too_long(t) for t in ts):
             out = [self._one(t, ctx=self._ctx(t, vals=x if isinstance(x, Facts) else None, raw=x)) for t, x in zip(ts, xs)]
         else:
@@ -574,6 +578,7 @@ class DecisionPart:
         return out[0] if one else out
 
     def score(self, text):
+        """The probabilities a decision answers with (see decide) → {option: probability}; a list → a list."""
         d = self.decide(text)
         return d.probs if isinstance(d, Decision) else [x.probs for x in d]
 
@@ -610,6 +615,13 @@ class DecisionPart:
 
     def reset(self):
         self.model.reset(**self._kw())
+
+    def calls(self):
+        """What the part cost since it was made, as a combination's calls(): {"asked" (decisions made by the part on its
+        own; inside a combination they count there), "calls" ({"0:<name>": the model's calls}), "calls_per_question"
+        (1 per decision: one model)}. A scorer's token count is its own `usage`."""
+        return {"asked": self.asked, "calls": {f"0:{self.__name__}": self.asked},
+                "calls_per_question": 1.0 if self.asked else 0.0}
 
     # --- a LoRA adapter for this question (experimental; solvi.lora)
     @_deprecate.kwargs(risk="max_risk")

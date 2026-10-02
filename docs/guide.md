@@ -1332,6 +1332,17 @@ guarantee line. `replay` re-runs every stage and compares the proposals too, not
 `trust_models=True` (or a part's model unavailable) it checks instead that the recorded answer follows from the recorded
 proposals by the combination's rule. `System.teach` on a question a combination answers teaches every part.
 
+**The same methods as a part.** A combination has every public method of a decision part, with the same signature and
+result keys, so code written for one takes the other. `decide`, `score`, `act_guard`, `calibrate_for` (a shared
+threshold for a target error among the answered, `method="empirical"` or `"ltt"`), `conformal` and the calibration
+files act on the combination as a whole; `fit`, `adapt`, `teach`, `reset`, `memory()` (a memory for every part, which
+inside a combination only checks) and `remove_lora` go to every part and return one result per part; `calls()` counts
+the models called (a part's `calls()` counts its own decisions the same way). What belongs to one part raises
+`NotImplementedError` naming the part to call it on: `adapt_lora`, `save_lora` and `load_lora` (an adapter is trained
+on one checkpoint for one question, and its holdout recalibrates that part's own threshold), `budget`, `sections_k`,
+`long_key` and `long_input` (each part reads long texts by its own `long=`), and `in_pass` (a shared forward pass is
+for parts of one model). After changing a part, calibrate the combination again.
+
 ### A memory of corrections: part.memory
 
 The cases people corrected are the best evidence of where a decider goes wrong. A memory of corrected cases keeps them

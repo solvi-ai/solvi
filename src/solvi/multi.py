@@ -195,7 +195,7 @@ class _Leaf:
     def leaves(self):
         return [self]
 
-    def question(self):
+    def same_question(self):
         return _question(self.part.spec)
 
     def fingerprint(self):
@@ -301,7 +301,15 @@ def _wrap(m):
 # ------------------------------------------------------------------------------------------------ combinations
 class Combination:
     """What Cascade, Vote and Route share: a catalog function over the union of the parts' facts that returns a
-    Decision; the model recorded in the trace (fingerprint over every part's); act_guard, conformal; fit / teach."""
+    Decision; the model recorded in the trace (fingerprint over every part's).
+
+    The decider protocol: a combination has every public method of a DecisionPart, with the same signature and result
+    keys. decide / score / act_guard / calibrate_for / conformal / save_calibration / load_calibration act on the
+    combination as a whole (one threshold shared by every part); fit / adapt / teach / reset / memory / remove_lora go
+    to every part (a list per part, in leaves order, where the part returns one value); calls() counts the models
+    called. What belongs to one part — adapt_lora, save_lora, load_lora (an adapter is one checkpoint's, for one
+    question), budget, sections_k, long_key, long_input (each part reads long texts by its own long=), in_pass (a
+    shared forward pass is for parts of one model) — raises NotImplementedError naming the part to call it on."""
 
     kind_name = "combination"
 
@@ -309,9 +317,9 @@ class Combination:
         self.members = [_wrap(m) for m in members]
         if not self.members:
             raise ValueError(f"a {self.kind_name} needs at least one decision part")
-        q0 = self.members[0].question()
+        q0 = self.members[0].same_question()
         for m in self.members[1:]:
-            q = m.question()
+            q = m.same_question()
             if q != q0:
                 diff = {k: (q0[k], q[k]) for k in q0 if q0[k] != q[k]}
                 raise ValueError(f"the parts of a {self.kind_name} must answer the same question; {m.name} differs from "
@@ -353,12 +361,13 @@ class Combination:
 
     # --- the question and identity
     @_deprecate.kwargs(checkpoints="requires")
-    def question(self, cat=None, name=None, text=None, min_confidence=None, requires=None, require_evidence=False):
-        """With a catalog: make this combination a question's answer (as DecisionPart.question) → the Question. Without:
-        what the parts must agree on (kind, options, ...)."""
-        if cat is None:
-            return self.members[0].question()
+    def question(self, cat, name=None, text=None, min_confidence=None, requires=None, require_evidence=False):
+        """Make this combination a question's answer (as DecisionPart.question) → the Question."""
         return DecisionPart.question(self, cat, name, text, min_confidence, requires, require_evidence)
+
+    def same_question(self):
+        """What the parts must agree on (kind, options, "not stated", rank k, number bins)."""
+        return self.members[0].same_question()
 
     @property
     def spec(self):
@@ -385,6 +394,29 @@ class Combination:
     @property
     def kind(self):
         return self.spec.kind
+
+    @property
+    def labels(self):
+        """The options as the models read them (the first part's; every part answers the same question)."""
+        return self._first.labels
+
+    @property
+    def multi(self):
+        return self.spec.multi
+
+    @property
+    def task(self):
+        return self.spec.task
+
+    @property
+    def adaptation(self):
+        """Every part's adaptation (adapt / fit / teach), in leaves order."""
+        return [lf.part.adaptation for lf in self.leaves()]
+
+    @property
+    def lora(self):
+        """Every part's LoRA adapter (or None), in leaves order."""
+        return [lf.part.lora for lf in self.leaves()]
 
     @property
     def available(self):
@@ -431,20 +463,26 @@ class Combination:
         return f"{type(self).__name__}({self.name!r}, {[m.name for m in self.members]}, model={self.model_id!r})"
 
     # --- deciding
-    def text_of(self, vals):
-        """The facts this combination reads (System.teach passes them back to `teach`)."""
-        return Facts({f: vals[f] for f in self.facts if f in vals})
+    def text_of(self, facts):
+        """The facts this combination reads, from a dict of facts (System.teach passes them back to `teach`)."""
+        return Facts({f: facts[f] for f in self.facts if f in facts})
 
     def __call__(self, *args, **kw):
         vals = dict(zip(self.facts, args))
         vals.update(kw)
         return self._decide(_Src(vals=vals))
 
-    def decide(self, x):
-        """An input (a text, a state, or Facts) → Decision; a list of inputs → a list."""
-        one = isinstance(x, Facts) or _single(x)
-        out = [self._decide(_src(v)) for v in ([x] if one else list(x))]
+    @_deprecate.kwargs(x="text")
+    def decide(self, text):
+        """An input (a text, a state, or Facts by name) → Decision; a list of inputs → a list."""
+        one = isinstance(text, Facts) or _single(text)
+        out = [self._decide(_src(v)) for v in ([text] if one else list(text))]
         return out[0] if one else out
+
+    def score(self, text):
+        """The probabilities the combination answers with (see decide) → {option: probability}; a list → a list."""
+        d = self.decide(text)
+        return d.probs if isinstance(d, Decision) else [x.probs for x in d]
 
     def _decide(self, src):
         st = self.state(src)
@@ -585,32 +623,8 @@ class Combination:
                              "scale=\"raw\" or \"rank\" says how they share one threshold")
         if groups is not None and delta is not None:
             check_rate("delta", delta)
-        if scale not in SCALES:
-            raise ValueError(f"scale must be one of {SCALES}, not {scale!r}")
-        srcs, gold = self._examples(examples)
-        states = [self.state(s).force() for s in srcs]
-        self._one_source(states)
-        if scale == "rank":
-            per = {id(lf): [] for lf in self.leaves()}
-            for st in states:
-                for ls in st.walk():
-                    per[id(ls.leaf)].append(ls.sig)
-            ranks = [_table(per[id(lf)]) for lf in self.leaves()]
-            rk = {id(lf): r for lf, r in zip(self.leaves(), ranks)}
-            sig = np.array([_rank(rk[id(ls.leaf)], ls.sig) for st in states for ls in st.walk()], float)
-        else:
-            ranks, rk = None, {}
-            sig = np.array([x for st in states for x in st.sigs()], float)
-        grid = np.concatenate([np.unique(sig[np.isfinite(sig)]), [np.inf]])
+        srcs, gold, states, ranks, rk, grid, loss, auto_all, cost, calls, who = self._sweep(examples, scale)
         n, G = len(states), len(grid)
-        loss, auto_all, cost, calls, who = np.zeros((n, G)), np.zeros((n, G), bool), np.zeros((n, G)), np.zeros((n, G)), []
-        answering = getattr(self, "_answering", None)
-        for i, st in enumerate(states):
-            auto, keys, _, vals, c, k = self.vec(st, grid, rk)
-            right = {kk: self._right(v, gold[i]) for kk, v in vals.items()}
-            ok = np.array([right[kk] for kk in keys])
-            loss[i], auto_all[i], cost[i], calls[i] = auto & ~ok, auto, c, k
-            who.append(None if answering is None else answering(st, grid, rk))
         mono = np.maximum.accumulate(loss[:, ::-1], axis=1)[:, ::-1]
         promise = f"P(answered alone and wrong) ≤ {risk:g} for inputs like the calibration examples"
         extra = {}
@@ -686,6 +700,101 @@ class Combination:
         out.update(extra)
         return out
 
+    def _sweep(self, examples, scale, grid_of=None):
+        """Ask every part on labelled examples and evaluate the combination at every shared threshold of a grid →
+        (inputs, labels, states, ranks, rank tables, grid [G] ending in inf, loss [n, G] (answered alone and wrong),
+        answered alone [n, G], cost [n, G], calls [n, G], the answering stage per example or None). grid_of: the grid
+        from the signals (default: every distinct one)."""
+        if scale not in SCALES:
+            raise ValueError(f"scale must be one of {SCALES}, not {scale!r}")
+        srcs, gold = self._examples(examples)
+        states = [self.state(s).force() for s in srcs]
+        self._one_source(states)
+        if scale == "rank":
+            per = {id(lf): [] for lf in self.leaves()}
+            for st in states:
+                for ls in st.walk():
+                    per[id(ls.leaf)].append(ls.sig)
+            ranks = [_table(per[id(lf)]) for lf in self.leaves()]
+            rk = {id(lf): r for lf, r in zip(self.leaves(), ranks)}
+            sig = np.array([_rank(rk[id(ls.leaf)], ls.sig) for st in states for ls in st.walk()], float)
+        else:
+            ranks, rk = None, {}
+            sig = np.array([x for st in states for x in st.sigs()], float)
+        pts = np.unique(sig[np.isfinite(sig)]) if grid_of is None else np.asarray(grid_of(sig), float)
+        grid = np.concatenate([pts, [np.inf]])
+        n, G = len(states), len(grid)
+        loss, auto_all, cost, calls, who = np.zeros((n, G)), np.zeros((n, G), bool), np.zeros((n, G)), np.zeros((n, G)), []
+        answering = getattr(self, "_answering", None)
+        for i, st in enumerate(states):
+            auto, keys, _, vals, c, k = self.vec(st, grid, rk)
+            right = {kk: self._right(v, gold[i]) for kk, v in vals.items()}
+            ok = np.array([right[kk] for kk in keys])
+            loss[i], auto_all[i], cost[i], calls[i] = auto & ~ok, auto, c, k
+            who.append(None if answering is None else answering(st, grid, rk))
+        return srcs, gold, states, ranks, rk, grid, loss, auto_all, cost, calls, who
+
+    @_deprecate.kwargs(error="max_error")
+    def calibrate_for(self, examples, *, max_error=0.05, signal="auto", method="empirical", delta=0.10, scale="raw"):
+        """Choose the shared threshold for a target error rate among the answers the combination gives alone, on
+        labelled examples [(input, correct)] — as DecisionPart.calibrate_for, with one threshold t for every part's
+        signal (on `scale`, as in act_guard). method="empirical": the lowest threshold at which the calibration
+        decisions the combination answers alone are wrong at most `max_error` of the time — no guarantee on new inputs;
+        method="ltt" (learn-then-test): the error among the answered is ≤ `max_error` with probability ≥ 1 − delta for
+        inputs like the examples (a binomial test at every threshold of a grid of at most 64 quantiles of the signals,
+        Bonferroni over the grid, which holds although a cascade's error is not monotone in t). No threshold reaches the
+        target → everything escalates (inf). Replaces the parts' own thresholds inside the combination, changes its
+        fingerprint and clears its conformal set.
+
+        The decider protocol: the signature and the keys of DecisionPart.calibrate_for — "signal" ("shared" or
+        "shared-rank"), "threshold", "answered", "error", "n", "max_error", "method", "guarantee" — plus
+        "calls_per_question" and "scale". signal: "auto" only (each part brings its own). Every option after the
+        examples is keyword-only; error= is the 0.7 name of max_error=."""
+        from .calibration import _binom_cdf, check_rate, ltt_grid
+        error = max_error
+        if method not in ("empirical", "ltt"):
+            raise ValueError('method must be "empirical" or "ltt"')
+        check_rate("max_error", error, zero=method == "empirical")
+        if method == "ltt":
+            check_rate("delta", delta)
+        if signal != "auto":
+            raise ValueError(f"signal={signal!r}: a combination's signal is each part's own (signal=\"auto\"); "
+                             "scale=\"raw\" or \"rank\" says how they share one threshold")
+        _, _, states, ranks, _, grid, loss, auto_all, _, calls, _ = self._sweep(
+            examples, scale, ltt_grid if method == "ltt" else None)
+        n, G = len(states), len(grid)
+        answered, wrong = auto_all[:, :G - 1].sum(0), loss[:, :G - 1].sum(0)
+        j = G - 1                                     # the inf threshold: nothing answered alone
+        if method == "ltt":
+            for i in range(G - 1):
+                if answered[i] and _binom_cdf(float(wrong[i]), int(answered[i]), error) <= delta / max(1, G - 1):
+                    j = i
+                    break
+            g = {"method": "ltt", "error": error, "delta": delta, "n": n, "signal": _SIGNAL[scale],
+                 "promise": f"error among the answers given alone ≤ {error:g} with probability ≥ {1 - delta:g}, "
+                            "for inputs like the calibration examples"}
+        else:
+            for i in range(G - 2, -1, -1):           # from the highest threshold down, while the error holds
+                if not answered[i]:
+                    continue
+                if wrong[i] / answered[i] <= error + 1e-12:
+                    j = i
+                else:
+                    break
+            g = {"method": "empirical", "error": error, "n": n, "signal": _SIGNAL[scale],
+                 "promise": "none: the error was measured on the calibration examples only"}
+        t = float(grid[j])
+        self.threshold, self.guarantee, self.groups = t, g, None
+        self.scale, self.ranks = scale, ranks
+        self.conformal_set = None
+        self._setup()
+        a, lo = auto_all[:, j], loss[:, j]
+        return _deprecate.Result({"signal": _SIGNAL[scale], "threshold": t, "answered": float(a.mean()) if n else 0.0,
+                                  "error": float(lo[a].sum() / a.sum()) if a.any() else 0.0, "n": n, "max_error": error,
+                                  "method": method, "guarantee": g["promise"],
+                                  "calls_per_question": float(calls[:, j].mean()) if n else 0.0, "scale": scale},
+                                 "calibrate_for()", coverage="answered", target_error="max_error")
+
     def save_calibration(self, path):
         """Write the combination's calibration (the shared threshold, per group too, the guarantee, the conformal set) with
         the question and every member's fingerprint to a JSON file (solvi.calibfile). → path."""
@@ -748,9 +857,10 @@ class Combination:
         for lf in self.leaves():
             yield lf.part, (lf.text(_Src(vals=dict(x))) if isinstance(x, Facts) else x)
 
-    def teach(self, x, correct):
-        """One correction, absorbed by every part at once (x: an input, or Facts by name) → total ms."""
-        return sum(p.teach(t, correct) for p, t in self._each(x))
+    @_deprecate.kwargs(x="text")
+    def teach(self, text, correct):
+        """One correction, absorbed by every part at once (an input, or Facts by name) → total ms."""
+        return sum(p.teach(t, correct) for p, t in self._each(text))
 
     def fit(self, examples, lam=1.0, folds=4):
         """Few-shot "S" for every part (see DecisionPart.fit) → [Adaptation]."""
@@ -758,9 +868,10 @@ class Combination:
         return [lf.part.fit([(lf.text(_Src(vals=dict(x))) if isinstance(x, Facts) else x, y) for x, y in ex], lam, folds)
                 for lf in self.leaves()]
 
-    def adapt(self, inputs):
-        """Label-bias correction for every part (see DecisionPart.adapt)."""
-        xs = list(inputs)
+    @_deprecate.kwargs(inputs="texts")
+    def adapt(self, texts):
+        """Label-bias correction for every part (see DecisionPart.adapt) → [per part]."""
+        xs = list(texts)
         return [lf.part.adapt([lf.text(_Src(vals=dict(x))) if isinstance(x, Facts) else x for x in xs])
                 for lf in self.leaves()]
 
@@ -768,6 +879,71 @@ class Combination:
         """Every member part's reset() (their adaptations and calibrations)."""
         for lf in self.leaves():
             lf.part.reset()
+
+    def memory(self, memory=None, **settings):
+        """A memory of corrected cases for every part (DecisionPart.memory with these settings) → [CorrectionMemory],
+        in leaves order; False detaches every part's → None. Inside a combination a part's memory only checks (it can
+        escalate, never answer). A memory belongs to one part, so an existing one is attached on that part
+        (part.memory(mem)), not here — that raises."""
+        if memory is False:
+            for lf in self.leaves():
+                lf.part.memory(False)
+            return None
+        if memory is not None:
+            raise ValueError(f"a CorrectionMemory belongs to one part ({memory.part.__name__!r}): attach it with "
+                             "part.memory(mem); combination.memory() gives every part its own")
+        return [lf.part.memory(None, **settings) for lf in self.leaves()]
+
+    def remove_lora(self):
+        """Every part's remove_lora() → [the removed adapter's hash or None], in leaves order. The combination's own
+        threshold was fitted on the parts with their adapters: calibrate it again."""
+        return [lf.part.remove_lora() for lf in self.leaves()]
+
+    # --- what belongs to one part, not to a combination: each raises, saying where it is
+    def _one_part(self, what, why):
+        raise NotImplementedError(f"{type(self).__name__}.{what}: {why} — call it on the part "
+                                  f"({self.__name__}.parts[i].{what}), then calibrate the combination again if it "
+                                  "changed the part")
+
+    @_deprecate.kwargs(risk="max_risk")
+    def adapt_lora(self, examples, *, r=8, epochs=6, holdout=None, seed=0, device=None, lr=3e-4, max_risk=0.10,
+                   signal="confidence", max_updates=400):
+        """Not for a combination (raises NotImplementedError): an adapter is trained on one checkpoint's encoder for one
+        question, and its holdout recalibrates that part's own threshold, which a combination replaces with its shared
+        one. Train it on the part, then calibrate the combination."""
+        self._one_part("adapt_lora()", "a LoRA adapter is trained on one checkpoint's encoder for one question, and its "
+                                       "holdout recalibrates that part's own threshold, which the combination replaces")
+
+    def save_lora(self, path):
+        """Not for a combination (raises NotImplementedError): an adapter file holds one part's adapter."""
+        self._one_part("save_lora()", "an adapter file holds one part's adapter")
+
+    def load_lora(self, path, strict=True):
+        """Not for a combination (raises NotImplementedError): an adapter file holds one part's adapter."""
+        self._one_part("load_lora()", "an adapter file holds one part's adapter")
+
+    def budget(self):
+        """Not for a combination (raises NotImplementedError): each part reads an input by its own model's length."""
+        self._one_part("budget()", "each part reads an input by its own model's length and long= setting")
+
+    def sections_k(self):
+        """Not for a combination (raises NotImplementedError): each part retrieves by its own long= setting."""
+        self._one_part("sections_k()", "each part retrieves the sections of a long text by its own long= setting")
+
+    def long_key(self):
+        """Not for a combination (raises NotImplementedError): each part reads long texts by its own long= setting
+        (every part's is in the combination's fingerprint)."""
+        self._one_part("long_key()", "each part reads long texts by its own long= setting")
+
+    def long_input(self, text):
+        """Not for a combination (raises NotImplementedError): each part reads a long text by its own long= setting."""
+        self._one_part("long_input()", "each part reads a long text by its own long= setting")
+
+    def in_pass(self, siblings, args, names=None):
+        """Not for a combination (raises NotImplementedError): the runtime's shared forward pass is for parts of one
+        model; the strategist never puts a combination in one (plan_batches)."""
+        self._one_part("in_pass()", "a shared forward pass is for parts of one model, and the strategist never puts a "
+                                    "combination in one")
 
     # --- replay without re-running the models
     def check_record(self, r):

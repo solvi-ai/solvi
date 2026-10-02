@@ -108,9 +108,16 @@ notice).
   proposer) — the endpoint, the key in the header only, retries with backoff, token counts under one set of names, and
   one policy for HTTP errors: a wrong key, model or URL raises, a refused input escalates that decision, no answer is
   retried and then escalates.
-- **One decider protocol.** A decision part and a Cascade / Vote / Route take the same `act_guard(examples, *,
-  max_risk, signal, groups, min_group, delta)` and return the same keys, a combination's with `calls_per_question`,
-  `cost`, `scale` and `answered_by` besides.
+- **One decider protocol.** A decision part and a Cascade / Vote / Route have the same public methods, with the same
+  signatures and result keys: `act_guard(examples, *, max_risk, signal, groups, min_group, delta)` (a combination's
+  result with `calls_per_question`, `cost`, `scale` and `answered_by` besides), and now on a combination too
+  `calibrate_for(examples, *, max_error, signal, method, delta)` (one shared threshold for a target error among the
+  answered, empirical or learn-then-test; `solvi calibrate --method ltt` takes a combination), `score`, `memory` (a
+  memory for every part), `remove_lora`, `labels` / `task` / `multi`; and `part.calls()` as a combination's. What
+  belongs to one part — `adapt_lora`, `save_lora`, `load_lora`, `budget`, `sections_k`, `long_key`, `long_input`,
+  `in_pass` — raises on a combination with the reason and the part to call it on. A combination's `decide(x=)`,
+  `teach(x=)`, `adapt(inputs=)` and `text_of(vals=)` are `text=`, `texts=` and `facts=`, as a part's (the old
+  keywords warn; `vals=` is gone), and `combination.question()` without a catalog is `same_question()`.
 - **`solvi.generate`** — a model that writes: `generator(...).generate(messages, schema=..., parse=..., text=...,
   quotes=[...])` returns a text, a parsed value or JSON validated against a pydantic model or a JSON schema, with the
   strings that must be quoted from the text checked as written; an invalid reply raises `InvalidOutput` with the reason
