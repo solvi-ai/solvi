@@ -722,13 +722,16 @@ class TextRead:
         return "Please tell me the " + ", ".join(parts[:-1]) + (" and the " if len(parts) > 1 else "") + parts[-1] + "."
 
     def to_dict(self):
-        from .runtime import _canon
-        return {"question": self.question, "route": _canon(self.route), "missing": self.missing,
-                "state": _canon(self.state),
-                "fields": {f: {"status": r.status, "value": _canon(r.value) if r.ok else None, "confidence": r.confidence,
+        """The read as JSON-ready data, values written as Response.to_dict() writes them (a date as its ISO string, a
+        Decimal as its text, an Enum as its value)."""
+        from .schema import jsonable
+        return {"question": self.question, "route": jsonable(self.route), "missing": self.missing,
+                "state": jsonable(self.state),
+                "fields": {f: {"status": r.status, "value": jsonable(r.value) if r.ok else None,
+                               "confidence": r.confidence,
                                "quote": None if r.quote is None else [r.quote.value, r.quote.start, r.quote.end],
                                "why": r.why, "required": r.required} for f, r in self.fields.items()},
-                "changes": [{"field": c.field, "old": _canon(c.old), "new": _canon(c.new),
+                "changes": [{"field": c.field, "old": jsonable(c.old), "new": jsonable(c.new),
                              "quote": [c.quote.value, c.quote.start, c.quote.end]} for c in self.changes]}
 
     def records(self):

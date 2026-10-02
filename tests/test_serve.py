@@ -367,6 +367,20 @@ def test_ask_text_over_http_routes_reads_with_quotes_and_answers(tmp_path):
     assert "/ask_text" in c.get("/openapi.json").json()["paths"]
 
 
+def test_ask_text_returns_dates_it_read_as_iso_strings_like_the_values():
+    import datetime as dt
+    s, tin = _shop()
+    text = "Hi, please refund order A-10457: I paid 1.5 million rubles on 12 September and it arrived broken."
+    d = client(system=s, textin=tin).post("/ask_text", json={"text": text, "today": "2026-09-28"}).json()
+    assert d["values"]["purchase_date"] == "2026-09-12"
+    assert d["read"]["state"]["purchase_date"] == "2026-09-12"                 # not "datetime.date(2026, 9, 12)"
+    assert d["read"]["fields"]["purchase_date"]["value"] == "2026-09-12"
+    tin.today = dt.date(2026, 9, 28)
+    read = tin.read(text).to_dict()
+    assert read["state"] == {"order_id": "A-10457", "amount": 1500000.0, "currency": "RUB", "purchase_date": "2026-09-12"}
+    assert json.loads(json.dumps(read)) == read
+
+
 def test_ask_text_needs_a_decider_to_route_and_is_an_mcp_tool():
     s, _ = _shop()
     c = client(system=s)                                    # no decider, three entry points
