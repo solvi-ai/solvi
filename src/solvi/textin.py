@@ -11,8 +11,8 @@
 Entry points are the system's questions with the typed input state each one reads (`system.entry_points()`, from the same
 schemas as `solvi serve`). The model does two small things: the decider picks the entry point (a choice over the entry
 points with their descriptions; below `min_confidence` or a near tie it escalates, and nothing is asked), and an extractor
-points at the piece of text that holds each field (the decider's own span pointer when the checkpoint has one, else the
-deterministic `CueExtractor`). Code does the rest: a deterministic parser per type turns the quote into the value —
+points at the piece of text that holds each field (the deterministic `CueExtractor` by default; the decider's own span
+pointer, `DeciderExtractor`, when you name it). Code does the rest: a deterministic parser per type turns the quote into the value —
 numbers ("1,500", "1.5 million", "2k", "полтора миллиона"), dates ("2026-09-12", "12.09.2026", "12 September", "12 сентября";
 without a year only with `today=`), enums by label or synonym, booleans, strings — and a quote that does not parse leaves
 the field unread. A field the text does not state is "not stated"; a required one is listed in `missing` for a clarifying
@@ -855,7 +855,9 @@ class TextIn:
     decider: picks the entry point (a DecideModel, or any object with decide(text, task, options, descriptions=,
     kind="choice") → Decision); not needed with one entry point or when the question is given. extractor: finds each
     field's span — an object with find(text, FieldSpec) → [Quote] (best first), or a list of them tried in order; default:
-    the decider's pointer (DeciderExtractor) when it has one, else CueExtractor.
+    CueExtractor, whatever the decider (measured: benchmarks/textin_extractors.py — on the repository's texts with typed
+    fields the cue finder read 282 of 306 stated values right and 1 wrong, solvi-base's span pointer 111 right and 11
+    wrong; the pointer is used only when named, DeciderExtractor(decider)).
 
     entry_points: the question names to choose from (default: every question). descriptions: {question: text} for the
     router (default: the question's text). synonyms: {field: {label: [synonym]}} for enum fields; cues: {field: [word]}
@@ -873,7 +875,7 @@ class TextIn:
                  min_field_confidence=0.5, task="Which request is this text making?", source=SOURCE):
         self.system, self.decider = system, decider
         if extractor is None:
-            extractor = DeciderExtractor(decider) if getattr(decider, "has_pointer", False) else CueExtractor()
+            extractor = CueExtractor()
         self.extractors = list(extractor) if isinstance(extractor, (list, tuple)) else [extractor]
         self.entry_points = {e.name: e for e in _entry_points(system, entry_points)}
         self.descriptions = dict(descriptions or {})

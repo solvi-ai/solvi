@@ -2110,8 +2110,8 @@ updates its measured costs and stats in place. A System with `async def` (or `bl
 (the MCP server too).
 
 **Text in.** `POST /ask_text` reads a message with `solvi.textin.TextIn(system, decider)` — `--decider` picks the entry
-point (any decider: a checkpoint, `systemone:URL#model`, `llm:URL#model`), and its span pointer reads the fields when it
-has one (an LLM does), else the deterministic `CueExtractor`; `create_app(..., textin=TextIn(...))` or
+point (any decider: a checkpoint, `systemone:URL#model`, `llm:URL#model`), and the deterministic `CueExtractor` reads
+the fields (`TextIn(extractor=DeciderExtractor(decider))` uses the decider's span pointer); `create_app(..., textin=TextIn(...))` or
 `Service(..., textin=...)` sets synonyms, patterns and cues. Without a decider a text can only go to a named `question`
 (or to the one question of a System with one), else the request is a 422. Dates without a year and relative dates are
 read against `today` — the request's, else the server's date — which the trace records. A text that does not say which
@@ -2207,13 +2207,13 @@ million rubles on 12 September". `solvi.textin` turns such a text into the quest
 state, reads every value with a quote, and leaves the decision to the catalog as before.
 
 ```python
-from solvi.textin import CueExtractor, TextIn
+from solvi.textin import TextIn
 
 eps = system.entry_points()          # the questions with the typed input state each one reads
 eps[0].fields["amount"]              # EntryField(name="amount", type=float, description=..., required=True)
 eps[0].tool()                        # the same as a function-calling tool: {"type": "function", "function": {...}}
 
-tin = TextIn(system, decider, extractor=CueExtractor(), today=date(2026, 9, 28),   # fields by the cue finder
+tin = TextIn(system, decider, today=date(2026, 9, 28),            # fields by the cue finder (the default)
              synonyms={"currency": {"RUB": ["rubles", "руб", "₽"], "EUR": ["euro", "€"]}},
              patterns={"order_id": r"[A-Z]-\d+"})
 read = tin.read("Please refund order A-10457: I paid 1.5 million rubles on 12 September.")
@@ -2235,17 +2235,32 @@ declare) and whether the question needs them — the same schemas `solvi serve` 
 question text (or `descriptions={name: text}`). Below `min_confidence` (0.6), on a near tie (`min_margin` 0.1), or when the
 decider's act signal escalates, nothing is chosen: `read.question` is None, `system.ask_text` runs nothing and the likely
 questions abstain with guard `escalated`, and `read.clarify()` asks which one is meant. The extractor points at the text of
-each field: the decider's own span pointer (`DeciderExtractor`) when the checkpoint has one, else `CueExtractor` — a
-deterministic finder of candidates of the field's type (numbers, dates, enum labels and synonyms, cue words, a pattern)
-nearest after a cue word (the field's name, plus `cues={field: [...]}`; its description's words rank candidates too); any object with
-`find(text, FieldSpec) → [Quote]` works, and a list of extractors is tried in order. Code does the rest: a deterministic
+each field: by default `CueExtractor` — a deterministic finder of candidates of the field's type (numbers, dates, enum
+labels and synonyms, cue words, a pattern) nearest after a cue word (the field's name, plus `cues={field: [...]}`; its
+description's words rank candidates too), whatever the decider. The decider's own span pointer reads the fields only
+when you name it, `extractor=DeciderExtractor(decider)`; any object with `find(text, FieldSpec) → [Quote]` works, and a
+list of extractors is tried in order (the trace records which one read each field). Code does the rest: a deterministic
 parser per type turns the quote into the value.
 
-The default is one or the other, not both: with a pointer checkpoint (solvi-base, solvi-large) only the pointer reads the
-fields, and where it answers "not stated" the field is missing even when the cue finder would have found it — on the
-sentence above solvi-base read the order id and the date and left the amount and the currency "not stated" (one run, no
-rate measured). The example therefore names its extractor. `extractor=[DeciderExtractor(decider), CueExtractor()]`
-tries the pointer first and falls back to the cue finder; the trace records which one read each field. Routing has no
+The default was chosen by measurement (`benchmarks/textin_extractors.py`, solvi-base in ONNX, one process): every text
+in this repository that carries typed fields — the shop requests of this section (18, English and Russian), the e-mails
+of `examples/04_refunds.py` (40), the invoices of `examples/03_invoices.py` (40), the tickets of
+`gallery/11_refund_double_charge` (16) and the claims of `examples/16_primitives.py` (3) — read field by field with the
+question given, against the values the repository's own hand-written code reads (306 stated values, 9 fields the text
+does not state):
+
+| extractor | right | wrong | missed |
+|---|---|---|---|
+| `CueExtractor` | 282 | 1 | 23 |
+| solvi-base's span pointer (`DeciderExtractor`) | 111 | 11 | 184 |
+| the pointer, then the cue finder | 220 | 12 | 74 |
+| the cue finder, then the pointer | 282 | 1 | 23 |
+
+The pointer answers "not stated" or a confidence below `min_field_confidence` for most fields it is asked about (the
+amount and the currency of "please refund order A-10457, 1.5 million rubles, paid 12 September"), and the cue finder
+never needed it as a fallback. A string field without a pattern is the cue finder's weak spot: it reads the words after
+"order id:" or "address is", up to the end of the clause, so give an identifier its pattern (`patterns=` or the
+field's `json_schema_extra={"pattern": ...}`) and an enum its synonyms. Routing has no
 "none of these" option: a text that asks none of the questions is escalated only when the decider is unsure
 (`min_confidence`, `min_margin`), so a confident wrong route is possible — add an entry point for "something else" if
 your texts can be about anything.

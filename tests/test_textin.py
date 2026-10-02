@@ -306,6 +306,21 @@ def test_decider_pointer_as_the_extractor():
         DeciderExtractor(decider())
 
 
+def test_default_extractor_is_the_cue_finder_even_when_the_decider_has_a_pointer():
+    """Measured (benchmarks/textin_extractors.py): the cue finder reads far more fields right than solvi-base's pointer,
+    so the pointer reads only when it is named."""
+    from test_primitives import L14G, L14gStub
+    m = DecideModel(L14gStub(), L14G)
+    assert m.has_pointer
+    _, s = shop()
+    tin = TextIn(s, m)
+    assert [type(e) for e in tin.extractors] == [CueExtractor]
+    read = tin.read("please refund order A-10457: 1.5 million RUB, paid on 12 September 2026", question="request_refund")
+    assert read.state["amount"] == 1_500_000.0 and read.state["currency"] == "RUB"
+    assert read.fields["amount"].model["type"] == "CueExtractor"
+    assert [type(e) for e in TextIn(s, m, DeciderExtractor(m)).extractors] == [DeciderExtractor]
+
+
 def test_cue_extractor_picks_the_number_after_its_cue():
     _, s = shop()
     tin = textin(s)
