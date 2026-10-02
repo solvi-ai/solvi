@@ -1,5 +1,5 @@
-"""fit (logistic head with feature selection) vs fit_fast (closed-form ridge) on the example tasks: training time, accuracy on
-fresh examples, and online learning — start from 10 labeled examples and teach the rest one by one.
+"""fit (closed-form ridge head; the facts selected by leave-one-out error) vs fit(select=False) (every fact) on the example
+tasks: training time, accuracy on fresh examples, and online learning — start from 10 labeled examples and teach the rest one by one.
 
 Run:  uv run python benchmarks/fast_head.py"""
 from __future__ import annotations
@@ -38,17 +38,17 @@ if __name__ == "__main__":
         for n in (20, 50, 200):
             train = gen(0, n)
             row = [f"{n:4d} examples:"]
-            for kind in ("fit", "fit_fast"):
+            for kind, kw in (("fit", {}), ("select=False", {"select": False})):
                 s = System(mod.cat, mod.QUESTIONS)
                 t0 = time.perf_counter()
-                getattr(s, kind)(q, train)
+                s.fit(q, train, **kw)
                 ms = (time.perf_counter() - t0) * 1000
                 acc = np.mean([s.ask(a, [q])[q].answer == y for a, y in test])
                 row.append(f"{kind} {acc:.3f} in {ms:7.1f} ms")
             print("  " + "   ".join(row))
         s = System(mod.cat, mod.QUESTIONS)
         stream = gen(0, 200)
-        s.fit_fast(q, stream[:10])
+        s.fit(q, stream[:10], select=False)
         curve, times = [], []
         for i, (st, y) in enumerate(stream[10:], 11):
             times.append(s.teach(q, st, y))

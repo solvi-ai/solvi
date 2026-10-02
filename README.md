@@ -267,7 +267,7 @@ Every answer is a value and a confidence, and the types also declare answer prim
   document; the trace lists the sections read. `long="full"` reads a text whole up to the length a checkpoint trained on
   long inputs declares (`max_len_long`), and retrieves within that length beyond it.
 - **Learning from corrections.** `part.memory()` escalates an answer when similar corrected cases say another one;
-  `fit_fast` heads refit on all kept examples as corrections accumulate; `part.adapt_lora(examples, holdout=0.3)` trains
+  `fit` heads refit on all kept examples as corrections accumulate; `part.adapt_lora(examples, holdout=0.3)` trains
   a small LoRA adapter for one question on solvi-base once it has ~100 labelled answers (`solvi[lora]`, experimental);
   `System.learning(store)` proposes updates from trusted corrections only and promotes one when it passes held-out,
   honesty and calibration gates, with rollback (experimental, off unless called)
@@ -367,6 +367,21 @@ runner with every raw answer: [docs/vs_llm.md](docs/vs_llm.md), [benchmarks/vs_l
 
 ## Speed
 
+One `ask` without a model ([benchmarks/ask_speed.py](benchmarks/ask_speed.py): planning, running the parts and hashing
+the trace; Python 3.10, Intel i7-12700H shared with other jobs, medians of three runs of 15 passes):
+
+| case | steps | per ask |
+|---|---:|---:|
+| README quickstart (leave request) | 5 | 0.29 ms |
+| 15 gallery entries (median entry; range) | 4-23 | 0.88 ms (0.64-5.6 ms) |
+| random catalog of 50 parts, 5 questions | 19 | 0.95 ms |
+| random catalog of 1 000 parts, 5 questions | 114 | 6.1 ms |
+| stream alert over an input of 3 712 floats (the NAB task's catalog) | 7 | 3.7 ms |
+
+A large input costs its hashing: every given value is written as canonical JSON and hashed once per ask (about 0.25 µs
+per float). The slowest gallery entry checks its texts for instruction-like sentences (`perturb`), which takes most of
+its time. Saving each response to a store adds its own cost (the whole response is written as JSON).
+
 Strategist on random layered catalogs ([benchmarks/strategist_scale.py](benchmarks/strategist_scale.py), one CPU core;
 solvi 0.7.1 with the changes since, Python 3.10, Intel i7-12700H, medians of two runs). The parts are trivial
 arithmetic: running all of them ("run all") costs less than one ask, so the saving shows only when parts are slow
@@ -421,7 +436,7 @@ receipt with the one-pass extractor on an A100).
 | [examples/05_tic_tac_toe.py](examples/05_tic_tac_toe.py) | Tic-tac-toe agent: each move is an answer with its reason (win, block, fork, ...); a hard check rejects invalid boards |
 | [examples/06_learned_rules.py](examples/06_learned_rules.py) | `learn_rule`: route parcels to delivery zones from free-form addresses with a readable if-then list learned from labels |
 | [examples/09_strategy_at_scale.py](examples/09_strategy_at_scale.py) | Insurance claim desk: the strategist generates a different plan per question set, hard checks first with early exit, slow services in parallel; timed |
-| [examples/10_learn_in_milliseconds.py](examples/10_learn_in_milliseconds.py) | `fit_fast`: a new question learned in milliseconds, then corrected one example at a time (each correction ~0.2 ms, nothing retrained) |
+| [examples/10_learn_in_milliseconds.py](examples/10_learn_in_milliseconds.py) | `fit`: a new question learned in milliseconds, then corrected one example at a time (each correction ~0.2 ms, nothing retrained) |
 | [examples/11_answer_types_and_constraints.py](examples/11_answer_types_and_constraints.py) | Multi-label and ordinal answers tied by constraints between answers; contradictions in learned answers are repaired by joint decoding |
 | [examples/12_grounded_audit.py](examples/12_grounded_audit.py) | One catalog with and without models: provenance, `res.audit()`, a hallucinated quote caught by grounding, a decision outside its options, a model changed since the decision, lifetime safeguard stats |
 | [examples/13_decide_model.py](examples/13_decide_model.py) | Support-email routing by a decider model as a catalog part: bias correction on unlabelled emails, 16 labelled examples, abstention, a constraint with a rule-based question, a hard check, the audit, `teach`, escalation for a target error rate, a JSON ticket (the real model with `SOLVI_DECIDE_MODEL`, a stand-in otherwise) |

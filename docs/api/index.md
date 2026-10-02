@@ -29,7 +29,7 @@ this reference lists what each module exports and the signatures.
 | [`solvi.episode`](episode.md) | an agent's memory (what was tried, what failed, what worked) as an input |
 | [`solvi.worldmap`](worldmap.md) | a map of an environment an agent builds by acting: claims with provenance |
 | [`solvi.drift`](drift.md) | drift: has the stream moved away from the one the thresholds were calibrated on? |
-| [`solvi.fast`](fast.md) | fast answer heads in closed form (`fit_fast`, `CandidateHead`) |
+| [`solvi.fast`](fast.md) | fast answer heads in closed form (`System.fit`'s `FastHead` and `select_features`, `CandidateHead`) |
 | [`solvi.extract_long`](extract_long.md) | `@extract` by description for long documents (`LongSpanExtractor`; torch) |
 | [`solvi.extract_model`](extract_model.md) | a model-backed `@extract` with pointer heads (torch) |
 | [`solvi.extract_multi`](extract_multi.md) | a single-pass `@extract` over several fields (torch) |

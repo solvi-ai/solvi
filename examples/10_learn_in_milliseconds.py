@@ -1,6 +1,6 @@
 """Learning in milliseconds: a new question learned from a handful of labeled examples with a closed-form head, then corrected
 one example at a time — each correction is absorbed instantly (about 0.1-0.2 ms), nothing is retrained, rules and hard checks are
-untouched. Compare with `fit` (feature selection + logistic regression, seconds).
+untouched. `fit` chooses the facts the head reads (the question's flow) by leave-one-out error; `select=False` keeps them all.
 
 Run:  uv run python examples/10_learn_in_milliseconds.py"""
 from __future__ import annotations
@@ -37,16 +37,17 @@ if __name__ == "__main__":
     slow = System(shop.cat, shop.QUESTIONS)
     t0 = time.perf_counter()
     slow.fit("suspicious", stream)
-    print(f"fit on 200 examples:      {(time.perf_counter() - t0) * 1000:7.0f} ms, accuracy {accuracy(slow, test):.3f}")
+    print(f"fit on 200 examples:               {(time.perf_counter() - t0) * 1000:7.0f} ms, accuracy {accuracy(slow, test):.3f} "
+          f"({len(slow.heads['suspicious'].features)} facts kept)")
 
     fast = System(shop.cat, shop.QUESTIONS)
     t0 = time.perf_counter()
-    head = fast.fit_fast("suspicious", stream)
-    print(f"fit_fast on 200 examples: {(time.perf_counter() - t0) * 1000:7.0f} ms, accuracy {accuracy(fast, test):.3f} "
+    head = fast.fit("suspicious", stream, select=False)
+    print(f"fit(select=False) on 200 examples: {(time.perf_counter() - t0) * 1000:7.0f} ms, accuracy {accuracy(fast, test):.3f} "
           f"(exact leave-one-out {head.loo_acc:.3f}, ridge λ = {head.lam})")
 
     live = System(shop.cat, shop.QUESTIONS)
-    live.fit_fast("suspicious", stream[:10])
+    live.fit("suspicious", stream[:10], select=False)
     print(f"\nstart from 10 examples: accuracy {accuracy(live, test):.3f}; now a reviewer corrects orders one by one:")
     times = []
     for i, (state, label) in enumerate(stream[10:], 11):

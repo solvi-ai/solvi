@@ -1,5 +1,5 @@
 """Run every clinical screening case (DEMO ONLY, NOT MEDICAL ADVICE): answers, NEWS2 points per parameter, what was missing,
-trace replay, timing. Then measure an answer-only baseline: a ridge answerer (solvi's fit_fast on the raw vital signs, no
+trace replay, timing. Then measure an answer-only baseline: a ridge answerer (solvi's fit on the raw vital signs, no
 table, no rules) trained on synthetic patients labeled by the exact NEWS2 rules. Exits non-zero if any answer differs from
 cases.json.
 
@@ -89,7 +89,7 @@ if __name__ == "__main__":
     for kind in ("ordinal", "choice"):      # the ordinal head answers with the median level; a choice head with the most likely
         q = Question("escalation", "Escalation level", getattr(Answer, kind)(task.ESCALATION))
         base = System(Catalog(), [q])
-        head = base.fit_fast("escalation", train, features=RAW)
+        head = base.fit("escalation", train, features=RAW)
         pred = [base.ask(dict(s), ["escalation"])["escalation"].answer for s, _ in test]
         acc = sum(p == y for p, (_, y) in zip(pred, test)) / len(test)
         emerg = [p for p, (_, y) in zip(pred, test) if y == "emergency"]

@@ -14,7 +14,7 @@ from .runtime import MISSING, Record, Result, execute, now_ms, path_confidence, 
 from .strategist import computable, plan
 
 if TYPE_CHECKING:                                 # numpy loads with the heads, on first use: `import solvi` stays light
-    from .heads import Head
+    from .fast import FastHead
 
 
 @dataclass
@@ -257,7 +257,7 @@ class System:
                                  f"{'is not a question' if len(lost) == 1 else 'are not questions'} of this system "
                                  f"({', '.join(self.questions)}): a constraint's arguments are question names, and it "
                                  "applies only when all of them are asked")
-        self.heads: dict[str, Head] = {}
+        self.heads: dict[str, FastHead] = {}
         from .storage import JSONLStorage, open_storage
         if journal and storage is not None:
             raise ValueError("pass journal= or storage=, not both (journal= is a JSONL storage)")
@@ -566,9 +566,11 @@ class System:
         """The answers from an executed flow: rules / hard checks / heads, calibration, constraints, the low-confidence
         safeguard → (results, feasible, violations). No side effects besides an answer head's record in the trace."""
         by = {r.name: r for r in trace.records}
+        hard = [(n, p) for n, p in self.catalog.parts.items() if p.kind == "check" and p.hard]   # in catalog order
+        pcache = {}                                   # the questions share one walk of path_confidence
         results = {}
         for q in qs:
-            r = self._answer(q, flow, trace, vals, by)
+            r = self._answer(q, flow, trace, vals, by, hard, pcache)
             r.kind = q.answer.kind
             if q.name in self.calib and r.status == "ok":
                 r.confidence = _platt(r.confidence, *self.calib[q.name])
@@ -686,16 +688,16 @@ class System:
                 lines.append(f"  {i18n.label(k, lang):{w}s} {st[key]}")
         return "\n".join(lines)
 
-    def _answer(self, q, flow, trace, vals, by):
+    def _answer(self, q, flow, trace, vals, by, hard, pcache=None):
         facts = flow.per_question.get(q.name, [])
         # hard checks: a false hard check in the question's flow decides the answer (the model cannot override it).
         # A hard check with `then` governs only the questions listed there (and those that name it as a checkpoint);
-        # for other questions it is an ordinary failed check.
+        # for other questions it is an ordinary failed check. hard: the catalog's hard checks, in catalog order.
         in_flow = set(facts)
-        for f in [n for n in self.catalog.parts if n in in_flow]:        # several failed: the first declared in the catalog decides
-            part = self.catalog.parts.get(f)
+        hard = [(f, part) for f, part in hard if f in in_flow]
+        for f, part in hard:                          # several failed: the first declared in the catalog decides
             r = by.get(f)
-            if part is not None and part.kind == "check" and part.hard and r is not None and r.value is False:
+            if r is not None and r.value is False:
                 if not governs(part, q):
                     continue
                 if q.name in part.then:
@@ -710,10 +712,9 @@ class System:
                                   provenance=r.origin, source=f, guard="hard_check")
                 return Result(None, 0.0, f"hard check {f} is false and no answer is set for it", "abstain", source=f,
                               guard="hard_check")
-        for f in [n for n in self.catalog.parts if n in in_flow]:        # a governing hard check that could not be evaluated:
-            part, r = self.catalog.parts.get(f), by.get(f)                # the answer is unknown, never "passed"
-            if part is not None and part.kind == "check" and part.hard and r is not None and r.value is MISSING \
-                    and governs(part, q):
+        for f, part in hard:                          # a governing hard check that could not be evaluated: the answer
+            r = by.get(f)                             # is unknown, never "passed"
+            if r is not None and r.value is MISSING and governs(part, q):
                 return Result(None, 0.0, f"hard check {f} could not be evaluated: {r.error or 'no value'}"
                               + _caused_by(by, r), "abstain", source=f, guard="hard_check")
         missing =[f for f in facts if f in by and by[f].value is MISSING]
@@ -743,7 +744,7 @@ class System:
                 return Result(None, 0.0, "rule not computed: " + (r.error if r else "no step") +
                               (f"; missing {', '.join(missing)}" if missing else "") + _caused_by(by, r), "abstain",
                               guard="timeout" if late else "grounding" if grounding else None)
-            pc = path_confidence(self.catalog, trace, rule.inputs)
+            pc = path_confidence(self.catalog, trace, rule.inputs, pcache)
             conf = min(pc, r.confidence)
             why = "; ".join(f"{x} = {srepr(vals.get(x))}" for x in rule.inputs)
             src = rule.func.__name__ if rule.func is not None else rule.name
@@ -787,7 +788,7 @@ class System:
         why = ", ".join(f"{f} = {srepr(vals.get(f))} ({c:+.2f})" for f, c in sorted(contrib.items(), key=lambda t: -abs(t[1]))[:4])
         if soft_failed:
             why += "; failed checks: " + ", ".join(soft_failed)
-        conf = base * path_confidence(self.catalog, trace, head.features)
+        conf = base * path_confidence(self.catalog, trace, head.features, pcache)
         _append(trace, Record(step=0, kind="head", name="answer:" + q.name, inputs={f: vhash(vals[f]) for f in head.features},
                               value=a, confidence=base, provenance="learned", model=model_info(head), probs=dict(p)),
                 len(flow.steps))
@@ -936,25 +937,58 @@ class System:
         _, vals = execute(self.catalog, flow, init_state, early_exit=False)
         return vals
 
-    def fit(self, question, examples):
-        """examples: [(init_state, answer)] → the answer head and its features (and hence the question's flow). The
-        candidates are every fact computable from the examples' init_state keys, the given keys included."""
+    def fit(self, question, examples, features=None, *, select=None, min_gain=0.0, lam=None, refit=2.0,
+            refit_until=2000):
+        """An answer head for a question without a rule, learned from examples — [(init_state, answer)]: a closed-form
+        ridge head (solvi.fast.FastHead, milliseconds to seconds), which every `teach` for this question updates at once.
+
+        features: the facts it may read, by default every fact computable from the examples' init_state keys, the given
+        keys included. select: keep only the facts that help — greedy forward selection by the exact leave-one-out
+        squared error (solvi.fast.select_features); a fact is kept while it lowers that error by more than `min_gain` ×
+        the error of the answers' shares. The kept facts become the question's flow, so later requests compute only
+        what the head reads. Default (None): select when `features` is not given, keep every fact listed when it is.
+        lam, refit, refit_until: as FastHead (a refit keeps the selected facts; it does not choose again).
+        `head.selection` says what each kept fact did to the error. Before 0.8, fit was a logistic head chosen by
+        cross-validated accuracy (+1 point), which kept nothing on imbalanced questions; fit_fast was this without the
+        selection (now fit(..., select=False))."""
+        from .fast import FastHead, select_features
+        import time
         q = self.questions[question]
         examples = _learnable(q, examples)
+        t0 = time.perf_counter()
         rows = [self.facts_for(s) for s, _ in examples]
-        ans = [q.answer.normalize(a) for _, a in examples]
+        explicit = features is not None
         keys = set(self._state(examples[0][0])[0].keys())
-        cands = sorted(self._computable(keys))              # the given keys too: "all facts computable from" them
-        from .heads import Head
-        if q.answer.kind == "multi":
-            self.heads[question] = MultiHead(q.answer.options, lambda: Head(["yes", "no"]),
-                                             lambda h, ys: h.fit(rows, ys, cands)).fit(ans)
-        else:
-            self.heads[question] = Head(q.answer.options).fit(rows, ans, cands)
-        self._warn_no_features("fit", question, self.heads[question], cands, keys, ans)
-        return self.heads[question]
+        if features is None:
+            features = sorted(self._computable(keys))      # the given keys too
+        features = list(features)
+        select = not explicit if select is None else bool(select)
+        ans = [q.answer.normalize(a) for _, a in examples]
 
-    def _warn_no_features(self, method, question, head, cands, keys, answers):
+        def make():
+            return FastHead(["yes", "no"] if q.answer.kind == "multi" else q.answer.options, lam=lam, refit=refit,
+                            refit_until=refit_until)
+
+        def train(h, ys):
+            if not select:
+                return h.fit(rows, ys, features)
+            chosen, path, unusable = select_features(rows, ys, h.options, features, min_gain)
+            h.fit(rows, ys, chosen)
+            h.dropped, h.selection = unusable, path       # dropped: facts that cannot be encoded (not: not chosen)
+            return h
+        head = MultiHead(q.answer.options, make, train).fit(ans) if q.answer.kind == "multi" else train(make(), ans)
+        head.fit_ms = (time.perf_counter() - t0) * 1000
+        dropped = getattr(head, "dropped", None) or {}
+        if dropped and explicit:           # features the caller asked for explicitly must not vanish silently
+            import warnings
+            warnings.warn(f"fit({question!r}): features not used — " +
+                          "; ".join(f"{f}: {why}" for f, why in dropped.items()), stacklevel=2)
+        if not explicit:                   # and a head left without any feature says why
+            self._warn_no_features(question, head, features, keys, ans, select)
+        self.heads[question] = head
+        return head
+
+    def _warn_no_features(self, question, head, cands, keys, answers, select):
         """A head without features answers the same for every input: say so, with the reason (a UserWarning)."""
         if head.features:
             return
@@ -981,50 +1015,23 @@ class System:
             if unusable:
                 why += "; the inputs themselves cannot be used — " + "; ".join(f"{f}: {w}" for f, w in
                                                                               list(unusable.items())[:5])
-        elif getattr(head, "dropped", None):
+        elif not select or set(getattr(head, "dropped", None) or ()) >= set(cands):
             why = "none of the facts can be used — " + "; ".join(f"{f}: {w}" for f, w in list(head.dropped.items())[:5])
         else:
             top = Counter(str(a) for a in answers).most_common(1)[0][1] / max(1, len(answers))
-            why = (f"none of the {len(cands)} facts raised the cross-validated accuracy on its own (the most frequent "
-                   f"answer is {top:.0%} of the examples): the greedy selection kept nothing — usual for an imbalanced "
-                   "question; fit_fast keeps every feature")
-        warnings.warn(f"{method}({question!r}): the head has no features — every input gets the same answer. {why}",
+            why = (f"none of the {len(cands)} facts lowered the leave-one-out error of the answers' shares (the most "
+                   f"frequent answer is {top:.0%} of the examples): the selection kept nothing — the facts do not tell "
+                   "the answers apart on these examples; select=False keeps every fact")
+        warnings.warn(f"fit({question!r}): the head has no features — every input gets the same answer. {why}",
                       stacklevel=3)
 
     def fit_fast(self, question, examples, features=None, lam=None, refit=2.0, refit_until=2000):
-        """Fast answer head (closed-form ridge, milliseconds): examples — [(init_state, answer)]. Features: the given facts
-        (numbers, booleans, categories or vectors such as a document embedding), by default every fact: the given keys and
-        every fact computed from them. Unlike fit it
-        keeps all features and learns online: every `teach` for this question updates it instantly. refit: each time `teach`
-        doubles the number of examples (2.0), the head is fitted again on all of them, so the ridge strength and the features
-        chosen on the first few examples do not stay frozen; None — rank-one updates only, no examples kept. No refit past
-        `refit_until` examples (see solvi.fast.FastHead)."""
-        from .fast import FastHead
-        import time
-        q = self.questions[question]
-        examples = _learnable(q, examples)
-        t0 = time.perf_counter()
-        rows = [self.facts_for(s) for s, _ in examples]
-        explicit = features is not None
-        if features is None:
-            keys = set(self._state(examples[0][0])[0].keys())
-            features = sorted(self._computable(keys))      # the given keys too, as fit
-        ans = [q.answer.normalize(a) for _, a in examples]
-        if q.answer.kind == "multi":
-            head = MultiHead(q.answer.options, lambda: FastHead(["yes", "no"], lam=lam, refit=refit, refit_until=refit_until),
-                             lambda h, ys: h.fit(rows, ys, list(features))).fit(ans)
-        else:
-            head = FastHead(q.answer.options, lam=lam, refit=refit, refit_until=refit_until).fit(rows, ans, list(features))
-        head.fit_ms = (time.perf_counter() - t0) * 1000
-        dropped = getattr(head, "dropped", None) or {}
-        if dropped and explicit:           # features the caller asked for explicitly must not vanish silently
-            import warnings
-            warnings.warn(f"fit_fast({question!r}): features not used — " +
-                          "; ".join(f"{f}: {why}" for f, why in dropped.items()), stacklevel=2)
-        if not explicit:                   # and a head left without any feature says why
-            self._warn_no_features("fit_fast", question, head, list(features), keys, ans)
-        self.heads[question] = head
-        return head
+        """Deprecated (0.8; removed in 0.9): `fit(question, examples, features, select=False, ...)` — the same ridge head
+        on every feature, now built by fit."""
+        import warnings
+        warnings.warn("fit_fast is deprecated: use fit (fit_fast(...) is fit(..., select=False)); it will be removed in "
+                      "0.9", DeprecationWarning, stacklevel=2)
+        return self.fit(question, examples, features, select=False, lam=lam, refit=refit, refit_until=refit_until)
 
     def learn_rule(self, question, examples, facts, **kw):
         """An answer rule learned from examples (solvi.rules.RuleList): a readable "if feature then answer" list, installed in the

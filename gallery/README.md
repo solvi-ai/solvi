@@ -19,7 +19,7 @@ model-backed; answers are valid for their type; every forced answer names the ha
 has a constraint-repair event; a catalog without learned parts is 100% deterministic. Over the fifteen runners: 170 scenario
 responses (plus 10 in 03's learned-verdict demo), all invariants hold. Learned parts are labelled as such: the rule lists
 of 01 and 02 are registered with `model=`, so the audit counts them as learned (90–91% deterministic there) instead of
-passing them off as plain code; 09's `fit_fast` head and 12's `learn_rule` list show up the same way (97–98%), and so do
+passing them off as plain code; 09's `fit` head and 12's `learn_rule` list show up the same way (97–98%), and so do
 the keyword stand-in deciders of 13–15 (86–96%).
 
 ## Entries
@@ -34,7 +34,7 @@ the keyword stand-in deciders of 13–15 (86–96%).
 | [06](06_release_rollout) | DevOps | promote / hold / roll back, page on-call | error increase, two-proportion z-test, p95 from histograms, SLO burn; an error ceiling rolls back and skips 9 steps | `hard checks` `strategist plan` `early exit` `trace replay` `abstains` `audited` |
 | [07](07_kyc_aml) | compliance | risk, file a SAR, freeze | fuzzy sanctions match plus birth date; structuring (deposits just under 10 000) computed; a sanctions hit skips the paid lookups | `hard checks` `strategist plan` `early exit` `trace replay` `abstains` `audited` |
 | [08](08_clinical_screening) | healthcare (demo) | escalation, NEWS2 band, sepsis screen | NEWS2 exactly per the RCP table, qSOFA; missing vitals abstain; escalation and band ordinal, tied by a constraint; a linear answerer trained on 4 000 patients missed 144–156 of 501 emergencies | `hard checks` `trace replay` `abstains` `ordinal` `constraints` `audited` |
-| [09](09_credit_adverse_action) | lending | approve / decline / refer, adverse-action reasons | reasons in Regulation B wording as computed facts; "refer to underwriter" learned with `fit_fast`, corrected by `teach` in 0.17 ms | `hard checks` `early exit` `trace replay` `learns in ms` `abstains` `audited` |
+| [09](09_credit_adverse_action) | lending | approve / decline / refer, adverse-action reasons | reasons in Regulation B wording as computed facts; "refer to underwriter" learned with `fit`, corrected by `teach` in 0.17 ms | `hard checks` `early exit` `trace replay` `learns in ms` `abstains` `audited` |
 | [10](10_procurement_3way_match) | procurement | pay / hold / reject, duplicate, approver | PO / receipt / invoice matched per line with tolerances in base currency (FX), duplicate "INV-001187" = "inv 1187"; the rate from the table, else from a same-day feed (a stale rate is rejected by `validate`) | `hard checks` `strategist plan` `early exit` `trace replay` `abstains` `fallback producers` `typed` `audited` |
 | [11](11_refund_double_charge) | payments support | double charge?, refund, reply | the customer's claim is quoted, the decision reads the ledger — they disagree in 6 of 16 cases; paraphrases and denials are read by a rule, unclear text abstains | `cited` `hard checks` `early exit` `trace replay` `abstains` `audited` |
 | [12](12_predictive_maintenance) | industrial IoT | ok / watch / service / stop, likely fault | least-squares trends, z-scores, hours to the alert level; hard trips work with a sensor offline; 6 readable learned rules | `hard checks` `trace replay` `readable learned rules` `abstains` `audited` |

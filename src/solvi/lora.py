@@ -120,7 +120,7 @@ def check(part, allow_large=False):
     from .decide import DecisionPart, TorchScorer
     if not isinstance(part, DecisionPart):
         raise TypeError(f"adapt_lora adapts a model decision (a DecisionPart), not a {type(part).__name__}: a rule or a "
-                        "learned head has no encoder to adapt (use fit / fit_fast)")
+                        "learned head has no encoder to adapt (use fit)")
     scorer = getattr(part.model, "scorer", None)
     if not isinstance(scorer, TorchScorer):
         name = type(scorer).__name__
@@ -463,7 +463,7 @@ def adapt(part, examples, *, r=8, epochs=6, holdout=None, seed=0, device=None, l
         raise ValueError(f"adapt_lora({name}): {k} usable examples; it needs at least {MIN_EXAMPLES} (and about "
                          f"{FEW_EXAMPLES} or more to beat fit)")
     if k < FEW_EXAMPLES:
-        warnings.warn(f"adapt_lora({name}): {k} examples — below about {FEW_EXAMPLES}, part.fit (and fit_fast for questions "
+        warnings.warn(f"adapt_lora({name}): {k} examples — below about {FEW_EXAMPLES}, part.fit (and System.fit for questions "
                       "without a model) is about as accurate and takes milliseconds (the adapter gained ~3 points at 32 "
                       "examples in our measurements, within noise on some tasks)", LoraWarning, stacklevel=3)
     before = _accuracy(part, hold) if hold else None

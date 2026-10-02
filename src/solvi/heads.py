@@ -2,7 +2,11 @@
 A number is encoded as its value plus thresholds at training quantiles ("greater than threshold" steps).
 Multinomial logistic regression with L2 (Adam, 300 steps — milliseconds; one-vs-rest ridge could not express the middle one
 of ordered classes). Features are chosen by greedy forward selection on 5-fold cross-validation accuracy (gain ≥ 1 pt):
-the selected facts define the question's flow."""
+the selected facts define the question's flow.
+
+System.fit built this head before 0.8; it now builds a solvi.fast.FastHead, whose selection is scored by the leave-one-out
+squared error (accuracy kept nothing on imbalanced questions). Head stays for code that builds one itself; its
+Featurizer is shared with FastHead."""
 from __future__ import annotations
 
 import numpy as np

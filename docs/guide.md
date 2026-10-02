@@ -242,7 +242,7 @@ An answer outside the options is never returned: a rule that produces one makes 
   distribution rather than the most likely level, so a split between "low" and "high" gives "medium", not a jump.
   `answer_type.rank(v)` gives the position.
 - `Answer.multi(["pii", "abuse", "prompt_injection"])` — any subset, returned as a tuple in option order (empty tuple for none).
-  A rule may return a list or set. `fit` / `fit_fast` learn one yes/no head per option; `teach` updates all of them.
+  A rule may return a list or set. `fit` learns one yes/no head per option; `teach` updates all of them.
 - Any option list may be a dict `{option: description}`; descriptions are kept in `answer_type.descriptions`.
 
 ### Constraints between answers
@@ -513,7 +513,7 @@ def repair_days(doc: str) -> Estimate[0, 3, 7, 14]:
   Estimates, spans and rule rankings are not changed by joint decoding.
 
 `Answer.maybe(t)`, `Answer.span`, `Answer.rank` and `Answer.estimate` build the same answer types without type hints. Learned
-heads (`fit`, `fit_fast`) answer the four classic kinds only (examples answered `Unknown` are left out). All of it
+heads (`fit`) answer the four classic kinds only (examples answered `Unknown` are left out). All of it
 round-trips through JSON (`result.not_stated`, `evidence`, `extra`) and replays. From a decider — `model.decision(name,
 task, fact, Maybe[...] / Span[T] / Rank[...] / Estimate[...], evidence=True)` — these need an answer-primitives checkpoint (its "not
 stated" output and its pointer; see [decide_format.md §9](decide_format.md#9-answer-primitives-l14g-typed-v2)).
@@ -1461,7 +1461,7 @@ rest of the checkpoint frozen. **Which one to use:**
 
 | labelled examples of the question | use |
 |---|---|
-| fewer than ~100 | `part.fit` (milliseconds; for a question without a model, `system.fit_fast` or `system.fit`) |
+| fewer than ~100 | `part.fit` (milliseconds; for a question without a model, `system.fit`) |
 | ~100 or more, solvi-base | `part.adapt_lora`, with `act_guard` on ~300 other labels |
 | solvi-large, or thousands of examples | [`tools/adapt_lora_gpu.py`](../tools/adapt_lora_gpu.py) from the repository (not installed by pip) on a GPU, then `part.load_lora(path)` |
 
@@ -1811,77 +1811,86 @@ runs them one after another (their inputs still run in parallel) — measure bef
 ## Questions without a rule: fit, learn_rule, teach
 
 Some answers are hard to write as a rule (a risk level, a region from a messy address). solvi offers two ways to learn
-them from labeled examples. Both use the facts that your catalog computes, not raw text.
+them from labeled examples: an answer head (`fit`) and a readable rule list (`learn_rule`). Both use the facts that your catalog computes, not raw text.
 
-### fit: a learned answer head
+### fit: a learned answer head, corrected instantly
 
 ```python
-history = [(init_state_1, "low"), (init_state_2, "high"), ...]   # 100-300 labeled examples
+history = [(init_state_1, "low"), (init_state_2, "high"), ...]   # labeled examples
 head = system.fit("risk", history)
-print(head.features, head.cv_acc)          # selected facts and their cross-validated accuracy
+print(head.features, head.selection)       # the facts it kept, and the leave-one-out error after adding each
+print(head.loo_acc)                        # exact leave-one-out accuracy
 ```
+
+`system.fit(question, examples, features=None, *, select=None, min_gain=0.0)` fits a closed-form ridge head
+(`solvi.fast.FastHead`): one matrix decomposition per ridge strength, so it takes milliseconds to a few seconds, and the
+ridge strength is chosen by exact leave-one-out accuracy (`head.loo_acc`).
 
 - Features are all facts computable from the examples' `init_state` keys, the given keys themselves included (a given
   number is a feature as it is, without a function around it; a given value that cannot be encoded — a long text, a
-  dict — is left out and named in `head.dropped`). Numbers are encoded as a value plus thresholds
-  at training quantiles, booleans as +/-1, and strings with at most 20 distinct values as categories.
-- The model is a multinomial logistic regression with L2 regularization. Training takes milliseconds to a few seconds.
-- Features are selected greedily by 5-fold cross-validated accuracy (a feature is kept if it adds at least 1 point).
-  **The selected facts become the question's flow**, so later requests compute only what the head uses.
+  dict — is left out and named in `head.dropped`). Numbers are encoded as a value plus thresholds at training
+  quantiles, booleans as +/-1, strings with at most 20 distinct values as categories, and numeric vectors (a document
+  embedding from `LongSpanExtractor.embedder()`) per dimension; when there are few of them, their pairwise products
+  are added so middle classes and interactions can be expressed.
+- Without `features=`, the facts are selected greedily: start from the answers' shares and add the fact that lowers
+  the exact leave-one-out squared error most, while it lowers it by more than `min_gain` × the error of the shares
+  (`min_gain=0.0`: any decrease). **The selected facts become the question's flow**, so later requests compute only
+  what the head reads. The squared error is a proper score: a rare answer counts. `features=[...]` keeps every fact
+  listed; `select=False` keeps every computable fact; `select=True` selects among the facts listed.
 - The answer's `why` lists the largest feature contributions, `probs` gives all class probabilities.
-- A head left with no feature answers the same for every input; `fit` and `fit_fast` warn when that happens and say why:
-  on an imbalanced question no single fact may add a point over the most frequent answer, so the greedy selection keeps
-  nothing (`fit_fast` keeps every feature); or no fact could be computed from the examples' inputs — every parameter of
-  a part is a fact it reads, one with a default value too (`def fn(facts, _nm=nm)` waits for a fact `_nm`).
+- A head left with no feature answers the same for every input; `fit` warns when that happens and says why: no fact
+  lowered the leave-one-out error (the facts do not tell the answers apart on these examples), or no fact could be
+  computed from the examples' inputs — every parameter of a part is a fact it reads, one with a default value too
+  (`def fn(facts, _nm=nm)` waits for a fact `_nm`).
 
-### fit_fast: learn in milliseconds, correct instantly
+Before 0.8 `fit` was a logistic regression whose features were chosen by cross-validated accuracy (+1 point), and
+`fit_fast` was the ridge head on every feature. Accuracy kept nothing when one answer is 80-90% of the examples. The
+choice was made on development splits (Abt-Buy product matching: 11% matches, 17 facts; NAB anomaly candidates: 22%,
+14 facts, leave one series out; the three example tasks at 30, 100 and 300 examples). The old `fit` kept 1 of 17 facts
+on Abt-Buy (F1 0.846 on the development split, 0.868 on the held-out one) and none on NAB (0.261 / 0.259); the ridge
+head with this selection gives 0.900 / 0.928 with 13 facts on Abt-Buy and 0.351 / 0.422 on NAB, against 0.903 / 0.931
+and 0.342 / 0.421 with every fact. On the example tasks (macro F1 on fresh draws, three seeds) the selection beat every
+fact in 5 of 6 settings at 100 and 300 examples and lost on refunds at 100 (0.913 against 0.961); at 30 examples it won
+on two tasks and lost badly on the third (invoices, 3 classes: 0.504 against 0.714 — choosing among 14 facts on 30
+examples overfits; pass `select=False` on so few). A logistic head chosen by log loss was better than the ridge head
+on two settings by about 3 points and worse elsewhere, at 10-100 times the fitting time.
+`fit_fast(...)` still works in 0.8, with a DeprecationWarning: it is `fit(..., select=False)`; it goes in 0.9.
 
-`system.fit_fast(question, examples, features=None)` fits a closed-form ridge head: one matrix decomposition, so it takes
-milliseconds instead of seconds, and the ridge strength is chosen by exact leave-one-out accuracy (`head.loo_acc`). Features are
-the given facts (numbers, booleans, categories, and numeric vectors such as a document embedding from
-`LongSpanExtractor.embedder()`), by default every fact — the given keys and every fact computed from them; when there are few of them, their pairwise products are added
-so middle classes and interactions can be expressed.
-
-Its main property is online learning: `system.teach(question, init_state, correct)` updates a fast head immediately with a
-rank-one Sherman–Morrison step (about 0.1–0.2 ms) and returns the time in ms. Other questions, rules and hard checks do not
-change, and the example still goes to the journal.
+Its other property is online learning: `system.teach(question, init_state, correct)` updates the head immediately with
+a rank-one Sherman–Morrison step (about 0.1–0.2 ms) and returns the time in ms. Other questions, rules and hard checks
+do not change, and the example still goes to the journal.
 
 ```python
-head = system.fit_fast("suspicious", history[:10])     # start small
+head = system.fit("suspicious", history[:10], select=False)     # start small: every fact
 for state, label in reviewer_corrections:
-    system.teach("suspicious", state, label)            # each one is absorbed at once
+    system.teach("suspicious", state, label)                     # each one is absorbed at once
 ```
 
 **Refits as examples accumulate.** A rank-one step keeps what the first fit chose: the ridge strength, the featurizer
 (number scales and the known values of each category — a value first seen later counts as none of them) and whether
 pairwise products are used. Chosen on 10 examples these are often wrong for 300. So the head keeps its examples and,
 each time `teach` doubles their number (at 20, 40, 80, 160, … after a start on 10), fits again on all of them — exactly
-a fresh `fit_fast` on those examples — then goes on with rank-one steps. On eight tabular sets (three example tasks, five
-open datasets), a head started on 10 examples and taught up to 300 was 5.8 points less accurate than a fit on all 300
-without refits and 0.2 points more accurate with them; its share of answers under an `act_guard` guarantee rose from 67%
-to 86% (a full fit: 86%). The cost:
+a fresh fit on those examples and the facts it reads (the selection is not made again: the flow stays) — then goes on
+with rank-one steps. On eight tabular sets (three example tasks, five open datasets), a head started on 10 examples
+and taught up to 300 was 5.8 points less accurate than a fit on all 300 without refits and 0.2 points more accurate
+with them; its share of answers under an `act_guard` guarantee rose from 67% to 86% (a full fit: 86%). The cost:
 
 - the update that triggers a refit takes as long as a fit on that many examples (on a 14-fact dataset: about 3 ms at
   160, 11 ms at 640, 100 ms for a fit on 2000, with 40% of one core). An early refit that switches pairwise products on
   (hundreds of columns from few examples) is the slowest, about 200 ms with 40% of one core — as long as the first
-  `fit_fast` on those examples would take. The other updates are unchanged, and in total a
+  fit on those examples would take. The other updates are unchanged, and in total a
   run of updates was never more than about 0.6 ms per update slower — often faster, since a refit usually drops the
   pairwise products a start on few examples switched on;
 - the kept examples: their fact rows, about 1 KB each for 14 plain facts (vector facts such as embeddings cost their
   length), up to `refit_until` examples (2000). Past that no refit is due, the rows are dropped and the head goes on with
   rank-one steps only;
 - a refit is a change like any update: `teach` makes it at once and it is not gated. The learning loop
-  (`System.learning`) manages decision parts, not fast heads: while it is attached with `gate_teach=True`, `teach` only
-  stores the correction and the fast head (and its refit schedule) does not move. The head depends only on its first
+  (`System.learning`) manages decision parts, not fitted heads: while it is attached with `gate_teach=True`, `teach`
+  only stores the correction and the head (and its refit schedule) does not move. The head depends only on its first
   fit and the sequence of corrections, so replaying them gives the same head (the same fingerprint); keep a
   `copy.deepcopy(head)` to go back.
 
-`fit_fast(..., refit=None)` turns it off (rank-one steps only, no examples kept); `refit=1.5` refits more often.
-
-On the example tasks (`benchmarks/fast_head.py`, one run on this version) `fit_fast` trained 11–32× faster than `fit`; at
-200 examples it was 5.8 points more accurate on one task (0.955 against 0.897) and 0.8 points less on the other (0.960
-against 0.968); learning online from 10 to 200 corrections ends within a few points of fitting on all 200 at once. Use `fit` when accuracy on a fixed
-dataset matters most, `fit_fast` when labels arrive one by one or you need to retrain on every request.
+`fit(..., refit=None)` turns it off (rank-one steps only, no examples kept); `refit=1.5` refits more often.
 
 ### learn_rule: a readable rule list
 
@@ -2006,7 +2015,7 @@ threshold with a promise, use `system.guarantee` (below).
 ### A guarantee on any question: System.guarantee
 
 `part.act_guard` and `calibrate_for` put a promise on a model's decision. `system.guarantee` puts one on a question,
-whatever answers it — a fitted head (`fit_fast`, `fit`), a rule over computed facts, a model decision — and on any
+whatever answers it — a fitted head (`fit`), a rule over computed facts, a model decision — and on any
 number the question's answer can be judged by: its confidence, a fact the catalog computes (a trust score, the share
 of candidates that agree), the act probability, or a function of your own:
 
@@ -2026,7 +2035,7 @@ rng = random.Random(0)
 def draw(n):                                # (input, correct answer); near 0.5 the answer is a coin flip
     return [({"score": (x := rng.random())}, x + rng.gauss(0, 0.1) > 0.5) for _ in range(n)]
 
-system.fit_fast("refund", draw(400), features=["score"])
+system.fit("refund", draw(400), features=["score"])
 report = system.guarantee("refund", draw(600), error=0.05)     # held out: not the 400 the head was fitted on
 report["threshold"], report["answered"], report["error"], report["risk"]     # 0.84, 0.78, 0.019, 0.015
 r = system.ask({"score": 0.52})["refund"]
@@ -2044,7 +2053,7 @@ system.guarantee("refund", examples, risk=0.02, groups="answer", delta=None)   #
 system.guarantee("act", examples, risk=0.03, signal="trust",       # right / wrong by a judge of your own
                  correct=lambda result, label: overlaps(result, label))
 system.guarantee("correct", examples, error=0.3, answer="yes", folds=5)
-# one-sided: "yes" alone when P(yes) ≥ the threshold (it may be below 0.5), else abstain; folds=5: the fit_fast head
+# one-sided: "yes" alone when P(yes) ≥ the threshold (it may be below 0.5), else abstain; folds=5: the fitted head
 # was fitted on these very examples, so each is scored by a head refitted without it (the promise is then approximate)
 system.guarantee("refund", False)                                  # remove it
 ```
@@ -2113,8 +2122,9 @@ head's fingerprint.
 
 What hashing costs: every given value and every computed value is put in canonical form and hashed once per ask,
 however many steps read it; the input's hash is taken when the ask starts. The time grows with the size of the values —
-about 0.4 ms per thousand floats of a list — so a decision over a large input is slower than the "about 0.4 ms" of a
-small one. A part should not change a given value in place: the hashes describe the input as it was given.
+about 0.3 ms per thousand floats of a list (a list of plain floats, strings or ints takes a fast path; the input is
+written as JSON once, its values' hashes taken from the same text) — so a decision over a large input is slower than
+the "about 0.3 ms" of a small one (README, Speed). A part should not change a given value in place: the hashes describe the input as it was given.
 
 `res.trace.fingerprint` records what decided: the catalog's fingerprint, the questions' and the fingerprint of every part
 in the flow (see [Catalog fingerprint, solvi diff and shadow mode](#catalog-fingerprint-solvi-diff-and-shadow-mode)); it is
@@ -3919,7 +3929,7 @@ Every fact and answer has a provenance kind (`record.origin`, `result.provenance
 | `computed` | a plain function: `fn`, `check`, a hand-written rule | replay re-runs it and compares |
 | `quoted` | an `extract` part returning a `Quote` | the offsets must lie in the source text; for a model, `doc[start:end]` must be the value |
 | `decided` | a model's choice among declared options, with probabilities (`Decision`) | the value must be one of the options; probabilities recorded |
-| `learned` | a `fit` / `fit_fast` head, a `learn_rule` list, another trained function | the head type and a fingerprint of its parameters are recorded |
+| `learned` | a `fit` head, a `learn_rule` list, another trained function | the head type and a fingerprint of its parameters are recorded |
 | `proposed` | a model that writes: a strategist's plan, a generator's text or JSON (`solvi.generate`) | the deterministic layer verifies what it proposes; replay re-reads a recorded reply through its parser and schema |
 
 The default comes from what a part returns (a `Quote` → `quoted`, a `Decision` → `decided`) and whether a model is behind
@@ -3951,7 +3961,7 @@ was loaded from, `model.model_id`), and a fingerprint (`solvi.provenance.fingerp
 
 - extractors: settings, thresholds / temperatures, the span head, evenly sampled encoder weights, and the names and sizes of
   the weight files — about 10 ms once, then cached until `fit` / `save`;
-- `Head`, `FastHead` (fit, fit_fast): a hash of their parameters — it changes with every `teach`;
+- `FastHead` (fit; `Head`, the logistic head before 0.8): a hash of their parameters — it changes with every `teach`;
 - `RuleList` (learn_rule): a hash of its rules;
 - any other object: its own `fingerprint()` method, or a `version` attribute, or `"unversioned:<type>"` (then a changed model
   cannot be detected — give your models a version).

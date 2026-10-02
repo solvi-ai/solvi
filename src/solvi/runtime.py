@@ -4,10 +4,12 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import inspect
+import itertools
 import json
 import sys
 import time
 from dataclasses import dataclass, field
+from json.encoder import encode_basestring as _jstr
 from typing import Any
 
 from .core import Decision, Quote, Serial, Unknown, accept, evidence_rows, ground, has_evidence, locate, unwrap, validated
@@ -15,7 +17,36 @@ from .core import Claim                                # Claim.extra is recorded
 from .provenance import TIMED_OUT, model_info
 
 
+_FLOAT, _NONE = float, type(None)
+_ASIS = frozenset((str, int, bool, _NONE))      # exact types _canon returns unchanged
+_NINE = itertools.repeat(9)
+_STR = frozenset((str,))
+
+
+def _canon_seq(v):
+    """_canon of a list or tuple. Lists of plain floats, of floats with gaps (None) or of plain strings / ints / bools
+    — a series, an embedding, a list of names — skip the per-element dispatch; the result is the same list."""
+    kinds = set(map(type, v))
+    if kinds <= _ASIS:
+        return list(v)
+    if kinds == {_FLOAT}:
+        return list(map(round, v, _NINE))
+    if kinds <= {_FLOAT, _NONE}:
+        return [None if x is None else round(x, 9) for x in v]
+    return [_canon(x) for x in v]
+
+
 def _canon(v):
+    """A value as plain JSON data, the same for equal values in every process: what vhash hashes."""
+    t = type(v)
+    if t is _FLOAT:                               # the common types first, by exact type (subclasses take the long way)
+        return round(v, 9)
+    if t in _ASIS:
+        return v
+    if t is list or t is tuple:
+        return _canon_seq(v)
+    if t is dict and set(map(type, v)) <= _STR:   # string keys: no two with the same text, no order to settle
+        return {k: _canon(x) for k, x in v.items()}
     if isinstance(v, Quote):
         return {"quote": [_canon(v.value), v.start, v.end, v.source]}
     if isinstance(v, Decision):
@@ -50,13 +81,35 @@ def _canon(v):
     return r
 
 
+_JSON = json.JSONEncoder(ensure_ascii=False, sort_keys=True).encode    # json.dumps(c, ensure_ascii=False, sort_keys=True),
+#                                                                       without building an encoder per call
+
+
+_INF = float("inf")
+
+
 def _ckey(c):
-    return json.dumps(c, ensure_ascii=False, sort_keys=True)
+    """The JSON text of a canonical form, as json.dumps(c, ensure_ascii=False, sort_keys=True) writes it; a plain
+    string, int or finite float is written directly (the encoder's own formatting: its string escaper, int and float
+    repr)."""
+    t = type(c)
+    if t is str:
+        return _jstr(c)
+    if t is int:
+        return int.__repr__(c)
+    if t is _FLOAT and c == c and c != _INF and c != -_INF:
+        return float.__repr__(c)
+    return _JSON(c)
+
+
+def _shash(s) -> str:
+    """The hash of a canonical form's JSON text (_ckey)."""
+    return hashlib.sha256(s.encode()).hexdigest()[:16]
 
 
 def _chash(c) -> str:
     """The hash of a canonical form (_canon): what vhash returns for the value it came from."""
-    return hashlib.sha256(json.dumps(c, ensure_ascii=False, sort_keys=True).encode()).hexdigest()[:16]
+    return _shash(_ckey(c))
 
 
 def vhash(v) -> str:
@@ -719,28 +772,52 @@ class StepOut:
 class HashMemo(dict):
     """vhash of the values of one run, by object: a value read by several steps — and then recorded, and hashed as part
     of the input — is canonicalised and hashed once (each entry keeps its value alive, so an id is not reused within
-    the run). The hashes are vhash's own, byte for byte."""
+    the run). The hashes are vhash's own, byte for byte. seed: a HashSeed of values hashed before the run (the same
+    objects asked again and again, e.g. by solvi.search): a value found there is not hashed again."""
 
-    def __init__(self, init_state=None):
+    def __init__(self, init_state=None, seed=None):
         super().__init__()
         self.init_state = init_state
+        self.seed = seed
 
     def __call__(self, v):
         e = self.get(id(v))
         if e is None or e[0] is not v:
-            e = self[id(v)] = (v, vhash(v))
+            e = self.seed.get(id(v)) if self.seed is not None else None
+            if e is None or e[0] is not v:
+                e = (v, vhash(v))
+            self[id(v)] = e
         return e[1]
 
     def init_hash(self):
-        """vhash(init_state), with each given value canonicalised once: its own hash (what the steps that read it
-        record) is taken from the same canonical form and kept for them."""
-        canon = {}
+        """vhash(init_state), with each given value canonicalised and written as JSON once: its own hash (what the steps
+        that read it record) is taken from the same text, and the input's JSON is put together from the values' texts —
+        byte for byte what json.dumps writes for the whole canonical dict (sorted keys, ", " and ": ")."""
+        texts = {}
+        seed = self.seed
         for k, v in self.init_state.items():
-            c = canon[str(k)] = _canon(v)             # as _canon of the dict: a later key of the same text wins
+            e = seed.get(id(v)) if seed is not None else None
+            if e is not None and e[0] is v:           # hashed before the run: its text and hash as they were then
+                texts[str(k)] = e[2]
+                self.setdefault(id(v), e)
+                continue
+            s = texts[str(k)] = _ckey(_canon(v))     # as _canon of the dict: a later key of the same text wins
             e = self.get(id(v))
             if e is None or e[0] is not v:
-                self[id(v)] = (v, _chash(c))
-        return _chash(canon)
+                self[id(v)] = (v, _shash(s))
+        return _shash("{" + ", ".join(_jstr(k) + ": " + texts[k] for k in sorted(texts)) + "}")
+
+
+class HashSeed(dict):
+    """Values hashed once for many runs: id → (value, hash, canonical JSON text). For values that the runs read as the
+    same objects and that nothing changes in place (a given text asked with every candidate of a search, a fact held at
+    its value) — a value changed in place after it was added keeps its old hash. A catalog carrying one
+    (`catalog._hash_seed`) lends it to every run of its flows."""
+
+    def add(self, v):
+        s = _ckey(_canon(v))
+        self[id(v)] = (v, _shash(s), s)
+        return self
 
 
 def _extra(v):
@@ -1044,7 +1121,7 @@ class _Run:
         self.schedule = []
         self.timeout = None
         self.known = dict(known) if known else ({} if (catalog.readers or catalog.types) else None)
-        self.memo = HashMemo(init_state)
+        self.memo = HashMemo(init_state, getattr(catalog, "_hash_seed", None))
         self.init_hash = self.memo.init_hash()        # first: the steps then find every given value already hashed
         self.batch_of = {}                            # step name → (names, decision parts) of its shared forward pass
         for group in getattr(flow, "batches", None) or ():
@@ -1321,21 +1398,28 @@ def _learned_hard_checks(run):
                              if failed and any(by == names[i] for by in settled_by.values()) else "")})
 
 
-def path_confidence(catalog, trace, facts):
+def path_confidence(catalog, trace, facts, cache=None):
     """A fact's confidence is the minimum confidence of the extractions it depends on. A fact with alternative producers
     depends on what the producer that was used reads (the record's `producer`), not on the inputs of producers that
-    did not give the value."""
-    by = {r.name: r for r in trace.records}
-    memo = {}
+    did not give the value. cache: a dict the caller keeps for one trace (the answers of one ask), so the questions
+    share the walk; a walk that met a ring of facts (net ⇄ gross: its values depend on where it started) is not kept."""
+    if cache is not None and cache.get("records") is trace.records and len(trace.records) == cache["n"]:
+        by, memo = cache["by"], cache["memo"]
+    else:
+        by, memo = {r.name: r for r in trace.records}, {}
+    walking, ring = set(), []
 
     def conf(f):
         if f in memo:
             return memo[f]
+        if f in walking:                  # a fact is never an input of itself (guards a ring of facts)
+            ring.append(f)
+            return 1.0
         r = by.get(f)
         if r is None:
             memo[f] = 1.0
             return 1.0
-        memo[f] = 1.0                     # being walked: a fact is never an input of itself (guards a ring of facts)
+        walking.add(f)
         part = catalog.parts.get(f)
         c = r.confidence                  # 1.0 for plain computations; a quote's or a decision's confidence otherwise
         if part is not None:
@@ -1344,9 +1428,16 @@ def path_confidence(catalog, trace, facts):
                 ins = next((a.inputs for a in part.alternatives if a.name == r.producer), ins)
             for x in ins:
                 c = min(c, conf(x))
+        walking.discard(f)
         memo[f] = c
         return c
-    return min([conf(f) for f in facts] or [1.0])
+    out = min([conf(f) for f in facts] or [1.0])
+    if cache is not None:
+        if ring:
+            cache.clear()
+        else:
+            cache.update(records=trace.records, n=len(trace.records), by=by, memo=memo)
+    return out
 
 
 def now_ms():

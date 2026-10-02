@@ -87,7 +87,7 @@ audit invariants hold on 10/10 responses: 374 support items, 100% deterministic,
 ## vs an answer-only model
 
 - **NEWS2 is an exact table, and a learned answerer only approximates it.** We measured this: a ridge answerer
-  (solvi's `fit_fast` on the eight raw vitals, with pairwise terms, but no table and no rules) was trained on 4 000
+  (solvi's `fit` on the eight raw vitals, with pairwise terms, but no table and no rules) was trained on 4 000
   synthetic patients labelled by the exact rules. On 2 000 new patients it gets 79.5 % of escalations right as an ordinal
   head (it answers with the median level), misses 156 of 501 emergencies and sends 2 routine patients to emergency. As a
   plain choice head (the most likely level) it gets 76.3 % right, misses 144 emergencies and sends 4 routine patients to

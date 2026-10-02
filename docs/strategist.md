@@ -49,7 +49,7 @@ note `mutual_producers` for a System with a strategist (an error, `cycle`, only 
 cannot plan it).
 
 Everything that plans for a System uses its strategist, not only `ask`: `answers_of` / replay, `facts_for` and so the
-feature candidates of `fit` / `fit_fast`, `learn_order`, the input schemas of `solvi serve` and `solvi check`.
+feature candidates of `fit`, `learn_order`, the input schemas of `solvi serve` and `solvi check`.
 3. **With a model** (`ModelStrategist(model, producers="equivalent")`, or `ModelStrategist.load(path)`, which implies
    `"equivalent"`): where declared costs do not settle the choice (a fact with ≥ 2 usable producers, not all with a declared
    cost), the fact becomes a **segment**: code narrows the catalog to the fact's producers and, up to 3 levels back, the

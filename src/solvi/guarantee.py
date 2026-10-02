@@ -1,5 +1,5 @@
 """A guarantee on any signal: a calibrated threshold with a stated promise on a question's answer — given by a rule, a
-fitted head (fit / fit_fast), a model decision — on a fact the catalog computes (a trust score, an agreement share), or
+fitted head (fit), a model decision — on a fact the catalog computes (a trust score, an agreement share), or
 on any scalar outside a System.
 
     report = system.guarantee("pair", examples, risk=0.01)          # conformal risk control on the answer's confidence
@@ -423,7 +423,7 @@ def _fold_heads(system, question, examples, folds, seed):
     from .fast import FastHead
     head = system.heads.get(question)
     if not isinstance(head, FastHead):
-        raise ValueError(f"folds= refits the question's head on part of the examples: {question!r} needs a fit_fast head "
+        raise ValueError(f"folds= refits the question's head on part of the examples: {question!r} needs a head fitted with fit "
                          f"(it has {type(head).__name__ if head is not None else 'none'})")
     if folds < 2 or folds > len(examples):
         raise ValueError(f"folds must be between 2 and the number of examples ({len(examples)})")
@@ -451,7 +451,7 @@ def guard_question(system, question, examples=None, *, error=None, risk=None, me
     """Put a calibrated threshold with a stated promise on a question of `system` (System.guarantee): every later answer
     is let through alone only when its signal ≥ the threshold, else the question abstains with the reason; the promise,
     the signal and the threshold are recorded with every answer. examples: [(init_state, correct answer)], not used to fit
-    the answer (or folds=k: the question's fit_fast head is refitted k times, each example scored by a head that did not
+    the answer (or folds=k: the question's fitted head is refitted k times, each example scored by a head that did not
     see it — the head that answers is fitted on all of them, so the promise is then approximate). False removes the
     question's guarantee.
     signal: "confidence" (default — the answer's confidence), "act" (the act probability of the model decision that
