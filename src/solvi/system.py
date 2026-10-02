@@ -607,7 +607,9 @@ class System:
                     except ValueError as e:           # a `then` answer that is not an answer of this question: the check
                         return Result(None, 0.0, f"hard check {f} is false and its `then` answer is not usable: {e}",   # still
                                       "abstain", source=f, guard="hard_check")                                         # decides
-                    return Result(forced, 1.0, f"hard check {f} is false", "forced",
+                    because = (r.extra or {}).get("reasons") if isinstance(r.extra, dict) else None   # refine.Fail
+                    return Result(forced, 1.0, f"hard check {f} is false" + (": " + "; ".join(because) if because else ""),
+                                  "forced",
                                   provenance=r.origin, source=f, guard="hard_check")
                 return Result(None, 0.0, f"hard check {f} is false and no answer is set for it", "abstain", source=f,
                               guard="hard_check")

@@ -481,6 +481,11 @@ def _recompute(part, r, args, init, catalog=None):
             was = [list(x) for x in (r.extra or {}).get("evidence") or ()]
             if got != was:
                 return [(r.step, r.name, f"evidence {was} ≠ recomputed {got}")]
+        if not why and r.error is None and (isinstance(v, Claim) or (r.extra or {}).get("reasons")):
+            got = (v.extra or {}).get("reasons") if isinstance(v, Claim) else None   # a check's reasons (refine.Fail)
+            was = (r.extra or {}).get("reasons")
+            if got != was:
+                return [(r.step, r.name, f"reasons {was} ≠ recomputed {got}")]
     if r.error is not None:
         if why is None:
             return [(r.step, r.name, f"recorded error {r.error!r}, but the step recomputes fine")]
