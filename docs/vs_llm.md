@@ -27,14 +27,11 @@ Short version:
 - **Thinking first helps a decision model on rules, but it is still not code.** Jeeves, an open 9B decision model that
   can reason before it picks, scored 0.969 on bank messages. With reasoning on it scored 0.863 on refunds and 0.912 on
   3-way match (0.745 and 0.831 without): above Jev, below the strong LLMs and solvi's catalog. Asked directly it still
-  broke 7 hard checks and 55 limits on the rule sets. It runs on your own GPU, at about 3 s per decision with reasoning
-  and 0.12 s without on one A100.
+  broke 7 hard checks and 55 limits on the rule sets. It runs on your own GPU.
 
-Criteria and predictions were written down and hashed before any test number. Most of our predictions were wrong: we
-expected the frontier model to slip on values exactly at a limit, currency conversion and instructions injected into
-the input. It didn't. Of the eight success criteria we set for solvi, one was met: the guarantee with Grok inside solvi.
-Jev was added in a second run, with its own eight criteria and predictions written down first; six were met. Jeeves was
-added in a third run, with nine criteria written down first; seven were met, two of them on subsets.
+Criteria and predictions were written down and hashed before any test number, for the first run and again before Jev
+and Jeeves were added. Most of our predictions were wrong: we expected the frontier model to slip on values exactly at
+a limit, currency conversion and instructions injected into the input. It didn't.
 
 Everything needed to check these numbers is in [benchmarks/vs_llm/](../benchmarks/vs_llm/): the data, the written
 policies, the runner, and every raw answer we got. The solvi arm reruns offline for free. The LLM tables can be
@@ -127,9 +124,8 @@ Jeeves ran on 2026-09-29, with solvi at commit 191a417 (0.7.1 plus Jeeves suppor
 gallery, on the same sets, splits and scoring. The weights (Apache-2.0, fine-tuned from Qwen3.5-9B) and the server code
 ([github.com/PostHog/jeeves](https://github.com/PostHog/jeeves) at f04ec55) are PostHog's; we served them with their own
 code on one Colab A100 40 GB. That GPU has no FP8, so the model ran in bf16, slower than the authors' H100 numbers. To
-send many requests at once we put a small batching front-end over their engine. On 96 probe requests it gave the same
-answers as their own server on 195 of 198 questions with reasoning and on all 198 without. The latencies on this page
-are from their own server, one request at a time. With reasoning on, the runs were cut like Grok's: stability on half
+send many requests at once we put a small batching front-end over their engine. The run's latencies include queueing
+under those concurrent requests, so this page gives no latency for Jeeves. With reasoning on, the runs were cut like Grok's: stability on half
 the subsample, and inside solvi on 72 refund test cases, 36 3-way match test cases and 180 bank messages. Without
 reasoning, every set ran in full.
 
@@ -172,10 +168,10 @@ Accuracy per set, then what went wrong on the three rule sets (gallery, refunds 
 | Qwen3-235B-2507 inside solvi | 0.427 | 0.425 | 0.451 | 0.858 | 0 / 27 | 113 | | 4.7 s per question | $0.14 per 1,000 questions |
 | Jev (decision model) directly | 0.841 | 0.819 | 0.898 | 0.964 | 1 / 65 | 38 | 4.6-10.6% | 0.11-0.43 s (0.43-0.47 s per request) | $0.02-0.04 |
 | Jev inside solvi | 0.758 | 0.689 | 0.861 | 0.939 | 0 / 38 | 111 | | 0.44 s per question | $0.05 per 1,000 questions |
-| Jeeves (thinking) directly | 0.856 | 0.863 | 0.912 | 0.969 | 7 / 55 | 32 | 11.7-13.3% [^half] | ~3 s (9.7 s per request) [^jv] | own GPU |
-| Jeeves (thinking) inside solvi | 0.749 | 0.767 [^sub] | 0.954 [^sub] | 0.956 [^sub] | 0 / 1 | 38 | | 7.0 s per question [^jv] | own GPU |
-| Jeeves (no thinking) directly | 0.752 | 0.745 | 0.831 | 0.964 | 26 / 103 | 31 | 15.4-22.8% | 0.12 s (0.37 s per request) [^jv] | own GPU |
-| Jeeves (no thinking) inside solvi | 0.643 | 0.514 | 0.715 | 0.947 | 1 [^t10] / 22 | 99 | | 0.35 s per question [^jv] | own GPU |
+| Jeeves (thinking) directly | 0.856 | 0.863 | 0.912 | 0.969 | 7 / 55 | 32 | 11.7-13.3% [^half] | not comparable [^jv] | own GPU |
+| Jeeves (thinking) inside solvi | 0.749 | 0.767 [^sub] | 0.954 [^sub] | 0.956 [^sub] | 0 / 1 | 38 | | not comparable [^jv] | own GPU |
+| Jeeves (no thinking) directly | 0.752 | 0.745 | 0.831 | 0.964 | 26 / 103 | 31 | 15.4-22.8% | not comparable [^jv] | own GPU |
+| Jeeves (no thinking) inside solvi | 0.643 | 0.514 | 0.715 | 0.947 | 1 [^t10] / 22 | 99 | | not comparable [^jv] | own GPU |
 
 [^r]: All 61 were in the text reading of gallery task 11: whether the customer says they were charged twice, and the
     reply that depends on it. The ledger decisions were 100% right. The reader was rewritten for 0.7.0, and with it solvi
@@ -187,9 +183,8 @@ Accuracy per set, then what went wrong on the three rule sets (gallery, refunds 
 [^sub]: To stay within our $40 budget, Grok inside solvi ran on 72 of the 144 refund test cases and 36 of the 3-way
     match test cases (calibrated on 48 instead of 96), and not at all on bank messages. Jeeves with reasoning ran inside
     solvi on the same refund and 3-way match subsets and on 180 of the 360 bank messages.
-[^jv]: Jeeves' own server on one Colab A100 40 GB in bf16, one request at a time, median over 96 probe requests. The
-    authors report a 2.0 s median with this reasoning setting on an H100. The latencies in the raw files are higher:
-    they include queueing under many concurrent requests.
+[^jv]: Jeeves ran on one Colab A100 40 GB in bf16, with many requests at once. The latencies in the raw files include
+    queueing under those concurrent requests, so they say little about one request on your GPU.
 [^t10]: One 3-way match decision; our gallery task's fault, not the model's. See
     [finding 7](#what-we-found).
 
@@ -211,10 +206,10 @@ Models inside solvi were not measured for flips.
 | Qwen3-235B-2507 inside solvi | 0.427 | 0 / 43 | - | 30 | 47.0% (18.4%) | 15 / 20 | | 4.7 s / question | $0.14 / 1,000 questions |
 | Jev directly | 0.841 | 1 / 43 | - | 7 | 53.6% (3.8%) | 16 / 20 | 3.2 / 7.8 / 5.5% | 0.19 s | $0.03 |
 | Jev inside solvi | 0.758 | 0 / 43 | - | 29 | 78.7% (10.6%) | 19 / 20 | | 0.44 s / question | $0.05 / 1,000 questions |
-| Jeeves (thinking) directly | 0.856 | 1 / 43 | - | 4 | 30.3% (3.8%) | 12 / 20 | 3.7 / 12.1 / 7.8% | ~3 s | own GPU |
-| Jeeves (thinking) inside solvi | 0.749 | 0 / 43 | - | 28 | 78.7% (10.3%) | 15 / 20 | | 7.0 s / question | own GPU |
-| Jeeves (no thinking) directly | 0.752 | 6 / 43 | - | 5 | 20.2% (7.1%) | 10 / 20 | 1.2 / 16.4 / 5.8% | 0.12 s | own GPU |
-| Jeeves (no thinking) inside solvi | 0.643 | 0 / 43 | - | 26 | 66.9% (11.2%) | 17 / 20 | | 0.35 s / question | own GPU |
+| Jeeves (thinking) directly | 0.856 | 1 / 43 | - | 4 | 30.3% (3.8%) | 12 / 20 | 3.7 / 12.1 / 7.8% | not comparable | own GPU |
+| Jeeves (thinking) inside solvi | 0.749 | 0 / 43 | - | 28 | 78.7% (10.3%) | 15 / 20 | | not comparable | own GPU |
+| Jeeves (no thinking) directly | 0.752 | 6 / 43 | - | 5 | 20.2% (7.1%) | 10 / 20 | 1.2 / 16.4 / 5.8% | not comparable | own GPU |
+| Jeeves (no thinking) inside solvi | 0.643 | 0 / 43 | - | 26 | 66.9% (11.2%) | 17 / 20 | | not comparable | own GPU |
 
 The gallery cases were written together with the catalogs, so solvi's 100% here is by construction, not a finding. What
 this set measures is how faithfully an LLM follows a written rule. Grok's two misses were on the two questions that have
@@ -234,10 +229,10 @@ to abstain: it filled in a missing exchange rate, and it routed an email that mi
 | Qwen3-235B-2507 inside solvi | 0.425 | 0 / 24 | 17 / 164 | 40 | 49.1% (14.1%) | | 4.7 s / question | $0.14 / 1,000 questions |
 | Jev directly | 0.819 | 0 / 24 | 53 / 164 | 28 | 67.4% (7.2%) | 1.7 / 4.6 / 2.5% | 0.11 s | $0.02 |
 | Jev inside solvi | 0.689 | 0 / 24 | 27 / 164 | 57 | 78.5% (12.6%) | | 0.44 s / question | $0.05 / 1,000 questions |
-| Jeeves (thinking) directly | 0.863 | 1 / 24 | 38 / 164 | 11 | 45.7% (4.2%) | 5.0 / 11.7 / 10.8% | ~3 s | own GPU |
-| Jeeves (thinking) inside solvi (72 cases) | 0.767 | 0 / 2 | 1 / 52 | 9 | 79.2% (3.9%) | | 7.0 s / question | own GPU |
-| Jeeves (no thinking) directly | 0.745 | 4 / 24 | 71 / 164 | 9 | 29.0% (5.4%) | 0.4 / 15.4 / 5.4% | 0.12 s | own GPU |
-| Jeeves (no thinking) inside solvi | 0.514 | 0 / 24 | 10 / 164 | 45 | 58.9% (13.3%) | | 0.35 s / question | own GPU |
+| Jeeves (thinking) directly | 0.863 | 1 / 24 | 38 / 164 | 11 | 45.7% (4.2%) | 5.0 / 11.7 / 10.8% | not comparable | own GPU |
+| Jeeves (thinking) inside solvi (72 cases) | 0.767 | 0 / 2 | 1 / 52 | 9 | 79.2% (3.9%) | | not comparable | own GPU |
+| Jeeves (no thinking) directly | 0.745 | 4 / 24 | 71 / 164 | 9 | 29.0% (5.4%) | 0.4 / 15.4 / 5.4% | not comparable | own GPU |
+| Jeeves (no thinking) inside solvi | 0.514 | 0 / 24 | 10 / 164 | 45 | 58.9% (13.3%) | | not comparable | own GPU |
 
 Per question, solvi was right on 100% of "is there an outstanding double charge" and "refund", including every value
 exactly at a limit. It was right on 67.4% of "does the customer say they were charged twice", and 90.3% of the reply to
@@ -260,10 +255,10 @@ were right on every question. Jev was right on every claim, but on 84.0% of "is 
 | Qwen3-235B-2507 inside solvi | 0.451 | 0 / 31 | 10 / 71 | 43 | 52.3% (19.0%) | 12 / 14 | | 4.7 s / question | $0.14 / 1,000 questions |
 | Jev directly | 0.898 | 0 / 31 | 12 / 71 | 3 | 57.4% (1.2%) | 3 / 14 | 1.1 / 10.6 / 1.7% | 0.15 s | $0.03 |
 | Jev inside solvi | 0.861 | 0 / 31 | 11 / 71 | 25 | 89.1% (6.5%) | 12 / 14 | | 0.44 s / question | $0.05 / 1,000 questions |
-| Jeeves (thinking) directly | 0.912 | 5 / 31 | 17 / 71 | 17 | 55.8% (7.1%) | 12 / 14 | 0 / 13.3 / 4.4% | ~3 s | own GPU |
-| Jeeves (thinking) inside solvi (36 cases) | 0.954 | 0 / 12 | 0 / 12 | 1 | 94.4% (1.0%) | 2 / 2 | | 7.0 s / question | own GPU |
-| Jeeves (no thinking) directly | 0.831 | 16 / 31 | 32 / 71 | 17 | 44.7% (8.8%) | 7 / 14 | 0 / 22.8 / 2.2% | 0.12 s | own GPU |
-| Jeeves (no thinking) inside solvi | 0.715 | 1 / 31 | 12 / 71 | 28 | 75.0% (8.6%) | 13 / 14 | | 0.35 s / question | own GPU |
+| Jeeves (thinking) directly | 0.912 | 5 / 31 | 17 / 71 | 17 | 55.8% (7.1%) | 12 / 14 | 0 / 13.3 / 4.4% | not comparable | own GPU |
+| Jeeves (thinking) inside solvi (36 cases) | 0.954 | 0 / 12 | 0 / 12 | 1 | 94.4% (1.0%) | 2 / 2 | | not comparable | own GPU |
+| Jeeves (no thinking) directly | 0.831 | 16 / 31 | 32 / 71 | 17 | 44.7% (8.8%) | 7 / 14 | 0 / 22.8 / 2.2% | not comparable | own GPU |
+| Jeeves (no thinking) inside solvi | 0.715 | 1 / 31 | 12 / 71 | 28 | 75.0% (8.6%) | 13 / 14 | | not comparable | own GPU |
 
 Where the exchange rate was missing or stale, gpt-oss-120b and Qwen answered anyway in about half the cases instead of
 abstaining. Jev answered anyway on 11 of the 14 decisions with a missing fact; Jeeves on 2 with reasoning and 7
@@ -281,10 +276,10 @@ without.
 | Qwen3-235B-2507 inside solvi | 0.858 | 3 / 63 | 8 | 85.3% (2.6%) | | 10 / 10 | | 4.7 s / question | $0.14 / 1,000 questions |
 | Jev directly | 0.964 | 3 / 63 | 3 | 89.7% (0.9%) | 95.8% (2.3%) | 10 / 10 | 0 / 0 / 0% | 0.43 s | $0.04 |
 | Jev inside solvi | 0.939 | 5 / 63 | 11 | 94.2% (3.2%) | | 10 / 10 | | 0.44 s / question | $0.05 / 1,000 questions |
-| Jeeves (thinking) directly | 0.969 | 1 / 63 | 0 | 75.3% (0%) | 96.1% (2.0%) | 10 / 10 | 0 / 0 / 0% | ~3 s | own GPU |
-| Jeeves (thinking) inside solvi (180 messages) | 0.956 | 1 / 27 | 5 | 95.6% (2.9%) | | 5 / 5 | | 7.0 s / question | own GPU |
-| Jeeves (no thinking) directly | 0.964 | 4 / 63 | 0 | 73.9% (0%) | 95.8% (2.3%) | 10 / 10 | 0 / 0 / 0% | 0.12 s | own GPU |
-| Jeeves (no thinking) inside solvi | 0.947 | 1 / 63 | 8 | 94.2% (2.4%) | | 10 / 10 | | 0.35 s / question | own GPU |
+| Jeeves (thinking) directly | 0.969 | 1 / 63 | 0 | 75.3% (0%) | 96.1% (2.0%) | 10 / 10 | 0 / 0 / 0% | not comparable | own GPU |
+| Jeeves (thinking) inside solvi (180 messages) | 0.956 | 1 / 27 | 5 | 95.6% (2.9%) | | 5 / 5 | | not comparable | own GPU |
+| Jeeves (no thinking) directly | 0.964 | 4 / 63 | 0 | 73.9% (0%) | 95.8% (2.3%) | 10 / 10 | 0 / 0 / 0% | not comparable | own GPU |
+| Jeeves (no thinking) inside solvi | 0.947 | 1 / 63 | 8 | 94.2% (2.4%) | | 10 / 10 | | not comparable | own GPU |
 
 "Alone at a calibrated threshold" puts a conformal threshold (risk 0.10) on the model's own confidence, fitted on the
 calibration part. Grok's stated confidence is often below 0.9 even when it is right, so the fixed 0.9 cut sends many
@@ -390,9 +385,9 @@ calibrated threshold decide when a person looks.
   the test decisions alone and 15.5% of those were wrong, 14.4% of all decisions against the 10% it was fitted for.
   Inside solvi, `act_guard` per question kept that share at 0.099.
 - *It is not deterministic.* Sending the same request again changed 3.2% of its answers on the gallery, 1.7% on
-  refunds, 1.1% on 3-way match and none on bank messages. All 17 changes were near ties (the chosen option at 0.35-0.60),
-  none at confidence ≥ 0.9. Reordering the options and keys changed 4.6-10.6% on the rule sets. A solvi trace keeps
-  the answer it got; replaying a decision that calls the model again can come out differently.
+  refunds, 1.1% on 3-way match and none on bank messages; the changes were near ties, not confident answers.
+  Reordering the options and keys changed 4.6-10.6% on the rule sets. A solvi trace keeps the answer it got; replaying
+  a decision that calls the model again can come out differently.
 
 **7. An open decision model that thinks first**
 
@@ -404,8 +399,8 @@ calibrated threshold decide when a person looks.
   83% of the refund decisions and 78% of the 3-way match decisions with a value exactly at a limit.
 - *Asked directly, it still breaks hard rules.* On 3-way match it broke 5 hard checks with reasoning and 16 without
   (paying or holding an invoice from an unknown supplier, or paying one that was already paid), with 17 confident errors either way.
-- *Speed and cost.* It runs on your own GPU. On one A100 in bf16, a decision took about 0.12 s without reasoning and
-  about 3 s with it. The whole run, both settings and both arms, took about 4.5 GPU-hours.
+- *Speed and cost.* It runs on your own GPU, so there is no per-request price; reasoning makes each decision
+  slower.
 - *Repeatability.* Sending the same request again changed 0-5% of its answers, but reordering the options changed
   11.7-13.3% with reasoning and 15.4-22.8% without, as much as the cheap LLM.
 - *Inside solvi.* With reasoning, no hard check was broken, and wrong answers given without a person stayed at or below
@@ -461,16 +456,16 @@ the claim, with the rule as the fallback.
 - **Two decision models, one version each.** Jev 1.13 and Jeeves (the weights on Hugging Face on 2026-09-29, code
   at f04ec55) are the only decision models we ran, with our own wording of the "abstain" option and one yes/no question
   per option for multi-label questions. Another wording may score differently.
-- **Jeeves on a slower GPU.** We ran Jeeves on an A100 without FP8, so its latency is higher than on the H100 its
-  authors use. The answers should not depend on it, but we did not check that.
+- **Jeeves on a slower GPU.** We ran Jeeves on an A100 without FP8 (in bf16), not on the H100 its authors use. The
+  answers should not depend on it, but we did not check that.
 - **DeepSeek-V3.2 was withheld** by the rule fixed before the run (more than 2% empty answers on every set). Where it
   did answer on refunds and 3-way match, every answer was right: 559 of 576 and 411 of 432 decisions answered. Counting
   the empty answers as wrong, that is 0.970 and 0.951. With a provider that doesn't drop answers it might rank with the
   strong models.
 - **Budget cuts.** The run cost $39.23 including a 15-case pilot: Grok $34.32, DeepSeek $2.21, gpt-oss-120b $2.07, Qwen
   $0.62. To stay within $40, Grok inside solvi ran on subsets and not on bank messages, Grok's stability was measured on
-  half the subsample, and DeepSeek inside solvi was not run. The Jev run cost $0.27 on top. The Jeeves run took about
-  4.5 A100-hours on Colab (24 compute units).
+  half the subsample, and DeepSeek inside solvi was not run. The Jev run cost $0.27 on top. The Jeeves run used a rented
+  Colab GPU.
 - **Short rules.** Each policy is about one page. Long, conflicting or rarely used rules may behave differently.
 - **One run.** Each case ran once, at temperature 0, on one day's model versions behind OpenRouter. Providers can change
   the weights behind a name.

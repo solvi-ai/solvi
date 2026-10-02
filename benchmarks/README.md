@@ -1,7 +1,8 @@
 # Benchmarks
 
-Dataset loaders for the public benchmarks behind the numbers in the [README](../README.md). Each loader turns a dataset
-into plain documents (`key`, `text`), reference fields or clause spans, and typed questions with ground truth.
+The scripts behind the measured numbers in the [README](../README.md) and the docs (see Scripts below), and dataset
+loaders for public document benchmarks: each loader turns a dataset into plain documents (`key`, `text`), reference
+fields or clause spans, and typed questions with ground truth.
 
 | Module | Dataset | Documents |
 |---|---|---|
@@ -54,11 +55,9 @@ The loaders need nothing beyond the standard library, except the parquet fallbac
 
 ## Results
 
-Setups, per-question numbers and caveats are in [docs/benchmarks.md](../docs/benchmarks.md).
-
-The extraction numbers (SROIE, CORD, CUAD, Kleister-NDA) cannot be reproduced from this repository: the scripts that
-produced them were not ported from the research repository, and the dataset loaders above have no caller here. They are
-kept as the exact reading of each dataset behind those numbers. What can be rerun is listed under Scripts.
+Every measured number in the README and the docs comes from a script below or from a published model card; the dataset
+loaders above are kept as the exact reading of each dataset (the extraction numbers once measured with them are not
+quoted any more: their scripts were not ported here).
 
 ## Scripts
 
@@ -69,6 +68,8 @@ kept as the exact reading of each dataset behind those numbers. What can be reru
 | `ask_speed.py` | milliseconds per `ask` on small and large inputs (the README quickstart, the gallery, random catalogs of 50 and 1 000 parts, a 3.7k-float stream input): the README's Speed table |
 | `ask_overhead.py` | what solvi adds to one `ask` (every gallery entry and a decider project, no real model) |
 | `trace_signature.py` | what a signature (`solvi.signature`) adds over the hash chain when one stored record is edited |
+| `octonion_signature.py` | the positional octonion signature, an experiment that left the package in 0.8 (`trace_signature.py` compares it with the syndrome code) |
+| `drift_simulation.py` | what `solvi.drift.DriftMonitor` flags on simulated streams: false flags on unchanged streams, and how many decisions after a change of the share answered alone or of the mix of answers it flags |
 | `textin_extractors.py` | text in on the repository's own texts with typed fields (the shop requests of the guide, the e-mails of `examples/04`, the invoices of `examples/03`, the tickets of gallery 11, the claims of `examples/16`; and, counted apart, 30 texts written for it with string fields that have no pattern): each field read by `CueExtractor`, by the decider's span pointer and by the two in either order — right, wrong, missed against the values the hand-written code reads; no download beyond the decider (the numbers behind `TextIn`'s default extractor) |
 | `textin_massive.py` | text in on MASSIVE (en-US, CC BY 4.0; `$MASSIVE_DIR`): routing to eight entry points of a home assistant, and each field read by `CueExtractor` and by the decider's span pointer — right, overlapping, wrong, missed |
 | `vs_llm/` | solvi vs asking an LLM: the sets, the written policies, the runner for solvi / a model directly / a model inside solvi (LLMs and the decision models Jev and Jeeves), and every raw answer of the published run ([docs/vs_llm.md](../docs/vs_llm.md)) |

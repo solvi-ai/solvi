@@ -112,7 +112,7 @@ def test_best_practices_says_where_its_numbers_come_from_and_is_linked():
     """The page said its scripts "are named in the changelog entries" (one script was, for a number the page does not
     quote) and was reachable only from the site's navigation."""
     page = (ROOT / "docs" / "best_practices.md").read_text()
-    assert "named in the changelog" not in page and "not in this repository" in page
+    assert "named in the changelog" not in page and "benchmarks/" in page
     assert "docs/best_practices.md" in README and "best_practices.md" in GUIDE
 
 
@@ -180,11 +180,13 @@ def test_the_readme_shows_the_published_extractor_and_says_what_it_does_without_
     assert all(hasattr(LongSpanExtractor, n) for n in ("load", "save", "fit", "field", "tune_threshold"))
 
 
-def test_numbers_without_a_script_in_the_repository_say_so():
+def test_every_measured_number_names_a_script_or_a_model_card():
     """benchmarks.md said "All numbers come from pre-registered experiments" while most numbers in the README and the
-    docs have no script here; a reader could not tell which ones can be re-run."""
-    bench = (ROOT / "docs" / "benchmarks.md").read_text()
-    assert "All\nnumbers come from" not in bench and "cannot be reproduced from it" in bench
+    docs had no script here. Since 0.8 a number either comes from a script in benchmarks/ (or an example) or a model
+    card, or it is not in the docs: no page needs to say that its numbers cannot be reproduced."""
+    pages = [README, GUIDE] + [p.read_text() for p in (ROOT / "docs").glob("*.md")]
+    for text in pages:
+        flat = _flat(text)
+        assert "not in this repository" not in flat and "cannot be reproduced from it" not in flat
     results = README.split("## Results")[1].split("## ")[0]
-    assert "not in this repository" in results
-    assert "measured with a script that is not in this repository" in _flat(GUIDE.split("## Concepts")[0])
+    assert "comes from a script in [benchmarks/](benchmarks/) or from a published model card" in _flat(results)

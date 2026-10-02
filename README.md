@@ -243,10 +243,8 @@ Every answer is a value and a confidence, and the types also declare answer prim
   in (sorted by default).
 - **Several models.** Any decider above — an LLM, a System One service (Jev, Kev, Von, Laya-serve, …), a local
   checkpoint — combines with the others: `Cascade`, `Vote` and `Route` (`solvi.multi`) combine models — the next model only when one escalates, an answer
-  only when models of different families agree, or a model picked by code — under one guarantee. On
-  typed-decisions a vote of solvi-large and Julia 1 answered 50% alone against 31% / 40% for each alone, at the same
-  10% risk (Julia in-distribution there; measured with a script that is not in this repository —
-  [examples/20_vote_across_families.py](examples/20_vote_across_families.py) shows the setup with stand-in servers).
+  only when models of different families agree, or a model picked by code — under one guarantee
+  ([examples/20_vote_across_families.py](examples/20_vote_across_families.py) shows a vote with stand-in servers).
 - **Serving and operations.** `solvi serve module:system` exposes the questions over HTTP (OpenAPI from the same types),
   MCP and the System One API; `await system.aask(...)` runs async parts concurrently with timeouts; `cost_policy="measured"`
   lets the planner pick the fastest equivalent source and switch when it slows down. `TraceStorage` keeps decisions with a
@@ -266,8 +264,8 @@ Every answer is a value and a confidence, and the types also declare answer prim
 - **Behind a coding agent's hooks (preview).** `solvi hook install` puts solvi in front of Claude Code's edits and prompts:
   every Edit / Write is checked against a rules file (forbidden patterns, required functions, Python calls read from the
   code; fuzzy questions for a model, which block only with a calibration) and denied with the rule and the lines, sent
-  to the user, or let through; a prompt gets the one project skill it needs, or nothing. Deterministic by default, about
-  0.1 s a call; every decision stored and verifiable; Codex as a preview
+  to the user, or let through; a prompt gets the one project skill it needs, or nothing. Deterministic by default; every
+  decision stored and verifiable; Codex as a preview
   ([guide](docs/guide.md#solvi-behind-a-coding-agents-hooks), [examples/22_coding_agent_hooks.py](examples/22_coding_agent_hooks.py)).
 - **Text in.** `system.ask_text("please refund order A-10457, 1.5 million RUB, paid on 12 September 2026",
   textin=TextIn(system, decider, patterns={"order_id": r"A-\d+"}))`: the decider picks which question the message asks
@@ -339,23 +337,13 @@ behind the receipt numbers below; it has no save / load. See
 
 ## Results
 
-Same training documents for both sides. The baseline, Laya, is a ModernBERT-large model that answers the typed questions
-directly, fine-tuned with its authors' recipe. Details and caveats: [docs/benchmarks.md](docs/benchmarks.md). These were
-measured with scripts that are not in this repository (only the dataset loaders are), so they cannot be reproduced from
-it; the solvi-vs-LLM tables below can ([benchmarks/vs_llm/](benchmarks/vs_llm/)).
-
-| Task (test set) | solvi | Baseline |
-|---|---|---|
-| SROIE receipts, 6 questions (361 receipts) | **97.8%** | 92.6% |
-| SROIE, only 100 labeled training receipts | **95.9%** | 80.0% |
-| CORD receipts, 4 questions (100 receipts) | **98.5%** | 96.0% |
-| CORD, share of questions answered at >= 99% precision | **99.7%** | 14.2% |
-| CUAD contracts, 5 questions (102 contracts, median 33k chars) | **94.8%** | 77.5% (sees first 1024 tokens only) |
-
-- Calibrated confidence: ECE 0.008 (SROIE), 0.011 (CORD), 0.027 (CUAD).
-- On the document benchmarks, 100% of answers are backed by a quote at stated offsets, or the system abstains.
-- Speed: about 0.4 ms per decision when no model is involved; about 39 ms per receipt with the one-pass extractor on an
-  A100 GPU.
+Every number in this README comes from a script in [benchmarks/](benchmarks/) or from a published model card. Field
+extraction: the [extract-receipts](https://huggingface.co/solvi-ai/extract-receipts) card reports 97.3% on typed questions
+over CORD receipts (100 test receipts) with ECE 0.011 and 98.6% of questions answered at ≥ 99% precision, and the
+[extract-base](https://huggingface.co/solvi-ai/extract-base) card its zero-shot and few-label numbers; the decision
+models' cards ([solvi-base](https://huggingface.co/solvi-ai/solvi-base), [solvi-large](https://huggingface.co/solvi-ai/solvi-large))
+theirs. On the gallery, the rules, quotes and checks are the answer: every answer is backed by a quote at stated offsets,
+a computed fact, or the system abstains. Details: [docs/benchmarks.md](docs/benchmarks.md).
 
 ### How it compares to asking an LLM
 
@@ -416,8 +404,8 @@ Insurance claim desk with six slow services of 100-300 ms ([examples/09_strategy
 | all five questions | 1 122 ms | 1 025 ms | 463 ms |
 | expired policy (hard check settles it) | 1 122 ms | 152 ms | 153 ms |
 
-A rule-only decision on a small catalog takes well under a millisecond; on documents the extractor dominates (about 39 ms per
-receipt with the one-pass extractor on an A100).
+A rule-only decision on a small catalog takes well under a millisecond ([benchmarks/ask_speed.py](benchmarks/ask_speed.py));
+on documents the extractor dominates.
 
 ## When to use it
 
@@ -436,8 +424,8 @@ receipt with the one-pass extractor on an A100).
   published extract-base gets 2–95% by field on data sets it never saw (see "Extract from documents"); label 25–100
   documents and fine-tune.
 - No labels at all. Plan on roughly 100 labeled documents (field positions) per task.
-- CPU-only deployment with a quantized model: the int8 ONNX extractor loses up to 12 points on amounts, company
-  names and addresses. fp32 on CPU keeps accuracy but takes about 0.7 s per receipt on 2 cores.
+- CPU-only deployment with a quantized extractor: dynamic int8 quantization changed half of extract-base's spans (its
+  model card), so none is provided; use fp32 or fp16 and measure the time per document on your hardware.
 
 ## Examples
 
@@ -475,7 +463,7 @@ Run them from a clone: `python examples/01_leave_request.py`.
 - [docs/decide_format.md](docs/decide_format.md): the decider checkpoint contract (for training your own).
 - [docs/strategist.md](docs/strategist.md): the code strategist and the experimental model strategist and name matching.
 - [ROADMAP.md](ROADMAP.md), [CHANGELOG.md](CHANGELOG.md), [CONTRIBUTING.md](CONTRIBUTING.md), [SECURITY.md](SECURITY.md).
-- [docs/benchmarks.md](docs/benchmarks.md): setups, per-question numbers, caveats.
+- [docs/benchmarks.md](docs/benchmarks.md): the scripts behind the numbers, what solvi adds to an ask, the dataset loaders.
 - [docs/vs_llm.md](docs/vs_llm.md): solvi vs asking an LLM (Grok 4.7, gpt-oss-120b, Qwen3, DeepSeek), with raw answers.
 - [benchmarks/](benchmarks/): the benchmark scripts that can be rerun, and the dataset loaders behind the extraction
   numbers (SROIE, CORD, CUAD, Kleister-NDA — their scripts are not in the repository).

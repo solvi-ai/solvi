@@ -17,7 +17,7 @@ the escalation are ordinal answers: ordered levels, lowest first.
   red parameter is low-medium, 5-6 is medium, 7 or more is high.
 - **qSOFA** (Sepsis-3) counts RR ≥ 22, altered mentation and SBP ≤ 100. The sepsis screen is positive at qSOFA ≥ 2, or at
   qSOFA 1 with lactate ≥ 2 mmol/L.
-- **Two hard checks** are checkpoints of `escalation`: SpO2 < 85 %, and SBP < 90 with altered consciousness. If either
+- **Two hard checks** are required by `escalation` (`requires`): SpO2 < 85 %, and SBP < 90 with altered consciousness. If either
   fails, the answer is forced to emergency, whatever the score.
 - **Ordered levels and a constraint (solvi 0.4).** `escalation` and `news2_band` are `Answer.ordinal`, and the constraint
   `escalation_covers_band(escalation, news2_band)` says the escalation never falls below what the band requires (high →

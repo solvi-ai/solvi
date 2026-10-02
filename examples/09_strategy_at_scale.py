@@ -1,6 +1,6 @@
 """The strategist on a complex scenario: an insurance claim desk with a large catalog — policy, medical, fraud, payout and legal
 parts, several of them slow (a fraud model, registry lookups, a medical-code service). For each set of questions the strategist
-generates a different plan: only the parts those questions need, the checkpoints, and checks on what gets computed. Hard checks
+generates a different plan: only the parts those questions need, the parts a question requires, and checks on what gets computed. Hard checks
 run first — when one fails, the expensive rest is skipped. Independent slow parts run in parallel (System(..., workers=8)).
 Every plan is printed and timed against a plain script that computes everything one by one.
 

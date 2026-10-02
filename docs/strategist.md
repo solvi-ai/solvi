@@ -18,8 +18,8 @@ Status (0.8): the code strategist (`CostStrategist()`, `producers="equivalent"`)
 model (`solvi.segment_model`, `solvi.strategy_model` up to 0.7) and the name matcher (`solvi.aliases.NameMatcher`) are **experimental: no checkpoint is
 published**: `ModelStrategist.load` and
 `NameMatcher.load` read a checkpoint in the format below that you trained yourself (the research repository has the recipe); without one,
-examples/17 uses stand-ins with the same interfaces. The research behind it (the typed decomposer, name matching, the segment model) and what was measured are summarised
-[below](#what-was-measured).
+examples/17 uses stand-ins with the same interfaces. What this means in practice is summarised
+[below](#status-and-what-to-use).
 
 ## Planning: `CostStrategist` and `ModelStrategist`
 
@@ -34,8 +34,8 @@ System(cat, questions, strategist=ModelStrategist.load("path/to/strategist-check
 
 1. **`producers="declared"` (default).** The deterministic strategist's plan, except that producers whose inputs cannot be
    computed are dropped (they no longer make the fact unreachable). The remaining producers keep their declaration order as
-   a run-time fallback chain. Wherever the deterministic strategist answers, the answers are the same (checked on all 12
-   gallery catalogs: 333 of 333 question × case). No model is ever asked: there is nothing to choose.
+   a run-time fallback chain. By design, wherever the deterministic strategist answers, the answers are the same. No
+   model is ever asked: there is nothing to choose.
 2. **`producers="equivalent"`.** You declare that the producers of a fact are interchangeable (any accepted output is the
    same fact). Then *points* are computed by code: an exact 0/1 program (scipy's HiGHS; branch and bound as a fallback)
    picks one producer per needed fact — the cheapest valid plan by declared `cost=` (a part without one counts 1).
@@ -187,30 +187,14 @@ exactly this; the training side (in the research repository) uses the same funct
 The fingerprint recorded in traces is a hash of `solvi_strategist.json`, `config.json`, `tokenizer.json` and the weights file
 the backend loads (`model.safetensors` or the two ONNX files): a retrained or re-exported checkpoint has another one.
 
-## What was measured
+## Status and what to use
 
-The full report is in the research repository; criteria were registered before training.
-Synthetic long catalogs (chains of stages as real solvi catalogs, up to 128 steps; half the stages with an extra producer: a
-dead end, a costly or a cheap shortcut, plus stages with a cheap and a costly producer; every producer of a fact gives the
-same value), 100 tasks per length bucket on training themes, 60 on held-out themes with held-out docstring phrasings:
+The code planner is the ready part: `CostStrategist()` (the dead-end-aware plan) and `producers="equivalent"` with
+declared costs need no model, and with `cost=` declared code alone picks the cheapest valid plan. Validity is always
+code's: every plan goes through the segment check and the plan validation above, whoever proposed it.
 
-| planner | goal reached, 65–128 steps | cost vs optimum (own / held-out themes) | CPU per plan, 65–128 |
-|---|---|---|---|
-| deterministic strategist | 0% (one dead end suffices; 23% even at 1–16) | — | 0.5 ms |
-| `CostStrategist()` code, costs not declared | 100% | 1.48 / 1.48 | 9 ms |
-| code with costs from a 10-word keyword list of the training docstrings | 100% | 1.07 / 1.47 | 9 ms |
-| `ModelStrategist.load(...)` — the segment model | 100% | 1.07 / 1.44 | 420 ms cold (onnx, 4 threads); 51 ms for a catalog it has seen; 250 ms int8 |
-| code with declared costs (the model is never asked) | 100% | **1.000** | 9 ms |
-
-- **Validity is code's:** every planner that goes through the verifier reached the goal in every task, with 0 wrong answers;
-  the model's first proposal passed the segment check in 98.8% of segments (the runner-up or code's choice covered the rest).
-- **What the model learned is the cost hints in docstrings** — about as well as a 10-word keyword list; on phrasings it never
-  saw it barely beats code with unit costs. Declare `cost=` and code alone is exact.
-- **Name matching** on the 12 gallery catalogs renamed in held-out styles (5 renderings each): the matcher links 79% of the
-  names right; with 5 labelled cases acceptance covers 10% of the catalogs, with 3 labels + up to 6 targeted questions 38%;
-  every accepted wiring answered every case like the original, but 17–22% of them differ from the true wiring in a name the
-  cases did not exercise. On long synthetic catalogs (1–64 steps) coverage is 0–75% and 4–8% of the answers of accepted
-  wirings were wrong. Treat accepted aliases as a suggestion to review, not as proof.
-
-Status (0.8): `CostStrategist()` (code only, the dead-end-aware plan) and `producers="equivalent"` with declared costs are
-ready; the segment model and the name matcher of `solvi.aliases` are **experimental** (no published checkpoint).
+The segment model of `ModelStrategist` and the name matcher of `solvi.aliases` are **experimental**: no checkpoint is
+published, so `ModelStrategist.load` and `NameMatcher.load` need one you trained yourself. Where they help, the segment
+model mostly reads cost hints from docstrings, which declaring `cost=` makes unnecessary. Treat aliases that `accept`
+returns as a suggestion to review, not as proof: an accepted wiring answers every example and probe like the original,
+but can still differ from the true one in a name your cases do not exercise.
