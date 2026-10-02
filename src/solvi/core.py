@@ -110,8 +110,9 @@ class Claim:
     """A value with the quotes that support it — what a plain rule (or any part) returns to attach evidence and / or a
     confidence to its answer: `return Claim("billing", evidence=["charged twice"])`. Evidence items are Quotes (their
     offsets are checked: the text must be literally there) or strings (located in `source`: by default the part's only text
-    input, or "doc"); an item not in its text rejects the output (safeguard "grounding rejected"). The provenance stays
-    the part's own (a hand-written rule: computed)."""
+    input, or "doc" — as whole words and numbers: "3" is not evidence when the text says "30"); an item not in its text
+    rejects the output (safeguard "grounding rejected"). The provenance stays the part's own (a hand-written rule:
+    computed)."""
     value: Any
     evidence: list = field(default_factory=list)
     confidence: float = 1.0
@@ -166,10 +167,31 @@ def has_evidence(v):
     return isinstance(v, (Claim, Decision)) and bool(v.evidence)
 
 
+def find_whole(text, t):
+    """Where `text` is written in `t` as whole words and numbers → the start of its first such occurrence, or -1.
+    An occurrence that begins or ends inside a longer word or number is not one: "3" is not found in "30", in "3.5" or
+    in "1,300", "cat" not in "category" — but "30" is found in "30." and "30%", "charged twice" in "was charged twice,".
+    (Only the ends are held to this: what the evidence itself contains is compared literally.)"""
+    if not text:
+        return -1
+    n, i = len(text), t.find(text)
+    while i >= 0:
+        j = i + n
+        left = not text[0].isalnum() or i == 0 or not (
+            t[i - 1].isalnum() or (text[0].isdigit() and t[i - 1] in ".," and i > 1 and t[i - 2].isdigit()))
+        right = not text[-1].isalnum() or j == len(t) or not (
+            t[j].isalnum() or (text[-1].isdigit() and t[j] in ".," and j + 1 < len(t) and t[j + 1].isdigit()))
+        if left and right:
+            return i
+        i = t.find(text, i + 1)
+    return -1
+
+
 def locate(part, v, init_state):
-    """A Claim's / Decision's evidence with every item as a Quote: a string is located (its first literal occurrence) in
-    the output's source text — Claim.source, else the part's `source`, else "doc" if the part reads it, else its only
-    given text input, else "doc"; a string that is not there becomes Quote(text, -1, -1, source), which ground rejects.
+    """A Claim's / Decision's evidence with every item as a Quote: a string is located in the output's source text —
+    Claim.source, else the part's `source`, else "doc" if the part reads it, else its only given text input, else "doc" —
+    at its first occurrence as whole words and numbers (find_whole: "3" does not quote "30"); a string that is not there
+    becomes Quote(text, -1, -1, source), which ground rejects. An item given as a Quote keeps its own offsets.
     Outputs without evidence are returned as they are (no work)."""
     if not has_evidence(v) or init_state is None:
         return v
@@ -189,7 +211,7 @@ def locate(part, v, init_state):
             continue
         text = str(e)
         t = init_state.get(src)
-        i = t.find(text) if isinstance(t, str) and text else -1
+        i = find_whole(text, t) if isinstance(t, str) else -1
         out.append(Quote(text, i, i + len(text) if i >= 0 else -1, src))
     return dataclasses.replace(v, evidence=out)
 

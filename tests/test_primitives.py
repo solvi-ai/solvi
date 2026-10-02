@@ -691,3 +691,43 @@ def test_decider_questions_from_a_pydantic_model_of_primitives():
     r = System(cat, qs).ask({"doc": TEXT})
     assert r["total"].answer == 1250.5 and r["channel"].evidence and r["ranked"].answer == ("phone", "email")
     assert Claim_.model_validate_json('{"total": 1, "channel": "<not stated>", "ranked": ["email"], "days": 2}').channel is Unknown
+
+
+# ---------------------------------------------------------------- evidence strings are whole words and numbers
+def test_an_evidence_string_is_found_as_whole_words_and_numbers_not_inside_longer_ones():
+    from solvi.core import find_whole
+    t = "North Beach to Chinatown: 30. Fee 3.5, total 1,300 (category A); was charged twice, 12%."
+    for text in ("3", "5", "1", "300", "cat", "harged twice", "charged twi", "Chinatow", "0"):
+        assert find_whole(text, t) == -1, text
+    for text in ("30", "3.5", "1,300", "category", "charged twice", "charged twice,", "12", "12%", "(category A)", ": 30."):
+        assert t[find_whole(text, t):].startswith(text), text
+    assert find_whole("3", "30 or 3") == 6 and find_whole("", t) == -1 and find_whole("7", "7") == 0
+    assert find_whole("два", "двадцать два") == 9                  # any script
+
+
+def test_a_wrong_number_is_not_verified_by_a_longer_number_that_contains_it():
+    """Claim(3, evidence=["3"]) over "...: 30." used to be accepted: the evidence was matched as a substring."""
+    class M:
+        model_id, version, deterministic = "m", "1", False
+
+    def build(value, quote):
+        cat = Catalog()
+
+        @cat.fn(model=M())
+        def minutes(doc: str) -> int:
+            return Claim(value, evidence=[quote], source="doc")
+
+        @cat.rule("short")
+        def short(minutes: int) -> bool:
+            return minutes < 10
+        return System(cat, [Question("short", "short?", Answer.yes_no())])
+    doc = {"doc": "North Beach to Chinatown: 30."}
+    res = build(3, "3").ask(doc)
+    assert res["short"].status == "abstain" and res["short"].answer is None
+    assert [e["kind"] for e in res.safeguards] == ["grounding"]
+    assert "not grounded: evidence '3' is not in doc" in res.trace.records[0].error
+    ok = build(30, "30").ask(doc)
+    assert (ok["short"].answer, ok["short"].status) == ("no", "ok")
+    assert ok.trace.records[0].extra["evidence"] == [[26, 28, "doc", "30"]] and ok.trace.replay(build(30, "30"))["ok"]
+    by_offsets = build(3, Quote("3", 26, 27)).ask(doc)             # a Quote says where it points: checked literally there
+    assert by_offsets["short"].answer == "yes"
