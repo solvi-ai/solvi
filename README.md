@@ -75,6 +75,9 @@ pip install "solvi[duckdb]"    # + duckdb: stored decisions in a DuckDB file (so
 pip install "solvi[lora]"      # + torch, transformers, peft: part.adapt_lora, a LoRA adapter per question (experimental)
 ```
 
+Two words mark what is not settled yet: **preview** — it works and is tested, and its API may still change;
+**experimental** — no published model or measurement backs it yet, and it may change or go.
+
 `solvi.agents` (guarding an agent's tool calls) needs only the core; its adapters use the PydanticAI, LangGraph or OpenAI
 Agents SDK you already have ("solvi[pydantic-ai]", "solvi[langgraph]", "solvi[openai-agents]" install them).
 
