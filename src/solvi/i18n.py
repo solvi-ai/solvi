@@ -151,6 +151,9 @@ MESSAGES_RU = [
     ("rule not computed: {e:msg}", "правило не вычислено: {e}"),
     ("no step", "шага нет"),
     ("missing inputs: {fs}", "не хватает входов: {fs}"),
+    # the part further up whose own failure left the inputs missing (System._caused_by): one, or several joined by "and"
+    ("caused by {who}: {x:msg} and {more:msg}", "причина — {who}: {x} и {more}"),
+    ("caused by {who}: {x:msg}", "причина — {who}: {x}"),
     ("missing {fs}", "не хватает {fs}"),
     ("the rule abstained (returned None)", "правило воздержалось (вернуло None)"),
     ("rule returned {v}, not one of the answer options", "правило вернуло {v} — это не вариант ответа"),

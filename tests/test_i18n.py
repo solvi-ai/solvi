@@ -148,6 +148,14 @@ def test_an_exceptions_text_is_never_translated_and_text_in_messages_are():
     assert ru("rule not computed: ValueError: missing invoice number") == \
         "правило не вычислено: ValueError: missing invoice number"
     assert ru("small: confidence 0.40 < 0.75") == "small: уверенность 0.40 < 0.75"        # a nested reason still is
+    # the part that failed further up (System._caused_by): its exception stays, solvi's own reasons are translated
+    assert ru("hard check day_allowed could not be evaluated: missing inputs: violations; "
+              "caused by spec: ValueError: no slot in the plan") == \
+        ("жёсткую проверку day_allowed не удалось вычислить: не хватает входов: violations; "
+         "причина — spec: ValueError: no slot in the plan")
+    assert ru("rule not computed: missing inputs: total; caused by rate: timed out after 2 s and fee: rejected by "
+              "validate") == ("правило не вычислено: не хватает входов: total; причина — rate: время истекло: 2 с и fee: "
+                              "отклонено validate")
     # text in (ask_text): solvi's own messages
     for en, want in (
             ("not stated in the text: amount, currency; rule not computed: missing inputs: amount",
