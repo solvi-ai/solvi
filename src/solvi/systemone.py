@@ -330,7 +330,7 @@ class SystemOneScorer:
 
 
 def systemone(base_url, model, api_key=None, timeout=30.0, opener=None, *, extra_body=None, deterministic=False,
-              retries=2, backoff=1.0, sleep=None):
+              retries=2, backoff=1.0, sleep=None, max_len=None):
     """A DecideModel over a System One endpoint (see the module docs).
 
     extra_body: request fields merged into every request's JSON, e.g. OpenRouter's provider routing and `user`; a field
@@ -351,10 +351,16 @@ def systemone(base_url, model, api_key=None, timeout=30.0, opener=None, *, extra
     decision escalates ("did not answer after N attempts: ...") and is not cached. Another 4xx escalates at once, with
     the service's error text (and a gateway's wrapped cause, OpenRouter's `error.metadata.raw`); a reply that breaks the
     contract escalates too ("invalid System One output — ..."). opener: a replacement for urllib's urlopen (tests,
-    proxies); sleep: for the backoff (tests)."""
+    proxies); sleep: for the backoff (tests). max_len: the tokens one request reads under long="retrieve" (words and
+    punctuation × 1.3, the question included; default None: 512, as for a local decider) — as llm(max_len=...)."""
     sc = SystemOneScorer(base_url, model, api_key, timeout, opener, extra_body=extra_body, retries=retries,
                          backoff=backoff, sleep=sleep)
-    m = DecideModel(sc, meta={"format": "systemone", "temperature": 1.0}, model_id=sc.model_id, backend="systemone")
+    meta = {"format": "systemone", "temperature": 1.0}
+    if max_len is not None:                           # absent: 512, and the meta hashes as before
+        if isinstance(max_len, bool) or not isinstance(max_len, int) or max_len < 64:
+            raise ValueError(f"max_len must be a number of tokens of at least 64, not {max_len!r}")
+        meta["max_len"] = max_len
+    m = DecideModel(sc, meta=meta, model_id=sc.model_id, backend="systemone")
     # "not stated" is asked in words (an option of its own, as solvi.llm does); set on the capabilities directly so that
     # the model's fingerprint stays what it was
     m.caps["unknown"] = _unknown_caps({"label": NOT_STATED}, m.caps["columns"])

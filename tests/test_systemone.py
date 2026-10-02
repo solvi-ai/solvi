@@ -325,3 +325,15 @@ def test_nothing_is_learned_while_the_service_does_not_answer():
         with pytest.raises(ValueError, match="no usable output"):
             call()
     assert part.adaptation is None or not part.adaptation.examples
+
+
+def test_max_len_widens_what_a_system_one_model_reads_under_retrieve():
+    """systemone() budgeted long="retrieve" for a 512-token encoder with no argument to change it."""
+    a = systemone("http://127.0.0.1:9", "m").decision("t", "Which team?", "email", ["billing", "shipping"],
+                                                      long="retrieve")
+    b = systemone("http://127.0.0.1:9", "m", max_len=3000).decision("t", "Which team?", "email",
+                                                                    ["billing", "shipping"], long="retrieve")
+    assert a.model.max_len == 512 and b.model.max_len == 3000 and b.budget() > 5 * a.budget()
+    assert "max_len" not in systemone("http://127.0.0.1:9", "m").meta
+    with pytest.raises(ValueError, match="max_len"):
+        systemone("http://127.0.0.1:9", "m", max_len=10)

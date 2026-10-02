@@ -617,7 +617,8 @@ reports with solvi-large: `max_len` 1024 or 2048 did not raise accuracy over 512
 questions gained 2–4 points, value questions lost 4–8) and made quotes slightly worse at 2048; CPU time grows with the
 tokens read — about 1.6× at 1024 and 3.2× at 2048. Keep 512 for solvi-large. A larger budget pays off only for a model
 trained on long inputs (next paragraph), or for an LLM: `llm(..., max_len=3000)` reads up to 3,000 tokens per request
-under `long="retrieve"` (counted as words × 1.3; default 512, as for a local decider).
+under `long="retrieve"` (counted as words × 1.3; default 512, as for a local decider); `systemone(..., max_len=)` the
+same.
 
 **Reading whole: `long="full"`.** A checkpoint trained on long inputs declares how much it reads whole — `max_len_long`
 in its `solvi_decide.json` ([decide_format.md](decide_format.md)); `m.long_len` shows it. With `long="full"` a text that
