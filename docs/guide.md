@@ -916,6 +916,40 @@ Put the LLM where it pays for itself: alone with `act_guard`, or in a `Vote` wit
 equally strong (see "Which combination with an LLM" below). A "small model first, LLM second" cascade is not a good
 default.
 
+### An agent's memory as an input: episodes
+
+A decision replays because it depends on its recorded input only. An agent that takes many steps keeps state between
+them — what it tried, where it has been — and when that state lives in the harness, the decisions stop replaying, the
+model does not see what was already tried, and every agent writes its own loop detection. `solvi.episode` keeps that
+state as plain data that is given to each decision:
+
+```python
+from solvi.episode import Chooser, Episode, EpisodeView, LongMemory
+ep = Episode("ticket 4411")
+ep.note("act", "restart the router")                       # an event
+ep.progress("the customer confirmed")                      # explicit progress: the counts "since progress" start again
+res = system.ask({"message": text, "episode": ep.snapshot()})
+
+@cat.check(hard=True, then={"action": "handoff"})          # a part reads the snapshot like any fact
+def not_in_a_loop(episode):
+    return not EpisodeView(episode).looping(stalled=20)
+```
+
+`EpisodeView` gives the counts (since the last progress and in total), the facts board and the detectors `repeated`,
+`ping_pong`, `stalled`, `revisits`, and `looping` (stalled and one of the first two — single detectors fire on honest
+repetition). `Chooser(model, storage=...).choose(name, task, {option: action}, context=..., rule=..., episode=ep)` is
+the step built from these: the model proposes an option, a validator turns down what was already done without
+progress (and what your `check` refuses), the rule's option answers otherwise; `chooser.replay()` re-checks every
+stored step. `LongMemory` keeps outcomes across episodes — `record(context, key, +1 / −1)`, decayed per episode —
+and `scores(context)` is given to the decision as a fact.
+
+Say what progress is — a sub-goal reached — and not "something changed": a wrong action changes the page too, and then
+erases the memory of itself. Measured with solvi-base on simulated support tickets and incidents (synthetic, one seed):
+tickets solved 37% → 68% with the episode in the input (the model proposed what had already failed in 65% of its
+turns) → 77% with the long memory; incidents 0% → 26% → 42%; stored decisions replayed 125–170 of 125–170. A
+hand-written script solves 77% of the tickets and 98% of the incidents: the memory makes a model-driven agent sound,
+not better than rules.
+
 ### A choice among many options
 
 A decider reads the question — task, options, descriptions — and the input in one sequence. Thirty catalog rows as

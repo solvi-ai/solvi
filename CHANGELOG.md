@@ -2,6 +2,14 @@
 
 ## 0.7.2 — unreleased
 
+- `solvi.episode`: an agent's memory as a given fact of its decisions. `Episode` records events and explicit progress;
+  its `snapshot()` goes into a decision's input, and catalog parts read it through `EpisodeView` — counts since the
+  last progress, and the loop detectors `repeated`, `ping_pong`, `stalled`, `revisits`, `looping`. `Chooser` is one
+  step of an agent as a decision: the model proposes an action from a closed list, what was already done without
+  progress is turned down, a rule answers otherwise, and every stored step replays. `LongMemory` keeps outcomes across
+  episodes as scores given to the decision. With solvi-base on two simulated tasks: support tickets solved 37% → 68%
+  → 77% (with the long memory), incidents 0% → 26% → 42%, 100% of the stored decisions replay; a script still does
+  as well or better (77%, 98%). A sub-goal layer from the same prototype changed no outcome and is not included.
 - Agent guard (preview): `guard.tool(..., ground_last=N)` — only the user's last N messages ground a value, so a file
   the user asked to read twenty requests ago does not ground deleting it now — and `once=True` — a call with exactly
   the arguments of a call already made escalates (a `Session` keeps the calls made and does not count one that
