@@ -164,3 +164,49 @@ def test_refit_must_grow():
     import pytest
     with pytest.raises(ValueError):
         FastHead(["x", "y"], refit=1.0)
+
+
+def test_a_candidate_head_learns_a_choice_among_candidates_that_change():
+    """Candidates differ at every step (no fixed options to attach weights to): the head learns over their features."""
+    import random
+
+    import pytest
+    from solvi.fast import CandidateHead
+    kinds = {"door": 1.0, "npc": 0.0, "item": 2.0, "route": 0.5}
+
+    def steps(n, seed):
+        rng, out = random.Random(seed), []
+        for _ in range(n):
+            cs = [{"kind": rng.choice(list(kinds)), "distance": rng.randint(1, 20), "dead_end": rng.random() < 0.25,
+                   "reward": rng.choice([0, 0, 1, 1, 2, 3])} for _ in range(rng.randint(4, 8))]
+            best = max(range(len(cs)), key=lambda i: 2.5 * cs[i]["reward"] - 0.35 * cs[i]["distance"]
+                       - 6.0 * cs[i]["dead_end"] + kinds[cs[i]["kind"]])
+            out.append((cs, best))
+        return out
+
+    train, test = steps(300, 1), steps(200, 2)
+
+    def acc(h):
+        return sum(h.choose(cs)[0] == y for cs, y in test) / len(test)
+
+    nearest = sum(min(range(len(cs)), key=lambda i: (cs[i]["dead_end"], cs[i]["distance"])) == y for cs, y in test) / len(test)
+    head = CandidateHead(["kind", "distance", "reward", "dead_end"]).fit(train)
+    assert acc(head) > 0.85 > 0.6 > nearest
+    i, probs = head.choose(test[0][0])
+    assert len(probs) == len(test[0][0]) and abs(sum(probs) - 1) < 1e-9 and probs[i] == max(probs)
+    small = CandidateHead(["kind", "distance", "reward", "dead_end"]).fit(train[:30])
+    before, fp = acc(small), small.fingerprint()
+    ms = [small.teach(cs, y) for cs, y in train[30:]]                     # one correction at a time
+    assert acc(small) > before and acc(small) > 0.8 and small.fingerprint() != fp and sum(ms) / len(ms) < 50
+    rel = CandidateHead(["distance", "reward"], relative=True)
+    rows = rel.rows([{"distance": 3, "reward": 1}, {"distance": 9, "reward": 0}])
+    assert rows[0] == {"distance": 3, "reward": 1, "distance:above_min": 0, "distance:below_max": 6,
+                       "reward:above_min": 1, "reward:below_max": 0}
+    several = CandidateHead(["distance"]).fit([([{"distance": 1}, {"distance": 1}, {"distance": 9}], {0, 1})] * 5
+                                              + [([{"distance": 7}, {"distance": 2}], 1)] * 5)
+    assert several.choose([{"distance": 8}, {"distance": 1}, {"distance": 5}])[0] == 1
+    for bad in ([([{"distance": 1}], 3)], [([{"distance": 1}, {"distance": 2}], set())]):
+        with pytest.raises(ValueError):
+            CandidateHead(["distance"]).fit(bad)
+    with pytest.raises(ValueError):
+        head.choose([])

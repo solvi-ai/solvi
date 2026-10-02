@@ -214,3 +214,94 @@ class FastHead:
                 out[owner[i]] += c / 2
                 out[owner[j]] += c / 2
         return out
+
+
+class CandidateHead:
+    """A choice among candidates that change with every decision, learned from the candidates' own features.
+
+    An answer head has fixed options. An agent's step has other candidates each time — the exits of a room, the rows a
+    search returned, the tools on offer — so there is nothing to attach a per-option weight to, and fit / teach have no
+    key to learn under. What does carry over from step to step is what a candidate *is*: its distance, its kind, whether
+    it was a dead end. This head learns "is this candidate the one to take?" over those features (a FastHead: ridge,
+    fitted in milliseconds, taught by one correction) and chooses the candidate it scores highest. relative=True also
+    gives each numeric feature relative to the other candidates of the step (its gap to the smallest and the largest).
+
+        head = CandidateHead(["kind", "distance", "reward", "dead_end"]).fit(steps)   # steps: [(candidates, chosen index)]
+        i, probs = head.choose(candidates)             # candidates: [{feature: value}]; probs sum to 1 over them
+        head.teach(candidates, 2)                      # one correction: the candidate that should have been taken
+
+    Labels come from a rule you are replacing, from people, or from outcomes — and an outcome label must be the
+    criterion of the sub-goal the step served (progress towards the goal for "go on", a level gained for "train"): one
+    global measure teaches the head to ignore every step that does not move it.
+
+    Measured on two tasks. Candidates scored by a hidden formula over four features (4–8 per step, 200 test steps):
+    0.81 after 30 steps and 0.93 after 300, against 0.51–0.55 for "nearest that is open" / "largest reward"; taught
+    one step at a time from 30 to 300: 0.89, 1 ms per step; with 20% of the labels wrong: 0.85. Where to train in a
+    game, on its real data (16 features of a place, 180 test situations): 0.81 after 420 situations (0.67 after 100)
+    against 0.23 for the nearest place. relative=True changed these by −5 and +2 points: off by default. The head
+    learns the rule it is shown — in the game it reproduced the navigation rule and replaced the model there; it did
+    not beat the rule."""
+
+    def __init__(self, features, relative=False, pairs=None, refit=2.0):
+        self.features = list(features)
+        self.relative = bool(relative)
+        self.head = FastHead(["yes", "no"], pairs=pairs, refit=refit)
+        self.n = 0
+
+    def rows(self, candidates):
+        """The rows the head reads: each candidate's features and, for numbers, the gaps to the step's min and max."""
+        cands = [dict(c) for c in candidates]
+        if not self.relative:
+            return [{f: c.get(f) for f in self.features} for c in cands]
+        out = [{f: c.get(f) for f in self.features} for c in cands]
+        for f in self.features:
+            vs = [c.get(f) for c in cands]
+            nums = [v for v in vs if isinstance(v, (int, float)) and not isinstance(v, bool)]
+            if len(nums) != len(vs) or not nums:
+                continue
+            lo, hi = min(nums), max(nums)
+            for r, v in zip(out, vs):
+                r[f + ":above_min"], r[f + ":below_max"] = v - lo, hi - v
+        return out
+
+    def _names(self, rows):
+        return list(dict.fromkeys(k for r in rows for k in r))
+
+    def fit(self, steps):
+        """steps: [(candidates, chosen)] — chosen: the index of the right candidate, or a set of indexes when several are
+        as good. The others of the step are its "no" examples."""
+        rows, answers = [], []
+        for candidates, chosen in steps:
+            good = {chosen} if isinstance(chosen, int) else set(chosen)
+            rs = self.rows(candidates)
+            if not rs or any(not 0 <= i < len(rs) for i in good):
+                raise ValueError(f"chosen {chosen!r} is not among {len(rs)} candidate(s)")
+            rows += rs
+            answers += ["yes" if i in good else "no" for i in range(len(rs))]
+        if len(set(answers)) < 2:
+            raise ValueError("the steps need a chosen candidate and at least one other")
+        self.head.fit(rows, answers, self._names(rows))
+        self.n = len(steps)
+        return self
+
+    def scores(self, candidates):
+        """The head's score of each candidate being the one to take (higher: better), in the candidates' order."""
+        return [float(self.head.scores(r)[0]) for r in self.rows(candidates)]
+
+    def choose(self, candidates):
+        """→ (the index of the best candidate, [probability per candidate]) — ties go to the earlier candidate."""
+        s = np.array(self.scores(candidates))
+        if not len(s):
+            raise ValueError("nothing to choose from")
+        p = np.exp(4.0 * (s - s.max()))
+        p = p / p.sum()
+        return int(np.argmax(s)), [float(x) for x in p]
+
+    def teach(self, candidates, chosen):
+        """One correction: this candidate (index, or a set of them) was the one to take. → ms."""
+        good = {chosen} if isinstance(chosen, int) else set(chosen)
+        return sum(self.head.update(r, "yes" if i in good else "no") for i, r in enumerate(self.rows(candidates)))
+
+    def fingerprint(self):
+        from .provenance import digest
+        return digest("CandidateHead", self.features, self.relative, self.head.fingerprint())

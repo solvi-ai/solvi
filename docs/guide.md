@@ -950,6 +950,24 @@ turns) → 77% with the long memory; incidents 0% → 26% → 42%; stored decisi
 hand-written script solves 77% of the tickets and 98% of the incidents: the memory makes a model-driven agent sound,
 not better than rules.
 
+### Candidates that change: a head over their features
+
+An answer head has fixed options; an agent's step has other candidates each time. `solvi.fast.CandidateHead` learns
+the choice from what a candidate is — its features — rather than from which option it is:
+
+```python
+from solvi.fast import CandidateHead
+head = CandidateHead(["kind", "distance", "reward", "dead_end"]).fit(steps)      # steps: [(candidates, chosen index)]
+i, probs = head.choose(candidates)        # candidates: [{feature: value}]
+head.teach(candidates, 2)                 # one correction, about a millisecond
+```
+
+It is a `FastHead` asked "is this the candidate to take?" for each candidate; labels come from a rule, from people,
+or from outcomes judged by the sub-goal the step served. On two tasks: a hidden formula over four features, 0.93
+against 0.51–0.55 for two simple rules (0.81 after 30 steps); where to train in a game, on its real data, 0.81 against
+0.23 for the nearest place. It learns the rule it is shown and answers in a millisecond; it does not invent a better
+one.
+
 ### A choice among many options
 
 A decider reads the question — task, options, descriptions — and the input in one sequence. Thirty catalog rows as

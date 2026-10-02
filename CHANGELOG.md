@@ -2,6 +2,12 @@
 
 ## 0.7.2 — unreleased
 
+- `solvi.fast.CandidateHead`: a choice among candidates that change with every decision, learned from the candidates'
+  features (a `FastHead` asked "is this the one to take?" per candidate; `fit(steps)`, `choose(candidates)`,
+  `teach(candidates, chosen)` in about a millisecond). Heads, `fit` and `teach` need fixed options; an agent's
+  candidates are new at every step. Measured on two tasks: a hidden formula over four features 0.93 (0.81 after 30
+  steps) against 0.51–0.55 for simple rules; where to train in a game on its real data 0.81 against 0.23 for the
+  nearest place.
 - `solvi.episode`: an agent's memory as a given fact of its decisions. `Episode` records events and explicit progress;
   its `snapshot()` goes into a decision's input, and catalog parts read it through `EpisodeView` — counts since the
   last progress, and the loop detectors `repeated`, `ping_pong`, `stalled`, `revisits`, `looping`. `Chooser` is one
