@@ -4,7 +4,7 @@ of them — a second signal next to the decider, with an abstain threshold, reco
     mem = team.memory()                          # a CorrectionMemory bound to the decision part `team`
     mem.add(email, "billing", source="human", by="ann", stored_id=res.stored_id)
     mem.learn_from(store)                        # or every trusted correction of the question in a TraceStorage
-    mem.calibrate(risk=0.05)                     # the abstain threshold, leave-one-out over the stored corrections
+    mem.calibrate(max_risk=0.05)                     # the abstain threshold, leave-one-out over the stored corrections
 
     team(email=...)                              # extra["memory"]: its proposal, the cases it rests on, its fingerprint
 
@@ -47,6 +47,7 @@ from dataclasses import asdict, dataclass, field
 
 import numpy as np
 
+from . import _deprecate
 from .core import NOT_STATED_KEY, Unknown
 from .provenance import ESCALATED, MEMORY, digest
 from .storage import TRUSTED_SOURCES, UntrustedLabel, check_source
@@ -289,9 +290,10 @@ class CorrectionMemory:
         return p
 
     # --- the abstain threshold
-    def calibrate(self, risk=0.05):
+    @_deprecate.kwargs(risk="max_risk")
+    def calibrate(self, max_risk=0.05):
         """Choose min_strength by conformal risk control, leave-one-out over the stored cases: each case is proposed for by
-        the others, and the lowest strength is taken at which P(the memory proposes AND is wrong) ≤ risk, for inputs like
+        the others, and the lowest strength is taken at which P(the memory proposes AND is wrong) ≤ max_risk, for inputs like
         the stored corrections (inf: it never proposes). A case's twins — cases with the same features (and words) —
         are left out with it: a correction stored twice would otherwise vouch for itself. Recorded as the memory's
         promise; changes its fingerprint.
@@ -301,7 +303,8 @@ class CorrectionMemory:
         learned about its proposals, and min_strength is inf (it does not propose) — compare `nearest` with `radius`
         (its values are None, and the note says so, when every stored case is a twin of every other)."""
         from .calibration import check_rate, crc_threshold
-        check_rate("risk", risk)
+        risk = max_risk
+        check_rate("max_risk", risk)
         cases, _ = self._snapshot()
         if len(cases) < 2:
             raise ValueError("calibration needs at least two stored cases")

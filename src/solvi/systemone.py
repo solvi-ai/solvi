@@ -46,18 +46,15 @@ and the model name — not the weights behind them, which the service can change
 from __future__ import annotations
 
 import hashlib
-import http.client
 import json
 import math
 import time
-import urllib.error
-import urllib.parse
-import urllib.request
 
 import numpy as np
 
 from .decide import DecideModel, _unknown_caps
-from .llm import WHY_CHARS, _error_text
+from .remote import NoAnswer, Refused, RemoteClient, RemoteError
+from .remote import tokens as remote_tokens
 
 EPS = 1e-6
 REASONING_CHARS = 1000          # the most characters of a question's reasoning text kept in a decision's extra
@@ -106,39 +103,31 @@ def _not_stated(it):
     return bool(getattr(it, "unknown", False)) and NOT_STATED not in it.options
 
 
+class SystemOneError(RemoteError):
+    """The service refused the request itself (a wrong key, model or URL: HTTP 401, 403, 404 and other client errors
+    except 400 / 413 / 422) — raised, as solvi.llm does, rather than escalated. The message has the endpoint, never the
+    key."""
+
+
 class _Failed(Exception):
-    """The service did not answer (after the retries) or refused the request: the reason, for the escalation."""
+    """A reply that is not a JSON object: the reason, for the escalation."""
 
 
-class SystemOneScorer:
-    """A scorer for DecideModel over `POST {base_url}/v1/systemone` (standard library HTTP, no dependencies)."""
+class SystemOneScorer(RemoteClient):
+    """A scorer for DecideModel over `POST {base_url}/v1/systemone` (standard library HTTP, no dependencies; the shared
+    client of solvi.remote)."""
 
     tag = "systemone"
+    service = "the System One service"
+    error = SystemOneError
 
-    def __init__(self, base_url, model, api_key=None, timeout=30.0, opener=None, *, extra_body=None, retries=2,
+    def __init__(self, base_url, model, api_key=None, *, timeout=30.0, opener=None, extra_body=None, retries=2,
                  backoff=1.0, sleep=None):
-        if not str(base_url).lower().startswith(("http://", "https://")):
-            raise ValueError(f"a System One service is an http(s):// URL, not {str(base_url)[:40]!r}")  # no file: / ftp:
-        from .llm import endpoint
-        sp = urllib.parse.urlsplit(str(base_url))
-        path = sp.path.rstrip("/")
-        path = path if path.endswith("/v1/systemone") else path + "/v1/systemone"
-        self.url = urllib.parse.urlunsplit((sp.scheme, sp.netloc, path, sp.query, ""))   # a query stays a query
-        self.endpoint = endpoint(self.url)               # what the trace, repr and fingerprint show: no credentials
-        self.model = model
-        self.api_key = api_key
-        self.timeout = timeout
-        self.opener = opener or urllib.request.urlopen
+        super().__init__(base_url, model, api_key, path="/v1/systemone", timeout=timeout, retries=retries,
+                         backoff=backoff, opener=opener, sleep=sleep)
         self.extra_body = _extra_body(extra_body)
-        self.retries, self.backoff = max(0, int(retries)), float(backoff)
-        self.sleep = sleep or time.sleep
         self.model_id = f"systemone:{model}"
-        self.requests = 0
-        self.usage = {"input_tokens": 0, "output_tokens": 0, "reasoning_tokens": 0}   # reasoning: thinking models
         self.cost = 0.0                                  # the sum of the replies' usage.cost
-
-    def __repr__(self):                                  # never the key
-        return f"SystemOneScorer({self.endpoint!r}, {self.model!r})"
 
     def fingerprint(self):
         fp = f"systemone|{self.endpoint}|{self.model}"
@@ -206,36 +195,11 @@ class SystemOneScorer:
         return {"logits": z, "unknown": math.log(max(float(p), EPS))}
 
     # --- one request
-    def _post(self, body):
-        req = urllib.request.Request(self.url, data=json.dumps(body).encode(), method="POST",  # noqa: S310 — http(s) only
-                                     headers={"content-type": "application/json",
-                                              **({"authorization": f"Bearer {self.api_key}"} if self.api_key else {})})
-        with self.opener(req, timeout=self.timeout) as r:
-            self.requests += 1
-            return json.loads(r.read().decode())
-
     def request(self, body):
-        """→ the service's response; _Failed (with the reason, never the key) when it does not answer after the retries
-        (network errors, timeouts, a broken connection, 408 / 409 / 429 / 5xx) or refuses the request (another 4xx)."""
-        attempt, last = 0, None
-        while True:
-            try:
-                return self._post(body)
-            except urllib.error.HTTPError as e:
-                if not (e.code in (408, 409, 429) or e.code >= 500):
-                    why = _error_text(e)
-                    raise _Failed(f"the System One service refused the request: HTTP {e.code}"
-                                  + (f" — {why[:WHY_CHARS]}" if why else "")) from None
-                why = _error_text(e)
-                last = f"HTTP {e.code}" + (f" — {why[:WHY_CHARS]}" if why else "")
-            except (urllib.error.URLError, TimeoutError, OSError, ValueError, http.client.HTTPException) as e:
-                # HTTPException: the connection broke mid-answer (IncompleteRead, RemoteDisconnected, BadStatusLine);
-                # ValueError: a reply that is not JSON
-                last = f"{type(e).__name__}: {getattr(e, 'reason', e)}"
-            attempt += 1
-            if attempt > self.retries:
-                raise _Failed(f"the System One service did not answer after {attempt} attempts: {last}")
-            self.sleep(self.backoff * 2 ** (attempt - 1))
+        """→ the service's response; NoAnswer after the retries (network errors, timeouts, a broken connection, 408 /
+        409 / 429 / 5xx), Refused for HTTP 400 / 413 / 422 (the reason, never the key), SystemOneError for a wrong
+        key, model or URL (401, 403, 404, another 4xx)."""
+        return self.send(body)
 
     def body(self, text, questions):
         b = json.loads(json.dumps(self.extra_body)) if self.extra_body else {}      # a fresh copy per request
@@ -248,7 +212,7 @@ class SystemOneScorer:
         if resp.get("model") and resp.get("model") != self.model:
             info["served_by"] = str(resp["model"])
         u = resp.get("usage") if isinstance(resp.get("usage"), dict) else {}
-        tokens = {k: u[k] for k in self.usage if isinstance(u.get(k), int) and not isinstance(u.get(k), bool)}
+        tokens = remote_tokens(u)
         if tokens:
             info["usage"] = tokens
         c = u.get("cost")
@@ -301,15 +265,14 @@ class SystemOneScorer:
                 resp = self.request(self.body(text, {n + s: q for n, sub in qs.items() for s, q in sub.items()}))
                 if not isinstance(resp, dict):
                     raise _Failed("the System One service's reply is not a JSON object")
-            except _Failed as e:              # escalate every question of the request; not cached: asked again next time
-                for i in idx:
+            except (NoAnswer, Refused, _Failed) as e:   # escalate every question of the request; not cached: asked
+                for i in idx:                            # again next time
                     out[i] = {"logits": np.zeros(len(items[i].options)), "escalate": str(e), "transient": True,
                               "info": {"systemone": {"endpoint": self.endpoint, "model": self.model, "questions": len(idx)}}}
                 continue
             ms = (time.perf_counter() - t0) * 1000
             info = self._info(resp, ms, len(idx))
-            for k in info.get("usage", {}):
-                self.usage[k] += info["usage"][k]
+            self.count(info.get("usage", {}))
             self.cost += info.get("cost", 0.0)
             answers = resp.get("answers") if isinstance(resp.get("answers"), dict) else {}
             for n, i in names.items():
@@ -328,7 +291,7 @@ class SystemOneScorer:
         return out
 
 
-def systemone(base_url, model, api_key=None, timeout=30.0, opener=None, *, extra_body=None, deterministic=False,
+def systemone(base_url, model, api_key=None, *, timeout=30.0, opener=None, extra_body=None, deterministic=False,
               retries=2, backoff=1.0, sleep=None, max_len=None):
     """A DecideModel over a System One endpoint (see the module docs).
 
@@ -347,13 +310,15 @@ def systemone(base_url, model, api_key=None, timeout=30.0, opener=None, *, extra
     deterministic: False (default) — replay checks the recorded output instead of calling the service again; True for a
     local server whose output is reproducible (replay re-runs it and compares). retries / backoff: for network errors,
     timeouts, a broken connection, 408 / 409 / 429 / 5xx (backoff · 2^k seconds between attempts); after them the
-    decision escalates ("did not answer after N attempts: ...") and is not cached. Another 4xx escalates at once, with
-    the service's error text (and a gateway's wrapped cause, OpenRouter's `error.metadata.raw`); a reply that breaks the
-    contract escalates too ("invalid System One output — ..."). opener: a replacement for urllib's urlopen (tests,
+    decision escalates ("did not answer after N attempts: ...") and is not cached. HTTP 400 / 413 / 422 escalates at
+    once, with the service's error text (and a gateway's wrapped cause, OpenRouter's `error.metadata.raw`); 401, 403,
+    404 and any other 4xx — a wrong key, model or URL — raise SystemOneError, as solvi.llm raises LLMError (0.7
+    escalated every decision instead, which read like a model that is never sure). Everything after `api_key` is
+    keyword-only. A reply that breaks the contract escalates too ("invalid System One output — ..."). opener: a replacement for urllib's urlopen (tests,
     proxies); sleep: for the backoff (tests). max_len: the tokens one request reads under long="retrieve" (words and
     punctuation × 1.3, the question included; default None: 512, as for a local decider) — as llm(max_len=...)."""
-    sc = SystemOneScorer(base_url, model, api_key, timeout, opener, extra_body=extra_body, retries=retries,
-                         backoff=backoff, sleep=sleep)
+    sc = SystemOneScorer(base_url, model, api_key, timeout=timeout, opener=opener, extra_body=extra_body,
+                         retries=retries, backoff=backoff, sleep=sleep)
     meta = {"format": "systemone", "temperature": 1.0}
     if max_len is not None:                           # absent: 512, and the meta hashes as before
         if isinstance(max_len, bool) or not isinstance(max_len, int) or max_len < 64:

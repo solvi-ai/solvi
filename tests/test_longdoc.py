@@ -238,7 +238,7 @@ def _law(m, **kw):
 def test_a_long_input_keeps_its_group_under_per_group_thresholds():
     from solvi.decide import Facts
     part = _law(model())
-    part.act_guard([(Facts(contract=TEXT, domain="supply"), "France")] * 3, risk=0.10, groups="domain", min_group=1)
+    part.act_guard([(Facts(contract=TEXT, domain="supply"), "France")] * 3, max_risk=0.10, groups="domain", min_group=1)
     d = part(contract=TEXT, domain="supply")                  # the group is given: no "group unknown" escalation
     assert not (d.escalate or "").startswith("group unknown")
     assert d.extra["guarantee"]["group"] == ["supply"] and d.extra["long"]["read"] == 1
@@ -290,6 +290,6 @@ def test_decide_pass_reads_a_long_input_by_its_window_with_its_context():
     paid = m.decision("paid", "Is it paid?", "contract", bool)
     d, _ = m.decide_pass(TEXT, [a, paid])
     assert d.value == "France" and d.extra["long"]["read"] == 1 and d.extra["pass"]["shared"] is False
-    a.act_guard([(Facts(contract=TEXT, domain="supply"), "France")] * 3, risk=0.10, groups="domain", min_group=1)
+    a.act_guard([(Facts(contract=TEXT, domain="supply"), "France")] * 3, max_risk=0.10, groups="domain", min_group=1)
     d, _ = m.decide_pass(Facts(contract=TEXT, domain="supply"), [a, paid])
     assert d.extra["guarantee"]["group"] == ["supply"]

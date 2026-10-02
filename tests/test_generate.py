@@ -56,9 +56,9 @@ def test_generate_returns_the_text_and_records_the_request_without_the_key():
     assert srv.headers[0]["Authorization"] == f"Bearer {KEY}"
     meta = out.meta
     assert meta["model"] == "llm:m-1@http://127.0.0.1:9/v1/chat/completions" and len(meta["request"]) == 16
-    assert meta["usage"] == {"prompt_tokens": 11, "completion_tokens": 7} and meta["finish"] == "stop"
+    assert meta["usage"] == {"input_tokens": 11, "output_tokens": 7} and meta["finish"] == "stop"
     assert KEY not in json.dumps(meta) and KEY not in g.fingerprint() and KEY not in repr(g)
-    assert g.usage["completion_tokens"] == 7 and g.calls == 1
+    assert g.usage["output_tokens"] == 7 and g.calls == 1
 
 
 def test_a_structured_reply_is_validated_against_a_pydantic_model_or_a_json_schema():
@@ -129,7 +129,7 @@ def test_server_errors_are_retried_then_unanswered_and_a_wrong_key_raises_llm_er
     with pytest.raises(Unanswered, match="after 3 attempts"):
         g.generate("q")
     g, _ = gen(400)
-    with pytest.raises(Unanswered, match="invalid input for the endpoint: HTTP 400 — nope"):
+    with pytest.raises(Unanswered, match="the LLM server refused the request: HTTP 400 — nope"):
         g.generate("q")
     g, _ = gen(401)
     with pytest.raises(LLMError, match="check the URL"):

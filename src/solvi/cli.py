@@ -276,7 +276,7 @@ def cmd_ask(a):
                 decider = load_model(a.decider, a.backend, api_key=a.api_key)
             except ModelError as e:
                 _fail(str(e))
-        from .llm import LLMError
+        from .remote import RemoteError
         tin = None
         if a.today:                                    # as `solvi serve` reads a text: year-less and relative dates
             import datetime as dt
@@ -290,7 +290,7 @@ def cmd_ask(a):
             res = system.ask_text(text, decider, textin=tin, question=names[0] if names else None)
         except (KeyError, ValueError) as e:
             _fail(f"ask --text: {e.args[0] if e.args else e}")
-        except LLMError as e:                          # a wrong key, model or URL: said plainly, no traceback
+        except RemoteError as e:                       # a wrong key, model or URL: said plainly, no traceback
             _fail(f"ask --decider {a.decider}: {e}")
     else:
         if a.decider:

@@ -2,13 +2,13 @@
 fitted head (fit), a model decision — on a fact the catalog computes (a trust score, an agreement share), or
 on any scalar outside a System.
 
-    report = system.guarantee("pair", examples, risk=0.01)          # conformal risk control on the answer's confidence
-    report = system.guarantee("pair", examples, error=0.02)         # learn-then-test: error among the answered ≤ 2%
-    report = system.guarantee("act", examples, risk=0.03, signal="trust", correct=judge)     # a computed fact
-    report = system.guarantee("correct", examples, error=0.3, answer="yes")   # one-sided: "yes" alone when P(yes) ≥ t
+    report = system.guarantee("pair", examples, max_risk=0.01)          # conformal risk control on the answer's confidence
+    report = system.guarantee("pair", examples, max_error=0.02)         # learn-then-test: error among the answered ≤ 2%
+    report = system.guarantee("act", examples, max_risk=0.03, signal="trust", correct=judge)     # a computed fact
+    report = system.guarantee("correct", examples, max_error=0.3, answer="yes")   # one-sided: "yes" alone when P(yes) ≥ t
 
     from solvi.guarantee import calibrate
-    p = calibrate(scores, correct, error=0.05)                      # any scalar: p.threshold, p.allows(s), p.report
+    p = calibrate(scores, correct, max_error=0.05)                      # any scalar: p.threshold, p.allows(s), p.report
 
 examples: [(init_state, correct answer)] held out from whatever fitted the answer (or folds=k for a fast head fitted
 on them). The question is asked on each (nothing stored, nothing counted), the signal and right / wrong are collected,
@@ -16,13 +16,13 @@ and the threshold is chosen by one of three methods — each makes a different p
 examples (exchangeable with them: the same stream, not a new domain):
 
     method       parameter  promise
-    "crc"        risk=r     P(answered alone and wrong) ≤ r — a share of ALL inputs, answered or escalated; on average
+    "crc"        max_risk=r     P(answered alone and wrong) ≤ r — a share of ALL inputs, answered or escalated; on average
                             over calibration sets (conformal risk control: (wrong answered + 1) / (n + 1) ≤ r)
-    "ltt"        error=e    the error AMONG the answers given alone ≤ e, with probability ≥ 1 − delta over the
+    "ltt"        max_error=e    the error AMONG the answers given alone ≤ e, with probability ≥ 1 − delta over the
                             calibration set (learn-then-test: a binomial test per threshold, Bonferroni over ≤ 64)
-    "empirical"  error=e    none: the error among the answered was ≤ e on the calibration examples only
+    "empirical"  max_error=e    none: the error among the answered was ≤ e on the calibration examples only
 
-risk= selects "crc", error= selects "ltt" (method="empirical" to ask for the plain one). groups= gives a threshold per
+max_risk= selects "crc", max_error= selects "ltt" (method="empirical" to ask for the plain one). groups= gives a threshold per
 group (a fact name, a hierarchy of fact names, a function of facts, or "answer": the answer the question would give —
 "among the inputs answered 'match', ..."), with the promise inside every group (after HG-CRC; see solvi.calibration).
 
@@ -194,27 +194,28 @@ class Promise:
         return f"Promise({self.method}, threshold={self.threshold:.4g}: {self.promise})"
 
 
-def calibrate(scores, correct, *, error=None, risk=None, method=None, delta=0.10, groups=None, min_group=100,
+def calibrate(scores, correct, *, max_error=None, max_risk=None, method=None, delta=0.10, groups=None, min_group=100,
               min_support=10, weak="raise", signal="signal"):
     """A threshold with a promise on any scalar signal: answer alone when signal ≥ threshold. scores: the signal per
     calibration example (None / NaN / −inf: never answered alone; +inf: always — a forced answer); correct: was the answer
-    right (booleans). risk= → conformal risk control ("crc"), error= → learn-then-test ("ltt"), or method="empirical"
-    with error=; the promises are in the module docstring. delta: learn-then-test's confidence and, with groups, the
+    right (booleans). max_risk= → conformal risk control ("crc"), max_error= → learn-then-test ("ltt"), or method="empirical"
+    with max_error=; the promises are in the module docstring. delta: learn-then-test's confidence and, with groups, the
     binomial bound of conformal risk control per group (delta=None there: on average per group). groups: one group (a
     value or a path) per example; min_group: a group with fewer examples is pooled with its parent. min_support: a
     threshold must have this many examples at or above it. weak: "raise" (default) or "warn" when the signal does not
     separate right from wrong. → Promise (its threshold is inf — everything escalates — when none keeps the promise;
     report["why"] says why)."""
     from .calibration import check_rate, group_nodes
+    error, risk = max_error, max_risk
     if (error is None) == (risk is None):
-        raise ValueError("give the promise as risk= (P(answered alone and wrong), conformal risk control) or error= "
-                         "(the error among the answers given alone, learn-then-test)")
+        raise ValueError("give the promise as max_risk= (P(answered alone and wrong), conformal risk control) or "
+                         "max_error= (the error among the answers given alone, learn-then-test)")
     if method is None:
         method = "crc" if risk is not None else "ltt"
     if method not in METHODS:
         raise ValueError(f"method must be one of {METHODS}, not {method!r}")
     if method == "crc" and risk is None or method != "crc" and error is None:
-        raise ValueError(f'method="{method}" takes ' + ("risk=" if method == "crc" else "error="))
+        raise ValueError(f'method="{method}" takes ' + ("max_risk=" if method == "crc" else "max_error="))
     level = check_rate("risk" if method == "crc" else "error", risk if method == "crc" else error,
                        zero=method == "empirical")
     if method == "ltt" or (groups is not None and delta is not None):
@@ -445,7 +446,7 @@ def _fold_heads(system, question, examples, folds, seed):
     return out
 
 
-def guard_question(system, question, examples=None, *, error=None, risk=None, method=None, delta=0.10, signal=None,
+def guard_question(system, question, examples=None, *, max_error=None, max_risk=None, method=None, delta=0.10, signal=None,
                    answer=None, groups=None, min_group=100, min_support=10, correct=None, folds=None, seed=0,
                    weak="raise", promise=None):
     """Put a calibrated threshold with a stated promise on a question of `system` (System.guarantee): every later answer
@@ -485,7 +486,7 @@ def guard_question(system, question, examples=None, *, error=None, risk=None, me
             sig, ok, grp, lost = _calibration_rows(system, question, examples, guard, correct, folds, seed)
             with warnings.catch_warnings(record=True) as caught:
                 warnings.simplefilter("always")
-                promise = calibrate(sig, ok, error=error, risk=risk, method=method, delta=delta,
+                promise = calibrate(sig, ok, max_error=max_error, max_risk=max_risk, method=method, delta=delta,
                                     groups=None if groups is None else grp, min_group=min_group, min_support=min_support,
                                     weak=weak, signal=guard.describe_signal())
         except BaseException:

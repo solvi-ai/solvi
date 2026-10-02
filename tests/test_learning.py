@@ -180,7 +180,7 @@ def test_the_memory_rung_keeps_the_provenance_of_each_case(tmp_path):
 
 def test_act_guard_is_recalibrated_on_fresh_labels(tmp_path):
     part, s, store = build(tmp_path)
-    part.act_guard([(texts(t, 1, start=300 + i)[0], t) for t in TEAMS for i in range(10)], risk=0.3)
+    part.act_guard([(texts(t, 1, start=300 + i)[0], t) for t in TEAMS for i in range(10)], max_risk=0.3)
     old = dict(part.guarantee)
     loop = loop_of(s, gates={"max_change": 0.9, "min_calibration": 8})
     stream(s, 20)
@@ -190,7 +190,7 @@ def test_act_guard_is_recalibrated_on_fresh_labels(tmp_path):
     assert rep.promoted and part.guarantee["n"] == rep.questions["route"]["calibration"] != old["n"]
     # too few calibration labels: the update cannot keep its promise, so it is rejected
     part2, s2, _ = build(tmp_path, "e.db")
-    part2.act_guard([(texts(t, 1, start=300 + i)[0], t) for t in TEAMS for i in range(10)], risk=0.3)
+    part2.act_guard([(texts(t, 1, start=300 + i)[0], t) for t in TEAMS for i in range(10)], max_risk=0.3)
     loop2 = loop_of(s2, gates={"max_change": 0.9})
     stream(s2, 10)
     rep2 = loop2.run()
@@ -286,7 +286,7 @@ def test_the_shadow_set_uses_the_labels_split(tmp_path):
 def test_the_act_guard_gate_reports_a_recalibration_with_errors(tmp_path):
     from solvi.learning import Label
     part, s, store = build(tmp_path)
-    part.act_guard([(texts(t, 1, start=300 + i)[0], t) for t in TEAMS for i in range(10)], risk=0.5)
+    part.act_guard([(texts(t, 1, start=300 + i)[0], t) for t in TEAMS for i in range(10)], max_risk=0.5)
     loop = loop_of(s, gates={"min_calibration": 8})
     cal = [Label(f"l{t}{i}", "route", {"email": texts(t, 1, start=400 + i)[0]}, t, "human", split="calibration")
            for t in TEAMS for i in range(10)]

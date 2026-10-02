@@ -147,7 +147,7 @@ def pay(iban, amount, **kw):
 
 
 def main():
-    rep = guard.calibrate_authorizer(labelled_calls(), risk=0.10)
+    rep = guard.calibrate_authorizer(labelled_calls(), max_risk=0.10)
     print(f"authorizer calibrated on {rep['n']} labelled calls: answers alone {rep['answered']:.0%}, "
           f"risk {rep['risk']:.3f} — {rep['guarantee']}")
 

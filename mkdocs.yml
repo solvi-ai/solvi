@@ -62,6 +62,7 @@ nav:
       - solvi.openset: api/openset.md
       - solvi.systemone: api/systemone.md
       - solvi.llm: api/llm.md
+      - solvi.remote: api/remote.md
       - solvi.generate: api/generate.md
       - solvi.agree: api/agree.md
       - solvi.refine: api/refine.md

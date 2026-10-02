@@ -787,10 +787,10 @@ a fallback producer (a rule, a human queue) runs if there is one:
   checkpoint's threshold for that error rate (`model.act_threshold_for(0.1)`), `use_act=False` ignores the signal.
   **The checkpoint's thresholds were fitted on the model's own validation data and do not hold on a new domain** (measured:
   a "10% error" threshold gave 38–52% error on unseen tasks). For a real error target, calibrate on your own labelled
-  stream with `part.act_guard(examples, risk=...)` (below);
+  stream with `part.act_guard(examples, max_risk=...)` (below);
 - without an act head (or besides it): `escalate_below=0.8` — a calibrated confidence below it escalates as **low
   confidence** (`"confidence 0.62 < 0.80 (escalate_below); would have answered 'billing'"`);
-- `part.calibrate_for(examples, error=0.05)` picks the threshold for a target error rate on labelled examples
+- `part.calibrate_for(examples, max_error=0.05)` picks the threshold for a target error rate on labelled examples
   `[(input, correct)]`: the lowest threshold at which the decisions it lets through are wrong at most 5% of the time (the act
   probability when the model has an act head, else the confidence) → `{"signal", "threshold", "coverage", "error", ...}`.
 
@@ -804,12 +804,12 @@ higher. Two thresholds come with a promise that holds for inputs like the calibr
 the same stream, not a new domain):
 
 ```python
-info = part.act_guard(examples, risk=0.10)     # a few hundred [(input, correct)] from your own stream
+info = part.act_guard(examples, max_risk=0.10)     # a few hundred [(input, correct)] from your own stream
 # correct: an option, Unknown ("not stated"), a span's text (compared as text), a ranking's order
 # P(answered alone and wrong) ≤ 10% — a share of ALL questions, answered or escalated
 info["answered"], info["error"], info["risk"], info["must_escalate_at_least"]
 
-part.calibrate_for(examples, error=0.05, method="ltt", delta=0.1)
+part.calibrate_for(examples, max_error=0.05, method="ltt", delta=0.1)
 # the error AMONG the answers given alone ≤ 5% with probability ≥ 90% — stricter, often lets nothing through
 
 part.conformal(examples, coverage=0.90)
@@ -825,7 +825,7 @@ must escalate at least (μ − risk) / (1 − risk) of them — `must_escalate_a
 The promise is about all inputs, not about the answers: at `risk=0.10` the answers given alone can be wrong far more
 than 10% of the time when few are answered (`info["error"]` is that error on the calibration examples, and
 `info["promise"]` says it in words). For "the answers given alone are wrong at most 10% of the time" use
-`calibrate_for(error=0.10, method="ltt")`. A signal that does not tell right answers from wrong ones keeps the promise
+`calibrate_for(max_error=0.10, method="ltt")`. A signal that does not tell right answers from wrong ones keeps the promise
 only by escalating: when its AUROC on the calibration examples is not above chance at the 5% level (a one-sided
 Mann–Whitney test, `solvi.calibration.separation`; judged with at least 10 right and 10 wrong examples), `act_guard` warns (`UserWarning`, and `info["warnings"]`) — the
 answers it lets through are then wrong about as often as all of them. A combination checks each part's signal.
@@ -841,7 +841,7 @@ a fitted head, a rule, a trust score you compute — are `system.guarantee` ([be
 The thresholds live in the part. Save them once, and have the catalog load them every time it starts:
 
 ```python
-info = part.act_guard(examples, risk=0.10)
+info = part.act_guard(examples, max_risk=0.10)
 part.save_calibration("team.calib.json")        # or: solvi calibrate myapp.decisions:system team labels.csv --risk 0.1
 
 # in the catalog module, after making the part and before registering it
@@ -873,7 +873,7 @@ inside the hard group. `groups=` calibrates a threshold per group of a hierarchy
 from solvi.decide import Facts          # also solvi.multi.Facts
 
 examples = [(Facts(email=text, domain="billing", task="refunds"), "approve"), ...]   # or states with those keys
-info = part.act_guard(examples, risk=0.10, groups=["domain", "task"], min_group=100, delta=0.10)
+info = part.act_guard(examples, max_risk=0.10, groups=["domain", "task"], min_group=100, delta=0.10)
 info["groups"]      # {("billing", "refunds"): {"threshold", "n", "answered", "error", "risk", "pooled"}, ("billing",): ..., (): ...}
 ```
 
@@ -1028,7 +1028,7 @@ from solvi.llm import llm
 gpt = llm("https://openrouter.ai/api/v1", "qwen/qwen-2.5-72b-instruct", api_key=os.environ["OPENROUTER_API_KEY"])
 local = llm("http://127.0.0.1:8080/v1", "qwen2.5-7b-instruct")      # llama.cpp; vLLM :8000/v1, Ollama :11434/v1
 part = gpt.decision("team", "Which team should handle this?", "email", TEAMS)
-part.act_guard(examples, risk=0.10)       # start with the LLM alone; then compare a Vote with solvi-large (below)
+part.act_guard(examples, max_risk=0.10)       # start with the LLM alone; then compare a Vote with solvi-large (below)
 ```
 
 Any server of the OpenAI chat-completions API (OpenAI, OpenRouter, vLLM, llama.cpp, Ollama, LM Studio) proposes; solvi
@@ -1106,7 +1106,9 @@ default; `max_len=` widens that (see "A larger budget").
 **Cost and latency.** Each question about each input is a paid request — the question, every option with its
 description and the whole text, a few hundred tokens or more — and takes 0.3–5 s, where a local decider takes ~50 ms on
 a CPU and costs nothing per call. The questions of one `system.ask` go one after another, one request each; `workers=4` sends the inputs
-of one `part.decide([...])` call — a batch, the examples of a calibration — in parallel; answers are cached per (question, input) while the model object lives; `model.scorer.usage` counts the tokens.
+of one `part.decide([...])` call — a batch, the examples of a calibration — in parallel; answers are cached per (question, input) while the model object lives; `model.scorer.usage` counts the tokens (`input_tokens`, `output_tokens`, `reasoning_tokens` — the same names for every
+remote model, whatever the server calls them). A wrong key, model or URL (HTTP 401, 403, 404) raises — `LLMError` /
+`SystemOneError`, both `solvi.remote.RemoteError` — rather than escalating every decision.
 Put the LLM where it pays for itself: alone with `act_guard`, or in a `Vote` with solvi-large where the two are about
 equally strong (see "Which combination with an LLM" below). A "small model first, LLM second" cascade is not a good
 default.
@@ -1252,7 +1254,7 @@ team = Vote([large, other], rule="all")              # answer when they agree an
 team = Route({long_email: large, "vip": large}, default=small)   # code picks the model per input
 
 cat.fn(team)
-info = team.act_guard(examples, risk=0.10)           # one guarantee for the combination as a whole
+info = team.act_guard(examples, max_risk=0.10)           # one guarantee for the combination as a whole
 ```
 
 - **Cascade**: ask the parts in order and answer with the first whose decision does not escalate; if every part
@@ -1274,14 +1276,14 @@ task and the facts they read may differ. A mismatch raises at construction. Comb
 Vote([mid, large])])`.
 
 **Thresholds and the guarantee.** Before calibration each part escalates by its own thresholds (`escalate_below`,
-`act_threshold`, `min_margin`). `act_guard(examples, risk=0.10)` asks every part on labelled examples of your stream
+`act_threshold`, `min_margin`). `act_guard(examples, max_risk=0.10)` asks every part on labelled examples of your stream
 (`[(input, correct)]`; an input is what every part reads, or `solvi.multi.Facts(email=..., vip=...)` by name) and chooses
 **one threshold t for every part's signal** — its act probability when its model gives one, else its calibrated
 confidence — by conformal risk control, so that P(answered alone and wrong) ≤ risk for inputs like the examples.
 The signals of different models can live on different scales: an act probability spreads over [0, 1], an LLM's
 confidence from log-probabilities sits above 0.999 on almost every answer. One threshold on the raw values then
 effectively fits one model, and the combination behaves like that model alone — often the stronger one, which is often
-the right outcome. `act_guard(examples, risk=0.10, scale="rank")` (opt-in) replaces each part's signal by its **rank
+the right outcome. `act_guard(examples, max_risk=0.10, scale="rank")` (opt-in) replaces each part's signal by its **rank
 among that part's own signals on the calibration examples** (the share of them at or below it), so every part can take
 part. Measured on a cascade of solvi-large and an LLM over three data sets (risk 0.10; the risk stayed ≤ 10% in every
 mode), the rank helped on one set and hurt on two: 33.7% → 44.8% of the questions answered alone where the first
@@ -1299,7 +1301,7 @@ question), `cost` (with `costs=`), `scale` and, for a cascade, `answered_by` (th
 model, so compare it with each model alone and, when the scales differ, try `scale="rank"` (`solvi calibrate` prints
 the warning). `conformal(examples,
 coverage=0.9)` gives answer sets from the probabilities the combination answers with — call it after `act_guard`, which
-clears it. `act_guard(examples, risk=0.10, groups="domain", min_group=100, delta=0.10)` chooses one shared
+clears it. `act_guard(examples, max_risk=0.10, groups="domain", min_group=100, delta=0.10)` chooses one shared
 threshold per group on the same monotonized loss, with the same rules as for one part (thresholds per group, above);
 the examples are then `Facts(...)` with the group facts, which join the combination's inputs.
 
@@ -1337,7 +1339,7 @@ does nothing.
 "fp": ...}`; the fingerprint covers every part's, the rule and the threshold) and keeps every proposal in `extra`:
 `stages` and `answered_by` (cascade), `votes` and `rule` (vote), `route` and `routed` (route) — each proposal with its
 part, model, value, probabilities, signal and escalation reason — plus `calls`, the models called for this decision.
-`combination.usage()` sums the calls since it was made. The audit prints one line per stage, vote or route and the
+`combination.calls()` sums the calls since it was made (`usage()` in 0.7). The audit prints one line per stage, vote or route and the
 guarantee line. `replay` re-runs every stage and compares the proposals too, not only the answer; with
 `trust_models=True` (or a part's model unavailable) it checks instead that the recorded answer follows from the recorded
 proposals by the combination's rule. `System.teach` on a question a combination answers teaches every part.
@@ -1351,7 +1353,7 @@ and, at decision time, finds the nearest ones — a second signal next to the mo
 mem = team.memory()                                  # a solvi.memory.CorrectionMemory bound to the part
 mem.add(email, "billing", source="human", by="ann", stored_id=res.stored_id)
 mem.learn_from(store)                                # every trusted correction of the question in a TraceStorage
-mem.calibrate(risk=0.05)                             # the abstain threshold, leave-one-out over the stored cases
+mem.calibrate(max_risk=0.05)                             # the abstain threshold, leave-one-out over the stored cases
 
 res = system.ask({"email": text})
 res.audit("route").memory                            # the proposal, what came of it, the cases it rests on
@@ -1631,7 +1633,7 @@ rng = np.random.default_rng(0)
 known = rng.beta(6, 2, 2000)                                   # the decider's signal on labelled calibration inputs
 right = rng.uniform(size=2000) < 1 - 0.3 * (1 - known) ** 1.5  # ... and whether it was right
 outside = rng.beta(2, 5, 2000)                                 # its signal on inputs it has no answer for
-gate = OpenSetGate.calibrate(known, right, outside, error=0.05)
+gate = OpenSetGate.calibrate(known, right, outside, max_error=0.05)
 gate.thresholds[0.1], gate.thresholds[0.4]                     # 0.66, 0.73: higher for more outside inputs
 for s in np.concatenate([rng.beta(6, 2, 500), rng.beta(2, 5, 300)]):   # then only outside inputs
     gate.observe(s)                                            # after each decision it gated
@@ -2169,7 +2171,7 @@ def draw(n):                                # (input, correct answer); near 0.5 
     return [({"score": (x := rng.random())}, x + rng.gauss(0, 0.1) > 0.5) for _ in range(n)]
 
 system.fit("refund", draw(400), features=["score"])
-report = system.guarantee("refund", draw(600), error=0.05)     # held out: not the 400 the head was fitted on
+report = system.guarantee("refund", draw(600), max_error=0.05)     # held out: not the 400 the head was fitted on
 report["threshold"], report["answered"], report["error"], report["risk"]     # 0.84, 0.78, 0.019, 0.015
 r = system.ask({"score": 0.52})["refund"]
 r.status, r.why        # "abstain", "confidence 0.6229 < 0.8406 (threshold of the guarantee: error among the answers
@@ -2180,12 +2182,12 @@ r.extra["guarantee"]   # {"method": "ltt", "promise", "n": 600, "signal": "confi
 The other forms:
 
 ```python
-system.guarantee("refund", examples, risk=0.02)                    # P(answered alone and wrong) ≤ 2% of ALL inputs
-system.guarantee("refund", examples, risk=0.02, signal="margin")   # on a fact the catalog computes
-system.guarantee("refund", examples, risk=0.02, groups="answer", delta=None)   # inside each answer ("yes", "no")
-system.guarantee("act", examples, risk=0.03, signal="trust",       # right / wrong by a judge of your own
+system.guarantee("refund", examples, max_risk=0.02)                    # P(answered alone and wrong) ≤ 2% of ALL inputs
+system.guarantee("refund", examples, max_risk=0.02, signal="margin")   # on a fact the catalog computes
+system.guarantee("refund", examples, max_risk=0.02, groups="answer", delta=None)   # inside each answer ("yes", "no")
+system.guarantee("act", examples, max_risk=0.03, signal="trust",       # right / wrong by a judge of your own
                  correct=lambda result, label: overlaps(result, label))
-system.guarantee("correct", examples, error=0.3, answer="yes", folds=5)
+system.guarantee("correct", examples, max_error=0.3, answer="yes", folds=5)
 # one-sided: "yes" alone when P(yes) ≥ the threshold (it may be below 0.5), else abstain; folds=5: the fitted head
 # was fitted on these very examples, so each is scored by a head refitted without it (the promise is then approximate)
 system.guarantee("refund", False)                                  # remove it
@@ -2222,7 +2224,7 @@ checkpoints of the question, so every flow computes them. Every answer of the qu
 trace record (`guard:<question>`: the signal's value, the threshold, the promise); below the threshold the question
 abstains (safeguard low confidence) and says what it would have answered; a forced answer (a failed hard check) and an
 abstention are left as they are. Replay with the System re-derives the verdict; a guarantee recalibrated since the
-decision is a mismatch ("the question's guarantee changed"). `solvi.guarantee.calibrate(scores, correct, error=...)`
+decision is a mismatch ("the question's guarantee changed"). `solvi.guarantee.calibrate(scores, correct, max_error=...)`
 does the same for any scalar outside a System: `p.threshold`, `p.allows(score)`, `p.report`.
 
 Measured, the hand-written thresholds of three tasks against `system.guarantee` on the same calibration and eval sets:
@@ -3185,7 +3187,7 @@ user authorized this payment" cannot talk it into a yes. Calibrate it on labelle
 
 ```python
 guard.make_authorizer(DecideModel.load("solvi-ai/solvi-base"))       # reads the whole conversation; reads="user_request": the user's messages only
-rep = guard.calibrate_authorizer([(call, context, True), ...], risk=0.10)
+rep = guard.calibrate_authorizer([(call, context, True), ...], max_risk=0.10)
 # act_guard: P(allowed by the authorizer alone and wrong) ≤ 10% for calls like these; the trace records the promise
 ```
 
@@ -4504,8 +4506,8 @@ PART is a question answered by a model decision (or the decision part's name; a 
 LABELS is a CSV or JSON-lines file with a `label` column and the input: the facts the part reads as columns
 (`message`), a `text` / `input` column, or else the other columns as a state; `--groups` columns are read as the group
 facts; a multi-label answer is a JSON list (or `a|b` in a CSV); a CSV cell names an option that is not text by how it
-reads (`3` is the level 3 of `Scale[1, 2, 3, 4, 5]`). It runs `part.act_guard(examples, risk=...)` (`--method
-crc`, the default) or `part.calibrate_for(examples, error=..., method="ltt")`, prints the answered share, the error among
+reads (`3` is the level 3 of `Scale[1, 2, 3, 4, 5]`). It runs `part.act_guard(examples, max_risk=...)` (`--method
+crc`, the default) or `part.calibrate_for(examples, max_error=..., method="ltt")`, prints the answered share, the error among
 the answered, the risk (answered alone and wrong, of all), `must_escalate_at_least` and the per-group table, and writes
 the calibration (`PART.calib.json` by default) — `part.load_calibration(path)` in the catalog applies it
 ([keeping a calibration](#keeping-a-calibration-save_calibration-load_calibration)). Exit status 1 when nothing can be

@@ -31,7 +31,7 @@ On top of the raw logits, per question (task, options, kind):
     shift is per option (choice, multi), a tilt / spread over the levels (score) or one yes−no bias (noul);
   - "other" / "none" as an abstain threshold: such an option is not scored by the model; it is chosen when the best real
     option's calibrated probability is below a threshold (fitted on labelled examples that include it, else the default);
-  - `calibrate_for(examples, error=0.05)`: the escalation threshold for a target error rate.
+  - `calibrate_for(examples, max_error=0.05)`: the escalation threshold for a target error rate.
 
 Backends: "torch" (`solvi[model]`) or "onnx" (`solvi[onnx]`: onnxruntime + tokenizers, no torch), or any object with
 `logits(items)` (and optionally `logits_pass(passes)`) — tests, other models: see DecideModel."""
@@ -54,6 +54,7 @@ from enum import Enum
 
 import numpy as np
 
+from . import _deprecate
 from .core import Decision, Quote, Unknown
 from .provenance import ESCALATED, INSTRUCTION
 
@@ -1349,7 +1350,7 @@ class DecideModel:
         ok = [e for e in self.act_thresholds if e <= error + 1e-12]
         if not ok:
             raise ValueError(f"the checkpoint has no act threshold for error ≤ {error} (it has {sorted(self.act_thresholds)}); "
-                             "use part.calibrate_for(examples, error=...)")
+                             "use part.calibrate_for(examples, max_error=...)")
         return self.act_thresholds[max(ok)]
 
     def wire(self, kind):
@@ -2903,7 +2904,8 @@ class DecisionPart:
         self.model.reset(**self._kw())
 
     # --- a LoRA adapter for this question (experimental; solvi.lora)
-    def adapt_lora(self, examples, r=8, epochs=6, holdout=None, seed=0, device=None, lr=3e-4, risk=0.10,
+    @_deprecate.kwargs(risk="max_risk")
+    def adapt_lora(self, examples, *, r=8, epochs=6, holdout=None, seed=0, device=None, lr=3e-4, max_risk=0.10,
                    signal="confidence", max_updates=400):
         """Experimental: train a small LoRA adapter on the decider's encoder for this question, from labelled examples
         [(input, correct)] — for solvi-base (the torch backend, `pip install "solvi[lora]"`) and about 100 examples or
@@ -2930,7 +2932,7 @@ class DecisionPart:
         remove_lora rolls back. → {"adapter", "k", "updates", "seconds", "estimate_seconds", "size_mb", "device",
         "holdout": {"n", "accuracy_before", "accuracy_after", "act_guard"} or None, "cleared", "experimental": True}."""
         from .lora import adapt
-        return adapt(self, examples, r=r, epochs=epochs, holdout=holdout, seed=seed, device=device, lr=lr, risk=risk,
+        return adapt(self, examples, r=r, epochs=epochs, holdout=holdout, seed=seed, device=device, lr=lr, max_risk=max_risk,
                      signal=signal, max_updates=max_updates)
 
     def remove_lora(self):
@@ -3025,7 +3027,8 @@ class DecisionPart:
         self.__signature__ = inspect.Signature([inspect.Parameter(f, inspect.Parameter.POSITIONAL_OR_KEYWORD)
                                                 for f in self.facts + extra])
 
-    def calibrate_for(self, examples, error=0.05, signal="auto", method="empirical", delta=0.10):
+    @_deprecate.kwargs(error="max_error")
+    def calibrate_for(self, examples, *, max_error=0.05, signal="auto", method="empirical", delta=0.10):
         """Choose the escalation threshold for a target error rate among the answers given alone, on labelled examples
         [(input, correct)]. method="empirical": the lowest threshold at which the calibration decisions it lets through
         are wrong at most `error` of the time — no guarantee on new inputs (it was 3–5× off on other data sets in our
@@ -3037,9 +3040,12 @@ class DecisionPart:
         made with use_act=False) the checkpoint's act threshold keeps escalating: the examples it escalates count as
         escalated here, so the numbers returned are what the part does. No threshold reaches the target → everything
         escalates (inf).
-        Changes the part's fingerprint. → {"signal", "threshold", "coverage", "error", "n", "target_error", "method",
-        "guarantee"}. For a guarantee on the share of all questions answered wrongly, see act_guard."""
+        Changes the part's fingerprint. → {"signal", "threshold", "answered" (the share answered alone on the
+        examples), "error" (among them), "n", "max_error", "method", "guarantee"}. For a guarantee on the share of all
+        questions answered wrongly, see act_guard. Every option after the examples is keyword-only; error= is the 0.7
+        name of max_error=, and the result's 0.7 keys "coverage" / "target_error" still read (deprecated)."""
         from .calibration import accuracy_at, check_rate, ltt_threshold
+        error = max_error
         examples = list(examples)
         if method not in ("empirical", "ltt"):
             raise ValueError('method must be "empirical" or "ltt"')
@@ -3059,10 +3065,12 @@ class DecisionPart:
         thr = max(thr, 0.0) if name == "confidence" else thr      # −1 marks an example the act gate escalates
         self._set_threshold(name, thr, self._sourced(g))
         acc, cov = accuracy_at(sig, ok, thr)
-        return {"signal": name, "threshold": thr, "coverage": cov, "error": (1 - acc) if cov else 0.0, "n": len(ok),
-                "target_error": error, "method": method, "guarantee": g["promise"]}
+        return _deprecate.Result({"signal": name, "threshold": thr, "answered": cov, "error": (1 - acc) if cov else 0.0,
+                                  "n": len(ok), "max_error": error, "method": method, "guarantee": g["promise"]},
+                                 "calibrate_for()", coverage="answered", target_error="max_error")
 
-    def act_guard(self, examples, risk=0.10, signal="auto", groups=None, min_group=100, delta=0.10):
+    @_deprecate.kwargs(risk="max_risk")
+    def act_guard(self, examples, *, max_risk=0.10, signal="auto", groups=None, min_group=100, delta=0.10):
         """Answer alone only as far as a guarantee allows (conformal risk control), from labelled examples of your own
         stream [(input, correct)] — a few hundred is typical: the escalation threshold is set so that, for inputs like
         the examples, P(answered alone AND wrong) ≤ risk — a share of all questions (answered or escalated), not of
@@ -3091,9 +3099,14 @@ class DecisionPart:
         input that does not give its group escalates. The group facts join the part's inputs: register the part in a
         catalog after act_guard. Adds "groups" ({path: {"threshold", "n", "answered", "error", "risk", "pooled"}}) to
         the result; "threshold" is then the rest of the stream's — inf when every example is in a group with its own
-        threshold, whatever "answered" says: read the thresholds per group."""
+        threshold, whatever "answered" says: read the thresholds per group.
+
+        The decider protocol: a combination (solvi.multi) takes the same act_guard(examples, *, max_risk, signal,
+        groups, min_group, delta) and returns the same keys. Every option after the examples is keyword-only; risk= is
+        the 0.7 name of max_risk=."""
         from .calibration import check_rate, crc_threshold
-        check_rate("risk", risk)                      # risk=10 (a percent) or 1.5 would be recorded as a promise
+        risk = max_risk
+        check_rate("max_risk", risk)                      # risk=10 (a percent) or 1.5 would be recorded as a promise
         if groups is not None and delta is not None:
             check_rate("delta", delta)
         examples = list(examples)
@@ -3249,7 +3262,7 @@ SEPARATION_MIN = 10        # right and wrong calibration examples each, before a
 def guard_promise(risk, error, answered=True):
     """act_guard's promise in words, with the error among the answers given alone on the calibration examples."""
     among = (f"; among the answers given alone the error was {error:.1%} on the calibration examples, and it is not "
-             "bounded (calibrate_for(error=..., method='ltt') bounds it)") if answered else "; nothing is answered alone"
+             "bounded (calibrate_for(max_error=..., method='ltt') bounds it)") if answered else "; nothing is answered alone"
     return (f"of all inputs like the calibration examples, answered or escalated, at most {risk:g} are answered alone "
             f"and wrong" + among)
 

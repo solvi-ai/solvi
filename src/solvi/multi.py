@@ -10,7 +10,7 @@ deterministic code over their proposals decides; every proposal is in the trace.
     team = Route({lambda email: len(email) > 2000: large}, default=small)     # code picks the model per input
 
     cat.fn(team)                               # like any decision part: a fact, or `team.question(cat)` for an answer
-    team.act_guard(examples, risk=0.10)        # P(answered alone and wrong) ≤ 10%, for the combination as a whole
+    team.act_guard(examples, max_risk=0.10)        # P(answered alone and wrong) ≤ 10%, for the combination as a whole
 
 A combination is a catalog part like a DecisionPart: its value is one of the options, its provenance `decided`, its
 fingerprint covers every model's, and the trace records every proposal: `extra["stages"]` and `extra["answered_by"]`
@@ -38,12 +38,16 @@ from collections.abc import Mapping
 
 import numpy as np
 
+from . import _deprecate
 from .core import Decision, Quote, Unknown
 from .decide import DecisionPart, Facts, GroupBy, _group_info, _group_promise, _single, group_record, guard_promise, no_separation, one_source
 from .provenance import ESCALATED, code_fingerprint, digest
 
-_SIGNAL = {"rank": "shared threshold on each model's rank among the calibration examples",
-           "raw": "shared threshold on each model's signal"}
+# guarantee["signal"]: a name, as a part's ("act", "confidence"): one threshold shared by every part, on each part's
+# own signal ("shared") or on its rank among that part's calibration signals ("shared-rank")
+_SIGNAL = {"rank": "shared-rank", "raw": "shared"}
+_SIGNAL_0_7 = {"shared-rank": "shared threshold on each model's rank among the calibration examples",
+               "shared": "shared threshold on each model's signal"}
 RECORD_KEYS = ("stages", "answered_by", "votes", "route", "routed")      # what a replay compares with the recomputed
 MAX_RANKS = 1024        # calibration signals kept per model for scale="rank" (more examples: this many evenly spaced ones)
 SCALES = ("rank", "raw")
@@ -290,13 +294,13 @@ class _State:
 def _wrap(m):
     if isinstance(m, DecisionPart):
         return _Leaf(m)
-    if isinstance(m, _Combination):
+    if isinstance(m, Combination):
         return m
     raise TypeError(f"a combination is made of decision parts (model.decision(...)) or other combinations, not {m!r}")
 
 
 # ------------------------------------------------------------------------------------------------ combinations
-class _Combination:
+class Combination:
     """What Cascade, Vote and Route share: a catalog function over the union of the parts' facts that returns a
     Decision; the model recorded in the trace (fingerprint over every part's); act_guard, conformal; fit / teach."""
 
@@ -411,7 +415,10 @@ class _Combination:
     def fingerprint(self):
         """A hash of the combination: its kind and rule, every member's fingerprint, and its calibration (threshold,
         guarantee, conformal set)."""
-        th = {k: v for k, v in (("threshold", self.threshold), ("guarantee", self.guarantee),
+        g = self.guarantee
+        if g is not None and g.get("signal") in _SIGNAL_0_7:      # hashed as 0.7 wrote it: the fingerprints, and the
+            g = {**g, "signal": _SIGNAL_0_7[g["signal"]] + (", per group" if "groups" in g else "")}  # stored decisions
+        th = {k: v for k, v in (("threshold", self.threshold), ("guarantee", g),          # that carry them, stay valid
                                 ("conformal", self.conformal_set)) if v is not None}
         if self.scale == "rank":                      # the raw scale keeps the fingerprint it always had
             th["scale"] = ("rank", [np.asarray(r, float) for r in self.ranks or []])
@@ -534,7 +541,8 @@ class _Combination:
             return v == y
         return (Unknown if v is Unknown else sp.label(v)) == (Unknown if y is Unknown else sp.label(y))
 
-    def act_guard(self, examples, risk=0.10, groups=None, min_group=100, delta=0.10, scale="raw"):
+    @_deprecate.kwargs(risk="max_risk")
+    def act_guard(self, examples, *, max_risk=0.10, signal="auto", groups=None, min_group=100, delta=0.10, scale="raw"):
         """Answer alone only as far as a guarantee allows, for the combination as a whole: on labelled examples of your
         stream [(input, correct)] (an input is what every part reads, or Facts(...) by name) every part is asked, and
         one threshold t shared by every part is chosen by conformal risk control so that P(answered alone AND wrong)
@@ -543,7 +551,7 @@ class _Combination:
         Replaces the parts' own thresholds inside this combination (the parts themselves are not changed); changes the
         combination's fingerprint and clears its conformal sets (call conformal afterwards). Too few or too hard
         examples → everything escalates (threshold inf). → {"threshold", "answered", "error" (among the answered),
-        "risk" (answered and wrong, on the examples), "n", "guarantee", "calls" (models called per question), "cost"
+        "risk" (answered and wrong, on the examples), "n", "guarantee", "calls_per_question" (models called per question), "cost"
         (with costs=), "scale", and for a cascade "answered_by" (the share each stage answered) and "warnings" when a
         stage answers alone on less than 5% of the examples (the cascade is then no better than one model) or a part's
         signal does not separate right from wrong answers (also a UserWarning), "promise" (in words: of all inputs, not
@@ -563,9 +571,20 @@ class _Combination:
 
         groups, min_group, delta: one shared threshold per group, as DecisionPart.act_guard(groups=...) — on the same
         monotonized loss, so the promise holds within every group; the group facts join the combination's inputs.
-        Adds "groups" to the result."""
+        Adds "groups" to the result.
+
+        The decider protocol: the signature and the keys of DecisionPart.act_guard — "signal" ("shared", or
+        "shared-rank" with scale="rank"; also guarantee["signal"]), "threshold", "answered", "error", "risk", "n",
+        "guarantee", "promise", "base_error", "must_escalate_at_least", "warnings", "groups" — plus "calls_per_question"
+        (models called per question; "calls" in 0.7), "cost", "scale", "answered_by". signal: "auto" only (each part
+        brings its own; `scale` says how they share one threshold). Every option after the examples is keyword-only;
+        risk= is the 0.7 name of max_risk=."""
         from .calibration import certify_groups, check_rate
-        check_rate("risk", risk)
+        risk = max_risk
+        check_rate("max_risk", risk)
+        if signal != "auto":
+            raise ValueError(f"signal={signal!r}: a combination's signal is each part's own (signal=\"auto\"); "
+                             "scale=\"raw\" or \"rank\" says how they share one threshold")
         if groups is not None and delta is not None:
             check_rate("delta", delta)
         if scale not in SCALES:
@@ -617,7 +636,7 @@ class _Combination:
             t = nodes[()]["threshold"]
             self.groups = {"by": by, "nodes": nodes}
             self.guarantee = {"method": "crc-groups" if delta is None else "group-bound", "risk": risk, "n": n,
-                              "signal": _SIGNAL[scale] + ", per group", "groups": by.label(),
+                              "signal": _SIGNAL[scale], "groups": by.label(),
                               "min_group": min_group, "delta": delta, "promise": _group_promise(risk, delta, len(nodes))}
             a_ = auto_all[np.arange(n), gi] & np.array([got[o]["index"] is not None for o in owner])
             extra["groups"] = _group_info(nodes, owner, paths, a_, loss[np.arange(n), gi] > 0)
@@ -634,9 +653,14 @@ class _Combination:
         elif not np.isfinite(t):
             a, lo = np.zeros(n, bool), np.zeros(n)
         err = float(lo[a].sum() / a.sum()) if a.any() else 0.0
-        out = {"threshold": t, "answered": float(a.mean()), "error": err, "risk": float(lo.mean()), "n": n,
-               "guarantee": self.guarantee["promise"], "promise": guard_promise(risk, err, bool(a.any())),
-               "calls": float(calls[rows, gi].mean()), "scale": scale}
+        base = float(np.mean([not self._right(self.final(st, -math.inf, rk).value, y)       # every question answered
+                              for st, y in zip(states, gold)])) if n else 0.0
+        out = _deprecate.Result({"signal": _SIGNAL[scale], "threshold": t, "answered": float(a.mean()), "error": err,
+                                 "risk": float(lo.mean()), "n": n, "guarantee": self.guarantee["promise"],
+                                 "promise": guard_promise(risk, err, bool(a.any())), "base_error": base,
+                                 "must_escalate_at_least": max(0.0, (base - risk) / (1 - risk)),
+                                 "calls_per_question": float(calls[rows, gi].mean()), "scale": scale},
+                                "act_guard()", calls="calls_per_question")
         flat = [] if not a.any() else [
             no_separation([ls.sig for st in states for ls in st.walk() if ls.leaf is lf],
                           [self._right(ls.hard.value, y) for st, y in zip(states, gold) for ls in st.walk()
@@ -704,16 +728,22 @@ class _Combination:
         return {"coverage": coverage, "quantile": q, "n": len(scores),
                 "mean_size": float(np.mean([len(self.candidates(d)) for d in ds]))}
 
-    def usage(self):
-        """What the combination cost since it was made: {"asked" (decisions), "calls" (per part, in leaves order),
-        "per_question" (models called per decision), "cost" (with costs=)}."""
+    def calls(self):
+        """What the combination cost since it was made: {"asked" (decisions), "calls" (models called, per part, in
+        leaves order), "calls_per_question" (models called per decision), "cost" (with costs=)}. `usage` is a scorer's
+        token count; usage() here was the 0.7 name of calls()."""
         lv = self.leaves()
         calls = [lf.calls for lf in lv]
         out = {"asked": self.asked, "calls": {f"{i}:{lf.name}": c for i, (lf, c) in enumerate(zip(lv, calls))},
-               "per_question": sum(calls) / self.asked if self.asked else 0.0}
+               "calls_per_question": sum(calls) / self.asked if self.asked else 0.0}
         if any(lf.cost_given for lf in lv):
             out["cost"] = sum(lf.cost * c for lf, c in zip(lv, calls)) / self.asked if self.asked else 0.0
-        return out
+        return _deprecate.Result(out, "calls()", per_question="calls_per_question")
+
+    def usage(self):
+        """Deprecated (removed in 0.9): calls() — "per_question" is "calls_per_question" there."""
+        _deprecate.renamed("Combination.usage()", "calls()")
+        return self.calls()
 
     # --- learning: every part learns
     def _each(self, x):
@@ -768,10 +798,10 @@ def _same(jv_a, jv_b):
     return vhash(jv_a) == vhash(jv_b)
 
 
-class Cascade(_Combination):
+class Cascade(Combination):
     """Ask the parts in order; answer with the first whose decision does not escalate; escalate when all do (with the
     last part's answer as "would have answered"). The next model is asked only when the one before escalates, so a
-    cheap model that is often sure saves the large model's calls — `usage()` and `extra["calls"]` count them;
+    cheap model that is often sure saves the large model's calls — `calls()` and `extra["calls"]` count them;
     `costs=[45, 137]` (ms, per part) makes act_guard and usage report the expected cost; a member that is itself a
     combination takes its parts' costs itself (Vote([...], costs=[...])), so costs= with one raises."""
 
@@ -872,7 +902,7 @@ def _rule(K, A, rule):
     return agree, vk, mask, agree & (A | ~mask).all(0)
 
 
-class Vote(_Combination):
+class Vote(Combination):
     """Ask every part; answer when the rule holds — "all": every part proposes the same value, "majority": more than
     half do — and every agreeing part answers alone (its signal ≥ the threshold); otherwise escalate, listing the
     proposals. Parts of one model that can share a forward pass are asked in one pass. The probabilities are the mean
@@ -966,7 +996,7 @@ class Vote(_Combination):
         return bad
 
 
-class Route(_Combination):
+class Route(Combination):
     """Pick one part per input by code: `routes` maps a predicate (a function of facts by name — its parameters are
     facts the route reads — returning true to take that part) or a fact name (its value is true) to a part; the first
     that holds picks, else `default`. Only the picked part's model is called; `extra["route"]` records which part and

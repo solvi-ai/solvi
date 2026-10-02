@@ -75,8 +75,8 @@ def test_the_api_pages_render_what_the_guide_tells_users_to_call_on_combinations
     import ast
     assert "inherited_members: true" in (ROOT / "docs" / "api" / "multi.md").read_text()
     tree = ast.parse((ROOT / "src" / "solvi" / "multi.py").read_text())
-    base = next(c for c in tree.body if isinstance(c, ast.ClassDef) and c.name == "_Combination")
-    for name in ("act_guard", "conformal", "decide", "usage", "fit", "teach", "save_calibration", "fingerprint"):
+    base = next(c for c in tree.body if isinstance(c, ast.ClassDef) and c.name == "Combination")
+    for name in ("act_guard", "conformal", "decide", "calls", "fit", "teach", "save_calibration", "fingerprint"):
         f = next(f for f in base.body if isinstance(f, ast.FunctionDef) and f.name == name)
         assert ast.get_docstring(f), name
     from solvi.memory import CorrectionMemory

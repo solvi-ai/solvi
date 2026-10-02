@@ -217,9 +217,9 @@ if __name__ == "__main__":
 
     print("\n=== 9. escalation for a target error rate ===")
     held_out = dataset(4, 40)
-    info = team.calibrate_for(held_out, error=0.1)
-    print(f"  calibrate_for(error=0.1) on 40 labelled emails: escalate below confidence {info['threshold']:.2f} "
-          f"({info['signal']}); there it answers {info['coverage']:.0%} with {info['error']:.0%} errors")
+    info = team.calibrate_for(held_out, max_error=0.1)
+    print(f"  calibrate_for(max_error=0.1) on 40 labelled emails: escalate below confidence {info['threshold']:.2f} "
+          f"({info['signal']}); there it answers {info['answered']:.0%} with {info['error']:.0%} errors")
     esc = [x for x, _ in test if system.ask({"email": x}, ["team"])["team"].status == "abstain"]
     print(f"  {len(esc)} of {len(test)} test emails now go to a person; e.g. {system.ask({'email': esc[0]})['team'].why[:90]}"
           if esc else "  no test email escalates")

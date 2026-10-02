@@ -172,7 +172,7 @@ def test_in_a_cascade_a_flipped_answer_passes_the_question_on():
     assert d.value == "billing" and d.escalate is None and d.extra["answered_by"] == 1
     assert "instruction-like" in d.extra["stages"][0]["escalate"]
     with pytest.warns(UserWarning, match="part 'team': the part's signal does not separate"):   # it is surest where
-        info = c.act_guard([(INJECTED, "billing"), (CLEAN, "billing")] * 30, risk=0.10)       # it obeys: AUROC 0
+        info = c.act_guard([(INJECTED, "billing"), (CLEAN, "billing")] * 30, max_risk=0.10)       # it obeys: AUROC 0
     assert info["risk"] <= 0.10 and info["answered_by"][0] < 1
 
 

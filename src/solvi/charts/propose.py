@@ -7,7 +7,6 @@
 A proposer is never trusted: the checker verifies every number it writes against the source."""
 from __future__ import annotations
 
-import json
 import re
 import urllib.parse
 import urllib.request
@@ -209,19 +208,22 @@ Rules:
 
 
 class LLMProposer:
-    """A ChartSpec from any OpenAI-compatible `POST {base_url}/chat/completions` (standard library HTTP). The API key
-    is sent in the Authorization header only, never recorded. opener: a replacement for urllib's urlopen (tests)."""
+    """A ChartSpec from any OpenAI-compatible `POST {base_url}/chat/completions`, over the shared client of
+    solvi.remote (retries with backoff; a wrong key, model or URL raises solvi.llm.LLMError; no answer raises
+    solvi.remote.NoAnswer). The API key is sent in the Authorization header only, never recorded. opener: a replacement
+    for urllib's urlopen (tests)."""
 
-    def __init__(self, base_url, model, api_key=None, *, timeout=60.0, max_tokens=1500, json_mode=True, opener=None):
-        sp = urllib.parse.urlsplit(base_url)
-        if sp.scheme.lower() not in ("http", "https"):
-            raise ValueError(f"an LLM endpoint is an http(s):// URL, not {str(base_url)[:40]!r}")
-        path = sp.path.rstrip("/")
-        path = path if path.endswith("/chat/completions") else path + "/chat/completions"
-        self.url = urllib.parse.urlunsplit((sp.scheme, sp.netloc, path, sp.query, ""))
-        self.model, self._key, self.timeout, self.max_tokens = model, api_key, float(timeout), int(max_tokens)
-        self.json_mode = json_mode
-        self.opener = opener or urllib.request.urlopen
+    def __init__(self, base_url, model, api_key=None, *, timeout=60.0, max_tokens=1500, json_mode=True, opener=None,
+                 retries=2, backoff=1.0, sleep=None):
+        from ..llm import LLMError
+        from ..remote import RemoteClient
+
+        class _Client(RemoteClient):
+            service, error = "the LLM server", LLMError
+        self.client = _Client(base_url, model, api_key, path="/chat/completions", timeout=timeout, retries=retries,
+                              backoff=backoff, opener=opener, sleep=sleep)
+        self.model, self.max_tokens, self.json_mode = model, int(max_tokens), json_mode
+        sp = urllib.parse.urlsplit(self.client.url)
         self.id = f"llm:{model}@{sp.scheme}://{sp.hostname}{(':' + str(sp.port)) if sp.port else ''}{sp.path}"
 
     def __repr__(self):
@@ -234,13 +236,7 @@ class LLMProposer:
                 "messages": [{"role": "system", "content": SYSTEM}, {"role": "user", "content": user}]}
         if self.json_mode:
             body["response_format"] = {"type": "json_object"}
-        headers = {"content-type": "application/json"}
-        if self._key:
-            headers["authorization"] = f"Bearer {self._key}"
-        data = json.dumps(body, ensure_ascii=False).encode()
-        req = urllib.request.Request(self.url, data=data, method="POST", headers=headers)  # noqa: S310 — http(s) only
-        with self.opener(req, timeout=self.timeout) as r:
-            resp = json.loads(r.read().decode())
+        resp = self.client.send(body)
         content = resp["choices"][0]["message"]["content"]
         from ..llm import _json
         return _json(content)

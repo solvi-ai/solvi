@@ -110,12 +110,12 @@ def test_an_option_jeeves_does_not_know_escalates_with_its_error_text(jeeves):
 def test_act_guard_a_vote_with_another_family_and_replay(jeeves):
     j = systemone(jeeves.url, "jeeves-latest", extra_body=OPTIONS)
     team = j.decision("team", "Which team?", "email", TEAMS)
-    info = team.act_guard(CALIB, risk=0.10)
+    info = team.act_guard(CALIB, max_risk=0.10)
     assert info["signal"] == "confidence" and info["risk"] <= 0.10
     other = systemone("http://127.0.0.1:9", "solvi-large", opener=standin).decision("team", "Which team?", "email",
                                                                                      TEAMS)
     vote = Vote([team, other], rule="all", name="team")
-    assert vote.act_guard(CALIB, risk=0.10)["risk"] <= 0.10
+    assert vote.act_guard(CALIB, max_risk=0.10)["risk"] <= 0.10
     cat = Catalog()
     s = System(cat, [vote.question(cat, "team", "Which team handles it?")])
     r = s.ask({"email": "I was charged twice"})

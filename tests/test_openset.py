@@ -24,7 +24,7 @@ def _outside(rng, n):
 def _gate(seed=0, n=3000, **kw):
     rng = np.random.default_rng(seed)
     ks, kr = _known(rng, n)
-    return OpenSetGate.calibrate(ks, kr, _outside(rng, n), error=0.05, **kw), rng
+    return OpenSetGate.calibrate(ks, kr, _outside(rng, n), max_error=0.05, **kw), rng
 
 
 def test_a_larger_share_of_outside_inputs_needs_a_higher_threshold():

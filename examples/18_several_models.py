@@ -128,18 +128,18 @@ if __name__ == "__main__":
     print("\n=== 1. each model alone, P(answered alone and wrong) ≤ 10% ===")
     for name, part in (("small", small), ("large", large), ("other", other)):
         one = Cascade([part], name="team")             # a one-part combination: the same calibration as below
-        line(name, one.act_guard(calib, risk=0.10), risk_on(one, test), COST[name])
+        line(name, one.act_guard(calib, max_risk=0.10), risk_on(one, test), COST[name])
 
     print("\n=== 2. cascade small → large: the large model only when the small one escalates ===")
     cascade = Cascade([small, large], costs=[COST["small"], COST["large"]])
-    info = cascade.act_guard(calib, risk=0.10)
+    info = cascade.act_guard(calib, max_risk=0.10)
     line("cascade small → large", info, risk_on(cascade, test), info["cost"])
     print(f"  answered by the small model {info['answered_by'][0]:.0%}, by the large {info['answered_by'][1]:.0%}; "
-          f"{info['calls']:.2f} models called per question")
+          f"{info['calls_per_question']:.2f} models called per question")
 
     print("\n=== 3. vote of two families: answer only when both agree and both are sure ===")
     vote = Vote([large, other], rule="all")
-    info = vote.act_guard(calib, risk=0.10)
+    info = vote.act_guard(calib, max_risk=0.10)
     line("vote large + other", info, risk_on(vote, test), COST["large"] + COST["other"])
     x, y = next((x, y) for x, y in test if "disagree" in (vote.decide(x).escalate or ""))
     print(f"  {x[:60]!r} (a {y} email): {vote.decide(x).escalate}")
@@ -149,7 +149,7 @@ if __name__ == "__main__":
     def long_email(email):
         return len(email) > 120
     route = Route({long_email: large}, default=small)
-    info = route.act_guard(calib, risk=0.10)
+    info = route.act_guard(calib, max_risk=0.10)
     share_long = np.mean([long_email(x) for x, _ in test])
     line("route by length", info, risk_on(route, test), share_long * COST["large"] + (1 - share_long) * COST["small"])
 

@@ -69,6 +69,7 @@ import json
 import re
 from typing import Any, Callable
 
+from .. import _deprecate
 from ..core import Answer, Catalog, Claim, Question, Quote
 
 VERDICTS = ("allow", "deny", "escalate")
@@ -1511,7 +1512,7 @@ class Guard:
         """A decider's yes / no question "does the conversation authorize this call?" over `reads` ("conversation": the
         whole context, tool outputs included; "user_request": only the user's messages) and the proposed call as text,
         with perturb=k (re-asked without instruction-like sentences; a changed answer escalates) — set as the guard's
-        authorizer and returned. Calibrate it with `guard.calibrate_authorizer(examples, risk=0.10)`."""
+        authorizer and returned. Calibrate it with `guard.calibrate_authorizer(examples, max_risk=0.10)`."""
         if reads not in ("conversation", "user_request"):
             raise ValueError('reads must be "conversation" or "user_request"')
         part = decider.decision("authorized", task, [reads, "proposal"], type=bool, perturb=perturb, **kw)
@@ -1532,13 +1533,14 @@ class Guard:
                 pass
         return Facts(conversation=text, user_request=request, proposal=proposal(c.name, args))
 
-    def calibrate_authorizer(self, examples, risk=0.10, **kw):
+    @_deprecate.kwargs(risk="max_risk")
+    def calibrate_authorizer(self, examples, *, max_risk=0.10, **kw):
         """act_guard on the authorizer from labelled calls [(call, context, authorized: bool)]: P(allowed by the
-        authorizer alone and wrong) ≤ risk for calls like these (solvi.decide.DecisionPart.act_guard). → its report."""
+        authorizer alone and wrong) ≤ max_risk for calls like these (solvi.decide.DecisionPart.act_guard). → its report."""
         if self._authorizer is None:
             raise ValueError("the guard has no authorizer: make_authorizer(decider) first")
         ex = [(self.authorizer_input(c, ctx), bool(y)) for c, ctx, y in examples]
-        out = self._authorizer.act_guard(ex, risk=risk, **kw)
+        out = self._authorizer.act_guard(ex, max_risk=max_risk, **kw)
         self._systems.clear()
         return out
 

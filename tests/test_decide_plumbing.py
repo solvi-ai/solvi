@@ -71,12 +71,12 @@ def test_a_guarantee_on_the_act_signal_needs_a_part_that_uses_it():
     m, cal = DecideModel(Act(), V2), stream(400)
     off = m.decision("q", "Which?", "x", ["a", "b"], use_act=False)
     with pytest.raises(ValueError, match="use_act=False"):
-        off.act_guard(cal, risk=0.05, signal="act")
+        off.act_guard(cal, max_risk=0.05, signal="act")
     assert off.guarantee is None and off.act_threshold is None
-    info = off.act_guard(cal, risk=0.2, signal="auto")          # auto takes the signal the part enforces
+    info = off.act_guard(cal, max_risk=0.2, signal="auto")          # auto takes the signal the part enforces
     assert info["signal"] == "confidence"
     on = m.decision("q2", "Which?", "x", ["a", "b"])
-    assert on.act_guard(cal, risk=0.2, signal="act")["signal"] == "act"
+    assert on.act_guard(cal, max_risk=0.2, signal="act")["signal"] == "act"
 
 
 def test_the_adaptation_of_an_evidence_question_survives_save_and_load(tmp_path):

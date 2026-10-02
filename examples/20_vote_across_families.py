@@ -147,7 +147,7 @@ if __name__ == "__main__":
     rows = [("family A alone", Cascade([a], name="team")), ("family B alone", Cascade([b], name="team")),
             ("vote A + B (both agree)", Vote([a, b], rule="all", name="team"))]
     for label, comb in rows:
-        info = comb.act_guard(calib, risk=0.10)
+        info = comb.act_guard(calib, max_risk=0.10)
         got, err, risk = on_new(comb, test)
         print(f"  {label:25s} answered alone {got:4.0%}, error among them {err:5.1%}, risk {risk:5.1%}   "
               f"(threshold {info['threshold']:.2f})")

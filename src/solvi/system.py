@@ -1102,8 +1102,8 @@ class System:
 
     def guarantee(self, question, examples=None, **kw):
         """A calibrated threshold with a stated promise on this question's answer, from labelled examples
-        [(init_state, correct answer)]: risk= (P(answered alone and wrong) ≤ risk, conformal risk control), error= (the
-        error among the answers given alone ≤ error with probability ≥ 1 − delta, learn-then-test) or method="empirical";
+        [(init_state, correct answer)]: max_risk= (P(answered alone and wrong) ≤ it, conformal risk control), max_error= (the
+        error among the answers given alone ≤ it with probability ≥ 1 − delta, learn-then-test) or method="empirical";
         on the answer's confidence, a computed fact or any signal (signal=), one-sided (answer=), per group (groups=).
         Below the threshold the question abstains with the reason; the promise is recorded with every answer.
         examples=False removes it. → the calibration report. See solvi.guarantee.guard_question."""

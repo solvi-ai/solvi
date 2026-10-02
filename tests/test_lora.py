@@ -101,7 +101,7 @@ def test_training_changes_predictions_fingerprint_trace_and_rollback(ckpt):
     train, test = _toy(120, 1), _toy(40, 2)
     z0 = np.array([m.logits(t, "Which team?", TEAMS)["billing"] for t, _ in test])
     fp0, mfp0, acc0 = part.fingerprint(), m.fingerprint(), _acc(part, test)
-    part.act_guard(_toy(40, 5), risk=0.2)                      # a calibration that the adapter makes stale
+    part.act_guard(_toy(40, 5), max_risk=0.2)                      # a calibration that the adapter makes stale
     snap = (part.escalate_below, part.guarantee)
     fp_cal = part.fingerprint()
     rep, w = _adapt(part, train, holdout=0.25)

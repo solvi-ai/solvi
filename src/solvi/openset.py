@@ -11,7 +11,7 @@ threshold for a share of such inputs and follows the share as the stream goes:
     from solvi.openset import OpenSetGate, leave_out
     sim = leave_out(calib, make)                 # make(kept options) → a decider without the others: the left-out
                                                  # inputs play "new kinds", any answer to them is wrong
-    gate = OpenSetGate.calibrate(known_signals, known_right, sim["novel"], error=0.05)
+    gate = OpenSetGate.calibrate(known_signals, known_right, sim["novel"], max_error=0.05)
     system.guarantee("intent", promise=gate, signal="act")          # or, outside a System: gate.gate(decision)
 
 How the threshold is sized. For a share π of inputs from outside, the error among the answers given alone at
@@ -176,12 +176,12 @@ class OpenSetGate:
 
     # --- calibration
     @classmethod
-    def calibrate(cls, known_scores, known_correct, novel_scores, *, error=0.05, delta=0.10, min_share=0.10,
+    def calibrate(cls, known_scores, known_correct, novel_scores, *, max_error=0.05, delta=0.10, min_share=0.10,
                   shares=SHARES, track=(25, 200), min_track=50, alpha=0.01, horizon=1000, design=(0.1, 0.3, 0.6),
                   window=500, min_support=10, monitor=None, grid=16, seed=0):
         """known_scores / known_correct: the decider's signal and right / wrong on calibration examples like the
         stream's known inputs (the deployed decider on held-out labelled examples); novel_scores: its signal on inputs
-        whose answer is not among its options (leave_out(...)["novel"], or real outside examples). error, delta: the
+        whose answer is not among its options (leave_out(...)["novel"], or real outside examples). max_error, delta: the
         promise. min_share: the share of outside inputs the threshold is always sized for (0: the plain learn-then-test
         threshold while the stream looks like the calibration examples). shares: the grid of shares. track: the windows
         (decisions) the share is estimated over, each once it has min(window, min_track) decisions; () or None: only
@@ -191,7 +191,8 @@ class OpenSetGate:
         through this many known examples. monitor: a solvi.drift.DriftMonitor whose flag also starts the estimate.
         grid: thresholds tried per share (learn-then-test, Bonferroni). → OpenSetGate"""
         from .calibration import check_rate
-        check_rate("error", error)
+        error = max_error
+        check_rate("max_error", error)
         check_rate("delta", delta)
         check_rate("alpha", alpha)
         if alpha < 1e-4:

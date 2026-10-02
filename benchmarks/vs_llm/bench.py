@@ -433,14 +433,14 @@ def arm_solvi_T(rows, out, decider, device=None):
     opts = list(POL.T_QUEUES)
     part = decider_part(model, opts)
     cal = [(r["state"]["message"], t_label(r["gold"]["queue"])) for r in rows if r["split"] == "cal"]
-    g = part.act_guard(cal, risk=RISK)
+    g = part.act_guard(cal, max_risk=RISK)
     log(f"solvi T act_guard: {g}")
     stab = {r["id"] for r in stab_rows(rows, "T")}
     shuffled = random.Random(5).sample(opts, len(opts))
     p_order = decider_part(model, shuffled)
     p_para = decider_part(model, opts, task_text=POL.PARAPHRASE["queue"])
     for p in (p_order, p_para):                                       # the same calibration examples
-        p.act_guard(cal, risk=RISK)
+        p.act_guard(cal, max_risk=RISK)
     recs = [{"act_guard": g}]
     for r in rows:
         variants = [("base", part)] + ([("rep", part), ("order", p_order), ("para", p_para)] if r["id"] in stab else [])
@@ -771,7 +771,7 @@ def arm_inside(name, sets, out, base_url, key, budget):
                                 g = r["gold"][n]
                                 y = (ABST if so else Unknown) if g == ABST else (tuple(g) if kinds[n] == "multi" else g)
                                 ex_.append((llm_text(r), y))
-                            guards[n] = p.act_guard(ex_, risk=RISK)
+                            guards[n] = p.act_guard(ex_, max_risk=RISK)
                 for r in (r for r in rows if r["split"] == apply_to):
                     o = inside_decide(System(cats[r["task"]][0], task_mod(r["task"]).QUESTIONS), r["task"], r)
                     o["variant"] = "base"
@@ -796,7 +796,7 @@ def arm_inside_T(model, rows, so=False):
         cal = [(r["state"]["message"], t_label(r["gold"]["queue"])) for r in rows if r["split"] == "cal"]
     with ThreadPoolExecutor(WORKERS) as ex:                           # the raw decisions into the cache, in parallel
         list(ex.map(lambda r: part(message=r["state"]["message"]), rows))
-    g = part.act_guard(cal, risk=RISK)
+    g = part.act_guard(cal, max_risk=RISK)
     log(f"inside T act_guard: {g}")
 
     def one(r):

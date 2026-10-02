@@ -3,7 +3,7 @@
 `act_guard`, `calibrate_for` and `conformal` set a decision's thresholds in memory. A calibration file keeps them, so a
 catalog calibrated once (on a few hundred labelled examples of your stream) loads the same thresholds every time it starts:
 
-    info = part.act_guard(examples, risk=0.10)
+    info = part.act_guard(examples, max_risk=0.10)
     part.save_calibration("team.calib.json")
 
     # in the catalog module, after making the part and before registering it (groups add the part's inputs):
@@ -74,8 +74,8 @@ def _kind_of(part):
     from .decide import DecisionPart
     if isinstance(part, DecisionPart):
         return "DecisionPart"
-    from .multi import _Combination
-    if isinstance(part, _Combination):
+    from .multi import Combination
+    if isinstance(part, Combination):
         return type(part).__name__
     raise TypeError(f"a calibration file is made from a DecisionPart or a Cascade / Vote / Route, not {type(part).__name__}")
 
@@ -374,9 +374,9 @@ def cmd_calibrate(a):
                 _fail("calibrate --method ltt: no thresholds per group (use --method crc)")
             if not hasattr(part, "calibrate_for"):
                 _fail("calibrate --method ltt: a combination calibrates with act_guard (--method crc)")
-            info = part.calibrate_for(examples, error=a.risk, method="ltt", delta=a.delta)
+            info = part.calibrate_for(examples, max_error=a.risk, method="ltt", delta=a.delta)
         else:
-            info = part.act_guard(examples, risk=a.risk, groups=groups, min_group=a.min_group,
+            info = part.act_guard(examples, max_risk=a.risk, groups=groups, min_group=a.min_group,
                                   delta=None if a.delta < 0 else a.delta)
         if a.conformal:
             info["conformal"] = part.conformal(examples, coverage=a.conformal)

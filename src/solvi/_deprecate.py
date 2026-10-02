@@ -92,3 +92,27 @@ def module_getattr(module, names):
         renamed(f"{module}.{name}", f"{mod or module}.{new}", stacklevel=3)
         return getattr(importlib.import_module(mod or module), new)
     return __getattr__
+
+
+class Result(dict):
+    """A result dict whose old keys still read (warning once) but are not in it: `Result(d, old="new")`. Iteration,
+    equality and JSON see the new keys only."""
+
+    def __init__(self, data=(), owner="", **old):
+        super().__init__(data)
+        self._old, self._owner = old, owner
+
+    def __missing__(self, key):
+        new = self._old.get(key)
+        if new is None:
+            raise KeyError(key)
+        renamed(f"{self._owner}[{key!r}]", f"[{new!r}]", stacklevel=3)
+        return self[new]
+
+    def get(self, key, default=None):
+        if key not in self and key in self._old:
+            return self[key]
+        return super().get(key, default)
+
+    def __reduce__(self):                             # pickles / copies as a plain dict
+        return (dict, (dict(self),))

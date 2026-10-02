@@ -19,7 +19,7 @@ unified diff. Out come seven yes/no risk answers and a route: **quick review** o
   is not sure of abstains.
 - **The route.** `review = quick` only when every answer is "no"; any "yes", and any abstention, gives `full`.
   `risk_reasons` says why in words ("missing_tests: logic changed in app/utils/format.py, no test file").
-- **The guarantee.** Each decider question is calibrated with `act_guard(examples, risk=0.10 / 4)` on 400 labelled
+- **The guarantee.** Each decider question is calibrated with `act_guard(examples, max_risk=0.10 / 4)` on 400 labelled
   changes: P(answered alone and wrong) ≤ 2.5% per question. A risky change reaches quick review only if some decider
   question it should have flagged was answered "no" alone, so P(a risky change goes to quick review) ≤ 4 × 2.5% = 10%
   for changes like the labelled ones (a union bound; wrong "yes" answers count against the budget too, so the real rate
@@ -142,7 +142,7 @@ model = DecideModel.load("solvi-ai/solvi-large")      # a local decider (pip ins
 
 def decided(q, examples):
     front = model.decision(f"{q}_model", DECIDED[q], "change_text", Literal["yes", "no"], perturb=2)
-    front.act_guard(your_labelled_changes(q), risk=RISK / len(DECIDED))
+    front.act_guard(your_labelled_changes(q), max_risk=RISK / len(DECIDED))
     part = reader.decision(...)                                      # the keyword stand-in, as now
     ...
     cat.fn(provides=q)(front)         # asked first

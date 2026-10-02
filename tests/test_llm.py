@@ -182,7 +182,7 @@ def test_a_usage_or_logprobs_field_of_an_unexpected_shape_does_not_stop_the_answ
         return {**c, "usage": "n/a", "choices": [{**c["choices"][0], "logprobs": {"content": [1, "x"]}}]}
     m = model(Shapeless(odd))
     d = m.decision("team", "Which team?", "email", TEAMS).decide("I was charged twice")
-    assert d.value == "billing" and d.escalate is None and m.scorer.usage["prompt_tokens"] == 0
+    assert d.value == "billing" and d.escalate is None and m.scorer.usage["input_tokens"] == 0
 
 
 def test_a_catalog_answer_abstains_on_an_invalid_reply_and_the_audit_says_why():
@@ -264,7 +264,7 @@ def test_an_llm_decision_is_traced_calibrated_and_replayed_without_calling_it_ag
     m = model(fake)
     part = m.decision("team", "Which team?", "email", TEAMS)
     info = part.act_guard([("charged twice", "billing"), ("my parcel", "shipping")] * 30 + [("hello", "shipping")] * 10,
-                          risk=0.10)
+                          max_risk=0.10)
     assert info["signal"] == "confidence" and info["risk"] <= 0.10
     cat = Catalog()
     part.question(cat, "route")
@@ -384,19 +384,19 @@ def test_a_400_about_the_input_escalates_that_item_and_keeps_the_format():
     part = m.decision("team", "Which team?", "email", TEAMS)
     assert part.decide("my parcel is late").value == "shipping"
     d = part.decide("BAD input")
-    assert d.escalate and "invalid input for the endpoint: HTTP 400 — This model's maximum context length" in d.escalate
+    assert d.escalate and "the LLM server refused the request: HTTP 400 — This model's maximum context length" in d.escalate
     assert fake.bodies[-1]["response_format"]["type"] == "json_schema" and "logprobs" in fake.bodies[-1]
     assert part.decide("I was charged").value == "billing"
     assert fake.bodies[-1]["response_format"]["type"] == "json_schema"         # the format was never stepped down
     first = Picky()
     d = model(first).decision("team", "Which team?", "email", TEAMS).decide("BAD before any success")
-    assert d.escalate and "invalid input" in d.escalate and first.calls == 1   # not a format problem: no ladder
+    assert d.escalate and "refused the request" in d.escalate and first.calls == 1   # not a format problem: no ladder
     late = FakeLLM()
     lm = model(late)
     lm.decision("team", "Which team?", "email", TEAMS).decide("my parcel is late")
     late.reject = {"response_format"}                                         # after a success: never stepped down
     d = lm.decision("team", "Which team?", "email", TEAMS).decide("I was charged")
-    assert d.escalate and "invalid input for the endpoint: HTTP 400" in d.escalate
+    assert d.escalate and "the LLM server refused the request: HTTP 400" in d.escalate
     assert lm.scorer._format == "json_schema"
 
 
@@ -566,7 +566,7 @@ def test_a_wrapped_provider_error_about_the_format_steps_the_ladder_down():
         ["json_schema", "json_schema", "json_object", None]
     down = Gateway(always=True)
     d = model(down).decision("team", "Which team?", "email", TEAMS).decide("my parcel is late")
-    assert d.escalate and "invalid input for the endpoint: HTTP 400 after trying" in d.escalate
+    assert d.escalate and "the LLM server refused the request: HTTP 400 after trying" in d.escalate
     assert "Provider returned error" in d.escalate and "json_schema response format is not supported" in d.escalate
     assert "Cloudflare" in d.escalate and len(down.bodies) == 4
 
@@ -730,14 +730,14 @@ def test_a_calibration_refuses_log_probabilities_mixed_with_written_numbers_and_
     mixed = [("I was charged twice on my card", "billing"), ("my parcel is late", "shipping")] * 20
     part = model(SomeLogprobs(), workers=1).decision("team", "Which team?", "email", TEAMS)
     with pytest.raises(ValueError, match="two sources: 20 from log-probabilities, 20 from the numbers the model wrote"):
-        part.act_guard(mixed, risk=0.10)
+        part.act_guard(mixed, max_risk=0.10)
     with pytest.raises(ValueError, match="two sources"):
-        part.calibrate_for(mixed, error=0.10)
+        part.calibrate_for(mixed, max_error=0.10)
     other = model(SomeLogprobs(), workers=1).decision("team", "Which team?", "email", TEAMS)
     with pytest.raises(ValueError, match="part 'team'"):
-        Vote([model(SomeLogprobs(), workers=1).decision("team", "Which team?", "email", TEAMS), other]).act_guard(mixed, risk=0.10)
+        Vote([model(SomeLogprobs(), workers=1).decision("team", "Which team?", "email", TEAMS), other]).act_guard(mixed, max_risk=0.10)
     clean = model(SomeLogprobs(), workers=1).decision("team", "Which team?", "email", TEAMS)
-    clean.act_guard([("charged twice on my card", "billing"), ("card lost in the parcel", "shipping")] * 20, risk=0.5)
+    clean.act_guard([("charged twice on my card", "billing"), ("card lost in the parcel", "shipping")] * 20, max_risk=0.5)
     assert clean.guarantee["probabilities"] == "logprobs"
     clean.escalate_below = 0.5                                 # so that the threshold itself lets both through
     d = clean.decide("I was charged twice")                    # no "card": the written numbers
@@ -746,7 +746,7 @@ def test_a_calibration_refuses_log_probabilities_mixed_with_written_numbers_and_
                                  "log-probabilities")
     assert clean.decide("charged on my card").escalate is None
     plain = model(FakeLLM()).decision("team", "Which team?", "email", TEAMS)   # no logprobs at all: as before
-    plain.act_guard(mixed, risk=0.10)
+    plain.act_guard(mixed, max_risk=0.10)
     assert plain.guarantee["probabilities"] == "stated"
 
 
@@ -760,10 +760,10 @@ def test_act_guard_and_calibrate_for_take_span_answers_compared_by_their_text():
     ex = [(f"Hello, order A-{i} is late.", f"A-{i}") for i in range(40)]
     ex += [(f"Hello, the wrong order A-{i} came.", f"A-{i}") for i in range(10)]
     span = model(FakeLLM(reply=reply)).decision("o", "Order number?", "email", Span[str])
-    info = span.act_guard(ex, risk=0.10)
+    info = span.act_guard(ex, max_risk=0.10)
     assert info["error"] == 0.0 and info["answered"] == pytest.approx(0.8) and info["base_error"] == pytest.approx(0.2)
-    got = span.calibrate_for(ex, error=0.05)
-    assert got["coverage"] == pytest.approx(0.8) and got["error"] == 0.0
+    got = span.calibrate_for(ex, max_error=0.05)
+    assert got["answered"] == pytest.approx(0.8) and got["error"] == 0.0
     maybe = model(FakeLLM(reply=reply)).decision("o", "Order number?", "email", Maybe[Span[str]])
-    info = maybe.act_guard(ex + [("Hello, nothing to report.", Unknown)] * 20, risk=0.10)
+    info = maybe.act_guard(ex + [("Hello, nothing to report.", Unknown)] * 20, max_risk=0.10)
     assert info["base_error"] == pytest.approx(10 / 70)

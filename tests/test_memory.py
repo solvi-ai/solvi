@@ -170,7 +170,7 @@ def test_calibrate_sets_the_abstain_threshold_leave_one_out():
     for team in TEAMS:
         for t in texts(team, 12):
             mem.add(t, team, source="human")
-    got = mem.calibrate(risk=0.1)
+    got = mem.calibrate(max_risk=0.1)
     assert got["n"] == 36 and got["risk"] <= 0.1 and got["proposed"] > 0.8 and mem.guarantee["method"] == "crc-loo"
     # a memory whose labels are noise proposes nothing it cannot back
     noisy = CorrectionMemory(part)
@@ -178,7 +178,7 @@ def test_calibrate_sets_the_abstain_threshold_leave_one_out():
     for team in TEAMS:
         for t in texts(team, 12):
             noisy.add(t, rng.choice(TEAMS), source="human")
-    g = noisy.calibrate(risk=0.05)
+    g = noisy.calibrate(max_risk=0.05)
     assert g["risk"] <= 0.05
     assert got["min_strength"] > -1e8 and got["radius"] == mem.radius and 0 <= got["nearest"]["min"] <= got["nearest"]["max"]
     assert "note" not in got
@@ -192,7 +192,7 @@ def test_calibrate_on_cases_that_are_all_out_of_each_others_reach_says_so(tmp_pa
     for team in TEAMS:
         for t in texts(team, 6):
             mem.add(t, team, source="human")
-    got = mem.calibrate(risk=0.1)
+    got = mem.calibrate(max_risk=0.1)
     assert got["min_strength"] == float("inf") and mem.min_strength == float("inf") and got["proposed"] == 0.0
     assert "no stored case has another within the radius 1e-09" in got["note"] and got["nearest"]["min"] > 1e-9
     assert mem.propose(texts("billing", 1)[0]).label is None
@@ -243,7 +243,7 @@ def test_calibrate_does_not_change_the_live_min_strength_while_it_runs():
         seen.append(mem.min_strength)
         return orig(*a, **kw)
     mem._propose = spy
-    mem.calibrate(risk=0.2)
+    mem.calibrate(max_risk=0.2)
     assert seen and set(seen) == {2.5}
 
 
@@ -270,7 +270,7 @@ def test_leave_one_out_leaves_out_the_cases_twins():
     for t, y in zip(far, ["billing", "technical", "shipping"]):
         mem.add(t, y, by="ann")
         mem.add(t, y, by="bob")               # the same correction stored twice: a twin, not independent evidence
-    got = mem.calibrate(risk=0.3)
+    got = mem.calibrate(max_risk=0.3)
     assert got["proposed"] == 0.0                # each case's only neighbour is its twin: nothing left to propose
 
 
@@ -283,7 +283,7 @@ def test_calibrate_when_one_input_was_corrected_twice_says_so_instead_of_raising
     t = texts("billing", 1)[0]
     mem.add(t, "shipping", stored_id="a")
     mem.add(t, "shipping", stored_id="b")
-    got = mem.calibrate(risk=0.05)
+    got = mem.calibrate(max_risk=0.05)
     assert got["min_strength"] == float("inf") and got["proposed"] == 0.0
     assert got["nearest"] == {"min": None, "median": None, "max": None}
     assert "every stored case has the same features" in got["note"] and "radius" not in got["note"]

@@ -124,7 +124,7 @@ model = DecideModel.load("solvi-ai/solvi-large")      # a local decider (pip ins
 
 front = model.decision("skill_model", "Which of the agent's skills does this prompt need, if any?", "prompt", OPTIONS,
                        other=False, min_margin=0.15, perturb=2)
-front.act_guard(your_labelled_prompts, risk=RISK)                  # [(prompt, skill name or "none")]
+front.act_guard(your_labelled_prompts, max_risk=RISK)                  # [(prompt, skill name or "none")]
 front.conformal(your_labelled_prompts, coverage=0.97)
 cat.fn(provides="picked")(front)             # declared before skill_decider: asked after the user's own naming
 cat.fn(provides="picked")(skill_decider)     # the keywords: when the model escalates or its server does not answer

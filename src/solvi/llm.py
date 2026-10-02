@@ -4,7 +4,7 @@ the LLM proposes, solvi's checks, rules and thresholds decide.
     from solvi.llm import llm
     model = llm("http://127.0.0.1:8080/v1", "qwen2.5-7b-instruct")          # api_key="..." for a hosted service
     part = model.decision("team", "Which team should handle this?", "email", {"billing": "Charges", "shipping": "Delivery"})
-    part.act_guard(examples, risk=0.10)                                      # start with the LLM alone, calibrated
+    part.act_guard(examples, max_risk=0.10)                                      # start with the LLM alone, calibrated
 
 One question is one request (`POST {base_url}/chat/completions`, temperature 0), the input between <text> and </text>
 (a tag of that name inside it written as &lt;text&gt;, so it cannot close the block), with a JSON schema for the reply:
@@ -53,20 +53,15 @@ second" is not a good default: measured on three data sets, a cascade came out n
 from __future__ import annotations
 
 import hashlib
-import http.client
 import json
 import math
 import re
-import threading
-import time
-import urllib.error
-import urllib.parse
-import urllib.request
 from concurrent.futures import ThreadPoolExecutor
 
 import numpy as np
 
 from .decide import DecideModel
+from .remote import WHY_CHARS, NoAnswer, Refused, RemoteClient, RemoteError, endpoint, error_text  # noqa: F401 (endpoint: 0.7 import path)
 
 EPS = 1e-6
 NOT_STATED = "not stated"
@@ -126,15 +121,6 @@ def template_hash():
     return hashlib.sha256(blob.encode()).hexdigest()[:16]
 
 
-def endpoint(url):
-    """A URL without credentials, query or fragment — what the trace may show."""
-    p = urllib.parse.urlsplit(url)
-    host = p.hostname or ""
-    if p.port:
-        host += f":{p.port}"
-    return urllib.parse.urlunsplit((p.scheme, host, p.path, "", ""))
-
-
 class InvalidOutput(ValueError):
     """The LLM's reply broke the contract (not JSON, an answer outside the options, a quote not in the text, ...).
     `answer`: the rejected answer when there is one (a span answer not in the text), recorded in `extra["llm"]["rejected"]`."""
@@ -144,51 +130,14 @@ class InvalidOutput(ValueError):
         self.answer = answer
 
 
-class LLMError(RuntimeError):
+class LLMError(RemoteError):
     """The server refused the request itself (a wrong key, model or URL: HTTP 401, 403, 404 and other client errors) —
     a configuration error, raised rather than escalated. The message has the endpoint, never the key."""
 
 
-class _Transient(Exception):
-    """The server did not answer (network, timeout, 429, 5xx) after the retries."""
-
-
-class _BadInput(Exception):
-    """The server refused this request's input (HTTP 400 / 413 / 422 not about the reply format): that item escalates."""
-
-
 _FORMAT_WORDS = re.compile(r"response_format|json_schema|json_object|logprobs|structured[ _-]?outputs?|guided",
                            re.IGNORECASE)
-WHY_CHARS = 300                                        # how much of a server's error message goes into an escalation
-
-
-def _error_text(e):
-    """The body of an HTTP error → its message: the JSON error's "message" (or a string "detail", as FastAPI and Jeeves
-    send), else the text. A gateway that wraps the upstream provider's error (OpenRouter: "Provider returned error" with
-    the real cause in `error.metadata.raw`) → the message and that cause. Whitespace runs collapsed; not cut (the caller
-    cuts what it shows)."""
-    try:
-        raw = e.read(16384).decode("utf-8", "replace")
-    except Exception:  # noqa: BLE001 — no body to read
-        return ""
-    try:
-        j = json.loads(raw)
-        err = j.get("error")
-        msg = err.get("message") if isinstance(err, dict) else err or j.get("message")
-        if not isinstance(msg, str) and isinstance(j.get("detail"), str):   # FastAPI / Jeeves: {"detail": "..."}
-            msg = j["detail"]
-        out = msg if isinstance(msg, str) else raw
-        meta = err.get("metadata") if isinstance(err, dict) else None
-        cause = meta.get("raw") if isinstance(meta, dict) else None
-        if cause is not None and not isinstance(cause, str):
-            cause = json.dumps(cause, ensure_ascii=False)
-        if cause and cause.strip():
-            who = meta.get("provider_name")
-            out += f" ({who}: {cause})" if isinstance(who, str) and who else f" ({cause})"
-        raw = out
-    except (ValueError, AttributeError):
-        pass
-    return " ".join(raw.split())
+_error_text = error_text                               # 0.7 name, for the modules that import it
 
 
 def _shape(it):
@@ -562,11 +511,13 @@ def _extra_body(extra):
         raise ValueError(f"extra_body is not JSON: {e}") from None
 
 
-class LLMScorer:
+class LLMScorer(RemoteClient):
     """A scorer for DecideModel over an OpenAI-compatible `POST {base_url}/chat/completions` (standard library HTTP, no
-    dependencies). See the module docs; `llm(...)` builds the DecideModel."""
+    dependencies; the shared client of solvi.remote). See the module docs; `llm(...)` builds the DecideModel."""
 
     tag = "llm"
+    service = "the LLM server"
+    error = LLMError
 
     def __init__(self, base_url, model, api_key=None, *, timeout=60.0, retries=2, backoff=1.0, response_format="auto",
                  logprobs="auto", ask="probabilities", max_tokens=None, seed=None, headers=None, extra_body=None,
@@ -577,19 +528,10 @@ class LLMScorer:
             raise ValueError("logprobs must be 'auto', True or False")
         if ask not in ("probabilities", "confidence"):
             raise ValueError('ask must be "probabilities" or "confidence"')
-        sp = urllib.parse.urlsplit(base_url)
-        if sp.scheme.lower() not in ("http", "https"):
-            raise ValueError(f"an LLM endpoint is an http(s):// URL, not {str(base_url)[:40]!r}")   # no file: / ftp:
-        path = sp.path.rstrip("/")
-        path = path if path.endswith("/chat/completions") else path + "/chat/completions"
-        self.url = urllib.parse.urlunsplit((sp.scheme, sp.netloc, path, sp.query, ""))
-        self.endpoint = endpoint(self.url)
-        self.model = model
-        self._key = api_key
-        self.timeout, self.retries, self.backoff = float(timeout), int(retries), float(backoff)
+        super().__init__(base_url, model, api_key, path="/chat/completions", timeout=timeout, retries=retries,
+                         backoff=backoff, headers=headers, opener=opener, sleep=sleep)
         self.response_format, self.logprobs, self.ask = response_format, logprobs, ask
         self.seed = seed
-        self._headers = dict(headers or {})
         self.extra_body = _extra_body(extra_body)
         # a request that asks the model to think: "auto" starts with the contract in the prompt, because a server that
         # enforces a reply format by constrained decoding can skip the thinking altogether (see `llm`)
@@ -600,8 +542,6 @@ class LLMScorer:
         # default: 512 for a reply alone, 2,048 when the thinking counts against the limit too
         self.max_tokens = int(max_tokens) if max_tokens is not None else (MAX_TOKENS_REASONING if self.reasoning else 512)
         self.workers = max(1, int(workers))
-        self.opener = opener or urllib.request.urlopen
-        self.sleep = sleep or time.sleep
         self.template = template_hash()
         self.model_id = f"llm:{model}@{self.endpoint}"
         # what the server has accepted so far ("auto": the first that works, kept for the next requests); worker
@@ -609,12 +549,6 @@ class LLMScorer:
         self._format = ("prompt" if self.reasoning else "json_schema") if response_format == "auto" else response_format
         self._lp = logprobs is not False
         self._ok = False
-        self._lock = threading.Lock()
-        self.requests = 0
-        self.usage = {"prompt_tokens": 0, "completion_tokens": 0}
-
-    def __repr__(self):                                # never the key
-        return f"LLMScorer({self.endpoint!r}, {self.model!r})"
 
     def fingerprint(self):
         fp = f"llm|{self.endpoint}|{self.model}|{self.template}|{self.ask}|{self.response_format}|{self.logprobs}|" \
@@ -645,15 +579,6 @@ class LLMScorer:
             b["top_logprobs"] = 5
         return b
 
-    def _post(self, body):
-        data = json.dumps(body, ensure_ascii=False).encode()
-        headers = {"content-type": "application/json", **self._headers}
-        if self._key:
-            headers["authorization"] = f"Bearer {self._key}"
-        req = urllib.request.Request(self.url, data=data, method="POST", headers=headers)  # noqa: S310 — http(s) only
-        with self.opener(req, timeout=self.timeout) as r:
-            return json.loads(r.read().decode())
-
     def _ladder(self, fmt=None, lp=None):
         """The (format, logprobs) settings to try after the server rejects the reply format (HTTP 400): drop what it may
         not support, one thing at a time, as far as the configuration allows."""
@@ -683,42 +608,33 @@ class LLMScorer:
             return True
 
     def request(self, it):
-        """→ (the server's response dict, the format used); _Transient when the server does not answer, _BadInput when it
-        refuses this request's input."""
-        attempt, last, tried = 0, None, []
-        while True:
+        """→ (the server's response dict, the format used); NoAnswer when the server does not answer, Refused when it
+        refuses this request's input (after the reply-format ladder), LLMError for a wrong key, model or URL."""
+        tried = []
+        with self._lock:
+            fmt, lp = self._format, self._lp
+        tried.append((fmt, lp))
+        current = [fmt, lp]
+
+        def refused(code, why):                    # HTTP 400 / 413 / 422: maybe the reply format; step down and retry
+            f, p = current
+            if code == 413 or not self._step_down(f, p, why):
+                return None
             with self._lock:
-                fmt, lp = self._format, self._lp
-            if (fmt, lp) not in tried:
-                tried.append((fmt, lp))
-            body = self.body(it, fmt, lp)
-            try:
-                resp = self._post(body)
-                with self._lock:
-                    self.requests += 1
-                    self._ok = True
-                return resp, fmt
-            except urllib.error.HTTPError as e:
-                code = e.code
-                if code in (400, 413, 422):
-                    why = _error_text(e)
-                    if code != 413 and self._step_down(fmt, lp, why):
-                        continue
-                    steps = "" if len(tried) < 2 else " after trying " + ", ".join(
-                        f + (" with logprobs" if with_lp else "") for f, with_lp in tried)
-                    raise _BadInput(f"HTTP {code}{steps}" + (f" — {why[:WHY_CHARS]}" if why else "")) from None
-                if code in (408, 409, 429) or code >= 500:
-                    last = f"HTTP {code}"
-                else:
-                    raise LLMError(f"HTTP {code} from {self.endpoint} (model {self.model!r}): check the URL, the model "
-                                   "name and the API key") from None
-            except (urllib.error.URLError, TimeoutError, OSError, ValueError, http.client.HTTPException) as e:
-                # HTTPException: the connection broke mid-answer (IncompleteRead, RemoteDisconnected, BadStatusLine)
-                last = f"{type(e).__name__}: {getattr(e, 'reason', e)}"
-            attempt += 1
-            if attempt > self.retries:
-                raise _Transient(f"no answer from {self.endpoint} after {attempt} attempts ({last})")
-            self.sleep(self.backoff * 2 ** (attempt - 1))
+                current[:] = [self._format, self._lp]
+            if tuple(current) not in tried:
+                tried.append(tuple(current))
+            return self.body(it, *current)
+        try:
+            resp = self.send(self.body(it, fmt, lp), refused)
+        except Refused as e:
+            steps = "" if len(tried) < 2 else " after trying " + ", ".join(
+                f + (" with logprobs" if with_lp else "") for f, with_lp in tried)
+            raise Refused(f"{self.service} refused the request: HTTP {e.code}{steps}" + (f" — {e.why}" if e.why else ""),
+                          e.code, e.why) from None
+        with self._lock:
+            self._ok = True
+        return resp, current[0]
 
     def one(self, it):
         """One Item → the scorer's output; an invalid reply or no answer → uniform logits and `escalate` (never a guess)."""
@@ -727,11 +643,10 @@ class LLMScorer:
         base = {"endpoint": self.endpoint, "model": self.model, "template": self.template}
         try:
             resp, fmt = self.request(it)
-        except _Transient as e:
-            return {**blank, "escalate": f"the LLM server did not answer — {e}", "transient": True,
-                    "info": {"llm": base}}
-        except _BadInput as e:
-            return {**blank, "escalate": f"invalid input for the endpoint: {e}", "info": {"llm": base}}
+        except NoAnswer as e:
+            return {**blank, "escalate": str(e), "transient": True, "info": {"llm": base}}
+        except Refused as e:
+            return {**blank, "escalate": str(e), "info": {"llm": base}}
         info = {**base, "format": fmt}
         try:
             if not isinstance(resp, dict):          # a 200 that is not a chat completion (a list, a string, a number)
@@ -743,20 +658,16 @@ class LLMScorer:
             u = resp.get("usage")
             if not isinstance(u, dict):             # "usage": "n/a": not counted, the answer is still read
                 u = {}
-            with self._lock:
-                for key in self.usage:
-                    if isinstance(u.get(key), int):
-                        self.usage[key] += u[key]
-            if u:
-                info["usage"] = {key: u[key] for key in ("prompt_tokens", "completion_tokens") if isinstance(u.get(key), int)}
+            got = self.count(u)
+            if got:
+                info["usage"] = got
             if resp.get("model") and resp.get("model") != self.model:
                 info["served_by"] = str(resp["model"])
             msg = ch.get("message") or {}
             if not isinstance(msg, dict):
                 raise InvalidOutput(f"the response's message is not an object but a {type(msg).__name__}")
-            det = u.get("completion_tokens_details")
-            if isinstance(det, dict) and isinstance(det.get("reasoning_tokens"), int):
-                info["reasoning_tokens"] = det["reasoning_tokens"]
+            if "reasoning_tokens" in got:
+                info["reasoning_tokens"] = got["reasoning_tokens"]
             if self.reasoning and not self._reasoning_hidden and not _thought(msg, u):
                 info["reasoning"] = "none"             # asked to think, answered without thinking
                 self._warn_unthought(fmt)
@@ -807,8 +718,8 @@ def llm(base_url, model, api_key=None, *, timeout=60.0, retries=2, backoff=1.0, 
     vLLM, "http://127.0.0.1:8080/v1" for llama.cpp, "http://127.0.0.1:11434/v1" for Ollama). model: the model name the
     server knows. api_key: sent as a Bearer token, never recorded. response_format: "auto" (json_schema, then json_object,
     then the contract in the prompt only, as far as the server accepts — stepped down only before the first successful
-request and on a 400 about the format; any other 400 / 413 / 422 escalates that question: "invalid input for the
-endpoint"; when extra_body asks for reasoning, "auto" is the contract in the prompt only, so the model thinks before it
+request and on a 400 about the format; any other 400 / 413 / 422 escalates that question: "the LLM server refused
+the request"; when extra_body asks for reasoning, "auto" is the contract in the prompt only, so the model thinks before it
 answers — see the module docs), or one of them. logprobs: "auto" (ask for them;
     drop them when the server refuses; a gateway whose providers differ answers some requests from them and some from
     the written numbers — a calibration then refuses the mix), True, False. ask: "probabilities" (one per option) or "confidence" (one number,

@@ -203,7 +203,7 @@ def _examples():
 def test_save_and_load_calibration_restores_the_fingerprint(tmp_path):
     m = model(noise=3.0)
     part = m.decision("team", TASK, "email", TEAMS)
-    info = part.act_guard(_examples(), risk=0.10)
+    info = part.act_guard(_examples(), max_risk=0.10)
     part.conformal(_examples(), coverage=0.9)
     f = part.save_calibration(tmp_path / "team.calib.json")
     rec = json.loads(Path(f).read_text())
@@ -219,7 +219,7 @@ def test_save_and_load_calibration_restores_the_fingerprint(tmp_path):
 
 def test_load_calibration_refuses_another_model_or_question(tmp_path):
     part = model().decision("team", TASK, "email", TEAMS)
-    part.act_guard(_examples(), risk=0.10)
+    part.act_guard(_examples(), max_risk=0.10)
     f = part.save_calibration(tmp_path / "c.json")
     other = model(version="2").decision("team", TASK, "email", TEAMS)
     with pytest.raises(ValueError, match="another model"):
@@ -246,7 +246,7 @@ def test_a_calibration_file_does_not_load_onto_a_part_computing_another_signal(t
                         (dict(long="retrieve", top_k=2), dict(long="retrieve", top_k=3)),
                         (dict(long="retrieve", rerank=True), dict(long="retrieve"))):
         part = m.decision("team", TASK, "email", TEAMS, **made)
-        part.act_guard(_examples(), risk=0.2)
+        part.act_guard(_examples(), max_risk=0.2)
         f = part.save_calibration(tmp_path / "s.json")
         assert m.decision("team", TASK, "email", TEAMS, **made).load_calibration(f).fingerprint() == part.fingerprint()
         with pytest.raises(ValueError, match="computes its signal"):
@@ -256,7 +256,7 @@ def test_a_calibration_file_does_not_load_onto_a_part_computing_another_signal(t
 def test_loading_a_calibration_keeps_both_thresholds_as_saved(tmp_path):
     m = model(noise=3.0)
     part = m.decision("team", TASK, "email", TEAMS)
-    part.act_guard(_examples(), risk=0.2)
+    part.act_guard(_examples(), max_risk=0.2)
     part.act_threshold = 0.7                             # set by hand after calibrating: saved and restored as it is
     f = part.save_calibration(tmp_path / "t.json")
     fresh = m.decision("team", TASK, "email", TEAMS).load_calibration(f)
@@ -268,7 +268,7 @@ def test_calibration_with_groups_and_everything_escalated(tmp_path):
     m = model(noise=3.0)
     part = m.decision("team", TASK, "email", TEAMS)
     ex = [(Facts(email=t, domain="a" if i % 3 else "b"), k) for i, (t, k) in enumerate(_examples())]
-    part.act_guard(ex, risk=0.2, groups="domain", min_group=30)
+    part.act_guard(ex, max_risk=0.2, groups="domain", min_group=30)
     f = part.save_calibration(tmp_path / "g.json")
     fresh = m.decision("team", TASK, "email", TEAMS).load_calibration(f)
     assert fresh.fingerprint() == part.fingerprint()
@@ -276,13 +276,13 @@ def test_calibration_with_groups_and_everything_escalated(tmp_path):
     # grouping by a function: pass it again; its code must match
     def dom(email):
         return "long" if len(email) > 45 else "short"
-    part.act_guard(ex, risk=0.2, groups=dom, min_group=30)
+    part.act_guard(ex, max_risk=0.2, groups=dom, min_group=30)
     part.save_calibration(f)
     with pytest.raises(ValueError, match="pass it again"):
         m.decision("team", TASK, "email", TEAMS).load_calibration(f)
     assert m.decision("team", TASK, "email", TEAMS).load_calibration(f, groups=dom).fingerprint() == part.fingerprint()
     # nothing can be answered alone: the threshold is inf and it round-trips
-    part.act_guard(_examples()[:3], risk=0.01)
+    part.act_guard(_examples()[:3], max_risk=0.01)
     part.save_calibration(f)
     assert m.decision("team", TASK, "email", TEAMS).load_calibration(f).escalate_below == float("inf")
 
@@ -294,7 +294,7 @@ def test_combination_calibration_round_trip(tmp_path):
     def cascade():
         return Cascade([a.decision("team", TASK, "email", TEAMS), b.decision("team", TASK, "email", TEAMS)])
     c = cascade()
-    c.act_guard(_examples(), risk=0.1)
+    c.act_guard(_examples(), max_risk=0.1)
     f = c.save_calibration(tmp_path / "k.json")
     c2 = cascade().load_calibration(f)
     assert c2.fingerprint() == c.fingerprint() and c2.threshold == c.threshold
@@ -389,7 +389,7 @@ def test_calibrate_command_groups_ltt_and_usage_errors(tmp_path, capsys):
     assert json.loads(out.read_text())["groups"]["by"] == ["domain"]
     code, text = run(capsys, "calibrate", f"{d}/catalog.py:system", "route", jl, "--method", "ltt", "--risk", "0.2",
                      "--out", out, "--json")
-    assert code in (0, 1) and "coverage" in json.loads(text)
+    assert code in (0, 1) and "answered" in json.loads(text)
     sysspec = f"{d}/catalog.py:system"
     for argv in (["priority", jl], ["nope", jl], ["route", tmp_path / "missing.csv"],
                  ["route", jl, "--method", "ltt", "--groups", "domain"]):

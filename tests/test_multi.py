@@ -56,8 +56,10 @@ def test_cascade_asks_the_large_model_only_when_the_small_one_escalates():
     assert d.escalate.startswith("model escalated: every model of the cascade escalated")
     assert "team (small)" in d.escalate and "team (large)" in d.escalate
     assert d.extra["answered_by"] is None and d.extra["calls"] == 2 and d.value == d.extra["stages"][1]["value"]
-    u = c.usage()
-    assert u["asked"] == 2 and u["calls"] == {"0:team": 2, "1:team": 1} and u["per_question"] == 1.5
+    u = c.calls()
+    assert u["asked"] == 2 and u["calls"] == {"0:team": 2, "1:team": 1} and u["calls_per_question"] == 1.5
+    with pytest.warns(DeprecationWarning, match=r"usage\(\) is deprecated: use calls\(\)"):
+        assert c.usage()["calls_per_question"] == 1.5                 # the 0.7 name, one release
     assert u["cost"] == pytest.approx((2 * 45 + 137) / 2)
 
 
@@ -134,13 +136,13 @@ def test_a_route_keyed_by_a_fact_name_does_not_read_a_raw_input_as_that_fact():
     with pytest.raises(ValueError, match="reads the fact"):          # every non-empty text used to go to the vip route
         r.decide("Refund, charged twice.")
     with pytest.raises(ValueError, match="reads the fact"):          # and the shared threshold was calibrated on that
-        r.act_guard([(CLEAR, "billing")] * 20, risk=0.5)
+        r.act_guard([(CLEAR, "billing")] * 20, max_risk=0.5)
     assert large.scorer.calls == []
     with pytest.raises(ValueError, match="does not give"):           # a missing fact is not false
         r.decide(Facts(email="Refund, charged twice."))
     assert r.decide(Facts(email="Refund, charged twice.", vip=False)).extra["route"]["by"] == "default"
     assert r.decide({"email": "Refund, charged twice.", "vip": True}).extra["route"]["by"] == "vip"   # a state gives it
-    info = r.act_guard([(Facts(email=CLEAR, vip=bool(i % 2)), "billing") for i in range(20)], risk=0.5)
+    info = r.act_guard([(Facts(email=CLEAR, vip=bool(i % 2)), "billing") for i in range(20)], max_risk=0.5)
     assert info["n"] == 20
 
     def long_email(email):                                           # a predicate of the input itself: as before
@@ -275,7 +277,7 @@ def test_act_guard_on_a_cascade_and_a_vote_keeps_the_risk_on_new_inputs():
         cal = _stream(rng, f"c{rep}", 300, S, L, gold)
         test = _stream(rng, f"t{rep}", 600, S, L, gold)
         for key, comb in (("cascade", Cascade([s, l_])), ("vote", Vote([s, l_], rule="all"))):
-            info = comb.act_guard(cal, risk=0.10)
+            info = comb.act_guard(cal, max_risk=0.10)
             assert info["risk"] <= 0.10
             wrong = [d.escalate is None and d.value != y for d, (_, y) in zip(comb.decide([t for t, _ in test]), test)]
             risks[key].append(float(np.mean(wrong)))
@@ -321,21 +323,21 @@ def test_rank_scale_lets_a_cascade_use_both_models_when_their_signals_differ_in_
     S, L, s, l_ = _scales_parts()
     cal, test = _scales_stream(rng, "c", 600, S, L), _scales_stream(rng, "t", 3000, S, L)
     raw, rank = Cascade([s, l_]), Cascade([s, l_])
-    ir = raw.act_guard(cal, risk=0.10)                        # raw is the default
-    ik = rank.act_guard(cal, risk=0.10, scale="rank")
+    ir = raw.act_guard(cal, max_risk=0.10)                        # raw is the default
+    ik = rank.act_guard(cal, max_risk=0.10, scale="rank")
     assert ir["scale"] == "raw" and ik["scale"] == "rank" and rank.scale == "rank" and len(rank.ranks) == 2
     assert ir["answered_by"][0] < 0.05 and raw.scale == "raw" and raw.ranks is None
     assert any("no better than a single model" in w and 'scale="rank"' in w for w in ir["warnings"])
     assert ik["answered_by"][0] > 0.05 and "warnings" not in ik
     assert ik["answered"] > ir["answered"] + 0.05
-    assert rank.guarantee["signal"] == "shared threshold on each model's rank among the calibration examples"
-    assert raw.guarantee["signal"] == "shared threshold on each model's signal"
+    assert rank.guarantee["signal"] == "shared-rank"                  # a name, as a part's "act" / "confidence"
+    assert raw.guarantee["signal"] == "shared"
     risks = {"raw": [], "rank": []}                            # the promise holds on new inputs, over calibrations
     for rep in range(10):
         c2, t2 = _scales_stream(rng, f"c{rep}", 300, S, L), _scales_stream(rng, f"t{rep}", 1000, S, L)
         for key in risks:
             comb = Cascade([s, l_])
-            comb.act_guard(c2, risk=0.10, scale=key)
+            comb.act_guard(c2, max_risk=0.10, scale=key)
             ds = comb.decide([t for t, _ in t2])
             risks[key].append(np.mean([d.escalate is None and d.value != y for d, (_, y) in zip(ds, t2)]))
     assert all(np.mean(r) <= 0.10 + 0.01 for r in risks.values()), risks
@@ -367,10 +369,11 @@ def test_old_calibration_files_load_on_the_raw_scale_bit_for_bit(tmp_path):
     cal, test = _scales_stream(rng, "c", 300, S, L), _scales_stream(rng, "t", 300, S, L)
     for make in (lambda: Cascade([s, l_]), lambda: Vote([s, l_])):
         raw = make()
-        raw.act_guard(cal, risk=0.10)                          # the default scale
+        raw.act_guard(cal, max_risk=0.10)                          # the default scale
         # the fingerprint a combination had before scales existed: no scale in it
+        g07 = {**raw.guarantee, "signal": "shared threshold on each model's signal"}   # the signal as 0.7 named it
         old_fp = digest(type(raw).__name__, raw._describe(), [m.fingerprint() for m in raw.members],
-                        {"threshold": raw.threshold, "guarantee": raw.guarantee})
+                        {"threshold": raw.threshold, "guarantee": g07})
         assert raw.fingerprint() == old_fp
         f = raw.save_calibration(tmp_path / "old.json")
         rec = json.loads(f.read_text())
@@ -383,7 +386,7 @@ def test_old_calibration_files_load_on_the_raw_scale_bit_for_bit(tmp_path):
             assert (a.value, a.escalate, a.conf, a.extra.get("threshold")) == (b.value, b.escalate, b.conf,
                                                                                b.extra.get("threshold"))
         ranked = make()                                        # a rank-scale file keeps the ranks and decides the same
-        ranked.act_guard(cal, risk=0.10, scale="rank")
+        ranked.act_guard(cal, max_risk=0.10, scale="rank")
         f2 = ranked.save_calibration(tmp_path / "rank.json")
         rec2 = json.loads(f2.read_text())
         assert rec2["scale"] == "rank" and [len(r) for r in rec2["ranks"]] == [300, 300]
@@ -402,9 +405,9 @@ def test_act_guard_records_the_promise_and_reports_the_cost():
     c = Cascade([small.decision("team", "Which team?", "email", TEAMS),
                  large.decision("team", "Which team?", "email", TEAMS)], costs=[45, 137])
     fp = c.fingerprint()
-    info = c.act_guard(_labelled(), risk=0.10)
+    info = c.act_guard(_labelled(), max_risk=0.10)
     assert info["risk"] <= 0.10 and 0 < info["answered"] <= 1 and info["n"] == 240
-    assert 1 <= info["calls"] <= 2 and 45 <= info["cost"] <= 182 and sum(info["answered_by"]) == pytest.approx(info["answered"])
+    assert 1 <= info["calls_per_question"] <= 2 and 45 <= info["cost"] <= 182 and sum(info["answered_by"]) == pytest.approx(info["answered"])
     assert c.fingerprint() != fp and c.threshold == info["threshold"]
     d = c(email=HARD)
     assert d.extra["guarantee"]["method"] == "crc" and d.extra["threshold"] == info["threshold"]
@@ -412,13 +415,13 @@ def test_act_guard_records_the_promise_and_reports_the_cost():
     _, sys_ = _system(c)
     assert "guarantee   P(answered alone and wrong) ≤ 0.1" in str(sys_.ask({"email": HARD}).audit("route"))
     with pytest.raises(ValueError):
-        c.act_guard([], risk=0.1)
+        c.act_guard([], max_risk=0.1)
 
 
 def test_conformal_sets_for_a_vote():
     small, large = _model("small", 2.0), _model("large", 2.0, bias={"technical": 0.5})
     v = Vote([small.decision("team", "Which team?", "email", TEAMS), large.decision("team", "Which team?", "email", TEAMS)])
-    v.act_guard(_labelled(), risk=0.10)
+    v.act_guard(_labelled(), max_risk=0.10)
     info = v.conformal(_labelled(), coverage=0.90)
     assert info["n"] == 240 and 1 <= info["mean_size"] <= 3
     hits = [y in v(email=t).extra["candidates"] for t, y in _labelled(1000)]
@@ -488,10 +491,10 @@ def test_act_guard_per_group_on_a_combination_holds_inside_every_group(make):
     def risk_in(group):
         ex = [(x, y) for x, y in test if x["domain"] == group]
         return float(np.mean([d.escalate is None and d.value != y for d, (_, y) in zip(comb.decide([x for x, _ in ex]), ex)]))
-    comb.act_guard(cal, risk=0.10)
+    comb.act_guard(cal, max_risk=0.10)
     plain_hard = risk_in("hard")
     fp = comb.fingerprint()
-    info = comb.act_guard(cal, risk=0.10, groups="domain", min_group=100)
+    info = comb.act_guard(cal, max_risk=0.10, groups="domain", min_group=100)
     assert comb.fingerprint() != fp and comb.facts == ["doc", "domain"]
     assert set(info["groups"]) == {("easy",), ("hard",), ()} and info["groups"][()]["n"] == 0
     assert info["groups"][("hard",)]["threshold"] > info["groups"][("easy",)]["threshold"]
@@ -525,6 +528,32 @@ def test_a_cost_for_a_nested_combination_is_refused_and_costs_of_one_are_still_r
         Cascade([p[0], Vote([p[1], p[2]])], costs=[2, 10])
     c = Cascade([p[0], Vote([p[1], p[2]], costs=[5, 20])])
     assert [lf.cost for lf in c.leaves()] == [1.0, 5.0, 20.0]
-    assert "cost" in c.act_guard(_labelled(), risk=0.10)
+    assert "cost" in c.act_guard(_labelled(), max_risk=0.10)
     ones = Cascade([p[0], p[2]], costs=[1, 1])                 # given, even if 1: reported
-    assert ones.act_guard(_labelled(), risk=0.10)["cost"] >= 1
+    assert ones.act_guard(_labelled(), max_risk=0.10)["cost"] >= 1
+
+
+def test_parts_and_combinations_speak_one_decider_protocol():
+    """act_guard(examples, risk, signal, ...) on a part and (examples, risk, groups, ...) on a combination: the third
+    positional argument differed, the result keys differed and guarantee["signal"] was a name for a part and a sentence
+    for a combination."""
+    import inspect
+
+    from solvi.decide import DecisionPart
+    from solvi.multi import Combination
+    shared = ["examples", "max_risk", "signal", "groups", "min_group", "delta"]
+    for cls in (DecisionPart, Combination):
+        ps = list(inspect.signature(cls.act_guard).parameters.values())[1:]
+        assert [p.name for p in ps][:6] == shared and all(p.kind is p.KEYWORD_ONLY for p in ps[1:])
+    rng = np.random.default_rng(5)
+    S, L, s, l_ = _scales_parts()
+    cal = _scales_stream(rng, "c", 300, S, L)
+    keys = {"signal", "threshold", "answered", "error", "risk", "n", "guarantee", "promise", "base_error",
+            "must_escalate_at_least"}
+    one, both = s.act_guard(cal, max_risk=0.10), Vote([s, l_]).act_guard(cal, max_risk=0.10)
+    assert keys <= set(one) and keys <= set(both) and "calls_per_question" in both
+    assert one["signal"] in ("act", "confidence") and both["signal"] == "shared"
+    with pytest.raises(ValueError, match="a combination's signal is each part's own"):
+        Vote([s, l_]).act_guard(cal, max_risk=0.10, signal="act")
+    with pytest.warns(DeprecationWarning, match=r"act_guard\(risk=\) is deprecated: use max_risk="):
+        Vote([s, l_]).act_guard(cal, risk=0.10)

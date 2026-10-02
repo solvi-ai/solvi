@@ -444,8 +444,8 @@ def _accuracy(part, hold):
     return float(sum(ok) / len(ok))
 
 
-def adapt(part, examples, *, r=8, epochs=6, holdout=None, seed=0, device=None, lr=3e-4, risk=0.10, signal="confidence",
-          max_updates=400, allow_large=False):
+def adapt(part, examples, *, r=8, epochs=6, holdout=None, seed=0, device=None, lr=3e-4, max_risk=0.10,
+          signal="confidence", max_updates=400, allow_large=False):
     """part.adapt_lora (see there). allow_large: in-process training of a checkpoint larger than solvi-base (what
     tools/adapt_lora_gpu.py passes, on a GPU)."""
     from .core import Unknown
@@ -486,11 +486,11 @@ def adapt(part, examples, *, r=8, epochs=6, holdout=None, seed=0, device=None, l
            "experimental": True}
     if hold:
         after = _accuracy(part, hold)
-        guard = part.act_guard(hold, risk=risk, signal=signal)
+        guard = part.act_guard(hold, max_risk=max_risk, signal=signal)
         out["holdout"] = {"n": len(hold), "accuracy_before": before, "accuracy_after": after, "act_guard": guard}
     else:
         warnings.warn(f"adapt_lora({name}): no held-out labels, so escalation is not calibrated — confidences after LoRA "
-                      "are overconfident. Call part.act_guard(held_out, risk=0.10) on labels not used for training (~300 "
+                      "are overconfident. Call part.act_guard(held_out, max_risk=0.10) on labels not used for training (~300 "
                       "is typical), or pass holdout=", LoraWarning, stacklevel=3)
     return out
 

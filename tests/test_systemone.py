@@ -67,7 +67,7 @@ def test_a_system_one_decision_in_a_catalog_is_traced_and_guarded():
     m = systemone("http://localhost:8009", "kev-latest", opener=svc)
     part = m.decision("team", "Which team?", "email", TEAMS)
     info = part.act_guard([("charged twice", "billing"), ("my parcel", "shipping")] * 30
-                          + [("hello", "shipping")] * 10, risk=0.10)
+                          + [("hello", "shipping")] * 10, max_risk=0.10)
     assert info["signal"] == "confidence" and info["risk"] <= 0.10
     cat = Catalog()
     part.question(cat, "route")
@@ -181,7 +181,7 @@ def test_a_multi_label_question_is_one_noul_per_option_thresholded_and_guarded()
     ns = m.decision("tags2", "Which topics?", "email", TEAMS, multi=True, unknown=True)
     assert ns.decide("hello").value is Unknown and "q0__ns" in svc.bodies[-1]["questions"]
     info = tags.act_guard([("charged twice", ("billing",)), ("my parcel", ("shipping",))] * 30
-                          + [("hello", ("billing",))] * 10, risk=0.10)
+                          + [("hello", ("billing",))] * 10, max_risk=0.10)
     assert info["signal"] == "confidence" and info["risk"] <= 0.10
 
 
@@ -262,13 +262,22 @@ def test_a_refused_request_escalates_at_once_with_the_services_error_text():
     d = m.decision("tags", "Which topics?", "email", TEAMS, multi=True).decide("x")
     assert svc.calls == 1 and d.escalate
     assert "HTTP 400" in d.escalate and "Provider returned error (Someone: criteria too long)" in d.escalate
-    cat = Catalog()
-    part = m.decision("team", "Which team?", "email", TEAMS)
-    part.question(cat, "route")
-    s = System(cat, [Question("route", "Route", Answer.choice(list(TEAMS)))])
-    svc.errors = [http_error(401, b'{"error": {"message": "bad key"}}')]
-    r = s.ask({"email": "I was charged twice"})["route"]
-    assert r.status == "abstain"                                       # no exception, no guess
+
+
+@pytest.mark.parametrize("code", [401, 403, 404])
+def test_a_wrong_key_model_or_url_raises_as_solvi_llm_does_instead_of_escalating_every_decision(code):
+    """0.7 escalated every decision on a 401: `solvi models check systemone:... --api-key BAD` exited 0 with "answered
+    alone 0.0%" computed from placeholders, while the same command for llm: exited 1."""
+    from solvi.llm import LLMError
+    from solvi.remote import RemoteError
+    from solvi.systemone import SystemOneError
+    svc = Flaky(http_error(code, b'{"error": {"message": "bad key"}}'))
+    m = systemone("http://localhost:8009", "kev-latest", api_key="sekret", opener=svc, sleep=lambda s: pytest.fail("no retry"))
+    with pytest.raises(SystemOneError, match=f"HTTP {code} from http://localhost:8009/v1/systemone") as e:
+        m.decision("team", "Which team?", "email", TEAMS).decide("I was charged twice")
+    assert isinstance(e.value, RemoteError) and issubclass(LLMError, RemoteError) and "sekret" not in str(e.value)
+    with pytest.raises(TypeError):
+        systemone("http://localhost:8009", "kev-latest", None, 5.0)                 # keyword-only after api_key
 
 
 def test_a_reply_that_breaks_the_contract_escalates():

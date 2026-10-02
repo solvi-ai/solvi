@@ -12,6 +12,7 @@ this reference lists what each module exports and the signatures.
 | [`solvi.openset`](openset.md) | inputs from outside the calibration set: a threshold sized for the share of them, estimated as the stream goes, and a change flag |
 | [`solvi.systemone`](systemone.md) | a model behind the System One HTTP API as a decider |
 | [`solvi.llm`](llm.md) | an OpenAI-compatible chat-completions server (an LLM) as a decider |
+| [`solvi.remote`](remote.md) | the client every remote model shares: retries, token counts, one policy for HTTP errors |
 | [`solvi.multi`](multi.md) | cascade, vote and route over several models |
 | [`solvi.generate`](generate.md) | generation by an LLM: a text or validated JSON, quotes checked in a text, recorded as a model's output |
 | [`solvi.agree`](agree.md) | agreement of generated candidates under a key: the chosen one, its share as a fact, the tally |

@@ -236,7 +236,7 @@ def decided(q, examples):
     """the decider's question with a threshold at RISK / 4, then a person when it escalates"""
     part = reader.decision(f"{q}_decider", DECIDED[q], "change_text", Literal["yes", "no"], perturb=2)
     CALIBRATION[q] = part.act_guard([(change_text(**s), "yes" if y[q] else "no") for s, y in examples],
-                                    risk=RISK / len(DECIDED))
+                                    max_risk=RISK / len(DECIDED))
     cat.fn(provides=q)(part)
 
     def to_person(change_text):

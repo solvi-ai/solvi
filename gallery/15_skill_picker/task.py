@@ -141,7 +141,7 @@ def synthetic_prompts(n=400, seed=0):
 EXAMPLES = synthetic_prompts()
 skill_decider = reader.decision("skill_decider", "Which of the agent's skills does this prompt need, if any?", "prompt",
                                 OPTIONS, other=False, min_margin=0.15, perturb=2)
-CALIBRATION = skill_decider.act_guard(EXAMPLES, risk=RISK)
+CALIBRATION = skill_decider.act_guard(EXAMPLES, max_risk=RISK)
 CANDIDATES = skill_decider.conformal(EXAMPLES, coverage=0.97)
 cat.fn(provides="picked")(skill_decider)
 

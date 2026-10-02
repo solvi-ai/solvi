@@ -166,7 +166,7 @@ def test_a_proposer_that_fails_ends_the_loop_with_an_escalation():
     s, _ = _system()
     run = refine(s, {}, "ok", propose=g.proposer("q", schema=Slot), into="proposal", rounds=3)
     assert not run.accepted and len(run.rounds) == 1
-    assert run.escalation.startswith("the proposer failed: Unanswered: no answer from") and run.replay(s)["ok"]
+    assert run.escalation.startswith("the proposer failed: Unanswered: the LLM server did not answer") and run.replay(s)["ok"]
 
 
 def test_without_a_proposer_the_system_generates_and_reads_the_earlier_feedback_as_a_fact():

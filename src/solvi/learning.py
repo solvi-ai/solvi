@@ -606,9 +606,9 @@ class Learning:
                                     "threshold no longer holds for the changed signal"}
         sig = g.get("signal", "auto")
         if g.get("method") == "crc":
-            r = part.act_guard(cal, risk=g["risk"], signal=sig)
+            r = part.act_guard(cal, max_risk=g["risk"], signal=sig)
         else:
-            r = part.calibrate_for(cal, error=g["error"], signal=sig, method=g["method"], delta=g.get("delta", 0.10))
+            r = part.calibrate_for(cal, max_error=g["error"], signal=sig, method=g["method"], delta=g.get("delta", 0.10))
         return True, {k: r.get(k) for k in ("signal", "threshold", "answered", "error", "risk", "n", "guarantee")}
 
     def _recalibrate_conformal(self, part, cal):

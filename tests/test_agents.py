@@ -321,7 +321,7 @@ def test_authorizer_with_perturb_and_act_guard():
     assert "instruction_flips" in g.system("send_payment").stats and g.system("send_payment").stats["instruction_flips"] == 1
     assert d.replay()["ok"]
     ex = [(pay(amount=a), CTX, a == 250) for a in (250, 900, 250, 650, 250, 250, 780, 250) * 5]
-    rep = g.calibrate_authorizer(ex, risk=0.10)
+    rep = g.calibrate_authorizer(ex, max_risk=0.10)
     assert rep["n"] == 40 and part.guarantee["method"] == "crc"
     d = g.check(pay(), CTX, facts=f)
     assert d.outcome == "allow"

@@ -63,7 +63,7 @@ def test_act_guard_sets_a_threshold_and_every_decision_records_its_promise():
     m = model(noise=2.0)
     part = m.decision("team", "Which team?", "email", TEAMS)
     fp = part.fingerprint()
-    info = part.act_guard(_labelled(), risk=0.10)
+    info = part.act_guard(_labelled(), max_risk=0.10)
     assert info["signal"] == "confidence" and part.escalate_below == info["threshold"]
     assert info["risk"] <= 0.10 and 0 < info["answered"] < 1 and info["n"] == 240
     assert "P(answered alone and wrong) ≤ 0.1" in info["guarantee"]
@@ -74,8 +74,8 @@ def test_act_guard_sets_a_threshold_and_every_decision_records_its_promise():
 
 def test_calibrate_for_ltt_lets_nothing_through_on_few_examples():
     part = model(noise=2.0).decision("team", "Which team?", "email", TEAMS)
-    info = part.calibrate_for(_labelled()[:40], error=0.02, method="ltt")
-    assert info["method"] == "ltt" and info["threshold"] == float("inf") and info["coverage"] == 0
+    info = part.calibrate_for(_labelled()[:40], max_error=0.02, method="ltt")
+    assert info["method"] == "ltt" and info["threshold"] == float("inf") and info["answered"] == 0
     assert part(email="I was charged twice, please refund order 3.").escalate
     with pytest.raises(ValueError):
         part.calibrate_for(_labelled(), method="magic")
@@ -140,16 +140,16 @@ def test_calibrating_on_the_confidence_reports_what_the_part_does_when_the_act_h
     act = np.where(rng.uniform(size=600) < 0.3, -2.0, 2.0)                # the act head escalates 30% of them
     cal = [(f"{np.log(c / (1 - c)):.6f}|{a}", "a" if r else "b") for c, r, a in zip(conf, right, act)]
     m = DecideModel(WithAct(), {"format": "l14f typed v1", "act": {"threshold": 0.5}})
-    for calibrate in (lambda p: p.act_guard(cal, risk=0.10, signal="confidence")["answered"],
-                      lambda p: p.calibrate_for(cal, error=0.3, signal="confidence")["coverage"],
-                      lambda p: p.calibrate_for(cal, error=0.99, signal="confidence")["coverage"]):
+    for calibrate in (lambda p: p.act_guard(cal, max_risk=0.10, signal="confidence")["answered"],
+                      lambda p: p.calibrate_for(cal, max_error=0.3, signal="confidence")["answered"],
+                      lambda p: p.calibrate_for(cal, max_error=0.99, signal="confidence")["answered"]):
         part = m.decision("q", "Which?", "x", ["a", "b"])
         reported = calibrate(part)
         ds = part.decide([t for t, _ in cal])
         assert reported == pytest.approx(np.mean([d.escalate is None for d in ds])) and 0 < reported <= 0.72
         assert part.escalate_below >= 0
     off = m.decision("q", "Which?", "x", ["a", "b"], use_act=False)      # no act gate: nothing to account for
-    assert off.act_guard(cal, risk=0.10)["answered"] == pytest.approx(
+    assert off.act_guard(cal, max_risk=0.10)["answered"] == pytest.approx(
         np.mean([d.escalate is None for d in off.decide([t for t, _ in cal])]))
 
 
@@ -210,7 +210,7 @@ def test_a_near_tie_is_a_low_confidence_safeguard_in_the_audit():
 
 def test_act_guard_reports_how_much_must_escalate_when_the_model_is_often_wrong():
     part = model(noise=2.0).decision("team", "Which team?", "email", TEAMS)
-    info = part.act_guard(_labelled(), risk=0.05)
+    info = part.act_guard(_labelled(), max_risk=0.05)
     assert info["base_error"] > 0.05
     assert info["must_escalate_at_least"] == pytest.approx((info["base_error"] - 0.05) / 0.95)
     assert 1 - info["answered"] >= info["must_escalate_at_least"] - 1e-9
@@ -228,7 +228,7 @@ def test_the_audit_says_what_the_thresholds_behind_an_answer_promise():
     s = System(cat, [Question("route", "Route", Answer.choice(TEAMS))])
     email = {"email": "I was charged twice, please refund order 3."}
     assert "guarantee   none for some decisions" in str(s.ask(email).audit("route"))
-    part.act_guard(_labelled(), risk=0.10)
+    part.act_guard(_labelled(), max_risk=0.10)
     txt = str(s.ask(email).audit("route"))
     assert "guarantee   P(answered alone and wrong) ≤ 0.1" in txt and "(crc, n = 240)" in txt
 
@@ -239,7 +239,7 @@ def test_two_decisions_with_the_same_promise_are_not_reported_as_uncalibrated():
     a = m.decision("team", "Which team?", "email", TEAMS)
     b = m.decision("team_again", "Which team handles it?", "email", TEAMS)
     for part in (a, b):
-        part.act_guard(_labelled(), risk=0.10)
+        part.act_guard(_labelled(), max_risk=0.10)
     cat = Catalog()
     cat.fn(a)
     cat.fn(b)
@@ -337,7 +337,7 @@ def test_act_guard_per_group_on_a_decision_part_records_the_group_and_holds_insi
     m = DecideModel(tab, meta={"format": "test", "temperature": 1.0})
     part = m.decision("q", "Q?", "doc", ["a", "b"])
     cal, test = _table_stream(rng, tab, "cal", 1500), _table_stream(rng, tab, "test", 6000)
-    plain = part.act_guard(cal, risk=0.10)
+    plain = part.act_guard(cal, max_risk=0.10)
     fp = part.fingerprint()
 
     def risk_in(group):
@@ -345,7 +345,7 @@ def test_act_guard_per_group_on_a_decision_part_records_the_group_and_holds_insi
         ys = [y for x, y in test if x["domain"] == group]
         return float(np.mean([d.escalate is None and d.value != y for d, y in zip(ds, ys)]))
     assert risk_in("hard") > 0.2 and plain["risk"] <= 0.10
-    info = part.act_guard(cal, risk=0.10, groups=["domain", "task"], min_group=200)
+    info = part.act_guard(cal, max_risk=0.10, groups=["domain", "task"], min_group=200)
     assert part.fingerprint() != fp and part.groups is not None
     assert risk_in("hard") <= 0.10 and risk_in("easy") <= 0.10
     g = info["groups"]
@@ -372,7 +372,7 @@ def test_act_guard_per_group_on_a_decision_part_records_the_group_and_holds_insi
     assert "within every group at once" in str(res.audit("answer")) and "here: group" in str(res.audit("answer"))
     with pytest.raises(ValueError, match="group"):
         part.act_guard([("cal 1", "a")] * 5, groups="domain")
-    part.act_guard(cal, risk=0.10)                                  # without groups again: one threshold, inputs as before
+    part.act_guard(cal, max_risk=0.10)                                  # without groups again: one threshold, inputs as before
     assert part.groups is None and list(part.__signature__.parameters) == ["doc"]
 
 
@@ -422,10 +422,10 @@ def test_switching_the_signal_clears_the_other_threshold():
     from test_primitives import L14G
     part = DecideModel(KeywordAct(), L14G).decision("team", "Which team?", "email", TEAMS, act_threshold=0.99)
     ex = [(t, team) for team in TEAMS for t in texts(team, 100)]
-    part.calibrate_for(ex, error=0.05, signal="confidence")
+    part.calibrate_for(ex, max_error=0.05, signal="confidence")
     assert part.act_threshold is None and part.guarantee["cleared"] == {"act_threshold": 0.99}
     assert part.escalate_below is not None
-    info = part.act_guard(ex, risk=0.10, signal="act")
+    info = part.act_guard(ex, max_risk=0.10, signal="act")
     assert part.escalate_below is None and part.act_threshold == info["threshold"]
     assert "escalate_below" in part.guarantee["cleared"]
     assert not part(email=texts("billing", 1, 500)[0]).escalate      # the stale confidence threshold no longer applies
@@ -437,10 +437,10 @@ def test_ltt_and_calibrate_for_refuse_an_error_outside_0_1(error):
         ltt_threshold([0.9, 0.8], [0, 1], error=error)
     part = model().decision("team", "Which team?", "email", TEAMS)
     with pytest.raises(ValueError, match="strictly between 0 and 1"):
-        part.calibrate_for(_labelled()[:20], error=error, method="ltt")
+        part.calibrate_for(_labelled()[:20], max_error=error, method="ltt")
     if error not in (0, 0.0):                                  # empirical: 0 is a target (no error on the examples)
         with pytest.raises(ValueError, match=r"in \[0, 1\)"):
-            part.calibrate_for(_labelled()[:20], error=error, method="empirical")
+            part.calibrate_for(_labelled()[:20], max_error=error, method="empirical")
     with pytest.raises(ValueError, match="delta"):
         ltt_threshold([0.9, 0.8], [0, 1], error=0.1, delta=0)
 
@@ -486,7 +486,7 @@ def test_act_guard_states_its_promise_with_the_error_among_the_answered_and_warn
     coin = DecideModel(_Coin(), meta={"format": "test", "temperature": 1.0})
     part = coin.decision("ok", "Is it right?", "x", ["yes", "no"])
     with pytest.warns(UserWarning, match=r"the confidence signal does not separate right from wrong answers .*AUROC 0\.\d\d"):
-        info = part.act_guard(ex, risk=0.30)
+        info = part.act_guard(ex, max_risk=0.30)
     assert info["answered"] > 0 and info["risk"] <= 0.30 and info["error"] > 0.35
     assert info["warnings"] and "against" in info["warnings"][0]
     assert info["promise"].startswith("of all inputs like the calibration examples, answered or escalated, at most 0.3 "
@@ -495,26 +495,26 @@ def test_act_guard_states_its_promise_with_the_error_among_the_answered_and_warn
     other = DecideModel(_Coin(), meta={"format": "test", "temperature": 1.0}).decision("ok", "Is it right?", "x",
                                                                                        ["yes", "no"])
     with pytest.warns(UserWarning, match="part 'ok': the part's signal does not separate"):
-        v = Vote([part, other]).act_guard(ex, risk=0.45)
+        v = Vote([part, other]).act_guard(ex, max_risk=0.45)
     assert v["warnings"] and "promise" in v
     good = model(noise=0.5).decision("team", "Which team?", "email", TEAMS)
     with warnings.catch_warnings():
         warnings.simplefilter("error")                # a signal that separates: no warning
-        info = good.act_guard(_labelled(), risk=0.10)
+        info = good.act_guard(_labelled(), max_risk=0.10)
     assert "warnings" not in info
 
 
 @pytest.mark.parametrize("bad", [1.5, 10, 1.0, 0, -0.1, "x", None])
 def test_a_risk_or_coverage_outside_0_1_is_refused_everywhere_not_recorded_as_a_promise(bad):
-    """Only calibrate_for checked its rate: act_guard(risk=1.5) was recorded as the promise "≤ 1.5" in every decision,
+    """Only calibrate_for checked its rate: act_guard(max_risk=1.5) was recorded as the promise "≤ 1.5" in every decision,
     risk=1.0 divided by zero, coverage=-1 raised IndexError."""
     from solvi.memory import CorrectionMemory
     from solvi.multi import Cascade
     part = model(noise=2.0).decision("team", "Which team?", "email", TEAMS)
-    for call in (lambda: part.act_guard(_labelled(), risk=bad), lambda: part.conformal(_labelled(), coverage=bad),
-                 lambda: Cascade([part]).act_guard(_labelled(), risk=bad),
+    for call in (lambda: part.act_guard(_labelled(), max_risk=bad), lambda: part.conformal(_labelled(), coverage=bad),
+                 lambda: Cascade([part]).act_guard(_labelled(), max_risk=bad),
                  lambda: Cascade([part]).conformal(_labelled(), coverage=bad),
-                 lambda: CorrectionMemory(part).calibrate(risk=bad)):
+                 lambda: CorrectionMemory(part).calibrate(max_risk=bad)):
         with pytest.raises(ValueError, match="(risk|coverage) must be a number strictly between 0 and 1"):
             call()
     assert part.guarantee is None

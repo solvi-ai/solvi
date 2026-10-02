@@ -39,17 +39,16 @@ response caching (put a caching proxy in front of the server), no streaming, no 
 from __future__ import annotations
 
 import hashlib
-import http.client
 import inspect
 import json
 import re
 import threading
-import urllib.error
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 
 from .core import Claim, find_whole
-from .llm import WHY_CHARS, InvalidOutput, LLMError, LLMScorer, _error_text
+from .llm import InvalidOutput, LLMScorer
+from .remote import NoAnswer, Refused
 
 RESPONSE_FORMATS = ("prompt", "json_object", "json_schema")
 FEEDBACK = "Your answer was checked by a program, and it does not work:\n{reasons}\nGive a corrected answer."
@@ -356,30 +355,13 @@ class Generator:
 
     def _send(self, body):
         """POST with the client's retries and backoff → the response dict; Unanswered / LLMError (see the module docs)."""
-        c, attempt, last = self.client, 0, None
-        while True:
-            try:
-                resp = c._post(body)
-                with c._lock:
-                    c.requests += 1
-                with self._lock:
-                    self.calls += 1
-                return resp
-            except urllib.error.HTTPError as e:
-                if e.code in (400, 413, 422):
-                    why = _error_text(e)
-                    raise Unanswered(f"invalid input for the endpoint: HTTP {e.code}" + (f" — {why[:WHY_CHARS]}" if why else "")) from None
-                if e.code in (408, 409, 429) or e.code >= 500:
-                    last = f"HTTP {e.code}"
-                else:
-                    raise LLMError(f"HTTP {e.code} from {c.endpoint} (model {c.model!r}): check the URL, the model name and "
-                                   "the API key") from None
-            except (urllib.error.URLError, TimeoutError, OSError, ValueError, http.client.HTTPException) as e:
-                last = f"{type(e).__name__}: {getattr(e, 'reason', e)}"
-            attempt += 1
-            if attempt > c.retries:
-                raise Unanswered(f"no answer from {c.endpoint} after {attempt} attempts ({last})")
-            c.sleep(c.backoff * 2 ** (attempt - 1))
+        try:
+            resp = self.client.send(body)
+        except (NoAnswer, Refused) as e:
+            raise Unanswered(str(e)) from None
+        with self._lock:
+            self.calls += 1
+        return resp
 
     def _content(self, resp, meta):
         """A response → the reply's text; InvalidOutput for a refusal, a cut-off or empty reply, or no choices."""
@@ -389,11 +371,7 @@ class Generator:
         ch = chs[0] if isinstance(chs, list) and chs else None
         if not isinstance(ch, dict):
             raise InvalidOutput("the response has no choices")
-        u = resp.get("usage") if isinstance(resp.get("usage"), dict) else {}
-        meta["usage"] = {k: u[k] for k in ("prompt_tokens", "completion_tokens") if isinstance(u.get(k), int)}
-        with self.client._lock:
-            for k, n in meta["usage"].items():
-                self.client.usage[k] += n
+        meta["usage"] = self.client.count(resp.get("usage"))
         if resp.get("model") and resp.get("model") != self.client.model:
             meta["served_by"] = str(resp["model"])
         meta["finish"] = ch.get("finish_reason")

@@ -334,14 +334,14 @@ def test_calibrate_for_a_target_error_rate():
     part = m.decision("team", "Which team?", "email", TEAMS, option_order="given")
     ex = ([("charged twice, refund", "billing")] * 6 + [("the app shows an error", "technical")] * 6
           + [("a crash and a refund", "billing")] * 2 + [("a crash and a refund", "technical")] * 2)
-    info = part.calibrate_for(ex, error=0.05)
+    info = part.calibrate_for(ex, max_error=0.05)
     assert info["signal"] == "confidence" and 0.5 < info["threshold"] <= 1 and info["error"] <= 0.05
-    assert info["coverage"] == pytest.approx(12 / 16) and part.escalate_below == info["threshold"]
+    assert info["answered"] == pytest.approx(12 / 16) and part.escalate_below == info["threshold"]
     assert not part(email="a crash and a refund").act and part(email="refund").act
     ma = v2()
     pa = ma.decision("team", "Which team?", "email", TEAMS)
-    info = pa.calibrate_for([("refund", "billing"), ("maybe refund", "technical"), ("crash", "technical")], error=0.0)
-    assert info["signal"] == "act" and pa.act_threshold == info["threshold"] and info["coverage"] == pytest.approx(2 / 3)
+    info = pa.calibrate_for([("refund", "billing"), ("maybe refund", "technical"), ("crash", "technical")], max_error=0.0)
+    assert info["signal"] == "act" and pa.act_threshold == info["threshold"] and info["answered"] == pytest.approx(2 / 3)
     with pytest.raises(ValueError):
         part.calibrate_for(ex, signal="act")
 

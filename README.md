@@ -219,9 +219,9 @@ Every answer is a value and a confidence, and the types also declare answer prim
 
 ## Escalation with a guarantee, several models, serving
 
-- **A guaranteed risk.** `part.act_guard(examples, risk=0.10)` calibrates on a few hundred labelled examples of your stream
+- **A guaranteed risk.** `part.act_guard(examples, max_risk=0.10)` calibrates on a few hundred labelled examples of your stream
   so that P(answered alone and wrong) ≤ 10% for inputs like them (conformal risk control) — a share of all inputs, not
-  the error among the answers given alone (`calibrate_for(error=0.10, method="ltt")` bounds that); the audit shows the promise
+  the error among the answers given alone (`calibrate_for(max_error=0.10, method="ltt")` bounds that); the audit shows the promise
   behind every answer, or says there is none. `part.conformal(examples)` gives the person who takes an escalation a short
   list of candidates. Near ties escalate (`min_margin=`), and the answer does not depend on the order the options are listed
   in (sorted by default).
