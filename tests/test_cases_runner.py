@@ -187,3 +187,23 @@ def test_pytest_plugin_collects_cases_as_items(pytester):
     r.stdout.fnmatch_lines(["*case 'wrong'*", "*route: expected 'support', got 'billing' ?ok?*"])
     r = pytester.runpytest(*args, "-q", "entry", "--solvi-fuzz", "10", "-k", "invoice")
     r.assert_outcomes(passed=1, deselected=2)
+
+
+def test_a_case_that_cannot_fail_is_reported(tmp_path):
+    """A misspelled key, a status or safeguards entry for a question that was not asked, a case with only a state: each
+    used to pass (6 of 7 such cases), so a regression case that checked nothing looked like a passing one."""
+    hollow = [
+        {"name": "typo in the key", "state": {"text": "invoice"}, "expcted": {"route": "support"}, "expected": {"route": "billing"}},
+        {"name": "nothing expected", "state": {"text": "invoice"}},
+        {"name": "status of a question not asked", "state": {"text": "invoice"}, "status": {"rout": "ok"}},
+        {"name": "safeguards of a question not asked", "state": {"text": "password"}, "safeguards": {"rout": ["hard_check"]}},
+        {"name": "no safeguards at all is an expectation", "state": {"text": "invoice"}, "safeguards": []},
+        {"name": "a note is allowed", "state": {"text": "invoice"}, "expected": {"route": "billing"}, "note": "why this case"},
+    ]
+    (res,) = testing.run_path(_write(tmp_path, hollow))
+    p = {c.name: c.problems for c in res.cases}
+    assert p["typo in the key"] == ["unknown key(s) 'expcted' (a case has: name, state, expected, status, safeguards, ask, note)"]
+    assert p["nothing expected"] == ['the case expects nothing: give "expected", "status" or "safeguards"']
+    assert p["status of a question not asked"][0].startswith("status of rout: not asked")
+    assert p["safeguards of a question not asked"][0].startswith("safeguards of rout: not asked")
+    assert p["no safeguards at all is an expectation"] == [] and p["a note is allowed"] == []

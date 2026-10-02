@@ -863,9 +863,21 @@ def capabilities(meta, multi_question=None, act=None):
 
 
 # ------------------------------------------------------------------------------------------------ calibration of one decision
+def _usable(Z):
+    """Logits a learning call may take. A scorer that could not answer (a remote model that is down, a reply that breaks
+    the contract) returns placeholder zeros marked `escalate`: a decision escalates on the mark, and adapt / fit / teach
+    and the memory must not learn from the zeros."""
+    Z = list(Z)
+    bad = [z.escalate for z in Z if getattr(z, "escalate", None)]
+    if bad:
+        raise ValueError(f"the model gave no usable output for {len(bad)} of {len(Z)} input(s) — {bad[0]} — so nothing was "
+                         "learned; repeat the call when the model answers")
+    return Z
+
+
 def _given(logits, n):
     """Precomputed logits for adapt / fit / teach → a list of n arrays."""
-    Z = [np.asarray(z, float) for z in logits]
+    Z = [np.asarray(z, float) for z in _usable(logits)]
     if len(Z) != n:
         raise ValueError(f"{len(Z)} logits for {n} input(s)")
     return Z
@@ -1557,8 +1569,9 @@ class DecideModel:
         text whole up to that many tokens (long="full"; cached apart)."""
         out, todo = [None] * len(specs_texts), []
 
-        def key(sp, t):
-            return (sp.key, t, ("read", int(read_len))) if read_len else (sp.key, t)
+        def key(sp, t):                               # "not stated" allowed is another question to the scorer: a
+            k = (sp.key, t, "unknown") if sp.unknown else (sp.key, t)    # Maybe[...] part and a plain one do not share a reply
+            return k + (("read", int(read_len)),) if read_len else k
         with self._lock:
             for i, (sp, t) in enumerate(specs_texts):
                 k = key(sp, t)
@@ -1894,7 +1907,7 @@ class DecideModel:
         texts = [self.text(t) for t in texts]
         if not texts:
             raise ValueError("adapt needs unlabelled texts")
-        Z = np.array(self._raw([(sp, t) for t in texts]) if logits is None else _given(logits, len(texts)))
+        Z = np.array(_usable(self._raw([(sp, t) for t in texts])) if logits is None else _given(logits, len(texts)))
         mean = Z.mean(0)
         a = self.adaptations.setdefault(sp.key, Adaptation())
         a.bias = [float(v) for v in mean - mean.mean()]
@@ -1916,7 +1929,7 @@ class DecideModel:
         given = None if logits is None else _given(logits, len(examples))
         keep = [i for i, (_, y) in enumerate(examples) if y is not Unknown]
         ex = [(self.text(examples[i][0]), examples[i][1]) for i in keep]
-        Z = self._raw([(sp, t) for t, _ in ex]) if given is None else [given[i] for i in keep]
+        Z = _usable(self._raw([(sp, t) for t, _ in ex])) if given is None else [given[i] for i in keep]
         a = self.adaptations.setdefault(sp.key, Adaptation())
         a.examples = [(list(map(float, z)), sp.label(y)) for z, (_, y) in zip(Z, ex)]
         self._refit(sp, a, lam, folds)
@@ -1929,7 +1942,7 @@ class DecideModel:
         fit. logits: the input's logits already computed (see adapt). → the update time in ms (the model's forward pass,
         if the input was not scored before, is not included)."""
         sp = _Spec(task, options, descriptions, multi, other, kind, **spec)
-        z = self._raw([(sp, self.text(text))])[0] if logits is None else _given([logits], 1)[0]
+        z = _usable(self._raw([(sp, self.text(text))]))[0] if logits is None else _given([logits], 1)[0]
         t0 = time.perf_counter()
         a = self.adaptations.setdefault(sp.key, Adaptation())
         a.examples.append((list(map(float, z)), sp.label(correct)))
@@ -2002,7 +2015,7 @@ class DecideModel:
     def save_adaptations(self, path):
         """Write every adaptation (with its kept examples' logits) to a JSON file, with the checkpoint's fingerprint."""
         data = {"weights": self.weights_fingerprint(), "model_id": self.model_id,
-                "adaptations": [{"key": [k[0], list(k[1]), list(k[2]), k[3]], **asdict(a)} for k, a in self.adaptations.items()]}
+                "adaptations": [{"key": [k[0], list(k[1]), list(k[2]), *k[3:]], **asdict(a)} for k, a in self.adaptations.items()]}
         with open(path, "w") as fh:
             json.dump(data, fh, ensure_ascii=False, indent=1, default=_json_default)
 
@@ -2015,8 +2028,8 @@ class DecideModel:
         for d in data["adaptations"]:
             k = d.pop("key")
             ex = [(list(z), tuple(y) if isinstance(y, list) else y) for z, y in d.pop("examples", [])]
-            self.adaptations[(k[0], tuple(k[1]), tuple(k[2]), k[3] if isinstance(k[3], str) else bool(k[3]))] = \
-                Adaptation(**d, examples=ex)
+            self.adaptations[(k[0], tuple(k[1]), tuple(k[2]), k[3] if isinstance(k[3], str) else bool(k[3]), *k[4:])] = \
+                Adaptation(**d, examples=ex)             # k[4:]: "pointer" / "evidence" questions (files before 0.7.2 lost it)
         return self
 
     # --- catalog parts
@@ -2858,6 +2871,10 @@ class DecisionPart:
         has_act = all(a is not None for a in act)
         if signal == "act" and not has_act:
             raise ValueError("the model gives no act signal: use signal='confidence'")
+        if signal == "act" and self.use_act is False:
+            raise ValueError("this part was made with use_act=False: a threshold on the act signal would never escalate "
+                             "and the recorded guarantee would not hold — use signal='confidence', or make the part with "
+                             "use_act=True")
         use_act = signal == "act" or (signal == "auto" and has_act and self.use_act is not False)
         return (act if use_act else conf), ok, ("act" if use_act else "confidence"), ds
 

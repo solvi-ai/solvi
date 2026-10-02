@@ -80,6 +80,14 @@ def _extra_body(extra):
         raise ValueError(f"extra_body is not JSON: {e}") from None
 
 
+def _prob(v, what):
+    """A probability of a reply: a finite number in [0, 1] — else ValueError (the reply breaks the contract: the decision
+    escalates). NaN compares false with every threshold, so it would pass them all."""
+    if isinstance(v, bool) or not isinstance(v, (int, float)) or not math.isfinite(v) or not 0 <= v <= 1:
+        raise ValueError(f"{what} is not a probability: {v!r}")
+    return float(v)
+
+
 def _logit(p):
     p = min(max(float(p), EPS), 1 - EPS)
     return math.log(p / (1 - p))
@@ -171,14 +179,14 @@ class SystemOneScorer:
     def answer_logits(it, ans):
         """An answer to a single (not multi-label) question → log-probabilities in the item's option order."""
         if ans.get("type") == "noul" or "noul" in ans:
-            p = min(max(float(ans["noul"]), EPS), 1 - EPS)
+            p = min(max(_prob(ans["noul"], "noul"), EPS), 1 - EPS)
             yes_first = it.options[0].lower() in ("yes", "true")
             return np.log(np.array([p, 1 - p] if yes_first else [1 - p, p]))
         probs = ans.get("probabilities") or {}
         missing = [o for o in it.options if o not in probs]
         if missing:
             raise ValueError(f"the service returned no probability for {missing}")
-        return np.log(np.clip(np.array([float(probs[o]) for o in it.options]), EPS, None))
+        return np.log(np.clip(np.array([_prob(probs[o], f"the probability of {o!r}") for o in it.options]), EPS, None))
 
     @classmethod
     def read(cls, it, answers):

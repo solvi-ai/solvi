@@ -139,10 +139,20 @@ def _show(v):
     return _plain(v)
 
 
+CASE_KEYS = ("name", "state", "expected", "status", "safeguards", "ask", "note")
+
+
 def check(system, case, state):
-    """Ask one case and compare → CaseResult. Exceptions from ask are reported as a crash, not raised."""
+    """Ask one case and compare → CaseResult. Exceptions from ask are reported as a crash, not raised. A case that cannot
+    fail is a problem too: a key that is not one of CASE_KEYS (a misspelled "expcted"), a status or safeguards entry for
+    a question that was not asked, a case that expects nothing."""
     name = case.get("name", "?")
     out = CaseResult(name)
+    odd = sorted(k for k in case if k not in CASE_KEYS)
+    if odd:
+        out.problems.append(f"unknown key(s) {', '.join(map(repr, odd))} (a case has: {', '.join(CASE_KEYS)})")
+    if not (case.get("expected") or case.get("status") or case.get("safeguards") or isinstance(case.get("safeguards"), list)):
+        out.problems.append("the case expects nothing: give \"expected\", \"status\" or \"safeguards\"")
     try:
         res = system.ask(state, case.get("ask"))
     except Exception as e:  # noqa: BLE001
@@ -163,7 +173,9 @@ def check(system, case, state):
         elif not same(r.answer, gold_of(at, want)):
             out.problems.append(f"{q}: expected {want!r}, got {_show(r.answer)!r} [{r.status}]")
     for q, st in (case.get("status") or {}).items():
-        if q in res.results and res[q].status != st:
+        if q not in res.results:
+            out.problems.append(f"status of {q}: not asked (unknown question, or left out by \"ask\")")
+        elif res[q].status != st:
             out.problems.append(f"{q}: expected status {st}, got {res[q].status} ({res[q].why})")
     fired = {}
     for e in res.safeguards or ():
@@ -176,6 +188,9 @@ def check(system, case, state):
             out.problems.append(f"safeguards: expected {sorted(set(want_sg))}, fired {got}")
     else:
         for q, kinds in want_sg.items():
+            if q not in res.results:
+                out.problems.append(f"safeguards of {q}: not asked (unknown question, or left out by \"ask\")")
+                continue
             got = sorted(fired.get(q, ()))
             if got != sorted(set(kinds)):
                 out.problems.append(f"{q}: expected safeguards {sorted(set(kinds))}, fired {got}")

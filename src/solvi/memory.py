@@ -119,10 +119,14 @@ class CorrectionMemory:
     def __len__(self):
         return len(self.cases)
 
-    def features(self, text):
-        """The decider's probabilities over the options for a text (raw logits, checkpoint temperature), rounded."""
+    def features(self, text, learning=False):
+        """The decider's probabilities over the options for a text (raw logits, checkpoint temperature), rounded.
+        learning: the features are for a case to store — a model that gave no usable output raises (see decide._usable)."""
         sp = self.part.spec
         z, _ = self.part._read([text])[0]           # a long input: the window a decision reads
+        if learning:
+            from .decide import _usable
+            _usable([z])
         z = np.asarray(z, float) / self.part.model._T(sp)
         if sp.multi:
             p = 1 / (1 + np.exp(-z))
@@ -143,7 +147,7 @@ class CorrectionMemory:
         Case (an identical case already stored is not added twice)."""
         check_source(source)
         text = self.part._input_text(x)
-        f = self.features(text)
+        f = self.features(text, learning=True)
         lab = self._label(correct)
         ws = words(text) if self.text else None
         cid = digest("case", f, ws, lab, source, by, time, stored_id)

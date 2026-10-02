@@ -258,6 +258,15 @@ class System:
         self.producer_policy = ProducerPolicy()   # which producer of a fact to try first
         from .audit import STATS
         self.stats = {k: 0 for k in STATS}        # lifetime counts: model outputs and the safeguards that caught them
+        for part in catalog.parts.values():       # a `then` answer outside the question's options would only show when the
+            for qn, ans in (part.then or {}).items() if part.kind == "check" and part.hard else ():   # check fails
+                if qn in self.questions:
+                    try:
+                        self.questions[qn].answer.normalize(ans)
+                    except ValueError as e:
+                        import warnings
+                        warnings.warn(f"hard check {part.name}: `then` answers {qn!r} with {ans!r}: {e} — when the check "
+                                      f"fails, {qn!r} will abstain", stacklevel=2)
 
     def _typed_question(self, q):
         """A question without an answer type takes it from its rule's return type; a typed rule must fit its question."""
@@ -577,7 +586,12 @@ class System:
                 if not governs(part, q):
                     continue
                 if q.name in part.then:
-                    return Result(q.answer.normalize(part.then[q.name]), 1.0, f"hard check {f} is false", "forced",
+                    try:
+                        forced = q.answer.normalize(part.then[q.name])
+                    except ValueError as e:           # a `then` answer that is not an answer of this question: the check
+                        return Result(None, 0.0, f"hard check {f} is false and its `then` answer is not usable: {e}",   # still
+                                      "abstain", source=f, guard="hard_check")                                         # decides
+                    return Result(forced, 1.0, f"hard check {f} is false", "forced",
                                   provenance=r.origin, source=f, guard="hard_check")
                 return Result(None, 0.0, f"hard check {f} is false and no answer is set for it", "abstain", source=f,
                               guard="hard_check")

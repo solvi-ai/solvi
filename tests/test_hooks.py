@@ -484,3 +484,22 @@ def test_the_demo(tmp_path):
     assert "migrations-reversible" in out["edits"][2][2] and "instruction-like text" in out["edits"][2][2]
     assert out["prompts"][0][1].startswith('The project skill "db-migrations"') and out["prompts"][1][1] is None
     assert out["verified"] and out["replayed"]
+
+
+@pytest.mark.parametrize("rid", ["path", "added_lines", "result_text", "instructions", "edit", "added-lines"])
+def test_a_rule_id_the_hook_uses_itself_is_refused_when_the_rules_load(tmp_path, rid):
+    """A rule called `path` gave its check the name of a given fact, which replaced it: the rule was never enforced and an
+    edit writing the forbidden token was allowed. `instructions` failed at edit time instead of when the rules load."""
+    p = tmp_path / "r.toml"
+    p.write_text(f'[[rule]]\nid = "{rid}"\npaths = ["**"]\nforbid = ["SECRET"]\n')
+    with pytest.raises(hooks.RulesError, match="the hook uses itself"):
+        hooks.load_rules(str(p))
+
+
+def test_two_rules_whose_checks_would_share_a_name_are_refused(tmp_path):
+    p = tmp_path / "r.toml"
+    p.write_text('[[rule]]\nid = "secrets"\npaths = ["**"]\nforbid = ["A"]\n\n[[rule]]\nid = "secrets-lines"\npaths = ["**"]\nforbid = ["B"]\n')
+    with pytest.raises(hooks.RulesError, match="named like another rule's"):
+        hooks.load_rules(str(p))
+    p.write_text('[[rule]]\nid = "secrets"\npaths = ["**"]\nforbid = ["A"]\n\n[[rule]]\nid = "tokens"\npaths = ["**"]\nforbid = ["B"]\n')
+    assert [r.id for r in hooks.load_rules(str(p))] == ["secrets", "tokens"]

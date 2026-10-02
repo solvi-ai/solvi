@@ -2,6 +2,28 @@
 
 ## 0.7.2 — unreleased
 
+- **Checks that silently did nothing, and state the decider lost or mixed** (from the independent audit and from
+  solving nine tasks with the library):
+  - `agents.Guard`: a policy, `fn` or `require_request` that names a tool the guard does not have (a typo) raised
+    nothing and checked nothing — now a `ValueError` when the tool's checks are built; `authorize=True` on a guard
+    without an authorizer raises too. `guard.tool(name=..., schema=...)`, the docstring's own example, returned a
+    decorator and registered nothing: it now declares the tool at once (and still decorates a function).
+  - hooks: a rule whose id is a name the hook uses itself (`path`, `added_lines`, `result_text`, `instructions`,
+    `edit`) was never enforced or failed at edit time; two rules whose checks would share a name (`X` and `X-lines`)
+    likewise. Both are a `RulesError` when the rules load.
+  - `solvi test`: a case with a misspelled key (`"expcted"`), a `status` or `safeguards` entry for a question that
+    was not asked, or no expectation at all used to pass; each is now a problem of the case.
+  - a hard check's `then` answer outside the question's options made `ask` raise exactly when the check failed: the
+    question now abstains with the reason, and building the System warns.
+  - the decider's logits cache ignored "not stated": a `Maybe[...]` part and a plain one with the same task and
+    options shared one reply (the second got the other's answer and no model call).
+  - `save_adaptations` dropped the fifth key element of `evidence=` and pointer questions: after a reload the fit sat
+    on the plain question with the same task and options.
+  - `act_guard(signal="act")` on a part made with `use_act=False` recorded a promise nothing enforced: it raises.
+  - `fit`, `teach`, `adapt` and the correction memory learned from the placeholder zeros a remote model returns while
+    it does not answer: they raise ("the model gave no usable output ... nothing was learned").
+  - `solvi.systemone`: a reply with NaN, out-of-range or non-numeric probabilities was answered alone (NaN passes
+    every threshold): it escalates as a reply that breaks the contract, as `solvi.llm` already did.
 - **Replay checks the answers.** A replay re-computed the steps of a trace and never looked at the answers stored with
   it: a response whose `no [forced]` was edited to `yes [ok]` replayed ok, and so did a store with the answer edited and
   every hash recomputed (`replay_all` → `[]`, `solvi replay` exit 0, the report "Replay: ok"). `trace.replay(system)` now

@@ -272,3 +272,51 @@ def test_a_reply_that_breaks_the_contract_escalates():
     d = systemone("http://localhost:8009", "kev-latest", opener=broken).decision("team", "Which team?", "email",
                                                                                   TEAMS).decide("x")
     assert d.escalate and "invalid System One output" in d.escalate and "shipping" in d.escalate
+
+
+# ------------------------------------------------------------------- a reply that is not probabilities; a service that is down
+class Scripted:
+    """Answers every question with what `answer(question)` gives; raises `down` instead when it is set."""
+
+    def __init__(self, answer, down=None):
+        self.answer, self.down = answer, down
+
+    def __call__(self, req, timeout=None):
+        if self.down is not None:
+            raise self.down
+        body = json.loads(req.data.decode())
+        return io.BytesIO(json.dumps({"model": body["model"],
+                                      "answers": {n: self.answer(q) for n, q in body["questions"].items()}},
+                                     allow_nan=True).encode())
+
+
+@pytest.mark.parametrize("probs", [{"billing": float("nan"), "shipping": 0.5}, {"billing": 7, "shipping": -3},
+                                   {"billing": "0.9", "shipping": 0.1}, {"billing": True, "shipping": False}])
+def test_a_reply_with_non_probabilities_escalates_never_answers(probs):
+    """NaN compares false with every threshold: it used to pass escalate_below and any calibrated one."""
+    m = systemone("http://localhost:8009", "kev-latest",
+                  opener=Scripted(lambda q: {"type": "choice", "choice": "billing", "probabilities": probs}))
+    d = m.decision("team", "Which team?", "email", TEAMS, escalate_below=0.6).decide("I was charged twice")
+    assert d.escalate and "not a probability" in d.escalate
+
+
+@pytest.mark.parametrize("p", [float("nan"), 17, -0.2, "0.9"])
+def test_a_yes_no_reply_that_is_not_a_probability_escalates(p):
+    m = systemone("http://localhost:8009", "kev-latest", opener=Scripted(lambda q: {"type": "noul", "noul": p}))
+    d = m.decision("urgent", "Urgent?", "email", type=bool, escalate_below=0.6).decide("hello")
+    assert d.escalate and "not a probability" in d.escalate
+
+
+def test_nothing_is_learned_while_the_service_does_not_answer():
+    """A service that is down gives placeholder zeros marked `escalate`: fit, teach, adapt and the memory used to learn
+    from the zeros without a word."""
+    from solvi.memory import CorrectionMemory
+    svc = Scripted(None, down=urllib.error.HTTPError("http://localhost:8009/v1/systemone", 503, "x", {}, io.BytesIO(b"{}")))
+    m = systemone("http://localhost:8009", "kev-latest", opener=svc, retries=0)
+    part = m.decision("team", "Which team?", "email", TEAMS)
+    ex = [("I was charged twice", "billing"), ("my parcel is lost", "shipping")] * 4
+    for call in (lambda: part.fit(ex), lambda: part.teach("I was charged twice", "billing"),
+                 lambda: part.adapt([t for t, _ in ex]), lambda: CorrectionMemory(part).add("I was charged twice", "billing")):
+        with pytest.raises(ValueError, match="no usable output"):
+            call()
+    assert part.adaptation is None or not part.adaptation.examples

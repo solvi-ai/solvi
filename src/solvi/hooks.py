@@ -225,6 +225,12 @@ def _toml(text):
     return tomllib.loads(text)
 
 
+RESERVED_NAMES = frozenset({"path", "added_lines", "result_text", "change_text", "instructions", "no_instructions", "edit",
+                            "edit_verdict"})
+"""What the hook's catalog names itself: the facts it gives about a change and its own parts."""
+RULE_PARTS = ("_lines", "_trigger", "_judged", "_answer")       # the parts a rule adds, by suffix of its name
+
+
 def load_rules(path):
     """A rules file (TOML, or JSON by its extension) → [Rule]; RulesError says what is wrong and where."""
     try:
@@ -238,7 +244,7 @@ def load_rules(path):
     raw = data.get("rule", data.get("rules", []))
     if not isinstance(raw, list):
         raise RulesError(f"{path}: expected [[rule]] tables")
-    out, seen = [], set()
+    out, seen, owned = [], set(), set()
     for i, r in enumerate(raw):
         where = f"{path}: rule {r.get('id', i + 1) if isinstance(r, dict) else i + 1}"
         if not isinstance(r, dict):
@@ -281,6 +287,15 @@ def load_rules(path):
                     redact=bool(r.get("redact", False)), **kw)
         if rule.name in seen:
             raise RulesError(f"{where}: two rules named {rule.name}")
+        if rule.name in RESERVED_NAMES:               # the hook's own facts and parts: the rule would replace one, or be
+            raise RulesError(f"{where}: the id {rule.id!r} is a name the hook uses itself "    # replaced by one, and never run
+                             f"({', '.join(sorted(RESERVED_NAMES))}); choose another id")
+        mine = {rule.name} | {rule.name + s for s in RULE_PARTS}
+        clash = sorted(mine & owned)
+        if clash:
+            raise RulesError(f"{where}: its checks would be named like another rule's ({', '.join(clash)}); choose "
+                             "another id")
+        owned |= mine
         seen.add(rule.name)
         out.append(rule)
     return out

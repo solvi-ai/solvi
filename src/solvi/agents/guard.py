@@ -1215,7 +1215,9 @@ class Guard:
             self._systems.pop(n, None)
             self._unknown = None
             return f
-        return add if func is None else add(func)
+        if func is None and name is not None and schema is not None:
+            add(None)                                 # guard.tool(name=..., schema=...) is a declaration, complete as it
+        return add if func is None else add(func)     # stands; applied to a function it registers that function instead
 
     def declare(self, name, schema=None, description="", **kw):
         """Declare a tool that solvi does not run (the framework or an MCP server does): its name, the arguments' schema
@@ -1258,6 +1260,12 @@ class Guard:
         declares, nor a given or computed fact, nor an argument of any tool — would apply to no tool at all: a
         ValueError, not a silently dropped check. (Skipped while a declared tool has no schema yet: its arguments are
         not known.)"""
+        for kind, items in (("policy", [(f, tools) for f, tools, _ in self._policies]), ("fn", self._fns)):
+            for f, tools in items:                    # a typo in the tool's name: the policy would never run
+                gone = sorted(set(tools or ()) - set(self.tools))
+                if gone:
+                    raise ValueError(f"{kind} {f.__name__} names {gone}, which the guard has no tool for (its tools: "
+                                     f"{sorted(self.tools)}) — it would check nothing")
         if any(t.model is None for t in self.tools.values()):
             return
         names = set(GIVEN) | set(self.facts) | {"argument_errors", "call_arguments", "grounding", "proposal"}
@@ -1380,6 +1388,9 @@ class Guard:
         from ..system import System
         if t.model is None:
             raise ValueError(f"tool {t.name} has no argument schema yet (guard.tool(..., schema=...) or guard.adopt)")
+        if t.authorize is True and self.authorizer is None:
+            raise ValueError(f"tool {t.name} is declared with authorize=True, but the guard has no authorizer "
+                             "(guard.make_authorizer(decider)): its calls would go unauthorized")
         self._check_policies()
         cat = Catalog()
         schema = json.dumps(t.model.model_json_schema(), sort_keys=True, default=str)

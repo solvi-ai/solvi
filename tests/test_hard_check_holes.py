@@ -145,3 +145,86 @@ def test_an_untyped_policy_that_returns_a_falsy_non_bool_does_not_allow_the_call
 
     d = g.call({"name": "send_payment", "arguments": {"amount": 1000000.0}}, context=[{"role": "user", "content": "pay 1000000"}])
     assert d.outcome != "allow" and paid == []
+
+
+def test_a_then_answer_outside_the_options_warns_at_build_and_abstains_instead_of_raising():
+    """`then={"pay": "nope"}` was accepted when the System was built, and `ask` raised ValueError exactly when the check
+    failed."""
+    cat = Catalog()
+
+    @cat.check(hard=True, then={"pay": "nope"})
+    def cap(amount, limit) -> bool:
+        return amount <= limit
+
+    @cat.rule("pay")
+    def pay(amount):
+        return "yes"
+
+    with pytest.warns(UserWarning, match="`then` answers 'pay' with 'nope'"):
+        s = System(cat, [Question("pay", "Pay?", Answer.choice(["yes", "no"]), checkpoints=["cap"])])
+    r = s.ask(OVER)["pay"]
+    assert r.answer is None and r.status == "abstain" and r.guard == "hard_check" and "nope" in r.why
+    assert s.ask({"amount": 5, "limit": 100})["pay"].answer == "yes"
+
+
+def _payments():
+    from solvi.agents import Guard
+    paid = []
+    g = Guard()
+
+    @g.tool
+    def send_payment(amount: float) -> str:
+        """Pay."""
+        paid.append(amount)
+        return "paid"
+
+    return g, paid
+
+
+BIG = ({"name": "send_payment", "arguments": {"amount": 1000000.0}}, [{"role": "user", "content": "pay 1000000"}])
+
+
+def test_a_policy_for_a_tool_the_guard_does_not_have_is_an_error_not_a_silent_no_op():
+    g, paid = _payments()
+
+    @g.policy("send_paymnet")                          # a typo: the policy would never run
+    def under_cap(amount) -> bool:
+        return amount <= 100
+
+    with pytest.raises(ValueError, match="send_paymnet.*no tool"):
+        g.call(BIG[0], context=BIG[1])
+    assert paid == []
+
+
+def test_authorize_true_without_an_authorizer_is_an_error():
+    from solvi.agents import Guard
+    g = Guard()
+
+    @g.tool(authorize=True)
+    def send_payment(amount: float) -> str:
+        """Pay."""
+        return "paid"
+
+    with pytest.raises(ValueError, match="authorize=True.*no authorizer"):
+        g.call(BIG[0], context=BIG[1])
+
+
+def test_tool_declared_by_name_and_schema_is_registered_without_a_second_call():
+    """`guard.tool(name="refund", schema=RefundArgs)` — the docstring's own example — returned a decorator and registered
+    nothing: calls of the tool were "unknown tool"."""
+    from pydantic import BaseModel
+
+    from solvi.agents import Guard
+
+    class RefundArgs(BaseModel):
+        order: str
+        amount: float
+
+    g = Guard()
+    g.tool(name="refund", schema=RefundArgs, ground=["order"])
+    assert "refund" in g.tools and g.tools["refund"].func is None
+    d = g.check({"name": "refund", "arguments": {"order": "A-17", "amount": 5.0}}, context=[{"role": "user", "content": "refund order A-17"}])
+    assert d.outcome == "allow"
+    assert g.check({"name": "refund", "arguments": {"order": "B-99", "amount": 5.0}},
+                   context=[{"role": "user", "content": "refund order A-17"}]).outcome == "deny"
+    assert g.declare("cancel", schema=RefundArgs).name == "cancel"          # the older spelling keeps working
