@@ -171,8 +171,9 @@ Every command is in the [guide](docs/guide.md#command-line).
 
 Types declare questions; the model proposes; checks decide. The fields of a pydantic model are the questions, their types
 the kinds (one option, several, an ordered score, yes/no); a decider (`solvi.decide`, `solvi[onnx]` or `solvi[model]`)
-answers them about a text or a JSON / pydantic state — several in one forward pass when the checkpoint can — with
-probabilities, a calibrated confidence and act / escalate. Hard checks, constraints and rules still decide.
+answers them about a text or a JSON / pydantic state — one question per forward pass with the published checkpoints,
+several in one pass with `DecideModel.load(..., multi_question=True)` — with probabilities, a calibrated confidence and
+act / escalate. Hard checks, constraints and rules still decide.
 
 ```python
 from typing import Literal
@@ -198,7 +199,7 @@ questions[1].checkpoints.append("no_legal_threat")
 res = System(cat, questions).ask({"ticket": {"subject": "Charged twice", "body": "Refund my double payment!",
                                              "customer": {"tier": "pro"}}})
 print({q: (r.answer, r.status) for q, r in res.results.items()})
-print(res.audit("team"))           # probabilities, the model's fingerprint, the shared pass, what escalated and why
+print(res.audit("team"))           # the act probability, the model's fingerprint, what escalated and why
 ```
 
 A state is read as key paths (`customer.tier: pro`), the format the decider is trained on; an unsure or escalated answer
@@ -405,7 +406,7 @@ receipt with the one-pass extractor on an A100).
 | [examples/12_grounded_audit.py](examples/12_grounded_audit.py) | One catalog with and without models: provenance, `res.audit()`, a hallucinated quote caught by grounding, a decision outside its options, a model changed since the decision, lifetime safeguard stats |
 | [examples/13_decide_model.py](examples/13_decide_model.py) | Support-email routing by a decider model as a catalog part: bias correction on unlabelled emails, 16 labelled examples, abstention, a constraint with a rule-based question, a hard check, the audit, `teach`, escalation for a target error rate, a JSON ticket (the real model with `SOLVI_DECIDE_MODEL`, a stand-in otherwise) |
 | [examples/14_typed_catalog.py](examples/14_typed_catalog.py) | Typed facts: a pydantic request, type hints as fact types, answer types from the rules' return types (Enum, Literal, bool), a mismatch caught at registration, rejected values → fallback / abstention, a response as JSON that loads back and replays |
-| [examples/15_typed_decisions.py](examples/15_typed_decisions.py) | Typed decisions: a pydantic ticket, the questions as a pydantic model's fields (choice, ordinal score, yes/no, multi-label), four answers from one forward pass, a hard check, a constraint and a rule over the model, an escalation in the audit and stats (the real model with `SOLVI_DECIDE_MODEL`, a stand-in otherwise) |
+| [examples/15_typed_decisions.py](examples/15_typed_decisions.py) | Typed decisions: a pydantic ticket, the questions as a pydantic model's fields (choice, ordinal score, yes/no, multi-label), four answers (one forward pass when the model shares passes), a hard check, a constraint and a rule over the model, an escalation in the audit and stats (the real model with `SOLVI_DECIDE_MODEL`, a stand-in otherwise) |
 | [examples/16_primitives.py](examples/16_primitives.py) | Answer primitives: "not stated" vs abstain, spans parsed into numbers, evidence quotes checked in the text (`require_evidence`), a ranking with scores, an estimate with an interval — from rules and from a decider with the answer-primitives contract; confidence per kind, JSON round trip, replay |
 | [examples/17_model_strategist.py](examples/17_model_strategist.py) | The code strategist: dead ends dropped, the cheapest verified plan by declared costs, a model's proposal checked and rejected; aliases for names that match no fact (experimental; stand-ins without weights) |
 | [examples/18_several_models.py](examples/18_several_models.py) | Several models, one decision: a cascade small → large, a vote of two model families, a route by code — each under one `act_guard` guarantee, with cost per question; every stage in the audit and the trace |

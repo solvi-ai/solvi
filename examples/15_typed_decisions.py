@@ -8,12 +8,14 @@ pydantic model, and each field's type says what kind of question it is:
     angry:   bool                                                        yes / no (noul)
     topics:  list[Literal["refund", "delay", "bug", "data_loss"]]        every option that applies (multi)
 
-One decider answers all four in ONE forward pass over the ticket (the state is serialized as key paths), each answer with
+One decider answers all four over the ticket (the state is serialized as key paths) — in ONE forward pass when the model
+shares passes (the stand-in does; the published checkpoints answer one question per pass unless loaded with
+multi_question=True) — each answer with
 probabilities, a calibrated confidence and act / escalate. Around the model, plain code decides: a hard check sends legal
 threats to a person as "critical", a constraint sends refunds to billing (joint decoding), a rule reads the customer's tier.
 
   1. the questions from the types; the ticket as the model reads it
-  2. one ticket: four answers from one pass; the audit
+  2. one ticket: four answers, and how many forward passes they took; the audit
   3. rules, a hard check and a constraint override the model
   4. an unclear ticket: the model escalates — abstain, "model escalated" in the audit and the stats
   5. a correction absorbed at once; the traces replay
@@ -155,7 +157,8 @@ if __name__ == "__main__":
     print("  the ticket as the model reads it:")
     print("    " + part.text_of(TICKET.model_dump()).replace("\n", "\n    "))
 
-    print("\n=== 2. one ticket: the answers, one forward pass ===")
+    print("\n=== 2. one ticket: the answers, " + ("one forward pass" if model.batchable else "one forward pass per question")
+          + " ===")
     before = model.passes
     res = system.ask(TICKET)
     print("  " + line(res))

@@ -498,8 +498,10 @@ cat.fn(team)                              # a fact other parts read (returns Dec
 q = urgency.question(cat, min_confidence=0.6)             # or: the answer of a question (registers cat.rule("urgency")(urgency))
 ```
 
-`model.decision(name, task, text_fact="doc", options=..., descriptions=None, multi=False, other=None, *, kind=None,
-type=None, escalate_below=None, act_threshold=None, use_act=None, target_error=None, score_value="median")` returns a
+`model.decision(name, task, text_fact="doc", options=(), descriptions=None, multi=False, other=None, *, kind=None,
+type=None, escalate_below=None, act_threshold=None, use_act=None, target_error=None, score_value="median", unknown=False,
+k=None, bins=None, unit=None, coverage=0.8, evidence=False, option_order="canonical", permutations=4, min_margin=None,
+long=None, top_k=None, rerank=False, perturb=0, retrieve_query=None)` returns a
 callable catalog function named `name` that returns `Decision(value, probs)`. The question is given by `options` (a list, or
 `{option: description}`) and `kind` (`"choice"`, `"multi"`, `"score"`, `"noul"`), or by a type (`type=`, or in place of the
 options; a dict of options is then read as descriptions). `model.decisions(Schema, text_fact)` gives one part per field of a
@@ -1375,7 +1377,7 @@ and `act_guard`) give one.
 [examples/13_decide_model.py](../examples/13_decide_model.py) routes support emails with a decision part: bias correction on
 60 unlabelled emails, S on 16 labelled ones, abstention, a constraint with a rule-based question, a hard check, the audit,
 `System.teach`, `calibrate_for` and a JSON ticket. [examples/15_typed_decisions.py](../examples/15_typed_decisions.py) is the
-whole story: a pydantic ticket, the questions as the fields of a pydantic model, four answers from one forward pass, a hard
+whole story: a pydantic ticket, the questions as the fields of a pydantic model, four answers (in one forward pass when the model shares passes), a hard
 check, a constraint and a rule over the model, an escalation, the audit. Both run the real decider when
 `SOLVI_DECIDE_MODEL` points to a checkpoint and a keyword stand-in otherwise.
 
@@ -3335,7 +3337,8 @@ them — `solvi.hash` ties a span to its trace record either way.
 `system.stats` counts, over the system's lifetime: `asks`, `answers`, `abstained`, `model_outputs` (outputs of model-backed
 parts, answer heads and learned rules), `grounding_rejected`, `type_rejected`, `outside_options`, `rule_abstained`,
 `low_confidence`, `validator_rejected`,
-`forced_by_hard_check`, `constraint_repairs`, `fallbacks`, `model_escalated` and `evidence_missing`.
+`forced_by_hard_check`, `constraint_repairs`, `fallbacks`, `model_escalated`, `evidence_missing`, `timeouts`,
+`instruction_flips` and `memory_disagreements`.
 `system.safeguard_report()` prints them (`evidence missing` once it has fired). Counting costs about
 1% of a decision. [examples/12_grounded_audit.py](../examples/12_grounded_audit.py) runs one catalog with and without models,
 with a hallucinating extractor and a classifier answering outside its options.
