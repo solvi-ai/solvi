@@ -2997,7 +2997,16 @@ input (`validate_reads_unknown`: it cannot run, so every output of that producer
 refuses such a catalog, and a part that is not an alternative producer is refused when it is declared); constraints between answers that no combination satisfies — one alone or all together,
 tried by brute force over the answers' finite domains (yes/no, choice, ordinal, multi-label up to 10 options; up to
 `--max-combos` combinations per group of constraints that share questions) — and a constraint reading a name that is not
-a question (it never applies). **Warnings**: a part no question's flow uses (a question without a rule, fit or `uses`
+a question (it never applies); a rule with a `return <literal>` that is not one of its question's options
+(`rule_returns_non_option`: `return "aprove"` — on that path the question abstains); a hard check without `-> bool`
+with a `return` that is plainly not `True` or `False` (`hard_check_untyped`: `return 0`, `return None`, a bare
+`return` — on that path the check is rejected and the questions it governs abstain). Both read the function's source:
+only literals in `return` statements (also in `a if c else b`) are judged, a returned variable or call is not.
+**Warnings**: a rule registered for a question the system does not ask (`unused_rule`); with `System(inputs=Model)`, an
+argument that no part computes and the model does not declare (`input_not_declared`: `amout` for `amount` — it could
+only arrive as an extra key, and never when the model forbids extra keys), and a `uses` hint naming neither a part nor
+a field of the model (`uses_unknown`; without an input model any such name is taken for a given fact, so a typo in
+`uses` cannot be told there); a part no question's flow uses (a question without a rule, fit or `uses`
 counts as using everything computable: its future head's candidate features); `then=` on a soft check (ignored); a rule
 reading a question's name (answers are not facts); typed readers of a given fact, or alternative producers, whose types no
 value satisfies together; an option the constraints always rule out (`dead_option`); a constraint that raises on some
