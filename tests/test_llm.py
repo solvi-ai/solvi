@@ -559,3 +559,22 @@ def test_a_span_over_two_neighbouring_retrieved_sections_maps_to_the_documents_t
     assert len(read) == 2 and read[0][0] < d.value.start < read[0][1] < read[1][0] < d.value.end < read[1][1]   # over both
     assert d.escalate is None and d.value.value == doc[d.value.start:d.value.end]
     assert d.value.value == "payable within thirty days\n\nof the date of the invoice"
+
+
+def test_the_prompt_says_what_a_not_stated_answers_one_number_means_and_it_is_read_that_way():
+    """With no passage the prompt's "your probability that the passage is the right answer" was written both ways
+    (0.1 and 0.9 for the same certainty that the text is silent) and read as p(not stated)."""
+    fake = FakeLLM(reply=json.dumps({"answer": None, "confidence": 0.9, "quote": ""}))
+    d = model(fake).decision("d", "When was it signed?", "doc", Maybe[Span[str]]).decide("No date here.")
+    sysmsg = fake.bodies[-1]["messages"][0]["content"]
+    assert "with null: your probability that the text does not state it" in sysmsg
+    conf = fake.bodies[-1]["response_format"]["json_schema"]["schema"]["properties"]["confidence"]
+    assert "null: that the text does not state it" in conf["description"]
+    assert d.value is Unknown and d.conf == pytest.approx(0.9)
+    fake = FakeLLM(reply=json.dumps({"answer": "not stated", "confidence": 0.8, "quote": ""}))
+    d = model(fake, ask="confidence").decision("r", "Refund?", "email", type=bool, unknown=True).decide("Hello.")
+    assert 'with "not stated": your probability that the text does not say it' in fake.bodies[-1]["messages"][0]["content"]
+    assert d.value is Unknown and d.conf == pytest.approx(0.8)
+    plain = FakeLLM(reply=json.dumps({"answer": "A-1", "confidence": 0.9, "quote": ""}))
+    model(plain).decision("o", "Order?", "doc", Span[str]).decide("Order A-1")
+    assert "with null" not in plain.bodies[-1]["messages"][0]["content"]       # no "not stated": nothing to explain

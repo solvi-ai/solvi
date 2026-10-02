@@ -95,12 +95,18 @@ _FORMS_CONF = {
               "every option that applies (an empty list if none does), written exactly as listed",
               '"confidence": your probability that the list is exactly right'),
 }
+# what the one number means for an answer of "not stated" (a span's null): the model's probability that the text does not
+# say it, read as p(not stated). Without it "your probability that the passage is the right answer" with no passage was
+# written both ways — 0.1 ("no passage, so low") and 0.9 ("sure there is none").
+_NULL_CONF = {"span": "; with null: your probability that the text does not state it (high when you are sure it does not)",
+              "choice": f'; with "{NOT_STATED}": your probability that the text does not say it',
+              "multi": f'; with ["{NOT_STATED}"]: your probability that the text does not say it'}
 FORMATS = ("json_schema", "json_object", "prompt")
 
 
 def template_hash():
     """The hash of the prompt templates and reply forms (part of every LLM decision's fingerprint)."""
-    blob = json.dumps([TEMPLATE_VERSION, SYSTEM_PROMPT, USER_PROMPT, _FORMS, _FORMS_CONF], sort_keys=True)
+    blob = json.dumps([TEMPLATE_VERSION, SYSTEM_PROMPT, USER_PROMPT, _FORMS, _FORMS_CONF, _NULL_CONF], sort_keys=True)
     return hashlib.sha256(blob.encode()).hexdigest()[:16]
 
 
@@ -192,7 +198,10 @@ def schema(it, ask="probabilities"):
         ans = {"type": ["string", "null"] if getattr(it, "unknown", False) else "string",
                "description": "the passage of the text that answers" + (" (null: not stated)" if getattr(it, "unknown",
                                                                                                        False) else "")}
-        props = {"answer": ans, "confidence": {"type": "number", "minimum": 0, "maximum": 1}, "quote": quote}
+        conf = {"type": "number", "minimum": 0, "maximum": 1}
+        if getattr(it, "unknown", False):
+            conf["description"] = "a passage: the probability that it is the right answer; null: that the text does not state it"
+        props = {"answer": ans, "confidence": conf, "quote": quote}
     else:
         labs = _labels(it)
         enum = {"type": "string", "enum": labs}
@@ -214,6 +223,8 @@ def messages(it, ask="probabilities"):
         answer_rule += (f'; "{NOT_STATED}" when the text does not say' if shape == "choice" else
                         f'; ["{NOT_STATED}"] when the text does not say' if shape == "multi" else
                         "; null when the text does not say")
+        if shape == "span" or ask == "confidence":        # one number: say what it means for "not stated"
+            prob_rule += _NULL_CONF[shape]
     sysmsg = SYSTEM_PROMPT.format(form=form, answer_rule=answer_rule, prob_rule=prob_rule)
     if shape == "span":
         opts = ""
@@ -415,7 +426,7 @@ def read_reply(it, content, logprobs=None, ask="probabilities"):
         if ans is None or (isinstance(ans, str) and ans.strip() == NOT_STATED and locate(NOT_STATED, text, ignore_case=False) is None):
             if not unknown_ok:
                 raise InvalidOutput("the reply says the text does not state it; the question needs a passage")
-            return {"logits": np.zeros(0), "pointer": {"null": c, "spans": []}, "info": info}
+            return {"logits": np.zeros(0), "pointer": {"null": c, "spans": []}, "info": info}   # the prompt: c = p(null)
         if not isinstance(ans, str) or not ans.strip():
             raise InvalidOutput(f"the answer is not a passage: {ans!r}")
         sp = locate(ans.strip(), text)
