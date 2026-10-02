@@ -66,6 +66,8 @@ nav:
       - solvi.generate: api/generate.md
       - solvi.agree: api/agree.md
       - solvi.refine: api/refine.md
+      - solvi.compile: api/compile.md
+      - solvi.sandbox: api/sandbox.md
       - solvi.multi: api/multi.md
       - solvi.memory: api/memory.md
       - solvi.lora: api/lora.md
