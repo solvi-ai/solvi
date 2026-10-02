@@ -96,9 +96,10 @@ typeCheckingMode = "basic"
 reportMissingImports = "warning"      # the optional extras (torch, transformers, onnxruntime, mcp, ...) may be missing
 reportMissingModuleSource = "none"
 # solvi is a dynamically typed code base: `x: T = None` defaults, facts and records typed `object` / `Any`, attributes set
-# on instances (a Response's System, a loaded model's files) and dicts of mixed values. These rules report that style
-# (about 260 findings on 0.7, none of them a bug on review) — shown as warnings, not failures; the rest of basic mode
-# (undefined and possibly unbound names, bad imports of solvi's own modules, call arity, return types, ...) fails CI.
+# on instances (a Response's System, a loaded model's files) and dicts of mixed values. These rules report that style —
+# shown as warnings, not failures (395 warnings on 0.7.2.dev0 with the CI command `uvx pyright@1.1.414 --pythonpath
+# .venv/bin/python`; the about 260 of 0.7 were reviewed and none was a bug); the rest of basic mode (undefined and
+# possibly unbound names, bad imports of solvi's own modules, call arity, return types, ...) fails CI.
 reportOptionalMemberAccess = "none"
 reportOptionalSubscript = "none"
 reportOptionalIterable = "none"
