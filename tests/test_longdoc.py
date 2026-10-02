@@ -102,6 +102,8 @@ def test_bm25_and_selection():
     assert gap.to_doc(i, gap.text.index(doc.section_text(doc.sections[5])) + 5) is None
     rr = doc.select("law", k=1, rerank=lambda xs: [1.0 if "Paris" in x else 0.0 for x in xs])
     assert "Paris" in doc.section_text(rr[0][0])
+    one = doc.select("Paris", k=3)                            # one section matches: the first two fill up the three
+    assert one[0][1] > 0 and [s.index for s, sc in one[1:]] == [0, 1] and all(sc == 0 for _, sc in one[1:])
     tight = doc.select("law agreement", k=5, budget=150)
     assert sum(approx_tokens(doc.section_text(s)) for s, _ in tight) <= 150 or len(tight) == 1
 

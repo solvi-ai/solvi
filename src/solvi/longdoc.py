@@ -187,7 +187,9 @@ class LongDocument:
         """The sections that bear on `query`, best first → [(Section, score)]: the top k by BM25 that fit `budget` tokens
         together (ties: the earlier section). rerank: a function [section text] → [relevance] (e.g. the decider's p(yes),
         see DecisionPart) applied to the best `rerank_top` (default 3k) by BM25; its score orders them instead (BM25 breaks
-        ties). Sections with no query term at all are kept only when nothing matches (then the first ones)."""
+        ties). When fewer than k sections contain a query term, the rest of the k are the document's first sections
+        (score 0, in document order) — so k sections are read whenever the document has them, and with no match at all
+        they are the first k."""
         bm = self.scores(query)
         order = sorted(range(len(self.sections)), key=lambda i: (-bm[i], i))
         score = {i: bm[i] for i in order}
