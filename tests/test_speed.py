@@ -56,3 +56,48 @@ def test_parallel_same_answer_valid_trace_and_faster():
     assert [r.hash for r in r1.trace.records] == [r.hash for r in r2.trace.records]   # scheduling does not change the trace
     assert r2.trace.replay(cat)["ok"]
     assert t_par < 0.7 * t_seq
+
+
+def test_a_given_value_is_canonicalised_and_hashed_once_per_ask_and_the_hashes_are_the_same(monkeypatch):
+    """A large input was canonicalised again for the input's hash after the steps had hashed it (and before the memo,
+    once per step that read it): with a 3.7k-float input most of a decision's time was hashing."""
+    import solvi.runtime as rt
+    from solvi import Answer, Catalog, Question
+    cat = Catalog()
+
+    @cat.fn
+    def mean(series):
+        return sum(series) / len(series)
+
+    @cat.fn
+    def last(series):
+        return series[-1]
+
+    @cat.check(hard=True, then={"alert": "no"})
+    def enough_history(series):
+        return len(series) >= 3
+
+    @cat.fn
+    def window(series, n):
+        return series[-n:]
+
+    @cat.rule("alert")
+    def alert(last, mean, window, label):
+        return "yes" if last > mean and len(window) == 2 else "no"
+    s = System(cat, [Question("alert", "?", Answer.yes_no(), checkpoints=["enough_history"])])
+    state = {"series": [0.5, 1.25, 2.0, 7.5], "n": 2, "label": "x" * 300, 5: "a key that is not a string"}
+    seen = []
+    canon = rt._canon
+    monkeypatch.setattr(rt, "_canon", lambda v: (seen.append(id(v)), canon(v))[1])
+    res = s.ask(state)
+    for v in (state["series"], state["label"], res.values["window"]):           # read by 4 steps, by 1, made by a step
+        assert seen.count(id(v)) == 1, v
+    monkeypatch.setattr(rt, "_canon", canon)
+    tr = res.trace
+    assert tr.init_hash == rt.vhash(state) and tr.replay(s, res.flow)["ok"]            # byte for byte what vhash gives
+    prev = tr.init_hash
+    for r in tr.records:
+        assert r.inputs == {x: rt.vhash(res.values[x]) for x in r.inputs}
+        assert r.prev == prev and r.hash == rt.vhash(r.body())
+        prev = r.hash
+    assert res["alert"].answer == "yes"

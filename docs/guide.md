@@ -1816,6 +1816,11 @@ Every step of the flow is a `Record` in `res.trace.records`:
 Answers from a learned head are records too (`kind="head"`, after the flow's steps): the answer, its probabilities and the
 head's fingerprint.
 
+What hashing costs: every given value and every computed value is put in canonical form and hashed once per ask,
+however many steps read it; the input's hash is taken when the ask starts. The time grows with the size of the values —
+about 0.4 ms per thousand floats of a list — so a decision over a large input is slower than the "about 0.4 ms" of a
+small one. A part should not change a given value in place: the hashes describe the input as it was given.
+
 `res.trace.fingerprint` records what decided: the catalog's fingerprint, the questions' and the fingerprint of every part
 in the flow (see [Catalog fingerprint, solvi diff and shadow mode](#catalog-fingerprint-solvi-diff-and-shadow-mode)); it is
 not part of the hash chain (a stored response is covered by the store's chain).

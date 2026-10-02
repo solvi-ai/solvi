@@ -40,8 +40,13 @@ def _ckey(c):
     return json.dumps(c, ensure_ascii=False, sort_keys=True)
 
 
+def _chash(c) -> str:
+    """The hash of a canonical form (_canon): what vhash returns for the value it came from."""
+    return hashlib.sha256(json.dumps(c, ensure_ascii=False, sort_keys=True).encode()).hexdigest()[:16]
+
+
 def vhash(v) -> str:
-    return hashlib.sha256(json.dumps(_canon(v), ensure_ascii=False, sort_keys=True).encode()).hexdigest()[:16]
+    return _chash(_canon(v))
 
 
 def srepr(v):
@@ -157,8 +162,10 @@ class Record(Serial):
         """The provenance kind of this record's value."""
         return self.provenance or self.default_provenance
 
-    def body(self):
-        b = {"step": self.step, "kind": self.kind, "name": self.name, "inputs": self.inputs, "value": vhash(self.value),
+    def body(self, h=vhash):
+        """What the record's hash is taken over. h: the hash of a value (vhash; the executor passes its memo, so a value
+        already hashed in this run is not hashed again)."""
+        b = {"step": self.step, "kind": self.kind, "name": self.name, "inputs": self.inputs, "value": h(self.value),
              "quote": self.quote, "error": self.error, "prev": self.prev}
         if self.tried is not None:                    # single-producer records hash exactly as before
             b["producer"], b["tried"] = self.producer, self.tried
@@ -685,19 +692,30 @@ class StepOut:
 
 
 class HashMemo(dict):
-    """vhash of the values of one run, by object: a value read by several steps is hashed once (only non-scalar values;
-    each entry keeps its value alive, so an id is not reused within the run)."""
+    """vhash of the values of one run, by object: a value read by several steps — and then recorded, and hashed as part
+    of the input — is canonicalised and hashed once (each entry keeps its value alive, so an id is not reused within
+    the run). The hashes are vhash's own, byte for byte."""
+
+    def __init__(self, init_state=None):
+        super().__init__()
+        self.init_state = init_state
 
     def __call__(self, v):
-        if v is None or type(v) in (str, int, float, bool):
-            return vhash(v) if type(v) is not str or len(v) < 256 else self._get(v)
-        return self._get(v)
-
-    def _get(self, v):
         e = self.get(id(v))
-        if e is None:
+        if e is None or e[0] is not v:
             e = self[id(v)] = (v, vhash(v))
         return e[1]
+
+    def init_hash(self):
+        """vhash(init_state), with each given value canonicalised once: its own hash (what the steps that read it
+        record) is taken from the same canonical form and kept for them."""
+        canon = {}
+        for k, v in self.init_state.items():
+            c = canon[str(k)] = _canon(v)             # as _canon of the dict: a later key of the same text wins
+            e = self.get(id(v))
+            if e is None or e[0] is not v:
+                self[id(v)] = (v, _chash(c))
+        return _chash(canon)
 
 
 def _extra(v):
@@ -995,7 +1013,8 @@ class _Run:
         self.schedule = []
         self.timeout = None
         self.known = dict(known) if known else ({} if (catalog.readers or catalog.types) else None)
-        self.memo = HashMemo()
+        self.memo = HashMemo(init_state)
+        self.init_hash = self.memo.init_hash()        # first: the steps then find every given value already hashed
         self.batch_of = {}                            # step name → (names, decision parts) of its shared forward pass
         for group in getattr(flow, "batches", None) or ():
             group = [n for n in group if n in index]
@@ -1149,8 +1168,7 @@ class _Run:
     def finish(self):
         """The records in flow order (hash-chained), the skipped steps and why → (trace, values)."""
         steps, done, catalog, flow = self.steps, self.done, self.catalog, self.flow
-        init_hash = vhash(self.init_state)
-        self.memo.clear()
+        init_hash = self.init_hash
         prev, recs, skipped, timings = init_hash, [], [], {}
         for i, st in enumerate(steps, 1):
             if i - 1 not in done:
@@ -1169,9 +1187,10 @@ class _Run:
                          confidence=o.confidence, error=o.error, prev=prev, producer=o.producer, tried=o.tried,
                          provenance=provenance_of(part, o), model=model_info(part.model) if part.model is not None else None,
                          probs=o.probs, extra=o.extra, tried_models=o.tried_models)
-            rec.hash = vhash(rec.body())
+            rec.hash = vhash(rec.body(self.memo))
             prev = rec.hash
             recs.append(rec)
+        self.memo.clear()
         final = {k: v for k, v in self.vals.items()}
         trace = Trace(init_hash, recs, dict(self.init_state), skipped, self.schedule, timings,
                       early_exit=bool(self.early_exit))
