@@ -4,10 +4,14 @@ solvi's own classes stay plain dataclasses (fast to build inside ask); these mod
 `res.model_dump()` / `res.model_dump("json")` / `res.to_json()`, `Response.from_json(s, catalog=cat)`,
 `Response.model_json_schema()`, and `system.response_schema()` — the same schema with each answer as its closed set.
 
-JSON has no dates, enums or models: on load, `catalog=` (or a System) restores typed values from the facts' types (a
-producer's return type, the type a given fact's readers expect, or System(inputs=...)), so a trace restored from JSON replays
-with the same hashes. Untyped values that JSON cannot carry (a date in an untyped fact) come back as strings, and their steps
-no longer replay."""
+JSON has no dates, sets, enums or models. Values of the stdlib types the dump flattens — date, datetime, time, Decimal,
+UUID, set, frozenset, tuple, also inside lists and dicts — are written with their type next to them (a trace's
+`init_types`, a record's `type`) and come back as they were, declared or not. For the rest (an enum, a pydantic model, a
+dataclass) `catalog=` (or a System) restores typed values from the facts' types (a producer's return type, the type a given
+fact's readers expect, or System(inputs=...)), so a trace restored from JSON replays with the same hashes. A value that is
+neither (an untyped enum; an untyped date in a record stored by solvi ≤ 0.7.1) comes back as JSON gave it and is listed
+in the loaded trace's `unrestored`: replay then reports its steps as "not_restored" — no verdict on the data — rather
+than as damaged."""
 from __future__ import annotations
 
 import math
@@ -83,6 +87,7 @@ class RecordModel(BaseModel):
     missing: bool = False
     not_stated: bool = False            # the value is solvi.Unknown
     native: bool = True                 # False: the value is not plain JSON (a date, an enum, a model): restored on load
+    type: Any = None                    # its stdlib type as recorded by the dump (see type_tree), restored without a catalog
     quote: Optional[tuple[int, int, str]] = None
     confidence: float = 1.0
     error: Optional[str] = None
@@ -107,6 +112,7 @@ class TraceModel(BaseModel):
     timings: dict[str, float] = {}
     rejected: list[tuple[str, str]] = []
     typed_init: list[str] = []          # given facts whose values are not plain JSON: restored on load
+    init_types: dict[str, Any] = {}     # ... and the stdlib type of each as recorded by the dump (see type_tree)
     fingerprint: dict[str, Any] = {}    # the catalog's, questions' and models' fingerprints (System.fingerprint)
 
 
@@ -284,6 +290,112 @@ def native(v):
     return False
 
 
+# --- stdlib values JSON flattens: the dump records their type (a "type tree"), the load restores them from it
+UNRESTORABLE = "?"                                    # in a type tree: a value only a declared type can restore
+_LEAF = None
+
+
+def _leaves():
+    """name → (type, restore from the JSON form) of the leaf types a dump records; type → name."""
+    global _LEAF
+    if _LEAF is None:
+        import datetime
+        import decimal
+        import uuid
+
+        def iso(cls):
+            return lambda t: cls.fromisoformat(t[:-1] + "+00:00" if t.endswith("Z") else t)
+        by_name = {"date": (datetime.date, datetime.date.fromisoformat), "datetime": (datetime.datetime, iso(datetime.datetime)),
+                   "time": (datetime.time, iso(datetime.time)), "Decimal": (decimal.Decimal, decimal.Decimal),
+                   "UUID": (uuid.UUID, uuid.UUID)}
+        _LEAF = (by_name, {t: n for n, (t, _) in by_name.items()})
+    return _LEAF
+
+
+_SEQS = {"list": list, "tuple": tuple, "set": set, "frozenset": frozenset}
+
+
+def type_tree(v):
+    """What a load needs to give `v` back from its JSON form, or None when JSON gives it back as it is:
+    "date" / "datetime" / "time" / "Decimal" / "UUID" for a value of exactly that type that its JSON form restores;
+    {"k": "list" | "tuple" | "set" | "frozenset", "of": tree} (every item alike) or {..., "items": [tree]} (a set's
+    items in the order the dump writes them); {"k": "dict", "items": {key: tree}} for the keys that need one;
+    "?" (UNRESTORABLE) for anything else — an enum, a model, an aware datetime whose zone its text does not carry."""
+    t = type(v)
+    if v is None or t in (str, int, float, bool):
+        return None
+    if t in (list, tuple, set, frozenset):
+        trees = [type_tree(x) for x in v]
+        if t is list and all(x is None for x in trees):
+            return None
+        if all(x == trees[0] for x in trees):
+            return {"k": t.__name__} if not trees or trees[0] is None else {"k": t.__name__, "of": trees[0]}
+        if t in (set, frozenset):
+            from .runtime import _canon, _ckey
+            trees = [type_tree(x) for x in sorted(v, key=lambda x: _ckey(_canon(x)))]
+        return {"k": t.__name__, "items": trees}
+    if t is dict:
+        if not all(type(k) is str for k in v):
+            return UNRESTORABLE
+        trees = {k: tr for k, x in v.items() for tr in [type_tree(x)] if tr is not None}
+        return {"k": "dict", "items": trees} if trees else None
+    by_name, by_type = _leaves()
+    name = by_type.get(t)
+    if name is None:
+        return UNRESTORABLE
+    try:
+        back = by_name[name][1](to_jsonable_python(v))
+    except Exception:  # noqa: BLE001 — its JSON form does not parse back
+        return UNRESTORABLE
+    return name if type(back) is t and repr(back) == repr(v) else UNRESTORABLE
+
+
+def restorable(tree):
+    """Does a type tree restore the whole value (no part of it needs a declared type)?"""
+    if tree is None or isinstance(tree, str):
+        return tree != UNRESTORABLE
+    if not isinstance(tree, dict):
+        return False
+    if "of" in tree:
+        return restorable(tree["of"])
+    items = tree.get("items")
+    return all(restorable(x) for x in (items.values() if isinstance(items, dict) else items or ()))
+
+
+def from_tree(tree, v):
+    """A value's JSON form → the value its type tree describes; what does not fit the tree (already restored, edited)
+    is returned as it is."""
+    if tree is None or tree == UNRESTORABLE or v is None:
+        return v
+    if isinstance(tree, str):
+        leaf = _leaves()[0].get(tree)
+        if leaf is None or not isinstance(v, str):
+            return v
+        try:
+            return leaf[1](v)
+        except Exception:  # noqa: BLE001
+            return v
+    if not isinstance(tree, dict):
+        return v
+    if tree.get("k") == "dict":
+        items = tree.get("items")
+        if not isinstance(v, dict) or not isinstance(items, dict):
+            return v
+        return {k: from_tree(items.get(k), x) for k, x in v.items()}
+    cls = _SEQS.get(tree.get("k"))
+    if cls is None or not isinstance(v, (list, tuple)):
+        return v
+    items = tree.get("items")
+    if isinstance(items, list) and len(items) == len(v):
+        out = [from_tree(t, x) for t, x in zip(items, v)]
+    else:
+        out = [from_tree(tree.get("of"), x) for x in v]
+    try:
+        return cls(out)
+    except TypeError:                                 # an item that cannot be in a set (it was not restored)
+        return v
+
+
 _TYPES = None
 
 
@@ -330,15 +442,23 @@ def _record(r):
         d["tried_models"] = r.tried_models
     if ns:
         d["not_stated"] = True
+    if not (missing or ns):
+        tree = type_tree(r.value)
+        if tree is not None:
+            d["type"] = tree
     return d
 
 
 def _trace(t):
-    return {"init_hash": t.init_hash, "init": dict(t.init), "records": [_record(r) for r in t.records],
-            "skipped": [list(s) for s in t.skipped], "schedule": list(t.schedule), "timings": dict(t.timings),
-            "rejected": [list(x) for x in getattr(t, "rejected", None) or ()],
-            "typed_init": [k for k, v in t.init.items() if not native(v)],
-            "fingerprint": dict(getattr(t, "fingerprint", None) or {})}
+    d = {"init_hash": t.init_hash, "init": dict(t.init), "records": [_record(r) for r in t.records],
+         "skipped": [list(s) for s in t.skipped], "schedule": list(t.schedule), "timings": dict(t.timings),
+         "rejected": [list(x) for x in getattr(t, "rejected", None) or ()],
+         "typed_init": [k for k, v in t.init.items() if not native(v)],
+         "fingerprint": dict(getattr(t, "fingerprint", None) or {})}
+    types = {k: tree for k, v in t.init.items() for tree in [type_tree(v)] if tree is not None}
+    if types:
+        d["init_types"] = types
+    return d
 
 
 def _result(r):
@@ -464,22 +584,49 @@ def _load_result(m):
                   m.extra)
 
 
+def _back(tree, declared, v, flattened):
+    """A value from its JSON form → (the value, why it could not be restored or None): by the type the dump recorded
+    when that restores all of it, else by the declared type (`declared`: a function → the type or None), else as far
+    as the recorded type goes. flattened: the dump says the value is not plain JSON."""
+    if tree is not None and restorable(tree):
+        return from_tree(tree, v), None
+    if tree is None and not flattened:
+        return v, None
+    t = declared()
+    if t is not None:
+        return _restore(t, v), None
+    if tree is None:
+        return v, "its type was not recorded (stored by solvi ≤ 0.7.1) and none is declared"
+    return from_tree(tree, v), "its type is not one the dump restores (an enum, a model, a class) and none is declared"
+
+
 def _load_trace(m, catalog, system):
     from .runtime import MISSING, Record, Trace
     typed = set(m.typed_init)
-    init = {k: _restore(_given_type(catalog, system, k), v) if k in typed else v for k, v in m.init.items()}
+    init, lost = {}, {}                               # lost: fact → why its value is not the one that was hashed
+    for k, v in m.init.items():
+        init[k], why = _back(m.init_types.get(k), lambda k=k: _given_type(catalog, system, k), v, k in typed)
+        if why:
+            lost[k] = why
     recs = []
     from .core import Unknown
     for r in m.records:
-        v = MISSING if r.missing else Unknown if r.not_stated else r.value if r.native else \
-            _restore(_given_type(catalog, system, r.name[7:]) if r.kind == "textin" else
-                     _fact_type(catalog, r.name, r.producer), r.value)
+        if r.missing or r.not_stated:
+            v = MISSING if r.missing else Unknown
+        else:
+            v, why = _back(r.type, lambda r=r: _given_type(catalog, system, r.name[7:]) if r.kind == "textin" else
+                           _fact_type(catalog, r.name, r.producer), r.value, not r.native)
+            if why:
+                lost[r.name] = why
         recs.append(Record(r.step, r.kind, r.name, dict(r.inputs), v, None if r.quote is None else tuple(r.quote),
                            r.confidence, r.error, r.prev, r.hash, r.producer,
                            None if r.tried is None else [list(t) for t in r.tried], r.provenance, r.model,
                            None if r.probs is None else _probs(r.probs), r.extra, r.tried_models))
-    return Trace(m.init_hash, recs, init, [tuple(s) for s in m.skipped], list(m.schedule), dict(m.timings),
-                 [tuple(x) for x in m.rejected], dict(m.fingerprint))
+    tr = Trace(m.init_hash, recs, init, [tuple(s) for s in m.skipped], list(m.schedule), dict(m.timings),
+               [tuple(x) for x in m.rejected], dict(m.fingerprint))
+    if lost:
+        tr.unrestored = lost                          # replay: mismatches these explain are "not_restored", not damage
+    return tr
 
 
 def _stub(name, kind, inputs):

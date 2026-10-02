@@ -62,7 +62,8 @@ def srepr(v):
 
 MISSING = object()
 
-MISMATCH_KINDS = ("integrity", "recompute", "model_changed", "missing_part", "missing_input", "flow", "error")
+MISMATCH_KINDS = ("integrity", "recompute", "model_changed", "missing_part", "missing_input", "flow", "answer",
+                  "not_restored", "error")
 
 
 class Mismatch(tuple):
@@ -77,6 +78,9 @@ class Mismatch(tuple):
         flow           a planned step is not in the trace
         answer         a stored answer is not the one the trace gives under the same questions and catalog: the answer
                        was changed after the run (replay with the System; a bare Catalog cannot check answers)
+        not_restored   a hash or a step does not verify because a value it rests on did not come back from storage as it
+                       was: its type is neither one the dump restores (date, Decimal, set, ...) nor declared (an untyped
+                       enum or object; an untyped date in a record stored by solvi ≤ 0.7.1) — no verdict on the data
         error          the replay itself failed (the record could not be loaded, or replay raised): no verdict on the data
 
     It compares, unpacks and serializes as the plain triple."""
@@ -109,6 +113,8 @@ def mismatch_summary(mismatches, catalog=None):
         s = "data damaged: a stored answer is not the one its trace gives"
     elif set(kinds) <= {"error"}:
         s = "replay failed (no verdict on the data)"
+    elif "not_restored" in kinds:
+        s = "not verified: values stored without their type did not come back as they were (no verdict on the data)"
     elif "missing_part" in kinds:
         s = "data intact, catalog changed (parts missing)"
     elif catalog == "changed" or "missing_input" in kinds:
@@ -263,11 +269,21 @@ class Trace(Serial):
         vals = dict(self.init)
         prev = self.init_hash
         bad, models = [], []
+        lossy = getattr(self, "unrestored", None) or {}   # loaded from JSON: values that did not come back as they were
         if vhash(self.init) != self.init_hash:
-            bad.append(Mismatch(0, "init", "init_hash does not match the recorded input", "integrity"))
+            lost = sorted(k for k in lossy if k in self.init)
+            if lost:
+                bad.append(Mismatch(0, "init", "the recorded input cannot be checked: " + _lost_text(lossy, lost),
+                                    "not_restored"))
+            else:
+                bad.append(Mismatch(0, "init", "init_hash does not match the recorded input", "integrity"))
+        n0, cur = len(bad), None
         for r in self.records:
-            if r.prev != prev:
+            if lossy and cur is not None:             # what the record before added: explained by a lost value, or not
+                _not_restored(bad, n0, lossy, cur)
+            if r.prev != prev:                        # a broken link is damage whatever the values are
                 bad.append(Mismatch(r.step, r.name, "hash chain broken", "integrity"))
+            n0, cur = len(bad), r
             if vhash(r.body()) != r.hash:
                 bad.append(Mismatch(r.step, r.name, "record modified after execution", "integrity"))
             prev = r.hash
@@ -319,6 +335,8 @@ class Trace(Serial):
                     bad += _grounded(part, r, self.init) + _checked(part.model, r)
                     continue
             bad += _recompute(part, r, args, self.init, catalog)
+        if lossy and cur is not None:
+            _not_restored(bad, n0, lossy, cur)
         if flow is not None:
             seen = {r.name for r in self.records} | {n for n, _ in self.skipped}
             for st in flow.steps:
@@ -337,6 +355,22 @@ class Trace(Serial):
         if bad:
             out.update(mismatch_summary(bad, out["catalog"]))
         return out
+
+
+def _lost_text(lossy, names):
+    return "; ".join(f"{k} came back from storage as JSON gave it — {lossy[k]}" for k in names)
+
+
+def _not_restored(bad, n0, lossy, r):
+    """The mismatches of one record (bad[n0:]) that a value lost in storage explains — the record's own value, or a
+    fact it read — become kind "not_restored": the step cannot be checked, which is no verdict on the data."""
+    lost = ([r.name] if r.name in lossy else []) + [x for x in r.inputs if x in lossy]
+    if not lost:
+        return
+    for i in range(n0, len(bad)):
+        m = bad[i] if isinstance(bad[i], Mismatch) else Mismatch(*bad[i])
+        if m.kind in ("integrity", "recompute"):
+            bad[i] = Mismatch(m[0], m[1], f"{m[2]} — not checked: {_lost_text(lossy, lost)}", "not_restored")
 
 
 def _answers_differ(trace, system, flow):

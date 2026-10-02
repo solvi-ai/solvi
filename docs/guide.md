@@ -427,10 +427,17 @@ system.response_schema()           # ... with each question's answer as its clos
 Question.from_json(q.to_json()) == q
 ```
 
-JSON has no dates or enums: the dump marks values that are not plain JSON, and on load `catalog=` (a Catalog, or the
-System, which also knows `inputs=`) restores them from the producer's return type, the type the fact's readers expect, or the
-input model — so the restored trace hashes and replays exactly. Untyped non-JSON values come back as strings (their steps
-then no longer replay). The classes stay plain dataclasses; the pydantic models are in `solvi.schema`.
+JSON has no dates, sets or enums. The dump writes the type of every value of the stdlib types it flattens — `date`,
+`datetime`, `time`, `Decimal`, `UUID`, `set`, `frozenset`, `tuple`, also inside lists and dicts — next to the value, and
+a load gives them back as they were, declared or not: the README quickstart, whose parts read untyped dates, replays
+from a store. For the rest (an enum, a pydantic model, a dataclass) `catalog=` (a Catalog, or the System, which also
+knows `inputs=`) restores them from the producer's return type, the type the fact's readers expect, or the input model —
+so the restored trace hashes and replays exactly. A value that is neither — an untyped enum or object, an aware
+datetime whose zone its text does not carry, an untyped date in a record stored by solvi 0.7.1 or earlier — comes back
+as JSON gave it and is named in the loaded trace's `unrestored`: replay reports the steps that rest on it as
+`not_restored` ("no verdict on the data"), `solvi diff` lists the decision under "could not be re-run", and
+`counterfactual` draws no conclusion from it. The classes stay plain dataclasses; the pydantic models are in
+`solvi.schema`.
 
 Notes: types are resolved with `typing.get_type_hints`; a name that cannot be resolved (a class defined inside a function
 under `from __future__ import annotations`) is skipped with a warning. A pydantic model in a module loaded without an entry
@@ -1810,11 +1817,14 @@ Each mismatch is the triple with a `.kind`, so a report can tell damaged data fr
 `integrity` (the hash chain, a record's hash, the input's hash or a recorded input hash does not verify), `recompute`
 (a step no longer gives the recorded value), `model_changed`, `missing_part` (the part or a producer was renamed or
 removed since: a mismatch, not an exception, and the steps after it are still checked), `missing_input` (a part now
-reads an input the trace does not hold), `flow` (a planned step is not recorded) and `error` (`replay_all`: a stored
-record could not be loaded, or the replay raised). When there are mismatches the result also has `"kinds"`, the count
+reads an input the trace does not hold), `flow` (a planned step is not recorded), `not_restored` (a hash or a step does
+not verify because a value it rests on did not come back from storage as it was — its type is neither one the dump
+restores nor declared: no verdict on the data, see [serialization](#typed-input-state-and-serialization)) and `error`
+(`replay_all`: a stored record could not be loaded, or the replay raised). When there are mismatches the result also has `"kinds"`, the count
 per kind, and `"summary"`, one line: `"data damaged: the hash chain or a record does not verify"`, `"data intact,
 catalog changed (parts missing)"`, `"data intact, catalog changed"`, `"data intact, model changed"`, `"data intact,
-steps do not recompute"` or `"replay failed (no verdict on the data)"`. `replay_all` gives the same two keys and the
+steps do not recompute"`, `"not verified: values stored without their type did not come back as they were (no verdict
+on the data)"` or `"replay failed (no verdict on the data)"`. `replay_all` gives the same two keys and the
 catalog verdict for every stored decision that does not replay, and `solvi replay` prints them.
 
 Continuing the README quickstart:

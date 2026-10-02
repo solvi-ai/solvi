@@ -213,7 +213,8 @@ def diff(storage, system, confidence=0.01, limit=None, **filters):
     """Re-run stored decisions with `system` (e.g. a new catalog or model) and report what changes → DiffReport.
     Each stored decision is loaded (typed values restored with `system`), its recorded input is asked again for the same
     questions (store=False: nothing is written to the system's own storage), and the two responses are compared (see
-    compare). filters: TraceStorage.query filters (question=, since=, ...) to pick the decisions; limit: at most this many.
+    compare). A stored decision whose input did not come back as it was (see solvi.schema: an untyped enum or object, an
+    untyped date stored by solvi ≤ 0.7.1) is listed under `errors` — "could not be re-run" — not as a changed one. filters: TraceStorage.query filters (question=, since=, ...) to pick the decisions; limit: at most this many.
     The system's learned parts may learn from these asks as from any other (System(learn=...))."""
     from .provenance import catalog_fingerprint
     rep = DiffReport()
@@ -232,6 +233,11 @@ def diff(storage, system, confidence=0.01, limit=None, **filters):
             rep.catalog["stored"][key] = rep.catalog["stored"].get(key, 0) + 1
             changed_parts |= {n for n, h in (fp.get("parts") or {}).items() if now["parts"].get(n) != h}
             names = [q for q in old.results if q in system.questions]
+            lost = sorted(k for k in getattr(old.trace, "unrestored", None) or () if k in old.trace.init)
+            if lost:                                  # a re-run on text where the decision read a date is not a change
+                raise ValueError("the stored input was not restored (" + ", ".join(lost) + ": stored without a type "
+                                 "the dump restores, and none is declared) — declare the types (System(inputs=...) or "
+                                 "annotations) to re-run it")
             new = system.ask(dict(old.trace.init), names, store=False)
         except Exception as e:  # noqa: BLE001
             rep.errors.append({"id": s.id, "seq": s.seq, "error": f"{type(e).__name__}: {e}"})

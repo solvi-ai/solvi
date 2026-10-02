@@ -305,7 +305,11 @@ def test_replay_with_typed_facts():
     d = res.trace.model_dump("json")
     assert Trace.model_validate(d, catalog=cat).replay(cat)["ok"]           # dates restored from the facts' types
     assert Trace.model_validate(d, catalog=s).replay(s)["ok"]
-    assert not Trace.model_validate(d).replay(cat)["ok"]                    # without types a date stays a string
+    assert Trace.model_validate(d).replay(cat)["ok"]                        # also without them: the dump has each type
+    old = {**d, "records": [{k: v for k, v in r.items() if k != "type"} for r in d["records"]]}
+    old.pop("init_types", None)                                             # as solvi ≤ 0.7.1 wrote it: a date stays a
+    rep = Trace.model_validate(old).replay(cat)                             # string, which is no verdict on the data
+    assert not rep["ok"] and set(rep["kinds"]) == {"not_restored"}
     rec = next(r for r in res.trace.records if r.name == "risk_score")
     rec.value = 4.0                                                         # tamper with a coerced value
     rep = res.trace.replay(cat)

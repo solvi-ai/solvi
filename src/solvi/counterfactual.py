@@ -78,6 +78,7 @@ class Counterfactuals:
     evals: int = 0
     exhausted: bool = False                         # the search stopped at max_evals
     kind: str | None = None
+    inconclusive: str | None = None                 # why nothing was searched (a stored response whose input was lost)
 
     @property
     def best(self):
@@ -97,6 +98,8 @@ class Counterfactuals:
         lines = [f"{self.question} {now}"]
         if self.found:
             lines += [f"  {c}" for c in self.found]
+        elif self.inconclusive:
+            lines.append(f"  no conclusion: {self.inconclusive}")
         else:
             lines.append("  no change of " + (", ".join(self.searched) or "any input")
                          + " (one at a time" + (" or two together" if self._two else "") + ") changes the answer")
@@ -116,7 +119,7 @@ class Counterfactuals:
         return {"question": self.question, "answer": _plain(self.answer), "status": self.status,
                 "found": [c.to_dict() for c in self.found], "searched": list(self.searched),
                 "not_searched": dict(self.not_searched), "held": list(self.held), "unavailable": list(self.unavailable),
-                "evals": self.evals, "exhausted": self.exhausted}
+                "evals": self.evals, "exhausted": self.exhausted, "inconclusive": self.inconclusive}
 
 
 def _val(v):
@@ -422,8 +425,23 @@ def search(res, question, max_changes=2, over=None, target=None, domains=None, s
     if over is None:
         from .audit import build
         over = [g["name"] for g in build(res, question)[question].given]
+    lost = {f: w for f, w in (getattr(res.trace, "unrestored", None) or {}).items() if f in init}
+    if lost:                                          # a stored response whose input did not come back as it was: when
+        from .runtime import vhash                    # the re-run of the unchanged input no longer gives the recorded
+        base = rerun({})                              # answer (text where the decision read a date), every re-run is
+        if (vhash(base.answer), base.status) != (vhash(a.answer), a.status):   # off, and "no change changes it" is wrong
+            for f in over:
+                out.not_searched[f] = (f"came back from storage as JSON gave it — {lost[f]}" if f in lost
+                                       else "the decision's input was not restored")
+            out.inconclusive = ("the stored input was not restored (" + ", ".join(sorted(lost)) + "): re-run as it came "
+                                "back, the decision does not give its recorded answer — declare the types "
+                                "(System(inputs=...) or annotations) and load it again")
+            return out
     kinds = {}
     for f in over:
+        if f in lost:
+            out.not_searched[f] = f"came back from storage as JSON gave it — {lost[f]}"
+            continue
         if f not in init:
             out.not_searched[f] = "not a given input of this decision"
             continue
