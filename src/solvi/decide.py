@@ -417,7 +417,7 @@ class _Encoder:
     Both return the token ids and, per question, the position of its mode marker and of its option markers."""
 
     def __init__(self, path, max_len, markers=None):
-        from tokenizers import Tokenizer
+        Tokenizer = need("tokenizers", "onnx", "a decider checkpoint's tokenizer").Tokenizer
         f = os.path.join(path, "tokenizer.json")
         self.tok = Tokenizer.from_file(f)
         self.tok.no_padding()
@@ -622,13 +622,25 @@ class _NetScorer:
         return out
 
 
+def need(module, extra, what):
+    """Import an optional dependency → the module; ImportError naming the extra to install when it is missing (a
+    dependency that fails inside it is raised as it is)."""
+    import importlib
+    try:
+        return importlib.import_module(module)
+    except ImportError as e:
+        if e.name is not None and e.name.split(".")[0] != module.split(".")[0]:
+            raise
+        raise ImportError(f'{what} needs {module}: pip install "solvi[{extra}]"') from None
+
+
 class OnnxScorer(_NetScorer):
     """onnxruntime session over onnx/model_*.onnx (inputs input_ids, attention_mask; output logits [B, L, C]). The block
     layout needs an export with the inputs position_ids, full_attention_mask and sliding_attention_mask ([B, 1, L, L] bool);
     without them several questions fall back to one per pass."""
 
     def __init__(self, path, max_len=512, device=None, onnx_file=None, bs=16, caps=None):
-        import onnxruntime as ort
+        ort = need("onnxruntime", "onnx", 'backend="onnx"')
         self._setup(path, max_len, bs, caps)
         self.file = onnx_file or _onnx_file(path, block=self.mq is not None and self.mq["layout"] == "block")
         if self.file is None:
@@ -658,7 +670,8 @@ class TorchScorer(_NetScorer):
     The block layout passes per-layer-type attention masks and position ids (sdpa attention)."""
 
     def __init__(self, path, max_len=512, device=None, bs=16, caps=None):
-        import torch
+        torch = need("torch", "model", 'backend="torch"')
+        need("transformers", "model", 'backend="torch"')
         from safetensors.torch import load_file
         from transformers import AutoConfig, AutoModel
         self.torch = torch
@@ -1238,12 +1251,14 @@ class DecideModel:
         the checkpoint's `max_len`); it also sets long="retrieve"'s budget. max_len_long: the length long="full" reads
         whole (default: the checkpoint's `max_len_long`; a checkpoint that declares none refuses long="full" unless it is
         given here — with a warning: it was not trained on long inputs). Part of the fingerprint."""
+        if backend not in ("auto", "onnx", "torch"):     # before anything is downloaded
+            raise ValueError(f'backend must be "torch", "onnx" or "auto", not {backend!r}')
         path = os.path.expanduser(str(path_or_id))
         if not os.path.isdir(path):
             if os.path.isabs(path) or path.startswith((".", "~")):    # a path, not a Hugging Face id: do not ask the hub
                 raise FileNotFoundError(f"{path}: no such folder (a checkpoint is a folder with solvi_decide.json, or a "
                                         "Hugging Face id like solvi-ai/solvi-base)")
-            from huggingface_hub import snapshot_download
+            snapshot_download = need("huggingface_hub", "onnx", "loading a decider by its Hugging Face id").snapshot_download
             allow = None
             if backend == "onnx":
                 allow = ["*.json", "onnx/*"]
@@ -1268,6 +1283,12 @@ class DecideModel:
                 backend = "onnx" if _onnx_file(path) else "torch"
             except ImportError:
                 backend = "torch"
+            if backend == "torch":
+                try:
+                    import torch  # noqa: F401
+                except ImportError:
+                    raise ImportError('DecideModel.load needs a runtime: pip install "solvi[onnx]" (onnxruntime, for a '
+                                      'checkpoint with an onnx/ folder) or "solvi[model]" (torch)') from None
         if backend == "onnx":
             scorer = OnnxScorer(path, n, device, bs=bs, caps=caps)
             weights = scorer.file

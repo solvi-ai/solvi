@@ -2,6 +2,7 @@
 correction without labels, few-shot shift / scale with teach, "other" as a threshold, and solvi.calibration.
 A tiny fake scorer stands in for the ModernBERT decider; one optional test runs the real ONNX checkpoint if present."""
 import io
+import json
 import os
 import runpy
 import zlib
@@ -435,3 +436,24 @@ def test_the_published_onnx_decider_if_present():
     s = System(cat, [part.question(cat)])
     res = s.ask({"email": "The app crashes when I open settings."})
     assert res["team"].answer == "technical" and res.trace.replay(cat)["ok"]
+
+
+def test_a_missing_runtime_names_the_extra_to_install_and_a_bad_backend_is_refused_first(tmp_path, monkeypatch):
+    """DecideModel.load failed with a bare ModuleNotFoundError (huggingface_hub, onnxruntime; with backend="auto" and
+    neither runtime "No module named 'torch'"), and accepted any backend string until after the download."""
+    import sys
+    ck = tmp_path / "ck"
+    ck.mkdir()
+    (ck / "solvi_decide.json").write_text(json.dumps({"format": "solvi_decide v3", "max_len": 512}))
+    for mod in ("onnxruntime", "torch", "transformers", "huggingface_hub"):
+        monkeypatch.setitem(sys.modules, mod, None)
+    with pytest.raises(ValueError, match='backend must be "torch", "onnx" or "auto", not \'tensorflow\''):
+        DecideModel.load("someone/model", backend="tensorflow")
+    with pytest.raises(ImportError, match=r'Hugging Face id needs huggingface_hub: pip install "solvi\[onnx\]"'):
+        DecideModel.load("someone/model")
+    with pytest.raises(ImportError, match=r'backend="onnx" needs onnxruntime: pip install "solvi\[onnx\]"'):
+        DecideModel.load(ck, backend="onnx")
+    with pytest.raises(ImportError, match=r'backend="torch" needs torch: pip install "solvi\[model\]"'):
+        DecideModel.load(ck, backend="torch")
+    with pytest.raises(ImportError, match=r'needs a runtime: pip install "solvi\[onnx\]"'):
+        DecideModel.load(ck)
