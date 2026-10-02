@@ -1573,7 +1573,9 @@ Plain CPU parts gain nothing from `aask`: for them the sync `ask` stays the defa
 ### Learned order of hard checks
 
 Every `ask` measures the run time of each part: `system.costs` keeps a moving average (ms) per part (`cost=` on a decorator
-is the prior until a part has run; `costs="measured"` also feeds it to the planner, see above). It also records which hard checks failed on which input.
+is the prior until a part has run; `costs="measured"` also feeds it to the planner, see above). While learning is on —
+`System(order="learned")`, `producers="learned"`, `learn=True`, or after `learn_order()` — it also records which hard
+checks failed on which input; a default System does not (`learn=False`: no work inside `ask` beyond the costs).
 
 `System(cat, questions, order="learned")` — or `system.learn_order(examples)` on a list of `init_state`s, which runs only the
 hard checks and what they read and then switches the order — makes the executor evaluate hard checks **one at a time**, the

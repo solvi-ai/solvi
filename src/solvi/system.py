@@ -184,7 +184,9 @@ class System:
         """order: "default" (hard checks and their inputs first, all together) or "learned" (hard checks one at a time, most
         expected saving first — see learn_order). producers: "declared" (alternative producers of a fact are tried in
         declaration order) or "learned" (a policy picks the order per input and learns from outcomes). learn: after every
-        ask, update part costs and the order / producer models from what happened (milliseconds).
+        ask, update the order / producer models from what happened (which hard check failed on which input, which
+        producer was accepted); default: on when order="learned" or producers="learned", else off (part costs are
+        measured either way). learn_order() turns it on.
         inputs: a pydantic model of init_state (optional): a dict passed to ask is validated against it — its fields (with
         defaults) are the given facts, a field that fails is left out and reported (safeguard type_rejected). ask also takes
         a BaseModel instance directly, with or without `inputs`.
@@ -711,7 +713,10 @@ class System:
     def learn_order(self, examples=None, features=None):
         """Learn which hard checks tend to fail on which inputs, and switch this system to the learned order.
         examples: [init_state] — each runs only its hard checks and what they read (no early exit), which also measures their
-        costs. Without examples, the models learned from past asks are used as they are (every ask feeds them).
+        costs. Without examples, the models learned from past asks are used as they are: asks feed them only while
+        learning is on (System(order="learned"), producers="learned" or learn=True), so on a default System that never
+        learned they are empty and every check counts as failing half the time. From this call on every ask feeds them
+        (`self.learn` becomes True).
         features: computed facts to use besides init_state (cheap ones: they are computed before the hard checks)."""
         import copy
         if features is not None:
@@ -736,6 +741,7 @@ class System:
             trace, vals = execute(self.catalog, sub, st, early_exit=False, costs=self.costs)
             self._observe(trace, st, vals, None)
         self.order = "learned"
+        self.learn = True                             # the learned order goes on learning from the asks, as order="learned" does
         return self.order_model
 
     # --- constraints between answers: joint decoding
