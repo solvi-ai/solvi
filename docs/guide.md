@@ -26,13 +26,14 @@ Contents:
 14. [solvi behind a coding agent's hooks (preview)](#solvi-behind-a-coding-agents-hooks)
 15. [A model that writes: generation, agreement and the re-ask loop](#a-model-that-writes-generation-agreement-and-the-re-ask-loop)
 16. [A specification compiled into the catalog: solvi.compile (experimental)](#a-specification-compiled-into-the-catalog-solvicompile)
-17. [Verified charts: a specialist that checks every number (preview)](#verified-charts-a-specialist-that-checks-every-number)
-18. [Checking a catalog: solvi check](#checking-a-catalog-solvi-check)
-19. [Grounded decisions: provenance, audit and safeguards](#grounded-decisions-provenance-audit-and-safeguards)
-20. [Printing results: solvi.show](#printing-results-solvishow)
-21. [Extracting fields from documents](#extracting-fields-from-documents)
-22. [Command line](#command-line)
-23. [Guarantees and limitations](#guarantees-and-limitations)
+17. [Who answers: System 1, the slow path or a person (solvi.dispatch, experimental)](#who-answers-system-1-the-slow-path-or-a-person-solvidispatch)
+18. [Verified charts: a specialist that checks every number (preview)](#verified-charts-a-specialist-that-checks-every-number)
+19. [Checking a catalog: solvi check](#checking-a-catalog-solvi-check)
+20. [Grounded decisions: provenance, audit and safeguards](#grounded-decisions-provenance-audit-and-safeguards)
+21. [Printing results: solvi.show](#printing-results-solvishow)
+22. [Extracting fields from documents](#extracting-fields-from-documents)
+23. [Command line](#command-line)
+24. [Guarantees and limitations](#guarantees-and-limitations)
 
 ## Concepts
 
@@ -3924,6 +3925,146 @@ samples of the real inputs. The parts read structured inputs: nothing here write
 features for a head. Once loaded, a compiled module runs in your process with restricted builtins; the subprocess
 limits hold only during compilation (see `solvi.sandbox`). Labels, when you have them, are the stronger check —
 pass them.
+
+## Who answers: System 1, the slow path or a person (solvi.dispatch)
+
+> **Experimental.** The API may change. It decides who answers and records why; it does not make either path more
+> accurate, and it does not teach the fast path from the slow one.
+
+A System that answers within a guarantee — a fitted head, a classifier behind an open-set gate, rules and checks — is
+fast and cheap, and knows when it is unsure: it abstains below its threshold. An LLM, a re-ask loop or a search is slow
+and costs money per input. `solvi.dispatch` puts them in one recorded decision per input: System 1 is asked first;
+when its own signals say its answer cannot be given alone, the slow path answers (or checks), and when that cannot
+answer either — or there is no budget left — a person gets the input with both candidates and the reasons, never a
+guess.
+
+```python
+from solvi import Answer, Catalog, Decision, Question, System
+from solvi.dispatch import Budget, Dispatcher, SlowPath
+from solvi.generate import Generated
+
+TEAMS = ["billing", "shipping"]
+
+fast = Catalog()                                  # System 1: cheap, sure only when the e-mail says "charged"
+
+
+@fast.rule("team")
+def team(email):
+    if "charged" in email:
+        return Decision("billing", {"billing": 0.95, "shipping": 0.05})
+    return Decision("shipping", {"billing": 0.4, "shipping": 0.6})
+
+
+system1 = System(fast, [Question("team", "Which team?", Answer.choice(TEAMS), min_confidence=0.8)])
+
+slow = Catalog()                                  # System 2: a stand-in for an LLM decision part
+
+
+@slow.fn
+def reading(email):                               # the model's answer, with the tokens it used
+    said = "shipping" if "parcel" in email or "delivery" in email else "billing"
+    return Generated(said, extra={"generated": {"model": "stand-in", "usage": {"input_tokens": 400,
+                                                                               "output_tokens": 60}}})
+
+
+@slow.rule("team")
+def slow_team(reading):
+    return reading
+
+
+system2 = System(slow, [Question("team", "Which team?", Answer.choice(TEAMS))])
+d = Dispatcher(system1, SlowPath(system2), price=(0.04, 0.17), total=Budget(calls=2))
+for email in ["I was charged twice", "my parcel is late", "the delivery never came", "where is my refund?"]:
+    res = d.ask({"email": email})
+    print(f"{res.by:6} {res.answer!s:9} {res.action:6} {res.reasons[-1][:60]}")
+print(d.summary()["by"], d.spent.calls, f"${d.spent.usd:.6f}")
+print(res.candidates, d.replay(res)["ok"])
+```
+
+```
+s1     billing   accept System 1 answered
+s2     shipping  think  System 1 is below its threshold: low confidence 0.60 < 0.8;
+s2     shipping  think  System 1 is below its threshold: low confidence 0.60 < 0.8;
+human  None      human  no budget left in total (calls 2 of 2 used)
+{'s1': 1, 's2': 2, 'human': 1} 2 $0.000052
+{'s1': 'shipping'} True
+```
+
+With a model, System 2 is `model.decision(...)` from `solvi.llm` made the question's answer (`part.question(cat)`),
+generated candidates with `solvi.agree` in its catalog, or typed facts read with quotes (`solvi.generate`) — whatever
+answers the same question slowly, with its own `System.guarantee` if you have labelled examples for it.
+
+### What wakes the slow path
+
+System 1's response is read for the signals the library already has. `Dispatcher(..., wake=...)` lists the ones that
+wake the slow path (default: all); an input whose signal is left out goes to a person.
+
+| signal | when | action |
+|---|---|---|
+| `guarantee` | the answer is below the question's guarantee or `min_confidence` (it abstained, "low_confidence") | think |
+| `openset` | below an `OpenSetGate`'s threshold (the input is unlike the calibration examples) | think |
+| `abstain` | System 1 abstained otherwise: a model escalated, a fact is missing, a rule returned None | think |
+| `constraint` | the answers break a constraint between the questions asked (`res.feasible` is False) | think |
+| `agreement` | a share computed by `solvi.agree` is below its minimum (`agreement={"sql_agreement": 1.0}`) | think |
+| `drift` | the open-set gate has flagged a change of the stream, or a `DriftMonitor` (`monitor=`) has | check |
+| `supervise` | a sampled share of the answers System 1 gives alone (`supervise=0.05`) | check |
+
+**think**: System 1's answer is not given alone. The slow path's accepted answer is given (`think="s2"`), or only when
+it equals what System 1 would have answered (`think="agree"`: two different readers agree; otherwise a person). **check**:
+System 1's answer stands; the slow path answers too, and a disagreement is recorded (`res.disagreement`,
+`d.disagreements()`) — or, with `on_disagree="human"` / `"s2"`, goes to a person / to the slow path's accepted answer.
+A hard check that forces the answer is never re-thought or checked: the check decides. `same=` says when two answers
+are the same (overlapping quotes, numbers within a tolerance); `unknown="human"` treats the slow path's "not stated" as
+"none of the options fits" — a person decides — for closed options where a new kind of input can come.
+
+The supervision draw is a hash of `seed`, the input and the decision's number, so it is reproducible and replayed.
+A drift flag stays up until `d.reset_drift()`; replay takes it as recorded (it depends on the stream before).
+
+### The slow path
+
+`SlowPath(system2)` asks a System that answers the question. Two other forms put System 1's checks in front of a
+proposer:
+
+```python
+SlowPath(judge, propose=writer.proposer(messages, schema=Plan), into="plan", rounds=3)   # solvi.refine
+SlowPath(judge, space=lambda facts: candidates(facts), into="slot", search={"objective": "score"})   # solvi.search
+```
+
+With `propose=`, each proposal is given to `judge` as the fact `into`, its hard checks judge it, and the reasons of
+the failed ones go back to the model for up to `rounds` rounds (`solvi.refine`); with `space=`, the candidates of an
+enumerable space run through the checks (`solvi.search`). The answer is accepted when the System does not abstain on
+it and, for these two, its checks accept it. `slow.run(state, question)` runs it alone (a `Thought`: mode, answer,
+accepted, why, record, cost) — the "slow path alone" arm of a comparison.
+
+### Budget and cost
+
+`budget=Budget(usd=, calls=, ms=)` is per decision, `total=Budget(...)` for the dispatcher's life. Dollars are the
+tokens each model output records in the trace (`extra["llm"]["usage"]`, `extra["generated"]["usage"]`) times `price`
+— dollars per million input and output tokens, or a function `(model, usage) → dollars`; a budget in dollars without a
+price is refused. Before the slow path starts, its expected cost (the mean of its runs so far) must fit what is left of
+the total and the per-decision budget; between the rounds of a refinement the spend so far must. Otherwise the input
+goes to a person, and the reason says which limit. A single System ask is not stopped half-way: a run that went over the
+per-decision budget keeps its answer and records how far over (`res.over_budget`). Every `Dispatched` carries
+`cost = {"s1", "s2", "total"}` (dollars, calls, ms, tokens); `d.spent`, `d.summary()` the totals.
+
+### The record and replay
+
+`res = d.ask(state)` is a `Dispatched`: `answer`, `by` (`"s1"`, `"s2"`, `"human"`), `action`, `reasons`, `s1` (System 1's
+Response), `s2` (the slow path's Thought, whose record is a Response, a Refinement or a SearchRun), `candidates`,
+`disagreement`, `cost`, `n`, `draw`, `spent_before`, `drift`. `d.replay(res)` re-checks it without calling a model:
+the dispatcher is configured as it was, System 1's trace replays, the draw recomputes, the dispatch follows from the
+response, the draw and the recorded spend, drift flag and expected cost; the slow path's record replays (LLM outputs
+are re-read through their schemas, as `solvi.llm` and `solvi.generate` replay them) and its cost recomputes; the answer
+and who gave it follow. `Dispatcher(..., storage=store)` keeps every decision as one hash-chained record of kind
+"dispatch"; `d.stored()` loads them, `d.replay_all()` replays them all. `res.to_dict()` / `Dispatched.from_dict(d,
+system1, system2)` store and load one.
+
+**Not done here.** The slow path does not teach System 1: the disagreements and the slow path's accepted answers are
+recorded as material (`d.disagreements()`), not used — and an answer of the slow path is not a label (see
+`label_source`). One question per dispatcher; asks follow one another (the budget, the drift flag and the decision
+numbers depend on the order). The slow path's promise, when it has a guarantee, holds for inputs like its calibration
+examples — the inputs System 1 hands it are the hard ones, unlike an average calibration set, so measure the slow path's
+error on what it is actually given before you trust `think="s2"`.
 
 ## Verified charts: a specialist that checks every number
 

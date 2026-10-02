@@ -97,6 +97,7 @@ nav:
       - solvi.otel: api/otel.md
       - solvi.sets: api/sets.md
       - solvi.search: api/search.md
+      - solvi.dispatch: api/dispatch.md
       - solvi.counterfactual: api/counterfactual.md
       - solvi.perturb: api/perturb.md
       - solvi.storage: api/storage.md
