@@ -222,6 +222,7 @@ class Trace(Serial):
     timings: dict = field(default_factory=dict)     # part (and producer) → run time in ms (not hashed)
     rejected: list = field(default_factory=list)    # [(given fact, why)] inputs that failed System(inputs=...) (not facts)
     fingerprint: dict = field(default_factory=dict)  # which catalog / questions / models decided (System.fingerprint; not hashed)
+    early_exit: bool = True                         # False: the whole flow ran although a hard check failed (ask(early_exit=False))
 
     def explain_order(self):
         """The learned schedule as text: which hard check ran first and why."""
@@ -339,9 +340,13 @@ class Trace(Serial):
             _not_restored(bad, n0, lossy, cur)
         if flow is not None:
             seen = {r.name for r in self.records} | {n for n, _ in self.skipped}
+            ran = {r.name for r in self.records}
             for st in flow.steps:
                 if st.part.name not in seen:
                     bad.append(Mismatch(0, st.part.name, "planned step missing from the trace", "flow"))
+                elif not self.early_exit and st.part.name not in ran:
+                    bad.append(Mismatch(0, st.part.name, "planned step not recorded, though the trace says the whole flow "
+                                                         "was computed (early_exit=False)", "flow"))
         bad = [m if isinstance(m, Mismatch) else Mismatch(*m) for m in bad]
         answers = "unchecked"                          # needs the System (its questions) and the response's answers
         if system is not None and getattr(self, "answers", None) is not None:
@@ -944,7 +949,9 @@ def execute(catalog, flow, init_state, workers=1, early_exit=True, order=None, c
     as soon as the failed ones settle every question they govern; answers are the same as with the default order.
     costs: a CostBook (ms per part) for the learned order and the producer policy. policy: a ProducerPolicy for facts with
     alternative producers (without one they are tried in declaration order). known: given fact → the type its value was
-    already validated against (System(inputs=...)), so typed parts reading it with that type skip re-validation."""
+    already validated against (System(inputs=...)), so typed parts reading it with that type skip re-validation.
+    early_exit=False: every step of the flow runs, whatever the hard checks say (the answers are the same: a failed hard
+    check still decides); the trace records it (`trace.early_exit`)."""
     run = _Run(catalog, flow, init_state, early_exit, order, costs, policy, known)
     for idxs in run.phases():
         run.run_sync(idxs, workers)
@@ -1166,7 +1173,8 @@ class _Run:
             prev = rec.hash
             recs.append(rec)
         final = {k: v for k, v in self.vals.items()}
-        trace = Trace(init_hash, recs, dict(self.init_state), skipped, self.schedule, timings)
+        trace = Trace(init_hash, recs, dict(self.init_state), skipped, self.schedule, timings,
+                      early_exit=bool(self.early_exit))
         trace._outs = {self.names[i]: o for i, o in done.items() if o.outcomes is not None}   # for the producer policy
         return trace, final
 

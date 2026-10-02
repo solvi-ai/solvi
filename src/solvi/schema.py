@@ -114,6 +114,7 @@ class TraceModel(BaseModel):
     typed_init: list[str] = []          # given facts whose values are not plain JSON: restored on load
     init_types: dict[str, Any] = {}     # ... and the stdlib type of each as recorded by the dump (see type_tree)
     fingerprint: dict[str, Any] = {}    # the catalog's, questions' and models' fingerprints (System.fingerprint)
+    early_exit: bool = True             # False: the whole flow was computed although a hard check failed
 
 
 class StepModel(BaseModel):
@@ -458,6 +459,8 @@ def _trace(t):
     types = {k: tree for k, v in t.init.items() for tree in [type_tree(v)] if tree is not None}
     if types:
         d["init_types"] = types
+    if not getattr(t, "early_exit", True):            # only when it was switched off: other traces dump as before
+        d["early_exit"] = False
     return d
 
 
@@ -623,7 +626,7 @@ def _load_trace(m, catalog, system):
                            None if r.tried is None else [list(t) for t in r.tried], r.provenance, r.model,
                            None if r.probs is None else _probs(r.probs), r.extra, r.tried_models))
     tr = Trace(m.init_hash, recs, init, [tuple(s) for s in m.skipped], list(m.schedule), dict(m.timings),
-               [tuple(x) for x in m.rejected], dict(m.fingerprint))
+               [tuple(x) for x in m.rejected], dict(m.fingerprint), m.early_exit)
     if lost:
         tr.unrestored = lost                          # replay: mismatches these explain are "not_restored", not damage
     return tr

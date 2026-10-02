@@ -203,7 +203,9 @@ Question("route", "Which team?", Answer.choice(["a", "b"]), uses=["country", "to
 - `answer`: `Answer.yes_no()` (options `["yes", "no"]`) or `Answer.choice(options)` (and the types below); leave it out
   when the question's rule has a return type — the answer type then comes from it (see [Types](#types-questions-and-model-decisions));
 - `checkpoints`: parts that must be in this question's flow in every request (a missing name raises
-  `solvi.strategist.PlanError`);
+  `solvi.strategist.PlanError`). In the flow is not the same as run: when a hard check settles the question first, a
+  checkpoint part after it is skipped — `ask(state, early_exit=False)` runs it anyway (see
+  [Early exit](#early-exit-and-parallel-execution));
 - `uses`: a hint for the strategist, the facts that matter when the question has neither a rule nor a trained head;
 - `min_confidence`: an answer below this confidence abstains (status `abstain`, the reason says what it would have answered);
 - `require_evidence`: an answer without a supporting quote abstains (safeguard "evidence missing"; see
@@ -1483,8 +1485,24 @@ trace says, per fact, which cost decided and where it came from (declared, warm-
 
 At run time the executor first computes the hard checks and what they depend on. If a hard check fails, every question whose
 flow contains it is settled (forced by `then`, or abstained), and the steps that only those questions needed are not run.
-They are listed in `res.trace.skipped` with the check that made them unnecessary. Pass `early_exit=False` to
-`solvi.runtime.execute` to compute the whole flow anyway (`System.facts_for` does this for training).
+They are listed in `res.trace.skipped` with the check that made them unnecessary. This is the default, because the
+skipped rest is often the expensive part (a model, an API). Its price: a decision forced by a hard check has no rule
+values or downstream facts in its record, and a part listed in `checkpoints` — it is in the flow, but the question was
+settled before it ran — is missing from `res.values`.
+
+When the record must hold everything — a scorecard whose points you want for every stored decision, a proposal to hand
+to a person when it is rejected — compute the whole flow anyway:
+
+```python
+res = system.ask(state, early_exit=False)     # this ask;  System(cat, questions, early_exit=False): every ask
+res["approve"].status                          # "forced": the failed hard check still decides
+res.values["points"], res.trace.skipped        # every fact and rule value is there; nothing was skipped
+res.trace.early_exit                           # False: recorded in the trace (and in a stored response)
+```
+
+The answers are the same either way; only the steps that run differ. The trace records the switch, and a replay with
+the flow checks that no planned step is missing from such a trace. `aask`, `ask_text` and `aask_text` take the same
+argument; `System.facts_for` computes the whole flow for training.
 
 `System(catalog, questions, workers=8)` (or `system.ask(state, workers=8)`) runs independent steps in parallel threads: a step
 starts as soon as the steps it reads have finished. This pays off when parts wait on I/O — HTTP APIs, databases, model

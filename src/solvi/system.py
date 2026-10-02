@@ -180,7 +180,7 @@ class Response(Serial):
 class System:
     def __init__(self, catalog: Catalog, questions, journal: str | None = None, workers: int = 1, order: str = "default",
                  producers: str = "declared", learn: bool | None = None, inputs=None, strategist=None, storage=None,
-                 timeout: float | None = None, costs="declared", lang: str = "en"):
+                 timeout: float | None = None, costs="declared", lang: str = "en", early_exit: bool = True):
         """order: "default" (hard checks and their inputs first, all together) or "learned" (hard checks one at a time, most
         expected saving first — see learn_order). producers: "declared" (alternative producers of a fact are tried in
         declaration order) or "learned" (a policy picks the order per input and learns from outcomes). learn: after every
@@ -199,6 +199,11 @@ class System:
         costs: what that planner's costs are — "declared" (`cost=`, 1 when undeclared) or "measured" (the run times
         system.costs measures, after a warm-up; or a solvi.learned.MeasuredCosts with its settings). freeze_costs() fixes
         them; the plan record in each trace says which cost decided each choice.
+        early_exit: True (default) — when a hard check fails, the steps only the questions it settles needed are skipped
+        (the expensive rest is not paid for); the decision's record then holds no values for them, and a part listed in
+        `checkpoints` may not have run. False — every step of the flow runs anyway: the answers are the same (the failed
+        hard check still decides), `res.values` and the trace hold every fact and rule value, and the trace says so
+        (`trace.early_exit` is False). `ask(..., early_exit=...)` overrides it for one ask.
         lang: the language of what solvi renders for people — res.audit(), solvi.show, safeguard_report() — "en" (default)
         or "ru" (solvi.i18n). Only the rendering changes: traces, stored responses, hashes and `why` stay in English."""
         from . import i18n
@@ -222,6 +227,7 @@ class System:
             self.storage.catalog = self               # typed values of stored responses are restored with this system
         self.workers = workers                    # >1: independent steps run in parallel threads
         self.timeout = timeout                    # aask: default seconds per call of a part
+        self.early_exit = bool(early_exit)        # False: the whole flow runs although a hard check failed
         self.calib: dict[str, tuple] = {}         # question → (a, b): confidence' = σ(a·logit(confidence) + b)
         self.learned_rules = {}                   # question → RuleList (readable rules learned from examples)
         if order not in ("default", "learned"):
@@ -297,16 +303,23 @@ class System:
         return response_schema(self)
 
     # --- answers
-    def ask(self, init_state, names=None, workers=None, order=None, store=True):
+    def ask(self, init_state, names=None, workers=None, order=None, store=True, early_exit=None):
         """init_state: a dict of given facts, or a pydantic BaseModel instance (its fields). order: override the system's
         order for this ask — "default", "learned", or an object with p_fail(check, row) and row(vals, init_keys) (e.g. an
         oracle for experiments). store=False: do not save this response to the system's storage.
+        early_exit: None — the system's (System(early_exit=), True by default: after a failed hard check the steps only
+        the settled questions needed are skipped). False — compute the whole flow anyway: the answers are the same, and
+        `res.values` and the trace hold every fact and rule value of a decision a hard check forced (and every part
+        listed in `checkpoints`); the trace records it (`res.trace.early_exit`), and replay checks no step is missing.
         An `async def` part is awaited in an event loop of its own, one call at a time: use `aask` for such catalogs."""
         t0 = now_ms()
         p = self._prepare(init_state, names, order)
         trace, vals = execute(self.catalog, p.flow, p.state, workers=workers or self.workers, order=p.order,
-                              costs=self.costs, policy=p.policy, known=p.known)
+                              costs=self.costs, policy=p.policy, known=p.known, early_exit=self._early(early_exit))
         return self._respond(p, trace, vals, t0, store)
+
+    def _early(self, early_exit):
+        return self.early_exit if early_exit is None else bool(early_exit)
 
     # --- text in
     def entry_points(self, names=None):
@@ -337,7 +350,8 @@ class System:
         p.textin = read
         return p
 
-    def ask_text(self, text, decider=None, *, textin=None, question=None, store=True, workers=None, order=None):
+    def ask_text(self, text, decider=None, *, textin=None, question=None, store=True, workers=None, order=None,
+                 early_exit=None):
         """A free text → the answer of the question it asks, in one trace: a solvi.textin.TextIn (made from `decider`, or
         `textin=`) picks the entry point and reads its input fields with quotes, then the question is asked on that state.
         `text` may be a TextRead already (TextIn.read / update): each field is re-derived from its quote with the field's
@@ -347,16 +361,16 @@ class System:
         "textin": quote, parser, the model that found it); the audit counts the fields as quoted by a model, not given.
         When the entry point escalates, nothing runs: the likely questions abstain (guard "escalated"). A required field the
         text does not state is not guessed: the question abstains for lack of it. `res.textin` is the TextRead
-        (`res.textin.missing`, `res.textin.clarify()`)."""
+        (`res.textin.missing`, `res.textin.clarify()`). early_exit: as for `ask`."""
         read = self._textin(text, decider, textin, question)
         t0 = now_ms()
         p = self._prepare_text(read, order)
         trace, vals = execute(self.catalog, p.flow, p.state, workers=workers or self.workers, order=p.order,
-                              costs=self.costs, policy=p.policy, known=p.known)
+                              costs=self.costs, policy=p.policy, known=p.known, early_exit=self._early(early_exit))
         return self._respond(p, trace, vals, t0, store)
 
     async def aask_text(self, text, decider=None, *, textin=None, question=None, store=True, timeout=None,
-                        speculate=False, order=None):
+                        speculate=False, order=None, early_exit=None):
         """ask_text with aask (async parts awaited)."""
         from .runtime import aexecute
         read = self._textin(text, decider, textin, question)
@@ -364,10 +378,11 @@ class System:
         p = self._prepare_text(read, order)
         trace, vals = await aexecute(self.catalog, p.flow, p.state, order=p.order, costs=self.costs, policy=p.policy,
                                      known=p.known, timeout=self.timeout if timeout is None else timeout,
-                                     speculate=speculate)
+                                     speculate=speculate, early_exit=self._early(early_exit))
         return self._respond(p, trace, vals, t0, store)
 
-    async def aask(self, init_state, names=None, order=None, store=True, timeout=None, speculate=False):
+    async def aask(self, init_state, names=None, order=None, store=True, timeout=None, speculate=False,
+                   early_exit=None):
         """`ask` on an event loop: `async def` parts (database lookups, HTTP APIs, model servers) are awaited, parts marked
         `blocking=True` run in worker threads (asyncio.to_thread), plain sync parts inline; steps whose inputs are ready run
         concurrently. The answers, records and hashes are those of `ask` on the same input: records are written in flow
@@ -379,13 +394,14 @@ class System:
         speculate=False: hard checks and the steps they read first, then what the open questions need (as `ask`: no call
         starts that `ask` would not make). speculate=True: every step starts once its inputs are ready, and a failed hard
         check cancels the pending calls that only the questions it settles needed (lower latency; some paid calls may start
-        and be cancelled). Cancelling `aask` itself cancels every pending call."""
+        and be cancelled). Cancelling `aask` itself cancels every pending call. early_exit: as for `ask` (False: every
+        step runs, whatever the hard checks say)."""
         from .runtime import aexecute
         t0 = now_ms()
         p = self._prepare(init_state, names, order)
         trace, vals = await aexecute(self.catalog, p.flow, p.state, order=p.order, costs=self.costs, policy=p.policy,
                                      known=p.known, timeout=self.timeout if timeout is None else timeout,
-                                     speculate=speculate)
+                                     speculate=speculate, early_exit=self._early(early_exit))
         return self._respond(p, trace, vals, t0, store)
 
     @property

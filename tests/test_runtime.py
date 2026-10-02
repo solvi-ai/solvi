@@ -4,7 +4,7 @@ import random
 
 import pytest
 
-from solvi import System
+from solvi import Answer, Catalog, Question, System
 from examples_loader import load
 from solvi.runtime import vhash
 
@@ -104,3 +104,64 @@ def test_rehashed_value_on_a_failed_step_is_caught():
         prev = x.hash
     rep = t.replay(cat)
     assert not rep["ok"] and rep["mismatches"][0][0] == r.step
+
+
+# ---------------------------------------------------------------- early_exit=False: the whole flow, recorded
+def _proposal():
+    cat = Catalog()
+
+    @cat.fn
+    def draft(text):
+        return text.upper()
+
+    @cat.check(hard=True, then={"ok": "no"})
+    def not_empty(text):
+        return bool(text.strip())
+
+    @cat.fn
+    def length(draft):
+        return len(draft)
+
+    @cat.rule("ok")
+    def ok(length):
+        return "yes" if length > 3 else "no"
+    return cat, [Question("ok", "ok?", Answer.yes_no(), checkpoints=["not_empty", "draft"])]
+
+
+def test_a_failed_hard_check_skips_the_rest_by_default_and_early_exit_false_computes_it_anyway():
+    """A decision forced by a hard check had no rule values in its record, and a part listed in `checkpoints` was missing
+    from res.values; System.ask had no way to ask for the whole flow."""
+    import asyncio
+    from solvi.runtime import Trace
+    cat, qs = _proposal()
+    s = System(cat, qs)
+    res = s.ask({"text": " "})
+    assert res["ok"].status == "forced" and "draft" not in res.values and res.trace.early_exit is True
+    assert [n for n, _ in res.trace.skipped] == ["draft", "length", "answer:ok"]
+    full = s.ask({"text": " "}, early_exit=False)
+    assert (full["ok"].answer, full["ok"].status, full["ok"].guard) == ("no", "forced", "hard_check")
+    assert full.values["draft"] == " " and full.values["length"] == 1 and full.trace.skipped == []
+    assert [r.name for r in full.trace.records] == ["not_empty", "draft", "length", "answer:ok"]
+    assert full.trace.early_exit is False and full.trace.replay(s, full.flow)["ok"]
+    for other in (System(cat, qs, early_exit=False).ask({"text": " "}), asyncio.run(s.aask({"text": " "}, early_exit=False))):
+        assert [r.hash for r in other.trace.records] == [r.hash for r in full.trace.records]
+    assert System(cat, qs, early_exit=False).ask({"text": " "}, early_exit=True).trace.skipped != []
+    d = full.to_dict()
+    assert d["trace"]["early_exit"] is False and "early_exit" not in res.to_dict()["trace"]
+    back = Trace.model_validate(d["trace"], catalog=cat)
+    assert back.early_exit is False and back.replay(s, full.flow)["ok"]
+    cut = Trace.model_validate({**d["trace"], "records": d["trace"]["records"][:2], "skipped": [["length", "x"], ["answer:ok", "x"]]},
+                               catalog=cat)                      # a trace of a whole flow cannot have skipped steps
+    rep = cut.replay(cat, full.flow)
+    assert [m.kind for m in rep["mismatches"]] == ["flow", "flow"]
+
+
+def test_a_stored_decision_made_with_early_exit_false_holds_the_rule_values_and_replays(tmp_path):
+    from solvi import JSONLStorage
+    cat, qs = _proposal()
+    store = JSONLStorage(tmp_path / "d.jsonl")
+    s = System(cat, qs, storage=store, early_exit=False)
+    res = s.ask({"text": " "})
+    got = store.get(res.stored_id)
+    assert got.values["length"] == 1 and got.trace.early_exit is False and got["ok"].status == "forced"
+    assert store.replay_all(s) == [] and store.verify()["ok"]
