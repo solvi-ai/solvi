@@ -960,11 +960,13 @@ def test_query_finds_a_yes_no_answer_given_as_a_bool_on_every_backend(filled):
 
 
 def test_every_store_closes_and_is_a_context_manager_and_the_extension_is_read_in_any_case(tmp_path):
+    import sqlite3
+
     from solvi.storage import open_storage
     with open_storage(tmp_path / "a.DB") as store:
         assert isinstance(store, SQLiteStorage)
         System(*build(), storage=store).ask(STATES[0])
-    with pytest.raises(Exception):                                  # closed: the connection is gone
+    with pytest.raises(sqlite3.ProgrammingError):                   # closed: the connection is gone
         store.head()
     with JSONLStorage(tmp_path / "a.jsonl") as js:
         System(*build(), storage=js).ask(STATES[0])
