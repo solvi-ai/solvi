@@ -94,3 +94,6 @@ class RuleList:
     def __str__(self):
         lines = [f"{i + 1:2d}. if {r['if']} → {r['then']}   ({r['support']}/{r['covered']})" for i, r in enumerate(self.rules)]
         return "\n".join(lines + [f"else → {self.default}"])
+
+
+__all__ = ["literals", "RuleList", "words"]

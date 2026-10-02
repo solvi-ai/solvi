@@ -4,3 +4,6 @@ from . import _deprecate
 
 __getattr__ = _deprecate.module_getattr("solvi.fast", {n: "solvi.heads:" + n for n in (
     "FastHead", "VecFeaturizer", "CandidateHead", "select_features")})
+
+
+__all__ = []

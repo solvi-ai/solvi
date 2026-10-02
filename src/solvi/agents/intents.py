@@ -81,3 +81,6 @@ def request_policy(intent=None, phrases=None):
     user_asked.__doc__ = f"The user asked for this kind of action ({label}) in their own words."
     user_asked.__module__ = __name__
     return user_asked
+
+
+__all__ = ["INTENTS", "request_policy"]

@@ -761,3 +761,6 @@ answers — see the module docs), or one of them. logprobs: "auto" (ask for them
     m = DecideModel(sc, meta=meta, model_id=sc.model_id, backend="llm")
     m.deterministic = False                           # replay checks the recorded output instead of calling the LLM again
     return m
+
+
+__all__ = ["InvalidOutput", "llm", "LLMError", "LLMScorer", "locate", "messages", "schema", "template_hash"]

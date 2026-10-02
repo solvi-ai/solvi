@@ -352,3 +352,6 @@ class LongMemory:
         items = [v for keys in self.data["items"].values() for v in keys.values()]
         return {"episodes": self.data["episodes"], "contexts": len(self.data["items"]), "items": len(items),
                 "positive": sum(v["score"] > 0 for v in items), "negative": sum(v["score"] < 0 for v in items)}
+
+
+__all__ = ["Chooser", "Episode", "EpisodeView", "LongMemory"]

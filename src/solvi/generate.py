@@ -642,3 +642,7 @@ def several(generators, messages, **kw):
         raise type(e)(f"all {len(gens)} replies failed; the first: {e}")
     return Generated([v for v, _, _ in outs], evidence=[q for _, qs, _ in outs for q in qs], source=kw.get("source"),
                      extra={"generated": [{x: y for x, y in m.items() if x != "exc"} for _, _, m in outs]})
+
+
+__all__ = ["Generated", "GenerationPart", "Generator", "generator", "json_errors", "quoted", "Schema", "several",
+           "Unanswered"]

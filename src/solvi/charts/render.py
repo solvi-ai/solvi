@@ -525,3 +525,6 @@ def render_svg(chart: VerifiedChart, proposed=None) -> Drawing:
            f'<title id="{uid}-t">{title}</title><desc id="{uid}-d">{escape(_desc(chart))}</desc>'
            f'<rect width="{W}" height="{H}" fill="{BG}"/>' + "".join(cv.parts) + "</svg>\n")
     return Drawing(svg, W, H, cv.texts, cv.fonts, notes)
+
+
+__all__ = ["BG", "Box", "contrast", "Drawing", "INK", "MIN_FONT", "MUTED", "PALETTE", "render_svg"]

@@ -144,3 +144,6 @@ class GuardedToolset(WrapperToolset):
 
 
 GuardedToolset.__init__ = _deprecate.kwargs(GuardedToolset.__init__, declare="auto_declare")   # 0.7 name, removed in 0.9
+
+
+__all__ = ["context_of", "GuardedToolset"]

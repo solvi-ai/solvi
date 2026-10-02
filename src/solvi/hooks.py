@@ -1412,3 +1412,7 @@ def main(argv=None):
 
 if __name__ == "__main__":
     sys.exit(main())
+
+
+__all__ = ["Change", "changes_of", "front_matter", "glob_regex", "install", "load_rules", "main", "parser", "reasons",
+           "Rule", "rules_system", "RulesError", "SAMPLE_RULES", "SettingsError", "uninstall", "words"]

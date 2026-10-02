@@ -425,3 +425,6 @@ def _unit_suffix(u, scale):
     if u == "%":
         return "%"
     return f"{sc} {u}".rstrip() if u else sc
+
+
+__all__ = ["canon_unit", "ChartChecker", "Reading", "SENT_END", "SourceIndex"]

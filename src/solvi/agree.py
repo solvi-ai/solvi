@@ -157,3 +157,6 @@ def agree(cat, name, candidates, key, *, prefer=None, share=None, tally=None):
     share_part.__annotations__ = {"return": float}
     cat.fn(share_part)
     return tally, name, share
+
+
+__all__ = ["agree", "consensus"]

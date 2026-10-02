@@ -886,3 +886,9 @@ class Catalog:
             if a.name == name:
                 return a
         raise KeyError(f"{name} is not a producer of {fact}")
+
+
+__all__ = ["accept", "accepts", "Answer", "AnswerType", "bin_labels", "Catalog", "check_evidence", "Claim",
+           "cuts_number", "Decision", "evidence_rows", "find_whole", "ground", "has_evidence", "locate",
+           "NOT_STATED_KEY", "NotStated", "Part", "plain_json", "PRIMITIVES", "Question", "question_data", "Quote",
+           "Serial", "Unknown", "unknown_key", "unwrap", "validated"]

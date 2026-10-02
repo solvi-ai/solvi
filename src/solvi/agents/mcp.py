@@ -329,3 +329,6 @@ def run_proxy(guard, upstream, facts=None, escalate="elicit", stdin=None, stdout
     finally:
         px.upstream.close()
     return px
+
+
+__all__ = ["CONTEXT_CHARS", "CONTEXT_MESSAGES", "Proxy", "run_proxy", "Upstream", "UpstreamError"]

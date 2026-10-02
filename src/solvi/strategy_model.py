@@ -9,3 +9,6 @@ def __getattr__(name):
         raise AttributeError(f"module 'solvi.strategy_model' has no attribute {name!r}")
     _deprecate.renamed(f"solvi.strategy_model.{name}", f"solvi.segment_model.{name}")
     return getattr(segment_model, name)
+
+
+__all__ = []

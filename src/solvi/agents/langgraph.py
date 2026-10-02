@@ -263,3 +263,6 @@ def guarded_tool_node(tools, guard, facts: Callable | dict | None = None, on_esc
     node = ToolNode(tools, wrap_tool_call=w, awrap_tool_call=w.acall, **kw)
     node.solvi_guard = w
     return node
+
+
+__all__ = ["approved", "guard_wrappers", "guarded_tool_node", "with_policies"]

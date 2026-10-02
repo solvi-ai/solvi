@@ -7,3 +7,6 @@ __getattr__ = _deprecate.module_getattr("solvi.learned", {
     "CostBook": "solvi.costs:CostBook", "MeasuredCosts": "solvi.costs:MeasuredCosts",
     "OrderModel": "solvi.strategist:OrderModel", "ProducerPolicy": "solvi.strategist:ProducerPolicy",
     "Binary": "solvi.strategist:Binary", "scalar_row": "solvi.strategist:scalar_row"})
+
+
+__all__ = []

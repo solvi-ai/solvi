@@ -300,3 +300,6 @@ class WorldMap:
                 {_thaw(x["state"]): {"visits": x["visits"], "facts": x["facts"]} for x in st}
         self._prev = prev
         return self
+
+
+__all__ = ["WorldMap"]

@@ -582,3 +582,6 @@ def _one(res, q, events, catalog):
     au.guarantee = _guarantee(au)
     au.counts = counts
     return au
+
+
+__all__ = ["AnswerAudit", "Audit", "build", "collect", "LABEL", "QUIET", "STAT_KEYS", "STATS"]

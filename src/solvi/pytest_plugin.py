@@ -109,3 +109,6 @@ class CaseItem(pytest.Item):
 
     def reportinfo(self):
         return self.path, None, f"solvi case: {self.name}"
+
+
+__all__ = ["pytest_addoption", "pytest_collect_file"]

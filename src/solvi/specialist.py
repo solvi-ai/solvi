@@ -291,3 +291,7 @@ class Specialist:
         if sha != (trace.step("render") or {}).get("output_sha256") or sha != record.get("output_sha256"):
             problems.append("the re-rendered output differs from the recorded one")
         return Replay(not problems, problems)
+
+
+__all__ = ["BLOCKED", "canonical", "CHANGED", "Checked", "DROPPED", "Issue", "Replay", "Run", "Specialist", "Trace",
+           "WARNING"]

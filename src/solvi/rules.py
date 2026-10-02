@@ -4,3 +4,6 @@ from . import _deprecate
 
 __getattr__ = _deprecate.module_getattr("solvi.rules", {n: "solvi.rulelist:" + n for n in ("RuleList", "words",
                                                                                               "literals")})
+
+
+__all__ = []

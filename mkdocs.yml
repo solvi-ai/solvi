@@ -138,7 +138,7 @@ plugins:
             show_root_heading: false
             show_root_toc_entry: false
             members_order: source
-            filters: ["!^_"]
+            filters: public
             show_signature_annotations: true
             separate_signature: true
             merge_init_into_class: true

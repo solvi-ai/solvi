@@ -1272,3 +1272,8 @@ def replay_record(r, init):
     elif f in init:
         bad.append((r.step, r.name, f"{f} was not read from the text ({ex.get('status')}) but is in the input"))
     return bad
+
+
+__all__ = ["Change", "CueExtractor", "DeciderExtractor", "entry_points", "EntryField", "EntryPoint", "field_spec",
+           "FieldRead", "FieldSpec", "NUMBER_RE", "parse_bool", "parse_date", "parse_enum", "parse_number",
+           "ParseError", "rederive", "replay_record", "SEP", "SOURCE", "TextIn", "TextRead"]

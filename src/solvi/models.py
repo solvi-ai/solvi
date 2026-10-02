@@ -394,3 +394,7 @@ def cmd_models(a):
             a.json = False
         return cmd_list(a)
     return {"pull": cmd_pull, "check": cmd_check}[action](a)
+
+
+__all__ = ["add_parser", "cached", "cached_path", "cmd_models", "kind_of", "load", "ModelError", "PUBLISHED", "pull",
+           "resolve"]

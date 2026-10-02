@@ -531,3 +531,6 @@ class CandidateHead:
     def fingerprint(self):
         from .provenance import digest
         return digest("CandidateHead", self.features, self.relative, self.head.fingerprint())
+
+
+__all__ = ["CandidateHead", "FastHead", "Featurizer", "Head", "select_features", "VecFeaturizer"]

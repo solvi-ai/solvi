@@ -375,3 +375,7 @@ def main(argv=None):
         print(f"{passed}/{n} cases passed in {len(files)} file(s)"
               + (f", {len(bad_files)} could not be loaded" if bad_files else ""))
     return 0 if passed == n and not bad_files else 1
+
+
+__all__ = ["CaseResult", "check", "FileResult", "find", "fuzz", "is_cases_file", "load", "main", "mutations",
+           "run_case", "run_file", "run_path", "Suite"]

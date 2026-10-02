@@ -632,3 +632,6 @@ def _period_html(d):
                               f" from #{h(c['seq'])} (<code>{h(c['id'])}</code>, {h(c['time'])})</li>" for c in d["changes"])
              + "</ul>" if d["changes"] else "<p>No change of the catalog or of a model over the period.</p>")
     return "\n".join(B)
+
+
+__all__ = ["CSS", "decision", "highlight", "md", "period", "render"]

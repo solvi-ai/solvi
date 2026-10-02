@@ -408,3 +408,6 @@ def search(system, state, question, space, *, into=None, objective=None, maximiz
                              if rejected else ""))
     run.seconds = round(time.perf_counter() - t0, 3)
     return run
+
+
+__all__ = ["search", "SearchRun", "Tree"]

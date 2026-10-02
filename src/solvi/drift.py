@@ -501,3 +501,6 @@ class DriftMonitor:
             gc += (coverage_at(c1, o1, self.accuracy) - coverage_at(c2, o2, self.accuracy)) >= d_cov - 1e-12
             rounds += 1
         return (ge + 1) / (rounds + 1), (gc + 1) / (rounds + 1)
+
+
+__all__ = ["Cusum", "DriftMonitor", "Observation", "window_stats"]

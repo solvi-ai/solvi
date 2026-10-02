@@ -581,3 +581,6 @@ def _pairs(s, kinds, init, one):
                 if hits:
                     break
     return found
+
+
+__all__ = ["Change", "Counterfactual", "Counterfactuals", "Rerun", "search"]

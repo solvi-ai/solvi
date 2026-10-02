@@ -376,3 +376,8 @@ def group_thresholds(score, wrong, groups, risk=0.10, min_group=100, delta=0.10)
     apply with node_of(group, nodes). groups: one per example — a value, a path (domain, task) or None."""
     nodes, _ = certify_groups(_signal_losses(score, wrong), groups, risk, min_group, delta)
     return {k: v["threshold"] for k, v in nodes.items()}
+
+
+__all__ = ["accuracy_at", "certify_groups", "check_rate", "conformal_quantile", "coverage_at", "crc_threshold", "ece",
+           "evaluate", "group_nodes", "group_path", "group_thresholds", "loss_budget", "ltt_grid", "ltt_threshold",
+           "node_of", "reliability", "separation", "set_scores", "summary", "threshold_for"]

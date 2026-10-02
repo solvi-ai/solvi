@@ -67,3 +67,6 @@ def show(res, catalog=None, flow=True, state=True, audit=True, lang=None):
         if rep.get("models"):
             print(t("sh.model_steps", lang) + ", ".join(f"{n} {v}" for _, n, v in rep["models"]))
     print(t("sh.time", lang, ms=f"{res.ms:.2f}"))
+
+
+__all__ = ["show"]

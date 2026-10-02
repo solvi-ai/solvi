@@ -3458,3 +3458,10 @@ def decision_of(catalog, question):
         if part is not None and part.alternatives is None:
             d = getattr(part.func, "__solvi_decision__", None)
     return d
+
+
+__all__ = ["act_features", "Adaptation", "block_masks", "BlockUnsupported", "capabilities", "DecideModel",
+           "decision_of", "DecisionPart", "decode_pointer", "Facts", "group_name", "group_record", "GroupBy",
+           "guard_promise", "Item", "jsonable", "KINDS", "Logits", "LongInputWarning", "lora_key", "no_separation",
+           "one_source", "OnnxScorer", "Pass", "pass_prompt", "plan_batches", "pointer_evidence", "prompt",
+           "state_text", "TorchScorer"]

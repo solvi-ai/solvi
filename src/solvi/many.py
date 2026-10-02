@@ -206,3 +206,6 @@ def decide_many(model, text, task, options, descriptions=None, *, many=None, **s
         d.escalate = why if d.escalate is None else f"{d.escalate}; {why}"
     d.extra["many"] = info
     return d
+
+
+__all__ = ["bm25_scores", "decide_many", "fits", "Many"]

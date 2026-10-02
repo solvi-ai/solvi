@@ -1282,3 +1282,8 @@ def open_storage(where, system=None):
     if ext.endswith((".db", ".sqlite", ".sqlite3")):
         return SQLiteStorage(p, system)
     return JSONLStorage(p, system)
+
+
+__all__ = ["chained", "check_source", "DuckDBStorage", "entry", "FORMAT", "JSONLStorage", "open_storage", "plain",
+           "PostgresStorage", "record_body", "record_hash", "SQLiteStorage", "Stored", "TraceStorage",
+           "TRUSTED_SOURCES", "UntrustedLabel"]

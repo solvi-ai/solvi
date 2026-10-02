@@ -243,3 +243,6 @@ def confirm_spec(tool, arguments=None, match=None, reads=(), last=None):
     spec = {"args": args, "match": {a: _matcher_text(m) for a, m in match.items()}, "last": last,
             "reads": sorted(reads)}
     return json.dumps(spec, sort_keys=True), {a: m for a, m in match.items() if callable(m)}
+
+
+__all__ = ["accepted_proposals", "accepts", "confirm_spec", "confirmation_fn", "user_confirmed"]

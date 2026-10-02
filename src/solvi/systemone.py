@@ -330,3 +330,6 @@ def systemone(base_url, model, api_key=None, *, timeout=30.0, opener=None, extra
     m.caps["unknown"] = _unknown_caps({"label": NOT_STATED}, m.caps["columns"])
     m.deterministic = bool(deterministic)
     return m
+
+
+__all__ = ["REASONING_CHARS", "systemone", "SystemOneError", "SystemOneScorer"]

@@ -66,3 +66,6 @@ def optional(module, extra, what):
         return importlib.import_module(module)
     except ModuleNotFoundError as e:
         raise ImportError(f"{what} needs {e.name or module}: pip install 'solvi[{extra}]'") from e
+
+
+__all__ = ["load_module", "load_object", "LoadError", "optional"]

@@ -659,3 +659,6 @@ def add_parser(sub):
                    help="the most answer combinations tried per group of constraints (default 100000)")
     c.add_argument("--json", action="store_true", help="print JSON")
     return c
+
+
+__all__ = ["add_parser", "cmd_check", "Finding", "lint", "Report", "silent_defaults"]

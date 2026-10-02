@@ -773,3 +773,9 @@ def _partial(model, state, e):
             rejected.append((k, f"{TYPE_REJECTED}: given {k} = {_short(state[k])} is not a field of {model.__name__}, "
                                 f"which forbids extra keys ({why})"))
     return _in_field_order(model, out), rejected
+
+
+__all__ = ["adapter", "answer_type_of", "Bins", "check", "check_answer", "compatible", "compile_part", "Estimate",
+           "FactTypeError", "field_types", "forget_rule", "hints", "is_model", "Maybe", "Ordinal", "primitive_answer",
+           "producers", "question_kind", "Rank", "RankOf", "register", "Scale", "Span", "span_value", "SpanOf", "Spec",
+           "spec", "split_unknown", "state_of", "type_name", "typed_in", "typed_out"]

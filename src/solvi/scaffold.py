@@ -550,3 +550,5 @@ def add_parser(sub):
     s.add_argument("--force", action="store_true", help="overwrite files that exist")
     return s
 
+
+__all__ = ["add_parser", "cmd_init", "files", "init", "SPECS", "TEMPLATES"]

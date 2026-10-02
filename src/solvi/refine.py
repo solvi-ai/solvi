@@ -386,3 +386,6 @@ def refine(system, state, question, propose=None, *, into="proposal", rounds=3, 
     fb_name = "reasons" if feedback is None else f"function {getattr(feedback, '__name__', '?')}"
     return Refinement(question, out, ok, esc, int(rounds), into if propose is not None else None, feedback_into, accept,
                       fb_name)
+
+
+__all__ = ["accepted", "causes", "Fail", "Failed", "failed_checks", "refine", "Refinement", "Round"]

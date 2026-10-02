@@ -455,3 +455,7 @@ def add_parser(sub):
     c.add_argument("--out", help="the calibration file to write (default PART.calib.json)")
     c.add_argument("--json", action="store_true", help="print JSON")
     return c
+
+
+__all__ = ["add_parser", "cmd_calibrate", "examples_of", "find_part", "FORMAT", "label_of", "load", "read_rows",
+           "record", "save"]

@@ -263,3 +263,6 @@ def fmt(answer, kind=None, extra=None):
         rng = (f"less than {hi:g}" if lo is None else f"{lo:g} or more" if hi is None else f"[{lo:g}, {hi:g})")
         return f"{answer:g}{u} ({extra.get('coverage', 0.8):.0%} interval: {rng})"
     return repr(answer)
+
+
+__all__ = ["estimate_of", "fmt", "normalize", "plackett_luce", "rank_candidates", "Rejected", "resolve"]

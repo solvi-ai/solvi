@@ -446,3 +446,7 @@ def variants(text, k=2):
         if len(out) >= k:
             break
     return out
+
+
+__all__ = ["injection_spans", "instruction_like", "instruction_rule", "instruction_spans", "normalize",
+           "quoted_instructions", "sentences", "Variant", "variants"]

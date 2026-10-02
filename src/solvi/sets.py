@@ -652,3 +652,6 @@ def _result(items, constraints, groups, method, out):
                           "members": [[i, list(a)] for i, a in mem]} for name, label, lo, hi, mem in groups
                          if lo > 0 or any(a for _, a in mem)]}
     return SetDecision(decided, [c.to_dict() for c in constraints], method, comps, not violations, violations, exact, record)
+
+
+__all__ = ["AtMostOne", "Capacity", "decide_set", "Decided", "EACH", "ExactlyOne", "Exclusive", "Item", "SetDecision"]

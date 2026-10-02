@@ -386,3 +386,6 @@ class Shadow:
         for t, n in sorted(per.items(), key=lambda kv: -kv[1]):
             lines.append(f"  {t}  ×{n}")
         return "\n".join(lines)
+
+
+__all__ = ["causes", "compare", "diff", "DiffReport", "Shadow"]

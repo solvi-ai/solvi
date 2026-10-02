@@ -229,3 +229,6 @@ def guard_tools(tools, guard: Guard, **kw) -> list:
     """guard_tool for each FunctionTool of a list (other tools — hosted, MCP — are returned unchanged)."""
     kw.setdefault("made", [])
     return [guard_tool(t, guard, **kw) if isinstance(t, FunctionTool) else t for t in tools]
+
+
+__all__ = ["guard_run_config", "guard_tool", "guard_tools"]

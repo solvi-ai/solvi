@@ -280,3 +280,7 @@ def main(argv=None):
 
 if __name__ == "__main__":
     sys.exit(main())
+
+
+__all__ = ["ABSTAIN", "compare", "GATED", "gold_of", "load_set", "load_task", "main", "metrics", "report", "run",
+           "same", "system_of"]

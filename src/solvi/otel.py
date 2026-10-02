@@ -192,3 +192,6 @@ def to_otlp_json(res_or_store, service_name="solvi", end_ns=None, **filters):
             out.append(span)
     return {"resourceSpans": [{"resource": {"attributes": _attrs({"service.name": service_name})},
                                "scopeSpans": [{"scope": {"name": SCOPE, "version": __version__}, "spans": out}]}]}
+
+
+__all__ = ["export", "spans", "to_otlp_json"]

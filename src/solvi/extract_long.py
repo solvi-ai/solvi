@@ -289,3 +289,6 @@ class LongSpanExtractor:
         f.__solvi_model__ = self                 # cat.extract records this model (and its fingerprint) in the trace
         f.__solvi_provenance__ = "quoted"
         return f
+
+
+__all__ = ["LongSpanExtractor"]

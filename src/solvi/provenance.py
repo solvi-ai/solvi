@@ -416,3 +416,8 @@ def snippet(init, quote, width=60):
         return None
     t = text[s:e]
     return t if len(t) <= width else t[: width - 1] + "…"
+
+
+__all__ = ["catalog_fingerprint", "classify", "code_fingerprint", "digest", "ESCALATED", "fingerprint", "FUZZY",
+           "INSTRUCTION", "KINDS", "matches", "MEMORY", "model_id", "model_info", "NOT_GROUNDED", "OUTSIDE_OPTIONS",
+           "QUOTE_OUTSIDE", "snippet", "TIMED_OUT", "torch_fingerprint", "TYPE_REJECTED", "VALIDATE"]

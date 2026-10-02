@@ -1266,3 +1266,10 @@ def __getattr__(name):                                # 0.7 names, removed in 0.
         _deprecate.renamed("solvi.serve.Guard", "solvi.serve.AccessGuard")
         return AccessGuard
     raise AttributeError(f"module 'solvi.serve' has no attribute {name!r}")
+
+
+__all__ = ["AccessGuard", "add_parser", "AskRequest", "AskTextRequest", "BadRequest", "Busy", "ChoiceAnswer",
+           "cmd_serve", "create_app", "input_model", "input_schema", "internal_error", "Limits", "mcp_tools",
+           "NotFound", "NoulAnswer", "parse_json", "question_inputs", "redact", "RequestError", "run_builtin",
+           "ScoreAnswer", "sdk_available", "SERVE_DEFAULTS", "Service", "SystemOneQuestion", "SystemOneRequest",
+           "SystemOneResponse", "too_deep", "tool_name", "trace_hash"]
