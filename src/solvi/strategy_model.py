@@ -91,11 +91,25 @@ def seg_labels(names, nodes, n=N_NODES):
     return ty[:n], fn[:n]
 
 
+def _auto_backend(has_onnx_file, what):
+    """backend="auto": onnx when onnxruntime is installed and the checkpoint has the onnx files, else torch; with
+    neither runtime installed, an ImportError that names both extras (not "No module named 'torch'")."""
+    import importlib.util
+    ort, torch = (importlib.util.find_spec(m) is not None for m in ("onnxruntime", "torch"))
+    if ort and has_onnx_file:
+        return "onnx"
+    if torch:
+        return "torch"
+    raise ImportError(f"{what} needs a runtime: pip install 'solvi[onnx]' (onnxruntime, small) or 'solvi[model]' "
+                      "(torch)" + ("" if has_onnx_file else " — this checkpoint has no onnx files: 'solvi[model]'"))
+
+
 class Tok:
     """ModernBERT's tokenizer (tokenizers), cells truncated to CELL_TOK tokens, with a cache of encoded cell texts."""
 
     def __init__(self, path, cell_tok=CELL_TOK):
-        from tokenizers import Tokenizer
+        from .loader import optional
+        Tokenizer = optional("tokenizers", "onnx", "the strategist's tokenizer").Tokenizer
         self.t = Tokenizer.from_file(os.path.join(path, "tokenizer.json"))
         self.t.enable_truncation(cell_tok)
         self.t.no_padding()
@@ -416,10 +430,13 @@ class SegmentModel:
         """backend "torch", "onnx" or "auto"; quantized=True (onnx): the int8 cell encoder (onnx/encoder_int8.onnx) —
         about 2× faster on CPU and 4× smaller, pooled states within ~0.1% (cosine) of fp32."""
         path = os.path.expanduser(str(path_or_id))
+        from .loader import optional
+        if backend not in ("auto", "torch", "onnx"):
+            raise ValueError('backend must be "torch", "onnx" or "auto"')
         if not os.path.isdir(path):
-            from huggingface_hub import snapshot_download
             allow = {"onnx": ["*.json", "onnx/*"], "torch": ["*.json", "*.safetensors"]}.get(backend)
-            path = snapshot_download(path_or_id, allow_patterns=allow)
+            hub = optional("huggingface_hub", "onnx", "SegmentModel.load of a Hugging Face id")
+            path = hub.snapshot_download(path_or_id, allow_patterns=allow)
         mf = os.path.join(path, "solvi_strategist.json")
         if not os.path.isfile(mf):
             raise FileNotFoundError(f"{path} has no solvi_strategist.json: not a solvi strategist checkpoint")
@@ -430,11 +447,7 @@ class SegmentModel:
         if quantized:
             enc_file = os.path.join(path, "onnx", "encoder_int8.onnx")
         if backend == "auto":
-            try:
-                import onnxruntime  # noqa: F401
-                backend = "onnx" if os.path.isfile(enc_file) else "torch"
-            except ImportError:
-                backend = "torch"
+            backend = _auto_backend(os.path.isfile(enc_file), "SegmentModel")
         tok = Tok(path, int(meta.get("cell_tok", CELL_TOK)))
         if backend == "onnx":
             runner = OnnxRunner(enc_file, dec_file, threads)
@@ -501,8 +514,9 @@ class SegmentModel:
 
 class TorchRunner:
     def __init__(self, path, meta, threads=None):
-        import torch
-        from safetensors.torch import load_file
+        from .loader import optional
+        torch = optional("torch", "model", 'SegmentModel (backend="torch")')
+        load_file = optional("safetensors.torch", "model", 'SegmentModel (backend="torch")').load_file
         if threads:
             torch.set_num_threads(int(threads))
         self.torch = torch
@@ -533,7 +547,8 @@ DEC_NAMES = ["pooled", "kind", "vt", "depth", "ready", "cmask", "fn_idx", "fn_ma
 
 class OnnxRunner:
     def __init__(self, enc_file, dec_file, threads=None):
-        import onnxruntime as ort
+        from .loader import optional
+        ort = optional("onnxruntime", "onnx", 'SegmentModel (backend="onnx")')
         so = ort.SessionOptions()
         if threads:
             so.intra_op_num_threads = int(threads)

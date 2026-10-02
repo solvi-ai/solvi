@@ -17,8 +17,10 @@ from .core import Quote
 class LongSpanExtractor:
     def __init__(self, model_name="answerdotai/ModernBERT-large", max_len=1024, stride=128, max_span=96, device=None):
         """stride: overlap between adjacent windows in tokens (as in transformers); max_span: maximum answer length in tokens."""
-        import torch
-        from transformers import AutoModel, AutoTokenizer
+        from .loader import optional
+        torch = optional("torch", "model", "LongSpanExtractor")
+        tf = optional("transformers", "model", "LongSpanExtractor")
+        AutoModel, AutoTokenizer = tf.AutoModel, tf.AutoTokenizer
         self.torch = torch
         self.device = device or ("cuda" if torch.cuda.is_available() else "cpu")
         self.tok = AutoTokenizer.from_pretrained(model_name)
@@ -209,8 +211,8 @@ class LongSpanExtractor:
         import os
         path_or_id = path
         if not os.path.isdir(path):
-            from huggingface_hub import snapshot_download
-            path = snapshot_download(path)
+            from .loader import optional
+            path = optional("huggingface_hub", "model", "LongSpanExtractor.load of a Hugging Face id").snapshot_download(path)
         cfg = json.load(open(f"{path}/solvi_extract.json"))
         ex = cls(path, max_len=cfg["max_len"], stride=cfg["stride"], max_span=cfg["max_span"], device=device)
         ex.enc.to(ex.torch.float32)

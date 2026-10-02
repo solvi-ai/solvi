@@ -127,18 +127,20 @@ class NameMatcher:
 
     @classmethod
     def load(cls, path_or_id, backend="auto", threads=None):
+        from .loader import optional
+        from .strategy_model import _auto_backend
+        if backend not in ("auto", "torch", "onnx"):
+            raise ValueError('backend must be "torch", "onnx" or "auto"')
         path = os.path.expanduser(str(path_or_id))
         if not os.path.isdir(path):
-            from huggingface_hub import snapshot_download
-            path = snapshot_download(path_or_id)
-        meta = json.load(open(os.path.join(path, "solvi_matcher.json")))
+            path = optional("huggingface_hub", "onnx", "NameMatcher.load of a Hugging Face id").snapshot_download(path_or_id)
+        mf = os.path.join(path, "solvi_matcher.json")
+        if not os.path.isfile(mf):
+            raise FileNotFoundError(f"{path} has no solvi_matcher.json: not a solvi name matcher checkpoint")
+        meta = json.load(open(mf))
         onnx_file = os.path.join(path, "onnx", "matcher.onnx")
         if backend == "auto":
-            try:
-                import onnxruntime  # noqa: F401
-                backend = "onnx" if os.path.isfile(onnx_file) else "torch"
-            except ImportError:
-                backend = "torch"
+            backend = _auto_backend(os.path.isfile(onnx_file), "NameMatcher")
         enc = _OnnxEnc(path, onnx_file, threads, meta) if backend == "onnx" else _TorchEnc(path, meta, threads)
         m = cls(enc, meta, path, backend)
         m._files = [os.path.join(path, f) for f in ("solvi_matcher.json", "tokenizer.json")] + \
@@ -163,9 +165,11 @@ class NameMatcher:
 
 class _TorchEnc:
     def __init__(self, path, meta, threads=None):
-        import torch
-        from safetensors.torch import load_file
-        from transformers import AutoTokenizer, BertConfig, BertModel
+        from .loader import optional
+        torch = optional("torch", "model", 'NameMatcher (backend="torch")')
+        load_file = optional("safetensors.torch", "model", 'NameMatcher (backend="torch")').load_file
+        tf = optional("transformers", "model", 'NameMatcher (backend="torch")')
+        AutoTokenizer, BertConfig, BertModel = tf.AutoTokenizer, tf.BertConfig, tf.BertModel
         if threads:
             torch.set_num_threads(int(threads))
         self.torch = torch
@@ -198,8 +202,9 @@ class _TorchEnc:
 
 class _OnnxEnc:
     def __init__(self, path, file, threads=None, meta=None):
-        import onnxruntime as ort
-        from tokenizers import Tokenizer
+        from .loader import optional
+        ort = optional("onnxruntime", "onnx", 'NameMatcher (backend="onnx")')
+        Tokenizer = optional("tokenizers", "onnx", 'NameMatcher (backend="onnx")').Tokenizer
         so = ort.SessionOptions()
         if threads:
             so.intra_op_num_threads = int(threads)
