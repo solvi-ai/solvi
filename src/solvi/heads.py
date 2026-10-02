@@ -28,6 +28,8 @@ from __future__ import annotations
 
 import numpy as np
 
+from . import _deprecate
+
 
 
 class Featurizer:
@@ -118,17 +120,19 @@ class Head:
         self.options = list(options)
         self.features = []
         self.W = None
-        self.T = 1.0
         self.fz = None
-        self.loo_acc = None
+        self.cv_acc = None                # 5-fold cross-validation accuracy of the selection (fit)
+        self.prior = None
         self._fp = None
+
+    loo_acc = _deprecate.attr("loo_acc", "cv_acc", "Head")      # 0.7: the same number under the other head's name
 
     def fingerprint(self):
         """A stable hash of the head's parameters (recorded with every answer it gives)."""
         if getattr(self, "_fp", None) is None:
             from .provenance import digest
-            self._fp = digest("Head", self.options, self.features, self.W, self.T, getattr(self, "prior", None),
-                              None if self.fz is None else self.fz.spec)
+            self._fp = digest("Head", self.options, self.features, self.W, 1.0, getattr(self, "prior", None),   # 1.0: a
+                              None if self.fz is None else self.fz.spec)   # temperature that was never fitted
         return self._fp
 
     def fit(self, rows, answers, candidates, min_gain=0.01):
@@ -153,14 +157,12 @@ class Head:
             chosen.append(f)
             cur = acc
         self.features, self.cv_acc = chosen, cur
-        self.loo_acc = cur
         if not chosen:
             self.W = None
             self.prior = np.bincount(y, minlength=k) / len(y)
             return self
         X = np.array([self.fz.row(r, chosen) for r in rows])
         self.W = _softmax_fit(X, y, k)
-        self.T = 1.0
         return self
 
     def predict(self, row):
@@ -168,7 +170,7 @@ class Head:
             p = self.prior
         else:
             x = np.array(self.fz.row(row, self.features) + [1.0])
-            z = x @ self.W / self.T
+            z = x @ self.W
             p = np.exp(z - z.max())
             p /= p.sum()
         return {o: float(pi) for o, pi in zip(self.options, p)}
@@ -336,9 +338,7 @@ class FastHead:
                               None if self.fz is None else self.fz.spec)
         return self._fp
 
-    @property
-    def cv_acc(self):                     # same name as Head, for code that prints it
-        return self.loo_acc
+    cv_acc = _deprecate.attr("cv_acc", "loo_acc", "FastHead")   # 0.7: the leave-one-out accuracy under Head's name
 
     def _x(self, row):
         b = np.array(self.fz.row(row, self.features))
@@ -388,6 +388,11 @@ class FastHead:
         return max(self.fitted_on + 1, math.ceil(self.fitted_on * self.refit))
 
     def update(self, row, answer):
+        """Deprecated (removed in 0.9): teach(row, answer)."""
+        _deprecate.renamed("FastHead.update()", "FastHead.teach()")
+        return self.teach(row, answer)
+
+    def teach(self, row, answer):
         """Absorb one labeled example (rank-one update of the inverse; a refit on all kept examples when their number reaches
         the refit schedule); returns the time it took in ms."""
         import time
@@ -521,7 +526,7 @@ class CandidateHead:
     def teach(self, candidates, chosen):
         """One correction: this candidate (index, or a set of them) was the one to take. → ms."""
         good = {chosen} if isinstance(chosen, int) else set(chosen)
-        return sum(self.head.update(r, "yes" if i in good else "no") for i, r in enumerate(self.rows(candidates)))
+        return sum(self.head.teach(r, "yes" if i in good else "no") for i, r in enumerate(self.rows(candidates)))
 
     def fingerprint(self):
         from .provenance import digest

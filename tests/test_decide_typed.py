@@ -287,7 +287,7 @@ def test_use_act_false_ignores_the_models_signal_and_act_threshold_overrides_it(
     m = v2()
     p = m.decision("team", "Which team?", "email", TEAMS, use_act=False)
     assert p(email="maybe a refund").act and p(email="maybe a refund").extra["act"] < 0.5
-    q = m.decision("team", "Which team?", "email", TEAMS, act_threshold=0.01)
+    q = m.decision("team", "Which team?", "email", TEAMS, min_act=0.01)
     assert q(email="maybe a refund").act
     assert p.fingerprint() != q.fingerprint() != m.decision("team", "Which team?", "email", TEAMS).fingerprint()
 
@@ -295,7 +295,7 @@ def test_use_act_false_ignores_the_models_signal_and_act_threshold_overrides_it(
 def test_escalate_below_uses_calibrated_confidence_as_low_confidence():
     m = v2(act=False)
     cat = Catalog()
-    team = m.decision("team", "Which team?", "email", TEAMS, escalate_below=0.9)
+    team = m.decision("team", "Which team?", "email", TEAMS, min_confidence=0.9)
     cat.fn(team)
 
     @cat.rule("route")
@@ -547,7 +547,7 @@ def test_act_calibrator_and_thresholds_for_a_target_error():
     d = m.decision("team", "Which team?", "email", TEAMS)(email="refund")      # act logit 3 → σ(3 + 0.5 − 1.5)
     assert d.extra["act"] == pytest.approx(1 / (1 + np.exp(-2.0))) and d.act
     assert m.act_threshold_for(0.1) == 0.7 and m.act_threshold_for(0.07) == 0.9
-    strict = m.decision("team", "Which team?", "email", TEAMS, target_error=0.05)
+    strict = m.decision("team", "Which team?", "email", TEAMS, max_error=0.05)
     assert strict.act_threshold == 0.9 and not strict(email="refund").act
     with pytest.raises(ValueError, match="calibrate_for"):
         m.act_threshold_for(0.01)
@@ -709,7 +709,7 @@ def test_the_published_checkpoint_answers_typed_questions_as_the_readme_shows_if
     assert {"single", "multi", "score", "noul", "span"} <= set(m.caps["modes"]) and m.caps["unknown"]["label"] == "not stated"
     assert not m.batchable                              # its multi-question pass is declared, and off by default
     cat = Catalog()
-    qs = m.questions(cat, Ticket, text_fact="ticket", escalate_below=0.6)
+    qs = m.questions(cat, Ticket, text_fact="ticket", min_confidence=0.6)
 
     @cat.check(hard=True, then={"urgency": "critical"})
     def no_legal_threat(ticket) -> bool:

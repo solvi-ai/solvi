@@ -478,7 +478,7 @@ def test_l14g_capabilities_and_old_formats_unchanged():
         c = capabilities(meta)
         assert set(c) == old_keys and "rank" not in c["markers"] and "pointer" not in (c["multi_question"] or {})
     m = DecideModel(L14gStub(), {"format": "l14f typed v1"})
-    assert set(m.temperatures) == {"single", "multi", "score", "noul", "act"} and not m.has_unknown and not m.has_pointer
+    assert set(m.temperatures) == {"single", "multi", "score", "noul", "act"} and not m.has_not_stated and not m.has_pointer
     assert m.wire("rank") == "single" and m.wire("number") == "score"
 
 

@@ -147,14 +147,14 @@ def test_extra_body_is_merged_copied_fingerprinted_and_cannot_override_the_reque
 def test_not_stated_is_an_option_of_its_own_and_the_question_abstains():
     svc = PinnedService()
     m = systemone("http://localhost:8009", "kev-latest", opener=svc)
-    team = m.decision("team", "Which team?", "email", TEAMS, unknown=True)
+    team = m.decision("team", "Which team?", "email", TEAMS, not_stated=True)
     d = team.decide("hello")
     q = svc.bodies[-1]["questions"]["q0"]
     assert q["type"] == "choice" and list(q["criteria"]) == ["billing", "shipping", "not stated"]
     assert q["criteria"]["not stated"].startswith("The input does not state it")
     assert d.value is Unknown and d.probs[Unknown] == pytest.approx(0.8, abs=1e-6)
     assert team.decide("I was charged twice").value == "billing"
-    ref = m.decision("refund", "Does the customer want a refund?", "email", type=bool, unknown=True)
+    ref = m.decision("refund", "Does the customer want a refund?", "email", type=bool, not_stated=True)
     assert ref.decide("hello").value is Unknown
     assert list(svc.bodies[-1]["questions"]["q0"]["criteria"]) == ["yes", "no", "not stated"]
     assert ref.decide("I was charged twice").value is True
@@ -178,7 +178,7 @@ def test_a_multi_label_question_is_one_noul_per_option_thresholded_and_guarded()
     assert d.conf == pytest.approx(0.95, abs=1e-6)
     assert tags.decide("I was charged twice").value == ("billing",)
     assert tags.decide("hi there").value == () and tags.decide("hi there").conf == pytest.approx(0.9, abs=1e-6)
-    ns = m.decision("tags2", "Which topics?", "email", TEAMS, multi=True, unknown=True)
+    ns = m.decision("tags2", "Which topics?", "email", TEAMS, multi=True, not_stated=True)
     assert ns.decide("hello").value is Unknown and "q0__ns" in svc.bodies[-1]["questions"]
     info = tags.act_guard([("charged twice", ("billing",)), ("my parcel", ("shipping",))] * 30
                           + [("hello", ("billing",))] * 10, max_risk=0.10)
@@ -310,14 +310,14 @@ def test_a_reply_with_non_probabilities_escalates_never_answers(probs):
     """NaN compares false with every threshold: it used to pass escalate_below and any calibrated one."""
     m = systemone("http://localhost:8009", "kev-latest",
                   opener=Scripted(lambda q: {"type": "choice", "choice": "billing", "probabilities": probs}))
-    d = m.decision("team", "Which team?", "email", TEAMS, escalate_below=0.6).decide("I was charged twice")
+    d = m.decision("team", "Which team?", "email", TEAMS, min_confidence=0.6).decide("I was charged twice")
     assert d.escalate and "not a probability" in d.escalate
 
 
 @pytest.mark.parametrize("p", [float("nan"), 17, -0.2, "0.9"])
 def test_a_yes_no_reply_that_is_not_a_probability_escalates(p):
     m = systemone("http://localhost:8009", "kev-latest", opener=Scripted(lambda q: {"type": "noul", "noul": p}))
-    d = m.decision("urgent", "Urgent?", "email", type=bool, escalate_below=0.6).decide("hello")
+    d = m.decision("urgent", "Urgent?", "email", type=bool, min_confidence=0.6).decide("hello")
     assert d.escalate and "not a probability" in d.escalate
 
 

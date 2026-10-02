@@ -49,7 +49,7 @@ def test_every_question_type_goes_through_jeeves_with_its_options(jeeves):
     m.decision("urgent", "Does this need urgent attention?", "email", type=bool).question(cat, "urgent")
     m.decision("mood", "How frustrated is the customer?", "email", ["calm", "frustrated", "very angry"],
                kind="score").question(cat, "mood")
-    m.decision("refund", "Which team?", "email", TEAMS, unknown=True).question(cat, "who")
+    m.decision("refund", "Which team?", "email", TEAMS, not_stated=True).question(cat, "who")
     m.decision("tags", "Which topics?", "email", TEAMS, multi=True).question(cat, "tags")
     s = System(cat, [Question("route", "Route", Answer.choice(list(TEAMS))), Question("urgent", "Urgent", Answer.yes_no()),
                      Question("mood", "Mood", Answer.choice(["calm", "frustrated", "very angry"])),
@@ -66,7 +66,7 @@ def test_every_question_type_goes_through_jeeves_with_its_options(jeeves):
         assert body["options"] == OPTIONS["options"] and body["model"] == "jeeves-latest"
         assert set(body) == {"options", "model", "state", "questions"}
     assert s.ask({"email": "hello"})["who"].status == "abstain"            # "not stated": the question abstains
-    assert m.decision("refund", "Which team?", "email", TEAMS, unknown=True).decide("hello").value is Unknown
+    assert m.decision("refund", "Which team?", "email", TEAMS, not_stated=True).decide("hello").value is Unknown
 
 
 def test_reasoning_tokens_latency_and_the_reasoning_are_recorded_but_never_decide(jeeves):
@@ -82,7 +82,7 @@ def test_reasoning_tokens_latency_and_the_reasoning_are_recorded_but_never_decid
     assert why["text"] == full[:REASONING_CHARS] and why["truncated"] == len(full)
     assert d.value == "shipping"                          # ... the answer is the probabilities'
     assert m.scorer.usage["reasoning_tokens"] == 512
-    tags = m.decision("tags", "Which topics?", "email", TEAMS, multi=True, unknown=True).decide("charged twice")
+    tags = m.decision("tags", "Which topics?", "email", TEAMS, multi=True, not_stated=True).decide("charged twice")
     assert set(tags.extra["systemone"]["reasoning"]) == {"billing", "shipping", "not stated"}
     assert tags.value == ("billing",)
     plain = systemone(jeeves.url, "jeeves-latest", extra_body=OPTIONS)

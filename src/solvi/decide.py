@@ -38,6 +38,7 @@ Backends: "torch" (`solvi[model]`) or "onnx" (`solvi[onnx]`: onnxruntime + token
 from __future__ import annotations
 
 import dataclasses
+import functools
 import hashlib
 import inspect
 import json
@@ -78,6 +79,23 @@ _KIND = {"choice": "choice", "single": "choice", "one": "choice", "multi": "mult
 NULL_SOURCE = "text"                            # the source of a pointer quote before it is bound to its fact
 
 
+def _spec_names(fn):
+    """`not_stated=` is the name; `unknown=` (0.7) still works with a DeprecationWarning. The internal spec keeps
+    `unknown` (stored adaptations and calibration files carry that key)."""
+    where = fn.__qualname__
+
+    @functools.wraps(fn)
+    def wrapper(*args, **kw):
+        if "not_stated" in kw:
+            if "unknown" in kw:
+                raise TypeError(f"{where}() got both unknown= and not_stated=: unknown= is the old name of not_stated=")
+            kw["unknown"] = kw.pop("not_stated")
+        elif "unknown" in kw:
+            _deprecate.renamed(f"{where}(unknown=)", "not_stated=", stacklevel=3)
+        return fn(*args, **kw)
+    return wrapper
+
+
 _OPTION_KINDS = {"score_value": ("score",), "k": ("rank",), "bins": ("number",), "unit": ("number",),
                  "coverage": ("number",), "other": ("choice", "multi"), "min_margin": ("choice", "score", "noul", "rank")}
 
@@ -93,10 +111,10 @@ def _unused_options(name, k_, kind, multi, long, has_act, given):
     for opt in ("top_k", "rerank"):
         if given.get(opt) is not None and long is None:
             raise ValueError(f'{name}: {opt}= selects sections of a long text: it needs long="retrieve" or "full"')
-    for opt in ("act_threshold", "target_error"):
+    for opt in ("min_act", "max_error"):
         if given.get(opt) is not None and not has_act:
             raise ValueError(f"{name}: {opt}= sets the act threshold, and this checkpoint has no act head — use "
-                             "escalate_below= (a calibrated confidence) instead")
+                             "min_confidence= (a calibrated confidence) instead")
 
 
 def _kind(kind, multi=False):
@@ -1219,6 +1237,9 @@ class DecideModel:
     column per mode: [:, 0] choose-one, [:, 1] multi-label, more as `meta["columns"]` says) or {"logits": array, "act":
     logit}; optionally `logits_pass(passes)` → per Pass a list of those (one per question) and `fingerprint()`."""
 
+    long_len = property(lambda self: (_deprecate.renamed("DecideModel.long_len", "max_len_long"), self.max_len_long)[1],
+                        doc="Deprecated (removed in 0.9): max_len_long.")
+
     deterministic = True
 
     def __init__(self, scorer, meta=None, model_id=None, path=None, backend=None, cache_size=4096, multi_question=None,
@@ -1326,8 +1347,8 @@ class DecideModel:
         if os.path.isfile(cfg_file):
             with open(cfg_file) as fh:
                 pos = json.load(fh).get("max_position_embeddings")
-        if m.long_len is not None and pos and m.long_len > int(pos):
-            raise ValueError(f"max_len_long {m.long_len} is beyond the encoder's max_position_embeddings ({pos}) in "
+        if m.max_len_long is not None and pos and m.max_len_long > int(pos):
+            raise ValueError(f"max_len_long {m.max_len_long} is beyond the encoder's max_position_embeddings ({pos}) in "
                              f"{cfg_file}")
         m._wfp = _file_fingerprint([os.path.join(path, f) for f in ("config.json", "solvi_decide.json", "tokenizer.json")]
                                    + [weights])
@@ -1363,9 +1384,15 @@ class DecideModel:
         return "score" if w == "number" and "score" in self.caps["modes"] else "single"
 
     @property
-    def has_unknown(self):
+    def has_not_stated(self):
         """Does the checkpoint give a "not stated" output (an l14g checkpoint's `unknown`)?"""
         return self.caps.get("unknown") is not None
+
+    @property
+    def has_unknown(self):
+        """Deprecated (removed in 0.9): has_not_stated."""
+        _deprecate.renamed("DecideModel.has_unknown", "has_not_stated")
+        return self.has_not_stated
 
     @property
     def has_pointer(self):
@@ -1425,7 +1452,7 @@ class DecideModel:
         return int(getattr(enc, "max_len", 0) or self.meta.get("max_len") or getattr(self.scorer, "max_len", 0) or 512)
 
     @property
-    def long_len(self):
+    def max_len_long(self):
         """The tokens long="full" reads whole (question and input): the load(max_len_long=...) override, else the
         checkpoint's `max_len_long`, else None (the checkpoint was not trained on long inputs)."""
         n = self._overrides.get("max_len_long", self.caps.get("max_len_long"))
@@ -1902,11 +1929,14 @@ class DecideModel:
             d.escalate = f"confidence {d.conf:.2f} < {eb:.2f} (escalate_below); would have answered {d.value!r}"
         return d
 
-    def decide(self, text, task, options, descriptions=None, multi=False, other=None, kind=None, escalate_below=None,
+    @_deprecate.kwargs(escalate_below="min_confidence")
+    @_spec_names
+    def decide(self, text, task, options, descriptions=None, multi=False, other=None, kind=None, min_confidence=None,
                **spec):
         """→ Decision(value, probs) (a list of them for a list of inputs). The value is always one of the options; a text
-        or a state (dict, list, pydantic model: see state_text). `spec`: unknown=, k=, bins=, unit=, coverage=,
-        evidence= (see decision)."""
+        or a state (dict, list, pydantic model: see state_text). `spec`: not_stated=, k=, bins=, unit=, coverage=,
+        evidence= (see decision). min_confidence: escalate below this confidence (`escalate_below=` in 0.7)."""
+        escalate_below = min_confidence
         sp = _Spec(task, options, descriptions, multi, other, kind, **spec)
         one = _single(text)
         texts = [text] if one else list(text)
@@ -1960,6 +1990,7 @@ class DecideModel:
             self.adaptations[sp.key] = Adaptation()
         return self.adaptations.get(sp.key)
 
+    @_spec_names
     def adapt(self, texts, task, options, descriptions=None, multi=False, other=None, kind=None, logits=None, **spec):
         """Label-bias correction without labels: the mean logit of each option over unlabelled inputs of the domain
         (centered over the options) is subtracted before the softmax / sigmoid. → the Adaptation. A later fit is kept
@@ -1980,6 +2011,7 @@ class DecideModel:
             self._refit(sp, a)
         return a
 
+    @_spec_names
     def fit(self, examples, task, options, descriptions=None, multi=False, other=None, lam=1.0, folds=4, kind=None,
             logits=None, **spec):
         """Few-shot adaptation "S" from labelled examples [(input, correct)]: a shift and a shared scale on the
@@ -1999,6 +2031,7 @@ class DecideModel:
         self._refit(sp, a, lam, folds)
         return a
 
+    @_spec_names
     def teach(self, text, correct, task, options, descriptions=None, multi=False, other=None, lam=1.0, kind=None,
               logits=None, **spec):
         """One labelled example, absorbed at once: the shift / scale is refitted from the kept examples (warm start, K + 1
@@ -2069,6 +2102,7 @@ class DecideModel:
             top = max(acc for acc, _ in accs)
             a.other_threshold = min((t for acc, t in accs if acc >= top - 1e-12), key=lambda t: abs(t - self.other_threshold))
 
+    @_spec_names
     def reset(self, task=None, options=None, descriptions=None, multi=False, other=None, kind=None, **spec):
         """Forget the adaptation of one question, or every adaptation."""
         if task is None:
@@ -2097,9 +2131,11 @@ class DecideModel:
         return self
 
     # --- catalog parts
+    @_deprecate.kwargs(escalate_below="min_confidence", act_threshold="min_act", target_error="max_error",
+                       unknown="not_stated")
     def decision(self, name, task, text_fact="doc", options=(), descriptions=None, multi=False, other=None, *, kind=None,
-                 type=None, escalate_below=None, act_threshold=None, use_act=None, target_error=None,
-                 score_value=None, unknown=False, k=None, bins=None, unit=None, coverage=None, evidence=False,
+                 type=None, min_confidence=None, min_act=None, use_act=None, max_error=None,
+                 score_value=None, not_stated=False, k=None, bins=None, unit=None, coverage=None, evidence=False,
                  option_order="canonical", permutations=4, min_margin=None, long=None, top_k=None, rerank=False,
                  perturb=0, retrieve_query=None, _shared=frozenset()):
         """A catalog part: text_fact (a fact name, or a list of them) → Decision(value, probs).
@@ -2110,9 +2146,9 @@ class DecideModel:
         text fact is read as it is (several joined by new lines); a state (dict, list, pydantic model) by state_text
         (several facts: {fact: value}).
 
-        Escalation: the model's act signal when it has one (use_act=False ignores it; act_threshold overrides the
-        checkpoint's threshold; target_error=0.1 takes the checkpoint's threshold for that error rate), and a calibrated
-        confidence below escalate_below (see calibrate_for); an escalated decision is rejected — the fact is missing, the
+        Escalation: the model's act signal when it has one (use_act=False ignores it; min_act overrides the
+        checkpoint's threshold; max_error=0.1 takes the checkpoint's threshold for that error rate), and a calibrated
+        confidence below min_confidence (see calibrate_for); an escalated decision is rejected — the fact is missing, the
         answer abstains ("model escalated" / "low confidence" in the audit and stats). min_margin=0.1: also escalate when
         the two most probable answers are closer than that (a near tie is where a misleading text flips the choice).
 
@@ -2130,7 +2166,7 @@ class DecideModel:
         The value is one of the options by construction; the options are the part's closed set; provenance `decided`; the
         trace records the model, whose fingerprint covers the checkpoint and this part's adaptation and thresholds.
 
-        Answer primitives (an l14g checkpoint, docs/decide_format.md §9): `Maybe[T]` or unknown=True — "not stated" is an
+        Answer primitives (an l14g checkpoint, docs/decide_format.md §9): `Maybe[T]` or not_stated=True — "not stated" is an
         answer (solvi.Unknown); `Rank[Literal[...], k]` or kind="rank", k= — the options best first; `Estimate[edges]` or
         kind="number", bins=, unit=, coverage= — a number over bins; `Span[T]` or kind="span" — a piece of the (one, given)
         text fact, coerced to T when it is a question's answer; evidence=True (or a number) — supporting quotes from the
@@ -2150,11 +2186,16 @@ class DecideModel:
 
         An option the question's kind does not use is a ValueError, not ignored: score_value= (score questions; default
         "median"), k= (rank), bins= / unit= / coverage= (number; coverage default 0.8), other= (choice and multi),
-        min_margin= (not multi), top_k= / rerank= (with long=), act_threshold= / target_error= (a checkpoint with an act
-        head), and kind= that contradicts multi=True."""
+        min_margin= (not multi), top_k= / rerank= (with long=), min_act= / max_error= (a checkpoint with an act
+        head), and kind= that contradicts multi=True.
+
+        Names (0.8): min_confidence= (0.7: escalate_below=), min_act= (act_threshold=), max_error= (target_error=),
+        not_stated= (unknown=) — the old ones work with a DeprecationWarning until 0.9; the part keeps the thresholds as
+        `part.min_confidence` / `part.min_act`."""
+        escalate_below, act_threshold, target_error, unknown = min_confidence, min_act, max_error, not_stated
         given = {"score_value": score_value, "k": k, "bins": bins, "unit": unit, "coverage": coverage, "other": other,
-                 "min_margin": min_margin, "top_k": top_k, "rerank": rerank or None, "act_threshold": act_threshold,
-                 "target_error": target_error}
+                 "min_margin": min_margin, "top_k": top_k, "rerank": rerank or None, "min_act": act_threshold,
+                 "max_error": target_error}
         as_bool, extra = False, {}
         if type is None and _is_type(options):
             type, options = options, ()
@@ -2178,9 +2219,9 @@ class DecideModel:
         if (k_ == "span" or prim["evidence"]) and not self.has_pointer:
             raise ValueError(f"{name}: this checkpoint cannot point at its input (span answers, evidence): it declares no "
                              "'pointer' / 'span' mode (docs/decide_format.md §9)")
-        if prim["unknown"] and not self.has_unknown:
+        if prim["unknown"] and not self.has_not_stated:
             raise ValueError(f"{name}: this checkpoint has no 'not stated' output (declare 'unknown', docs/decide_format.md "
-                             "§9); drop Maybe[...] / unknown=True")
+                             "§9); drop Maybe[...] / not_stated=True")
         if option_order not in ("given", "canonical", "average"):
             raise ValueError('option_order must be "given", "canonical" or "average"')
         if long not in (None, "retrieve", "full"):
@@ -2196,7 +2237,7 @@ class DecideModel:
 
     def _check_full(self, name):
         """long="full" needs a long-input length: declared by the checkpoint, or forced at load (with a warning)."""
-        L = self.long_len
+        L = self.max_len_long
         if L is None:
             raise ValueError(
                 f'{name}: long="full" needs a checkpoint trained on long inputs — this one declares no "max_len_long" in its '
@@ -2219,8 +2260,9 @@ class DecideModel:
     def decisions(self, schema, text_fact="doc", fields=None, **kw):
         """One decision part per field of a pydantic model class: the field's type is the question (bool, Literal[...],
         an Enum, Scale[...], list[Literal[...]]), its description the task (else its title, else its name), and
-        `json_schema_extra` may carry "options" ({option: description}), "escalate_below", "act_threshold", "use_act",
-        "target_error", "other", "score_value". → {field: DecisionPart} in field order."""
+        `json_schema_extra` may carry "options" ({option: description}), "min_confidence", "min_act", "use_act",
+        "max_error", "other", "score_value" (the 0.7 keys "escalate_below", "act_threshold", "target_error" still read,
+        with a DeprecationWarning). → {field: DecisionPart} in field order."""
         import typing
 
         from .typed import Bins, Ordinal, RankOf, SpanOf
@@ -2234,10 +2276,13 @@ class DecideModel:
                 t = typing.Annotated[(t, *marks)]
             extra = fi.json_schema_extra if isinstance(fi.json_schema_extra, dict) else {}
             args = dict(kw)
-            for k in ("escalate_below", "act_threshold", "use_act", "target_error", "other", "score_value", "kind",
-                      "evidence", "coverage", "unit"):
+            old = {"escalate_below": "min_confidence", "act_threshold": "min_act", "target_error": "max_error"}
+            for k in ("min_confidence", "min_act", "use_act", "max_error", "other", "score_value", "kind",
+                      "evidence", "coverage", "unit", *old):
                 if k in extra:
-                    args[k] = extra[k]
+                    if k in old:
+                        _deprecate.renamed(f"json_schema_extra {k!r}", repr(old[k]), stacklevel=3)
+                    args[old.get(k, k)] = extra[k]
             task = fi.description or fi.title or name.replace("_", " ").capitalize() + "?"
             out[name] = self.decision(name, task, text_fact, options=extra.get("options") or (), type=t, **args,
                                       _shared=frozenset(kw))      # an option given to every field applies where it can
@@ -2326,6 +2371,15 @@ class DecisionPart:
     is also the model recorded in the trace: `fingerprint()` covers the checkpoint and this question's adaptation and
     thresholds only, so teaching one decision does not mark the others as changed."""
 
+    # the thresholds by the question-level names (decision(min_confidence=, min_act=)); stored as escalate_below /
+    # act_threshold, the keys of calibration files and snapshots
+    min_confidence = property(lambda self: self.escalate_below,
+                              lambda self, v: setattr(self, "escalate_below", v),
+                              doc="Escalate below this calibrated confidence (stored as `escalate_below`).")
+    min_act = property(lambda self: self.act_threshold, lambda self, v: setattr(self, "act_threshold", v),
+                       doc="Escalate below this act probability (stored as `act_threshold`).")
+    long_len = _deprecate.attr("long_len", "max_len_long", "DecisionPart")
+
     def __init__(self, model, name, task, text_fact, options, descriptions=None, multi=False, other=None, *, kind=None,
                  as_bool=False, escalate_below=None, act_threshold=None, use_act=None, score_value="median",
                  option_order="canonical", permutations=4, min_margin=None, long=None, top_k=None, rerank=False,
@@ -2336,8 +2390,8 @@ class DecisionPart:
         if self.retrieve_query and long is None:
             raise ValueError('retrieve_query is what long="retrieve" (or long="full" beyond its length) searches by: '
                              "set long=")
-        self.long_len = getattr(model, "long_len", None) if long == "full" else None   # read whole up to (long="full")
-        if long == "full" and self.long_len is None:
+        self.max_len_long = getattr(model, "max_len_long", None) if long == "full" else None   # read whole up to (long="full")
+        if long == "full" and self.max_len_long is None:
             raise ValueError('long="full" needs a checkpoint with a long-input length ("max_len_long"); use long="retrieve"')
         self.spec = _Spec(task, options, descriptions, multi, other, kind, as_bool, score_value, **prim)
         sp = self.spec
@@ -2670,14 +2724,14 @@ class DecisionPart:
         averaged (the act logit too); the question's adaptation applies afterwards, to the part's own spec. long="full":
         a text that does not fit an ordinary pass is read whole, up to the checkpoint's long-input length."""
         texts = list(texts)
-        if self.long_len and texts:
+        if self.max_len_long and texts:
             n = [self.model.count_tokens(t) for t in texts]
             big = [i for i, x in enumerate(n) if x > self._pass_budget()]
             if big:
                 self._cpu_warning(max(n))
                 out = [None] * len(texts)
                 small = [i for i in range(len(texts)) if i not in set(big)]
-                for ix, rl in ((big, self.long_len), (small, 0)):
+                for ix, rl in ((big, self.max_len_long), (small, 0)):
                     if ix:
                         for i, r in zip(ix, self._raw_at([texts[i] for i in ix], rl)):
                             out[i] = r
@@ -2743,7 +2797,7 @@ class DecisionPart:
             return None
         q = (("query", self.retrieve_query),) if self.retrieve_query else ()     # absent: the key is what it was
         if self.long == "full":
-            return ("full", self.long_len, self.sections_k(), self.rerank) + q
+            return ("full", self.max_len_long, self.sections_k(), self.rerank) + q
         return (self.long, self.sections_k(), self.rerank) + q
 
     def sections_k(self):
@@ -2766,7 +2820,7 @@ class DecisionPart:
     def budget(self):
         """The tokens of input this decision can read in one pass: max_len (long="full": max_len_long) minus its
         question."""
-        return max(32, (self.long_len or self.model.max_len) - self._prompt_tokens())
+        return max(32, (self.max_len_long or self.model.max_len) - self._prompt_tokens())
 
     def _pass_budget(self):
         return max(32, self.model.max_len - self._prompt_tokens())
@@ -2813,7 +2867,7 @@ class DecisionPart:
             if n <= self.budget():
                 z, a = self._raw([text])[0]
                 d = self.model._decision(sp, z)
-                d.extra["long"] = {"mode": "full", "tokens": n, "max_len": self.long_len}
+                d.extra["long"] = {"mode": "full", "tokens": n, "max_len": self.max_len_long}
                 return d, a
         doc, sel, win, rr = self._window(text)
         z, a = self._raw([win.text])[0]
@@ -2824,7 +2878,7 @@ class DecisionPart:
         if self.retrieve_query:                      # what the sections were searched by, when not the question itself
             d.extra["long"]["query"] = self.retrieve_query
         if self.long == "full":                      # longer than max_len_long: retrieved within it
-            d.extra["long"].update(mode="full", fallback="retrieve", tokens=n, max_len=self.long_len)
+            d.extra["long"].update(mode="full", fallback="retrieve", tokens=n, max_len=self.max_len_long)
         if isinstance(d.value, Quote):
             got = win.to_doc(d.value.start, d.value.end)
             if got is None:

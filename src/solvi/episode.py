@@ -185,9 +185,9 @@ class Chooser:
     None — the caller decides, e.g. asks a person); info: the option and the producers tried. A single option is
     returned without a decision."""
 
-    def __init__(self, model, storage=None, escalate_below=0.5, check=None, repeat_limit=1, use_act=None):
+    def __init__(self, model, storage=None, min_confidence=0.5, check=None, repeat_limit=1, use_act=None):
         self.model, self.storage, self.use_act = model, storage, use_act
-        self.escalate_below, self.repeat_limit, self.check = escalate_below, int(repeat_limit), check
+        self.min_confidence, self.repeat_limit, self.check = min_confidence, int(repeat_limit), check
         self.catalog = self._catalog()
         self.asked = 0
 
@@ -206,7 +206,7 @@ class Chooser:
         def pick_by_model(question, episode):
             """The model chooses among the options given in the input."""
             part = m.decision(question["name"], question["task"], "state", list(question["actions"]),
-                              escalate_below=me.escalate_below, use_act=me.use_act)
+                              min_confidence=me.min_confidence, use_act=me.use_act)
             return part(state=question["context"])
 
         @cat.fn(provides="pick", cost=1000)

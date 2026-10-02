@@ -16,7 +16,7 @@ confidence), fit / teach / adapt, the audit and the trace.
 
 What the API has no type for is asked in its terms:
 
-- "not stated" (`unknown=True`, `Maybe[...]`): one more option, "not stated", with a description ("the input does not
+- "not stated" (`not_stated=True`, `Maybe[...]`): one more option, "not stated", with a description ("the input does not
   state it ..."); a yes/no question that allows it is asked as a choice over yes / no / not stated. Its probability
   competes with the options' in one softmax, as with solvi.llm and the checkpoints that have a "not stated" output: the
   decision is `Unknown` when it is the most probable, and a question built on it abstains ("not stated").

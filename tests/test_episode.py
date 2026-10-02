@@ -66,7 +66,7 @@ ACTIONS = {"restart": "restart the router", "cable": "check the cable", "replace
 def test_the_chooser_turns_down_what_was_done_without_progress_and_replays(tmp_path):
     m = DecideModel(Stubborn(), meta={"format": "test", "temperature": 1.0})
     store = SQLiteStorage(tmp_path / "steps.db")
-    ch = Chooser(m, storage=store, escalate_below=0.0)
+    ch = Chooser(m, storage=store, min_confidence=0.0)
     ep = Episode("ticket")
     done = []
     for rule in ("restart", "cable", "replace"):
@@ -79,7 +79,7 @@ def test_the_chooser_turns_down_what_was_done_without_progress_and_replays(tmp_p
     assert ch.replay() == (3, 3, []) and store.verify()["ok"]
     ep.progress("the customer rebooted the modem")                    # progress: the first action may be tried again
     assert ch.choose("next", "What should support do next?", ACTIONS, rule="cable", episode=ep)[:2] == ("restart the router", "model")
-    strict = Chooser(m, escalate_below=0.0, check=lambda v, q, episode: v != "restart")     # your own check
+    strict = Chooser(m, min_confidence=0.0, check=lambda v, q, episode: v != "restart")     # your own check
     assert strict.choose("next", "?", ACTIONS, rule="cable", episode=Episode())[:2] == ("check the cable", "rule")
     assert ch.choose("only", "?", {"wait": "wait"}) == ("wait", "only", {"choice": "wait"}) and strict.replay() is None
     with pytest.raises(ValueError):
@@ -133,7 +133,7 @@ def test_the_chooser_refuses_a_rule_outside_the_options_and_says_when_it_abstain
     """A rule naming something outside the options came back as action None with who "rule"; with no usable producer
     who was "abstain", a value the docstring did not list."""
     m = DecideModel(Stubborn(), meta={"format": "test", "temperature": 1.0})
-    ch = Chooser(m, escalate_below=0.0, check=lambda v, q, episode: False)     # every model choice is turned down
+    ch = Chooser(m, min_confidence=0.0, check=lambda v, q, episode: False)     # every model choice is turned down
     with pytest.raises(ValueError, match="rule 'reboot' is not one of the options"):
         ch.choose("next", "?", ACTIONS, rule="reboot", episode=Episode())
     action, who, info = ch.choose("next", "?", ACTIONS, episode=Episode())

@@ -750,7 +750,7 @@ class DeciderExtractor:
 
     def find(self, text, fs):
         task = fs.description or f"What is the {fs.name.replace('_', ' ')}?"
-        d = self.decider.decide(text, task, [], kind="span", unknown=bool(getattr(self.decider, "has_unknown", False)))
+        d = self.decider.decide(text, task, [], kind="span", not_stated=bool(getattr(self.decider, "has_not_stated", False)))
         if d.value is Unknown or not isinstance(d.value, Quote) or d.escalate or d.value.end <= d.value.start:
             return []
         q = d.value

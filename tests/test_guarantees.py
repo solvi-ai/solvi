@@ -108,7 +108,7 @@ def test_an_unsure_decision_never_gets_an_empty_candidate_list():
     """A model sure on the calibration examples gives a small quantile; an unsure decision then had no answer under it
     — "candidates at 90%: []" exactly for the escalations a person takes over."""
     m = DecideModel(Sure(), meta={"format": "test", "temperature": 1.0})
-    part = m.decision("team", "Which team?", "email", TEAMS, escalate_below=0.9)
+    part = m.decision("team", "Which team?", "email", TEAMS, min_confidence=0.9)
     part.conformal([(f"a {t} question {i}", t) for t in TEAMS for i in range(30)], coverage=0.90)
     assert part.conformal_set["quantile"] < 0.05
     d = part(email="Can you call me back?")                              # no team's word: one third each
@@ -420,7 +420,7 @@ class KeywordAct:
 def test_switching_the_signal_clears_the_other_threshold():
     from solvi.decide import DecideModel
     from test_primitives import L14G
-    part = DecideModel(KeywordAct(), L14G).decision("team", "Which team?", "email", TEAMS, act_threshold=0.99)
+    part = DecideModel(KeywordAct(), L14G).decision("team", "Which team?", "email", TEAMS, min_act=0.99)
     ex = [(t, team) for team in TEAMS for t in texts(team, 100)]
     part.calibrate_for(ex, max_error=0.05, signal="confidence")
     assert part.act_threshold is None and part.guarantee["cleared"] == {"act_threshold": 0.99}

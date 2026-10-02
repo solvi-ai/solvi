@@ -190,7 +190,7 @@ class Triage(BaseModel):
 
 model = DecideModel.load("solvi-ai/solvi-base")         # or a local folder; solvi_decide.json says what it can do
 cat = Catalog()
-questions = model.questions(cat, Triage, text_fact="ticket", escalate_below=0.6)
+questions = model.questions(cat, Triage, text_fact="ticket", min_confidence=0.6)
 
 @cat.check(hard=True, then={"urgency": "critical"})         # a legal threat is critical, whatever the model says
 def no_legal_threat(ticket) -> bool:

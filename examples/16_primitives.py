@@ -155,7 +155,7 @@ def load_model():
     src = os.environ.get("SOLVI_DECIDE_MODEL")
     if src:
         m = DecideModel.load(os.path.expanduser(src))
-        if m.has_unknown and m.has_pointer:
+        if m.has_not_stated and m.has_pointer:
             return m
         print(f"  ({src} is not a typed v2 checkpoint: using the stand-in)")
     return DecideModel(StandIn(), StandIn.META)
@@ -195,7 +195,7 @@ if __name__ == "__main__":
 
     print("\n=== 3. a decider answers the same types ===")
     model = load_model()
-    print(f"  decider: {model.model_id}; not stated: {model.has_unknown}; pointer: {model.has_pointer}")
+    print(f"  decider: {model.model_id}; not stated: {model.has_not_stated}; pointer: {model.has_pointer}")
     mcat, mqs = model_catalog(model)
     msys = System(mcat, mqs)
     for name, doc in CLAIMS.items():

@@ -125,7 +125,7 @@ def test_a_close_cut_escalates_whatever_the_sign_of_a_selectors_scores():
 def test_a_tournament_block_that_escalates_makes_the_final_decision_escalate():
     m = DecideModel(Overlap(limit=12), meta={"format": "test", "temperature": 1.0})
     d = decide_many(m, "Goal: get out. Room: nothing here matches.", TASK, ACTIONS, many=Many(mode="tournament", block=8),
-                    escalate_below=0.5)
+                    min_confidence=0.5)
     calls = d.extra["many"]["calls"]
     assert any(c["escalate"] for c in calls[:-1]) and d.escalate and "tournament call(s) before the last escalated" in d.escalate
     sure = decide_many(m, TEXT, TASK, ACTIONS, many=Many(mode="tournament", block=8))

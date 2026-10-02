@@ -253,7 +253,7 @@ def test_yes_no_multi_span_not_stated_and_evidence():
     assert tags.value == ("billing", "shipping") and tags.probs["shipping"] == pytest.approx(0.7, abs=1e-4)
     span = m.decision("o", "What is the order number?", "email", kind="span").decide(text)
     assert span.value.value == "A-17" and text[span.value.start:span.value.end] == "A-17"
-    ns = m.decision("r", "Does the customer want a refund?", "email", type=bool, unknown=True).decide(text)
+    ns = m.decision("r", "Does the customer want a refund?", "email", type=bool, not_stated=True).decide(text)
     assert ns.value is Unknown
     ev = m.decision("u2", "Urgent?", "email", type=bool, evidence=True).decide(text)
     assert [q.value for q in ev.evidence] == ["ASAP"] and text[ev.evidence[0].start:ev.evidence[0].end] == "ASAP"
@@ -297,8 +297,8 @@ class Keywords:
 def test_the_llm_as_the_last_stage_of_a_cascade_and_in_a_vote():
     fake = FakeLLM()
     small = DecideModel(Keywords(), meta={"format": "test", "temperature": 1.0}).decision(
-        "team", "Which team?", "email", TEAMS, escalate_below=0.9)
-    big = model(fake).decision("team", "Which team?", "email", TEAMS, escalate_below=0.7)
+        "team", "Which team?", "email", TEAMS, min_confidence=0.9)
+    big = model(fake).decision("team", "Which team?", "email", TEAMS, min_confidence=0.7)
     c = Cascade([small, big])
     d = c.decide("I was charged twice")
     assert d.value == "billing" and d.extra["answered_by"] == 0 and not fake.bodies
@@ -307,7 +307,7 @@ def test_the_llm_as_the_last_stage_of_a_cascade_and_in_a_vote():
     d = c.decide("charged for a parcel twice")
     stages = d.extra["stages"]
     assert len(stages) == 2 and stages[1]["model"].startswith("llm:tiny-chat")
-    v = Vote([small, model(FakeLLM()).decision("team", "Which team?", "email", TEAMS, escalate_below=0.7)])
+    v = Vote([small, model(FakeLLM()).decision("team", "Which team?", "email", TEAMS, min_confidence=0.7)])
     assert v.decide("I was charged twice").value == "billing"
 
 
@@ -657,7 +657,7 @@ def test_the_prompt_says_what_a_not_stated_answers_one_number_means_and_it_is_re
     assert "null: that the text does not state it" in conf["description"]
     assert d.value is Unknown and d.conf == pytest.approx(0.9)
     fake = FakeLLM(reply=json.dumps({"answer": "not stated", "confidence": 0.8, "quote": ""}))
-    d = model(fake, ask="confidence").decision("r", "Refund?", "email", type=bool, unknown=True).decide("Hello.")
+    d = model(fake, ask="confidence").decision("r", "Refund?", "email", type=bool, not_stated=True).decide("Hello.")
     assert 'with "not stated": your probability that the text does not say it' in fake.bodies[-1]["messages"][0]["content"]
     assert d.value is Unknown and d.conf == pytest.approx(0.8)
     plain = FakeLLM(reply=json.dumps({"answer": "A-1", "confidence": 0.9, "quote": ""}))

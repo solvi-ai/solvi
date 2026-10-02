@@ -17,6 +17,7 @@ import random
 from collections import deque
 from dataclasses import dataclass, field
 
+from . import _deprecate
 from .core import Quote
 
 
@@ -226,6 +227,12 @@ class Binary:
         self._since = 0
 
     def observe(self, row, y):
+        """Deprecated (removed in 0.9): teach(row, y)."""
+        _deprecate.renamed("Binary.observe()", "Binary.teach()")
+        return self.teach(row, y)
+
+    def teach(self, row, y):
+        """One labelled row: y is True or False."""
         y = bool(y)
         self.rows.append((row, y))
         self.n += 1
@@ -236,7 +243,7 @@ class Binary:
             self.refit()
         else:
             try:
-                self.head.update(row, "yes" if y else "no")
+                self.head.teach(row, "yes" if y else "no")
                 self._since += 1
             except Exception:  # noqa: BLE001  (a category never seen at fit time → refit)
                 self.refit()
@@ -279,7 +286,7 @@ class OrderModel:
 
     def observe(self, check, row, failed):
         m = self.models.setdefault(check, Binary(self.min_rows, self.refit_every))
-        m.observe(row, failed)
+        m.teach(row, failed)
 
     def p_fail(self, check, row):
         m = self.models.get(check)
@@ -325,13 +332,13 @@ class ProducerPolicy:
         """outcomes: {producer: (accepted, value)} for the producers that ran on this input."""
         ref = group.alternatives[-1].name
         for name, (ok, _) in outcomes.items():
-            self._m(self.accept, (group.name, name)).observe(row, ok)
+            self._m(self.accept, (group.name, name)).teach(row, ok)
         if ref in outcomes and outcomes[ref][0]:
             from .runtime import vhash
             want = vhash(_plain(outcomes[ref][1]))
             for name, (ok, v) in outcomes.items():
                 if name != ref and ok:
-                    self._m(self.agree, (group.name, name)).observe(row, vhash(_plain(v)) == want)
+                    self._m(self.agree, (group.name, name)).teach(row, vhash(_plain(v)) == want)
 
 
 def _plain(v):

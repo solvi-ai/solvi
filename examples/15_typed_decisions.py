@@ -108,7 +108,7 @@ def load_model():
 def build(model):
     cat = Catalog()
     reads = ["subject", "body", "customer"]                 # the decider reads these facts as one state
-    extra = {} if model.has_act else {"escalate_below": 0.55}
+    extra = {} if model.has_act else {"min_confidence": 0.55}
     questions = model.questions(cat, Triage, text_fact=reads, **extra)
 
     @cat.fn

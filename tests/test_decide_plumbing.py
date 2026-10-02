@@ -33,7 +33,7 @@ def test_a_maybe_question_and_a_plain_one_do_not_share_a_cached_reply():
         sc = Words()
         m = DecideModel(sc, {**V2, "act": False})
         plain = m.decision("p", "Is it signed?", "doc", ["yes", "no"])
-        maybe = m.decision("q", "Is it signed?", "doc", ["yes", "no"], unknown=True)
+        maybe = m.decision("q", "Is it signed?", "doc", ["yes", "no"], not_stated=True)
         order = (maybe, plain) if first == "maybe" else (plain, maybe)
         out = {p.__name__: (p(doc="some text").value, round(p(doc="some text").conf, 6)) for p in order}
         assert out["q"][0] is Unknown and out["p"][0] != Unknown
@@ -111,7 +111,7 @@ def test_an_option_the_question_kind_does_not_use_is_refused_instead_of_ignored(
     m = DecideModel(Words(), {**V2, "act": False})
     for kw, msg in (({"k": 3}, "k= is for rank"), ({"score_value": "mean"}, "score_value= is for score"),
                     ({"coverage": 0.9}, "coverage= is for number"), ({"top_k": 3}, "needs long="),
-                    ({"rerank": True}, "needs long="), ({"act_threshold": 0.9}, "no act head"),
+                    ({"rerank": True}, "needs long="), ({"min_act": 0.9}, "no act head"),
                     ({"kind": "choice", "multi": True}, "contradict")):
         with pytest.raises(ValueError, match=msg):
             m.decision("p", "Which?", "doc", ["a", "b"], **kw)

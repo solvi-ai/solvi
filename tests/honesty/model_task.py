@@ -40,6 +40,6 @@ def system():
     m = DecideModel.load(path, backend="onnx")
     cat = Catalog()
     qs = [m.decision("team", "Which team should handle this customer message?", "doc", TEAMS,
-                     escalate_below=0.5).question(cat),
+                     min_confidence=0.5).question(cat),
           m.decision("refund", "Does the customer ask for their money back?", "doc", bool).question(cat)]
     return System(cat, qs)

@@ -435,14 +435,14 @@ def test_calibrate_reads_csv_labels_of_integer_options(tmp_path):
 
 def test_load_calibration_without_a_guarantee_onto_a_part_made_with_escalate_below(tmp_path):
     m = model(noise=3.0)
-    part = m.decision("team", TASK, "email", TEAMS, escalate_below=0.6)
+    part = m.decision("team", TASK, "email", TEAMS, min_confidence=0.6)
     part.conformal(_examples(), coverage=0.9)            # conformal sets only: the file holds no guarantee
     f = part.save_calibration(tmp_path / "c.json")
     assert json.loads(Path(f).read_text())["guarantee"] is None
-    fresh = m.decision("team", TASK, "email", TEAMS, escalate_below=0.6).load_calibration(f)
+    fresh = m.decision("team", TASK, "email", TEAMS, min_confidence=0.6).load_calibration(f)
     assert (fresh.escalate_below, fresh.act_threshold, fresh.guarantee) == (0.6, None, None)
     assert fresh.conformal_set == part.conformal_set and fresh.fingerprint() == part.fingerprint()
-    other = m.decision("team", TASK, "email", TEAMS, escalate_below=0.9).load_calibration(f)
+    other = m.decision("team", TASK, "email", TEAMS, min_confidence=0.9).load_calibration(f)
     assert other.escalate_below == 0.6                   # the file's threshold, as saved
 
 

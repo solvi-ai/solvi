@@ -87,3 +87,32 @@ def test_modules_renamed_in_0_8_still_read_with_a_warning(old, new, name):
     assert got is getattr(importlib.import_module(new), name)
     with pytest.raises(AttributeError):
         mod.no_such_name  # noqa: B018
+
+
+def test_decider_options_take_the_question_level_names():
+    from solvi.decide import DecideModel
+    from test_decide_plumbing import V2, Words
+    m = DecideModel(Words(), {**V2, "act": False})
+    for old, new, v in (("escalate_below", "min_confidence", 0.7), ("unknown", "not_stated", True)):
+        with pytest.warns(DeprecationWarning, match=rf"decision\({old}=\) is deprecated: use {new}="):
+            p = m.decision("p", "Signed?", "doc", ["yes", "no"], **{old: v})
+        assert p.fingerprint() == m.decision("p", "Signed?", "doc", ["yes", "no"], **{new: v}).fingerprint()
+    p = m.decision("p", "Signed?", "doc", ["yes", "no"], min_confidence=0.7)
+    assert p.min_confidence == p.escalate_below == 0.7             # the stored name keeps the calibration files' key
+    with pytest.warns(DeprecationWarning, match="has_unknown is deprecated: use has_not_stated"):
+        assert m.has_unknown is m.has_not_stated is True
+
+
+def test_heads_report_one_accuracy_each_and_learn_one_label_by_teach():
+    from solvi.heads import FastHead, Head
+    rows = [{"x": float(i)} for i in range(20)]
+    ans = ["a" if i < 10 else "b" for i in range(20)]
+    fh = FastHead(["a", "b"]).fit(rows, ans, ["x"])
+    with pytest.warns(DeprecationWarning, match="FastHead.cv_acc is deprecated: use loo_acc"):
+        assert fh.cv_acc == fh.loo_acc
+    with pytest.warns(DeprecationWarning, match=r"FastHead.update\(\) is deprecated: use FastHead.teach\(\)"):
+        fh.update({"x": 3.0}, "a")
+    h = Head(["a", "b"]).fit(rows, ans, ["x"])
+    assert not hasattr(h, "T") and h.cv_acc is not None
+    with pytest.warns(DeprecationWarning, match="Head.loo_acc is deprecated: use cv_acc"):
+        assert h.loo_acc == h.cv_acc

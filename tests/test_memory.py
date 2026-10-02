@@ -83,7 +83,7 @@ def test_learn_from_storage_takes_trusted_corrections_and_skips_the_rest(tmp_pat
 
 
 def test_answer_mode_answers_where_the_decider_escalated_and_says_so():
-    _, cat, part, s = setup(escalate_below=0.999)
+    _, cat, part, s = setup(min_confidence=0.999)
     mem = part.memory(mode="answer")
     for t in texts("billing", 4):
         mem.add(t, "billing", source="human")
@@ -319,7 +319,7 @@ def test_a_memory_given_answer_keeps_the_models_probability_as_its_confidence():
     cases, next to probs that say billing 0.79 — so min_confidence=0.99 let it through, and it was missing from its own
     conformal candidates."""
     m, _, _, _ = setup()
-    part = m.decision("team", TASK, "email", TEAMS, option_order="given", escalate_below=0.9999)
+    part = m.decision("team", TASK, "email", TEAMS, option_order="given", min_confidence=0.9999)
     part.conformal([(t, k) for k in TEAMS for t in texts(k, 30)], coverage=0.9)
     mem = part.memory(mode="answer", min_strength=0.5)
     t = texts("billing", 1, start=70)[0]

@@ -84,7 +84,7 @@ QUESTIONS.append(Question("route", "Which team should handle the ticket?", Answe
 ''',
     "model": '''
 # ---------- a question the model answers: it proposes one of the options; the hard check above still decides
-route = model.decision("route", "Which team should handle this ticket?", "message", ROUTES, escalate_below=0.5)
+route = model.decision("route", "Which team should handle this ticket?", "message", ROUTES, min_confidence=0.5)
 CALIBRATION = HERE / "route.calib.json"           # written by: solvi calibrate catalog.py:system route labels.csv
 if CALIBRATION.exists() and calibration_fits(CALIBRATION):
     route.load_calibration(CALIBRATION)           # refuses a calibration made with another model
@@ -167,7 +167,7 @@ QUESTIONS = [
     "rule_only": "",
     "model": '''
 # ---------- a question the model answers from the customer's own words (it proposes; a human reads the audit)
-reason = model.decision("reason", "Why does the customer want a refund?", "message", REASONS, escalate_below=0.5)
+reason = model.decision("reason", "Why does the customer want a refund?", "message", REASONS, min_confidence=0.5)
 CALIBRATION = HERE / "reason.calib.json"          # written by: solvi calibrate catalog.py:system reason labels.csv
 if CALIBRATION.exists() and calibration_fits(CALIBRATION):
     reason.load_calibration(CALIBRATION)          # refuses a calibration made with another model
@@ -232,7 +232,7 @@ QUESTIONS = [Question("approve", "Approve the expense?", Answer.yes_no(), requir
     "rule_only": "",
     "model": '''
 # ---------- a question the model answers from the employee's note
-category = model.decision("category", "What kind of expense is it?", "note", CATEGORIES, escalate_below=0.5)
+category = model.decision("category", "What kind of expense is it?", "note", CATEGORIES, min_confidence=0.5)
 CALIBRATION = HERE / "category.calib.json"        # written by: solvi calibrate catalog.py:system category labels.csv
 if CALIBRATION.exists() and calibration_fits(CALIBRATION):
     category.load_calibration(CALIBRATION)        # refuses a calibration made with another model

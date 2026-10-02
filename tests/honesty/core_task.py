@@ -112,7 +112,7 @@ class KeywordScorer:
 
 
 DECIDER = DecideModel(KeywordScorer(), meta={"format": "test", "temperature": 1.0})
-TEAM = DECIDER.decision("team", "Which team handles this message?", "doc", list(KW), escalate_below=0.6)
+TEAM = DECIDER.decision("team", "Which team handles this message?", "doc", list(KW), min_confidence=0.6)
 
 
 # ------------------------------------------------------------------------------------- approve: a hard check that raises

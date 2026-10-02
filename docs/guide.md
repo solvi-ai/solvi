@@ -605,17 +605,17 @@ q = urgency.question(cat, min_confidence=0.6)             # or: the answer of a 
 ```
 
 `model.decision(name, task, text_fact="doc", options=(), descriptions=None, multi=False, other=None, *, kind=None,
-type=None, escalate_below=None, act_threshold=None, use_act=None, target_error=None, score_value=None, unknown=False,
+type=None, min_confidence=None, min_act=None, use_act=None, max_error=None, score_value=None, not_stated=False,
 k=None, bins=None, unit=None, coverage=None, evidence=False, option_order="canonical", permutations=4, min_margin=None,
 long=None, top_k=None, rerank=False, perturb=0, retrieve_query=None)` returns a
 callable catalog function named `name` that returns `Decision(value, probs)`. The question is given by `options` (a list, or
 `{option: description}`) and `kind` (`"choice"`, `"multi"`, `"score"`, `"noul"`), or by a type (`type=`, or in place of the
 options; a dict of options is then read as descriptions). `model.decisions(Schema, text_fact)` gives one part per field of a
-pydantic model; a field's `json_schema_extra` may carry `"options"` (descriptions), `"escalate_below"`, `"act_threshold"`,
-`"target_error"`, `"use_act"`, `"other"`. An option the question's kind does not use raises `ValueError` rather than
+pydantic model; a field's `json_schema_extra` may carry `"options"` (descriptions), `"min_confidence"`, `"min_act"`,
+`"max_error"`, `"use_act"`, `"other"`. An option the question's kind does not use raises `ValueError` rather than
 being ignored: `score_value=` (score questions; default `"median"`), `k=` (rank), `bins=` / `unit=` / `coverage=` (number;
 coverage default 0.8), `other=` (choice and multi), `min_margin=` (not multi-label), `top_k=` / `rerank=` (with `long=`),
-`act_threshold=` / `target_error=` (a checkpoint with an act head); an option given to `decisions(...)` for every field
+`min_act=` / `max_error=` (a checkpoint with an act head); an option given to `decisions(...)` for every field
 applies to the fields that use it.
 
 - the value is one of the options **by construction** — the network only scores the options it is given — and the options
@@ -730,7 +730,7 @@ under `long="retrieve"` (counted as words × 1.3; default 512, as for a local de
 same.
 
 **Reading whole: `long="full"`.** A checkpoint trained on long inputs declares how much it reads whole — `max_len_long`
-in its `solvi_decide.json` ([decide_format.md](decide_format.md)); `m.long_len` shows it. With `long="full"` a text that
+in its `solvi_decide.json` ([decide_format.md](decide_format.md)); `m.max_len_long` shows it. With `long="full"` a text that
 does not fit `max_len` is read whole, in one pass of up to `max_len_long` tokens; a longer text falls back to retrieve
 within `max_len_long` (sections of ≈ 170 tokens, `top_k` and `rerank` as above). A text that fits `max_len` is decided
 as before.
@@ -783,12 +783,12 @@ a fallback producer (a rule, a human queue) runs if there is one:
 
 - the model's own signal: act probability below the threshold → `abstain`, `guard="escalated"`, why `"model escalated: act
   0.12 < 0.50; would have answered 'billing'"`; the audit and `system.stats["model_escalated"]` count it (safeguard
-  **model escalated**). The threshold is the checkpoint's; `act_threshold=` overrides it, `target_error=0.1` takes the
+  **model escalated**). The threshold is the checkpoint's; `min_act=` overrides it, `max_error=0.1` takes the
   checkpoint's threshold for that error rate (`model.act_threshold_for(0.1)`), `use_act=False` ignores the signal.
   **The checkpoint's thresholds were fitted on the model's own validation data and do not hold on a new domain** (measured:
   a "10% error" threshold gave 38–52% error on unseen tasks). For a real error target, calibrate on your own labelled
   stream with `part.act_guard(examples, max_risk=...)` (below);
-- without an act head (or besides it): `escalate_below=0.8` — a calibrated confidence below it escalates as **low
+- without an act head (or besides it): `min_confidence=0.8` — a calibrated confidence below it escalates as **low
   confidence** (`"confidence 0.62 < 0.80 (escalate_below); would have answered 'billing'"`);
 - `part.calibrate_for(examples, max_error=0.05)` picks the threshold for a target error rate on labelled examples
   `[(input, correct)]`: the lowest threshold at which the decisions it lets through are wrong at most 5% of the time (the act
@@ -946,7 +946,7 @@ instruction inside quotes is emptied. The rules read a normalised text (NFKC, ze
 removed, Cyrillic / Greek look-alikes of Latin letters mapped to them), so "Ign\u200bore" and "Ignоre" with a Cyrillic
 "о" are caught; what is removed is the input's own passage. The part asks again on up to k variants in a fixed order — every such passage
 removed; each sentence alone; only the quoted ones — and escalates at the first changed answer, with safeguard
-**instruction**. A variant with the same answer goes through the part's own gate (its act threshold, `escalate_below`,
+**instruction**. A variant with the same answer goes through the part's own gate (its act threshold, `min_confidence`,
 the guarantee's threshold): when the model would escalate without the sentence, the instruction did not change the
 answer but made the model sure of it, and the decision escalates too ("without it the model does not answer alone",
 `"unsure": True`). An input that is nothing but such sentences leaves no variant to ask about and escalates naming
@@ -980,7 +980,7 @@ part = kev.decision("team", "Which team should handle this?", "email", {"billing
 
 Any server of `POST /v1/systemone` (Jev, and open ones: Kev, Jeeves, Von, Laya-serve, Intern-Decision) proposes; solvi's checks,
 rules, thresholds (act_guard on the confidence: the API has no act signal) and trace decide. Choice, yes/no and score
-questions are sent as they are. What the API has no type for is asked in its terms: "not stated" (`unknown=True`,
+questions are sent as they are. What the API has no type for is asked in its terms: "not stated" (`not_stated=True`,
 `Maybe[...]`) is one more option with a description (a yes/no question that allows it becomes a choice over yes / no /
 not stated), and when it is the most probable the decision is `Unknown` and the question abstains; a multi-label
 question is one `noul` per option in the same request, chosen at 0.5, its confidence the least sure option's
@@ -1275,8 +1275,8 @@ The parts must answer the same question — the same kind and options (and "not 
 task and the facts they read may differ. A mismatch raises at construction. Combinations nest: `Cascade([small,
 Vote([mid, large])])`.
 
-**Thresholds and the guarantee.** Before calibration each part escalates by its own thresholds (`escalate_below`,
-`act_threshold`, `min_margin`). `act_guard(examples, max_risk=0.10)` asks every part on labelled examples of your stream
+**Thresholds and the guarantee.** Before calibration each part escalates by its own thresholds (`min_confidence`,
+`min_act`, `min_margin`). `act_guard(examples, max_risk=0.10)` asks every part on labelled examples of your stream
 (`[(input, correct)]`; an input is what every part reads, or `solvi.multi.Facts(email=..., vip=...)` by name) and chooses
 **one threshold t for every part's signal** — its act probability when its model gives one, else its calibrated
 confidence — by conformal risk control, so that P(answered alone and wrong) ≤ risk for inputs like the examples.
@@ -1412,7 +1412,7 @@ probabilities to about three decimals. `solvi_decide.json` declares what the che
 kinds it was trained on, the head columns, the state serialization, the act head, several questions per pass, temperatures
 and thresholds: **[docs/decide_format.md](decide_format.md)** is the contract. The first, text-only checkpoints (`l14b_decider v1`)
 load and behave exactly as before: choose-one and multi-label natively, a score or yes/no asked as a choice among the levels
-or "yes" / "no", no act head (escalate by `escalate_below`), one question per pass. `load(..., multi_question=..., act=...)`
+or "yes" / "no", no act head (escalate by `min_confidence`), one question per pass. `load(..., multi_question=..., act=...)`
 overrides the declaration for experiments. The published solvi-base and solvi-large keep several questions per pass off:
 with `load("solvi-ai/solvi-base", backend="onnx", multi_question=True)` a pass over five questions is about 2.2 times
 faster on a CPU, and 88% of the answers are the ones a pass per question gives (600 typed-decision questions). `load(..., max_len=N)` sets the tokens of an ordinary pass (and retrieve's
@@ -1432,7 +1432,7 @@ lists them; `model.caps` has the parsed capabilities. Any object with `logits(it
 
 ```python
 model.score(input, task, options, descriptions=None, multi=False, kind=None)   # → {option: probability}; a list → a list
-model.decide(input, task, options, ..., kind=None, escalate_below=None)       # → Decision(value, probs)
+model.decide(input, task, options, ..., kind=None, min_confidence=None)       # → Decision(value, probs)
 model.logits(input, task, options)                                             # raw logits
 ```
 
@@ -4123,7 +4123,7 @@ Hashes: a record hashes its provenance only when it differs from the default (`q
 |---|---|---|
 | grounding | a quote lies outside its text, or a model's quote is not literally `doc[start:end]` (strings up to whitespace; numbers as written, e.g. `1250.0` ↔ `"1,250.00"` — `int`, `float`, `Decimal`, `Fraction` and numpy scalars; a `date` when the text reads as that date; a `bool`, a `datetime` or a list cannot be compared and is not checked); an evidence quote or a span is not literally in its text | the output is rejected: the fact is missing, the claim stays in the error; the next alternative producer runs, else dependent answers abstain |
 | closed set | a `Decision` (or a value of a part with `options=`) is not one of the options; a rule's answer is not one of the question's options | rejected / the question abstains |
-| low confidence | a `Quote` / `Decision` is below the part's `min_confidence` or a decision's `escalate_below`; an answer is below the question's `min_confidence` | rejected / the question abstains, saying what it would have answered |
+| low confidence | a `Quote` / `Decision` is below the part's `min_confidence` (a decision part's too); an answer is below the question's `min_confidence` | rejected / the question abstains, saying what it would have answered |
 | model escalated | a decider's act / escalate signal is below its threshold (see [the output](#the-output-probabilities-calibrated-confidence-act-or-escalate)) | rejected: the fact is missing, next producer, else the question abstains, saying what it would have answered |
 | validate | a producer's `validate(value, ...)` returns false | rejected, next producer |
 | type rejected | a typed part's argument or output fails its type annotation, or a field fails `System(input_model=...)` | rejected: the fact is missing, next producer, else dependent answers abstain |

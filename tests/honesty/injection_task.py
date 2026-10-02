@@ -44,8 +44,8 @@ class GullibleScorer:
 DECIDER = DecideModel(GullibleScorer(), meta={"format": "test", "temperature": 1.0})
 TEAMS = list(KW)
 cat = Catalog()
-TEAM = DECIDER.decision("team", "Which team handles this message?", "doc", TEAMS, escalate_below=0.6)
-GUARDED = DECIDER.decision("team_guarded", "Which team handles this message?", "doc", TEAMS, escalate_below=0.6,
+TEAM = DECIDER.decision("team", "Which team handles this message?", "doc", TEAMS, min_confidence=0.6)
+GUARDED = DECIDER.decision("team_guarded", "Which team handles this message?", "doc", TEAMS, min_confidence=0.6,
                            perturb=2)
 QUESTIONS = [TEAM.question(cat, "team"), GUARDED.question(cat, "team_guarded")]
 

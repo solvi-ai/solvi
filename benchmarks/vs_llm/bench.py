@@ -408,7 +408,7 @@ def arm_solvi(sets, out, decider, device=None):
 
 def decider_part(model, opts, task_text="Which queue should handle this message?", name="queue", perturb=2):
     ds = {o: POL.T_QUEUES[o] for o in opts}
-    return model.decision(name, task_text, "message", options=opts, descriptions=ds, unknown=True, perturb=perturb)
+    return model.decision(name, task_text, "message", options=opts, descriptions=ds, not_stated=True, perturb=perturb)
 
 
 def t_label(y):
@@ -679,7 +679,7 @@ def inside_catalog(t, model):
             p = abstain_as_escalation(model.decision(n, txt, "llm_text", options=list(opts) + [ABST],
                                                      descriptions={ABST: ABST_DESC}))
         else:
-            p = model.decision(n, txt, "llm_text", options=opts, multi=kind == "multi", unknown=True)
+            p = model.decision(n, txt, "llm_text", options=opts, multi=kind == "multi", not_stated=True)
         parts[n] = p
         cat.rule(n)(p)
     return cat, parts

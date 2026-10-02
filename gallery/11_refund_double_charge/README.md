@@ -138,7 +138,7 @@ claim_llm = model.decision(
      "denied": "they mention a double charge only to say it did not happen",
      "unclear": "they ask, or are unsure, whether it happened",
      "not mentioned": "the message is not about being charged twice"},
-    escalate_below=0.8)                           # better: claim_llm.act_guard(your_labelled_tickets, max_risk=0.05)
+    min_confidence=0.8)                           # better: claim_llm.act_guard(your_labelled_tickets, max_risk=0.05)
 cat.fn(provides="double_charge_claim")(claim_llm)    # declared first: asked first
 
 

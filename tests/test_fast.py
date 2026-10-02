@@ -73,7 +73,7 @@ def _rows(n, seed=0):
 def _teach_all(h, rows, ys, start):
     fits = []
     for r, y in zip(rows[start:], ys[start:]):
-        h.update(r, y)
+        h.teach(r, y)
         if h.fitted_on == h.n:
             fits.append(h.n)
     return fits
@@ -95,7 +95,7 @@ def test_after_a_refit_the_head_equals_a_fresh_fit_on_the_same_rows():
     rows, ys = _rows(160, seed=1)
     h = FastHead(["x", "y"]).fit(rows[:10], ys[:10], ["a", "b", "c"])     # λ and pairs chosen on 10 rows
     for r, y in zip(rows[10:], ys[10:]):
-        h.update(r, y)
+        h.teach(r, y)
     g = FastHead(["x", "y"]).fit(rows, ys, ["a", "b", "c"])
     assert h.fitted_on == 160
     assert np.array_equal(h.W, g.W) and np.array_equal(h.Ainv, g.Ainv) and h.lam == g.lam and h.pairs == g.pairs
@@ -111,7 +111,7 @@ def test_teaching_the_same_sequence_gives_the_same_head():
         h = FastHead(["x", "y"]).fit(rows[:10], ys[:10], ["a", "b", "c"])
         seen = []
         for r, y in zip(rows[10:], ys[10:]):
-            h.update(r, y)
+            h.teach(r, y)
             seen.append(h.fingerprint())
         fps.append(seen)
     assert fps[0] == fps[1]
@@ -145,8 +145,8 @@ def test_an_old_pickled_head_loads_and_learns_as_before():
     old = pickle.loads(pickle.dumps(old))
     assert old.fingerprint() == h.fingerprint()
     for r, y in zip(rows[10:], ys[10:]):
-        h.update(r, y)
-        old.update(r, y)
+        h.teach(r, y)
+        old.teach(r, y)
     assert np.array_equal(old.W, h.W) and old.fingerprint() == h.fingerprint()
 
 
@@ -155,10 +155,10 @@ def test_an_unknown_answer_changes_nothing():
     rows, ys = _rows(19, seed=5)
     h = FastHead(["x", "y"]).fit(rows[:10], ys[:10], ["a", "b", "c"])
     for r, y in zip(rows[10:], ys[10:]):
-        h.update(r, y)
+        h.teach(r, y)
     fp, n = h.fingerprint(), len(h._rows)
     with pytest.raises(ValueError):
-        h.update(rows[0], "z")                                 # the update that would trigger the refit at 20
+        h.teach(rows[0], "z")                                 # the update that would trigger the refit at 20
     assert h.fingerprint() == fp and len(h._rows) == n and h.fitted_on == 10
 
 

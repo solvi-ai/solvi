@@ -115,7 +115,7 @@ def load(path, **kw):
 # --------------------------------------------------------------------------------------------------- reading
 def test_full_reads_the_whole_text(ckpt):
     m = load(ckpt)
-    assert m.long_len == 1024 and m.long_declared and m.max_len == 64
+    assert m.max_len_long == 1024 and m.long_declared and m.max_len == 64
     lengths = pointing(m)
     text = doc(10)                                           # ~260 tokens: over max_len, within max_len_long
     n = m.count_tokens(text)
@@ -168,7 +168,7 @@ def test_quote_offsets_point_at_the_text_in_full_mode(ckpt):
 
 def test_a_checkpoint_without_max_len_long_refuses_full(short_ckpt):
     m = load(short_ckpt)
-    assert m.long_len is None and not m.long_declared
+    assert m.max_len_long is None and not m.long_declared
     with pytest.raises(ValueError, match='long="retrieve"'):
         m.decision("team", "Which team?", "email", TEAMS, long="full")
     m.decision("team", "Which team?", "email", TEAMS, long="retrieve")                   # retrieve still works
@@ -307,7 +307,7 @@ def test_onnx_backend_reads_the_whole_text_like_torch(ckpt, tmp_path):
                           dynamic_axes={"input_ids": {0: "batch", 1: "length"}, "attention_mask": {0: "batch", 1: "length"},
                                         "logits": {0: "batch", 1: "length"}})
     om = DecideModel.load(str(d), backend="onnx")
-    assert om.backend.startswith("onnx") and om.long_len == 1024 and om.on_cpu() is True
+    assert om.backend.startswith("onnx") and om.max_len_long == 1024 and om.on_cpu() is True
     text = doc(12)
     q = dict(name="team", task="Which team?", text_fact="email", options=TEAMS, long="full")
     a, b = tm.decision(**q)(email=text), om.decision(**q)(email=text)

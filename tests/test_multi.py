@@ -22,8 +22,8 @@ def _model(name, noise, **kw):
 
 def _parts(small_below=0.8, large_below=0.6):
     small, large = _model("small", 3.0), _model("large", 1.0)
-    return (small.decision("team", "Which team?", "email", TEAMS, escalate_below=small_below),
-            large.decision("team", "Which team?", "email", TEAMS, escalate_below=large_below), small, large)
+    return (small.decision("team", "Which team?", "email", TEAMS, min_confidence=small_below),
+            large.decision("team", "Which team?", "email", TEAMS, min_confidence=large_below), small, large)
 
 
 # --------------------------------------------------------------------------------------------------- construction
@@ -65,7 +65,7 @@ def test_cascade_asks_the_large_model_only_when_the_small_one_escalates():
 
 def test_cascade_answers_with_the_large_model_when_it_is_sure():
     s, _, _, large = _parts(small_below=0.999)
-    l_ = large.decision("team", "Which team?", "email", TEAMS, escalate_below=0.5)
+    l_ = large.decision("team", "Which team?", "email", TEAMS, min_confidence=0.5)
     d = Cascade([s, l_])(email=CLEAR)
     assert d.extra["answered_by"] == 1 and d.extra["stages"][0]["escalate"] and d.escalate is None
     assert d.probs == pytest.approx(d.extra["stages"][1]["probs"], abs=1e-6)

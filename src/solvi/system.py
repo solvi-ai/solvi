@@ -1176,7 +1176,7 @@ class System:
         head = self.heads.get(question)
         dec = decision_of(self.catalog, question)
         if isinstance(head, (FastHead, MultiHead)) and getattr(head, "online", True):
-            ms = head.update(self.facts_for(init_state), correct)
+            ms = head.teach(self.facts_for(init_state), correct)
         if dec is not None:
             try:
                 label = dec.spec.label(correct)           # the decision's own label (a bool decision: "yes" / "no")
@@ -1207,13 +1207,9 @@ class MultiHead:
             self.heads[o] = self.train(self.make(), ["yes" if o in a else "no" for a in answers])
         h = next(iter(self.heads.values()))
         self.features = sorted({f for hh in self.heads.values() for f in hh.features})
-        self.online = hasattr(h, "update")
-        self.loo_acc = getattr(h, "loo_acc", None)
+        self.online = hasattr(h, "teach")
+        self.loo_acc = h.__dict__.get("loo_acc")      # a FastHead's leave-one-out accuracy (a Head has cv_acc)
         return self
-
-    @property
-    def cv_acc(self):
-        return self.loo_acc
 
     def predict(self, row):
         return {o: h.predict(row)["yes"] for o, h in self.heads.items()}
@@ -1225,8 +1221,8 @@ class MultiHead:
                 out[f] = out.get(f, 0.0) + c
         return out
 
-    def update(self, row, answer):
-        return sum(h.update(row, "yes" if o in answer else "no") for o, h in self.heads.items())
+    def teach(self, row, answer):
+        return sum(h.teach(row, "yes" if o in answer else "no") for o, h in self.heads.items())
 
 
 def _append(trace, rec, n_steps):

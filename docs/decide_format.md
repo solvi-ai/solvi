@@ -72,7 +72,7 @@ solvi_decide.json      format and capabilities (below)
 | `multi_question` | several questions per forward pass: `false`, `true`, a number (`max_questions`), or `{"layout", "max_questions", "max_len", "window"}` — layout `block` (§5), `max_questions` per pass (default 6), `max_len` of a block sequence (1024), `window` of the local attention layers (64, ±tokens) | `false` |
 | `temperature` | a number (the single-choice temperature; `temperature_multi` then gives the multi-label one), or one per kind: `choice` (or `single`), `multi`, `score`, `noul` (missing kinds: the single-choice one) | `l14b_decider v1`: 1.45; else 1.0 |
 | `thresholds` | `other` (the "other" abstain threshold, §6), `multi` (a multi-label option applies at p ≥ it), `escalate_below` (a default confidence threshold for parts that set none). The top-level `other_threshold`, `multi_threshold`, `temperature_multi` of the text-only deciders are still read | 0.5, 0.5, none |
-| `act` | the act / escalate head: `false` / absent — none; `{}` or `"act_head": true` — present with defaults. `column` (default `columns.act`), `temperature` (1.0), `calibrator` (optional, §6), `threshold` (0.5), `threshold_for_error` (`{"target error": threshold}`, used by `target_error=`) | per format |
+| `act` | the act / escalate head: `false` / absent — none; `{}` or `"act_head": true` — present with defaults. `column` (default `columns.act`), `temperature` (1.0), `calibrator` (optional, §6), `threshold` (0.5), `threshold_for_error` (`{"target error": threshold}`, used by `max_error=`) | per format |
 
 Other keys (`base`, `training`, `licenses`, ...) are free: `model.metadata()` shows them. Every capability field, the
 temperatures and thresholds are part of the checkpoint's fingerprint (a v2 or `l14f typed v1` checkpoint; `l14b_decider v1` hashes as
@@ -160,8 +160,8 @@ Then, per question (task, options, descriptions, kind):
    | `n_options` | the number of scored options K |
    | `kind=choice`, `kind=multi`, `kind=score`, `kind=noul` | 1 for the question's kind, else 0 |
 
-8. act or escalate: act probability < threshold (`act.threshold`, a part's `act_threshold`, or
-   `act.threshold_for_error[target]` via `target_error=`) → "model escalated"; else confidence < `escalate_below` →
+8. act or escalate: act probability < threshold (`act.threshold`, a part's `min_act`, or
+   `act.threshold_for_error[target]` via `max_error=`) → "model escalated"; else confidence < `min_confidence` →
    "low confidence". Either rejects the decision (the answer abstains, a fallback producer may run).
 
 ## 7. The input: text or state
@@ -266,7 +266,7 @@ exactly as before (same `model.caps`, temperatures and fingerprints).
 | `temperature` | adds `rank`, `number` (default: the `score` one), `span` (1.0; divides the pointer's start / end scores and the null span's before the softmax, for spans and evidence) | per kind |
 | `act.calibrator.features` | may also use `p_unknown` (the decision's p("not stated"), 0 when not asked) and `kind=rank`, `kind=number`, `kind=span` | — |
 
-`model.has_unknown`, `model.has_pointer` say what a loaded checkpoint can do. A decision that asks for what the checkpoint
+`model.has_not_stated`, `model.has_pointer` say what a loaded checkpoint can do. A decision that asks for what the checkpoint
 cannot give raises when it is made (`model.decision(...)`): a span or evidence without a pointer, "not stated" without
 `unknown`. `rank` and `number` work with older checkpoints too **(solvi)**: a rank is asked as a single choice (the order
 is by probability), a number as a score over its bins (or a single choice).
