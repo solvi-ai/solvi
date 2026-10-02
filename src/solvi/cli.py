@@ -147,13 +147,30 @@ def cmd_verify(a):
     return 0 if v["ok"] else 1
 
 
+def _checked_filters(a, system, store):
+    """The query filters of replay / diff, checked: a --question the system does not have or a --status that is none
+    is a usage error (a mistyped filter would match nothing and pass forever) → (filters, how many decisions match)."""
+    f = _filters(a)
+    q = f.get("question")
+    if q is not None and q not in system.questions:
+        _fail(f"--question {q}: no such question (the system has: {', '.join(system.questions)})")
+    if f.get("status") is not None and f["status"] not in ("ok", "forced", "abstain"):
+        _fail(f"--status {f['status']}: one of ok, forced, abstain")
+    n = len(store.query(**f))
+    if n == 0:
+        print(f"solvi: no stored decision matches in {a.store}: nothing was checked", file=sys.stderr)
+    return f, n
+
+
 def cmd_replay(a):
     system = load_system(a.system)
-    bad = _store(a.store, system).replay_all(system, trust_models=a.trust_models, **_filters(a))
+    store = _store(a.store, system)
+    filters, n = _checked_filters(a, system, store)
+    bad = store.replay_all(system, trust_models=a.trust_models, **filters)
     if a.json:
         _dump(bad)
     else:
-        print("every stored trace replays" if not bad else f"{len(bad)} stored trace(s) do not replay:")
+        print(f"every stored trace replays ({n})" if not bad else f"{len(bad)} of {n} stored trace(s) do not replay:")
         for b in bad:
             print(f"- {b['id']} (#{b['seq']}): {b['summary']}" + (f" — {b['note']}" if b.get("note") else ""))
             for m in b["mismatches"][:5]:
@@ -165,8 +182,11 @@ def cmd_replay(a):
 def cmd_diff(a):
     from .diff import diff
     system = load_system(a.system)
-    rep = diff(_store(a.store, system), system, confidence=None if a.confidence < 0 else a.confidence, limit=a.limit,
-               **_filters(a))
+    if a.limit is not None and a.limit < 1:
+        _fail(f"--limit {a.limit}: at least 1")
+    store = _store(a.store, system)
+    filters, _ = _checked_filters(a, system, store)
+    rep = diff(store, system, confidence=None if a.confidence < 0 else a.confidence, limit=a.limit, **filters)
     if a.json:
         _dump(rep.to_dict())
     else:

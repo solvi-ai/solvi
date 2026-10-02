@@ -665,3 +665,21 @@ def test_usage_errors_exit_with_status_2_and_a_message_not_a_traceback(tmp_path,
     (d / "broken.py").write_text("import nothing_like_this_zz\n")       # an error inside the user's module is theirs
     with pytest.raises(ModuleNotFoundError):
         main(["check", "broken.py:system"])
+
+
+def test_replay_and_diff_refuse_a_mistyped_filter_and_say_how_many_decisions_they_covered(tmp_path, capsys):
+    d, system, store = _stored_project(tmp_path, capsys)
+    for cmd in ("replay", "diff"):
+        code, out = run(capsys, cmd, store, "--system", system)
+        assert code == 0 and ("every stored trace replays (1)" in out or "1 stored decision(s) re-run" in out), out
+        for extra, said in ((["--question", "nope"], "no such question"), (["--status", "zzz"], "--status")):
+            capsys.readouterr()
+            with pytest.raises(SystemExit) as e:
+                main([cmd, store, "--system", system, *extra])
+            assert e.value.code == 2 and said in capsys.readouterr().err
+        capsys.readouterr()
+        assert main([cmd, store, "--system", system, "--until", "2000-01-01"]) == 0       # nothing matches: said aloud
+        assert "no stored decision matches" in capsys.readouterr().err
+    with pytest.raises(SystemExit) as e:
+        main(["diff", store, "--system", system, "--limit", "-5"])
+    assert e.value.code == 2
