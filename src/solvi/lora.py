@@ -3,8 +3,8 @@
 When a question has a hundred labelled answers or more, a shift and a scale on the logits (`part.fit`) stop improving: they
 cannot change what the model reads in the input. A LoRA adapter can: low-rank updates (rank 8) of the encoder's attention
 and MLP weights in every layer, plus the last layer of the output head, trained on this question's examples with the
-rest of the checkpoint frozen. Expect the gain over `fit` to grow with the examples: small at a few dozen (where `fit`
-is about as good and takes milliseconds), larger at hundreds. The adapter is 3.2 MB (bf16); training on a CPU takes
+rest of the checkpoint frozen. A gain over `fit` needs examples: at a few dozen try `fit` first (it takes
+milliseconds), and compare the two on held-out labels. The adapter is 3.2 MB (bf16); training on a CPU takes
 minutes (adapt_lora estimates the time after its first update and says so before training), on a GPU seconds.
 
     part = model.decision("team", "Which team?", "email", TEAMS)      # DecideModel.load(..., backend="torch")
@@ -146,7 +146,7 @@ def check(part, allow_large=False):
     if hidden > MAX_HIDDEN and not allow_large:
         n = sum(p.numel() for p in scorer.model.parameters()) / 1e6
         raise ValueError(f"adapt_lora({part.__name__}): this decider has {n:.0f}M parameters; in-process training is for "
-                         f"solvi-base (on a CPU a solvi-large adapter takes 40 minutes and more at 300 examples). Train it "
+                         f"solvi-base (on a CPU a solvi-large adapter takes far longer). Train it "
                          f"on a GPU with {GPU_SCRIPT} and load it with part.load_lora(path)")
 
 
@@ -465,8 +465,8 @@ def adapt(part, examples, *, r=8, epochs=6, holdout=None, seed=0, device=None, l
                          f"{FEW_EXAMPLES} or more to beat fit)")
     if k < FEW_EXAMPLES:
         warnings.warn(f"adapt_lora({name}): {k} examples — below about {FEW_EXAMPLES}, part.fit (and System.fit for questions "
-                      "without a model) is about as accurate and takes milliseconds (the adapter gained ~3 points at 32 "
-                      "examples in our measurements, within noise on some tasks)", LoraWarning, stacklevel=3)
+                      "without a model) takes milliseconds and is worth trying first: compare both on held-out labels",
+                      LoraWarning, stacklevel=3)
     before = _accuracy(part, hold) if hold else None
     rows = list(zip(_texts(part, [x for x, _ in pairs]), [y for _, y in pairs]))
 
@@ -491,8 +491,8 @@ def adapt(part, examples, *, r=8, epochs=6, holdout=None, seed=0, device=None, l
         out["holdout"] = {"n": len(hold), "accuracy_before": before, "accuracy_after": after, "act_guard": guard}
     else:
         warnings.warn(f"adapt_lora({name}): no held-out labels, so escalation is not calibrated — confidences after LoRA "
-                      "are overconfident. Call part.act_guard(held_out, max_risk=0.10) on labels not used for training (~300 "
-                      "is typical), or pass holdout=", LoraWarning, stacklevel=3)
+                      "are overconfident. Call part.act_guard(held_out, max_risk=0.10) on labels not used for training (a few "
+                      "hundred is typical), or pass holdout=", LoraWarning, stacklevel=3)
     return out
 
 

@@ -279,7 +279,8 @@ def select_features(rows, answers, options, features, min_gain=0.0):
     fact that lowers the exact leave-one-out squared error most; stop when none lowers it by more than `min_gain` × the
     error of the answers' shares. → (chosen, {fact: error after adding it}, {fact that cannot be encoded: why}). A
     proper score, so a rare answer counts:
-    accuracy, the old criterion, kept nothing on questions where the most frequent answer is 80-90% of the examples.
+    accuracy, the old criterion, keeps nothing where one answer is most of the examples (a fact seldom changes the
+    majority answer).
     Each fact is chosen with its own encoding only (no pairwise products while choosing)."""
     fz = VecFeaturizer().fit(rows, features)
     cands = [f for f in features if f in fz.spec]

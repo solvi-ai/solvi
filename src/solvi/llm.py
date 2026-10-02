@@ -205,7 +205,7 @@ def messages(it, ask="probabilities"):
 
 # ------------------------------------------------------------------------------------------------ reading the reply
 # a number whose first decimal is spelled out: gpt-oss writes "0. nine" for 0.9 now and then when no reply format is
-# enforced (2-3 in 600 replies in our runs); only this exact form is read, as the digit it names
+# enforced; only this exact form is read, as the digit it names
 _DIGITS = ("zero", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine")
 _SPELLED = re.compile(r"(?<![\w.])(\d)\. (" + "|".join(_DIGITS) + r")(?=\s*[,}\]])")
 
@@ -692,8 +692,8 @@ class LLMScorer(RemoteClient):
                 return
             self._warned_unthought = True
         import warnings
-        hint = (" Some servers skip the thinking when the reply format is enforced (measured: one of OpenRouter's "
-                "gpt-oss-120b providers, under json_schema and json_object); response_format=\"prompt\" lets it think."
+        hint = (" Some servers skip the thinking when the reply format is enforced (json_schema, json_object); "
+                "response_format=\"prompt\" lets it think."
                 if fmt != "prompt" else "")
         warnings.warn(f"the request asks the model to reason, and a reply shows none (no reasoning text, no reasoning "
                       f"tokens counted; reply format {fmt}); such replies carry extra['llm']['reasoning'] = 'none'.{hint}", UserWarning, stacklevel=2)

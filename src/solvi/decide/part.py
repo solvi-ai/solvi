@@ -399,10 +399,9 @@ class DecisionPart:
         m = self.model
         if tokens > LONG_CPU_TOKENS and callable(getattr(m, "on_cpu", None)) and m.on_cpu():
             m._warn_once("cpu", (
-                f"{m.model_id}: long=\"full\" reads a {tokens}-token text whole on a CPU. Measured: a whole 4k-token "
-                "text costs about 12x and an 8k one about 31x a 512-token pass (about 1.6 s and 4 s per question on a "
-                "4-thread laptop CPU). Use a GPU, or long=\"retrieve\" with a larger max_len (e.g. max_len=2048: "
-                "about 3x a 512-token pass, and as accurate as reading whole for a model trained on long inputs)."))
+                f"{m.model_id}: long=\"full\" reads a {tokens}-token text whole on a CPU: a pass costs more than in "
+                "proportion to its length, so this is many times a 512-token pass. Use a GPU, or long=\"retrieve\" "
+                "with a larger max_len (e.g. max_len=2048), which reads the text's relevant sections."))
 
     def _raw_at(self, texts, read_len=0):
         if self.option_order != "average":           # given, or canonical (the spec itself is in sorted order)
@@ -629,8 +628,8 @@ class DecisionPart:
                    signal="confidence", max_updates=400):
         """Experimental: train a small LoRA adapter on the decider's encoder for this question, from labelled examples
         [(input, correct)] — for solvi-base (the torch backend, `pip install "solvi[lora]"`) and about 100 examples or
-        more. Below that, `fit` (and `System.fit` for questions without a model) are about as good and take milliseconds;
-        the adapter can keep improving where `fit` levels off.
+        more. Below that, try `fit` (and `System.fit` for questions without a model) first: they take milliseconds;
+        the adapter can keep improving where `fit` levels off. Compare the two on held-out labels.
 
         Cost: minutes on a CPU; the time is estimated from the first update and reported (a LoraWarning) before
         training. r: the adapter's rank (alpha = 2r);
@@ -644,7 +643,7 @@ class DecisionPart:
         without it. Confidences after LoRA are overconfident, so escalation must be recalibrated on labels NOT used for
         training: holdout — a list of [(input, correct)], a share of the examples (0.25) or a number of them split off
         (by the seed) — runs act_guard(holdout, risk, signal) after training and reports the held-out accuracy before and
-        after; without one a LoraWarning says so (call act_guard yourself; ~300 labels is typical). Refuses a decider that
+        after; without one a LoraWarning says so (call act_guard yourself; a few hundred labels is typical). Refuses a decider that
         is not a torch encoder (ONNX: load it with backend="torch"; an LLM or a rule has no weights to adapt), one larger
         than solvi-base (use tools/adapt_lora_gpu.py on a GPU and load_lora), and rank / number / span questions.
         Keep it with save_lora / load_lora or save_calibration (the adapter is written next to the calibration file);

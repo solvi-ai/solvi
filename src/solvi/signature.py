@@ -18,7 +18,8 @@ the chain does not move the other items). The code is named in the signature's "
   the store (except with probability ~n / 2^256): detected, not located. A classical single-error-locating code.
 
 The positional octonion code that was the second "alg" up to 0.7 is an experiment in benchmarks/octonion_signature.py
-since 0.8: on a flat store it located exactly as the syndrome code does, 4x larger and ~60x slower.
+since 0.8: on a flat store it located exactly as the syndrome code does, 4x larger and ~60x slower
+(benchmarks/trace_signature.py compares the two).
 
 Limits (tests/test_signature.py pins each):
 - one changed record is located and its content hash restored; the record itself (its value) only from `candidates`
@@ -121,7 +122,8 @@ def _syn_hits(ds, bad, sig):
 
 ALGS = ("syndrome",)
 _MOVED = ("the octonion signature code left the package in solvi 0.8: it is an experiment in "
-          "benchmarks/octonion_signature.py (the syndrome code locates the same changes, 4x smaller, ~60x faster)")
+          "benchmarks/octonion_signature.py (the syndrome code locates the same changes, 4x smaller, ~60x faster: "
+          "benchmarks/trace_signature.py)")
 
 
 def sign(obj, alg="syndrome"):
