@@ -71,6 +71,7 @@ nav:
       - solvi.specialist: api/specialist.md
       - solvi.charts: api/charts.md
       - solvi.longdoc: api/longdoc.md
+      - solvi.audit: api/audit.md
       - solvi.report: api/report.md
       - solvi.otel: api/otel.md
       - solvi.counterfactual: api/counterfactual.md
