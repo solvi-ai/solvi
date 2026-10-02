@@ -2416,7 +2416,8 @@ MCP proxy grounds only from tool outputs and keeps the last 50, so there a `grou
 declare such tools with `injections="off"` (and policies over the values), or run the proxy with a reviewer
 (`--escalate elicit`). The detector is the second line; what stops an attacker's value is `ground_from=("user",)`.
 
-**How a value is found.** `ground=["iban", "amount"]` finds each string as a *token*: the occurrence must not continue
+**How a value is found.** An argument that is `None` is not looked for, nor is an optional argument left at its `""`
+default; any other empty string is never grounded. `ground=["iban", "amount"]` finds each string as a *token*: the occurrence must not continue
 a longer word on either side, nor be joined to one by `. @ - / : _` ("bob@x.org" is not found in "bob@x.org.evil" or
 "evil.bob@x.org", "acct" not in "acct-12"); zero-width and other format characters are read as absent, so they cannot
 make a boundary; a string of digits gets the same protection as a number ("0532" is not found in "DE89 3704 0044 0532"). `ground={"iban": "whole", "email": "whole"}` is stricter — the value must be delimited by

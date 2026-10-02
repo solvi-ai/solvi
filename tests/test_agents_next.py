@@ -678,3 +678,19 @@ def test_the_adapter_extras_are_declared():
     text = (Path(__file__).parent.parent / "pyproject.toml").read_text()
     extras = text.split("[project.optional-dependencies]")[1].split("\n[")[0]
     assert {"pydantic-ai", "langgraph", "openai-agents"} <= set(re.findall(r"^([\w-]+) = ", extras, re.M))
+
+
+def test_an_optional_argument_left_at_its_empty_default_is_not_reported_as_missing():
+    g = Guard()
+
+    @g.tool(ground=["address", "note"])
+    def ship(address: str, note: str = "", gift: str = "no") -> str:
+        return "ok"
+    said = [("user", "Ship it to 12 Elm Street.")]
+    d = g.check({"name": "ship", "arguments": {"address": "12 Elm Street"}}, said)
+    assert d.outcome == "allow", d.reasons                               # note was not given: nothing to ground
+    assert g.check({"name": "ship", "arguments": {"address": "12 Elm Street", "note": ""}}, said).outcome == "allow"
+    bad = g.check({"name": "ship", "arguments": {"address": "12 Elm Street", "note": "leave at the door"}}, said)
+    assert bad.outcome == "deny" and "note=" in bad.reasons[0]
+    empty = g.check({"name": "ship", "arguments": {"address": ""}}, said)   # a required argument: an empty string never is
+    assert empty.outcome == "deny" and "(empty)" in empty.reasons[0]

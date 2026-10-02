@@ -576,7 +576,8 @@ def _grounding(spec, matchers=None):
         """Where each argument that must come from the conversation is quoted: {"found": {argument: [[text, start, end,
         role]]}, "missing": [...], "injected": [...]}. A string is found as a token (not inside a longer word or
         address; see MATCHERS), a number as a number token of exactly its value (a lone "1,500" only under a locale), a
-        list item by item; an empty or whitespace-only string is never grounded. The first occurrence in a message of
+        list item by item; an empty or whitespace-only string is never grounded (an optional argument left at its ""
+        default is not asked for). The first occurrence in a message of
         an allowed role wins (an untainted one before a tainted one). Taint is context-wide: when any tool output in the
         conversation carries instruction-like text (solvi.perturb.injection_spans), a value found only in tool outputs
         is injected. With scan_user, a value the user wrote only within NEAR characters of an override in their own
@@ -620,6 +621,8 @@ def _grounding(spec, matchers=None):
             quotes = []
             for item in items:
                 if isinstance(item, str) and not _visible(item).strip():
+                    if item == "" and "empty_default" in rules and arg in rules["empty_default"]:
+                        continue                      # an optional argument left at its "" default: nothing was given
                     missing.append(f"{arg}={_short(item)} (empty)")
                     continue
                 best, stale = None, False
@@ -1491,6 +1494,9 @@ class Guard:
                 spec["tool_values"] = "escalate"
             if t.ground_last:
                 spec["last"] = int(t.ground_last)
+            empty = sorted(a for a in t.ground if t.model.model_fields[a].default == "")
+            if empty:                                 # optional arguments whose default is "": the default grounds itself
+                spec["empty_default"] = empty
             cat.fn(_grounding(json.dumps(spec, sort_keys=True), {a: m for a, m in t.match.items() if callable(m)}))
             check(arguments_grounded, "deny")
             if middle:
