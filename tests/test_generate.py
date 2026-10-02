@@ -159,7 +159,8 @@ def test_json_schema_response_format_is_sent_only_when_asked_and_the_reply_is_st
 
 
 def test_sample_asks_the_greedy_reply_first_then_seeded_samples_and_keeps_a_failed_one_as_none():
-    g, srv = gen("A", "", "B")
+    g, srv = gen("A", "", "B")                       # the fake server answers in call order: ask one at a time so the
+    g.workers = 1                                     # order is the requests' (in use, each request has its own seed)
     out = g.sample("q", k=3, temperature=0.9)
     assert out.value == ["A", None, "B"]
     assert [(b["temperature"], b.get("seed")) for b in sorted(srv.bodies, key=lambda b: b.get("seed") or 0)] == \
