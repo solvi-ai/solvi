@@ -30,7 +30,8 @@ Spans and evidence quotes are not part of the API (ValueError).
 thinking decision model's controls, e.g. Jeeves's `{"options": {"max_think": 512, "nothink_threshold": 0.9}}`); the
 fields solvi sets (model, state, questions) are refused, and extra_body enters the fingerprint (except Jeeves's
 `options.return_reasoning`, which changes the reply, not the answers). Per decision `extra["systemone"]` records the
-endpoint, the model name (and `served_by` when the service names another), the request's `ms` and, when the service
+endpoint (the URL without credentials or query, as the fingerprint and repr show it; the request keeps the query), the
+model name (and `served_by` when the service names another), the request's `ms` and, when the service
 reports them, its `usage` (input / output / reasoning tokens), `cost` and `latency_ms` — for the whole request, which
 answers `questions` questions at once — and the question's `reasoning` when the service returns it (Jeeves with
 `return_reasoning`: the text cut to REASONING_CHARS characters, for the audit; the answer is read from the
@@ -50,6 +51,7 @@ import json
 import math
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 
 import numpy as np
@@ -117,7 +119,12 @@ class SystemOneScorer:
                  backoff=1.0, sleep=None):
         if not str(base_url).lower().startswith(("http://", "https://")):
             raise ValueError(f"a System One service is an http(s):// URL, not {str(base_url)[:40]!r}")  # no file: / ftp:
-        self.url = base_url.rstrip("/") + "/v1/systemone"
+        from .llm import endpoint
+        sp = urllib.parse.urlsplit(str(base_url))
+        path = sp.path.rstrip("/")
+        path = path if path.endswith("/v1/systemone") else path + "/v1/systemone"
+        self.url = urllib.parse.urlunsplit((sp.scheme, sp.netloc, path, sp.query, ""))   # a query stays a query
+        self.endpoint = endpoint(self.url)               # what the trace, repr and fingerprint show: no credentials
         self.model = model
         self.api_key = api_key
         self.timeout = timeout
@@ -131,10 +138,10 @@ class SystemOneScorer:
         self.cost = 0.0                                  # the sum of the replies' usage.cost
 
     def __repr__(self):                                  # never the key
-        return f"SystemOneScorer({self.url!r}, {self.model!r})"
+        return f"SystemOneScorer({self.endpoint!r}, {self.model!r})"
 
     def fingerprint(self):
-        fp = f"systemone|{self.url}|{self.model}"
+        fp = f"systemone|{self.endpoint}|{self.model}"
         x = self.extra_body
         if x and isinstance(x.get("options"), dict) and "return_reasoning" in x["options"]:
             # Jeeves's return_reasoning only adds the chains to the reply: the answers, and the fingerprint, stay
@@ -245,7 +252,7 @@ class SystemOneScorer:
 
     def _info(self, resp, ms, n):
         """What a decision records of its request (extra["systemone"])."""
-        info = {"endpoint": self.url, "model": self.model, "ms": round(ms, 3), "questions": n}
+        info = {"endpoint": self.endpoint, "model": self.model, "ms": round(ms, 3), "questions": n}
         if resp.get("model") and resp.get("model") != self.model:
             info["served_by"] = str(resp["model"])
         u = resp.get("usage") if isinstance(resp.get("usage"), dict) else {}
@@ -305,7 +312,7 @@ class SystemOneScorer:
             except _Failed as e:              # escalate every question of the request; not cached: asked again next time
                 for i in idx:
                     out[i] = {"logits": np.zeros(len(items[i].options)), "escalate": str(e), "transient": True,
-                              "info": {"systemone": {"endpoint": self.url, "model": self.model, "questions": len(idx)}}}
+                              "info": {"systemone": {"endpoint": self.endpoint, "model": self.model, "questions": len(idx)}}}
                 continue
             ms = (time.perf_counter() - t0) * 1000
             info = self._info(resp, ms, len(idx))

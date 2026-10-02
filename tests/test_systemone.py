@@ -337,3 +337,18 @@ def test_max_len_widens_what_a_system_one_model_reads_under_retrieve():
     assert "max_len" not in systemone("http://127.0.0.1:9", "m").meta
     with pytest.raises(ValueError, match="max_len"):
         systemone("http://127.0.0.1:9", "m", max_len=10)
+
+
+def test_the_url_keeps_its_query_and_the_trace_records_it_without_credentials_or_query():
+    """The URL was built by concatenation: "http://host?api-key=K" became "...?api-key=K/v1/systemone" (the request
+    went to "/"), and the key in the query was recorded in extra["systemone"]["endpoint"], repr and the fingerprint."""
+    fake = FakeService()
+    m = systemone("https://user:pw@s1.example/api/?api-key=QSECRET", "jev", opener=fake)
+    d = m.decision("team", "Which team?", "email", TEAMS).decide("I was charged twice")
+    assert d.value == "billing"
+    assert m.scorer.url == "https://user:pw@s1.example/api/v1/systemone?api-key=QSECRET"      # the request's URL
+    assert d.extra["systemone"]["endpoint"] == "https://s1.example/api/v1/systemone"
+    for shown in (json.dumps(d.extra), repr(m.scorer), m.fingerprint()):
+        assert "QSECRET" not in shown and "pw" not in shown
+    plain = systemone("http://127.0.0.1:8009/", "jev")              # a plain URL: the fingerprint it always had
+    assert plain.scorer.fingerprint().startswith("systemone|http://127.0.0.1:8009/v1/systemone|jev")
