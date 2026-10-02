@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import functools
 import importlib
+import inspect
 import warnings
 
 REMOVAL = "0.9"
@@ -32,17 +33,26 @@ def kwargs(fn=None, /, **mapping):
         return functools.partial(kwargs, **mapping)
     where = getattr(fn, "__qualname__", fn.__name__).replace(".__init__", "")
 
-    @functools.wraps(fn)
-    def wrapper(*args, **kw):
+    def translate(kw):
         for old, target in mapping.items():
             if old in kw:
                 new, convert, how = (target, None, f"{target}=") if isinstance(target, str) else target
                 if new in kw:
                     raise TypeError(f"{where}() got both {old}= and {new}=: {old}= is the old name of {new}=")
-                renamed(f"{where}({old}=)", how, stacklevel=3)
+                renamed(f"{where}({old}=)", how, stacklevel=4)
                 value = kw.pop(old)
                 kw[new] = value if convert is None else convert(value)
-        return fn(*args, **kw)
+        return kw
+
+    if inspect.iscoroutinefunction(fn):
+        @functools.wraps(fn)
+        async def awrapper(*args, **kw):
+            return await fn(*args, **translate(kw))
+        return awrapper
+
+    @functools.wraps(fn)
+    def wrapper(*args, **kw):
+        return fn(*args, **translate(kw))
     return wrapper
 
 

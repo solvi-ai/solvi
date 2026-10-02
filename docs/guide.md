@@ -1719,8 +1719,12 @@ from solvi import System
 
 system = System(cat, questions)
 res = system.ask(init_state)                   # all questions
-res = system.ask(init_state, ["ship"])         # a subset
+res = system.ask(init_state, ["ship"])         # a subset: questions=["ship"] (or "ship")
 ```
+
+`system.ask(init_state, questions=None, *, workers=None, order=None, store=True, early_exit=None)`; `aask` takes the same
+`questions` and keyword-only `order`, `store`, `timeout`, `speculate`, `early_exit`. (`names=` is the 0.7 spelling of
+`questions=`: deprecated, removed in 0.9.)
 
 `System(catalog, questions, *, workers=1, order="default", producers="declared", learn=None, inputs=None,
 strategist=None, storage=None, timeout=None, costs="declared", lang="en", early_exit=True)`; `learn`: after every ask,

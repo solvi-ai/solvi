@@ -12,6 +12,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
+from . import _deprecate
+
 
 # --- comparing two responses to the same input
 def _qstate(r):
@@ -338,11 +340,12 @@ class Shadow:
         self.changed, self.errors = [], []
         self.last = None                              # (candidate response or None, diff) of the last ask
 
-    def ask(self, init_state, names=None, **kw):
-        resp = self.current.ask(init_state, names, **kw)
+    @_deprecate.kwargs(names="questions")
+    def ask(self, init_state, questions=None, **kw):
+        resp = self.current.ask(init_state, questions, **kw)
         self.stats["asks"] += 1
         try:
-            cand = self.candidate.ask(init_state, names, store=False)
+            cand = self.candidate.ask(init_state, questions, store=False)
             ch = compare(resp, cand, self.confidence)
         except Exception as e:  # noqa: BLE001
             self.stats["errors"] += 1

@@ -81,8 +81,9 @@ class EntryPoint:
                 "required": self.required, "schema": self.schema}
 
 
-def entry_points(system, names=None):
+def entry_points(system, questions=None):
     """The questions of a system as entry points (see System.entry_points)."""
+    names = questions
     from .serve import _fact_type, input_schema, question_inputs
     out = []
     for q in system.questions.values():

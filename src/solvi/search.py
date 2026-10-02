@@ -308,7 +308,7 @@ def search(system, state, question, space, *, into=None, objective=None, maximiz
         run.asked += 1
         st = dict(state)
         st.update(cand if kind == "domains" else {into: cand})
-        return asker.ask(st, names=[question], store=False, early_exit=False if partial or prune else None)
+        return asker.ask(st, questions=[question], store=False, early_exit=False if partial or prune else None)
 
     def judge(cand, res):
         """Accepted? → its objective value (or 0 without one), else None; counts the rejections."""
@@ -394,7 +394,7 @@ def search(system, state, question, space, *, into=None, objective=None, maximiz
         best = kept[0][2]
         st = dict(state)
         st.update(best if kind == "domains" else {into: best})
-        res = system.ask(st, names=[question], store=store)
+        res = system.ask(st, questions=[question], store=store)
         if res[question].status == "abstain" or not accepted(res, question, accept):
             run.escalation = ("the best candidate is not accepted when asked in full with the System — a fact held "
                               "for the search differs from the one the full ask computes; search with hold=False")

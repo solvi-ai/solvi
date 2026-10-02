@@ -267,7 +267,7 @@ class System:
                                  f"({', '.join(self.questions)}): a constraint's arguments are question names, and it "
                                  "applies only when all of them are asked")
         self.heads: dict[str, FastHead] = {}
-        from .storage import JSONLStorage, open_storage
+        from .storage import open_storage
         self.storage = open_storage(storage)
         if self.storage is not None and self.storage.catalog is None:
             self.storage.catalog = self               # typed values of stored responses are restored with this system
@@ -350,9 +350,11 @@ class System:
         return response_schema(self)
 
     # --- answers
-    def ask(self, init_state, names=None, workers=None, order=None, store=True, early_exit=None):
-        """init_state: a dict of given facts, or a pydantic BaseModel instance (its fields). names: the questions to ask —
-        a name or a list of names (None: all; an unknown name raises KeyError). order: override the system's
+    @_deprecate.kwargs(names="questions")
+    def ask(self, init_state, questions=None, *, workers=None, order=None, store=True, early_exit=None):
+        """init_state: a dict of given facts, or a pydantic BaseModel instance (its fields). questions: the questions to
+        ask — a name or a list of names (None: all; an unknown name raises KeyError; `names=` is its deprecated
+        spelling). Every other option is keyword-only. order: override the system's
         order for this ask — "default", "learned", or an object with p_fail(check, row) and row(vals, init_keys) (e.g. an
         oracle for experiments). store=False: do not save this response to the system's storage.
         early_exit: None — the system's (System(early_exit=), True by default: after a failed hard check the steps only
@@ -363,7 +365,7 @@ class System:
         if workers is not None and (not isinstance(workers, int) or isinstance(workers, bool) or workers < 1):
             raise ValueError(f"workers must be a positive int, not {workers!r}")
         t0 = now_ms()
-        p = self._prepare(init_state, names, order)
+        p = self._prepare(init_state, questions, order)
         trace, vals = execute(self.catalog, p.flow, p.state, workers=workers or self.workers, order=p.order,
                               costs=self.costs, policy=p.policy, known=p.known, early_exit=self._early(early_exit))
         return self._respond(p, trace, vals, t0, store)
@@ -372,12 +374,12 @@ class System:
         return self.early_exit if early_exit is None else bool(early_exit)
 
     # --- text in
-    def entry_points(self, names=None):
+    def entry_points(self, questions=None):
         """The questions as entry points: each question's name, text and the typed input state it reads — every given fact
         its flow reads, with its type, description and whether the question needs it (the schemas `solvi serve` publishes).
         → [solvi.textin.EntryPoint]; `ep.tool()` is the function-calling form."""
         from .textin import entry_points
-        return entry_points(self, names)
+        return entry_points(self, questions)
 
     def _textin(self, text, decider, textin, question):
         from .textin import TextIn, TextRead
@@ -432,7 +434,8 @@ class System:
                                      speculate=speculate, early_exit=self._early(early_exit))
         return self._respond(p, trace, vals, t0, store)
 
-    async def aask(self, init_state, names=None, order=None, store=True, timeout=None, speculate=False,
+    @_deprecate.kwargs(names="questions")
+    async def aask(self, init_state, questions=None, *, order=None, store=True, timeout=None, speculate=False,
                    early_exit=None):
         """`ask` on an event loop: `async def` parts (database lookups, HTTP APIs, model servers) are awaited, parts marked
         `blocking=True` run in worker threads (asyncio.to_thread), plain sync parts inline; steps whose inputs are ready run
@@ -450,7 +453,7 @@ class System:
         whatever `blocking` says. early_exit: as for `ask` (False: every step runs, whatever the hard checks say)."""
         from .runtime import aexecute
         t0 = now_ms()
-        p = self._prepare(init_state, names, order)
+        p = self._prepare(init_state, questions, order)
         _speculate_note(speculate, p)
         trace, vals = await aexecute(self.catalog, p.flow, p.state, order=p.order, costs=self.costs, policy=p.policy,
                                      known=p.known, timeout=self.timeout if timeout is None else timeout,

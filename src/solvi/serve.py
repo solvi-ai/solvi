@@ -59,6 +59,8 @@ from typing import Any, Literal, Optional
 
 from pydantic import BaseModel, ConfigDict, Field, create_model
 
+from . import _deprecate
+
 REF = "#/components/schemas/{model}"          # where the OpenAPI document keeps the models (see create_app)
 
 
@@ -339,10 +341,11 @@ class Service:
         return bool(store) or not self.allow_client_no_store
 
     # --- a System
-    def ask(self, state, names=None, store=True):
-        """→ Response.to_dict() with "stored_id" and "trace_hash". store=False is honoured only when the server allows
+    @_deprecate.kwargs(names="questions")
+    def ask(self, state, questions=None, store=True):
+        """→ Response.to_dict() with "stored_id" and "trace_hash". questions: names (None: all). store=False is honoured only when the server allows
         clients to opt out of storing (allow_client_no_store)."""
-        resp = self._ask(state, names, self.storing(store))
+        resp = self._ask(state, questions, self.storing(store))
         d = resp.to_dict()
         d["stored_id"], d["trace_hash"] = resp.stored_id, trace_hash(resp)
         return redact(d, "ask")
@@ -377,9 +380,9 @@ class Service:
         with self.exclusive():
             if self.is_async:                         # async parts: awaited concurrently within the ask (System.aask)
                 from .runtime import run_sync
-                return run_sync(s.aask(state, names=list(names) if names else None, store=store,
+                return run_sync(s.aask(state, questions=list(names) if names else None, store=store,
                                        timeout=self.part_timeout))
-            return s.ask(state, names=list(names) if names else None, store=store)
+            return s.ask(state, questions=list(names) if names else None, store=store)
 
     @property
     def is_async(self):
@@ -392,12 +395,13 @@ class Service:
         """System.aask on the server's event loop: asks run concurrently (a System's costs and stats are updated between
         awaits, so they need no lock)."""
         s = self._checked(state, names)
-        return await s.aask(state, names=list(names) if names else None, store=store, timeout=self.part_timeout)
+        return await s.aask(state, questions=list(names) if names else None, store=store, timeout=self.part_timeout)
 
-    async def aask(self, state, names=None, store=True):
+    @_deprecate.kwargs(names="questions")
+    async def aask(self, state, questions=None, store=True):
         """ask, for an async System (System.aask)."""
         async with self.aslot():
-            resp = await self._aask(state, names, self.storing(store))
+            resp = await self._aask(state, questions, self.storing(store))
         d = resp.to_dict()
         d["stored_id"], d["trace_hash"] = resp.stored_id, trace_hash(resp)
         return redact(d, "ask")
