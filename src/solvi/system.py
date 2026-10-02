@@ -235,6 +235,10 @@ class System:
             if clash:
                 raise ValueError(_clash(catalog, clash, f"System(inputs={getattr(inputs, '__name__', inputs)}) declares"))
         self.strategist = strategist              # None: the deterministic strategist (solvi.strategist.plan)
+        questions = list(questions)
+        dup = sorted({q.name for q in questions if sum(x.name == q.name for x in questions) > 1})
+        if dup:                                       # the last one would silently win
+            raise ValueError(f"two questions named {', '.join(map(repr, dup))}: question names are unique in a System")
         self.questions = {q.name: self._typed_question(q) for q in questions}
         for c in catalog.constraints.values():        # argument names are question names: one that is not (a typo) means
             lost = [x for x in c.inputs if x not in self.questions]   # the constraint would never apply, without a word
@@ -330,7 +334,8 @@ class System:
 
     # --- answers
     def ask(self, init_state, names=None, workers=None, order=None, store=True, early_exit=None):
-        """init_state: a dict of given facts, or a pydantic BaseModel instance (its fields). order: override the system's
+        """init_state: a dict of given facts, or a pydantic BaseModel instance (its fields). names: the questions to ask —
+        a name or a list of names (None: all; an unknown name raises KeyError). order: override the system's
         order for this ask — "default", "learned", or an object with p_fail(check, row) and row(vals, init_keys) (e.g. an
         oracle for experiments). store=False: do not save this response to the system's storage.
         early_exit: None — the system's (System(early_exit=), True by default: after a failed hard check the steps only
@@ -338,6 +343,8 @@ class System:
         `res.values` and the trace hold every fact and rule value of a decision a hard check forced (and every part
         listed in `checkpoints`); the trace records it (`res.trace.early_exit`), and replay checks no step is missing.
         An `async def` part is awaited in an event loop of its own, one call at a time: use `aask` for such catalogs."""
+        if workers is not None and (not isinstance(workers, int) or isinstance(workers, bool) or workers < 1):
+            raise ValueError(f"workers must be a positive int, not {workers!r}")
         t0 = now_ms()
         p = self._prepare(init_state, names, order)
         trace, vals = execute(self.catalog, p.flow, p.state, workers=workers or self.workers, order=p.order,
@@ -466,12 +473,24 @@ class System:
         clash = sorted(k for k in init_state if k in self.catalog.parts)
         if clash:                                     # the planner would take the given value for the part's own: a check
             raise ValueError(_clash(self.catalog, clash, "the input has"))   # named in the input would never run
-        qs = [self.questions[n] for n in (names or self.questions)]
+        qs = [self.questions[n] for n in self._names(names)]
         flow = self._plan(qs, init_state.keys(), why_costs=True)
+        if not (order is None or order in ("default", "learned") or hasattr(order, "p_fail")):
+            raise ValueError(f'order must be "default", "learned" or an object with p_fail(check, row), not {order!r}')
         mode = self.order if order is None else order
         om = None if mode == "default" else (self.order_model if mode == "learned" else mode)
         policy = self.producer_policy if self.producers == "learned" else None
         return _Prepared(init_state, known, rejected, qs, flow, om, policy)
+
+    def _names(self, names):
+        """The questions to ask: None → all; a name, or a list of names, each one of this system's questions."""
+        if names is None:
+            return list(self.questions)
+        names = [names] if isinstance(names, str) else list(names)
+        lost = [n for n in names if n not in self.questions]
+        if lost:
+            raise KeyError(f"no question {', '.join(map(repr, lost))} in this system ({', '.join(self.questions)})")
+        return names
 
     def _plan(self, questions, init_keys, why_costs=False):
         """The flow of these questions on these given facts, planned as `ask` plans it: by System(strategist=) (the
