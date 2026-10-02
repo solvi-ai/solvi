@@ -38,7 +38,7 @@ def test_multi_learned_with_fit_fast_and_teach():
         x, c = rng.uniform(0, 100), rng.choice(["DE", "FR", "US"])
         return {"x": x, "country": c}, [f for f, on in (("big", x > 60), ("foreign", c != "DE")) if on]
     s = System(cat, [q])
-    s.fit_fast("flags", [ex() for _ in range(200)])
+    s.fit("flags", [ex() for _ in range(200)], select=False)
     test = [ex() for _ in range(200)]
     acc = sum(s.ask(st)["flags"].answer == Answer.multi(["big", "foreign"]).normalize(y) for st, y in test) / len(test)
     assert acc > 0.8

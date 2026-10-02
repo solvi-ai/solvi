@@ -108,7 +108,7 @@ if __name__ == "__main__":
     history = [make(rng, i, orders_db) for i in range(300)]
     system = System(cat, QUESTIONS)
     head = system.fit("suspicious", history)
-    print(f"trained on {len(history)} orders; selected features: {head.features}; cross-validated accuracy {head.cv_acc:.2f}")
+    print(f"trained on {len(history)} orders; selected features: {head.features}; leave-one-out accuracy {head.loo_acc:.2f}")
     test = [make(rng, 1000 + i, orders_db) for i in range(500)]
     acc = sum(system.ask(s, ["suspicious"])["suspicious"].answer == y for s, y in test) / len(test)
     print(f"accuracy on 500 new orders: {acc:.3f} (ceiling ~0.95 due to label noise)")

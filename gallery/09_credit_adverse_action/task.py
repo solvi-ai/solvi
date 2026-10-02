@@ -5,7 +5,7 @@ A points scorecard (eight factors, 100 points) and three knock-outs give the dec
 ECOA / Regulation B and FCRA require on a decline are computed facts, not a story told afterwards: the factors that lost
 the most points, knock-outs first, worded like the Regulation B sample notice, at most four. Eligibility (age to contract,
 residency) is a hard check. "Refer to underwriter?" has no written rule: run.py learns it in milliseconds from 200 past files
-(fit_fast) and absorbs each underwriter correction instantly; here, without that history, it abstains.
+(fit) and absorbs each underwriter correction instantly; here, without that history, it abstains.
 Try: age 17, monthly_debt_payments 2400, credit_history_months 8, or delinquencies_24m 3. Synthetic policy, not lending advice."""
 from __future__ import annotations
 

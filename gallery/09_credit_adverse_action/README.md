@@ -17,7 +17,7 @@ Regulation B, FCRA style), and **"refer to a senior underwriter?"**, a question 
   reasons come from the same scorecard that made the decision, they always explain *that* decision.
 - **Eligibility is a hard check**: age 18 or over (capacity to contract), and citizen or permanent resident. A failure
   forces decline, the matching reason, and "no referral". The scoring steps are skipped (early exit).
-- **"Refer to underwriter?" has no written rule.** `run.py` learns it with `fit_fast` from 200 synthetic past files;
+- **"Refer to underwriter?" has no written rule.** `run.py` learns it with `fit` from 200 synthetic past files;
   an underwriter then reviews 300 new files, each verdict absorbed by `teach`. In the playground (no history) it abstains.
 
 ## Run

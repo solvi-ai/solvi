@@ -65,7 +65,7 @@ kept as the exact reading of each dataset behind those numbers. What can be reru
 | Script | What it measures |
 |---|---|
 | `perturb_injection.py` | `perturb=k` against instructions appended to Bitext support messages: how often they are followed, what it costs |
-| `fast_head.py`, `strategist_scale.py` | `fit_fast` and the strategist at scale |
+| `fast_head.py`, `strategist_scale.py` | `fit` (the answer head and its selection) and the strategist at scale |
 | `ask_speed.py` | milliseconds per `ask` on small and large inputs (the README quickstart, the gallery, random catalogs of 50 and 1 000 parts, a 3.7k-float stream input): the README's Speed table |
 | `ask_overhead.py` | what solvi adds to one `ask` (every gallery entry and a decider project, no real model) |
 | `trace_signature.py` | what a signature (`solvi.signature`) adds over the hash chain when one stored record is edited |

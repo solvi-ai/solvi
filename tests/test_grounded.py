@@ -287,7 +287,7 @@ def test_answer_head_decisions_are_in_the_trace_with_their_fingerprint():
     s = System(cat, [q])
     rng = random.Random(0)
     xs = [rng.uniform(0, 100) for _ in range(60)]
-    head = s.fit_fast("big", [({"x": x}, x > 50) for x in xs])
+    head = s.fit("big", [({"x": x}, x > 50) for x in xs], select=False)
     res = s.ask({"x": 80})
     hr = res.trace.records[-1]
     assert hr.kind == "head" and hr.name == "answer:big" and hr.origin == "learned"
@@ -370,7 +370,7 @@ def test_stats_count_hard_checks_constraints_and_low_confidence():
     q_b = Question("b", "", Answer.yes_no(), min_confidence=0.55)
     s = System(cat, [Question("a", "", Answer.yes_no(), checkpoints=["positive"]), q_b])
     rng = random.Random(1)
-    s.fit_fast("b", [({"x": v}, "yes" if v > 3 else "no") for v in [rng.uniform(-5, 10) for _ in range(80)]])
+    s.fit("b", [({"x": v}, "yes" if v > 3 else "no") for v in [rng.uniform(-5, 10) for _ in range(80)]], select=False)
     r1 = s.ask({"x": -1})                                            # hard check forces a = no
     assert r1["a"].status == "forced" and r1["a"].guard == "hard_check"
     assert s.stats["forced_by_hard_check"] == 1

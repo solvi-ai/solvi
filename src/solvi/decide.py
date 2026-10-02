@@ -2867,7 +2867,7 @@ class DecisionPart:
                    signal="confidence", max_updates=400):
         """Experimental: train a small LoRA adapter on the decider's encoder for this question, from labelled examples
         [(input, correct)] — for solvi-base (the torch backend, `pip install "solvi[lora]"`) and about 100 examples or
-        more. Below that, `fit` (and `fit_fast` for questions without a model) are as good and take milliseconds; in our
+        more. Below that, `fit` (and `System.fit` for questions without a model) are as good and take milliseconds; in our
         measurements on solvi-base the adapter beat `fit` by about 3 / 4 / 6 / 9 points at 32 / 100 / 300 / 1000 examples
         per process, where `fit` levels off.
 

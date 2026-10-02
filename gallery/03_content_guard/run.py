@@ -97,7 +97,7 @@ if __name__ == "__main__":
     res = System(task.cat, task.QUESTIONS).ask(prepared(task, cases[0]["state"]))
     print(f"\nthe audit of '{cases[0]['name']}' (res.audit('verdict')):\n" + str(res.audit('verdict')))
 
-    # the constraints at work: replace the verdict rule by a head learned from 6 labelled texts (fit_fast). Hard checks still
+    # the constraints at work: replace the verdict rule by a head learned from 6 labelled texts (fit). Hard checks still
     # force "block"; where the head contradicts the harm answer, solvi picks the most probable verdict that satisfies every
     # constraint and says so. What no constraint covers stays the head's own answer (a constraint is not the whole policy).
     weak = load_task()
@@ -105,8 +105,8 @@ if __name__ == "__main__":
     for label, feats, must_repair in (("a weak head that sees only the surface", ["surface"], True),
                                       ("a head that also reads the risk score", ["risk_score", "surface"], False)):
         learned = System(weak.cat, weak.QUESTIONS)
-        learned.fit_fast("verdict", LABELLED, features=feats)
-        print(f"\na learned verdict (fit_fast on 6 labelled texts) instead of the rule — {label}:")
+        learned.fit("verdict", LABELLED, features=feats)
+        print(f"\na learned verdict (fit on 6 labelled texts) instead of the rule — {label}:")
         repaired, demo_tally, agree = None, Tally(), 0
         for case in cases:
             r = learned.ask(prepared(weak, case["state"]))

@@ -19,7 +19,7 @@ def data(seed, n):
 
 def test_fit_fast_is_quick_and_accurate():
     s = System(S.cat, S.QUESTIONS)
-    head = s.fit_fast("suspicious", data(0, 300))
+    head = s.fit("suspicious", data(0, 300), select=False)
     assert isinstance(head, FastHead) and head.loo_acc > 0.75
     test = data(1, 300)
     acc = np.mean([s.ask(a, ["suspicious"])["suspicious"].answer == y for a, y in test])
@@ -40,7 +40,7 @@ def test_loo_matches_brute_force():
 def test_teach_updates_instantly_like_refitting():
     s = System(S.cat, S.QUESTIONS)
     train = data(0, 60)
-    s.fit_fast("suspicious", train[:40])
+    s.fit("suspicious", train[:40], select=False)
     times = []
     for st, y in train[40:]:
         ms = s.teach("suspicious", st, y)
@@ -48,7 +48,7 @@ def test_teach_updates_instantly_like_refitting():
         times.append(ms)
     assert float(np.median(times)) < 50          # the median of 20 updates: one slow update on a loaded machine is noise
     ref = System(S.cat, S.QUESTIONS)
-    ref.fit_fast("suspicious", train)
+    ref.fit("suspicious", train, select=False)
     for st, _ in data(2, 30):                                   # online updates == refit on all 60 (up to fixed scaling)
         a = s.heads["suspicious"].scores(s.facts_for(st))
         assert np.all(np.isfinite(a))
@@ -57,7 +57,7 @@ def test_teach_updates_instantly_like_refitting():
 @pytest.mark.filterwarnings("error::RuntimeWarning")         # no "invalid value encountered in matmul" on the way
 def test_a_non_finite_feature_makes_the_head_abstain_not_answer_nan():
     s = System(S.cat, S.QUESTIONS)
-    s.fit_fast("suspicious", data(0, 300))
+    s.fit("suspicious", data(0, 300), select=False)
     st = dict(data(3, 1)[0][0])
     for bad in (float("nan"), float("inf")):
         r = s.ask({**st, "items": [("A", 3, bad)]})["suspicious"]
@@ -121,15 +121,15 @@ def test_teaching_the_same_sequence_gives_the_same_head():
 def test_a_refit_through_system_teach_and_fit_fast_refit_none():
     s = System(S.cat, S.QUESTIONS)
     train = data(0, 45)
-    head = s.fit_fast("suspicious", train[:10])
+    head = s.fit("suspicious", train[:10], select=False)
     before = head.fingerprint()
     for st, y in train[10:20]:
         s.teach("suspicious", st, y)
     assert head.fitted_on == 20 and head.fingerprint() != before
-    ref = System(S.cat, S.QUESTIONS).fit_fast("suspicious", train[:20])
+    ref = System(S.cat, S.QUESTIONS).fit("suspicious", train[:20], select=False)
     assert np.array_equal(head.W, ref.W)
     off = System(S.cat, S.QUESTIONS)
-    h2 = off.fit_fast("suspicious", train[:10], refit=None)
+    h2 = off.fit("suspicious", train[:10], refit=None, select=False)
     for st, y in train[10:20]:
         off.teach("suspicious", st, y)
     assert h2.fitted_on == 10 and h2._rows is None
@@ -229,11 +229,12 @@ def test_a_head_left_without_features_warns_with_the_reason():
     cat.fn(mk("b"))
     s = System(cat, [Question("q", "?", Answer.yes_no())])
     ex = [({"facts": {"a": float(i % 7), "b": float(i % 3)}}, "yes" if i % 7 > 3 else "no") for i in range(200)]
-    for fit in (s.fit_fast, s.fit):
+    for kw in ({"select": False}, {}):
         with pytest.warns(UserWarning, match=r"the head has no features.*no fact can be computed from the examples' "
                                              r"inputs \['facts'\].*a needs \['_nm'\].*a parameter with a default value"):
-            assert fit("q", ex).features == []
-    # an imbalanced question: no single fact beats the most frequent answer, so fit's greedy selection keeps nothing
+            assert s.fit("q", ex, **kw).features == []
+    # an imbalanced question that needs two facts: accuracy (fit before 0.8) kept nothing; the leave-one-out error
+    # keeps what tells the rare answer apart, and says nothing
     cat2 = Catalog()
 
     @cat2.fn
@@ -247,13 +248,20 @@ def test_a_head_left_without_features_warns_with_the_reason():
     rows = [{"x": rng.random(), "y": rng.random()} for _ in range(300)]
     ex2 = [(r, "yes" if r["x"] > 0.6 and r["y"] > 0.6 else "no") for r in rows]       # 16% yes, needs both facts
     s2 = System(cat2, [Question("q", "?", Answer.yes_no())])
-    with pytest.warns(UserWarning, match=r"fit\('q'\): the head has no features.*none of the 4 facts raised.*"
-                                         r"most frequent answer is 8\d% of the examples.*fit_fast keeps every feature"):
-        assert s2.fit("q", ex2).features == []
     import warnings
     with warnings.catch_warnings():
         warnings.simplefilter("error")                                               # a head with features: silent
-        assert s2.fit_fast("q", ex2).features == ["half", "third", "x", "y"]      # the given keys too
+        head = s2.fit("q", ex2)
+        assert len(head.features) == 2 and {"x", "half"} & set(head.features) and {"y", "third"} & set(head.features)
+        assert list(head.selection) == head.features
+        assert s2.fit("q", ex2, select=False).features == ["half", "third", "x", "y"]      # the given keys too
+    assert s2.ask({"x": 0.9, "y": 0.9})["q"].answer == "yes" and s2.ask({"x": 0.9, "y": 0.1})["q"].answer == "no"
+    # answers the facts say nothing about: nothing is kept, and the warning says why
+    noise = [(r, rng.choice(["yes", "no", "no", "no", "no"])) for r in rows]
+    with pytest.warns(UserWarning, match=r"fit\('q'\): the head has no features.*none of the 4 facts lowered the "
+                                         r"leave-one-out error.*most frequent answer is \d\d% of the examples.*"
+                                         r"select=False keeps every fact"):
+        assert s2.fit("q", noise).features == []
 
 
 def test_a_given_number_is_a_feature_of_fit_and_fit_fast_as_the_guide_says():
@@ -271,7 +279,7 @@ def test_a_given_number_is_a_feature_of_fit_and_fit_fast_as_the_guide_says():
     assert s.fit("ok", ex).features == ["count"]
     r = s.ask({"score": 0.3, "count": 8, "note": "x"})
     assert r["ok"].answer == "yes" and "count = 8" in r["ok"].why and r.trace.replay(s.catalog)["ok"]
-    head = s.fit_fast("ok", ex)
+    head = s.fit("ok", ex, select=False)
     assert {"count", "score", "doubled"} <= set(head.features) and "note" not in head.features   # 200 distinct strings
     assert s.ask({"score": 0.3, "count": 1, "note": "x"})["ok"].answer == "no"
 
@@ -296,11 +304,21 @@ def test_teach_refuses_an_unknown_question_or_an_answer_outside_the_options_befo
 def test_teach_warns_when_the_correction_is_lost():
     s = System(S.cat, S.QUESTIONS)
     a, y = data(0, 1)[0]
-    s.fit("suspicious", data(0, 60))                                 # a plain head learns nothing at once, no storage
-    with pytest.warns(UserWarning, match="correction is lost"):
+    with pytest.warns(UserWarning, match="correction is lost"):        # no head, no storage: nothing learns it
         assert s.teach("suspicious", a, y) is None
-    s.fit_fast("suspicious", data(0, 60))                            # an online head learns it: no warning
+    s.fit("suspicious", data(0, 60))                                 # a fitted head learns it at once: no warning
     import warnings
     with warnings.catch_warnings():
         warnings.simplefilter("error")
         assert s.teach("suspicious", a, y) is not None
+
+
+def test_fit_fast_is_a_deprecated_alias_of_fit_without_selection():
+    """0.8 merged fit_fast into fit: fit_fast(...) still works for one release, warns, and builds what
+    fit(..., select=False) builds."""
+    train = data(0, 120)
+    a = System(S.cat, S.QUESTIONS)
+    with pytest.warns(DeprecationWarning, match="fit_fast is deprecated: use fit"):
+        h1 = a.fit_fast("suspicious", train)
+    h2 = System(S.cat, S.QUESTIONS).fit("suspicious", train, select=False)
+    assert h1.features == h2.features and h1.fingerprint() == h2.fingerprint()

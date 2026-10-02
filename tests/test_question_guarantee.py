@@ -40,7 +40,7 @@ def _system(storage=None):
 def _head(seed=0, n=400):
     rng = random.Random(seed)
     s = _system()
-    s.fit_fast("label", _draw(rng, n), features=["score"])
+    s.fit("label", _draw(rng, n), features=["score"])
     return s, rng
 
 
@@ -137,7 +137,7 @@ def test_thresholds_per_answer_hold_the_promise_inside_each_answer():
 def test_the_verdict_is_a_hashed_record_and_a_stored_decision_replays(tmp_path):
     rng = random.Random(7)
     s = _system(JSONLStorage(tmp_path / "d.jsonl"))
-    s.fit_fast("label", _draw(rng, 400), features=["score"])
+    s.fit("label", _draw(rng, 400), features=["score"])
     s.guarantee("label", _draw(rng, 600), error=0.1)
     res = s.ask({"x": 0.5})
     rec = next(r for r in res.trace.records if r.name == "guard:label")
@@ -164,13 +164,16 @@ def test_cross_fitting_scores_each_example_by_a_head_that_did_not_see_it():
     rng = random.Random(9)
     s = _system()
     ex = _draw(rng, 200)
-    s.fit_fast("label", ex, features=["score", "side"])
+    s.fit("label", ex, features=["score", "side"])
     rep = s.guarantee("label", ex, error=0.3, method="empirical", folds=5)
     assert rep["folds"] == 5 and any("approximate" in w for w in rep["warnings"])
-    with pytest.raises(ValueError, match="fit_fast head"):
-        s2 = _system()
-        s2.fit("label", ex)
-        s2.guarantee("label", ex, error=0.3, folds=5)
+    s2 = _system()
+    s2.fit("label", ex)                                   # fit builds the same kind of head since 0.8: folds work too
+    assert s2.guarantee("label", ex, error=0.3, method="empirical", folds=5)["folds"] == 5
+    with pytest.raises(ValueError, match="head fitted with fit"):
+        s3 = _system()
+        s3.learn_rule("label", ex, facts=["score"])
+        s3.guarantee("label", ex, error=0.3, folds=5)
 
 
 def test_a_custom_judge_of_right_and_wrong():

@@ -53,7 +53,7 @@ Warnings:
 Notes (never fail):
   mutual_producers      facts derived from each other (net from gross and gross from net), each with a producer
                         outside the loop: the system's strategist plans around it
-  no_rule               a question without a rule answers only after fit / fit_fast (it abstains until then)
+  no_rule               a question without a rule answers only after fit (it abstains until then)
 
 The flows are planned with every given fact present (`solvi.strategist.given_facts`), as `solvi serve` does, by the
 system's own strategist (System(strategist=)) — the deterministic one when none is set."""
@@ -287,7 +287,7 @@ def _questions(cat, questions, heads, given, rep, planner):
                 rep.add("error", "unanswerable", name, f"a {q.answer.kind} question without a rule: a learned head cannot "
                                                        "answer it (give it a rule or a model decision)")
             else:
-                rep.add("note", "no_rule", name, "no rule: it abstains until an answer head is fitted (fit / fit_fast)"
+                rep.add("note", "no_rule", name, "no rule: it abstains until an answer head is fitted (fit)"
                         + ("" if q.uses else "; without `uses` its flow is everything computable"))
     return flows, counted
 

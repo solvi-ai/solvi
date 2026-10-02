@@ -245,7 +245,7 @@ class LongSpanExtractor:
         return v
 
     def embedder(self, name="doc_embedding"):
-        """A catalog part: doc → embedding vector, usable as a feature of System.fit_fast."""
+        """A catalog part: doc → embedding vector, usable as a feature of System.fit."""
         def f(doc):
             return self.embed(doc)
         f.__name__ = name

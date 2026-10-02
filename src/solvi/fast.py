@@ -84,6 +84,51 @@ class VecFeaturizer(Featurizer):
         return x
 
 
+_LAMS = (0.1, 0.3, 1, 3, 10, 30, 100)
+
+
+def _loo_error(X, Y):
+    """The ridge's exact leave-one-out squared error (the best over FastHead's ridge strengths): mean over the examples
+    of the squared distance between the one-hot answer and the prediction made without that example."""
+    e, V = np.linalg.eigh(X.T @ X)
+    XV, VB = X @ V, V.T @ (X.T @ Y)
+    best = None
+    for lam in _LAMS:
+        inv = 1.0 / (e + lam)
+        h = np.einsum("ij,j,ij->i", XV, inv, XV)
+        loo = Y - (Y - XV @ (inv[:, None] * VB)) / (1 - h)[:, None]
+        err = float(((loo - Y) ** 2).sum(1).mean())
+        best = err if best is None or err < best else best
+    return best
+
+
+def select_features(rows, answers, options, features, min_gain=0.0):
+    """Greedy forward selection for a FastHead: start from no feature (the answers' shares) and add, one at a time, the
+    fact that lowers the exact leave-one-out squared error most; stop when none lowers it by more than `min_gain` × the
+    error of the answers' shares. → (chosen, {fact: error after adding it}, {fact that cannot be encoded: why}). A
+    proper score, so a rare answer counts:
+    accuracy, the old criterion, kept nothing on questions where the most frequent answer is 80-90% of the examples.
+    Each fact is chosen with its own encoding only (no pairwise products while choosing)."""
+    fz = VecFeaturizer().fit(rows, features)
+    cands = [f for f in features if f in fz.spec]
+    Y = np.eye(len(options))[[options.index(a) for a in answers]]
+    ones = np.ones((len(rows), 1))
+    cur = float(((Y - Y.mean(0)) ** 2).sum(1).mean())
+    gain = float(min_gain) * cur
+    cols = {f: np.array([fz.row(r, [f]) for r in rows]) for f in cands}
+    chosen, path = [], {}
+    while len(chosen) < len(cands):
+        trial = [(_loo_error(np.hstack([cols[c] for c in chosen] + [cols[f], ones]), Y), i, f)
+                 for i, f in enumerate(cands) if f not in chosen]
+        err, _, f = min(trial)
+        if cur - err <= gain:
+            break
+        chosen.append(f)
+        path[f] = round(err, 6)
+        cur = err
+    return chosen, path, {f: _why_dropped(rows, f) for f in features if f not in fz.spec}
+
+
 class FastHead:
     def __init__(self, options, lam=None, pairs=None, refit=2.0, refit_until=2000):
         """lam: ridge strength (None — chosen by exact leave-one-out accuracy); pairs: add pairwise products of the base features

@@ -1,5 +1,5 @@
 """Run every credit case: decision, principal reason and the full adverse-action reason list, trace replay, timing. Before
-that, learn "refer to a senior underwriter?" from 200 synthetic past files with fit_fast (milliseconds); afterwards an
+that, learn "refer to a senior underwriter?" from 200 synthetic past files with fit (milliseconds); afterwards an
 underwriter reviews new files one by one and each verdict is absorbed instantly by teach (time shown).
 Exits non-zero if any answer differs from cases.json.
 
@@ -60,12 +60,12 @@ def accuracy(system, data):
 
 def _refit(data):
     s = System(task.cat, task.QUESTIONS)
-    s.fit_fast(Q, data, features=task.UNDERWRITER_FACTS)
+    s.fit(Q, data, features=task.UNDERWRITER_FACTS)
     return s
 
 
 def system():
-    """The system cases.json expects: refer_to_underwriter learned with fit_fast from the same 200 past files as below
+    """The system cases.json expects: refer_to_underwriter learned with fit from the same 200 past files as below
     (what `solvi test` and the pytest plugin build, via "system": "run.py:system" in cases.json)."""
     rng = random.Random(3)
     return _refit([past_file(rng, i) for i in range(200)])
@@ -77,7 +77,7 @@ if __name__ == "__main__":
     history = [past_file(rng, i) for i in range(200)]
     test = [past_file(rng, 1000 + i) for i in range(400)]
     stream = [past_file(rng, 5000 + i) for i in range(300)]
-    head = system.fit_fast(Q, history, features=task.UNDERWRITER_FACTS)
+    head = system.fit(Q, history, features=task.UNDERWRITER_FACTS)
     acc0 = accuracy(system, test)
     print(f"'{Q}' learned from {len(history)} past files in {head.fit_ms:.1f} ms "
           f"(exact leave-one-out {head.loo_acc:.3f}); accuracy on {len(test)} new files {acc0:.3f}\n")
