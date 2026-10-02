@@ -405,6 +405,8 @@ class _Combination:
         return {}
 
     def fingerprint(self):
+        """A hash of the combination: its kind and rule, every member's fingerprint, and its calibration (threshold,
+        guarantee, conformal set)."""
         th = {k: v for k, v in (("threshold", self.threshold), ("guarantee", self.guarantee),
                                 ("conformal", self.conformal_set)) if v is not None}
         if self.scale == "rank":                      # the raw scale keeps the fingerprint it always had
@@ -727,6 +729,7 @@ class _Combination:
                 for lf in self.leaves()]
 
     def reset(self):
+        """Every member part's reset() (their adaptations and calibrations)."""
         for lf in self.leaves():
             lf.part.reset()
 

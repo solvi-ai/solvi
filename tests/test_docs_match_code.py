@@ -65,3 +65,18 @@ def test_every_module_the_docs_import_from_has_an_api_page_in_the_index_and_the_
         assert page.exists() and f"::: {mod}" in page.read_text(), mod
         assert f"[`{mod}`]({page.name})" in index and f"{mod}: api/{page.name}" in nav, mod
     assert "[`solvi.lora`](lora.md)" in index
+
+
+def test_the_api_pages_render_what_the_guide_tells_users_to_call_on_combinations_and_memories():
+    """act_guard, conformal, decide, fit ... of Cascade / Vote / Route live on a private base and rendered nowhere;
+    a memory's save / load had no docstring, so the page left them out."""
+    import ast
+    assert "inherited_members: true" in (ROOT / "docs" / "api" / "multi.md").read_text()
+    tree = ast.parse((ROOT / "src" / "solvi" / "multi.py").read_text())
+    base = next(c for c in tree.body if isinstance(c, ast.ClassDef) and c.name == "_Combination")
+    for name in ("act_guard", "conformal", "decide", "usage", "fit", "teach", "save_calibration", "fingerprint"):
+        f = next(f for f in base.body if isinstance(f, ast.FunctionDef) and f.name == name)
+        assert ast.get_docstring(f), name
+    from solvi.memory import CorrectionMemory
+    for name in ("save", "load", "load_dict", "to_dict", "apply"):
+        assert getattr(CorrectionMemory, name).__doc__, name

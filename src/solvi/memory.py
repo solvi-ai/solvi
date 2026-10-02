@@ -345,6 +345,8 @@ class CorrectionMemory:
         return digest("CorrectionMemory", self.weights, self.settings(), sorted(c.id for c in self.cases))
 
     def to_dict(self):
+        """The memory as JSON-able data: the checkpoint's hash, the question, the settings and every case (see
+        load_dict)."""
         return {"weights": self.weights, "question": self.part.spec.describe(), "settings": self.settings(),
                 "cases": [c.to_dict() for c in self.cases]}
 
@@ -386,12 +388,15 @@ class CorrectionMemory:
         return self
 
     def save(self, path):
+        """Write the memory (to_dict) to a JSON file. → path."""
         from .schema import tag_floats
         with open(path, "w") as fh:
             json.dump(tag_floats(self.to_dict()), fh, ensure_ascii=False, indent=1, allow_nan=False)
         return path
 
     def load(self, path, strict=True):
+        """Replace the settings and cases with a file written by save (strict: refuse a memory of another checkpoint
+        or question, as load_dict). → self."""
         with open(path) as fh:
             from .schema import untag_floats
             return self.load_dict(untag_floats(json.load(fh)), strict)
