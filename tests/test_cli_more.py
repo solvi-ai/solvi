@@ -619,3 +619,18 @@ def test_models_load_raises_model_error_not_system_exit_for_a_missing_file_or_at
     with pytest.raises(SystemExit) as e:
         main(["models", "check", "nofile.py:model"])
     assert e.value.code == 2 and "no such file: nofile.py" in capsys.readouterr().err
+
+
+def test_models_check_names_a_missing_folder_and_takes_a_decider_with_only_decision(tmp_path, capsys, monkeypatch, no_hub):
+    monkeypatch.chdir(tmp_path)
+    for spec in ("./my-decider", "../nope/model", str(tmp_path / "gone"), "~/no-such-solvi-model"):
+        with pytest.raises(models.ModelError, match="no such folder"):
+            models.resolve(spec)
+    with pytest.raises(models.ModelError, match="is not downloaded: solvi models pull someone/thing"):
+        models.resolve("someone/thing")
+    (tmp_path / "dec.py").write_text("class OnlyDecision:\n    def decision(self, *a, **k):\n        raise NotImplementedError\n\n\nobj = OnlyDecision()\n")
+    code, out = run(capsys, "models", "check", "dec.py:obj", "--json")
+    data = json.loads(out)
+    assert code == 0 and data["id"] == "OnlyDecision" and data["fingerprint"] is None
+    assert "solvi-ai/solvi-large-long" in models.PUBLISHED
+    assert "files" not in (models.cached.__doc__ or "")
