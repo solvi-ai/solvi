@@ -100,7 +100,7 @@ def kind_of(spec):
 
 def resolve(spec):
     """A MODEL spec → (kind, where): a folder for "folder" and a cached "hub" id, (url, model) for "systemone" and "llm",
-the spec for "code". A Hugging Face id that is not in the cache raises ModelError (run `solvi models pull ID`); so
+    the spec for "code". A Hugging Face id that is not in the cache raises ModelError (run `solvi models pull ID`); so
     does a spec written as a path ("./x", "../x", "/x", "~/x") that is not a folder — "no such folder", never "pull"."""
     k = kind_of(spec)
     if k in ("systemone", "llm"):
