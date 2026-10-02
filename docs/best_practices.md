@@ -184,6 +184,17 @@ deleting it now.
 **Mark calls that must not repeat** (`once=True`): a second refund of the same order was made 6 times out of 6 without
 it.
 
+**Require the user's own yes for actions a tool output could ask for** (`guard.require_confirmation`). With an
+instruction planted in order lookups, an agent cancelled an order nobody asked about in 9 of 12 τ-bench runs without a
+guard, 4 with grounding and policies, 0 with confirmation (tasks solved under the attack 2 / 4 / 7). It costs turns:
+on clean tasks it did not beat no guard (14–15 of 30 against 18, one run each), so keep it to actions that must be
+the user's decision.
+
+**Write policies for what your backend does not check, not for what it does.** τ-bench's tools already refuse a wrong
+status or a foreign payment method, and there a guard changed nothing (17 against 18 of 30 solved). They do not check
+whose order is cancelled: a planted note got another customer's order cancelled in 5 of 12 runs without a guard, 0
+with an ownership policy.
+
 **Do not use a small decision model as the only authorizer.** Asked "did the user ask for this call with these
 values?", solvi-base said yes to 15 of 15 calls it should have refused. Grounding and policies in code did the work.
 
