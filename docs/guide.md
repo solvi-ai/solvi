@@ -916,6 +916,34 @@ Put the LLM where it pays for itself: alone with `act_guard`, or in a `Vote` wit
 equally strong (see "Which combination with an LLM" below). A "small model first, LLM second" cascade is not a good
 default.
 
+### A choice among many options
+
+A decider reads the question — task, options, descriptions — and the input in one sequence. Thirty catalog rows as
+options do not fit, and twenty that fit leave the input a few dozen tokens (the decision's `extra["truncated"]` shows
+it). `solvi.many` chooses among dozens or hundreds, with any decider (a local checkpoint, `solvi.llm`,
+`solvi.systemone`), and records what it did:
+
+```python
+from solvi.many import Many, decide_many
+d = decide_many(model, text, "Which action achieves the goal?", actions, many=Many(query=goal))
+d.value                 # one of the actions
+d.extra["many"]         # {"mode": "shortlist", "considered": 8, "of": 45, "unconsidered": 37, "gap": ..., "calls": [...]}
+```
+
+`mode="direct"`: one ordinary decision, when everything fits. `"shortlist"`: a selector (BM25 over the options' labels
+and descriptions against `query`, or your function) ranks the options, the decider chooses among the best `k`; the
+options left out were not considered — the record says how many, and the decision escalates when the best one left
+out scores close to the last one kept. `"tournament"`: blocks of `block` options, winners meet, the last round
+decides; every option is considered, in about N / (block − 1) calls. `"auto"` (default): direct when the question fits
+and leaves the input at least half of `max_len`, else shortlist, else (no selector) tournament. The calls are in the
+record, and the same input gives the same record.
+
+A threshold calibrated on one set of options does not carry over to options that change, and a shortlist's accuracy
+is bounded by the selector's recall. Measured with solvi-base on a text game with 20–45 actions per situation: direct
+0.70, shortlist (k = 8, the goal as the query) 0.63, tournament 0.57 in five calls. On 240 catalog rows the model
+picked the right product in almost no request, with any mode: where numbers decide (a price within a budget), narrow
+the candidates in code first and give the model what is left.
+
 ### Several questions in one pass
 
 When the checkpoint declares `multi_question` (see [decide_format.md](decide_format.md)), the strategist groups the decision

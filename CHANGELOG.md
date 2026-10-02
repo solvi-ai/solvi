@@ -2,6 +2,13 @@
 
 ## 0.7.2 — unreleased
 
+- `solvi.many`: a choice among more options than one pass reads. `decide_many(model, text, task, options,
+  many=Many(...))` works with any decider and returns an ordinary Decision: `direct` when the options fit, `shortlist`
+  (BM25 or your selector ranks the options against a query, the decider chooses among the best k, and a close cut
+  escalates), `tournament` (blocks, then the winners), `auto`. `extra["many"]` records the mode, how many options were
+  considered of how many, and every model call; the same input gives the same record. With solvi-base on a text game
+  with 20–45 actions: direct 0.70, shortlist 0.63, tournament 0.57 (5 calls); 240 catalog rows no longer raise, but
+  the model alone does not pick the right row — narrow by code first.
 - `solvi.drift.DriftMonitor`: has the stream of decisions moved away from the one the thresholds were calibrated on? It
   compares the last `window` decisions of a question with a reference window — the share answered alone, the
   distribution of the answers, the mean confidence and act probability; with labels the accuracy, the calibration
