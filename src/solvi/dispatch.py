@@ -461,13 +461,15 @@ class Dispatcher:
     decision's number). think: "s2" (default: the slow path's accepted answer is given) or "agree" (given only when it
     equals what System 1 would have answered; otherwise a person). on_disagree: what a check that disagrees does —
     "record" (default: System 1's answer stands, the disagreement is recorded), "human", or "s2" (the slow path's
-    accepted answer replaces it). storage: a TraceStorage that keeps every decision (kind "dispatch"). asked: the
+    accepted answer replaces it). same: a function (answer, answer) → bool that says when two answers are the same
+    (default: equal values). unknown: what the slow path's "not stated" (solvi.Unknown) is — "answer" (default: a real
+    answer) or "human" (none of the options fits: a person decides). storage: a TraceStorage that keeps every decision (kind "dispatch"). asked: the
     questions System 1 is asked together (default: all of its questions, so that constraints between them apply);
     store_responses: whether System 1's and the slow path's Systems store their responses in their own storage."""
 
     def __init__(self, system, slow=None, *, question=None, budget=None, total=None, price=None, wake=SIGNALS,
                  agreement=None, monitor=None, supervise=0.0, seed=0, think="s2", on_disagree="record", storage=None,
-                 store_responses=True, asked=None):
+                 store_responses=True, asked=None, same=None, unknown="answer"):
         if question is None:
             if len(system.questions) != 1:
                 raise ValueError(f"the System asks {sorted(system.questions)}: say which with question=")
@@ -483,6 +485,10 @@ class Dispatcher:
             raise ValueError('think must be "s2" or "agree"')
         if on_disagree not in ("record", "human", "s2"):
             raise ValueError('on_disagree must be "record", "human" or "s2"')
+        if unknown not in ("answer", "human"):
+            raise ValueError('unknown must be "answer" or "human"')
+        if same is not None and not callable(same):
+            raise TypeError("same is a function (answer, answer) → bool")
         for b in (budget, total):
             if b is not None and not isinstance(b, Budget):
                 raise TypeError("budget= and total= take a Budget(usd=, calls=, ms=)")
@@ -511,6 +517,7 @@ class Dispatcher:
         self._require(list(self.agreement))
         self.monitor, self.supervise, self.seed = monitor, float(supervise), int(seed)
         self.think_policy, self.on_disagree = think, on_disagree
+        self.same, self.unknown = same, unknown
         from .storage import open_storage
         self.storage = open_storage(storage)
         self.store_responses = bool(store_responses)
@@ -538,7 +545,9 @@ class Dispatcher:
         from .provenance import code_fingerprint, digest
         pr = code_fingerprint(self.price) if callable(self.price) else self.price
         return digest("Dispatcher", self.question, self.wake, sorted(self.agreement.items()), self.supervise, self.seed,
-                      self.think_policy, self.on_disagree, None if self.budget is None else self.budget.to_dict(),
+                      self.think_policy, self.on_disagree, self.unknown,
+                      code_fingerprint(self.same) if self.same is not None else None,
+                      None if self.budget is None else self.budget.to_dict(),
                       None if self.total is None else self.total.to_dict(), pr,
                       self.slow.fingerprint() if self.slow is not None else None)
 
@@ -661,7 +670,7 @@ class Dispatcher:
             with self._lock:
                 self.runs.append(th.cost)
         answer, by = self._outcome(action, r1, would1, th, reasons)
-        if th is not None and action == "check" and _vh(th.answer) != _vh(would1):
+        if th is not None and action == "check" and not self.agrees(th.answer, would1):
             disagreement = {"s1": would1, "s2": th.answer, "s2_accepted": th.accepted}
         c2 = th.cost if th is not None else Cost(0.0 if self.price is not None else None)
         cost = {"s1": c1, "s2": c2, "total": c1 + c2}
@@ -682,25 +691,41 @@ class Dispatcher:
             return None, "human"
         if action == "accept":
             return r1.answer, "s1"
+        from .core import Unknown
+        ok = th.accepted
+        if ok and self.unknown == "human" and th.answer is Unknown:
+            ok = False
+            if action == "think":
+                reasons.append("the slow path says none of the options (not stated): a person decides")
+                return None, "human"
         if action == "think":
-            if not th.accepted:
+            if not ok:
                 reasons.append(f"the slow path did not answer: {th.why or th.stopped}")
                 return None, "human"
-            if self.think_policy == "agree" and _vh(th.answer) != _vh(would1):
+            if self.think_policy == "agree" and not self.agrees(th.answer, would1):
                 reasons.append(f"the slow path answered {th.answer!r}, System 1 would have answered {would1!r}: a "
                                "person decides")
                 return None, "human"
             return th.answer, "s2"
         # check
-        if _vh(th.answer) == _vh(would1):
+        if self.agrees(th.answer, would1):
             return r1.answer, "s1"
-        reasons.append(f"the slow path says {th.answer!r}" + ("" if th.accepted else " (not accepted)")
-                       + f", System 1 {would1!r}")
+        reasons.append(f"the slow path says {th.answer!r}" + ("" if ok else " (not accepted)") + f", System 1 {would1!r}")
         if self.on_disagree == "human":
             return None, "human"
-        if self.on_disagree == "s2" and th.accepted:
+        if self.on_disagree == "s2" and ok:
             return th.answer, "s2"
         return r1.answer, "s1"
+
+    def agrees(self, a, b):
+        """Are two answers the same? same(a, b) when given (overlapping quotes, numbers within a tolerance), else
+        equal values. A same() that raises: not the same."""
+        if self.same is None:
+            return _vh(a) == _vh(b)
+        try:
+            return bool(self.same(a, b))
+        except Exception:  # noqa: BLE001 — a comparison that fails is not an agreement
+            return False
 
     def reset_drift(self):
         """Forget the drift flag (after the stream was looked at, System 1 recalibrated, ...)."""

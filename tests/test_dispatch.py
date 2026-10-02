@@ -365,3 +365,28 @@ def test_an_open_set_gate_below_its_threshold_thinks_and_its_flag_makes_later_an
     res = d.ask({"email": "charged twice"})
     assert res.action == "check" and "open-set gate flagged" in res.reasons[0]
     assert d.replay(res)["ok"]
+
+
+def test_same_says_when_two_answers_agree_and_a_comparison_that_raises_is_not_an_agreement():
+    s2, _ = slow_llm(reply='{"answer": "billing", "probabilities": {"billing": 0.9, "shipping": 0.1}, "quote": ""}')
+    loose = Dispatcher(fast(), SlowPath(s2), think="agree", same=lambda a, b: True)
+    assert loose.ask({"email": "hello"}).by == "s2"
+    broken = Dispatcher(fast(), SlowPath(s2), think="agree", same=lambda a, b: 1 / 0)
+    assert broken.ask({"email": "hello"}).by == "human"
+
+
+def test_the_slow_paths_not_stated_is_an_answer_or_with_unknown_human_a_hand_off():
+    from typing import Literal
+
+    from solvi import Maybe, Unknown
+    srv = FakeLLM(reply='{"answer": "not stated", "confidence": 0.9, "quote": ""}')
+    model = llm(URL, "m", api_key="k", opener=srv, sleep=lambda s: None, ask="confidence")
+    part = model.decision("team", "Which team?", "email", Maybe[Literal["billing", "shipping"]])
+    cat = Catalog()
+    s2 = System(cat, [part.question(cat)])
+    res = Dispatcher(fast(), SlowPath(s2)).ask({"email": "hello"})
+    assert res.by == "s2" and res.answer is Unknown
+    d = Dispatcher(fast(), SlowPath(s2), unknown="human")
+    res = d.ask({"email": "hello again"})
+    assert res.by == "human" and "none of the options" in res.reasons[-1]
+    assert d.replay(res)["ok"]
