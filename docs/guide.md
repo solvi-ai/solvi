@@ -697,7 +697,7 @@ part.calibrate_for(examples, error=0.05, method="ltt", delta=0.1)
 
 part.conformal(examples, coverage=0.90)
 # every decision: extra["candidates"] — the answers that cannot be ruled out (they contain the right one 90% of the time);
-# an escalation's message lists them for the person who takes over
+# an escalation's message lists them for the person who takes over (never an empty list: at least the top answer)
 ```
 
 `act_guard` is conformal risk control: the lowest threshold whose risk on the examples, (errors let through + 1) / (n + 1),

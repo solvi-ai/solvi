@@ -2552,12 +2552,16 @@ class DecisionPart:
 
     def candidates(self, d):
         """The conformal answer set of a decision (after conformal(...)): the answers that cannot be ruled out at the
-        calibrated coverage, most probable first — a short list for the person who handles an escalation."""
+        calibrated coverage, most probable first — a short list for the person who handles an escalation. Never empty:
+        when no answer passes (an unsure decision — the one that escalates), the most probable answer is listed; a
+        larger set only covers more."""
         from .calibration import set_scores
         keys = list(d.probs)
         s = set_scores([d.probs[k] for k in keys], self.conformal_set["ordinal"], Unknown in keys)
         keep = sorted((i for i in range(len(keys)) if s[i] <= self.conformal_set["quantile"]),
                       key=lambda i: -d.probs[keys[i]])
+        if not keep and keys:
+            keep = [max(range(len(keys)), key=lambda i: d.probs[keys[i]])]
         return [keys[i] if keys[i] is Unknown else self.spec.out(keys[i]) for i in keep]
 
     def _option_orders(self):

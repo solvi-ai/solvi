@@ -3,6 +3,7 @@ import numpy as np
 import pytest
 
 from solvi.calibration import conformal_quantile, crc_threshold, ltt_threshold, set_scores
+from solvi.decide import DecideModel
 from test_decide import TEAMS, model, texts
 
 
@@ -91,6 +92,29 @@ def test_conformal_sets_cover_the_right_answer_and_reach_the_escalation_message(
     d = part(email="The app crashed after the refund of order 5.")
     assert d.escalate and "candidates at 90%" in d.escalate
     assert set(d.extra["candidates"]) <= set(TEAMS)
+
+
+class Sure:
+    """Sure wherever a team's word is in the text, undecided where none is."""
+
+    def fingerprint(self):
+        return "sure-1"
+
+    def logits(self, items):
+        return [np.array([6.0 * (o in it.text) for o in it.options]) for it in items]
+
+
+def test_an_unsure_decision_never_gets_an_empty_candidate_list():
+    """A model sure on the calibration examples gives a small quantile; an unsure decision then had no answer under it
+    — "candidates at 90%: []" exactly for the escalations a person takes over."""
+    m = DecideModel(Sure(), meta={"format": "test", "temperature": 1.0})
+    part = m.decision("team", "Which team?", "email", TEAMS, escalate_below=0.9)
+    part.conformal([(f"a {t} question {i}", t) for t in TEAMS for i in range(30)], coverage=0.90)
+    assert part.conformal_set["quantile"] < 0.05
+    d = part(email="Can you call me back?")                              # no team's word: one third each
+    assert d.escalate and d.conf < 0.4 and d.extra["candidates"] == [d.value]
+    assert "candidates at 90%: ['" in d.escalate
+    assert part(email="a billing question").extra["candidates"] == ["billing"]
 
 
 class PositionBiased:
