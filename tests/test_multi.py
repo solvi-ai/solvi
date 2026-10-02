@@ -557,3 +557,10 @@ def test_parts_and_combinations_speak_one_decider_protocol():
         Vote([s, l_]).act_guard(cal, max_risk=0.10, signal="act")
     with pytest.warns(SolviDeprecationWarning, match=r"act_guard\(risk=\) is deprecated since 0.8 and will be removed in 0.9: use max_risk="):
         Vote([s, l_]).act_guard(cal, risk=0.10)
+
+
+def test_a_part_that_escalated_with_no_value_counts_as_not_right_in_calibration():
+    """A part whose model gave no usable output has no value; calibrating a combination raised "None is not yes / no"."""
+    s, l_, _, _ = _parts()
+    v = Vote([s, l_])
+    assert v._right(None, "billing") is False and v._right("billing", "billing") is True

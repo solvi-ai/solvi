@@ -577,6 +577,8 @@ class Combination:
             y = y.value
         if sp.kind in ("rank", "span"):
             return v == y
+        if v is None:                                     # the part escalated with no value: not a right answer
+            return False
         return (Unknown if v is Unknown else sp.label(v)) == (Unknown if y is Unknown else sp.label(y))
 
     @_deprecate.kwargs(risk="max_risk")
