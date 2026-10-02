@@ -139,7 +139,7 @@ class LongSpanExtractor:
         torch = self.torch
         max_span = self.max_span
         enc = self._windows(desc, text)
-        best, null = (0, 0, -1.0), 0.0
+        best, null = (0, 0, 0.0), 0.0                      # no window with text (an empty document): no span, score 0
         with torch.no_grad():
             n = len(enc["input_ids"])
             for b in range(0, n, bs):
@@ -266,6 +266,7 @@ class LongSpanExtractor:
     def field(self, name, desc):
         def f(doc):
             s, e, sc, _ = self.predict(doc, desc)
+            sc = min(1.0, max(0.0, float(sc)))             # a probability: the trace never records one outside [0, 1]
             if sc < self.thr.get(name, self.thr_default):
                 return Quote("", 0, 0, confidence=1 - sc)
             return Quote(doc[s:e], s, e, confidence=sc)
