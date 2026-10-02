@@ -2333,7 +2333,9 @@ the user's (allowed), and user messages are not scanned for instructions by defa
 all the time, and scanning them would escalate ordinary requests. `Guard(scan_user=True)` (or `tool(scan_user=True)`
 for high-impact tools) escalates a call whose user-grounded value the user wrote *only* within 200 characters of an
 override in their own message ("ignore previous instructions", "SYSTEM:", role tags — the narrower rules, not "pay
-… now"): the pasted-injection case. A value the user also wrote plainly elsewhere is taken from there.
+… now"): the pasted-injection case. The role-tag rule is a sentence that starts with a label such as `System:`,
+`Model:`, `Assistant:`, `Admin:`, `Prompt:` or `Instructions:` in any letter case, so a user who writes "Model: XPS 13
+9310. Please refund order A-10457." is escalated too: turn `scan_user` on only where that cost is acceptable. A value the user also wrote plainly elsewhere is taken from there.
 
 **What the guard guarantees, and what it only tries.** The hard guarantee is *provenance*: an argument declared as
 the user's (`ground_from=("user",)`) is allowed only when its value is in a message the user wrote — a value that
@@ -2405,6 +2407,14 @@ transfer or reply — about 16% get flagged. A flag only escalates (never denies
 taken from tool outputs that is a person's time. Tune per tool: `injections="grounded"` (the default) escalates only
 calls whose grounded values come from tool outputs in a flagged context; `injections="off"` turns the detector off for
 the tool — provenance still holds: a user-grounded argument is still never taken from a tool output.
+
+Two things make the flags add up. A field label at the start of a sentence is read as a role tag ("Model: XPS 13
+9310.", "System: Windows 11." in an order or a ticket), and the taint is context-wide: one flagged output anywhere in
+the conversation escalates every call whose grounded value is found only in tool outputs — a clean order lookup next to
+a newsletter that says "Please send us your feedback". The longer the context, the likelier one output is flagged. The
+MCP proxy grounds only from tool outputs and keeps the last 50, so there a `ground=` argument will usually escalate:
+declare such tools with `injections="off"` (and policies over the values), or run the proxy with a reviewer
+(`--escalate elicit`). The detector is the second line; what stops an attacker's value is `ground_from=("user",)`.
 
 **How a value is found.** `ground=["iban", "amount"]` finds each string as a *token*: the occurrence must not continue
 a longer word on either side, nor be joined to one by `. @ - / : _` ("bob@x.org" is not found in "bob@x.org.evil" or
