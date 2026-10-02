@@ -716,3 +716,18 @@ def test_ask_text_takes_today_and_asks_the_end_user_in_their_words(tmp_path, cap
     assert run(capsys, "ask", f"{f}:system", "--text", "paid on: 12 September", "--today", "today", "--json")[0] == 0
     assert run(capsys, "ask", f"{f}:system", "--text", "x", "--today", "soon")[0] == 2
     assert run(capsys, "ask", f"{f}:system", "--state", "{}", "--today", "2026-09-28")[0] == 2
+
+
+def test_help_and_the_unknown_command_error_list_every_command(capsys):
+    assert main(["--help"]) == 0
+    text = capsys.readouterr().out
+    listed = text.split("positional arguments:")[1].split("option")[0]
+    for cmd in ("verify", "replay", "diff", "report", "serve", "check", "ask", "calibrate", "models", "init", "test",
+                "honesty", "hook"):
+        assert f" {cmd} " in listed or f"{cmd}," in listed, cmd
+    assert main(["bogus"]) == 2
+    err = capsys.readouterr().err
+    assert all(f"'{c}'" in err for c in ("test", "honesty", "hook", "init"))
+    with pytest.raises(SystemExit):
+        main(["replay", "x.db", "--system", "os:getcwd"])
+    assert "os:getcwd: not a solvi System" in capsys.readouterr().err   # no "--system" for commands that have none

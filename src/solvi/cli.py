@@ -65,7 +65,7 @@ def load_system(spec):
     """"module:attr" or "file.py:attr" → the System (calling attr when it is a function)."""
     obj = load_object(spec)
     if not hasattr(obj, "ask") or not hasattr(obj, "catalog"):
-        _fail(f"--system {spec}: not a solvi System")
+        _fail(f"{spec}: not a solvi System (module:attr or file.py:attr — a System or a function returning one)")
     return obj
 
 
@@ -380,8 +380,10 @@ def main(argv=None):
     p = argparse.ArgumentParser(prog="solvi", description="solvi: init a project; ask, check, serve a system; test, "
                                                           "honesty; calibrate a model decision; models; verify, replay, "
                                                           "diff and report stored decisions",
-                                epilog="also: " + "; ".join(f"solvi {k} — {w}" for k, (_, w) in COMMANDS.items()))
+                                epilog="solvi COMMAND --help shows a command's options")
     sub = p.add_subparsers(dest="cmd", required=True)
+    for k, (_, w) in COMMANDS.items():                # listed here; dispatched above, to their own option parsers
+        sub.add_parser(k, help=w, add_help=False)
 
     def common(sp, system=True, filters=True):
         sp.add_argument("store", help=STORE_HELP)

@@ -1,4 +1,4 @@
-"""python -m solvi verify | replay | diff (see solvi.cli)."""
+"""python -m solvi COMMAND: the `solvi` command (see solvi.cli)."""
 import sys
 
 from .cli import main
