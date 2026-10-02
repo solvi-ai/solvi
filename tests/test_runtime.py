@@ -201,3 +201,23 @@ def test_a_part_that_returns_a_plain_object_replays():
     loop = Thing(0)
     loop.v = loop
     assert isinstance(vhash(loop), str)                              # attributes that point back: no crash
+
+
+def test_trace_value_reads_a_computed_fact_then_a_given_one_then_missing():
+    from solvi.runtime import MISSING
+    cat = Catalog()
+
+    @cat.fn
+    def double(x):
+        return x * 2
+
+    @cat.fn
+    def broken(x):
+        raise ValueError("no")
+
+    @cat.rule("big")
+    def big(double, broken):
+        return "yes"
+    t = System(cat, [Question("big", "Big?", Answer.yes_no())]).ask({"x": 21}).trace
+    assert t.value("double") == 42 and t.value("x") == 21
+    assert t.value("broken") is MISSING and t.value("nothing") is MISSING
