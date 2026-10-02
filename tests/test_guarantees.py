@@ -457,3 +457,48 @@ def test_ltt_default_grid_follows_the_scores_so_confidences_near_1_can_pass():
     assert len(g) == 64 and g[0] == c.min() and g[-1] == c.max()        # label-free: quantiles of the scores
     assert list(ltt_grid([0.3, 0.3, 0.9, float("nan")])) == [0.3, 0.9]  # few distinct scores: all of them
     assert ltt_threshold([], [], error=0.1) == float("inf")
+
+
+class _Coin:
+    """A decider at chance: logits from the text's hash, unrelated to the label."""
+    model_id = "coin"
+
+    def fingerprint(self):
+        return "coin-1"
+
+    def logits(self, items):
+        import hashlib
+        out = []
+        for it in items:
+            h = int(hashlib.sha256(it.text.encode()).hexdigest(), 16)
+            out.append(np.array([(h % 1000) / 250.0, ((h // 1000) % 1000) / 250.0])[:len(it.options)])
+        return out
+
+
+def test_act_guard_states_its_promise_with_the_error_among_the_answered_and_warns_on_a_signal_at_chance():
+    """act_guard kept "answered alone and wrong ≤ risk of all inputs" with a judge at chance, said nothing, and its
+    one-line summaries read like a bound on the error among the answers."""
+    import warnings
+
+    from solvi.multi import Vote
+    rng = np.random.default_rng(3)
+    ex = [(f"case {i} about item {rng.integers(10**6)}", "yes" if rng.uniform() < 0.5 else "no") for i in range(400)]
+    coin = DecideModel(_Coin(), meta={"format": "test", "temperature": 1.0})
+    part = coin.decision("ok", "Is it right?", "x", ["yes", "no"])
+    with pytest.warns(UserWarning, match=r"the confidence signal does not separate right from wrong answers .*AUROC 0\.\d\d"):
+        info = part.act_guard(ex, risk=0.30)
+    assert info["answered"] > 0 and info["risk"] <= 0.30 and info["error"] > 0.35
+    assert info["warnings"] and "against" in info["warnings"][0]
+    assert info["promise"].startswith("of all inputs like the calibration examples, answered or escalated, at most 0.3 "
+                                      "are answered alone and wrong; among the answers given alone the error was ")
+    assert f"{info['error']:.1%}" in info["promise"] and "not bounded" in info["promise"]
+    other = DecideModel(_Coin(), meta={"format": "test", "temperature": 1.0}).decision("ok", "Is it right?", "x",
+                                                                                       ["yes", "no"])
+    with pytest.warns(UserWarning, match="part 'ok': the part's signal does not separate"):
+        v = Vote([part, other]).act_guard(ex, risk=0.45)
+    assert v["warnings"] and "promise" in v
+    good = model(noise=0.5).decision("team", "Which team?", "email", TEAMS)
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")                # a signal that separates: no warning
+        info = good.act_guard(_labelled(), risk=0.10)
+    assert "warnings" not in info

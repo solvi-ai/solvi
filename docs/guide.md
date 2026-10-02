@@ -711,6 +711,13 @@ is at most `risk`. Measured on solvi-large with 300 examples per data set (200 r
 questions was 9.6–10.0% on every set, while the answered share depends on how hard the questions are (typed-decisions 32%,
 Taskmaster-2 50%, ContractNLI 97%, JSON questions 99.6%). When the model is wrong on a share μ of the examples, any rule
 must escalate at least (μ − risk) / (1 − risk) of them — `must_escalate_at_least` tells you before you tune anything.
+The promise is about all inputs, not about the answers: at `risk=0.10` the answers given alone can be wrong far more
+than 10% of the time when few are answered (`info["error"]` is that error on the calibration examples, and
+`info["promise"]` says it in words). For "the answers given alone are wrong at most 10% of the time" use
+`calibrate_for(error=0.10, method="ltt")`. A signal that does not tell right answers from wrong ones keeps the promise
+only by escalating: when its AUROC on the calibration examples is not above chance at the 5% level (a one-sided
+Mann–Whitney test, `solvi.calibration.separation`; judged with at least 10 right and 10 wrong examples), `act_guard` warns (`UserWarning`, and `info["warnings"]`) — the
+answers it lets through are then wrong about as often as all of them. A combination checks each part's signal.
 `calibrate_for(method="ltt")` tests at most 64 thresholds: quantiles of the distinct signals on the calibration
 examples (the labels are not read, so the promise holds; the Bonferroni correction is over those thresholds). Before
 0.7 it tried a fixed grid from 0.2 to 0.995, which let nothing through for an LLM decider whose confidences sit above

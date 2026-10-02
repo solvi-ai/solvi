@@ -631,7 +631,8 @@ def test_max_len_widens_what_an_llm_reads_under_retrieve_and_the_default_stays_5
 
 
 class SomeLogprobs(FakeLLM):
-    """A gateway whose providers differ: log-probabilities only for the texts that mention "card"."""
+    """A gateway whose providers differ: log-probabilities only for the texts that mention "card" (one request at a
+    time: the switch is the fake's own state)."""
 
     def __call__(self, req, timeout=None):
         self.logprobs = "card" in _text(json.loads(req.data.decode()))
@@ -642,15 +643,15 @@ def test_a_calibration_refuses_log_probabilities_mixed_with_written_numbers_and_
     """logprobs="auto" through a gateway answered some requests from log-probabilities (0.99...) and some from the
     numbers the model wrote (0.85-0.95); one threshold over both answered alone by which provider replied."""
     mixed = [("I was charged twice on my card", "billing"), ("my parcel is late", "shipping")] * 20
-    part = model(SomeLogprobs()).decision("team", "Which team?", "email", TEAMS)
+    part = model(SomeLogprobs(), workers=1).decision("team", "Which team?", "email", TEAMS)
     with pytest.raises(ValueError, match="two sources: 20 from log-probabilities, 20 from the numbers the model wrote"):
         part.act_guard(mixed, risk=0.10)
     with pytest.raises(ValueError, match="two sources"):
         part.calibrate_for(mixed, error=0.10)
-    other = model(SomeLogprobs()).decision("team", "Which team?", "email", TEAMS)
+    other = model(SomeLogprobs(), workers=1).decision("team", "Which team?", "email", TEAMS)
     with pytest.raises(ValueError, match="part 'team'"):
-        Vote([model(SomeLogprobs()).decision("team", "Which team?", "email", TEAMS), other]).act_guard(mixed, risk=0.10)
-    clean = model(SomeLogprobs()).decision("team", "Which team?", "email", TEAMS)
+        Vote([model(SomeLogprobs(), workers=1).decision("team", "Which team?", "email", TEAMS), other]).act_guard(mixed, risk=0.10)
+    clean = model(SomeLogprobs(), workers=1).decision("team", "Which team?", "email", TEAMS)
     clean.act_guard([("charged twice on my card", "billing"), ("card lost in the parcel", "shipping")] * 20, risk=0.5)
     assert clean.guarantee["probabilities"] == "logprobs"
     clean.escalate_below = 0.5                                 # so that the threshold itself lets both through

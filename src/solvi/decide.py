@@ -46,6 +46,7 @@ import os
 import re
 import threading
 import time
+import warnings
 from collections import OrderedDict
 from collections.abc import Mapping
 from dataclasses import asdict, dataclass, field
@@ -2996,9 +2997,14 @@ class DecisionPart:
         the answered ones. It holds for your stream, not under a shift of domain: recalibrate when the inputs change.
         Too few or too hard examples → everything escalates (threshold inf). Feasibility: when the model is wrong on
         a share μ > risk of the examples, any rule must escalate at least (μ − risk) / (1 − risk) of the inputs
-        ("must_escalate_at_least"; arXiv 2606.29054) — a better signal can only get closer to that bound. Changes the part's fingerprint; the trace
-        of every decision records the promise. → {"signal", "threshold", "answered" (share answered alone on the
-        examples), "error" (among them), "risk" (answered and wrong, on the examples), "n", "guarantee"}.
+        ("must_escalate_at_least"; arXiv 2606.29054) — a better signal can only get closer to that bound. Changes the
+        part's fingerprint; the trace of every decision records the promise. The error among the answers given alone is
+        not bounded (calibrate_for(method="ltt") bounds it): with few answered it can be far above `risk`. A signal that
+        does not separate right from wrong answers (solvi.calibration.separation: AUROC not above chance at the 5%
+        level) keeps the promise only by escalating, and is warned about (UserWarning, "warnings"). → {"signal",
+        "threshold", "answered" (share answered alone on the examples), "error" (among them), "risk" (answered and
+        wrong, on the examples), "n", "guarantee", "promise" (in words, with that error), "base_error",
+        "must_escalate_at_least", "warnings" when there are any}.
 
         groups: a threshold per group — a fact name ("domain"), a hierarchy of fact names (["domain", "task"]) or a
         function of facts returning a group or a path (see GroupBy); the examples then give those facts (Facts(...) or
@@ -3040,10 +3046,15 @@ class DecisionPart:
             self._set_threshold(name, nodes[()]["threshold"], self._sourced(g), {"by": by, "nodes": nodes, "signal": name})
             thr = nodes[()]["threshold"]
             out = {"groups": info}
-        out = {"signal": name, "threshold": thr, "answered": float(auto.mean()),
-               "error": float(1 - o[auto].mean()) if auto.any() else 0.0,
+        err = float(1 - o[auto].mean()) if auto.any() else 0.0
+        out = {"signal": name, "threshold": thr, "answered": float(auto.mean()), "error": err,
                "risk": float(((1 - o) * auto).mean()), "n": len(ok), "guarantee": g["promise"],
+               "promise": guard_promise(risk, err, bool(auto.any())),
                "base_error": base, "must_escalate_at_least": max(0.0, (base - risk) / (1 - risk)), **out}
+        warn = no_separation(sig, ok, name, err, base) if auto.any() else None
+        if warn:
+            out["warnings"] = [warn]
+            warnings.warn(warn, UserWarning, stacklevel=2)
         return out
 
     def conformal(self, examples, coverage=0.90):
@@ -3153,6 +3164,37 @@ def one_source(ds, who="the calibration examples"):
                          "logprobs=False (or True, for a server that always returns them), or pin the provider "
                          "(extra_body={'provider': {...}}), and calibrate again")
     return "logprobs" if "logprobs" in n else ("stated" if n else None)
+
+
+SEPARATION_MIN = 10        # right and wrong calibration examples each, before act_guard judges whether its signal separates
+
+
+def guard_promise(risk, error, answered=True):
+    """act_guard's promise in words, with the error among the answers given alone on the calibration examples."""
+    among = (f"; among the answers given alone the error was {error:.1%} on the calibration examples, and it is not "
+             "bounded (calibrate_for(error=..., method='ltt') bounds it)") if answered else "; nothing is answered alone"
+    return (f"of all inputs like the calibration examples, answered or escalated, at most {risk:g} are answered alone "
+            f"and wrong" + among)
+
+
+def no_separation(sig, ok, name, error, base, who=""):
+    """A warning when the signal does not tell right answers from wrong ones on the calibration examples (one-sided
+    Mann-Whitney test of its AUROC against chance at the 5% level: solvi.calibration.separation), else None — tested
+    only with at least SEPARATION_MIN right and as many wrong examples (fewer cannot tell). The promise still holds —
+    by escalating, not by choosing: what is answered alone is wrong about as often as everything."""
+    from .calibration import separation
+    right = int(sum(1 for o in ok if o))
+    if min(right, len(ok) - right) < SEPARATION_MIN:
+        return None
+    auc, z = separation(sig, ok)
+    if z is None or z >= 1.645:
+        return None
+    head = (f"{who}the {name} signal does not separate right from wrong answers on the calibration examples (AUROC "
+            f"{auc:.2f}, not above chance at the 5% level)")
+    if error is None:
+        return head + ": a threshold on it escalates right and wrong answers alike"
+    return (head + f": the answers given alone were wrong {error:.1%} of the time against {base:.1%} for all of them — "
+            "the promise holds by escalating, not by choosing what to answer")
 
 
 def _group_promise(risk, delta, n_groups):

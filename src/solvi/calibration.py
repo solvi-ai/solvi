@@ -137,6 +137,33 @@ def crc_threshold(score, wrong, risk=0.10):
     return float("inf")
 
 
+def separation(score, correct):
+    """Does a signal tell right answers from wrong ones? → (AUROC, z) over the examples: the probability that a right
+    answer's score is above a wrong one's (ties count half), and the one-sided Mann-Whitney z of that against chance
+    (0.5); (None, None) when the examples are all right or all wrong. z < 1.645: not better than chance at the 5% level
+    — a threshold on the signal then escalates right and wrong answers alike, and the answers it lets through are
+    wrong about as often as all of them (act_guard warns)."""
+    s, c = _arrays(score, correct)
+    s = np.where(np.isfinite(s), s, np.where(s > 0, 1e300, -1e300))
+    n1, n0 = int(c.sum()), int(len(c) - c.sum())
+    if not n1 or not n0:
+        return None, None
+    order = np.argsort(s, kind="stable")
+    ranks = np.empty(len(s))
+    ss = s[order]
+    i = 0
+    while i < len(ss):                                 # average ranks over ties
+        j = i
+        while j + 1 < len(ss) and ss[j + 1] == ss[i]:
+            j += 1
+        ranks[order[i:j + 1]] = (i + j) / 2 + 1
+        i = j + 1
+    u = float(ranks[c > 0].sum() - n1 * (n1 + 1) / 2)
+    auc = u / (n1 * n0)
+    z = (u - n1 * n0 / 2) / math.sqrt(n1 * n0 * (n1 + n0 + 1) / 12)
+    return auc, z
+
+
 def _binom_cdf(k, n, p):
     """P(Binomial(n, p) ≤ k), without scipy."""
     if n == 0:

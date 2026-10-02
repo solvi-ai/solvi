@@ -33,12 +33,13 @@ from __future__ import annotations
 import dataclasses
 import inspect
 import math
+import warnings
 from collections.abc import Mapping
 
 import numpy as np
 
 from .core import Decision, Quote, Unknown
-from .decide import DecisionPart, Facts, GroupBy, _group_info, _group_promise, _single, group_record, one_source
+from .decide import DecisionPart, Facts, GroupBy, _group_info, _group_promise, _single, group_record, guard_promise, no_separation, one_source
 from .provenance import ESCALATED, code_fingerprint, digest
 
 _SIGNAL = {"rank": "shared threshold on each model's rank among the calibration examples",
@@ -538,7 +539,9 @@ class _Combination:
         examples → everything escalates (threshold inf). → {"threshold", "answered", "error" (among the answered),
         "risk" (answered and wrong, on the examples), "n", "guarantee", "calls" (models called per question), "cost"
         (with costs=), "scale", and for a cascade "answered_by" (the share each stage answered) and "warnings" when a
-        stage answers alone on less than 5% of the examples (the cascade is then no better than one model)}.
+        stage answers alone on less than 5% of the examples (the cascade is then no better than one model) or a part's
+        signal does not separate right from wrong answers (also a UserWarning), "promise" (in words: of all inputs, not
+        of the answered ones — "error" is not bounded)}.
 
         scale: what the shared threshold is on. "raw" (default): the parts' signals themselves (the act probability
         when the model gives one, else the calibrated confidence). When the scales differ — an act probability spread
@@ -621,9 +624,15 @@ class _Combination:
             a, lo = a & live, lo * live
         elif not np.isfinite(t):
             a, lo = np.zeros(n, bool), np.zeros(n)
-        out = {"threshold": t, "answered": float(a.mean()),
-               "error": float(lo[a].sum() / a.sum()) if a.any() else 0.0, "risk": float(lo.mean()), "n": n,
-               "guarantee": self.guarantee["promise"], "calls": float(calls[rows, gi].mean()), "scale": scale}
+        err = float(lo[a].sum() / a.sum()) if a.any() else 0.0
+        out = {"threshold": t, "answered": float(a.mean()), "error": err, "risk": float(lo.mean()), "n": n,
+               "guarantee": self.guarantee["promise"], "promise": guard_promise(risk, err, bool(a.any())),
+               "calls": float(calls[rows, gi].mean()), "scale": scale}
+        flat = [] if not a.any() else [
+            no_separation([ls.sig for st in states for ls in st.walk() if ls.leaf is lf],
+                          [self._right(ls.hard.value, y) for st, y in zip(states, gold) for ls in st.walk()
+                           if ls.leaf is lf], "part's", None, None, f"part {lf.name!r}: ") for lf in self.leaves()]
+        flat = [w for w in flat if w]
         if any(lf.cost != 1.0 for lf in self.leaves()):
             out["cost"] = float(cost[rows, gi].mean())
         if who[0] is not None:
@@ -639,6 +648,10 @@ class _Combination:
                         for j, (m, b) in enumerate(zip(self.members, out["answered_by"])) if b < STAGE_FLOOR]
                 if warn:
                     out["warnings"] = warn
+        if flat:
+            out["warnings"] = out.get("warnings", []) + flat
+            for w in flat:
+                warnings.warn(w, UserWarning, stacklevel=2)
         out.update(extra)
         return out
 
