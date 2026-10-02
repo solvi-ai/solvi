@@ -27,7 +27,8 @@ QUOTE_OUTSIDE = "quote outside the text"
 NOT_GROUNDED = "not grounded"
 OUTSIDE_OPTIONS = "outside the options"
 VALIDATE = "rejected by validate"
-TYPE_REJECTED = "type rejected"               # a typed fact failed its type (solvi.typed)
+TYPE_REJECTED = "type rejected"               # a typed fact failed its type (solvi.typed); the guard kind of the same
+#                                               event is "type_rejected" (solvi.primitives.TYPE_REJECTED)
 ESCALATED = "model escalated"                 # a decider's own act / escalate signal said "hand it to a person" (solvi.decide)
 TIMED_OUT = "timed out"                       # a part did not finish within its timeout (System.aask)
 INSTRUCTION = "answer depends on an instruction-like sentence"   # perturb=k: the answer changed without such a sentence

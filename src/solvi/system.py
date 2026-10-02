@@ -1180,7 +1180,7 @@ def _resolved(q, r, pc, why, src, init):
     """An answer primitive (not stated, span, rank, estimate) or an answer with evidence, from the rule's record (see
     solvi.primitives)."""
     from .core import Unknown
-    from .primitives import Rejected, fmt, resolve
+    from .primitives import NO_EVIDENCE, Rejected, fmt, resolve
     try:
         out = resolve(q.answer, r, init)
     except Rejected as e:
@@ -1189,7 +1189,7 @@ def _resolved(q, r, pc, why, src, init):
     if q.require_evidence and a is not Unknown and not ev:
         return Result(None, 0.0, f"no supporting quote (require_evidence); would have answered "
                                  f"{fmt(a, q.answer.kind, out['extra'])}; {why}", "abstain", out["probs"], r.origin, src,
-                      "evidence_missing", extra=out["extra"])
+                      NO_EVIDENCE, extra=out["extra"])
     if a is Unknown:
         why = f"not stated; {why}"
     return Result(a, min(pc, out["confidence"]), why, probs=out["probs"], provenance=r.origin, source=src, evidence=ev,
