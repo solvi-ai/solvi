@@ -59,15 +59,19 @@ will not find a better one.
 
 **A rule across items belongs after the items' decisions, not inside each one.** "One counterpart per product" over
 product-matching pairs, enforced with `solvi.sets.decide_set` on the answers as given, raised F1 for every solver we
-tried, and helped a weak solver most. Giving each request the other candidates as facts instead (how the pair ranks
+tried, and helped a weak solver most: on Abt-Buy (1,916 pairs) 0.872 → 0.909 for an LLM asked each pair, 0.860 → 0.870
+for the same LLM through `solvi.llm`, 0.931 → 0.933 for a fitted head ([abtbuy/solution.py](../benchmarks/tasks/abtbuy/solution.py)
+`--repair`, [abtbuy/llm_pair.py](../benchmarks/tasks/abtbuy/llm_pair.py)). Giving each request the other candidates as facts instead (how the pair ranks
 among them) did worse. Prefer the exact method: it was at least as good as the greedy one, and fast on large
 components.
 
 **When the alternatives can be enumerated, search them instead of asking a model to propose.** On trip and meeting
-planning problems a `solvi.search` through the same checks found the right plan more often than an LLM's plans did, even
-after re-asks. Make the checks that rule out a prefix (a missing flight, a meeting out of reach) usable on partial
-candidates and list them in `prune=`: that keeps the search small where the orders of the parts are too many to try
-(10 cities can be visited in 10! ≈ 3.6 million orders).
+planning problems a `solvi.search` through the same checks found the right plan more often than an LLM's plans did: on
+NATURAL PLAN 95 / 100 / 98 of 100 calendar, meeting and trip problems against 92 / 75 / 43 for gpt-oss-120b's own plans
+([naturalplan/solution.py](../benchmarks/tasks/naturalplan/solution.py)). Make the checks that rule out a prefix (a missing
+flight, a meeting out of reach) usable on partial candidates and list them in `prune=`: that keeps the search small
+where the orders of the parts are too many to try — the largest 10-city trip took 11,414 asks, where 10 cities can be
+visited in 10! ≈ 3.6 million orders.
 
 ## Guarantees and calibration
 
@@ -81,14 +85,18 @@ stay level while the mean act probability falls steeply: with the default thresh
 the cases it would have answered correctly. Calibrate per question, with the number of options production has.
 
 **Put the promise where the decision is made.** When a head, a rule or a trust score answers, calibrate the question
-itself (`system.guarantee`), not only the model under it — and on the signal that separates right from wrong: on
-contract clauses a trust score built from three facts separated them and answered a good share alone at a low risk,
-while the LLM's own confidence did not separate them better than chance and is refused. Use `error=` for "≤ e of what
+itself (`system.guarantee`), not only the model under it — and on the signal that separates right from wrong: on CUAD
+contract clauses a trust score built from three facts separated right from wrong answers with AUROC 0.83 on dev, the
+LLM's own confidence with 0.63; at a 3% risk the trust score answered 67.6% of the eval questions alone with 4.0% wrong,
+while the confidence answered 14% of dev ([cuad/solution.py](../benchmarks/tasks/cuad/solution.py)). Use `error=` for "≤ e of what
 we answer is wrong" and `risk=` for "≤ r of all inputs": on a stream of mostly easy non-matches the risk held overall
 while the matches an LLM gave alone were wrong far more often — `groups="answer"` puts the promise inside each answer.
 
 **Size thresholds for inputs the decider has no answer for — when new kinds can come.** New kinds of input break every
-promise calibrated without them. An `OpenSetGate` with outside signals from `leave_out` follows their share without
+promise calibrated without them: on a Banking77 stream where 40% of the requests come from 20 unseen intents after
+request 1,000, a "≤ 5% wrong" threshold calibrated without them gave 16.4% wrong after the shift; an `OpenSetGate`
+calibrated with `leave_out` kept 0.7% (57.6% answered alone before the shift, 13.7% after) and flagged the change 68
+requests in ([banking77/solution.py](../benchmarks/tasks/banking77/solution.py), `--plain` for the first). An `OpenSetGate` with outside signals from `leave_out` follows their share without
 labels: on public intent sets, with nothing tuned, it kept its promise in simulated streams where new intents or
 out-of-scope queries grew gradually or jumped, where a plain threshold broke; the price is fewer requests answered
 alone before any change. Pay for it only where new kinds are expected; for gradual ones `track=(200,)` costs less;
@@ -116,14 +124,18 @@ the input differently, use a LoRA adapter (`adapt_lora`), a head over computed f
 **With a reasoning LLM, let it think: do not force a reply format on it.** A server that enforces `response_format`
 by constrained decoding may apply the grammar from the first token and skip the thinking. On OpenRouter one of
 gpt-oss-120b's providers answered every request that way under json_schema and json_object (no reasoning tokens) and
-served a part of all requests; a yes/no hallucination judge and a product-matching question asked through `solvi.llm`
-both scored lower with the schema enforced than with the contract in the prompt. solvi does this by default: with
+served a part of all requests (about a fifth of the judge's replies below had no reasoning under json_schema); a
+yes/no hallucination judge asked through `solvi.llm` scored F1 0.744 on RAGTruth dev with the schema enforced and 0.791
+with the contract in the prompt (the plain call to the model: 0.802), on eval 0.733 → 0.766 (plain 0.784)
+([ragtruth/reply_format.py](../benchmarks/tasks/ragtruth/reply_format.py)); a product-matching question on Abt-Buy 0.837 → 0.860
+(plain 0.872, [abtbuy/llm_pair.py](../benchmarks/tasks/abtbuy/llm_pair.py)). solvi does this by default: with
 reasoning asked for in `extra_body`, `response_format="auto"` sends no format and `max_tokens` defaults to 2,048. If you
 set `response_format="json_schema"` by hand, look for `extra["llm"]["reasoning"] == "none"` in the trace.
 
 **Count an escalated decision as unanswered.** An LLM decision whose reply was invalid or cut off has no value and no
 probabilities (`d.value is None`); go by `d.escalate`, not by `p ≥ 0.5`. With a reasoning model, give `max_tokens`
-room: at 400, some replies were cut off; asked again at the default 2,048, none was.
+room: at 400, 26 of 1,916 product-pair replies were cut off ([abtbuy/llm_pair.py](../benchmarks/tasks/abtbuy/llm_pair.py));
+the default with reasoning is 2,048.
 
 **Keep the quote in the question.** Asking the same judge for the unsupported passage along with its yes/no is part of
 how it finds one: without the quote its recall fell clearly. Moving the text before the question or dropping the "say
@@ -143,8 +155,9 @@ plan — the model traded one violation for another — and on days of meetings 
 possible. Cap the rounds and measure what each one buys.
 
 **Agreement of samples lowers the error of what is answered; it does not make it small.** Three queries per question,
-compared by the rows they return: answering only when all three agree cut the wrong answers of a text-to-SQL model, but
-far from all of them. The rest were three samples agreeing on a reading of the question that was not the reference's.
+compared by the rows they return: answering only when all three agree cut the wrong answers of a text-to-SQL model from
+48% to 28% at 63% answered (BIRD mini-dev, 150 questions, [bird/solution.py](../benchmarks/tasks/bird/solution.py)) — far from
+all of them. The rest were three samples agreeing on a reading of the question that was not the reference's.
 Treat the share as a signal to calibrate on labelled examples, not as a proof.
 
 ## Instructions in the input
@@ -203,8 +216,9 @@ deleting it now.
 
 **Require the user's own yes for actions a tool output could ask for** (`guard.require_confirmation`). With an
 instruction planted in order lookups, an agent cancelled an order nobody asked about in most τ-bench runs without a
-guard, in fewer with grounding and policies, and in none with confirmation. It costs turns: on clean tasks it did not
-beat no guard, so keep it to actions that must be the user's decision.
+guard, in fewer with grounding and policies, and in none with confirmation. It costs turns: on the 30 clean τ-bench
+tasks a guard with confirmation solved 14 against 18 without a guard, one run each with a simulated customer
+([taubench/solution.py](../benchmarks/tasks/taubench/solution.py)), so keep it to actions that must be the user's decision.
 
 **Write policies for what your backend does not check, not for what it does.** τ-bench's tools already refuse a wrong
 status or a foreign payment method, and there a guard changed nothing. They do not check whose order is cancelled: a

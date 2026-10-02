@@ -25,3 +25,7 @@ site/
 # benchmarks/vs_llm: its sets are shipped (data/ above is for downloaded datasets); new runs are not
 !benchmarks/vs_llm/data/
 benchmarks/vs_llm/out/
+
+# benchmarks/tasks: the downloads (data/ above), the model-answer cache and the runs stay on the machine that made them
+benchmarks/tasks/cache/
+benchmarks/tasks/*/runs/

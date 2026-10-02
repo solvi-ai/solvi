@@ -68,6 +68,35 @@ the written rules. An open decision model that reasons first (Jeeves by PostHog)
 0.912), still below the strong LLMs and the catalog. Tables, caveats and the reproduction are on [solvi vs asking an LLM](vs_llm.md). Data, runner and raw answers
 are in [benchmarks/vs_llm/](../benchmarks/vs_llm/).
 
+## Nine public tasks
+
+[benchmarks/tasks/](../benchmarks/tasks/) is a stand of nine real tasks on public data, each with a scorer, a
+baseline that does not use solvi and one solution with solvi: the variant chosen on dev, on the library's current
+pieces. Five are the kind of task solvi is built for; four were picked because they fit it badly. `fetch.sh` downloads
+the data from its sources, `prepare.py` makes the fixed splits, and every LLM answer is cached by its request, so a
+rerun of the published numbers costs nothing once the cache is filled. All on eval, solvi 0.8.0, `openai/gpt-oss-120b`
+where an LLM is used:
+
+| Task | Metric | Baseline | solvi | Script |
+|---|---|---|---|---|
+| τ-bench retail, 30 tasks | solved; changes not in gold; calls the environment refused | 18; 14; 10 | 14; 13; 0 | `taubench/solution.py` |
+| CUAD, 1,025 questions | accuracy; quotes in the contract; answered alone, wrong among them | 0.882; 260 of 398; 100%, 11.8% | 0.899; 263 of 263; 67.6%, 4.0% | `cuad/solution.py` |
+| RAGTruth, 600 responses | F1; answered alone, wrong among them | 0.784; 100%, 22.0% | 0.766; 19.0%, 12.3% | `ragtruth/solution.py` |
+| Banking77 stream, 2,000 | before / after the shift: answered alone, wrong among them (promise 5%) | 83.7%, 3.9% / 65.0%, 22.5% | 57.6%, 0.7% / 13.7%, 0.7% | `banking77/solution.py` |
+| German Credit, 1,000 × 2 versions | decisions equal to the policy | 2,000 of 2,000 | 2,000 of 2,000, with the audit | `credit/solution.py` |
+| BIRD mini-dev, 150 | right; answered; wrong among answered | 78; 100%; 48.0% | 73; 74.7%; 34.8% | `bird/solution.py` |
+| Abt-Buy, 1,916 pairs | F1; offers with two counterparts | 0.872; 19 | 0.933; 0 | `abtbuy/solution.py` |
+| NATURAL PLAN, 3 × 100 | right: calendar / meetings / trips | 92 / 75 / 43 | 95 / 100 / 98 | `naturalplan/solution.py` |
+| NAB, 33 series | F1; false alarms | 0.391; 115 | 0.361; 119 | `nab/solution.py` |
+
+What it says: solvi did not make a model more accurate — on RAGTruth, BIRD, τ-bench and NAB the solution is at or
+below the baseline. Where it won, something other than the model did the work: comparison code and a fitted head
+(Abt-Buy, supervised on 5,743 labelled pairs against a zero-shot baseline), a search through checks (NATURAL PLAN), an
+open-set threshold that keeps its promise when new intents arrive (Banking77), a trust signal under a guarantee with
+every quote checked (CUAD). On every task each decision is stored and replays. Caveats per task (one run of τ-bench with
+a simulated customer, the seed of Banking77's simulated new intents, the supervision on Abt-Buy) and the cost of a run
+from an empty cache are in [benchmarks/tasks/README.md](../benchmarks/tasks/README.md).
+
 ## Known negative results
 
 - **New field from its description only.** An extractor trained on a few fields does not find a field it never saw
