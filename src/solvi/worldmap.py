@@ -1,0 +1,228 @@
+"""A map of an environment that an agent builds by acting — claims with provenance, not a given.
+
+An agent that works in the same environment again and again — a site, an internal tool, a command line, a file tree —
+re-discovers its structure on every task unless it keeps a map. A `WorldMap` is that map, written as the agent goes:
+
+    from solvi.worldmap import WorldMap
+    m = WorldMap("console.map.json")              # loaded when the file exists; m.save() writes it
+    m.see(page, "Billing", to="/billing")         # an action on offer here; `to` when the environment shows it (a link)
+    m.arrive(page, "Billing", "/billing")         # the action was taken: the claim is confirmed — or refuted
+    m.next(page, {"/billing/refunds"})            # the action to take towards a target over what is known, or None
+    m.explore(page)                               # ... or towards the nearest claim nobody has checked yet
+
+Every edge is a claim "(state, action) leads to state" with a status — hypothesis, confirmed — a source — seen (the
+environment showed where it leads), observed (the agent went), told (a document, a sign), human — and its evidence
+(the steps, a quote). Whoever made a claim, the next observation can refute it: a person's correction or a line of an
+outdated document is a hypothesis like any other, and `arrive` records the refutation with what was believed and by
+whom. Every write is a journal entry in a hash chain (`verify()`), so the map as it was at any step can be rebuilt.
+
+What the map knows is what it was told through these calls: it does not know what a page or a directory is. The
+adapter — list the actions of a state, take one — is yours. `snapshot(state, targets)` gives a decision the part of
+the map it needs as a plain fact (the known way, what is unexplored here), so decisions that use it replay.
+
+Measured on real environments, a stream of 40 "get to <target>" tasks with 25 targets, one step per action; "by words":
+the offered action whose label shares most words with the target's name, no map.
+
+    environment                                   by words            a map per task      one map kept across tasks
+    commands of uv, docker, git (254)             19 of 40, 34.7      23 of 40, 28.2      35 of 40, 11.1 (last ten: 5.7)
+    files of a repository (1,020 entries)          0 of 40             0 of 40            23 of 40, 36.2 (last ten: 4.0)
+    docs.python.org (targets two clicks deep)     32 of 40, 13.1      32 of 40,  9.8      38 of 40,  4.2
+    docs.astral.sh/uv (every page one click away) 40 of 40,  1.0      40 of 40,  1.0      40 of 40,  1.0
+
+So: the gain is the map carried from one task to the next, in an environment that is deep and met again. It does not
+make a first exploration shorter, it gives nothing where everything is one step away, and it does not tell which state
+a task needs — only how to get to one that is named. In a game without the game's own map, an agent's second episode
+took 275 decisions where the first took 1,305."""
+from __future__ import annotations
+
+import json
+from collections import deque
+from pathlib import Path
+
+SOURCES = ("seen", "observed", "told", "human")
+HYPOTHESIS_COST = 3                  # a claim nobody has walked counts as this many confirmed steps when planning
+
+
+class WorldMap:
+    """See the module docstring. path: a JSON file the map is loaded from when it exists (save() writes it).
+    hypothesis_cost: how many confirmed steps an unchecked claim with a destination counts as in `distances`."""
+
+    def __init__(self, path=None, hypothesis_cost=HYPOTHESIS_COST):
+        self.file = Path(path) if path else None
+        self.hypothesis_cost = int(hypothesis_cost)
+        self.edges = {}                  # (state, action) → {"to", "status", "source", "evidence", "taken"}
+        self.states = {}                 # state → {"visits", "facts"}
+        self.journal, self._prev = [], ""
+        if self.file and self.file.exists():
+            self.load(self.file)
+
+    # --- the journal
+    def _write(self, op, **data):
+        from .runtime import vhash
+        rec = {"n": len(self.journal), "op": op, **data, "prev": self._prev}
+        rec["hash"] = vhash(rec)
+        self._prev = rec["hash"]
+        self.journal.append(rec)
+        return rec
+
+    def verify(self):
+        """Is the journal's hash chain whole (nothing edited, removed or reordered)?"""
+        from .runtime import vhash
+        prev = ""
+        for r in self.journal:
+            if r.get("prev") != prev or vhash({k: v for k, v in r.items() if k != "hash"}) != r.get("hash"):
+                return False
+            prev = r["hash"]
+        return True
+
+    # --- what the agent reports
+    def visit(self, state, step=None, **facts):
+        """The agent is in this state (facts: what it noticed here — a title, a service; kept on the state)."""
+        s = self.states.setdefault(state, {"visits": 0, "facts": {}})
+        s["visits"] += 1
+        if facts:
+            s["facts"].update(facts)
+            self._write("visit", state=state, step=step, facts=facts)
+        return self
+
+    def see(self, state, action, to=None, step=None):
+        """An action is on offer in this state. `to`: where it leads when the environment shows that before acting (a
+        link's address, a directory entry) — then a hypothesis with a destination, source "seen"; else the destination
+        is unknown until someone takes it. A confirmed claim is not touched."""
+        e = self.edges.get((state, action))
+        if e is None or (e["status"] != "confirmed" and e["to"] is None and to is not None):
+            self.edges[(state, action)] = {"to": to, "status": "hypothesis", "source": "seen", "evidence": [[step, None]],
+                                           "taken": e["taken"] if e else 0}
+            self._write("see", state=state, action=action, to=to, step=step)
+        return self
+
+    def told(self, state, action, to, source="told", quote=None, step=None):
+        """Someone says where an action leads — a document, a sign (source="told"), a person (source="human"): a
+        hypothesis with a destination and the quote. It replaces an unchecked claim; a confirmed one stands until an
+        observation refutes it — use `arrive` for what was observed."""
+        if source not in SOURCES or source == "observed":
+            raise ValueError(f'source is one of "seen", "told", "human" (an observation is arrive()), not {source!r}')
+        e = self.edges.get((state, action))
+        if e is not None and e["status"] == "confirmed":
+            self._write("told_ignored", state=state, action=action, to=to, source=source, quote=quote, step=step,
+                        confirmed=e["to"])
+            return self
+        self.edges[(state, action)] = {"to": to, "status": "hypothesis", "source": source, "evidence": [[step, quote]],
+                                       "taken": e["taken"] if e else 0}
+        self._write("told", state=state, action=action, to=to, source=source, quote=quote, step=step)
+        return self
+
+    def human(self, state, action, to, note=None, step=None):
+        """A person's correction: told(..., source="human")."""
+        return self.told(state, action, to, source="human", quote=note, step=step)
+
+    def arrive(self, state, action, to, step=None):
+        """The action was taken in `state` and led to `to`: the claim is confirmed. → True when this refuted what was
+        believed (another destination, whoever claimed it); the refutation is in the journal."""
+        e = self.edges.setdefault((state, action), {"to": None, "status": "hypothesis", "source": "seen", "evidence": [],
+                                                    "taken": 0})
+        refuted = e["to"] is not None and e["to"] != to
+        if refuted:
+            self._write("refute", state=state, action=action, believed=e["to"], source=e["source"], observed=to, step=step)
+        e.update(to=to, status="confirmed", source="observed", taken=e["taken"] + 1)
+        e["evidence"].append([step, None])
+        self._write("confirm", state=state, action=action, to=to, step=step)
+        return refuted
+
+    # --- what the map answers
+    def claim(self, state, action):
+        """The claim about an action in a state, or None."""
+        return self.edges.get((state, action))
+
+    def distances(self, targets, confirmed_only=False):
+        """state → (cost to the nearest target, the first action to take): over confirmed claims (1 each) and, unless
+        confirmed_only, unchecked claims with a destination (hypothesis_cost each). Targets map to (0, None)."""
+        rev = {}
+        for (s, a), e in sorted(self.edges.items(), key=lambda kv: (str(kv[0][0]), str(kv[0][1]))):
+            if e["to"] is None or (confirmed_only and e["status"] != "confirmed"):
+                continue
+            rev.setdefault(e["to"], []).append((s, a, 1 if e["status"] == "confirmed" else self.hypothesis_cost))
+        dist = {t: (0, None) for t in targets}
+        todo = deque(sorted(dist, key=str))
+        while todo:
+            t = todo.popleft()
+            for s, a, c in rev.get(t, ()):
+                d = dist[t][0] + c
+                if s not in dist or d < dist[s][0]:
+                    dist[s] = (d, a)
+                    todo.append(s)
+        return dist
+
+    def next(self, state, targets, confirmed_only=False):
+        """The action to take in `state` on the cheapest known way to a target; None when no way is known (or the
+        state is a target)."""
+        d = self.distances(set(targets), confirmed_only).get(state)
+        return None if d is None else d[1]
+
+    def path(self, state, targets, confirmed_only=False):
+        """The actions of the cheapest known way from `state` to a target → [(state, action)], [] when none."""
+        dist, out, seen = self.distances(set(targets), confirmed_only), [], set()
+        while state in dist and dist[state][1] is not None and state not in seen:
+            seen.add(state)
+            a = dist[state][1]
+            out.append((state, a))
+            state = self.edges[(state, a)]["to"]
+        return out
+
+    def frontier(self):
+        """What acting can still teach: the (state, action) pairs never taken — unknown destinations and claims nobody
+        has checked."""
+        return [k for k, e in self.edges.items() if e["taken"] == 0]
+
+    def unvisited(self):
+        """States some claim leads to that the agent has not been in."""
+        return sorted({e["to"] for e in self.edges.values() if e["to"] is not None and e["to"] not in self.states}, key=str)
+
+    def explore(self, state):
+        """The action to take in `state` towards the nearest untaken action (an untaken action here first); None when
+        the map has nothing left to check from here."""
+        here = sorted((a for (s, a), e in self.edges.items() if s == state and e["taken"] == 0), key=str)
+        if here:
+            return here[0]
+        return self.next(state, {s for s, _ in self.frontier()})
+
+    def snapshot(self, state, targets=()):
+        """The part of the map a decision needs, as a plain fact: the known way to a target, what is on offer here and
+        what of it is unchecked. Give it to a decision as a given fact; the decision then replays."""
+        d = self.distances(set(targets)).get(state) if targets else None
+        here = {str(a): {"to": e["to"], "status": e["status"], "source": e["source"]}
+                for (s, a), e in sorted(self.edges.items(), key=lambda kv: str(kv[0][1])) if s == state}
+        return {"state": state, "next": None if d is None else d[1], "cost": None if d is None else d[0],
+                "actions": here, "unchecked": sorted(a for a, e in here.items() if e["status"] != "confirmed"),
+                "visits": self.states.get(state, {}).get("visits", 0), "head": self._prev}
+
+    def stats(self):
+        es = list(self.edges.values())
+        return {"states": len(self.states), "claims": len(es), "confirmed": sum(e["status"] == "confirmed" for e in es),
+                "unchecked": sum(e["taken"] == 0 for e in es), "refuted": sum(r["op"] == "refute" for r in self.journal),
+                "journal": len(self.journal)}
+
+    # --- keeping it
+    def to_dict(self):
+        return {"format": "solvi.worldmap v1", "hypothesis_cost": self.hypothesis_cost, "states": self.states,
+                "edges": [{"state": s, "action": a, **e} for (s, a), e in self.edges.items()], "journal": self.journal}
+
+    def save(self, path=None):
+        p = Path(path) if path else self.file
+        if p is None:
+            raise ValueError("no path to save the map to")
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text(json.dumps(self.to_dict(), ensure_ascii=False), encoding="utf-8")
+        return p
+
+    def load(self, path):
+        data = json.loads(Path(path).read_text(encoding="utf-8"))
+        if data.get("format") != "solvi.worldmap v1":
+            raise ValueError(f"{path} is not a solvi.worldmap v1 file")
+        self.hypothesis_cost = int(data.get("hypothesis_cost", self.hypothesis_cost))
+        self.states = data["states"]
+        self.edges = {(e["state"], e["action"]): {k: e[k] for k in ("to", "status", "source", "evidence", "taken")}
+                      for e in data["edges"]}
+        self.journal = data["journal"]
+        self._prev = self.journal[-1]["hash"] if self.journal else ""
+        return self

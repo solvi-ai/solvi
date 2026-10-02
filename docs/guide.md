@@ -950,6 +950,31 @@ turns) → 77% with the long memory; incidents 0% → 26% → 42%; stored decisi
 hand-written script solves 77% of the tickets and 98% of the incidents: the memory makes a model-driven agent sound,
 not better than rules.
 
+### A map the agent builds: worldmap
+
+An agent that works in the same environment again — a site, an internal tool, a command line, a file tree — finds its
+structure anew on every task unless it keeps a map. `solvi.worldmap.WorldMap` is written as the agent acts: every edge
+is a claim "(state, action) leads to state" with a status (hypothesis, confirmed), a source (seen, observed, told,
+human) and its evidence, and every write is an entry of a hash-chained journal.
+
+```python
+from solvi.worldmap import WorldMap
+m = WorldMap("console.map.json")              # loaded when the file exists; m.save() writes it
+m.see(page, "Billing", to="/billing")         # on offer here (`to` when the environment shows it, as a link does)
+m.arrive(page, "Billing", "/billing")         # taken: confirmed — or refuted, whoever made the claim
+m.next(page, {"/billing/refunds"})            # the action towards a target over what is known, else None
+m.explore(page)                               # ... towards the nearest claim nobody has checked
+m.human(page, "Reports", "/audit", note="Anna")    # a person's or a document's claim: a hypothesis like the others
+m.snapshot(page, targets)                     # the part a decision needs, as a given fact
+```
+
+The adapter — list a state's actions, take one — is yours; the map only knows what these calls told it. On real
+environments (40 "get to X" tasks each, 25 targets, steps per task): commands of uv, docker and git 34.7 without a map,
+28.2 with a map per task, 11.1 with one map kept across the tasks (35 of 40 reached against 19); the files of a
+repository 0 of 40 reached without a kept map, 23 of 40 with it (the last ten tasks: 4 steps); docs.python.org 13.1 →
+9.8 → 4.2; a site whose every page is one click away: 1.0 in all three. The gain is the map carried between tasks in
+a deep environment met again; it does not shorten a first exploration or choose which state a task needs.
+
 ### Candidates that change: a head over their features
 
 An answer head has fixed options; an agent's step has other candidates each time. `solvi.fast.CandidateHead` learns

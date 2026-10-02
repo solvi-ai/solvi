@@ -115,6 +115,11 @@ fallback rule take all eight harmful actions. Hard checks belong to the question
 "no progress for a while AND one of them" was right far more often. Answer it softly: close the option for a while,
 escalate.
 
+**Keep a map of an environment the agent meets again.** Without one, every task re-discovers the structure: in the
+command trees of three real tools an agent reached 19 of 40 named commands in 34.7 steps a task; with a `WorldMap`
+kept across the tasks, 35 of 40 in 11.1 (the last ten: 5.7). Where everything is one step away (a site with a full
+sidebar) a map adds nothing, and it does not shorten the first exploration.
+
 **A script is a strong baseline — measure against it.** On simulated support tickets a model with memory solved 77%,
 exactly what a short script did; on incidents a runbook resolved 98% against the model's 42%. What solvi adds to a
 model-driven agent is that every step is checked, recorded and replayable, not that the model beats the rules.

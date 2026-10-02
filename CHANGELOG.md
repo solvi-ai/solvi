@@ -2,6 +2,14 @@
 
 ## 0.7.2 — unreleased
 
+- `solvi.worldmap.WorldMap`: a map of an environment that an agent builds by acting. Edges are claims "(state, action)
+  leads to state" with a status, a source (seen, observed, told, human) and evidence; an observation refutes a claim
+  whoever made it — a person, an outdated document; every write is in a hash-chained journal; `next` gives the action
+  towards a target over what is known, `explore` towards what nobody has checked, `snapshot` the part a decision needs
+  as a fact; kept in a JSON file. On real environments (40 tasks each): commands of uv / docker / git 19 of 40 reached
+  in 34.7 steps without a map, 35 of 40 in 11.1 with a map kept across tasks; a repository's files 0 → 23 of 40;
+  docs.python.org 13.1 → 4.2 steps; a flat site: no difference. It carries what was learned to the next task; it does
+  not shorten a first exploration.
 - Docs: [Best practices](docs/best_practices.md) — what the measurements behind this release say to do: keep a
   state's keys in one order (a decision model's answers depend on it — solvi-base and Jev alike), narrow many options
   by code before asking, calibrate on your own stream, keep an agent's memory in the decision's input, and more, each
