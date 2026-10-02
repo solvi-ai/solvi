@@ -1718,6 +1718,8 @@ class DecideModel:
             d.extra.update(info)
         if why and d.escalate is None:              # the scorer could not give a usable output: never a guess
             d.escalate = f"{ESCALATED}: {why}"
+            if sp.kind != "span":                   # nor a value: uniform logits would read as the first option
+                d.value, d.probs, d.confidence = None, {}, 0.0
         return d
 
     def _decision_v3(self, sp, z, u):

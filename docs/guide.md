@@ -1031,7 +1031,8 @@ Any server of the OpenAI chat-completions API (OpenAI, OpenRouter, vLLM, llama.c
 decides as with any decider. One question is one request at temperature 0, with a JSON schema for the reply — the answer
 among the options, a probability per option (`ask="confidence"`: one number) and a quote from the text that supports it
 — sent as `response_format` json_schema when the server takes it, else as json_object, else in the prompt only
-(`response_format="auto"` tries them in that order and keeps what works: it steps down only before the first request that
+(`response_format="auto"` tries them in that order — with reasoning asked for, it starts at the prompt, see below — and
+keeps what works: it steps down only before the first request that
 succeeds, and only on an HTTP 400 / 422 about the format — one that names `response_format`, `json_schema`, `logprobs`,
 structured outputs, or says nothing; a gateway's wrapped error counts too, such as OpenRouter's "Provider returned error"
 with the provider's own message in `error.metadata.raw`; another 400, 413 or 422 escalates that question, `invalid input
@@ -1051,9 +1052,11 @@ A reply that is not a choice — a query, a plan, a JSON extraction — is `solv
 
 Everything is checked, and what fails escalates — `model escalated: invalid LLM output — ...` — instead of being turned
 into a guess: an answer that is not one of the options, probabilities that are not numbers in [0, 1] or disagree with
-the answer, a reply that is not JSON, is cut off or refused. The quote (and a span answer) is looked up literally, up
-to typographic quotes and apostrophes (’ ‘ “ ” as ' "), dashes (– — as -), runs of whitespace and — when nothing matches
-with the case kept — letter case; the value and the quote are then the text's own spelling at those offsets, never the
+the answer, a reply that is not JSON, is cut off or refused. Such a decision (and one whose server did not answer) has
+no value (`d.value is None`), no probabilities (`d.probs == {}`) and confidence 0, so code that reads the value or
+p(yes) without looking at `d.escalate` cannot take it for an answer. The quote (and a span answer) is looked up
+literally, up to typographic quotes and apostrophes (’ ‘ “ ” as ' "), dashes (– — as -), runs of whitespace and — when
+nothing matches with the case kept — letter case; the value and the quote are then the text's own spelling at those offsets, never the
 model's. A quote still not found escalates when the
 question asks for evidence (`evidence=True`), and otherwise is dropped — the answer stands and
 `extra["llm"]["quote_dropped"]` records the quote. A span answer that is not in the text escalates with that reason
@@ -1077,9 +1080,23 @@ error. An LLM's output is not reproducible bit for bit, so `replay` does not cal
 every request — on OpenRouter, `{"provider": {"order": ["groq"], "allow_fallbacks": False}}` pins the provider (the
 same name can be served by several, with different quantization and behaviour) and `{"reasoning": {"effort": "low"}}`
 sets reasoning. It cannot set what solvi sets itself (the messages, the reply format, logprobs, the model, temperature,
-max_tokens, seed): those raise `ValueError`. It enters the fingerprint. With reasoning on, raise `max_tokens` (default
-512) and `timeout` (default 60 s): the thinking counts against `max_tokens` on most servers, and a reply cut off there
-escalates ("the reply was cut off (max_tokens)"). Under `long="retrieve"` an LLM reads 512 tokens per request by
+max_tokens, seed): those raise `ValueError`. It enters the fingerprint.
+
+**A model that is asked to reason gets to reason.** When `extra_body` asks for reasoning (`reasoning`,
+`reasoning_effort`, `thinking`, or `chat_template_kwargs` with `enable_thinking`, unless set to "none" / disabled),
+`response_format="auto"` puts the contract in the prompt and sends no `response_format`, and `max_tokens` defaults to
+2,048 instead of 512. A server that enforces a reply format by constrained decoding can apply it from the first token
+and skip the thinking altogether: on OpenRouter, one of gpt-oss-120b's providers did so under json_schema and under
+json_object, for about a fifth of all requests, and the same yes/no judge scored F1 0.744 on RAGTruth dev with the
+schema enforced against 0.790 with the contract in the prompt (the plain call to the model: 0.802; paired bootstrap of
+the change +0.046, 95% interval +0.019 … +0.074). The reply is validated the same way either way. A reply that shows no
+reasoning — no reasoning text and no reasoning tokens counted — when it was asked for carries
+`extra["llm"]["reasoning"] = "none"` and is warned about once (with `response_format="json_schema"` set by hand, that
+is how you see it); `extra["llm"]["reasoning_tokens"]` records the count when the server reports one. Without the
+grammar gpt-oss now and then writes a decimal as `0. nine`: that exact form is read as 0.9 and recorded in
+`extra["llm"]["repaired"]`; anything else that is not JSON escalates as before. Raise `timeout` (default 60 s) with
+reasoning on: the thinking counts against `max_tokens` on most servers, and a reply cut off there escalates ("the
+reply was cut off (max_tokens)"). Under `long="retrieve"` an LLM reads 512 tokens per request by
 default; `max_len=` widens that (see "A larger budget").
 
 **Cost and latency.** Each question about each input is a paid request — the question, every option with its

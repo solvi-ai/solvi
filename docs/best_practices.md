@@ -122,6 +122,28 @@ reference raised the one false flag). Treat a quiet monitor as "no large change"
 calibration and the mix of answers, and level off within a few dozen examples. When a question needs the model to read
 the input differently, use a LoRA adapter (`adapt_lora`), a head over computed facts, or a rule.
 
+## An LLM as a decider
+
+**With a reasoning LLM, let it think: do not force a reply format on it.** A server that enforces `response_format`
+by constrained decoding may apply the grammar from the first token and skip the thinking. On OpenRouter one of
+gpt-oss-120b's providers answered every request that way under json_schema and json_object (0 reasoning tokens) and
+served about a fifth of all requests; a yes/no hallucination judge asked through `solvi.llm` scored F1 0.744 on
+RAGTruth dev with the schema enforced and 0.790 with the contract in the prompt (the plain call to the model: 0.802),
+and on eval 0.733 → 0.766 (plain call 0.784; the remaining −0.018 is inside the noise, 95% interval −0.049 … +0.012).
+A product-matching question on Abt-Buy (1,916 pairs) moved 0.837 → 0.860 (plain call 0.872; difference −0.012, 95%
+interval −0.049 … +0.021). solvi does this by default: with reasoning asked for in `extra_body`, `response_format="auto"` sends no
+format and `max_tokens` defaults to 2,048. If you set `response_format="json_schema"` by hand, look for
+`extra["llm"]["reasoning"] == "none"` in the trace.
+
+**Count an escalated decision as unanswered.** An LLM decision whose reply was invalid or cut off has no value and no
+probabilities (`d.value is None`); go by `d.escalate`, not by `p ≥ 0.5`. With a reasoning model, give `max_tokens`
+room: at 400, 26 of 1,916 product-pair replies were cut off; asked again at the default 2,048, none was.
+
+**Keep the quote in the question.** Asking the same judge for the unsupported passage along with its yes/no is part of
+how it finds one: without the quote its recall on RAGTruth dev fell from 0.757 to 0.643 (F1 −0.053, 95% interval
+−0.089 … −0.018). Moving the text before the question or dropping the "say so with low probabilities" rule changed
+nothing measurable (F1 within ±0.004).
+
 ## A model that writes
 
 **Ask for table rows copied as written, and parse them in code.** An extraction that asked for a travel-time table as

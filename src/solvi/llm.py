@@ -13,7 +13,13 @@ One question is one request (`POST {base_url}/chat/completions`, temperature 0),
 
 (a multi-label answer is a list and its probabilities are per option; a span answer is a passage of the text and a
 confidence; "not stated" is an option only when the question allows it). The schema goes as `response_format`
-json_schema when the server takes it, else the same contract is in the prompt and the reply is parsed. When the server
+json_schema when the server takes it, else the same contract is in the prompt and the reply is parsed. A request that
+asks the model to reason (`extra_body` with `reasoning` / `reasoning_effort` ...) puts the contract in the prompt from
+the start: a server that enforces a reply format by constrained decoding can skip the thinking altogether (measured on
+OpenRouter's gpt-oss-120b: one provider, which served about a fifth of the requests, answered with no reasoning at all
+under json_schema and under json_object; a yes/no judge on RAGTruth dev scored F1 0.744 that way and 0.790 with the
+contract in the prompt). A reply that shows no reasoning when it was asked for is marked
+`extra["llm"]["reasoning"] = "none"`, with a warning once. When the server
 returns log-probabilities for the answer's tokens, the probabilities come from them (the chosen option: the product of
 its tokens' probabilities; the others: the alternatives at its first token), not from the numbers the model wrote;
 `extra["llm"]["probabilities"]` records which, and a calibration refuses examples that mix the two (two scales; see
@@ -25,7 +31,8 @@ letter case; what is recorded is the text's own spelling). A
 quote that is not in the text escalates when the question asks for evidence; otherwise it is dropped (the answer stands,
 `extra["llm"]["quote_dropped"]` records it); a span answer not in the text escalates, its passage in
 `extra["llm"]["rejected"]`. An invalid reply, a refusal, a cut-off reply or a server that does not answer
-(after `retries`) escalates — "model escalated: invalid LLM output — ..." — and is never turned into a guess. The
+(after `retries`) escalates — "model escalated: invalid LLM output — ..." — and is never turned into a guess: the
+decision has no value (None), no probabilities and confidence 0. The
 probabilities become the decider's logits (log p), so everything built on a DecideModel works unchanged: act_guard /
 conformal / calibrate_for on your labelled examples (on the confidence: an LLM gives no act signal), fit / teach / adapt,
 Cascade / Vote / Route, the audit and the trace.
@@ -248,22 +255,38 @@ def messages(it, ask="probabilities"):
 
 
 # ------------------------------------------------------------------------------------------------ reading the reply
-def _json(content):
-    """The reply's JSON object (a ```json fence or text around it tolerated in the prompt-only format)."""
+# a number whose first decimal is spelled out: gpt-oss writes "0. nine" for 0.9 now and then when no reply format is
+# enforced (2-3 in 600 replies in our runs); only this exact form is read, as the digit it names
+_DIGITS = ("zero", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine")
+_SPELLED = re.compile(r"(?<![\w.])(\d)\. (" + "|".join(_DIGITS) + r")(?=\s*[,}\]])")
+
+
+def _json(content, info=None):
+    """The reply's JSON object (a ```json fence or text around it tolerated in the prompt-only format; a decimal written
+    as "0. nine" read as 0.9 and recorded in info["repaired"])."""
     s = content.strip()
-    try:
-        v = json.loads(s)
-    except ValueError:
-        m = re.search(r"\{.*\}", s, re.S)
-        if not m:
-            raise InvalidOutput("the reply is not JSON") from None
+    for attempt in (s, None):
+        if attempt is None:
+            fixed = _SPELLED.sub(lambda m: f"{m.group(1)}.{_DIGITS.index(m.group(2))}", s)
+            if fixed == s:
+                break
+            attempt = fixed
         try:
-            v = json.loads(m.group(0))
+            v = json.loads(attempt)
         except ValueError:
-            raise InvalidOutput("the reply is not JSON") from None
-    if not isinstance(v, dict):
-        raise InvalidOutput("the reply is not a JSON object")
-    return v
+            m = re.search(r"\{.*\}", attempt, re.S)
+            try:
+                v = json.loads(m.group(0)) if m else None
+            except ValueError:
+                v = None
+            if v is None:
+                continue
+        if attempt is not s and info is not None:
+            info["repaired"] = "a decimal with a spelled-out digit (\"0. nine\" as 0.9)"
+        if not isinstance(v, dict):
+            raise InvalidOutput("the reply is not a JSON object")
+        return v
+    raise InvalidOutput("the reply is not JSON")
 
 
 # typographic quotes, apostrophes and dashes → their ASCII form, one character for one (offsets stay valid)
@@ -404,12 +427,12 @@ def _logit(p):
 def read_reply(it, content, logprobs=None, ask="probabilities"):
     """A reply's content → the scorer's output for the Item: {"logits", "unknown", "pointer", "info"}. InvalidOutput when
     the reply breaks the contract."""
-    reply = _json(content)
+    info = {}
+    reply = _json(content, info)
     if "answer" not in reply:
         raise InvalidOutput('the reply has no "answer"')
     shape, text = _shape(it), it.text
     unknown_ok = bool(getattr(it, "unknown", False))
-    info = {}
     quote = reply.get("quote", "")
     if quote is None:
         quote = ""
@@ -488,9 +511,39 @@ def read_reply(it, content, logprobs=None, ask="probabilities"):
 
 
 # ------------------------------------------------------------------------------------------------ the scorer
+MAX_TOKENS_REASONING = 2048                            # max_tokens's default when extra_body asks for reasoning
+
 # the request fields solvi sets itself: the reply contract, the format ladder and the trace depend on them
 RESERVED = ("model", "messages", "response_format", "logprobs", "top_logprobs", "temperature", "max_tokens", "seed",
             "stream", "n")
+
+
+def asks_reasoning(extra):
+    """True when the request fields ask the model to think first: OpenRouter's `reasoning` (unless its effort is "none"
+    or it is disabled), OpenAI's / vLLM's `reasoning_effort` (unless "none"), `thinking` (unless disabled) or
+    `chat_template_kwargs` with `enable_thinking` / `thinking` true."""
+    if not isinstance(extra, dict):
+        return False
+    r = extra.get("reasoning")
+    if isinstance(r, dict) and r.get("enabled") is not False and r.get("effort") != "none" and r.get("max_tokens") != 0:
+        return True
+    if isinstance(extra.get("reasoning_effort"), str) and extra["reasoning_effort"] != "none":
+        return True
+    t = extra.get("thinking")
+    if t is True or (isinstance(t, dict) and t.get("type", "enabled") != "disabled" and t.get("enabled") is not False):
+        return True
+    kw = extra.get("chat_template_kwargs")
+    return isinstance(kw, dict) and (kw.get("enable_thinking") is True or kw.get("thinking") is True)
+
+
+def _thought(msg, usage):
+    """Whether a reply shows that the model thought: reasoning text in the message, or reasoning tokens counted in the
+    usage. (Some providers count 0 reasoning tokens while returning the reasoning text, so both are looked at.)"""
+    if any(msg.get(k) for k in ("reasoning", "reasoning_content", "reasoning_details")):
+        return True
+    det = usage.get("completion_tokens_details") if isinstance(usage, dict) else None
+    n = det.get("reasoning_tokens") if isinstance(det, dict) else None
+    return isinstance(n, int) and not isinstance(n, bool) and n > 0
 
 
 def _extra_body(extra):
@@ -516,7 +569,7 @@ class LLMScorer:
     tag = "llm"
 
     def __init__(self, base_url, model, api_key=None, *, timeout=60.0, retries=2, backoff=1.0, response_format="auto",
-                 logprobs="auto", ask="probabilities", max_tokens=512, seed=None, headers=None, extra_body=None,
+                 logprobs="auto", ask="probabilities", max_tokens=None, seed=None, headers=None, extra_body=None,
                  workers=4, opener=None, sleep=None):
         if response_format not in ("auto",) + FORMATS:
             raise ValueError(f"response_format must be 'auto' or one of {FORMATS}")
@@ -535,9 +588,17 @@ class LLMScorer:
         self._key = api_key
         self.timeout, self.retries, self.backoff = float(timeout), int(retries), float(backoff)
         self.response_format, self.logprobs, self.ask = response_format, logprobs, ask
-        self.max_tokens, self.seed = int(max_tokens), seed
+        self.seed = seed
         self._headers = dict(headers or {})
         self.extra_body = _extra_body(extra_body)
+        # a request that asks the model to think: "auto" starts with the contract in the prompt, because a server that
+        # enforces a reply format by constrained decoding can skip the thinking altogether (see `llm`)
+        self.reasoning = asks_reasoning(self.extra_body)
+        r = (self.extra_body or {}).get("reasoning")
+        self._reasoning_hidden = isinstance(r, dict) and bool(r.get("exclude"))   # asked, but not to be returned
+        self._warned_unthought = False
+        # default: 512 for a reply alone, 2,048 when the thinking counts against the limit too
+        self.max_tokens = int(max_tokens) if max_tokens is not None else (MAX_TOKENS_REASONING if self.reasoning else 512)
         self.workers = max(1, int(workers))
         self.opener = opener or urllib.request.urlopen
         self.sleep = sleep or time.sleep
@@ -545,7 +606,7 @@ class LLMScorer:
         self.model_id = f"llm:{model}@{self.endpoint}"
         # what the server has accepted so far ("auto": the first that works, kept for the next requests); worker
         # threads read and step it down under the lock, and never after a request has succeeded
-        self._format = "json_schema" if response_format == "auto" else response_format
+        self._format = ("prompt" if self.reasoning else "json_schema") if response_format == "auto" else response_format
         self._lp = logprobs is not False
         self._ok = False
         self._lock = threading.Lock()
@@ -558,6 +619,8 @@ class LLMScorer:
     def fingerprint(self):
         fp = f"llm|{self.endpoint}|{self.model}|{self.template}|{self.ask}|{self.response_format}|{self.logprobs}|" \
              f"{self.max_tokens}|{self.seed}"
+        if self.reasoning and self.response_format == "auto":
+            fp += "|auto:prompt"                       # where "auto" starts for a reasoning request
         if self.extra_body:                            # provider pinning, reasoning ... change what answers
             blob = json.dumps(self.extra_body, sort_keys=True, ensure_ascii=False)
             fp += "|x:" + hashlib.sha256(blob.encode()).hexdigest()[:16]
@@ -691,6 +754,12 @@ class LLMScorer:
             msg = ch.get("message") or {}
             if not isinstance(msg, dict):
                 raise InvalidOutput(f"the response's message is not an object but a {type(msg).__name__}")
+            det = u.get("completion_tokens_details")
+            if isinstance(det, dict) and isinstance(det.get("reasoning_tokens"), int):
+                info["reasoning_tokens"] = det["reasoning_tokens"]
+            if self.reasoning and not self._reasoning_hidden and not _thought(msg, u):
+                info["reasoning"] = "none"             # asked to think, answered without thinking
+                self._warn_unthought(fmt)
             if msg.get("refusal"):
                 raise InvalidOutput(f"the model refused: {str(msg['refusal'])[:120]}")
             if ch.get("finish_reason") == "length":
@@ -706,6 +775,18 @@ class LLMScorer:
         out["info"] = {"llm": {**info, **out.get("info", {})}}
         return out
 
+    def _warn_unthought(self, fmt):
+        with self._lock:
+            if self._warned_unthought:
+                return
+            self._warned_unthought = True
+        import warnings
+        hint = (" Some servers skip the thinking when the reply format is enforced (measured: one of OpenRouter's "
+                "gpt-oss-120b providers, under json_schema and json_object); response_format=\"prompt\" lets it think."
+                if fmt != "prompt" else "")
+        warnings.warn(f"the request asks the model to reason, and a reply shows none (no reasoning text, no reasoning "
+                      f"tokens counted; reply format {fmt}); such replies carry extra['llm']['reasoning'] = 'none'.{hint}", UserWarning, stacklevel=2)
+
     def logits(self, items):
         items = list(items)
         if self.workers > 1 and len(items) > 1:
@@ -718,7 +799,7 @@ MODES = ["single", "multi", "score", "noul", "span"]
 
 
 def llm(base_url, model, api_key=None, *, timeout=60.0, retries=2, backoff=1.0, response_format="auto", logprobs="auto",
-        ask="probabilities", max_tokens=512, seed=None, headers=None, extra_body=None, workers=4, opener=None, sleep=None,
+        ask="probabilities", max_tokens=None, seed=None, headers=None, extra_body=None, workers=4, opener=None, sleep=None,
         max_len=None):
     """A DecideModel over an OpenAI-compatible chat-completions server (see the module docs).
 
@@ -727,7 +808,8 @@ def llm(base_url, model, api_key=None, *, timeout=60.0, retries=2, backoff=1.0, 
     server knows. api_key: sent as a Bearer token, never recorded. response_format: "auto" (json_schema, then json_object,
     then the contract in the prompt only, as far as the server accepts — stepped down only before the first successful
 request and on a 400 about the format; any other 400 / 413 / 422 escalates that question: "invalid input for the
-endpoint"), or one of them. logprobs: "auto" (ask for them;
+endpoint"; when extra_body asks for reasoning, "auto" is the contract in the prompt only, so the model thinks before it
+answers — see the module docs), or one of them. logprobs: "auto" (ask for them;
     drop them when the server refuses; a gateway whose providers differ answers some requests from them and some from
     the written numbers — a calibration then refuses the mix), True, False. ask: "probabilities" (one per option) or "confidence" (one number,
     fewer tokens; the rest shared evenly). retries / backoff: for network errors, timeouts, 408 / 409 / 429 / 5xx.
@@ -746,10 +828,11 @@ endpoint"), or one of them. logprobs: "auto" (ask for them;
     System.ask go one after another). opener: a replacement for urllib's urlopen
     (tests, proxies); sleep: for the backoff (tests).
 
-    max_tokens: the reply's limit (default 512). A reasoning model's thinking counts against it on most servers, and a
-    reply cut off at the limit escalates ("the reply was cut off (max_tokens)"): with reasoning on, raise it (1,500-4,000)
-    and the timeout. max_len: the tokens one request reads under long="retrieve" (words and punctuation × 1.3, the
-    question included; default None: 512, as for a local decider). A text up to that length is sent whole; a longer
+    max_tokens: the reply's limit (default 512; 2,048 when extra_body asks for reasoning). A reasoning model's thinking
+    counts against it on most servers, and a reply cut off at the limit escalates ("the reply was cut off (max_tokens)"):
+    measured with gpt-oss-120b at reasoning effort low, 6 of 600 short product-pair questions were cut off at 400, none
+    at 800. With reasoning on, raise the timeout too. max_len: the tokens one request reads under long="retrieve" (words
+    and punctuation × 1.3, the question included; default None: 512, as for a local decider). A text up to that length is sent whole; a longer
     one, with long="retrieve", is read by its best sections within it — max_len=3000 reads about six times more of a
     contract per request (and pays for it). Without long= the whole text is always sent. It enters the fingerprint
     (through the part's long-text settings)."""

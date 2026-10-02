@@ -579,6 +579,8 @@ def ground(part, v, init_state=None):
         if part.options is None and isinstance(v, Decision) and "interval" in v.extra:
             opts = None                       # a number: its value summarizes the distribution over the bins (checked as the answer)
         vals = list(value) if isinstance(value, (list, tuple, set)) else [value]
+        if isinstance(v, Decision) and v.escalate and value is None:
+            return v.escalate                 # no output at all (an LLM's invalid reply): its reason, not "outside"
         if opts and any(x not in opts for x in vals):
             return f"decision {_short(value)!r} is {OUTSIDE_OPTIONS} {list(opts)}"
         if isinstance(v, Decision):

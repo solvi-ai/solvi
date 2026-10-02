@@ -141,7 +141,16 @@ def test_an_invalid_reply_escalates_and_is_never_guessed(reply, why):
     m = model(FakeLLM(reply=reply))
     d = m.decision("team", "Which team?", "email", TEAMS).decide("I was charged twice")
     assert d.escalate and d.escalate.startswith("model escalated: invalid LLM output") and why in d.escalate
-    assert d.conf <= 0.5 + 1e-9                                  # uniform: nothing proposed
+    assert d.value is None and d.probs == {} and d.conf == 0.0     # nothing proposed: no value, no probabilities
+
+
+def test_a_cut_off_yes_no_reply_has_no_value_rather_than_the_first_option():
+    """Uniform logits used to read as the first option: a cut-off reply to a yes/no question came back value True with
+    p(yes) 0.5, which code reading the value (or p >= 0.5) took for a "yes"."""
+    def cut(req, timeout=None):
+        return io.BytesIO(json.dumps({"choices": [{"message": {"content": '{"answer": "y'}, "finish_reason": "length"}]}).encode())
+    d = llm("http://llm.example/v1", "m", opener=cut).decision("same", "Same product?", "pair", bool).decide("a | b")
+    assert d.escalate and "cut off" in d.escalate and d.value is None and d.probs == {}
 
 
 class Shapeless(FakeLLM):
@@ -165,7 +174,7 @@ class Shapeless(FakeLLM):
 def test_a_200_response_of_an_unexpected_shape_escalates_instead_of_raising(shape, why):
     d = model(Shapeless(shape)).decision("team", "Which team?", "email", TEAMS).decide("I was charged twice")
     assert d.escalate and d.escalate.startswith("model escalated: invalid LLM output") and why in d.escalate
-    assert d.conf <= 0.5 + 1e-9
+    assert d.value is None and d.conf == 0.0
 
 
 def test_a_usage_or_logprobs_field_of_an_unexpected_shape_does_not_stop_the_answer():
@@ -423,6 +432,7 @@ def test_a_quote_not_in_the_text_is_dropped_unless_evidence_is_asked_for():
     assert ok.escalate is None and [q.value for q in ok.evidence] == ["I'm charged - twice"]
 
 
+@pytest.mark.filterwarnings("ignore:the request asks the model to reason")       # FakeLLM shows no reasoning
 def test_extra_body_is_merged_and_cannot_override_the_contract():
     pin = {"provider": {"order": ["groq"], "allow_fallbacks": False}, "reasoning": {"effort": "low"}}
     fake = FakeLLM()
@@ -430,7 +440,7 @@ def test_extra_body_is_merged_and_cannot_override_the_contract():
     assert m.decision("team", "Which team?", "email", TEAMS).decide("my parcel is late").value == "shipping"
     body = fake.bodies[-1]
     assert body["provider"] == pin["provider"] and body["reasoning"] == {"effort": "low"}
-    assert body["response_format"]["type"] == "json_schema" and body["model"] == "tiny-chat"
+    assert "response_format" not in body and body["model"] == "tiny-chat"     # reasoning asked: the contract in the prompt
     pin["provider"]["order"] = ["other"]                                     # copied: a later edit changes nothing
     m.decision("team", "Which team?", "email", TEAMS).decide("I was charged")
     assert fake.bodies[-1]["provider"]["order"] == ["groq"]
@@ -443,6 +453,81 @@ def test_extra_body_is_merged_and_cannot_override_the_contract():
         model(FakeLLM(), extra_body=[("provider", {})])
     with pytest.raises(ValueError, match="not JSON"):
         model(FakeLLM(), extra_body={"x": object()})
+
+
+class ThinkingLLM(FakeLLM):
+    """FakeLLM whose replies show thinking — reasoning text and reasoning tokens — except under an enforced reply
+    format when `skip_when_enforced` (as one of OpenRouter's gpt-oss-120b providers does), or always when `never`."""
+
+    def __init__(self, skip_when_enforced=True, never=False, **kw):
+        super().__init__(**kw)
+        self.skip_when_enforced, self.never = skip_when_enforced, never
+
+    def __call__(self, req, timeout=None):
+        body = json.loads(req.data.decode())
+        out = json.loads(super().__call__(req, timeout).read())
+        skip = self.never or (self.skip_when_enforced and body.get("response_format"))
+        out["choices"][0]["message"]["reasoning"] = None if skip else "The text mentions a parcel."
+        out["usage"]["completion_tokens_details"] = {"reasoning_tokens": 0 if skip else 12}
+        return io.BytesIO(json.dumps(out).encode())
+
+
+def test_a_reasoning_request_puts_the_contract_in_the_prompt_so_the_model_can_think():
+    fake = ThinkingLLM()
+    m = model(fake, extra_body={"reasoning": {"effort": "low"}})
+    d = m.decision("team", "Which team?", "email", TEAMS).decide("my parcel is late")
+    assert d.value == "shipping" and d.extra["llm"]["format"] == "prompt" and "response_format" not in fake.bodies[-1]
+    assert d.extra["llm"]["reasoning_tokens"] == 12 and "reasoning" not in d.extra["llm"]
+    assert "auto:prompt" in m.scorer.fingerprint() and "auto:prompt" not in model(FakeLLM()).scorer.fingerprint()
+    plain = ThinkingLLM()                                          # no reasoning asked: json_schema as before
+    model(plain).decision("team", "Which team?", "email", TEAMS).decide("my parcel is late")
+    assert plain.bodies[-1]["response_format"]["type"] == "json_schema"
+    for off in ({"reasoning": {"effort": "none"}}, {"reasoning": {"enabled": False}}, {"reasoning_effort": "none"}):
+        f = ThinkingLLM()
+        model(f, extra_body=off).decision("team", "Which team?", "email", TEAMS).decide("my parcel is late")
+        assert f.bodies[-1]["response_format"]["type"] == "json_schema"
+
+
+def test_a_reply_that_skipped_the_asked_for_reasoning_is_marked_and_warned_about_once():
+    fake = ThinkingLLM()                                           # thinks only without an enforced format
+    m = model(fake, extra_body={"reasoning_effort": "low"}, response_format="json_schema")
+    part = m.decision("team", "Which team?", "email", TEAMS)
+    with pytest.warns(UserWarning, match="a reply shows none") as w:
+        ds = part.decide(["my parcel is late", "I was charged twice"])
+    assert len([x for x in w if "a reply shows none" in str(x.message)]) == 1
+    assert all(d.extra["llm"]["reasoning"] == "none" and d.extra["llm"]["reasoning_tokens"] == 0 for d in ds)
+    assert [d.value for d in ds] == ["shipping", "billing"]       # the answer stands; the trace says how it was made
+    hidden = model(ThinkingLLM(never=True), extra_body={"reasoning": {"effort": "low", "exclude": True}})
+    d = hidden.decision("team", "Which team?", "email", TEAMS).decide("my parcel is late")
+    assert "reasoning" not in d.extra["llm"]                       # asked not to be shown: nothing to check
+
+
+def test_max_tokens_defaults_to_512_and_to_2048_when_reasoning_is_asked_for():
+    for extra, n in ((None, 512), ({"reasoning": {"effort": "low"}}, 2048), ({"reasoning_effort": "none"}, 512)):
+        fake = ThinkingLLM()
+        model(fake, extra_body=extra).decision("team", "Which team?", "email", TEAMS).decide("my parcel is late")
+        assert fake.bodies[-1]["max_tokens"] == n
+    fake = ThinkingLLM()
+    model(fake, extra_body={"reasoning": {"effort": "low"}}, max_tokens=300).decision(
+        "team", "Which team?", "email", TEAMS).decide("my parcel is late")
+    assert fake.bodies[-1]["max_tokens"] == 300                    # an explicit limit is kept
+
+
+@pytest.mark.parametrize("written, read", [("0. nine", 0.9), ("0. one", 0.1)])
+def test_a_decimal_with_a_spelled_out_digit_is_read_as_that_digit_and_recorded(written, read):
+    reply = '{"answer": "shipping", "confidence": %s, "quote": "parcel"}' % written
+    d = model(FakeLLM(reply=reply), response_format="prompt", ask="confidence").decision(
+        "team", "Which team?", "email", TEAMS).decide("my parcel is late")
+    if read < 0.5:                                                 # the answer below the other option's share: invalid
+        assert d.escalate and "confidence 0.10" in d.escalate
+        return
+    assert d.value == "shipping" and d.probs["shipping"] == pytest.approx(read)
+    assert "0. nine" in d.extra["llm"]["repaired"]
+    for bad in ('{"answer": "shipping", "confidence": 0. ninety, "quote": ""}',       # only one spelled digit
+                '{"answer": "shipping", "confidence": nine, "quote": ""}'):
+        d = model(FakeLLM(reply=bad), response_format="prompt", ask="confidence").decision(
+            "team", "Which team?", "email", TEAMS).decide("my parcel is late")
+        assert d.escalate and "not JSON" in d.escalate
 
 
 def test_seed_is_sent_only_when_set():
