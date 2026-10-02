@@ -761,7 +761,8 @@ answers it lets through are then wrong about as often as all of them. A combinat
 examples (the labels are not read, so the promise holds; the Bonferroni correction is over those thresholds). Before
 0.7 it tried a fixed grid from 0.2 to 0.995, which let nothing through for an LLM decider whose confidences sit above
 0.999. Every decision records the promise of its threshold (`decision.extra["guarantee"]`) and the audit shows it per
-answer. Recalibrate when the inputs change: the promise does not survive a shift of domain.
+answer. Recalibrate when the inputs change: the promise does not survive a shift of domain. The same promises on a whole question —
+a fitted head, a rule, a trust score you compute — are `system.guarantee` ([below](#a-guarantee-on-any-question-systemguarantee)).
 
 #### Keeping a calibration: save_calibration, load_calibration
 
@@ -1907,14 +1908,97 @@ are written as for `fit` (`True` / `False` for a yes/no question). The held-out 
 previous calibration, are not saved to the storage and do not count in `system.stats`, so calling `calibrate` again
 replaces the parameters with a fit of the same kind.
 
-solvi does not pick an abstention threshold for you. With calibrated confidence you choose one per question from
-held-out data, for example "answer automatically at confidence >= 0.95, send the rest to a person":
+A threshold you choose yourself ("answer automatically at confidence >= 0.95") promises nothing on new inputs. For a
+threshold with a promise, use `system.guarantee` (below).
+
+### A guarantee on any question: System.guarantee
+
+`part.act_guard` and `calibrate_for` put a promise on a model's decision. `system.guarantee` puts one on a question,
+whatever answers it — a fitted head (`fit_fast`, `fit`), a rule over computed facts, a model decision — and on any
+number the question's answer can be judged by: its confidence, a fact the catalog computes (a trust score, the share
+of candidates that agree), the act probability, or a function of your own:
 
 ```python
-r = system.ask(state)["total_band"]
-if r.status == "abstain" or r.confidence < 0.95:
-    send_to_review(state, r.why)
+import random
+from solvi import Answer, Catalog, Question, System
+
+cat = Catalog()
+
+@cat.fn
+def margin(score: float) -> float:          # any number the catalog computes can carry a promise
+    return abs(score - 0.5)
+
+system = System(cat, [Question("refund", "Refund the order?", Answer.yes_no())])
+rng = random.Random(0)
+
+def draw(n):                                # (input, correct answer); near 0.5 the answer is a coin flip
+    return [({"score": (x := rng.random())}, x + rng.gauss(0, 0.1) > 0.5) for _ in range(n)]
+
+system.fit_fast("refund", draw(400), features=["score"])
+report = system.guarantee("refund", draw(600), error=0.05)     # held out: not the 400 the head was fitted on
+report["threshold"], report["answered"], report["error"], report["risk"]     # 0.84, 0.78, 0.019, 0.015
+r = system.ask({"score": 0.52})["refund"]
+r.status, r.why        # "abstain", "confidence 0.6229 < 0.8406 (threshold of the guarantee: error among the answers
+                       #  given alone ≤ 0.05 with probability ≥ 0.9, ...); would have answered 'yes' (...)"
+r.extra["guarantee"]   # {"method": "ltt", "promise", "n": 600, "signal": "confidence", "value", "threshold", ...}
 ```
+
+The other forms:
+
+```python
+system.guarantee("refund", examples, risk=0.02)                    # P(answered alone and wrong) ≤ 2% of ALL inputs
+system.guarantee("refund", examples, risk=0.02, signal="margin")   # on a fact the catalog computes
+system.guarantee("refund", examples, risk=0.02, groups="answer", delta=None)   # inside each answer ("yes", "no")
+system.guarantee("act", examples, risk=0.03, signal="trust",       # right / wrong by a judge of your own
+                 correct=lambda result, label: overlaps(result, label))
+system.guarantee("correct", examples, error=0.3, answer="yes", folds=5)
+# one-sided: "yes" alone when P(yes) ≥ the threshold (it may be below 0.5), else abstain; folds=5: the fit_fast head
+# was fitted on these very examples, so each is scored by a head refitted without it (the promise is then approximate)
+system.guarantee("refund", False)                                  # remove it
+```
+
+Which promise each method makes, for inputs like the calibration examples (the same stream, not a new domain):
+
+| method | given as | promise |
+|---|---|---|
+| `"crc"` (conformal risk control) | `risk=r` | P(answered alone and wrong) ≤ r — a share of **all** inputs, answered or escalated, on average over calibration sets |
+| `"ltt"` (learn-then-test) | `error=e` | the error **among the answers given alone** ≤ e, with probability ≥ 1 − delta over the calibration set |
+| `"empirical"` | `error=e, method="empirical"` | none: the error among the answered was ≤ e on the calibration examples only |
+
+Which one to use: "≤ 5% of the answers we give are wrong" is `error=` (learn-then-test). `risk=` is the cheaper
+promise and the weaker one when most inputs are easy: with 89% of the pairs being non-matches, "1% of all pairs" was met
+while a predicted match given alone could still be wrong far more often — `groups="answer"` puts the promise inside
+each answer. groups also takes a fact name, a hierarchy or a function of facts, as `act_guard` does.
+
+What is checked before a threshold is set, so that a promise is never made on a signal that cannot carry it:
+
+- **separation**: the signal must rank the right answers above the wrong ones on the calibration examples (a one-sided
+  Mann–Whitney test at 5%). A judge at chance — a model approving its own queries, AUROC 0.52 — is refused with a
+  ValueError (`weak="warn"` sets it anyway, warns, and records the warning with every answer);
+- **support**: a threshold must have at least `min_support=10` calibration examples at or above it; when none does,
+  everything escalates and `report["why"]` says so (a "75% right" threshold resting on one example answered 3 eval
+  questions, all wrong);
+- **feasibility**: conformal risk control cannot certify a risk below 1 / (n + 1) with n examples, and learn-then-test
+  often lets nothing through on a hundred: the threshold is then inf and the report says why.
+
+The report gives both shares on the calibration examples — `"risk"` (answered alone and wrong, of all) and `"error"`
+(among the answered) — with `"answered"`, the threshold's `"support"`, `"separation"` (`auroc`, `p`), `"base_error"`
+and, for conformal risk control, `"must_escalate_at_least"`. The facts the signal and the groups read become
+checkpoints of the question, so every flow computes them. Every answer of the question records its verdict as a hashed
+trace record (`guard:<question>`: the signal's value, the threshold, the promise); below the threshold the question
+abstains (safeguard low confidence) and says what it would have answered; a forced answer (a failed hard check) and an
+abstention are left as they are. Replay with the System re-derives the verdict; a guarantee recalibrated since the
+decision is a mismatch ("the question's guarantee changed"). `solvi.guarantee.calibrate(scores, correct, error=...)`
+does the same for any scalar outside a System: `p.threshold`, `p.allows(score)`, `p.report`.
+
+Measured, the hand-written thresholds of three tasks against `system.guarantee` on the same calibration and eval sets:
+a matching head (Abt-Buy, 1,916 eval pairs) — the same thresholds and the same eval numbers for all six promises
+(e.g. 1% of all pairs: 96.9% answered alone, 0.59% wrong; learn-then-test 1%: 92.3%, 0.34%); a contract-clause trust
+score (CUAD, 1,025 eval questions) — the same at risk 0.02 / 0.03 / 0.05 (46.2% / 54.5% / 71.0% answered alone, 3.8% /
+4.1% / 4.7% wrong), while the LLM's own confidence as the signal is refused (AUROC 0.51); a text-to-SQL head (BIRD, 100
+dev questions, one-sided, 5 folds) — 75.3% returned, 35.4% wrong against the hand-written 74.7%, 34.8%; learn-then-test
+at 30% lets nothing through on 100 examples, and conformal risk control at 20% returned 60% with 20% of all questions
+wrong on eval.
 
 ## The trace and verification
 

@@ -269,6 +269,7 @@ class System:
         self.timeout = timeout                    # aask: default seconds per call of a part
         self.early_exit = bool(early_exit)        # False: the whole flow runs although a hard check failed
         self.calib: dict[str, tuple] = {}         # question → (a, b): confidence' = σ(a·logit(confidence) + b)
+        self.guards = {}                          # question → solvi.guarantee.QuestionGuard (System.guarantee)
         self.learned_rules = {}                   # question → RuleList (readable rules learned from examples)
         if order not in ("default", "learned"):
             raise ValueError('order must be "default" or "learned"')
@@ -547,6 +548,9 @@ class System:
         if self.learn:
             self._observe(trace, init_state, vals, policy)
         results, feasible, violations = self._results(qs, flow, trace, vals, p.textin)
+        if self.guards:                               # calibrated thresholds with a promise (solvi.guarantee)
+            from .guarantee import apply_guards
+            apply_guards(self, results, trace, vals, flow)
         resp = Response(results, flow, trace, vals, now_ms() - t0, feasible, violations, self.catalog)
         resp._heads = self.heads                      # for the audit: which features a learned head could not use
         resp._system = self                           # for reports and counterfactuals (questions, answer heads, replay)
@@ -594,7 +598,11 @@ class System:
         for r in trace.records:
             if r.value is not MISSING:
                 vals[r.name] = r.value
-        return self._results(qs, flow, t, vals)[0]
+        results = self._results(qs, flow, t, vals)[0]
+        if self.guards:                               # the recorded guard verdicts, re-derived (solvi.guarantee)
+            from .guarantee import apply_guards
+            apply_guards(self, results, t, vals, flow, live=False)
+        return results
 
     def fingerprint(self):
         """What makes this system's decisions: {"catalog": the catalog's fingerprint (every part's code and declarations,
@@ -633,10 +641,12 @@ class System:
                                           a.unknown, a.k, tuple(a.bins or ()), a.coverage, a.unit, a.source, repr(a.type))
             return (q.text, ans, tuple(q.checkpoints), tuple(q.uses or ()) if q.uses is not None else None,
                     q.min_confidence, q.require_evidence)
-        key = (tuple((n, content(q)) for n, q in self.questions.items()), tuple(sorted(self.calib.items())))
+        key = (tuple((n, content(q)) for n, q in self.questions.items()), tuple(sorted(self.calib.items())),
+               tuple(sorted((n, g.fingerprint()) for n, g in self.guards.items())))     # solvi.guarantee
         cached = getattr(self, "_qfp", None)
         if cached is None or cached[0] != key:
-            cached = self._qfp = (key, digest(sorted((q.name, data(q)) for q in self.questions.values()), list(key[1])))
+            cached = self._qfp = (key, digest(sorted((q.name, data(q)) for q in self.questions.values()), list(key[1]),
+                                              *([list(key[2])] if key[2] else [])))
         return cached[1]
 
     def _fingerprint(self, flow):
@@ -1073,6 +1083,16 @@ class System:
             raise
         self.calib[question] = _platt_fit(np.array(xs), np.array(ys))
         return self.calib[question]
+
+    def guarantee(self, question, examples=None, **kw):
+        """A calibrated threshold with a stated promise on this question's answer, from labelled examples
+        [(init_state, correct answer)]: risk= (P(answered alone and wrong) ≤ risk, conformal risk control), error= (the
+        error among the answers given alone ≤ error with probability ≥ 1 − delta, learn-then-test) or method="empirical";
+        on the answer's confidence, a computed fact or any signal (signal=), one-sided (answer=), per group (groups=).
+        Below the threshold the question abstains with the reason; the promise is recorded with every answer.
+        examples=False removes it. → the calibration report. See solvi.guarantee.guard_question."""
+        from .guarantee import guard_question
+        return guard_question(self, question, examples, **kw)
 
     def learning(self, storage=None, parts=None, ladder=None, gates=None, **options):
         """Learning from corrections with gates and rollback — experimental, off until you call this (see

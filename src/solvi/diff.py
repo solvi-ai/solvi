@@ -306,7 +306,7 @@ def diff(storage, system, confidence=0.01, limit=None, **filters):
             rep.errors.append({"id": s.id, "seq": s.seq, "error": f"{type(e).__name__}: {e}"})
             continue
         was = {r.name for r in old.trace.records} | {n for n, _ in old.trace.skipped}
-        added_parts |= {r.name for r in new.trace.records if r.name not in was and r.kind not in ("head", "plan", "textin")}
+        added_parts |= {r.name for r in new.trace.records if r.name not in was and r.kind not in ("head", "plan", "textin", "guard")}
         ch = compare(old, new, confidence)
         if ch:
             rep.changed.append({"id": s.id, "seq": s.seq, "time": s.time, "questions": ch})

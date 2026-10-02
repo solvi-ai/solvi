@@ -318,6 +318,10 @@ class Trace(Serial):
                 if r.model is not None:
                     models.append((r.step, r.name, "trusted"))
                 continue
+            if r.kind == "guard":                         # a question's calibrated threshold (solvi.guarantee): re-verified
+                from .guarantee import replay_guard
+                bad += replay_guard(r, system, vals)
+                continue
             if r.kind == "plan":                          # a strategist's plan record (solvi.strategy): re-verified, not re-run
                 from .strategy import replay_plan
                 bad += replay_plan(r, catalog, self.init)
