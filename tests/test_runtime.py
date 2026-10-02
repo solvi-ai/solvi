@@ -221,3 +221,22 @@ def test_trace_value_reads_a_computed_fact_then_a_given_one_then_missing():
     t = System(cat, [Question("big", "Big?", Answer.yes_no())]).ask({"x": 21}).trace
     assert t.value("double") == 42 and t.value("x") == 21
     assert t.value("broken") is MISSING and t.value("nothing") is MISSING
+
+
+def test_a_question_changed_in_place_changes_the_questions_fingerprint():
+    """The fingerprint was cached by the question objects' ids: `q.min_confidence = 0.99` changed the answers but not
+    the fingerprint the traces record."""
+    cat = Catalog()
+
+    @cat.rule("big")
+    def big(x):
+        return "yes" if x > 1 else "no"
+    q = Question("big", "Big?", Answer.yes_no())
+    s = System(cat, [q])
+    before = s.fingerprint()["questions"]
+    assert s.ask({"x": 2}).trace.fingerprint["questions"] == before
+    s.questions["big"].min_confidence = 0.99
+    assert s.fingerprint()["questions"] != before and s.ask({"x": 2}).trace.fingerprint["questions"] != before
+    s.questions["big"].answer.options.append("maybe")
+    assert len({before, s.fingerprint()["questions"]}) == 2 and s.fingerprint()["questions"] != \
+        System(cat, [Question("big", "Big?", Answer.yes_no(), min_confidence=0.99)]).fingerprint()["questions"]

@@ -614,11 +614,19 @@ class System:
         return {"catalog": c["fp"], "questions": self._questions_fp(), "parts": dict(c["parts"]), "models": models}
 
     def _questions_fp(self):
-        """The questions' fingerprint (answer types, min_confidence, checkpoints, calibration); cached while the question
-        objects and the calibration are the same."""
+        """The questions' fingerprint (answer types, min_confidence, checkpoints, calibration); cached while the questions'
+        contents and the calibration are the same (a question changed in place — `q.min_confidence = 0.9` — changes
+        it: the cache is keyed by what the questions hold, not by the objects)."""
         from .provenance import digest
         from .schema import dump
-        key = (tuple((n, id(q)) for n, q in self.questions.items()), tuple(sorted(self.calib.items())))
+
+        def content(q):
+            a = q.answer
+            ans = None if a is None else (a.kind, tuple(map(repr, a.options)), repr(sorted(a.descriptions.items(), key=str)),
+                                          a.unknown, a.k, tuple(a.bins or ()), a.coverage, a.unit, a.source, repr(a.type))
+            return (q.text, ans, tuple(q.checkpoints), tuple(q.uses or ()) if q.uses is not None else None,
+                    q.min_confidence, q.require_evidence)
+        key = (tuple((n, content(q)) for n, q in self.questions.items()), tuple(sorted(self.calib.items())))
         cached = getattr(self, "_qfp", None)
         if cached is None or cached[0] != key:
             cached = self._qfp = (key, digest(sorted((q.name, dump(q, "json")) for q in self.questions.values()), list(key[1])))
