@@ -193,7 +193,10 @@ class FastHead:
         return (time.perf_counter() - t0) * 1000
 
     def scores(self, row):
-        return self._x(row) @ self.W
+        x = self._x(row)
+        if not np.isfinite(x).all():                  # a NaN / inf feature: no score (the System abstains on it)
+            return np.full(self.W.shape[1], np.nan)
+        return x @ self.W
 
     def predict(self, row):
         s = np.clip(self.scores(row), 1e-3, None)

@@ -54,6 +54,7 @@ def test_teach_updates_instantly_like_refitting():
         assert np.all(np.isfinite(a))
 
 
+@pytest.mark.filterwarnings("error::RuntimeWarning")         # no "invalid value encountered in matmul" on the way
 def test_a_non_finite_feature_makes_the_head_abstain_not_answer_nan():
     s = System(S.cat, S.QUESTIONS)
     s.fit_fast("suspicious", data(0, 300))
