@@ -149,6 +149,7 @@ _MORE_BEFORE = re.compile(r"(?<!\w)" + _MORE + r"\s+$", re.I)
 _FRACTION_BEFORE = re.compile(r"(?<!\w)(?:\w+\s+)?(?:an?\s+)?(?:half|quarters?|thirds?|fifths?|tenths?|четверть|треть|"
                               r"половина)(?:\s+of)?\s+$", re.I)
 _HALF_BEFORE = re.compile(r"(?<!\w)(?:[\w.,]+\s+)?and\s+an?\s+$", re.I)          # ... before a number that starts "half"
+_PART_AFTER = re.compile(r"\s+(?:halves|thirds?|fifths?|tenths?)(?!\w)", re.I)   # "2 thirds" ("2 quarters" may be a count)
 _HALF_AFTER = re.compile(r"\s+(?:and\s+a\s+half|с\s+половиной)(?!\w)(?:\s+(?:" + _SCALE_WORDS_RE + r")(?!\w))?", re.I)
 
 
@@ -160,7 +161,18 @@ def _fraction_around(text, m):
         before = None                                 # "in the second half 300 were sold": no fraction of the digits
     if before is None and (m.group("w") or "").lower().startswith("half"):
         before = _HALF_BEFORE.search(text[:m.start()])
-    after = _HALF_AFTER.match(text, m.end())
+    after = _HALF_AFTER.match(text, m.end()) or (_PART_AFTER.match(text, m.end()) if m.group("d") is not None else None)
+    if before is None and after is None:
+        return None
+    return (before.start() if before else m.start()), (after.end() if after else m.end())
+
+
+def _more_around(text, m):
+    """The number words next to a spelled-out number (or digits with a scale word) that make it a longer one — "ten
+    thousand [and one]", "[two thousand] three hundred" → (start, end) of the whole phrase, or None."""
+    if m.group("w") is None and not m.group("s1"):
+        return None
+    before, after = _MORE_BEFORE.search(text[:m.start()]), _MORE_AFTER.match(text, m.end())
     if before is None and after is None:
         return None
     return (before.start() if before else m.start()), (after.end() if after else m.end())
@@ -243,9 +255,10 @@ def parse_number(s, spec=None):
 
 def _number_span(text, m):
     """A number candidate's span, with the currency after a space-grouped number ("1 500 000 руб") so the parser sees
-    the context that makes it one number — and with the fraction words around it ("quarter of a million", "5 and a
-    half thousand"), so the parser sees that it is a longer number and refuses it."""
-    whole = _fraction_around(text, m)
+    the context that makes it one number — and with the fraction or number words around it ("quarter of a million", "5
+    and a half thousand", "2 thirds", "ten thousand and one"), so the parser sees that it is a longer number and refuses
+    it instead of reading the part that was cut out."""
+    whole = _fraction_around(text, m) or _more_around(text, m)
     if whole is not None:
         return whole
     e = m.end()
