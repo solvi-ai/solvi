@@ -1,5 +1,6 @@
 """solvi.signature: a signature of a trace / a store names the one changed record and restores its content hash; its
-limits are pinned too. Every test runs for both codes: "syndrome" (the default) and "octonion".
+limits are pinned too. Up to 0.7 every test ran for two codes, "syndrome" (the default) and "octonion"; the octonion code
+is an experiment in benchmarks/octonion_signature.py since 0.8 (its self-check runs at the end of this file).
 
 Claims, written down before the numbers below were measured (the source: our trace-signature experiment on solver
 traces — 7218 derivation trees, 34 356 substitutions of 7 kinds; the positional octonion code, 32 numbers: every kind
@@ -34,35 +35,22 @@ import os
 import random
 import time
 
-import numpy as np
 import pytest
 from test_storage import STATES, Clock, _edit_answer, _jsonl_lines, _jsonl_write, _rehash, _sql_bodies, build, make_store
 
 from solvi import System
-from solvi.signature import ALGS, BYTES, NotLocatable, check, extend, inv, load, locate, mul, record_digest, repair, sign
+from solvi.signature import ALGS, NotLocatable, check, extend, load, locate, record_digest, repair, sign
 
 alg = pytest.mark.parametrize("alg", ALGS)
 
 
 def _restored(alg, digest):
-    """What the signature restores of a content hash: all of it (syndrome) or its first 28 bytes (octonion)."""
-    return (digest if alg == "syndrome" else digest[:BYTES]).hex()
+    """What the signature restores of a content hash: all of it."""
+    return digest.hex()
 
 
 def _rand_items(rng, n):
     return [rng.randbytes(rng.randint(1, 60)) for _ in range(n)]
-
-
-# --- the algebra the signature rests on
-def test_octonion_algebra():
-    rng = np.random.default_rng(0)
-    a, b, c = (rng.normal(size=(500, 4, 8)) for _ in range(3))
-    n = lambda x: np.linalg.norm(x, axis=-1)  # noqa: E731
-    assert np.allclose(n(mul(a, b)), n(a) * n(b))                        # a composition algebra: no zero divisors
-    assert np.allclose(mul(mul(a, b), b), mul(a, mul(b, b)))              # alternative
-    assert np.allclose(mul(mul(a, a), b), mul(a, mul(a, b)))
-    assert not np.allclose(mul(mul(a, b), c), mul(a, mul(b, c)))          # not associative
-    assert np.allclose(mul(mul(a, b), inv(b)), a) and np.allclose(mul(inv(a), mul(a, b)), b)   # division both sides
 
 
 # --- S1, S2: one change located and restored; no false alarms
@@ -136,8 +124,8 @@ def test_appended_items_not_covered_and_extend(alg):
     assert locate(more, sig) is None                         # the signed prefix is unchanged
     ext, full = extend(sig, more[40:]), sign(more, alg)
     assert ext["count"] == 47 and ext["alg"] == alg
-    assert ext["root"] == full["root"] if alg == "syndrome" else np.allclose(ext["root"], full["root"])
-    assert extend(sign([], alg), more)["root"] == full["root"] if alg == "syndrome" else True
+    assert ext["root"] == full["root"]
+    assert extend(sign([], alg), more)["root"] == full["root"]
     more[42] = b"edited after signing"
     assert locate(more, sig) is None                         # ... and what came after it is not covered
 
@@ -221,7 +209,7 @@ def test_cli_verify_signature(alg, tmp_path, capsys):
     for st in STATES:
         s.ask(st)
     out = tmp_path / "sig.json"
-    assert main(["verify", store.path, "--sign", str(out), "--alg", alg]) == 0 and load(str(out))["alg"] == alg
+    assert main(["verify", store.path, "--sign", str(out)]) == 0 and load(str(out))["alg"] == alg
     assert main(["verify", store.path, "--signature", str(out)]) == 0
     assert "signature verified" in capsys.readouterr().out
     recs = _jsonl_lines(store)
@@ -250,3 +238,22 @@ def test_speed(alg):
     assert locate(its, sig) == 500
     t_loc = time.perf_counter() - t
     assert t_sign < 0.1 * 5 and t_loc < 0.15 * 5             # the claim with 5x headroom for a loaded CI machine
+
+
+# --- the octonion code: out of the package since 0.8
+def test_the_octonion_code_is_refused_with_a_pointer_to_the_benchmark_that_holds_it(tmp_path):
+    assert ALGS == ("syndrome",)
+    for call in (lambda: sign([b"a"], "octonion"), lambda: check([b"a"], {"alg": "octonion", "count": 1, "root": [0.0] * 32}),
+                 lambda: load({"alg": "octonion", "count": 1, "root": [0.0] * 32})):
+        with pytest.raises(ValueError, match="benchmarks/octonion_signature.py"):
+            call()
+
+
+def test_the_octonion_experiment_in_benchmarks_still_locates_one_change():
+    import importlib.util
+    import pathlib
+    path = pathlib.Path(__file__).parent.parent / "benchmarks" / "octonion_signature.py"
+    spec = importlib.util.spec_from_file_location("octonion_signature", path)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    mod._self_check()

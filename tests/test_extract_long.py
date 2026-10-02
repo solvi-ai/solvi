@@ -148,10 +148,9 @@ def test_a_missing_optional_dependency_names_the_extra_to_install(monkeypatch):
     runtime: "No module named 'torch'"), while storage, otel and serve name the extra."""
     import sys
     from solvi.extract_long import LongSpanExtractor
-    from solvi.extract_model import SpanExtractor
     from solvi.extract_multi import MultiSpanExtractor
     monkeypatch.setitem(sys.modules, "torch", None)                # as if it were not installed
-    for make in (lambda: SpanExtractor("m"), lambda: MultiSpanExtractor(["total"], "m"), lambda: LongSpanExtractor("m")):
+    for make in (lambda: MultiSpanExtractor(["total"], "m"), lambda: LongSpanExtractor("m")):
         with pytest.raises(ImportError, match=r"Extractor needs torch: pip install 'solvi\[model\]'"):
             make()
 
@@ -173,3 +172,16 @@ def test_the_model_loaders_check_the_backend_and_the_folder_first_and_name_both_
     monkeypatch.setattr(importlib.util, "find_spec", lambda m, *a: None if m in ("onnxruntime", "torch") else real(m, *a))
     with pytest.raises(ImportError, match=r"needs a runtime: pip install 'solvi\[onnx\]'.*'solvi\[model\]'"):
         NameMatcher.load(str(tmp_path))
+
+
+def test_extract_model_is_a_deprecated_alias_of_the_long_extractor_that_warns_on_import():
+    import importlib
+    import sys
+
+    from solvi import _deprecate
+    from solvi.extract_long import LongSpanExtractor
+    sys.modules.pop("solvi.extract_model", None)
+    _deprecate._seen.discard("solvi.extract_model.SpanExtractor")
+    with pytest.warns(DeprecationWarning, match="solvi.extract_long.LongSpanExtractor"):
+        mod = importlib.import_module("solvi.extract_model")
+    assert mod.SpanExtractor is LongSpanExtractor

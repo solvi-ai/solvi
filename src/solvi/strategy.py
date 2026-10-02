@@ -635,7 +635,9 @@ class ModelStrategist:
     @classmethod
     def load(cls, path, backend="auto", producers="equivalent", threads=None, quantized=False, **kw):
         """A trained segment model (a directory or a Hugging Face id; docs/strategist.md) behind this strategist. The model
-        chooses among interchangeable producers, so `producers` defaults to "equivalent" here."""
+        chooses among interchangeable producers, so `producers` defaults to "equivalent" here.
+
+        Experimental: no checkpoint is published — it reads one you trained yourself (docs/strategist.md has the format)."""
         from .strategy_model import SegmentModel
         return cls(SegmentModel.load(path, backend=backend, threads=threads, quantized=quantized), producers=producers, **kw)
 

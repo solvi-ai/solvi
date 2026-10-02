@@ -82,7 +82,6 @@ nav:
       - solvi.drift: api/drift.md
       - solvi.fast: api/fast.md
       - solvi.extract_long: api/extract_long.md
-      - solvi.extract_model: api/extract_model.md
       - solvi.extract_multi: api/extract_multi.md
       - solvi.strategist: api/strategist.md
       - solvi.strategy: api/strategy.md

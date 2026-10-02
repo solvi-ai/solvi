@@ -1801,7 +1801,8 @@ every request with the same keys.
 whose inputs are never given dropped (the deterministic strategist needs the inputs of every producer of a fact);
 `ModelStrategist(producers="equivalent")` treats the producers of a fact as interchangeable and picks the cheapest verified
 plan by declared `cost=`, keeping every hard check that governs a question (`System(..., producers="equivalent")` is a
-shortcut for it). Both are code only. A segment model and name matching (`solvi.aliases`) are experimental. Details, the
+shortcut for it). Both are code only. A segment model (`ModelStrategist.load`) and the name matcher of `solvi.aliases` are
+experimental: no checkpoint is published for either. Details, the
 trace record of a plan and what was measured: [docs/strategist.md](strategist.md).
 
 **Costs from measurements.** `System(cat, questions, producers="equivalent", costs="measured")` plans with the run times
@@ -2396,19 +2397,19 @@ new_items)` after appending. Each record is reduced to its content hash h_i (wit
 chain does not move the other records). The default code, `alg="syndrome"`, keeps S0 = Σ h_i and S1 = Σ (i+1)·h_i mod
 a 256-bit prime: one change at k by d moves them by d and (k+1)·d, which gives k and the whole original hash.
 
-`alg="octonion"` is a second code: each hash written into 4 octonions, times an element of its position, multiplied in
-order — 32 floats. It locates exactly as the syndrome code on a store, larger and slower; it is kept for future signatures
-of tree-shaped objects (derivations), where its non-associativity sees a change of brackets that sums cannot. Not
-recommended for stores. A signature carries its `"alg"`, and check / locate / repair / `solvi verify --signature` read it.
+A signature carries its `"alg"`. Up to 0.7 a second code, `alg="octonion"` (each hash written into 4 octonions times an
+element of its position, multiplied in order — 32 floats), was part of the package; it located exactly as the syndrome
+code on a store, larger and slower, and is now an experiment in `benchmarks/octonion_signature.py`, kept for future
+signatures of tree-shaped objects (derivations), where its non-associativity sees a change of brackets that sums cannot.
 
-| Change | Result (stores of 2–500 records, `benchmarks/trace_signature.py`; both codes) |
+| Change | Result (stores of 2–500 records, `benchmarks/trace_signature.py`; the syndrome code and the octonion experiment alike) |
 |---|---|
 | one record edited, the chain and the head recomputed | located and its content hash restored: 2000 of 2000, 0 wrong |
 | two or three records edited | detected 1500 of 1500, located 0 (`NotLocatable`), never a wrong record |
 | two records swapped, one deleted or inserted in the middle | detected, not located |
 | records cut off the end / appended after signing | "signed items missing" / not covered: sign again or `extend` |
 
-| Records | syndrome (default): sign / locate | octonion: sign / locate |
+| Records | syndrome: sign / locate | octonion experiment (`benchmarks/`): sign / locate |
 |---|---|---|
 | 1 000 | 1.3 / 1.4 ms | 13 / 16 ms |
 | 10 000 | 13 / 14 ms | 175 / 149 ms |
@@ -4075,7 +4076,7 @@ def risk(amount, country): ...
 ```
 
 `LongSpanExtractor.field`, `MultiSpanExtractor.field` and `LongSpanExtractor.embedder` mark their functions (the attributes
-`__solvi_model__` and `__solvi_provenance__`), so registering them is enough. For `SpanExtractor`, or any other model,
+`__solvi_model__` and `__solvi_provenance__`), so registering them is enough. For any other model,
 pass `model=`.
 
 ### Model identity in the trace
@@ -4408,27 +4409,12 @@ def governing_state(governing_law):
   its description alone (14% and 66% on two held-out fields in our tests). Label examples for every field you need. A
   universal extractor that handles new fields is in progress.
 
-### SpanExtractor: one field per pass
+### SpanExtractor (removed in 0.8)
 
-`solvi.extract_model.SpanExtractor` is the simplest variant: description plus text in, one span out, one forward pass
-per field. `fit([(text, description, (s, e) or None), ...])` trains it (examples without a span are skipped), and
-`predict([(text, description), ...])` returns `[(start, end, confidence)]`. It has no `field()` helper; wrap it yourself and
-pass `model=` so the trace records the model:
-
-```python
-from solvi.extract_model import SpanExtractor
-
-sx = SpanExtractor()
-sx.fit(train_items, epochs=4)
-
-@cat.extract(model=sx)
-def total(doc):
-    "the total amount paid"
-    s, e, c = sx.predict([(doc, total.__doc__)])[0]
-    return Quote(doc[s:e], s, e, confidence=c)
-```
-
-It is about 3.6x slower than `MultiSpanExtractor` for four fields with similar accuracy; prefer the one-pass extractor.
+`solvi.extract_model.SpanExtractor`, one field per pass with no `field()` helper and no save / load, had no caller and
+is gone: importing `SpanExtractor` from `solvi.extract_model` still works in 0.8, warns, and gives `LongSpanExtractor`
+(removed in 0.9). It trains on the same items, `fit([(text, description, (s, e) or None), ...])`; `predict(text,
+description)` returns one `(start, end, score, no_answer_score)`, and `field(name, description)` is the `@extract` part.
 
 ### Hardware notes
 

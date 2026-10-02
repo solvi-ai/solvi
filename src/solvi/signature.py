@@ -11,20 +11,16 @@ not where, and not what was there. A signature kept next to that head answers bo
     repair(store, sig)                 # {"index", "digest": its original content hash, "match": the candidate it equals}
 
 Every signed item is reduced to its content hash (SHA-256; the chain fields `prev`, `hash`, `id` left out, so recomputing
-the chain does not move the other items). Two codes, named in the signature's "alg" (check / locate / repair / extend
-read it from there):
+the chain does not move the other items). The code is named in the signature's "alg":
 
-- "syndrome" (the default): S0 = Σ h_i and S1 = Σ (i+1)·h_i mod a 256-bit prime — 64 bytes. One change at k by d moves S0
+- "syndrome": S0 = Σ h_i and S1 = Σ (i+1)·h_i mod a 256-bit prime — 64 bytes. One change at k by d moves S0
   by d and S1 by (k+1)·d: k = ΔS1 / ΔS0, and the original hash is h_k − d, all 32 bytes. Several changes give a k outside
   the store (except with probability ~n / 2^256): detected, not located. A classical single-error-locating code.
-- "octonion": each hash written into 4 octonions (7 bytes and an anchor each) times an element of its position; the
-  signature is the ordered product ((L0 L1) L2)... — 32 floats. Octonions have no zero divisors (one change always moves
-  the product) and are alternative (a leaf is divided back out exactly); the solved leaf decodes to a hash (28 bytes) at
-  the changed position only. It comes from our trace-signature experiment, where derivation TREES were signed and the
-  non-associativity saw a change of brackets. On a flat store it locates exactly as the syndrome code does, 4x larger
-  and ~60x slower: kept for future tree-shaped (derivation) signatures, not recommended for stores.
 
-Limits (tests/test_signature.py pins each, for both codes):
+The positional octonion code that was the second "alg" up to 0.7 is an experiment in benchmarks/octonion_signature.py
+since 0.8: on a flat store it located exactly as the syndrome code does, 4x larger and ~60x slower.
+
+Limits (tests/test_signature.py pins each):
 - one changed record is located and its content hash restored; the record itself (its value) only from `candidates`
   (a backup, another replica, the values that fact had elsewhere) — the signature holds a hash, not the record;
 - several changed records (a reorder is two) are detected but not located: `locate` raises NotLocatable;
@@ -32,109 +28,15 @@ Limits (tests/test_signature.py pins each, for both codes):
 - records appended after signing are not covered (sign again or extend(), as with the head); the signed prefix is
   checked;
 - it is an error-locating code, not a MAC: someone who can rewrite the signature too can forge it. Keep it where you
-  keep the head.
-numpy only (for the octonion code)."""
+  keep the head."""
 from __future__ import annotations
 
 import hashlib
 import json
 
-import numpy as np
-
-ALG = "solvi-octonion-pos/1"            # seeds the position elements of the octonion code
-BLOCKS = 4                       # octonions per element: 4 x 8 = 32 numbers
-BYTES = 7 * BLOCKS               # content-hash bytes written into a leaf (7 per octonion, the 8th component is the anchor)
-GRID_TOL = 1e-6                  # a decoded component must lie this close to its byte grid point
-SAME_TOL = 1e-8                  # two signatures within this (max abs) are the same
-
-
 class NotLocatable(ValueError):
     """The signature does not match, and not because of one changed record (several changed, reordered, deleted or
     inserted records, or another count)."""
-
-
-# --- the algebra
-def _cayley_dickson(a, b):
-    """Octonion (or smaller) product by Cayley–Dickson doubling: (p, q)(r, s) = (pr − s*q, sp + qr*)."""
-    n = len(a)
-    if n == 1:
-        return [a[0] * b[0]]
-    h = n // 2
-    p, q, r, s = a[:h], a[h:], b[:h], b[h:]
-
-    def conj(x):
-        return [x[0]] + [-v for v in x[1:]]
-
-    def add(x, y, sgn=1):
-        return [u + sgn * v for u, v in zip(x, y)]
-    return add(_cayley_dickson(p, r), _cayley_dickson(conj(s), q), -1) + add(_cayley_dickson(s, p), _cayley_dickson(q, conj(r)))
-
-
-def _table():
-    c = np.zeros((8, 8, 8))
-    eye = np.eye(8)
-    for i in range(8):
-        for j in range(8):
-            c[i, j] = _cayley_dickson(list(eye[i]), list(eye[j]))
-    return c.reshape(64, 8)
-
-
-_C = _table()
-_CONJ = np.array([1.0] + [-1.0] * 7)
-
-
-def mul(a, b):
-    """Blockwise octonion product of arrays [..., BLOCKS, 8]."""
-    a, b = np.broadcast_arrays(a, b)
-    return (a[..., :, None] * b[..., None, :]).reshape(*a.shape[:-1], 64) @ _C
-
-
-def inv(a):
-    """Blockwise octonion inverse: conjugate / squared norm."""
-    return a * _CONJ / (a * a).sum(-1, keepdims=True)
-
-
-# --- leaves
-_POS = {}
-
-
-def _position(i):
-    """The unit element of position i (seeded by SHA-256; the same everywhere)."""
-    e = _POS.get(i)
-    if e is None:
-        seed = int.from_bytes(hashlib.sha256(f"{ALG}|pos|{i}".encode()).digest()[:8], "little")
-        x = np.random.default_rng(seed).normal(size=(BLOCKS, 8))
-        e = x / np.linalg.norm(x, axis=-1, keepdims=True)
-        if len(_POS) < 1 << 16:
-            _POS[i] = e
-    return e
-
-
-def encode(ds):
-    """Content hashes (a list of bytes; the first 28 of each are used) → their elements [n, BLOCKS, 8]: per octonion an
-    anchor 1 and 7 bytes mapped to (−1, 1), scaled to unit norm (decoding divides by the anchor: the scale does not
-    matter)."""
-    b = np.frombuffer(b"".join(bytes(d[:BYTES]) for d in ds), dtype=np.uint8).astype(np.float64).reshape(-1, BLOCKS, 7)
-    x = np.concatenate([np.ones((len(b), BLOCKS, 1)), (b - 127.5) / 128.0], axis=-1)
-    return x / np.linalg.norm(x, axis=-1, keepdims=True)
-
-
-def decode(x):
-    """Elements [..., BLOCKS, 8] → (valid [...], bytes [..., 28]): valid where every component lies on the byte grid."""
-    a = x[..., :1]
-    with np.errstate(divide="ignore", invalid="ignore"):
-        v = x[..., 1:] / a * 128.0 + 127.5
-    r = np.rint(v)
-    ok = np.isfinite(v).all((-1, -2)) & (np.abs(v - r) < GRID_TOL * 128).all((-1, -2)) & (r >= 0).all((-1, -2)) \
-        & (r <= 255).all((-1, -2))
-    return ok, np.clip(np.nan_to_num(r), 0, 255).astype(np.uint8).reshape(*x.shape[:-2], BYTES)
-
-
-def leaves(ds, start=0):
-    """The leaves of content hashes at positions start, start+1, ... → [n, BLOCKS, 8]."""
-    if not ds:
-        return np.zeros((0, BLOCKS, 8))
-    return mul(encode(ds), np.stack([_position(start + i) for i in range(len(ds))]))
 
 
 # --- what is signed: content hashes of the items in order
@@ -183,15 +85,6 @@ def digests(obj):
     return [None if x is None else record_digest(x) for x in items(obj)]
 
 
-def _fold(lv, acc=None):
-    """The running products ((L0 L1) L2)... of leaves [n, BLOCKS, 8] (after `acc` when given) → [n, BLOCKS, 8]."""
-    out = np.empty_like(lv)
-    for i in range(len(lv)):
-        acc = lv[i] if acc is None else mul(acc, lv[i])
-        out[i] = acc
-    return out
-
-
 # --- the syndrome code (the default): two sums mod a prime
 P = 2**256 - 189                 # the largest prime below 2^256
 
@@ -226,53 +119,25 @@ def _syn_hits(ds, bad, sig):
     return False, [(k, ((_int(ds[k]) - d0) % P).to_bytes(32, "big"))]
 
 
-# --- the octonion code: the positional product
-def _oct_root(ds):
-    return _fold(leaves(ds))[-1] if ds else np.zeros((BLOCKS, 8))
-
-
-def _oct_hits(ds, bad, sig):
-    n = len(ds)
-    root = np.asarray(sig["root"], dtype=np.float64).reshape(BLOCKS, 8)
-    lv = leaves(ds)
-    prefix = _fold(lv)
-    if not bad and np.max(np.abs(prefix[-1] - root)) < SAME_TOL:
-        return True, []
-    # peel the suffix off the signed root: back[k] is what the product up to k was, if every item after k is unchanged;
-    # the item k solved from it and the current prefix decodes to a content hash only where k is the one that changed
-    back = np.empty_like(lv)
-    iv = inv(lv)
-    b = root
-    for k in range(n - 1, -1, -1):
-        back[k] = b
-        b = mul(b, iv[k])
-    before = np.concatenate([np.tile(np.array([1.0] + [0.0] * 7), (1, BLOCKS, 1)), prefix[:-1]])
-    ok, raw = decode(mul(mul(inv(before), back), inv(np.stack([_position(i) for i in range(n)]))))
-    hits = [int(i) for i in np.nonzero(ok)[0]]
-    return False, [(i, bytes(raw[i])) for i in hits if bytes(raw[i]) != ds[i][:BYTES] or i in bad]
-
-
-ALGS = ("syndrome", "octonion")
+ALGS = ("syndrome",)
+_MOVED = ("the octonion signature code left the package in solvi 0.8: it is an experiment in "
+          "benchmarks/octonion_signature.py (the syndrome code locates the same changes, 4x smaller, ~60x faster)")
 
 
 def sign(obj, alg="syndrome"):
     """The signature of a trace, a Response, a TraceStorage (its chained records) or a list of items → {"alg", "count",
     "root"}: plain JSON — keep it next to the head, in a ticket, a log you do not control.
 
-    alg "syndrome" (the default): root = two numbers mod a 256-bit prime (hex; 64 bytes) — S0 = Σ h_i, S1 = Σ (i+1) h_i
-    over the content hashes; one change at k by d moves them by d and (k+1) d, which gives k and the whole original hash.
-    alg "octonion": root = 32 floats, the positional octonion product; restores 28 bytes of the hash. Kept for signatures
-    of tree-shaped objects (derivations, where the order of brackets matters); on a flat store it only costs more."""
+    alg "syndrome" (the only one): root = two numbers mod a 256-bit prime (hex; 64 bytes) — S0 = Σ h_i, S1 = Σ (i+1) h_i
+    over the content hashes; one change at k by d moves them by d and (k+1) d, which gives k and the whole original hash."""
+    if alg == "octonion":
+        raise ValueError(_MOVED)
+    if alg != "syndrome":
+        raise ValueError(f"unknown signature alg {alg!r}: one of {ALGS}")
     ds = digests(obj)
     if any(d is None for d in ds):
         raise ValueError("the store has unreadable records: verify() it first")
-    if alg == "syndrome":
-        root = [format(x, "x") for x in _syn(ds)]
-    elif alg == "octonion":
-        root = [float(x) for x in _oct_root(ds).ravel()]
-    else:
-        raise ValueError(f"unknown signature alg {alg!r}: one of {ALGS}")
-    return {"alg": alg, "count": len(ds), "root": root}
+    return {"alg": alg, "count": len(ds), "root": [format(x, "x") for x in _syn(ds)]}
 
 
 def extend(signature, new_items, start=None):
@@ -281,21 +146,17 @@ def extend(signature, new_items, start=None):
     _check(signature)
     n = signature["count"] if start is None else start
     new = [record_digest(x) for x in new_items]
-    if signature["alg"] == "syndrome":
-        root = [format(x, "x") for x in _syn(new, n, *_syn_root(signature))]
-    else:
-        acc = np.asarray(signature["root"], dtype=np.float64).reshape(BLOCKS, 8) if signature["count"] else None
-        if new:
-            acc = _fold(leaves(new, n), acc)[-1]
-        root = [float(x) for x in (acc if acc is not None else np.zeros((BLOCKS, 8))).ravel()]
+    root = [format(x, "x") for x in _syn(new, n, *_syn_root(signature))]
     return {"alg": signature["alg"], "count": n + len(new), "root": root}
 
 
 def _check(signature):
-    size = {"syndrome": 2, "octonion": BLOCKS * 8}
+    size = {"syndrome": 2}
+    if isinstance(signature, dict) and signature.get("alg") == "octonion":
+        raise ValueError(_MOVED)
     if not isinstance(signature, dict) or signature.get("alg") not in size \
             or len(signature.get("root") or ()) != size[signature["alg"]] or not isinstance(signature.get("count"), int):
-        raise ValueError(f"not a solvi signature ({' / '.join(ALGS)}): {signature!r:.120}")
+        raise ValueError(f"not a solvi signature (alg {' / '.join(ALGS)}): {signature!r:.120}")
 
 
 def load(s):
@@ -316,8 +177,7 @@ def check(obj, signature, candidates=None):
     "index", "digest", "match", "reason"}.
 
     ok: the first `signed` items are the ones signed. Otherwise, when one item changed: index (its position; for a trace
-    0 is the input, i the record i-1), digest (the hex of its original content hash: 32 bytes with "syndrome", the first 28
-    with "octonion") and match (the first of `candidates` — records, or for a trace record also plain values — whose
+    0 is the input, i the record i-1), digest (the hex of its original content hash, 32 bytes) and match (the first of `candidates` — records, or for a trace record also plain values — whose
     content hash is that digest; None). When it cannot be located: index None and the reason. Items appended after
     signing are not covered and do not count."""
     _check(signature)
@@ -335,7 +195,7 @@ def check(obj, signature, candidates=None):
     if n == 0:
         out["ok"] = True
         return out
-    same, hits = (_syn_hits if signature["alg"] == "syndrome" else _oct_hits)(ds, bad, signature)
+    same, hits = _syn_hits(ds, bad, signature)
     if same:
         out["ok"] = True
         return out

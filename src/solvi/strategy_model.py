@@ -1,4 +1,6 @@
-"""The segment model behind solvi.strategy.ModelStrategist (experimental): the typed decomposer from research,
+"""The segment model behind solvi.strategy.ModelStrategist. Experimental: no checkpoint is published — it reads one you trained yourself (docs/strategist.md has the format).
+
+The typed decomposer from research,
 compressed (the first 2 layers of ModernBERT-base, a vocabulary cut to 8192 tokens), without the graph level (the compressed
 decomposer did not need it), reading one short task per segment and pointing at 1–4 catalog parts.
 

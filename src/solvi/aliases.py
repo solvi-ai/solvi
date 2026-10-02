@@ -1,4 +1,4 @@
-"""Name matching (experimental; from the name-matching research): when the catalog's parameter names do not match its facts —
+"""Name matching: when the catalog's parameter names do not match its facts —
 parts written by different teams, each with its own naming style — a matcher model proposes aliases ("the parameter
 `INVC_AMNT` is the fact `invoice_total`"), and deterministic code decides which to accept.
 
@@ -20,7 +20,11 @@ silent wrong wiring — as far as the examples and probes can tell wirings apart
 
 Accepted aliases are applied by rewiring: every part that read an aliased name now reads the fact itself (its function is
 wrapped, its docstring lists the aliases), and the new catalog lists them in `catalog.aliases`; planning, checks, quotes into
-given texts, execution, the trace and replay behave exactly as for a catalog written with one naming."""
+given texts, execution, the trace and replay behave exactly as for a catalog written with one naming.
+
+The matcher model (`NameMatcher`) is experimental: no checkpoint is published — `NameMatcher.load` reads one you trained
+yourself (docs/strategist.md has the format), and examples/17 uses a stand-in. `propose` takes any object with the same
+methods; `accept` and `apply` are plain code."""
 from __future__ import annotations
 
 import copy
@@ -118,7 +122,9 @@ def source_text(catalog, kind, f, init_types):
 class NameMatcher:
     """The link encoder: all-MiniLM-L6-v2 over texts (name, type, docstring), for arch "char" fused with a character CNN
     over the identifier (score = w_t·cos_text + w_c·cos_char), for arch "text" the text part alone; divided by T (0.05).
-    Backends: "torch" (transformers) or "onnx" (onnxruntime + tokenizers)."""
+    Backends: "torch" (transformers) or "onnx" (onnxruntime + tokenizers).
+
+    Experimental: no checkpoint is published — it reads one you trained yourself (docs/strategist.md has the format)."""
 
     def __init__(self, enc, meta, path, backend):
         self.enc, self.meta, self.path, self.backend = enc, meta, path, backend

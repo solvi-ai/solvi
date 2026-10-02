@@ -14,8 +14,9 @@ producers (`provides=`) it needs the inputs of all of them — a fallback chain 
 code verifies, answers come only from verified plans**. A model error costs cost or coverage (the question abstains, or
 code's own plan is used); it never becomes a silent wrong wiring — as far as the checks and your examples can tell.
 
-Status: experimental in 0.5.0. The code strategist (`ModelStrategist()`, `producers="equivalent"`) is ready and needs no
-model. **The segment model's and the name matcher's weights are not published with 0.5.0**: `ModelStrategist.load` and
+Status (0.8): the code strategist (`ModelStrategist()`, `producers="equivalent"`) is ready and needs no model. The segment
+model (`solvi.strategy_model`) and the name matcher (`solvi.aliases.NameMatcher`) are **experimental: no checkpoint is
+published**: `ModelStrategist.load` and
 `NameMatcher.load` read a checkpoint in the format below that you trained yourself (the research repository has the recipe); without one,
 examples/17 uses stand-ins with the same interfaces. The research behind it (the typed decomposer, name matching, the segment model) and what was measured are summarised
 [below](#what-was-measured).
@@ -208,5 +209,5 @@ same value), 100 tasks per length bucket on training themes, 60 on held-out them
   cases did not exercise. On long synthetic catalogs (1–64 steps) coverage is 0–75% and 4–8% of the answers of accepted
   wirings were wrong. Treat accepted aliases as a suggestion to review, not as proof.
 
-Status for 0.5.0: `ModelStrategist()` (code only, the dead-end-aware plan) and `producers="equivalent"` with declared costs are
-ready; the segment model and `solvi.aliases` ship as **experimental**.
+Status (0.8): `ModelStrategist()` (code only, the dead-end-aware plan) and `producers="equivalent"` with declared costs are
+ready; the segment model and the name matcher of `solvi.aliases` are **experimental** (no published checkpoint).
