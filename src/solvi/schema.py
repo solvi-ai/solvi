@@ -411,17 +411,8 @@ def _type_names():
 
 
 def _answer(at):
-    if at is None:
-        return None
-    d = {"kind": at.kind, "options": list(at.options), "descriptions": dict(at.descriptions)}
-    for k in ("unknown", "k", "bins", "coverage", "unit", "source"):
-        v = getattr(at, k)
-        if v not in (None, False):                    # only what is set: answer types of 0.4 dump as before
-            d[k] = list(v) if k == "bins" else v
-    if at.type is not None:
-        from .typed import type_name
-        d["type"] = type_name(at.type)
-    return d
+    from .core import answer_data
+    return answer_data(at)
 
 
 def _unknown(v):
@@ -492,11 +483,8 @@ def _to_dict(obj):
     if n == "AnswerType":
         return _answer(obj)
     if n == "Question":
-        d = {"name": obj.name, "text": obj.text, "answer": _answer(obj.answer), "checkpoints": list(obj.checkpoints),
-             "uses": None if obj.uses is None else list(obj.uses), "min_confidence": obj.min_confidence}
-        if obj.require_evidence:
-            d["require_evidence"] = True
-        return d
+        from .core import question_data
+        return question_data(obj)
     if n == "Result":
         return _result(obj)
     if n == "Record":

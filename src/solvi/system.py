@@ -544,12 +544,19 @@ class System:
     def _questions_fp(self):
         """The questions' fingerprint (answer types, min_confidence, checkpoints, calibration); cached while the question
         objects and the calibration are the same."""
+        from .core import plain_json, question_data
         from .provenance import digest
-        from .schema import dump
+
+        def data(q):                                  # as solvi.schema.dump(q, "json"); pydantic only for other values
+            d = question_data(q)
+            if plain_json(d):
+                return d
+            from .schema import jsonable
+            return jsonable(d)
         key = (tuple((n, id(q)) for n, q in self.questions.items()), tuple(sorted(self.calib.items())))
         cached = getattr(self, "_qfp", None)
         if cached is None or cached[0] != key:
-            cached = self._qfp = (key, digest(sorted((q.name, dump(q, "json")) for q in self.questions.values()), list(key[1])))
+            cached = self._qfp = (key, digest(sorted((q.name, data(q)) for q in self.questions.values()), list(key[1])))
         return cached[1]
 
     def _fingerprint(self, flow):

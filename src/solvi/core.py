@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import inspect
 import json
+import math
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, Callable
@@ -604,6 +605,46 @@ def accepts(alt, v, args, init_state=None):
     """accept() without the value → (ok, reason)."""
     ok, why, _ = accept(alt, v, args, init_state)
     return ok, why
+
+
+def answer_data(at):
+    """An answer type as plain data (its serialized form, solvi.schema; only what is set, so answer types of 0.4 dump
+    as before)."""
+    if at is None:
+        return None
+    d = {"kind": at.kind, "options": list(at.options), "descriptions": dict(at.descriptions)}
+    for k in ("unknown", "k", "bins", "coverage", "unit", "source"):
+        v = getattr(at, k)
+        if v not in (None, False):
+            d[k] = list(v) if k == "bins" else v
+    if at.type is not None:
+        from .typed import type_name
+        d["type"] = type_name(at.type)
+    return d
+
+
+def question_data(q):
+    """A question as plain data (its serialized form, solvi.schema) — without importing pydantic."""
+    d = {"name": q.name, "text": q.text, "answer": answer_data(q.answer), "checkpoints": list(q.checkpoints),
+         "uses": None if q.uses is None else list(q.uses), "min_confidence": q.min_confidence}
+    if q.require_evidence:
+        d["require_evidence"] = True
+    return d
+
+
+def plain_json(v):
+    """Is v JSON data as it is — str / int / bool / None, finite floats, lists and tuples, dicts with str keys — so that
+    solvi.schema.jsonable would give it back unchanged (up to tuples as lists)?"""
+    t = type(v)
+    if v is None or t in (str, int, bool):
+        return True
+    if t is float:
+        return math.isfinite(v)
+    if t in (list, tuple):
+        return all(plain_json(x) for x in v)
+    if t is dict:
+        return all(type(k) is str and plain_json(x) for k, x in v.items())
+    return False
 
 
 class Catalog:

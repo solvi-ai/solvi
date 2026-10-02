@@ -412,3 +412,25 @@ def test_a_key_the_input_model_forbids_is_reported_as_rejected_not_dropped_witho
     res = System(cat, qs, inputs=Closed).ask({"id": "a1", "months": "many", "age": 19})        # with a field that fails too
     assert [k for k, _ in res.trace.rejected] == ["months", "age"] and res["long"].status == "abstain"
     assert not System(cat, qs, inputs=Closed).ask({"id": "a1", "months": 3}).trace.rejected
+
+
+def test_an_untyped_catalog_does_not_import_pydantic_on_the_first_ask_and_the_questions_fingerprint_is_unchanged():
+    """Since 0.7 every response records trace.fingerprint, and fingerprinting the questions imported solvi.schema and
+    so pydantic on the first ask of any System (~170 ms) — against "untyped parts cost nothing"."""
+    code = ("import sys\nfrom solvi import Answer, Catalog, Question, System\ncat = Catalog()\n"
+            "@cat.fn\ndef a(x):\n    return x + 1\n@cat.rule('q')\ndef q(a):\n    return 'yes' if a > 1 else 'no'\n"
+            "r = System(cat, [Question('q', 'q', Answer.yes_no())]).ask({'x': 1})\n"
+            "print(r['q'].answer, bool(r.trace.fingerprint['questions']), 'pydantic' in sys.modules)")
+    out = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, check=True).stdout.split()
+    assert out == ["yes", "True", "False"]
+    from solvi.provenance import digest
+    from solvi.schema import dump
+
+    class Color(Enum):
+        RED = "red"
+    qs = [Question("a", "A?", Answer.choice(["x", "y"])), Question("b", "B?", Answer.yes_no(), min_confidence=0.7,
+                                                                 checkpoints=["c"], uses=["z"], require_evidence=True),
+          Question("c", "C?", Answer.choice([Color.RED])), Question("e", "E?", Answer.choice([1, 2.5, float("inf")]))]
+    for q in qs:                                        # the fingerprint stored traces carry: as schema.dump gave it
+        s = System(Catalog(), [q])
+        assert s._questions_fp() == digest(sorted([(q.name, dump(q, "json"))]), [])
