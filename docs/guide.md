@@ -3413,11 +3413,15 @@ It writes `catalog.py` (a computation, a hard check with `then=`, a rule, the qu
 (regression cases that pass, with a forced answer among them), `example.json` (an input for `solvi ask`), `README.md`
 (next steps), `.github/workflows/solvi.yml` (`solvi check` and `solvi test` on every push; in a subfolder of a git
 repository its `working-directory` already points there — move the file to the repository's `.github/workflows`) and
-`.gitignore`. A file that exists stops it with exit status 1 and nothing written; `--force` overwrites.
+`.gitignore`. A file that exists stops it with exit status 1 and nothing written; `--force` overwrites. A `DIR` that is
+itself a file is refused the same way.
 
 With `--with-model` the model is a keyword stand-in until `SOLVI_DECIDE_MODEL` names a real one (a folder, a Hugging
 Face id you pulled, `systemone:URL#model`), so tests and CI need no model; the cases pin the model's answer only where a
-hard check forces it. The catalog loads `<question>.calib.json` when it is there (`solvi calibrate` writes it).
+hard check forces it. The catalog loads `<question>.calib.json` when it is there (`solvi calibrate` writes it). A
+calibration belongs to the model it was made with: under a real model the catalog refuses another model's file, and
+where `SOLVI_DECIDE_MODEL` is not set (CI, a new shell) the stand-in answers without a real model's calibration and says
+so on stderr — so a calibrated project still passes its own workflow.
 
 ### ask: one decision
 

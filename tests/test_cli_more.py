@@ -69,6 +69,19 @@ def test_init_does_not_overwrite(tmp_path, capsys):
     assert code == 2
 
 
+def test_init_into_a_path_that_is_a_file_says_so_and_writes_nothing(tmp_path, capsys):
+    f = tmp_path / "notes.txt"
+    f.write_text("mine\n")
+    capsys.readouterr()
+    assert main(["init", str(f)]) == 1                                   # not a TypeError
+    err = capsys.readouterr().err
+    assert "is a file, not a folder" in err and "nothing written" in err and f.read_text() == "mine\n"
+    assert main(["init", str(f), "--force"]) == 1 and f.read_text() == "mine\n"
+    with pytest.raises(NotADirectoryError):
+        from solvi.scaffold import init
+        init(f)
+
+
 def test_init_workflow_points_to_the_project_in_a_repository(tmp_path):
     (tmp_path / ".git").mkdir()
     d = tmp_path / "services" / "triage"
@@ -292,6 +305,51 @@ def test_combination_calibration_round_trip(tmp_path):
 
 
 # --------------------------------------------------------------------------------------------------- solvi calibrate
+REAL_MODEL = '''import numpy as np
+from solvi.decide import DecideModel
+
+
+class Real:
+    """What SOLVI_DECIDE_MODEL names in a scaffolded project: not the keyword stand-in."""
+    model_id = "test/real"
+
+    def fingerprint(self):
+        return "real"
+
+    def logits(self, items):
+        return [np.stack([np.arange(len(it.options), 0, -1.0)] * 2, 1) for it in items]
+
+
+model = DecideModel(Real(), meta={"format": "test", "temperature": 1.0})
+'''
+
+
+@pytest.mark.parametrize("template", TEMPLATES)
+def test_init_project_calibrated_with_a_real_model_still_passes_its_ci_with_the_stand_in(tmp_path, capsys, monkeypatch,
+                                                                                         template):
+    from solvi.scaffold import SPECS
+    monkeypatch.chdir(tmp_path)
+    d = scaffold(tmp_path, template, with_model=True)
+    q = SPECS[template]["model_question"]
+    (d / "real.py").write_text(REAL_MODEL)
+    monkeypatch.setenv("SOLVI_DECIDE_MODEL", f"{d}/real.py:model")       # the README: export ..., then calibrate
+    code, _ = run(capsys, "calibrate", f"{d}/catalog.py:system", q, d / "labels.csv", "--risk", "0.5",
+                  "--out", d / f"{q}.calib.json")
+    assert (d / f"{q}.calib.json").exists(), code
+    assert "test/real" in json.loads((d / f"{q}.calib.json").read_text())["models"]
+    monkeypatch.delenv("SOLVI_DECIDE_MODEL")                             # CI, a new shell: the stand-in
+    capsys.readouterr()
+    assert main(["test", str(d)]) == 0
+    io = capsys.readouterr()
+    assert "cases passed" in io.out and f"{q}.calib.json" in io.err and "stand-in runs without it" in io.err
+    assert main(["check", f"{d}/catalog.py:system"]) == 0
+    code, out = run(capsys, "ask", f"{d}/catalog.py:system", d / "example.json", "--json")
+    assert code == 0 and json.loads(out)["answers"]
+    part = calibfile.find_part(load_object(f"{d}/catalog.py:system"), q)
+    assert part.guarantee is None                                        # the real model's thresholds were not applied
+    assert "stand-in" in (d / "README.md").read_text() and f"{q}.calib.json" in (d / "README.md").read_text()
+
+
 def test_calibrate_command_writes_a_file_the_catalog_loads(tmp_path, capsys, monkeypatch):
     monkeypatch.chdir(tmp_path)
     d = scaffold(tmp_path, "support", with_model=True)
@@ -303,15 +361,17 @@ def test_calibrate_command_writes_a_file_the_catalog_loads(tmp_path, capsys, mon
     part = calibfile.find_part(system, "route")
     assert part.guarantee["method"] == "crc" and part.conformal_set is not None
     assert main(["test", str(d)]) == 0
-    # a calibration made with another model stops the catalog from loading — but not `solvi calibrate`
+    # a calibration made with another model stops the catalog from loading under a real model — but not `solvi calibrate`
     rec = json.loads(out.read_text())
     rec["fingerprint"], rec["models"] = "0" * 16, {"another/model": "1" * 16}
     out.write_text(json.dumps(rec))
+    (d / "real.py").write_text(REAL_MODEL)
+    monkeypatch.setenv("SOLVI_DECIDE_MODEL", f"{d}/real.py:model")
     capsys.readouterr()
     assert main(["test", str(d)]) == 1 and "calibrated on another model" in capsys.readouterr().out
     code, text = run(capsys, "calibrate", f"{d}/catalog.py:system", "route", d / "labels.csv", "--json")
     data = json.loads(text)
-    assert code == 0 and data["saved"] == "route.calib.json" and data["not_applied"]
+    assert code in (0, 1) and data["saved"] == "route.calib.json" and data["not_applied"]   # 1: it escalates everything
     Path("route.calib.json").replace(out)             # written in the working directory (the default name)
     assert main(["test", str(d)]) == 0
 

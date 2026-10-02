@@ -4,10 +4,11 @@ a CI workflow and a .gitignore.
     solvi init [DIR] [--template support|refunds|minimal] [--with-model] [--force]
 
 The catalog (catalog.py) has a computation, a hard check, a rule and — with --with-model — a question answered by a
-decider (a keyword stand-in by default, so tests and CI need no model; SOLVI_DECIDE_MODEL names a real one). cases.json
+decider (a keyword stand-in by default, so tests and CI need no model; SOLVI_DECIDE_MODEL names a real one; a
+calibration file made with a real model is skipped, with a note, while the stand-in answers). cases.json
 pins its answers for `solvi test`; `solvi check catalog.py:system` lints it; `solvi ask catalog.py:system example.json`
 asks it once. Existing files are never overwritten without --force.
-Exit status: 0 — written; 1 — a file exists (nothing is written); 2 — usage errors."""
+Exit status: 0 — written; 1 — a file exists, or DIR is a file (nothing is written); 2 — usage errors."""
 from __future__ import annotations
 
 import json
@@ -85,7 +86,7 @@ QUESTIONS.append(Question("route", "Which team should handle the ticket?", Answe
 # ---------- a question the model answers: it proposes one of the options; the hard check above still decides
 route = model.decision("route", "Which team should handle this ticket?", "message", ROUTES, escalate_below=0.5)
 CALIBRATION = HERE / "route.calib.json"           # written by: solvi calibrate catalog.py:system route labels.csv
-if CALIBRATION.exists():
+if CALIBRATION.exists() and calibration_fits(CALIBRATION):
     route.load_calibration(CALIBRATION)           # refuses a calibration made with another model
 QUESTIONS.append(route.question(cat, checkpoints=["no_legal_threat"]))
 ''',
@@ -168,7 +169,7 @@ QUESTIONS = [
 # ---------- a question the model answers from the customer's own words (it proposes; a human reads the audit)
 reason = model.decision("reason", "Why does the customer want a refund?", "message", REASONS, escalate_below=0.5)
 CALIBRATION = HERE / "reason.calib.json"          # written by: solvi calibrate catalog.py:system reason labels.csv
-if CALIBRATION.exists():
+if CALIBRATION.exists() and calibration_fits(CALIBRATION):
     reason.load_calibration(CALIBRATION)          # refuses a calibration made with another model
 QUESTIONS.append(reason.question(cat))
 ''',
@@ -233,7 +234,7 @@ QUESTIONS = [Question("approve", "Approve the expense?", Answer.yes_no(), checkp
 # ---------- a question the model answers from the employee's note
 category = model.decision("category", "What kind of expense is it?", "note", CATEGORIES, escalate_below=0.5)
 CALIBRATION = HERE / "category.calib.json"        # written by: solvi calibrate catalog.py:system category labels.csv
-if CALIBRATION.exists():
+if CALIBRATION.exists() and calibration_fits(CALIBRATION):
     category.load_calibration(CALIBRATION)        # refuses a calibration made with another model
 QUESTIONS.append(category.question(cat))
 ''',
@@ -293,6 +294,21 @@ def load_model():
     return DecideModel(KeywordStandIn(), meta={"format": "keyword stand-in", "temperature": 1.0})
 
 
+def calibration_fits(path):
+    """Is a calibration file for the model that runs now? A real model (SOLVI_DECIDE_MODEL) always loads it — and
+    load_calibration refuses one made with another model. The keyword stand-in (tests, CI, a shell without the
+    variable) loads only a calibration made with the stand-in: a real model's thresholds say nothing about it, so it
+    runs without them, with a note."""
+    if os.environ.get("SOLVI_DECIDE_MODEL"):
+        return True
+    made_with = json.loads(Path(path).read_text(encoding="utf-8")).get("models") or {}
+    if KeywordStandIn.model_id in made_with:
+        return True
+    print(f"{Path(path).name}: calibrated with {', '.join(made_with) or 'another model'}; SOLVI_DECIDE_MODEL is not set, "
+          "so the keyword stand-in runs without it", file=sys.stderr)
+    return False
+
+
 model = load_model()
 '''
 
@@ -301,7 +317,7 @@ def catalog_py(template, with_model):
     t = SPECS[template]
     imports = t["imports"]
     if with_model:
-        imports = "import json\nimport os\n" + imports + "from pathlib import Path\n\nimport numpy as np\n"
+        imports = "import json\nimport os\n" + imports + "import sys\nfrom pathlib import Path\n\nimport numpy as np\n"
     head = f'"""{t["title"]}\n\nMade by `solvi init --template {template}{" --with-model" if with_model else ""}`: a ' \
            "computation, a hard check and a rule" + (",\nand a question a model answers" if with_model else "") + """.
 
@@ -448,7 +464,10 @@ def readme_md(name, template, with_model):
                 "```", "",
                 (f"`solvi calibrate` sets when the model answers alone so that P(answered alone and wrong) ≤ 10% for inputs "
                  f"like the labelled ones, and writes `{q}.calib.json`; `catalog.py` loads it at start "
-                 f"(`{q}.load_calibration(...)`), and refuses it when the model changed — calibrate again then. Twelve "
+                 f"(`{q}.load_calibration(...)`), and refuses it when the model changed — calibrate again then. "
+                 f"`{q}.calib.json` belongs to the model it was made with: where `SOLVI_DECIDE_MODEL` is not set (CI, a "
+                 "new shell) the keyword stand-in answers without it and says so on stderr, so the tests keep passing; "
+                 "commit the file, and set the variable wherever the real model should answer. Twelve "
                  "examples only show the mechanics: use a few hundred from your own stream. The model's answers are not "
                  "pinned in `cases.json` (except where a hard check forces them); pin them once you trust the model.")]
     return "\n".join(out) + "\n"
@@ -482,11 +501,13 @@ def files(target, template="support", with_model=False):
 
 
 def init(target=".", template="support", with_model=False, force=False):
-    """Write a new project into `target` → the paths written. FileExistsError (nothing written) when a file exists and
-    force is False."""
+    """Write a new project into `target` → the paths written. FileExistsError (nothing written; its first argument
+    lists the files) when a file exists and force is False; NotADirectoryError when `target` is itself a file."""
     if template not in TEMPLATES:
         raise ValueError(f"template must be one of {TEMPLATES}, not {template!r}")
     target = Path(target)
+    if target.exists() and not target.is_dir():
+        raise NotADirectoryError(f"{target} is a file, not a folder")
     fs = files(target, template, with_model)
     exist = [p for p in fs if (target / p).exists()]
     if exist and not force:
@@ -504,6 +525,9 @@ def cmd_init(a):
     """`solvi init` (see solvi.cli) → exit status."""
     try:
         written = init(a.dir, a.template, a.with_model, a.force)
+    except NotADirectoryError:
+        print(f"solvi init: {a.dir} is a file, not a folder; nothing written (name a folder)", file=sys.stderr)
+        return 1
     except FileExistsError as e:
         print(f"solvi init: {a.dir} already has {', '.join(e.args[0])}; nothing written (--force overwrites)",
               file=sys.stderr)
