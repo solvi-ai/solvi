@@ -2490,6 +2490,8 @@ class DecisionPart:
             self.correction_memory.apply(d, ctx["text"], alone=threshold is None and not ctx.get("combined"))
         if self.conformal_set is not None and d.probs:
             cands = self.candidates(d)
+            if (d.extra.get("memory") or {}).get("action") == "answered" and d.value not in cands:
+                cands.append(d.value)                 # the memory's answer is a candidate, whatever the model's set
             d.extra["candidates"] = cands
             if d.escalate:
                 d.escalate += f"; candidates at {self.conformal_set['coverage']:.0%}: {cands!r}"

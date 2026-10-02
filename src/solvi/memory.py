@@ -27,7 +27,10 @@ What it does with a proposal (mode):
   "answer"           as "check", and when the decider escalated by its own threshold (act, confidence, margin) and the
                      memory proposes a label, the memory answers with it; the trace says so (action "answered", the
                      escalation it replaced) and the part's act_guard promise is not claimed for that answer (the
-                     memory's own promise, from calibrate, is recorded instead).
+                     memory's own promise, from calibrate, is recorded instead). The decision's confidence is then
+                     the model's own probability of that answer — its `probs` still describe the model — so a
+                     `min_confidence` meant for the model is not passed on the neighbours' word; their agreement
+                     is in extra["memory"]. The answer is listed among the conformal candidates.
 Inside a Cascade / Vote / Route the memory only checks.
 
 Every decision records extra["memory"]: {"fp", "n", "mode", "proposal", "strength", "agreement", "abstain", "neighbours":
@@ -422,7 +425,7 @@ class CorrectionMemory:
                 rec["action"], rec["replaced"] = "answered", d.escalate
                 rec["model_answer"] = _shown(mine)
                 d.value = Unknown if p.label == NOT_STATED_KEY else sp.out(tuple(p.label) if sp.multi else p.label)
-                d.confidence = p.agreement
+                d.confidence = _model_p(sp, d.probs, p.label)     # the model's own probability of the memory's answer
                 d.escalate = None
                 d.extra.pop("guarantee", None)
                 rec["guarantee"] = (self.guarantee or {}).get("promise", "none: the memory's threshold is not calibrated")
@@ -434,6 +437,17 @@ class CorrectionMemory:
 
 def _shown(label):
     return tuple(label) if isinstance(label, list) else label
+
+
+def _model_p(sp, probs, label):
+    """The model's probability of a label the memory answers with (multi-label: the least certain option's probability of
+    being in / out of that set) — the confidence of a memory-given answer: the neighbours' agreement is not a
+    probability the model's thresholds (min_confidence, a guard on the confidence) were made for."""
+    if label == NOT_STATED_KEY:
+        return float(probs.get(Unknown, 0.0))
+    if sp.multi:
+        return float(min((probs.get(o, 0.0) if o in label else 1.0 - probs.get(o, 0.0)) for o in sp.real)) if sp.real else 0.0
+    return float(probs.get(label, 0.0))
 
 
 def _threshold_escalation(reason):

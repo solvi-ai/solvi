@@ -312,3 +312,27 @@ def test_a_memory_file_of_another_question_is_refused(tmp_path):
     loose = four.memory(CorrectionMemory(four).load(f, strict=False))
     with pytest.raises(ValueError, match="stored for another question"):         # not a numpy broadcast error
         loose.propose(texts("billing", 1)[0])
+
+
+def test_a_memory_given_answer_keeps_the_models_probability_as_its_confidence():
+    """mode="answer": the answer used to carry the neighbours' agreement as its confidence — 1.00 from three agreeing
+    cases, next to probs that say billing 0.79 — so min_confidence=0.99 let it through, and it was missing from its own
+    conformal candidates."""
+    m, _, _, _ = setup()
+    part = m.decision("team", TASK, "email", TEAMS, option_order="given", escalate_below=0.9999)
+    part.conformal([(t, k) for k in TEAMS for t in texts(k, 30)], coverage=0.9)
+    mem = part.memory(mode="answer", min_strength=0.5)
+    t = texts("billing", 1, start=70)[0]
+    for i in range(3):
+        mem.add(t, "shipping", source="human", stored_id=f"c{i}")           # people corrected it to shipping
+    d = part.decide(t)
+    rec = d.extra["memory"]
+    assert d.value == "shipping" and rec["action"] == "answered" and rec["agreement"] == 1.0 and rec["model_answer"] == "billing"
+    assert d.conf == pytest.approx(d.probs["shipping"]) and d.conf < 0.5     # the model's own probability of it
+    assert "shipping" in d.extra["candidates"] and "billing" in d.extra["candidates"]
+    cat = Catalog()
+    r = System(cat, [part.question(cat, "route", min_confidence=0.99)]).ask({"email": t})["route"]
+    assert r.status == "abstain" and r.guard == "low_confidence"             # a threshold meant for the model holds
+    cat2 = Catalog()
+    r2 = System(cat2, [part.question(cat2, "route")]).ask({"email": t})["route"]
+    assert r2.status == "ok" and r2.answer == "shipping"

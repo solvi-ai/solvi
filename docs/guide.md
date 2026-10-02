@@ -1213,7 +1213,9 @@ whose probability vectors lie far apart (another language than the checkpoint's,
 - `"answer"` — as `"check"`, and where the decider escalated by its own threshold (act, confidence, margin — not a
   perturbation or another safeguard) and the memory proposes a label, the memory answers with it. The trace says so
   (action `answered`, the escalation it replaced, the model's answer); the part's `act_guard` promise is not claimed for
-  that answer, the memory's own (from `calibrate`) is recorded instead.
+  that answer, the memory's own (from `calibrate`) is recorded instead. The answer's confidence is the model's own
+  probability of it (the `probs` still describe the model), so a question's `min_confidence` is not passed on the
+  neighbours' word — their agreement is in `extra["memory"]`.
 
 Inside a `Cascade`, `Vote` or `Route` a part's memory only checks, and each stage's record carries it. Every decision
 records `extra["memory"]` — `fp`, `n`, `mode`, `proposal`, `strength`, `agreement`, `abstain`, `action` and `neighbours`
