@@ -342,6 +342,24 @@ def test_example_13_runs_with_the_stand_in(monkeypatch):
     assert "System.teach(team" in text and "low confidence" in text
 
 
+def test_load_expands_the_home_folder_and_does_not_ask_the_hub_for_a_path(tmp_path, monkeypatch):
+    """The guide's first decider example is DecideModel.load("~/models/solvi-base"): `~` was not expanded, the path was
+    not a directory, and it went to Hugging Face as a repository id (HFValidationError)."""
+    import sys
+    import types
+
+    def no_hub(*a, **kw):
+        raise AssertionError(f"asked the hub for {a}")
+    monkeypatch.setitem(sys.modules, "huggingface_hub", types.SimpleNamespace(snapshot_download=no_hub))
+    monkeypatch.setenv("HOME", str(tmp_path))
+    (tmp_path / "models" / "solvi-base").mkdir(parents=True)
+    with pytest.raises(FileNotFoundError, match="solvi-base has no solvi_decide.json"):   # found the folder under ~
+        DecideModel.load("~/models/solvi-base", backend="onnx")
+    for missing in ("~/models/nope", str(tmp_path / "nope"), "./nope/solvi-base"):
+        with pytest.raises(FileNotFoundError, match="no such folder"):
+            DecideModel.load(missing, backend="onnx")
+
+
 def _real_model_dir():
     for p in (os.environ.get("SOLVI_DECIDE_MODEL"), os.path.expanduser("~/.cache/solvi_release/decide-base")):
         if p and os.path.isfile(os.path.join(p, "solvi_decide.json")) and os.path.isdir(os.path.join(p, "onnx")):

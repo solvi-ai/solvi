@@ -1223,13 +1223,17 @@ class DecideModel:
     @classmethod
     def load(cls, path_or_id, device=None, backend="auto", max_len=None, bs=16, multi_question=None, act=None,
              max_len_long=None):
-        """multi_question / act: override what solvi_decide.json declares (for experiments, e.g. testing a checkpoint
+        """path_or_id: a checkpoint folder (`~` is expanded) or a Hugging Face id (downloaded once, then read from the
+        cache). multi_question / act: override what solvi_decide.json declares (for experiments, e.g. testing a checkpoint
         in multi-question passes); both are part of the fingerprint. max_len: the tokens of one ordinary pass (default:
         the checkpoint's `max_len`); it also sets long="retrieve"'s budget. max_len_long: the length long="full" reads
         whole (default: the checkpoint's `max_len_long`; a checkpoint that declares none refuses long="full" unless it is
         given here — with a warning: it was not trained on long inputs). Part of the fingerprint."""
-        path = str(path_or_id)
+        path = os.path.expanduser(str(path_or_id))
         if not os.path.isdir(path):
+            if os.path.isabs(path) or path.startswith((".", "~")):    # a path, not a Hugging Face id: do not ask the hub
+                raise FileNotFoundError(f"{path}: no such folder (a checkpoint is a folder with solvi_decide.json, or a "
+                                        "Hugging Face id like solvi-ai/solvi-base)")
             from huggingface_hub import snapshot_download
             allow = None
             if backend == "onnx":
