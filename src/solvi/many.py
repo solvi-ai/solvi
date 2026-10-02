@@ -18,7 +18,8 @@ Modes (`Many(mode=...)`):
               record says how many, and when the first one left out scores nearly as well as the last one kept
               (`gap`), the decision escalates
   tournament  the options in blocks of `block`: the decider chooses in each block, the winners meet in the next round,
-              the last round decides. Every option is considered; about N / (block − 1) calls
+              the last round decides. Every option is considered; about N / (block − 1) calls. When a block's
+              call escalates, its winner still goes on, and the final decision escalates too
   auto        direct when the question fits and leaves the input at least `min_input` tokens (default: half of
               max_len); else shortlist when there is a selector, else tournament
 
@@ -51,7 +52,8 @@ class Many:
     request, finds better). selector: "bm25", a function (query, labels, texts) → one score per option, or None (no
     shortlist: auto goes to the tournament). min_input: the tokens the input must be left with for a direct decision
     (None: half of max_len). gap: shortlist escalates when (score of the last kept − score of the first left out) /
-    the best score is below it and the one left out matched the query at all. max_options: more is an error at once."""
+    the best score is below it and the one left out matched the query at all (BM25: a score above 0; your selector:
+    scores are measured from the lowest one given, so negative scores work, and a tie at the cut is a close cut). max_options: more is an error at once."""
     mode: str = "auto"
     k: int = 8
     block: int = 10
@@ -162,8 +164,13 @@ def decide_many(model, text, task, options, descriptions=None, *, many=None, **s
         short = [labels[i] for i in order[:k]]
         best, last = scores[order[0]], scores[order[k - 1]]
         out = scores[order[k]] if n > k else None                        # the first option left out
-        relevant = out is not None and out > 0                           # it matched the query: something was dropped
-        gap = None if not relevant else ((last - out) / best if best > 0 else 0.0)
+        if callable(many.selector):                                      # your scores have no "0 = no match" (cosines,
+            low = min(scores)                                            # log-probabilities, negative distances): the
+            relevant = out is not None and (out > low or out == last)    # worst score is the floor, and a tie at the
+            gap = None if not relevant else ((last - out) / (best - low) if best > low else 0.0)   # cut is a close cut
+        else:
+            relevant = out is not None and out > 0                       # it matched the query: something was dropped
+            gap = None if not relevant else ((last - out) / best if best > 0 else 0.0)
         d = ask(short)
         info.update(mode="shortlist", considered=k, unconsidered=n - k,
                     shortlist=[[labels[i], round(scores[i], 4)] for i in order[:k]],
@@ -192,5 +199,10 @@ def decide_many(model, text, task, options, descriptions=None, *, many=None, **s
     d = ask(pool)                                                        # the last round decides
     blocks.append({"round": rounds + 1, "options": pool, "winner": d.value, "confidence": round(float(d.conf), 6)})
     info.update(mode="tournament", considered=n, unconsidered=0, rounds=rounds + 1, blocks=blocks)
+    unsure = [c for c in calls[:-1] if c["escalate"]]                    # a block whose choice the model would not
+    if unsure:                                                           # act on: the right option may have been
+        why = (f"{len(unsure)} of the {len(calls) - 1} tournament call(s) before the last escalated "   # dropped there
+               f"({unsure[0]['escalate']}); would have answered {d.value!r}")
+        d.escalate = why if d.escalate is None else f"{d.escalate}; {why}"
     d.extra["many"] = info
     return d

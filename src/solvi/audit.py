@@ -391,10 +391,13 @@ class AnswerAudit:
         return "\n".join(lines)
 
     def to_dict(self):
+        """The audit of this answer as JSON-ready data (dates as ISO text, sets as sorted lists, as every to_dict())."""
         from dataclasses import asdict
+
+        from .schema import jsonable
         d = asdict(self)
         d.update(deterministic=self.deterministic, fuzzy=self.fuzzy, share_deterministic=self.share_deterministic)
-        return d
+        return jsonable(d)
 
 
 @dataclass
@@ -405,6 +408,8 @@ class Audit:
     overall: dict | None = None     # Response.overall: confidence, weakest answer, answered / abstained, complete, feasible
 
     def __getitem__(self, q):
+        if q not in self.answers:
+            raise KeyError(f"no audit of {q!r}: the audited answers are {', '.join(self.answers) or 'none'}")
         return self.answers[q]
 
     _lang = "en"                    # the language str() renders in (not a field: to_dict() stays the same)
@@ -434,8 +439,10 @@ class Audit:
                          for q, a in self.answers.items())
 
     def to_dict(self):
-        return {"answers": {q: a.to_dict() for q, a in self.answers.items()}, "safeguards": self.safeguards,
-                "model_outputs": self.model_outputs, "overall": self.overall}
+        """The whole audit as JSON-ready data."""
+        from .schema import jsonable
+        return {"answers": {q: a.to_dict() for q, a in self.answers.items()}, "safeguards": jsonable(self.safeguards),
+                "model_outputs": self.model_outputs, "overall": jsonable(self.overall)}
 
 
 def build(res, question=None, catalog=None, lang=None):
@@ -447,6 +454,10 @@ def build(res, question=None, catalog=None, lang=None):
     else:
         n_model = res.model_outputs
     qs = [question] if isinstance(question, str) else list(question or res.results)
+    lost = [q for q in qs if q not in res.results]
+    if lost:
+        raise KeyError(f"no answer to {', '.join(map(repr, lost))} in this response: it answered "
+                       f"{', '.join(res.results) or 'nothing'}")
     out = Audit({q: _one(res, q, events, catalog) for q in qs}, events, n_model, getattr(res, "overall", None))
     if lang != i18n.DEFAULT:
         out._lang = lang

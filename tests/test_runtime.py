@@ -165,3 +165,78 @@ def test_a_stored_decision_made_with_early_exit_false_holds_the_rule_values_and_
     got = store.get(res.stored_id)
     assert got.values["length"] == 1 and got.trace.early_exit is False and got["ok"].status == "forced"
     assert store.replay_all(s) == [] and store.verify()["ok"]
+
+
+# ---------------------------------------------------------------- vhash of arrays and plain objects
+def test_vhash_tells_long_numpy_arrays_apart_and_hashes_an_array_as_the_list_it_is_stored_as():
+    """repr elides a long array ("..."): two 5000-vectors that differed in the middle hashed the same."""
+    import numpy as np
+    a = np.arange(5000, dtype=float)
+    b = a.copy()
+    b[2500] = -1.0
+    assert vhash(a) != vhash(b) and vhash(a) == vhash(a.copy()) == vhash(a.tolist())
+    assert vhash(np.int64(5)) == vhash(5) and vhash(np.float64(0.5)) == vhash(0.5)
+    assert vhash({"m": np.eye(2)}) == vhash({"m": [[1.0, 0.0], [0.0, 1.0]]})
+
+
+def test_a_part_that_returns_a_plain_object_replays():
+    """An object with the default repr was hashed by its memory address, so its step never recomputed on a live trace."""
+    class Thing:
+        def __init__(self, v):
+            self.v = v
+    cat = Catalog()
+
+    @cat.fn
+    def thing(x):
+        return Thing(x)
+
+    @cat.rule("q")
+    def q(thing):
+        return thing.v > 1
+    s = System(cat, [Question("q", "?", Answer.yes_no())])
+    res = s.ask({"x": 2})
+    assert res["q"].answer == "yes" and res.trace.replay(s, res.flow)["ok"]
+    assert vhash(Thing(1)) == vhash(Thing(1)) != vhash(Thing(2))
+    assert vhash(test_a_part_that_returns_a_plain_object_replays) == vhash(test_a_part_that_returns_a_plain_object_replays)
+    loop = Thing(0)
+    loop.v = loop
+    assert isinstance(vhash(loop), str)                              # attributes that point back: no crash
+
+
+def test_trace_value_reads_a_computed_fact_then_a_given_one_then_missing():
+    from solvi.runtime import MISSING
+    cat = Catalog()
+
+    @cat.fn
+    def double(x):
+        return x * 2
+
+    @cat.fn
+    def broken(x):
+        raise ValueError("no")
+
+    @cat.rule("big")
+    def big(double, broken):
+        return "yes"
+    t = System(cat, [Question("big", "Big?", Answer.yes_no())]).ask({"x": 21}).trace
+    assert t.value("double") == 42 and t.value("x") == 21
+    assert t.value("broken") is MISSING and t.value("nothing") is MISSING
+
+
+def test_a_question_changed_in_place_changes_the_questions_fingerprint():
+    """The fingerprint was cached by the question objects' ids: `q.min_confidence = 0.99` changed the answers but not
+    the fingerprint the traces record."""
+    cat = Catalog()
+
+    @cat.rule("big")
+    def big(x):
+        return "yes" if x > 1 else "no"
+    q = Question("big", "Big?", Answer.yes_no())
+    s = System(cat, [q])
+    before = s.fingerprint()["questions"]
+    assert s.ask({"x": 2}).trace.fingerprint["questions"] == before
+    s.questions["big"].min_confidence = 0.99
+    assert s.fingerprint()["questions"] != before and s.ask({"x": 2}).trace.fingerprint["questions"] != before
+    s.questions["big"].answer.options.append("maybe")
+    assert len({before, s.fingerprint()["questions"]}) == 2 and s.fingerprint()["questions"] != \
+        System(cat, [Question("big", "Big?", Answer.yes_no(), min_confidence=0.99)]).fingerprint()["questions"]

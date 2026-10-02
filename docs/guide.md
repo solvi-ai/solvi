@@ -83,7 +83,10 @@ cat = Catalog()
 
 Part names must be unique in a catalog (a duplicate raises `ValueError`). A rule is registered per question; registering
 a second rule for the same question replaces the first. The decorators return the original function, so parts stay
-ordinary, testable Python.
+ordinary, testable Python. A part and a key of `init_state` cannot share a name: `ask` raises `ValueError` for an input
+key named like a part (the given value would replace the part — a hard check included), and `System(inputs=Model)`
+refuses a model with such a field when it is built. Name a part after what it computes (`savings_points`), not after the
+input it reads (`def savings(savings)` reads its own name).
 
 A part may be an `async def` function (a database or HTTP lookup): `system.aask` awaits it, concurrently with the other
 steps; `timeout=` (seconds) and `blocking=True` (a sync function that waits: run in a worker thread) on any decorator
@@ -120,8 +123,9 @@ def ship_rule(big_order):
 
   No rule and no model confidence can override a failed hard check. To make sure a hard check is always in a question's
   flow, list it in the question's `checkpoints`. When several hard checks fail, the first one declared in the catalog decides:
-  declare the most important first. A question's flow and answer do not depend on which other questions are asked in the
-  same request.
+  declare the most important first. A question's flow does not depend on which other questions are asked in the same
+  request, and neither does its answer — except through a constraint between answers, which applies only when all its
+  questions are asked.
 
   A hard check that could not be evaluated (it raised, or a fact it reads is missing) never counts as passed: the
   questions it governs abstain. The reason names the check and, when the check could not run for lack of an input, the
@@ -251,6 +255,22 @@ satisfies every constraint, and appends "changed from … to satisfy …" to the
 abstentions never change. `res.feasible` says whether the final answers satisfy every constraint; if fixed answers conflict,
 it is `False` and `res.violations` names the constraints.
 
+What to know about constraints:
+
+- A constraint applies only when **all** its questions are asked in the request: `ask(state, ["verdict"])` does not
+  apply a constraint between `verdict` and `harm`, so a learned answer may differ from the one `ask(state)` gives.
+- Its argument names are question names. `System(...)` raises `ValueError` for a constraint that reads a name that is
+  not one of its questions (a typo would otherwise mean the constraint never applies), and a second constraint with
+  the name of an earlier one raises when it is declared.
+- A constraint that raises counts as broken; the exception is in the reason of every answer it reads (`constraint
+  one_owner raised TypeError: …`).
+- The search is exhaustive only up to 50,000 combinations of the candidate answers — 15 yes/no answers under one
+  constraint. Above that only the most probable answers of each question are tried (with 16 or more yes/no answers:
+  the answers as given), so nothing may be repaired: `res.feasible` is `False`, `res.violations` names the constraints
+  and each answer's reason says `not repaired: … joint decoding tried only the 1 most probable answer(s) of each
+  question (65,536 combinations of 16 answers exceed its limit of 50,000)`. Split such a request into groups of
+  questions that share constraints, or enforce the rule in code (an "at most one" needs no search).
+
 ## Types, questions and model decisions
 
 One story runs through this section: **types declare questions; the model proposes; checks decide.** Type hints make the
@@ -310,7 +330,9 @@ what the trace records. A value that fails is **rejected**, like an ungrounded q
   `outside_options`), exactly like a model decision outside its options. An Enum answer is returned as its value.
 
 A producer's `validate` gets the coerced value. Replay re-runs the same validation, so typed steps replay like any other.
-Untyped parts are not touched: no validation, no pydantic import, and the same hashes as before.
+Untyped parts are not touched: no validation, the same hashes as before, and no pydantic import. (The trace's
+fingerprint of the questions is computed without pydantic unless an option is not a plain JSON value — an Enum
+member, for example — or an answer is a typed span; then the first `ask` imports it.)
 
 ### Types declare questions
 
@@ -391,7 +413,8 @@ def repair_days(doc: str) -> Estimate[0, 3, 7, 14]:
   offsets — or a string, located in `source` (default: the part's only given text input, else `doc`) at its first
   occurrence as whole words and numbers: `"3"` is not evidence when the text says `30`, `3.5` or `1,300`, nor `"cat"`
   when it says `category` (`"30"` is found in `30.` and `30%`); to quote a part of a word, give a `Quote` with its
-  offsets. Evidence must point into **given** text facts. An output whose evidence is not in its text is **rejected** like an
+  offsets. A `Quote` whose offsets begin or end inside a number (`Quote("3", 26, 27)` over `30`) is not that number
+  and is rejected — the same holds for a model-backed part's own quote. Evidence must point into **given** text facts. An output whose evidence is not in its text is **rejected** like an
   ungrounded quote (not downgraded): the fact is missing, the next producer runs (a fallback), else the answer abstains —
   safeguard **grounding rejected**. Accepted evidence is recorded in the trace (`record.extra["evidence"]`, hashed and
   replayed), returned as `result.evidence`, shown in the audit (`evidence  doc[37:44] 'cracked'  verified`) and counted in
@@ -458,7 +481,11 @@ so the restored trace hashes and replays exactly. A value that is neither — an
 datetime whose zone its text does not carry, an untyped date in a record stored by solvi 0.7.1 or earlier — comes back
 as JSON gave it and is named in the loaded trace's `unrestored`: replay reports the steps that rest on it as
 `not_restored` ("no verdict on the data"), `solvi diff` lists the decision under "could not be re-run", and
-`counterfactual` draws no conclusion from it. The classes stay plain dataclasses; the pydantic models are in
+`counterfactual` draws no conclusion from it. A span answer's value type is written by name — a built-in one (`str`,
+`int`, `float`, `bool`, `date`, `datetime`, `Decimal`) as such, any other class as `module:qualname` — and a name that
+cannot be imported again (a class defined inside a function) makes `from_json` raise `ValueError`. Option descriptions
+are keyed by the option's text in JSON and come back on the options themselves (`Answer.ordinal({1: "bad", 2: "ok"})`).
+The classes stay plain dataclasses; the pydantic models are in
 `solvi.schema`.
 
 Notes: types are resolved with `typing.get_type_hints`; a name that cannot be resolved (a class defined inside a function
@@ -1021,7 +1048,10 @@ not better than rules.
 An agent that works in the same environment again — a site, an internal tool, a command line, a file tree — finds its
 structure anew on every task unless it keeps a map. `solvi.worldmap.WorldMap` is written as the agent acts: every edge
 is a claim "(state, action) leads to state" with a status (hypothesis, confirmed), a source (seen, observed, told,
-human) and its evidence, and every write is an entry of a hash-chained journal.
+human) and its evidence, and every write is an entry of a hash-chained journal. The journal is what a saved map is
+loaded from: `load` checks the chain and rebuilds the claims by replaying it (an edge edited in the file changes
+nothing; a broken chain raises), `verify()` also compares the map with its journal, and `rebuild(upto=n)` gives the
+map as it was after the first n entries.
 
 ```python
 from solvi.worldmap import WorldMap
@@ -1614,13 +1644,16 @@ res = await system.aask(application)         # same Response as ask
 res = await system.aask(application, speculate=True)
 ```
 
-- `async def` parts (fn, extract, check, rule, alternative producers) are awaited; a sync part marked `blocking=True`
-  runs in a worker thread (`asyncio.to_thread`); any other sync part runs inline, as in `ask`.
+- `async def` parts (fn, extract, check, rule, alternative producers) are awaited — also when marked `blocking=True`,
+  which only matters for sync parts; a sync part marked `blocking=True` runs in a worker thread (`asyncio.to_thread`);
+  any other sync part runs inline, as in `ask`.
 - Steps run as soon as the steps they read have finished, all concurrently. By default in the phases of `ask`: hard
   checks and what they read first, then what the open questions still need — so no call starts that `ask` would not
   make, and a failed hard check stops the paid lookups behind it. `speculate=True` starts every step as soon as its
   inputs are ready and **cancels** the pending calls a failed hard check makes unnecessary (lower latency; some calls may
   start and be cancelled; steps that finished anyway are dropped). Cancelling `aask` itself cancels every pending call.
+  Under a learned order (`System(order="learned")`, `learn_order()`) the hard checks run one at a time in that order,
+  so `speculate=True` is ignored, with a `UserWarning`.
 - **Timeouts.** A call that takes longer than its part's `timeout=` (or `aask(timeout=)`, or `System(timeout=)`) fails
   with `timed out after 2 s`: the fact is missing and the questions that need it abstain with guard `timeout` (a hard
   check that times out: "could not be evaluated", as for any error). The safeguard `timeout` is in `res.safeguards`, the
@@ -1642,7 +1675,9 @@ Plain CPU parts gain nothing from `aask`: for them the sync `ask` stays the defa
 ### Learned order of hard checks
 
 Every `ask` measures the run time of each part: `system.costs` keeps a moving average (ms) per part (`cost=` on a decorator
-is the prior until a part has run; `costs="measured"` also feeds it to the planner, see above). It also records which hard checks failed on which input.
+is the prior until a part has run; `costs="measured"` also feeds it to the planner, see above). While learning is on —
+`System(order="learned")`, `producers="learned"`, `learn=True`, or after `learn_order()` — it also records which hard
+checks failed on which input; a default System does not (`learn=False`: no work inside `ask` beyond the costs).
 
 `System(cat, questions, order="learned")` — or `system.learn_order(examples)` on a list of `init_state`s, which runs only the
 hard checks and what they read and then switches the order — makes the executor evaluate hard checks **one at a time**, the
@@ -1983,7 +2018,18 @@ several processes may write to one file). Two more take an optional dependency a
 cannot fork) and `DuckDBStorage("decisions.duckdb")` (`pip install 'solvi[duckdb]'`; one writing process; query the tables
 with DuckDB next to JSONL or Parquet files). `storage="decisions.duckdb"` or a `postgresql://` URL work too. A stored record holds the answers, the safeguards, the models, the whole
 response (`res.to_dict()`), the time and your own `meta` (`store.save(res, meta={"ticket": 42})`). `teach` stores its
-corrections in the same chain (`store.corrections()`).
+corrections in the same chain (`store.corrections()`). `query(answer=...)` matches the stored form of an answer:
+`answer=True` finds a yes/no question's "yes". `len(store)` counts every chained record (decisions, corrections,
+redaction marks); `len(list(store.iter()))` the decisions. Every store has `close()` and is a context manager (`with
+SQLiteStorage("decisions.db") as store:`); the file extension is read in any case (`decisions.DB` is SQLite).
+
+What a stored decision costs and how durable it is depends on the backend. `JSONLStorage` appends one line and flushes
+it to the operating system: the cheapest, but by default not synced to disk, so a power failure can lose the last
+records (the chain stays verifiable up to them) — `JSONLStorage(path, fsync=True)` syncs every record before `save`
+returns, at the cost of one disk sync per decision. `SQLiteStorage` commits a transaction per record (the record, its
+index rows and the new head): durable once `save` returns, and slower than an unsynced JSON line (a disk sync per commit).
+`DuckDBStorage` and `PostgresStorage` commit per record too; with PostgreSQL the cost is mostly the round trip to the
+server. Measure on your machine before storing every decision of a high-volume stream.
 
 | Method | Returns |
 |---|---|
@@ -2860,7 +2906,7 @@ make one toolset / node / tool list per conversation if the process-wide memory 
 
 **Which frameworks.** Each adapter has an extra — `pip install "solvi[pydantic-ai]"`, `"solvi[langgraph]"`,
 `"solvi[openai-agents]"` — and importing one without its framework says which. Supported and tested with real runs (`tests/test_agents_frameworks.py`,
-`tests/test_agents_recheck3.py`): PydanticAI (2.51), LangGraph (1.2.12 with langchain-core 1.6.5), the OpenAI Agents SDK
+`tests/test_agents_user_words_and_approvals.py`): PydanticAI (2.51), LangGraph (1.2.12 with langchain-core 1.6.5), the OpenAI Agents SDK
 (0.22.3) and MCP (the proxy). Other frameworks — LlamaIndex, AutoGen, smolagents, CrewAI — have no adapter; their
 histories can be passed to `guard.check` as messages, and shapes the guard does not recognise are read fail-closed
 (unknown blocks are tool outputs), but formats that merge the user's text with tool text (smolagents' "Observation:"
@@ -3174,6 +3220,7 @@ See [examples/21_verified_chart.py](../examples/21_verified_chart.py).
 ```
 solvi check myapp.decisions:system            # exit 0: no errors; 1: errors; 2: usage errors
 solvi check myapp.decisions:system --strict   # warnings fail too;  --json for data
+solvi check gallery/01_support_triage         # a task file or a directory with task.py, as for solvi test
 ```
 
 ```python
@@ -3186,7 +3233,8 @@ Flows are planned with every given fact present. **Errors**: a hard check whose 
 whose flow never runs it (`then_not_in_flow`: the question's rule does not read it through any fact and the question does
 not list it in `checkpoints`, so when the check fails the question is answered as if it had passed — the fix is
 `checkpoints=[...]`); `then=` naming no question or an answer outside the question's options; facts that need each other
-(`cycle`); a question no input can answer (a fact nothing can compute, a missing checkpoint, a span / rank / estimate
+(`cycle`; facts derived from each other, each with a producer outside the loop, are only a note, `mutual_producers`, for
+a System with `strategist=` — the flows are planned by the system's own strategist); a question no input can answer (a fact nothing can compute, a missing checkpoint, a span / rank / estimate
 question without a rule); a producer's type its consumer cannot read, or a `System(inputs=...)` field its typed reader
 cannot read (`type_conflict`); a producer's `validate` that requires an argument no producer of its fact takes as an
 input (`validate_reads_unknown`: it cannot run, so every output of that producer would be rejected — `System(...)`
@@ -3207,8 +3255,9 @@ counts as using everything computable: its future head's candidate features); `t
 reading a question's name (answers are not facts); typed readers of a given fact, or alternative producers, whose types no
 value satisfies together; an option the constraints always rule out (`dead_option`); a constraint that raises on some
 answers; and **silent defaults**: in a function that reads the input (a given fact), `x or <literal>` and
-`d.get(k, <literal>)` turn a missing, empty or null input into a value nobody gave — the answer looks decided while it
-rests on a guess. Say what a missing input means (check for `None` and abstain, or declare the default in
+`d.get(k, <literal>)` on that input (`amount or 0`, `order.get("total", 0)`, `order["tax"] or 0`) turn a missing,
+empty or null input into a value nobody gave — the answer looks decided while it rests on a guess. A lookup in a
+constant table (`{...}.get(kind, 1)`) or a default on a computed value is not flagged. Say what a missing input means (check for `None` and abstain, or declare the default in
 `System(inputs=...)`), or mark the line `# solvi: ok`. **Notes** never fail: a question without a rule abstains until
 an answer head is fitted.
 
@@ -3286,7 +3335,7 @@ Hashes: a record hashes its provenance only when it differs from the default (`q
 
 | Safeguard | Fires when | Effect |
 |---|---|---|
-| grounding | a quote lies outside its text, or a model's quote is not literally `doc[start:end]` (strings up to whitespace, numbers as written, e.g. `1250.0` ↔ `"1,250.00"`); an evidence quote or a span is not literally in its text | the output is rejected: the fact is missing, the claim stays in the error; the next alternative producer runs, else dependent answers abstain |
+| grounding | a quote lies outside its text, or a model's quote is not literally `doc[start:end]` (strings up to whitespace; numbers as written, e.g. `1250.0` ↔ `"1,250.00"` — `int`, `float`, `Decimal`, `Fraction` and numpy scalars; a `date` when the text reads as that date; a `bool`, a `datetime` or a list cannot be compared and is not checked); an evidence quote or a span is not literally in its text | the output is rejected: the fact is missing, the claim stays in the error; the next alternative producer runs, else dependent answers abstain |
 | closed set | a `Decision` (or a value of a part with `options=`) is not one of the options; a rule's answer is not one of the question's options | rejected / the question abstains |
 | low confidence | a `Quote` / `Decision` is below the part's `min_confidence` or a decision's `escalate_below`; an answer is below the question's `min_confidence` | rejected / the question abstains, saying what it would have answered |
 | model escalated | a decider's act / escalate signal is below its threshold (see [the output](#the-output-probabilities-calibrated-confidence-act-or-escalate)) | rejected: the fact is missing, next producer, else the question abstains, saying what it would have answered |
@@ -3359,16 +3408,22 @@ What is searched (`over=`: default, the given facts the question's flow reads):
 
 - numbers and dates — outward from the current value in both directions with doubling steps, then bisection between the
   last unchanged and the first changed value: the nearest threshold crossing, exact for inputs the answer is monotone in
-  (a non-monotone input can hide a nearer crossing between two probes). Integers and dates give exact bounds
+  (a non-monotone input can hide a nearer crossing between two probes). A direction where no probe changes the answer
+  is tried again on an even grid up to the farthest probe, which finds the band of a two-sided rule (`abs(value + 20) >
+  5` at 40 → `no if value ≤ -15`); a narrower band can still be missed, so when nothing is found the result says "no
+  change ... was found", not that none exists. Integers and dates give exact bounds
   (`debt ≤ 1999`, `purchase_date ≥ 2026-08-20`); floats are shown at the shortest decimal that holds, `≤` or `<` as the
-  rule has it. A non-negative input stays non-negative;
+  rule has it. A non-negative input stays non-negative; a domain `(lo, hi)` that does not contain the current value is
+  refused for that input (`cf.not_searched` says why);
 - booleans, Enums and `Literal` fields of `System(inputs=...)` — every other value;
 - anything else only with `domains={"history": ["on time", "late"]}`; a tuple bounds a number: `domains={"amount": (0, 5000)}`.
 
 `max_changes=2` (the default) tries two inputs together when no single input changes the answer ("approve if amount ≤ 1000
 (now 1200) and debt ≤ 1999 (now 2500)" — each bound holds with the other change made); `max_changes=1` does not.
 `target="approve"` looks only for that answer. Results are ranked by the number of changes, then their size (the relative
-change of a number; 1 for an enumerated value). `max_evals=5000` caps the re-runs (`cf.exhausted`). A response loaded from
+change of a number; for a date the days moved over 30, or over the width of its domain; 1 for an enumerated value).
+A given input read only by a part that did not run (a soft check skipped after a hard check failed) is listed in
+`cf.not_searched`. `max_evals=5000` caps the re-runs (`cf.exhausted`). A response loaded from
 a store with its System works the same; one loaded without it needs `system=`.
 
 ### Reports for people: res.report, store.report, solvi report

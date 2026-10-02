@@ -424,3 +424,35 @@ def test_a_model_rule_whose_quote_is_not_in_the_text_abstains_with_guard_groundi
         assert r[q].status == "abstain" and r[q].guard == "grounding" and r[q].answer is None
     assert [e["kind"] for e in r.safeguards] == ["grounding", "grounding"]     # one event per answer, not two
     assert s.stats["grounding_rejected"] == 2
+
+
+def test_a_models_quote_of_a_decimal_a_numpy_number_or_a_date_is_compared_with_the_text():
+    """Quote(Decimal("999.99"), 0, 5) over "hello" was accepted from a model-backed part: only str, int and float values
+    were compared with the text at the offsets."""
+    import datetime
+    import fractions
+    from decimal import Decimal
+    import numpy as np
+    from solvi.provenance import matches
+    assert matches(Decimal("999.99"), "hello") is False and matches(Decimal("12.50"), "total 12.50") is True
+    assert matches(Decimal("1250.5"), "1,250.50 EUR") is True and matches(Decimal("12.5"), "12.51") is False
+    assert matches(fractions.Fraction(1, 2), "0.5") is True and matches(np.float64(12.5), "12.50") is True
+    assert matches(np.int64(7), "8 items") is False and matches(Decimal("NaN"), "12") is False
+    assert matches(datetime.date(2020, 1, 1), "hello") is False and matches(datetime.date(2020, 1, 1), "on 2020-01-01") is True
+    assert matches(datetime.date(2026, 9, 12), "12 September 2026") is True
+    assert matches(datetime.date(2026, 9, 13), "12 September 2026") is False
+    assert matches(datetime.date(2026, 9, 12), "12 Sep") is None and matches(True, "yes") is None   # cannot be compared
+
+    class M:
+        version = "1"
+    cat = Catalog()
+
+    @cat.extract(model=M())
+    def total(doc):
+        return Quote(Decimal("999.99"), 0, 5)
+
+    @cat.rule("big")
+    def big(total):
+        return total > 100
+    res = System(cat, [Question("big", "?", Answer.yes_no())]).ask({"doc": "hello world, total 12.50"})
+    assert res["big"].status == "abstain" and "not grounded" in res.trace.records[0].error

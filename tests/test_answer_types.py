@@ -113,3 +113,97 @@ def test_rule_answers_stay_fixed_and_learned_ones_adapt_or_report():
 def test_consistent_answers_untouched():
     r = _guard({"safe": 0.9, "unsafe": 0.1}, {"none": 0.9, "prompt_injection": 0.05, "pii": 0.05})
     assert (r["verdict"].answer, r["harm"].answer) == ("safe", "none") and r.feasible and not r.violations
+
+
+# ---------------------------------------------------------------- constraints: what used to pass without a word
+def _yes_no_system(n, constraint=True):
+    """n yes/no questions, each answered by a model with P(yes) 0.6 + 0.01·i, under "at most one yes"."""
+    import inspect
+    from solvi import Decision
+    cat = Catalog()
+    names = [f"m{i}" for i in range(n)]
+
+    class M:
+        version = "1"
+    for i, name in enumerate(names):
+        def rule(x, _p=0.6 + 0.01 * i):
+            return Decision("yes", {"yes": _p, "no": 1 - _p})
+        rule.__name__ = name
+        rule.__signature__ = inspect.Signature([inspect.Parameter("x", inspect.Parameter.POSITIONAL_OR_KEYWORD)])
+        cat.rule(name, model=M())(rule)
+    if constraint:
+        src = f"def at_most_one({', '.join(names)}):\n    return [{', '.join(names)}].count('yes') <= 1\n"
+        ns = {}
+        exec(src, ns)  # noqa: S102 — a constraint over n questions, written out
+        cat.constraint(ns["at_most_one"])
+    return System(cat, [Question(q, "?", Answer.yes_no()) for q in names]), names
+
+
+def test_joint_decoding_says_when_it_could_not_try_every_combination():
+    """15 yes/no answers under one constraint were repaired; with 16 nothing was, and nothing said why."""
+    s, names = _yes_no_system(15)
+    res = s.ask({"x": 1})
+    assert res.feasible and [res[q].answer for q in names].count("yes") == 1 and res["m14"].answer == "yes"
+    s, names = _yes_no_system(16)
+    res = s.ask({"x": 1})
+    assert not res.feasible and res.violations == ["at_most_one"] and all(res[q].answer == "yes" for q in names)
+    assert all("not repaired: at_most_one broken, and joint decoding tried only the 1 most probable answer(s) of each "
+               "question (65,536 combinations of 16 answers exceed its limit of 50,000)" in res[q].why for q in names)
+
+
+def test_a_constraint_with_a_wrong_name_a_duplicate_or_an_exception_is_not_silent():
+    cat = Catalog()
+
+    @cat.rule("verdict")
+    def verdict(x):
+        return "safe"
+
+    @cat.rule("harm")
+    def harm(x):
+        return "none"
+
+    @cat.constraint
+    def fit(verdict, harn):                              # a typo: it would never apply
+        return True
+    qs = [Question("verdict", "?", Answer.choice(["safe", "unsafe"])), Question("harm", "?", Answer.choice(["none", "high"]))]
+    with pytest.raises(ValueError, match="constraint fit reads harn, which is not a question of this system"):
+        System(cat, qs)
+    del cat.constraints["fit"]
+
+    @cat.constraint
+    def together(verdict, harm):
+        return verdict.no_such_attribute
+    with pytest.raises(ValueError, match="constraint together is already in the catalog"):
+        @cat.constraint
+        def together(verdict):                           # noqa: F811 — the duplicate is the point
+            return True
+    res = System(cat, qs).ask({"x": 1})
+    assert not res.feasible and res.violations == ["together"]
+    assert all("constraint together raised AttributeError: 'str' object has no attribute 'no_such_attribute'" in r.why
+               for r in res.results.values())
+
+
+def test_answer_factories_refuse_what_they_would_ignore_or_crash_on():
+    """estimate(lo=0, hi=10) returned an estimate with no bins; estimate([0, 5], lo=1, hi=2, step=1) ignored three
+    keywords; from_type(Literal[1, "a"]) raised TypeError: '<' not supported; choice([]) and duplicates were accepted."""
+    import enum
+    from typing import Literal
+    with pytest.raises(ValueError, match="needs step="):
+        Answer.estimate(lo=0, hi=10)
+    with pytest.raises(ValueError, match="not both"):
+        Answer.estimate([0, 5], lo=1, hi=2, step=1)
+    with pytest.raises(ValueError, match="lo < hi"):
+        Answer.estimate(lo=10, hi=0, step=1)
+    assert Answer.estimate(lo=0, hi=10, step=5).bins == [0, 5, 10]
+    with pytest.raises(ValueError, match="at least one option"):
+        Answer.choice([])
+    with pytest.raises(ValueError, match="'a' is given twice"):
+        Answer.multi(["a", "b", "a"])
+    with pytest.raises(ValueError, match="not the string"):
+        Answer.choice("ab")
+
+    class Mixed(enum.Enum):
+        ONE = 1
+        BEE = "b"
+    assert Answer.from_type(Literal[1, "a"]).options == [1, "a"] and Answer.from_type(Mixed).options == [1, "b"]
+    assert Answer.from_type(Literal["no", "yes"]).kind == "yes_no"

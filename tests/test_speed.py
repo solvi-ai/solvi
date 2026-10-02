@@ -42,20 +42,39 @@ def test_early_exit_skips_unneeded_steps():
     assert r.trace.replay(cat)["ok"]
 
 
-def test_parallel_same_answer_valid_trace_and_faster():
+def test_parallel_same_answer_valid_trace_and_the_independent_steps_overlap():
     cat, qs = build()
     seq = System(cat, qs)
     par = System(cat, qs, workers=4)
-    t0 = time.perf_counter()
     r1 = seq.ask({"x": 1, "flag": True})
-    t_seq = time.perf_counter() - t0
-    t0 = time.perf_counter()
     r2 = par.ask({"x": 1, "flag": True})
-    t_par = time.perf_counter() - t0
     assert r1["ok"].answer == r2["ok"].answer == "yes"
     assert [r.hash for r in r1.trace.records] == [r.hash for r in r2.trace.records]   # scheduling does not change the trace
     assert r2.trace.replay(cat)["ok"]
-    assert t_par < 0.7 * t_seq
+    # the two slow steps ran at the same time (a timing ratio of two single runs is noise on a loaded machine)
+    spans = {}
+    cat2 = Catalog()
+
+    def timed(name):
+        def f(x):
+            t0 = time.perf_counter()
+            time.sleep(0.1)
+            spans[name] = (t0, time.perf_counter())
+            return x
+        f.__name__ = name
+        return f
+    cat2.fn(timed("a"))
+    cat2.fn(timed("b"))
+
+    @cat2.rule("ok")
+    def ok2(a, b):
+        return a == b
+    System(cat2, [Question("ok", "ok?", Answer.yes_no())], workers=2).ask({"x": 1})
+    (a0, a1), (b0, b1) = spans["a"], spans["b"]
+    assert a0 < b1 and b0 < a1
+    System(cat2, [Question("ok", "ok?", Answer.yes_no())]).ask({"x": 1})
+    (a0, a1), (b0, b1) = spans["a"], spans["b"]
+    assert a1 <= b0 or b1 <= a0                                    # one worker: one after the other
 
 
 def test_a_given_value_is_canonicalised_and_hashed_once_per_ask_and_the_hashes_are_the_same(monkeypatch):
@@ -101,3 +120,18 @@ def test_a_given_value_is_canonicalised_and_hashed_once_per_ask_and_the_hashes_a
         assert r.prev == prev and r.hash == rt.vhash(r.body())
         prev = r.hash
     assert res["alert"].answer == "yes"
+
+
+def test_importing_solvi_and_the_first_ask_of_an_untyped_catalog_do_not_import_pydantic():
+    """The docs say untyped parts cost nothing and pydantic is imported only for typed parts; the first ask of any
+    catalog used to import it (the trace's fingerprint of the questions). What the docs say is what this pins."""
+    import subprocess
+    import sys
+    code = ("import sys, solvi\n"
+            "a = 'pydantic' in sys.modules\n"
+            "cat = solvi.Catalog()\n"
+            "cat.rule('q')(lambda x: 'yes')\n"
+            "solvi.System(cat, [solvi.Question('q', '', solvi.Answer.yes_no())]).ask({'x': 1})\n"
+            "print(a, 'pydantic' in sys.modules)\n")
+    out = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, check=True).stdout.split()
+    assert out == ["False", "False"]

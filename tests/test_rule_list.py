@@ -74,3 +74,10 @@ def test_a_learned_rule_that_replaces_a_typed_rule_takes_its_typed_bookkeeping_w
     def code(text) -> str:                                                     # the replaced rule read code: int
         return text.strip()
     assert "code" in cat.parts
+
+
+def test_learned_rules_are_deterministic():
+    from solvi.rules import RuleList
+    rows = [{"a": f"W{i % 3} X{i % 2}"} for i in range(60)]
+    ys = ["p" if i % 3 == 0 else "q" for i in range(60)]
+    assert str(RuleList(["a"]).fit(rows, ys)) == str(RuleList(["a"]).fit(list(rows), list(ys)))

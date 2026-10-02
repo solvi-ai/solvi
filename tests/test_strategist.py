@@ -111,11 +111,4 @@ def test_answers_do_not_depend_on_which_other_questions_are_asked():
     alone = s.ask({"x": 7}, ["cause"])
     assert together["state"].answer == "stop" and together["state"].status == "forced"
     assert together["cause"].answer == alone["cause"].answer == "high"       # the hard check governs only "state"
-    assert "below_trip" in together["cause"].why or together["cause"].status == "ok"
-
-
-def test_learned_rules_are_deterministic():
-    from solvi.rules import RuleList
-    rows = [{"a": f"W{i % 3} X{i % 2}"} for i in range(60)]
-    ys = ["p" if i % 3 == 0 else "q" for i in range(60)]
-    assert str(RuleList(["a"]).fit(rows, ys)) == str(RuleList(["a"]).fit(list(rows), list(ys)))
+    assert together["cause"].status == alone["cause"].status == "ok" and together["cause"].why == alone["cause"].why

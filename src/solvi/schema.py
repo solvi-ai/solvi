@@ -27,7 +27,7 @@ class AnswerSpec(BaseModel):
     model_config = ConfigDict(defer_build=True)       # validators built on first use: importing stays light
     kind: Literal["yes_no", "choice", "ordinal", "multi", "span", "rank", "estimate"]
     options: list[Any]
-    descriptions: dict[str, str] = {}
+    descriptions: dict[Any, str] = {}                # option → what it means (keyed by the option's text in JSON)
     unknown: bool = False
     k: Optional[int] = None
     bins: Optional[list[float]] = None
@@ -411,8 +411,49 @@ def _type_names():
 
 
 def _answer(at):
-    from .core import answer_data
-    return answer_data(at)
+    if at is None:
+        return None
+    # descriptions are keyed by the option's text (JSON keys are strings; an int option keeps its own type in `options`)
+    d = {"kind": at.kind, "options": list(at.options), "descriptions": {str(k): v for k, v in at.descriptions.items()}}
+    for k in ("unknown", "k", "bins", "coverage", "unit", "source"):
+        v = getattr(at, k)
+        if v not in (None, False):                    # only what is set: answer types of 0.4 dump as before
+            d[k] = list(v) if k == "bins" else v
+    if at.type is not None:
+        d["type"] = _span_type_name(at.type)
+    return d
+
+
+def _span_type_name(t):
+    """A span's value type → its name in the dump: a built-in one by its name (str, int, float, bool, date, datetime,
+    Decimal), any other class by "module:qualname" (an Enum, a model), so it can be found again on load."""
+    from .typed import type_name
+    if t in _type_names().values():
+        return type_name(t)
+    if isinstance(t, type) and "<locals>" not in t.__qualname__:
+        return f"{t.__module__}:{t.__qualname__}"
+    return type_name(t)
+
+
+def _span_type(name):
+    """The inverse of _span_type_name; a name that cannot be resolved raises ValueError (it used to load as None: a span
+    of any text)."""
+    t = _type_names().get(name)
+    if t is not None:
+        return t
+    if ":" in name:
+        import importlib
+        mod, _, qual = name.partition(":")
+        try:
+            t = importlib.import_module(mod)
+            for part in qual.split("."):
+                t = getattr(t, part)
+            if isinstance(t, type):
+                return t
+        except (ImportError, AttributeError):
+            pass
+    raise ValueError(f"span type {name!r} cannot be restored from its name: a built-in type (str, int, float, bool, "
+                     "date, datetime, Decimal) or a class importable as module:qualname is")
 
 
 def _unknown(v):
@@ -556,9 +597,10 @@ def _load_answer(d):
     from .core import AnswerType
     if d is None:
         return None
-    return AnswerType(d.kind, list(d.options), dict(d.descriptions), d.unknown, d.k,
-                      None if d.bins is None else [int(b) if float(b).is_integer() else b for b in d.bins], d.coverage,
-                      d.unit, d.source, _type_names().get(d.type) if d.type else None)
+    by_text = {str(o): o for o in d.options}          # descriptions back on the options themselves (1, not "1")
+    return AnswerType(d.kind, list(d.options), {by_text.get(str(k), k): v for k, v in d.descriptions.items()}, d.unknown,
+                      d.k, None if d.bins is None else [int(b) if float(b).is_integer() else b for b in d.bins], d.coverage,
+                      d.unit, d.source, _span_type(d.type) if d.type else None)
 
 
 def _probs(p):

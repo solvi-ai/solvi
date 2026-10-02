@@ -629,7 +629,7 @@ def test_a_typed_span_reads_dates_and_numbers_as_people_write_them():
         with pytest.raises(ValueError, match=why):
             span_value(d, text)
     for typ, text, want in ((float, "149.90", 149.9), (float, "41,908.56 USD", 41908.56), (float, "EUR 18,851.12", 18851.12),
-                            (float, "1 500 000 руб", 1500000.0), (float, "1.5 million", 1500000.0), (float, "1.000", 1.0),
+                            (float, "1 500 000 руб", 1500000.0), (float, "1.5 million", 1500000.0), (float, "1.0000", 1.0),
                             (int, "1,200", 1200), (int, "2k", 2000), (Decimal, "€12,50", Decimal("12.5"))):
         assert span_value(typ, text) == want, text
     for typ, text in ((float, "5%"), (float, "3 100"), (float, "about 20 or 30"), (int, "12.5"), (int, "twelve"),
@@ -734,5 +734,41 @@ def test_a_wrong_number_is_not_verified_by_a_longer_number_that_contains_it():
     ok = build(30, "30").ask(doc)
     assert (ok["short"].answer, ok["short"].status) == ("no", "ok")
     assert ok.trace.records[0].extra["evidence"] == [[26, 28, "doc", "30"]] and ok.trace.replay(build(30, "30"))["ok"]
-    by_offsets = build(3, Quote("3", 26, 27)).ask(doc)             # a Quote says where it points: checked literally there
-    assert by_offsets["short"].answer == "yes"
+    by_offsets = build(3, Quote("3", 26, 27)).ask(doc)             # a Quote's offsets inside the number 30: not "3"
+    assert (by_offsets["short"].status, by_offsets["short"].answer) == ("abstain", None)
+    assert "not grounded: evidence '3' is not the text at doc[26:27] ('30')" in by_offsets.trace.records[0].error
+    assert build(30, Quote("30", 26, 28)).ask(doc)["short"].answer == "no"
+
+
+def test_a_model_quote_with_offsets_inside_a_number_is_rejected():
+    from solvi.core import cuts_number
+    t = "Fee 3.5, total 1,300 and 30 or 3; Chinatown"
+    assert cuts_number(t, 4, 5) and cuts_number(t, 6, 7) and cuts_number(t, 17, 20) and cuts_number(t, 25, 26)
+    assert not cuts_number(t, 4, 7) and not cuts_number(t, 15, 20) and not cuts_number(t, 25, 27) \
+        and not cuts_number(t, 31, 32) and not cuts_number(t, 34, 39)                # a word may be cut: only numbers
+
+    class M:
+        model_id, version, deterministic = "m", "1", False
+    cat = Catalog()
+
+    @cat.extract(model=M())
+    def minutes(doc: str):
+        return Quote(3, 26, 27)
+
+    @cat.rule("short")
+    def short(minutes) -> bool:
+        return minutes < 10
+    res = System(cat, [Question("short", "short?", Answer.yes_no())]).ask({"doc": "North Beach to Chinatown: 30."})
+    assert res["short"].status == "abstain" and "is not the text at [26:27] ('30')" in res.trace.records[0].error
+
+
+def test_a_typed_span_does_not_read_an_ambiguous_number():
+    """Span[float] read "2.500" as 2.5 while the guarded parser, and the docstring, refuse it as ambiguous."""
+    from decimal import Decimal
+    from solvi.typed import span_value
+    for t in ("2.500", "1.000", "12.345"):
+        for vtype in (float, Decimal):
+            with pytest.raises(ValueError, match="ambiguous"):
+                span_value(vtype, t)
+    assert span_value(float, "2.50") == 2.5 and span_value(float, "1.000,50") == 1000.5 and span_value(int, "1,000") == 1000
+    assert span_value(float, "2.5000") == 2.5 and span_value(float, "1e3") == 1000.0 and span_value(float, "2.500", strict=True) == 2.5

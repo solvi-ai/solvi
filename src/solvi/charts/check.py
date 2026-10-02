@@ -6,6 +6,7 @@ import re
 from dataclasses import dataclass
 from decimal import Decimal
 
+from ..core import find_whole
 from ..specialist import BLOCKED, CHANGED, DROPPED, WARNING, Checked, Issue
 from ..textin import _CUR_AFTER, NUMBER_RE, _SCALES, ParseError, _digits
 from .spec import SCALES, ChartSpec, VerifiedChart, VerifiedPoint, VerifiedSeries
@@ -210,18 +211,26 @@ class ChartChecker:
                 places = [q.start]
             else:
                 places = [m.start() for m in re.finditer(re.escape(q.text), source)]
+                whole = [p for p in places if find_whole(q.text, source[max(0, p - 2):p + len(q.text) + 2]) >= 0]
+                places = whole or places              # "3%" inside "23%" is not a place the quote stands at
                 if not places:
                     issues.append(Issue(DROPPED, "quote_outside", f"{pt.label!r}: the quote {q.text!r} is not in the "
                                         "source", path))
                     return None
-            first_reason = None
-            for p in places:
-                vp, why = self._verify_at(pt, idx, p, p + len(q.text), u, mult, used)
+            first_reason, found, taken = None, None, None
+            for p in places:                          # a quote without a start: it must verify wherever it occurs —
+                vp, why = self._verify_at(pt, idx, p, p + len(q.text), u, mult, used)   # else which place is meant?
                 if vp is not None:
-                    used[(vp.start, vp.end)] = f"{path} ({pt.label!r})"
-                    return vp
-                first_reason = first_reason or why
-            code, msg = first_reason
+                    found = found or vp
+                elif why[0] == "quote_reused":        # verifies there, and another point already drew that place
+                    taken = taken or why
+                else:
+                    first_reason = first_reason or (why[0], why[1] + (
+                        f" — at offset {p}; the quote occurs {len(places)} times: give its start" if len(places) > 1 else ""))
+            if found is not None and first_reason is None:
+                used[(found.start, found.end)] = f"{path} ({pt.label!r})"
+                return found
+            code, msg = first_reason or taken
             issues.append(Issue(DROPPED, code, f"{pt.label!r} = {_fmt(pt.value)}{_unit_suffix(u, spec.scale)}: {msg}",
                                 path))
             return None

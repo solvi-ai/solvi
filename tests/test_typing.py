@@ -414,6 +414,27 @@ def test_a_key_the_input_model_forbids_is_reported_as_rejected_not_dropped_witho
     assert not System(cat, qs, inputs=Closed).ask({"id": "a1", "months": 3}).trace.rejected
 
 
+class _Tier(Enum):
+    GOLD = "gold"
+    BASIC = "basic"
+
+
+def test_a_question_comes_back_from_json_equal_with_described_int_options_and_a_class_span_type():
+    """Question.from_json(q.to_json()) == q failed for Answer.ordinal({1: "bad", 2: "ok"}) (the keys came back as
+    strings) and for a span of an Enum (it loaded with type None: a span of any text)."""
+    import datetime
+    from solvi import AnswerType
+    for at in (Answer.ordinal({1: "bad", 2: "ok"}), Answer.span(type=_Tier), Answer.span(type=datetime.date),
+               Answer.choice({"a": "the first", "b": "the second"})):
+        q = Question("q", "?", at)
+        assert Question.from_json(q.to_json()) == q, at
+    at = Answer.ordinal({1: "bad", 2: "ok"})
+    assert AnswerType.model_validate(at.model_dump()) == at                   # python mode too
+    assert '"type": "test_typing:_Tier"' in Question("q", "?", Answer.span(type=_Tier)).to_json()
+    with pytest.raises(ValueError, match="cannot be restored from its name"):
+        Question.from_json('{"name": "q", "text": "?", "answer": {"kind": "span", "options": [], "type": "Color"}}')
+
+
 def test_an_untyped_catalog_does_not_import_pydantic_on_the_first_ask_and_the_questions_fingerprint_is_unchanged():
     """Since 0.7 every response records trace.fingerprint, and fingerprinting the questions imported solvi.schema and
     so pydantic on the first ask of any System (~170 ms) — against "untyped parts cost nothing"."""
@@ -430,7 +451,8 @@ def test_an_untyped_catalog_does_not_import_pydantic_on_the_first_ask_and_the_qu
         RED = "red"
     qs = [Question("a", "A?", Answer.choice(["x", "y"])), Question("b", "B?", Answer.yes_no(), min_confidence=0.7,
                                                                  checkpoints=["c"], uses=["z"], require_evidence=True),
-          Question("c", "C?", Answer.choice([Color.RED])), Question("e", "E?", Answer.choice([1, 2.5, float("inf")]))]
+          Question("c", "C?", Answer.choice([Color.RED])), Question("e", "E?", Answer.choice([1, 2.5, float("inf")])),
+          Question("f", "F?", Answer.ordinal({1: "bad", 2: "ok"})), Question("g", "G?", Answer.span(type=_Tier))]
     for q in qs:                                        # the fingerprint stored traces carry: as schema.dump gave it
         s = System(Catalog(), [q])
         assert s._questions_fp() == digest(sorted([(q.name, dump(q, "json"))]), [])

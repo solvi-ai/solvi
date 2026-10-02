@@ -22,6 +22,9 @@ jobs:
         run: uv run python -m solvi.honesty tests/honesty/core_v1.json --baseline tests/honesty/core_v1.baseline.json
       - name: gallery cases as regression tests (docs/testing.md)
         run: uv run solvi test gallery/ -q
+      - name: gallery catalogs pass solvi check (no errors)
+        run: |
+          for d in gallery/[0-9]*/; do echo "== $d"; uv run solvi check "$d" > /dev/null || { uv run solvi check "$d"; exit 1; }; done
       - name: run the gallery
         run: |
           for f in gallery/*/run.py; do echo "== $f"; uv run python "$f" > /dev/null; done

@@ -131,7 +131,8 @@ def test_teach_is_stored_and_chained(filled):
     _, store, s, _ = filled
     s.teach("approve", STATES[2], True)
     c = store.corrections()
-    assert len(c) == 1 and c[0]["question"] == "approve" and c[0]["answer"] is True and c[0]["init"]["amount"] == 500
+    assert len(c) == 1 and c[0]["question"] == "approve" and c[0]["answer"] == "yes" and c[0]["init"]["amount"] == 500
+    #                                                     True is stored as the answer it means (yes / no question)
     assert len(list(store.iter())) == 4 and len(store) == 5
     assert store.verify()["ok"]
 
@@ -946,3 +947,28 @@ def test_the_audit_of_a_stored_decision_without_its_catalog_knows_which_checks_a
     for st in old_failed["flow"]["steps"]:
         st.pop("hard", None)
     assert "enough_history = False (hard, decides the answer)" in str(Response.model_validate(old_failed).audit("alert"))
+
+
+def test_query_finds_a_yes_no_answer_given_as_a_bool_on_every_backend(filled):
+    """query(question="approve", answer=True) found 0 records where answer="yes" found them."""
+    _, store, s, _ = filled
+    by_text = [x.seq for x in store.query(question="approve", answer="yes")]
+    assert by_text and [x.seq for x in store.query(question="approve", answer=True)] == by_text
+    assert [x.seq for x in store.query(answer=False)] == [x.seq for x in store.query(answer="no")]
+    store.catalog = None                                            # without the System: a bool is "yes" / "no" too
+    assert [x.seq for x in store.query(question="approve", answer=True)] == by_text
+
+
+def test_every_store_closes_and_is_a_context_manager_and_the_extension_is_read_in_any_case(tmp_path):
+    import sqlite3
+
+    from solvi.storage import open_storage
+    with open_storage(tmp_path / "a.DB") as store:
+        assert isinstance(store, SQLiteStorage)
+        System(*build(), storage=store).ask(STATES[0])
+    with pytest.raises(sqlite3.ProgrammingError):                   # closed: the connection is gone
+        store.head()
+    with JSONLStorage(tmp_path / "a.jsonl") as js:
+        System(*build(), storage=js).ask(STATES[0])
+    js.close()                                                      # nothing held open: closing twice is fine
+    assert len(JSONLStorage(tmp_path / "a.jsonl")) == 1

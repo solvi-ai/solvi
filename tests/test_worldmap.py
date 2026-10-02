@@ -114,3 +114,53 @@ def test_a_map_of_string_states_is_written_as_before_and_an_unusable_state_is_re
         with pytest.raises(TypeError):
             m.arrive("home", "Billing", bad)
     assert m.stats()["states"] == 1 and m.claim("home", "Billing")["to"] == "billing"
+
+
+def test_a_saved_map_is_loaded_from_its_journal_so_an_edited_edge_changes_nothing(tmp_path):
+    """verify() re-hashed only the journal and load() took edges and states from the file unchecked: an edge edited to
+    point elsewhere passed verify() and next() followed it."""
+    m = WorldMap(tmp_path / "m.json")
+    walk(m, "refunds", hints=True)
+    m.human("home", "Reports", "audit", note="Anna")
+    m.told("home", "Billing", "elsewhere")                        # ignored: the claim is confirmed
+    m.save()
+    data = json.loads((tmp_path / "m.json").read_text())
+    for e in data["edges"]:
+        if (e["state"], e["action"]) == ("home", "Billing"):
+            e["to"] = "phishing"
+    data["states"]["home"]["visits"] = 99
+    (tmp_path / "m.json").write_text(json.dumps(data))
+    again = WorldMap(tmp_path / "m.json")
+    assert again.claim("home", "Billing")["to"] == "billing" and again.edges == m.edges and again.states == m.states
+    assert again.verify() and again.next("home", {"refunds"}) == "Billing"
+    again.edges[("home", "Billing")]["to"] = "phishing"           # the map in memory against its journal
+    assert not again.verify()
+    data["journal"][2]["to"] = "phishing"
+    (tmp_path / "m.json").write_text(json.dumps(data))
+    with pytest.raises(ValueError, match="hash chain is broken"):
+        WorldMap(tmp_path / "m.json")
+
+
+def test_the_map_as_it_was_at_any_step_is_rebuilt_from_the_journal():
+    m = WorldMap()
+    m.visit("home").see("home", "Billing", "billing")
+    n = len(m.journal)
+    m.arrive("home", "Billing", "payments")                       # refutes the claim
+    m.visit("payments")
+    then = m.rebuild(upto=n)
+    assert then.claim("home", "Billing") == {"to": "billing", "status": "hypothesis", "source": "seen",
+                                             "evidence": [[None, None]], "taken": 0}
+    now = m.rebuild()
+    assert now.edges == m.edges and now.states == m.states and now.states["home"]["visits"] == 1
+    assert [r["op"] for r in m.journal] == ["visit", "see", "refute", "confirm", "visit"]
+
+
+def test_a_map_file_written_before_visits_were_journaled_still_loads(tmp_path):
+    m = WorldMap()
+    m._visits = False                                              # as the earlier version wrote it
+    walk(m, "roles")
+    d = m.to_dict()
+    d.pop("visits_journaled")
+    (tmp_path / "old.json").write_text(json.dumps(d))
+    old = WorldMap(tmp_path / "old.json")
+    assert old.states == m.states and old.edges == m.edges and old.verify() and not old._visits

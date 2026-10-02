@@ -228,3 +228,34 @@ def test_tool_declared_by_name_and_schema_is_registered_without_a_second_call():
     assert g.check({"name": "refund", "arguments": {"order": "B-99", "amount": 5.0}},
                    context=[{"role": "user", "content": "refund order A-17"}]).outcome == "deny"
     assert g.declare("cancel", schema=RefundArgs).name == "cancel"          # the older spelling keeps working
+
+
+def _named_like_its_input():
+    cat = Catalog()
+
+    @cat.fn
+    def savings(savings):                     # a part named like the input field it reads
+        return 1 if savings == "below 100 DM" else 0
+
+    @cat.rule("decision")
+    def decision(savings):
+        return "refuse" if savings >= 1 else "approve"
+    return cat, [Question("decision", "Decide", Answer.choice(["refuse", "approve"]))]
+
+
+def test_a_part_named_like_the_field_it_reads_is_refused_not_mis_wired():
+    cat, qs = _named_like_its_input()
+    with pytest.raises(ValueError, match="'savings' .*fn.*reads its own name.*savings_points"):
+        System(cat, qs).ask({"savings": "below 100 DM"})
+
+
+def test_an_input_model_with_a_field_named_like_a_part_is_refused_when_the_system_is_built():
+    pydantic = pytest.importorskip("pydantic")
+
+    class Application(pydantic.BaseModel):
+        savings: str
+        amount: float = 0.0
+
+    cat, qs = _named_like_its_input()
+    with pytest.raises(ValueError, match=r"System\(inputs=Application\) declares 'savings' .*reads its own name"):
+        System(cat, qs, inputs=Application)

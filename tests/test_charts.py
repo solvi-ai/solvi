@@ -77,6 +77,19 @@ def test_rule_proposer_labels_after_the_number_and_total():
     assert "Tonnes" in r.output and "total_mismatch" not in codes(r)
 
 
+@pytest.mark.parametrize("text", ["In 2023 and 2024 things happened.", "Since 2019 offices opened in Lyon.",
+                                  "From 2020 to 2024 stores closed."])
+def test_rule_proposer_does_not_chart_a_year_followed_by_a_word(text):
+    r = chart(text)
+    assert not r.ok and r.checked.verified is None and r.proposal.series[0].points == []
+
+
+def test_rule_proposer_still_charts_a_four_digit_count_that_is_not_a_year():
+    r = chart("In 2023 the plant had 2000 employees and the office 1950 employees.")
+    v = r.checked.verified
+    assert r.ok and v.unit == "employee" and sorted(p.as_written for p in v.series[0].points) == ["1950", "2000"]
+
+
 def test_russian_currency_space_grouped():
     r = chart(RU)
     v = r.checked.verified
@@ -401,3 +414,51 @@ def test_a_number_that_shares_characters_with_a_drawn_one_is_not_drawn_again():
     pt = ChartSpec.model_validate(spec([("a", 10, "10 $")], unit="USD")).series[0].points[0]
     vp, why = ChartChecker()._verify_at(pt, idx, 2, 6, "USD", Decimal(1), {(5, 8): "series[0].points[0] ('b')"})
     assert vp is None and why[0] == "quote_reused"
+
+
+def test_replay_compares_the_records_own_issues_and_output_hash_with_the_trace():
+    """A stored record whose `issues` were emptied replayed ok; for a blocked run nothing but the chain was checked."""
+    t = "Revenue by region: Europe 42%, North America 35%, Asia 30%."
+    sp = ChartSpecialist(FixedProposer(spec([("Europe", 42, "42%"), ("Asia", 23, "30%")])))
+    r = sp.run(t)
+    rec = r.to_dict()
+    assert rec["issues"] and sp.replay(rec, t).ok
+    for edit in ({"issues": []}, {"issues": rec["issues"][:-1] + [dict(rec["issues"][-1], message="fine")]},
+                 {"output_sha256": "0" * 64}):
+        got = sp.replay({**rec, **edit}, t)
+        assert not got.ok and any("the record's" in p for p in got.problems), edit
+    blocked = ChartSpecialist(FixedProposer("not json")).run(t)
+    rec = blocked.to_dict()
+    assert not blocked.ok and ChartSpecialist().replay(rec, t).ok
+    assert not ChartSpecialist().replay({**rec, "issues": []}, t).ok
+
+
+def test_a_quote_without_a_start_must_verify_at_every_place_it_occurs():
+    """"Europe grew 42 percent. Asia shipped 42 units.": the point labelled Asia, in %, verified at '42 percent'."""
+    t = "Europe grew 42 percent. Asia shipped 42 units."
+    r = run(t, spec([("Asia", 42, "42")]))
+    assert not r.ok and codes(r, DROPPED) == ["unit_mismatch"] and "occurs 2 times: give its start" in r.issues[0].message
+    r = run(t, spec([("Europe", 42, {"text": "42", "start": t.index("42")})]))          # with its start: that place
+    assert r.ok and not codes(r, DROPPED)
+    t2 = "Europe 42%, Asia 42%, Africa 16%."
+    r = run(t2, spec([("Europe", 42, "42%"), ("Asia", 42, "42%"), ("Africa", 16, "16%")], kind="pie"))
+    assert r.ok and not codes(r, DROPPED)                                              # two places, both verify: one each
+    assert [p.start for p in r.checked.verified.series[0].points] == [7, 17, 29]
+
+
+def test_render_svg_draws_a_one_point_line_and_refuses_what_it_cannot_draw():
+    """render_svg is exported: a one-category line, a pie of zeros, a chart without categories or values raised
+    ZeroDivisionError / ValueError: max() arg is an empty sequence."""
+    from decimal import Decimal
+    from solvi.charts import render_svg
+    from solvi.charts.check import VerifiedChart, VerifiedPoint, VerifiedSeries
+
+    def chart_of(kind, cats, values):
+        pts = [None if v is None else VerifiedPoint(label=c, value=Decimal(v), start=0, end=1, as_written=str(v))
+               for c, v in zip(cats, values)]
+        return VerifiedChart(kind=kind, title="t", unit="", categories=cats, series=[VerifiedSeries(points=pts)])
+    assert "<svg" in render_svg(chart_of("line", ["2024"], [5])).svg
+    for kind, cats, values in (("pie", ["a", "b"], [0, 0]), ("pie", ["a", "b"], [5, -1]), ("bar", [], []),
+                               ("bar", ["a", "b"], [None, None])):
+        with pytest.raises(ValueError, match="render_svg"):
+            render_svg(chart_of(kind, cats, values))

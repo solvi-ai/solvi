@@ -14,7 +14,8 @@ KINDS = ("bar", "line", "pie")
 
 class SourceQuote(BaseModel):
     """A passage of the source, copied character for character; `start` is its offset (optional: without it the
-    checker looks the passage up, and an ambiguous one must verify at every place it occurs)."""
+    checker looks the passage up, and one that occurs several times — as whole words and numbers — must verify at every
+    such place, else the point is dropped: give `start`)."""
     model_config = ConfigDict(extra="forbid")
     text: str = Field(min_length=1)
     start: int | None = Field(default=None, ge=0)

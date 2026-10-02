@@ -42,6 +42,55 @@ def test_refund_window_date():
     assert cf.held == [] and "refund = no [forced]" in str(cf)
 
 
+def test_a_date_change_is_sized_in_days_not_against_the_dates_ordinal():
+    """A date change cost days / 739,000, so any date shift — ten years too — ranked before any change of a number."""
+    cat = Catalog()
+
+    @cat.check(hard=True, then={"approve": "reject"})
+    def short_stay(start, end):
+        return (end - start).days <= 30
+
+    @cat.rule("approve")
+    def approve(balance):
+        return "approve" if balance >= 5 else "reject"
+    s = System(cat, [Question("approve", "Approve?", Answer.choice(["approve", "reject"]), checkpoints=["short_stay"])])
+    start = datetime.date(2026, 9, 1)
+    res = s.ask({"start": start, "end": datetime.date(2026, 10, 31), "balance": 9})       # 60 days: forced reject
+    cf = res.counterfactual("approve")
+    end = next(c for c in cf if c.changes[0].fact == "end")
+    assert str(end) == "approve if end ≤ 2026-10-01 (now 2026-10-31)" and end.cost == 1.0
+    res = s.ask({"start": start, "end": datetime.date(2026, 10, 3), "balance": 3})         # 32 days, low balance
+    cf = res.counterfactual("approve", max_changes=2)
+    assert str(cf.best) == "approve if balance ≥ 5 (now 3) and end ≤ 2026-10-01 (now 2026-10-03)"
+    assert cf.best.kind == cf.to_dict()["kind"] == "choice" and cf.to_dict()["found"][0]["kind"] == "choice"
+    ranked = s.ask({"start": start, "end": datetime.date(2026, 9, 20), "balance": 4}).counterfactual("approve")
+    assert str(ranked.best) == "approve if balance ≥ 5 (now 4)"                           # 25%, not "move a date"
+    assert ranked.not_searched == {}
+
+
+def test_inputs_read_only_by_a_part_that_did_not_run_are_listed_not_left_out():
+    cat = Catalog()
+
+    @cat.check(hard=True, then={"approve": "reject"})
+    def funded(balance) -> bool:
+        return balance >= 5
+
+    @cat.check
+    def enough_notice(start, today) -> bool:
+        return (start - today).days >= 14
+
+    @cat.rule("approve")
+    def approve(enough_notice):
+        return "approve" if enough_notice else "needs_manager"
+    s = System(cat, [Question("approve", "Approve?", Answer.choice(["approve", "needs_manager", "reject"]),
+                              checkpoints=["funded"])])
+    res = s.ask({"balance": 3, "start": datetime.date(2026, 10, 19), "today": datetime.date(2026, 9, 25)})
+    cf = res.counterfactual("approve")
+    assert str(cf.best) == "approve if balance ≥ 5 (now 3)"
+    assert cf.not_searched == {"start": "read only by a part that did not run in this decision",
+                               "today": "read only by a part that did not run in this decision"}
+
+
 def test_refund_bool_flip_and_target():
     s = refunds()
     res = s.ask({"purchase_date": datetime.date(2026, 9, 10), "today": datetime.date(2026, 9, 19), "opened": True})
@@ -150,6 +199,34 @@ def test_domain_bounds_the_search():
     assert not res.counterfactual("approve", over=["amount"], domains={"amount": (1100, 5000)})
     assert str(res.counterfactual("approve", over=["amount"], domains={"amount": (950, 5000)}).best) == \
         "approve if amount ≤ 1000 (now 1200)"
+
+
+def _alert(center, band):
+    cat = Catalog()
+
+    @cat.rule("alert")
+    def alert(value):
+        return abs(value - center) > band
+    return System(cat, [Question("alert", "Alert?", Answer.yes_no())])
+
+
+def test_a_domain_that_does_not_hold_the_current_value_is_refused_not_searched_both_ways():
+    """value 2.656 with domains={"value": (1.8, 2.3)} used to print "no if value ≤ 2.5" and "no if value ≥ 2.5"."""
+    res = _alert(2.0, 0.5).ask({"value": 2.656})
+    assert str(res.counterfactual("alert").best) == "no if value ≤ 2.5 (now 2.656)"
+    cf = res.counterfactual("alert", domains={"value": (1.8, 2.3)})
+    assert not cf and cf.searched == [] and "outside the domain given for it (1.8, 2.3)" in cf.not_searched["value"]
+
+
+def test_the_band_of_a_two_sided_rule_is_found_and_a_miss_is_not_a_flat_no_change():
+    """abs(value + 20) > 5 at 40: the doubling probes stepped over the band [-25, -15] and the result said "no change of
+    value changes the answer"."""
+    res = _alert(-20.0, 5).ask({"value": 40.0})
+    cf = res.counterfactual("alert", domains={"value": (-100.0, 100.0)})
+    assert str(cf.best) == "no if value ≤ -15 (now 40)"
+    cf = res.counterfactual("alert")                                 # non-negative by default: the band is out of reach
+    assert not cf and "was found that changes the answer" in str(cf) and "narrower band can be missed" in str(cf)
+    assert "can be missed" not in str(lending().ask({**STATE, "amount": 900}).counterfactual("approve", over=["opened"]))
 
 
 def test_model_part_that_did_not_run_has_no_proposal():

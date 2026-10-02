@@ -13,8 +13,10 @@ import numpy as np
 
 class SpanExtractor:
     def __init__(self, model_name="answerdotai/ModernBERT-large", max_len=1024, device=None):
-        import torch
-        from transformers import AutoModel, AutoTokenizer
+        from .loader import optional
+        torch = optional("torch", "model", "SpanExtractor")
+        tf = optional("transformers", "model", "SpanExtractor")
+        AutoModel, AutoTokenizer = tf.AutoModel, tf.AutoTokenizer
         self.torch = torch
         self.device = device or ("cuda" if torch.cuda.is_available() else "cpu")
         self.tok = AutoTokenizer.from_pretrained(model_name)

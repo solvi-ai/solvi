@@ -160,7 +160,7 @@ def test_check_segment_rules():
     gov = mandatory_checks(cat, qs, init)
     code = search(cat, qs, init, extra=[c for cs in gov.values() for c in cs])
     seg = [s for s in segments(cat, qs, init, code, all_facts=True) if s["fact"] == "a3"][0]
-    assert check_segment(cat, seg, ["a3_std"]) is None or "a2" not in {x for x, _, _ in seg["available"]}
+    assert "a2" in {x for x, _, _ in seg["available"]} and check_segment(cat, seg, ["a3_std"]) is None
     assert "not a candidate" in check_segment(cat, seg, ["policy"])
     assert "at most" in check_segment(cat, seg, ["a1"] * 5)
     assert check_segment(cat, seg, []) == "empty segment"
@@ -232,6 +232,40 @@ class StubMatcher:
         return np.array(out)
 
 
+def test_link_table_ranks_the_sources_of_each_unresolved_name_and_match_names_wires_them():
+    from solvi.aliases import link_table, match_names
+    cat, qs = team_catalog()
+    table = link_table(cat, qs, {"net", "tax"}, StubMatcher(), k=3)
+    assert set(table) == {"INV_TOTAL", "TAX_AMT"} and table["INV_TOTAL"][0][0] == "invoice_total"
+    for links in table.values():
+        lp = [x for _, x in links]
+        assert len(links) == 3 and lp == sorted(lp, reverse=True) and all(x <= 0 for x in lp)
+    states = [{"net": n, "tax": t} for n, t in [(100, 20), (50, 10), (90, 40), (120, 5), (10, 1), (95, 29), (200, 35)]]
+    ex = [(s, {"big": "yes" if s["net"] + s["tax"] > 100 and s["tax"] < 30 else "no"}) for s in states]
+    wired, got = match_names(cat, qs, {"net", "tax"}, StubMatcher(), ex, probes=states)
+    assert got.aliases["INV_TOTAL"] == "invoice_total" and wired is not cat and not unresolved(wired, {"net", "tax"})
+    assert all(System(wired, qs).ask(st)["big"].answer == want["big"] for st, want in ex)
+    same, none = match_names(wired, qs, {"net", "tax"}, StubMatcher(), [])
+    assert same is wired and none.why == "every name resolves" and none.aliases == {}
+
+
+def test_model_strategist_record_false_keeps_the_plan_out_of_the_trace_and_fallbacks_false_keeps_one_producer():
+    cat, qs = chain()
+    rec = System(cat, qs, strategist=ModelStrategist(producers="equivalent")).ask(ST)
+    assert rec.trace.records[-1].kind == "plan"
+    off = System(cat, qs, strategist=ModelStrategist(producers="equivalent", record=False)).ask(ST)
+    assert all(r.kind != "plan" for r in off.trace.records) and off["ok"].answer == rec["ok"].answer
+    one = System(cat, qs, strategist=ModelStrategist(producers="equivalent", fallbacks=False)).ask(ST)
+    assert all(len(st.part.alternatives or [st.part]) == 1 for st in one.flow.steps) and one["ok"].answer == "approved"
+
+
+def test_plan_raises_plan_error_for_a_checkpoint_that_is_not_in_the_catalog():
+    from solvi.strategist import PlanError
+    cat, _ = chain()
+    with pytest.raises(PlanError, match="checkpoint nope not found"):
+        det_plan(cat, [Question("ok", "", None, checkpoints=["nope"])], set(ST))
+
+
 def test_unresolved_and_apply():
     cat, qs = team_catalog()
     assert set(unresolved(cat, {"net", "tax"})) == {"INV_TOTAL", "TAX_AMT"}
@@ -257,7 +291,7 @@ def test_accept_by_examples_and_active_mode():
     got = accept(cat, qs, props, ex, probes=states, k=5)     # tax_amount is the given tax: both wirings are the same fact
     assert got.aliases in ok
     act = accept(cat, qs, props, ex, probes=states, oracle=truth, active=(2, 4))
-    assert act.aliases in ok + (None,) and act.labels <= 6
+    assert act.aliases in ok and act.labels <= 6                     # something was accepted, with few labels asked
     # a wrong-only proposal list is never accepted
     wrong = [Proposal({"INV_TOTAL": "tax_amount", "TAX_AMT": "invoice_total"}, -1.0, {})]
     assert accept(cat, qs, wrong, ex, probes=states, k=5).aliases is None
@@ -273,6 +307,7 @@ def test_example_17_runs(capsys, monkeypatch):
     assert "accepted: {'INV_TOTAL': 'invoice_amount', 'FX': 'fx_rate'}" in out
 
 
+@pytest.mark.model
 def test_segment_model_save_load_propose(tmp_path):
     """A tiny random segment network: save → load (torch) → propose; ONNX parity when onnxruntime is there."""
     pytest.importorskip("torch")
@@ -361,6 +396,41 @@ def test_path_confidence_follows_the_producer_that_ran_and_survives_a_ring_of_fa
     cat, qs = _net_gross()
     res = System(cat, qs, strategist=ModelStrategist(producers="equivalent", fallbacks=False)).ask({"net_in": 100.0})
     assert path_confidence(cat, res.trace, ["gross", "net"]) == 1.0            # the full catalog: net ⇄ gross
+
+
+def test_solvi_check_calls_facts_derived_from_each_other_a_cycle_only_for_the_deterministic_strategist():
+    from solvi.check import lint
+    cat, qs = _net_gross()
+    rep = lint(System(cat, qs, strategist=ModelStrategist()))
+    assert rep.ok and rep.codes() == ["mutual_producers"]
+    rep = lint(System(cat, qs))                                     # the deterministic strategist cannot plan it
+    assert "cycle" in rep.codes("error") and "ModelStrategist" in str(rep)
+    cat = Catalog()                                                 # a loop with no way in stays an error whatever plans
+
+    @cat.fn
+    def a(b): return b
+
+    @cat.fn
+    def b(a): return a
+
+    @cat.rule("q")
+    def q(a) -> bool: return True
+    assert "cycle" in lint(System(cat, [Question("q", "", None)], strategist=ModelStrategist())).codes("error")
+
+
+def test_fit_serve_and_check_plan_with_the_systems_strategist_as_ask_does():
+    from solvi.check import lint
+    from solvi.serve import question_inputs
+    cat, qs = chain()
+    s = System(cat, qs, strategist=ModelStrategist())
+    assert s.ask(ST)["ok"].answer == "approved"
+    assert {"a2", "a3"} <= set(s.facts_for(ST))                     # computed around the dead-end producer, as ask does
+    info = question_inputs(s, "ok")
+    assert "partner_feed" in info["properties"] and "partner_feed" not in info["required"]   # the dead end's input is
+    assert lint(s).ok                                                                         # optional, not required
+    det = System(*chain())
+    assert "a2" not in det.facts_for(ST)                            # the deterministic strategist: unchanged
+    assert "partner_feed" in question_inputs(det, "ok")["required"]
 
 
 # ---------------------------------------------------------------- aliases.apply keeps every declaration

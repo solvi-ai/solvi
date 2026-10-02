@@ -11,7 +11,9 @@ Errors (a decision is, or can be, wrong or impossible):
                         read it, through any fact, and the question does not list it in `checkpoints`): when the check
                         fails, the question is answered as if it had passed
   then_unknown / then_bad_answer   `then=` names no question / an answer that is not one of the question's options
-  cycle                 facts that need each other: none of them can be computed unless one is given
+  cycle                 facts that need each other: none of them can be computed unless one is given (facts derived
+                        from each other, each with a producer outside the loop, are a cycle for the deterministic
+                        strategist only; with System(strategist=...) they are the note `mutual_producers`)
   unanswerable          a question no input can answer (its flow needs a fact nothing can compute; a span / rank /
                         estimate question without a rule — a learned head cannot answer it; a missing checkpoint)
   type_conflict         a producer's return type that its consumer cannot read; a System(inputs=...) field that a typed
@@ -42,14 +44,19 @@ Warnings:
                         a field of the model. (Without an input model a `uses` name that is not a part is taken for a
                         given fact — a learned head may read given facts directly — so a typo there cannot be told;
                         a misspelled `checkpoints` entry is an error: `unanswerable`)
-  silent_default        in a function that reads the input (a given fact): `x or <literal>` or `.get(k, <literal>)`,
-                        which turns a missing, empty or null input into a value nobody gave — say so explicitly (check
+  silent_default        in a function that reads the input (a given fact): `x or <literal>` or `.get(k, <literal>)` on
+                        that input (`amount or 0`, `order.get("total", 0)`; not a lookup in a constant table or a
+                        default on a computed value), which turns a missing, empty or null input into a value nobody
+                        gave — say so explicitly (check
                         for None and abstain, or declare the default in System(inputs=...)); `# solvi: ok` on the line
                         accepts it
 Notes (never fail):
+  mutual_producers      facts derived from each other (net from gross and gross from net), each with a producer
+                        outside the loop: the system's strategist plans around it
   no_rule               a question without a rule answers only after fit / fit_fast (it abstains until then)
 
-The flows are planned with every given fact present (`solvi.strategist.given_facts`), as `solvi serve` does."""
+The flows are planned with every given fact present (`solvi.strategist.given_facts`), as `solvi serve` does, by the
+system's own strategist (System(strategist=)) — the deterministic one when none is set."""
 from __future__ import annotations
 
 import ast
@@ -132,8 +139,15 @@ def lint(obj, strict=False, max_combos=100_000):
     heads = system.heads if system is not None else {}
     rep = Report(strict=strict)
     given = given_facts(cat, questions.values())
-    in_cycle = _cycles(cat, rep)
-    flows, counted = _questions(cat, questions, heads, given, rep)
+    if system is not None:                            # planned as the system's ask plans (its strategist, if any)
+        planner = system._plan
+    else:
+        from .strategist import plan
+
+        def planner(qs, keys):
+            return plan(cat, qs, keys, heads)
+    in_cycle = _cycles(cat, rep, getattr(system, "strategist", None))
+    flows, counted = _questions(cat, questions, heads, given, rep, planner)
     _hard_checks(cat, questions, flows, rep)
     if questions:
         used = set().union(*counted.values()) if counted else set()
@@ -157,9 +171,11 @@ def lint(obj, strict=False, max_combos=100_000):
 
 
 # --- cycles
-def _cycles(cat, rep):
+def _cycles(cat, rep, strategist=None):
     """Strongly connected components of the fact graph (a part → the facts it reads) with more than one fact, or a part
-    that reads its own fact → the facts in them."""
+    that reads its own fact → the facts in them. Facts derivable from each other (net from gross, gross from net) where
+    each also has a producer that reads nothing inside the loop are a cycle only for the deterministic strategist, which
+    needs the inputs of every producer: with System(strategist=...) they are a note."""
     graph = {n: [x for x in p.inputs if x in cat.parts] for n, p in cat.parts.items()}
     index, low, stack, on, out, counter = {}, {}, [], set(), [], [0]
 
@@ -202,21 +218,48 @@ def _cycles(cat, rep):
         if len(comp) > 1 or comp[0] in graph[comp[0]]:
             comp = sorted(comp)
             found.update(comp)
-            rep.add("error", "cycle", " → ".join(comp + [comp[0]]),
-                    "these facts need each other: none of them can be computed unless one of them is given")
+            where = " → ".join(comp + [comp[0]])
+            if not _breakable(cat, set(comp)):
+                rep.add("error", "cycle", where,
+                        "these facts need each other: none of them can be computed unless one of them is given")
+            elif strategist is None:
+                rep.add("error", "cycle", where,
+                        "these facts are derived from each other; each has a producer outside the loop, but the "
+                        "deterministic strategist needs the inputs of every producer of a fact, so none of them can be "
+                        "computed — plan with System(..., strategist=solvi.strategy.ModelStrategist()), which uses the "
+                        "producers whose inputs are there")
+            else:
+                rep.add("note", "mutual_producers", where,
+                        "these facts are derived from each other; each has a producer outside the loop, which the "
+                        "system's strategist uses when its inputs are given")
     return found
 
 
+def _breakable(cat, comp):
+    """Can every fact of a loop be computed without going round it: some producer of it reads only facts outside the loop
+    or facts of the loop already settled that way?"""
+    from .strategy import alternatives
+    done, changed = set(), True
+    while changed:
+        changed = False
+        for f in comp - done:
+            if any(all(x not in comp or x in done for x in a.inputs) for a in alternatives(cat.parts[f])):
+                done.add(f)
+                changed = True
+    return done == comp
+
+
 # --- questions
-def _questions(cat, questions, heads, given, rep):
+def _questions(cat, questions, heads, given, rep, planner):
     """Plan each question with every given fact present → ({question: facts in its flow}, {question: the facts that count
-    as used}); unanswerable questions, rules reading question names, questions without a rule."""
+    as used}); unanswerable questions, rules reading question names, questions without a rule. planner(questions, given
+    facts) → Flow: the system's own (System._plan)."""
     from .core import PRIMITIVES
-    from .strategist import PlanError, plan
+    from .strategist import PlanError
     flows, counted = {}, {}
     for name, q in questions.items():
         try:
-            flow = plan(cat, [q], given, heads)
+            flow = planner([q], given)
         except PlanError as e:
             rep.add("error", "unanswerable", name, str(e))
             flows[name] = counted[name] = set()
@@ -227,7 +270,7 @@ def _questions(cat, questions, heads, given, rep):
                 and q.answer.kind in PRIMITIVES:
             # no rule, and no head can answer it: its flow (everything computable) runs for nothing — only the
             # checkpoints count as used. A question a head can answer uses everything computable: its candidate features
-            counted[name] = set(plan(cat, [replace(q, uses=list(q.checkpoints))], given, heads).per_question.get(name, ())) \
+            counted[name] = set(planner([replace(q, uses=list(q.checkpoints))], given).per_question.get(name, ())) \
                 if q.checkpoints else set()
         missing = flow.unresolved.get(name)
         if missing:
@@ -504,9 +547,12 @@ def _literal(node):
     return False
 
 
-def silent_defaults(func):
+def silent_defaults(func, names=None):
     """[(line, snippet, why)] in a function's source: `x or <literal>` and `.get(k, <literal>)` (the literal not None),
-    except on lines marked `# solvi: ok`. [] when the source is not available."""
+    except on lines marked `# solvi: ok`. [] when the source is not available. names: the function's arguments that are
+    given inputs — then only a default on one of them counts (`amount or 0`, `order.get("total", 0)`, `order["x"] or
+    0`), not one on a constant table (`{...}.get(kind, 1)`), a computed value (`math.sqrt(v) or 1e-9`) or an
+    exception's attribute (`e.lineno or 0`)."""
     f = inspect.unwrap(func)
     try:
         lines, start = inspect.getsourcelines(f)
@@ -518,12 +564,24 @@ def silent_defaults(func):
     except SyntaxError:                               # a lambda in the middle of an expression
         return []
     out = []
+
+    def given(expr):                                  # is the value an input's own (the input, or a field / key of it)?
+        if names is None:
+            return True
+        while True:
+            if isinstance(expr, (ast.Attribute, ast.Subscript)):
+                expr = expr.value
+            elif isinstance(expr, ast.Call) and isinstance(expr.func, ast.Attribute) and expr.func.attr == "get":
+                expr = expr.func.value                # order.get("x") or 0
+            else:
+                return isinstance(expr, ast.Name) and expr.id in names
     for node in ast.walk(tree):
         hit = None
-        if isinstance(node, ast.BoolOp) and isinstance(node.op, ast.Or) and _literal(node.values[-1]):
+        if isinstance(node, ast.BoolOp) and isinstance(node.op, ast.Or) and _literal(node.values[-1]) \
+                and any(given(v) for v in node.values[:-1]):
             hit = f"`{ast.unparse(node)}` gives {ast.unparse(node.values[-1])} for a missing, empty or null value"
         elif isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute) and node.func.attr == "get" \
-                and len(node.args) == 2 and _literal(node.args[1]):
+                and len(node.args) == 2 and _literal(node.args[1]) and given(node.func.value):
             hit = f"`{ast.unparse(node)}` gives {ast.unparse(node.args[1])} for a missing key"
         if hit:
             line = start + node.lineno - 1
@@ -543,7 +601,7 @@ def _silent_defaults(cat, given, rep):
             seen.add(id(a.func))
             f = inspect.unwrap(a.func)
             path = _short_path(getattr(getattr(f, "__code__", None), "co_filename", "?"))
-            for line, _, why in silent_defaults(a.func):
+            for line, _, why in silent_defaults(a.func, set(a.inputs) & given):
                 rep.add("warning", "silent_default", f"{path}:{line} ({getattr(f, '__name__', a.name)})",
                         why + ": say what a missing input means (check for None and abstain, or declare the default in "
                               "System(inputs=...)); `# solvi: ok` accepts it")
@@ -560,9 +618,10 @@ def _short_path(p):
 
 # --- the command
 def cmd_check(a):
-    """`solvi check` (see solvi.cli) → 0: no errors (with --strict: no warnings either); 1: problems."""
-    from .cli import load_object
-    obj = load_object(a.target)
+    """`solvi check` (see solvi.cli) → 0: no errors (with --strict: no warnings either); 1: problems. The target is
+    module:attr / file.py:attr, or — as for `solvi test` — a task file or a directory holding task.py (its System:
+    `task.system()`, else System(task.cat, task.QUESTIONS))."""
+    obj = _target(a.target)
     if not (hasattr(obj, "parts") and hasattr(obj, "rules")) and not hasattr(obj, "catalog"):
         from .cli import _fail
         _fail(f"check {a.target}: not a solvi System, Catalog or Guard")
@@ -575,11 +634,27 @@ def cmd_check(a):
     return 0 if rep.ok else 1
 
 
+def _target(spec):
+    from pathlib import Path
+    p = Path(spec)
+    task = p / "task.py" if p.is_dir() else p if p.is_file() and p.suffix == ".py" else None
+    if task is not None and task.is_file():
+        from .honesty import load_task, system_of
+        mod = load_task(task)
+        if not callable(getattr(mod, "system", None)) and not (hasattr(mod, "cat") and hasattr(mod, "QUESTIONS")):
+            from .cli import _fail
+            _fail(f"check {spec}: a task module defines system() or cat and QUESTIONS (else give module:attr)")
+        return system_of(mod)
+    from .cli import load_object
+    return load_object(spec)
+
+
 def add_parser(sub):
     c = sub.add_parser("check", help="lint a catalog: hard checks outside their question's flow, unused parts, cycles, "
                                      "type conflicts, constraints that cannot hold, silent defaults")
     c.add_argument("target", help="module:attr or file.py:attr — a System (or a function returning one), a Catalog, or a "
-                                  "solvi.agents.Guard (each tool's checks)")
+                                  "solvi.agents.Guard (each tool's checks); or a task file / a directory with task.py, "
+                                  "as for solvi test")
     c.add_argument("--strict", action="store_true", help="warnings fail too (exit status 1)")
     c.add_argument("--max-combos", type=int, default=100_000,
                    help="the most answer combinations tried per group of constraints (default 100000)")

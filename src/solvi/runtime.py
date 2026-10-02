@@ -33,7 +33,20 @@ def _canon(v):
         return {"not_stated": True}
     if v is MISSING:                              # a failed step: repr(object()) carries a memory address
         return {"missing": True}
-    return repr(v)
+    np = sys.modules.get("numpy")                 # not imported: no value can be an array
+    if np is not None and isinstance(v, (np.ndarray, np.generic)):
+        return _canon(v.tolist())                 # element by element, as the list it is stored as: repr elides a long
+    r = repr(v)                                   # array ("...") and writes np.int64(5) or 5 by numpy's version
+    if " at 0x" in r:                             # the default repr: a memory address, another one in every run
+        t = type(v)
+        if callable(v) and hasattr(v, "__qualname__"):
+            return {"object": "function", "name": f"{getattr(v, '__module__', '')}.{v.__qualname__}"}
+        if hasattr(v, "__dict__"):                # a plain object: by its class and attributes, so it recomputes
+            try:
+                return {"object": f"{t.__module__}.{t.__qualname__}", "state": _canon(vars(v))}
+            except RecursionError:                # attributes that point back at it
+                return r
+    return r
 
 
 def _ckey(c):
@@ -786,23 +799,29 @@ def _drive(g):
 
 async def _acall(part, call, timeout):
     """One call of user code under aask: an `async def` part is awaited, a part marked blocking runs in a worker thread,
-    a plain sync part runs inline; a timeout (the part's, else the run's) raises PartTimeout."""
+    a plain sync part runs inline; a timeout (the part's, else the run's) raises PartTimeout. An `async def` part is
+    awaited whatever `blocking` says (in a worker thread it would only build its coroutine, and the timeout would never
+    see the await); the timeout covers the whole call, an awaitable it returns included."""
     t = part.timeout if part.timeout is not None else timeout
-    if part.blocking and _THREADS:
+    if part.blocking and _THREADS and not is_async_func(part.func):
         aw = asyncio.to_thread(call)
     else:
         v = call()
         if not inspect.isawaitable(v):
             return v
         aw = v
-    if t is None:
+
+    async def whole():
         v = await aw
-    else:
-        try:
-            v = await asyncio.wait_for(aw, t)
-        except asyncio.TimeoutError:
-            raise PartTimeout(f"{TIMED_OUT} after {t:g} s") from None
-    return await v if inspect.isawaitable(v) else v
+        while inspect.isawaitable(v):
+            v = await v
+        return v
+    if t is None:
+        return await whole()
+    try:
+        return await asyncio.wait_for(whole(), t)
+    except asyncio.TimeoutError:
+        raise PartTimeout(f"{TIMED_OUT} after {t:g} s") from None
 
 
 async def _adrive(g, timeout):

@@ -188,6 +188,17 @@ def find_whole(text, t):
     return -1
 
 
+def cuts_number(t, i, j):
+    """Does t[i:j] begin or end inside a longer number written in t? A quote [26:27] of "30" is the "3" of "30", one of
+    "3.5" or "1,300" is part of that number. (Words are not held to this: a quote with offsets may end inside a word.)"""
+    if not 0 <= i < j <= len(t):
+        return False
+    left = t[i].isdigit() and i > 0 and (t[i - 1].isdigit() or (t[i - 1] in ".," and i > 1 and t[i - 2].isdigit()))
+    right = t[j - 1].isdigit() and j < len(t) and (
+        t[j].isdigit() or (t[j] in ".," and j + 1 < len(t) and t[j + 1].isdigit()))
+    return left or right
+
+
 def locate(part, v, init_state):
     """A Claim's / Decision's evidence with every item as a Quote: a string is located in the output's source text —
     Claim.source, else the part's `source`, else "doc" if the part reads it, else its only given text input, else "doc" —
@@ -235,7 +246,19 @@ def check_evidence(evidence, init_state):
         if matches(str(e.value), src[e.start:e.end]) is False:
             return (f"{NOT_GROUNDED}: evidence {_short(e.value)!r} is not the text at {e.source}[{e.start}:{e.end}] "
                     f"({_short(src[e.start:e.end])!r})")
+        if cuts_number(src, e.start, e.end):          # Quote("3", 26, 27) over "30": the text there is "3", but the
+            return (f"{NOT_GROUNDED}: evidence {_short(e.value)!r} is not the text at {e.source}[{e.start}:{e.end}] "   # number
+                    f"({_short(_number_around(src, e.start, e.end))!r})")                                               # is 30
     return None
+
+
+def _number_around(t, i, j):
+    """t[i:j] widened to the whole number it cuts (for the rejection message)."""
+    while i > 0 and (t[i - 1].isdigit() or (t[i - 1] in ".," and i > 1 and t[i - 2].isdigit())):
+        i -= 1
+    while j < len(t) and (t[j].isdigit() or (t[j] in ".," and j + 1 < len(t) and t[j + 1].isdigit())):
+        j += 1
+    return t[i:j]
 
 
 PRIMITIVES = ("span", "rank", "estimate")         # answer kinds resolved by solvi.primitives (with their value's details)
@@ -287,9 +310,17 @@ class AnswerType(Serial):
 
 
 def _opts(options):
-    if isinstance(options, dict):
-        return list(options), dict(options)
-    return list(options), {}
+    """options (a list, or a dict {option: description}) → (options, descriptions); no options, or an option twice, raises
+    ValueError (an answer type that can never answer, or a model scoring one option twice)."""
+    if isinstance(options, (str, bytes)):
+        raise ValueError(f"options are a list or a dict of options, not the string {options!r}")
+    opts, desc = (list(options), dict(options)) if isinstance(options, dict) else (list(options), {})
+    if not opts:
+        raise ValueError("an answer type needs at least one option")
+    dup = [o for i, o in enumerate(opts) if o in opts[:i]]
+    if dup:
+        raise ValueError(f"option {dup[0]!r} is given twice")
+    return opts, desc
 
 
 def _num(x):
@@ -350,9 +381,15 @@ class Answer:
         returns a plain number (interval [x, x], confidence 1) or a distribution ({bin label or index: p}, or a list of p per
         bin); a model its probabilities over the bins as ordered options. Without bins the estimate is a plain number (rules
         only). `Estimate[0, 7, 14]` in a type hint."""
+        if bins is not None and (lo, hi, step) != (None, None, None):
+            raise ValueError("estimate takes bins, or lo=, hi= and step= — not both")
+        if bins is None and (lo is not None or hi is not None) and step is None:
+            raise ValueError("estimate with lo= and hi= needs step= (the width of a bin)")
         if bins is None and step is not None:
             if lo is None or hi is None:
                 raise ValueError("estimate with step= needs lo= and hi=")
+            if not float(step) > 0 or not hi > lo:
+                raise ValueError("estimate needs lo < hi and step > 0")
             n = int(round((hi - lo) / step))
             bins = [lo + i * step for i in range(n + 1)]
         if bins is not None:
@@ -530,8 +567,10 @@ def ground(part, v, init_state=None):
             src = init_state.get(v.source, "")
             if not (isinstance(src, str) and 0 <= v.start <= v.end <= len(src)):
                 return QUOTE_OUTSIDE
-            if part.strict() and v.value is not None and matches(v.value, src[v.start:v.end]) is False:
-                return f"{NOT_GROUNDED}: {_short(v.value)!r} is not the text at [{v.start}:{v.end}] ({_short(src[v.start:v.end])!r})"
+            if part.strict() and v.value is not None and (matches(v.value, src[v.start:v.end]) is False
+                                                           or cuts_number(src, v.start, v.end)):
+                return (f"{NOT_GROUNDED}: {_short(v.value)!r} is not the text at [{v.start}:{v.end}] "
+                        f"({_short(_number_around(src, v.start, v.end))!r})")
     elif isinstance(v, Decision) or part.options is not None:
         value = v.value if isinstance(v, Decision) else v
         opts = part.options if part.options is not None else list(v.probs)
@@ -612,14 +651,15 @@ def answer_data(at):
     as before)."""
     if at is None:
         return None
-    d = {"kind": at.kind, "options": list(at.options), "descriptions": dict(at.descriptions)}
+    # descriptions are keyed by the option's text (JSON keys are strings; an int option keeps its own type in `options`)
+    d = {"kind": at.kind, "options": list(at.options), "descriptions": {str(k): v for k, v in at.descriptions.items()}}
     for k in ("unknown", "k", "bins", "coverage", "unit", "source"):
         v = getattr(at, k)
         if v not in (None, False):
             d[k] = list(v) if k == "bins" else v
-    if at.type is not None:
-        from .typed import type_name
-        d["type"] = type_name(at.type)
+    if at.type is not None:                           # a typed span: its name as the dump writes it (solvi.schema)
+        from .schema import _span_type_name
+        d["type"] = _span_type_name(at.type)
     return d
 
 
@@ -703,6 +743,8 @@ class Catalog:
                 forget_rule(self, p.question)
             self.rules[p.question] = p
         elif kind == "constraint":
+            if p.name in self.constraints:            # as for parts: a second one of the same name replaced the first
+                raise ValueError(f"constraint {p.name} is already in the catalog")
             self.constraints[p.name] = p
         else:
             if p.name in self.parts:

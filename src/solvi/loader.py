@@ -5,7 +5,10 @@
 
 A name that cannot be read — no ":", a missing file, a missing attribute — raises LoadError (never SystemExit: this is
 library code; the `solvi` command turns it into its own error message). Whatever the module itself raises while it is
-imported passes through."""
+imported passes through.
+
+optional(module, extra, what) imports an optional dependency, or raises ImportError naming the extra that installs it
+(`pip install 'solvi[model]'`) — what the model loaders use instead of a bare ModuleNotFoundError."""
 from __future__ import annotations
 
 import importlib
@@ -53,3 +56,13 @@ def load_module(spec):
     if callable(obj) and not hasattr(obj, "ask") and not callable(getattr(obj, "decision", None)):
         obj = obj()
     return mod, obj
+
+
+def optional(module, extra, what):
+    """Import an optional dependency → the module; when it (or a module it needs) is not installed: ImportError
+    "<what> needs <module>: pip install 'solvi[<extra>]'". extra: "model" (torch, transformers), "onnx" (onnxruntime,
+    tokenizers, huggingface_hub), ..."""
+    try:
+        return importlib.import_module(module)
+    except ModuleNotFoundError as e:
+        raise ImportError(f"{what} needs {e.name or module}: pip install 'solvi[{extra}]'") from e

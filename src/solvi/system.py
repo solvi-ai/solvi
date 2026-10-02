@@ -177,6 +177,26 @@ class Response(Serial):
         return render(decision(self, question, system, replay), format)
 
 
+def _speculate_note(speculate, p):
+    """aask(speculate=True) under a learned order: the hard checks run one at a time in that order, so nothing starts
+    early — say so rather than ignore the option."""
+    if speculate and p.order is not None:
+        import warnings
+        warnings.warn("aask(speculate=True) is ignored under a learned order (System(order=\"learned\"), learn_order() "
+                      "or order=...): the hard checks run one at a time in the learned order, nothing starts early",
+                      stacklevel=3)
+
+
+def _clash(catalog, names, head):
+    """The message for given facts named like parts of the catalog (a given value would replace the part)."""
+    parts = catalog.parts
+    own = [k for k in names if k in parts[k].inputs]  # `def savings(savings)`: the part reads the field it is named after
+    return (head + " " + ", ".join(f"{k!r} (the catalog's {parts[k].kind} of that name)" for k in names)
+            + ": a given fact cannot stand in for a part of the catalog — rename the input key or the part"
+            + (f"; {', '.join(own)} {'reads its own name' if len(own) == 1 else 'read their own names'}: name a part "
+               f"after what it computes (e.g. {own[0]}_points), not after the input it reads" if own else ""))
+
+
 class System:
     def __init__(self, catalog: Catalog, questions, journal: str | None = None, workers: int = 1, order: str = "default",
                  producers: str = "declared", learn: bool | None = None, inputs=None, strategist=None, storage=None,
@@ -184,10 +204,14 @@ class System:
         """order: "default" (hard checks and their inputs first, all together) or "learned" (hard checks one at a time, most
         expected saving first — see learn_order). producers: "declared" (alternative producers of a fact are tried in
         declaration order) or "learned" (a policy picks the order per input and learns from outcomes). learn: after every
-        ask, update part costs and the order / producer models from what happened (milliseconds).
+        ask, update the order / producer models from what happened (which hard check failed on which input, which
+        producer was accepted); default: on when order="learned" or producers="learned", else off (part costs are
+        measured either way). learn_order() turns it on.
         inputs: a pydantic model of init_state (optional): a dict passed to ask is validated against it — its fields (with
         defaults) are the given facts, a field that fails is left out and reported (safeguard type_rejected). ask also takes
-        a BaseModel instance directly, with or without `inputs`.
+        a BaseModel instance directly, with or without `inputs`. A given fact cannot share a name with a part of the
+        catalog (ask refuses such a key: the value would replace the part), so a model field named like a part is refused
+        here.
         strategist: an object with plan(catalog, questions, init_keys, heads) → Flow used by ask instead of the deterministic
         strategist (experimental: solvi.strategy.ModelStrategist; its plan is recorded in the trace, see docs/strategist.md).
         storage: a solvi.storage.TraceStorage (or a path: .db / .sqlite → SQLite, else JSON lines) — every ask saves its
@@ -215,8 +239,24 @@ class System:
                              f"gets the value and, by name, inputs of the fact's producers — as it is, it cannot run and "
                              f"every output of {name} would be rejected")
         self.inputs = inputs
+        if inputs is not None:                        # a declared field named like a part could never be given (ask refuses
+            from .typed import field_types           # the key): say it now, not at the first ask
+            clash = sorted(k for k in field_types(inputs) if k in catalog.parts)
+            if clash:
+                raise ValueError(_clash(catalog, clash, f"System(inputs={getattr(inputs, '__name__', inputs)}) declares"))
         self.strategist = strategist              # None: the deterministic strategist (solvi.strategist.plan)
+        questions = list(questions)
+        dup = sorted({q.name for q in questions if sum(x.name == q.name for x in questions) > 1})
+        if dup:                                       # the last one would silently win
+            raise ValueError(f"two questions named {', '.join(map(repr, dup))}: question names are unique in a System")
         self.questions = {q.name: self._typed_question(q) for q in questions}
+        for c in catalog.constraints.values():        # argument names are question names: one that is not (a typo) means
+            lost = [x for x in c.inputs if x not in self.questions]   # the constraint would never apply, without a word
+            if lost:
+                raise ValueError(f"constraint {c.name} reads {', '.join(lost)}, which "
+                                 f"{'is not a question' if len(lost) == 1 else 'are not questions'} of this system "
+                                 f"({', '.join(self.questions)}): a constraint's arguments are question names, and it "
+                                 "applies only when all of them are asked")
         self.heads: dict[str, Head] = {}
         from .storage import JSONLStorage, open_storage
         if journal and storage is not None:
@@ -304,7 +344,8 @@ class System:
 
     # --- answers
     def ask(self, init_state, names=None, workers=None, order=None, store=True, early_exit=None):
-        """init_state: a dict of given facts, or a pydantic BaseModel instance (its fields). order: override the system's
+        """init_state: a dict of given facts, or a pydantic BaseModel instance (its fields). names: the questions to ask —
+        a name or a list of names (None: all; an unknown name raises KeyError). order: override the system's
         order for this ask — "default", "learned", or an object with p_fail(check, row) and row(vals, init_keys) (e.g. an
         oracle for experiments). store=False: do not save this response to the system's storage.
         early_exit: None — the system's (System(early_exit=), True by default: after a failed hard check the steps only
@@ -312,6 +353,8 @@ class System:
         `res.values` and the trace hold every fact and rule value of a decision a hard check forced (and every part
         listed in `checkpoints`); the trace records it (`res.trace.early_exit`), and replay checks no step is missing.
         An `async def` part is awaited in an event loop of its own, one call at a time: use `aask` for such catalogs."""
+        if workers is not None and (not isinstance(workers, int) or isinstance(workers, bool) or workers < 1):
+            raise ValueError(f"workers must be a positive int, not {workers!r}")
         t0 = now_ms()
         p = self._prepare(init_state, names, order)
         trace, vals = execute(self.catalog, p.flow, p.state, workers=workers or self.workers, order=p.order,
@@ -376,6 +419,7 @@ class System:
         read = self._textin(text, decider, textin, question)
         t0 = now_ms()
         p = self._prepare_text(read, order)
+        _speculate_note(speculate, p)
         trace, vals = await aexecute(self.catalog, p.flow, p.state, order=p.order, costs=self.costs, policy=p.policy,
                                      known=p.known, timeout=self.timeout if timeout is None else timeout,
                                      speculate=speculate, early_exit=self._early(early_exit))
@@ -394,11 +438,13 @@ class System:
         speculate=False: hard checks and the steps they read first, then what the open questions need (as `ask`: no call
         starts that `ask` would not make). speculate=True: every step starts once its inputs are ready, and a failed hard
         check cancels the pending calls that only the questions it settles needed (lower latency; some paid calls may start
-        and be cancelled). Cancelling `aask` itself cancels every pending call. early_exit: as for `ask` (False: every
-        step runs, whatever the hard checks say)."""
+        and be cancelled). Cancelling `aask` itself cancels every pending call. Under a learned order speculate=True is
+        ignored, with a UserWarning (the hard checks run one at a time in that order). An `async def` part is awaited
+        whatever `blocking` says. early_exit: as for `ask` (False: every step runs, whatever the hard checks say)."""
         from .runtime import aexecute
         t0 = now_ms()
         p = self._prepare(init_state, names, order)
+        _speculate_note(speculate, p)
         trace, vals = await aexecute(self.catalog, p.flow, p.state, order=p.order, costs=self.costs, policy=p.policy,
                                      known=p.known, timeout=self.timeout if timeout is None else timeout,
                                      speculate=speculate, early_exit=self._early(early_exit))
@@ -439,21 +485,47 @@ class System:
             rejected = None
         clash = sorted(k for k in init_state if k in self.catalog.parts)
         if clash:                                     # the planner would take the given value for the part's own: a check
-            raise ValueError("the input has " + ", ".join(  # named in the input would never run
-                f"{k!r} (the catalog's {self.catalog.parts[k].kind} of that name)" for k in clash)
-                + ": a given fact cannot stand in for a part of the catalog — rename the input key or the part")
-        qs = [self.questions[n] for n in (names or self.questions)]
-        if self.cost_policy is not None:              # costs from measurements (see MeasuredCosts)
-            c, src = self.cost_policy.costs(self.costs, _producers(self.catalog))
-            flow = self.strategist.plan(self.catalog, qs, init_state.keys(), self.heads, costs=c)
-            _why_costs(self.catalog, flow, init_state.keys(), c, src, self.cost_policy.frozen is not None)
-        else:
-            flow = (plan if self.strategist is None else self.strategist.plan)(self.catalog, qs, init_state.keys(),
-                                                                               self.heads)
+            raise ValueError(_clash(self.catalog, clash, "the input has"))   # named in the input would never run
+        qs = [self.questions[n] for n in self._names(names)]
+        flow = self._plan(qs, init_state.keys(), why_costs=True)
+        if not (order is None or order in ("default", "learned") or hasattr(order, "p_fail")):
+            raise ValueError(f'order must be "default", "learned" or an object with p_fail(check, row), not {order!r}')
         mode = self.order if order is None else order
         om = None if mode == "default" else (self.order_model if mode == "learned" else mode)
         policy = self.producer_policy if self.producers == "learned" else None
         return _Prepared(init_state, known, rejected, qs, flow, om, policy)
+
+    def _names(self, names):
+        """The questions to ask: None → all; a name, or a list of names, each one of this system's questions."""
+        if names is None:
+            return list(self.questions)
+        names = [names] if isinstance(names, str) else list(names)
+        lost = [n for n in names if n not in self.questions]
+        if lost:
+            raise KeyError(f"no question {', '.join(map(repr, lost))} in this system ({', '.join(self.questions)})")
+        return names
+
+    def _plan(self, questions, init_keys, why_costs=False):
+        """The flow of these questions on these given facts, planned as `ask` plans it: by System(strategist=) (the
+        deterministic solvi.strategist.plan when none is set), with measured costs under System(costs="measured").
+        Everything that plans for this system goes through here — ask, answers_of, facts_for / fit, learn_order, the input
+        schemas of `solvi serve` and `solvi check` — so they all see the same flow. why_costs: note in the plan record
+        which cost decided each choice (ask)."""
+        if self.cost_policy is not None:              # costs from measurements (see MeasuredCosts)
+            c, src = self.cost_policy.costs(self.costs, _producers(self.catalog))
+            flow = self.strategist.plan(self.catalog, questions, init_keys, self.heads, costs=c)
+            if why_costs:
+                _why_costs(self.catalog, flow, init_keys, c, src, self.cost_policy.frozen is not None)
+            return flow
+        return (plan if self.strategist is None else self.strategist.plan)(self.catalog, questions, init_keys, self.heads)
+
+    def _computable(self, init_keys):
+        """The facts this system's strategist can compute from these given facts (with a strategist set, a fact needs one
+        usable producer; the deterministic strategist needs the inputs of every alternative)."""
+        if self.strategist is None:
+            return computable(self.catalog, init_keys)
+        from .strategy import reachable
+        return reachable(self.catalog, init_keys)
 
     def _respond(self, p, trace, vals, t0, store):
         """What ask and aask share after running: the trace's plan record and fingerprint, costs, answers, safeguards,
@@ -515,7 +587,7 @@ class System:
         import copy
         qs = [self.questions[n] for n in names]
         if flow is None:
-            flow = (plan if self.strategist is None else self.strategist.plan)(self.catalog, qs, trace.init.keys(), self.heads)
+            flow = self._plan(qs, trace.init.keys())
         t = copy.copy(trace)
         t.records = list(trace.records)                # an answer head appends its record: to the copy
         vals = dict(trace.init)
@@ -542,8 +614,9 @@ class System:
         return {"catalog": c["fp"], "questions": self._questions_fp(), "parts": dict(c["parts"]), "models": models}
 
     def _questions_fp(self):
-        """The questions' fingerprint (answer types, min_confidence, checkpoints, calibration); cached while the question
-        objects and the calibration are the same."""
+        """The questions' fingerprint (answer types, min_confidence, checkpoints, calibration); cached while the questions'
+        contents and the calibration are the same (a question changed in place — `q.min_confidence = 0.9` — changes
+        it: the cache is keyed by what the questions hold, not by the objects)."""
         from .core import plain_json, question_data
         from .provenance import digest
 
@@ -553,7 +626,14 @@ class System:
                 return d
             from .schema import jsonable
             return jsonable(d)
-        key = (tuple((n, id(q)) for n, q in self.questions.items()), tuple(sorted(self.calib.items())))
+
+        def content(q):
+            a = q.answer
+            ans = None if a is None else (a.kind, tuple(map(repr, a.options)), repr(sorted(a.descriptions.items(), key=str)),
+                                          a.unknown, a.k, tuple(a.bins or ()), a.coverage, a.unit, a.source, repr(a.type))
+            return (q.text, ans, tuple(q.checkpoints), tuple(q.uses or ()) if q.uses is not None else None,
+                    q.min_confidence, q.require_evidence)
+        key = (tuple((n, content(q)) for n, q in self.questions.items()), tuple(sorted(self.calib.items())))
         cached = getattr(self, "_qfp", None)
         if cached is None or cached[0] != key:
             cached = self._qfp = (key, digest(sorted((q.name, data(q)) for q in self.questions.values()), list(key[1])))
@@ -718,13 +798,16 @@ class System:
     def learn_order(self, examples=None, features=None):
         """Learn which hard checks tend to fail on which inputs, and switch this system to the learned order.
         examples: [init_state] — each runs only its hard checks and what they read (no early exit), which also measures their
-        costs. Without examples, the models learned from past asks are used as they are (every ask feeds them).
+        costs. Without examples, the models learned from past asks are used as they are: asks feed them only while
+        learning is on (System(order="learned"), producers="learned" or learn=True), so on a default System that never
+        learned they are empty and every check counts as failing half the time. From this call on every ask feeds them
+        (`self.learn` becomes True).
         features: computed facts to use besides init_state (cheap ones: they are computed before the hard checks)."""
         import copy
         if features is not None:
             self.order_model.features = list(features)
         for st in examples or ():
-            flow = plan(self.catalog, list(self.questions.values()), st.keys(), self.heads)
+            flow = self._plan(list(self.questions.values()), st.keys())
             names = {s.part.name: s for s in flow.steps}
             keep = set()
 
@@ -743,6 +826,7 @@ class System:
             trace, vals = execute(self.catalog, sub, st, early_exit=False, costs=self.costs)
             self._observe(trace, st, vals, None)
         self.order = "learned"
+        self.learn = True                             # the learned order goes on learning from the asks, as order="learned" does
         return self.order_model
 
     # --- constraints between answers: joint decoding
@@ -753,16 +837,24 @@ class System:
         if not cons:
             return True, []
 
-        def ok(assign, c):
+        raised = {}                                   # constraint → the exception it raised on the answers as given
+
+        def ok(assign, c, note=False):
             if any(assign.get(q) is None for q in c.inputs):
                 return True                           # an abstained answer: nothing to check
             try:
                 return bool(c.func(**{q: assign[q] for q in c.inputs}))
-            except Exception:  # noqa: BLE001
+            except Exception as e:  # noqa: BLE001 — a constraint that raises counts as broken, and says so (below)
+                if note:
+                    raised[c.name] = f"{type(e).__name__}: {str(e)[:120]}"
                 return False
         current = {q: r.answer for q, r in results.items()}
-        if all(ok(current, c) for c in cons):
+        if all([ok(current, c, True) for c in cons]):
             return True, []
+        for c in cons:                                # the error is in the reason of every answer the constraint reads
+            if c.name in raised:
+                for q in c.inputs:
+                    results[q].why += f"; constraint {c.name} raised {raised[c.name]} (it counts as broken)"
         # candidates: learned answers may change (their distribution), rule / forced / abstained answers are fixed
         qs = sorted({q for c in cons for q in c.inputs})
         cands = {}
@@ -798,7 +890,15 @@ class System:
                 if best is None or score > best[0]:
                     best = (score, assign)
         if best is None:
-            return False, [c.name for c in cons if not ok(current, c)]
+            broken = [c.name for c in cons if not ok(current, c)]
+            total = math.prod(len(v) for v in cands.values())
+            if total > max_combos:                    # not every combination was tried: say so, the answers stand as given
+                for q in qs:
+                    if len(cands[q]) > 1 and any(q in c.inputs for c in cons if c.name in broken):
+                        results[q].why += (f"; not repaired: {', '.join(broken)} broken, and joint decoding tried only the "
+                                           f"{k} most probable answer(s) of each question ({total:,} combinations of "
+                                           f"{len(qs)} answers exceed its limit of {max_combos:,})")
+            return False, broken
         for q in qs:
             r = results[q]
             if best[1][q] != r.answer:
@@ -814,12 +914,12 @@ class System:
 
     # --- task-specific training
     def facts_for(self, init_state):
-        """All computable facts (for head training): a "compute everything" flow without rules."""
+        """All computable facts (for head training): a "compute everything" flow without rules, planned by the system's
+        strategist (so a fact `ask` computes around a dead-end producer is a feature candidate too)."""
         from .core import Question
-        from .strategist import plan as _plan
         init_state = self._state(init_state)[0]
         q = Question("__all__", "", None)
-        flow = _plan(self.catalog, [q], init_state.keys())
+        flow = self._plan([q], init_state.keys())
         flow.steps = [s for s in flow.steps if s.part.kind != "rule"]
         _, vals = execute(self.catalog, flow, init_state, early_exit=False)
         return vals
@@ -832,7 +932,7 @@ class System:
         rows = [self.facts_for(s) for s, _ in examples]
         ans = [q.answer.normalize(a) for _, a in examples]
         keys = set(self._state(examples[0][0])[0].keys())
-        cands = sorted(computable(self.catalog, keys))      # the given keys too: "all facts computable from" them
+        cands = sorted(self._computable(keys))              # the given keys too: "all facts computable from" them
         from .heads import Head
         if q.answer.kind == "multi":
             self.heads[question] = MultiHead(q.answer.options, lambda: Head(["yes", "no"]),
@@ -850,7 +950,7 @@ class System:
         import warnings
         from collections import Counter
         if not [c for c in cands if c not in keys]:     # the given keys alone did not do (see head.dropped)
-            have, blocked = computable(self.catalog, keys), []
+            have, blocked = self._computable(keys), []
             for p in self.catalog.parts.values():
                 missing = [x for x in p.inputs if x not in have]
                 if p.name in have or not missing:
@@ -896,7 +996,7 @@ class System:
         explicit = features is not None
         if features is None:
             keys = set(self._state(examples[0][0])[0].keys())
-            features = sorted(computable(self.catalog, keys))  # the given keys too, as fit
+            features = sorted(self._computable(keys))      # the given keys too, as fit
         ans = [q.answer.normalize(a) for _, a in examples]
         if q.answer.kind == "multi":
             head = MultiHead(q.answer.options, lambda: FastHead(["yes", "no"], lam=lam, refit=refit, refit_until=refit_until),
@@ -990,11 +1090,17 @@ class System:
         updated. Any correction goes to the storage (journal) for the next fit. Returns the update time in ms when something learned
         at once, else None. source ("human", "outcome", "rule"), by (who) and of (the stored id of the decision it corrects)
         are stored with it (TraceStorage.save_correction). With a learning loop (System.learning(..., gate_teach=True))
-        nothing learns at once: the correction is only stored, and the loop's gates decide whether it is learned."""
+        nothing learns at once: the correction is only stored, and the loop's gates decide whether it is learned.
+        An unknown question raises KeyError and an answer that is not one of the question's options ValueError, before
+        anything is learned or stored; the answer is stored normalized (True → "yes"). When nothing learned at once and
+        there is no storage, the correction is lost: a UserWarning says so."""
         from .decide import decision_of
         from .fast import FastHead
         from .storage import check_source
         check_source(source)
+        if question not in self.questions:
+            raise KeyError(f"teach: no question {question!r} in this system ({', '.join(self.questions)})")
+        correct = self.questions[question].answer.normalize(correct)   # ValueError: not one of the options
         ms = None
         init_state = self._state(init_state)[0]
         loop = getattr(self, "_learning", None)
@@ -1006,11 +1112,10 @@ class System:
         head = self.heads.get(question)
         dec = decision_of(self.catalog, question)
         if isinstance(head, (FastHead, MultiHead)) and getattr(head, "online", True):
-            ms = head.update(self.facts_for(init_state), self.questions[question].answer.normalize(correct))
+            ms = head.update(self.facts_for(init_state), correct)
         if dec is not None:
-            ans = self.questions[question].answer.normalize(correct)
             try:
-                label = dec.spec.label(ans)               # the decision's own label (a bool decision: "yes" / "no")
+                label = dec.spec.label(correct)           # the decision's own label (a bool decision: "yes" / "no")
             except ValueError:
                 label = None                              # an answer the decision cannot give (e.g. set by a hard check)
             if label is not None:
@@ -1018,6 +1123,11 @@ class System:
                 ms = dec.teach(dec.text_of(vals), label)
         if self.storage is not None:
             self.storage.save_correction(question, init_state, correct, source=source, by=by, of=of)
+        elif ms is None:
+            import warnings
+            warnings.warn(f"teach({question!r}): nothing learned it — no online head (fit_fast) or model decision "
+                          "answers this question, and the system has no storage to keep it for the next fit: the "
+                          "correction is lost", stacklevel=2)
         return ms
 
 
@@ -1091,7 +1201,7 @@ def _resolved(q, r, pc, why, src, init):
     """An answer primitive (not stated, span, rank, estimate) or an answer with evidence, from the rule's record (see
     solvi.primitives)."""
     from .core import Unknown
-    from .primitives import Rejected, fmt, resolve
+    from .primitives import NO_EVIDENCE, Rejected, fmt, resolve
     try:
         out = resolve(q.answer, r, init)
     except Rejected as e:
@@ -1100,7 +1210,7 @@ def _resolved(q, r, pc, why, src, init):
     if q.require_evidence and a is not Unknown and not ev:
         return Result(None, 0.0, f"no supporting quote (require_evidence); would have answered "
                                  f"{fmt(a, q.answer.kind, out['extra'])}; {why}", "abstain", out["probs"], r.origin, src,
-                      "evidence_missing", extra=out["extra"])
+                      NO_EVIDENCE, extra=out["extra"])
     if a is Unknown:
         why = f"not stated; {why}"
     return Result(a, min(pc, out["confidence"]), why, probs=out["probs"], provenance=r.origin, source=src, evidence=ev,

@@ -33,7 +33,7 @@ this reference lists what each module exports and the signatures.
 | [`solvi.strategy`](strategy.md) | the model strategist (experimental, `ModelStrategist`) |
 | [`solvi.learned`](learned.md) | the learned strategist and measured costs (`MeasuredCosts`) |
 | [`solvi.aliases`](aliases.md) | name matching between parameters and facts (experimental) |
-| [`solvi.audit`](audit.md) | the audit of a response: what each answer rests on |
+| [`solvi.audit`](audit.md) | `res.audit()`: what each answer rests on and which safeguards fired; `to_dict()` as JSON-ready data |
 | [`solvi.show`](show.md) | printing a response |
 | [`solvi.report`](report.md) | reports of one decision or a period of stored decisions (Markdown, HTML, data) |
 | [`solvi.otel`](otel.md) | decisions as OpenTelemetry spans (the API, or OTLP/JSON) |

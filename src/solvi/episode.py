@@ -180,8 +180,10 @@ class Chooser:
     options: {option: action} (the option is what the model reads, the action what the episode counts). The producers
     of the choice: the model (rejected when its option is not in the list, when its action was already taken
     `repeat_limit` times without progress, when `check(option, question, episode)` says no, or when it escalates), then
-    `rule` — the option a rule would take. who: "model" | "rule" | "only" (one option: no decision); info: the option
-    and the producers tried. A single option is returned without a decision."""
+    `rule` — the option a rule would take (one of the options: another value raises ValueError). who: "model" | "rule" |
+    "only" (one option: no decision) | "abstain" (the model's option was rejected and there is no rule: the action is
+    None — the caller decides, e.g. asks a person); info: the option and the producers tried. A single option is
+    returned without a decision."""
 
     def __init__(self, model, storage=None, escalate_below=0.5, check=None, repeat_limit=1, use_act=None):
         self.model, self.storage, self.use_act = model, storage, use_act
@@ -227,6 +229,8 @@ class Chooser:
         actions = dict(options) if isinstance(options, dict) else {o: o for o in options}
         if not actions:
             raise ValueError("nothing to choose from")
+        if rule is not None and rule not in actions:  # it would be chosen as an action of None
+            raise ValueError(f"rule {rule!r} is not one of the options ({', '.join(map(repr, actions))})")
         if len(actions) == 1:
             v = next(iter(actions))
             return actions[v], "only", {"choice": v}
@@ -278,7 +282,31 @@ class LongMemory:
         self.data = {"episodes": 0, "items": {}}      # context → key → {"score", "n", "last", "why"}
         self.episode = None
         if self.path and self.path.exists():
-            self.data = json.loads(self.path.read_text(encoding="utf-8"))
+            self.data = self._read(self.path)
+
+    @staticmethod
+    def _read(path):
+        """The memory file at path, checked: a JSON file of another kind is refused here (ValueError), not later as a
+        KeyError deep in `scores` or `begin`."""
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except (ValueError, UnicodeDecodeError) as e:
+            raise ValueError(f"{path} is not a LongMemory file: it is not JSON ({e})") from None
+        why = None
+        if not isinstance(data, dict) or not isinstance(data.get("items"), dict) \
+                or type(data.get("episodes")) is not int:
+            why = 'it has no "episodes" count and "items" table'
+        else:
+            for ctx, keys in data["items"].items():
+                bad = next((k for k, v in keys.items() if not isinstance(v, dict) or type(v.get("n")) is not int
+                            or type(v.get("score")) not in (int, float)), None) if isinstance(keys, dict) else ctx
+                if bad is not None:
+                    why = f"item {bad!r} of context {ctx!r} has no numeric score and count"
+                    break
+        if why:
+            raise ValueError(f"{path} is not a LongMemory file: {why} (written by LongMemory.save: "
+                             '{"episodes": n, "items": {context: {key: {"score", "n", "last", "why"}}}})')
+        return data
 
     @staticmethod
     def _ctx(c):

@@ -105,3 +105,28 @@ def test_options_as_a_dict_and_bad_arguments():
         decide_many(model(), TEXT, TASK, ACTIONS, many=Many(max_options=10))
     with pytest.raises(ValueError, match="duplicate"):
         decide_many(model(), TEXT, TASK, ["a", "a", "b"])
+
+
+def test_a_close_cut_escalates_whatever_the_sign_of_a_selectors_scores():
+    """With a selector whose scores are not positive (cosines, log-probabilities, negative distances) the close-cut
+    escalation never fired: an exact tie at the cut left `gap` None."""
+    m = DecideModel(Overlap(limit=12), meta={"format": "test", "temperature": 1.0})
+    for sel in (lambda q, labels, texts: [-1.0 if "door" in t else -5.0 for t in texts],
+                lambda q, labels, texts: [-0.1 if "door" in t else -0.9 for t in texts],
+                lambda q, labels, texts: [1.0 if "door" in t else 0.2 for t in texts],
+                lambda q, labels, texts: [0.0 for t in texts]):
+        d = decide_many(m, TEXT, TASK, ACTIONS, many=Many(mode="shortlist", k=4, query="door", selector=sel))
+        assert d.extra["many"]["gap"] == 0.0 and d.escalate and "left out" in d.escalate
+    clear = decide_many(m, TEXT, TASK, ACTIONS, many=Many(mode="shortlist", k=8, query="door", selector=lambda q, labels, texts: [
+        -1.0 if "door" in t else -5.0 for t in texts]))
+    assert clear.extra["many"]["gap"] is None and clear.escalate is None       # what is left out is the worst there is
+
+
+def test_a_tournament_block_that_escalates_makes_the_final_decision_escalate():
+    m = DecideModel(Overlap(limit=12), meta={"format": "test", "temperature": 1.0})
+    d = decide_many(m, "Goal: get out. Room: nothing here matches.", TASK, ACTIONS, many=Many(mode="tournament", block=8),
+                    escalate_below=0.5)
+    calls = d.extra["many"]["calls"]
+    assert any(c["escalate"] for c in calls[:-1]) and d.escalate and "tournament call(s) before the last escalated" in d.escalate
+    sure = decide_many(m, TEXT, TASK, ACTIONS, many=Many(mode="tournament", block=8))
+    assert sure.escalate is None

@@ -284,3 +284,30 @@ def test_learned_producer_policy_avoids_a_cheap_producer_where_it_is_wrong():
     assert next(r for r in short.trace.records if r.name == "total").producer == "total_regex"
     assert next(r for r in long.trace.records if r.name == "total").producer == "total_model"
     assert long.trace.replay(cat, long.flow)["ok"] and short.trace.replay(cat, short.flow)["ok"]
+
+
+def test_learn_order_turns_online_learning_on_and_a_default_system_does_not_learn_from_asks():
+    """The docs said every ask feeds the order model; on a default System (learn=False) none did, and learn_order()
+    without examples switched to an empty model that then stayed empty."""
+    from solvi import Answer, Catalog, Question, System
+    cat = Catalog()
+
+    @cat.check(hard=True, then={"ship": "no"})
+    def paid(status):
+        return status == "paid"
+
+    @cat.rule("ship")
+    def ship(status):
+        return "yes"
+    qs = [Question("ship", "Ship?", Answer.yes_no(), checkpoints=["paid"])]
+    states = [{"status": "paid" if i % 4 else "unpaid"} for i in range(40)]
+    s = System(cat, qs)
+    for st in states:
+        s.ask(st)
+    assert s.learn is False and s.order_model.n("paid") == 0
+    s.learn_order()
+    assert s.learn is True and s.order == "learned"
+    for st in states:
+        s.ask(st)
+    assert s.order_model.n("paid") == 40
+    assert System(cat, qs, order="learned").learn is True and System(cat, qs, learn=True).learn is True

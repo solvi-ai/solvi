@@ -315,7 +315,9 @@ def _line(cv, chart, top, notes, ph=220.0):
              for ci, p in enumerate(s.points) if p is not None}
     vw = max(text_width(t, VALUE_FONT) for t in texts.values())
     x0, x1 = MARGIN + vw / 2 + 10, W - MARGIN - vw / 2 - 10
-    step = (x1 - x0) / (n - 1)
+    if n == 1:                                        # one point: in the middle
+        x0 = x1 = (x0 + x1) / 2
+    step = (x1 - x0) / (n - 1) if n > 1 else 0.0
     vals = [float(p.value) for s in chart.series for p in s.points if p is not None]
     vmin, vmax = min(vals), max(vals)
     if vmin == vmax:
@@ -476,7 +478,13 @@ def _desc(chart):
 
 def render_svg(chart: VerifiedChart, proposed=None) -> Drawing:
     """A VerifiedChart → Drawing (the SVG and its layout). proposed: how many values were proposed (the footer says how
-    many of them verified)."""
+    many of them verified). A chart the checker never produces — no categories, no verified value, a pie whose values
+    do not add up to more than zero or hold a negative — raises ValueError (it cannot be drawn honestly)."""
+    vals = [p.value for s in chart.series for p in s.points if p is not None]
+    if not chart.categories or not vals:
+        raise ValueError("render_svg: the chart has no categories or no verified value: nothing to draw")
+    if chart.kind == "pie" and (sum(vals) <= 0 or any(v < 0 for v in vals)):
+        raise ValueError("render_svg: a pie needs values that are not negative and add up to more than zero")
     notes = []
     uid = "c" + hashlib.sha256(chart.model_dump_json().encode()).hexdigest()[:10]
     for attempt in range(4):
