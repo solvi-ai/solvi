@@ -11,10 +11,10 @@
 Entry points are the system's questions with the typed input state each one reads (`system.entry_points()`, from the same
 schemas as `solvi serve`). The model does two small things: the decider picks the entry point (a choice over the entry
 points with their descriptions; below `min_confidence` or a near tie it escalates, and nothing is asked), and an extractor
-points at the piece of text that holds each field (the decider's own span pointer when the checkpoint has one, else the
-deterministic `CueExtractor`). Code does the rest: a deterministic parser per type turns the quote into the value —
+points at the piece of text that holds each field (the deterministic `CueExtractor` by default; the decider's own span
+pointer, `DeciderExtractor`, when you name it). Code does the rest: a deterministic parser per type turns the quote into the value —
 numbers ("1,500", "1.5 million", "2k", "полтора миллиона"), dates ("2026-09-12", "12.09.2026", "12 September", "12 сентября";
-without a year only with `today=`), enums by label or synonym, booleans, strings — and a quote that does not parse leaves
+without a year only with `today=` — else the field is unread: "the year is not stated"), enums by label or synonym, booleans, strings — and a quote that does not parse leaves
 the field unread. A field the text does not state is "not stated"; a required one is listed in `missing` for a clarifying
 question instead of a guess.
 
@@ -322,8 +322,9 @@ def parse_date(s, spec=None):
     {"dayfirst": False}: month first); 12 September 2026, September 12, 2026, 12 Sep, 12 сентября; today / yesterday /
     tomorrow. A lower-case "may" after a number, without a year and before a verb or a pronoun ("these 2 may be
     wrong"), is the modal verb, not the month. A date without a year, a two-digit year, or a relative date needs spec {"today": "YYYY-MM-DD"}
-    (TextIn(today=...)): without it it is an error. With it a date without a year is read in today's year (an
-    assumption, not a reading: "28 December" read on 5 January is the December ahead). A two-digit year is the one within
+    (TextIn(today=...)): without it it is an error — for a date without a year "the year is not stated", never a year
+    guessed. With it a date without a year is read in today's year (an assumption the caller made by passing today, not
+    a reading: "28 December" read on 5 January is the December ahead). A two-digit year is the one within
     (today − 80 years, today + 20 years]: with today 2026-09-28, "85" is 1985 and "30" is 2030. Exactly one date in the
     quote."""
     spec = spec or {}
@@ -358,7 +359,7 @@ def parse_date(s, spec=None):
         y = m.group("y")
         if y is None:
             if today is None:
-                raise ParseError(f"{m.group()!r} has no year: pass today= to read it")
+                raise ParseError(f"{m.group()!r}: the year is not stated (pass today= to read it in today's year)")
             y = today.year
         y = int(y)
     try:
@@ -841,7 +842,7 @@ class TextRead:
 def _for_the_user(why):
     """A parser's reason in the words of a clarifying question: what the person who wrote the text can fix (the
     developer's hint — "pass today=" — stays in the field's `why`)."""
-    for mark, said in (("has no year", "the year is missing"), ("two-digit year", "the year has only two digits"),
+    for mark, said in (("the year is not stated", "the year is not stated"), ("two-digit year", "the year has only two digits"),
                        ("is relative", "I need the date itself")):
         if mark in (why or ""):
             return said
@@ -855,7 +856,9 @@ class TextIn:
     decider: picks the entry point (a DecideModel, or any object with decide(text, task, options, descriptions=,
     kind="choice") → Decision); not needed with one entry point or when the question is given. extractor: finds each
     field's span — an object with find(text, FieldSpec) → [Quote] (best first), or a list of them tried in order; default:
-    the decider's pointer (DeciderExtractor) when it has one, else CueExtractor.
+    CueExtractor, whatever the decider (measured: benchmarks/textin_extractors.py — on the repository's texts with typed
+    fields the cue finder read 282 of 306 stated values right and 1 wrong, solvi-base's span pointer 111 right and 11
+    wrong; the pointer is used only when named, DeciderExtractor(decider)).
 
     entry_points: the question names to choose from (default: every question). descriptions: {question: text} for the
     router (default: the question's text). synonyms: {field: {label: [synonym]}} for enum fields; cues: {field: [word]}
@@ -873,7 +876,7 @@ class TextIn:
                  min_field_confidence=0.5, task="Which request is this text making?", source=SOURCE):
         self.system, self.decider = system, decider
         if extractor is None:
-            extractor = DeciderExtractor(decider) if getattr(decider, "has_pointer", False) else CueExtractor()
+            extractor = CueExtractor()
         self.extractors = list(extractor) if isinstance(extractor, (list, tuple)) else [extractor]
         self.entry_points = {e.name: e for e in _entry_points(system, entry_points)}
         self.descriptions = dict(descriptions or {})

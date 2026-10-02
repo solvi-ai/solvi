@@ -39,6 +39,9 @@ escalated them (`GuardDecision.policy_only`); a call escalated by provenance or 
 (`no_injected_arguments`, `no_instructions_in_tool_outputs`), an unreadable schema, the authorizer or a check that could
 not be evaluated needs a person's approval of that very call, and is rejected otherwise.
 
+`guard_tools(..., show_policies=True)`: each copy's description lists the reasons of the policies that check the tool,
+so the model reads them before it calls (off by default).
+
 A tool the guard does not know is denied (declare=True: declared from the tool's params_json_schema on first use). A
 tool's own needs_approval (True, or a function) still applies. The decision made for needs_approval is reused by the
 guardrail of the same call id with the same arguments in the same process (a call that reaches the guardrail with other
@@ -46,9 +49,13 @@ arguments, or an escalation a person has answered since, is checked again); afte
 checked again.
 
 `once=True` tools: the guarded tools of one `guard_tools(...)` call (or one `guard_tool`) keep the calls they allowed
-(`solvi_guard.made`) for as long as they live — across runs, in this process — and give them as the fact `calls_made`,
-together with any `calls_made` your `facts` give. The guardrail sees a call before the SDK runs it, not its result: an
-allowed call counts as made even when the tool then fails (a repeat asks a person).
+(`solvi_guard.made`) for as long as they live — across runs and conversations, in this process — and give them as the
+fact `calls_made`, together with any `calls_made` your `facts` give. The memory is not per conversation: the SDK hands
+a tool's `needs_approval` (where the guard first decides) no conversation identifier — `Runner.run(conversation_id=)` is
+OpenAI's server-side conversation and `RunConfig.group_id` a tracing label, neither in that context. For memory per
+conversation, build the guarded tools per conversation (each `guard_tools(...)` call has its own `made`), or pass
+the calls made in it as `facts={"calls_made": [...]}`. The guardrail sees a call before the SDK runs it, not its result: an allowed call counts as made even
+when the tool then fails (a repeat asks a person).
 
 Handoffs: the SDK may rewrite the history a handed-off agent gets (nested into one summary message by
 `nest_handoff_history`, or filtered by a handoff's `input_filter`); the guard reads what the run gives it and fails
@@ -197,16 +204,21 @@ def _approval(ctx, name, call_id, per_call=False):
 
 
 def guard_tool(tool: FunctionTool, guard: Guard, facts: Callable | dict | None = None, on_escalate="approval",
-               declare=False, made: list | None = None) -> FunctionTool:
+               declare=False, made: list | None = None, show_policies=False) -> FunctionTool:
     """A copy of a FunctionTool whose every call passes `guard` (see the module docs). facts: a dict, or a function of the
     RunContextWrapper returning one. The copy's `solvi_guard.decisions` lists every GuardDecision. made: a list the
-    allowed calls are appended to (for once=True tools; `guard_tools` shares one among its tools)."""
+    allowed calls are appended to (for once=True tools; `guard_tools` shares one among its tools). show_policies=True:
+    the copy's description lists the reasons of the policies that check the tool (Guard.described), so the model reads
+    them before it calls; off by default (the description is the tool's own)."""
     if not isinstance(tool, FunctionTool):
         raise TypeError(f"guard_tool guards a FunctionTool (function_tool(...)), not {type(tool).__name__}")
     g = _Guarded(tool, guard, facts, on_escalate, declare, made)
     rail = ToolInputGuardrail(guardrail_function=g.guardrail, name="solvi_guard")
+    extra = {}
+    if show_policies and tool.name in guard.tools and guard.tools[tool.name].model is not None:
+        extra["description"] = guard.described(tool.name, tool.description or "")
     out = dataclasses.replace(tool, tool_input_guardrails=list(tool.tool_input_guardrails or []) + [rail],
-                              needs_approval=g.needs_approval)
+                              needs_approval=g.needs_approval, **extra)
     out.solvi_guard = g
     return out
 

@@ -120,7 +120,7 @@ def test_parse_date():
     assert parse_date("12.09.2026") == "2026-09-12" and parse_date("09/12/26", {"dayfirst": False, **t}) == "2026-09-12"
     assert parse_date("12 September 2026") == parse_date("September 12, 2026") == parse_date("12th of Sep 2026") == "2026-09-12"
     assert parse_date("12 сентября", t) == "2026-09-12" and parse_date("yesterday", t) == "2026-09-27"
-    with pytest.raises(ParseError, match="no year"):
+    with pytest.raises(ParseError, match="the year is not stated"):
         parse_date("12 September")                         # never a guessed year
     with pytest.raises(ParseError):
         parse_date("31.02.2026")
@@ -166,8 +166,21 @@ def test_missing_required_fields_are_listed_not_guessed():
     assert res.textin is read
     # a year-less date without today= is not guessed either: unparsed, and the clarifying question says what was read
     read2 = TextIn(s, decider(), patterns={"order_id": r"[A-Z]-\d+"}).read("refund A-1: 20 EUR on 12 September")
-    assert read2.fields["purchase_date"].status == "unparsed" and "no year" in read2.fields["purchase_date"].why
-    assert "'12 September'" in read2.clarify()
+    assert read2.fields["purchase_date"].status == "unparsed" and "the year is not stated" in read2.fields["purchase_date"].why
+    assert read2.missing == ["purchase_date"]
+    assert read2.clarify() == "Please tell me the purchase date (I read '12 September' but the year is not stated)."
+
+
+def test_a_date_without_a_year_is_read_in_todays_year_only_when_today_is_given():
+    _, s = shop()
+    text = "refund A-1: 20 EUR paid on 28 December"
+    bare = TextIn(s, decider(), patterns={"order_id": r"[A-Z]-\d+"}).read(text, question="request_refund")
+    assert "purchase_date" not in bare.state and "the year is not stated" in bare.clarify()
+    with pytest.raises(ParseError, match="the year is not stated"):
+        parse_date("28 December")
+    jan = TextIn(s, decider(), patterns={"order_id": r"[A-Z]-\d+"}, today=dt.date(2027, 1, 5)).read(text,
+                                                                                                   question="request_refund")
+    assert jan.state["purchase_date"] == dt.date(2027, 12, 28)          # the documented assumption the caller took on
 
 
 def test_ask_text_one_trace_with_provenance_and_audit():
@@ -304,6 +317,21 @@ def test_decider_pointer_as_the_extractor():
     assert res2.textin.fields["amount"].status == "not_stated" and res2["pay"].status == "abstain"
     with pytest.raises(ValueError, match="pointer"):
         DeciderExtractor(decider())
+
+
+def test_default_extractor_is_the_cue_finder_even_when_the_decider_has_a_pointer():
+    """Measured (benchmarks/textin_extractors.py): the cue finder reads far more fields right than solvi-base's pointer,
+    so the pointer reads only when it is named."""
+    from test_primitives import L14G, L14gStub
+    m = DecideModel(L14gStub(), L14G)
+    assert m.has_pointer
+    _, s = shop()
+    tin = TextIn(s, m)
+    assert [type(e) for e in tin.extractors] == [CueExtractor]
+    read = tin.read("please refund order A-10457: 1.5 million RUB, paid on 12 September 2026", question="request_refund")
+    assert read.state["amount"] == 1_500_000.0 and read.state["currency"] == "RUB"
+    assert read.fields["amount"].model["type"] == "CueExtractor"
+    assert [type(e) for e in TextIn(s, m, DeciderExtractor(m)).extractors] == [DeciderExtractor]
 
 
 def test_cue_extractor_picks_the_number_after_its_cue():

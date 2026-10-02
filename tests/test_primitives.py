@@ -623,7 +623,7 @@ def test_a_typed_span_reads_dates_and_numbers_as_people_write_them():
                        ("21.07.2026", d(2026, 7, 21)), ("12 сентября 2026", d(2026, 9, 12)),
                        ("18 октября 2026 г.", d(2026, 10, 18))):
         assert span_value(d, text) == want, text
-    for text, why in (("12.09.2026", "day or month first"), ("03/04/2026", "day or month first"), ("21 July", "no year"),
+    for text, why in (("12.09.2026", "day or month first"), ("03/04/2026", "day or month first"), ("21 July", "the year is not stated"),
                       ("21/07/26", "two-digit year"), ("between 1 May 2026 and 3 May 2026", "more than one date"),
                       ("next week", "no date")):
         with pytest.raises(ValueError, match=why):

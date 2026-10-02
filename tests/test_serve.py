@@ -385,6 +385,24 @@ def test_ask_text_returns_dates_it_read_as_iso_strings_like_the_values():
     assert json.loads(json.dumps(read)) == read
 
 
+def test_the_server_never_supplies_its_own_date_so_a_year_less_date_is_asked_for_not_guessed():
+    s, tin = _shop()
+    c = client(system=s, textin=tin)
+    text = "Please refund order A-10457: I paid 1.5 million rubles on 28 December."
+    d = c.post("/ask_text", json={"text": text}).json()
+    pd = d["read"]["fields"]["purchase_date"]
+    assert pd["status"] == "unparsed" and pd["value"] is None and "the year is not stated" in pd["why"]
+    assert d["read"]["missing"] == ["purchase_date"] and "the year is not stated" in d["read"]["clarify"]
+    assert d["results"]["request_refund"]["status"] == "abstain"
+    dated = c.post("/ask_text", json={"text": text, "today": "2026-12-30"}).json()
+    assert dated["read"]["state"]["purchase_date"] == "2026-12-28"
+    svc = Service(s, tin.decider, textin=tin)
+    out, err = __import__("solvi.serve", fromlist=["call_tool"]).call_tool(svc, "ask_text", {"text": text,
+                                                                                             "today": "2026-12-30"})
+    assert not err and out["read"]["state"]["purchase_date"] == "2026-12-28"
+    assert svc.ask_text(text)["read"]["missing"] == ["purchase_date"]
+
+
 def test_ask_text_needs_a_decider_to_route_and_is_an_mcp_tool():
     s, _ = _shop()
     c = client(system=s)                                    # no decider, three entry points

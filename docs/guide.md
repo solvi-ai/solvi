@@ -2215,11 +2215,13 @@ updates its measured costs and stats in place. A System with `async def` (or `bl
 (the MCP server too).
 
 **Text in.** `POST /ask_text` reads a message with `solvi.textin.TextIn(system, decider)` — `--decider` picks the entry
-point (any decider: a checkpoint, `systemone:URL#model`, `llm:URL#model`), and its span pointer reads the fields when it
-has one (an LLM does), else the deterministic `CueExtractor`; `create_app(..., textin=TextIn(...))` or
+point (any decider: a checkpoint, `systemone:URL#model`, `llm:URL#model`), and the deterministic `CueExtractor` reads
+the fields (`TextIn(extractor=DeciderExtractor(decider))` uses the decider's span pointer); `create_app(..., textin=TextIn(...))` or
 `Service(..., textin=...)` sets synonyms, patterns and cues. Without a decider a text can only go to a named `question`
-(or to the one question of a System with one), else the request is a 422. Dates without a year and relative dates are
-read against `today` — the request's, else the server's date — which the trace records. A text that does not say which
+(or to the one question of a System with one), else the request is a 422. Dates without a year, two-digit years and
+relative dates are read against `today` — the request's (`"today": "2026-09-28"`; the MCP tool takes it too), else the
+`TextIn`'s — which the trace records; the server never supplies its own date, so without one "paid 12 September" is
+not read (the field is missing, "the year is not stated") rather than given this year. A text that does not say which
 question it asks is not an error: `read.question` is null, `read.escalated` says why, the likely questions abstain, and
 `read.clarify` asks which one is meant; a required field the text does not give is listed in `read.missing` and the
 question abstains for lack of it — nothing is guessed.
@@ -2227,7 +2229,7 @@ question abstains for lack of it — nothing is guessed.
 **MCP.** With `--mcp`, each question is a tool: its input schema is the question's input state schema, and a call returns
 the question's result — answer, confidence, status, why, guard, evidence, the safeguards that fired — with `stored_id`
 and `trace_hash`, as JSON text and as structured content. One more tool, `ask_text` (`solvi_ask_text` if a question has
-that name), takes `{"text", "question"?}` and returns what `POST /ask_text` does, so an agent can pass a user's message
+that name), takes `{"text", "question"?, "today"?}` and returns what `POST /ask_text` does, so an agent can pass a user's message
 as it is. An abstention is a result, not an error; an exception is a tool
 error (`isError`). The official `mcp` SDK (2.x, `solvi[mcp]`) serves it when installed; otherwise solvi's built-in stdio
 JSON-RPC server answers `initialize`, `ping`, `tools/list` and `tools/call` (`--mcp-impl sdk|builtin` chooses). The two
@@ -2312,13 +2314,13 @@ million rubles on 12 September". `solvi.textin` turns such a text into the quest
 state, reads every value with a quote, and leaves the decision to the catalog as before.
 
 ```python
-from solvi.textin import CueExtractor, TextIn
+from solvi.textin import TextIn
 
 eps = system.entry_points()          # the questions with the typed input state each one reads
 eps[0].fields["amount"]              # EntryField(name="amount", type=float, description=..., required=True)
 eps[0].tool()                        # the same as a function-calling tool: {"type": "function", "function": {...}}
 
-tin = TextIn(system, decider, extractor=CueExtractor(), today=date(2026, 9, 28),   # fields by the cue finder
+tin = TextIn(system, decider, today=date(2026, 9, 28),            # fields by the cue finder (the default)
              synonyms={"currency": {"RUB": ["rubles", "руб", "₽"], "EUR": ["euro", "€"]}},
              patterns={"order_id": r"[A-Z]-\d+"})
 read = tin.read("Please refund order A-10457: I paid 1.5 million rubles on 12 September.")
@@ -2340,17 +2342,32 @@ declare) and whether the question needs them — the same schemas `solvi serve` 
 question text (or `descriptions={name: text}`). Below `min_confidence` (0.6), on a near tie (`min_margin` 0.1), or when the
 decider's act signal escalates, nothing is chosen: `read.question` is None, `system.ask_text` runs nothing and the likely
 questions abstain with guard `escalated`, and `read.clarify()` asks which one is meant. The extractor points at the text of
-each field: the decider's own span pointer (`DeciderExtractor`) when the checkpoint has one, else `CueExtractor` — a
-deterministic finder of candidates of the field's type (numbers, dates, enum labels and synonyms, cue words, a pattern)
-nearest after a cue word (the field's name, plus `cues={field: [...]}`; its description's words rank candidates too); any object with
-`find(text, FieldSpec) → [Quote]` works, and a list of extractors is tried in order. Code does the rest: a deterministic
+each field: by default `CueExtractor` — a deterministic finder of candidates of the field's type (numbers, dates, enum
+labels and synonyms, cue words, a pattern) nearest after a cue word (the field's name, plus `cues={field: [...]}`; its
+description's words rank candidates too), whatever the decider. The decider's own span pointer reads the fields only
+when you name it, `extractor=DeciderExtractor(decider)`; any object with `find(text, FieldSpec) → [Quote]` works, and a
+list of extractors is tried in order (the trace records which one read each field). Code does the rest: a deterministic
 parser per type turns the quote into the value.
 
-The default is one or the other, not both: with a pointer checkpoint (solvi-base, solvi-large) only the pointer reads the
-fields, and where it answers "not stated" the field is missing even when the cue finder would have found it — on the
-sentence above solvi-base read the order id and the date and left the amount and the currency "not stated" (one run, no
-rate measured). The example therefore names its extractor. `extractor=[DeciderExtractor(decider), CueExtractor()]`
-tries the pointer first and falls back to the cue finder; the trace records which one read each field. Routing has no
+The default was chosen by measurement (`benchmarks/textin_extractors.py`, solvi-base in ONNX, one process): every text
+in this repository that carries typed fields — the shop requests of this section (18, English and Russian), the e-mails
+of `examples/04_refunds.py` (40), the invoices of `examples/03_invoices.py` (40), the tickets of
+`gallery/11_refund_double_charge` (16) and the claims of `examples/16_primitives.py` (3) — read field by field with the
+question given, against the values the repository's own hand-written code reads (306 stated values, 9 fields the text
+does not state):
+
+| extractor | right | wrong | missed |
+|---|---|---|---|
+| `CueExtractor` | 282 | 1 | 23 |
+| solvi-base's span pointer (`DeciderExtractor`) | 111 | 11 | 184 |
+| the pointer, then the cue finder | 220 | 12 | 74 |
+| the cue finder, then the pointer | 282 | 1 | 23 |
+
+The pointer answers "not stated" or a confidence below `min_field_confidence` for most fields it is asked about (the
+amount and the currency of "please refund order A-10457, 1.5 million rubles, paid 12 September"), and the cue finder
+never needed it as a fallback. A string field without a pattern is the cue finder's weak spot: it reads the words after
+"order id:" or "address is", up to the end of the clause, so give an identifier its pattern (`patterns=` or the
+field's `json_schema_extra={"pattern": ...}`) and an enum its synonyms. Routing has no
 "none of these" option: a text that asks none of the questions is escalated only when the decider is unsure
 (`min_confidence`, `min_margin`), so a confident wrong route is possible — add an entry point for "something else" if
 your texts can be about anything.
@@ -2363,11 +2380,14 @@ your texts can be about anything.
 | `bool` | yes / no words; the field's name or a `cues=` word ("urgent") → True; a phrase declared in `negatives={field: [...]}` (or `json_schema_extra={"negative_cues": ...}`) → False. Description words only rank candidates. A cue answered by a yes / no word ("Urgent: no", "urgent = false", "Is it urgent? No.") is that answer. A cue with a negation near it, before or after it in the sentence ("isn't urgent", "far from urgent", "anything but urgent", "urgent? not at all", "was urgent yesterday, not anymore", "urgent but cancelling isn't", "не срочно") is `unparsed` — never True, and False only through a declared negative |
 | `str` | the quote, trimmed; `patterns={field: regex}` must match it whole |
 
-A date without a year, or a relative one, is read only with `TextIn(today=...)`: without it the field is `unparsed`.
-With it, a date without a year is given **today's year** — an assumption, recorded in the trace with `today`, and
-wrong around the turn of a year: "paid 28 December" read on 5 January becomes 28 December of the new year, almost a
-year ahead (`solvi serve` always supplies today's date). Where a rule compares such a date with today (a refund
-window), add a check that the date is not in the future, or ask for the year. Every field ends in one state: `read`, `not_stated`, `unparsed` (the quote does not parse), `unsure` (found
+A date without a year is not guessed. Without `TextIn(today=...)` it is not read: the field is `unparsed` with the
+reason "the year is not stated", a required one is in `read.missing`, and `read.clarify()` asks "Please tell me the
+purchase date (I read '12 September' but the year is not stated)." The same holds for a relative date and a two-digit
+year. With `today=` you take the assumption on: a date without a year is given **today's year**, recorded in the trace
+with `today` — wrong around the turn of a year ("paid 28 December" read on 5 January becomes 28 December of the new
+year, almost a year ahead). Where a rule compares such a date with today (a refund window), add a check that the date
+is not in the future, or leave `today` out and ask for the year. `solvi serve` and `solvi ask --text` pass a `today`
+only when the request (`"today"`) or the command line (`--today`) gives one. Every field ends in one state: `read`, `not_stated`, `unparsed` (the quote does not parse), `unsure` (found
 with confidence below `min_field_confidence`, 0.5) or `unsupported` (no parser for the type). A required field that is not
 `read` is in `read.missing`: the question is asked anyway (a hard check may already decide it), and without that field it
 abstains — "not stated in the text: purchase_date; cannot compute: ..." — instead of guessing.
@@ -2433,8 +2453,9 @@ in a long session a value the user named many requests ago, for another purpose,
 last message ground a value (2: the last two): the reason then says the value is from an earlier request. `once=True`
 escalates a call of the tool with exactly the arguments of a call already made — a second refund of the same order —
 unless the first one failed. The calls made are the given fact `calls_made`: a `Session`, the MCP proxy and the three
-framework adapters keep it (an adapter for as long as its toolset / node / tools live, in this process; add calls made
-earlier through `facts={"calls_made": [...]}`). For a tool the framework runs, `session.call` counts an allowed call as
+framework adapters keep it (PydanticAI and LangGraph per conversation, the OpenAI Agents SDK per process — see
+"`once=True` behind an adapter" below; add calls made earlier through
+`facts={"calls_made": [...]}`). For a tool the framework runs, `session.call` counts an allowed call as
 made and `session.record(decision, result)` (or `error=`: not made after all) reports how it went. With a bare
 `guard.check` / `guard.call` you give the fact yourself (`[]` when nothing was made); a `once=True` call checked without
 it escalates, since the check cannot be evaluated.
@@ -2769,7 +2790,45 @@ for any store.
 
 **Declared tools.** `guard.declare(name, schema=Model or a JSON schema, ground=..., ...)` declares a tool solvi does not
 run (a framework or an MCP server does); `guard.adopt(name, json_schema)` gives a declared tool its schema later.
-`guard.tools[name].definition()` is the function-calling definition to give the model.
+`guard.tools[name].definition()` (or `guard.definition(name)`) is the function-calling definition to give the model.
+
+**Showing the policies to the model.** By default a tool's definition is its own description: the model learns a
+policy when a call is refused with its reason. To tell it the rules up front, ask for them —
+`guard.definition(name, policies=True)` appends the reasons of the policies that check the tool (each policy's
+docstring's first line, deny ones first; one that escalates says "else a person decides"), and `guard.policies_of(name)`
+lists them as `(policy, reason, on_fail)`:
+
+```python
+g = Guard()
+
+@g.tool
+def refund(order_id: str, amount: float) -> str:
+    """Refund an order."""
+    ...
+
+@g.policy("refund")
+def under_cap(amount: float) -> bool:
+    """A refund is at most 500."""
+    return amount <= 500
+
+@g.policy("refund", on_fail="escalate")
+def small_enough(amount: float) -> bool:
+    """A refund is at most 100."""
+    return amount <= 100
+
+g.definition("refund")["description"]                 # 'Refund an order.' (the default: unchanged)
+print(g.definition("refund", policies=True)["description"])
+# Refund an order.
+#
+# A guard checks this call: it is refused unless
+# - A refund is at most 500.
+# - A refund is at most 100. (else a person decides)
+```
+
+The adapters take the same flag for the tools they offer the model: `GuardedToolset(..., show_policies=True)`
+(PydanticAI), `guard_tools(..., show_policies=True)` (OpenAI Agents SDK), and for LangGraph, whose node does not choose
+what the model sees, `model.bind_tools(with_policies(tools, guard))`. The reasons are written for refusals and every
+line goes into each request, so it stays off unless you turn it on; the checks themselves are the same either way.
 
 ### PydanticAI
 
@@ -2901,14 +2960,19 @@ itself it is any object); a tool whose arguments collide with the guard's facts 
 ```
 
 **`once=True` behind an adapter.** An adapter has no `Session`, so it keeps the calls made itself and gives them as the
-fact `calls_made`: `GuardedToolset.made` (a call counts when the tool returned without raising), the guarded node's
-`solvi_guard.made` (the ToolNode ran the tool and its message is not an error), and one list shared by the tools of a
-`guard_tools(...)` call (`tool.solvi_guard.made`; the OpenAI guardrail sees a call before the SDK runs it, so an allowed
-call counts even when the tool then fails). The memory is that object's, for as long as it lives in this process:
-across runs, threads and users — not per conversation. A repeat of a call made for another user therefore escalates
-too, and nothing is remembered after a restart. For another scope, keep the calls yourself (a database row per
-conversation) and pass them as `facts=lambda ctx: {"calls_made": [...]}` — they are added to the adapter's own — and
-make one toolset / node / tool list per conversation if the process-wide memory is too wide.
+fact `calls_made` — per conversation where the framework names the conversation:
+
+| adapter | remembers per | `made` | a call counts when |
+|---|---|---|---|
+| PydanticAI `GuardedToolset` | `RunContext.conversation_id` (runs continuing one `message_history` and a resumed deferred call share it; a run without history starts a new one) | `{conversation id: [calls]}` | the tool returned without raising |
+| LangGraph `guarded_tool_node` | the run config's `thread_id` (calls run without one share the key `None`) | `solvi_guard.made`, `{thread id: [calls]}` | the ToolNode ran the tool and its message is not an error |
+| OpenAI Agents `guard_tools` | the process: the SDK gives `needs_approval`, where the guard first decides, no conversation id | `tool.solvi_guard.made`, one list shared by the tools of the call | the guardrail allowed it (it sees a call before the SDK runs it, so even when the tool then fails) |
+
+So with PydanticAI and LangGraph a repeat in another conversation (another user's thread) is not a repeat; with the
+OpenAI Agents SDK it is, unless you build the guarded tools per conversation (each `guard_tools(...)` call has its own
+memory). The memory lives in this process: nothing is remembered after a restart. For another scope keep the calls
+yourself (a database row per conversation) and pass them as `facts=lambda ctx: {"calls_made": [...]}` — they are added
+to the adapter's own.
 
 **Which frameworks.** Each adapter has an extra — `pip install "solvi[pydantic-ai]"`, `"solvi[langgraph]"`,
 `"solvi[openai-agents]"` — and importing one without its framework says which. Supported and tested with real runs (`tests/test_agents_frameworks.py`,

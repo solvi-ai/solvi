@@ -325,7 +325,7 @@ def test_text_in_with_an_llm_routes_and_points_at_each_field():
 
     from test_textin import REFUND, shop
 
-    from solvi.textin import TextIn
+    from solvi.textin import DeciderExtractor, TextIn
 
     def reply(body):
         c = body["messages"][1]["content"]
@@ -341,7 +341,7 @@ def test_text_in_with_an_llm_routes_and_points_at_each_field():
         return json.dumps({"answer": None, "confidence": 0.9, "quote": ""})
     _, s = shop()
     m = model(FakeLLM(reply=reply), ask="confidence")
-    tin = TextIn(s, m, today=dt.date(2026, 9, 28), synonyms={"currency": {"RUB": ["rubles"]}})
+    tin = TextIn(s, m, DeciderExtractor(m), today=dt.date(2026, 9, 28), synonyms={"currency": {"RUB": ["rubles"]}})
     read = tin.read(REFUND)
     assert read.question == "request_refund" and read.missing == []
     assert read.state["amount"] == 1500000.0 and read.state["purchase_date"] == dt.date(2026, 9, 12)
