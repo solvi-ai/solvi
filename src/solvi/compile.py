@@ -28,18 +28,30 @@ temperature 0, the second at 0.7 with seed 1; pass two writers for two models). 
    and the tests' inputs. A disagreement is shown to both writers: the input, both answers, the clauses the deciding
    parts cite;
 3. both pass the tests a separate call derived from the specification — it never sees the code, and each test names
-   the clause it checks. A test that every draft which runs fails goes back once to the test writer, which works
-   the answer out again and keeps, corrects or drops it (recorded). Every input of the pool must get an answer;
+   the clause it checks. A test that every draft which runs fails with an answer goes back once to the test writer,
+   which works the answer out again and keeps, corrects or drops it (recorded). Every input of the pool must get an
+   answer;
 4. both match the labelled `examples` and the `reference`, when you give them.
 A draft with failures is rewritten from its module and the failures, up to `rounds` rounds; then the compilation is not
-accepted, `Compiled.catalog()` refuses it, and `reason` says why. The record keeps the spec's hash and clauses, every
+accepted, `Compiled.catalog()` refuses it, and `reason` says why. A draft that has not run for two rounds in a row
+(refused by the contract or the sandbox, or no module in the reply) is replaced by a fresh one, written from the task
+again with a seed of its own and told only what the stuck one was refused for — at most `fresh_drafts` times, each
+replacement recorded; the fresh draft meets the same checks. The record keeps the spec's hash and clauses, every
 prompt and reply, the writer, the tests, and each check's outcome per round.
+
+    c = compile_groups(spec, questions, inputs, writer, by="tool_name")   # a large specification, group by group
+    c.record["groups"]                                    # per group: its values, clauses, accepted or why not
+
+A large specification compiles in groups: the clauses that govern each kind of decision (the values of one input
+field) are compiled on their own, with the shared clauses, under the same acceptance; the accepted groups are assembled
+into one module that routes each input to its group, and the whole is checked again on the full pool.
 
 What it does not do. Agreement of two drafts is not correctness: two samples of one model can share a misreading, and
 the tests come from the same model. Coverage is checked by citation, not by meaning — a part may cite a clause it
 implements wrongly. The inputs pool decides what "agree" covers: a region of inputs nobody generates is not compared.
 Labels, when you have them, are the stronger check. Nothing here writes extractors from text or searches; the
-compiled parts read structured inputs.
+compiled parts read structured inputs. In groups, a clause the grouping leaves out of a group is not compiled for it:
+the group's agreement and tests cannot see what its specification does not say — read the grouping.
 """
 from __future__ import annotations
 
@@ -201,6 +213,20 @@ class Spec:
         s.clauses = {i: Clause(i, t, sec) for i, (sec, t) in zip(ids, new)}
         s.changes = ch
         s.parent = self.hash
+        return s
+
+    def subset(self, ids, name: str | None = None) -> "Spec":
+        """The clauses `ids` of this specification (their ids, sections and order kept) as a specification of its own."""
+        keep = set(ids)
+        unknown = sorted(keep - set(self.clauses))
+        if unknown:
+            raise ValueError(f"not clauses of this specification: {', '.join(unknown)}")
+        s = Spec.__new__(Spec)
+        s.name, s.changes = name or self.name, None
+        s.clauses = {i: c for i, c in self.clauses.items() if i in keep}
+        s.text = "\n\n".join(c.text for c in s.clauses.values())
+        if not s.clauses:
+            raise ValueError("the subset has no clauses")
         return s
 
     def to_dict(self):
@@ -373,19 +399,24 @@ def read_module(source: str, spec: Spec, questions, patch=False) -> tuple[dict, 
             problems.append(f"PARTS[{name!r}] must be a dict")
             continue
         if name not in funcs and not patch:
-            problems.append(f"PARTS names {name!r}, which is not a top-level function of the module")
+            problems.append(f"PARTS names {name!r}, which is not a top-level function of the module (define it at the "
+                            "top level, not inside a class or another function)")
         kind = p.get("kind")
         if kind not in KINDS:
             problems.append(f"{name}: kind must be one of {KINDS}, not {kind!r}")
         cl = p.get("clauses")
         if not isinstance(cl, list) or (not cl and kind != "rule"):      # a rule giving only a default may cite none
-            problems.append(f"{name}: 'clauses' must list the clauses it implements")
+            problems.append(f"{name}: 'clauses' must list the clauses it implements (a helper that implements no "
+                            "clause is not a part: leave it out of PARTS)")
         else:
             problems += [f"{name} cites {c!r}, which is not a clause" for c in cl if c not in spec.clauses]
         if kind == "check":
             then = p.get("then") or {}
             if p.get("hard") and not then:
                 problems.append(f"{name}: a hard check needs 'then' ({{question: answer}})")
+            for q, a in list(then.items()):                # True / False for a yes/no question, as a rule may return
+                if isinstance(a, bool) and q in qs and options_of(qs[q]) == ["yes", "no"]:
+                    then[q] = "yes" if a else "no"
             for q, a in then.items():
                 if q not in qs:
                     problems.append(f"{name}: then names {q!r}, which is not a question")
@@ -433,8 +464,11 @@ def unknown_reads(source: str, parts: dict, given) -> list[str]:
             args = [a.arg for a in node.args.posonlyargs + node.args.args + node.args.kwonlyargs]
             bad = [a for a in args if a not in given and a not in facts]
             if bad:
+                g = sorted(given)[0] if given else "x"
                 out.append(f"part {node.name} reads {', '.join(bad)}: neither an input field nor a fact set by a part "
-                           f"(the inputs are {', '.join(sorted(given))})")
+                           f"(the inputs are exactly {', '.join(sorted(given))}; to read something inside an input, "
+                           f"write a fn part for it — `def {bad[0]}({g}): return {g}[{bad[0]!r}]` — or work it out "
+                           f"inside the part from the input)")
     return out
 
 
@@ -510,6 +544,9 @@ Plain top-level Python functions. Each catalog part is one function:
 - write one part per quantity a clause defines (for example one function per row of a points table), so the record of
   a decision shows each; helper functions that are not parts are allowed.
 - deterministic and pure: no state between calls, no input / output.
+- no classes: data are dicts, lists and tuples (a class needs `__init__`, a dunder name the sandbox refuses).
+- no type annotations on a part's arguments or result: solvi checks them against the facts it is given, and an inexact
+  one (say `list` for an input that may be None) makes the part refuse that input.
 
 At the end of the module, two literal dicts:
 ```python
@@ -754,6 +791,7 @@ class Compiled:
     reason: str
     record: dict = field(default_factory=dict)
     changes: dict | None = None
+    groups: dict | None = None            # compile_groups: {group name: its own Compiled}
     _ns: dict | None = field(default=None, repr=False)
 
     def clauses_of(self, part: str) -> list:
@@ -793,12 +831,14 @@ class Compiled:
     def to_dict(self) -> dict:
         return {"spec": self.spec.to_dict(), "questions": [q.model_dump() for q in self.questions], "source": self.source,
                 "parts": self.parts, "not_normative": self.not_normative, "accepted": self.accepted,
-                "reason": self.reason, "record": self.record, "changes": self.changes}
+                "reason": self.reason, "record": self.record, "changes": self.changes,
+                "groups": {n: g.to_dict() for n, g in self.groups.items()} if self.groups is not None else None}
 
     @classmethod
     def from_dict(cls, d) -> "Compiled":
         return cls(Spec.from_dict(d["spec"]), [Question.model_validate(q) for q in d["questions"]], d["source"],
-                   d["parts"], d["not_normative"], d["accepted"], d["reason"], d.get("record") or {}, d.get("changes"))
+                   d["parts"], d["not_normative"], d["accepted"], d["reason"], d.get("record") or {}, d.get("changes"),
+                   {n: cls.from_dict(g) for n, g in d["groups"].items()} if d.get("groups") is not None else None)
 
     def save(self, path) -> Path:
         """Write `module.py` (the code, as accepted) and `compiled.json` (everything) into a folder."""
@@ -941,6 +981,10 @@ class _Draft:
     rows: list | None = None
     feedback: str | None = None
     caught: list = field(default_factory=list)
+    generation: int = 0                   # 0: the first writer's draft; n: the n-th fresh draft that replaced it
+    fresh: bool = False                   # the next write starts over (a replacement), not from this module
+    stuck: int = 0                        # rounds in a row this draft did not run (contract, sandbox, no module)
+    pitfalls: list = field(default_factory=list)   # what the replaced drafts were refused for (told to a fresh one)
 
 
 def _run_draft(d, questions, inputs, mem_mb, item_s):
@@ -964,8 +1008,10 @@ def _ran_clauses(c_parts, ran):
 
 
 def _loop(spec, questions, inputs, gens, *, rounds, tests, examples, reference, write, log, mem_mb, item_s, extra_check,
-          need_tests=False):
-    """The write → check → rewrite loop over two drafts → (accepted draft or None, reason, per-round summary, tests)."""
+          need_tests=False, fresh_drafts=0, stuck_after=2):
+    """The write → check → rewrite loop over two drafts → (accepted draft or None, reason, per-round summary, tests).
+    A draft that did not run for `stuck_after` rounds in a row is replaced by a fresh one (at most `fresh_drafts` in
+    all): its next write starts over from the task, told only what the replaced drafts were refused for."""
     review_gen = gens[0]
     test_list, bad_tests, terr = tests
     if need_tests and not test_list:
@@ -974,11 +1020,13 @@ def _loop(spec, questions, inputs, gens, *, rounds, tests, examples, reference, 
     reviewed = {}
     history = []
     drafts = [_Draft(0), _Draft(1)]
+    used = 0
     for rnd in range(1, rounds + 1):
         for d in drafts:
             if rnd > 1 and not d.feedback:
                 continue
             src, patch, why = write(d, rnd)
+            d.fresh = False
             d.caught = []
             d.rows = None
             d.source, d.patch = src, patch
@@ -1012,7 +1060,8 @@ def _loop(spec, questions, inputs, gens, *, rounds, tests, examples, reference, 
             else:
                 d.rows = rows
         ok = [d for d in drafts if d.rows is not None]
-        # a test every running draft fails (whatever they answer) goes back once to the test writer: keep, fix or drop
+        # a test every running draft fails with an answer goes back once to the test writer: keep, fix or drop (a draft
+        # that abstains or raises on it says nothing about the test — that is fed back as "abstained")
         if ok:
             for j, t in enumerate(test_list):
                 if t["id"] in reviewed:
@@ -1020,7 +1069,9 @@ def _loop(spec, questions, inputs, gens, *, rounds, tests, examples, reference, 
                 k = len(pool) + j
                 a = [{q: _norm(r) for q, r in d.rows[k]["answers"].items()} for d in ok]
                 fails = [any(a[i].get(q) != e for q, e in t["expect"].items()) for i in range(len(ok))]
-                if all(fails):
+                answered = [not d.rows[k].get("error") and all(a[i].get(q) is not None for q in t["expect"])
+                            for i, d in enumerate(ok)]
+                if all(fails) and all(answered):
                     got = [{q: a[i].get(q) for q in t["expect"]} for i in range(len(ok))]
                     verdict, v = _review(spec, questions, t, got, review_gen, log)
                     reviewed[t["id"]] = {"verdict": verdict, "why": v.get("why"), "was": dict(t["expect"]),
@@ -1111,12 +1162,24 @@ def _loop(spec, questions, inputs, gens, *, rounds, tests, examples, reference, 
                     fb[d.index].append("\n".join(lines))
         for d in drafts:
             d.feedback = "\n\n".join(fb[d.index]) or None
-            summary["drafts"].append({"draft": d.index, "problems": d.problems[:5], "caught": d.caught,
-                                      "feedback": bool(d.feedback)})
+            summary["drafts"].append({"draft": d.index, "generation": d.generation, "problems": d.problems[:5],
+                                      "caught": d.caught, "feedback": bool(d.feedback)})
         summary["agreement"] = agree
         history.append(summary)
         if len(ok) == 2 and not any(d.feedback for d in drafts):
             return drafts[0], drafts[1], f"accepted in round {rnd}", history, reviewed
+        # a draft refused before it ran, round after round, is replaced by a fresh one (bounded, recorded): a stuck
+        # draft must not block a partner that works. The fresh draft meets the same checks; nothing is relaxed.
+        for d in drafts:
+            d.stuck = 0 if d.rows is not None else d.stuck + 1
+            if d.stuck >= stuck_after and used < fresh_drafts and rnd < rounds:
+                used += 1
+                d.generation += 1
+                d.fresh, d.stuck = True, 0
+                d.pitfalls = list(dict.fromkeys(d.pitfalls + d.problems[:6]))[-10:]
+                summary.setdefault("replaced", []).append({"draft": d.index, "generation": d.generation,
+                                                           "after_rounds_not_run": stuck_after,
+                                                           "problems": d.problems[:5]})
     last = "; ".join(f"draft {d.index}: " + ", ".join(dict.fromkeys(d.caught)) for d in drafts if d.feedback)
     history.append({"last_drafts": [{"source": d.source, "parts": d.parts, "problems": d.problems} for d in drafts]})
     return None, None, f"not accepted after {rounds} round(s): {last}", history, reviewed
@@ -1128,19 +1191,33 @@ def _gens(writer):
     return ws if len(ws) == 2 else [ws[0], ws[0]]
 
 
-def _settings(i, writers):
-    """Draft 0: temperature 0; draft 1: 0.7 with seed 1 — unless two writers are given (each at temperature 0)."""
+def _settings(i, writers, generation=0):
+    """Draft 0: temperature 0; draft 1: 0.7 with seed 1 — unless two writers are given (each at temperature 0). A fresh
+    draft that replaces a stuck one: 0.7 with a seed of its own (100 × generation + draft + 1), so it is a new sample."""
+    if generation:
+        return 0.7, 100 * generation + i + 1
     if writers[0] is not writers[1]:
         return 0.0, None
     return (0.0, None) if i == 0 else (0.7, 1)
 
 
+def _pitfalls(d):
+    """What a fresh draft is told: the problems the drafts it replaces were refused for (never their code)."""
+    if not d.pitfalls:
+        return ""
+    return ("\n\n## Mistakes earlier attempts at this module made (the harness refused them; avoid them)\n- "
+            + "\n- ".join(p[:400] for p in d.pitfalls))
+
+
 def compile_spec(spec: Spec, questions, inputs: Inputs, writer=None, *, rounds: int = 4, tests: int = 40,
-                 examples=(), reference: Callable | None = None, mem_mb: int = 1024, item_s: int = 5) -> Compiled:
+                 examples=(), reference: Callable | None = None, mem_mb: int = 1024, item_s: int = 5,
+                 fresh_drafts: int = 2, stuck_after: int = 2) -> Compiled:
     """Compile `spec` into catalog parts answering `questions` over `inputs` (see the module docs). `writer`: a
     solvi.generate Generator (or two, for two models), or a base URL (model openai/gpt-oss-120b). `examples`: labelled
     [(input, {question: answer})] that both drafts must match; `reference(input) → {question: answer}`, compared on the
-    whole pool. Never raises for a bad draft: the result says whether it was accepted."""
+    whole pool. `fresh_drafts`: how many times in all a draft that did not run (refused by the contract or the sandbox,
+    or no module in the reply) for `stuck_after` rounds in a row is replaced by a fresh draft, written from the task
+    again with a seed of its own (0: never). Never raises for a bad draft: the result says whether it was accepted."""
     questions = list(questions)
     gens = _gens(writer)
     log = []
@@ -1148,8 +1225,11 @@ def compile_spec(spec: Spec, questions, inputs: Inputs, writer=None, *, rounds: 
     base = _task_text(spec, questions, inputs)
 
     def write(d, rnd):
-        t, s = _settings(d.index, gens)
-        if d.source is None or rnd == 1:
+        t, s = _settings(d.index, gens, d.generation)
+        if d.fresh:
+            prompt = (f"{base}\n\n{CONTRACT}\n\n{SANDBOX_RULES}{_pitfalls(d)}\n\nWrite the complete module now, in one "
+                      "```python block.")
+        elif d.source is None or rnd == 1:
             prompt = f"{base}\n\n{CONTRACT}\n\n{SANDBOX_RULES}\n\nWrite the complete module now, in one ```python block."
             if d.feedback:
                 prompt += f"\n\n## Your previous answer\n\n{d.feedback}"
@@ -1158,10 +1238,11 @@ def compile_spec(spec: Spec, questions, inputs: Inputs, writer=None, *, rounds: 
                       f"```python\n{d.source.rstrip()}\n```\n\n## What the harness found\n\n{d.feedback}\n\n"
                       "Rewrite the complete module so that these problems go away; keep what already works. Answer with "
                       "the whole module in one ```python block.")
-        text, err = _ask(gens[d.index], prompt, t, s, log, f"round {rnd} draft {d.index}")
+        text, err = _ask(gens[d.index], prompt, t, s, log, f"round {rnd} draft {d.index}"
+                         + (f" (fresh {d.generation})" if d.generation else ""))
         code = code_of(text) if text else None
         if code is None:
-            return d.source if d.source and rnd > 1 else None, None, [
+            return d.source if d.source and rnd > 1 and not d.fresh else None, None, [
                 f"no module in the reply ({err or 'no ```python block'})" + ("; write the module sooner, keep the "
                                                                              "reasoning short" if err and "cut off" in err
                                                                              else "")]
@@ -1170,13 +1251,14 @@ def compile_spec(spec: Spec, questions, inputs: Inputs, writer=None, *, rounds: 
     a, b, reason, history, reviewed = _loop(spec, questions, inputs, gens, rounds=rounds,
                                             tests=(test_list, bad, terr), examples=list(examples), reference=reference,
                                             write=write, log=log, mem_mb=mem_mb, item_s=item_s, extra_check=None,
-                                            need_tests=bool(tests))
+                                            need_tests=bool(tests), fresh_drafts=fresh_drafts, stuck_after=stuck_after)
     return _result(spec, questions, a, b, reason, history, reviewed, test_list, bad, terr, log, gens, None)
 
 
 def _result(spec, questions, a, b, reason, history, reviewed, test_list, bad, terr, log, gens, changes):
     record = {"spec_hash": spec.hash, "writer": [g.model_id for g in gens], "writer_fp": [g.fingerprint() for g in gens],
               "rounds": history, "tests": test_list, "tests_invalid": bad, "tests_error": terr, "reviews": reviewed,
+              "replaced": [{"round": h["round"], **r} for h in history for r in h.get("replaced", [])],
               "calls": log, "time": time.time()}
     if a is not None:
         record["other_source"] = b.source
@@ -1199,7 +1281,8 @@ def _effective(patch, pparts, old_parts):
 
 
 def recompile(old: Compiled, spec: Spec, inputs: Inputs, writer=None, *, rounds: int = 4, tests: int = 40,
-              examples=(), reference: Callable | None = None, mem_mb: int = 1024, item_s: int = 5) -> Compiled:
+              examples=(), reference: Callable | None = None, mem_mb: int = 1024, item_s: int = 5,
+              fresh_drafts: int = 2, stuck_after: int = 2) -> Compiled:
     """Recompile an accepted compilation for a revised specification (`old.spec.revise(...)`): the writer returns only
     the parts it adds, replaces or removes — each citing a changed or added clause — and the rest stays byte-identical.
     Accepted by the same checks as compile_spec (two independent patches agree, tests written for the new
@@ -1208,6 +1291,9 @@ def recompile(old: Compiled, spec: Spec, inputs: Inputs, writer=None, *, rounds:
         raise ValueError("recompile needs a revised specification: old.spec.revise(new_text)")
     if not old.accepted:
         raise Rejected(old.reason)
+    if old.record.get("grouped"):
+        raise ValueError("recompile does not patch a compilation made in groups: run compile_groups on the revised "
+                         "specification")
     questions = list(old.questions)
     gens = _gens(writer)
     log = []
@@ -1226,9 +1312,11 @@ def recompile(old: Compiled, spec: Spec, inputs: Inputs, writer=None, *, rounds:
     current = (f"## The current module (implements the previous version)\n\n```python\n{old.source.rstrip()}\n```")
 
     def write(d, rnd):
-        t, s = _settings(d.index, gens)
+        t, s = _settings(d.index, gens, d.generation)
         prompt = f"{base}\n\n{CONTRACT}\n\n{SANDBOX_RULES}\n\n{current}\n\n{PATCH_CONTRACT}"
-        if d.patch is not None and rnd > 1:
+        if d.fresh:
+            prompt += _pitfalls(d) + "\n\nWrite the change now, in one ```python block."
+        elif d.patch is not None and rnd > 1:
             prompt += (f"\n\n## Your previous change (round {rnd - 1})\n\n```python\n{d.patch.rstrip()}\n```\n\n"
                        f"## What the harness found\n\n{d.feedback}\n\nWrite the change again, complete (it replaces your "
                        "previous change), so that these problems go away. One ```python block.")
@@ -1236,7 +1324,8 @@ def recompile(old: Compiled, spec: Spec, inputs: Inputs, writer=None, *, rounds:
             if d.feedback:
                 prompt += f"\n\n## Your previous answer\n\n{d.feedback}"
             prompt += "\n\nWrite the change now, in one ```python block."
-        text, err = _ask(gens[d.index], prompt, t, s, log, f"round {rnd} draft {d.index}")
+        text, err = _ask(gens[d.index], prompt, t, s, log, f"round {rnd} draft {d.index}"
+                         + (f" (fresh {d.generation})" if d.generation else ""))
         patch = code_of(text) if text else None
         if patch is None:
             return None, None, [f"no change in the reply ({err or 'no ```python block'})"]
@@ -1267,7 +1356,7 @@ def recompile(old: Compiled, spec: Spec, inputs: Inputs, writer=None, *, rounds:
     a, b, reason, history, reviewed = _loop(spec, questions, inputs, gens, rounds=rounds,
                                             tests=(test_list, bad, terr), examples=list(examples), reference=reference,
                                             write=write, log=log, mem_mb=mem_mb, item_s=item_s, extra_check=None,
-                                            need_tests=bool(tests))
+                                            need_tests=bool(tests), fresh_drafts=fresh_drafts, stuck_after=stuck_after)
     changes = {"clauses": ch}
     if a is not None:
         pparts, _, rm, _ = read_module(a.patch, spec, questions, patch=True)
@@ -1278,6 +1367,461 @@ def recompile(old: Compiled, spec: Spec, inputs: Inputs, writer=None, *, rounds:
     c = _result(spec, questions, a, b, reason, history, reviewed, test_list, bad, terr, log, gens, changes)
     c.record["parent"] = {"spec_hash": old.spec.hash, "source_sha": hashlib.sha256(old.source.encode()).hexdigest()}
     return c
+
+
+# ───────────────────────────────────────────────────────────── a large specification, compiled in groups
+@dataclass
+class Groups:
+    """Which clauses govern which decisions. `by`: the input field that names the decision (a tool's name, the kind of
+    a request); `groups`: {name: {"values": [values of `by` the group decides], "clauses": [clause ids]}}; `shared`:
+    clauses that govern every decision (or state no rule: a preamble, a definition), put into every group's
+    specification. A clause may be in several groups; a value of `by` in exactly one. `record`: how the grouping was
+    made (the prompt and reply when `group_clauses` wrote it)."""
+    by: str
+    groups: dict
+    shared: list = field(default_factory=list)
+    record: dict = field(default_factory=dict)
+
+    def problems(self, spec: Spec, values=None) -> list[str]:
+        """Why this grouping cannot be used with `spec` ([] — it can): unknown clauses, a clause placed nowhere, a
+        value in two groups or not a value of `by`, a group name that is not an identifier."""
+        why, seen = [], {}
+        if not isinstance(self.groups, dict) or not self.groups:
+            return ["no groups"]
+        for g, d in self.groups.items():
+            if not isinstance(g, str) or not re.fullmatch(r"[A-Za-z][A-Za-z0-9_]{0,40}", g):
+                why.append(f"group name {g!r} is not a short identifier")
+            if not isinstance(d, dict) or not isinstance(d.get("values"), list) or not isinstance(d.get("clauses"), list):
+                why.append(f"group {g}: needs a 'values' list and a 'clauses' list")
+                continue
+            if not d["values"]:
+                why.append(f"group {g} decides no value of {self.by}")
+            for v in d["values"]:
+                if v in seen:
+                    why.append(f"{self.by} = {v!r} is in groups {seen[v]} and {g}: each value goes to one group")
+                seen.setdefault(v, g)
+                if values is not None and v not in values:
+                    why.append(f"group {g}: {v!r} is not a value of {self.by}")
+            why += [f"group {g} names {c!r}, which is not a clause" for c in d["clauses"] if c not in spec.clauses]
+        if not isinstance(self.shared, list):
+            return why + ["shared must be a list of clause ids"]
+        why += [f"shared names {c!r}, which is not a clause" for c in self.shared if c not in spec.clauses]
+        placed = set(self.shared) | {c for d in self.groups.values() if isinstance(d, dict) for c in d.get("clauses") or []}
+        miss = [c for c in spec.clauses if c not in placed]
+        if miss:
+            why.append("clauses in no group and not shared: " + ", ".join(miss))
+        return why
+
+    def of(self, value) -> str | None:
+        """The group that decides this value of `by` (None: no group)."""
+        return next((g for g, d in self.groups.items() if value in d["values"]), None)
+
+    def to_dict(self):
+        return {"by": self.by, "groups": self.groups, "shared": self.shared, "record": self.record}
+
+
+GROUP_PROMPT = """# Group the clauses of a specification by the decision they govern
+
+{spec}
+
+## The decisions
+Every input names its decision in the field `{by}`, one of: {values}.
+
+Group the values of `{by}` into at most {k} groups of decisions governed by mostly the same clauses (one group per
+value, or one for values alike), and put each clause into the groups whose decisions it governs. A clause that governs
+every decision, or states no rule (a preamble, a definition every group uses), goes into "shared"; a clause that
+governs several groups but not all goes into each of them. Every value of `{by}` is in exactly one group; a group
+whose decisions only the shared clauses govern has no clauses of its own. Group names are short identifiers.
+Answer with one ```json block:
+{{"shared": ["c1", ...], "groups": {{"group_name": {{"values": [...], "clauses": ["c7", ...]}}, ...}}}}
+"""
+
+
+def _by_values(inputs, by, values):
+    if values is not None:
+        return list(values)
+    d = inputs.fields.get(by)
+    if isinstance(d, list):
+        return list(d)
+    out = list(dict.fromkeys(x.get(by) for x in inputs.samples if by in x))
+    if not out:
+        raise ValueError(f"no values of {by!r} to group by: declare the field's values, give samples, or values=")
+    return out
+
+
+def group_clauses(spec: Spec, by: str, values, writer=None, *, max_groups: int = 8) -> Groups:
+    """One LLM call (temperature 0) puts the clauses of `spec` into groups by the value of the input field `by` they
+    govern → a `Groups`. A reply that cannot be used is asked once more with why; still unusable → ValueError. The
+    grouping only decides what each sub-compilation reads: every group is accepted on its own, and the assembled whole
+    is checked again (see compile_groups) — a clause left out of a group shows as a disagreement or a failed test, or
+    not at all if no input exercises it, so read `groups.groups` before you rely on it."""
+    gen = _gens(writer)[0]
+    values = list(values)
+    prompt = GROUP_PROMPT.format(spec=spec.render(), by=by, values=", ".join(json.dumps(v, ensure_ascii=False)
+                                                                             for v in values), k=max_groups)
+    log, err = [], None
+    for attempt in range(2):
+        p = prompt if attempt == 0 else prompt + f"\n\nYour previous answer could not be used:\n- {err}\nAnswer again."
+        t0 = time.time()
+        try:
+            g = gen.generate([{"role": "user", "content": p}], parse=_json_block, temperature=0.0)
+            raw, meta, e = g.value, g.meta, None
+        except Exception as ex:  # noqa: BLE001 — an unusable reply is asked once more
+            raw, meta, e = {}, {}, f"{type(ex).__name__}: {ex}"[:300]
+        log.append({"what": "grouping" if attempt == 0 else "grouping again", "prompt": p,
+                    "reply": (meta or {}).get("text"), "error": e, "seconds": round(time.time() - t0, 1),
+                    "model": getattr(gen, "model_id", None), "usage": (meta or {}).get("usage")})
+        raw = raw if isinstance(raw, dict) else {}
+        grp = Groups(by, raw.get("groups") or {}, raw.get("shared") or [], {"calls": log})
+        why = grp.problems(spec, values) if not e else [e]
+        if len(grp.groups) > max_groups:
+            why.append(f"{len(grp.groups)} groups, at most {max_groups}")
+        missing = [v for v in values if grp.of(v) is None] if not e and isinstance(grp.groups, dict) else []
+        if missing:
+            why.append(f"values in no group: {', '.join(map(str, missing))}")
+        if not why:
+            return grp
+        err = "\n- ".join(why[:12])
+    raise ValueError(f"the grouping could not be used: {err}")
+
+
+class _Scoped(Inputs):
+    """The inputs of one group: the samples and drawn inputs whose `by` value the group decides."""
+
+    def __init__(self, base: Inputs, by, values):
+        fields = dict(base.fields)
+        if isinstance(fields.get(by), list):
+            fields[by] = [v for v in fields[by] if v in values]
+        note = (f"\n\nThis part of the specification decides only the inputs whose `{by}` is one of: "
+                + ", ".join(json.dumps(v, ensure_ascii=False) for v in values)
+                + ". Other inputs are decided elsewhere: your module is never asked about them.")
+        super().__init__(fields, describe=base.text() + note, samples=[x for x in base.samples if x.get(by) in values],
+                         generate=base.generate, n=base.n, seed=base.seed)
+        self.by, self.values = by, list(values)
+
+    def validate(self, x):
+        why = super().validate(x)
+        if isinstance(x, dict) and x.get(self.by) not in self.values:
+            why.append(f"{self.by} = {x.get(self.by)!r} is not decided by this group")
+        return why
+
+    def pool(self, numbers=()):
+        try:
+            out = super().pool(numbers)
+        except ValueError:
+            out = []
+        out = [x for x in out if x.get(self.by) in self.values]
+        if not out:
+            raise ValueError(f"no input of the pool has {self.by} in {self.values}")
+        return out
+
+
+def _bound(tree):
+    """Names a module binds at its top level (a dotted `import a.b` binds `a`, left as it is)."""
+    out = set()
+    for node in tree.body:
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            out.add(node.name)
+        elif isinstance(node, (ast.Assign, ast.AnnAssign, ast.AugAssign)):
+            for t in (node.targets if isinstance(node, ast.Assign) else [node.target]):
+                out |= {n.id for n in ast.walk(t) if isinstance(n, ast.Name)}
+        elif isinstance(node, ast.Import):
+            out |= {a.asname for a in node.names if a.asname} | {a.name for a in node.names
+                                                                if not a.asname and "." not in a.name}
+        elif isinstance(node, ast.ImportFrom):
+            out |= {a.asname or a.name for a in node.names if a.name != "*"}
+    return out
+
+
+class _Prefix(ast.NodeTransformer):
+    """Every use of a module's own top-level names gets a prefix (names, arguments, keyword arguments of calls to its
+    own functions, imports by alias); attributes, strings and method names stay."""
+
+    def __init__(self, names, pre):
+        self.names, self.pre = names, pre
+
+    def _p(self, n):
+        return self.pre + n if n in self.names else n
+
+    def visit_Name(self, node):
+        node.id = self._p(node.id)
+        return node
+
+    def visit_arg(self, node):
+        node.arg = self._p(node.arg)
+        self.generic_visit(node)
+        return node
+
+    def visit_FunctionDef(self, node):
+        node.name = self._p(node.name)
+        self.generic_visit(node)
+        return node
+
+    visit_AsyncFunctionDef = visit_FunctionDef
+
+    def visit_ClassDef(self, node):
+        node.name = self._p(node.name)
+        for i, st in enumerate(node.body):
+            if isinstance(st, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                name = st.name
+                node.body[i] = self.visit(st)
+                node.body[i].name = name
+            else:
+                node.body[i] = self.visit(st)
+        for f in ("bases", "keywords", "decorator_list"):
+            setattr(node, f, [self.visit(x) for x in getattr(node, f)])
+        return node
+
+    def visit_Call(self, node):
+        if isinstance(node.func, ast.Name) and node.func.id in self.names:
+            for kw in node.keywords:
+                if kw.arg is not None:
+                    kw.arg = self._p(kw.arg)
+        self.generic_visit(node)
+        return node
+
+    def visit_Import(self, node):
+        for a in node.names:
+            if a.asname:
+                a.asname = self._p(a.asname)
+            elif "." not in a.name and a.name in self.names:
+                a.asname = self.pre + a.name
+        return node
+
+    def visit_ImportFrom(self, node):
+        for a in node.names:
+            if a.name != "*" and (a.asname or a.name) in self.names:
+                a.asname = self.pre + (a.asname or a.name)
+        return node
+
+
+def _group_module(source, parts, pre, by, given, questions):
+    """One group's module for the assembly → (statements, parts, rule of each question). Its top-level names get the
+    prefix; each part is gated — outside the group's values a check is True and a fact or the group's rule is None,
+    before anything else runs — and loses its type annotations (an out-of-scope None must not be refused); the
+    group's rules become facts the assembled rule routes to."""
+    tree = ast.parse(source)
+    tree.body = [n for n in tree.body if not (
+        (isinstance(n, ast.Assign) and any(isinstance(t, ast.Name) and t.id in META for t in n.targets))
+        or (isinstance(n, ast.Expr) and _is_meta_call(ast.unparse(n))))]
+    names = (_bound(tree) | set(parts)) - set(given or ()) - {"Fail"}
+    tree = _Prefix(names, pre).visit(tree)
+    out_parts, rules = {}, {}
+    for name, p in parts.items():
+        new = pre + name if name in names else name
+        p = dict(p)
+        if p["kind"] == "rule":
+            rules[p["question"]] = new
+            p = {"kind": "fn", "clauses": list(p.get("clauses") or []), "rule_of": p["question"]}
+        out_parts[new] = p
+    for node in tree.body:
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name in out_parts:
+            a = node.args
+            for x in a.posonlyargs + a.args + a.kwonlyargs:
+                x.annotation = None
+            node.returns = None
+            if by not in [x.arg for x in a.posonlyargs + a.args + a.kwonlyargs]:
+                a.args.insert(0, ast.arg(arg=by))
+            neutral = "True" if out_parts[node.name]["kind"] == "check" else "None"
+            node.body.insert(0, ast.parse(f"if {by} not in {pre}SCOPE:\n    return {neutral}").body[0])
+    ast.fix_missing_locations(tree)
+    return ast.unparse(tree), out_parts, rules
+
+
+def assemble(by: str, members: list, questions, given=None, refused=()) -> tuple[str, dict]:
+    """The groups' modules as one module → (source, parts). `members`: [(group name, values, source, parts)] of
+    accepted groups; `refused`: [(group name, values, reason)] — inputs with those values abstain with the reason. Each
+    question's rule routes by `by` to the rule of the group that decides the value; a value no group decides abstains."""
+    chunks, parts, rules = [], {}, {}
+    for name, values, source, gparts in members:
+        pre = f"{name}__"
+        chunks.append(f"{pre}SCOPE = frozenset({list(values)!r})")
+        text, gp, gr = _group_module(source, gparts, pre, by, given, questions)
+        chunks.append(text)
+        parts.update(gp)
+        rules[name] = gr
+    for name, values, _ in refused:
+        chunks.append(f"{name}__SCOPE = frozenset({list(values)!r})")
+    for q in questions:
+        args = [rules[n][q.name] for n, *_ in members if q.name in rules[n]]
+        lines = [f"def decide_{q.name}({', '.join([by] + args)}):"]
+        for name, *_ in members:
+            if q.name in rules[name]:
+                lines.append(f"    if {by} in {name}__SCOPE:\n        return {rules[name][q.name]}")
+        for name, _, why in refused:
+            lines.append(f"    if {by} in {name}__SCOPE:\n        raise ValueError({('the clauses of group ' + name + ' were not accepted: ' + why)[:300]!r})")
+        lines.append(f"    raise ValueError('no group of the specification decides {by} = ' + repr({by}))")
+        chunks.append("\n".join(lines))
+        parts[f"decide_{q.name}"] = {"kind": "rule", "question": q.name, "clauses": []}
+    src = "\n\n\n".join(c.rstrip("\n") for c in chunks) + "\n\n\n" + _literal("PARTS", parts)
+    return src, parts
+
+
+def compile_groups(spec: Spec, questions, inputs: Inputs, writer=None, *, by: str, groups: Groups | dict | None = None,
+                   values=None, max_groups: int = 8, partial: bool = False, **kw) -> Compiled:
+    """Compile a large specification in groups: the clauses that govern each kind of decision (the values of the input
+    field `by`, such as a tool's name) are compiled on their own, with the shared clauses, by `compile_spec` and its
+    acceptance — two independent drafts agree on the group's inputs, tests derived from the group's clauses pass —
+    then assembled into one module whose rule routes each input to its group, and the whole is checked again:
+    both assembled modules (the groups' accepted drafts, and their independent partners) agree on the full pool, give
+    every input of an accepted group an answer, decide each group's inputs as the group's own draft did, and pass every
+    group's tests. Nothing is rewritten at this step: a failure is a refusal, with the reason.
+
+    groups: a `Groups` (or {"shared": [...], "groups": {name: {"values", "clauses"}}}); None — `group_clauses` writes it
+    with the writer. values: the values of `by` (default: the field's declared values, else those of the samples).
+    partial: False — the whole is accepted only when every group is; True — the accepted groups are assembled, and an
+    input of a refused group abstains with the reason (the result says which groups). kw: compile_spec's options
+    (rounds, tests, examples, reference, mem_mb, item_s, fresh_drafts, stuck_after).
+    The result is an ordinary `Compiled` (system(), to_guard, Versions); `c.groups` holds each group's own compilation
+    and `c.record["groups"]` what each accepted."""
+    questions = list(questions)
+    vals = _by_values(inputs, by, values)
+    if groups is None:
+        groups = group_clauses(spec, by, vals, writer, max_groups=max_groups)
+    elif isinstance(groups, dict):
+        groups = Groups(by, groups.get("groups") or {}, groups.get("shared") or [], {"given": True})
+    why = groups.problems(spec)
+    if why:
+        raise ValueError("the grouping cannot be used: " + "; ".join(why[:8]))
+    plan = {g: {"values": [v for v in d["values"]], "clauses": list(d["clauses"])} for g, d in groups.groups.items()}
+    rest = [v for v in vals if groups.of(v) is None]
+    if rest:                                          # values no group names: decided by the shared clauses alone
+        plan["other" if "other" not in plan else "other_values"] = {"values": rest, "clauses": []}
+    subs, rec = {}, {}
+    examples = list(kw.pop("examples", ()))
+    for g, d in plan.items():
+        ids = list(dict.fromkeys(list(groups.shared) + d["clauses"]))
+        sub_inputs = _Scoped(inputs, by, d["values"])
+        r = {"values": d["values"], "clauses": d["clauses"], "shared": len(groups.shared)}
+        if not ids:
+            subs[g] = Compiled(spec, questions, "", {}, {}, False, "the group has no clauses", {})
+        else:
+            sub_spec = spec.subset(ids, name=f"{spec.name} — {g}")
+            try:
+                sub_inputs.pool()
+            except ValueError as e:
+                subs[g] = Compiled(sub_spec, questions, "", {}, {}, False, f"not compiled: {e}", {})
+            else:
+                subs[g] = compile_spec(sub_spec, questions, sub_inputs, writer,
+                                       examples=[(x, a) for x, a in examples if x.get(by) in d["values"]], **kw)
+        c = subs[g]
+        r.update({"accepted": c.accepted, "reason": c.reason, "rounds": len([h for h in c.record.get("rounds", [])
+                                                                             if "round" in h]),
+                  "replaced": len(c.record.get("replaced", [])), "tests": len(c.record.get("tests", [])),
+                  "parts": len(c.parts)})
+        rec[g] = r
+    record = {"grouped": True, "by": by, "grouping": groups.to_dict(), "groups": rec,
+              "spec_hash": spec.hash, "calls": groups.record.get("calls", [])}
+    ok = [g for g in plan if subs[g].accepted]
+    refused = [g for g in plan if not subs[g].accepted]
+    if not ok or (refused and not partial):
+        reason = "not accepted: groups not accepted — " + "; ".join(f"{g}: {subs[g].reason}" for g in refused)
+        return Compiled(spec, questions, "", {}, {}, False, reason, record, None, subs)
+    given = given_names(inputs) or set()
+    a_members = [(g, plan[g]["values"], subs[g].source, subs[g].parts) for g in ok]
+    b_members = []
+    for g in ok:
+        other = subs[g].record.get("other_source")
+        bparts, _, _, _ = read_module(other, subs[g].spec, questions)
+        b_members.append((g, plan[g]["values"], other, bparts))
+    ref = [(g, plan[g]["values"], subs[g].reason) for g in refused]
+    src_a, parts_a = assemble(by, a_members, questions, given, ref)
+    src_b, parts_b = assemble(by, b_members, questions, given, ref)
+    nn = {}
+    cited = {c for p in parts_a.values() for c in p.get("clauses") or []}
+    for g in ok:
+        for c, why_nn in subs[g].not_normative.items():
+            if c not in cited:
+                nn.setdefault(c, why_nn)
+    for g in refused:
+        for c in plan[g]["clauses"]:
+            if c not in cited:
+                nn.setdefault(c, f"not compiled: group {g} was not accepted, its inputs abstain")
+    whole = _check_whole(spec, questions, inputs, by, plan, subs, ok, refused, src_a, parts_a, src_b, parts_b, nn,
+                         given, kw.get("mem_mb", 1024), kw.get("item_s", 5))
+    record["whole"] = whole
+    record["other_source"] = src_b
+    if whole["problems"]:
+        reason = "not accepted: the assembled whole fails its check — " + "; ".join(whole["problems"][:5])
+        return Compiled(spec, questions, "", {}, {}, False, reason, record, None, subs)
+    reason = f"accepted: {len(ok)} group(s) assembled, the whole agrees on {whole['inputs']} inputs"
+    if refused:
+        reason += ("; not accepted, so their inputs abstain: " + ", ".join(refused))
+        record["refused_groups"] = {g: {"values": plan[g]["values"], "reason": subs[g].reason} for g in refused}
+    return Compiled(spec, questions, src_a, parts_a, nn, True, reason, record, None, subs)
+
+
+def _check_whole(spec, questions, inputs, by, plan, subs, ok, refused, src_a, parts_a, src_b, parts_b, nn, given, mem_mb,
+                 item_s):
+    """The checks of the assembled whole (see compile_groups) → {"inputs", "problems", per-check counts}."""
+    problems = []
+    for src, parts, side in ((src_a, parts_a, "A"), (src_b, parts_b, "B")):
+        why = sandbox.check(src)
+        why += unknown_reads(src, {n: p for n, p in parts.items()}, given)
+        miss = coverage(spec, parts, nn) if side == "A" else []
+        if miss:
+            why.append("clauses no group covers: " + ", ".join(miss))
+        problems += [f"assembled {side}: {w}" for w in why]
+    if problems:
+        return {"inputs": 0, "problems": problems}
+    nums = numbers_in(spec.text) + numbers_in(src_a) + numbers_in(src_b)
+    try:
+        pool = inputs.pool(nums)
+    except ValueError:
+        pool = []
+    tests = [(g, t) for g in ok for t in subs[g].record.get("tests", []) if not t.get("dropped")]
+    allin = pool + [t["input"] for _, t in tests]
+    rows = {}
+    for side, src, parts in (("A", src_a, parts_a), ("B", src_b, parts_b)):
+        r, err = _run_draft(_Draft(0, source=src, parts=parts), questions, allin, mem_mb, item_s)
+        if r is None:
+            return {"inputs": len(allin), "problems": [f"assembled {side} did not run: {err}"]}
+        rows[side] = r
+    ans = {s: [{q: _norm(v) for q, v in row["answers"].items()} for row in rows[s]] for s in rows}
+    out = {"inputs": len(allin), "pool": len(pool), "tests": len(tests), "disagree": 0, "unanswered": 0,
+           "not_abstaining": 0, "unfaithful": 0, "tests_failed": 0, "no_group": 0}
+    for k, x in enumerate(allin):
+        g = next((g for g in plan if x.get(by) in plan[g]["values"]), None)
+        a, b = ans["A"][k], ans["B"][k]
+        if g is None or g in refused:
+            if g is None:
+                out["no_group"] += 1
+            if any(v is not None for v in list(a.values()) + list(b.values())):
+                out["not_abstaining"] += 1
+            continue
+        if any(v is None for v in list(a.values()) + list(b.values())) or not a or not b:
+            out["unanswered"] += 1
+        elif a != b:
+            out["disagree"] += 1
+    # each group's own drafts on the same inputs: the assembly must not change a decision
+    for g in ok:
+        idx = [k for k, x in enumerate(allin) if x.get(by) in plan[g]["values"]]
+        if not idx:
+            continue
+        sub_in = [allin[k] for k in idx]
+        for side, src in (("A", subs[g].source), ("B", subs[g].record.get("other_source"))):
+            gparts, _, _, _ = read_module(src, subs[g].spec, questions)
+            r, err = _run_draft(_Draft(0, source=src, parts=gparts), questions, sub_in, mem_mb, item_s)
+            if r is None:
+                problems.append(f"group {g} ({side}) did not run on the full pool: {err}")
+                continue
+            for k, row in zip(idx, r):
+                if {q: _norm(v) for q, v in row["answers"].items()} != ans[side][k]:
+                    out["unfaithful"] += 1
+    for j, (g, t) in enumerate(tests):
+        k = len(pool) + j
+        for s in ("A", "B"):
+            if any(ans[s][k].get(q) != e for q, e in t["expect"].items()):
+                out["tests_failed"] += 1
+    for key, text in (("disagree", "the two assembled modules disagree on {} inputs"),
+                      ("unanswered", "{} inputs of accepted groups get no answer"),
+                      ("not_abstaining", "{} inputs of refused groups or of no group are answered"),
+                      ("unfaithful", "{} decisions differ from the group's own draft"),
+                      ("tests_failed", "{} group tests fail on the assembled modules")):
+        if out[key]:
+            problems.append(text.format(out[key]))
+    out["problems"] = problems
+    return out
 
 
 # ───────────────────────────────────────────────────────────── what a change does to decisions
@@ -1440,5 +1984,6 @@ def to_guard(compiled: Compiled, guard, tools=None, *, question: str | None = No
     return names
 
 
-__all__ = ["Clause", "Compiled", "DecisionDiff", "Inputs", "Rejected", "Spec", "Versions", "compile_spec", "coverage",
-           "decision_diff", "merge", "numbers_in", "read_module", "recompile", "split_clauses", "to_guard"]
+__all__ = ["Clause", "Compiled", "DecisionDiff", "Groups", "Inputs", "Rejected", "Spec", "Versions", "assemble",
+           "compile_groups", "compile_spec", "coverage", "decision_diff", "group_clauses", "merge", "numbers_in",
+           "read_module", "recompile", "split_clauses", "to_guard"]

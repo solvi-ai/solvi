@@ -335,3 +335,179 @@ def test_a_new_clause_that_abolishes_an_old_rule_removes_its_part_and_the_old_cl
     stale = 'REMOVE = {"not_too_heavy": "c4"}\nNOT_NORMATIVE = {"c4": "gone", "c5": "x"}\nPARTS = {}\n'
     c3 = recompile(c1, c1.spec.revise(v2), INPUTS, Writer([[stale], [stale]], tests=tests), rounds=1)
     assert not c3.accepted and "name the [changed], [added] or removed clause of the change" in json.dumps(c3.record)
+
+
+class BySeed(Writer):
+    """A stand-in whose drafts are chosen by the seed of the request (None: draft 0; 1: draft 1; 101, 102, ...: the
+    fresh drafts that replace a stuck one), each sequence indexed by how often that seed was asked."""
+
+    def generate(self, messages, parse=None, temperature=None, seed=None, **kw):
+        p = messages[-1]["content"]
+        if not p.startswith("# Task"):
+            return super().generate(messages, parse, temperature, seed, **kw)
+        self.prompts.append((p, temperature, seed))
+        seq = self.drafts[seed]
+        n = sum(1 for x in self.prompts if len(x) == 3 and x[2] == seed)
+        reply = "```python\n" + seq[min(n, len(seq)) - 1] + "\n```"
+        return type("G", (), {"value": parse(reply) if parse else reply, "meta": {"text": reply}})()
+
+
+READS_ORDER = GOOD.replace("def free_shipping(total):\n    return total >= 50",
+                           "def free_shipping(order):\n    return order['total'] >= 50")
+
+
+def test_a_draft_stuck_on_the_contract_is_replaced_by_a_fresh_one_and_the_pair_is_accepted_as_before():
+    w = BySeed({None: [READS_ORDER], 1: [GOOD], 101: [GOOD]})
+    c = compile_spec(Spec(POLICY), QS, INPUTS, w)
+    assert c.accepted and c.reason == "accepted in round 3"
+    assert c.record["replaced"] == [{"round": 2, "draft": 0, "generation": 1, "after_rounds_not_run": 2,
+                                     "problems": c.record["rounds"][1]["drafts"][0]["problems"]}]
+    fresh = [p for p, t, s in [x for x in w.prompts if len(x) == 3] if s == 101][0]
+    assert "Mistakes earlier attempts at this module made" in fresh and "reads order" in fresh
+    assert "def free_shipping(order)" not in fresh                       # told why, never shown the stuck module
+    assert c.record["rounds"][2]["drafts"][0]["generation"] == 1
+    assert "round 3 draft 0 (fresh 1)" in [x["what"] for x in c.record["calls"]]
+    # the fresh draft meets the same checks: one that disagrees is not accepted
+    w = BySeed({None: [READS_ORDER], 1: [GOOD], 101: [OFF_BY_ONE]}, tests=[TEST_OK[1]])
+    c = compile_spec(Spec(POLICY), QS, INPUTS, w)
+    assert not c.accepted and "disagreement" in c.reason
+    # replacements are bounded: fresh_drafts=0 keeps the stuck draft, as before 0.9
+    c = compile_spec(Spec(POLICY), QS, INPUTS, BySeed({None: [READS_ORDER], 1: [GOOD]}), fresh_drafts=0)
+    assert not c.accepted and c.record["replaced"] == [] and "contract" in c.reason
+
+
+def test_a_hard_check_may_name_its_yes_no_answer_as_true_or_false():
+    s = Spec("- A refund over 100 needs a manager.\n")
+    src = ('def small(amount):\n    return amount <= 100\n\ndef allow(small):\n    return True\n\n'
+           'PARTS = {"small": {"kind": "check", "hard": True, "then": {"allow": False}, "clauses": ["c1"]},\n'
+           '         "allow": {"kind": "rule", "question": "allow", "clauses": []}}\n')
+    parts, _, _, why = read_module(src, s, [Question("allow", "May it be paid?", Answer.yes_no())])
+    assert why == [] and parts["small"]["then"] == {"allow": "no"}
+
+
+def test_a_test_a_draft_cannot_answer_is_not_sent_to_review():
+    fragile = GOOD.replace('return {"domestic": 5, "world": 20}[zone]', 'return {"domestic": 5}[zone]')
+    world = {"clause": "c4", "input": {"zone": "world", "total": 10, "weight": 1}, "expect": {"ship": "paid"},
+             "why": "light parcel to the world zone"}
+    w = Writer([[fragile], [fragile]], tests=TEST_OK + [world], review={"verdict": "drop"})
+    c = compile_spec(Spec(POLICY), QS, INPUTS, w, rounds=1)
+    assert c.record["reviews"] == {} and not any(p.startswith("# Re-check") for p, _ in w.prompts)
+
+
+SHOP = """# Agent policy
+
+- Before any action the user must be authenticated.
+
+## Refunds
+
+- A refund is at most 100.
+
+## Shipping
+
+- Nothing ships to a closed address.
+"""
+SHOP_QS = [Question("allow", "May the call be made?", Answer.yes_no())]
+SHOP_IN = Inputs({"tool": ["refund", "ship", "lookup"], "authed": [True, False], "amount": (0, 300),
+                  "closed": [True, False]}, n=200, seed=5)
+REFUND = '''
+def authed_ok(authed):
+    return bool(authed)
+
+def small(amount):
+    return amount <= 100
+
+def allow(authed_ok, small):
+    return authed_ok and small
+
+PARTS = {"authed_ok": {"kind": "fn", "clauses": ["c1"]}, "small": {"kind": "fn", "clauses": ["c2"]},
+         "allow": {"kind": "rule", "question": "allow", "clauses": ["c1", "c2"]}}
+NOT_NORMATIVE = {}
+'''
+SHIP = '''
+import re
+
+def open_address(closed):
+    return not closed
+
+def allow(authed, open_address):
+    return bool(authed) and open_address
+
+PARTS = {"open_address": {"kind": "check", "hard": True, "then": {"allow": "no"}, "clauses": ["c3"]},
+         "allow": {"kind": "rule", "question": "allow", "clauses": ["c1"]}}
+NOT_NORMATIVE = {}
+'''
+LOOKUP = '''
+def allow(authed):
+    return bool(authed)
+
+PARTS = {"allow": {"kind": "rule", "question": "allow", "clauses": ["c1"]}}
+NOT_NORMATIVE = {}
+'''
+
+
+class ByGroup(Writer):
+    """A stand-in that answers each group's prompts with that group's module and tests (told apart by the values the
+    prompt says the group decides)."""
+
+    def __init__(self, modules, tests):
+        super().__init__([[""], [""]])
+        self.modules, self.group_tests = modules, tests
+
+    def _group(self, p):
+        return next(g for g in self.modules if f'is one of: "{g}"' in p)
+
+    def generate(self, messages, parse=None, temperature=None, seed=None, **kw):
+        p = messages[-1]["content"]
+        self.prompts.append((p, temperature))
+        if p.startswith("# Write tests"):
+            reply = "```json\n" + json.dumps(self.group_tests[self._group(p)]) + "\n```"
+        else:
+            reply = "```python\n" + self.modules[self._group(p)] + "\n```"
+        return type("G", (), {"value": parse(reply) if parse else reply, "meta": {"text": reply}})()
+
+
+SHOP_TESTS = {
+    "refund": [{"clause": "c2", "input": {"tool": "refund", "authed": True, "amount": 101, "closed": False},
+                "expect": {"allow": "no"}, "why": "over 100"}],
+    "ship": [{"clause": "c3", "input": {"tool": "ship", "authed": True, "amount": 5, "closed": True},
+              "expect": {"allow": "no"}, "why": "closed address"}],
+    "lookup": [{"clause": "c1", "input": {"tool": "lookup", "authed": False, "amount": 5, "closed": False},
+                "expect": {"allow": "no"}, "why": "not authenticated"}]}
+SHOP_GROUPS = {"shared": ["c1"], "groups": {"refund": {"values": ["refund"], "clauses": ["c2"]},
+                                            "ship": {"values": ["ship"], "clauses": ["c3"]},
+                                            "lookup": {"values": ["lookup"], "clauses": []}}}
+
+
+def test_a_large_specification_compiles_group_by_group_and_the_assembled_whole_decides_as_each_group():
+    from solvi.compile import compile_groups
+    w = ByGroup({"refund": REFUND, "ship": SHIP, "lookup": LOOKUP}, SHOP_TESTS)
+    c = compile_groups(Spec(SHOP), SHOP_QS, SHOP_IN, w, by="tool", groups=SHOP_GROUPS)
+    assert c.accepted, c.reason
+    assert {g: r["accepted"] for g, r in c.record["groups"].items()} == {"refund": True, "ship": True, "lookup": True}
+    assert c.record["whole"]["problems"] == [] and c.record["whole"]["disagree"] == 0
+    assert c.groups["refund"].spec.clauses.keys() == {"c1", "c2"}                 # the group's clauses and the shared
+    s = c.system()
+    assert s.ask({"tool": "refund", "authed": True, "amount": 150, "closed": True})["allow"].answer == "no"
+    assert s.ask({"tool": "refund", "authed": True, "amount": 50, "closed": True})["allow"].answer == "yes"
+    r = s.ask({"tool": "ship", "authed": True, "amount": 500, "closed": True})["allow"]
+    assert r.answer == "no" and r.status == "forced"
+    assert s.ask({"tool": "lookup", "authed": True, "amount": 500, "closed": True})["allow"].answer == "yes"
+    assert c.clauses_of("ship__open_address") == ["c3"]
+    # a group whose drafts never pass: the whole is refused, or (partial=True) its inputs abstain
+    bad = REFUND.replace("amount <= 100", "amount <= 200")
+    w = ByGroup({"refund": bad, "ship": SHIP, "lookup": LOOKUP}, SHOP_TESTS)
+    c = compile_groups(Spec(SHOP), SHOP_QS, SHOP_IN, w, by="tool", groups=SHOP_GROUPS, rounds=1)
+    assert not c.accepted and "refund" in c.reason and c.record["groups"]["ship"]["accepted"]
+    c = compile_groups(Spec(SHOP), SHOP_QS, SHOP_IN, w, by="tool", groups=SHOP_GROUPS, rounds=1, partial=True)
+    assert c.accepted and c.record["refused_groups"]["refund"]["values"] == ["refund"]
+    s = c.system()
+    assert s.ask({"tool": "refund", "authed": True, "amount": 50, "closed": False})["allow"].status == "abstain"
+    assert s.ask({"tool": "ship", "authed": True, "amount": 50, "closed": False})["allow"].answer == "yes"
+
+
+def test_a_grouping_that_leaves_a_clause_out_or_puts_a_value_in_two_groups_is_refused_with_why():
+    from solvi.compile import Groups
+    g = Groups("tool", {"refund": {"values": ["refund"], "clauses": ["c2"]},
+                        "ship": {"values": ["ship", "refund"], "clauses": []}}, ["c1"])
+    why = g.problems(Spec(SHOP))
+    assert any("c3" in w for w in why) and any("'refund' is in groups refund and ship" in w for w in why)
