@@ -117,6 +117,42 @@ def test_an_unsure_decision_never_gets_an_empty_candidate_list():
     assert part(email="a billing question").extra["candidates"] == ["billing"]
 
 
+class WithAct:
+    """text "<logit of a>|<act logit>" → logits [L, 0] and the act logit."""
+
+    def fingerprint(self):
+        return "with-act-1"
+
+    def logits(self, items):
+        out = []
+        for it in items:
+            lg, act = map(float, it.text.split("|"))
+            out.append({"logits": np.array([lg, 0.0]), "act": act})
+        return out
+
+
+def test_calibrating_on_the_confidence_reports_what_the_part_does_when_the_act_head_still_escalates():
+    """signal="confidence" on a model with an act head: the checkpoint's act threshold goes on escalating. act_guard
+    reported 62% answered where the part answered 45%."""
+    rng = np.random.default_rng(7)
+    conf = rng.uniform(0.5, 1.0, 600)
+    right = rng.uniform(size=600) < 0.2 + 0.75 * conf
+    act = np.where(rng.uniform(size=600) < 0.3, -2.0, 2.0)                # the act head escalates 30% of them
+    cal = [(f"{np.log(c / (1 - c)):.6f}|{a}", "a" if r else "b") for c, r, a in zip(conf, right, act)]
+    m = DecideModel(WithAct(), {"format": "l14f typed v1", "act": {"threshold": 0.5}})
+    for calibrate in (lambda p: p.act_guard(cal, risk=0.10, signal="confidence")["answered"],
+                      lambda p: p.calibrate_for(cal, error=0.3, signal="confidence")["coverage"],
+                      lambda p: p.calibrate_for(cal, error=0.99, signal="confidence")["coverage"]):
+        part = m.decision("q", "Which?", "x", ["a", "b"])
+        reported = calibrate(part)
+        ds = part.decide([t for t, _ in cal])
+        assert reported == pytest.approx(np.mean([d.escalate is None for d in ds])) and 0 < reported <= 0.72
+        assert part.escalate_below >= 0
+    off = m.decision("q", "Which?", "x", ["a", "b"], use_act=False)      # no act gate: nothing to account for
+    assert off.act_guard(cal, risk=0.10)["answered"] == pytest.approx(
+        np.mean([d.escalate is None for d in off.decide([t for t, _ in cal])]))
+
+
 class PositionBiased:
     """Keyword logits plus a strong preference for whatever option is listed first."""
     model_id = "test/position-biased"

@@ -2887,6 +2887,12 @@ class DecisionPart:
                              "and the recorded guarantee would not hold — use signal='confidence', or make the part with "
                              "use_act=True")
         use_act = signal == "act" or (signal == "auto" and has_act and self.use_act is not False)
+        if not use_act and has_act and self.use_act is not False:
+            # calibrating on the confidence of a model with an act head: the checkpoint's act threshold goes on
+            # escalating (the part's own is cleared), so an example it escalates is never answered alone — signal −1,
+            # below every confidence. The calibration's numbers are then the part's.
+            gate = self.model.act_threshold
+            conf = [c if a >= gate else -1.0 for c, a in zip(conf, act)]
         return (act if use_act else conf), ok, ("act" if use_act else "confidence"), ds
 
     def _set_threshold(self, sig, thr, guarantee, groups=None):
@@ -2916,7 +2922,10 @@ class DecisionPart:
         ≥ 1 − delta for inputs like the examples — a strong promise, so it often lets nothing through (it tests at most 64
         thresholds, quantiles of the calibration signals: calibration.ltt_grid). signal: "act"
         (the model's act probability → act_threshold), "confidence" (the calibrated confidence → escalate_below) or
-        "auto" (act when the model has an act head). No threshold reaches the target → everything escalates (inf).
+        "auto" (act when the model has an act head). On "confidence" with a model that has an act head (and a part not
+        made with use_act=False) the checkpoint's act threshold keeps escalating: the examples it escalates count as
+        escalated here, so the numbers returned are what the part does. No threshold reaches the target → everything
+        escalates (inf).
         Changes the part's fingerprint. → {"signal", "threshold", "coverage", "error", "n", "target_error", "method",
         "guarantee"}. For a guarantee on the share of all questions answered wrongly, see act_guard."""
         from .calibration import accuracy_at, check_rate, ltt_threshold
@@ -2936,6 +2945,7 @@ class DecisionPart:
             thr = _threshold(sig, ok, error)
             g = {"method": "empirical", "error": error, "n": len(ok), "signal": name,
                  "promise": "none: the error was measured on the calibration examples only"}
+        thr = max(thr, 0.0) if name == "confidence" else thr      # −1 marks an example the act gate escalates
         self._set_threshold(name, thr, g)
         acc, cov = accuracy_at(sig, ok, thr)
         return {"signal": name, "threshold": thr, "coverage": cov, "error": (1 - acc) if cov else 0.0, "n": len(ok),
@@ -2972,6 +2982,7 @@ class DecisionPart:
         base = float(1 - o.mean())
         if groups is None:
             thr = crc_threshold(sig, [1 - x for x in ok], risk)
+            thr = max(thr, 0.0) if name == "confidence" else thr  # −1 marks an example the act gate escalates
             g = {"method": "crc", "risk": risk, "n": len(ok), "signal": name,
                  "promise": f"P(answered alone and wrong) ≤ {risk:g} for inputs like the calibration examples"}
             self._set_threshold(name, thr, g)
