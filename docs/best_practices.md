@@ -96,14 +96,27 @@ own confidence (AUROC 0.51) is refused. Use `error=` for "≤ e of what we answe
 inputs": with 89% easy non-matches, risk 2% held overall while predicted matches given alone by an LLM were wrong 12.5%
 of the time — `groups="answer"` puts the promise inside each answer.
 
+**Size thresholds for inputs the decider has no answer for — when new kinds can come.** New kinds of input break every
+promise calibrated without them (7.5–27% error against 5% on a stream with 40% new intents). An `OpenSetGate` with
+outside signals from `leave_out` follows their share without labels: on CLINC150 with nothing tuned it kept 5% in
+every simulated stream where new intents or out-of-scope queries grew to 20–60% gradually or jumped to 20% (at a
+sudden 40%: 1–2 of 30 streams above), and
+answered 60% alone before any change (the plain threshold: 93%, broken in up to every stream after); on Banking77 it
+answered as many requests as a hand-written policy (714 of 2,000 against 719) with a third of its error after the shift
+(0.7% against 3.6%). Pay for it only where new kinds are expected; for gradual ones `track=(200,)` costs less (77%
+answered before on CLINC); after a sudden jump to most of the traffic nothing keeps the promise for the first few
+dozen decisions — stop answering alone on the flag. Its signal has to tell outside from known: an act head trained with
+left-out options did, a plain confidence did not.
+
 **Watch for drift.** A calibrated threshold keeps its promise under a shifted stream by escalating more (66% answered
-alone → 12%, with no error raised). In a simulation `DriftMonitor(window=100)` flags such a change about 60 decisions
-in, and none of 1,200 unchanged streams of 1,000 decisions; a question with many answers needs a window of about five
-decisions per answer for the distribution of the answers to be tested at all (`rep["not_tested"]` says when it is not).
-Real streams are slower: on Banking77 with 20 unseen intents arriving at request 1,000 it flagged 76–935 requests
-later (mostly 100–300), with the defaults it did not flag the shift at all for two of four deciders, and the one false
-flag left came from a reference that was not the stream's mix (solvi-base's calibration set); on support tickets with
-solvi-base, 92 decisions in. Treat a quiet monitor as "no large change", not as "no change".
+alone → 12%, with no error raised). `DriftMonitor()` with its defaults flags such changes within a few dozen decisions
+on real streams: on Banking77 with 20 unseen intents arriving at request 1,000, +52 to +72 for four deciders (the
+window tests alone: never for two of them, +86 and +287 for the others), on support tickets with solvi-base +55 (92),
+with no false flag where the reference is the stream's own mix; in a simulation 0.5% of unchanged streams were
+flagged within 1,000 decisions (at most 1% promised). A change of the mix of the answers is seen
+only by the window tests, which need about five decisions per answer in a window (`rep["not_tested"]` says when it is
+not tested). Take the reference from the stream itself unless the calibration set has its mix (solvi-base's calib
+reference raised the one false flag). Treat a quiet monitor as "no large change", not as "no change".
 
 **`fit` and `teach` move the scores, not the reading.** They shift and scale the logits of one question; they help
 calibration and the mix of answers, and level off within a few dozen examples. When a question needs the model to read

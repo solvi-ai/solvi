@@ -59,6 +59,7 @@ nav:
       - solvi.decide: api/decide.md
       - solvi.calibration: api/calibration.md
       - solvi.guarantee: api/guarantee.md
+      - solvi.openset: api/openset.md
       - solvi.systemone: api/systemone.md
       - solvi.llm: api/llm.md
       - solvi.generate: api/generate.md

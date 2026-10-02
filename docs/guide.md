@@ -1552,37 +1552,144 @@ rep["drift"], rep["flags"], rep["why"]    # True, ["answers"], ["the answers are
 
 Without labels it tests the share answered alone, the distribution of the answers, the mean confidence and the mean act
 probability; with labels also the accuracy, and among the answers given alone the calibration error and
-`coverage_at`. A signal is flagged only when its test is significant and the change is large enough
-(`min_share`, `min_tv`, `min_shift`, ...), and `drift` needs `min_signals` of them. The tests are repeated at every
-decision, so each is held to `alpha / (signals tested × horizon)`: on a stream that has not changed, the chance of a
-false flag within `horizon` decisions (1,000) is at most `alpha` (0.01). It takes a `Decision`, a `Response` with
-`question=` (`mon.observe(res, question="team")` — the act probability is read from the trace; a bare result `res["q"]`
-carries none, and the monitor warns that the act signal is then not tested) or a dict, changes nothing and decides
-nothing: recalibrating or asking for labels is the caller's. `rep["tests"]` holds each signal's numbers, its `p` and the
-`level` it had to be below; `rep["not_tested"]` says which signal could not be tested and why — the distribution of the
-answers needs each answer about 5 times in a window (rarer ones are pooled), so a question with 57 answers needs a
-window of a few hundred. Simulated on independent decisions: none of 1,200 stationary streams of 1,000 decisions was
-flagged (3 to 57 answers); with `window=100` a fall of the share answered alone from 66% to 12% is flagged about 60
-decisions later, a change of the mix of three answers from 1:1:1 to 1:8:1 about 80 decisions later (`window=50`: 40
-and 55; `window=200`: 90 and 105). Take the reference from the stream's own traffic (the default) unless your
-calibration set has the stream's mix of answers.
+`coverage_at`. Two kinds of test run side by side. The window tests compare the last `window` decisions with the
+reference; a signal is flagged only when its test is significant and the change is large enough (`min_share`,
+`min_tv`, `min_shift`, ...). They are repeated at every decision, so each is held to `¾·alpha / (signals tested ×
+horizon)` — safe and slow. A sequential test follows the share answered alone, the mean confidence and the mean act
+probability decision by decision: CUSUMs (`solvi.drift.Cusum`, the detector the open-set gate below uses too) on each
+decision's shift from the mean so far, in the reference's standard deviations, with the flag level set by simulation
+on streams drawn from the reference (`sequential=False` turns it off). `drift` needs `min_signals` flagged signals of
+either kind. On a stream that has not changed, the chance of a false flag within `horizon` decisions (1,000) is at
+most `alpha` (0.01). It takes a `Decision`, a `Response` with `question=` (`mon.observe(res, question="team")` — the
+act probability is read from the trace; a bare result `res["q"]` carries none, and the monitor warns that the act
+signal is then not tested) or a dict, changes nothing and decides nothing: recalibrating or asking for labels is the
+caller's. `rep["tests"]` holds each signal's numbers, its `p` and the `level` it had to be below, and the CUSUMs' state
+(`"sequential"`: the largest, its level `h`, since when); `rep["not_tested"]` says which signal could not be tested and
+why — the distribution of the answers needs each answer about 5 times in a window (rarer ones are pooled), so a
+question with 57 answers needs a window of a few hundred. Take the reference from the stream's own traffic (the
+default) unless your calibration set has the stream's mix of answers.
 
-On real streams it is slower than in the simulation. Banking77 (2,000 requests, 20 intents the decider never saw make
-up the stream from request 1,000 on; four deciders: a TF-IDF classifier with its confidence, the same with an act head,
-solvi-base, and a vote of the two), the monitor watching the calibrated part's decisions:
+Simulated on independent decisions: 6 of 1,152 stationary streams of 1,000 decisions were flagged (0.5%, against at
+most 1%; 3 to 57 answers, a reference of 1,500 or the stream's first 100, three shapes of confidence; the window
+tests alone: none of 1,200). A fall of the share answered alone from 73% to 13% is flagged
+about 25 decisions later whatever the window (the window tests alone, for 66% → 12%: 40–90); a change of the mix of three answers from
+1:1:1 to 1:8:1 — which only the window tests see — about 80 decisions later with `window=100` (`window=50`: 67,
+`window=200`: 110).
 
-| monitor | false flags before the shift | flagged after the shift |
-|---|---|---|
-| `window=100`, the calibration set as the reference | none for three deciders; solvi-base from request 774 (its calibration set is not the stream's mix: it answers alone 78% of the stream against 65% of calib) | +76 to +223 |
-| `DriftMonitor()` (the stream's first 100 as the reference) | none | +86 (solvi-base), +287 (vote); **not flagged** within 1,000 requests for the two classifiers |
-| `window=200, alpha=0.001, min_signals=2`, reference: the first 300 requests (or calib) | none | +210 to +290; +935 for the vote |
+On real streams. Banking77 (2,000 requests, 20 intents the decider never saw make up the stream from request 1,000 on;
+four deciders: a TF-IDF classifier with its confidence, the same with an act head, solvi-base, and a vote of the two),
+the monitor watching the calibrated part's decisions; the first flag after the shift for the four deciders, and
+false flags before it:
 
-Before the union bound the same monitors raised false flags from request 276–732 with the calibration set as the
-reference (73–132 flagged decisions of 1,000) and flagged the shift 35–147 requests in. With solvi-base on support
-tickets whose wording and mix change at one point (150 reference, 200 unchanged, 150 changed decisions), `window=100`
-flags the change after 92 decisions (37 before the rework), `window=50` after 96 (14 before, with 23 false flags on the
-200 unchanged decisions; none now). A monitor that is quiet on an unchanged stream needs a large change or a long wait:
-size the window on your own stream, and do not read "no flag" as "no drift".
+| monitor | window tests only (before) | with the sequential test (now) | false flags before the shift |
+|---|---|---|---|
+| `DriftMonitor()` (the stream's first 100 as the reference) | **not flagged** within 1,000 requests for the two classifiers; +86 (solvi-base), +287 (vote) | +70, +70, +52, +72 | none |
+| `window=100`, the calibration set as the reference | +223, +111, +112, +76 | +62, +66, +63, +68 | solvi-base from request 774 (its calibration set is not the stream's mix: it answers alone 78% of the stream against 65% of calib; a window test) |
+| `window=200, alpha=0.001, min_signals=2`, reference: the first 300 requests (or calib) | +211, +210, +290, +935 | +202, +72, +76, +210 | none |
+
+The task's own hand-written CUSUM (on the act probability, its level picked on calib) flagged the shift at +42 for the
+classifier with the act head. With solvi-base on support tickets whose wording and mix change at one point (150
+reference, 200 unchanged, 150 changed decisions) the change is flagged after 55 decisions with `window=100` or
+`window=50` (92 and 96 with the window tests only), with no false flag on the 200 unchanged ones. A quiet monitor
+means "no change of this size in the last few dozen decisions", not "no change".
+
+### Inputs from outside the calibration set: OpenSetGate
+
+Every promise above holds for inputs like the calibration examples. An input whose right answer is not among the
+options — a new topic, a product the catalog never had — is outside that: whatever the decider answers is wrong, and a
+threshold calibrated without such inputs lets some of them through. On a 57-intent stream where 40% of the requests
+became new intents, every threshold solvi had (empirical, learn-then-test, `act_guard`, with or without a drift flag)
+gave 7.5–27% error among the answers given alone, against 5% promised. `solvi.openset` sizes the threshold for a share
+of such inputs and follows the share as the stream goes, without labels:
+
+```python
+import numpy as np
+from solvi.openset import OpenSetGate
+
+rng = np.random.default_rng(0)
+known = rng.beta(6, 2, 2000)                                   # the decider's signal on labelled calibration inputs
+right = rng.uniform(size=2000) < 1 - 0.3 * (1 - known) ** 1.5  # ... and whether it was right
+outside = rng.beta(2, 5, 2000)                                 # its signal on inputs it has no answer for
+gate = OpenSetGate.calibrate(known, right, outside, error=0.05)
+gate.thresholds[0.1], gate.thresholds[0.4]                     # 0.66, 0.73: higher for more outside inputs
+for s in np.concatenate([rng.beta(6, 2, 500), rng.beta(2, 5, 300)]):   # then only outside inputs
+    gate.observe(s)                                            # after each decision it gated
+gate.state()      # {"seen": 800, "level": None, "share": 1.0, "flag_at": 507, "change_at": 502, "why": "signals below
+                  #  0.529: CUSUM 11.0 ≥ 10.0 (tuned to a share of 0.6; since decision 502)", ...}
+gate.threshold_of()[0]                                         # inf: more outside inputs than any threshold serves
+```
+
+Where the outside signals come from: real outside examples if you have them; otherwise `leave_out(examples, make)`
+simulates them — the options are split into folds, `make(kept options)` builds the decider without a fold, and the
+fold's examples become inputs it has no answer for (`{"known": (signals, right), "novel": signals}`). With a model
+asked about options in its prompt (solvi-base, an LLM) `make` is `lambda kept: model.decision("intent", TASK, "text",
+kept)`; a classifier has to be refitted without them. The signal has to tell the two apart: an act head trained with
+left-out options as "wrong" does; a plain confidence did not (on Banking77 no threshold on it kept 5% once 20% of the
+requests were new). In a System the gate is the question's guarantee, and every decision records the threshold and
+the state it was given under; a replay re-derives the verdict without moving the gate:
+
+```python
+system.guarantee("intent", promise=gate, signal="act")     # the act probability of the decision part that answers
+res = system.ask({"text": text})
+res["intent"].extra["guarantee"]["state"]                   # {"seen", "level", "share", "cusum", "flag_at", ...}
+```
+
+How it works (the details are in the module's docstring): for each share π of a grid the threshold is learn-then-test
+on the calibration examples mixed in that share — with probability ≥ 1 − delta it keeps `error` on any stream with at
+most π outside inputs like the stand-ins. The share in use is an upper bound from the last 25 and the last 200
+decisions (`track=(25, 200)`: the short window sees a sudden change, the long one a small share), never below
+`min_share=0.1`. A CUSUM on the same indicator flags the change (`solvi.drift.Cusum`, the detector `DriftMonitor`
+uses: at most `alpha` false flags within `horizon` decisions, its level set by simulation); after the flag the share is
+also estimated from the change point on. `gate.run(signals)` replays a stream of signals without touching the gate
+(for backtests); `gate.gate(decision)` gates a part's Decision outside a System.
+
+Measured on Banking77 (57 known intents, 1,000 requests, then 1,000 with 40% new intents; the task's classifier and
+its act head; the gate calibrated on the 1,492 calib rows and 1,492 left-out-intent signals, settings picked on a
+calib-only simulation before the stream was run):
+
+| | before: answered alone / error | after: answered alone / error | new-intent requests answered | flag |
+|---|---|---|---|---|
+| no open-set handling (learn-then-test at 5%) | 80.8% / 2.48% | 58.5% / 16.4% | 87 of 399 | — |
+| hand-written: stricter thresholds per level, a guard level, a CUSUM (≈175 lines) | 46.8% / 0.00% | 25.1% / 3.59% | 8 of 399 | +42 |
+| `OpenSetGate` (defaults) | 57.6% / 0.69% | 13.7% / 0.73% | 1 of 399 | +68 |
+| `OpenSetGate(track=(200,))` | 68.8% / 0.73% | 19.6% / 2.04% | 4 of 399 | +68 |
+
+On this stream it answers as many requests alone as the hand-written policy (714 of 2,000 against 719) — more before
+the shift, fewer after it — with a third of its error after the shift. The single stream says little; the simulation
+on calib (a third of the intents held out three ways, 30 orders each, the shift sudden or gradual) says more:
+
+| share of new inputs after the change | hand-written | `OpenSetGate` (defaults) | `track=(200,)` | no open-set handling |
+|---|---|---|---|---|
+| answered alone before the change | 28.0% | 32.5% | 59.7% | 79.8% |
+| sudden 40%: error / streams above 5% | 6.8% / 33% | 4.6% / 11% | 7.0% / 54% | 10.0% / 94% |
+| sudden 60% | 8.1% / 31% | 5.3% / 13% | 7.0% / 51% | 11.1% / 88% |
+| gradual to 60% (over 500 decisions) | 5.4% / 26% | 3.7% / 14% | 4.7% / 27% | 8.2% / 78% |
+
+Most of the streams above 5% are one held-out third whose new intents looked more familiar to the classifier than
+every left-out fold (the stand-ins were optimistic there). On a second dataset with nothing tuned — CLINC150, 100 known
+intents, the other 50 held out, and the dataset's own out-of-scope queries as real outside inputs; the same
+classifier and act head, the gate from `leave_out` on the validation rows — the defaults answered 60.4% alone before
+the change (0.8% error) and kept 5% in every one of 30 streams for every gradual shift (to 20, 40, 60% new intents or
+out-of-scope queries: error 0.5–1.1%) and for a sudden shift to 20% (0.4–0.9%); after a sudden 40% it kept it overall
+(2.0% / 1.1%) with 1 and 2 of 30 streams above 5%; after a sudden jump to 60% it did not (9.9% / 9.0% error over the 0.2–0.5% it still answered). The hand-written policy, rebuilt on CLINC, answered nothing
+at all; the plain threshold answered 93% before and broke 5% in 30–100% of the streams with new intents (0–80% with
+out-of-scope queries, which its signal tells apart better).
+
+When to use what:
+
+- **A closed set of answers, nothing new expected**: the plain guarantee (`system.guarantee`, `calibrate_for`). The
+  gate's insurance costs answers in calm times: 60% against 93% answered alone before any change on CLINC, 58% against
+  81% on Banking77.
+- **New kinds may appear, gradually** (a product line added, a topic growing): `OpenSetGate(track=(200,))` — on CLINC
+  it kept 5% in every gradual stream and answered 77% before the change.
+- **New kinds may appear suddenly** (a release, an outage, a campaign) **up to about 40% of the traffic**: the defaults.
+- **A sudden jump to most of the traffic**: no threshold keeps the promise in the first few dozen decisions; take the
+  flag (`state()["flag_at"]`) as a signal to stop answering alone until people have looked.
+- **Only to know that something changed**: a `DriftMonitor` (below) — it needs no outside examples.
+
+What it does not do: it does not know what the new inputs are and does not learn them — labels, a new option and a
+recalibration are the caller's. The stand-ins decide how good the bound is: when the real new inputs look more
+familiar to the decider than the left-out ones, the error after the change is above the promise.
 
 ## Asking: System and Response
 

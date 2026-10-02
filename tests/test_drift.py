@@ -97,7 +97,9 @@ def test_stationary_streams_are_not_flagged_with_the_documented_defaults():
             flagged += [(k, ref, r["flags"]) for r in reps if r["drift"]][:1]
     assert flagged == []
     t = reps[-1]["tests"]
-    assert t["answers"]["level"] == pytest.approx(0.01 / (4 * 1000)) and set(t) == {"answered", "answers", "confidence", "act"}
+    # the window tests share three quarters of alpha (the CUSUMs have the rest)
+    assert t["answers"]["level"] == pytest.approx(0.0075 / (4 * 1000))
+    assert set(t) == {"answered", "answers", "confidence", "act", "sequential"} and t["sequential"]["S"] < t["sequential"]["h"]
 
 
 def test_answers_too_rare_for_the_window_are_pooled_or_the_signal_is_said_to_be_untested():
@@ -106,7 +108,7 @@ def test_answers_too_rare_for_the_window_are_pooled_or_the_signal_is_said_to_be_
     for d in iid(rng, 100, 57):
         rep = mon.observe(d)
     assert "answers" not in rep["tests"] and "fewer than two answers are expected at least 5 times" in rep["not_tested"]["answers"]
-    assert {"answered", "confidence", "act"} <= set(rep["tests"]) and rep["tests"]["act"]["level"] == pytest.approx(0.01 / 3000)
+    assert {"answered", "confidence", "act"} <= set(rep["tests"]) and rep["tests"]["act"]["level"] == pytest.approx(0.0075 / 3000)
     mon = DriftMonitor(window=100).calibrate(iid(rng, 1500, 12))         # 8.3 each: tested, nothing pooled
     for d in iid(rng, 100, 12):
         rep = mon.observe(d)
@@ -149,3 +151,36 @@ def test_a_response_gives_the_act_probability_and_a_bare_result_says_that_it_doe
     for _ in range(20):
         rep = two.observe({"value": "billing", "confidence": 0.9})
     assert "act" not in rep["tests"] and "the window holds no act probability" in rep["not_tested"]["act"]
+
+
+def test_the_sequential_test_flags_a_fall_of_the_share_answered_alone_sooner_than_the_window_tests():
+    """A CUSUM sums the evidence decision by decision; a window test repeated at every decision is held to a union bound
+    over the looks. On Banking77 the window tests alone never flagged 20 unseen intents for two deciders; with the
+    CUSUMs they flagged within 52-72 requests."""
+    rng = np.random.default_rng(3)
+    first = {}
+    for seq in (True, False):
+        mon = DriftMonitor(window=100, sequential=seq)
+        pre = iid(rng, 600, 3)
+        post = [dict(d, alone=d["confidence"] > 0.89) for d in iid(rng, 300, 3)]      # answered alone ~89% → ~13%
+        reps = [mon.observe(d) for d in pre + post]
+        assert not any(r["drift"] for r in reps[:600])
+        first[seq] = next(i for i, r in enumerate(reps) if r["drift"]) - 600
+    assert first[True] < 40 and first[True] < first[False]
+    rep = DriftMonitor(window=100).calibrate(iid(rng, 200, 3)).observe(iid(rng, 1, 3)[0])
+    assert rep["tests"]["sequential"]["h"] > 0
+    with pytest.raises(ValueError, match="4e-4"):
+        DriftMonitor(alpha=1e-5)
+
+
+def test_a_cusum_level_is_set_by_simulation_and_its_simulated_rate_kept():
+    from solvi.drift import Cusum
+
+    def null(rng, sims):
+        return lambda: rng.standard_normal((sims, 2)) - 0.5
+    c = Cusum.calibrate(["a", "b"], null, alpha=0.01, horizon=300, seed=1)
+    assert c.rate <= 0.01 and c.h > 0 and c.sims == 2000
+    c.step([3.0, -1.0])
+    assert c.top() == ("a", 3.0, 1) and c.S[1] == 0.0
+    with pytest.raises(ValueError, match="1e-4"):
+        Cusum.calibrate(["a"], null, alpha=1e-6)
