@@ -442,9 +442,9 @@ def build_catalog(check=True):
 def build_system(check=True):
     cat = build_catalog(check)
     qs = [Question("move", "Which cell to reveal or flag?", Answer.choice(MOVE_OPTIONS + ["take_certain", "none"]),
-                   checkpoints=["no_guess_when_certain"] if check else []),
+                   requires=["no_guess_when_certain"] if check else []),
           Question("certainty", "Is the move certain or a guess?", Answer.choice(["certain", "guess"]),
-                   checkpoints=["no_guess_when_certain"] if check else []),
+                   requires=["no_guess_when_certain"] if check else []),
           Question("certain_move", "A certain-safe cell, if one is known", Answer.choice(MOVE_OPTIONS + ["none"]))]
     return cat, System(cat, qs)
 

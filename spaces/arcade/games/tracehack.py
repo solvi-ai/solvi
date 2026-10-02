@@ -50,7 +50,7 @@ def decision(risk_points):
 
 
 QUESTIONS = [Question("decision", "Approve the loan?", Answer.choice(["approve", "review", "reject"]),
-                      checkpoints=["affordable"])]
+                      requires=["affordable"])]
 system = System(cat, QUESTIONS)
 
 APPLICANTS = {

@@ -229,12 +229,12 @@ def ship_rule(power_in_band):
 
 
 QUESTIONS = [
-    Question("slow", "Keep the slow as fused?", Answer.choice(["keep", "clamp"]), checkpoints=["slow_within_cap"]),
-    Question("lifesteal", "Keep the lifesteal as fused?", Answer.choice(["keep", "clamp"]), checkpoints=["lifesteal_within_cap"]),
-    Question("cooldown", "Keep the cooldown as fused?", Answer.choice(["keep", "clamp"]), checkpoints=["cooldown_ok"]),
+    Question("slow", "Keep the slow as fused?", Answer.choice(["keep", "clamp"]), requires=["slow_within_cap"]),
+    Question("lifesteal", "Keep the lifesteal as fused?", Answer.choice(["keep", "clamp"]), requires=["lifesteal_within_cap"]),
+    Question("cooldown", "Keep the cooldown as fused?", Answer.choice(["keep", "clamp"]), requires=["cooldown_ok"]),
     Question("power", "Is the power in the base cards' band?", Answer.choice(["in_band", "scale_down", "scale_up"])),
     Question("ship_as_is", "Can the fused card ship unchanged?", Answer.yes_no(),
-             checkpoints=["slow_within_cap", "lifesteal_within_cap", "cooldown_ok"]),
+             requires=["slow_within_cap", "lifesteal_within_cap", "cooldown_ok"]),
 ]
 system = System(cat, QUESTIONS)
 

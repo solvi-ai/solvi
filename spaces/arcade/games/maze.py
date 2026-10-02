@@ -189,7 +189,7 @@ def build_catalog(safety: bool = True, greedy=None):
 def build_system(safety: bool = True, greedy=None):
     cat = build_catalog(safety, greedy)
     qs = [Question("move", "Which way should Pac go?", Answer.choice(MOVES + ["EVADE"]),
-                   checkpoints=["greedy_is_safe"] if safety else []),
+                   requires=["greedy_is_safe"] if safety else []),
           Question("fallback", "Safest good move if the scored move is refused", Answer.choice(MOVES))]
     return cat, System(cat, qs)
 
