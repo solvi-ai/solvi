@@ -555,7 +555,7 @@ def test_once_a_call_already_made_with_the_same_arguments_escalates():
     plain, _, refunds2 = _files_guard()                                                    # without once: as before
     s2 = plain.session([("user", "Refund order 1001.")])
     assert [s2.call({"name": "refund", "arguments": {"order_id": 1001}}).outcome for _ in range(2)] == ["allow", "allow"]
-    assert plain.replay_all() == [] if plain.storage is not None else True
+    assert plain.storage is None
 
 
 def test_once_counts_a_call_of_a_declared_tool_that_the_framework_runs():
