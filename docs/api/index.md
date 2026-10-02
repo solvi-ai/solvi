@@ -42,6 +42,7 @@ this reference lists what each module exports and the signatures.
 | [`solvi.report`](report.md) | reports of one decision or a period of stored decisions (Markdown, HTML, data) |
 | [`solvi.otel`](otel.md) | decisions as OpenTelemetry spans (the API, or OTLP/JSON) |
 | [`solvi.sets`](sets.md) | decisions over a set: answers of many items made consistent under at-most / exactly-one / capacity constraints |
+| [`solvi.search`](search.md) | search over alternatives: candidates through the System's checks, the best by an objective, pruned, recorded |
 | [`solvi.counterfactual`](counterfactual.md) | counterfactuals: the smallest change of the given inputs that changes an answer |
 | [`solvi.perturb`](perturb.md) | instruction-like sentences in an input and the variants without them (`perturb=k`) |
 | [`solvi.storage`](storage.md) | TraceStorage: JSONL, SQLite, PostgreSQL and DuckDB stores, queries, replay |

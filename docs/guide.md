@@ -3526,9 +3526,99 @@ same as theirs, so the model's answers came from their cache):
   answers were wrong, the three samples agreeing on one convention of the question that is not the reference's.
 
 **Not done here.** No search: a loop re-asks one proposer, it does not enumerate alternatives or keep the best of two
-valid ones (on these plans a 50-line search over orders solved 95 / 100 / 98). No promise that re-asks converge. The
+valid ones — that is `solvi.search` (below; on these plans a search over orders solved 95 / 100 / 98). No promise that
+re-asks converge. The
 share of agreement is a signal; calibrate it on labelled examples before you trust a threshold. No streaming, no tool
 calls, no caching of replies (put a caching proxy in front of the server).
+
+### Search over alternatives: solvi.search
+
+When the candidates can be enumerated — the slots of a week, the orders of a few cities, the friends to meet — a
+search through the System's own checks beats asking a model to propose: run each candidate through the checks, keep
+the accepted ones, take the best.
+
+```python
+from solvi import Answer, Catalog, Question, System
+from solvi.refine import Fail
+from solvi.search import Tree, search
+
+cat = Catalog()
+FLIGHTS = {("Oslo", "Rome"), ("Rome", "Paris"), ("Paris", "Oslo"), ("Rome", "Vienna")}
+
+@cat.fn
+def cities(problem: str) -> list:                 # the problem read into facts: computed once for the whole search
+    return problem.split(", ")
+
+@cat.check(hard=True, then={"ok": "no"})
+def direct_flights(order: list) -> bool:          # false on a prefix → false on every order that starts with it
+    bad = [f"no flight {a} - {b}" for a, b in zip(order, order[1:]) if (a, b) not in FLIGHTS and (b, a) not in FLIGHTS]
+    return Fail(*bad) if bad else True
+
+@cat.check(hard=True, then={"ok": "no"})
+def every_city(cities: list, order: list) -> bool:
+    return sorted(order) == sorted(cities)
+
+@cat.rule("ok")
+def ok(direct_flights, every_city) -> bool:
+    return True
+
+system = System(cat, [Question("ok", "A valid trip?", Answer.yes_no(), checkpoints=["direct_flights", "every_city"])])
+
+def orders(facts):                                # the space, read from the facts: one more city per step
+    cs = facts["cities"]
+    return Tree([], lambda o: [o + [c] for c in cs if c not in o], complete=lambda o: len(o) == len(cs))
+
+run = search(system, {"problem": "Oslo, Rome, Paris, Vienna"}, "ok", orders, into="order",
+             prune=["direct_flights"], keep=2)
+print(run)
+# search ok: 28 asked, 2 accepted
+#   best: ['Oslo', 'Paris', 'Rome', 'Vienna']
+#   exact: every candidate was asked or cut — pruned by direct_flights (10); the first accepted in the space's order
+#   (and not the only one), given that the prune checks direct_flights stay false below a node
+#   rejected by: direct_flights (4)
+#   computed once: cities
+run.response["ok"].answer, run.kept, run.replay(system)["ok"]
+```
+
+`search(system, state, question, space, *, into=, objective=, maximize=True, prune=(), keep=1, budget=10_000,
+accept="checks", store=True, hold=True)`:
+
+- **The space**: a list or any iterable of candidates (given as the fact `into`); a dict `{fact: [values]}` (every
+  combination, the first fact outermost, given as those facts); a `Tree(root, children, complete=, bound=)` walked depth
+  first; or a function of the facts computed from `state` that returns one of these — the space read from the problem.
+- **Accepted**: as in `refine` (`accept="checks"`: every hard check governing the question passed), and the question
+  did not abstain — a candidate the System could not decide is never chosen. `run.rejected` counts the rejections by
+  deciding check.
+- **The best**: with `objective` (a function of the candidate, or the name of a fact the question computes) the `keep`
+  best accepted; without one the first `keep` in the space's order, and the search stops there (`keep=2` says whether
+  the first is the only one).
+- **Cuts**: `prune` names hard checks that, false on a partial node, stay false on every node below it; such a node is
+  not expanded. A Tree's `bound(node)` is the best objective any candidate below can reach; a node that cannot beat what
+  is kept is not expanded. `budget` caps the asks.
+- **When it is exact**: `run.exact` is True when the search ended by itself — every candidate was asked or cut — and
+  `run.why_exact` names what that rests on: that the prune checks are monotone and the bound optimistic. Neither is
+  checked by solvi; a wrong promise can cut the best candidate. When the budget stops it, `exact` is False and the best
+  is the best of what was asked; when nothing is accepted, `run.escalation` says why (and a `refine` with a proposer can
+  take over a space too big to search).
+- **Facts computed once**: parts that do not read the candidate (the problem read into typed facts — by rules or by a
+  model) run once and are held for every candidate (`run.held`); a model reading the problem is called once, not per
+  candidate. The searched asks are not stored or counted; the winner is asked again in full with the System
+  (`run.response`, stored when the System stores), and if that full ask does not accept it the search escalates instead.
+  `run.to_dict()` / `SearchRun.from_dict(d, catalog=cat)`; `run.replay(system)` replays the winner's trace and checks it
+  is accepted and its objective recomputes (pass a function objective again).
+
+**Measured** on NATURAL PLAN (100 eval problems of each kind, facts read by the solution's rule-based readers, its
+constraint checks and renderers reused): right 95 / 100 / 98 (meeting slot / day of meetings / multi-city trip),
+the same plan text as a hand-written depth-first search on 300 of 300, against 92 / 75 / 43 for the LLM's own plans and
+95 / 92 / 58 for the check-and-re-ask loop. Every search ended by itself (`exact`) and every winner replays. What stays
+problem-specific: the space of each kind (3 lines each) and, for trips, a walk of a partial order so the checks can judge
+a prefix (24 lines) — in place of 55 lines of search. The price is speed: 1,295 / 227,352 / 73,543 asks, 2 s / 246 s /
+40 s for the 100 problems of each kind on a laptop CPU (1–3 ms an ask), where the plain search took about a second for
+all 300.
+
+**Not done here:** no proposals by a model, no bisection over numbers (`res.counterfactual` does that), no parallel
+asks, no proof of the prune and bound promises. Each candidate is a full ask — about 1–3 ms with the trace hashed — so a
+space of millions is for code, not for this search.
 
 ## Verified charts: a specialist that checks every number
 
