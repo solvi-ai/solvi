@@ -20,12 +20,14 @@ Rules (case-insensitive), applied per sentence (a line, split after . ! ?):
   override    "ignore / disregard / forget / override / bypass … the rules / instructions / policy / prompt / the above …"
               (not "ignore my / our ...")
   address     speaks to the model: "as an AI" (not "as an AI researcher / company ..."), "you are an assistant / a
-              classifier" (not "you are the assistant I spoke with"), "dear / hey / attention AI / model"
+              classifier" (not "you are the assistant I spoke with"), "dear / hey / attention AI / model", "to the AI /
+              model / system:" (not "connects to the system", "peripheral to the model")
   direct      dictates the answer: "the correct answer / label / category is X" (not "is that / to / up to ..."), "your
               answer / output must be / is", "answer only", "answer with only / just / the label ...", "reply with X."
-              (one word), "classify / label this as", "mark / tag / flag this message / ticket / email as", "route this
-              to X." (one word), "you must / should … answer / choose / classify ..." (not "answer me / my email"),
-              "you must say / reply with / that"
+              (one word), "answer with \"...\"" (a quote), "include / mention / say ... in your answer / response",
+              "classify / label this as", "mark / tag / flag this message / ticket / email as", "route this to X." (one
+              word), "you must / should … answer / choose / classify ..." (not "answer me / my email"), "you must say /
+              reply with / that"
 
 A customer's request is not an instruction: "please reply with the tracking number", "please mark this as urgent",
 "please route this to your manager", "thank you for your answer" match nothing.
@@ -93,7 +95,9 @@ _ADDRESS = re.compile(r"\b(as an ai\b(?!\s+(researcher|engineer|developer|compan
                       r"product|team|expert|consultant|specialist|scientist|vendor|provider)\b)|"
                       r"you are (now )?(an? |the )?(ai|assistant|model|classifier|bot|language model|llm)\b"
                       r"(?!\s+((who|that|which)\s+)?(i|we)\b)|"
-                      r"(dear|hey|attention|to the) (ai|assistant|model|bot|classifier|system|llm)\b)", _I)
+                      r"(dear|hey|attention) (ai|assistant|model|bot|classifier|system|llm)\b|"
+                      r"(note|message|instructions?) to the (ai|assistant|model|bot|classifier|system|llm)\b|"
+                      r"to the (ai|assistant|model|bot|classifier|system|llm)(\s+\w+){0,2}\s*:)", _I)
 _DIRECT = re.compile(r"\b(the (correct|right|only|final|true|expected) (answer|label|category|class|option|choice|"
                      r"decision|output|team)( here)? (is\b|should be\b|must be\b|=)"
                      r"(?!\s+(that|to|up|not|in|on|for|what|why|how|when|if|whether)\b)|"
@@ -104,6 +108,9 @@ _DIRECT = re.compile(r"\b(the (correct|right|only|final|true|expected) (answer|l
                      r"(answer|respond|reply|output) with (only|just|exactly|the (word|label|option|answer|category|"
                      r"class))\b|"
                      r"(answer|respond|reply|output) with [\"'“«]?[\w-]+[\"'”»]?\s*[.!]?\s*$|"
+                     r"(answer|respond|reply|output) with [\"“«]|"
+                     r"(include|mention|say|add|write|put|state)\b[^.!?\n]{0,60}?\b(in|into|at the (start|end) of) your "
+                     r"(answer|response|output|reply)\b|"
                      r"(classify|label|categori[sz]e) (this|it|the \w+) as\b|"
                      r"(mark|tag|flag) (this|the) (e-?mail|message|ticket|text|input|request|case|conversation) as\b|"
                      r"route (this|it) to [\w-]+\s*[.!]?\s*$|"

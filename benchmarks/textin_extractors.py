@@ -12,6 +12,9 @@ hand-written code (or the text's author) gives it:
     invoices   examples/03_invoices.py: 40 generated invoices — vendor, amount (total due), due_date; gold = its extractors
     tickets    gallery/11_refund_double_charge: the 16 support tickets — the amount claimed; gold = the task's extractor
     claims     examples/16_primitives.py: the three damage claims — the amount
+    strings    30 short texts written for this benchmark (a pre-registered set, counted apart from the rest): string
+               fields with no pattern — order id, new address, customer name, vendor, invoice number — in "key: value"
+               lists and in sentences, next to other fields, and with cue words that are followed by no value
 
 Each field is read with the question given (routing apart) by TextIn with each extractor: the span pointer alone
 (`DeciderExtractor`), `CueExtractor` alone, and the two in order both ways. A field is "right" when the value read is the
@@ -198,6 +201,75 @@ def claims_rows():
     return _system(Claim, {"pay": ["amount"]}), [("pay", t, {"amount": gold[k]}) for k, t in ex.CLAIMS.items()]
 
 
+# --------------------------------------------------------------------------------------------------- strings
+# Written for this benchmark before CueExtractor's reading of strings without a pattern was changed (pre-registered:
+# the texts and their values were fixed first, then the code was measured on them): identifiers, addresses, names and
+# vendors with no pattern given, in "key: value" lists and in sentences, with other fields next to them and traps where
+# a cue word is followed by no value.
+class Order(BaseModel):
+    order_id: str = Field(description="The order number")
+    new_address: str = Field(description="The new delivery address")
+    customer_name: str = Field(description="The customer's name")
+
+
+class Bill(BaseModel):
+    vendor: str = Field(description="Who issued the invoice")
+    invoice_number: str = Field(description="The invoice's number")
+
+
+STRINGS_ORDER = [   # (text, order_id, new_address, customer_name)
+    ("order: A-10457, amount: 1", "A-10457", N, N),
+    ("order_id: A-5, 20 EUR, bought yesterday", "A-5", N, N),
+    ("Order id: 88123. New address: 12 Elm Street, Springfield. Name: Jane Doe.", "88123", "12 Elm Street, Springfield",
+     "Jane Doe"),
+    ("Please send order A-77 to 5 Rue de Rivoli, Paris.", "A-77", "5 Rue de Rivoli, Paris", N),
+    ("Hi, my name is Tom Baker and my order is A-4471. The new address is 221B Baker Street, London.", "A-4471",
+     "221B Baker Street, London", "Tom Baker"),
+    ("Customer: Anna Smith, order A-12, address: Hauptstrasse 3, Berlin", "A-12", "Hauptstrasse 3, Berlin", "Anna Smith"),
+    ("New address for A-31: 10 Downing Street, London", "A-31", "10 Downing Street, London", N),
+    ("I moved. Please update my order.", N, N, N),
+    ("Order number: B-2207; deliver to: 7 King's Road, Chelsea; name: Lee Chang", "B-2207", "7 King's Road, Chelsea",
+     "Lee Chang"),
+    ("Заказ: A-900, новый адрес: ул. Ленина 5, Казань", "A-900", "ул. Ленина 5, Казань", N),
+    ("order A-10457, please change the address to 14 Baker Street, London", "A-10457", "14 Baker Street, London", N),
+    ("The order is A-555 and the customer is Maria Lopez.", "A-555", N, "Maria Lopez"),
+    ("name: Ivan Petrov, order: A-1001, new address: Nevsky 28, St Petersburg", "A-1001", "Nevsky 28, St Petersburg",
+     "Ivan Petrov"),
+    ("Ticket about order A-3: the parcel never arrived.", "A-3", N, N),
+    ("Address unchanged. Order: Z-99.", "Z-99", N, N),
+    ("Customer name: O'Brien, Patrick. Order: A-640.", "A-640", N, "O'Brien, Patrick"),
+    ("My order A-2 was sent to the old address, please use 9 High Street, Oxford instead.", "A-2", "9 High Street, Oxford",
+     N),
+    ("order: A-10457 amount: 15 EUR", "A-10457", N, N),
+    ("Hello, this is Sarah Connor. Order A-1984. Please ship to 1 Main St, Los Angeles.", "A-1984", "1 Main St, Los Angeles",
+     "Sarah Connor"),
+    ("order: 4471-B / name: Kim", "4471-B", N, "Kim"),
+]
+STRINGS_BILL = [   # (text, vendor, invoice_number)
+    ("Invoice number: INV-2231, vendor: Acme Corp, total: 1,200 EUR", "Acme Corp", "INV-2231"),
+    ("Vendor: Globex Ltd. Invoice: 7781.", "Globex Ltd", "7781"),
+    ("invoice INV-77 from Initech, due 2026-10-01", "Initech", "INV-77"),
+    ("Invoice: 5521, supplier: Wayne Enterprises", "Wayne Enterprises", "5521"),
+    ("Vendor is Stark Industries, invoice number is SI-0042.", "Stark Industries", "SI-0042"),
+    ("Invoice: SI-9 (vendor: Umbrella)", "Umbrella", "SI-9"),
+    ("Please pay the attached invoice.", N, N),
+    ("vendor = Hooli; invoice = H-12", "Hooli", "H-12"),
+    ("The vendor will be confirmed later. Invoice: X-1", N, "X-1"),
+    ("Invoice for order A-5: issued by Soylent Inc, number SO-81.", "Soylent Inc", "SO-81"),
+]
+
+
+def strings_rows():
+    """Two systems' worth of string fields in one: the order fields and the invoice fields, each its own question."""
+    class Strings(Order, Bill):
+        pass
+
+    rows = [("change_order", t, {"order_id": o, "new_address": a, "customer_name": c}) for t, o, a, c in STRINGS_ORDER]
+    rows += [("register_invoice", t, {"vendor": v, "invoice_number": i}) for t, v, i in STRINGS_BILL]
+    return _system(Strings, {"change_order": ["order_id", "new_address", "customer_name"],
+                             "register_invoice": ["vendor", "invoice_number"]}), rows
+
+
 # --------------------------------------------------------------------------------------------------- measuring
 def same(a, b):
     if isinstance(b, float) and isinstance(a, (int, float)):
@@ -211,6 +283,9 @@ def judge(fr, gold):
     if fr.ok:
         return "right" if gold is not None and same(fr.value, gold) else "wrong"
     return "missed" if gold is not None else "absent"
+
+
+PREREGISTERED = ("strings",)     # counted apart: "all" stays the repository's texts
 
 
 def run(system, rows, extractor, decider):
@@ -236,23 +311,27 @@ def main():
     m = DecideModel.load(a.model, backend=a.backend)
     print(f"{a.model} ({m.backend}) loaded in {time.perf_counter() - t0:.1f} s; pointer {m.has_pointer}")
     sets = {"shop": shop_rows(), "refunds": refunds_rows(), "invoices": invoices_rows(), "tickets": tickets_rows(),
-            "claims": claims_rows()}
+            "claims": claims_rows(), "strings": strings_rows()}
     ptr, cue = DeciderExtractor(m), CueExtractor()
     extractors = {"pointer": ptr, "cue": cue, "pointer, then cue": [ptr, cue], "cue, then pointer": [cue, ptr]}
     out = {"model": a.model, "backend": m.backend, "sets": {}}
     total = {k: Counter() for k in extractors}
+    total_str = {k: Counter() for k in extractors}
     print(f"{'set':10} {'extractor':18} {'right':>6} {'wrong':>6} {'missed':>7} {'absent':>7}")
     for name, (system, rows) in sets.items():
         out["sets"][name] = {}
         for label, ex in extractors.items():
             c, per = run(system, rows, ex, m)
-            total[label].update(c)
+            (total_str if name in PREREGISTERED else total)[label].update(c)
             out["sets"][name][label] = {"total": dict(c), "per_field": {f: dict(v) for f, v in per.items()}}
             print(f"{name:10} {label:18} {c['right']:6} {c['wrong']:6} {c['missed']:7} {c['absent']:7}")
     print()
     for label, c in total.items():
         print(f"{'all':10} {label:18} {c['right']:6} {c['wrong']:6} {c['missed']:7} {c['absent']:7}")
+    for label, c in total_str.items():
+        print(f"{'strings':10} {label:18} {c['right']:6} {c['wrong']:6} {c['missed']:7} {c['absent']:7}")
     out["total"] = {k: dict(v) for k, v in total.items()}
+    out["total_strings"] = {k: dict(v) for k, v in total_str.items()}
     if a.json:
         with open(a.json, "w") as f:
             json.dump(out, f, indent=1)
