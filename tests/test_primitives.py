@@ -624,7 +624,7 @@ def test_a_typed_span_reads_dates_and_numbers_as_people_write_them():
         with pytest.raises(ValueError, match=why):
             span_value(d, text)
     for typ, text, want in ((float, "149.90", 149.9), (float, "41,908.56 USD", 41908.56), (float, "EUR 18,851.12", 18851.12),
-                            (float, "1 500 000 руб", 1500000.0), (float, "1.5 million", 1500000.0), (float, "1.000", 1.0),
+                            (float, "1 500 000 руб", 1500000.0), (float, "1.5 million", 1500000.0), (float, "1.0000", 1.0),
                             (int, "1,200", 1200), (int, "2k", 2000), (Decimal, "€12,50", Decimal("12.5"))):
         assert span_value(typ, text) == want, text
     for typ, text in ((float, "5%"), (float, "3 100"), (float, "about 20 or 30"), (int, "12.5"), (int, "twelve"),
@@ -731,3 +731,15 @@ def test_a_wrong_number_is_not_verified_by_a_longer_number_that_contains_it():
     assert ok.trace.records[0].extra["evidence"] == [[26, 28, "doc", "30"]] and ok.trace.replay(build(30, "30"))["ok"]
     by_offsets = build(3, Quote("3", 26, 27)).ask(doc)             # a Quote says where it points: checked literally there
     assert by_offsets["short"].answer == "yes"
+
+
+def test_a_typed_span_does_not_read_an_ambiguous_number():
+    """Span[float] read "2.500" as 2.5 while the guarded parser, and the docstring, refuse it as ambiguous."""
+    from decimal import Decimal
+    from solvi.typed import span_value
+    for t in ("2.500", "1.000", "12.345"):
+        for vtype in (float, Decimal):
+            with pytest.raises(ValueError, match="ambiguous"):
+                span_value(vtype, t)
+    assert span_value(float, "2.50") == 2.5 and span_value(float, "1.000,50") == 1000.5 and span_value(int, "1,000") == 1000
+    assert span_value(float, "2.5000") == 2.5 and span_value(float, "1e3") == 1000.0 and span_value(float, "2.500", strict=True) == 2.5

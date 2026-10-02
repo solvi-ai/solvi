@@ -143,9 +143,15 @@ def adapter(t):
     return ta
 
 
+def _NUMBER_TYPES():
+    from decimal import Decimal
+    return (int, float, Decimal)
+
+
 def span_value(vtype, text, strict=False):
     """The value a typed span states (`Span[float]`, `Span[date]`, ...) → the value; ValueError when the text is not one.
-    First the type's own reading of the text ("149.90", "2026-09-12"). When that fails and the type is a date or a number
+    First the type's own reading of the text ("149.90", "2026-09-12") — except a number the guarded parser calls
+    ambiguous ("2.500", "1.000": refused, as below). When that fails and the type is a date or a number
     (date, int, float, Decimal), the deterministic parsers of solvi.textin read what people write — "21 July 2026", "July
     21, 2026", "18 октября 2026 г.", "21.07.2026"; "41,908.56 USD", "EUR 18,851.12", "1 500 000 руб", "1.5 million" —
     and refuse what would be a guess: a numeric date that reads both ways ("03/04/2026", "12.09.2026": day or month
@@ -153,6 +159,13 @@ def span_value(vtype, text, strict=False):
     reading only."""
     t = text.strip()
     ta = adapter(vtype)
+    if not strict and vtype in _NUMBER_TYPES():       # a number: what the guarded parser calls ambiguous ("2.500": two
+        from .textin import ParseError, parse_number  # and a half, or two thousand five hundred?) is not read by the
+        try:                                          # type's own reading either
+            parse_number(t, {"integer": True} if vtype is int else None)
+        except ParseError as why:
+            if "ambiguous" in str(why):
+                raise ValueError(str(why)) from None
     try:
         return ta.validate_python(t)
     except ValueError as err:
