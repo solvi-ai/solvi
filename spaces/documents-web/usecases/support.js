@@ -36,7 +36,7 @@ def urgency(deadline, today):
 
 QUESTIONS = [
     Question("route", "Which queue?", Answer.choice(["billing", "fulfilment", "general", "ask for order number"]),
-             checkpoints=["has_order_number"]),
+             requires=["has_order_number"]),
     Question("urgency", "Urgency", Answer.choice(["high", "normal"])),
 ]
 `,

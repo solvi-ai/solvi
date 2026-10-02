@@ -42,7 +42,7 @@ def days_left(due, today):
 
 QUESTIONS = [
     Question("pay", "Payment decision", Answer.choice(["schedule", "escalate", "reject"]),
-             checkpoints=["iban_checksum", "not_overdue"]),
+             requires=["iban_checksum", "not_overdue"]),
     Question("days_left", "Time left to pay", Answer.choice(["overdue", "under a week", "a week or more"])),
 ]
 `,

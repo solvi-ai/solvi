@@ -39,7 +39,7 @@ def sign(notice_days):
     return "sign" if notice_days <= 60 else "negotiate"     # tenant should be able to leave on two months' notice
 
 QUESTIONS = [
-    Question("sign", "Sign as is?", Answer.choice(["sign", "negotiate"]), checkpoints=["deposit_within_cap"]),
+    Question("sign", "Sign as is?", Answer.choice(["sign", "negotiate"]), requires=["deposit_within_cap"]),
     Question("pets_allowed", "Are pets allowed?", Answer.choice(["yes", "no", "not stated"])),
 ]
 `,
