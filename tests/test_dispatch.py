@@ -390,3 +390,20 @@ def test_the_slow_paths_not_stated_is_an_answer_or_with_unknown_human_a_hand_off
     res = d.ask({"email": "hello again"})
     assert res.by == "human" and "none of the options" in res.reasons[-1]
     assert d.replay(res)["ok"]
+
+
+def test_a_stored_not_stated_answer_is_unknown_again_and_its_hand_off_replays(tmp_path):
+    from typing import Literal
+
+    from solvi import Maybe, Unknown
+    srv = FakeLLM(reply='{"answer": "not stated", "confidence": 0.9, "quote": ""}')
+    model = llm(URL, "m", api_key="k", opener=srv, sleep=lambda s: None, ask="confidence")
+    part = model.decision("team", "Which team?", "email", Maybe[Literal["billing", "shipping"]])
+    cat = Catalog()
+    s2 = System(cat, [part.question(cat)])
+    d = Dispatcher(fast(), SlowPath(s2), unknown="human", supervise=1.0, storage=JSONLStorage(tmp_path / "d.jsonl"))
+    d.ask({"email": "hello"})
+    d.ask({"email": "charged"})                                    # a check whose slow answer is "not stated"
+    back = d.stored()
+    assert back[0].s2.answer is Unknown and back[0].candidates["s2"] is Unknown
+    assert d.replay_all() == []

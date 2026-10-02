@@ -241,8 +241,8 @@ class Thought:
             else:
                 from .search import SearchRun
                 rec = SearchRun.from_dict(rec, catalog=system)
-        return cls(d["mode"], d.get("answer"), d["accepted"], d.get("why"), rec, Cost.from_dict(d.get("cost") or {}),
-                   d.get("stopped"))
+        return cls(d["mode"], _restored(d.get("answer")), d["accepted"], d.get("why"), rec,
+                   Cost.from_dict(d.get("cost") or {}), d.get("stopped"))
 
 
 class SlowPath:
@@ -415,8 +415,8 @@ class Dispatched:
         from .storage import plain
         return {"question": self.question, "answer": plain(self.answer), "by": self.by, "action": self.action,
                 "reasons": list(self.reasons), "s1": self.s1.to_dict(),
-                "s2": self.s2.to_dict() if self.s2 is not None else None, "candidates": plain(self.candidates),
-                "disagreement": plain(self.disagreement), "cost": {k: v.to_dict() for k, v in self.cost.items()},
+                "s2": self.s2.to_dict() if self.s2 is not None else None, "candidates": _stored(self.candidates),
+                "disagreement": _stored(self.disagreement), "cost": {k: v.to_dict() for k, v in self.cost.items()},
                 "n": self.n, "draw": self.draw, "spent_before": self.spent_before.to_dict(), "drift": self.drift,
                 "expected": None if self.expected is None else self.expected.to_dict(), "over_budget": self.over_budget,
                 "config": self.config}
@@ -431,8 +431,8 @@ class Dispatched:
         from .system import Response
         s1 = Response.model_validate(d["s1"], catalog=system)
         s2 = Thought.from_dict(d["s2"], slow_system or system) if d.get("s2") is not None else None
-        return cls(d["question"], d.get("answer"), d["by"], d["action"], list(d["reasons"]), s1, s2,
-                   d.get("candidates") or {}, d.get("disagreement"),
+        return cls(d["question"], _restored(d.get("answer")), d["by"], d["action"], list(d["reasons"]), s1, s2,
+                   _restored(d.get("candidates") or {}), _restored(d.get("disagreement")),
                    {k: Cost.from_dict(v) for k, v in (d.get("cost") or {}).items()}, d.get("n", 0), d.get("draw", 1.0),
                    Cost.from_dict(d.get("spent_before") or {}), d.get("drift"),
                    Cost.from_dict(d["expected"]) if d.get("expected") is not None else None, d.get("over_budget"),
@@ -842,6 +842,28 @@ def _would(r):
         best = max(p, key=lambda k: p[k])
         return best
     return None
+
+
+def _stored(v):
+    """A value as stored, dicts and lists all the way down (storage.plain writes "not stated" as its key)."""
+    from .storage import plain
+    if isinstance(v, dict):
+        return {str(k): _stored(x) for k, x in v.items()}
+    if isinstance(v, (list, tuple)):
+        return [_stored(x) for x in v]
+    return plain(v)
+
+
+def _restored(v):
+    """A stored value back: "not stated" (stored as its key) is solvi.Unknown again, in dicts and lists too."""
+    from .core import NOT_STATED_KEY, Unknown
+    if isinstance(v, str) and v == NOT_STATED_KEY:
+        return Unknown
+    if isinstance(v, dict):
+        return {k: _restored(x) for k, x in v.items()}
+    if isinstance(v, list):
+        return [_restored(x) for x in v]
+    return v
 
 
 def _vh(v):
