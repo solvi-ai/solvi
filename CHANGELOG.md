@@ -1,55 +1,172 @@
 # Changelog
 
-## 0.7.2 — unreleased
+## 0.8.0 — unreleased
 
-- **Checks that silently did nothing, and state the decider lost or mixed** (from the independent audit and from
-  solving nine tasks with the library):
-  - `agents.Guard`: a policy, `fn` or `require_request` that names a tool the guard does not have (a typo) raised
-    nothing and checked nothing — now a `ValueError` when the tool's checks are built; `authorize=True` on a guard
-    without an authorizer raises too. `guard.tool(name=..., schema=...)`, the docstring's own example, returned a
-    decorator and registered nothing: it now declares the tool at once (and still decorates a function).
-  - hooks: a rule whose id is a name the hook uses itself (`path`, `added_lines`, `result_text`, `instructions`,
-    `edit`) was never enforced or failed at edit time; two rules whose checks would share a name (`X` and `X-lines`)
-    likewise. Both are a `RulesError` when the rules load.
-  - `solvi test`: a case with a misspelled key (`"expcted"`), a `status` or `safeguards` entry for a question that
-    was not asked, or no expectation at all used to pass; each is now a problem of the case.
-  - a hard check's `then` answer outside the question's options made `ask` raise exactly when the check failed: the
-    question now abstains with the reason, and building the System warns.
-  - the decider's logits cache ignored "not stated": a `Maybe[...]` part and a plain one with the same task and
-    options shared one reply (the second got the other's answer and no model call).
-  - `save_adaptations` dropped the fifth key element of `evidence=` and pointer questions: after a reload the fit sat
-    on the plain question with the same task and options.
-  - `act_guard(signal="act")` on a part made with `use_act=False` recorded a promise nothing enforced: it raises.
-  - `fit`, `teach`, `adapt` and the correction memory learned from the placeholder zeros a remote model returns while
-    it does not answer: they raise ("the model gave no usable output ... nothing was learned").
-  - `solvi.systemone`: a reply with NaN, out-of-range or non-numeric probabilities was answered alone (NaN passes
-    every threshold): it escalates as a reply that breaks the contract, as `solvi.llm` already did.
-- **Replay checks the answers.** A replay re-computed the steps of a trace and never looked at the answers stored with
-  it: a response whose `no [forced]` was edited to `yes [ok]` replayed ok, and so did a store with the answer edited and
-  every hash recomputed (`replay_all` → `[]`, `solvi replay` exit 0, the report "Replay: ok"). `trace.replay(system)` now
-  derives the answers the trace gives (`System.answers_of`: nothing is re-run) and compares answer and status; a
-  difference is a mismatch of the new kind `answer` — "data damaged: a stored answer is not the one its trace gives" —
-  when the questions and the catalog are the recorded ones, else `recompute`. The result has `"answers": "same" |
-  "differ" | "unchecked"`; a bare `Catalog` cannot check answers (`"unchecked"`), so the README and the guide now replay
-  with the System. Not covered yet: an answer's confidence.
-- **A failed hard check always overrides — three ways it did not** (found by an independent audit):
-  - a check that returned a falsy value other than `False` — `0`, `None` from a forgotten return, `[]`, `""` — counted as
-    passed: the answer was `yes [ok]`, and in `solvi.agents.Guard` the call was allowed and made. A check's output is now
-    a bool (numpy's too); anything else rejects the step with the reason ("a check returns True or False, not NoneType"),
-    so the question abstains and the guard escalates. A check declared `-> bool` is validated by its type, as before.
-    **Behaviour change:** a check that passed by returning a truthy non-bool (a match object, a non-empty string) now
-    rejects its step too — return a bool.
-  - `cat.check(f, hard=True, then=...)` with the function passed directly registered a soft check without its options.
-  - an input key named like a part of the catalog replaced the part — a hard check named in the input never ran, over
-    `POST /ask`, the MCP question tools and `solvi ask --state` as well, and a fact given to the guard under a policy's
-    name switched the policy off. `ask` now raises `ValueError` for such a key (HTTP: 422); a given fact cannot stand in
-    for a check or a computed fact. **Behaviour change** for code that passed a computed fact in directly.
-- A typed input comes in the declared field order. With `System(inputs=Model)` a dict was validated but kept the
-  order its caller built it in, so two clients sending the same input gave the trace — and a decider that reads the
-  state — two different orders (a model instance already came in field order). The given facts are now the model's
-  fields in their declared order, then any other keys as given; nested models were already in field order, and a plain
-  `dict` field keeps its own. Hashes do not change (they are taken over sorted keys). Without `inputs=` a dict is
-  taken as it comes.
+0.8 gives every concept one name, makes the surface smaller and the decider protocol one, puts any model first (an LLM
+through `solvi.llm`, a decision service, or a local checkpoint for offline use), and fixes what an independent audit of
+0.7 found. Most renamed names still work in 0.8 with a `DeprecationWarning` that names the new one; they go in 0.9.
+Stores, calibration files and fingerprints written by 0.7.1 load, verify and replay unchanged (a test replays stores
+written by 0.7.1).
+
+### Breaking changes
+
+Removed or changed without a working alias:
+
+- Every `System` option after `questions` is keyword-only: `System(cat, qs, "file.jsonl")` is a TypeError —
+  `System(cat, qs, storage="file.jsonl")`. Every `ask` / `aask` option after the questions is keyword-only too:
+  `ask(state, ["q"], 4)` → `ask(state, ["q"], workers=4)`.
+- `act_guard` (of a part and of a Cascade / Vote / Route), `calibrate_for`, `adapt_lora`, `Guard.calibrate_authorizer`:
+  every option after the examples is keyword-only — `act_guard(examples, 0.1)` → `act_guard(examples, max_risk=0.1)`.
+  `systemone(url, model, key, 30.0)` → `systemone(url, model, key, timeout=30.0)`.
+- The octonion signature left the package: `sign(obj, "octonion")`, reading an octonion signature and `solvi verify
+  --sign --alg octonion` raise a ValueError pointing to `benchmarks/octonion_signature.py` (the default syndrome code
+  locates the same changes, 4x smaller, ~60x faster). `solvi verify` has no `--alg` option.
+- `model.decision(...)` raises for an option the question's kind does not use, where it accepted and ignored it (some
+  changed the part's fingerprint): `k=` off a ranking, `score_value=` off a score question, `bins=` / `unit=` /
+  `coverage=` off a number question, `other=` on a score or yes/no question, `min_margin=` on a multi-label one, `top_k=`
+  / `rerank=` without `long=`, `min_act=` / `max_error=` on a checkpoint without an act head, `kind=` that contradicts
+  `multi=True`. `decisions(schema, fields=[...])` raises for a field the schema does not have.
+- A wrong key, model or URL for a System One service (HTTP 401, 403, 404, another 4xx except 400 / 413 / 422) raises
+  `SystemOneError`, as `solvi.llm` raises `LLMError` (both are `solvi.remote.RemoteError`); it used to escalate every
+  decision, and `solvi models check` then reported "answered alone 0.0%" and exited 0.
+- `scorer.usage` of an LLM decider and `extra["llm"]["usage"]` count `input_tokens` / `output_tokens` /
+  `reasoning_tokens`, as a System One decider does (they were `prompt_tokens` / `completion_tokens`).
+- `guarantee["signal"]` of a Cascade / Vote / Route is a name — `"shared"`, `"shared-rank"` — as a part's is (`"act"`,
+  `"confidence"`); it was a sentence. Fingerprints and calibration files of 0.7 stay valid.
+- Escalation texts of remote models: "the LLM server refused the request: HTTP 400 — ..." (was "invalid input for the
+  endpoint: ..."), "the LLM server did not answer after 3 attempts: ..." (was "no answer from ... after 3 attempts").
+- Command lines that pass an option their mode does not read are refused (status 2) instead of being ignored: `solvi
+  serve` in HTTP, `--mcp` and `--guard` modes; `solvi ask --report` with `--json`, `--audit` or `--lang`; `--backend` /
+  `--api-key` without `--decider`; `solvi report --id` with period filters. `POST /ask` and `POST /ask_text` refuse a
+  body key they do not know (422) — a misspelled `"question"` used to ask every question.
+- `solvi ask --text --json` prints the text read as `"read"` (was `"textin"`), as `POST /ask_text` does.
+- Removed, nothing called them: `Catalog.producer`, `strategy.fact_of`, `Selection.expanded`, `serve.RequestTimeout`,
+  `SystemOneScorer.question`, `ModelStrategist(max_expand=)` / `search(max_expand=)`.
+- New in this release and renamed before it is published (no alias): `solvi.many.fit` → `fits` (its record key too),
+  `DriftMonitor.calibrate` → `set_reference`, `EpisodeView.revisits(kind, key)` → `revisits(key, kind)` with the key
+  required, `Episode.note(kind, key, value)` → `note(kind, key)`, `episode.Chooser(escalate_below=)` →
+  `min_confidence=`; `System.guarantee`, `solvi.guarantee.calibrate` and `OpenSetGate.calibrate` take `max_risk=` /
+  `max_error=` only.
+
+Renamed, the old name works in 0.8 with a warning (old → new):
+
+| 0.7 | 0.8 |
+|---|---|
+| `System(inputs=Model)`, `system.inputs` | `System(input_model=Model)`, `system.input_model` |
+| `System(costs="measured")`, `system.costs` | `System(cost_policy="measured")`, `system.cost_book` |
+| `System(journal=path)` | `System(storage=JSONLStorage(path))` (or `storage="file.jsonl"`) |
+| `system.ask(state, names=...)`, `aask(names=)`, `Service.ask(names=)`, `Shadow.ask(names=)` | `questions=` |
+| `Question(checkpoints=[...])`, `q.checkpoints`, `part.question(cat, checkpoints=)` | `requires=`, `q.requires` |
+| `res.computed_state`, `res.computed_state_text(lang)` | `res.state_text(lang)` |
+| `res.textin` | `res.read` |
+| `system.teach(..., source=)`, `store.save_correction(..., source=)` | `label_source=` |
+| `system.learn_rule(question, examples, facts=)` | `features=` |
+| `system.calibrate(question, states, truth)` | `system.calibrate(question, [(state, answer), ...])` |
+| `system.safeguard_report()`, `shadow.report()` | `safeguard_summary()`, `summary()` |
+| `Trace.value(name)` | `res.values[name]` (a given fact: `trace.init[name]`) |
+| `AnswerType.rank(v)` | `answer_type.options.index(v)` |
+| `model.decision(escalate_below=, act_threshold=, target_error=, unknown=)` (and `decide`, `decisions`, `questions`, a field's `json_schema_extra`) | `min_confidence=`, `min_act=`, `max_error=`, `not_stated=` |
+| `model.has_unknown`, `model.long_len`, `part.long_len` | `has_not_stated`, `max_len_long` |
+| `act_guard(risk=)`, `adapt_lora(risk=)`, `CorrectionMemory.calibrate(risk=)`, `Guard.calibrate_authorizer(risk=)` | `max_risk=` |
+| `calibrate_for(error=)`; its result's `"coverage"`, `"target_error"` | `max_error=`; `"answered"`, `"max_error"` |
+| a combination's `act_guard()["calls"]`, `combination.usage()` (`"per_question"`) | `"calls_per_question"`, `combination.calls()` |
+| `FastHead.update(row, answer)`, `Binary.observe(row, y)` | `teach(...)` |
+| `FastHead.cv_acc`, `Head.loo_acc` (each head's number under the other's name) | `FastHead.loo_acc`, `Head.cv_acc` |
+| `ModelStrategist()` without a model; `fallback=`, `fallbacks=` | `CostStrategist()`; `on_failure=`, `keep_alternatives=` |
+| `solvi.fast`, `solvi.learned`, `solvi.rules`, `solvi.strategy_model` | `solvi.heads`; `solvi.costs` + `solvi.strategist`; `solvi.rulelist`; `solvi.segment_model` |
+| `solvi.extract_model.SpanExtractor` | `solvi.extract_long.LongSpanExtractor` |
+| `MultiSpanExtractor.fit(docs, spans)`, `predict_doc(text)` | `fit([(text, spans), ...])`, `predict(text[, field])` |
+| `store.forget(fact, value)` (it never deleted anything) | `store.where_is(fact, value)` |
+| `JSONLStorage(path, catalog=)` (all backends), `store.get(id, catalog)`, `store.query(catalog=fingerprint)` | `system=`; `query(catalog_fp=)` |
+| `solvi.testing.check(system, case, state)` | `run_case(...)` |
+| a honesty case's `"gold"` | `"expected"`, as in `solvi test` cases |
+| `solvi hook ... --model M`, `$SOLVI_HOOK_MODEL` (hooks installed by 0.7 keep working) | `--decider M`, `$SOLVI_HOOK_DECIDER` |
+| `solvi.serve.Guard` (the ASGI middleware) | `solvi.serve.AccessGuard` |
+| `agents.Guard(facts=[names])` | `Guard(fact_names=[names])` |
+| the adapters' `declare=True` | `auto_declare=True` |
+| `run_proxy(context_messages=, context_chars=)` | `max_messages=`, `max_chars=` |
+| `System.learning(harvest_rules=True)` | — (it harvested nothing in the usual wiring; ignored) |
+
+Structure: `solvi.decide` is a package of layers (`kinds`, `state`, `wire`, `capabilities`, `backends`, `adapt`,
+`gate`, `part`, `model`) and re-exports every name it had; the combinations' base is public as
+`solvi.multi.Combination`; `ExperimentalWarning` and the "not stated" option name live in `solvi.core`; the helpers
+every command shares are in `solvi.command`, so no library module imports from `solvi.cli`; every module declares its
+public names in `__all__`, and the API reference shows only those (a helper that is not in `__all__` may change without
+notice).
+
+### New
+
+- **Any model first.** The README and the guide present the decider as whichever model you have: an LLM through
+  `solvi.llm` (the core install is enough), a System One service, or a local checkpoint such as solvi-base for offline
+  or cheap use — with solvi-base's model-card numbers where it is offered.
+- **`solvi.remote`**: the client every remote model shares (`solvi.llm`, `solvi.systemone`, `solvi.generate`, the chart
+  proposer) — the endpoint, the key in the header only, retries with backoff, token counts under one set of names, and
+  one policy for HTTP errors: a wrong key, model or URL raises, a refused input escalates that decision, no answer is
+  retried and then escalates.
+- **One decider protocol.** A decision part and a Cascade / Vote / Route take the same `act_guard(examples, *,
+  max_risk, signal, groups, min_group, delta)` and return the same keys, a combination's with `calls_per_question`,
+  `cost`, `scale` and `answered_by` besides.
+- **`solvi.generate`** — a model that writes: `generator(...).generate(messages, schema=..., parse=..., text=...,
+  quotes=[...])` returns a text, a parsed value or JSON validated against a pydantic model or a JSON schema, with the
+  strings that must be quoted from the text checked as written; an invalid reply raises `InvalidOutput` with the reason
+  and is never repaired. `sample(messages, k)`, `several(generators, messages)`; `writer.part(name, prompt)` is a catalog
+  part whose recorded reply replay re-reads through the parser and the schema without calling the model.
+- **`solvi.agree`**: agreement of generated candidates under a key you give (`agree(cat, "sql", "candidates",
+  key=row_digest)`): the first candidate of the largest group, its share as a plain number fact a rule, a head or a
+  guarantee can read, and a recorded tally that replay recomputes.
+- **`solvi.refine` and `Fail`**: a check can say why (`return Fail("Harold is busy 13:30 - 15:30")`, exported from
+  `solvi`), and `refine(system, state, question, propose=...)` runs propose → check → re-ask with the reasons of the
+  failed hard checks → escalate after `rounds`; every round is a stored decision and `Refinement.replay(system)` checks
+  that the loop did what its record says.
+- **`System.guarantee` / `solvi.guarantee`**: a calibrated threshold with a stated promise on any question — answered by
+  a fitted head, a rule or a model — and on any signal (the confidence, the act probability, a fact the catalog
+  computes, a function of yours): `max_risk=` (P(answered alone and wrong) of all inputs), `max_error=` (the error among
+  the answers given alone, with probability 1 − delta) or `method="empirical"` (no promise, and it says so); one-sided
+  (`answer=`), per group (`groups="answer"`), cross-fitted heads (`folds=`). A signal that does not separate right from
+  wrong is refused; the verdict is a hashed record of every answer and replay re-derives it.
+  `solvi.guarantee.calibrate` does the same for any scalar.
+- **`solvi.openset.OpenSetGate`**: inputs from outside the calibration set — a threshold sized for the share of such
+  inputs, followed as the stream goes (an upper bound over the last 25 and 200 decisions), and a change detector with
+  false flags bounded by simulation; `leave_out(examples, make)` simulates outside inputs by leaving options out.
+- **`solvi.sets.decide_set`**: the answers of many items made consistent under set-level rules (`AtMostOne`,
+  `ExactlyOne`, `Capacity`, `Exclusive`) — the most probable combination of the items' own answers, solved exactly by an
+  integer program per connected component (or greedily, as asked); fixed answers never change, each changed item cites
+  the group and the items holding it, and the record replays.
+- **`solvi.search`**: candidates run through a System's checks, the best kept by an objective; spaces from a list, a
+  dict of domains, a depth-first `Tree` with bounds, or a function of the facts; partial nodes cut by declared monotone
+  hard checks, `budget=` on the asks, the winner asked again in full and stored; `run.exact` says whether the search
+  ended by itself.
+- **Agent guard: "the user confirmed this"** — `guard.require_confirmation(tools, ...)`: a call goes ahead only when a
+  message of the assistant names every required value and the user's next message accepts it explicitly
+  (`solvi.agents.accepts`, English and Russian). `GuardDecision.advice()` says what to do next per failed check and
+  `feedback()` gives the messages to append to the model's history. `guard.policies_of(name)`,
+  `guard.definition(name, policies=True)` and the adapters' `show_policies=True` show a tool's policies to the model.
+  New grounding matchers `"nocase"` and `"id"`; every matcher reads Unicode spaces as plain ones.
+- **`solvi.drift`**: besides the window tests, a sequential test (`Cusum`) on the share answered alone, the mean
+  confidence and the mean act probability flags real shifts within a few dozen decisions; false flags on an unchanged
+  stream are bounded by `alpha` within `horizon` decisions. `DriftMonitor.set_reference(...)`.
+- **`System.fit` is one entry point**: the closed-form ridge head (`FastHead`, taught at once by `teach`, refitted as
+  corrections accumulate) with facts selected by the exact leave-one-out error; `select=False` keeps every computable
+  fact. `fit_fast(...)` still works with a DeprecationWarning (it is `fit(..., select=False)`). The given keys are
+  feature candidates too, as the guide says.
+- **`ask(early_exit=False)`** (also `aask`, `ask_text`, `aask_text`, and `System(early_exit=)`): compute the whole flow
+  although a hard check failed — the answers are the same, and `res.values` and the trace hold every value.
+- `ask_text`: `CueExtractor` is the default field reader whatever the decider (chosen by measurement on every text in
+  the repository with typed fields, `benchmarks/textin_extractors.py`); a string without a pattern ends before the next
+  key or another field's cue; an unsure read falls through to the next extractor; `solvi ask --text --today DATE`.
+- `llm(max_len=)` / `systemone(max_len=)`: how much a remote model reads per request under `long="retrieve"`. A request
+  that asks the model to reason gets the reply contract in the prompt (servers that enforce a format by constrained
+  decoding can skip the thinking) and `max_tokens` 2,048; a reply that skipped the reasoning is marked.
+- A `MultiSpanExtractor` saves and loads (`save(path)` / `load(path)`), and both extractors speak one protocol.
+- `solvi check`: five more findings (`rule_returns_non_option`, `hard_check_untyped`, `unused_rule`,
+  `input_not_declared`, `uses_unknown`) and `mutual_producers`; it takes a task file or a folder, as `solvi test` does.
+- New extras `solvi[pydantic-ai]`, `solvi[langgraph]`, `solvi[openai-agents]`; an adapter imported without its
+  framework names the extra.
+- `solvi` exports `Trace`, `Result`, `Record` and `MISSING`; every store closes and is a context manager.
+- Benchmarks: `ask_speed.py` (the README's Speed table), `textin_extractors.py` with a pre-registered set of string
+  fields, `drift_simulation.py` (what DriftMonitor flags on simulated streams), `octonion_signature.py` (the experiment
+  that left the package). A weekly CI workflow runs the tests that load
+  the published decider.
 - `solvi.worldmap.WorldMap`: a map of an environment that an agent builds by acting. Edges are claims "(state, action)
   leads to state" with a status, a source (seen, observed, told, human) and evidence; an observation refutes a claim
   whoever made it — a person, an outdated document; every write is in a hash-chained journal; `next` gives the action
@@ -63,7 +180,7 @@
   by code before asking, calibrate on your own stream, keep an agent's memory in the decision's input, and more, each
   with its number.
 - `store.redact(id, by=, note=)`: erasure that keeps the chain. A person's data in a stored decision could only be
-  found (`forget` is a report): deleting or editing the record breaks the hash chain, and rewriting the hashes after
+  found (`forget`, now `where_is`, is a report): deleting or editing the record breaks the hash chain, and rewriting the hashes after
   it looks exactly like tampering. `redact` removes the record's content — the response with its input and trace, the
   meta; a correction's input and answer — and keeps its place, time, hash and id, marks it `redacted` (who, why, the
   digest of what was removed) and appends a record of kind `redaction` that names it. `verify()` passes, also against
@@ -77,7 +194,7 @@
   and signature too). `keep_answers=False` removes the answers and keeps their digest. A record of format 1 (written by
   0.7.1) has one flat hash: redacting it works, and `verify()` lists it under `"unverified"`; a format-1 record after a
   format-2 one is a problem, so a record cannot claim the old format to escape the check.
-- `solvi.fast.CandidateHead`: a choice among candidates that change with every decision, learned from the candidates'
+- `solvi.heads.CandidateHead` (`solvi.fast` until 0.8): a choice among candidates that change with every decision, learned from the candidates'
   features (a `FastHead` asked "is this the one to take?" per candidate; `fit(steps)`, `choose(candidates)`,
   `teach(candidates, chosen)` in about a millisecond). Heads, `fit` and `teach` need fixed options; an agent's
   candidates are new at every step. Measured on two tasks: a hidden formula over four features 0.93 (0.81 after 30
@@ -111,9 +228,6 @@
   error and `coverage_at` — and flags a signal only when its test is significant and the change is large enough. With
   solvi-base on a stream of support tickets that changes at one point: flagged 37 decisions after the change, no false
   flag on 200 decisions before it (`window=100`; with 50 there are false flags). It only reports; what to do is yours.
-- `solvi.textin.parse_number` refuses a spelled-out number that goes on instead of cutting it: "две тысячи триста" was
-  read as 2000 and "one hundred fifty" as 100 (the words after the scale were dropped). A number with one scale word
-  is read as before ("two thousand", "полтора миллиона", "1.5 million").
 - `long="retrieve"` can search by other words than the question: `decision(..., long="retrieve", retrieve_query="Invoice
   No Contract No Ref Счёт №")`. BM25 matches words, and a field written as a labelled line, or a document in another
   language than the question, shares none with it: then nothing matches and the first sections are read. The decider
@@ -121,6 +235,158 @@
   without it keeps its fingerprint). With solvi-base on 41 synthetic documents of 1,100–4,800 tokens and six fields:
   the answer's line among the sections read 66% → 88% (Russian documents under English questions 25% → 92%), field
   accuracy 62% → 69%.
+- An input read cut is no longer silent. Without `long=`, a text that does not fit `max_len` (minus the question) was
+  cut by the tokenizer and nothing said so: the model answered a question about a fact at the end of the text as sure
+  as ever, and with many options the input was left a few dozen tokens. The decision now carries
+  `extra["truncated"] = {"input_tokens", "read_tokens", "question_tokens", "max_len"}` — exactly what the encoder read,
+  for a question alone, a shared pass and the block layout — the audit prints "read 478 of 1451 input tokens (the rest
+  was cut)" (Russian too), and a `LongInputWarning` is raised once per part. The answer itself is unchanged; a text
+  shorter in bytes than the tokens left for it is not tokenized again (7 µs per decision; 1.8 ms on a 1,451-token
+  text). `DecideModel.truncation(spec, text)` gives the numbers without a decision. With `long="retrieve"` or
+  `long="full"` nothing is cut and nothing is marked.
+- Options that do not fit say so in their own words: instead of `task and options do not fit in 512 tokens: Truncation
+  error: Sequence to truncate too short to respect the provided max_length`, the error gives the number of options,
+  the tokens the question takes and the tokens a pass reads, and what to do (a shortlist first, shorter descriptions,
+  a larger `max_len`).
+- `perturb=k` also escalates when an instruction leaves the answer and lifts the model's confidence. A variant whose
+  answer is the same now goes through the part's own gate (act threshold, `min_confidence`, the guarantee's
+  threshold); when the model would escalate without the instruction-like sentence, the decision escalates ("without
+  it the model does not answer alone"; `extra["perturb"]["unsure"]`). No extra forward pass. Same stand, `perturb=2`:
+  the injected answer given alone because of the injection in 0 of 80 (mixed), 0 of 80 (Russian) and 0 of 60 (English)
+  cases — what is left (4, 9) are tickets where the model gives that label alone on the clean text too. The
+  Bitext benchmark (`benchmarks/perturb_injection.py`, 200 messages) gives the same numbers as before.
+  A decision made under 0.7.1 on an input with such a sentence can replay as escalated under this version.
+- A model whose proposal was turned down stays in the trace. For a fact with alternative producers, the record kept the
+  identity of the producer that was used only: when a validator, a hard rule or the model's own escalation passed the
+  decision on to a rule, nothing in the trace said which model had run before it — `query(model=...)` did not find the
+  decision, `diff` printed `its model changed (#— → #b991…)`, and a replay could not tell that the model had changed.
+  A record now has `tried_models`: producer → `{"type", "id", "fp"}` and the probabilities it proposed, for every
+  model-backed producer that ran and was not used. The store indexes these models too, `diff` names the fingerprints
+  (and says `its model (#…) was rejected and is now used` when only that changed), and replay reports a changed
+  rejected model as a `model_changed` mismatch. Records where no model was turned down hash exactly as before.
+- Replay tells damaged data from a catalog that changed. A trace replayed against a catalog where a part (or a
+  producer) was renamed or removed used to raise `KeyError`, and `replay_all` reported it as `(0, "load", "KeyError:
+  ...")` — the same shape a damaged record has. Now it is a mismatch `part X is not in the catalog (renamed or
+  removed)`, and the steps after it are still checked on the recorded value. Every mismatch is a
+  `solvi.runtime.Mismatch`: the same `(step, name, reason)` triple (it compares, unpacks and serializes as before) with
+  a `.kind` — `integrity`, `recompute`, `model_changed`, `missing_part`, `missing_input`, `flow`, `error`. A replay with
+  mismatches also returns `"kinds"` and a one-line `"summary"` (`"data damaged: ..."`, `"data intact, catalog changed
+  (parts missing)"`, `"data intact, model changed"`, ...); `replay_all` carries them and the catalog verdict per stored
+  decision, tells a record that cannot be loaded (`"load"`) from a replay that raised (`"replay"`), and `solvi replay`
+  prints the summary and the kinds. A replay without mismatches returns exactly what it did.
+- Docs: a published long-input checkpoint for `long="full"` — [solvi-ai/solvi-large-long](https://huggingface.co/solvi-ai/solvi-large-long)
+  (solvi-large fine-tuned to read up to 8,192 tokens whole; `max_len_long: 8192`); the guide's "Long documents" section
+  names it.
+- Jeeves (github.com/PostHog/jeeves), a local decision model that reasons before it decides, works as a System One
+  decider: `systemone("http://127.0.0.1:8009", "jeeves-latest", extra_body={"options": {"max_think": 512,
+  "nothink_threshold": 0.9}})`. Its `options` pass through `extra_body` unchanged. `extra["systemone"]["usage"]` now
+  records `reasoning_tokens`, and `scorer.usage` sums them. The service's own `latency_ms` is recorded next to solvi's
+  `ms`. With `"return_reasoning": True`, each question's reasoning goes into `extra["systemone"]["reasoning"]` (text cut
+  to 1,000 characters, with its token count and whether the model thought; per option for a multi-label question). It is
+  recorded for the audit only: the answer is still read from the probabilities. `return_reasoning` does not change the
+  fingerprint, but the other options do.
+- The guide's System One section gains a "Local decision models" paragraph (Kev and Jeeves; Jeeves's published latency
+  numbers, attributed to its README). New tests run solvi against a stand-in Jeeves server that validates requests and
+  shapes replies as Jeeves's own server does: every question type, "not stated", multi-label, a vote with another
+  family, act_guard and replay.
+- Benchmark vs LLMs: Jeeves (PostHog, open weights, run on one A100) directly and inside solvi, with reasoning on and
+  off: `jeeves` and `jeeves-nothink` in `models.json`, their raw answers, the numbers in `expected.json`, and finding 7
+  on the page. With reasoning it scored 0.969 on bank messages and 0.863 / 0.912 on refunds / 3-way match.
+
+### Fixed
+
+Found by an independent audit of 0.7 and by solving real tasks with the library:
+
+- **A failed hard check always overrides — three ways it did not** (found by an independent audit):
+  - a check that returned a falsy value other than `False` — `0`, `None` from a forgotten return, `[]`, `""` — counted as
+    passed: the answer was `yes [ok]`, and in `solvi.agents.Guard` the call was allowed and made. A check's output is now
+    a bool (numpy's too); anything else rejects the step with the reason ("a check returns True or False, not NoneType"),
+    so the question abstains and the guard escalates. A check declared `-> bool` is validated by its type, as before.
+    **Behaviour change:** a check that passed by returning a truthy non-bool (a match object, a non-empty string) now
+    rejects its step too — return a bool.
+  - `cat.check(f, hard=True, then=...)` with the function passed directly registered a soft check without its options.
+  - an input key named like a part of the catalog replaced the part — a hard check named in the input never ran, over
+    `POST /ask`, the MCP question tools and `solvi ask --state` as well, and a fact given to the guard under a policy's
+    name switched the policy off. `ask` now raises `ValueError` for such a key (HTTP: 422); a given fact cannot stand in
+    for a check or a computed fact. **Behaviour change** for code that passed a computed fact in directly.
+- **Replay checks the answers.** A replay re-computed the steps of a trace and never looked at the answers stored with
+  it: a response whose `no [forced]` was edited to `yes [ok]` replayed ok, and so did a store with the answer edited and
+  every hash recomputed (`replay_all` → `[]`, `solvi replay` exit 0, the report "Replay: ok"). `trace.replay(system)` now
+  derives the answers the trace gives (`System.answers_of`: nothing is re-run) and compares answer and status; a
+  difference is a mismatch of the new kind `answer` — "data damaged: a stored answer is not the one its trace gives" —
+  when the questions and the catalog are the recorded ones, else `recompute`. The result has `"answers": "same" |
+  "differ" | "unchecked"`; a bare `Catalog` cannot check answers (`"unchecked"`), so the README and the guide now replay
+  with the System. Not covered yet: an answer's confidence.
+- **Checks that silently did nothing, and state the decider lost or mixed** (from the independent audit and from
+  solving nine tasks with the library):
+  - `agents.Guard`: a policy, `fn` or `require_request` that names a tool the guard does not have (a typo) raised
+    nothing and checked nothing — now a `ValueError` when the tool's checks are built; `authorize=True` on a guard
+    without an authorizer raises too. `guard.tool(name=..., schema=...)`, the docstring's own example, returned a
+    decorator and registered nothing: it now declares the tool at once (and still decorates a function).
+  - hooks: a rule whose id is a name the hook uses itself (`path`, `added_lines`, `result_text`, `instructions`,
+    `edit`) was never enforced or failed at edit time; two rules whose checks would share a name (`X` and `X-lines`)
+    likewise. Both are a `RulesError` when the rules load.
+  - `solvi test`: a case with a misspelled key (`"expcted"`), a `status` or `safeguards` entry for a question that
+    was not asked, or no expectation at all used to pass; each is now a problem of the case.
+  - a hard check's `then` answer outside the question's options made `ask` raise exactly when the check failed: the
+    question now abstains with the reason, and building the System warns.
+  - the decider's logits cache ignored "not stated": a `Maybe[...]` part and a plain one with the same task and
+    options shared one reply (the second got the other's answer and no model call).
+  - `save_adaptations` dropped the fifth key element of `evidence=` and pointer questions: after a reload the fit sat
+    on the plain question with the same task and options.
+  - `act_guard(signal="act")` on a part made with `use_act=False` recorded a promise nothing enforced: it raises.
+  - `fit`, `teach`, `adapt` and the correction memory learned from the placeholder zeros a remote model returns while
+    it does not answer: they raise ("the model gave no usable output ... nothing was learned").
+  - `solvi.systemone`: a reply with NaN, out-of-range or non-numeric probabilities was answered alone (NaN passes
+    every threshold): it escalates as a reply that breaks the contract, as `solvi.llm` already did.
+- A part named like the input field it reads is refused, at build time with an input model.
+- Stored untyped dates, sets, Decimals and tuples are restored, so the README quickstart replays from a store, and a
+  value that cannot be restored is "not verified", not "data damaged". `vhash` tells long numpy arrays apart and
+  hashes plain objects by their attributes.
+- More checks that silently did nothing: `once=True` behind the MCP proxy and the adapters (now per conversation in
+  PydanticAI and LangGraph), a constraint naming no question, a hard check's `then` outside the question's options.
+- The decider: the logits cache mixed a `Maybe[...]` question with a plain one; `save_adaptations` lost the key of
+  evidence questions; `act_guard(signal="act")` on a part made with `use_act=False` recorded an unenforced promise;
+  learning calls learned from the placeholder zeros of a remote model that did not answer; a System One reply with NaN
+  probabilities was answered alone; an LLM reply of an unexpected shape raised; an escalated decision read as "yes"; a
+  plain `Span` answered with a span the pointer itself rated below "no span"; conformal candidates were empty for the
+  escalations they are for; a calibration on the confidence ignored what the act head still escalated; act_guard and
+  calibrate_for refused span and ranking questions; a calibration silently mixed LLM log-probabilities with written
+  numbers; an input of the LLM could close the prompt's `<text>` block.
+- Calibration: `System.calibrate` diverged on constant confidences and counted its held-out examples; `threshold_for` /
+  `coverage_at` split tied confidences and depended on row order; every calibration checks its rates; a calibration
+  file without a guarantee loads; `solvi calibrate --groups` and CSV labels of integer options work;
+  `CorrectionMemory.calibrate()` with one input corrected twice, a memory file of another question, and its settings.
+- Text in: "half a million" and "two and a half million" are read whole, a number cut out of a longer one is refused,
+  "2 may be" is not a date, a date without a year is not guessed without `today=`, dates come back as ISO strings in
+  `read`, and `POST /ask_text` reads inside its in-flight slot.
+- Storage and tooling: a JSON line without a hash in a JSONL chain is passed over; `query(answer=True)` finds "yes";
+  `.DB` opens SQLite; the period report counts erased decisions and corrections and escapes every stored field; `solvi
+  test`, `--fuzz`, the pytest plugin and `solvi honesty` no longer write their inputs into the system's store; the
+  pytest plugin no longer runs files that are not solvi's; usage errors exit with status 2 and one line;
+  `solvi replay` / `diff` refuse a mistyped filter; `solvi diff` names the steps that changed the answer;
+  `models.load` raises instead of exiting the interpreter; `solvi init` projects keep passing their CI after the
+  calibration step.
+- Planning: facts derivable from each other are planned and run; every planner of a System uses its strategist;
+  `aliases.apply` keeps `timeout=` and `blocking=`.
+- Agents and hooks: grounding of typographic spaces and dashes; JSON-schema limits of a declared tool are enforced; an
+  optional argument at its `""` default is not reported missing; `forbid_calls` reads import aliases, keyword lines and
+  real paths; a secret blocked by a redact rule is not written to the hook store; install / uninstall with a quoted
+  path; the SDK MCP server answers like the built-in one.
+- Smaller: `DecideModel.load` expands `~`; the chart checker no longer reads a year as an amount; `WorldMap` and
+  `LongMemory` keep keys that are not strings and a map is rebuilt from its journal; `LongSpanExtractor` gives a
+  confidence inside [0, 1] on an empty document; evidence strings and quotes match whole words and numbers;
+  counterfactuals size a date change in days; `lang="ru"` leaves an exception's own text alone; the API reference has a
+  page for every module the docs import from.
+- A typed input comes in the declared field order. With `System(input_model=Model)` (`inputs=` in 0.7) a dict was validated but kept the
+  order its caller built it in, so two clients sending the same input gave the trace — and a decider that reads the
+  state — two different orders (a model instance already came in field order). The given facts are now the model's
+  fields in their declared order, then any other keys as given; nested models were already in field order, and a plain
+  `dict` field keeps its own. Hashes do not change (they are taken over sorted keys). Without `input_model=` a dict is
+  taken as it comes.
+- `solvi.textin.parse_number` refuses a spelled-out number that goes on instead of cutting it: "две тысячи триста" was
+  read as 2000 and "one hundred fifty" as 100 (the words after the scale were dropped). A number with one scale word
+  is read as before ("two thousand", "полтора миллиона", "1.5 million").
 - A typed span no longer answers a piece of a number, and reads dates and amounts as people write them. `Span[float]`
   and `Span[date]` validated the quoted text with pydantic alone, and a decider's pointer was trimmed to the first
   piece of its best span that parsed: from `EUR 18,851.12` it answered **851.12**, from `GBP 200,071.22` it answered
@@ -141,19 +407,6 @@
   solvi-base on a CPU, five questions per state, 120 typed-decision states: 120 passes instead of 600, 2.2 times
   faster, the same answer as one question per pass for 530 of 600 questions (88%) and the same act / escalate for 86%
   — which is why the published checkpoints keep it off.
-- An input read cut is no longer silent. Without `long=`, a text that does not fit `max_len` (minus the question) was
-  cut by the tokenizer and nothing said so: the model answered a question about a fact at the end of the text as sure
-  as ever, and with many options the input was left a few dozen tokens. The decision now carries
-  `extra["truncated"] = {"input_tokens", "read_tokens", "question_tokens", "max_len"}` — exactly what the encoder read,
-  for a question alone, a shared pass and the block layout — the audit prints "read 478 of 1451 input tokens (the rest
-  was cut)" (Russian too), and a `LongInputWarning` is raised once per part. The answer itself is unchanged; a text
-  shorter in bytes than the tokens left for it is not tokenized again (7 µs per decision; 1.8 ms on a 1,451-token
-  text). `DecideModel.truncation(spec, text)` gives the numbers without a decision. With `long="retrieve"` or
-  `long="full"` nothing is cut and nothing is marked.
-- Options that do not fit say so in their own words: instead of `task and options do not fit in 512 tokens: Truncation
-  error: Sequence to truncate too short to respect the provided max_length`, the error gives the number of options,
-  the tokens the question takes and the tokens a pass reads, and what to do (a shortlist first, shorter descriptions,
-  a larger `max_len`).
 - `CorrectionMemory.calibrate()` no longer returns the mark of "no proposal" as the threshold. When no stored case had
   another within the radius (Russian tickets: nearest cases 0.42–0.79 apart at the default radius 0.15), the
   leave-one-out run proposed nothing, and `min_strength` came back as `-1e9` with a guarantee line: any later proposal
@@ -208,52 +461,24 @@
   is emptied like one in "…", and "New instructions: …" is a role label in English too. A request is still not an
   instruction ("верните мне деньги", "отмените заказ по правилам возврата"); on 79,344 sentences of ordinary Russian
   text the rules fired once, and on 992 Enron e-mails and 5,000 support messages the new English rule never did.
-- `perturb=k` also escalates when an instruction leaves the answer and lifts the model's confidence. A variant whose
-  answer is the same now goes through the part's own gate (act threshold, `escalate_below`, the guarantee's
-  threshold); when the model would escalate without the instruction-like sentence, the decision escalates ("without
-  it the model does not answer alone"; `extra["perturb"]["unsure"]`). No extra forward pass. Same stand, `perturb=2`:
-  the injected answer given alone because of the injection in 0 of 80 (mixed), 0 of 80 (Russian) and 0 of 60 (English)
-  cases — what is left (4, 9) are tickets where the model gives that label alone on the clean text too. The
-  Bitext benchmark (`benchmarks/perturb_injection.py`, 200 messages) gives the same numbers as before.
-  A decision made under 0.7.1 on an input with such a sentence can replay as escalated under this version.
-- A model whose proposal was turned down stays in the trace. For a fact with alternative producers, the record kept the
-  identity of the producer that was used only: when a validator, a hard rule or the model's own escalation passed the
-  decision on to a rule, nothing in the trace said which model had run before it — `query(model=...)` did not find the
-  decision, `diff` printed `its model changed (#— → #b991…)`, and a replay could not tell that the model had changed.
-  A record now has `tried_models`: producer → `{"type", "id", "fp"}` and the probabilities it proposed, for every
-  model-backed producer that ran and was not used. The store indexes these models too, `diff` names the fingerprints
-  (and says `its model (#…) was rejected and is now used` when only that changed), and replay reports a changed
-  rejected model as a `model_changed` mismatch. Records where no model was turned down hash exactly as before.
-- Replay tells damaged data from a catalog that changed. A trace replayed against a catalog where a part (or a
-  producer) was renamed or removed used to raise `KeyError`, and `replay_all` reported it as `(0, "load", "KeyError:
-  ...")` — the same shape a damaged record has. Now it is a mismatch `part X is not in the catalog (renamed or
-  removed)`, and the steps after it are still checked on the recorded value. Every mismatch is a
-  `solvi.runtime.Mismatch`: the same `(step, name, reason)` triple (it compares, unpacks and serializes as before) with
-  a `.kind` — `integrity`, `recompute`, `model_changed`, `missing_part`, `missing_input`, `flow`, `error`. A replay with
-  mismatches also returns `"kinds"` and a one-line `"summary"` (`"data damaged: ..."`, `"data intact, catalog changed
-  (parts missing)"`, `"data intact, model changed"`, ...); `replay_all` carries them and the catalog verdict per stored
-  decision, tells a record that cannot be loaded (`"load"`) from a replay that raised (`"replay"`), and `solvi replay`
-  prints the summary and the kinds. A replay without mismatches returns exactly what it did.
-- Docs: a published long-input checkpoint for `long="full"` — [solvi-ai/solvi-large-long](https://huggingface.co/solvi-ai/solvi-large-long)
-  (solvi-large fine-tuned to read up to 8,192 tokens whole; `max_len_long: 8192`); the guide's "Long documents" section
-  names it.
-- Jeeves (github.com/PostHog/jeeves), a local decision model that reasons before it decides, works as a System One
-  decider: `systemone("http://127.0.0.1:8009", "jeeves-latest", extra_body={"options": {"max_think": 512,
-  "nothink_threshold": 0.9}})`. Its `options` pass through `extra_body` unchanged. `extra["systemone"]["usage"]` now
-  records `reasoning_tokens`, and `scorer.usage` sums them. The service's own `latency_ms` is recorded next to solvi's
-  `ms`. With `"return_reasoning": True`, each question's reasoning goes into `extra["systemone"]["reasoning"]` (text cut
-  to 1,000 characters, with its token count and whether the model thought; per option for a multi-label question). It is
-  recorded for the audit only: the answer is still read from the probabilities. `return_reasoning` does not change the
-  fingerprint, but the other options do.
 - A refused System One or LLM request whose error body is `{"detail": "..."}` (Jeeves, FastAPI) now escalates with that
   message rather than the raw JSON.
-- The guide's System One section gains a "Local decision models" paragraph (Kev and Jeeves; Jeeves's published latency
-  numbers, attributed to its README). New tests run solvi against a stand-in Jeeves server that validates requests and
-  shapes replies as Jeeves's own server does: every question type, "not stated", multi-label, a vote with another
-  family, act_guard and replay.
-- Benchmark vs LLMs: Jeeves (PostHog, open weights, run on one A100) directly and inside solvi, with reasoning on and
-  off: `jeeves` and `jeeves-nothink` in `models.json`, their raw answers, the numbers in `expected.json`, and finding 7
-  on the page. With reasoning it scored 0.969 on bank messages and 0.863 / 0.912 on refunds / 3-way match.
+
+### Changed
+
+- The published checkpoints answer one question per forward pass; the docs say so (several with
+  `DecideModel.load(..., multi_question=True)`).
+- `solvi serve` no longer supplies its own date: a request without `"today"` does not read year-less or relative dates.
+- `perturb=k` no longer reads ordinary ticket lines ("Model: XPS 13 9310.") as instructions, and escalates an input
+  that is nothing but an instruction.
+- A check that passed by returning a truthy non-bool now rejects its step; return a bool.
+- Answer factories refuse arguments they would ignore, no options and duplicate options.
+- The first ask of an untyped catalog no longer imports pydantic; a large input is hashed in about half the time, with
+  every hash unchanged.
+- Every measured number in the README, the docs and the API reference names its source — a script in `benchmarks/`, an
+  example, or a published model card; numbers measured with scripts that are not in this repository were removed and
+  their advice kept in words. The README and the guide present the decider as any model, an LLM first.
+- The version is `0.8.0.dev0` until the release.
 - Gallery task 10 (3-way match): the duplicate check is now a checkpoint of "already paid?" as well as of the payment.
   The task's own answers do not change, because its rule for that question reads the same fact. With the rule replaced
   by a model, as in the benchmark, the check no longer covered that question, and Jeeves without reasoning answered
