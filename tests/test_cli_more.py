@@ -541,3 +541,21 @@ def test_ask_text_with_an_llm_decider_takes_an_api_key_and_fails_cleanly(tmp_pat
     err = capsys.readouterr().err
     assert e.value.code == 2 and seen and seen[0] == "Bearer sk-test-1"
     assert "HTTP 401" in err and "Traceback" not in err and "sk-test-1" not in err
+
+
+def test_models_load_raises_model_error_not_system_exit_for_a_missing_file_or_attribute(tmp_path, monkeypatch, capsys):
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "mine.py").write_text("x = 1\n")
+    for spec, why in (("nofile.py:model", "no such file"), ("mine.py:model", "has no attribute 'model'")):
+        with pytest.raises(models.ModelError, match=why):          # library code: an ordinary exception
+            models.load(spec)
+    from solvi.loader import LoadError, load_object as load
+    with pytest.raises(LoadError, match="expected module:attribute"):
+        load("mine.py")
+    assert load("mine.py:x") == 1
+    with pytest.raises(SystemExit) as e:                               # the command still ends with status 2
+        load_object("nofile.py:system")
+    assert e.value.code == 2 and "no such file: nofile.py" in capsys.readouterr().err
+    with pytest.raises(SystemExit) as e:
+        main(["models", "check", "nofile.py:model"])
+    assert e.value.code == 2 and "no such file: nofile.py" in capsys.readouterr().err

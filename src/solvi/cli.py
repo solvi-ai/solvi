@@ -35,7 +35,6 @@ from __future__ import annotations
 
 import argparse
 import importlib
-import importlib.util
 import json
 import os
 import sys
@@ -52,28 +51,14 @@ def load_object(spec):
 
 
 def load_module(spec):
-    """"module:attr" or "file.py:attr" → (the module, the attribute — called when it is a function: a System factory)."""
-    mod_name, _, attr = spec.rpartition(":")
-    if not mod_name or not attr:
-        _fail(f"expected module:attribute or file.py:attribute, got {spec!r}")
-    if mod_name.endswith(".py") or os.sep in mod_name:
-        path = os.path.abspath(mod_name)
-        if not os.path.isfile(path):
-            _fail(f"no such file: {mod_name}")
-        sys.path.insert(0, os.path.dirname(path))
-        s = importlib.util.spec_from_file_location(os.path.splitext(os.path.basename(path))[0], path)
-        mod = importlib.util.module_from_spec(s)
-        sys.modules[s.name] = mod
-        s.loader.exec_module(mod)
-    else:
-        sys.path.insert(0, os.getcwd())
-        mod = importlib.import_module(mod_name)
-    if not hasattr(mod, attr):
-        _fail(f"{mod_name} has no attribute {attr!r}")
-    obj = getattr(mod, attr)
-    if callable(obj) and not hasattr(obj, "ask") and not callable(getattr(obj, "decision", None)):
-        obj = obj()
-    return mod, obj
+    """"module:attr" or "file.py:attr" → (the module, the attribute — called when it is a function: a System factory).
+    For the command: a name that cannot be read ends it with status 2 (library code uses solvi.loader, which raises
+    LoadError)."""
+    from .loader import LoadError, load_module as load
+    try:
+        return load(spec)
+    except LoadError as e:
+        _fail(str(e))
 
 
 def load_system(spec):

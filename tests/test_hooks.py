@@ -503,3 +503,16 @@ def test_two_rules_whose_checks_would_share_a_name_are_refused(tmp_path):
         hooks.load_rules(str(p))
     p.write_text('[[rule]]\nid = "secrets"\npaths = ["**"]\nforbid = ["A"]\n\n[[rule]]\nid = "tokens"\npaths = ["**"]\nforbid = ["B"]\n')
     assert [r.id for r in hooks.load_rules(str(p))] == ["secrets", "tokens"]
+
+
+def test_a_model_file_that_is_missing_or_exits_makes_the_hook_ask_not_exit(proj):
+    p = write(proj, "alembic/versions/0042_drop_salary.py", "def upgrade():\n    op.drop_column('users', 'salary')\n")
+    (proj / "exits.py").write_text("raise SystemExit(2)\n")
+    skills(proj)
+    for spec in ("nofile.py:model", "os.path:nope", "exits.py:model"):
+        code, out, err, _ = hook(proj, p, "pre-edit", "--model", spec)
+        d, why = decision(out)
+        assert code == 0 and d == "ask" and "could not check this edit" in why, (spec, code, err)
+        code, out, err, _ = hook(proj, prompt_submit(proj, "add a migration for the salary column"),
+                                 "pick-skill", "--model", spec)
+        assert code == 0 and out is None, (spec, code, err)          # never status 2: that would block the prompt

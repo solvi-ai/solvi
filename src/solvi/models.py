@@ -132,8 +132,9 @@ def declaration(path):
 
 
 def load(spec, backend="auto", api_key=None):
-    """A MODEL spec → a DecideModel (see the module docs). Never downloads. ModelError for a name that cannot be read;
-    other exceptions (a missing runtime, a broken checkpoint) pass through."""
+    """A MODEL spec → a DecideModel (see the module docs). Never downloads. ModelError for a name that cannot be read
+    (a `file.py:attr` whose file or attribute is missing included — never SystemExit); other exceptions (a missing
+    runtime, a broken checkpoint, an error inside your module) pass through."""
     from .decide import DecideModel
     k, where = resolve(spec)
     if k == "systemone":
@@ -143,8 +144,11 @@ def load(spec, backend="auto", api_key=None):
         from .llm import llm
         return llm(where[0], where[1], api_key=api_key or os.environ.get("SOLVI_LLM_API_KEY"))
     if k == "code":
-        from .cli import load_object
-        m = load_object(spec)
+        from .loader import LoadError, load_object
+        try:
+            m = load_object(spec)
+        except LoadError as e:
+            raise ModelError(f"{spec}: {e}") from None
         if not callable(getattr(m, "decision", None)):
             raise ModelError(f"{spec}: not a decider (a DecideModel, or an object with decision(...))")
         return m

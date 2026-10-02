@@ -870,7 +870,8 @@ def cmd_pre_edit(a):
         if ids and outcome != "allow":
             where = os.path.relpath(store.path, root) if hasattr(store, "path") else a.store
             text += f"\n(solvi decision {', '.join(ids)} in {where})"
-    except Exception as e:  # noqa: BLE001 — a policy hook that crashes must not let the edit through silently
+    except (Exception, SystemExit) as e:  # noqa: BLE001 — a policy hook that crashes (or a model file that exits) must
+        # not let the edit through silently
         outcome, text = "ask", f"solvi hook pre-edit could not check this edit ({type(e).__name__}: {e}); a person decides"
     out = _decision_json(outcome, text if outcome != "allow" else "solvi: no rule objects", a.agent, a.approve)
     if out is not None:
@@ -1038,7 +1039,8 @@ def cmd_pick_skill(a):
         print(json.dumps({"hookSpecificOutput": {"hookEventName": "UserPromptSubmit",
                                                  "additionalContext": skill_context(pick, skills, res)}},
                          ensure_ascii=False))
-    except Exception as e:  # noqa: BLE001 — a skill hint is optional: never stop the prompt
+    except (Exception, SystemExit) as e:  # noqa: BLE001 — a skill hint is optional: never stop the prompt (an exit
+        # status 2 of this hook would block it)
         print(f"solvi hook pick-skill: {type(e).__name__}: {e}", file=sys.stderr)
     return 0
 
