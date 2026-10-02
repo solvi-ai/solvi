@@ -2733,7 +2733,9 @@ inside a folder, `**` crosses folders (`**/x.py` also matches `x.py` at the root
 | `question`, `when` | fuzzy | a yes / no question a decider answers ("yes" is a violation), asked when an added line matches a `when` pattern (always, without `when`) |
 
 `why` is the reason the agent reads; `on_fail = "ask"` makes a deterministic rule ask instead of deny; `redact = true`
-shows a masked excerpt (`"sk-p…"`) instead of the matching text; `calibration` names a calibration file for the
+shows a masked excerpt (`"sk-p…"`) instead of the matching text, and the stored decision of such a hit is erased
+(`store.redact`: its place, hash and outcome stay and the store still verifies, but the change itself — the secret —
+is not kept, so that decision cannot be replayed or audited); `calibration` names a calibration file for the
 question (below). The sample, printed by `solvi hook sample-rules` and in
 [examples/coding_agent_rules.toml](../examples/coding_agent_rules.toml):
 

@@ -88,7 +88,7 @@ forbid = [
   '''\bsk-[A-Za-z0-9_-]{20,}''',
   '''\bgh[pousr]_[A-Za-z0-9]{36}\b''',
 ]
-redact = true       # reasons show a masked excerpt, not the secret
+redact = true       # reasons show a masked excerpt, not the secret; the stored decision's content is erased
 
 [[rule]]
 id = "no-employee-data-from-browser"
@@ -838,6 +838,11 @@ def decide_change(rules, change, model=None, instructions=True, store=None, meta
         extra["instruction_check"] = False
     sid = _save(store, res, dict(meta or {}, hook="pre-edit", tool=change.tool, path=change.path, outcome=outcome,
                                  reasons=[t for _, _, t in found], rules=used, **extra))
+    masked = sorted({rid for _, rid, _ in found if rid and any(r.id == rid and r.redact for r in rules)})
+    if sid is not None and masked:
+        # a rule with redact = true matched: the change holds what must not be kept (a secret), and the stored input
+        # state is the change — erase the record's content (its place, hash and answer stay; the chain verifies)
+        store.redact(sid, by="solvi hook", note=f"redact = true: {', '.join(masked)}")
     return outcome, why, used, sid
 
 

@@ -556,3 +556,18 @@ def test_forbid_calls_sees_aliases_changed_keyword_lines_symlinks_and_asks_when_
     (proj / "wf").symlink_to(proj / ".github" / "workflows", target_is_directory=True)
     d, why = says(write(proj, "wf/deploy.yml", "on: push\n"))                           # a rule on .github/workflows/**
     assert d != "allow" and "ci-workflows-need-a-person" in why
+
+
+def test_a_secret_blocked_by_a_redacting_rule_is_not_written_to_the_store(proj):
+    key = "sk-" + "a1B2c3D4e5F6g7H8i9J0k1L2"
+    code, out, _, _ = hook(proj, write(proj, "app/lib/config.ts", f'export const OPENAI_API_KEY = "{key}"\n'), "pre-edit")
+    d, why = decision(out)
+    assert d == "deny" and key not in why
+    store = proj / ".solvi" / "traces" / "hooks.jsonl"
+    assert key not in store.read_text()                                  # was there in clear: the stored input state
+    recs = [json.loads(ln) for ln in store.read_text().splitlines()]
+    assert recs[0].get("redacted") and recs[-1]["kind"] == "redaction"
+    from solvi.storage import open_storage
+    assert open_storage(str(store)).verify()["ok"]
+    hook(proj, write(proj, "tools/x.py", "eval('1')\n"), "pre-edit")    # a rule that does not redact: stored whole
+    assert "eval('1')" in store.read_text()
