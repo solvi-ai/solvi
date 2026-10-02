@@ -663,3 +663,22 @@ def test_a_calibration_refuses_log_probabilities_mixed_with_written_numbers_and_
     plain = model(FakeLLM()).decision("team", "Which team?", "email", TEAMS)   # no logprobs at all: as before
     plain.act_guard(mixed, risk=0.10)
     assert plain.guarantee["probabilities"] == "stated"
+
+
+def test_act_guard_and_calibrate_for_take_span_answers_compared_by_their_text():
+    """act_guard / calibrate_for raised "span is not adapted from labels" for Span and Maybe[Span] parts."""
+    def reply(body):
+        t = _text(body)
+        m = re.search(r"order (A-\d+)", t)
+        ans = None if m is None else (m.group(1) if "wrong" not in t else "order")
+        return json.dumps({"answer": ans, "confidence": 0.95 if "wrong" not in t else 0.6, "quote": ""})
+    ex = [(f"Hello, order A-{i} is late.", f"A-{i}") for i in range(40)]
+    ex += [(f"Hello, the wrong order A-{i} came.", f"A-{i}") for i in range(10)]
+    span = model(FakeLLM(reply=reply)).decision("o", "Order number?", "email", Span[str])
+    info = span.act_guard(ex, risk=0.10)
+    assert info["error"] == 0.0 and info["answered"] == pytest.approx(0.8) and info["base_error"] == pytest.approx(0.2)
+    got = span.calibrate_for(ex, error=0.05)
+    assert got["coverage"] == pytest.approx(0.8) and got["error"] == 0.0
+    maybe = model(FakeLLM(reply=reply)).decision("o", "Order number?", "email", Maybe[Span[str]])
+    info = maybe.act_guard(ex + [("Hello, nothing to report.", Unknown)] * 20, risk=0.10)
+    assert info["base_error"] == pytest.approx(10 / 70)

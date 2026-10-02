@@ -696,6 +696,7 @@ the same stream, not a new domain):
 
 ```python
 info = part.act_guard(examples, risk=0.10)     # a few hundred [(input, correct)] from your own stream
+# correct: an option, Unknown ("not stated"), a span's text (compared as text), a ranking's order
 # P(answered alone and wrong) ≤ 10% — a share of ALL questions, answered or escalated
 info["answered"], info["error"], info["risk"], info["must_escalate_at_least"]
 

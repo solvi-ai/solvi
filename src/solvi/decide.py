@@ -2895,6 +2895,17 @@ class DecisionPart:
         load(self, path, strict)
         return self
 
+    def _answer_key(self, y):
+        """An answer or a label as calibration compares them: "not stated" as itself, a span by its text (a Quote or
+        the text), a ranking as a tuple, anything else as this question's label."""
+        if y is Unknown:
+            return Unknown
+        if self.kind == "span":
+            return y.value if isinstance(y, Quote) else y
+        if self.kind == "rank":
+            return tuple(y)
+        return self.spec.label(y)
+
     def _labelled(self, examples, signal):
         """Decide labelled examples [(input, correct)] → (the signal per example, correct 0/1 per example, "act" |
         "confidence", [Decision]). "Not stated" (solvi.Unknown) is a label like any other."""
@@ -2903,12 +2914,12 @@ class DecisionPart:
             raise ValueError("calibration needs labelled examples")
         if signal not in ("auto", "act", "confidence"):
             raise ValueError('signal must be "auto", "act" or "confidence"')
-        gold = [Unknown if y is Unknown else self.spec.label(y) for _, y in ex]
+        gold = [self._answer_key(y) for _, y in ex]
         conf, act, ok, ds = [], [], [], []
         for (z, a), y in zip(self._read([t for t, _ in ex]), gold):    # a long input: the window a decision reads
             d = self.model._decision(self.spec, z)
             ds.append(d)
-            ok.append(float((Unknown if d.value is Unknown else self.spec.label(d.value)) == y))
+            ok.append(float(self._answer_key(d.value) == y))
             conf.append(d.conf)
             act.append(None if a is None else self.model.act_probability(self.spec, d, a))
         self._source = one_source(ds)                 # mixed log-probabilities and written numbers: refused
@@ -2994,7 +3005,8 @@ class DecisionPart:
         """Answer alone only as far as a guarantee allows (conformal risk control), from labelled examples of your own
         stream [(input, correct)] — a few hundred is typical: the escalation threshold is set so that, for inputs like
         the examples, P(answered alone AND wrong) ≤ risk — a share of all questions (answered or escalated), not of
-        the answered ones. It holds for your stream, not under a shift of domain: recalibrate when the inputs change.
+        the answered ones. `correct`: an option (a value), Unknown for "not stated", for a span question the passage's
+        text (or a Quote: its text is compared), for a ranking the order. It holds for your stream, not under a shift of domain: recalibrate when the inputs change.
         Too few or too hard examples → everything escalates (threshold inf). Feasibility: when the model is wrong on
         a share μ > risk of the examples, any rule must escalate at least (μ − risk) / (1 − risk) of the inputs
         ("must_escalate_at_least"; arXiv 2606.29054) — a better signal can only get closer to that bound. Changes the
