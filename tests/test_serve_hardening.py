@@ -104,3 +104,73 @@ def test_an_empty_token_is_a_configuration_error(tmp_path, capsys):
     with pytest.raises(SystemExit) as e:
         main(["serve", f"{tmp_path / 'shop.py'}:system", "--token", ""])
     assert e.value.code == 2 and "empty token" in capsys.readouterr().err
+
+
+def slow_reader(seconds=0.3):
+    """The text shop of test_serve with a TextIn whose read (the decider's passes) is slow and counts how many run at once."""
+    from solvi.textin import TextIn
+    from test_serve import _shop
+    s, tin = _shop()
+    seen = {"now": 0, "peak": 0, "reads": 0}
+    count = threading.Lock()
+
+    class Slow(TextIn):
+        def read(self, text, question=None):
+            with count:
+                seen["now"] += 1
+                seen["reads"] += 1
+                seen["peak"] = max(seen["peak"], seen["now"])
+            time.sleep(seconds)
+            try:
+                return super().read(text, question=question)
+            finally:
+                with count:
+                    seen["now"] -= 1
+    tin.__class__ = Slow
+    return s, tin, seen
+
+
+def test_ask_text_reads_the_text_inside_the_inflight_slot_and_the_lock():
+    s, tin, seen = slow_reader()
+    svc = Service(s, textin=tin, limits=Limits(max_inflight=1))
+    out = []
+
+    def go():
+        try:
+            out.append(svc.ask_text("cancel A-5, it is urgent")["read"]["question"])
+        except Busy:
+            out.append("busy")
+    ts = [threading.Thread(target=go) for _ in range(6)]
+    for t in ts:
+        t.start()
+    for t in ts:
+        t.join()
+    assert seen["peak"] == 1 and seen["reads"] == 1                   # the five over the limit never reached the decider
+    assert sorted(out) == ["busy"] * 5 + ["cancel_order"]
+    with pytest.raises(Exception, match="non-empty"):                 # a refused request takes no slot
+        svc.ask_text("")
+    two = Service(s, textin=tin, limits=Limits(max_inflight=6))      # slots for all: still one pass at a time
+    seen.update(peak=0, reads=0)
+    ts = [threading.Thread(target=lambda: two.ask_text("cancel A-5, it is urgent")) for _ in range(3)]
+    for t in ts:
+        t.start()
+    for t in ts:
+        t.join()
+    assert seen["peak"] == 1 and seen["reads"] == 3
+
+
+def test_ask_text_of_an_async_system_reads_off_the_event_loop():
+    import asyncio
+    s, tin, seen = slow_reader(0.4)
+    svc = Service(s, textin=tin, limits=Limits(max_inflight=1))
+
+    async def main():
+        first = asyncio.ensure_future(svc.aask_text("cancel A-5, it is urgent"))
+        t0 = time.perf_counter()
+        await asyncio.sleep(0.05)                                     # the loop is free while the text is read
+        waited = time.perf_counter() - t0
+        with pytest.raises(Busy):
+            await svc.aask_text("cancel A-5, it is urgent")
+        return waited, (await first)["read"]["question"]
+    waited, question = asyncio.run(main())
+    assert waited < 0.3 and question == "cancel_order" and seen["reads"] == 1

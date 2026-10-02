@@ -437,7 +437,8 @@ class Service:
             tin.today = dt.date.today()
         return tin
 
-    def _read(self, text, question, today):
+    def _reader(self, text, question, today):
+        """The TextIn for one request, after the checks that need no model (a refused request takes no slot)."""
         if not isinstance(text, str) or not text.strip():
             raise BadRequest("the text is a non-empty string")
         tin = self.textin(today)
@@ -446,7 +447,18 @@ class Service:
         if question is None and len(tin.entry_points) > 1 and tin.decider is None:
             raise BadRequest("choosing the question a text asks needs a decider: start the server with --decider "
                              "(or pass question=)")
-        return tin.read(text, question=question)
+        return tin
+
+    def _read_alone(self, tin, text, question):
+        """tin.read under the lock (the decider answers one request at a time), waited for at most
+        Limits.queue_timeout — then Busy."""
+        t = self.limits.queue_timeout
+        if not self._lock.acquire(timeout=-1 if t is None else max(0.0, float(t))):
+            raise Busy("the server is busy (another request holds the decider): try again later")
+        try:
+            return tin.read(text, question=question)
+        finally:
+            self._lock.release()
 
     @staticmethod
     def _text_result(resp):
@@ -459,8 +471,9 @@ class Service:
     def ask_text(self, text, question=None, store=True, today=None):
         """A free text → Response.to_dict() of System.ask_text plus "read" (the question it asks, the fields read with
         their quotes, the missing ones, a clarifying question), "stored_id" and "trace_hash"."""
-        read = self._read(text, question, today)
-        with self.exclusive():
+        tin = self._reader(text, question, today)
+        with self.exclusive():                        # the decider's passes (routing, the fields) are inside the slot
+            read = tin.read(text, question=question)  # and the lock, like the ask itself
             if self.is_async:
                 from .runtime import run_sync
                 resp = run_sync(self.system.aask_text(read, store=self.storing(store)))
@@ -470,8 +483,11 @@ class Service:
 
     async def aask_text(self, text, question=None, store=True, today=None):
         """ask_text, for an async System (System.aask_text)."""
+        import asyncio
+        tin = self._reader(text, question, today)
         async with self.aslot():
-            read = self._read(text, question, today)
+            # the decider's passes block: in a worker thread (one at a time), never on the event loop
+            read = await asyncio.to_thread(self._read_alone, tin, text, question)
             return self._text_result(await self.system.aask_text(read, store=self.storing(store)))
 
     @staticmethod
