@@ -391,6 +391,9 @@ class Answer:
 
 @dataclass
 class Question(Serial):
+    """A question the System answers: its name, text and answer type (None: from its rule's return type), the parts
+    that must run in its flow (`checkpoints`), the facts that matter for a question without a rule (`uses`), and the
+    abstentions it asks for (`min_confidence`, `require_evidence`)."""
     name: str
     text: str
     answer: AnswerType | None = None                  # None: from the return type of the question's rule (Answer.from_type)

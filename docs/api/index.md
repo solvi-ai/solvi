@@ -12,6 +12,7 @@ this reference lists what each module exports and the signatures.
 | [`solvi.llm`](llm.md) | an OpenAI-compatible chat-completions server (an LLM) as a decider |
 | [`solvi.multi`](multi.md) | cascade, vote and route over several models |
 | [`solvi.memory`](memory.md) | a memory of corrected cases: nearest neighbours with an abstain threshold |
+| [`solvi.lora`](lora.md) | a LoRA adapter per question, fitted on a few hundred labelled examples |
 | [`solvi.learning`](learning.md) | learning from corrections with gates and rollback (experimental) |
 | [`solvi.serve`](serve.md) | `solvi serve`: HTTP, MCP and the System One API |
 | [`solvi.agents`](agents.md) | guarding an agent's tool calls: `Guard`, the MCP proxy (adapters for PydanticAI, LangGraph, the OpenAI Agents SDK) |
@@ -20,6 +21,20 @@ this reference lists what each module exports and the signatures.
 | [`solvi.specialist`](specialist.md) | the specialist contract (preview): propose a typed spec, check it against the source, render, replay |
 | [`solvi.charts`](charts.md) | verified charts (preview): a text with numbers → an SVG in which every number is quoted from the text |
 | [`solvi.longdoc`](longdoc.md) | long texts: sections, BM25 retrieval, the window a decider reads |
+| [`solvi.many`](many.md) | a choice among many options: a shortlist, then the decider |
+| [`solvi.episode`](episode.md) | an agent's memory (what was tried, what failed, what worked) as an input |
+| [`solvi.worldmap`](worldmap.md) | a map of an environment an agent builds by acting: claims with provenance |
+| [`solvi.drift`](drift.md) | drift: has the stream moved away from the one the thresholds were calibrated on? |
+| [`solvi.fast`](fast.md) | fast answer heads in closed form (`fit_fast`, `CandidateHead`) |
+| [`solvi.extract_long`](extract_long.md) | `@extract` by description for long documents (`LongSpanExtractor`; torch) |
+| [`solvi.extract_model`](extract_model.md) | a model-backed `@extract` with pointer heads (torch) |
+| [`solvi.extract_multi`](extract_multi.md) | a single-pass `@extract` over several fields (torch) |
+| [`solvi.strategist`](strategist.md) | the strategist: a flow per request (`Flow`, `PlanError`) |
+| [`solvi.strategy`](strategy.md) | the model strategist (experimental, `ModelStrategist`) |
+| [`solvi.learned`](learned.md) | the learned strategist and measured costs (`MeasuredCosts`) |
+| [`solvi.aliases`](aliases.md) | name matching between parameters and facts (experimental) |
+| [`solvi.audit`](audit.md) | the audit of a response: what each answer rests on |
+| [`solvi.show`](show.md) | printing a response |
 | [`solvi.report`](report.md) | reports of one decision or a period of stored decisions (Markdown, HTML, data) |
 | [`solvi.otel`](otel.md) | decisions as OpenTelemetry spans (the API, or OTLP/JSON) |
 | [`solvi.counterfactual`](counterfactual.md) | counterfactuals: the smallest change of the given inputs that changes an answer |

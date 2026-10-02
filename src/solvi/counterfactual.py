@@ -34,6 +34,8 @@ from .provenance import FUZZY
 # ---------------------------------------------------------------- results
 @dataclass
 class Change:
+    """One change of a given input in a counterfactual: the fact, its value now, the value tried (`op` "=" or a
+    boundary "≤", "<", "≥", ">" for a number) and its cost."""
     fact: str
     now: object
     to: object                     # the value tried (the boundary for a number)
@@ -46,6 +48,8 @@ class Change:
 
 @dataclass
 class Counterfactual:
+    """The answer after a set of Changes (str: "<answer> if <changes>"), its status and reason, and `cost` (the sum
+    of the changes' costs); `to_dict()` for JSON."""
     answer: object                 # the answer after the change
     changes: list
     status: str = "ok"

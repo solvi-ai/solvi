@@ -3145,7 +3145,7 @@ class DecisionPart:
 
 
 def confidence_source(d):
-    """Where a decision's probabilities came from when its model says so (an LLM decider: extra["llm"]["probabilities"]
+    """Where a decision's probabilities came from when its model says so (an LLM decider: `extra["llm"]["probabilities"]`
     — "logprobs" from the answer's tokens, "stated" / "confidence" from the numbers the model wrote), else None."""
     info = d.extra.get("llm") if isinstance(getattr(d, "extra", None), dict) else None
     return info.get("probabilities") if isinstance(info, dict) else None

@@ -63,6 +63,8 @@ LEVELS = ("error", "warning", "note")
 
 @dataclass
 class Finding:
+    """One problem `solvi check` found: its level (error, warning or note), code (see the module docs), where (a part,
+    a question, a constraint or file:line) and the message."""
     level: str                  # error | warning | note
     code: str                   # see the module docs
     where: str                  # a part, a question, a constraint or file:line

@@ -128,7 +128,7 @@ def endpoint(url):
 
 class InvalidOutput(ValueError):
     """The LLM's reply broke the contract (not JSON, an answer outside the options, a quote not in the text, ...).
-    `answer`: the rejected answer when there is one (a span answer not in the text), recorded in extra["llm"]["rejected"]."""
+    `answer`: the rejected answer when there is one (a span answer not in the text), recorded in `extra["llm"]["rejected"]`."""
 
     def __init__(self, msg, answer=None):
         super().__init__(msg)

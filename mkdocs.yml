@@ -71,6 +71,20 @@ nav:
       - solvi.specialist: api/specialist.md
       - solvi.charts: api/charts.md
       - solvi.longdoc: api/longdoc.md
+      - solvi.many: api/many.md
+      - solvi.episode: api/episode.md
+      - solvi.worldmap: api/worldmap.md
+      - solvi.drift: api/drift.md
+      - solvi.fast: api/fast.md
+      - solvi.extract_long: api/extract_long.md
+      - solvi.extract_model: api/extract_model.md
+      - solvi.extract_multi: api/extract_multi.md
+      - solvi.strategist: api/strategist.md
+      - solvi.strategy: api/strategy.md
+      - solvi.learned: api/learned.md
+      - solvi.aliases: api/aliases.md
+      - solvi.audit: api/audit.md
+      - solvi.show: api/show.md
       - solvi.report: api/report.md
       - solvi.otel: api/otel.md
       - solvi.counterfactual: api/counterfactual.md

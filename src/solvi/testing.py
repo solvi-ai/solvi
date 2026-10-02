@@ -106,6 +106,8 @@ def load(path):
 # --------------------------------------------------------------------------------------------------- checking
 @dataclass
 class CaseResult:
+    """One case of a cases.json file after `solvi test`: its name, the problems found (none: `ok`), the answers given
+    {question: [answer, status]} and the time it took in ms."""
     name: str
     problems: list = field(default_factory=list)     # one line per mismatch (or the crash)
     answers: dict = field(default_factory=dict)      # question → [answer, status]
@@ -118,6 +120,8 @@ class CaseResult:
 
 @dataclass
 class FileResult:
+    """One cases.json file after `solvi test`: its CaseResults, `passed` (how many are ok), `ok` (all of them, and the
+    file loaded), `error` (why the file or its task could not be loaded)."""
     path: Path
     cases: list = field(default_factory=list)
     error: str | None = None                         # the file or its task could not be loaded

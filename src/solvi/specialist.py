@@ -173,6 +173,7 @@ class Run:
 
 @dataclass
 class Replay:
+    """The result of replaying a specialist's recorded run: `ok` (true in a boolean context) and the problems found."""
     ok: bool
     problems: list
 

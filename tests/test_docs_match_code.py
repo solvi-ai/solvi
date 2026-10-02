@@ -50,3 +50,18 @@ def test_decide_format_says_what_a_bare_solvi_decide_v3_gets():
     doc = _flat((ROOT / "docs" / "decide_format.md").read_text())
     assert "| `solvi_decide v3` (without that subformat) |" in doc and "no \"not stated\", no pointer, no act head unless declared" in doc
     assert "(also `format` `l14g typed v2` or `solvi_decide v3`)" not in doc
+
+
+def test_every_module_the_docs_import_from_has_an_api_page_in_the_index_and_the_nav():
+    """29 of 63 modules had no API page, among them solvi.drift, solvi.many, solvi.episode and solvi.worldmap that the
+    guide tells users to import from."""
+    docs = README + GUIDE + "".join(p.read_text() for p in (ROOT / "docs").glob("*.md"))
+    used = set(re.findall(r"from (solvi\.[a-z_]+)(?:\.[a-z_]+)* import", docs))
+    used |= {"solvi.drift", "solvi.many", "solvi.episode", "solvi.worldmap"}
+    index = (ROOT / "docs" / "api" / "index.md").read_text()
+    nav = (ROOT / "mkdocs.yml").read_text()
+    for mod in sorted(used):
+        page = ROOT / "docs" / "api" / f"{mod.split('.')[1]}.md"
+        assert page.exists() and f"::: {mod}" in page.read_text(), mod
+        assert f"[`{mod}`]({page.name})" in index and f"{mod}: api/{page.name}" in nav, mod
+    assert "[`solvi.lora`](lora.md)" in index
