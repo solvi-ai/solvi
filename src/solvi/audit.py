@@ -246,7 +246,7 @@ class AnswerAudit:
     quoted: list = field(default_factory=list)       # [{"name", "value", "start", "end", "source", "text", "match", "model", ...}]
     decided: list = field(default_factory=list)      # [{"name", "value", "probs", "model"}]
     learned: list = field(default_factory=list)      # [{"name", "value", "model", "probs"}]
-    checks: list = field(default_factory=list)       # [{"name", "value", "hard" (None: not recorded), "decides"}]
+    checks: list = field(default_factory=list)       # [{"name", "value", "hard" (None: not recorded), "decides", "reasons"}]
     rule: dict | None = None                         # the answer step: {"name", "provenance", "model", "probs"}
     constraints: list = field(default_factory=list)  # [{"name", "satisfied"}]
     safeguards: list = field(default_factory=list)   # events (see collect)
@@ -358,6 +358,7 @@ class AnswerAudit:
             tag = t("au.hard" if c["hard"] else "au.unknown_check" if c["hard"] is None else "au.soft", lang)
             lines.append(col("col.check") + f"{c['name']} = {c['value']!r} ({tag}"
                          + (t("au.decides", lang) if c["decides"] else "") + ")"
+                         + (": " + "; ".join(c["reasons"]) if c.get("reasons") else "")       # solvi.refine.Fail
                          + (f" — {m(c['error'])}" if c.get("error") else ""))
         if self.rule:
             lines.append(col("col.rule") + f"{self.rule['name']} ({i18n.provenance(self.rule['provenance'], lang)})"
@@ -523,7 +524,8 @@ def _one(res, q, events, catalog):
             p = st.part
             hard = True if f == deciding else None if getattr(p, "hard_unknown", False) else bool(p.hard)
             au.checks.append({"name": f, "value": None if _missing(r.value) else r.value, "hard": hard,
-                              "decides": f == deciding, "error": err})
+                              "decides": f == deciding, "error": err,
+                              "reasons": (r.extra or {}).get("reasons") if isinstance(r.extra, dict) else None})
             count("computed" if r.model is None else (origin if origin in FUZZY else "quoted_by_model"))
         elif origin == "quoted":
             s, e, src = r.quote if r.quote else (0, 0, "doc")

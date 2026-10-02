@@ -11,6 +11,9 @@ this reference lists what each module exports and the signatures.
 | [`solvi.systemone`](systemone.md) | a model behind the System One HTTP API as a decider |
 | [`solvi.llm`](llm.md) | an OpenAI-compatible chat-completions server (an LLM) as a decider |
 | [`solvi.multi`](multi.md) | cascade, vote and route over several models |
+| [`solvi.generate`](generate.md) | generation by an LLM: a text or validated JSON, quotes checked in a text, recorded as a model's output |
+| [`solvi.agree`](agree.md) | agreement of generated candidates under a key: the chosen one, its share as a fact, the tally |
+| [`solvi.refine`](refine.md) | a check that says why (`Fail`); the loop propose → check → re-ask with the reasons → escalate |
 | [`solvi.memory`](memory.md) | a memory of corrected cases: nearest neighbours with an abstain threshold |
 | [`solvi.lora`](lora.md) | a LoRA adapter per question, fitted on a few hundred labelled examples |
 | [`solvi.learning`](learning.md) | learning from corrections with gates and rollback (experimental) |

@@ -113,11 +113,13 @@ class Claim:
     offsets are checked: the text must be literally there) or strings (located in `source`: by default the part's only text
     input, or "doc" — as whole words and numbers: "3" is not evidence when the text says "30"); an item not in its text
     rejects the output (safeguard "grounding rejected"). The provenance stays the part's own (a hand-written rule:
-    computed)."""
+    computed). `extra`: details recorded in the trace with the fact (`record.extra`) — a check's reasons
+    (solvi.refine.Fail), a generator's request (solvi.generate.Generated)."""
     value: Any
     evidence: list = field(default_factory=list)
     confidence: float = 1.0
     source: str | None = None
+    extra: dict = field(default_factory=dict)
 
 
 @dataclass

@@ -11,6 +11,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from .core import Decision, Quote, Serial, Unknown, accept, evidence_rows, ground, has_evidence, locate, unwrap, validated
+from .core import Claim                                # Claim.extra is recorded (solvi.refine.Fail, solvi.generate)
 from .provenance import TIMED_OUT, model_info
 
 
@@ -493,6 +494,11 @@ def _recompute(part, r, args, init, catalog=None):
             was = [list(x) for x in (r.extra or {}).get("evidence") or ()]
             if got != was:
                 return [(r.step, r.name, f"evidence {was} ≠ recomputed {got}")]
+        if not why and r.error is None and (isinstance(v, Claim) or (r.extra or {}).get("reasons")):
+            got = (v.extra or {}).get("reasons") if isinstance(v, Claim) else None   # a check's reasons (refine.Fail)
+            was = (r.extra or {}).get("reasons")
+            if got != was:
+                return [(r.step, r.name, f"reasons {was} ≠ recomputed {got}")]
     if r.error is not None:
         if why is None:
             return [(r.step, r.name, f"recorded error {r.error!r}, but the step recomputes fine")]
@@ -734,7 +740,7 @@ class HashMemo(dict):
 
 
 def _extra(v):
-    x = v.extra or None if isinstance(v, Decision) else None
+    x = v.extra or None if isinstance(v, (Decision, Claim)) else None     # Claim.extra: a check's reasons, a generation
     if has_evidence(v):                               # located supporting quotes (outputs without evidence: as before)
         x = {**(x or {}), "evidence": evidence_rows(v)}
     return x

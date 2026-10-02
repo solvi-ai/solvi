@@ -22,13 +22,14 @@ Contents:
 12. [Text in: from a message to a question](#text-in-from-a-message-to-a-question)
 13. [Guarding an agent's tool calls (preview)](#guarding-an-agents-tool-calls)
 14. [solvi behind a coding agent's hooks (preview)](#solvi-behind-a-coding-agents-hooks)
-15. [Verified charts: a specialist that checks every number (preview)](#verified-charts-a-specialist-that-checks-every-number)
-16. [Checking a catalog: solvi check](#checking-a-catalog-solvi-check)
-17. [Grounded decisions: provenance, audit and safeguards](#grounded-decisions-provenance-audit-and-safeguards)
-18. [Printing results: solvi.show](#printing-results-solvishow)
-19. [Extracting fields from documents](#extracting-fields-from-documents)
-20. [Command line](#command-line)
-21. [Guarantees and limitations](#guarantees-and-limitations)
+15. [A model that writes: generation, agreement and the re-ask loop](#a-model-that-writes-generation-agreement-and-the-re-ask-loop)
+16. [Verified charts: a specialist that checks every number (preview)](#verified-charts-a-specialist-that-checks-every-number)
+17. [Checking a catalog: solvi check](#checking-a-catalog-solvi-check)
+18. [Grounded decisions: provenance, audit and safeguards](#grounded-decisions-provenance-audit-and-safeguards)
+19. [Printing results: solvi.show](#printing-results-solvishow)
+20. [Extracting fields from documents](#extracting-fields-from-documents)
+21. [Command line](#command-line)
+22. [Guarantees and limitations](#guarantees-and-limitations)
 
 ## Concepts
 
@@ -120,6 +121,9 @@ def ship_rule(big_order):
     the question abstains;
   - otherwise — the check has a `then` for other questions and only reads this question's facts — it is an ordinary failed
     check for this question and is listed in the reason.
+
+  A check can say why it is False: `return Fail("Harold is busy 13:30 - 15:30")` — see
+  [A check that says why](#a-check-that-says-why-fail).
 
   No rule and no model confidence can override a failed hard check. To make sure a hard check is always in a question's
   flow, list it in the question's `checkpoints`. When several hard checks fail, the first one declared in the catalog decides:
@@ -966,6 +970,8 @@ decision whose probabilities came from the other. Yes/no, scores, multi-label qu
 (`Maybe[...]`) and `evidence=True` work; rankings and numbers are asked as a choice over the options / bins. Where the
 reply has one number (a span, `ask="confidence"`), the prompt says what it means for "not stated" — the model's
 probability that the text does not say it — and solvi reads it as p(not stated): a "not stated" at 0.2 is an unsure one.
+A reply that is not a choice — a query, a plan, a JSON extraction — is `solvi.generate`'s, on the same client settings
+(see [A model that writes](#a-model-that-writes-generation-agreement-and-the-re-ask-loop)).
 
 Everything is checked, and what fails escalates — `model escalated: invalid LLM output — ...` — instead of being turned
 into a guess: an answer that is not one of the options, probabilities that are not numbers in [0, 1] or disagree with
@@ -3121,6 +3127,193 @@ Codex does not take a bare allow, so `--approve` is ignored there.
 runs a session: a clean edit, an edit that breaks a rule, an edit whose comment tries to talk past the rules, two
 prompts, then the verified store and the audit of one decision.
 
+## A model that writes: generation, agreement and the re-ask loop
+
+`solvi.llm` asks a model closed questions. When the model's output is something it writes — a SQL query, a plan, a JSON
+extraction of a table — three pieces put solvi around it: `solvi.generate` makes the call and records it,
+`solvi.agree` compares several candidates under a key you give, and `solvi.refine` runs propose → check → re-ask with
+the reasons → escalate. The model proposes; the checks decide; every round is a recorded, replayable decision. None of
+them makes the model better at writing: they decide what is returned without a person, and say why the rest is not.
+
+A runnable example, with a stand-in for the model (three queries per round, other ones once the checks have spoken):
+
+```python
+import sqlite3
+from solvi import Answer, Catalog, Fail, Question, System
+from solvi.agree import agree
+from solvi.refine import refine
+
+db = sqlite3.connect(":memory:")
+db.executescript("CREATE TABLE orders(id, amount, status);"
+                 "INSERT INTO orders VALUES (1, 30, 'paid'), (2, 70, 'paid'), (3, 20, 'open');")
+
+def rows(sql):                                   # the key: the rows a query returns, in any order
+    return tuple(sorted(db.execute(sql).fetchall()))
+
+cat = Catalog()
+
+@cat.fn
+def candidates(drafts, feedback):                # a stand-in for writer.part("candidates", prompt, k=3): 3 queries,
+    return drafts[min(len(feedback), 1)]         # other ones once the checks have said something
+
+agree(cat, "sql", "candidates", key=rows)        # facts: sql, sql_agreement, sql_tally
+
+@cat.check(hard=True, then={"answer": "no"})
+def most_agree(sql_agreement) -> bool:
+    return sql_agreement >= 2 / 3 or Fail(f"only {sql_agreement:.0%} of the queries return the same rows")
+
+@cat.rule("answer")
+def answer(sql, most_agree) -> bool:
+    return True
+
+system = System(cat, [Question("answer", "Return the query without a person?", Answer.yes_no(),
+                               checkpoints=["most_agree"])])
+drafts = [["SELECT sum(amount) FROM orders", "SELECT sum(amount) FROM orders WHERE status = 'paid'", "SELECT 1"],
+          ["SELECT sum(amount) FROM orders WHERE status = 'paid'", "SELECT 100", "SELECT 120"]]
+run = refine(system, {"drafts": drafts}, "answer", rounds=3)
+print(run.accepted, run.response.values["sql"], run.response.values["sql_agreement"])
+for r in run.rounds:
+    print(r.index, r.accepted, r.reasons)
+print(run.rounds[0].response["answer"].why)
+print(run.replay(system)["ok"])
+```
+
+```
+True SELECT sum(amount) FROM orders WHERE status = 'paid' 0.6666666666666666
+0 False ['only 33% of the queries return the same rows']
+1 True []
+hard check most_agree is false: only 33% of the queries return the same rows
+True
+```
+
+With a model the stand-in becomes one line, `cat.fn(writer.part("candidates", prompt, k=3, parse=sql_block))`, where
+`prompt(question, schema, feedback)` builds the messages from the facts it names, and the rest stays as it is.
+
+### A check that says why: Fail
+
+A check returns `Fail("Harold is busy on Monday 13:30 - 15:30")` instead of `False` when it can say what is wrong
+(several reasons: `Fail(*reasons)`). It is False wherever a bool is read — rules, hard checks, plain Python (`not
+Fail(...)` is True) — and `-> bool` checks keep their type. The reasons are recorded with the check
+(`record.extra["reasons"]`), added to the answer's reason when a hard check decides ("hard check nobody_busy is false:
+Harold is busy …"), shown on the check's line of the audit, and compared on replay (a check that now gives other reasons
+is a mismatch). A check that returns plain `False` keeps working: its reason is its docstring's first line, else
+"<name> is false". `solvi.refine.failed_checks(res, question)` lists the checks that are False with their reasons.
+
+### Generation: solvi.generate
+
+```python
+from solvi.generate import generator
+writer = generator("https://openrouter.ai/api/v1", "openai/gpt-oss-120b", api_key=KEY, max_tokens=3000,
+                   extra_body={"reasoning": {"effort": "low"}})
+g = writer.generate(messages)                                    # g.value: the reply's text
+g = writer.generate(messages, schema=Plan)                       # a pydantic model (or a JSON schema dict): validated
+g = writer.generate(messages, parse=sql_block)                   # your parser: raising or None rejects the reply
+g = writer.generate(messages, schema=Table, text=doc, quotes=["rows"])   # every row literally in doc
+g = writer.sample(messages, k=3, temperature=0.8)                # greedy first, then seeds 1, 2: a list, None if one failed
+cat.fn(writer.part("plan", prompt, schema=Plan))                 # a catalog part; k=3 for samples, text=/quotes= as above
+```
+
+The connection is solvi.llm's: `generator(...)` takes the same endpoint, key, headers, `extra_body`, retries, backoff,
+timeout and `opener`, and `Generator.of(decider)` shares the client of a decider made with `llm(...)`. A reply is
+accepted only whole: a refusal, a cut-off reply (`finish_reason` "length" — reasoning tokens count against
+`max_tokens`), an empty one, a parser that raises, JSON that does not parse or match the schema, and a quoted string
+that is not in the text raise `solvi.llm.InvalidOutput` with the reason; it is never repaired. A server that does not
+answer after the retries, or refuses the input (HTTP 400 / 413 / 422), raises `solvi.generate.Unanswered`; a wrong key,
+model or URL raises `LLMError`. In a catalog each of these makes the part fail, and the questions that need it abstain
+with the cause (`… caused by sql: InvalidOutput: the reply was cut off (max_tokens)`). A JSON schema is checked for its
+common keywords (type, properties, required, additionalProperties, items, enum, const, bounds, lengths, anyOf); one with
+a keyword it does not check (`$ref`, `pattern`, `format` …) is refused when it is given — pass a pydantic model then.
+`response_format="json_schema"` also sends the schema to the server; the reply is validated here either way.
+
+**Quotes.** `quotes=["rows", "items.*.source"]` names the strings of the value that must be copied from `text`. Each is
+looked up as written, as whole words and numbers ("3" is not found in "30"). Ask the model to copy a table's rows as the
+text writes them and parse them in code: a wrong number is then not in the text. A number copied into a field of its
+own can stand elsewhere in the text and pass (below). The quotes become the output's evidence, so in a catalog they are
+located again in the given fact `text=` names, recorded with their offsets and checked on replay.
+
+**The record.** `generate` returns a `Generated` — a `Claim` whose `extra["generated"]` holds the model id, the
+fingerprint of the request body, temperature, seed, finish reason, tokens and, for a structured or parsed reply, the
+reply's text (one per output for `sample`). Returned from a part, the value is the fact and the record keeps the rest.
+`writer.part(...)` attaches the model (`GenerationPart`, provenance `proposed`); its fingerprint covers the generator's
+settings, the prompt function's code, the parser and the schema, so a changed prompt shows on replay as a changed model.
+Replay does not call the model again (`part(..., replay="rerun")` does, for a server that answers the same request the
+same way): it reads the recorded reply again through the parser and the schema and names a recorded value that does not
+follow from it. The key is never recorded.
+
+### Agreement of candidates: solvi.agree
+
+```python
+from solvi.agree import agree, consensus
+agree(cat, "sql", "candidates", key=row_digest, prefer=returns_rows)    # facts: sql, sql_agreement, sql_tally
+consensus(queries, key=row_digest)              # the same outside a catalog: {"index", "value", "share", "groups", ...}
+```
+
+`Vote` combines decisions over the same closed options; generated outputs have none. `key(candidate)` says what makes
+two candidates the same — the digest of the rows a query returns, a normalized plan, a parsed number — and may read other
+facts by name (`def row_digest(sql, db_path)`). The largest group wins (a tie: the group whose first candidate comes
+first); `sql` is its first candidate, `sql_agreement` the share of all K candidates in it — a plain number fact a rule,
+a head or a guarantee reads like any other signal. A candidate that is None (its generation failed), whose key raises or
+is None, does not vote and still counts in K. `prefer`: when any candidate passes it, only those vote (rows before an
+empty result). When nothing votes, `sql` is missing — its error lists each candidate's reason — and the share is 0.0.
+`sql_tally` records per candidate its key or why it has none, the groups, the choice and the share; replay recomputes it
+(keep the key deterministic, or cache what it computes). Candidates from several models: `solvi.generate.several(
+[writer_a, writer_b], messages)`.
+
+### The loop: solvi.refine
+
+```python
+from solvi.refine import refine
+run = refine(system, {"problem": text}, "accept", propose=writer.proposer(messages, schema=Plan), into="plan",
+             rounds=3, accept="yes", feedback=lambda r: my_wording(r.reasons))
+run.accepted, run.proposal, run.escalation, run.rounds        # stored rounds: r.stored_id
+run.replay(system)                                             # {"ok", "mismatches": [(round, what, why)], ...}
+```
+
+One round: `propose(state, earlier_rounds)` returns a proposal — a value, or a `Generated` whose record is kept in the
+round — which is given to the System under `into`; the System is asked. `accept`: `"checks"` (default: every hard check
+that governs the question was evaluated and passed, whatever the answer), an answer or a list of answers, or a function
+of the Response. A round not accepted has `reasons` — the reasons of the failed hard checks that govern the question, in
+catalog order; when the question could not be decided at all, the errors of the parts that failed ("spec: ValueError:
+no slot in the plan"). `feedback(round)` turns them into what the proposer is told (default: the list of reasons).
+The loop stops at the first accepted round or after `rounds`, and escalates: `run.escalation` is "not accepted after 3
+round(s): <the last reasons>". A reply the generator rejects (not JSON, outside the schema, a quote not in the text) is
+a round too, and its reason is fed back; a proposer that fails otherwise (the server does not answer) ends the loop with
+"the proposer failed: …". `Generator.proposer(messages, schema=…, first=…)` builds the proposer: the first round asks
+the messages (or `first`, another generator — a stronger setting for the first try); each later round appends, per
+earlier round, its reply as the assistant's turn and its feedback as the user's.
+
+Without a proposer the System generates itself: each round gives the earlier rounds' feedback as the fact
+`feedback_into` (default `"feedback"`, a list of reasons) and the generating part reads it — the example above.
+`history=` continues an earlier refinement. `run.to_dict()` / `Refinement.from_dict(d, catalog=cat)` store and load it;
+`run.replay(system)` replays every round's trace and checks that the loop did what its record says: each round's
+acceptance, failed checks and causes follow from its response, the feedback is what the feedback function gives (pass a
+custom one again; `accept` too when it was a function), each round's input holds its proposal and the feedback before
+it, nothing ran after an accepted round, and the escalation matches.
+
+**Measured** (gpt-oss-120b; two solutions written by hand with solvi 0.7.1, rebuilt on these pieces, every request the
+same as theirs, so the model's answers came from their cache):
+
+- NATURAL PLAN, 100 eval problems of each kind (a meeting slot / a day of meetings / a multi-city trip), plans checked
+  by code, up to 2 re-asks quoting the violated constraints: right 92 / 75 / 43 for the model's first answer → 95 / 90 /
+  58 with the loop (and 95 / 92 / 58 with one more task-specific re-ask, "can you meet more friends?"); wrong among the
+  answers given 7.1% / 22.7% / 53.3% → 5.0% / 9.1% / 3.3%; on trips 40 of 100 went to a person after three rounds. The
+  rebuilt loop made the same 418 proposals with the same reasons as the hand-written one, and all 300 refinements replay.
+  The model trades one violation for another: on trips, 94 re-asks rescued 10 of 50 rejected plans.
+- The same task's typed facts, extracted with `schema=` and `quotes=` (travel-time rows and flights copied as written):
+  147 of 150 dev problems equal to a rule-based reader, 3 rejected, none accepted and wrong; eval 290 of 300, 8 rejected,
+  2 accepted and wrong (omissions — a quote check does not see a row left out). Asking for the numbers in fields of
+  their own instead had 15 of 150 accepted and wrong: the wrong number stood elsewhere in the text.
+- BIRD mini-dev, 150 eval questions, 3 queries per question compared by the digest of their rows: a single query is
+  wrong 48% of the time; answering only when all 3 agree answers 95 (63%) with 28.4% wrong; a learned head over the
+  share and the query's shape, its threshold chosen on dev, answers 112 (75%) with 34.8% wrong. A retry on a failed
+  hard check (4 of 150) moved 75 right to 77 — within noise. Agreement is not correctness: 27 of the 95 unanimous
+  answers were wrong, the three samples agreeing on one convention of the question that is not the reference's.
+
+**Not done here.** No search: a loop re-asks one proposer, it does not enumerate alternatives or keep the best of two
+valid ones (on these plans a 50-line search over orders solved 95 / 100 / 98). No promise that re-asks converge. The
+share of agreement is a signal; calibrate it on labelled examples before you trust a threshold. No streaming, no tool
+calls, no caching of replies (put a caching proxy in front of the server).
+
 ## Verified charts: a specialist that checks every number
 
 > **Preview in 0.7.** The first *specialist*: a small model proposes, code checks against the source, code renders.
@@ -3279,7 +3472,7 @@ Every fact and answer has a provenance kind (`record.origin`, `result.provenance
 | `quoted` | an `extract` part returning a `Quote` | the offsets must lie in the source text; for a model, `doc[start:end]` must be the value |
 | `decided` | a model's choice among declared options, with probabilities (`Decision`) | the value must be one of the options; probabilities recorded |
 | `learned` | a `fit` / `fit_fast` head, a `learn_rule` list, another trained function | the head type and a fingerprint of its parameters are recorded |
-| `proposed` | reserved for a strategist model | the deterministic layer verifies what it proposes |
+| `proposed` | a model that writes: a strategist's plan, a generator's text or JSON (`solvi.generate`) | the deterministic layer verifies what it proposes; replay re-reads a recorded reply through its parser and schema |
 
 The default comes from what a part returns (a `Quote` → `quoted`, a `Decision` → `decided`) and whether a model is behind
 it. Declare it explicitly with `provenance=` on any decorator. A part is model-backed when you pass `model=`:

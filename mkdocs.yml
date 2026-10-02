@@ -60,6 +60,9 @@ nav:
       - solvi.calibration: api/calibration.md
       - solvi.systemone: api/systemone.md
       - solvi.llm: api/llm.md
+      - solvi.generate: api/generate.md
+      - solvi.agree: api/agree.md
+      - solvi.refine: api/refine.md
       - solvi.multi: api/multi.md
       - solvi.memory: api/memory.md
       - solvi.lora: api/lora.md

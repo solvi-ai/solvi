@@ -7,7 +7,8 @@ Principle: fuzzy proposes, deterministic decides, everything is in the trace. Ev
   quoted    — an extract part returning a Quote: the value is grounded at offsets in the source text
   decided   — a model's choice among declared options, with probabilities (a Decision)
   learned   — a fit / fit_fast answer head, a learn_rule list, or another trained function
-  proposed  — reserved for a strategist model; the deterministic layer verifies what it proposes
+  proposed  — a model that writes: a strategist's plan, a generator's text or JSON (solvi.generate); the deterministic
+              layer verifies what it proposes
 
 A part backed by a model (an extractor, a head, a rule list, any object) records the model's identity in the trace:
 {"type", "id", "fp"} — the fingerprint is a stable hash of the model's configuration and weights, so a replay can tell

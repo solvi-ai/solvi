@@ -144,6 +144,7 @@ RU = {
 MESSAGES_RU = [
     # answers (System._answer)
     ("hard check {f} is false and no answer is set for it", "жёсткая проверка {f} не пройдена, а ответ для этого случая не задан"),
+    ("hard check {f} is false: {r}", "жёсткая проверка {f} не пройдена: {r}"),
     ("hard check {f} is false", "жёсткая проверка {f} не пройдена"),
     ("hard check {f} could not be evaluated: {e:msg}", "жёсткую проверку {f} не удалось вычислить: {e}"),
     ("no value", "нет значения"),
