@@ -52,11 +52,18 @@ ABSTAIN = None                                    # a gold answer of null: the h
 
 # --------------------------------------------------------------------------------------------------- loading
 def load_set(path):
-    """A honesty set (JSON) → its dict, with "path" and "task" (the task module's path) resolved."""
+    """A honesty set (JSON) → its dict, with "path" and "task" (the task module's path) resolved. A case's answers
+    are its "gold"; the "expected" of a `solvi test` cases.json is read as the same thing (null or "abstain": the honest
+    outcome is to abstain), so one file serves both commands. A case with both is an error."""
     path = Path(path)
     data = json.loads(path.read_text())
     if isinstance(data, list):                    # a bare list of cases (e.g. a gallery cases.json with gold answers)
         data = {"cases": data}
+    for i, c in enumerate(data.get("cases") or ()):
+        if "gold" in c and "expected" in c:
+            raise ValueError(f'{path}: case {c.get("name", i + 1)!r} has both "gold" and "expected" (they are one thing)')
+        if "gold" not in c and "expected" in c:
+            c["gold"] = {q: None if v == "abstain" else v for q, v in (c["expected"] or {}).items()}
     data.setdefault("name", path.stem)
     data.setdefault("version", None)
     data["path"] = str(path)

@@ -12,6 +12,7 @@ builds it (paths relative to the cases file). A case:
      "safeguards": {"priority": ["hard_check"]},           # optional: the safeguard kinds that fire for a question (exactly)
      "ask": ["priority", "route"]}                         # optional: ask only these questions (default: all)
 
+("gold" — the key a honesty set uses — is read as "expected", so one file serves `solvi test` and `solvi honesty`.)
 An expected answer is written as in solvi's JSON: an option, a list for multi-label, a number, "<not stated>" for
 solvi.Unknown; null or "abstain" means the question must abstain. Every response's trace must also replay.
 
@@ -148,7 +149,7 @@ def _store_kw(system, store):
         return {}
 
 
-CASE_KEYS = ("name", "state", "expected", "status", "safeguards", "ask", "note")
+CASE_KEYS = ("name", "state", "expected", "gold", "status", "safeguards", "ask", "note")
 
 
 def check(system, case, state, store=False):
@@ -161,7 +162,10 @@ def check(system, case, state, store=False):
     odd = sorted(k for k in case if k not in CASE_KEYS)
     if odd:
         out.problems.append(f"unknown key(s) {', '.join(map(repr, odd))} (a case has: {', '.join(CASE_KEYS)})")
-    if not (case.get("expected") or case.get("status") or case.get("safeguards") or isinstance(case.get("safeguards"), list)):
+    if "gold" in case and "expected" in case:
+        out.problems.append('both "gold" and "expected": they are one thing (a honesty set says "gold")')
+    expected = case.get("expected") if "expected" in case else case.get("gold")
+    if not (expected or case.get("status") or case.get("safeguards") or isinstance(case.get("safeguards"), list)):
         out.problems.append("the case expects nothing: give \"expected\", \"status\" or \"safeguards\"")
     try:
         res = system.ask(state, case.get("ask"), **_store_kw(system, store))
@@ -170,7 +174,7 @@ def check(system, case, state, store=False):
         return out
     out.ms = res.ms
     out.answers = {q: [_show(r.answer), r.status] for q, r in res.results.items()}
-    for q, want in (case.get("expected") or {}).items():
+    for q, want in (expected or {}).items():
         if q not in res.results:
             out.problems.append(f"{q}: not asked (unknown question, or left out by \"ask\")")
             continue
