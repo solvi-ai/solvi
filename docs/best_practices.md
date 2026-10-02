@@ -9,10 +9,15 @@ them as directions, not as benchmarks; the scripts are named in the changelog en
 **Keep the keys of a state in one fixed order, and do not reorder them later.** A decision model reads a dict as lines
 in the dict's order, and the order changes answers. This is not one model's quirk:
 
-| model | judgement questions over a state (600) | simple fact questions (1,013) |
+| model | judgement questions over a state: accuracy sorted → shuffled → reversed; answers that differ | simple fact questions (1,013): natural → sorted → shuffled; answers that differ |
 |---|---|---|
-| solvi-base | accuracy unchanged, 7–9% of answers differ when keys are shuffled | 95.9% in the natural order, 92.3% sorted |
-| Jev 1.13 | 77.3% → 74.7% shuffled → 70.5% reversed; 14–20% of answers differ | 97.0% in any order |
+| solvi-base (600 / 1,013) | 53.7% → 53.0% → 53.8%; 7–9% | 95.9% → 92.3% → 92.7%; 4–5% |
+| solvi-large (600) | 53.5% → 53.8% → 54.5%; 9% | 96.6% → 95.3% → 94.9%; 3% |
+| Jev 1.13 (600) | 77.3% → 74.7% → 70.5%; 14–20% | 97.0% → 96.9% → 96.9%; under 1% |
+| gpt-oss-120b, an LLM asked through `solvi.llm` (200) | 60.5% → 59.0% → 60.0%; 24–27% | 97.5% → 96.5% → 97.1%; 3% |
+
+Every model changes some answers when only the order of the keys changes — a quarter of them for the LLM on judgement
+questions — and for some the accuracy moves with it (Jev on judgements, the solvi checkpoints on fact questions).
 
 So: build the state the same way every time (a pydantic model gives a fixed field order), put what matters first, and
 when you calibrate a threshold or fit a question, use states in the order production will send. solvi keeps the order
