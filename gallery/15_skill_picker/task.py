@@ -175,7 +175,7 @@ def outcome(picked):
 
 QUESTIONS = [
     Question("skill", "Which skill should the agent use?", Answer.choice(list(OPTIONS)),
-             checkpoints=["production_deploy_asked_for"]),
+             requires=["production_deploy_asked_for"]),
     Question("outcome", "Use a skill, answer without one, or ask a person?",
-             Answer.choice(["use a skill", "no skill", "ask a person"]), checkpoints=["production_deploy_asked_for"]),
+             Answer.choice(["use a skill", "no skill", "ask a person"]), requires=["production_deploy_asked_for"]),
 ]

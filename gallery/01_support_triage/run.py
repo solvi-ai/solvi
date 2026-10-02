@@ -13,7 +13,7 @@ from solvi import System
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))   # gallery/_audit.py: the audit check shared by the runners
 from _audit import Tally, check, line as audit_line  # noqa: E402
-from solvi.rules import RuleList
+from solvi.rulelist import RuleList
 
 HERE = Path(__file__).resolve().parent
 

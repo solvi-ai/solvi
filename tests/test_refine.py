@@ -42,7 +42,7 @@ def _system(storage=None):
     def ok(allowed_day, nobody_busy) -> bool:
         return True
     return System(cat, [Question("ok", "Does the slot work?", Answer.yes_no(),
-                                 checkpoints=["allowed_day", "nobody_busy"])], storage=storage), cat
+                                 requires=["allowed_day", "nobody_busy"])], storage=storage), cat
 
 
 def test_fail_is_false_everywhere_and_its_reasons_are_recorded_shown_and_in_the_why():
@@ -73,7 +73,7 @@ def test_a_check_whose_reasons_change_is_a_replay_mismatch():
     @cat.rule("ok")
     def ok(c) -> bool:
         return True
-    s = System(cat, [Question("ok", "?", Answer.yes_no(), checkpoints=["c"])])
+    s = System(cat, [Question("ok", "?", Answer.yes_no(), requires=["c"])])
     res = s.ask({"x": 1})
     said["why"] = "another reason"
     rep = res.trace.replay(s)
@@ -183,7 +183,7 @@ def test_without_a_proposer_the_system_generates_and_reads_the_earlier_feedback_
     @cat.rule("ok")
     def ok(read_only) -> bool:
         return True
-    s = System(cat, [Question("ok", "?", Answer.yes_no(), checkpoints=["read_only"])])
+    s = System(cat, [Question("ok", "?", Answer.yes_no(), requires=["read_only"])])
     run = refine(s, {}, "ok", rounds=2)
     assert run.accepted and [r.response.trace.init["feedback"] for r in run.rounds] == [[], ["`DROP TABLE x` changes the database"]]
     assert run.replay(s)["ok"]

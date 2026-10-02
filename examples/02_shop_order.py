@@ -73,7 +73,7 @@ def free_shipping(order_total, new_customer):
 
 
 QUESTIONS = [
-    Question("ship_now", "Ship now?", Answer.yes_no(), checkpoints=["paid"]),
+    Question("ship_now", "Ship now?", Answer.yes_no(), requires=["paid"]),
     Question("free_shipping", "Free shipping?", Answer.yes_no()),
     Question("suspicious", "Suspicious order?", Answer.choice(["low", "review", "block"])),   # no rule — learned from history
 ]

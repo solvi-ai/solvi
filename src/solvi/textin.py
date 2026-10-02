@@ -923,7 +923,7 @@ class TextIn:
     entry_points: the question names to choose from (default: every question). descriptions: {question: text} for the
     router (default: the question's text). synonyms: {field: {label: [synonym]}} for enum fields; cues: {field: [word]}
     extra cue words; patterns: {field: regex} for string fields; negatives: {field: [phrase]} for yes / no fields — the
-    phrases that mean False ("not urgent", "no rush"; without one a negated cue does not parse) (a System(inputs=...)
+    phrases that mean False ("not urgent", "no rush"; without one a negated cue does not parse) (a System(input_model=...)
     field's json_schema_extra may carry "synonyms", "cues", "negative_cues", "pattern", "percent" too). percent: the
     number fields in percent ("5%" → 5; elsewhere a percentage does not parse). decimal: "." or "," — the decimal
     separator of the texts (default None: "1,000" is a thousand and "1.000" is ambiguous, so it does not parse). today: a
@@ -991,7 +991,7 @@ class TextIn:
         if key not in self._specs:
             ef = self.entry_points[question].fields[name]
             extra = {}
-            m = getattr(self.system, "inputs", None)
+            m = getattr(self.system, "input_model", None)
             if m is not None and name in m.model_fields and isinstance(m.model_fields[name].json_schema_extra, dict):
                 extra = m.model_fields[name].json_schema_extra
             fs = field_spec(ef, self.synonyms.get(name), self.cues.get(name), self.patterns.get(name), extra,
@@ -1006,7 +1006,7 @@ class TextIn:
         """A field's cue words (its name's, cues=, json_schema_extra "cues") without building its spec's stops."""
         ef = self.entry_points[question].fields[name]
         extra = {}
-        m = getattr(self.system, "inputs", None)
+        m = getattr(self.system, "input_model", None)
         if m is not None and name in m.model_fields and isinstance(m.model_fields[name].json_schema_extra, dict):
             extra = m.model_fields[name].json_schema_extra
         return field_spec(ef, cues=self.cues.get(name), extra={"cues": extra.get("cues")}).cues

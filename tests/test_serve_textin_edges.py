@@ -41,7 +41,7 @@ def leaky(tmp_path=None):
     @cat.rule("limit")
     def limit(amount) -> str:
         raise RuntimeError(f"config at {SECRET} is broken")
-    qs = [Question("approve", "Approve?", Answer.choice(["yes", "no"]), checkpoints=["low_risk"]),
+    qs = [Question("approve", "Approve?", Answer.choice(["yes", "no"]), requires=["low_risk"]),
           Question("price", "Priced?", Answer.choice(["ok", "no"])),
           Question("limit", "Within limit?", Answer.choice(["ok", "no"]))]
     s = System(cat, qs)

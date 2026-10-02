@@ -60,7 +60,7 @@ def build(version="1", guarantee=False, hallucinate=False, margin=0):
         return "yes" if risk == "low" and total <= limit - margin else "review"
 
     return System(cat, [Question("pay", "Pay the invoice?", Answer.choice(["yes", "review", "no"]),
-                                 checkpoints=["known_vendor"])])
+                                 requires=["known_vendor"])])
 
 
 STATE = {"doc": DOC, "blocked": [], "limit": 2000}

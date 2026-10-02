@@ -1,4 +1,4 @@
-"""Costs from measurements: System(..., producers="equivalent", costs="measured") feeds the run times system.costs
+"""Costs from measurements: System(..., producers="equivalent", cost_policy="measured") feeds the run times system.cost_book
 measures to the cost-optimal planner — after a warm-up it picks the fastest of equivalent producers, switches when that one
 slows down, rechecks a producer it stopped using, stops switching once frozen, and every plan record says which cost
 (declared, warm-up, measured, recheck, frozen) decided each choice."""
@@ -8,7 +8,7 @@ import time
 import pytest
 
 from solvi import Answer, Catalog, Question, System
-from solvi.learned import MeasuredCosts
+from solvi.costs import MeasuredCosts
 from solvi.strategy import ModelStrategist
 
 
@@ -52,7 +52,7 @@ def test_declared_costs_keep_the_declaration_order():
 def test_measured_costs_pick_the_fast_producer_switch_when_it_slows_and_freeze():
     delay = {"live": 0.03, "table": 0.0}
     cat, qs = rates(delay)
-    s = System(cat, qs, producers="equivalent", costs=MeasuredCosts(min_samples=2, recheck=None))
+    s = System(cat, qs, producers="equivalent", cost_policy=MeasuredCosts(min_samples=2, recheck=None))
 
     def ask():
         r = s.ask({"currency": "EUR"})
@@ -82,7 +82,7 @@ def test_measured_costs_pick_the_fast_producer_switch_when_it_slows_and_freeze()
 def test_a_producer_it_stopped_using_is_rechecked():
     delay = {"live": 0.0, "table": 0.04}
     cat, qs = rates(delay)
-    s = System(cat, qs, producers="equivalent", costs=MeasuredCosts(min_samples=1, recheck=3, alpha=1.0))
+    s = System(cat, qs, producers="equivalent", cost_policy=MeasuredCosts(min_samples=1, recheck=3, alpha=1.0))
     got = [used(s.ask({"currency": "EUR"})) for _ in range(3)]
     assert got == ["rate_live", "rate_table", "rate_live"]
     delay["live"], delay["table"] = 0.04, 0.0                               # the live feed got slow, the table fast
@@ -110,7 +110,7 @@ def test_declared_costs_are_the_prior_until_measured_and_aask_uses_the_same_plan
     @cat.rule("ok")
     def ok(score):
         return score < 0.9
-    s = System(cat, [Question("ok", "OK?", Answer.yes_no())], producers="equivalent", costs="measured")
+    s = System(cat, [Question("ok", "OK?", Answer.yes_no())], producers="equivalent", cost_policy="measured")
     for _ in range(4):
         r = asyncio.run(s.aask({"customer": "c1"}))
         assert next(x for x in r.trace.records if x.name == "score").producer == "score_cache"
@@ -121,17 +121,17 @@ def test_declared_costs_are_the_prior_until_measured_and_aask_uses_the_same_plan
 def test_settings_and_errors():
     cat, qs = rates({"live": 0, "table": 0})
     with pytest.raises(ValueError, match="cost-optimal planner"):
-        System(cat, qs, costs="measured")
-    with pytest.raises(ValueError, match="costs must be"):
-        System(cat, qs, producers="equivalent", costs="fastest")
+        System(cat, qs, cost_policy="measured")
+    with pytest.raises(ValueError, match="cost_policy must be"):
+        System(cat, qs, producers="equivalent", cost_policy="fastest")
     with pytest.raises(ValueError, match="producers=\"equivalent\" too"):
         System(cat, qs, producers="equivalent", strategist=ModelStrategist())
     with pytest.raises(ValueError):
         MeasuredCosts(min_samples=0)
     with pytest.raises(ValueError, match="freeze_costs"):
         System(cat, qs, producers="equivalent").freeze_costs()
-    s = System(cat, qs, strategist=ModelStrategist(producers="equivalent"), costs=MeasuredCosts(alpha=0.5))
-    assert s.costs.alpha == 0.5 and "MeasuredCosts" in repr(s.cost_policy)
+    s = System(cat, qs, strategist=ModelStrategist(producers="equivalent"), cost_policy=MeasuredCosts(alpha=0.5))
+    assert s.cost_book.alpha == 0.5 and "MeasuredCosts" in repr(s.cost_policy)
     s.ask({"currency": "EUR"})
     frozen = s.freeze_costs()
     assert set(frozen) >= {"rate_live", "rate_table"} and frozen["rate_table"] == 1.0   # never ran: unit

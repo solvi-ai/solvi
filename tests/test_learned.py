@@ -6,7 +6,7 @@ import random
 import time
 
 from solvi import Answer, Catalog, Question, Quote, System
-from solvi.learned import CostBook
+from solvi.costs import CostBook
 from solvi.runtime import vhash
 
 
@@ -45,7 +45,7 @@ def random_system(rng):
     for q in qnames:
         ins = rng.sample(facts[5:] or facts, rng.randint(1, 2))
         cat.rule(q)(_fn(q, ins, lambda *v: options[sum(v) % 3]))
-        qs.append(Question(q, q, Answer.choice(options), checkpoints=rng.sample(hard, rng.randint(0, 2))))
+        qs.append(Question(q, q, Answer.choice(options), requires=rng.sample(hard, rng.randint(0, 2))))
     return cat, qs
 
 
@@ -116,14 +116,14 @@ def _claim_catalog(calls):
     @cat.rule("decision")
     def decision(big_model):
         return "pay" if big_model < 1500 else "review"
-    return cat, [Question("decision", "?", Answer.choice(["pay", "deny", "review"]), checkpoints=["expensive_ok", "cheap_ok"])]
+    return cat, [Question("decision", "?", Answer.choice(["pay", "deny", "review"]), requires=["expensive_ok", "cheap_ok"])]
 
 
 def test_learned_order_runs_likely_failure_first_and_explains_it():
     calls = []
     cat, qs = _claim_catalog(calls)
     s = System(cat, qs)
-    s.costs.ms.update({"slow_lookup": 100.0, "expensive_ok": 0.01, "cheap_ok": 0.01, "big_model": 50.0, "answer:decision": 0.01})
+    s.cost_book.ms.update({"slow_lookup": 100.0, "expensive_ok": 0.01, "cheap_ok": 0.01, "big_model": 50.0, "answer:decision": 0.01})
     s.learn = False
     train = [{"customer": "ok", "amount": a} for a in range(0, 2000, 20)]
     s.learn_order(train)
@@ -144,8 +144,8 @@ def test_costs_are_tracked():
     cat, qs = _claim_catalog(calls)
     s = System(cat, qs)
     s.ask({"customer": "ok", "amount": 10})
-    assert {"slow_lookup", "big_model", "cheap_ok"} <= set(s.costs.ms)
-    assert isinstance(s.costs, CostBook)
+    assert {"slow_lookup", "big_model", "cheap_ok"} <= set(s.cost_book.ms)
+    assert isinstance(s.cost_book, CostBook)
 
 
 # ---------- alternative producers
@@ -299,7 +299,7 @@ def test_learn_order_turns_online_learning_on_and_a_default_system_does_not_lear
     @cat.rule("ship")
     def ship(status):
         return "yes"
-    qs = [Question("ship", "Ship?", Answer.yes_no(), checkpoints=["paid"])]
+    qs = [Question("ship", "Ship?", Answer.yes_no(), requires=["paid"])]
     states = [{"status": "paid" if i % 4 else "unpaid"} for i in range(40)]
     s = System(cat, qs)
     for st in states:

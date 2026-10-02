@@ -22,7 +22,7 @@ def _leave():
     def approve(days_requested):
         return "approve" if days_requested < 5 else "needs_manager"
     return System(cat, [Question("approve", "Approve?", Answer.choice(["approve", "needs_manager", "reject"]),
-                                 checkpoints=["enough_balance"])])
+                                 requires=["enough_balance"])])
 
 
 STATE = {"start": date(2026, 10, 19), "end": date(2026, 10, 23), "balance": 14}

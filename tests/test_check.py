@@ -23,7 +23,7 @@ def refund_catalog(checkpoint=True):
     @cat.rule("refund")
     def refund(days_since: int) -> bool:
         return days_since <= 30
-    q = Question("refund", "Refund?", checkpoints=["known_customer"] if checkpoint else [])
+    q = Question("refund", "Refund?", requires=["known_customer"] if checkpoint else [])
     return System(cat, [q])
 
 
@@ -36,7 +36,7 @@ def test_a_hard_check_with_then_outside_its_questions_flow():
     s = refund_catalog(checkpoint=False)
     rep = lint(s)
     assert rep.codes("error") == ["then_not_in_flow"] and not rep.ok
-    assert "checkpoints=['known_customer']" in rep.errors[0].message
+    assert "requires=['known_customer']" in rep.errors[0].message
     assert s.ask({"purchase_day": 1, "today": 5, "customer": "blocked"})["refund"].answer == "yes"   # the bug it catches
 
 
@@ -131,7 +131,7 @@ def test_type_conflicts():
     def small(size) -> bool:
         return True
     s = System(cat, [Question("ok", "OK?"), Question("small", "Small?"), Question("loud", "Loud?", Answer.yes_no(),
-                                                                                  uses=["shout"])], inputs=Order)
+                                                                                  uses=["shout"])], input_model=Order)
     rep = lint(s)
     errs = [f for f in rep.errors if f.code == "type_conflict"]
     assert len(errs) == 1 and errs[0].where == "amount" and "Order" in errs[0].message
@@ -282,7 +282,7 @@ def refund(days) -> bool:
 
 
 def good():
-    return System(cat, [Question("refund", "Refund?", checkpoints=["known_customer"])])
+    return System(cat, [Question("refund", "Refund?", requires=["known_customer"])])
 
 
 def bad():
@@ -432,7 +432,7 @@ def test_a_hard_check_without_a_bool_type_that_plainly_returns_a_non_bool():
     @cat.rule("approve")
     def approve(balance, customer, soft):
         return "approve"
-    s = System(cat, _approve(checkpoints=["enough", "known"]))
+    s = System(cat, _approve(requires=["enough", "known"]))
     rep = lint(s)
     assert rep.codes() == ["hard_check_untyped", "hard_check_untyped"] and not rep.ok
     assert ["returns None" in f.message or "returns 0" in f.message for f in rep.errors] == [True, True]
@@ -476,7 +476,7 @@ def test_names_that_nothing_computes_and_the_input_model_does_not_declare():
         def approve(left: float):
             return "approve" if left >= 0 else "reject"
         return System(cat, _approve(**kw) + [Question("later", "Later?", Answer.yes_no(), uses=["left", "balance", "nope"])],
-                      inputs=inputs)
+                      input_model=inputs)
     rep = lint(build(Inputs))
     got = {(f.code, f.where): f.message for f in rep.warnings}
     assert set(got) == {("input_not_declared", "amout"), ("uses_unknown", "later")} and rep.ok

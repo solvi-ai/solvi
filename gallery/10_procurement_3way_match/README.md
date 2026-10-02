@@ -14,7 +14,7 @@ paid (duplicate)?** and **needs a higher approver?**
 - **Currency conversion before the approval limit.** The invoice total is converted at the day's rate and compared with
   the limit of the approver's role (clerk 10 000, manager 50 000, director 250 000 USD).
 - **Duplicates** are matched on a normalised invoice number from the same supplier: `INV-001187` = `inv 1187`.
-- **Three hard checks**, all checkpoints of `payment`, reject the invoice: supplier not active, invoice for another PO or
+- **Three hard checks**, all required by `payment`, reject the invoice: supplier not active, invoice for another PO or
   supplier, already paid. The strategist puts them and their inputs first, so when one fails the line match is not
   computed at all (early exit).
 - **Two producers for the invoice rate (solvi 0.4).** `fx_rate` has alternative producers, tried in order:
@@ -26,7 +26,7 @@ paid (duplicate)?** and **needs a higher approver?**
 - **Typed (solvi 0.5).** The PO, the receipt, the invoice, the feed and the supplier table are pydantic models, and every
   function says what it reads and returns (`line_match(po: PurchaseOrder, …, fx_rate: float) -> list[dict[str, Any]]`,
   `payment(...) -> Literal["pay", "hold"]`). The catalog checks producer against consumer types when the functions are
-  registered; `run.py` builds `System(cat, QUESTIONS, inputs=Request)`, so each request is validated once. A malformed
+  registered; `run.py` builds `System(cat, QUESTIONS, input_model=Request)`, so each request is validated once. A malformed
   document — a line quantity `"many"` — is rejected with the field named (`lines.0.qty: Input should be a valid integer`),
   the answers that need it abstain, and the audit counts a `type rejected` safeguard, instead of a `KeyError` deep in the
   line match. The answers are the same as the untyped version's.

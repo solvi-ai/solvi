@@ -1,10 +1,10 @@
-"""solvi.rules.RuleList and System.learn_rule: the literals of a text, fitting twice, arguments that cannot work."""
+"""solvi.rulelist.RuleList and System.learn_rule: the literals of a text, fitting twice, arguments that cannot work."""
 from typing import Literal
 
 import pytest
 
 from solvi import Answer, Catalog, Question, System
-from solvi.rules import RuleList, literals
+from solvi.rulelist import RuleList, literals
 
 
 def _zones():
@@ -28,7 +28,7 @@ def test_learn_rule_learns_a_rule_list_from_russian_street_names():
     cat, qs = _zones()
     s = System(cat, qs)
     ex = [({"addr": f"ул. Северная, {i}"}, "n") for i in range(6)] + [({"addr": f"ул. Южная, {i}"}, "s") for i in range(6)]
-    rl = s.learn_rule("zone", ex, facts=["up"])
+    rl = s.learn_rule("zone", ex, features=["up"])
     assert {r["if"] for r in rl.rules} >= {"up has 'СЕВЕРНАЯ'"} and len(rl.rules) >= 1
     assert s.ask({"addr": "ул. Южная, 30"})["zone"].answer == "s"
     assert s.ask({"addr": "ул. Северная, 30"})["zone"].answer == "n"
@@ -50,14 +50,14 @@ def test_learn_rule_without_examples_or_with_an_unknown_fact_raises_and_installs
     s = System(cat, qs)
     en = [({"addr": f"{i} north st"}, "n") for i in range(6)] + [({"addr": f"{i} south st"}, "s") for i in range(6)]
     with pytest.raises(ValueError, match="no examples"):
-        s.learn_rule("zone", [], facts=["up"])
+        s.learn_rule("zone", [], features=["up"])
     with pytest.raises(ValueError, match="upp is not a part of the catalog or a given fact"):
-        s.learn_rule("zone", en, facts=["upp"])
+        s.learn_rule("zone", en, features=["upp"])
     with pytest.raises(ValueError, match="rows and"):
         RuleList(["a"]).fit([], [])
     assert cat.rules["zone"].func is zone and "zone" not in s.learned_rules
     assert s.ask({"addr": "1 south st"})["zone"].answer == "s"
-    assert s.learn_rule("zone", en, facts=["addr"]).rules                      # a given fact of the examples is fine
+    assert s.learn_rule("zone", en, features=["addr"]).rules                      # a given fact of the examples is fine
 
 
 def test_a_learned_rule_that_replaces_a_typed_rule_takes_its_typed_bookkeeping_with_it():
@@ -67,7 +67,7 @@ def test_a_learned_rule_that_replaces_a_typed_rule_takes_its_typed_bookkeeping_w
     def zone(code: int) -> Literal["n", "s"]:
         return "n" if code > 5 else "s"
     s = System(cat, [Question("zone", "?")])
-    s.learn_rule("zone", [({"code": i}, "n" if i > 5 else "s") for i in range(12)], facts=["code"])
+    s.learn_rule("zone", [({"code": i}, "n" if i > 5 else "s") for i in range(12)], features=["code"])
     assert not any("zone" in k for rs in cat.readers.values() for k in rs)
 
     @cat.fn
@@ -77,7 +77,7 @@ def test_a_learned_rule_that_replaces_a_typed_rule_takes_its_typed_bookkeeping_w
 
 
 def test_learned_rules_are_deterministic():
-    from solvi.rules import RuleList
+    from solvi.rulelist import RuleList
     rows = [{"a": f"W{i % 3} X{i % 2}"} for i in range(60)]
     ys = ["p" if i % 3 == 0 else "q" for i in range(60)]
     assert str(RuleList(["a"]).fit(rows, ys)) == str(RuleList(["a"]).fit(list(rows), list(ys)))

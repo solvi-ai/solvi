@@ -179,7 +179,7 @@ def test_constraint_repairs_a_decided_answer_and_hard_check_overrides_it():
     @cat.constraint
     def refunds_to_billing(route, refund):
         return refund == "no" or route == "billing"
-    q = part.question(cat, "route", checkpoints=["not_a_parcel_claim"])
+    q = part.question(cat, "route", requires=["not_a_parcel_claim"])
     s = System(cat, [q, Question("refund", "", Answer.yes_no())])
     res = s.ask({"email": "The app shows an error and a crash; refund me"})
     assert res["route"].answer == "billing" and res["route"].repaired[0] == "technical" and res.feasible

@@ -131,7 +131,7 @@ QUESTIONS = [Question("paid", "Is the invoice paid?", require_evidence=True),
              Question("currency", "Currency of the invoice?", Answer.choice(["EUR", "USD"])),
              Question("method", "How was it paid?", Answer.choice(["card", "transfer", "cash"]), require_evidence=True),
              TEAM.question(cat, "team"),
-             Question("approve", "Approve the payment?", Answer.yes_no(), checkpoints=["amount_ok"])]
+             Question("approve", "Approve the payment?", Answer.yes_no(), requires=["amount_ok"])]
 
 
 def system():

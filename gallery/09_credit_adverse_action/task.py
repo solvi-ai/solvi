@@ -138,10 +138,10 @@ def principal_reason(points, knockouts, adverse_action_reasons):
 
 ELIGIBILITY = ["adult", "resident"]
 QUESTIONS = [
-    Question("decision", "Approve, decline or refer?", Answer.choice(["approve", "decline", "refer"]), checkpoints=ELIGIBILITY),
+    Question("decision", "Approve, decline or refer?", Answer.choice(["approve", "decline", "refer"]), requires=ELIGIBILITY),
     Question("principal_reason", "Principal adverse-action reason",
              Answer.choice(["none", *REASONS.values(), "Applicant under the legal age to contract", "Temporary residence"]),
-             checkpoints=ELIGIBILITY),
-    Question("refer_to_underwriter", "Refer the file to a senior underwriter?", Answer.yes_no(), checkpoints=ELIGIBILITY,
+             requires=ELIGIBILITY),
+    Question("refer_to_underwriter", "Refer the file to a senior underwriter?", Answer.yes_no(), requires=ELIGIBILITY,
              uses=UNDERWRITER_FACTS),
 ]

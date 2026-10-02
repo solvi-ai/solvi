@@ -58,7 +58,7 @@ def quickstart():
 
     system = System(cat, [Question("approve", "Approve the leave?",
                                    Answer.choice(["approve", "needs_manager", "reject"]),
-                                   checkpoints=["enough_balance"])])
+                                   requires=["enough_balance"])])
     states = [{"start": date(2026, 10, 19), "end": date(2026, 10, 23), "today": date(2026, 9, 25), "balance": b}
               for b in (14, 3, 30, 5)]
     return system, states
@@ -122,7 +122,7 @@ def large_input(n_states=8, seed=0):
         return bool(above_floor and score > threshold)
 
     system = System(cat, [Question("alert", "Raise an alert at this point?", Answer.yes_no(),
-                                   checkpoints=["enough_history"])])
+                                   requires=["enough_history"])])
     rng = np.random.default_rng(seed)
     n = HORIZON + W + DAY * K_DAYS + n_states
     t = np.arange(n)

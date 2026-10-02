@@ -29,21 +29,21 @@ def _held_out(p_right, seed, n=300):
 def test_calibrating_a_rule_answer_gives_the_share_of_right_answers_as_its_confidence(p_right, seed):
     s = _rule_system()
     held, truth, acc = _held_out(p_right, seed)
-    s.calibrate("q", held, truth)
+    s.calibrate("q", list(zip(held, truth)))
     assert s.ask({"x": 9})["q"].confidence == pytest.approx(acc, abs=1e-3)
 
 
 def test_calibrating_twice_on_the_same_examples_gives_the_same_parameters():
     s = _rule_system()
     held, truth, _ = _held_out(0.7, 4)
-    first = s.calibrate("q", held, truth)
-    assert s.calibrate("q", held, truth) == pytest.approx(first)
+    first = s.calibrate("q", list(zip(held, truth)))
+    assert s.calibrate("q", list(zip(held, truth))) == pytest.approx(first)
 
 
 def test_calibrate_does_not_store_or_count_its_held_out_examples(tmp_path):
     s = _rule_system(storage=str(tmp_path / "j.jsonl"))
     held, truth, _ = _held_out(0.7, 5, n=40)
-    s.calibrate("q", held, truth)
+    s.calibrate("q", list(zip(held, truth)))
     assert s.stats["asks"] == 0
     assert not (tmp_path / "j.jsonl").exists() or not (tmp_path / "j.jsonl").read_text().strip()
     s.ask({"x": 1})
@@ -53,12 +53,23 @@ def test_calibrate_does_not_store_or_count_its_held_out_examples(tmp_path):
 
 def test_calibrate_takes_true_and_false_as_the_correct_answers_of_a_yes_no_question():
     held, truth, acc = _held_out(0.8, 6)
-    a, b = _rule_system().calibrate("q", held, truth)
-    assert _rule_system().calibrate("q", held, [t == "yes" for t in truth]) == pytest.approx((a, b))
+    a, b = _rule_system().calibrate("q", list(zip(held, truth)))
+    assert _rule_system().calibrate("q", [(s, t == "yes") for s, t in zip(held, truth)]) == pytest.approx((a, b))
     with pytest.raises(ValueError):
-        _rule_system().calibrate("q", held, ["maybe"] * len(held))
+        _rule_system().calibrate("q", [(s, "maybe") for s in held])
+    with pytest.raises(ValueError, match=r"examples are \[\(init_state, correct answer\)"):
+        _rule_system().calibrate("q", held)
+
+
+def test_calibrate_takes_examples_as_fit_does_and_the_0_7_form_with_a_warning():
+    """calibrate(question, states, truth) took its examples apart while fit, learn_rule and guarantee take
+    [(state, answer)]; the 0.7 form still works for one release."""
+    held, truth, _ = _held_out(0.8, 7)
+    new = _rule_system().calibrate("q", list(zip(held, truth)))
+    with pytest.warns(DeprecationWarning, match=r"calibrate\(question, \[\(state, answer\), \.\.\.\]\)"):
+        assert _rule_system().calibrate("q", held, truth) == pytest.approx(new)
     with pytest.raises(ValueError, match="300 examples and 2 correct answers"):
-        _rule_system().calibrate("q", held, truth[:2])
+        _rule_system().calibrate("q", held, truth[:2])                  # warned once already
 
 
 def test_calibrating_spread_confidences_reaches_the_maximum_likelihood_fit():

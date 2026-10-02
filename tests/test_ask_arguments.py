@@ -20,7 +20,7 @@ def _shop():
     @cat.rule("gift")
     def gift(total):
         return "yes" if total > 100 else "no"
-    return System(cat, [Question("ship", "Ship?", Answer.yes_no(), checkpoints=["paid"]),
+    return System(cat, [Question("ship", "Ship?", Answer.yes_no(), requires=["paid"]),
                         Question("gift", "Gift?", Answer.yes_no())])
 
 

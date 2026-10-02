@@ -154,6 +154,6 @@ def health(vib_z, temp_z, current_z, hours_to_vib_alert, vib_trend, temp_trend):
 
 QUESTIONS = [
     Question("health", "Machine health", Answer.choice(["ok", "watch", "service", "stop"]),
-             checkpoints=["vibration_below_trip", "temperature_below_trip"]),
+             requires=["vibration_below_trip", "temperature_below_trip"]),
     Question("fault", "Likely fault", Answer.choice(["none", "bearing", "imbalance", "electrical", "cooling"]), uses=FAULT_FACTS),
 ]

@@ -262,8 +262,8 @@ def test_model_strategist_record_false_keeps_the_plan_out_of_the_trace_and_fallb
 def test_plan_raises_plan_error_for_a_checkpoint_that_is_not_in_the_catalog():
     from solvi.strategist import PlanError
     cat, _ = chain()
-    with pytest.raises(PlanError, match="checkpoint nope not found"):
-        det_plan(cat, [Question("ok", "", None, checkpoints=["nope"])], set(ST))
+    with pytest.raises(PlanError, match="requires .nope., which is not in the catalog"):
+        det_plan(cat, [Question("ok", "", None, requires=["nope"])], set(ST))
 
 
 def test_unresolved_and_apply():

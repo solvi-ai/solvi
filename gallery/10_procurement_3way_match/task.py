@@ -12,7 +12,7 @@ two producers of one fact, each with its own `validate`.
 Typed (solvi 0.5): the documents are pydantic models and every function says what it reads and returns. The catalog checks
 producer against consumer types when the functions are registered; at run time a malformed document (a line without a unit
 price, a quantity "four hundred") is rejected with the field named (safeguard `type_rejected`) and the answers that need it
-abstain, instead of a KeyError deep in the line match. `System(cat, QUESTIONS, inputs=Request)` validates a request once.
+abstain, instead of a KeyError deep in the line match. `System(cat, QUESTIONS, input_model=Request)` validates a request once.
 Try: set the supplier's status to "on_hold", change a unit price by 3%, or the invoice currency to "JPY" (no rate in the
 table or the feed -> abstain; add "JPY": 0.0062 to the feed's rates -> the feed is used); set a line's qty to "many"."""
 
@@ -101,7 +101,7 @@ class Approver(BaseModel):
 
 
 class Request(BaseModel):
-    """init_state of this task (System(..., inputs=Request))."""
+    """init_state of this task (System(..., input_model=Request))."""
     po: PurchaseOrder
     receipt: GoodsReceipt
     invoice: Invoice
@@ -244,7 +244,7 @@ def escalate_approval(within_approval_limit: bool) -> bool:
 
 QUESTIONS = [
     Question("payment", "Pay, hold or reject the invoice?", Answer.choice(["pay", "hold", "reject"]),
-             checkpoints=["supplier_payable", "invoice_matches_po", "not_duplicate"]),
-    Question("duplicate", "Already paid (duplicate)?", Answer.yes_no(), checkpoints=["not_duplicate"]),
+             requires=["supplier_payable", "invoice_matches_po", "not_duplicate"]),
+    Question("duplicate", "Already paid (duplicate)?", Answer.yes_no(), requires=["not_duplicate"]),
     Question("escalate_approval", "Needs a higher approver?", Answer.yes_no()),
 ]

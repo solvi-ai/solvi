@@ -4,7 +4,7 @@ Targets for each question:
   • it has a rule → the rule's arguments;
   • an answer head is fitted → the facts selected during fitting;
   • otherwise → the `uses` hint; otherwise everything computable from init_state (marked "flow not narrowed").
-Then it walks back through signatures down to what init_state provides; the question's checkpoints are always added.
+Then it walks back through signatures down to what init_state provides; the question's required parts (`requires`) are always added.
 Checks: besides those the targets need, the strategist takes every catalog check whose inputs are all already in the flow and
 that touches at least one COMPUTED (non-input) fact — a check on computed facts. Nothing else from the catalog is executed.
 Typed facts: the flow records the type of each fact it uses (`flow.types`: a producer's return type, or for a given fact the
@@ -13,7 +13,11 @@ Decisions with a model: decision parts that read the same facts with the same mo
 questions in one forward pass, are grouped (`flow.batches`); the executor scores each group in one pass."""
 from __future__ import annotations
 
+import random
+from collections import deque
 from dataclasses import dataclass, field
+
+from .core import Quote
 
 
 class PlanError(Exception):
@@ -110,10 +114,10 @@ def plan(catalog, questions, init_keys, heads=None):
             why = f"{q.name}: flow not narrowed (no rule, fit or uses)"
         for f in targets:
             need(f, why, q.name)
-        for c in q.checkpoints:
+        for c in q.requires:
             if c not in catalog.parts:
-                raise PlanError(f"checkpoint {c} not found in catalog")
-            need(c, f"checkpoint {q.name}", q.name)
+                raise PlanError(f"{q.name!r} requires {c!r}, which is not in the catalog")
+            need(c, f"checkpoint {q.name}", q.name)      # the 0.7 wording: stored flows compare
         if rule is not None:
             per_q.setdefault(q.name, set())
     # checks on computed facts — decided per question, so a question's flow does not depend on which other questions are asked
@@ -168,3 +172,168 @@ def plan(catalog, questions, init_keys, heads=None):
         batches = plan_batches(order)
     return Flow(order, {q: sorted(v) for q, v in per_q.items()}, skipped, {q: sorted(v) for q, v in unresolved.items()},
                 types, batches)
+
+
+# --- learned order and producer policy (solvi.learned up to 0.7)
+# OrderModel — per hard check, P(this check fails on this input) from facts known before running it (init_state and
+# optionally cheap computed facts). The executor then runs hard checks one at a time, most expected saving first
+# (P(fail) × cost it can save ÷ cost to evaluate), and stops as soon as the failed ones settle every question. Answers do
+# not depend on the order: a question is settled only when every hard check declared before the deciding one (among those
+# governing it) has been evaluated — exactly the "first declared failed check decides" rule.
+# ProducerPolicy — for a fact with several producers, the order in which to try them on this input: predicted
+# P(accepted) and P(agrees with the reference producer | accepted), and cost. Outputs are still accepted only by the
+# producer's own validator; the policy only chooses who goes first. It learns from the outcomes of past runs, instantly.
+# Every probability is an online model on cheap features (Binary): Laplace counts until `min_rows` labelled rows, then a
+# FastHead (closed-form ridge, solvi.heads) refitted every `refit_every` rows and updated by a rank-one step in between.
+
+
+def scalar_row(values, keys=None):
+    """Cheap features from a dict of facts: numbers, booleans and short strings as they are; a long string gives its length;
+    a list / tuple / dict gives its length. Anything else is left out."""
+    out = {}
+    for k in (values if keys is None else keys):
+        if k not in values:
+            continue
+        v = values[k]
+        if isinstance(v, Quote):
+            v = v.value
+        if isinstance(v, bool) or (isinstance(v, (int, float)) and not isinstance(v, bool)):
+            out[k] = v
+        elif isinstance(v, str):
+            if len(v) <= 40:
+                out[k] = v
+            else:
+                out[k + "#len"] = float(len(v))
+        elif isinstance(v, dict):                         # one level down: {"invoice": {"currency": "EUR"}} → invoice.currency
+            out[k + "#len"] = float(len(v))
+            for kk, x in list(v.items())[:50]:
+                if isinstance(x, bool) or isinstance(x, (int, float)) or (isinstance(x, str) and len(x) <= 40):
+                    out[f"{k}.{kk}"] = x
+        elif isinstance(v, (list, tuple, set)):
+            out[k + "#len"] = float(len(v))
+    return out
+
+
+class Binary:
+    """P(y = 1 | row), learned online."""
+
+    def __init__(self, min_rows=20, refit_every=50, ring=2000, prior=0.5):
+        self.min_rows, self.refit_every = min_rows, refit_every
+        self.rows = deque(maxlen=ring)
+        self.n = self.pos = 0
+        self.prior = prior
+        self.head = None
+        self._since = 0
+
+    def observe(self, row, y):
+        y = bool(y)
+        self.rows.append((row, y))
+        self.n += 1
+        self.pos += y
+        if len(self.rows) < self.min_rows or len({b for _, b in self.rows}) < 2:
+            return
+        if self.head is None or self._since >= self.refit_every:
+            self.refit()
+        else:
+            try:
+                self.head.update(row, "yes" if y else "no")
+                self._since += 1
+            except Exception:  # noqa: BLE001  (a category never seen at fit time → refit)
+                self.refit()
+
+    def refit(self):
+        from .heads import FastHead
+        rows = [r for r, _ in self.rows]
+        feats = sorted({k for r in rows for k in r})
+        try:
+            self.head = FastHead(["yes", "no"], pairs=False, refit=None).fit(rows, ["yes" if y else "no" for _, y in self.rows], feats)
+            if not self.head.features:
+                self.head = None
+        except Exception:  # noqa: BLE001
+            self.head = None
+        self._since = 0
+
+    def rate(self):
+        return (self.pos + self.prior * 2) / (self.n + 2)             # Laplace-smoothed base rate
+
+    def p(self, row):
+        if self.head is None:
+            return self.rate()
+        s = self.head.scores(row)
+        p = float(s[0] - s[1] + 1) / 2                                # ridge on ±: (score_yes − score_no + 1) / 2
+        n = self.n
+        w = n / (n + 10.0)                                            # shrink towards the base rate while data is scarce
+        return min(1.0, max(0.0, w * p + (1 - w) * self.rate()))
+
+
+class OrderModel:
+    """P(hard check fails | cheap facts), one online model per hard check."""
+
+    def __init__(self, features=None, min_rows=20, refit_every=50):
+        self.features = list(features or [])        # computed facts to use besides init_state (cheap ones, computed early)
+        self.models = {}
+        self.min_rows, self.refit_every = min_rows, refit_every
+
+    def row(self, vals, init_keys):
+        return scalar_row(vals, list(init_keys) + [f for f in self.features if f not in init_keys])
+
+    def observe(self, check, row, failed):
+        m = self.models.setdefault(check, Binary(self.min_rows, self.refit_every))
+        m.observe(row, failed)
+
+    def p_fail(self, check, row):
+        m = self.models.get(check)
+        return 0.5 if m is None else m.p(row)
+
+    def n(self, check):
+        m = self.models.get(check)
+        return 0 if m is None else m.n
+
+
+class ProducerPolicy:
+    """Chooses the order of a fact's alternative producers per input and learns from outcomes.
+
+    Alternatives whose predicted agreement with the reference (the last declared producer, normally the most trusted) is at
+    least `quality` are tried first, cheapest expected cost first (cost ÷ P(accepted)); the rest follow in the same order.
+    With probability `explore` the remaining producers also run after the accepted one, as a shadow: their outputs are never
+    used, only compared, which gives agreement labels for producers the policy would otherwise stop trying."""
+
+    def __init__(self, quality=0.9, explore=0.1, seed=0, min_rows=20, refit_every=50):
+        self.quality, self.explore = quality, explore
+        self.rng = random.Random(seed)
+        self.accept, self.agree = {}, {}
+        self.min_rows, self.refit_every = min_rows, refit_every
+
+    def _m(self, table, key):
+        return table.setdefault(key, Binary(self.min_rows, self.refit_every))
+
+    def plan(self, group, row, costs):
+        """→ (ordered alternatives, notes per alternative, shadow?)"""
+        ref = group.alternatives[-1].name
+        info = []
+        for pos, a in enumerate(group.alternatives):
+            pa = self._m(self.accept, (group.name, a.name)).p(row)
+            qa = 1.0 if a.name == ref else self._m(self.agree, (group.name, a.name)).p(row)
+            c = costs.get(a)
+            info.append((qa < self.quality, c / max(pa, 1e-3), pos, a, pa, qa, c))
+        info.sort(key=lambda t: t[:3])
+        notes = {a.name: f"P(accepted) {pa:.2f}, P(agrees with {ref}) {qa:.2f}, cost {c:.1f} ms"
+                 for _, _, _, a, pa, qa, c in info}
+        return [t[3] for t in info], notes, self.rng.random() < self.explore
+
+    def observe(self, group, row, outcomes):
+        """outcomes: {producer: (accepted, value)} for the producers that ran on this input."""
+        ref = group.alternatives[-1].name
+        for name, (ok, _) in outcomes.items():
+            self._m(self.accept, (group.name, name)).observe(row, ok)
+        if ref in outcomes and outcomes[ref][0]:
+            from .runtime import vhash
+            want = vhash(_plain(outcomes[ref][1]))
+            for name, (ok, v) in outcomes.items():
+                if name != ref and ok:
+                    self._m(self.agree, (group.name, name)).observe(row, vhash(_plain(v)) == want)
+
+
+def _plain(v):
+    return v.value if isinstance(v, Quote) else v
+

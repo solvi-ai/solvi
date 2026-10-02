@@ -36,7 +36,7 @@ def stream(s, n, start=0, label=lambda team: team, source="human"):
         for team in TEAMS:
             email = texts(team, 1, start=i)[0]
             res = s.ask({"email": email})
-            s.teach("route", {"email": email}, label(team), source=source, by="ann", of=res.stored_id)
+            s.teach("route", {"email": email}, label(team), label_source=source, by="ann", of=res.stored_id)
 
 
 def accuracy(s, start=500, n=10):
@@ -151,9 +151,9 @@ def test_self_labels_are_impossible(tmp_path):
             s.ask({"email": texts(t, 1, start=i)[0]})
     assert loop.labels()["labels"] == [] and loop.run().action == "none"
     with pytest.raises(UntrustedLabel):
-        s.teach("route", {"email": texts("billing", 1)[0]}, "billing", source="model")
+        s.teach("route", {"email": texts("billing", 1)[0]}, "billing", label_source="model")
     with pytest.raises(UntrustedLabel):
-        store.save_correction("route", {"email": texts("billing", 1)[0]}, "billing", source="system")
+        store.save_correction("route", {"email": texts("billing", 1)[0]}, "billing", label_source="system")
     for i in range(3):                                              # records written around save_correction
         store._append({"v": 1, "kind": "teach", "teach": "route", "init": {"email": texts("billing", 1, start=i)[0]},
                        "answer": "shipping", "source": "model"})

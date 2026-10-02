@@ -353,12 +353,13 @@ class Combination:
         return [] if self.groups is None else list(self.groups["by"].names)
 
     # --- the question and identity
-    def question(self, cat=None, name=None, text=None, min_confidence=None, checkpoints=None, require_evidence=False):
+    @_deprecate.kwargs(checkpoints="requires")
+    def question(self, cat=None, name=None, text=None, min_confidence=None, requires=None, require_evidence=False):
         """With a catalog: make this combination a question's answer (as DecisionPart.question) → the Question. Without:
         what the parts must agree on (kind, options, ...)."""
         if cat is None:
             return self.members[0].question()
-        return DecisionPart.question(self, cat, name, text, min_confidence, checkpoints, require_evidence)
+        return DecisionPart.question(self, cat, name, text, min_confidence, requires, require_evidence)
 
     @property
     def spec(self):

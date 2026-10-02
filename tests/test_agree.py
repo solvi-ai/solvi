@@ -65,7 +65,7 @@ def _system():
     @cat.rule("ok")
     def ok(sql, all_agree) -> bool:
         return True
-    return System(cat, [Question("ok", "Can the query be returned?", Answer.yes_no(), checkpoints=["all_agree"])])
+    return System(cat, [Question("ok", "Can the query be returned?", Answer.yes_no(), requires=["all_agree"])])
 
 
 def test_agree_in_a_catalog_gives_the_chosen_value_the_share_and_a_recorded_tally_that_replays():

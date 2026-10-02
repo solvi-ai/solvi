@@ -583,7 +583,7 @@ def strings_system():
         return "ok"
 
     return System(cat, [Question("change_order", "Change an order"), Question("register_invoice", "Register an invoice")],
-                  inputs=Inputs)
+                  input_model=Inputs)
 
 
 @pytest.mark.parametrize("text, want", [

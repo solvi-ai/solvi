@@ -69,7 +69,7 @@ def email_words(doc):
     return len(doc.split())
 
 
-QUESTIONS = [Question("refund", "Approve the refund?", Answer.yes_no(), checkpoints=["within_30_days"])]
+QUESTIONS = [Question("refund", "Approve the refund?", Answer.yes_no(), requires=["within_30_days"])]
 TODAY = date(2026, 9, 25)
 
 

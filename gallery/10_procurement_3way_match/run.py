@@ -33,7 +33,7 @@ def short(s, n=140):
 
 
 if __name__ == "__main__":
-    system = System(task.cat, task.QUESTIONS, inputs=task.Request)    # typed: each request is validated once
+    system = System(task.cat, task.QUESTIONS, input_model=task.Request)    # typed: each request is validated once
     cases = json.loads((HERE / "cases.json").read_text())
     tally = Tally()
     failures, times = [], []

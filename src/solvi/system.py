@@ -15,7 +15,7 @@ from .runtime import MISSING, Record, Result, execute, now_ms, path_confidence, 
 from .strategist import computable, plan
 
 if TYPE_CHECKING:                                 # numpy loads with the heads, on first use: `import solvi` stays light
-    from .fast import FastHead
+    from .heads import FastHead
 
 
 @dataclass
@@ -116,12 +116,20 @@ class Response(Serial):
 
     @property
     def computed_state(self):
-        """Each computed fact with its value; a quote's offsets; for anything not computed by plain code, its provenance
-        (quoted by a model, decided, learned) and the model; errors, including rejected (ungrounded) model outputs."""
-        return self.computed_state_text()
+        """Deprecated (removed in 0.9): `state_text()`."""
+        _deprecate.renamed("Response.computed_state", "Response.state_text()")
+        return self.state_text()
 
     def computed_state_text(self, lang=None):
-        """computed_state in a language (solvi.i18n; default: the System's)."""
+        """Deprecated (removed in 0.9): `state_text(lang)`."""
+        _deprecate.renamed("Response.computed_state_text()", "Response.state_text()")
+        return self.state_text(lang)
+
+    def state_text(self, lang=None):
+        """The computed state for people: each computed fact with its value; a quote's offsets; for anything not
+        computed by plain code, its provenance (quoted by a model, decided, learned) and the model; errors, including
+        rejected (ungrounded) model outputs — in a language (solvi.i18n; default: the System's). The facts as data:
+        `res.values`."""
         from . import i18n
         lang = i18n.check(self.lang if lang is None else lang)
         t = i18n.t
@@ -204,19 +212,23 @@ def _jsonl(path):
 
 
 class System:
-    @_deprecate.kwargs(journal=("storage", _jsonl, "storage=JSONLStorage(path)"))
+    inputs = _deprecate.attr("inputs", "input_model", "System")       # 0.7 names, removed in 0.9
+    costs = _deprecate.attr("costs", "cost_book", "System")
+
+    @_deprecate.kwargs(journal=("storage", _jsonl, "storage=JSONLStorage(path)"), inputs="input_model",
+                       costs="cost_policy")
     def __init__(self, catalog: Catalog, questions, *, workers: int = 1, order: str = "default",
-                 producers: str = "declared", learn: bool | None = None, inputs=None, strategist=None, storage=None,
-                 timeout: float | None = None, costs="declared", lang: str = "en", early_exit: bool = True):
+                 producers: str = "declared", learn: bool | None = None, input_model=None, strategist=None, storage=None,
+                 timeout: float | None = None, cost_policy="declared", lang: str = "en", early_exit: bool = True):
         """order: "default" (hard checks and their inputs first, all together) or "learned" (hard checks one at a time, most
         expected saving first — see learn_order). producers: "declared" (alternative producers of a fact are tried in
         declaration order) or "learned" (a policy picks the order per input and learns from outcomes). learn: after every
         ask, update the order / producer models from what happened (which hard check failed on which input, which
         producer was accepted); default: on when order="learned" or producers="learned", else off (part costs are
         measured either way). learn_order() turns it on.
-        inputs: a pydantic model of init_state (optional): a dict passed to ask is validated against it — its fields (with
+        input_model: a pydantic model of init_state (optional; `inputs=` in 0.7): a dict passed to ask is validated against it — its fields (with
         defaults) are the given facts, a field that fails is left out and reported (safeguard type_rejected). ask also takes
-        a BaseModel instance directly, with or without `inputs`. A given fact cannot share a name with a part of the
+        a BaseModel instance directly, with or without `input_model`. A given fact cannot share a name with a part of the
         catalog (ask refuses such a key: the value would replace the part), so a model field named like a part is refused
         here.
         strategist: an object with plan(catalog, questions, init_keys, heads) → Flow used by ask instead of the deterministic
@@ -229,30 +241,31 @@ class System:
         timeout: seconds a part's call may take under `aask` when the part declares no `timeout=` (None: no limit).
         producers="equivalent": the producers of a fact are interchangeable — the cost-optimal planner
         (solvi.strategy.ModelStrategist(producers="equivalent")) picks one per fact, the cheapest valid plan.
-        costs: what that planner's costs are — "declared" (`cost=`, 1 when undeclared) or "measured" (the run times
-        system.costs measures, after a warm-up; or a solvi.learned.MeasuredCosts with its settings). freeze_costs() fixes
+        cost_policy: what that planner's costs are — "declared" (`cost=`, 1 when undeclared) or "measured" (the run times
+        system.cost_book measures, after a warm-up; or a solvi.costs.MeasuredCosts with its settings; `costs=` in 0.7). freeze_costs() fixes
         them; the plan record in each trace says which cost decided each choice.
         early_exit: True (default) — when a hard check fails, the steps only the questions it settles needed are skipped
         (the expensive rest is not paid for); the decision's record then holds no values for them, and a part listed in
-        `checkpoints` may not have run. False — every step of the flow runs anyway: the answers are the same (the failed
+        `requires` may not have run. False — every step of the flow runs anyway: the answers are the same (the failed
         hard check still decides), `res.values` and the trace hold every fact and rule value, and the trace says so
         (`trace.early_exit` is False). `ask(..., early_exit=...)` overrides it for one ask.
         lang: the language of what solvi renders for people — res.audit(), solvi.show, safeguard_report() — "en" (default)
         or "ru" (solvi.i18n). Only the rendering changes: traces, stored responses, hashes and `why` stay in English."""
         from . import i18n
-        from .learned import CostBook, OrderModel, ProducerPolicy
+        from .costs import CostBook
+        from .strategist import OrderModel, ProducerPolicy
         self.lang = i18n.check(lang)
         self.catalog = catalog
         for fact, name, lost in catalog.unreadable_validates():
             raise ValueError(f"validate of {name} reads {lost}, which no producer of {fact} takes as an input: validate "
                              f"gets the value and, by name, inputs of the fact's producers — as it is, it cannot run and "
                              f"every output of {name} would be rejected")
-        self.inputs = inputs
+        inputs = self.input_model = input_model
         if inputs is not None:                        # a declared field named like a part could never be given (ask refuses
             from .typed import field_types           # the key): say it now, not at the first ask
             clash = sorted(k for k in field_types(inputs) if k in catalog.parts)
             if clash:
-                raise ValueError(_clash(catalog, clash, f"System(inputs={getattr(inputs, '__name__', inputs)}) declares"))
+                raise ValueError(_clash(catalog, clash, f"System(input_model={getattr(inputs, '__name__', inputs)}) declares"))
         self.strategist = strategist              # None: the deterministic strategist (solvi.strategist.plan)
         questions = list(questions)
         dup = sorted({q.name for q in questions if sum(x.name == q.name for x in questions) > 1})
@@ -287,7 +300,8 @@ class System:
                 self.strategist = strategist = ModelStrategist(producers="equivalent")
             elif getattr(strategist, "producers", None) != "equivalent":
                 raise ValueError('producers="equivalent" with a strategist: give it producers="equivalent" too')
-        from .learned import MeasuredCosts
+        from .costs import MeasuredCosts
+        costs = cost_policy
         if isinstance(costs, MeasuredCosts):
             self.cost_policy = costs
         elif costs == "measured":
@@ -295,18 +309,18 @@ class System:
         elif costs == "declared":
             self.cost_policy = None
         else:
-            raise ValueError('costs must be "declared", "measured" or a MeasuredCosts')
+            raise ValueError('cost_policy must be "declared", "measured" or a MeasuredCosts')
         if self.cost_policy is not None and getattr(self.strategist, "producers", None) != "equivalent":
-            raise ValueError('costs="measured" needs the cost-optimal planner: System(..., producers="equivalent") or '
+            raise ValueError('cost_policy="measured" needs the cost-optimal planner: System(..., producers="equivalent") or '
                              'strategist=ModelStrategist(producers="equivalent")')
         # online learning of order / producer choice costs time inside ask (periodic refits), so it is on only when a learned
         # policy will use it (or when asked explicitly); plain systems keep flat, predictable decision times
         if learn is None:
             learn = order != "default" or producers == "learned"
         self.order, self.producers, self.learn = order, producers, learn
-        self.costs = CostBook()                   # moving average of each part's run time, ms
+        self.cost_book = CostBook()               # moving average of each part's run time, ms
         if self.cost_policy is not None and self.cost_policy.alpha is not None:
-            self.costs.alpha = self.cost_policy.alpha
+            self.cost_book.alpha = self.cost_policy.alpha
         self.order_model = OrderModel()           # P(hard check fails | cheap facts)
         self.producer_policy = ProducerPolicy()   # which producer of a fact to try first
         from .audit import STATS
@@ -339,10 +353,10 @@ class System:
 
     def _state(self, init_state):
         """init_state → (dict of given facts, [(fact, why)] rejected by `inputs`)."""
-        if self.inputs is None and type(init_state) is dict:
+        if self.input_model is None and type(init_state) is dict:
             return init_state, None
         from .typed import state_of
-        return state_of(init_state, self.inputs)
+        return state_of(init_state, self.input_model)
 
     def response_schema(self):
         """The JSON schema of this system's responses, with each question's answer as its closed set of options."""
@@ -360,14 +374,14 @@ class System:
         early_exit: None — the system's (System(early_exit=), True by default: after a failed hard check the steps only
         the settled questions needed are skipped). False — compute the whole flow anyway: the answers are the same, and
         `res.values` and the trace hold every fact and rule value of a decision a hard check forced (and every part
-        listed in `checkpoints`); the trace records it (`res.trace.early_exit`), and replay checks no step is missing.
+        listed in `requires`); the trace records it (`res.trace.early_exit`), and replay checks no step is missing.
         An `async def` part is awaited in an event loop of its own, one call at a time: use `aask` for such catalogs."""
         if workers is not None and (not isinstance(workers, int) or isinstance(workers, bool) or workers < 1):
             raise ValueError(f"workers must be a positive int, not {workers!r}")
         t0 = now_ms()
         p = self._prepare(init_state, questions, order)
         trace, vals = execute(self.catalog, p.flow, p.state, workers=workers or self.workers, order=p.order,
-                              costs=self.costs, policy=p.policy, known=p.known, early_exit=self._early(early_exit))
+                              costs=self.cost_book, policy=p.policy, known=p.known, early_exit=self._early(early_exit))
         return self._respond(p, trace, vals, t0, store)
 
     def _early(self, early_exit):
@@ -418,7 +432,7 @@ class System:
         t0 = now_ms()
         p = self._prepare_text(read, order)
         trace, vals = execute(self.catalog, p.flow, p.state, workers=workers or self.workers, order=p.order,
-                              costs=self.costs, policy=p.policy, known=p.known, early_exit=self._early(early_exit))
+                              costs=self.cost_book, policy=p.policy, known=p.known, early_exit=self._early(early_exit))
         return self._respond(p, trace, vals, t0, store)
 
     async def aask_text(self, text, decider=None, *, textin=None, question=None, store=True, timeout=None,
@@ -429,7 +443,7 @@ class System:
         t0 = now_ms()
         p = self._prepare_text(read, order)
         _speculate_note(speculate, p)
-        trace, vals = await aexecute(self.catalog, p.flow, p.state, order=p.order, costs=self.costs, policy=p.policy,
+        trace, vals = await aexecute(self.catalog, p.flow, p.state, order=p.order, costs=self.cost_book, policy=p.policy,
                                      known=p.known, timeout=self.timeout if timeout is None else timeout,
                                      speculate=speculate, early_exit=self._early(early_exit))
         return self._respond(p, trace, vals, t0, store)
@@ -455,7 +469,7 @@ class System:
         t0 = now_ms()
         p = self._prepare(init_state, questions, order)
         _speculate_note(speculate, p)
-        trace, vals = await aexecute(self.catalog, p.flow, p.state, order=p.order, costs=self.costs, policy=p.policy,
+        trace, vals = await aexecute(self.catalog, p.flow, p.state, order=p.order, costs=self.cost_book, policy=p.policy,
                                      known=p.known, timeout=self.timeout if timeout is None else timeout,
                                      speculate=speculate, early_exit=self._early(early_exit))
         return self._respond(p, trace, vals, t0, store)
@@ -468,9 +482,9 @@ class System:
         return bool(async_parts(self.catalog))
 
     def freeze_costs(self):
-        """Fix the costs the planner uses (System(costs="measured")) at what was measured so far — a producer that never
+        """Fix the costs the planner uses (System(cost_policy="measured")) at what was measured so far — a producer that never
         ran: its declared cost, else 1 — so the choice of producers stops changing; measuring goes on. → {producer: ms}"""
-        return self._measured().freeze(self.costs, _producers(self.catalog))
+        return self._measured().freeze(self.cost_book, _producers(self.catalog))
 
     def unfreeze_costs(self):
         """Back to the measured costs (see freeze_costs)."""
@@ -478,15 +492,15 @@ class System:
 
     def _measured(self):
         if self.cost_policy is None:
-            raise ValueError('costs are declared: freeze_costs needs System(..., costs="measured")')
+            raise ValueError('costs are declared: freeze_costs needs System(..., cost_policy="measured")')
         return self.cost_policy
 
     def _prepare(self, init_state, names, order):
         """What ask and aask share before running: the given facts, the questions, the flow, the order and the policy."""
         known = None
-        if self.inputs is not None or type(init_state) is not dict:
+        if self.input_model is not None or type(init_state) is not dict:
             from .typed import field_types, is_model
-            model = type(init_state) if is_model(init_state) else self.inputs
+            model = type(init_state) if is_model(init_state) else self.input_model
             init_state, rejected = self._state(init_state)
             if model is not None:                     # validated fields: typed parts reading them skip re-validation
                 ft = field_types(model)
@@ -517,12 +531,12 @@ class System:
 
     def _plan(self, questions, init_keys, why_costs=False):
         """The flow of these questions on these given facts, planned as `ask` plans it: by System(strategist=) (the
-        deterministic solvi.strategist.plan when none is set), with measured costs under System(costs="measured").
+        deterministic solvi.strategist.plan when none is set), with measured costs under System(cost_policy="measured").
         Everything that plans for this system goes through here — ask, answers_of, facts_for / fit, learn_order, the input
         schemas of `solvi serve` and `solvi check` — so they all see the same flow. why_costs: note in the plan record
         which cost decided each choice (ask)."""
         if self.cost_policy is not None:              # costs from measurements (see MeasuredCosts)
-            c, src = self.cost_policy.costs(self.costs, _producers(self.catalog))
+            c, src = self.cost_policy.costs(self.cost_book, _producers(self.catalog))
             flow = self.strategist.plan(self.catalog, questions, init_keys, self.heads, costs=c)
             if why_costs:
                 _why_costs(self.catalog, flow, init_keys, c, src, self.cost_policy.frozen is not None)
@@ -551,7 +565,7 @@ class System:
                 _append(trace, rec, len(flow.steps))
         trace.fingerprint = self._fingerprint(flow)
         for name, ms in trace.timings.items():         # cost tracking is cheap: always on
-            self.costs.observe(name, ms)
+            self.cost_book.observe(name, ms)
         if self.cost_policy is not None:
             self.cost_policy.observe(trace.timings)
         if self.learn:
@@ -633,7 +647,7 @@ class System:
         return {"catalog": c["fp"], "questions": self._questions_fp(), "parts": dict(c["parts"]), "models": models}
 
     def _questions_fp(self):
-        """The questions' fingerprint (answer types, min_confidence, checkpoints, calibration); cached while the questions'
+        """The questions' fingerprint (answer types, min_confidence, required parts, calibration); cached while the questions'
         contents and the calibration are the same (a question changed in place — `q.min_confidence = 0.9` — changes
         it: the cache is keyed by what the questions hold, not by the objects)."""
         from .core import plain_json, question_data
@@ -650,7 +664,7 @@ class System:
             a = q.answer
             ans = None if a is None else (a.kind, tuple(map(repr, a.options)), repr(sorted(a.descriptions.items(), key=str)),
                                           a.unknown, a.k, tuple(a.bins or ()), a.coverage, a.unit, a.source, repr(a.type))
-            return (q.text, ans, tuple(q.checkpoints), tuple(q.uses or ()) if q.uses is not None else None,
+            return (q.text, ans, tuple(q.requires), tuple(q.uses or ()) if q.uses is not None else None,
                     q.min_confidence, q.require_evidence)
         key = (tuple((n, content(q)) for n, q in self.questions.items()), tuple(sorted(self.calib.items())),
                tuple(sorted((n, g.fingerprint()) for n, g in self.guards.items())))     # solvi.guarantee
@@ -700,7 +714,7 @@ class System:
     def _answer(self, q, flow, trace, vals, by, hard, pcache=None):
         facts = flow.per_question.get(q.name, [])
         # hard checks: a false hard check in the question's flow decides the answer (the model cannot override it).
-        # A hard check with `then` governs only the questions listed there (and those that name it as a checkpoint);
+        # A hard check with `then` governs only the questions listed there (and those that require it);
         # for other questions it is an ordinary failed check. hard: the catalog's hard checks, in catalog order.
         in_flow = set(facts)
         hard = [(f, part) for f, part in hard if f in in_flow]
@@ -845,7 +859,7 @@ class System:
                 up(f)
             sub = copy.copy(flow)
             sub.steps = [s for s in flow.steps if s.part.name in keep]
-            trace, vals = execute(self.catalog, sub, st, early_exit=False, costs=self.costs)
+            trace, vals = execute(self.catalog, sub, st, early_exit=False, costs=self.cost_book)
             self._observe(trace, st, vals, None)
         self.order = "learned"
         self.learn = True                             # the learned order goes on learning from the asks, as order="learned" does
@@ -949,18 +963,18 @@ class System:
     def fit(self, question, examples, features=None, *, select=None, min_gain=0.0, lam=None, refit=2.0,
             refit_until=2000):
         """An answer head for a question without a rule, learned from examples — [(init_state, answer)]: a closed-form
-        ridge head (solvi.fast.FastHead, milliseconds to seconds), which every `teach` for this question updates at once.
+        ridge head (solvi.heads.FastHead, milliseconds to seconds), which every `teach` for this question updates at once.
 
         features: the facts it may read, by default every fact computable from the examples' init_state keys, the given
         keys included. select: keep only the facts that help — greedy forward selection by the exact leave-one-out
-        squared error (solvi.fast.select_features); a fact is kept while it lowers that error by more than `min_gain` ×
+        squared error (solvi.heads.select_features); a fact is kept while it lowers that error by more than `min_gain` ×
         the error of the answers' shares. The kept facts become the question's flow, so later requests compute only
         what the head reads. Default (None): select when `features` is not given, keep every fact listed when it is.
         lam, refit, refit_until: as FastHead (a refit keeps the selected facts; it does not choose again).
         `head.selection` says what each kept fact did to the error. Before 0.8, fit was a logistic head chosen by
         cross-validated accuracy (+1 point), which kept nothing on imbalanced questions; fit_fast was this without the
         selection (now fit(..., select=False))."""
-        from .fast import FastHead, select_features
+        from .heads import FastHead, select_features
         import time
         q = self.questions[question]
         examples = _learnable(q, examples)
@@ -1042,15 +1056,16 @@ class System:
                       "0.9", DeprecationWarning, stacklevel=2)
         return self.fit(question, examples, features, select=False, lam=lam, refit=refit, refit_until=refit_until)
 
-    def learn_rule(self, question, examples, facts, **kw):
-        """An answer rule learned from examples (solvi.rules.RuleList): a readable "if feature then answer" list, installed in the
-        catalog as a regular rule (deterministic, replayable). examples: [(init_state, answer)], at least one; facts: the
-        facts the list reads — parts of the catalog or given facts of the examples (a name that is neither raises, and
+    @_deprecate.kwargs(facts="features")
+    def learn_rule(self, question, examples, features, **kw):
+        """An answer rule learned from examples (solvi.rulelist.RuleList): a readable "if feature then answer" list, installed in the
+        catalog as a regular rule (deterministic, replayable). examples: [(init_state, answer)], at least one; features: the
+        facts the list reads (`facts=` in 0.7) — parts of the catalog or given facts of the examples (a name that is neither raises, and
         nothing is installed)."""
         from .core import Part
-        from .rules import RuleList
+        from .rulelist import RuleList
         q = self.questions[question]
-        facts = [facts] if isinstance(facts, str) else list(facts)
+        facts = [features] if isinstance(features, str) else list(features)
         if not examples:
             raise ValueError(f"learn_rule({question!r}): no examples to learn from")
         rows = [self.facts_for(s) for s, _ in examples]
@@ -1068,9 +1083,10 @@ class System:
         self.learned_rules[question] = rl
         return rl
 
-    def calibrate(self, question, examples, truth):
-        """Calibrate answer confidence (Platt scaling) on held-out examples: examples is [init_state], truth is [correct
-        answer] (written as for `fit` and `teach`: True / False for a yes/no question, an Enum member, ...).
+    def calibrate(self, question, examples, truth=None):
+        """Calibrate answer confidence (Platt scaling) on held-out examples [(init_state, correct answer)], as `fit` takes
+        them (the answer written as for `fit` and `teach`: True / False for a yes/no question, an Enum member, ...); the
+        0.7 form `calibrate(question, states, truth)` still works with a DeprecationWarning (removed in 0.9).
         → (a, b): confidence' = σ(a·logit(confidence) + b), applied to every later answer of the question.
         The held-out examples are run without the question's current calibration (so a second call fits the same thing
         again, not a correction of the first), are not saved to the storage and do not count in `stats`. Fewer than 10
@@ -1078,15 +1094,23 @@ class System:
         the shift b is fitted (a = 1) — the calibrated confidence is then the share of right answers."""
         import numpy as np
         q = self.questions[question]
-        truth = [q.answer.normalize(y) for y in truth]
-        if len(truth) != len(examples):
-            raise ValueError(f"calibrate: {len(examples)} examples and {len(truth)} correct answers")
+        examples = list(examples)
+        if truth is not None:
+            _deprecate.renamed("System.calibrate(question, states, truth)",
+                               "System.calibrate(question, [(state, answer), ...])")
+            truth = list(truth)
+            if len(truth) != len(examples):
+                raise ValueError(f"calibrate: {len(examples)} examples and {len(truth)} correct answers")
+            examples = list(zip(examples, truth))
+        if not all(isinstance(e, tuple) and len(e) == 2 for e in examples):
+            raise ValueError("calibrate: examples are [(init_state, correct answer), ...]")
+        examples, truth = [s for s, _ in examples], [q.answer.normalize(y) for _, y in examples]
         was = self.calib.pop(question, None)          # raw confidences: not the previously calibrated ones
         xs, ys = [], []
         try:
             for st, y in zip(examples, truth):
                 p = self._prepare(st, [question], None)
-                trace, vals = execute(self.catalog, p.flow, p.state, workers=self.workers, order=p.order, costs=self.costs,
+                trace, vals = execute(self.catalog, p.flow, p.state, workers=self.workers, order=p.order, costs=self.cost_book,
                                       policy=p.policy, known=p.known)
                 r = self._results(p.questions, p.flow, trace, vals)[0][question]
                 if r.status != "ok":
@@ -1122,19 +1146,21 @@ class System:
         from .learning import Learning
         return Learning(self, storage, parts, ladder, gates, **options)
 
-    def teach(self, question, init_state, correct, *, source="human", by=None, of=None):
+    @_deprecate.kwargs(source="label_source")
+    def teach(self, question, init_state, correct, *, label_source="human", by=None, of=None):
         """Human correction. A fast head (fit_fast) absorbs it at once; so does a model decision that answers the question
         (a solvi.decide decision part as the question's rule, or a rule passing a decided fact on): its per-option shift is
         updated. Any correction goes to the storage for the next fit. Returns the update time in ms when something learned
-        at once, else None. source ("human", "outcome", "rule"), by (who) and of (the stored id of the decision it corrects)
+        at once, else None. label_source ("human", "outcome", "rule"; `source=` in 0.7), by (who) and of (the stored id of the decision it corrects)
         are stored with it (TraceStorage.save_correction). With a learning loop (System.learning(..., gate_teach=True))
         nothing learns at once: the correction is only stored, and the loop's gates decide whether it is learned.
         An unknown question raises KeyError and an answer that is not one of the question's options ValueError, before
         anything is learned or stored; the answer is stored normalized (True → "yes"). When nothing learned at once and
         there is no storage, the correction is lost: a UserWarning says so."""
         from .decide import decision_of
-        from .fast import FastHead
+        from .heads import FastHead
         from .storage import check_source
+        source = label_source
         check_source(source)
         if question not in self.questions:
             raise KeyError(f"teach: no question {question!r} in this system ({', '.join(self.questions)})")
@@ -1145,7 +1171,7 @@ class System:
         if loop is not None and loop.gate_teach:
             if self.storage is None:
                 raise ValueError("a learning loop reads corrections from the storage: System(storage=...)")
-            self.storage.save_correction(question, init_state, correct, source=source, by=by, of=of)
+            self.storage.save_correction(question, init_state, correct, label_source=source, by=by, of=of)
             return None
         head = self.heads.get(question)
         dec = decision_of(self.catalog, question)
@@ -1160,7 +1186,7 @@ class System:
                 vals = init_state if all(f in init_state for f in dec.facts) else self.facts_for(init_state)
                 ms = dec.teach(dec.text_of(vals), label)
         if self.storage is not None:
-            self.storage.save_correction(question, init_state, correct, source=source, by=by, of=of)
+            self.storage.save_correction(question, init_state, correct, label_source=source, by=by, of=of)
         elif ms is None:
             import warnings
             warnings.warn(f"teach({question!r}): nothing learned it — no online head (fit_fast) or model decision "
@@ -1276,9 +1302,9 @@ def _read_results(read, results):
 
 
 def governs(part, question):
-    """Does a failed hard check decide this question? Yes if the question is in its `then`, names it as a checkpoint, or the
+    """Does a failed hard check decide this question? Yes if the question is in its `then`, requires it, or the
     check has no `then` at all."""
-    return not part.then or question.name in part.then or part.name in question.checkpoints
+    return not part.then or question.name in part.then or part.name in question.requires
 
 
 def _learnable(q, examples):

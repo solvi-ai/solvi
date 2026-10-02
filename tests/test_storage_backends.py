@@ -79,7 +79,7 @@ def test_save_get_query_replay_and_verify(store, tmp_path):
     for kw in ({}, {"answer": "no"}, {"question": "approve", "answer": None}, {"status": "ok"}, {"safeguard": "hard_check"},
                {"model": "Scorer"}, {"until": 1025.0}, {"question": "approve", "status": "forced"}):
         assert [x.seq for x in store.query(**kw)] == [x.seq for x in ref.query(**kw)], kw
-    s.teach("approve", STATES[2], True, source="outcome", by="ledger", of=ids[2])
+    s.teach("approve", STATES[2], True, label_source="outcome", by="ledger", of=ids[2])
     (c,) = store.corrections()
     assert (c["source"], c["by"], c["of"]) == ("outcome", "ledger", ids[2]) and store.verify()["ok"]
     assert store.head() == {"count": 5, "hash": store.record(c["id"])["hash"]}

@@ -8,7 +8,7 @@ JSON has no dates, sets, enums or models. Values of the stdlib types the dump fl
 UUID, set, frozenset, tuple, also inside lists and dicts — are written with their type next to them (a trace's
 `init_types`, a record's `type`) and come back as they were, declared or not. For the rest (an enum, a pydantic model, a
 dataclass) `catalog=` (or a System) restores typed values from the facts' types (a producer's return type, the type a given
-fact's readers expect, or System(inputs=...)), so a trace restored from JSON replays with the same hashes. A value that is
+fact's readers expect, or System(input_model=...)), so a trace restored from JSON replays with the same hashes. A value that is
 neither (an untyped enum; an untyped date in a record stored by solvi ≤ 0.7.1) comes back as JSON gave it and is listed
 in the loaded trace's `unrestored`: replay then reports its steps as "not_restored" — no verdict on the data — rather
 than as damaged."""
@@ -572,7 +572,7 @@ def _restore(t, v):
 
 
 def _given_type(catalog, system, k):
-    m = getattr(system, "inputs", None) if system is not None else None
+    m = getattr(system, "input_model", None) if system is not None else None
     if m is not None and k in m.model_fields:
         return m.model_fields[k].annotation
     rs = catalog.readers.get(k) if catalog is not None else None

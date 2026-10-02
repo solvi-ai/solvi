@@ -12,7 +12,7 @@ def _system(checkpoints):
     def approve(amount):
         return "yes"
 
-    return System(cat, [Question("approve", "Approve?", Answer.yes_no(), checkpoints=checkpoints)])
+    return System(cat, [Question("approve", "Approve?", Answer.yes_no(), requires=checkpoints)])
 
 
 def test_hard_check_that_raises_makes_the_question_abstain():
@@ -49,7 +49,7 @@ def _plan_catalog(with_check=True):
     @cat.rule("accept")
     def accept(count):
         return "yes" if count == 0 else "no"
-    return System(cat, [Question("accept", "Accept?", Answer.yes_no(), checkpoints=["day_allowed"] if with_check else [])])
+    return System(cat, [Question("accept", "Accept?", Answer.yes_no(), requires=["day_allowed"] if with_check else [])])
 
 
 def test_an_abstention_names_the_part_that_failed_not_only_the_check_that_could_not_run():

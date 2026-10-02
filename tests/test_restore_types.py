@@ -40,7 +40,7 @@ def quickstart():
     def approve(enough_notice):
         return "approve" if enough_notice else "needs_manager"
     return cat, [Question("approve", "Approve the leave?", Answer.choice(["approve", "needs_manager", "reject"]),
-                          checkpoints=["enough_balance"])]
+                          requires=["enough_balance"])]
 
 
 STATE = {"start": datetime.date(2026, 10, 19), "end": datetime.date(2026, 10, 23), "today": datetime.date(2026, 9, 25),

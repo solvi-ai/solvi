@@ -53,7 +53,7 @@ def team(words: set) -> Literal["billing", "shipping"]:
     return "billing" if "charged" in words else "shipping"
 
 
-QUESTIONS = [Question("approve", "Approve the refund?", checkpoints=["known_customer"]),
+QUESTIONS = [Question("approve", "Approve the refund?", requires=["known_customer"]),
              Question("team", "Which team handles it?")]
 
 
@@ -160,7 +160,7 @@ def test_inputs_model_types_the_schema():
     @cat.rule("ok")
     def ok(amount, note) -> bool:
         return amount < 10 and "fraud" not in note
-    s = System(cat, [Question("ok", "OK?")], inputs=Claim)
+    s = System(cat, [Question("ok", "OK?")], input_model=Claim)
     c = client(system=s)
     sch = c.get("/questions").json()[0]["input_schema"]
     assert sch["properties"]["amount"]["type"] == "number"

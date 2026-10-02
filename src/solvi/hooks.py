@@ -706,7 +706,7 @@ def edit_system(rules, change, model=None, instructions=True):
         cat.check(hard=True, then={"edit": outcome})(f)
         checks.append(f.__name__)
     cat.rule("edit")(edit_verdict)
-    q = Question("edit", "May the agent make this change?", Answer.choice(list(OUTCOMES)), checkpoints=checks)
+    q = Question("edit", "May the agent make this change?", Answer.choice(list(OUTCOMES)), requires=checks)
     return System(cat, [q]), used
 
 

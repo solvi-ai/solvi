@@ -413,10 +413,10 @@ calibrated threshold decide when a person looks.
 
 *The one hard check broken inside solvi was our fault.* On one 3-way match invoice that had already been paid, Jeeves
 without reasoning answered "no" to "already paid?". The duplicate check failed and forced "reject" for the payment, but
-not the answer to "already paid?": in gallery task 10 that check was a checkpoint of the payment question only. In the
+not the answer to "already paid?": in gallery task 10 that check was required by the payment question only. In the
 task's own catalog the "already paid?" rule reads the same fact as the check, so the check covered it anyway. With the
 rule replaced by a model, it no longer did. `solvi check` reports exactly this case (`then_not_in_flow`) for a catalog
-like that; we did not run it on the catalogs with replaced rules. Task 10 now names the check as a checkpoint of both
+like that; we did not run it on the catalogs with replaced rules. Task 10 now names the check as required by both
 questions. The saved answers are from before that fix.
 
 ## Update in 0.7.0: the refund task's claim reader

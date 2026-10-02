@@ -120,7 +120,7 @@ def build(extractor=None, classifier=None):
     return cat
 
 
-QUESTIONS = [Question("approve", "Approve the claim?", Answer.yes_no(), checkpoints=["amount_positive"]),
+QUESTIONS = [Question("approve", "Approve the claim?", Answer.yes_no(), requires=["amount_positive"]),
              Question("category", "Expense category", Answer.choice(CATEGORIES), min_confidence=0.5)]
 REQUEST = {"doc": CLAIM, "limit": {"travel": 100, "meals": 60, "equipment": 800}}
 
@@ -136,7 +136,7 @@ if __name__ == "__main__":
     system = System(cat, QUESTIONS)
     res = system.ask(REQUEST)
     print(res.audit())
-    print("\ncomputed_state:\n" + res.computed_state)
+    print("\ncomputed_state:\n" + res.state_text())
 
     print("\n=== 3. the extractor hallucinates a total: grounding rejects it, the regular expression takes over ===")
     extractor.hallucinate = True

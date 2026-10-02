@@ -8,15 +8,15 @@
 
 Errors (a decision is, or can be, wrong or impossible):
   then_not_in_flow      a hard check sets `then=` for a question whose flow never runs it (the question's rule does not
-                        read it, through any fact, and the question does not list it in `checkpoints`): when the check
+                        read it, through any fact, and the question does not list it in `requires`): when the check
                         fails, the question is answered as if it had passed
   then_unknown / then_bad_answer   `then=` names no question / an answer that is not one of the question's options
   cycle                 facts that need each other: none of them can be computed unless one is given (facts derived
                         from each other, each with a producer outside the loop, are a cycle for the deterministic
                         strategist only; with System(strategist=...) they are the note `mutual_producers`)
   unanswerable          a question no input can answer (its flow needs a fact nothing can compute; a span / rank /
-                        estimate question without a rule — a learned head cannot answer it; a missing checkpoint)
-  type_conflict         a producer's return type that its consumer cannot read; a System(inputs=...) field that a typed
+                        estimate question without a rule — a learned head cannot answer it; a missing required part)
+  type_conflict         a producer's return type that its consumer cannot read; a System(input_model=...) field that a typed
                         reader cannot read
   constraint_never_holds / constraints_conflict   constraints between answers that no combination of answers satisfies
                         (brute force over the answers' finite domains)
@@ -37,18 +37,18 @@ Warnings:
   dead_option           an option the constraints rule out whatever the other answers are
   constraint_raises     a constraint that raises on some combination of answers (it counts as broken)
   unused_rule           a rule registered for a question that is not among the System's questions: it never runs
-  input_not_declared    with System(inputs=Model): a part or a rule reads a name that is neither computed by a part nor
+  input_not_declared    with System(input_model=Model): a part or a rule reads a name that is neither computed by a part nor
                         a field of the model (`amout` for `amount`) — it can only arrive as an extra key of the input;
                         when the model forbids extra keys it can never arrive
-  uses_unknown          with System(inputs=Model): a question's `uses` hint names something that is neither a part nor
+  uses_unknown          with System(input_model=Model): a question's `uses` hint names something that is neither a part nor
                         a field of the model. (Without an input model a `uses` name that is not a part is taken for a
                         given fact — a learned head may read given facts directly — so a typo there cannot be told;
-                        a misspelled `checkpoints` entry is an error: `unanswerable`)
+                        a misspelled `requires` entry is an error: `unanswerable`)
   silent_default        in a function that reads the input (a given fact): `x or <literal>` or `.get(k, <literal>)` on
                         that input (`amount or 0`, `order.get("total", 0)`; not a lookup in a constant table or a
                         default on a computed value), which turns a missing, empty or null input into a value nobody
                         gave — say so explicitly (check
-                        for None and abstain, or declare the default in System(inputs=...)); `# solvi: ok` on the line
+                        for None and abstain, or declare the default in System(input_model=...)); `# solvi: ok` on the line
                         accepts it
 Notes (never fail):
   mutual_producers      facts derived from each other (net from gross and gross from net), each with a producer
@@ -269,9 +269,9 @@ def _questions(cat, questions, heads, given, rep, planner):
         if name not in cat.rules and name not in heads and not q.uses and q.answer is not None \
                 and q.answer.kind in PRIMITIVES:
             # no rule, and no head can answer it: its flow (everything computable) runs for nothing — only the
-            # checkpoints count as used. A question a head can answer uses everything computable: its candidate features
-            counted[name] = set(planner([replace(q, uses=list(q.checkpoints))], given).per_question.get(name, ())) \
-                if q.checkpoints else set()
+            # required parts count as used. A question a head can answer uses everything computable: its candidate features
+            counted[name] = set(planner([replace(q, uses=list(q.requires))], given).per_question.get(name, ())) \
+                if q.requires else set()
         missing = flow.unresolved.get(name)
         if missing:
             rep.add("error", "unanswerable", name, "no input can answer it: nothing can compute " + ", ".join(missing))
@@ -320,8 +320,8 @@ def _hard_checks(cat, questions, flows, rep):
             if name not in flows.get(qn, ()):
                 rep.add("error", "then_not_in_flow", name,
                         f"`then=` sets {qn!r}, but {qn!r}'s flow never runs this check (its rule does not read it through "
-                        f"any fact and it is not in the question's checkpoints): when it fails, {qn!r} is answered as if "
-                        f"it had passed — add checkpoints=[{name!r}] to the question")
+                        f"any fact and it is not in the question's `requires`): when it fails, {qn!r} is answered as if "
+                        f"it had passed — add requires=[{name!r}] to the question")
 
 
 # --- what a function plainly returns
@@ -387,9 +387,9 @@ def _rules(cat, questions, rep):
 
 
 def _names(cat, system, questions, rep):
-    """With System(inputs=Model), names only a typo (or an extra key) explains: an argument, or a `uses` hint, that
+    """With System(input_model=Model), names only a typo (or an extra key) explains: an argument, or a `uses` hint, that
     nothing computes and the model does not declare. Without a model every such name is a given fact: nothing to tell."""
-    m = getattr(system, "inputs", None)
+    m = getattr(system, "input_model", None)
     fields = getattr(m, "model_fields", None)
     readers = {}
     for p in list(cat.parts.values()) + list(cat.rules.values()):
@@ -406,12 +406,12 @@ def _names(cat, system, questions, rep):
             continue
         rep.add("warning", "input_not_declared", x,
                 f"{', '.join(dict.fromkeys(by))} read{'s' if len(set(by)) == 1 else ''} {x}, which no part computes and "
-                f"which is not a field of System(inputs={m.__name__})" + how)
+                f"which is not a field of System(input_model={m.__name__})" + how)
     for qn, q in questions.items():
         for x in q.uses or ():
             if x not in cat.parts and x not in fields:
                 rep.add("warning", "uses_unknown", qn, f"`uses` names {x!r}, which is neither a part of the catalog nor a "
-                                                       f"field of System(inputs={m.__name__})" + how)
+                                                       f"field of System(input_model={m.__name__})" + how)
 
 
 # --- types
@@ -429,12 +429,12 @@ def _types(cat, system, given, rep):
                 if ta != tb and not compatible(ta, tb) and not compatible(tb, ta):
                     rep.add("warning", "reader_types_differ", fact, f"given fact read as {type_name(ta)} by {ra} and as "
                                                                     f"{type_name(tb)} by {rb}")
-        m = getattr(system, "inputs", None)
+        m = getattr(system, "input_model", None)
         if m is not None and fact in m.model_fields:
             ft = m.model_fields[fact].annotation
             for reader, t in readers.items():
                 if not compatible(ft, t):
-                    rep.add("error", "type_conflict", fact, f"System(inputs={m.__name__}) gives {fact}: {type_name(ft)}, "
+                    rep.add("error", "type_conflict", fact, f"System(input_model={m.__name__}) gives {fact}: {type_name(ft)}, "
                                                             f"but {reader} reads {type_name(t)}")
     for fact, g in cat.parts.items():
         typed = [(a.name, a.returns) for a in (g.alternatives or ()) if a.returns is not None]
@@ -604,7 +604,7 @@ def _silent_defaults(cat, given, rep):
             for line, _, why in silent_defaults(a.func, set(a.inputs) & given):
                 rep.add("warning", "silent_default", f"{path}:{line} ({getattr(f, '__name__', a.name)})",
                         why + ": say what a missing input means (check for None and abstain, or declare the default in "
-                              "System(inputs=...)); `# solvi: ok` accepts it")
+                              "System(input_model=...)); `# solvi: ok` accepts it")
 
 
 def _short_path(p):

@@ -40,7 +40,7 @@ def build(threshold=100, version="1", min_confidence=None):
     def urgent(words) -> bool:
         return "urgent" in words
 
-    return System(cat, [Question("approve", "Approve?", Answer.yes_no(), checkpoints=["known_customer"],
+    return System(cat, [Question("approve", "Approve?", Answer.yes_no(), requires=["known_customer"],
                                  min_confidence=min_confidence),
                         Question("urgent", "Urgent?", Answer.yes_no())])
 

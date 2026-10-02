@@ -25,7 +25,7 @@ def paying(body, typed=False, direct=False):
     def pay(amount):
         return "yes"
 
-    return cat, System(cat, [Question("pay", "Pay?", Answer.choice(["yes", "no"]), checkpoints=["cap"])])
+    return cat, System(cat, [Question("pay", "Pay?", Answer.choice(["yes", "no"]), requires=["cap"])])
 
 
 OVER = {"amount": 9000, "limit": 100}                  # the cap is broken: "yes" is never right
@@ -161,7 +161,7 @@ def test_a_then_answer_outside_the_options_warns_at_build_and_abstains_instead_o
         return "yes"
 
     with pytest.warns(UserWarning, match="`then` answers 'pay' with 'nope'"):
-        s = System(cat, [Question("pay", "Pay?", Answer.choice(["yes", "no"]), checkpoints=["cap"])])
+        s = System(cat, [Question("pay", "Pay?", Answer.choice(["yes", "no"]), requires=["cap"])])
     r = s.ask(OVER)["pay"]
     assert r.answer is None and r.status == "abstain" and r.guard == "hard_check" and "nope" in r.why
     assert s.ask({"amount": 5, "limit": 100})["pay"].answer == "yes"
@@ -257,5 +257,5 @@ def test_an_input_model_with_a_field_named_like_a_part_is_refused_when_the_syste
         amount: float = 0.0
 
     cat, qs = _named_like_its_input()
-    with pytest.raises(ValueError, match=r"System\(inputs=Application\) declares 'savings' .*reads its own name"):
-        System(cat, qs, inputs=Application)
+    with pytest.raises(ValueError, match=r"System\(input_model=Application\) declares 'savings' .*reads its own name"):
+        System(cat, qs, input_model=Application)

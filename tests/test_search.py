@@ -48,7 +48,7 @@ def _calendar(storage=None):
     @cat.rule("ok")
     def ok(in_hours, nobody_busy) -> bool:
         return True
-    return System(cat, [Question("ok", "Does the slot work?", Answer.yes_no(), checkpoints=["in_hours", "nobody_busy"])],
+    return System(cat, [Question("ok", "Does the slot work?", Answer.yes_no(), requires=["in_hours", "nobody_busy"])],
                   storage=storage)
 
 
@@ -86,7 +86,7 @@ def test_an_objective_keeps_the_best_by_a_function_or_by_a_fact_of_the_response_
     @cat.rule("ok")
     def ok(no_rivals) -> bool:
         return True
-    s = System(cat, [Question("ok", "A valid team?", Answer.yes_no(), checkpoints=["no_rivals", "size"])])
+    s = System(cat, [Question("ok", "A valid team?", Answer.yes_no(), requires=["no_rivals", "size"])])
     teams = [["ann"], ["ann", "bob"], ["ann", "cy", "dee"], ["bob", "cy"], ["ann", "bob", "cy", "dee"]]
     run = search(s, {}, "ok", teams, into="team", objective=len, keep=2)
     assert run.best == ["ann", "cy", "dee"] and run.value == 3 and run.kept == [(["ann", "cy", "dee"], 3), (["bob", "cy"], 2)]
@@ -120,7 +120,7 @@ def _trip():
     def ok(once, direct, starts_at_a, all_cities) -> bool:
         return True
     return System(cat, [Question("ok", "A valid trip?", Answer.yes_no(),
-                                 checkpoints=["once", "direct", "starts_at_a", "all_cities"])])
+                                 requires=["once", "direct", "starts_at_a", "all_cities"])])
 
 
 CITIES = ["A", "B", "C", "D", "E"]
@@ -149,7 +149,7 @@ def test_a_bound_stops_the_walk_once_nothing_below_can_beat_what_is_kept():
     @cat.rule("ok")
     def ok(short) -> bool:
         return True
-    s = System(cat, [Question("ok", "?", Answer.yes_no(), checkpoints=["short"])])
+    s = System(cat, [Question("ok", "?", Answer.yes_no(), requires=["short"])])
     run = search(s, {}, "ok", meet, into="order", objective=len, prune=["short"])
     assert run.best == ["A", "B", "C"] and run.value == 3 and run.pruned.get("bound", 0) > 0 and run.asked < 20
     with pytest.raises(ValueError, match="bound needs an objective"):
@@ -187,7 +187,7 @@ def test_a_model_reading_the_state_is_called_once_and_hold_false_calls_it_per_ca
     @cat.rule("ok")
     def ok(under) -> bool:
         return True
-    s = System(cat, [Question("ok", "?", Answer.yes_no(), checkpoints=["under"])])
+    s = System(cat, [Question("ok", "?", Answer.yes_no(), requires=["under"])])
     run = search(s, {"problem": "7"}, "ok", list(range(20)), into="x", objective=lambda x: x)
     assert run.best == 7 and run.asked == 20 and calls["n"] == 2 and run.held == ["limit"]
     calls["n"] = 0

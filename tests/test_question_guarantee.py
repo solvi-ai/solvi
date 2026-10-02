@@ -99,12 +99,12 @@ def test_a_computed_fact_as_the_signal_is_computed_in_every_flow():
     s, rng = _head(4)
     rep = s.guarantee("label", _draw(rng, 600), max_error=0.10, signal="margin")
     assert rep["separation"]["auroc"] > 0.7
-    assert "margin" in s.questions["label"].checkpoints
+    assert "margin" in s.questions["label"].requires
     r = s.ask({"x": 0.51})["label"]
     assert r.status == "abstain" and "margin" in r.why and "would have answered" in r.why
     assert s.ask({"x": 0.97})["label"].status == "ok"
     s.guarantee("label", False)
-    assert "margin" not in s.questions["label"].checkpoints and s.ask({"x": 0.51})["label"].status == "ok"
+    assert "margin" not in s.questions["label"].requires and s.ask({"x": 0.51})["label"].status == "ok"
 
 
 def test_one_sided_answers_yes_alone_below_one_half_and_abstains_otherwise():
@@ -172,7 +172,7 @@ def test_cross_fitting_scores_each_example_by_a_head_that_did_not_see_it():
     assert s2.guarantee("label", ex, max_error=0.3, method="empirical", folds=5)["folds"] == 5
     with pytest.raises(ValueError, match="head fitted with fit"):
         s3 = _system()
-        s3.learn_rule("label", ex, facts=["score"])
+        s3.learn_rule("label", ex, features=["score"])
         s3.guarantee("label", ex, max_error=0.3, folds=5)
 
 

@@ -191,9 +191,9 @@ def report_to_regulator(regulator_report_needed):
 
 QUESTIONS = [
     Question("decision", "Pay, deny or investigate?", Answer.choice(["pay", "deny", "investigate"]),
-             checkpoints=["policy_in_force", "not_sanctioned"]),
+             requires=["policy_in_force", "not_sanctioned"]),
     Question("payout_band", "How much?", Answer.choice(["none", "under 10k", "10k-100k", "over 100k"])),
-    Question("fast_track", "Fast-track the payment?", Answer.yes_no(), checkpoints=["policy_in_force"]),
+    Question("fast_track", "Fast-track the payment?", Answer.yes_no(), requires=["policy_in_force"]),
     Question("medical_ok", "Medical part consistent?", Answer.yes_no()),
     Question("report_to_regulator", "Report to the regulator?", Answer.yes_no()),
 ]

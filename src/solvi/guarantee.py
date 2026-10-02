@@ -386,7 +386,7 @@ def _calibration_rows(system, question, examples, guard, correct, folds=None, se
                 system.heads[question] = heads[i]
             p = system._prepare(st, [question], None)
             trace, vals = execute(system.catalog, p.flow, p.state, workers=system.workers, order=p.order,
-                                  costs=system.costs, policy=p.policy, known=p.known)
+                                  costs=system.cost_book, policy=p.policy, known=p.known)
             r = system._results(p.questions, p.flow, trace, vals)[0][question]
             if r.status == "abstain":
                 sig.append(-math.inf)
@@ -421,7 +421,7 @@ def _calibration_rows(system, question, examples, guard, correct, folds=None, se
 def _fold_heads(system, question, examples, folds, seed):
     """Cross-fitting for a question answered by a fast head fitted on these examples: each example gets a head fitted
     on the other folds (the same features and settings) → [head per example]."""
-    from .fast import FastHead
+    from .heads import FastHead
     head = system.heads.get(question)
     if not isinstance(head, FastHead):
         raise ValueError(f"folds= refits the question's head on part of the examples: {question!r} needs a head fitted with fit "
@@ -475,7 +475,7 @@ def guard_question(system, question, examples=None, *, max_error=None, max_risk=
     if answer is not None:
         answer = system.questions[question].answer.normalize(answer)
     old = system.guards.pop(question, None)
-    if old is not None:                            # a guarantee set before: its checkpoints go with it
+    if old is not None:                            # a guarantee set before: its required parts go with it
         _drop_checkpoints(system, old)
     guard = QuestionGuard(question, None, signal, answer, groups)
     _add_checkpoints(system, guard)               # the signal's and the groups' facts are computed in every flow
@@ -515,15 +515,15 @@ def guard_question(system, question, examples=None, *, max_error=None, max_risk=
 
 
 def _add_checkpoints(system, guard):
-    """The facts the guard reads (a fact signal, group facts) that the catalog computes become checkpoints of the
+    """The facts the guard reads (a fact signal, group facts) that the catalog computes become required parts of the
     question, so every flow computes them; the ones added are remembered and removed with the guarantee."""
     import dataclasses
     q = system.questions[guard.question]
     need = ([guard.signal] if isinstance(guard.signal, str) else []) + (guard._by.names if guard._by is not None else [])
-    add = [f for f in need if f in system.catalog.parts and f not in q.checkpoints]
+    add = [f for f in need if f in system.catalog.parts and f not in q.requires]
     guard.added = add
     if add:
-        system.questions[guard.question] = dataclasses.replace(q, checkpoints=list(q.checkpoints) + add)
+        system.questions[guard.question] = dataclasses.replace(q, requires=list(q.requires) + add)
 
 
 def _drop_checkpoints(system, guard):
@@ -531,7 +531,7 @@ def _drop_checkpoints(system, guard):
     add = getattr(guard, "added", None)
     q = system.questions.get(guard.question)
     if add and q is not None:
-        system.questions[guard.question] = dataclasses.replace(q, checkpoints=[c for c in q.checkpoints if c not in add])
+        system.questions[guard.question] = dataclasses.replace(q, requires=[c for c in q.requires if c not in add])
     guard.added = []
 
 

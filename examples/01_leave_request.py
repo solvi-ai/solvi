@@ -96,7 +96,7 @@ def notify_hr(days_requested, remaining_after):
 
 QUESTIONS = [
     Question("approve", "Approve the leave?", Answer.choice(["approve", "needs_manager", "reject"]),
-             checkpoints=["enough_balance", "dates_valid"]),
+             requires=["enough_balance", "dates_valid"]),
     Question("notify_hr", "Notify HR?", Answer.yes_no()),
 ]
 

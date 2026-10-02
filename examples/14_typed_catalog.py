@@ -106,7 +106,7 @@ def line(res):
 
 
 if __name__ == "__main__":
-    system = System(cat, QUESTIONS, inputs=Parcel)
+    system = System(cat, QUESTIONS, input_model=Parcel)
     print("answer types from the rules:", {q: (s.answer.kind, s.answer.options) for q, s in system.questions.items()})
     print("fact types:", {f: type_name(t) for f, t in cat.types.items()})
 

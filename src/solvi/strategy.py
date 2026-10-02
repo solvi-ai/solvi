@@ -6,7 +6,7 @@ alternative producers (`provides=`), needs the inputs of ALL of them (a fallback
 1. **Points — code.** A branch-and-bound search picks ONE producer per needed fact so that the plan is valid and cheapest
    (declared `cost=`; a part without a declared cost counts as `unit`). A producer whose inputs cannot be computed from the
    given facts (a dead end) is never chosen. Hard checks that govern a question (its `then` names the question, it has no
-   `then`, or the question names it as a checkpoint) and that the deterministic flow over the usable producers contains
+   `then`, or the question requires it) and that the deterministic flow over the usable producers contains
    are **mandatory milestones**: every plan must keep them.
 2. **Segments — the model.** Where the choice is not settled by declared costs (a fact with several usable producers, not
    all of them with a declared cost), the model gets a short task — "produce this fact from these available facts; these are
@@ -99,7 +99,7 @@ def targets_of(catalog, q, reach, init_keys, heads=None):
 
 
 def governs(part, q):
-    return not part.then or q.name in part.then or part.name in q.checkpoints
+    return not part.then or q.name in part.then or part.name in q.requires
 
 
 # ---------------------------------------------------------------------------------------------------------------- search
@@ -116,7 +116,7 @@ class Selection:
 
 def search(catalog, questions, init_keys, costs=None, heads=None, fixed=None, extra=(), unit=UNIT,
            method="auto"):
-    """Cheapest valid selection for the questions' targets, their checkpoints and `extra` parts (e.g. mandatory checks).
+    """Cheapest valid selection for the questions' targets, their required parts and `extra` parts (e.g. mandatory checks).
     fixed: {fact: producer name} choices that must be kept (a model's accepted segments).
     method: "milp" (exact: a 0/1 program solved by scipy's HiGHS), "bnb" (branch and bound, capped at MAX_EXPAND nodes)
     or "auto" (milp when scipy has it). Ties go to the producer declared first.
@@ -134,7 +134,7 @@ def search(catalog, questions, init_keys, costs=None, heads=None, fixed=None, ex
 def _start(catalog, questions, init, reach, heads, extra):
     start, missing = [], []
     for q in questions:
-        for f in targets_of(catalog, q, reach, init, heads) + list(q.checkpoints):
+        for f in targets_of(catalog, q, reach, init, heads) + list(q.requires):
             (start if f in reach else missing).append(f)
     for f in extra:
         (start if f in reach else missing).append(f)
@@ -234,7 +234,7 @@ def _search_bnb(catalog, questions, init_keys, costs, heads, fixed, extra, unit)
     start = []
     missing = []
     for q in questions:
-        for f in targets_of(catalog, q, reach, init, heads) + list(q.checkpoints):
+        for f in targets_of(catalog, q, reach, init, heads) + list(q.requires):
             (start if f in reach else missing).append(f)
     for f in extra:
         (start if f in reach else missing).append(f)
@@ -422,8 +422,8 @@ def view(catalog, choice, fallbacks=True, reach=None):
 def with_checkpoints(questions, gov):
     out = []
     for q in questions:
-        extra = [c for c in gov.get(q.name, ()) if c not in q.checkpoints]
-        out.append(dataclasses.replace(q, checkpoints=list(q.checkpoints) + extra) if extra else q)
+        extra = [c for c in gov.get(q.name, ()) if c not in q.requires]
+        out.append(dataclasses.replace(q, requires=list(q.requires) + extra) if extra else q)
     return out
 
 
@@ -474,7 +474,7 @@ def validate(catalog, flow, questions, init_keys, mandatory=None):
 
 
 def build(catalog, questions, init_keys, sel, heads=None, fallbacks=True, gov=None):
-    """Selection → Flow (the deterministic strategist on the narrowed catalog, with mandatory checks as checkpoints)."""
+    """Selection → Flow (the deterministic strategist on the narrowed catalog, with mandatory checks as required parts)."""
     qs = with_checkpoints(questions, gov or {})
     return det_plan(view(catalog, sel.choice, fallbacks, reachable(catalog, init_keys) & (sel.needed | set(init_keys))),
                     qs, init_keys, heads)
@@ -644,7 +644,7 @@ class ModelStrategist:
         return None if self.model is None else self.model.info()
 
     def plan(self, catalog, questions, init_keys, heads=None, costs=None):
-        """→ Flow. costs: {producer: cost} from the caller (System(costs="measured") passes measured run times), under the
+        """→ Flow. costs: {producer: cost} from the caller (System(cost_policy="measured") passes measured run times), under the
         strategist's own `costs=` (which wins where both name a producer)."""
         t0 = time.perf_counter()
         init = set(init_keys)
@@ -752,7 +752,7 @@ def plan_record(flow):
                                                           for r in s.get("segments", ())]}
     if s.get("fallback"):
         extra["fallback"] = s["fallback"]
-    if s.get("costs"):                                # costs from measurements (System(costs="measured")): why each choice
+    if s.get("costs"):                                # costs from measurements (System(cost_policy="measured")): why each choice
         extra["costs"] = s["costs"]
     return Record(step=0, kind="plan", name="plan:strategy", inputs={}, value=value,
                   provenance="proposed" if by_model else "computed", model=s.get("model") if by_model else None, extra=extra)

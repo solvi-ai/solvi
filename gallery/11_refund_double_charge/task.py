@@ -200,10 +200,10 @@ def reply(double_charge_claim, duplicate_pairs, outstanding_duplicates, balance_
 
 QUESTIONS = [
     Question("customer_claims_double", "Does the customer say they were charged twice?", Answer.yes_no(),
-             checkpoints=["claimed_amount"]),
+             requires=["claimed_amount"]),
     Question("is_double_charge", "Does the ledger show a double charge still to refund?", Answer.yes_no()),
-    Question("refund", "Refund", Answer.choice(["auto", "manual", "none"]), checkpoints=["no_open_chargeback"]),
+    Question("refund", "Refund", Answer.choice(["auto", "manual", "none"]), requires=["no_open_chargeback"]),
     Question("reply", "Reply to send", Answer.choice(["confirm refund", "under review", "already refunded", "no duplicate found",
                                                       "chargeback in progress", "not about a charge"]),
-             checkpoints=["no_open_chargeback"]),
+             requires=["no_open_chargeback"]),
 ]

@@ -68,7 +68,7 @@ def test_learn_from_storage_takes_trusted_corrections_and_skips_the_rest(tmp_pat
     s = System(cat, [part.question(Catalog(), "route")], storage=store)
     rid = s.ask({"email": texts("billing", 1)[0]}).stored_id
     s.teach("route", {"email": texts("billing", 1)[0]}, "shipping", by="ann", of=rid)
-    s.teach("route", {"email": texts("billing", 1, start=1)[0]}, "shipping", source="outcome")
+    s.teach("route", {"email": texts("billing", 1, start=1)[0]}, "shipping", label_source="outcome")
     store.save_correction("route", {"email": texts("billing", 1, start=2)[0]}, "nonsense")   # not an option: skipped
     store._append({"v": 1, "kind": "teach", "teach": "route", "init": {"email": "x"}, "answer": "billing",
                    "source": "model"})                                            # written around save_correction

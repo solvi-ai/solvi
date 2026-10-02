@@ -163,7 +163,7 @@ if __name__ == "__main__":
     def not_locked(ticket: str) -> bool:
         """A ticket about a locked account goes to the account team, whatever the models say."""
         return "locked" not in ticket.lower()
-    q = vote.question(cat, "team", "Which team handles the ticket?", checkpoints=["not_locked"])
+    q = vote.question(cat, "team", "Which team handles the ticket?", requires=["not_locked"])
     system = System(cat, [q])
     for ticket in ("I was charged twice for order 4409, please refund the payment.",     # both sure, both billing
                    "I was charged twice for order 4411, please refund the payment.",     # family B slips, sure of it

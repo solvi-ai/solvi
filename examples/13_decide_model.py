@@ -150,7 +150,7 @@ def build(model):
         return refund == "no" or team in ("billing", "other")
 
     questions = [team.question(cat, "team", "Which team handles the email?", min_confidence=0.55,
-                               checkpoints=["no_legal_threat"]),
+                               requires=["no_legal_threat"]),
                  Question("refund", "Does the customer ask for a refund?", Answer.yes_no())]
     return cat, team, questions
 

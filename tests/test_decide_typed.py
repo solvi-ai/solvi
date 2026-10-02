@@ -470,7 +470,7 @@ def test_hard_checks_and_constraints_still_decide_over_the_model():
     @cat.constraint
     def refunds_to_billing(team, topics):
         return "refund" not in (topics or ()) or team == "billing"
-    qs[1].checkpoints.append("no_lawyer")
+    qs[1].requires.append("no_lawyer")
     s = System(cat, qs)
     r = s.ask({"email": "my lawyer says the app crash and the bug need a refund"})
     assert r["urgency"].answer == "critical" and r["urgency"].status == "forced"
@@ -714,7 +714,7 @@ def test_the_published_checkpoint_answers_typed_questions_as_the_readme_shows_if
     @cat.check(hard=True, then={"urgency": "critical"})
     def no_legal_threat(ticket) -> bool:
         return "lawyer" not in str(ticket).lower()
-    qs[1].checkpoints.append("no_legal_threat")
+    qs[1].requires.append("no_legal_threat")
     s = System(cat, qs)
     ticket = {"subject": "Charged twice", "body": "Refund my double payment!", "customer": {"tier": "pro"}}
     res = s.ask({"ticket": ticket})

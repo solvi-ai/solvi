@@ -110,11 +110,11 @@ def approve(enough_notice):
 
 system = System(cat, [Question("approve", "Approve the leave?",
                                Answer.choice(["approve", "needs_manager", "reject"]),
-                               checkpoints=["enough_balance"])])
+                               requires=["enough_balance"])])
 res = system.ask({"start": date(2026, 10, 19), "end": date(2026, 10, 23),
                   "today": date(2026, 9, 25), "balance": 14})
 print(res["approve"].answer, res["approve"].confidence, res["approve"].why)
-print(res.computed_state)
+print(res.state_text())
 print(res.trace.replay(system))
 ```
 
@@ -153,15 +153,15 @@ Every command is in the [guide](docs/guide.md#command-line).
   (`def risk_score(risk_points: dict[str, float]) -> float`): producer and consumer types are checked when a part is
   registered, values are validated / coerced with pydantic at run time, and a value that fails is rejected like an
   ungrounded quote (safeguard `type_rejected`). Untyped parts cost nothing.
-- **Questions.** `Question(name, text, Answer.yes_no() | Answer.choice([...]), checkpoints=[...])`. Questions without a
+- **Questions.** `Question(name, text, Answer.yes_no() | Answer.choice([...]), requires=[...])`. Questions without a
   rule get a small answer head trained from labeled examples (`system.fit`) or a readable learned rule list
   (`system.learn_rule`).
 - **Strategist.** For each question it walks backwards from the rule's arguments (or the learned features) through the
-  catalog signatures to the keys of `init_state`, adds the question's checkpoints and every check that touches a computed
+  catalog signatures to the keys of `init_state`, adds the question's required parts (`requires`) and every check that touches a computed
   fact. Everything else in the catalog is not executed; the flow records why each part was taken or skipped.
 - **Execution.** Each part runs once, even if several questions need it. Hard checks and their inputs run first; when one
   fails, the steps only the settled questions needed are skipped (`res.trace.skipped`). With `System(..., workers=8)`
-  independent steps run in parallel threads as soon as their inputs are ready. Results go into `computed_state` with their
+  independent steps run in parallel threads as soon as their inputs are ready. Results go into the computed state (`res.values`, `res.state_text()`) with their
   provenance; extracted values keep their quote. Each step record is hashed and chained to the previous one in flow order,
   so the trace does not depend on scheduling.
 - **Answers and trace.** `res[q].answer / .confidence / .why / .status` (`ok`, `forced`, `abstain`), plus
@@ -195,7 +195,7 @@ questions = model.questions(cat, Triage, text_fact="ticket", escalate_below=0.6)
 @cat.check(hard=True, then={"urgency": "critical"})         # a legal threat is critical, whatever the model says
 def no_legal_threat(ticket) -> bool:
     return "lawyer" not in str(ticket).lower()
-questions[1].checkpoints.append("no_legal_threat")
+questions[1].requires.append("no_legal_threat")
 
 res = System(cat, questions).ask({"ticket": {"subject": "Charged twice", "body": "Refund my double payment!",
                                              "customer": {"tier": "pro"}}})
@@ -234,7 +234,7 @@ Every answer is a value and a confidence, and the types also declare answer prim
   10% risk (Julia in-distribution there; measured with a script that is not in this repository —
   [examples/20_vote_across_families.py](examples/20_vote_across_families.py) shows the setup with stand-in servers).
 - **Serving and operations.** `solvi serve module:system` exposes the questions over HTTP (OpenAPI from the same types),
-  MCP and the System One API; `await system.aask(...)` runs async parts concurrently with timeouts; `costs="measured"`
+  MCP and the System One API; `await system.aask(...)` runs async parts concurrently with timeouts; `cost_policy="measured"`
   lets the planner pick the fastest equivalent source and switch when it slows down. `TraceStorage` keeps decisions with a
   hash chain across them; `solvi diff` shows which stored decisions a rule or model change would flip; `solvi test`,
   `solvi check` and the honesty suite (`solvi honesty`) belong in CI; `res.report(format="html")` and

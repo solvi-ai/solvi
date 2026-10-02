@@ -69,7 +69,7 @@ def collect(res, catalog=None):
             k = classify(r.error)
             if k:
                 events.append({"kind": k, "fact": r.name, "detail": r.error, "questions": where})
-    for fact, why in getattr(res.trace, "rejected", None) or ():     # given facts that failed System(inputs=...)
+    for fact, why in getattr(res.trace, "rejected", None) or ():     # given facts that failed System(input_model=...)
         down = _downstream(catalog, fact)
         events.append({"kind": "type_rejected", "fact": fact, "detail": why,
                        "questions": sorted(q for q, fs in res.flow.unresolved.items() if set(fs) & down and q in asked)})

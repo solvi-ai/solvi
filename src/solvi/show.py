@@ -48,7 +48,7 @@ def show(res, catalog=None, flow=True, state=True, audit=True, lang=None):
             print("    " + i18n.msg(line, lang, scope="flow"))
     if state:
         print(head("sh.state", 52))
-        text = res.computed_state_text(lang)
+        text = res.state_text(lang)
         for line in text.splitlines():
             print("  " + line)
         for r in res.trace.records:

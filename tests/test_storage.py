@@ -43,7 +43,7 @@ def build(threshold=100, version="1"):
     def urgent(words) -> bool:
         return "urgent" in words
 
-    return cat, [Question("approve", "Approve?", Answer.yes_no(), checkpoints=["known_customer"]),
+    return cat, [Question("approve", "Approve?", Answer.yes_no(), requires=["known_customer"]),
                  Question("urgent", "Urgent?", Answer.yes_no())]
 
 
@@ -141,16 +141,16 @@ def test_corrections_carry_their_source_and_untrusted_sources_are_refused(filled
     from solvi.storage import UntrustedLabel
     _, store, s, _ = filled
     rid = s.ask(STATES[0]).stored_id
-    s.teach("approve", STATES[0], False, source="outcome", by="ledger", of=rid)
+    s.teach("approve", STATES[0], False, label_source="outcome", by="ledger", of=rid)
     s.teach("approve", STATES[2], True, by="ann")
     c = store.corrections()
     assert [(x["source"], x["by"], x["of"]) for x in c] == [("outcome", "ledger", rid), ("human", "ann", None)]
     assert "source" not in store.record(c[1]["id"])                  # a human correction is stored as in 0.6
     for bad in ("model", "system", "self", None):
         with pytest.raises(UntrustedLabel):
-            s.teach("approve", STATES[0], True, source=bad)
+            s.teach("approve", STATES[0], True, label_source=bad)
         with pytest.raises(UntrustedLabel):
-            store.save_correction("approve", STATES[0], True, source=bad)
+            store.save_correction("approve", STATES[0], True, label_source=bad)
     assert len(store.corrections()) == 2 and store.verify()["ok"]
 
 
@@ -382,7 +382,7 @@ def renamed_build():
     def urgent(tokens) -> bool:
         return "urgent" in tokens
 
-    return cat, [Question("approve", "Approve?", Answer.yes_no(), checkpoints=["known_customer"]),
+    return cat, [Question("approve", "Approve?", Answer.yes_no(), requires=["known_customer"]),
                  Question("urgent", "Urgent?", Answer.yes_no())]
 
 
@@ -925,7 +925,7 @@ def test_the_audit_of_a_stored_decision_without_its_catalog_knows_which_checks_a
     @cat.rule("alert")
     def alert(n, calm):
         return "yes" if n > 10 and calm else "no"
-    qs = [Question("alert", "Alert?", Answer.yes_no(), checkpoints=["enough_history"])]
+    qs = [Question("alert", "Alert?", Answer.yes_no(), requires=["enough_history"])]
     store = JSONLStorage(tmp_path / "a.jsonl")
     s = System(cat, qs, storage=store)
     for n in (20, 1):

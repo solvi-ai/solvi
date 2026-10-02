@@ -301,7 +301,7 @@ def diff(storage, system, confidence=0.01, limit=None, **filters):
             lost = sorted(k for k in getattr(old.trace, "unrestored", None) or () if k in old.trace.init)
             if lost:                                  # a re-run on text where the decision read a date is not a change
                 raise ValueError("the stored input was not restored (" + ", ".join(lost) + ": stored without a type "
-                                 "the dump restores, and none is declared) — declare the types (System(inputs=...) or "
+                                 "the dump restores, and none is declared) — declare the types (System(input_model=...) or "
                                  "annotations) to re-run it")
             new = system.ask(dict(old.trace.init), names, store=False)
         except Exception as e:  # noqa: BLE001

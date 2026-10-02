@@ -3207,7 +3207,8 @@ class DecisionPart:
         self.correction_memory = memory
         return memory
 
-    def question(self, cat, name=None, text=None, min_confidence=None, checkpoints=None, require_evidence=False):
+    @_deprecate.kwargs(checkpoints="requires")
+    def question(self, cat, name=None, text=None, min_confidence=None, requires=None, require_evidence=False):
         """Make this decision the answer of a question: registers it as the question's rule (`cat.rule(name)(self)`) and
         returns the Question — choice, multi, ordinal (score) or yes_no (noul), with the option descriptions. System.teach on
         that question teaches this decision."""
@@ -3230,7 +3231,7 @@ class DecisionPart:
             at = {"multi": Answer.multi, "score": Answer.ordinal}.get(sp.kind, Answer.choice)(opts)
         if sp.unknown:
             at = Answer.maybe(at)
-        return Question(name, text or sp.task, at, checkpoints=list(checkpoints or []), min_confidence=min_confidence,
+        return Question(name, text or sp.task, at, requires=list(requires or []), min_confidence=min_confidence,
                         require_evidence=require_evidence)
 
 

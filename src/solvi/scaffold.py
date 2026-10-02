@@ -64,7 +64,7 @@ def priority(past_sla: bool, tier: str) -> str:
 
 QUESTIONS = [
     Question("priority", "How urgent is the ticket?", Answer.ordinal(["low", "normal", "high", "urgent"]),
-             checkpoints=["no_legal_threat"]),
+             requires=["no_legal_threat"]),
 ]
 ''',
     "rule_only": '''
@@ -80,7 +80,7 @@ def route(message: str) -> str:
 
 
 QUESTIONS.append(Question("route", "Which team should handle the ticket?", Answer.choice(ROUTES),
-                          checkpoints=["no_legal_threat"]))
+                          requires=["no_legal_threat"]))
 ''',
     "model": '''
 # ---------- a question the model answers: it proposes one of the options; the hard check above still decides
@@ -88,7 +88,7 @@ route = model.decision("route", "Which team should handle this ticket?", "messag
 CALIBRATION = HERE / "route.calib.json"           # written by: solvi calibrate catalog.py:system route labels.csv
 if CALIBRATION.exists() and calibration_fits(CALIBRATION):
     route.load_calibration(CALIBRATION)           # refuses a calibration made with another model
-QUESTIONS.append(route.question(cat, checkpoints=["no_legal_threat"]))
+QUESTIONS.append(route.question(cat, requires=["no_legal_threat"]))
 ''',
     "options": '''ROUTES = {"billing": "charges, refunds, invoices", "technical": "errors, bugs, outages",
           "general": "questions and anything else", "legal": "legal threats"}
@@ -161,7 +161,7 @@ def decision(amount: float) -> str:
 
 QUESTIONS = [
     Question("decision", "Refund, send to a person, or reject?", Answer.choice(["approve", "review", "reject"]),
-             checkpoints=["in_window", "not_serial_refunder"]),
+             requires=["in_window", "not_serial_refunder"]),
 ]
 ''',
     "rule_only": "",
@@ -227,7 +227,7 @@ def approve(amount: float) -> str:
     return "yes" if amount < 1000 else "no"
 
 
-QUESTIONS = [Question("approve", "Approve the expense?", Answer.yes_no(), checkpoints=["within_limit"])]
+QUESTIONS = [Question("approve", "Approve the expense?", Answer.yes_no(), requires=["within_limit"])]
 ''',
     "rule_only": "",
     "model": '''
@@ -446,7 +446,7 @@ def readme_md(name, template, with_model):
                                                                 ensure_ascii=False) + "' --json",
            "```", "",
            ("1. Change the catalog: your own computations, checks and rules. A check that must never be overridden is "
-            "`hard=True` with `then={question: answer}`, and the question lists it in `checkpoints=`."),
+            "`hard=True` with `then={question: answer}`, and the question lists it in `requires=`."),
            ("2. For every decision that matters, add a case to `cases.json` (`expected`, and `status` for a forced "
             "answer); `solvi test .` fails when an answer changes."),
            ("3. Keep decisions: `solvi ask ... --store decisions.db`, then `solvi report decisions.db`, `solvi verify "

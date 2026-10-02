@@ -13,7 +13,7 @@ Forty-eight hours of sensor readings from a pump go in: bearing temperature, vib
 - **Health rule.** Service when any signal is 4 or more sd off baseline, or when the alert level is at most 72 hours
   away. Watch when a signal is 2 or more sd off, or rising. Otherwise ok.
 - **Two hard safety checks** force `stop`: vibration of 7.1 mm/s or more, and bearing temperature of 95 °C or more.
-  They are checkpoints of `health`, so no rule and no missing sensor can delay them.
+  They are required parts of `health` (`requires`), so no rule and no missing sensor can delay them.
 - **An offline sensor is missing, not normal.** `prepare` drops a signal that contains nulls. The strategist then marks
   what depends on it as impossible to compute, and those answers abstain.
 - **"Likely fault" is learned as a readable rule list.** `run.py` gives `learn_rule` 150 labelled past incidents

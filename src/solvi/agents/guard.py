@@ -1640,7 +1640,7 @@ class Guard:
         else:
             cat.rule("verdict")(verdict_of)
         q = Question("verdict", f"May the agent call {t.name} with these arguments?", Answer.choice(list(VERDICTS)),
-                     checkpoints=checks)
+                     requires=checks)
         return System(cat, [q], lang=self.lang)
 
     def _parts_of(self, t):
@@ -1702,7 +1702,7 @@ class Guard:
             cat.check(hard=True, then={"verdict": "deny"})(known_tool)
             cat.rule("verdict")(unknown_verdict)
             self._unknown = System(cat, [Question("verdict", "Is the tool in the guard's catalog?",
-                                                  Answer.choice(list(VERDICTS)), checkpoints=["known_tool"])],
+                                                  Answer.choice(list(VERDICTS)), requires=["known_tool"])],
                                    lang=self.lang)
         return self._unknown
 

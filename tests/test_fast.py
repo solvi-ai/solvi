@@ -6,7 +6,7 @@ import pytest
 
 from examples_loader import load
 from solvi import Answer, Catalog, Question, System
-from solvi.fast import FastHead
+from solvi.heads import FastHead
 
 S = load("02_shop_order")
 
@@ -173,7 +173,7 @@ def test_a_candidate_head_learns_a_choice_among_candidates_that_change():
     import random
 
     import pytest
-    from solvi.fast import CandidateHead
+    from solvi.heads import CandidateHead
     kinds = {"door": 1.0, "npc": 0.0, "item": 2.0, "route": 0.5}
 
     def steps(n, seed):

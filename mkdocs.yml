@@ -81,12 +81,13 @@ nav:
       - solvi.episode: api/episode.md
       - solvi.worldmap: api/worldmap.md
       - solvi.drift: api/drift.md
-      - solvi.fast: api/fast.md
+      - solvi.heads: api/heads.md
       - solvi.extract_long: api/extract_long.md
       - solvi.extract_multi: api/extract_multi.md
       - solvi.strategist: api/strategist.md
       - solvi.strategy: api/strategy.md
-      - solvi.learned: api/learned.md
+      - solvi.costs: api/costs.md
+      - solvi.rulelist: api/rulelist.md
       - solvi.aliases: api/aliases.md
       - solvi.audit: api/audit.md
       - solvi.show: api/show.md

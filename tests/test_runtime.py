@@ -125,7 +125,7 @@ def _proposal():
     @cat.rule("ok")
     def ok(length):
         return "yes" if length > 3 else "no"
-    return cat, [Question("ok", "ok?", Answer.yes_no(), checkpoints=["not_empty", "draft"])]
+    return cat, [Question("ok", "ok?", Answer.yes_no(), requires=["not_empty", "draft"])]
 
 
 def test_a_failed_hard_check_skips_the_rest_by_default_and_early_exit_false_computes_it_anyway():

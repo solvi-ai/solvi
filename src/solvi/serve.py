@@ -19,7 +19,7 @@ HTTP (`solvi[serve]`: fastapi, uvicorn):
                          (solvi.systemone is the client side)
 
 The OpenAPI schema (/openapi.json, /docs) comes from the same pydantic types: each question's input schema from the types of
-the given facts its flow reads (System(inputs=...) fields, else the types its typed readers declare) and each response's
+the given facts its flow reads (System(input_model=...) fields, else the types its typed readers declare) and each response's
 answers as their closed sets (System.response_schema). Inputs are not validated by the web layer: the state goes to
 System.ask as it is, so a wrong-typed field is what it is in solvi — the fact is missing, the answers that need it
 abstain, and the trace and the audit say why (safeguard type_rejected). With `--store`, every answer is stored with its
@@ -93,10 +93,10 @@ def question_inputs(system, name):
 
 
 def _fact_type(system, fact):
-    """The type of a given fact → (type or Any, description): System(inputs=...)'s field, else the one type its typed
+    """The type of a given fact → (type or Any, description): System(input_model=...)'s field, else the one type its typed
     readers declare (Any when they disagree or nobody declares one)."""
     readers = system.catalog.readers.get(fact) or {}
-    m = system.inputs
+    m = system.input_model
     if m is not None and fact in m.model_fields:
         return m.model_fields[fact].annotation, m.model_fields[fact].description
     types = []

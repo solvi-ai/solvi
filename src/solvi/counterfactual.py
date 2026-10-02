@@ -18,7 +18,7 @@ The search, per input:
      Non-negative inputs stay non-negative unless a domain says otherwise; a domain (lo, hi) that does not contain the
      current value is refused for that input (listed as not searched); float bounds are shown at the shortest decimal
      that still holds;
-  booleans, Enums and Literal-typed inputs (System(inputs=...)) — every other value;
+  booleans, Enums and Literal-typed inputs (System(input_model=...)) — every other value;
   anything else — only with `domains={fact: [values]}`.
 Two inputs together only when no single one changes the answer: one input's candidates (its values, or probe points) with
 a search over the other, then each bound tightened with the other change made. Changes are ranked by count, then by size
@@ -280,7 +280,7 @@ class _Stop(Exception):
 
 def _literal_values(system, fact):
     import typing
-    m = getattr(system, "inputs", None)
+    m = getattr(system, "input_model", None)
     fs = getattr(m, "model_fields", None) or {}
     ann = fs[fact].annotation if fact in fs else None
     if ann is not None and typing.get_origin(ann) is typing.Literal:
@@ -483,7 +483,7 @@ def search(res, question, max_changes=2, over=None, target=None, domains=None, s
                                        else "the decision's input was not restored")
             out.inconclusive = ("the stored input was not restored (" + ", ".join(sorted(lost)) + "): re-run as it came "
                                 "back, the decision does not give its recorded answer — declare the types "
-                                "(System(inputs=...) or annotations) and load it again")
+                                "(System(input_model=...) or annotations) and load it again")
             return out
     kinds = {}
     for f in over:

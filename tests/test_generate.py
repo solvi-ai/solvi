@@ -187,7 +187,7 @@ def _sql_system(g, **kw):
     @cat.rule("ok")
     def ok(selects) -> bool:
         return True
-    return System(cat, [Question("ok", "Is the query fine?", Answer.yes_no(), checkpoints=["selects"])]), cat
+    return System(cat, [Question("ok", "Is the query fine?", Answer.yes_no(), requires=["selects"])]), cat
 
 
 def test_a_generation_part_is_recorded_as_a_proposed_model_output_and_replay_does_not_call_the_model():

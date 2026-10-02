@@ -24,7 +24,7 @@ def refunds():
     def refund(opened):
         return "no" if opened else "yes"
 
-    return System(cat, [Question("refund", "Refund?", Answer.choice(["yes", "no"]), checkpoints=["within_window"])])
+    return System(cat, [Question("refund", "Refund?", Answer.choice(["yes", "no"]), requires=["within_window"])])
 
 
 def test_refund_window_date():
@@ -53,7 +53,7 @@ def test_a_date_change_is_sized_in_days_not_against_the_dates_ordinal():
     @cat.rule("approve")
     def approve(balance):
         return "approve" if balance >= 5 else "reject"
-    s = System(cat, [Question("approve", "Approve?", Answer.choice(["approve", "reject"]), checkpoints=["short_stay"])])
+    s = System(cat, [Question("approve", "Approve?", Answer.choice(["approve", "reject"]), requires=["short_stay"])])
     start = datetime.date(2026, 9, 1)
     res = s.ask({"start": start, "end": datetime.date(2026, 10, 31), "balance": 9})       # 60 days: forced reject
     cf = res.counterfactual("approve")
@@ -83,7 +83,7 @@ def test_inputs_read_only_by_a_part_that_did_not_run_are_listed_not_left_out():
     def approve(enough_notice):
         return "approve" if enough_notice else "needs_manager"
     s = System(cat, [Question("approve", "Approve?", Answer.choice(["approve", "needs_manager", "reject"]),
-                              checkpoints=["funded"])])
+                              requires=["funded"])])
     res = s.ask({"balance": 3, "start": datetime.date(2026, 10, 19), "today": datetime.date(2026, 9, 25)})
     cf = res.counterfactual("approve")
     assert str(cf.best) == "approve if balance ≥ 5 (now 3)"
@@ -133,7 +133,7 @@ def lending(margin=0.0):
         return "approve" if amount <= 1000 and dti < 0.4 else "decline"
 
     return System(cat, [Question("approve", "Approve the loan?", Answer.choice(["approve", "decline"]),
-                                 checkpoints=["adult"])])
+                                 requires=["adult"])])
 
 
 STATE = {"amount": 1200.0, "debt": 1000, "income": 5000, "history": "on time", "age": 30}

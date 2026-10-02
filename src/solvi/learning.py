@@ -221,7 +221,7 @@ class Learning:
         if harvest_rules is not None:                  # 0.7: it harvested nothing in the usual wiring (a failed hard check
             from . import _deprecate                  # answers before the model is asked) and what it did harvest failed
             _deprecate.renamed("System.learning(harvest_rules=)",   # the held-out gate
-                               "corrections with source=\"rule\" (system.teach(..., source=\"rule\")); it is ignored")
+                               "corrections with source=\"rule\" (system.teach(..., label_source=\"rule\")); it is ignored")
         self._states = {}                              # version → in-process snapshot (keeps objects JSON cannot hold)
         system._learning = self
 

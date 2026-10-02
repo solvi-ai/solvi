@@ -98,6 +98,6 @@ def page_oncall(slo_burn_rate):
 
 QUESTIONS = [
     Question("decision", "Promote the canary, hold it where it is, or roll back?", Answer.choice(["promote", "hold", "roll_back"]),
-             checkpoints=["canary_errors_under_ceiling", "enough_canary_traffic"]),
-    Question("page_oncall", "Page the on-call engineer now?", Answer.yes_no(), checkpoints=["canary_errors_under_ceiling"]),
+             requires=["canary_errors_under_ceiling", "enough_canary_traffic"]),
+    Question("page_oncall", "Page the on-call engineer now?", Answer.yes_no(), requires=["canary_errors_under_ceiling"]),
 ]

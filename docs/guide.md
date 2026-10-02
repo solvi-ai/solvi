@@ -41,7 +41,7 @@ A solvi task has two ingredients:
 
 A request is a plain dict called `init_state` (for example `{"doc": text, "today": date(...)}`). Each key and each catalog
 function's output is a **fact**. For every request, the **strategist** picks from the catalog only the parts needed for
-the asked questions and orders them into a **flow**. Execution produces `computed_state` (every fact with its origin, and
+the asked questions and orders them into a **flow**. Execution produces the computed state (every fact with its origin, and
 a quote for extracted values) and a hash-chained **trace**. Each question gets an answer, a confidence, a reason and a
 status.
 
@@ -85,7 +85,7 @@ cat = Catalog()
 Part names must be unique in a catalog (a duplicate raises `ValueError`). A rule is registered per question; registering
 a second rule for the same question replaces the first. The decorators return the original function, so parts stay
 ordinary, testable Python. A part and a key of `init_state` cannot share a name: `ask` raises `ValueError` for an input
-key named like a part (the given value would replace the part — a hard check included), and `System(inputs=Model)`
+key named like a part (the given value would replace the part — a hard check included), and `System(input_model=Model)`
 refuses a model with such a field when it is built. Name a part after what it computes (`savings_points`), not after the
 input it reads (`def savings(savings)` reads its own name).
 
@@ -117,7 +117,7 @@ def ship_rule(big_order):
   in the reason of a learned answer.
 - A **hard check** decides the answers it governs whenever it is in the question's flow and evaluates to `False`:
   - if `then` names the question, the answer is set to that value with `status="forced"` and confidence 1.0;
-  - if the question lists the check in its `checkpoints` (or the check has no `then` at all) but `then` does not name it,
+  - if the question lists the check in its `requires` (or the check has no `then` at all) but `then` does not name it,
     the question abstains;
   - otherwise — the check has a `then` for other questions and only reads this question's facts — it is an ordinary failed
     check for this question and is listed in the reason.
@@ -126,7 +126,7 @@ def ship_rule(big_order):
   [A check that says why](#a-check-that-says-why-fail).
 
   No rule and no model confidence can override a failed hard check. To make sure a hard check is always in a question's
-  flow, list it in the question's `checkpoints`. When several hard checks fail, the first one declared in the catalog decides:
+  flow, list it in the question's `requires`. When several hard checks fail, the first one declared in the catalog decides:
   declare the most important first. A question's flow does not depend on which other questions are asked in the same
   request, and neither does its answer — except through a constraint between answers, which applies only when all its
   questions are asked.
@@ -205,27 +205,27 @@ def total_features(doc):
   (`record.tried`, e.g. `[["total_regex", "no value"], ["total_model", "accepted"]]`). Both are hashed into the chain.
   `replay` recomputes the value with the producer that was used, checks it still passes its validator, and checks that the
   producers tried before it are still rejected (shadow runs are not re-checked).
-- `cost=` (ms) is a prior; measured run times replace it (`system.costs`).
+- `cost=` (ms) is a prior; measured run times replace it (`system.cost_book`).
 
 ## Questions and answer types
 
 ```python
 from solvi import Answer, Question
 
-Question("ship", "Ship now?", Answer.yes_no(), checkpoints=["paid"])
+Question("ship", "Ship now?", Answer.yes_no(), requires=["paid"])
 Question("risk", "Risk level", Answer.choice(["low", "medium", "high"]))
 Question("route", "Which team?", Answer.choice(["a", "b"]), uses=["country", "total"])
 ```
 
-`Question(name, text, answer=None, checkpoints=[], uses=None, min_confidence=None, require_evidence=False)`:
+`Question(name, text, answer=None, requires=[], uses=None, min_confidence=None, require_evidence=False)`:
 
 - `name`: the key used for rules, `fit`, and `res[name]`;
 - `text`: human-readable wording;
 - `answer`: `Answer.yes_no()` (options `["yes", "no"]`) or `Answer.choice(options)` (and the types below); leave it out
   when the question's rule has a return type — the answer type then comes from it (see [Types](#types-questions-and-model-decisions));
-- `checkpoints`: parts that must be in this question's flow in every request (a missing name raises
+- `requires` (`checkpoints=` in 0.7, deprecated): parts that must be in this question's flow in every request (a missing name raises
   `solvi.strategist.PlanError`). In the flow is not the same as run: when a hard check settles the question first, a
-  checkpoint part after it is skipped — `ask(state, early_exit=False)` runs it anyway (see
+  required part after it is skipped — `ask(state, early_exit=False)` runs it anyway (see
   [Early exit](#early-exit-and-parallel-execution));
 - `uses`: a hint for the strategist, the facts that matter when the question has neither a rule nor a trained head;
 - `min_confidence`: an answer below this confidence abstains (status `abstain`, the reason says what it would have answered);
@@ -525,7 +525,7 @@ answering with that span — declare `Maybe[Span[T]]` to get "not stated" as an 
 ### Typed input state and serialization
 
 `system.ask(model_instance)` accepts a pydantic `BaseModel`: its fields (nested models included, as they are) are the given
-facts. `System(cat, questions, inputs=Request)` validates every dict passed to `ask` against `Request`: its fields, with
+facts. `System(cat, questions, input_model=Request)` validates every dict passed to `ask` against `Request`: its fields, with
 defaults, become the given facts, and a field that fails is left out — the fact is missing, the answers that need it
 abstain, and a `type_rejected` event names the field (`res.trace.rejected`). Keys the model does not declare pass
 through as given facts; to keep them out, give the model `model_config = ConfigDict(extra="forbid")`: each undeclared
@@ -548,7 +548,7 @@ JSON has no dates, sets or enums. The dump writes the type of every value of the
 `datetime`, `time`, `Decimal`, `UUID`, `set`, `frozenset`, `tuple`, also inside lists and dicts — next to the value, and
 a load gives them back as they were, declared or not: the README quickstart, whose parts read untyped dates, replays
 from a store. For the rest (an enum, a pydantic model, a dataclass) `catalog=` (a Catalog, or the System, which also
-knows `inputs=`) restores them from the producer's return type, the type the fact's readers expect, or the input model —
+knows `input_model=`) restores them from the producer's return type, the type the fact's readers expect, or the input model —
 so the restored trace hashes and replays exactly. A value that is neither — an untyped enum or object, an aware
 datetime whose zone its text does not carry, an untyped date in a record stored by solvi 0.7.1 or earlier — comes back
 as JSON gave it and is named in the loaded trace's `unrestored`: replay reports the steps that rest on it as
@@ -1180,11 +1180,11 @@ a deep environment met again; it does not shorten a first exploration or choose 
 
 ### Candidates that change: a head over their features
 
-An answer head has fixed options; an agent's step has other candidates each time. `solvi.fast.CandidateHead` learns
+An answer head has fixed options; an agent's step has other candidates each time. `solvi.heads.CandidateHead` learns
 the choice from what a candidate is — its features — rather than from which option it is:
 
 ```python
-from solvi.fast import CandidateHead
+from solvi.heads import CandidateHead
 head = CandidateHead(["kind", "distance", "reward", "dead_end"]).fit(steps)      # steps: [(candidates, chosen index)]
 i, probs = head.choose(candidates)        # candidates: [{feature: value}]
 head.teach(candidates, 2)                 # one correction, about a millisecond
@@ -1728,8 +1728,8 @@ res = system.ask(init_state, ["ship"])         # a subset: questions=["ship"] (o
 `questions` and keyword-only `order`, `store`, `timeout`, `speculate`, `early_exit`. (`names=` is the 0.7 spelling of
 `questions=`: deprecated, removed in 0.9.)
 
-`System(catalog, questions, *, workers=1, order="default", producers="declared", learn=None, inputs=None,
-strategist=None, storage=None, timeout=None, costs="declared", lang="en", early_exit=True)`; `learn`: after every ask,
+`System(catalog, questions, *, workers=1, order="default", producers="declared", learn=None, input_model=None,
+strategist=None, storage=None, timeout=None, cost_policy="declared", lang="en", early_exit=True)`; `learn`: after every ask,
 update the parts' measured costs and the learned order / producer policies from what happened (default: on when
 `order` or `producers` is "learned"); the others are described where they matter. `storage` (a `TraceStorage` or a path) saves every
 response with its whole trace, hash-chained across responses (see [Storing decisions](#storing-decisions-tracestorage)).
@@ -1748,7 +1748,7 @@ Every option after `questions` is keyword-only. With a JSON-lines store every `a
 | `res.flow.per_question` | question -> names of the parts in its flow |
 | `res.flow.skipped` | catalog part -> why it was not executed (inputs unavailable, or not needed) |
 | `res.flow.unresolved` | question -> facts that nothing can compute from this `init_state` |
-| `res.computed_state` | a printable listing: each computed fact, its value, quote offsets, extraction confidence, errors |
+| `res.state_text()` | a printable listing (`computed_state` in 0.7): each computed fact, its value, quote offsets, extraction confidence, errors |
 | `res.values` | dict of all fact values (inputs and computed) |
 | `res.trace` | the hash-chained trace (see [The trace](#the-trace-and-verification)) |
 | `res.audit(q=None)` | what each answer rests on and which safeguards fired (see [Grounded decisions](#grounded-decisions-provenance-audit-and-safeguards)) |
@@ -1794,7 +1794,7 @@ For each asked question the strategist picks targets:
 
 It then walks backwards from the targets through the catalog signatures to the keys of `init_state`, and always adds:
 
-- the question's checkpoints;
+- the question's required parts (`requires`);
 - every check whose inputs are already available in the flow and which touches at least one computed (not input) fact,
   a "check of what was computed".
 
@@ -1816,13 +1816,13 @@ shortcut for it). Both are code only. A segment model (`ModelStrategist.load`) a
 experimental: no checkpoint is published for either. Details, the
 trace record of a plan and what was measured: [docs/strategist.md](strategist.md).
 
-**Costs from measurements.** `System(cat, questions, producers="equivalent", costs="measured")` plans with the run times
-`system.costs` measures instead of declared costs: after a warm-up (each producer measured `min_samples` times; an
+**Costs from measurements.** `System(cat, questions, producers="equivalent", cost_policy="measured")` plans with the run times
+`system.cost_book` measures instead of declared costs: after a warm-up (each producer measured `min_samples` times; an
 undeclared one is tried at 0 ms, a declared one keeps its `cost=` until measured) it picks the fastest of equivalent
 producers — a local table over a 300 ms feed — and switches when that one slows down; a producer unused for `recheck`
 asks gets one more trial. `system.freeze_costs()` stops the switching (`unfreeze_costs()` resumes). The plan record of each
 trace says, per fact, which cost decided and where it came from (declared, warm-up, measured, recheck, frozen). Settings:
-`costs=solvi.learned.MeasuredCosts(min_samples=3, recheck=50, alpha=None)`; see
+`costs=solvi.costs.MeasuredCosts(min_samples=3, recheck=50, alpha=None)`; see
 [docs/strategist.md](strategist.md#costs-from-measurements).
 
 ### Early exit and parallel execution
@@ -1831,7 +1831,7 @@ At run time the executor first computes the hard checks and what they depend on.
 flow contains it is settled (forced by `then`, or abstained), and the steps that only those questions needed are not run.
 They are listed in `res.trace.skipped` with the check that made them unnecessary. This is the default, because the
 skipped rest is often the expensive part (a model, an API). Its price: a decision forced by a hard check has no rule
-values or downstream facts in its record, and a part listed in `checkpoints` — it is in the flow, but the question was
+values or downstream facts in its record, and a part listed in `requires` — it is in the flow, but the question was
 settled before it ran — is missing from `res.values`.
 
 When the record must hold everything — a scorecard whose points you want for every stored decision, a proposal to hand
@@ -1909,8 +1909,8 @@ Plain CPU parts gain nothing from `aask`: for them the sync `ask` stays the defa
 
 ### Learned order of hard checks
 
-Every `ask` measures the run time of each part: `system.costs` keeps a moving average (ms) per part (`cost=` on a decorator
-is the prior until a part has run; `costs="measured"` also feeds it to the planner, see above). While learning is on —
+Every `ask` measures the run time of each part: `system.cost_book` keeps a moving average (ms) per part (`cost=` on a decorator
+is the prior until a part has run; `cost_policy="measured"` also feeds it to the planner, see above). While learning is on —
 `System(order="learned")`, `producers="learned"`, `learn=True`, or after `learn_order()` — it also records which hard
 checks failed on which input; a default System does not (`learn=False`: no work inside `ask` beyond the costs).
 
@@ -1959,7 +1959,7 @@ print(head.loo_acc)                        # exact leave-one-out accuracy
 ```
 
 `system.fit(question, examples, features=None, *, select=None, min_gain=0.0)` fits a closed-form ridge head
-(`solvi.fast.FastHead`): one matrix decomposition per ridge strength, so it takes milliseconds to a few seconds, and the
+(`solvi.heads.FastHead`): one matrix decomposition per ridge strength, so it takes milliseconds to a few seconds, and the
 ridge strength is chosen by exact leave-one-out accuracy (`head.loo_acc`).
 
 - Features are all facts computable from the examples' `init_state` keys, the given keys themselves included (a given
@@ -2031,7 +2031,7 @@ with them; its share of answers under an `act_guard` guarantee rose from 67% to 
 ### learn_rule: a readable rule list
 
 ```python
-rules = system.learn_rule("zone", examples, facts=["address_upper"], min_support=3, min_precision=0.8, max_rules=40)
+rules = system.learn_rule("zone", examples, features=["address_upper"], min_support=3, min_precision=0.8, max_rules=40)
 print(rules)
 ```
 
@@ -2064,7 +2064,7 @@ read the corrections back (`system.storage.corrections()`, or the `{"teach": ...
 include them in the next `fit` or `learn_rule` call. Non-JSON values in `init_state` are stored as JSON (dates as ISO
 strings; 0.5 wrote their `repr`), other objects as their `repr`.
 
-Each correction keeps where it came from: `system.teach("risk", state, "high", source="outcome", by="ledger",
+Each correction keeps where it came from: `system.teach("risk", state, "high", label_source="outcome", by="ledger",
 of=res.stored_id)` — `source` is `"human"` (the default: a person corrected or confirmed the answer), `"outcome"` (what
 really happened) or `"rule"` (your code rejected a model's proposal and decided instead); anything else raises
 `UntrustedLabel`. `of` is the stored id of the decision it corrects; `corrections()` returns all three.
@@ -2134,7 +2134,7 @@ How confidence is computed (what it means for each answer kind: the table in
 Calibrate a question on held-out examples (Platt scaling on the confidence logit):
 
 ```python
-system.calibrate("total_band", heldout_states, heldout_answers)   # lists of init_state and correct answers
+system.calibrate("total_band", heldout)       # [(init_state, correct answer)], as fit takes them
 ```
 
 After calibration, `ok` answers of that question carry the calibrated confidence. With fewer than 10 usable examples,
@@ -2220,7 +2220,7 @@ What is checked before a threshold is set, so that a promise is never made on a 
 The report gives both shares on the calibration examples — `"risk"` (answered alone and wrong, of all) and `"error"`
 (among the answered) — with `"answered"`, the threshold's `"support"`, `"separation"` (`auroc`, `p`), `"base_error"`
 and, for conformal risk control, `"must_escalate_at_least"`. The facts the signal and the groups read become
-checkpoints of the question, so every flow computes them. Every answer of the question records its verdict as a hashed
+required parts of the question (`requires`), so every flow computes them. Every answer of the question records its verdict as a hashed
 trace record (`guard:<question>`: the signal's value, the threshold, the promise); below the threshold the question
 abstains (safeguard low confidence) and says what it would have answered; a forced answer (a failed hard check) and an
 abstention are left as they are. Replay with the System re-derives the verdict; a guarantee recalibrated since the
@@ -2522,7 +2522,7 @@ solvi serve myapp.decisions:system --decider solvi-ai/solvi-base   # + POST /v1/
 | `POST /v1/systemone` | the System One API answered by a solvi decider (`--decider`) |
 
 The OpenAPI document (`/openapi.json`, `/docs`) is built from the same pydantic types as the rest of solvi: a question's
-input schema lists the given facts its flow reads — typed by `System(inputs=...)`, else by the types its typed readers
+input schema lists the given facts its flow reads — typed by `System(input_model=...)`, else by the types its typed readers
 declare — with the ones it cannot be answered without as required (`solvi.serve.question_inputs`); its response schema
 has each answer as its closed set (`System.response_schema`). The web layer does not validate the state: it goes to
 `System.ask` as it is, so a wrong-typed field is handled as solvi handles it — the fact is missing, the answers that need
@@ -2656,7 +2656,7 @@ res["request_refund"].answer
 ```
 
 **Entry points.** Every question is an entry point (or the names you pass: `TextIn(..., entry_points=[...])`); its input
-fields are the given facts its flow reads, with their types (`System(inputs=...)`, else the types the catalog's parts
+fields are the given facts its flow reads, with their types (`System(input_model=...)`, else the types the catalog's parts
 declare) and whether the question needs them — the same schemas `solvi serve` publishes at `GET /questions`.
 
 **Who does what.** The decider picks the entry point: one choice question over the entry points, each described by its
@@ -3670,7 +3670,7 @@ def answer(sql, most_agree) -> bool:
     return True
 
 system = System(cat, [Question("answer", "Return the query without a person?", Answer.yes_no(),
-                               checkpoints=["most_agree"])])
+                               requires=["most_agree"])])
 drafts = [["SELECT sum(amount) FROM orders", "SELECT sum(amount) FROM orders WHERE status = 'paid'", "SELECT 1"],
           ["SELECT sum(amount) FROM orders WHERE status = 'paid'", "SELECT 100", "SELECT 120"]]
 run = refine(system, {"drafts": drafts}, "answer", rounds=3)
@@ -3849,7 +3849,7 @@ def every_city(cities: list, order: list) -> bool:
 def ok(direct_flights, every_city) -> bool:
     return True
 
-system = System(cat, [Question("ok", "A valid trip?", Answer.yes_no(), checkpoints=["direct_flights", "every_city"])])
+system = System(cat, [Question("ok", "A valid trip?", Answer.yes_no(), requires=["direct_flights", "every_city"])])
 
 def orders(facts):                                # the space, read from the facts: one more city per step
     cs = facts["cities"]
@@ -4017,11 +4017,11 @@ print(rep); rep.ok; rep.errors; rep.warnings  # each finding: level, code, where
 
 Flows are planned with every given fact present. **Errors**: a hard check whose `then=` sets an answer for a question
 whose flow never runs it (`then_not_in_flow`: the question's rule does not read it through any fact and the question does
-not list it in `checkpoints`, so when the check fails the question is answered as if it had passed — the fix is
-`checkpoints=[...]`); `then=` naming no question or an answer outside the question's options; facts that need each other
+not list it in `requires`, so when the check fails the question is answered as if it had passed — the fix is
+`requires=[...]`); `then=` naming no question or an answer outside the question's options; facts that need each other
 (`cycle`; facts derived from each other, each with a producer outside the loop, are only a note, `mutual_producers`, for
-a System with `strategist=` — the flows are planned by the system's own strategist); a question no input can answer (a fact nothing can compute, a missing checkpoint, a span / rank / estimate
-question without a rule); a producer's type its consumer cannot read, or a `System(inputs=...)` field its typed reader
+a System with `strategist=` — the flows are planned by the system's own strategist); a question no input can answer (a fact nothing can compute, a missing required part, a span / rank / estimate
+question without a rule); a producer's type its consumer cannot read, or a `System(input_model=...)` field its typed reader
 cannot read (`type_conflict`); a producer's `validate` that requires an argument no producer of its fact takes as an
 input (`validate_reads_unknown`: it cannot run, so every output of that producer would be rejected — `System(...)`
 refuses such a catalog, and a part that is not an alternative producer is refused when it is declared); constraints between answers that no combination satisfies — one alone or all together,
@@ -4032,7 +4032,7 @@ a question (it never applies); a rule with a `return <literal>` that is not one 
 with a `return` that is plainly not `True` or `False` (`hard_check_untyped`: `return 0`, `return None`, a bare
 `return` — on that path the check is rejected and the questions it governs abstain). Both read the function's source:
 only literals in `return` statements (also in `a if c else b`) are judged, a returned variable or call is not.
-**Warnings**: a rule registered for a question the system does not ask (`unused_rule`); with `System(inputs=Model)`, an
+**Warnings**: a rule registered for a question the system does not ask (`unused_rule`); with `System(input_model=Model)`, an
 argument that no part computes and the model does not declare (`input_not_declared`: `amout` for `amount` — it could
 only arrive as an extra key, and never when the model forbids extra keys), and a `uses` hint naming neither a part nor
 a field of the model (`uses_unknown`; without an input model any such name is taken for a given fact, so a typo in
@@ -4044,7 +4044,7 @@ answers; and **silent defaults**: in a function that reads the input (a given fa
 `d.get(k, <literal>)` on that input (`amount or 0`, `order.get("total", 0)`, `order["tax"] or 0`) turn a missing,
 empty or null input into a value nobody gave — the answer looks decided while it rests on a guess. A lookup in a
 constant table (`{...}.get(kind, 1)`) or a default on a computed value is not flagged. Say what a missing input means (check for `None` and abstain, or declare the default in
-`System(inputs=...)`), or mark the line `# solvi: ok`. **Notes** never fail: a question without a rule abstains until
+`System(input_model=...)`), or mark the line `# solvi: ok`. **Notes** never fail: a question without a rule abstains until
 an answer head is fitted.
 
 ## Grounded decisions: provenance, audit and safeguards
@@ -4126,7 +4126,7 @@ Hashes: a record hashes its provenance only when it differs from the default (`q
 | low confidence | a `Quote` / `Decision` is below the part's `min_confidence` or a decision's `escalate_below`; an answer is below the question's `min_confidence` | rejected / the question abstains, saying what it would have answered |
 | model escalated | a decider's act / escalate signal is below its threshold (see [the output](#the-output-probabilities-calibrated-confidence-act-or-escalate)) | rejected: the fact is missing, next producer, else the question abstains, saying what it would have answered |
 | validate | a producer's `validate(value, ...)` returns false | rejected, next producer |
-| type rejected | a typed part's argument or output fails its type annotation, or a field fails `System(inputs=...)` | rejected: the fact is missing, next producer, else dependent answers abstain |
+| type rejected | a typed part's argument or output fails its type annotation, or a field fails `System(input_model=...)` | rejected: the fact is missing, next producer, else dependent answers abstain |
 | hard check | a hard check governing the question is false | the answer is forced by `then`, or the question abstains |
 | constraint repair | learned or model answers break a constraint between answers | the most probable consistent combination is chosen |
 | fallback | an alternative producer was rejected and a later one was used | recorded in `tried` |
@@ -4201,7 +4201,7 @@ What is searched (`over=`: default, the given facts the question's flow reads):
   (`debt ≤ 1999`, `purchase_date ≥ 2026-08-20`); floats are shown at the shortest decimal that holds, `≤` or `<` as the
   rule has it. A non-negative input stays non-negative; a domain `(lo, hi)` that does not contain the current value is
   refused for that input (`cf.not_searched` says why);
-- booleans, Enums and `Literal` fields of `System(inputs=...)` — every other value;
+- booleans, Enums and `Literal` fields of `System(input_model=...)` — every other value;
 - anything else only with `domains={"history": ["on time", "late"]}`; a tuple bounds a number: `domains={"amount": (0, 5000)}`.
 
 `max_changes=2` (the default) tries two inputs together when no single input changes the answer ("approve if amount ≤ 1000
@@ -4301,7 +4301,7 @@ with a hallucinating extractor and a classifier answering outside its options.
 ```python
 from solvi.show import show
 
-show(res, cat)                              # answers, flow, computed_state, audit summary, replay result, time
+show(res, cat)                              # answers, flow, computed state, audit summary, replay result, time
 show(res, cat, flow=False, state=False)     # answers, audit summary, replay, time
 show(res, cat, audit=False)                 # without the audit summary
 show(res)                                   # without the catalog: no replay
@@ -4536,7 +4536,7 @@ below). `pull` needs `huggingface_hub` (`solvi[onnx]`). `solvi ask --decider` ta
 
 What solvi guarantees:
 
-- Every value in `computed_state` was produced by your code; every extracted value carries its quote and offsets, and
+- Every value in the computed state was produced by your code; every extracted value carries its quote and offsets, and
   its provenance (and the model's identity, for a model-backed part).
 - A model's quote that is not literally the text at its offsets, or a model decision outside its options, is rejected
   and counted; it never becomes an answer.

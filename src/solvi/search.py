@@ -210,7 +210,7 @@ def _held_system(system, state, vals, keys):
     from types import SimpleNamespace
 
     from .counterfactual import _pinned
-    from .learned import CostBook
+    from .costs import CostBook
     from .runtime import MISSING, HashSeed
     dep = _depends(system.catalog, keys)
     cat = copy.copy(system.catalog)
@@ -227,7 +227,7 @@ def _held_system(system, state, vals, keys):
     s = copy.copy(system)
     s.catalog, s.storage, s.learn, s.cost_policy = cat, None, False, None
     s.stats = {k: 0 for k in system.stats}
-    s.costs = CostBook()
+    s.cost_book = CostBook()
     plans = {}
     plan = s._plan
 

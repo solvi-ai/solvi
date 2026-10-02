@@ -15,6 +15,8 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, Callable
 
+from . import _deprecate
+
 
 class Serial:
     """pydantic-backed export of solvi's data classes (see solvi.schema; pydantic is imported on first use):
@@ -434,15 +436,19 @@ class Answer:
 @dataclass
 class Question(Serial):
     """A question the System answers: its name, text and answer type (None: from its rule's return type), the parts
-    that must run in its flow (`checkpoints`), the facts that matter for a question without a rule (`uses`), and the
+    that must run in its flow (`requires`; `checkpoints=` in 0.7), the facts that matter for a question without a rule (`uses`), and the
     abstentions it asks for (`min_confidence`, `require_evidence`)."""
     name: str
     text: str
     answer: AnswerType | None = None                  # None: from the return type of the question's rule (Answer.from_type)
-    checkpoints: list = field(default_factory=list)   # parts required in every flow for this question
+    requires: list = field(default_factory=list)      # parts required in every flow for this question
     uses: list | None = None                          # hint to the strategist: which facts matter (when there is no rule or fit)
     min_confidence: float | None = None               # an answer below this confidence abstains (a low-confidence safeguard)
     require_evidence: bool = False                    # an answer without supporting quotes abstains ("evidence missing")
+
+
+Question.__init__ = _deprecate.kwargs(Question.__init__, checkpoints="requires")
+Question.checkpoints = _deprecate.attr("checkpoints", "requires", "Question")    # 0.7 name, removed in 0.9
 
 
 @dataclass
@@ -671,7 +677,7 @@ def answer_data(at):
 
 def question_data(q):
     """A question as plain data (its serialized form, solvi.schema) — without importing pydantic."""
-    d = {"name": q.name, "text": q.text, "answer": answer_data(q.answer), "checkpoints": list(q.checkpoints),
+    d = {"name": q.name, "text": q.text, "answer": answer_data(q.answer), "checkpoints": list(q.requires),
          "uses": None if q.uses is None else list(q.uses), "min_confidence": q.min_confidence}
     if q.require_evidence:
         d["require_evidence"] = True

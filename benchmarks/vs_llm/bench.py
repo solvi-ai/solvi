@@ -170,7 +170,7 @@ def solvi_system(t):
         return run_mod(t).system()
     m = task_mod(t)
     if t == "10_procurement_3way_match":
-        return System(m.cat, m.QUESTIONS, inputs=m.Request)
+        return System(m.cat, m.QUESTIONS, input_model=m.Request)
     return System(m.cat, m.QUESTIONS)
 
 

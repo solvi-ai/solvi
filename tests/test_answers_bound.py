@@ -19,7 +19,7 @@ def paying():
     def pay(amount):
         return "yes"
 
-    return cat, [Question("pay", "Pay?", Answer.choice(["yes", "no"]), checkpoints=["cap"])]
+    return cat, [Question("pay", "Pay?", Answer.choice(["yes", "no"]), requires=["cap"])]
 
 
 def flip(o):

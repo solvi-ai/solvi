@@ -709,7 +709,7 @@ def model_facts(m):
 
 def state_of(obj, model=None):
     """init_state as a dict of given facts → (state, [(fact, rejection reason)]). A BaseModel instance gives its fields; with
-    `model` (System(inputs=...)) a dict is validated against it: the model's fields (with defaults) become given facts, a field
+    `model` (System(input_model=...)) a dict is validated against it: the model's fields (with defaults) become given facts, a field
     that fails validation is left out (the fact is missing) and reported; other keys pass through — unless the model
     forbids them (extra="forbid"): then each is left out and reported as rejected, like a field that failed.
     With `model` the facts come in the model's field order, then the other keys as they were given: the order is declared

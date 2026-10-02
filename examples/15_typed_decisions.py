@@ -130,7 +130,7 @@ def build(model):
 
     for q in questions:
         if q.name == "urgency":
-            q.checkpoints.append("no_legal_threat")
+            q.requires.append("no_legal_threat")
     questions.append(Question("priority_support", "Does the customer get priority support?", Answer.yes_no()))
     return cat, questions
 
@@ -148,7 +148,7 @@ if __name__ == "__main__":
     print(f"decider: {model.model_id} ({model.backend}); act head: {model.has_act}; "
           f"questions per pass: {model.caps['max_questions'] or 1}; state format: {model.state_format}")
     cat, questions = build(model)
-    system = System(cat, questions, inputs=Ticket)
+    system = System(cat, questions, input_model=Ticket)
 
     print("\n=== 1. the questions come from the types ===")
     for q in questions:

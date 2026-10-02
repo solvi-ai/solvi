@@ -109,7 +109,7 @@ def test_answers_do_not_depend_on_which_other_questions_are_asked():
     def cause(level):
         return "high" if level > 6 else "normal"
 
-    qs = [Question("state", "", Answer.choice(["run", "stop"]), checkpoints=["below_trip"]),
+    qs = [Question("state", "", Answer.choice(["run", "stop"]), requires=["below_trip"]),
           Question("cause", "", Answer.choice(["high", "normal"]))]
     s = System(cat, qs)
     together = s.ask({"x": 7})

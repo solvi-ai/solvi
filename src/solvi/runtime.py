@@ -294,7 +294,7 @@ class Trace(Serial):
     skipped: list = field(default_factory=list)     # [(part, why)] steps of the flow that did not need to run
     schedule: list = field(default_factory=list)    # learned order: why each hard check ran when it did (not hashed)
     timings: dict = field(default_factory=dict)     # part (and producer) → run time in ms (not hashed)
-    rejected: list = field(default_factory=list)    # [(given fact, why)] inputs that failed System(inputs=...) (not facts)
+    rejected: list = field(default_factory=list)    # [(given fact, why)] inputs that failed System(input_model=...) (not facts)
     fingerprint: dict = field(default_factory=dict)  # which catalog / questions / models decided (System.fingerprint; not hashed)
     early_exit: bool = True                         # False: the whole flow ran although a hard check failed (ask(early_exit=False))
 
@@ -681,7 +681,7 @@ def _plain_args(args, names):
 
 def _typed_args(part, args, known=None):
     """A typed part's arguments validated / coerced → (args, None) or (args, the rejection reason); untyped: as they are.
-    known: fact → the type its value already passed in this run (a typed producer, System(inputs=...)): not re-validated."""
+    known: fact → the type its value already passed in this run (a typed producer, System(input_model=...)): not re-validated."""
     if part.tin is None:
         return args, None
     from .typed import typed_in
@@ -989,7 +989,7 @@ def _run_step(p, vals, init_state, policy=None, costs=None, known=None, memo=Non
 
 
 def group_features(group, args):
-    from .learned import scalar_row
+    from .strategist import scalar_row
     plain = _plain_args(args, group.inputs)
     if group.features is not None:
         names = list(inspect.signature(group.features).parameters)
@@ -1074,11 +1074,11 @@ def execute(catalog, flow, init_state, workers=1, early_exit=True, order=None, c
     of its own (aexecute runs such catalogs concurrently).
 
     order: None — all hard checks (and their inputs) first, together. An object with `p_fail(check, row)` and `row(vals,
-    init_keys)` (solvi.learned.OrderModel, or an oracle) — hard checks one at a time, most expected saving first, stopping
+    init_keys)` (solvi.strategist.OrderModel, or an oracle) — hard checks one at a time, most expected saving first, stopping
     as soon as the failed ones settle every question they govern; answers are the same as with the default order.
     costs: a CostBook (ms per part) for the learned order and the producer policy. policy: a ProducerPolicy for facts with
     alternative producers (without one they are tried in declaration order). known: given fact → the type its value was
-    already validated against (System(inputs=...)), so typed parts reading it with that type skip re-validation.
+    already validated against (System(input_model=...)), so typed parts reading it with that type skip re-validation.
     early_exit=False: every step of the flow runs, whatever the hard checks say (the answers are the same: a failed hard
     check still decides); the trace records it (`trace.early_exit`)."""
     run = _Run(catalog, flow, init_state, early_exit, order, costs, policy, known)
@@ -1110,7 +1110,7 @@ class _Run:
     """One execution of a flow: the plan of phases and the state the sync and async drivers share."""
 
     def __init__(self, catalog, flow, init_state, early_exit=True, order=None, costs=None, policy=None, known=None):
-        from .learned import CostBook
+        from .costs import CostBook
         self.catalog, self.flow, self.init_state = catalog, flow, init_state
         self.early_exit, self.order, self.policy = early_exit, order, policy
         self.costs = costs if costs is not None else CostBook()

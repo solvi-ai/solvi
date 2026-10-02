@@ -102,7 +102,7 @@ def catalog():
         rule.__name__ = rule.__qualname__ = f"do_{name}"
         cat.rule(name)(rule)
     qs = [Question(n, text) for n, (_, text, _) in ENTRY.items()]
-    return System(cat, qs, inputs=Request)
+    return System(cat, qs, input_model=Request)
 
 
 # --------------------------------------------------------------------------------------------------- data

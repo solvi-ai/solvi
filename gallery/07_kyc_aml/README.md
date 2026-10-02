@@ -11,7 +11,7 @@ A customer profile and 90 days of transactions go in; three decisions come out: 
   compared with `difflib`; a hit needs a name score of at least 0.88 *and* no conflicting birth date. "Dmitriy Volkanov"
   born 1968-03-14 hits the listed "Dmitri Volkanov" (score 0.968); a "Dmitry Volkanov" born in 1991 scores 0.933 but is
   cleared by the birth date.
-- **`customer_not_sanctioned` is a hard check** in every question's checkpoints, with `then = {risk: high, file_sar: yes,
+- **`customer_not_sanctioned` is a hard check** in every question's `requires`, with `then = {risk: high, file_sar: yes,
   freeze: yes}`. No rule can override it. The strategist orders it first, so when it fails the rest of the flow, including
   the two paid lookups (news search, counterparty screening), is never run.
 - **Computed facts** carry the evidence: `structuring` (most cash deposits of 9 000-9 999 inside any 7-day window, with

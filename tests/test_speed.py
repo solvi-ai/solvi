@@ -30,7 +30,7 @@ def build():
     def ok(slow_a, slow_b):
         return slow_a + slow_b > 3
 
-    return cat, [Question("ok", "ok?", Answer.yes_no(), checkpoints=["allowed"])]
+    return cat, [Question("ok", "ok?", Answer.yes_no(), requires=["allowed"])]
 
 
 def test_early_exit_skips_unneeded_steps():
@@ -104,7 +104,7 @@ def test_a_given_value_is_canonicalised_and_hashed_once_per_ask_and_the_hashes_a
     @cat.rule("alert")
     def alert(last, mean, window, label):
         return "yes" if last > mean and len(window) == 2 else "no"
-    s = System(cat, [Question("alert", "?", Answer.yes_no(), checkpoints=["enough_history"])])
+    s = System(cat, [Question("alert", "?", Answer.yes_no(), requires=["enough_history"])])
     state = {"series": [0.5, 1.25, 2.0, 7.5], "n": 2, "label": "x" * 300, 5: "a key that is not a string"}
     seen = []
     canon = rt._canon

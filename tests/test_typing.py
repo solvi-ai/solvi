@@ -266,7 +266,7 @@ def test_basemodel_input():
 
 def test_inputs_model_validates_dicts():
     cat = typed_catalog()
-    s = System(cat, [Question("band", "Band")], inputs=Request)
+    s = System(cat, [Question("band", "Band")], input_model=Request)
     ok = s.ask({"flags": ["x"], "start": "2026-03-01"})
     assert ok["band"].answer == "low" and ok.trace.init["start"] == date(2026, 3, 1) and ok.trace.init["days"] == 5
     bad = s.ask({"flags": ["x"], "start": "not a date", "days": 2})
@@ -344,7 +344,7 @@ def test_import_is_light():
 def test_example_14():
     from examples_loader import load
     E = load("14_typed_catalog")
-    s = System(E.cat, E.QUESTIONS, inputs=E.Parcel)
+    s = System(E.cat, E.QUESTIONS, input_model=E.Parcel)
     r = s.ask(E.PARCEL)
     assert (r["duty"].answer, r["flags"].answer, r["release"].answer) == ("standard", (), "yes")
     r = s.ask(E.PARCEL.model_copy(update={"label": "Weight: 12 kg", "declared_weight_kg": 41.0}))
@@ -352,7 +352,7 @@ def test_example_14():
 
 
 def test_a_typed_input_comes_in_the_declared_field_order():
-    """A decider reads a state's keys in their order, and answers depend on it. With System(inputs=Model) the order is
+    """A decider reads a state's keys in their order, and answers depend on it. With System(input_model=Model) the order is
     the model's, whoever built the dict; without a model the dict is taken as it comes."""
     from pydantic import BaseModel
 
@@ -369,7 +369,7 @@ def test_a_typed_input_comes_in_the_declared_field_order():
     def ok(amount, extra=None) -> bool:
         return amount < 100
 
-    s = System(cat, [Question("ok", "Ok?")], inputs=Order)
+    s = System(cat, [Question("ok", "Ok?")], input_model=Order)
     a = s.ask({"note": "x", "zeta": 1, "amount": 5, "customer": "ann", "alpha": 2})
     b = s.ask({"customer": "ann", "alpha": 2, "amount": 5, "zeta": 1, "note": "x"})
     assert list(a.trace.init) == ["customer", "amount", "note", "zeta", "alpha"]       # fields, then the rest as given
@@ -384,7 +384,7 @@ def test_a_typed_input_comes_in_the_declared_field_order():
 
 
 def test_a_key_the_input_model_forbids_is_reported_as_rejected_not_dropped_without_a_word():
-    """With extra="forbid" on System(inputs=Model) undeclared keys vanished from the state and nothing said so
+    """With extra="forbid" on System(input_model=Model) undeclared keys vanished from the state and nothing said so
     (trace.rejected was empty), while the guide said other keys pass through."""
     from pydantic import BaseModel, ConfigDict
 
@@ -401,17 +401,17 @@ def test_a_key_the_input_model_forbids_is_reported_as_rejected_not_dropped_witho
         return months > 24
     qs = [Question("long", "Long?")]
     application = {"id": "a1", "months": 36, "age": 19, "purpose": "car"}
-    res = System(cat, qs, inputs=Open).ask(application)
+    res = System(cat, qs, input_model=Open).ask(application)
     assert list(res.trace.init) == ["id", "months", "age", "purpose"] and not res.trace.rejected    # they pass through
-    res = System(cat, qs, inputs=Closed).ask(application)
+    res = System(cat, qs, input_model=Closed).ask(application)
     assert list(res.trace.init) == ["id", "months"] and res["long"].answer == "yes"
     assert [k for k, _ in res.trace.rejected] == ["age", "purpose"]
     assert res.trace.rejected[0][1].startswith("type rejected: given age = 19 is not a field of Closed, which forbids extra keys")
     assert sorted((e["kind"], e["fact"]) for e in res.safeguards) == [("type_rejected", "age"), ("type_rejected", "purpose")]
     assert res.trace.replay(cat)["ok"]
-    res = System(cat, qs, inputs=Closed).ask({"id": "a1", "months": "many", "age": 19})        # with a field that fails too
+    res = System(cat, qs, input_model=Closed).ask({"id": "a1", "months": "many", "age": 19})        # with a field that fails too
     assert [k for k, _ in res.trace.rejected] == ["months", "age"] and res["long"].status == "abstain"
-    assert not System(cat, qs, inputs=Closed).ask({"id": "a1", "months": 3}).trace.rejected
+    assert not System(cat, qs, input_model=Closed).ask({"id": "a1", "months": 3}).trace.rejected
 
 
 class _Tier(Enum):
@@ -450,7 +450,7 @@ def test_an_untyped_catalog_does_not_import_pydantic_on_the_first_ask_and_the_qu
     class Color(Enum):
         RED = "red"
     qs = [Question("a", "A?", Answer.choice(["x", "y"])), Question("b", "B?", Answer.yes_no(), min_confidence=0.7,
-                                                                 checkpoints=["c"], uses=["z"], require_evidence=True),
+                                                                 requires=["c"], uses=["z"], require_evidence=True),
           Question("c", "C?", Answer.choice([Color.RED])), Question("e", "E?", Answer.choice([1, 2.5, float("inf")])),
           Question("f", "F?", Answer.ordinal({1: "bad", 2: "ok"})), Question("g", "G?", Answer.span(type=_Tier))]
     for q in qs:                                        # the fingerprint stored traces carry: as schema.dump gave it

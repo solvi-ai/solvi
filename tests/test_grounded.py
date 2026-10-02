@@ -102,7 +102,7 @@ def test_model_backed_parts_record_model_identity_and_provenance():
     assert rec.origin == "quoted"
     assert rec.model == {"type": "FakeExtractor", "id": "test/fake-extractor", "fp": ex.fingerprint()}
     assert "model" in rec.body()                               # model-backed records hash their model identity
-    assert "model FakeExtractor test/fake-extractor" in res.computed_state
+    assert "model FakeExtractor test/fake-extractor" in res.state_text()
     assert res["pay"].answer == "yes"
 
 
@@ -310,7 +310,7 @@ def test_learned_rule_records_its_rule_list():
         return text.split()[0]
 
     s = System(cat, [Question("zone", "", Answer.choice(["a", "b"]))])
-    rl = s.learn_rule("zone", [({"text": t}, z) for t, z in [("north x", "a")] * 5 + [("south y", "b")] * 5], facts=["word"])
+    rl = s.learn_rule("zone", [({"text": t}, z) for t, z in [("north x", "a")] * 5 + [("south y", "b")] * 5], features=["word"])
     res = s.ask({"text": "north z"})
     rr = res.trace.records[-1]
     assert rr.origin == "learned" and rr.model["type"] == "RuleList" and rr.model["fp"] == fingerprint(rl)
@@ -368,7 +368,7 @@ def test_stats_count_hard_checks_constraints_and_low_confidence():
         return b == "no" or a == "yes"
 
     q_b = Question("b", "", Answer.yes_no(), min_confidence=0.55)
-    s = System(cat, [Question("a", "", Answer.yes_no(), checkpoints=["positive"]), q_b])
+    s = System(cat, [Question("a", "", Answer.yes_no(), requires=["positive"]), q_b])
     rng = random.Random(1)
     s.fit("b", [({"x": v}, "yes" if v > 3 else "no") for v in [rng.uniform(-5, 10) for _ in range(80)]], select=False)
     r1 = s.ask({"x": -1})                                            # hard check forces a = no

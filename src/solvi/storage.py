@@ -34,6 +34,8 @@ import threading
 import time as _time
 from dataclasses import dataclass
 
+from . import _deprecate
+
 try:
     import fcntl
 except ImportError:                           # Windows, the browser (Pyodide): no advisory file locks
@@ -337,12 +339,15 @@ class TraceStorage:
         response.stored_id = rec["id"]
         return rec["id"]
 
-    def save_correction(self, question, init_state, answer, meta=None, *, source="human", by=None, of=None):
-        """Store a correction (what System.teach records) → its id. source: where the label comes from — "human" (a person
+    @_deprecate.kwargs(source="label_source")
+    def save_correction(self, question, init_state, answer, meta=None, *, label_source="human", by=None, of=None):
+        """Store a correction (what System.teach records) → its id. label_source (`source=` in 0.7; stored as the
+        record's "source"): where the label comes from — "human" (a person
         corrected or confirmed the answer), "outcome" (what really happened: the parcel was lost, the loan defaulted) or
         "rule" (code rejected a model's proposal and decided instead); anything else is refused (UntrustedLabel): the
         system's own answers are never labels. by: who (a user, a reviewer, a process); of: the stored id of the decision
         it corrects. Records of 0.6 have no source: they are human corrections."""
+        source = label_source
         check_source(source)
         body = {"v": FORMAT, "kind": "teach", "teach": question, "init": plain(dict(init_state)), "answer": plain(answer)}
         if source != "human":

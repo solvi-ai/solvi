@@ -67,7 +67,7 @@ def _system(inputs, questions):
         rule.__annotations__ = {**{f: anns[f].annotation for f in fields}, "return": Literal["done"]}
         rule.__name__ = rule.__qualname__ = f"do_{name}"
         cat.rule(name)(rule)
-    return System(cat, [Question(n, n.replace("_", " ").capitalize()) for n in questions], inputs=inputs)
+    return System(cat, [Question(n, n.replace("_", " ").capitalize()) for n in questions], input_model=inputs)
 
 
 # --------------------------------------------------------------------------------------------------- shop

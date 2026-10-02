@@ -65,8 +65,8 @@ feature candidates of `fit`, `learn_order`, the input schemas of `solvi serve` a
 ### Costs from measurements
 
 With no `cost=` declared, interchangeable producers tie and the first declared wins. `System(cat, questions,
-producers="equivalent", costs="measured")` (the same as `strategist=ModelStrategist(producers="equivalent")` plus
-`costs="measured"`) plans with the run times solvi measures anyway (`system.costs`, a moving average in ms per part):
+producers="equivalent", cost_policy="measured")` (the same as `strategist=ModelStrategist(producers="equivalent")` plus
+`cost_policy="measured"`) plans with the run times solvi measures anyway (`system.cost_book`, a moving average in ms per part):
 
 - **Warm-up.** A producer counts its measured time once it has run `min_samples` times (default 3); before that its
   declared `cost=`, or 0 ms when it declares none — so each undeclared producer gets chosen, and measured, in turn.
@@ -78,8 +78,8 @@ producers="equivalent", costs="measured")` (the same as `strategist=ModelStrateg
   declared cost, else 1) — the choice stops changing, measuring goes on; `system.unfreeze_costs()` resumes.
 
 ```python
-from solvi.learned import MeasuredCosts
-system = System(cat, questions, producers="equivalent", costs=MeasuredCosts(min_samples=5, recheck=100, alpha=0.2))
+from solvi.costs import MeasuredCosts
+system = System(cat, questions, producers="equivalent", cost_policy=MeasuredCosts(min_samples=5, recheck=100, alpha=0.2))
 ```
 
 Every plan record then carries `extra["costs"]`: `{"mode": "measured" | "frozen", "facts": {fact: {"chosen",
