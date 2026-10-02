@@ -269,7 +269,8 @@ def _mcp_session(catalog_file, impl, store=None):
              "params": {"name": "approve", "arguments": {"text": "please refund", "amount": 20, "email": "ann@x", "phone": "1"}}},
             {"jsonrpc": "2.0", "id": 4, "method": "tools/call",
              "params": {"name": "approve", "arguments": {"text": "please refund", "amount": 20, "email": "blocked@x",
-                                                     "phone": "1"}}}]
+                                                     "phone": "1"}}},
+            {"jsonrpc": "2.0", "id": 5, "method": "tools/call", "params": {"name": "nope", "arguments": {}}}]
     p = subprocess.Popen(args, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
                          cwd=os.path.dirname(catalog_file))
     out = {}
@@ -306,6 +307,9 @@ def test_mcp_server_each_question_is_a_tool(catalog_file, tmp_path, impl):
     assert blocked["structuredContent"]["status"] == "forced" and blocked["structuredContent"]["answer"] == "no"
     lines = (tmp_path / "mcp.jsonl").read_text().splitlines()
     assert len(lines) == 2
+    # the built-in server and the SDK answer alike: an unknown tool is a protocol error, initialize has instructions
+    assert out[5]["error"]["code"] == -32602 and "unknown tool: nope" in out[5]["error"]["message"]
+    assert "Each tool is a question" in out[1]["result"]["instructions"]
 
 
 def test_builtin_mcp_errors(system):

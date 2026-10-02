@@ -531,3 +531,78 @@ def test_a_model_file_that_is_missing_or_exits_makes_the_hook_ask_not_exit(proj)
         code, out, err, _ = hook(proj, prompt_submit(proj, "add a migration for the salary column"),
                                  "pick-skill", "--model", spec)
         assert code == 0 and out is None, (spec, code, err)          # never status 2: that would block the prompt
+
+
+def test_forbid_calls_sees_aliases_changed_keyword_lines_symlinks_and_asks_when_the_file_does_not_parse(proj):
+    def says(payload):
+        out = hook(proj, payload, "pre-edit")[1]
+        return decision(out) if out else ("allow", "")
+    d, why = says(write(proj, "tools/a.py", "import subprocess as sp\n\nsp.run('ls', shell=True)\n"))
+    assert d == "deny" and "calls subprocess.run(shell=True)" in why                    # import x as y
+    d, why = says(write(proj, "tools/b.py", "from os import system\n\nsystem('ls')\n"))
+    assert d == "deny" and "calls os.system" in why                                     # from x import f
+    assert says(write(proj, "tools/c.py", "import subprocess\n\nsubprocess.run('ls', shell=1)\n"))[0] == "deny"
+    (proj / "tools").mkdir(exist_ok=True)
+    (proj / "tools" / "run.py").write_text("import subprocess\n\nsubprocess.run(\n    'ls',\n    shell=False,\n)\n")
+    d, why = says(edit(proj, "tools/run.py", "    shell=False,", "    shell=True,"))   # only the keyword's line changes
+    assert d == "deny" and "no-dynamic-code" in why
+    d, why = says(write(proj, "tools/broken.py", "import subprocess\n\nsubprocess.run('ls', shell=True)\ndef (:\n"))
+    assert d == "ask" and "does not parse" in why                                       # cannot be checked: a person
+    d, why = says(write(proj, "tools/broken2.py", "eval('1')\ndef (:\n"))
+    assert d == "deny" and "calls eval" in why                                          # a plain name is still found
+    (proj / "alias").symlink_to(proj / "tools", target_is_directory=True)
+    assert says(write(proj, "alias/d.py", "eval('1')\n"))[0] == "deny"
+    (proj / ".github" / "workflows").mkdir(parents=True, exist_ok=True)
+    (proj / "wf").symlink_to(proj / ".github" / "workflows", target_is_directory=True)
+    d, why = says(write(proj, "wf/deploy.yml", "on: push\n"))                           # a rule on .github/workflows/**
+    assert d != "allow" and "ci-workflows-need-a-person" in why
+
+
+def test_a_secret_blocked_by_a_redacting_rule_is_not_written_to_the_store(proj):
+    key = "sk-" + "a1B2c3D4e5F6g7H8i9J0k1L2"
+    code, out, _, _ = hook(proj, write(proj, "app/lib/config.ts", f'export const OPENAI_API_KEY = "{key}"\n'), "pre-edit")
+    d, why = decision(out)
+    assert d == "deny" and key not in why
+    store = proj / ".solvi" / "traces" / "hooks.jsonl"
+    assert key not in store.read_text()                                  # was there in clear: the stored input state
+    recs = [json.loads(ln) for ln in store.read_text().splitlines()]
+    assert recs[0].get("redacted") and recs[-1]["kind"] == "redaction"
+    from solvi.storage import open_storage
+    assert open_storage(str(store)).verify()["ok"]
+    hook(proj, write(proj, "tools/x.py", "eval('1')\n"), "pre-edit")    # a rule that does not redact: stored whole
+    assert "eval('1')" in store.read_text()
+
+
+def test_library_functions_of_hooks_raise_ordinary_exceptions_not_system_exit(proj, monkeypatch):
+    monkeypatch.delenv("SOLVI_HOOK_MODEL", raising=False)
+    from solvi.loader import LoadError
+    with pytest.raises(LoadError, match="set SOLVI_HOOK_MODEL"):
+        hooks.rules_system()
+    settings = proj / ".claude" / "settings.json"
+    settings.write_text("{broken")
+    with pytest.raises(ValueError, match="is not JSON"):
+        hooks.install(str(proj))
+    with pytest.raises(ValueError, match="is not JSON"):
+        hooks.uninstall(str(proj))
+    assert settings.read_text() == "{broken"
+    r = solvi(proj, "hook", "install", "--project", proj)              # the command: one line, no traceback
+    assert r.returncode != 0 and "not JSON" in r.stderr and "Traceback" not in r.stderr
+    r = subprocess.run([sys.executable, "-m", "solvi", "calibrate", "solvi.hooks:rules_system", "x", "labels.csv"],
+                       capture_output=True, text=True, cwd=proj, env={k: v for k, v in env_for(proj).items()
+                                                                      if k != "SOLVI_HOOK_MODEL"}, timeout=120)
+    assert r.returncode == 2 and "set SOLVI_HOOK_MODEL" in r.stderr and "Traceback" not in r.stderr
+
+
+def test_install_leaves_alone_a_command_that_only_prints_solvis_words(proj):
+    settings = proj / ".claude" / "settings.json"
+    mine = {"hooks": {"PreToolUse": [{"matcher": "Edit", "hooks": [
+        {"type": "command", "command": "echo solvi hook pre-edit is slow today"},
+        {"type": "command", "command": "grep -c 'solvi hook pre-edit' notes.txt"}]}]}}
+    settings.write_text(json.dumps(mine))
+    assert "no solvi hooks" in solvi(proj, "hook", "uninstall", "--project", proj).stdout
+    solvi(proj, "hook", "install", "--project", proj, "--command", "uv run solvi")
+    solvi(proj, "hook", "install", "--project", proj, "--command", "uv run solvi")         # replaced, not doubled
+    s = json.loads(settings.read_text())["hooks"]
+    assert s["PreToolUse"][0] == mine["hooks"]["PreToolUse"][0] and len(s["PreToolUse"]) == 2
+    solvi(proj, "hook", "uninstall", "--project", proj)
+    assert json.loads(settings.read_text()) == mine

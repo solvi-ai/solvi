@@ -3,7 +3,7 @@ the amounts (each cited at its exact place in the OCR text); plain Python rules 
 
 Run:  uv run --extra model python examples/07_receipts_model.py
 Model: SOLVI_MODEL (a Hugging Face id or a local directory), default solvi-ai/extract-receipts.
-To train your own on your documents, see LongSpanExtractor.fit and benchmarks/."""
+To train your own on your documents, see LongSpanExtractor.fit (benchmarks/datasets has the loaders)."""
 from __future__ import annotations
 
 import os

@@ -14,6 +14,7 @@ from __future__ import annotations
 import datetime
 import html
 import json
+import re
 
 from .audit import LABEL
 
@@ -220,6 +221,15 @@ def period(store, since=None, until=None, question=None, examples=3, system=None
     `filters` go to query (status, safeguard, model, catalog). examples: stored ids shown per answer, escalation reason and
     safeguard. system: a System (or Catalog) to load the stored responses with (default: the store's)."""
     rows = store.query(question=question, since=since, until=until, **filters)
+    from .storage import _when as _seconds
+    t0, t1 = _seconds(since), _seconds(until)
+
+    def within(t):
+        return (t0 is None or t >= t0) and (t1 is None or t < t1)
+    # what the period's rows no longer show: decisions erased (redacted) and corrections recorded in it — whatever
+    # the other filters, since an erased record has nothing left to filter by
+    erased = sum(1 for s in store.iter("ask", redacted=True) if s.data.get("redacted") and within(s.time))
+    corrections = sum(1 for s in store.iter("teach", redacted=True) if within(s.time))
     cat = system if system is not None else store.catalog
     per_q, sg_total, changes = {}, {}, []
     last_cat, last_models, in_use = None, {}, {"catalogs": {}, "models": {}}
@@ -285,7 +295,7 @@ def period(store, since=None, until=None, question=None, examples=3, system=None
         p["guarantee_coverage"] = p["guaranteed"] / p["model_backed"] if p["model_backed"] else None
     return {"kind": "period", "since": _when(rows[0].time) if rows else None, "until": _when(rows[-1].time) if rows else None,
             "filters": {k: str(v) for k, v in dict(filters, since=since, until=until, question=question).items() if v is not None},
-            "decisions": len(rows), "questions": per_q,
+            "decisions": len(rows), "erased": erased, "corrections": corrections, "questions": per_q,
             "safeguards": {k: {"label": LABEL.get(k, k), "count": v} for k, v in sorted(sg_total.items(), key=lambda t: -t[1])},
             "changes": changes, "in_use": in_use}
 
@@ -322,14 +332,25 @@ def render(data, format="md"):
 
 
 # --- Markdown
-_MD_SPECIAL = "\\`*_{}[]<>()#+-!|~"
+_MD_SPECIAL = "\\`*[]<>#|~"                          # these act anywhere in a line
+_MD_START = re.compile(r"\s*(?:[-+=]|\d+(?=[.)]))")   # ... these only at its start: a list, a setext rule
 
 
 def md(s):
-    """Text escaped for Markdown: every character with a meaning in Markdown or HTML is backslash-escaped, newlines are
-    spaces (table cells and list items stay on one line)."""
+    """Text escaped for Markdown, where Markdown (or HTML in it) would act: `\\ ` * [ ] < > # | ~` anywhere; "_" unless it
+    is inside a word ("known_customer" stays); "!" before "["; a leading "-", "+", "=" or "1." / "1)" (a list item, a
+    heading rule). Brackets after an escaped "]" are inert, so "0 mismatch(es)" and "1970-01-01" stay as written.
+    Newlines are spaces (table cells and list items stay on one line)."""
     s = str(s).replace("\r", " ").replace("\n", " ")
-    return "".join("\\" + ch if ch in _MD_SPECIAL else ch for ch in s)
+    m = _MD_START.match(s)
+    at = m.end() - (1 if m.group().strip()[:1] in "-+=" else 0) if m else -1      # the character to escape at the start
+    out = []
+    for i, ch in enumerate(s):
+        inside = ch == "_" and 0 < i < len(s) - 1 and s[i - 1].isalnum() and s[i + 1].isalnum()
+        if ch in _MD_SPECIAL or (ch == "_" and not inside) or i == at or (ch == "!" and s[i + 1:i + 2] == "["):
+            out.append("\\")
+        out.append(ch)
+    return "".join(out)
 
 
 def _table(head, rows):
@@ -390,9 +411,15 @@ def _decision_md(d):
     return "\n".join(L) + "\n"
 
 
+def _also(d):
+    """What a period's count leaves out, said next to it: erased (redacted) decisions and corrections in the period."""
+    e, c = d.get("erased", 0), d.get("corrections", 0)
+    return f" ({e} erased and not shown; {c} correction(s) recorded)" if e or c else ""
+
+
 def _period_md(d):
     L = ["# Decisions report", ""]
-    L.append(f"{d['decisions']} stored decision(s)" + (f", {md(d['since'])} to {md(d['until'])}" if d["decisions"] else "")
+    L.append(f"{d['decisions']} stored decision(s)" + _also(d) + (f", {md(d['since'])} to {md(d['until'])}" if d["decisions"] else "")
              + (" — filters: " + ", ".join(f"{md(k)} = {md(v)}" for k, v in d["filters"].items()) if d["filters"] else "") + ".")
     for q, p in d["questions"].items():
         L += ["", f"## {md(q)}", "",
@@ -428,7 +455,7 @@ def _period_md(d):
     if d["changes"]:
         L += ["", "Changes:", ""]
         for c in d["changes"]:
-            L.append(f"- {md(c['what'])} {md(str(c['from'])[:16])} → {md(str(c['to'])[:16])} from #{c['seq']} "
+            L.append(f"- {md(c['what'])} {md(str(c['from'])[:16])} → {md(str(c['to'])[:16])} from #{md(c['seq'])} "
                      f"({md(c['id'])}, {md(c['time'])})")
     else:
         L.append("- no change of the catalog or of a model over the period")
@@ -569,7 +596,7 @@ def _decision_html(d):
 
 def _period_html(d):
     B = ["<h1>Decisions report</h1>",
-         f'<p class="mut">{d["decisions"]} stored decision(s)'
+         f'<p class="mut">{d["decisions"]} stored decision(s){_also(d)}'
          + (f", {h(d['since'])} to {h(d['until'])}" if d["decisions"] else "")
          + (" · filters: " + ", ".join(f"{h(k)} = {h(v)}" for k, v in d["filters"].items()) if d["filters"] else "") + "</p>"]
     for q, p in d["questions"].items():
@@ -602,6 +629,6 @@ def _period_html(d):
              + "".join(f"<li>model <code>{h(m)}</code>: {n} decision(s)</li>" for m, n in d["in_use"]["models"].items())
              + "</ul>")
     B.append("<ul>" + "".join(f"<li>{h(c['what'])} <code>{h(str(c['from'])[:16])}</code> → <code>{h(str(c['to'])[:16])}</code>"
-                              f" from #{c['seq']} (<code>{h(c['id'])}</code>, {h(c['time'])})</li>" for c in d["changes"])
+                              f" from #{h(c['seq'])} (<code>{h(c['id'])}</code>, {h(c['time'])})</li>" for c in d["changes"])
              + "</ul>" if d["changes"] else "<p>No change of the catalog or of a model over the period.</p>")
     return "\n".join(B)

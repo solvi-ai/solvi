@@ -62,7 +62,10 @@ import inspect
 import json
 from typing import Callable
 
-from agents import FunctionTool, RunConfig, ToolGuardrailFunctionOutput, ToolInputGuardrail
+try:
+    from agents import FunctionTool, RunConfig, ToolGuardrailFunctionOutput, ToolInputGuardrail
+except ImportError as e:                               # "No module named 'agents'" reads like a broken solvi install
+    raise ImportError('solvi.agents.openai_agents needs the OpenAI Agents SDK: pip install "solvi[openai-agents]"') from e
 
 from .guard import Guard, messages, proposal, with_calls_made
 

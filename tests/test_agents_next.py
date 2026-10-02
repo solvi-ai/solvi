@@ -555,7 +555,7 @@ def test_once_a_call_already_made_with_the_same_arguments_escalates():
     plain, _, refunds2 = _files_guard()                                                    # without once: as before
     s2 = plain.session([("user", "Refund order 1001.")])
     assert [s2.call({"name": "refund", "arguments": {"order_id": 1001}}).outcome for _ in range(2)] == ["allow", "allow"]
-    assert plain.replay_all() == [] if plain.storage is not None else True
+    assert plain.storage is None
 
 
 def test_once_counts_a_call_of_a_declared_tool_that_the_framework_runs():
@@ -622,3 +622,75 @@ def test_nocase_and_id_matchers_are_opt_in_and_token_stays_literal():
     assert _occurrences("W1", "İİ w1", "nocase") == [(3, 5)]      # "İ".lower() is two characters: offsets do not shift
     with pytest.raises(ValueError, match="nocase, id"):
         g.tool(lambda x: x, name="t", ground={"x": "lower"})
+
+
+def test_small_guard_defects_replay_all_without_a_store_unknown_roles_context_types_and_schema_constraints():
+    g = Guard()
+    with pytest.raises(ValueError, match="no storage"):
+        g.replay_all()
+    with pytest.raises(ValueError, match="ground_from"):
+        g.tool(lambda order: 1, name="t", ground=["order"], ground_from=("usr",))
+
+    class ContextualQuery(str):
+        pass
+
+    class RunContext:
+        pass
+
+    def search(query: ContextualQuery, limit: int = 5) -> str:
+        return "x"
+
+    def lookup(ctx: RunContext, order: str) -> str:
+        return "x"
+    assert g.tool(search) and g.tools["search"].arguments == ["query", "limit"]     # not a framework's context
+    assert g.tool(lookup) and g.tools["lookup"].arguments == ["order"]
+    g.declare("big", schema={"type": "object", "additionalProperties": True, "required": ["n"], "properties": {
+        "n": {"type": "integer", "minimum": 1, "maximum": 5}, "code": {"type": "string", "pattern": "^[A-Z]{2}$"},
+        "tags": {"type": "array", "items": {"type": "string"}, "maxItems": 2}}})
+
+    def big(**args):
+        return g.check({"name": "big", "arguments": args})
+    assert big(n=3, code="AB", tags=["a"]).outcome == "allow"
+    for bad in ({"n": 99}, {"n": 0}, {"n": 3, "code": "abc"}, {"n": 3, "tags": ["a", "b", "c"]}):
+        d = big(**bad)
+        assert d.outcome == "deny" and "invalid arguments" in d.reasons[0], bad
+    extra = big(n=3, note="anything")                       # additionalProperties: true — the schema allows it
+    assert extra.outcome == "allow" and extra.arguments == {"n": 3, "code": None, "tags": None, "note": "anything"}
+    g.declare("strict", schema={"type": "object", "properties": {"n": {"type": "integer"}}})
+    assert g.check({"name": "strict", "arguments": {"n": 1, "note": "x"}}).outcome == "deny"
+
+
+@pytest.mark.parametrize("module, framework, extra", [("pydantic_ai", "pydantic_ai", "pydantic-ai"),
+                                                      ("langgraph", "langchain_core.messages", "langgraph"),
+                                                      ("openai_agents", "agents", "openai-agents")])
+def test_an_adapter_without_its_framework_names_the_extra_to_install(monkeypatch, module, framework, extra):
+    import importlib
+    import sys
+    monkeypatch.setitem(sys.modules, framework, None)                     # as if the framework were not installed
+    monkeypatch.delitem(sys.modules, f"solvi.agents.{module}", raising=False)
+    with pytest.raises(ImportError, match=rf'pip install "solvi\[{extra}\]"'):
+        importlib.import_module(f"solvi.agents.{module}")
+
+
+def test_the_adapter_extras_are_declared():
+    import re
+    from pathlib import Path
+    text = (Path(__file__).parent.parent / "pyproject.toml").read_text()
+    extras = text.split("[project.optional-dependencies]")[1].split("\n[")[0]
+    assert {"pydantic-ai", "langgraph", "openai-agents"} <= set(re.findall(r"^([\w-]+) = ", extras, re.M))
+
+
+def test_an_optional_argument_left_at_its_empty_default_is_not_reported_as_missing():
+    g = Guard()
+
+    @g.tool(ground=["address", "note"])
+    def ship(address: str, note: str = "", gift: str = "no") -> str:
+        return "ok"
+    said = [("user", "Ship it to 12 Elm Street.")]
+    d = g.check({"name": "ship", "arguments": {"address": "12 Elm Street"}}, said)
+    assert d.outcome == "allow", d.reasons                               # note was not given: nothing to ground
+    assert g.check({"name": "ship", "arguments": {"address": "12 Elm Street", "note": ""}}, said).outcome == "allow"
+    bad = g.check({"name": "ship", "arguments": {"address": "12 Elm Street", "note": "leave at the door"}}, said)
+    assert bad.outcome == "deny" and "note=" in bad.reasons[0]
+    empty = g.check({"name": "ship", "arguments": {"address": ""}}, said)   # a required argument: an empty string never is
+    assert empty.outcome == "deny" and "(empty)" in empty.reasons[0]

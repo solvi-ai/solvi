@@ -137,3 +137,27 @@ def test_lang_is_checked():
     assert str(res.audit()).splitlines()[2].startswith("ok = 'yes'  [ок]  уверенность 1.00  ← вычислено: ok")
     with pytest.raises(ValueError):
         res.audit(lang="xx")
+
+
+def test_an_exceptions_text_is_never_translated_and_text_in_messages_are():
+    ru = lambda s: i18n.msg(s, "ru")      # noqa: E731
+    # the text of your exception stays yours, even when it reads like one of solvi's messages
+    for s in ("ValueError: missing invoice number", "LookupError: not stated", "RuntimeError: timed out after 3 s",
+              "app.errors.BillingException: no value"):
+        assert ru(s) == s
+    assert ru("rule not computed: ValueError: missing invoice number") == \
+        "правило не вычислено: ValueError: missing invoice number"
+    assert ru("small: confidence 0.40 < 0.75") == "small: уверенность 0.40 < 0.75"        # a nested reason still is
+    # text in (ask_text): solvi's own messages
+    for en, want in (
+            ("not stated in the text: amount, currency; rule not computed: missing inputs: amount",
+             "не указано в тексте: amount, currency; правило не вычислено: не хватает входов: amount"),
+            ("the entry point is unsure, nothing was asked: model escalated: entry point unsure — refund 0.41 < 0.60",
+             "вопрос по тексту не выбран, ничего не спрошено: модель передала человеку: вопрос не выбран уверенно — refund 0.41 < 0.60"),
+            ("model escalated: entry point unsure — refund 0.48 vs cancel 0.45 (margin < 0.1)",
+             "модель передала человеку: вопрос не выбран уверенно — refund 0.48 против cancel 0.45 (разрыв < 0.1)"),
+            ("found with confidence 0.30 < 0.50", "найдено с уверенностью 0.30 < 0.50"),
+            ("no parser reads list[str]", "нет разбора для типа list[str]"),
+            ("cannot parse as date: '12 September' has no year: pass today= to read it",
+             "не читается как date: '12 September' has no year: pass today= to read it")):
+        assert ru(en) == want, en

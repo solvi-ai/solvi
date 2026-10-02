@@ -667,3 +667,115 @@ def test_models_load_raises_model_error_not_system_exit_for_a_missing_file_or_at
     with pytest.raises(SystemExit) as e:
         main(["models", "check", "nofile.py:model"])
     assert e.value.code == 2 and "no such file: nofile.py" in capsys.readouterr().err
+
+
+def test_models_check_names_a_missing_folder_and_takes_a_decider_with_only_decision(tmp_path, capsys, monkeypatch, no_hub):
+    monkeypatch.chdir(tmp_path)
+    for spec in ("./my-decider", "../nope/model", str(tmp_path / "gone"), "~/no-such-solvi-model"):
+        with pytest.raises(models.ModelError, match="no such folder"):
+            models.resolve(spec)
+    with pytest.raises(models.ModelError, match="is not downloaded: solvi models pull someone/thing"):
+        models.resolve("someone/thing")
+    (tmp_path / "dec.py").write_text("class OnlyDecision:\n    def decision(self, *a, **k):\n        raise NotImplementedError\n\n\nobj = OnlyDecision()\n")
+    code, out = run(capsys, "models", "check", "dec.py:obj", "--json")
+    data = json.loads(out)
+    assert code == 0 and data["id"] == "OnlyDecision" and data["fingerprint"] is None
+    assert "solvi-ai/solvi-large-long" in models.PUBLISHED
+    assert "files" not in (models.cached.__doc__ or "")
+
+
+def _stored_project(tmp_path, capsys):
+    d = scaffold(tmp_path, "minimal")
+    code, _ = run(capsys, "ask", f"{d}/catalog.py:system", d / "example.json", "--store", d / "decisions.db")
+    assert code == 0
+    return d, f"{d}/catalog.py:system", str(d / "decisions.db")
+
+
+def test_usage_errors_exit_with_status_2_and_a_message_not_a_traceback(tmp_path, capsys, monkeypatch):
+    d, system, store = _stored_project(tmp_path, capsys)
+    monkeypatch.chdir(d)
+    (d / "adir").mkdir()
+    for argv, said in ((["ask", "no_such_module_zz:system", "example.json"], "no module named"),
+                       (["verify", store, "--anchor", "abc"], "--anchor"),
+                       (["replay", store, "--system", system, "--since", "garbage"], "--since"),
+                       (["diff", store, "--system", system, "--until", "garbage"], "--until"),
+                       (["report", store, "--html", "no/such/dir/out.html"], "out.html"),
+                       (["verify", store, "--sign", "no/such/dir/sig.json"], "sig.json"),
+                       (["verify", "adir"], "adir"),
+                       (["serve", system, "--log-level", "bogus"], "--log-level")):
+        capsys.readouterr()
+        try:
+            code = main(argv)
+        except SystemExit as e:
+            code = e.code
+        err = capsys.readouterr().err
+        assert code == 2 and said in err and "Traceback" not in err, (argv, code, err)
+    (d / "broken.py").write_text("import nothing_like_this_zz\n")       # an error inside the user's module is theirs
+    with pytest.raises(ModuleNotFoundError):
+        main(["check", "broken.py:system"])
+
+
+def test_replay_and_diff_refuse_a_mistyped_filter_and_say_how_many_decisions_they_covered(tmp_path, capsys):
+    d, system, store = _stored_project(tmp_path, capsys)
+    for cmd in ("replay", "diff"):
+        code, out = run(capsys, cmd, store, "--system", system)
+        assert code == 0 and ("every stored trace replays (1)" in out or "1 stored decision(s) re-run" in out), out
+        for extra, said in ((["--question", "nope"], "no such question"), (["--status", "zzz"], "--status")):
+            capsys.readouterr()
+            with pytest.raises(SystemExit) as e:
+                main([cmd, store, "--system", system, *extra])
+            assert e.value.code == 2 and said in capsys.readouterr().err
+        capsys.readouterr()
+        assert main([cmd, store, "--system", system, "--until", "2000-01-01"]) == 0       # nothing matches: said aloud
+        assert "no stored decision matches" in capsys.readouterr().err
+    with pytest.raises(SystemExit) as e:
+        main(["diff", store, "--system", system, "--limit", "-5"])
+    assert e.value.code == 2
+
+
+DATED_TASK = '''import datetime as dt
+from typing import Literal
+
+from solvi import Catalog, Question, System
+
+cat = Catalog()
+
+
+@cat.rule("late")
+def late(paid_on: dt.date) -> Literal["yes", "no"]:
+    return "yes" if paid_on < dt.date(2026, 9, 20) else "no"
+
+
+system = System(cat, [Question("late", "Was it paid late?")])
+'''
+
+
+def test_ask_text_takes_today_and_asks_the_end_user_in_their_words(tmp_path, capsys):
+    f = tmp_path / "dated.py"
+    f.write_text(DATED_TASK)
+    code, out = run(capsys, "ask", f"{f}:system", "--text", "paid on: 12 September", "--json")
+    read = json.loads(out)["textin"]
+    assert code == 1 and read["fields"]["paid_on"]["status"] == "unparsed"
+    code, out = run(capsys, "ask", f"{f}:system", "--text", "paid on: 12 September")
+    assert "today=" not in out and "the year is missing" in out                  # the clarifying question
+    code, out = run(capsys, "ask", f"{f}:system", "--text", "paid on: 12 September", "--today", "2026-09-28", "--json")
+    data = json.loads(out)
+    assert code == 0 and data["textin"]["state"] == {"paid_on": "2026-09-12"} and data["answers"]["late"]["answer"] == "yes"
+    assert run(capsys, "ask", f"{f}:system", "--text", "paid on: 12 September", "--today", "today", "--json")[0] == 0
+    assert run(capsys, "ask", f"{f}:system", "--text", "x", "--today", "soon")[0] == 2
+    assert run(capsys, "ask", f"{f}:system", "--state", "{}", "--today", "2026-09-28")[0] == 2
+
+
+def test_help_and_the_unknown_command_error_list_every_command(capsys):
+    assert main(["--help"]) == 0
+    text = capsys.readouterr().out
+    listed = text.split("positional arguments:")[1].split("option")[0]
+    for cmd in ("verify", "replay", "diff", "report", "serve", "check", "ask", "calibrate", "models", "init", "test",
+                "honesty", "hook"):
+        assert f" {cmd} " in listed or f"{cmd}," in listed, cmd
+    assert main(["bogus"]) == 2
+    err = capsys.readouterr().err
+    assert all(f"'{c}'" in err for c in ("test", "honesty", "hook", "init"))
+    with pytest.raises(SystemExit):
+        main(["replay", "x.db", "--system", "os:getcwd"])
+    assert "os:getcwd: not a solvi System" in capsys.readouterr().err   # no "--system" for commands that have none

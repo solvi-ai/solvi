@@ -32,7 +32,7 @@ jobs:
         if: matrix.python == '3.12'
         run: |
           uv sync --group dev --group agents
-          uv run pytest -q tests/test_agents_frameworks.py
+          uv run pytest -q tests/test_agents*.py
       - name: LoRA adapters (part.adapt_lora, CPU torch), long texts with a real tokenizer (long="full", torch and ONNX)
         if: matrix.python == '3.12'
         run: |
