@@ -38,7 +38,7 @@ def test_loop_detectors():
     ep.note("place", "2F")
     ep.note("place", "3F")
     v = EpisodeView(ep.snapshot())
-    assert v.ping_pong() == {"2F", "3F"} and v.stalled(9) and not v.stalled(10) and v.revisits("place", "2F") == 5
+    assert v.ping_pong() == {"2F", "3F"} and v.stalled(9) and not v.stalled(10) and v.revisits("2F", "place") == 5
     assert v.looping(stalled=9) and not v.looping(stalled=50)                           # stalled AND a ping-pong
     walk = Episode()
     for i in range(12):
@@ -138,3 +138,15 @@ def test_the_chooser_refuses_a_rule_outside_the_options_and_says_when_it_abstain
         ch.choose("next", "?", ACTIONS, rule="reboot", episode=Episode())
     action, who, info = ch.choose("next", "?", ACTIONS, episode=Episode())
     assert (action, who) == (None, "abstain") and "abstain" in Chooser.__doc__
+
+
+def test_revisits_names_the_state_and_note_keeps_no_value_nothing_reads():
+    """revisits(kind) without a key counted every event of the kind, not "this state"; note(value=) was stored and read
+    by nothing."""
+    import inspect
+    ep = Episode()
+    ep.note("place", "2F").note("place", "3F").note("place", "2F")
+    assert ep.revisits("2F", "place") == 2 and ep.count("place") == 3
+    with pytest.raises(TypeError):
+        ep.revisits()
+    assert "value" not in inspect.signature(Episode.note).parameters

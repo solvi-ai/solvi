@@ -97,8 +97,9 @@ class EpisodeView:
         """No progress for at least `steps` events."""
         return self.since_progress >= steps
 
-    def revisits(self, kind="state", key=None):
-        """How many times this state was already met since the last progress."""
+    def revisits(self, key, kind="state"):
+        """How many times this state (`key`, an event of `kind`) was already met since the last progress. The key is
+        required: count(kind) counts every event of a kind."""
         return self.count(kind, key)
 
     def looping(self, stalled=150, kind="place", round_trips=3, repeat=("act", None, 8)):
@@ -122,7 +123,7 @@ class Episode(EpisodeView):
         self.n = 0
         self.progress_at = 0
         self.facts = {}
-        self.events = []                              # (n, kind, key, value)
+        self.events = []                              # (n, kind, key)
         self._since = collections.defaultdict(collections.Counter)
         self._total = collections.defaultdict(collections.Counter)
         self.progress_log = []                        # [n, reason]
@@ -135,11 +136,12 @@ class Episode(EpisodeView):
     def recent(self):
         return [list(e[:3]) for e in self.events[-self.keep:]]
 
-    def note(self, kind, key, value=None):
-        """Record an event: what was done, where the agent is, what was seen."""
+    def note(self, kind, key):
+        """Record an event: what was done, where the agent is, what was seen (its key; a value worth deciding on is a
+        fact: set(name, value))."""
         self.n += 1
         k = _key(key)
-        self.events.append((self.n, kind, k, value))
+        self.events.append((self.n, kind, k))
         self._since[kind][k] += 1
         self._total[kind][k] += 1
         return self
