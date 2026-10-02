@@ -975,7 +975,10 @@ not better than rules.
 An agent that works in the same environment again — a site, an internal tool, a command line, a file tree — finds its
 structure anew on every task unless it keeps a map. `solvi.worldmap.WorldMap` is written as the agent acts: every edge
 is a claim "(state, action) leads to state" with a status (hypothesis, confirmed), a source (seen, observed, told,
-human) and its evidence, and every write is an entry of a hash-chained journal.
+human) and its evidence, and every write is an entry of a hash-chained journal. The journal is what a saved map is
+loaded from: `load` checks the chain and rebuilds the claims by replaying it (an edge edited in the file changes
+nothing; a broken chain raises), `verify()` also compares the map with its journal, and `rebuild(upto=n)` gives the
+map as it was after the first n entries.
 
 ```python
 from solvi.worldmap import WorldMap

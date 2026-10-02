@@ -14,7 +14,8 @@ Every edge is a claim "(state, action) leads to state" with a status — hypothe
 environment showed where it leads), observed (the agent went), told (a document, a sign), human — and its evidence
 (the steps, a quote). Whoever made a claim, the next observation can refute it: a person's correction or a line of an
 outdated document is a hypothesis like any other, and `arrive` records the refutation with what was believed and by
-whom. Every write is a journal entry in a hash chain (`verify()`), so the map as it was at any step can be rebuilt.
+whom. Every write is a journal entry in a hash chain (`verify()`), so the map as it was at any step can be rebuilt
+(`rebuild(upto=n)`); a saved map is loaded by replaying its journal, so an edge edited in the file changes nothing.
 
 What the map knows is what it was told through these calls: it does not know what a page or a directory is. The
 adapter — list the actions of a state, take one — is yours. `snapshot(state, targets)` gives a decision the part of
@@ -70,6 +71,7 @@ class WorldMap:
         self.edges = {}                  # (state, action) → {"to", "status", "source", "evidence", "taken"}
         self.states = {}                 # state → {"visits", "facts"}
         self.journal, self._prev = [], ""
+        self._visits = True              # every visit is a journal entry (False: a map loaded from a file written before)
         if self.file and self.file.exists():
             self.load(self.file)
 
@@ -83,14 +85,43 @@ class WorldMap:
         return rec
 
     def verify(self):
-        """Is the journal's hash chain whole (nothing edited, removed or reordered)?"""
+        """Is the journal's hash chain whole (nothing edited, removed or reordered), and is the map what the journal
+        says — every claim (and, for a map whose visits are journaled, every state) the one its entries give?"""
         from .runtime import vhash
         prev = ""
         for r in self.journal:
             if r.get("prev") != prev or vhash({k: v for k, v in r.items() if k != "hash"}) != r.get("hash"):
                 return False
             prev = r["hash"]
-        return True
+        try:
+            m = self.rebuild()
+        except ValueError:
+            return False
+        return m.edges == self.edges and (not self._visits or m.states == self.states)
+
+    def rebuild(self, upto=None):
+        """The map as its journal gives it — a new WorldMap made by applying the entries in order (upto: only the first
+        `upto` of them: the map as it was at that step). ValueError when the entries do not give this journal back (an
+        entry that could not have been written in its place)."""
+        m = WorldMap(hypothesis_cost=self.hypothesis_cost)
+        m._visits = self._visits
+        entries = self.journal if upto is None else self.journal[:upto]
+        for r in entries:
+            op = r.get("op")
+            st, a, to = _thaw(r.get("state")), _thaw(r.get("action")), _thaw(r.get("to"))
+            if op == "visit":
+                m.visit(st, r.get("step"), **(r.get("facts") or {}))
+            elif op == "see":
+                m.see(st, a, to, r.get("step"))
+            elif op in ("told", "told_ignored"):      # told() writes the one or the other itself
+                m.told(st, a, to, r.get("source"), r.get("quote"), r.get("step"))
+            elif op == "confirm":
+                m.arrive(st, a, to, r.get("step"))
+            elif op != "refute":                      # a refutation is written by the arrive that follows it
+                raise ValueError(f"journal entry {r.get('n')}: unknown operation {op!r}")
+        if [x["hash"] for x in m.journal] != [x.get("hash") for x in entries]:
+            raise ValueError("the journal does not replay: its entries do not give the same journal when applied in order")
+        return m
 
     # --- what the agent reports
     def visit(self, state, step=None, **facts):
@@ -99,6 +130,7 @@ class WorldMap:
         s["visits"] += 1
         if facts:
             s["facts"].update(facts)
+        if facts or self._visits:
             self._write("visit", state=state, step=step, facts=facts)
         return self
 
@@ -228,7 +260,8 @@ class WorldMap:
         of {"state", "visits", "facts"}, since a JSON object's keys are strings only."""
         states = self.states if all(isinstance(k, str) for k in self.states) else \
             [{"state": k, **v} for k, v in self.states.items()]
-        return {"format": "solvi.worldmap v1", "hypothesis_cost": self.hypothesis_cost, "states": states,
+        return {"format": "solvi.worldmap v1", "hypothesis_cost": self.hypothesis_cost, "visits_journaled": self._visits,
+                "states": states,
                 "edges": [{"state": s, "action": a, **e} for (s, a), e in self.edges.items()], "journal": self.journal}
 
     def save(self, path=None):
@@ -240,15 +273,30 @@ class WorldMap:
         return p
 
     def load(self, path):
+        """Read a saved map. The journal is the stored truth: its hash chain is checked and the claims are rebuilt from
+        it — the file's own `edges` are not trusted (an edge edited there changes nothing) — and so are the states of a
+        map whose visits are journaled; a file written before that keeps its `states` as stored. ValueError when the
+        journal's chain is broken or its entries do not replay."""
+        from .runtime import vhash
         data = json.loads(Path(path).read_text(encoding="utf-8"))
         if data.get("format") != "solvi.worldmap v1":
             raise ValueError(f"{path} is not a solvi.worldmap v1 file")
         self.hypothesis_cost = int(data.get("hypothesis_cost", self.hypothesis_cost))
-        st = data["states"]
-        self.states = dict(st) if isinstance(st, dict) else \
-            {_thaw(x["state"]): {"visits": x["visits"], "facts": x["facts"]} for x in st}
-        self.edges = {(_thaw(e["state"]), _thaw(e["action"])): {"to": _thaw(e["to"]), **{
-            k: e[k] for k in ("status", "source", "evidence", "taken")}} for e in data["edges"]}
+        self._visits = bool(data.get("visits_journaled", False))
         self.journal = data["journal"]
-        self._prev = self.journal[-1]["hash"] if self.journal else ""
+        prev = ""
+        for r in self.journal:
+            if r.get("prev") != prev or vhash({k: v for k, v in r.items() if k != "hash"}) != r.get("hash"):
+                raise ValueError(f"{path}: the journal's hash chain is broken at entry {r.get('n')} (edited, removed or "
+                                 "reordered)")
+            prev = r["hash"]
+        m = self.rebuild()
+        self.edges = m.edges
+        if self._visits:
+            self.states = m.states
+        else:
+            st = data["states"]
+            self.states = dict(st) if isinstance(st, dict) else \
+                {_thaw(x["state"]): {"visits": x["visits"], "facts": x["facts"]} for x in st}
+        self._prev = prev
         return self
