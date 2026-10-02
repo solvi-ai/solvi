@@ -131,7 +131,8 @@ def test_teach_is_stored_and_chained(filled):
     _, store, s, _ = filled
     s.teach("approve", STATES[2], True)
     c = store.corrections()
-    assert len(c) == 1 and c[0]["question"] == "approve" and c[0]["answer"] is True and c[0]["init"]["amount"] == 500
+    assert len(c) == 1 and c[0]["question"] == "approve" and c[0]["answer"] == "yes" and c[0]["init"]["amount"] == 500
+    #                                                     True is stored as the answer it means (yes / no question)
     assert len(list(store.iter())) == 4 and len(store) == 5
     assert store.verify()["ok"]
 

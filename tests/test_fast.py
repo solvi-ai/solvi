@@ -253,3 +253,32 @@ def test_a_head_left_without_features_warns_with_the_reason():
     with warnings.catch_warnings():
         warnings.simplefilter("error")                                               # a head with features: silent
         assert s2.fit_fast("q", ex2).features == ["half", "third"]
+
+
+def test_teach_refuses_an_unknown_question_or_an_answer_outside_the_options_before_storing(tmp_path):
+    """teach("no_such_question", state, "banana") returned None and stored a correction for a question that does not
+    exist with an answer that is not an option."""
+    from solvi.storage import JSONLStorage
+    store = JSONLStorage(tmp_path / "s.jsonl")
+    s = System(S.cat, S.QUESTIONS, storage=store)
+    state = data(0, 1)[0][0]
+    with pytest.raises(KeyError, match="no question 'nope'"):
+        s.teach("nope", state, "banana")
+    with pytest.raises(ValueError):
+        s.teach("suspicious", state, "banana")
+    assert store.corrections() == []
+    s.teach("free_shipping", state, True)
+    assert [c["answer"] for c in store.corrections()] == ["yes"]
+
+
+def test_teach_warns_when_the_correction_is_lost():
+    s = System(S.cat, S.QUESTIONS)
+    a, y = data(0, 1)[0]
+    s.fit("suspicious", data(0, 60))                                 # a plain head learns nothing at once, no storage
+    with pytest.warns(UserWarning, match="correction is lost"):
+        assert s.teach("suspicious", a, y) is None
+    s.fit_fast("suspicious", data(0, 60))                            # an online head learns it: no warning
+    import warnings
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        assert s.teach("suspicious", a, y) is not None

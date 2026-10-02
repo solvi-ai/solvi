@@ -1037,11 +1037,17 @@ class System:
         updated. Any correction goes to the storage (journal) for the next fit. Returns the update time in ms when something learned
         at once, else None. source ("human", "outcome", "rule"), by (who) and of (the stored id of the decision it corrects)
         are stored with it (TraceStorage.save_correction). With a learning loop (System.learning(..., gate_teach=True))
-        nothing learns at once: the correction is only stored, and the loop's gates decide whether it is learned."""
+        nothing learns at once: the correction is only stored, and the loop's gates decide whether it is learned.
+        An unknown question raises KeyError and an answer that is not one of the question's options ValueError, before
+        anything is learned or stored; the answer is stored normalized (True → "yes"). When nothing learned at once and
+        there is no storage, the correction is lost: a UserWarning says so."""
         from .decide import decision_of
         from .fast import FastHead
         from .storage import check_source
         check_source(source)
+        if question not in self.questions:
+            raise KeyError(f"teach: no question {question!r} in this system ({', '.join(self.questions)})")
+        correct = self.questions[question].answer.normalize(correct)   # ValueError: not one of the options
         ms = None
         init_state = self._state(init_state)[0]
         loop = getattr(self, "_learning", None)
@@ -1053,11 +1059,10 @@ class System:
         head = self.heads.get(question)
         dec = decision_of(self.catalog, question)
         if isinstance(head, (FastHead, MultiHead)) and getattr(head, "online", True):
-            ms = head.update(self.facts_for(init_state), self.questions[question].answer.normalize(correct))
+            ms = head.update(self.facts_for(init_state), correct)
         if dec is not None:
-            ans = self.questions[question].answer.normalize(correct)
             try:
-                label = dec.spec.label(ans)               # the decision's own label (a bool decision: "yes" / "no")
+                label = dec.spec.label(correct)           # the decision's own label (a bool decision: "yes" / "no")
             except ValueError:
                 label = None                              # an answer the decision cannot give (e.g. set by a hard check)
             if label is not None:
@@ -1065,6 +1070,11 @@ class System:
                 ms = dec.teach(dec.text_of(vals), label)
         if self.storage is not None:
             self.storage.save_correction(question, init_state, correct, source=source, by=by, of=of)
+        elif ms is None:
+            import warnings
+            warnings.warn(f"teach({question!r}): nothing learned it — no online head (fit_fast) or model decision "
+                          "answers this question, and the system has no storage to keep it for the next fit: the "
+                          "correction is lost", stacklevel=2)
         return ms
 
 
