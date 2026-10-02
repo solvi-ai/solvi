@@ -1175,8 +1175,10 @@ class Guard:
         ground_last=1 the call must rest on the current request (a call the user confirms with "yes, go ahead" then
         finds nothing and is denied: the agent restates the value, or use a larger N).
         once: a call of this tool with exactly the arguments of a call already made escalates (a second refund of the
-        same order, a file deleted twice). The calls made are the given fact `calls_made` — a Session keeps it; with
-        guard.check / guard.call pass facts={"calls_made": [...]} (strings from solvi.agents.guard.proposal)."""
+        same order, a file deleted twice). The calls made are the given fact `calls_made` — a Session, the MCP proxy
+        and the framework adapters keep it; with guard.check / guard.call pass facts={"calls_made": [...]} (strings
+        from solvi.agents.guard.proposal; [] when none was made). A call checked without it escalates: the check
+        cannot be evaluated."""
         def add(f):
             n = name or (f.__name__ if f is not None else None)
             if not n:
@@ -1485,7 +1487,9 @@ class Guard:
         state = {"tool_name": c.name, "tool_arguments": c.arguments, "conversation": text, "conversation_roles": roles,
                  "user_request": request}
         if c.name in self.tools and self.tools[c.name].once:
-            state["calls_made"] = sorted(str(x) for x in facts.pop("calls_made", None) or ())
+            made = facts.pop("calls_made", None)      # not given: not_made_before cannot be evaluated → escalate
+            if made is not None:
+                state["calls_made"] = sorted(str(x) for x in made)
         else:
             facts.pop("calls_made", None)             # a Session gives it with every call: only a once=True tool reads it
         clash = [k for k in facts if k in state or k in BUILTIN
@@ -1517,7 +1521,8 @@ class Guard:
     def call(self, call, context=None, facts=None):
         """Check a proposed call and, when it is allowed, make it: solvi runs the tool's registered function with the
         validated arguments → GuardDecision with `result` (or `error` when the tool raised). A tool without a function
-        (declared for a framework) is not run: `executed` stays False."""
+        (declared for a framework) is not run: `executed` stays False (in a Session, report its result with
+        `session.record`)."""
         d = self.check(call, context, facts, store=False)
         if d.allowed:
             self._run(d)
@@ -1714,6 +1719,14 @@ def _outcome_meta(d):
         return {"result_hash": None}
 
 
+def with_calls_made(facts, made):
+    """The facts of a call plus the calls an adapter made (the given fact `calls_made` a once=True tool reads), joined
+    with any `calls_made` the app's own facts give."""
+    facts = dict(facts or {})
+    facts["calls_made"] = list(facts.get("calls_made") or ()) + list(made)
+    return facts
+
+
 def _names(tools):
     if tools is None:
         return None
@@ -1723,6 +1736,11 @@ def _names(tools):
 class Session:
     """A conversation with an agent: `session.call(proposal)` checks and makes calls in its context and appends each
     made call's result as a tool output (`add` appends other messages).
+
+    `made` lists the calls that were made and did not fail — what a `once=True` tool reads. A call of a tool without
+    a function (the framework runs it) that `session.call` allows is counted as made when it is allowed, since it is
+    handed over to be made; `session.record(decision, result)` adds its result as a tool output, and with `error=` takes
+    it off the list again (a failed call may be tried again). After `session.check` nothing is counted until `record`.
 
     max_messages / max_chars: the context kept for checking (None: all of it) — the oldest messages are dropped first,
     and a message longer than max_chars keeps its beginning plus any instruction-like passage of the rest. A tool output
@@ -1750,7 +1768,24 @@ class Session:
             if not d.error:
                 self.made.append(proposal(d.tool, d.arguments))
             self.add("tool", f"{d.tool}: {d.error if d.error else _text(d.result)}")
+        elif d.allowed and d.tool in self.guard.tools and self.guard.tools[d.tool].func is None:
+            self.made.append(proposal(d.tool, d.arguments))   # handed to the framework to be made: a repeat is a repeat
         return d
+
+    def record(self, decision, result=None, error=None):
+        """Report a call the framework made (a tool without a function, or a call allowed by `check`): its result is
+        appended as a tool output and the call counts as made (for once=True tools); with `error` (a text) the error is
+        appended instead and the call does not count — it may be tried again. Only an allowed decision is recorded.
+        → the decision."""
+        if not decision.allowed:
+            raise ValueError(f"only an allowed call is made; this one is {decision.outcome!r}")
+        p = proposal(decision.tool, decision.arguments)
+        if error:
+            self.made = [x for x in self.made if x != p]
+        elif p not in self.made:
+            self.made.append(p)
+        self.add("tool", f"{decision.tool}: {error if error else _text(result)}")
+        return decision
 
     def _append(self, role, text, tainted=False):
         if self.max_chars is not None and len(text) > self.max_chars:

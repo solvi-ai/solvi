@@ -36,7 +36,11 @@ A tool the guard does not know is denied (declare=True: declared from the tool's
 LangGraph runs the node again, so the call is checked (and stored) again before the approval is recorded. A call of the
 same message that was already made — allowed at once, or approved while another call of the message still waited —
 is not made again on that re-run: the wrapper returns the result it had (per thread, node task, tool call id and
-arguments, in the process that made it; after a restart LangGraph's own re-run rule applies — keep such tools idempotent)."""
+arguments, in the process that made it; after a restart LangGraph's own re-run rule applies — keep such tools idempotent).
+
+`once=True` tools: the wrapper keeps the calls it made (`made`: a call counts when the ToolNode ran the tool and its
+ToolMessage is not an error) for as long as it lives — across threads, in this process — and gives them as the fact
+`calls_made`, together with any `calls_made` your `facts` give (calls made earlier or elsewhere)."""
 from __future__ import annotations
 
 import collections
@@ -45,7 +49,7 @@ from typing import Callable
 from langchain_core.messages import ToolMessage
 from langgraph.prebuilt import ToolNode
 
-from .guard import Guard, messages
+from .guard import Guard, messages, proposal, with_calls_made
 
 APPROVE = ("approve", "approved", "allow", "yes")      # the strings that approve (any case); else only True itself
 DONE_KEPT = 4096                                       # the results of made calls kept, so a re-run node does not repeat them
@@ -109,6 +113,7 @@ class _Wrap:
             raise ValueError('on_escalate: "interrupt" | "message"')
         self.guard, self.facts, self.on_escalate, self.declare = guard, facts, on_escalate, declare
         self.decisions = []
+        self.made = []                                   # the calls made (for once=True tools)
         self._asked = {}                                 # tool call id → the approval keys interrupts showed, in order
         self._done = collections.OrderedDict()           # (thread, the node's task, tool call id, arguments hash) → its result
 
@@ -117,7 +122,7 @@ class _Wrap:
         if self.declare and tc["name"] not in self.guard.tools and request.tool is not None:
             schema = request.tool.get_input_schema().model_json_schema()
             self.guard.declare(tc["name"], schema=schema, description=request.tool.description or "")
-        facts = self.facts(request.state) if callable(self.facts) else self.facts
+        facts = with_calls_made(self.facts(request.state) if callable(self.facts) else self.facts, self.made)
         return {"name": tc["name"], "arguments": tc.get("args") or {}, "id": tc.get("id")}, \
             messages(_messages_of(request.state)), facts
 
@@ -180,7 +185,9 @@ class _Wrap:
         k = (*task, tc.get("id"), _args_hash(tc.get("args") or {}))
         return k, self._done.get(k)
 
-    def _keep(self, k, out):
+    def _keep(self, k, out, d):
+        if getattr(out, "status", None) != "error":      # the tool ran and did not fail: made
+            self.made.append(proposal(d.tool, d.arguments))
         if k is not None:
             self._done[k] = out
             while len(self._done) > DONE_KEPT:
@@ -193,7 +200,7 @@ class _Wrap:
             return done
         call, ctx, facts = self._pre(request)
         what, out = self._post(request, self.guard.check(call, ctx, facts))
-        return self._keep(k, execute(request)) if what == "run" else out
+        return self._keep(k, execute(request), out) if what == "run" else out
 
     async def acall(self, request, execute):
         k, done = self._once(request)
@@ -201,7 +208,7 @@ class _Wrap:
             return done
         call, ctx, facts = self._pre(request)
         what, out = self._post(request, await self.guard.acheck(call, ctx, facts))
-        return self._keep(k, await execute(request)) if what == "run" else out
+        return self._keep(k, await execute(request), out) if what == "run" else out
 
 
 def guard_wrappers(guard, facts: Callable | dict | None = None, on_escalate="interrupt", declare=False):

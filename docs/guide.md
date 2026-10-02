@@ -2219,7 +2219,12 @@ in a long session a value the user named many requests ago, for another purpose,
 ("read notes.txt" earlier, a `delete_file("notes.txt")` later). `guard.tool(..., ground_last=1)` lets only the user's
 last message ground a value (2: the last two): the reason then says the value is from an earlier request. `once=True`
 escalates a call of the tool with exactly the arguments of a call already made — a second refund of the same order —
-unless the first one failed; a `Session` keeps the calls made, and without one they are the given fact `calls_made`.
+unless the first one failed. The calls made are the given fact `calls_made`: a `Session`, the MCP proxy and the three
+framework adapters keep it (an adapter for as long as its toolset / node / tools live, in this process; add calls made
+earlier through `facts={"calls_made": [...]}`). For a tool the framework runs, `session.call` counts an allowed call as
+made and `session.record(decision, result)` (or `error=`: not made after all) reports how it went. With a bare
+`guard.check` / `guard.call` you give the fact yourself (`[]` when nothing was made); a `once=True` call checked without
+it escalates, since the check cannot be evaluated.
 On a scripted session of 51 steps over files and a shop (15 calls that must not be made, 18 that must, 6 repeats):
 calls made that should not be 2 → 1, repeats made 6 → 1, no call that should be made blocked. The one left takes a
 path the user gave as a destination and uses it as a source: grounding does not know an argument's role.

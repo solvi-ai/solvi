@@ -27,7 +27,11 @@ how PydanticAI sends `ToolReturn(content=...)` and MCP tool content), see `conte
 
 A tool the guard does not know is denied; with declare=True it is declared from its JSON schema on first use (the
 guard then checks its types, and any policies that name it). The first parameter of a tool function typed as RunContext
-is not an argument (Guard.tool skips it)."""
+is not an argument (Guard.tool skips it).
+
+`once=True` tools: the toolset keeps the calls it made (`made`: a call counts when the tool returned without raising) for
+as long as it lives — across runs, in this process — and gives them as the fact `calls_made`, together with any
+`calls_made` your `facts` give (calls made earlier or elsewhere)."""
 from __future__ import annotations
 
 import dataclasses
@@ -36,7 +40,7 @@ from typing import Any, Callable
 from pydantic_ai import ApprovalRequired, ModelRetry, ToolFailed
 from pydantic_ai.toolsets import WrapperToolset
 
-from .guard import Guard, _text
+from .guard import Guard, _text, proposal, with_calls_made
 
 
 _FROM_TOOLS = ("tool-return", "retry-prompt", "builtin-tool-return")
@@ -78,6 +82,7 @@ class GuardedToolset(WrapperToolset):
     on_escalate: str = "approval"
     declare: bool = False
     decisions: list = dataclasses.field(default_factory=list, repr=False)   # every GuardDecision, in order
+    made: list = dataclasses.field(default_factory=list, repr=False)        # the calls made (for once=True tools)
     _asked: dict = dataclasses.field(default_factory=dict, repr=False)      # call id → the approval key asked for
 
     def __post_init__(self):
@@ -91,7 +96,7 @@ class GuardedToolset(WrapperToolset):
         if self.declare and name not in g.tools:
             td = tool.tool_def
             g.declare(name, schema=td.parameters_json_schema, description=td.description or "")
-        facts = self.facts(ctx) if callable(self.facts) else self.facts
+        facts = with_calls_made(self.facts(ctx) if callable(self.facts) else self.facts, self.made)
         d = await g.acheck({"name": name, "arguments": tool_args, "id": ctx.tool_call_id}, context_of(ctx.messages), facts)
         asked = self._asked.get(ctx.tool_call_id)
         if d.outcome == "escalate" and getattr(ctx, "tool_call_approved", False) and asked in (None, d.approval_key()):
@@ -99,7 +104,9 @@ class GuardedToolset(WrapperToolset):
             d = g.resolve(d, approve=True, reviewer="pydantic-ai approval", execute=False)
         self.decisions.append(d)
         if d.outcome == "allow":
-            return await super().call_tool(name, tool_args, ctx, tool)
+            out = await super().call_tool(name, tool_args, ctx, tool)
+            self.made.append(proposal(d.tool, d.arguments))       # it returned: made (a raised error is not)
+            return out
         if d.outcome == "escalate" and self.on_escalate == "approval":
             # the approval covers this call with these arguments and these reasons: a resumed call that escalates for
             # other ones (other arguments, a changed fact, a new tool output) is asked again

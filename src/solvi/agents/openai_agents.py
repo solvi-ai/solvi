@@ -45,6 +45,11 @@ guardrail of the same call id with the same arguments in the same process (a cal
 arguments, or an escalation a person has answered since, is checked again); after a resume in another process it is
 checked again.
 
+`once=True` tools: the guarded tools of one `guard_tools(...)` call (or one `guard_tool`) keep the calls they allowed
+(`solvi_guard.made`) for as long as they live — across runs, in this process — and give them as the fact `calls_made`,
+together with any `calls_made` your `facts` give. The guardrail sees a call before the SDK runs it, not its result: an
+allowed call counts as made even when the tool then fails (a repeat asks a person).
+
 Handoffs: the SDK may rewrite the history a handed-off agent gets (nested into one summary message by
 `nest_handoff_history`, or filtered by a handoff's `input_filter`); the guard reads what the run gives it and fails
 closed — a value the user wrote before the handoff may no longer be found as the user's, and a user-grounded call is
@@ -59,7 +64,7 @@ from typing import Callable
 
 from agents import FunctionTool, RunConfig, ToolGuardrailFunctionOutput, ToolInputGuardrail
 
-from .guard import Guard, messages
+from .guard import Guard, messages, proposal, with_calls_made
 
 _MODEL_INPUT = contextvars.ContextVar("solvi_model_input", default=None)   # the run's latest model input (its task)
 
@@ -97,7 +102,7 @@ def context_of(wrapper) -> list:
 
 
 class _Guarded:
-    def __init__(self, tool, guard, facts, on_escalate, declare):
+    def __init__(self, tool, guard, facts, on_escalate, declare, made=None):
         if not isinstance(guard, Guard):
             raise TypeError("guard is a solvi.agents.Guard")
         if on_escalate not in ("approval", "reject"):
@@ -107,12 +112,13 @@ class _Guarded:
         self.pending = {}                              # (call id, the arguments) → the decision made for needs_approval
         self.asked = {}                                # call id → the approval key of the escalation shown to a person
         self.decisions = []
+        self.made = [] if made is None else made       # the calls allowed to run (for once=True tools)
 
     async def check(self, wrapper, params, call_id):
         g, t = self.guard, self.tool
         if self.declare and t.name not in g.tools:
             g.declare(t.name, schema=t.params_json_schema, description=t.description or "")
-        facts = self.facts(wrapper) if callable(self.facts) else self.facts
+        facts = with_calls_made(self.facts(wrapper) if callable(self.facts) else self.facts, self.made)
         return await g.acheck({"name": t.name, "arguments": params, "id": call_id}, context_of(wrapper), facts)
 
     async def needs_approval(self, wrapper, params, call_id):
@@ -163,6 +169,7 @@ class _Guarded:
                 d = self.guard.resolve(d, approve=True, reviewer="openai-agents approval", execute=False)
         self.decisions.append(d)
         if d.outcome == "allow":
+            self.made.append(proposal(d.tool, d.arguments))        # the SDK runs it next
             return ToolGuardrailFunctionOutput.allow(output_info={"solvi": d.to_dict()})
         return ToolGuardrailFunctionOutput.reject_content(d.message(), output_info={"solvi": d.to_dict()})
 
@@ -187,12 +194,13 @@ def _approval(ctx, name, call_id, per_call=False):
 
 
 def guard_tool(tool: FunctionTool, guard: Guard, facts: Callable | dict | None = None, on_escalate="approval",
-               declare=False) -> FunctionTool:
+               declare=False, made: list | None = None) -> FunctionTool:
     """A copy of a FunctionTool whose every call passes `guard` (see the module docs). facts: a dict, or a function of the
-    RunContextWrapper returning one. The copy's `solvi_guard.decisions` lists every GuardDecision."""
+    RunContextWrapper returning one. The copy's `solvi_guard.decisions` lists every GuardDecision. made: a list the
+    allowed calls are appended to (for once=True tools; `guard_tools` shares one among its tools)."""
     if not isinstance(tool, FunctionTool):
         raise TypeError(f"guard_tool guards a FunctionTool (function_tool(...)), not {type(tool).__name__}")
-    g = _Guarded(tool, guard, facts, on_escalate, declare)
+    g = _Guarded(tool, guard, facts, on_escalate, declare, made)
     rail = ToolInputGuardrail(guardrail_function=g.guardrail, name="solvi_guard")
     out = dataclasses.replace(tool, tool_input_guardrails=list(tool.tool_input_guardrails or []) + [rail],
                               needs_approval=g.needs_approval)
@@ -202,4 +210,5 @@ def guard_tool(tool: FunctionTool, guard: Guard, facts: Callable | dict | None =
 
 def guard_tools(tools, guard: Guard, **kw) -> list:
     """guard_tool for each FunctionTool of a list (other tools — hosted, MCP — are returned unchanged)."""
+    kw.setdefault("made", [])
     return [guard_tool(t, guard, **kw) if isinstance(t, FunctionTool) else t for t in tools]

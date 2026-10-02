@@ -548,8 +548,36 @@ def test_once_a_call_already_made_with_the_same_arguments_escalates():
     d = g.check({"name": "refund", "arguments": {"order_id": 1001}}, [("user", "Refund order 1001.")],
                 facts={"calls_made": s.made})                                              # without a Session: a given fact
     assert d.outcome == "escalate"
-    assert g.check({"name": "refund", "arguments": {"order_id": 1001}}, [("user", "Refund order 1001.")]).outcome == "allow"
+    nothing = g.check({"name": "refund", "arguments": {"order_id": 1001}}, [("user", "Refund order 1001.")])
+    assert nothing.outcome == "escalate" and "calls_made" in " ".join(nothing.reasons)     # not given: cannot be checked
+    assert g.check({"name": "refund", "arguments": {"order_id": 1001}}, [("user", "Refund order 1001.")],
+                   facts={"calls_made": []}).outcome == "allow"
     plain, _, refunds2 = _files_guard()                                                    # without once: as before
     s2 = plain.session([("user", "Refund order 1001.")])
     assert [s2.call({"name": "refund", "arguments": {"order_id": 1001}}).outcome for _ in range(2)] == ["allow", "allow"]
     assert plain.replay_all() == [] if plain.storage is not None else True
+
+
+def test_once_counts_a_call_of_a_declared_tool_that_the_framework_runs():
+    g = Guard()
+    g.declare("refund", schema={"type": "object", "properties": {"order_id": {"type": "integer"}},
+                                "required": ["order_id"]}, once=True)
+    call = {"name": "refund", "arguments": {"order_id": 1001}}
+    s = g.session([("user", "Refund order 1001.")])
+    first = s.call(call)                                   # allowed and handed over: counted as made
+    assert first.outcome == "allow" and not first.executed and s.made == ['refund({"order_id": 1001})']
+    again = s.call(call)
+    assert again.outcome == "escalate" and "already made" in " ".join(again.reasons)
+    s.record(first, error="the bank is down")              # the framework reports a failure: it may be tried again
+    assert s.made == [] and s.context[-1] == ("tool", "refund: the bank is down")
+    retry = s.call(call)
+    assert retry.outcome == "allow"
+    s.record(retry, "refunded 1001")
+    assert s.made == ['refund({"order_id": 1001})'] and s.context[-1] == ("tool", "refund: refunded 1001")
+    s2 = g.session([("user", "Refund order 1001.")])       # check alone counts nothing until the result is recorded
+    d = s2.check(call)
+    assert d.outcome == "allow" and s2.made == [] and s2.check(call).outcome == "allow"
+    s2.record(d, "refunded 1001")
+    assert s2.check(call).outcome == "escalate"
+    with pytest.raises(ValueError, match="only an allowed call"):
+        s2.record(s2.check(call), "x")

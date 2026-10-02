@@ -184,3 +184,92 @@ def test_openai_agents_guardrail_rechecks_a_call_whose_arguments_changed():
     assert not asyncio.run(sg.needs_approval(ctx, CALLS[1], "c2"))
     asyncio.run(sg.guardrail(SimpleNamespace(context=SimpleNamespace(**{**vars(same), "tool_call_id": "c2"}))))
     assert sg.decisions[-1].outcome == "allow" and sg.pending == {}
+
+
+def once_guard():
+    refunded = []
+
+    def refund(order: str) -> str:
+        """Refund an order."""
+        if order == "B-2":
+            raise RuntimeError("the bank is down")
+        refunded.append(order)
+        return f"refunded {order}"
+    g = Guard()
+    g.tool(refund, once=True)
+    return g, refund, refunded
+
+
+def test_pydantic_ai_once_escalates_the_same_call_proposed_again():
+    pytest.importorskip("pydantic_ai")
+    from pydantic_ai import Agent, DeferredToolRequests, FunctionToolset
+    from pydantic_ai.messages import ModelResponse, TextPart, ToolCallPart
+    from pydantic_ai.models.function import FunctionModel
+
+    from solvi.agents.pydantic_ai import GuardedToolset
+    g, refund, refunded = once_guard()
+    tools = GuardedToolset(FunctionToolset([refund]), g)
+    steps = iter([ToolCallPart("refund", {"order": "A-1"}, tool_call_id="c1"),
+                  ToolCallPart("refund", {"order": "A-1"}, tool_call_id="c2")])
+
+    def model(messages, info):
+        part = next(steps, None)
+        return ModelResponse(parts=[part if part is not None else TextPart("done")])
+    agent = Agent(FunctionModel(model), toolsets=[tools], output_type=[str, DeferredToolRequests])
+    r = agent.run_sync("Refund order A-1.")
+    assert [d.outcome for d in tools.decisions] == ["allow", "escalate"] and refunded == ["A-1"]
+    assert isinstance(r.output, DeferredToolRequests) and tools.made == ['refund({"order": "A-1"})']
+    assert "already made" in " ".join(tools.decisions[-1].reasons)
+
+
+def test_langgraph_once_escalates_the_same_call_proposed_again_and_not_one_that_failed():
+    pytest.importorskip("langgraph")
+    from typing import Annotated, TypedDict
+
+    from langchain_core.messages import AIMessage, HumanMessage
+    from langchain_core.tools import tool
+    from langgraph.graph import END, START, StateGraph
+    from langgraph.graph.message import add_messages
+
+    from solvi.agents.langgraph import guarded_tool_node
+    g, refund, refunded = once_guard()
+
+    class State(TypedDict):
+        messages: Annotated[list, add_messages]
+    script = iter(["A-1", "A-1", "B-2", "B-2"])
+
+    def agent(state):
+        return {"messages": [AIMessage("", tool_calls=[{"name": "refund", "args": {"order": next(script)},
+                                                        "id": f"call-{len(state['messages'])}"}])]}
+    node = guarded_tool_node([tool(refund)], g, on_escalate="message", handle_tool_errors=True)
+    b = StateGraph(State)
+    b.add_node("agent", agent)
+    b.add_node("tools", node)
+    b.add_edge(START, "agent")
+    b.add_edge("agent", "tools")
+    b.add_edge("tools", END)
+    app = b.compile()
+    last = [app.invoke({"messages": [HumanMessage("Refund order A-1 and order B-2.")]})["messages"][-1] for _ in range(4)]
+    assert [d.outcome for d in node.solvi_guard.decisions] == ["allow", "escalate", "allow", "allow"]
+    assert refunded == ["A-1"] and "already made" in last[1].content and last[3].status == "error"
+    assert node.solvi_guard.made == ['refund({"order": "A-1"})']        # the failed B-2 was not made: tried again
+
+
+def test_openai_agents_once_rejects_the_same_call_proposed_again():
+    pytest.importorskip("agents")
+    from agents import Agent, Runner, function_tool, set_tracing_disabled
+    from agents.testing import ScriptedModel, assistant_message, function_call
+
+    from solvi.agents.openai_agents import guard_tools
+    g, refund, refunded = once_guard()
+    set_tracing_disabled(True)
+
+    async def run():
+        tools = guard_tools([function_tool(refund)], g, on_escalate="reject")
+        model = ScriptedModel([[function_call("refund", {"order": "A-1"}, call_id=f"c{i}")] for i in range(2)]
+                              + [[assistant_message("done")]])
+        await Runner.run(Agent(name="shop", model=model, tools=tools), "Refund order A-1.")
+        return tools[0].solvi_guard
+    sg = asyncio.run(run())
+    assert [d.outcome for d in sg.decisions] == ["allow", "escalate"] and refunded == ["A-1"]
+    assert "already made" in " ".join(sg.decisions[-1].reasons) and sg.made == ['refund({"order": "A-1"})']

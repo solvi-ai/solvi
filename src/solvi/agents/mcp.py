@@ -27,7 +27,8 @@ The proxy speaks MCP over stdio (JSON-RPC, one message per line) to the client a
   tools/call   the guard checks the call — allow: forwarded to the server with the arguments as the guard validated
                them (coerced to the schema's types: "2" for an integer is sent as 2, "no" for a boolean as false; the
                arguments the client did not send are not added), and its result's text is kept as a tool
-               output in the proxy's session, so later calls are checked against it (grounding, instruction-like text);
+               output in the proxy's session, so later calls are checked against it (grounding, instruction-like text),
+               and a call the server made without an error counts as made (a repeat of a once=True tool escalates);
                deny: an error result with the reasons; escalate: with --escalate elicit (default) and a client that
                declares the elicitation capability, the user is asked (elicitation/create: approve yes / no) and the
                answer is recorded as a person's resolution (only `{"action": "accept", "content": {"approve": true}}`
@@ -48,7 +49,7 @@ import shlex
 import subprocess
 import sys
 
-from .guard import Guard, ToolCall, _text
+from .guard import Guard, ToolCall, _text, proposal
 
 CONTEXT_MESSAGES = 50            # the tool outputs the proxy's session keeps for checking
 CONTEXT_CHARS = 100_000          # ... and their characters in all
@@ -174,7 +175,7 @@ class Proxy:
         if name in g.tools and name not in self.listed:          # declared, but hidden (see tools)
             return {"content": [{"type": "text", "text": f"{name} is not available through this proxy"}],
                     "isError": True}
-        d = g.check(ToolCall(name, args), self.session.context, self.session.facts, store=False)
+        d = g.check(ToolCall(name, args), self.session.context, self.session._facts(), store=False)
         if d.outcome == "escalate" and ask is not None:
             answer = ask(d)
             if answer is not None:
@@ -194,12 +195,15 @@ class Proxy:
         except Exception as e:                            # the call may or may not have reached the server: recorded
             d.error = f"forwarding failed: {type(e).__name__}"
             self.session.add("tool", f"{name}: {d.error}")
+            self.session.made.append(proposal(d.tool, d.arguments))   # once=True: it may have been made — a repeat asks
             g._save(d)
             raise
         else:
             if result.get("isError"):
                 d.error = _text(result.get("content")) or "error"
             d.result = result.get("structuredContent", _text(result.get("content")))
+        if not d.error:
+            self.session.made.append(proposal(d.tool, d.arguments))   # what a once=True tool reads on a later call
         self.session.add("tool", f"{name}: {_text(result.get('content'))}")
         if d.stored_id is None:
             g._save(d)

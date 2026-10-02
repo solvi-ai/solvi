@@ -116,3 +116,19 @@ def test_solvi_serve_guard_command(tmp_path):
     bad = subprocess.run([sys.executable, "-m", "solvi", "serve", "--guard", f"{cat}:guard"], capture_output=True,
                          text=True, timeout=60)
     assert bad.returncode == 2 and "--upstream" in bad.stderr
+
+
+def test_proxy_escalates_the_repeat_of_a_once_tool_and_not_a_call_that_failed(tmp_path):
+    from solvi.agents import Guard
+    g = Guard()
+    g.declare("write_file", once=True)
+    g.declare("read_file", once=True)
+    out, _ = run(g, [rpc(1, "initialize", {"protocolVersion": "2025-06-18", "capabilities": {}}), rpc(2, "tools/list"),
+                     call(3, "write_file", path="/work/a.txt", content="x"),
+                     call(4, "write_file", path="/work/a.txt", content="x"),      # the same call again: a person
+                     call(5, "write_file", path="/work/a.txt", content="y"),      # other arguments: another call
+                     call(6, "read_file", path="/work/none.txt"),                 # the server answers with an error
+                     call(7, "read_file", path="/work/none.txt")], escalate="deny")   # ... so it may be tried again
+    assert [out[i]["result"]["_meta"]["solvi"]["outcome"] for i in (3, 4, 5, 6, 7)] == \
+        ["allow", "escalate", "allow", "allow", "allow"]
+    assert "already made" in out[4]["result"]["content"][0]["text"]
