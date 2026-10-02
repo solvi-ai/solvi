@@ -2686,6 +2686,16 @@ itself it is any object); a tool whose arguments collide with the guard's facts 
                                                        "--upstream", "npx -y @modelcontextprotocol/server-filesystem /work"]}}}
 ```
 
+**`once=True` behind an adapter.** An adapter has no `Session`, so it keeps the calls made itself and gives them as the
+fact `calls_made`: `GuardedToolset.made` (a call counts when the tool returned without raising), the guarded node's
+`solvi_guard.made` (the ToolNode ran the tool and its message is not an error), and one list shared by the tools of a
+`guard_tools(...)` call (`tool.solvi_guard.made`; the OpenAI guardrail sees a call before the SDK runs it, so an allowed
+call counts even when the tool then fails). The memory is that object's, for as long as it lives in this process:
+across runs, threads and users — not per conversation. A repeat of a call made for another user therefore escalates
+too, and nothing is remembered after a restart. For another scope, keep the calls yourself (a database row per
+conversation) and pass them as `facts=lambda ctx: {"calls_made": [...]}` — they are added to the adapter's own — and
+make one toolset / node / tool list per conversation if the process-wide memory is too wide.
+
 **Which frameworks.** Each adapter has an extra — `pip install "solvi[pydantic-ai]"`, `"solvi[langgraph]"`,
 `"solvi[openai-agents]"` — and importing one without its framework says which. Supported and tested with real runs (`tests/test_agents_frameworks.py`,
 `tests/test_agents_recheck3.py`): PydanticAI (2.51), LangGraph (1.2.12 with langchain-core 1.6.5), the OpenAI Agents SDK
