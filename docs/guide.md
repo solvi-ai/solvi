@@ -1239,6 +1239,29 @@ whole story: a pydantic ticket, the questions as the fields of a pydantic model,
 check, a constraint and a rule over the model, an escalation, the audit. Both run the real decider when
 `SOLVI_DECIDE_MODEL` points to a checkpoint and a keyword stand-in otherwise.
 
+
+### Drift: has the stream moved away from the calibration?
+
+A threshold from `act_guard` holds for inputs like the calibration examples. When the inputs change, the promise is kept
+by escalating more, or the model keeps answering alone and is wrong more often — and nothing says so. `solvi.drift`
+compares the last decisions of a question with a reference window and names what moved:
+
+```python
+from solvi.drift import DriftMonitor
+mon = DriftMonitor(window=100)            # the first 100 decisions are the reference (or mon.calibrate(decisions, labels))
+rep = mon.observe(part(text))             # or mon.observe(decision, label=truth) when the truth is known
+rep["drift"], rep["flags"], rep["why"]    # True, ["answers"], ["the answers are distributed differently (total variation 0.24, ...)"]
+```
+
+Without labels it tests the share answered alone, the distribution of the answers, the mean confidence and the mean act
+probability; with labels also the accuracy, and among the answers given alone the calibration error and
+`coverage_at`. A signal is flagged only when its test is significant (`alpha`, 0.01) and the change is large enough
+(`min_share`, `min_tv`, `min_shift`, ...), and `drift` needs `min_signals` of them. It takes a `Decision`, a result
+(`res["q"]`) or a dict, changes nothing and decides nothing: recalibrating or asking for labels is the caller's. Measured
+with solvi-base on support tickets whose wording and mix change at one point: with `window=100` the change is flagged 37
+decisions later, with no false flag on 200 decisions before it; `window=50` gave false flags (2–4 episodes), so keep
+the window at 100 or more.
+
 ## Asking: System and Response
 
 ```python

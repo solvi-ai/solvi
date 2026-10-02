@@ -2,6 +2,12 @@
 
 ## 0.7.2 — unreleased
 
+- `solvi.drift.DriftMonitor`: has the stream of decisions moved away from the one the thresholds were calibrated on? It
+  compares the last `window` decisions of a question with a reference window — the share answered alone, the
+  distribution of the answers, the mean confidence and act probability; with labels the accuracy, the calibration
+  error and `coverage_at` — and flags a signal only when its test is significant and the change is large enough. With
+  solvi-base on a stream of support tickets that changes at one point: flagged 37 decisions after the change, no false
+  flag on 200 decisions before it (`window=100`; with 50 there are false flags). It only reports; what to do is yours.
 - `solvi.textin.parse_number` refuses a spelled-out number that goes on instead of cutting it: "две тысячи триста" was
   read as 2000 and "one hundred fifty" as 100 (the words after the scale were dropped). A number with one scale word
   is read as before ("two thousand", "полтора миллиона", "1.5 million").
