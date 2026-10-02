@@ -1590,13 +1590,16 @@ res = await system.aask(application)         # same Response as ask
 res = await system.aask(application, speculate=True)
 ```
 
-- `async def` parts (fn, extract, check, rule, alternative producers) are awaited; a sync part marked `blocking=True`
-  runs in a worker thread (`asyncio.to_thread`); any other sync part runs inline, as in `ask`.
+- `async def` parts (fn, extract, check, rule, alternative producers) are awaited — also when marked `blocking=True`,
+  which only matters for sync parts; a sync part marked `blocking=True` runs in a worker thread (`asyncio.to_thread`);
+  any other sync part runs inline, as in `ask`.
 - Steps run as soon as the steps they read have finished, all concurrently. By default in the phases of `ask`: hard
   checks and what they read first, then what the open questions still need — so no call starts that `ask` would not
   make, and a failed hard check stops the paid lookups behind it. `speculate=True` starts every step as soon as its
   inputs are ready and **cancels** the pending calls a failed hard check makes unnecessary (lower latency; some calls may
   start and be cancelled; steps that finished anyway are dropped). Cancelling `aask` itself cancels every pending call.
+  Under a learned order (`System(order="learned")`, `learn_order()`) the hard checks run one at a time in that order,
+  so `speculate=True` is ignored, with a `UserWarning`.
 - **Timeouts.** A call that takes longer than its part's `timeout=` (or `aask(timeout=)`, or `System(timeout=)`) fails
   with `timed out after 2 s`: the fact is missing and the questions that need it abstain with guard `timeout` (a hard
   check that times out: "could not be evaluated", as for any error). The safeguard `timeout` is in `res.safeguards`, the

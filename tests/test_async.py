@@ -263,6 +263,29 @@ def test_a_blocking_part_times_out_too():
     assert r["q"].guard == "timeout"
 
 
+def test_an_async_part_marked_blocking_is_awaited_and_its_timeout_holds():
+    """async def + blocking=True + timeout=0.05 ran 0.4 s and answered: the worker thread only built the coroutine."""
+    c = Catalog()
+
+    @c.fn(timeout=0.05, blocking=True)
+    async def slow(x):
+        await asyncio.sleep(0.4)
+        return x
+
+    @c.rule("q")
+    def q(slow):
+        return "yes"
+    t = time.perf_counter()
+    r = asyncio.run(System(c, [Question("q", "?", Answer.yes_no())]).aask({"x": 1}))
+    assert (r["q"].status, r["q"].guard) == ("abstain", "timeout") and time.perf_counter() - t < 0.3
+
+
+def test_speculate_under_a_learned_order_is_not_silently_ignored():
+    s = System(*shop(0), order="learned")
+    with pytest.warns(UserWarning, match=r"speculate=True\) is ignored under a learned order"):
+        assert asyncio.run(s.aask({"customer_id": "g-1"}, speculate=True))["refund"].answer == "yes"
+
+
 def test_async_extract_with_a_source_keeps_its_quote():
     from solvi import Quote
     cat = Catalog()

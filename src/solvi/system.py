@@ -177,6 +177,16 @@ class Response(Serial):
         return render(decision(self, question, system, replay), format)
 
 
+def _speculate_note(speculate, p):
+    """aask(speculate=True) under a learned order: the hard checks run one at a time in that order, so nothing starts
+    early — say so rather than ignore the option."""
+    if speculate and p.order is not None:
+        import warnings
+        warnings.warn("aask(speculate=True) is ignored under a learned order (System(order=\"learned\"), learn_order() "
+                      "or order=...): the hard checks run one at a time in the learned order, nothing starts early",
+                      stacklevel=3)
+
+
 def _clash(catalog, names, head):
     """The message for given facts named like parts of the catalog (a given value would replace the part)."""
     parts = catalog.parts
@@ -409,6 +419,7 @@ class System:
         read = self._textin(text, decider, textin, question)
         t0 = now_ms()
         p = self._prepare_text(read, order)
+        _speculate_note(speculate, p)
         trace, vals = await aexecute(self.catalog, p.flow, p.state, order=p.order, costs=self.costs, policy=p.policy,
                                      known=p.known, timeout=self.timeout if timeout is None else timeout,
                                      speculate=speculate, early_exit=self._early(early_exit))
@@ -427,11 +438,13 @@ class System:
         speculate=False: hard checks and the steps they read first, then what the open questions need (as `ask`: no call
         starts that `ask` would not make). speculate=True: every step starts once its inputs are ready, and a failed hard
         check cancels the pending calls that only the questions it settles needed (lower latency; some paid calls may start
-        and be cancelled). Cancelling `aask` itself cancels every pending call. early_exit: as for `ask` (False: every
-        step runs, whatever the hard checks say)."""
+        and be cancelled). Cancelling `aask` itself cancels every pending call. Under a learned order speculate=True is
+        ignored, with a UserWarning (the hard checks run one at a time in that order). An `async def` part is awaited
+        whatever `blocking` says. early_exit: as for `ask` (False: every step runs, whatever the hard checks say)."""
         from .runtime import aexecute
         t0 = now_ms()
         p = self._prepare(init_state, names, order)
+        _speculate_note(speculate, p)
         trace, vals = await aexecute(self.catalog, p.flow, p.state, order=p.order, costs=self.costs, policy=p.policy,
                                      known=p.known, timeout=self.timeout if timeout is None else timeout,
                                      speculate=speculate, early_exit=self._early(early_exit))
