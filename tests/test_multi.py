@@ -5,7 +5,7 @@ import numpy as np
 import pytest
 
 from solvi import Answer, Catalog, Question, System
-from solvi.decide import DecideModel
+from solvi.decide import DecideModel, Facts
 from solvi.multi import Cascade, Route, Vote, _src
 from solvi.runtime import Trace
 from test_decide import TEAMS, FakeScorer
@@ -126,6 +126,45 @@ def test_route_picks_the_part_by_code_and_only_that_model_runs():
     assert d.extra["route"]["by"] == "vip" and d.extra["routed"]["model"] == "large"
     d = r(email="I was charged twice for order 5521 and would like a refund please.", vip=False)
     assert d.extra["route"]["by"] == "long_email" and d.extra["calls"] == 1
+
+
+def test_a_route_keyed_by_a_fact_name_does_not_read_a_raw_input_as_that_fact():
+    s, l_, _, large = _parts(small_below=0.0, large_below=0.0)
+    r = Route({"vip": l_}, default=s)
+    with pytest.raises(ValueError, match="reads the fact"):          # every non-empty text used to go to the vip route
+        r.decide("Refund, charged twice.")
+    with pytest.raises(ValueError, match="reads the fact"):          # and the shared threshold was calibrated on that
+        r.act_guard([(CLEAR, "billing")] * 20, risk=0.5)
+    assert large.scorer.calls == []
+    with pytest.raises(ValueError, match="does not give"):           # a missing fact is not false
+        r.decide(Facts(email="Refund, charged twice."))
+    assert r.decide(Facts(email="Refund, charged twice.", vip=False)).extra["route"]["by"] == "default"
+    assert r.decide({"email": "Refund, charged twice.", "vip": True}).extra["route"]["by"] == "vip"   # a state gives it
+    info = r.act_guard([(Facts(email=CLEAR, vip=bool(i % 2)), "billing") for i in range(20)], risk=0.5)
+    assert info["n"] == 20
+
+    def long_email(email):                                           # a predicate of the input itself: as before
+        return len(email) > 40
+    assert Route({long_email: l_}, default=s).decide("Refund, charged twice.").extra["route"]["by"] == "default"
+
+    def both(email, vip):
+        return vip and len(email) > 40
+    with pytest.raises(ValueError, match="reads the facts"):
+        Route({both: l_}, default=s).decide("Refund, charged twice.")
+
+
+def test_a_route_with_two_predicates_over_the_same_fact():
+    s, l_, _, _ = _parts(small_below=0.0, large_below=0.0)
+
+    def strict(mode):
+        return mode == "strict"
+
+    def stop(mode):
+        return mode == "stop"
+    r = Route({strict: l_, stop: l_}, default=s)                     # was: ValueError: duplicate parameter name: 'mode'
+    assert r.facts == ["email", "mode"]
+    assert [r(email="Refund, charged twice.", mode=m).extra["route"]["by"] for m in ("strict", "stop", "other")] == \
+        ["strict", "stop", "default"]
 
 
 # --------------------------------------------------------------------------------------------------- catalog, trace, replay

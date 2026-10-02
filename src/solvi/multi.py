@@ -33,6 +33,7 @@ from __future__ import annotations
 import dataclasses
 import inspect
 import math
+from collections.abc import Mapping
 
 import numpy as np
 
@@ -329,7 +330,7 @@ class _Combination:
 
     def _setup(self):
         facts = list(dict.fromkeys(f for m in self.members for f in m.facts))
-        self.facts = facts + [f for f in self._extra_facts() if f not in facts]
+        self.facts = list(dict.fromkeys(facts + self._extra_facts()))   # two predicates may read the same fact
         self.__name__ = self.__qualname__ = self.name
         self.__doc__ = self.spec.task
         self.__signature__ = inspect.Signature([inspect.Parameter(f, inspect.Parameter.POSITIONAL_OR_KEYWORD)
@@ -936,8 +937,10 @@ class Route(_Combination):
     """Pick one part per input by code: `routes` maps a predicate (a function of facts by name — its parameters are
     facts the route reads — returning true to take that part) or a fact name (its value is true) to a part; the first
     that holds picks, else `default`. Only the picked part's model is called; `extra["route"]` records which part and
-    why, `extra["routed"]` its proposal. When the example inputs of act_guard are not Facts(...), a predicate with one
-    parameter is called with the input itself."""
+    why, `extra["routed"]` its proposal. An input that is not Facts(...) (decide(text), the examples of act_guard): a
+    state with the route's facts as keys gives them; otherwise a predicate with one parameter is called with the input
+    itself, and a route keyed by a fact name — or a predicate of several facts — raises: a text is not the value of a
+    fact. A fact that Facts(...) does not give raises too (it is not read as false)."""
 
     kind_name = "route"
 
@@ -971,12 +974,17 @@ class Route(_Combination):
         """The index of the member this input goes to."""
         for i, k in enumerate(self.keys):
             ps = self._params[i]
-            if src.vals is not None:
-                args = {p: (src.vals[p].value if isinstance(src.vals.get(p), Quote) else src.vals.get(p)) for p in ps}
-            elif len(ps) == 1:
+            given = src.vals if src.vals is not None else src.raw if isinstance(src.raw, Mapping) else None
+            if given is not None and all(p in given for p in ps):
+                args = {p: (given[p].value if isinstance(given[p], Quote) else given[p]) for p in ps}
+            elif src.vals is not None:              # a missing fact is not "false": the route cannot be decided
+                raise ValueError(f"route {self._by(i)} reads {[p for p in ps if p not in given]}, which the input does "
+                                 f"not give (it gives {sorted(given)})")
+            elif callable(k) and len(ps) == 1:      # a predicate of the input itself
                 args = {ps[0]: src.raw}
-            else:
-                raise ValueError(f"route {self._by(i)} reads {ps}: give the examples as Facts(...)")
+            else:                                   # a raw input is not the value of a fact
+                raise ValueError(f"route {self._by(i)} reads the fact{'s' if len(ps) > 1 else ''} {ps}: give the input "
+                                 "as Facts(...) or a state with those keys")
             if (bool(args[k]) if isinstance(k, str) else bool(k(**args))):
                 return i
         return len(self.keys)

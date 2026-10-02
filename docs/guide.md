@@ -1063,7 +1063,10 @@ info = team.act_guard(examples, risk=0.10)           # one guarantee for the com
   (other) 'billing'"`). The probabilities are the mean of the parts', the confidence the lowest agreeing one.
 - **Route**: `{predicate or fact name: part}` and a `default`; a predicate is a function of facts by name (its parameters
   join the route's inputs), a fact name picks its part when the fact is true. The first that holds picks; only that
-  part's model runs.
+  part's model runs. Several predicates may read the same fact (`mode == "strict"`, `mode == "stop"`). Outside a
+  catalog give the route's facts — `Facts(email=..., vip=True)` or a state with those keys, also in the examples of
+  `act_guard`: a bare text raises for a route keyed by a fact name (it would be read as the fact), as does a fact
+  that is not given.
 
 The parts must answer the same question — the same kind and options (and "not stated", rank `k`, number bins); the
 task and the facts they read may differ. A mismatch raises at construction. Combinations nest: `Cascade([small,
