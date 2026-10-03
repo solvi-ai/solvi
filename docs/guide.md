@@ -879,7 +879,11 @@ answers it lets through are then wrong about as often as all of them. A combinat
 examples (the labels are not read, so the promise holds; the Bonferroni correction is over those thresholds). Before
 0.7 it tried a fixed grid from 0.2 to 0.995, which let nothing through for an LLM decider whose confidences sit above
 0.999. Every decision records the promise of its threshold (`decision.extra["guarantee"]`) and the audit shows it per
-answer. Recalibrate when the inputs change: the promise does not survive a shift of domain. The same promises on a whole question —
+answer. Recalibrate when the inputs change: the promise does not survive a shift of domain. This includes the window
+after an abrupt shift and before a drift or open-set flag notices it: the answers given alone in that window can be
+wrong more often than promised, and no detector we tried closed the window without giving up a large share of the
+answers before the shift. After a flag, stop answering alone until the threshold is calibrated again on labels from
+after the shift. The same promises on a whole question —
 a fitted head, a rule, a trust score you compute — are `system.guarantee` ([below](#a-guarantee-on-any-question-systemguarantee)).
 
 #### Keeping a calibration: save_calibration, load_calibration
