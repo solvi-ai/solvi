@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from . import _deprecate
-from .core import Catalog
+from .core import Catalog, gone_in_1_0
 from .provenance import model_info
 from .runtime import MISSING, Record, Result, execute, now_ms, path_confidence, srepr, vhash
 from .strategist import computable, plan
@@ -994,17 +994,8 @@ class System:
         from .guarantee import guard_question
         return guard_question(self, question, examples, **kw)
 
-    def learning(self, storage=None, parts=None, ladder=None, gates=None, **options):
-        """Learning from corrections with gates and rollback — experimental, off until you call this (see
-        solvi.learning): → a Learning loop over `storage` (default: this system's) for the questions answered by the
-        decision parts in `parts` (default: all of them). Labels come only from human corrections, outcomes and rule
-        rejections; loop.run() proposes an update by the ladder (ladder=: fit_below, memory_below, adapter, memory), runs
-        the gates (gates=: min_gain, min_holdout, tolerance, risk, max_change, shadow_limit, max_conflict,
-        min_calibration, honesty) and promotes it only when all pass; loop.rollback(version) restores any promoted
-        version. options: changelog= (another TraceStorage for the update records), holdout=0.3, calibration=0.2,
-        gate_teach=True (teach only stores corrections while the loop is attached)."""
-        from .learning import Learning
-        return Learning(self, storage, parts, ladder, gates, **options)
+    learning = gone_in_1_0("learning()", "solvi.learning.Learning(system, storage, parts, ladder, gates, ...) — the "
+                           "learning loop is experimental (solvi.experimental.learning later)", "System")
 
     @_deprecate.removed_kwargs(source="label_source")
     def teach(self, question, init_state, correct, *, label_source="human", by=None, of=None):
@@ -1015,7 +1006,7 @@ class System:
         are stored with it (TraceStorage.save_correction). label_source="verified" (with of= the stored System 2 decision
         that answered alone under a guarantee — save_correction checks it): the label is only stored, for
         System.guarantee(..., corrections=, sources=); no head or decision learns from it (a head fed such labels gained
-        on one task of three), and a system without storage raises ValueError. With a learning loop (System.learning(..., gate_teach=True))
+        on one task of three), and a system without storage raises ValueError. With a learning loop (solvi.learning.Learning(system, ..., gate_teach=True))
         nothing learns at once: the correction is only stored, and the loop's gates decide whether it is learned.
         An unknown question raises KeyError and an answer that is not one of the question's options ValueError, before
         anything is learned or stored; the answer is stored normalized (True → "yes"). When nothing learned at once and

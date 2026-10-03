@@ -1992,7 +1992,7 @@ fit on all of them; with refits it catches up. The cost:
   length), up to `refit_until` examples (2000). Past that no refit is due, the rows are dropped and the head goes on with
   rank-one steps only;
 - a refit is a change like any update: `teach` makes it at once and it is not gated. The learning loop
-  (`System.learning`) manages decision parts, not fitted heads: while it is attached with `gate_teach=True`, `teach`
+  (`solvi.learning.Learning`) manages decision parts, not fitted heads: while it is attached with `gate_teach=True`, `teach`
   only stores the correction and the head (and its refit schedule) does not move. The head depends only on its first
   fit and the sequence of corrections, so replaying them gives the same head (the same fingerprint); keep a
   `copy.deepcopy(head)` to go back.
@@ -2089,7 +2089,7 @@ requests with new intents — System 2 = an LLM's recorded answers; the details 
 | a guarantee's calibration: `System.guarantee(..., corrections=store, sources=...)` | yes, when `sources` names it | fed every verified answer, System 1 answered more within its promise on two tasks of three |
 | a head (`fit` / `teach`) | no — `teach(label_source="verified")` only stores the label | gained on one task of three |
 | a memory of corrections | no — `UntrustedLabel` | broke System 1's promise on the contract task |
-| the learning loop (`System.learning`) | no — listed in `labels()["rejected"]` | its ladder is a head and a memory |
+| the learning loop (`solvi.learning.Learning`) | no — listed in `labels()["rejected"]` | its ladder is a head and a memory |
 
 Feed the calibration **every** answer System 2 vouched for, not only the cases where it disagreed with System 1: a
 threshold calibrated on disagreements alone sees only System 1's mistakes, and the verified disagreements were too few
@@ -2097,12 +2097,15 @@ to move anything. The report's `labels` lists the stored ids it read; calibratin
 
 ### Learning from corrections with gates and rollback (experimental)
 
-`system.learning(...)` turns the stored corrections into updates of the model decisions — only through gates, recorded,
+`Learning(system, ...)` (from `solvi.learning`; until 1.0 `system.learning(...)`, which now raises an AttributeError
+naming it) turns the stored corrections into updates of the model decisions — only through gates, recorded,
 and reversible. It is off until you call it, and experimental (it warns `ExperimentalWarning`; its API and defaults may
 change):
 
 ```python
-loop = system.learning(store, gates={"honesty": "tests/honesty/core_v1.json"})
+from solvi.learning import Learning
+
+loop = Learning(system, store, gates={"honesty": "tests/honesty/core_v1.json"})
 # ... the system runs; people correct escalations with system.teach(...) — now stored only, not learned at once
 rep = loop.run()                  # labels → a proposed update → gates → promoted or undone; recorded either way
 print(rep)                        # the rung per question and each gate's numbers

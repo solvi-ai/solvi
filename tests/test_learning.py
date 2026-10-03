@@ -1,4 +1,4 @@
-"""System.learning (experimental): labels only from trusted sources, the ladder, the gates (consistency, held-out, honesty,
+"""solvi.learning.Learning (experimental): labels only from trusted sources, the ladder, the gates (consistency, held-out, honesty,
 act_guard, shadow size), promotion recorded in the changelog, rejection undone, rollback to any promoted version — with a
 stand-in decider whose label bias corrections can fix."""
 import warnings
@@ -27,7 +27,7 @@ def build(tmp_path, name="d.db"):
 def loop_of(s, **kw):
     with warnings.catch_warnings():
         warnings.simplefilter("ignore", ExperimentalWarning)
-        return s.learning(**kw)
+        return Learning(s, **kw)
 
 
 def stream(s, n, start=0, label=lambda team: team, source="human"):
@@ -52,12 +52,14 @@ def test_learning_is_experimental_and_off_until_asked(tmp_path):
     assert part.adaptation is not None                              # without a loop teach learns at once, as before
     part.reset()
     with pytest.warns(ExperimentalWarning):
-        loop = s.learning()
+        loop = Learning(s)
     assert isinstance(loop, Learning) and loop.experimental
     s.teach("route", {"email": texts("billing", 1, start=1)[0]}, "billing")
     assert part.adaptation is None                                 # with it teach only stores: the gates decide
     loop.detach()
     assert s._learning is None
+    with pytest.raises(AttributeError, match=r"System.learning\(\) was removed in 1.0: use solvi.learning.Learning\(system"):
+        s.learning()                                              # 1.0: a stable System does not import the loop
 
 
 def test_a_stream_where_corrections_help_is_promoted_and_recorded(tmp_path):

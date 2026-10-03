@@ -158,7 +158,8 @@ def test_the_learning_loop_runs_on_duckdb(tmp_path):
     s.storage = store
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
-        loop = s.learning(gates={"max_change": 0.9})
+        from solvi.learning import Learning
+        loop = Learning(s, gates={"max_change": 0.9})
     stream(s, 10)
     rep = loop.run()
     assert rep.promoted and [h["action"] for h in loop.history()] == ["baseline", "update"]

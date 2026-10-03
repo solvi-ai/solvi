@@ -297,7 +297,7 @@ Every answer is a value and a confidence, and the types also declare answer prim
 - **Learning from corrections.** `solvi.memory.attach(part)` escalates an answer when similar corrected cases say another one;
   `fit` heads refit on all kept examples as corrections accumulate; `solvi.lora.adapt_lora(part, examples, holdout=0.3)` trains
   a small LoRA adapter for one question on solvi-base once it has ~100 labelled answers (`solvi[lora]`, experimental);
-  `System.learning(store)` proposes updates from trusted corrections only and promotes one when it passes held-out,
+  `solvi.learning.Learning(system, store)` proposes updates from trusted corrections only and promotes one when it passes held-out,
   honesty and calibration gates, with rollback (experimental, off unless called)
   ([guide](docs/guide.md#a-memory-of-corrections-solvimemory)).
 - **Records you can check later.** `store.signature()` — 64 bytes kept next to the chain's head — later names the one

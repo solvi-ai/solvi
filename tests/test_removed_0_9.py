@@ -75,7 +75,8 @@ def test_system_and_response_attributes(tmp_path):
     with pytest.raises(TypeError, match=rf"{GONE}System.calibrate\(question, \[\(state, answer\), \.\.\.\]\)"):
         s.calibrate("q", [{"x": 9}], [True])
     with pytest.raises(TypeError, match="unexpected keyword argument 'harvest_rules'"):
-        s.learning(harvest_rules=True)
+        from solvi.learning import Learning
+        Learning(s, harvest_rules=True)
 
 
 def test_question_and_answer_type():
