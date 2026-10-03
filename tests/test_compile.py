@@ -567,3 +567,20 @@ def test_a_part_reading_a_key_inside_a_dict_input_by_its_name_gets_an_accessor_p
     assert s.ask({"order": {"zone": "world", "total": 60, "weight": 40}})["ship"].answer == "refused"
     # a key missing from an input makes the accessor raise: the decision abstains, it is never guessed
     assert s.ask({"order": {"zone": "world", "total": 60}})["ship"].status == "abstain"
+
+
+def test_a_test_the_answering_draft_fails_is_reviewed_even_when_the_other_draft_abstains_on_it():
+    fragile = GOOD.replace('return {"domestic": 5, "world": 20}[zone]', 'return {"domestic": 5}[zone]')
+    wrong = {"clause": "c3", "input": {"zone": "world", "total": 49, "weight": 1}, "expect": {"ship": "free"},
+             "why": "a wrong test"}
+    w = Writer([[GOOD], [fragile]], tests=TEST_OK + [wrong], review={"verdict": "drop", "why": "49 is below 50"})
+    c = compile_spec(Spec(POLICY), QS, INPUTS, w, rounds=1)
+    assert c.record["reviews"]["t3"]["verdict"] == "drop" and c.record["reviews"]["t3"]["drafts_gave"] == [{"ship": "paid"}]
+
+
+def test_datetime_strptime_works_in_the_sandbox_and_its_helper_module_cannot_be_imported_directly():
+    from solvi import sandbox
+    src = "import datetime\n\ndef f(t):\n    return datetime.datetime.strptime(t, '%I:%M%p').hour\n"
+    ns = sandbox.load(src)
+    assert ns["f"]("3:45PM") == 15
+    assert sandbox.check("import _strptime\n")

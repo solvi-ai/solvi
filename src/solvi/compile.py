@@ -28,7 +28,7 @@ temperature 0, the second at 0.7 with seed 1; pass two writers for two models). 
    and the tests' inputs. A disagreement is shown to both writers: the input, both answers, the clauses the deciding
    parts cite;
 3. both pass the tests a separate call derived from the specification — it never sees the code, and each test names
-   the clause it checks. A test that every draft which runs fails with an answer goes back once to the test writer,
+   the clause it checks. A test that every draft which answers it fails goes back once to the test writer,
    which works the answer out again and keeps, corrects or drops it (recorded). Every input of the pool must get an
    answer;
 4. both match the labelled `examples` and the `reference`, when you give them.
@@ -1168,8 +1168,8 @@ def _loop(spec, questions, inputs, gens, *, rounds, tests, examples, reference, 
             else:
                 d.rows = rows
         ok = [d for d in drafts if d.rows is not None]
-        # a test every running draft fails with an answer goes back once to the test writer: keep, fix or drop (a draft
-        # that abstains or raises on it says nothing about the test — that is fed back as "abstained")
+        # a test every running draft that answers it fails goes back once to the test writer: keep, fix or drop (a
+        # draft that abstains or raises on it says nothing about the test — that goes back to the draft)
         if ok:
             for j, t in enumerate(test_list):
                 if t["id"] in reviewed:
@@ -1179,8 +1179,8 @@ def _loop(spec, questions, inputs, gens, *, rounds, tests, examples, reference, 
                 fails = [any(a[i].get(q) != e for q, e in t["expect"].items()) for i in range(len(ok))]
                 answered = [not d.rows[k].get("error") and all(a[i].get(q) is not None for q in t["expect"])
                             for i, d in enumerate(ok)]
-                if all(fails) and all(answered):
-                    got = [{q: a[i].get(q) for q in t["expect"]} for i in range(len(ok))]
+                if any(answered) and all(f for f, x in zip(fails, answered) if x):
+                    got = [{q: a[i].get(q) for q in t["expect"]} for i in range(len(ok)) if answered[i]]
                     verdict, v = _review(spec, questions, t, got, review_gen, log)
                     reviewed[t["id"]] = {"verdict": verdict, "why": v.get("why"), "was": dict(t["expect"]),
                                          "drafts_gave": got}

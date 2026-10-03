@@ -3798,9 +3798,10 @@ lets an LLM write those parts from the text and accepts them only after checks t
    raises on one has a bug. A disagreement goes back to both writers with the input, both answers and the clauses
    their deciding parts cite;
 4. **tests derived from the text**, written by a separate call that never sees the code, each naming the clause it
-   checks; both drafts must pass them. A test that every draft which runs fails with an answer goes back once to the
-   test writer, which works the answer out again and keeps, corrects or drops it — recorded, since a test can be wrong
-   as well (a draft that abstains on the test's input says nothing about the test: that goes back to the draft);
+   checks; both drafts must pass them. A test that every draft which answers it fails (at least one answers) goes
+   back once to the test writer, which works the answer out again and keeps, corrects or drops it — recorded, since a
+   test can be wrong as well (a draft that abstains on the test's input says nothing about the test: that goes back
+   to the draft);
 5. labelled examples or a reference function, when you have them (`examples=`, `reference=`), as further checks.
 
 A draft that fails is rewritten from its module and the failures, for up to `rounds` rounds. Acceptance is automatic

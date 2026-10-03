@@ -13,7 +13,7 @@ getattr & co. would reach a dunder by a string); any dunder name or attribute (`
 
 `run` executes the module in a fresh `python -I` subprocess: an empty environment, a scratch working directory, limits
 on memory (RLIMIT_AS), CPU time and wall-clock time, restricted builtins (the forbidden names removed, `__import__`
-admitting `ALLOWED` only). The driver — your code, never the model's — is imported before the module runs; it gets the
+admitting `ALLOWED` only, plus `INTERNAL` — `_strptime`, which `datetime.strptime` imports at call time). The driver — your code, never the model's — is imported before the module runs; it gets the
 module's namespace, the payload and the `signal` module (for a per-item alarm) and returns JSON. A module that does not
 load, a crash, a run over its limits come back as `{"load_error": ...}` or `{"crash": ...}`.
 
@@ -92,9 +92,14 @@ def check(source: str) -> list[str]:
     return list(dict.fromkeys(why))
 
 
+# what an allowed module imports from C at call time through the caller's builtins (`datetime.strptime` imports
+# `_strptime`): admitted by the import hook, never by `check` — a module may not import these itself
+INTERNAL = frozenset({"_strptime"})
+
+
 def _guarded_import(real):
     def guarded(name, globals=None, locals=None, fromlist=(), level=0):
-        if level or name.split(".")[0] not in ALLOWED:
+        if level or (name.split(".")[0] not in ALLOWED and name not in INTERNAL):
             raise ImportError(f"import {name} is not allowed in the sandbox")
         return real(name, globals, locals, fromlist, level)
     return guarded
