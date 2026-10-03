@@ -56,11 +56,12 @@ sees full responses unless lean=True is passed (a lean response has no hashes an
 every candidate in full.
 
 Not done here: no proposals by a model (solvi.refine re-asks one; when `run.best` is None because the space was too big
-for the budget, a refinement can take over), no search over numbers by bisection (`res.counterfactual` does that), no
+for the budget, a refinement can take over), no search over numbers by bisection, no
 parallel asks, and no proof of the `prune` / `bound` promises."""
 from __future__ import annotations
 
 import copy
+import dataclasses
 import itertools
 import time
 from dataclasses import dataclass, field
@@ -211,12 +212,36 @@ def _depends(catalog, keys):
     return out
 
 
+def _pinned(p, rec):
+    """A part that returns the value its model proposed in the recorded trace (or fails as it failed), calling nothing."""
+    from .runtime import MISSING
+    if rec is None:
+        why = f"{p.name}: a model-backed part that did not run in the recorded decision (no proposal to hold)"
+
+        def f(**_):
+            raise LookupError(why)
+    elif rec.value is MISSING:
+        err = rec.error or "no value"
+
+        def f(**_):
+            raise LookupError(err)
+    else:
+        value = rec.value
+
+        def f(**_):
+            return value
+    f.__name__ = p.func.__name__ if p.func is not None else p.name
+    return dataclasses.replace(p, func=f, kind="fn" if p.kind == "extract" else p.kind, model=None, provenance=None,
+                               options=None, validate=None, min_confidence=None, alternatives=None, features=None,
+                               exact=None, source=None, types=None, returns=None, tin=None, tout=None, timeout=None,
+                               blocking=False)
+
+
 def _held_system(system, state, vals, keys):
     """A copy of the System whose parts that do not read the candidate are held at the values computed once from
     `state` (`vals`), its own stats and costs (the searched candidates do not count as the System's asks), no storage."""
     from types import SimpleNamespace
 
-    from .counterfactual import _pinned
     from .costs import CostBook
     from .runtime import MISSING, HashSeed
     dep = _depends(system.catalog, keys)

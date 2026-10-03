@@ -14,6 +14,7 @@ had a measured run. Importing a removed module raises ModuleNotFoundError.
 | `tools/smoke_decide.py` | a one-off script for checking a decider checkpoint; no CI or docs ran it | `solvi models check <checkpoint>` and the `model` tests (`pytest -m model`) |
 | `solvi.otel` and the `otel` extra | nothing in solvi used it and no user was known; one more dependency surface to keep working | `res.to_dict()` or a store (`solvi.storage`), sent to your tracing backend by your own code |
 | `solvi.pytest_plugin` (the `pytest11` entry point, `pytest gallery/`, `--solvi-fuzz`) | it loaded in every pytest session wherever solvi was installed; `solvi test` runs the same cases | `solvi test <dir>` (`--fuzz N`), or one pytest test that calls `solvi.testing.run_path` (docs: Regression tests) |
+| `solvi.counterfactual` and `Response.counterfactual()` | no measured use: nothing in the benchmarks, the gallery or the examples relied on it | ask the System on the changed inputs (`solvi.search` tries many candidate inputs against the checks) |
 
 ## 0.9.0 — 2026-10-03 — System 1 and System 2
 

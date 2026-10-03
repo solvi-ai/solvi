@@ -100,7 +100,6 @@ nav:
       - solvi.search: api/search.md
       - solvi.auto: api/auto.md
       - solvi.dispatch: api/dispatch.md
-      - solvi.counterfactual: api/counterfactual.md
       - solvi.perturb: api/perturb.md
       - solvi.storage: api/storage.md
       - solvi.signature: api/signature.md

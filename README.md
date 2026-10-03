@@ -269,8 +269,7 @@ Every answer is a value and a confidence, and the types also declare answer prim
   lets the planner pick the fastest equivalent source and switch when it slows down. `TraceStorage` keeps decisions with a
   hash chain across them; `solvi diff` shows which stored decisions a rule or model change would flip; `solvi test`,
   `solvi check` and the honesty suite (`solvi honesty`) belong in CI; `res.report(format="html")` and
-  `solvi report decisions.db --html out.html` give an auditor one page per decision or per period. `res.counterfactual("approve")` says what would have changed the answer ("approve if
-  amount ≤ 1000 (now 1200)"), re-running only the code with the models' recorded proposals held.
+  `solvi report decisions.db --html out.html` give an auditor one page per decision or per period.
 - **Guarding an agent's tool calls (preview).** The agent proposes `{"name": tool, "arguments": {...}}`; `solvi.agents.Guard` checks
   it — the tool is in the catalog, the arguments validate against its types, the values that must come from the
   conversation are quoted there (and not only from a tool output that says "ignore previous instructions"), your policies

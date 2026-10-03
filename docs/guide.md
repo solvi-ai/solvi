@@ -581,8 +581,7 @@ knows `input_model=`) restores them from the producer's return type, the type th
 so the restored trace hashes and replays exactly. A value that is neither — an untyped enum or object, an aware
 datetime whose zone its text does not carry, an untyped date in a record stored by solvi 0.7.1 or earlier — comes back
 as JSON gave it and is named in the loaded trace's `unrestored`: replay reports the steps that rest on it as
-`not_restored` ("no verdict on the data"), `solvi diff` lists the decision under "could not be re-run", and
-`counterfactual` draws no conclusion from it. A span answer's value type is written by name — a built-in one (`str`,
+`not_restored` ("no verdict on the data"), and `solvi diff` lists the decision under "could not be re-run". A span answer's value type is written by name — a built-in one (`str`,
 `int`, `float`, `bool`, `date`, `datetime`, `Decimal`) as such, any other class as `module:qualname` — and a name that
 cannot be imported again (a class defined inside a function) makes `from_json` raise `ValueError`. Option descriptions
 are keyed by the option's text in JSON and come back on the options themselves (`Answer.ordinal({1: "bad", 2: "ok"})`).
@@ -2336,7 +2335,7 @@ store.verify()                                  # the chain across stored record
 A stored response loaded without a catalog (`store.get(id)` on a store opened with no `catalog=`, or
 `Stored.response()`) still audits and reports: its flow keeps each part's name, kind and inputs and, for a check,
 whether it is a hard one — a record stored before that was kept shows such a check as "hard or soft: not recorded".
-Replay, diff and counterfactuals need the System.
+Replay and diff need the System.
 
 Two backends ship without dependencies: `JSONLStorage` (an append-only file, one record per line; several
 processes may append on POSIX systems, where each append holds a file lock — on Windows one writing process) and `SQLiteStorage` (stdlib `sqlite3`; index tables by question, answer, status, safeguard kind, model and time;
@@ -3855,7 +3854,7 @@ eval set (`benchmarks/tasks/naturalplan/solution.py`, no model) the 100 meeting 
 the 100 trips 73,543 asks in 14 s — 78 s and 28 s when every candidate was a full ask, with the same plans (95 / 100 /
 98 right); one CPU core, Intel i7-12700H shared with other jobs: about 0.2 ms per candidate.
 
-**Not done here:** no proposals by a model, no bisection over numbers (`res.counterfactual` does that), no parallel
+**Not done here:** no proposals by a model, no bisection over numbers, no parallel
 asks, no proof of the prune and bound promises. A candidate still runs every part it needs, as an ask does (lean
 saves the hashing and the bookkeeping, about half of a full ask's time there), so a space of millions is for code,
 not for this search.
@@ -4547,51 +4546,6 @@ approve = 'yes'  [ok]  confidence 0.60  ← computed by approve
               · grounding rejected: total — total_model: not grounded: '488.60' is not the text at [100:105] ('48.60')
               · fallback producer: total — total_regex used after total_model rejected
 ```
-
-### Counterfactual explanations: res.counterfactual
-
-"What would have changed the answer?" — the smallest change of the given inputs, for adverse-action reasons in lending and
-clear answers in support:
-
-```python
-res = system.ask({"amount": 1200.0, "debt": 1000, "income": 5000, "history": "on time", "age": 30})
-cf = res.counterfactual("approve")
-print(cf)
-# approve = decline [ok]
-#   approve if amount ≤ 1000 (now 1200)
-#   held at their recorded proposals (no model called): risk
-#   not searched: history (str: no domain (pass domains={'history': [...]}))
-cf.best.changes[0]            # Change(fact="amount", now=1200.0, to=1000.0, op="≤", cost=0.17)
-cf.to_dict()
-```
-
-Only the deterministic flow is re-run, on the recorded plan: every model-backed part — an extractor, a model decision, a
-learned answer head — is **held at the proposal it recorded in this trace**, and no model is called. The explanation is
-"what the code would decide if the models said what they said"; the result lists the parts held. A model part that did not
-run in the recorded decision (a hard check failed first) has no proposal: inputs that need it make the question abstain and
-do not count as a change (listed as "without a recorded proposal"). Learned rule lists (`learn_rule`) are code and re-run.
-
-What is searched (`over=`: default, the given facts the question's flow reads):
-
-- numbers and dates — outward from the current value in both directions with doubling steps, then bisection between the
-  last unchanged and the first changed value: the nearest threshold crossing, exact for inputs the answer is monotone in
-  (a non-monotone input can hide a nearer crossing between two probes). A direction where no probe changes the answer
-  is tried again on an even grid up to the farthest probe, which finds the band of a two-sided rule (`abs(value + 20) >
-  5` at 40 → `no if value ≤ -15`); a narrower band can still be missed, so when nothing is found the result says "no
-  change ... was found", not that none exists. Integers and dates give exact bounds
-  (`debt ≤ 1999`, `purchase_date ≥ 2026-08-20`); floats are shown at the shortest decimal that holds, `≤` or `<` as the
-  rule has it. A non-negative input stays non-negative; a domain `(lo, hi)` that does not contain the current value is
-  refused for that input (`cf.not_searched` says why);
-- booleans, Enums and `Literal` fields of `System(input_model=...)` — every other value;
-- anything else only with `domains={"history": ["on time", "late"]}`; a tuple bounds a number: `domains={"amount": (0, 5000)}`.
-
-`max_changes=2` (the default) tries two inputs together when no single input changes the answer ("approve if amount ≤ 1000
-(now 1200) and debt ≤ 1999 (now 2500)" — each bound holds with the other change made); `max_changes=1` does not.
-`target="approve"` looks only for that answer. Results are ranked by the number of changes, then their size (the relative
-change of a number; for a date the days moved over 30, or over the width of its domain; 1 for an enumerated value).
-A given input read only by a part that did not run (a soft check skipped after a hard check failed) is listed in
-`cf.not_searched`. `max_evals=5000` caps the re-runs (`cf.exhausted`). A response loaded from
-a store with its System works the same; one loaded without it needs `system=`.
 
 ### Reports for people: res.report, store.report, solvi report
 

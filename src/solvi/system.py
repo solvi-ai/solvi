@@ -37,11 +37,11 @@ class _Prepared:
 class Response(Serial):
     """The answers of one ask, with the flow, the trace, every fact's value and the safeguards.
 
-    A response keeps a strong reference to the System that answered it (for `report()` and `counterfactual()`: the
-    questions, the answer heads, the replay). Deliberately not a weak one: `System(cat, qs).ask(state).report()` is common
+    A response keeps a strong reference to the System that answered it (for `report()`: the questions, the answer heads,
+    the replay). Deliberately not a weak one: `System(cat, qs).ask(state).report()` is common
     and the temporary System would be gone before the report runs. A response you keep for long keeps its System (and its
     models) alive; keep `res.to_dict()` or the stored record instead, or drop the reference with `res._system = None`
-    (then pass `system=` to report / counterfactual)."""
+    (then pass `system=` to report)."""
     results: dict
     flow: object
     trace: object
@@ -55,7 +55,7 @@ class Response(Serial):
     stored_id = None                    # its id in a TraceStorage once saved (System(storage=...) saves every ask)
     read = None                         # ask_text: the solvi.textin.TextRead the question and state were read from
     textin = _deprecate.removed_attr("textin", "read", "Response")                # 0.7 name
-    _system = None                      # the System that answered (reports, counterfactuals; see the class docs)
+    _system = None                      # the System that answered (reports; see the class docs)
     _heads = None                       # its answer heads (the audit)
 
     def __post_init__(self):
@@ -157,20 +157,6 @@ class Response(Serial):
         from .audit import build
         a = build(self, question, lang=self.lang if lang is None else lang)
         return a[question] if isinstance(question, str) else a
-
-    def counterfactual(self, question, max_changes=2, over=None, target=None, domains=None, system=None,
-                       max_evals=5000):
-        """The smallest change of the given inputs that changes this answer: "approve if amount ≤ 1000 (now 1200)".
-        Only the deterministic flow is re-run — every model-backed part (extractor, decision, learned head) is held at the
-        proposal it recorded in this trace, and no model is called; the result says which parts were held.
-        over: the given facts to change (default: those the question's flow reads); numbers and dates are searched for
-        the nearest threshold crossing (bisection — exact for inputs the answer is monotone in), booleans, enums and
-        Literal-typed inputs enumerated; `domains` = {fact: [values]} or {fact: (lo, hi)} adds or bounds a domain.
-        max_changes: 1 or 2 inputs changed together (two only when no single change does it). target: an answer to reach
-        (default: any other answer). → solvi.counterfactual.Counterfactuals (print it; .best; .to_dict())."""
-        from .counterfactual import search
-        return search(self, question, max_changes=max_changes, over=over, target=target, domains=domains, system=system,
-                      max_evals=max_evals)
 
     def report(self, format="md", question=None, system=None, replay="trusted"):
         """A human-readable report of this decision for an auditor or a customer: each answer, what it rests on, the quotes
@@ -585,7 +571,7 @@ class System:
             apply_guards(self, results, trace, vals, flow)
         resp = Response(results, flow, trace, vals, now_ms() - t0, feasible, violations, self.catalog)
         resp._heads = self.heads                      # for the audit: which features a learned head could not use
-        resp._system = self                           # for reports and counterfactuals (questions, answer heads, replay)
+        resp._system = self                           # for reports (questions, answer heads, replay)
         resp.read = p.textin
         if self.lang != "en":
             resp.lang = self.lang                     # rendering only (audit, show): nothing recorded depends on it

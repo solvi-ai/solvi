@@ -49,7 +49,6 @@ this reference lists what each module exports and the signatures.
 | [`solvi.search`](search.md) | search over alternatives: candidates through the System's checks, the best by an objective, pruned, recorded |
 | [`solvi.auto`](auto.md) | one entry point: a question, labelled examples, a promise and a slow path → System 1 fitted, its guarantee and the dispatcher calibrated, the store wired, the choices explained (preview) |
 | [`solvi.dispatch`](dispatch.md) | who answers: System 1 within its guarantee, a slow path (a System, refine or search) or a person — one recorded decision per input, with a budget (experimental) |
-| [`solvi.counterfactual`](counterfactual.md) | counterfactuals: the smallest change of the given inputs that changes an answer |
 | [`solvi.perturb`](perturb.md) | instruction-like sentences in an input and the variants without them (`perturb=k`) |
 | [`solvi.storage`](storage.md) | TraceStorage: JSONL, SQLite, PostgreSQL and DuckDB stores, queries, replay |
 | [`solvi.signature`](signature.md) | a signature of a trace or a store that names the one changed record (preview) |
