@@ -10,7 +10,7 @@ from .storage import DuckDBStorage, JSONLStorage, PostgresStorage, SQLiteStorage
 from .system import Response, System
 from .typed import Bins, Estimate, FactTypeError, Maybe, Rank, Scale, Span
 
-__version__ = "0.9.0.dev0"
+__version__ = "0.9.0"
 
 __all__ = ["MISSING", "Answer", "AnswerType", "Bins", "Catalog", "Claim", "Decision", "DuckDBStorage", "Estimate",
            "FactTypeError", "Fail", "JSONLStorage", "Maybe", "NotStated", "PostgresStorage", "Question", "Quote", "Rank",
