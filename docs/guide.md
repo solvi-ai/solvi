@@ -8,6 +8,35 @@ building on solvi, see [best practices](best_practices.md). Every measured numbe
 script in `benchmarks/` or an example, which you can re-run from this repository, or the model card of a published
 model (solvi-base, solvi-large, solvi-large-long, extract-base, extract-receipts).
 
+## Quick start: one entry point (solvi.auto, preview)
+
+The question, labelled examples, the promise and — if you have one — a slow path in; System 1 fitted, its guarantee
+and who answers what it hands over calibrated on examples it did not see, the store wired, and a plain account of
+every choice out:
+
+```python
+from solvi.auto import build
+
+s = build(question, examples, catalog=cat, max_risk=0.02,          # examples: [(state, correct answer)]
+          slow=llm(URL, "openai/gpt-oss-120b"), price=(0.037, 0.17), total=Budget(usd=5),   # optional
+          storage="decisions.jsonl")
+res = s.ask(state)            # res.answer, res.by ("s1", "s2" or "human"), res.reasons, res.cost
+print(s.explain())            # what System 1 is, its signal and promise, who answers each slice, what is not covered
+print(s.report())             # what it did, read from the store
+```
+
+System 1 is the catalog's rule for the question if it has one, your own fitted part (`learner=`), or a head fitted on
+the facts the catalog computes (`System.fit`). The signal its guarantee reads is chosen (the act probability, the
+confidence, or — for a rule — the computed number that best separates right from wrong); a choice among more than two
+options gets an open-set gate for answers no example shows. A slow path gets a share of the examples to be calibrated
+on only when System 1 actually hands it something; inputs the open-set gate holds back go to a person. Every piece is
+the one described further on (`System.fit`, `System.guarantee`, `solvi.openset`, `solvi.dispatch`), and everything
+stays replayable. On four tasks of the [task stand](../benchmarks/tasks/README.md) (Banking77, Abt-Buy, CUAD,
+RAGTruth) it matched or beat the hand-written setups with every promise kept on eval, in a quarter to half of the code;
+its eval numbers sat closer to the promised level than theirs (risk 9.3% of 10% on RAGTruth), its drift flag came later,
+and the slow path was rarely given anything ([`examples/24_one_entry_point.py`](../examples/24_one_entry_point.py) runs
+without a model).
+
 Contents:
 
 1. [Concepts](#concepts)

@@ -49,6 +49,7 @@ this reference lists what each module exports and the signatures.
 | [`solvi.otel`](otel.md) | decisions as OpenTelemetry spans (the API, or OTLP/JSON) |
 | [`solvi.sets`](sets.md) | decisions over a set: answers of many items made consistent under at-most / exactly-one / capacity constraints |
 | [`solvi.search`](search.md) | search over alternatives: candidates through the System's checks, the best by an objective, pruned, recorded |
+| [`solvi.auto`](auto.md) | one entry point: a question, labelled examples, a promise and a slow path → System 1 fitted, its guarantee and the dispatcher calibrated, the store wired, the choices explained (preview) |
 | [`solvi.dispatch`](dispatch.md) | who answers: System 1 within its guarantee, a slow path (a System, refine or search) or a person — one recorded decision per input, with a budget (experimental) |
 | [`solvi.counterfactual`](counterfactual.md) | counterfactuals: the smallest change of the given inputs that changes an answer |
 | [`solvi.perturb`](perturb.md) | instruction-like sentences in an input and the variants without them (`perturb=k`) |

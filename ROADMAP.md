@@ -88,6 +88,7 @@ Built on the account above: what works becomes the stable low level, and the hig
 
 | Item | Version |
 |---|---|
+| One entry point for System 1 and System 2 (`solvi.auto.build`): labelled examples, a promise and a slow path in, System 1 fitted, its guarantee and the slow path's slice calibrated on examples it did not see, the store wired, every choice explained; measured on four stand tasks against the hand-written setups | 0.9 |
 | Who answers: System 1, the slow path or a person in one recorded decision within a budget (`solvi.dispatch`), calibrated per slice of what System 1 hands over (`Dispatcher.calibrate`) | 0.9 |
 | The system report: who answered, the cost, the promise against the stored labels, drift — from the store alone (`System.report`, `solvi report --overview`) | 0.9 |
 | A specification compiled into catalog parts without labels (`solvi.compile`, `solvi.sandbox`), a person settling what the drafts dispute (`review=`), a changed text recompiled with the decisions it moves, a compiled policy as an agent guard (`to_guard`) | 0.9 |

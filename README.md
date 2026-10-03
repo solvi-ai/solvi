@@ -83,6 +83,26 @@ Agents SDK you already have ("solvi[pydantic-ai]", "solvi[langgraph]", "solvi[op
 
 Requires Python 3.10+.
 
+## From labelled examples to a system with a promise (preview)
+
+Give the question, labelled examples and the promise — and a slow path if you have one; `solvi.auto.build` fits
+System 1, calibrates its guarantee and who answers what it hands over on examples it did not see, stores every
+decision, and says what it chose:
+
+```python
+from solvi.auto import build
+
+s = build(question, examples, catalog=cat, max_risk=0.02,     # examples: [(state, correct answer)]
+          slow=llm(URL, "openai/gpt-oss-120b"), price=(0.037, 0.17), storage="decisions.jsonl")
+res = s.ask(state)              # res.answer, res.by ("s1", "s2" or "human"), res.reasons, res.cost
+print(s.explain())              # System 1, its signal and promise, who answers each slice, what is not covered
+```
+
+On four tasks of the stand (Banking77, Abt-Buy, CUAD, RAGTruth) the defaults matched or beat the hand-written setups
+with every promise kept on eval, in a quarter to half of the code — closer to the promised level than the hand-written
+ones, and the slow path was rarely given anything ([guide](docs/guide.md#quick-start-one-entry-point-solviauto-preview),
+[examples/24_one_entry_point.py](examples/24_one_entry_point.py)).
+
 ## Quickstart (core only, no model)
 
 ```python
@@ -502,6 +522,7 @@ on documents the extractor dominates.
 | [examples/21_verified_chart.py](examples/21_verified_chart.py) | A verified chart (`solvi.charts`, preview): every number quoted from the text and checked; a careless model's swapped digit, invented share and unquoted value dropped with reasons; a deterministic SVG that replays to identical bytes |
 | [examples/22_coding_agent_hooks.py](examples/22_coding_agent_hooks.py) | A coding agent's session behind `solvi hook`: the hooks installed in a temporary project, a clean edit allowed, an edit that takes an employee id from the browser denied with the rule and the line, a migration with an empty downgrade and a comment that tries to talk past the rules denied, a skill picked for one prompt and none for another; the store verified and one decision audited and replayed |
 | [examples/23_pokemon_world_map.py](examples/23_pokemon_world_map.py) | System 1 and System 2 on the world map of Pokémon Red (recorded, no ROM): rules over remembered routes, a search over the player's world map when they are unsure or surprised, routes compiled after each goal; 147 → 2 slow decisions from the first run to the second; every decision stored, replayed and reported (`System.report`) |
+| [examples/24_one_entry_point.py](examples/24_one_entry_point.py) | one entry point (`solvi.auto.build`): System 1 fitted from labelled examples, its guarantee and the slow path's slice calibrated on examples it did not see, every decision stored; `explain()` prints the choices (no model) |
 | [examples/07_receipts_model.py](examples/07_receipts_model.py) | Expense check on a scanned receipt: a receipts-tuned extractor cites each field, rules and a hard check decide (needs `solvi[model]`) |
 | [examples/08_contracts_by_description.py](examples/08_contracts_by_description.py) | Contract review with fields defined only in words: the general extractor reads the whole contract, cites clauses or says "absent" (needs `solvi[model]`) |
 

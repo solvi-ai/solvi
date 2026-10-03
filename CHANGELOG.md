@@ -83,6 +83,20 @@ changed once. Model and question fingerprints, and a decision part's, are unchan
 
 ### New
 
+- **One entry point: `solvi.auto.build`** (preview). The question, labelled examples, the promise (`max_risk=` or
+  `max_error=`) and, optionally, a slow path (an LLM, a decision part, a System, a function or a compiled
+  specification), a budget and a store in; a ready System 1 and dispatcher out, with `ask()`, `report()` and
+  `explain()` — a plain account of what System 1 is, the signal its guarantee reads, how the examples were split, the
+  promise and its threshold, who answers each slice it hands over and what is not covered. It composes what the library
+  has: the catalog's rule, your own fitted part (`learner=`) or a head fitted on the computed facts; the act
+  probability, the confidence or the computed number that best separates right from wrong; an open-set gate for a
+  choice among more than two options; `Dispatcher.calibrate` on examples System 1's guarantee did not see — only when
+  System 1 actually hands the slow path a slice, else those examples calibrate System 1. Measured on four tasks of the
+  stand against the hand-written setups: as good or better with every promise kept on eval, at a quarter to half of
+  the code. Limits: it lands closer to the promised level than the hand-written setups (risk 9.3% of 10%, 0.9% of 1%;
+  error 4.9% of 5% after a shift), it rarely gives the slow path anything (inputs unlike the examples go to a person,
+  and on the hard slice System 1's own guess was often the better answer), and its drift flag came later than the
+  hand-written one (191 vs 68 requests after a shift). Example: `examples/24_one_entry_point.py`.
 - **Who answers: `solvi.dispatch`** (experimental). `Dispatcher(system1, SlowPath(system2), ...)` asks System 1
   first; when its own signals say its answer cannot be given alone (below its guarantee, outside the open-set gate,
   an abstention, a broken constraint, low agreement), the slow path answers or checks — a System, a re-ask loop
