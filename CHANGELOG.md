@@ -12,13 +12,14 @@ had a measured run. Importing a removed module raises ModuleNotFoundError.
 | `solvi.many` (`Many`, `decide_many`) | measured worse: one direct decision over the options was more accurate than its shortlist and its tournament | narrow the options in code (filter, rank), then one ordinary decision |
 | Space `documents-server` (Gradio) | never deployed: Gradio Spaces need a paid plan; the browser Space `documents-web` does the same | the `documents-web` Space |
 | `tools/smoke_decide.py` | a one-off script for checking a decider checkpoint; no CI or docs ran it | `solvi models check <checkpoint>` and the `model` tests (`pytest -m model`) |
-| `solvi.otel` and the `otel` extra | nothing in solvi used it and no user was known; one more dependency surface to keep working | `res.to_dict()` or a store (`solvi.storage`), sent to your tracing backend by your own code |
+| `solvi.otel` and the `otel` extra | nothing in solvi used it and it had no measured use | `res.to_dict()` or a store (`solvi.storage`), sent to your tracing backend by your own code |
 | `solvi.pytest_plugin` (the `pytest11` entry point, `pytest gallery/`, `--solvi-fuzz`) | it loaded in every pytest session wherever solvi was installed; `solvi test` runs the same cases | `solvi test <dir>` (`--fuzz N`), or one pytest test that calls `solvi.testing.run_path` (docs: Regression tests) |
 | `solvi.counterfactual` and `Response.counterfactual()` | no measured use: nothing in the benchmarks, the gallery or the examples relied on it | ask the System on the changed inputs (`solvi.search` tries many candidate inputs against the checks) |
-| `ModelStrategist` and `solvi.segment_model` (the model strategist) | experimental, no checkpoint was ever published, and the model planned no better than a short keyword list at many times the time | `CostStrategist(producers="equivalent")` with `cost=` declared (or `cost_policy="measured"`) |
+| `ModelStrategist` and `solvi.segment_model` (the model strategist) | experimental, no checkpoint was ever published, and the model planned no better than a short keyword list, and far slower | `CostStrategist(producers="equivalent")` with `cost=` declared (or `cost_policy="measured"`) |
 | `solvi.aliases` (`NameMatcher`, `propose`, `accept`, `apply`, `match_names`) | experimental, no checkpoint of the matcher was ever published, no measurement | name the parameters after the facts they read, or a one-line part that renames a fact |
 | example `17_model_strategist.py` | it showed the two removed pieces with stand-in models | `examples/17_cost_strategist.py`: the code strategist alone |
 | `solvi.agents.pydantic_ai`, `solvi.agents.langgraph`, `solvi.agents.openai_agents` and the `pydantic-ai`, `langgraph`, `openai-agents` extras | no measured run went through any of them; the measured agent results (an injection benchmark, the τ-bench retail stand) call the guard directly | call `guard.check` (or `guard.call`) from your framework's tool-execution step; for MCP servers, the proxy (`solvi serve --guard --upstream`), which stays |
+
 ### Moving into the knowledge memory
 
 `solvi.memory` (`CorrectionMemory`, `part.memory`), `solvi.episode` and `solvi.extract_multi` stay in 1.0 for now and
@@ -2036,7 +2037,7 @@ weights are not published.
 ### Code strategist
 
 - `System(..., strategist=...)`: a pluggable strategist; the default is still `solvi.strategist.plan`
-  ([docs/strategist.md](docs/strategist.md), [examples/17_model_strategist.py](examples/17_model_strategist.py)).
+  ([docs/strategist.md](docs/strategist.md), `examples/17_model_strategist.py`, removed in 1.0).
 - `solvi.strategy.ModelStrategist()` (no model) — the deterministic plan with dead ends dropped: a producer whose inputs
   cannot be computed no longer makes its fact unreachable (the deterministic strategist needs the inputs of every producer).
 - `producers="equivalent"`: interchangeable producers, the cheapest verified plan by declared `cost=` (an exact 0/1 program,
