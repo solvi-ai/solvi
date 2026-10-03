@@ -10,6 +10,8 @@ had a measured run. Importing a removed module raises ModuleNotFoundError.
 | removed | why | use instead |
 |---|---|---|
 | `solvi.many` (`Many`, `decide_many`) | measured worse: one direct decision over the options was more accurate than its shortlist and its tournament | narrow the options in code (filter, rank), then one ordinary decision |
+| Space `documents-server` (Gradio) | never deployed: Gradio Spaces need a paid plan; the browser Space `documents-web` does the same | the `documents-web` Space |
+| `tools/smoke_decide.py` | a one-off script for checking a decider checkpoint; no CI or docs ran it | `solvi models check <checkpoint>` and the `model` tests (`pytest -m model`) |
 
 ## 0.9.0 — 2026-10-03 — System 1 and System 2
 
