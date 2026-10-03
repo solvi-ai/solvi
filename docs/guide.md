@@ -3961,6 +3961,46 @@ with why), the reviews of tests, and per round each draft's problems, which chec
 "abstained", "tests", "disagreement", "labelled examples", "the reference") and the agreement. `c.save(folder)` writes
 `module.py` and `compiled.json`; `Compiled.load(folder)` reads them back and refuses a module that was edited.
 
+### A person in the loop: review=
+
+Two drafts that disagree, or a test every draft fails, can stop a compilation that is nearly right: one draft misreads
+a clause, or the derived test is wrong. `review=` puts a person where the loop cannot settle it alone:
+
+```python
+from solvi.compile import Ruling, compile_spec, reference_reviewer
+
+def ask_a_person(d):                     # d: a Dispute
+    print(d.text())                      # the input, each draft's answer and the clauses it cites
+    return Ruling.pick(0)                # or Ruling.answer({"ship": "free"}), Ruling.neither("the text does not say"),
+                                         # and for a disputed test Ruling.keep() / Ruling.drop()
+
+c = compile_spec(spec, questions, inputs, writer, review=ask_a_person, review_budget=20, review_per_round=5)
+c.record["person"]                       # every question asked, every answer, and the tests they became
+c2 = compile_spec(spec, questions, inputs, writer, review=c.reviewer())    # rerun with the same answers
+```
+
+After both drafts ran in a round, the person is asked about:
+
+- **disputed tests** — a test every draft that answers it fails — instead of the test writer's own re-check: keep it,
+  drop it, or give the right answer (the test is corrected);
+- **disagreements** — the inputs are grouped by both answers and the clauses the deciding parts cite, and one input of
+  each of the largest groups is asked about (new groups first; a group answered in an earlier round that still divides
+  the drafts is asked again, with another input). The person says
+  which draft is right or gives the right answer, or says the specification does not decide the input.
+
+At most `review_per_round` questions a round and `review_budget` in all (None: no limit); a reviewer that returns None
+skips the question. **An answer becomes a test** (source "person"), never code: both drafts must pass it from then on,
+and a test the writer derived for the same input that contradicts it is corrected. Acceptance stays as strict as
+without the person — both drafts pass every test, agree on every input of the pool and answer every one — so a wrong
+answer from the person makes the compilation fail, it cannot make a wrong draft pass. An answer saying the
+specification does not decide an input (`Ruling.neither` without an answer) is a gap: the compilation is not accepted
+until the text is amended.
+
+`reference_reviewer(fn)` is a simulated person for experiments: `fn(input) → {question: answer}`, a hand-written
+reference. It picks the draft equal to the reference, else gives the reference's answer; it keeps a disputed test the
+reference agrees with, else corrects it. `recompile` takes the same options, and `compile_groups` passes them to every
+group, each with its own budget (`c.record["groups"][name]["person"]` counts the questions).
+
 ### A large specification in groups: compile_groups
 
 A policy of fifty clauses over a dozen tools is too much for one draft to get right everywhere at once. `compile_groups`
@@ -4105,6 +4145,22 @@ here is reported.
 the compiled catalog's inputs (they must be facts the guard gives — `tool_name`, `tool_arguments`, `conversation`,
 `conversation_roles` or your declared facts), runs the compiled System and refuses with the clause the check
 implements as the reason.
+
+A policy compiled as a question — "may this call be made?" — goes in whole with `allow=`:
+
+```python
+guard = Guard(fact_names={"authed": bool, "amount": float})
+to_guard(c, guard, allow="yes", name="shop_policy")      # one policy: the compiled answer must be "yes"
+d = guard.check({"name": "refund_order", "arguments": {}}, facts={"authed": True, "amount": 250})
+d.outcome, d.reasons    # deny, ['shop_policy: ... — [c5] Refunds over 200 go to a human: ... [deny]']
+```
+
+The policy asks the compiled question and refuses any other answer, naming the clauses of the parts that decided (the
+false hard checks, else the question's rule); an input the compiled policy cannot answer (it abstains — a group that
+was not accepted, a fact it cannot read) is refused as well, with the reason. When the policy text changes, compile
+it again (`recompile`, or `compile_groups` with the same grouping: the unchanged groups' prompts are the same) and
+`decision_diff(old, new, inputs=calls)` lists the calls whose decision moves, with the clauses why — before the new
+guard goes live.
 
 **Not done here.** Agreement is not correctness: two samples of one model can share a misreading, and the tests come
 from the same model — a wrong reading that both drafts and the tests share is accepted. Coverage is by citation, not by

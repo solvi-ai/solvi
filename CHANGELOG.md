@@ -26,6 +26,16 @@
   `stuck_after=2`); a part other parts call as a function becomes a helper; a key read inside a dict input gets an
   accessor; `datetime.strptime` works in the sandbox. Everything accepted in our runs was right (5 of 5); a calendar
   rule set that was refused before is now accepted and matches its reference on 2,141 of 2,141 cases.
+- `solvi.compile` with a person in the loop: `compile_spec(..., review=ask_a_person)` (also `recompile` and
+  `compile_groups`) asks a person, within a budget (`review_budget=20`, `review_per_round=5`), about the inputs two
+  drafts decide differently and about tests every draft fails. The person says which draft is right, gives the right
+  answer, or says the text does not decide it. Each answer becomes a test both drafts must pass — never code — so
+  acceptance is as strict as before, and a wrong answer cannot make a wrong draft pass. Every question and answer is
+  in `c.record["person"]`; `c.reviewer()` replays them. `reference_reviewer(fn)` simulates the person with a
+  hand-written reference, for experiments.
+- `to_guard(c, guard, allow="yes")`: a policy compiled as one question ("may this call be made?") becomes one Guard
+  policy that refuses any other answer and names the clauses that decided; with `decision_diff` you see which calls
+  a changed policy text moves before the new guard goes live.
 - `compile_groups` (experimental): a large specification is split into groups of clauses, each compiled and accepted
   on its own, then assembled and checked again as a whole. On a 56-clause customer-service policy no group was
   accepted — the drafts added rules the policy does not state, and acceptance refused them.

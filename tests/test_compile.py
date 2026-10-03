@@ -592,3 +592,126 @@ def test_a_part_named_like_an_input_is_a_contract_problem_before_it_runs():
                           '"free_shipping": {"kind": "fn", "clauses": ["c3"]}, "total": {"kind": "fn", "clauses": []},')
     c = compile_spec(Spec(POLICY), QS, INPUTS, Writer([[named], [GOOD]]), rounds=1)
     assert not c.accepted and "part total has the name of an input" in c.record["rounds"][0]["drafts"][0]["problems"][0]
+
+
+# ───────────────────────────────────────────── a person in the loop
+def ship_reference(x):
+    return {"ship": "refused" if x["zone"] == "world" and x["weight"] > 30 else "free" if x["total"] >= 50 else "paid"}
+
+
+def test_a_person_resolves_a_disagreement_and_the_answer_becomes_a_test_both_drafts_must_pass():
+    from solvi.compile import Ruling
+    asked = []
+
+    def person(d):
+        asked.append(d)
+        return Ruling.pick(0, "50 or more ships free")
+    w = Writer([[GOOD], [OFF_BY_ONE, GOOD]], tests=[TEST_OK[1]])
+    c = compile_spec(Spec(POLICY), QS, INPUTS, w, review=person)
+    assert c.accepted and c.reason == "accepted in round 2"
+    d = asked[0]
+    assert d.kind == "disagreement" and d.input["total"] == 50 and d.round == 1
+    assert d.answers == [{"ship": "free"}, {"ship": "paid"}] and "c3" in d.clauses[0] and "c3" in d.clause_text
+    assert "draft 0: {'ship': 'free'}" in d.text()
+    p = [t for t in c.record["tests"] if t.get("source") == "person"]
+    assert len(p) == 1 and p[0]["input"] == d.input and p[0]["expect"] == {"ship": "free"}
+    assert "50 or more ships free" in p[0]["why"]
+    rewrite = [q for q, t in w.prompts if t and "Your previous module" in q][0]
+    assert "a person decided" in rewrite
+    rec = c.record["person"]
+    assert rec["asked"] == rec["decisions"] == 1 and rec["neither"] == 0 and rec["log"][0]["outcome"] == "draft"
+    assert c.record["rounds"][0]["person"] == {"tests": 0, "disagreements": 1}
+
+
+def test_a_persons_answer_is_a_test_and_never_relaxes_acceptance():
+    from solvi.compile import Ruling
+    w = Writer([[GOOD], [OFF_BY_ONE, GOOD]], tests=[TEST_OK[1]])
+    c = compile_spec(Spec(POLICY), QS, INPUTS, w, review=lambda d: Ruling.pick(1), rounds=2)  # a wrong answer
+    assert not c.accepted and "tests" in c.reason                  # both drafts now agree, and both fail the person
+    w = Writer([[GOOD], [OFF_BY_ONE, GOOD]], tests=[TEST_OK[1]])
+    c = compile_spec(Spec(POLICY), QS, INPUTS, w, review=lambda d: Ruling.neither("the text does not say"))
+    assert not c.accepted and "does not decide" in c.reason and len(c.record["person"]["gaps"]) == 1
+
+
+def test_a_disputed_test_goes_to_the_person_instead_of_the_test_writer():
+    from solvi.compile import reference_reviewer
+    wrong = {"clause": "c3", "input": {"zone": "domestic", "total": 49, "weight": 1}, "expect": {"ship": "free"},
+             "why": "a wrong test"}
+    w = Writer([[GOOD], [GOOD]], tests=TEST_OK + [wrong])
+    c = compile_spec(Spec(POLICY), QS, INPUTS, w, review=reference_reviewer(ship_reference))
+    assert c.accepted and not any(p.startswith("# Re-check") for p, _ in w.prompts)
+    r = c.record["reviews"]["t3"]
+    assert r["by"] == "person" and r["verdict"] == "fix" and r["now"] == {"ship": "paid"}
+    assert c.record["person"]["by_kind"] == {"disagreement": 0, "test": 1}
+
+
+def test_the_person_is_asked_within_the_budget_and_the_answers_replay():
+    from solvi.compile import Ruling
+    two_kinds = OFF_BY_ONE.replace("weight > 30", "weight >= 30")
+    calls = []
+    w = Writer([[GOOD], [two_kinds, two_kinds, GOOD]], tests=[TEST_OK[1]])
+    c = compile_spec(Spec(POLICY), QS, INPUTS, w, review=lambda d: calls.append(d) or Ruling.pick(0),
+                     review_per_round=1, review_budget=1)
+    assert len(calls) == 1 and c.record["person"]["asked"] == 1 and c.accepted
+    replay = c.reviewer()
+    assert replay(calls[0]).verdict == "draft" and replay(calls[0]).draft == 0
+    w = Writer([[GOOD], [two_kinds, two_kinds, GOOD]], tests=[TEST_OK[1]])
+    c2 = compile_spec(Spec(POLICY), QS, INPUTS, w, review=replay, review_per_round=1, review_budget=1)
+    assert c2.accepted and c2.record["tests"] == c.record["tests"]
+    calls.clear()
+    w = Writer([[GOOD], [two_kinds, two_kinds, GOOD]], tests=[TEST_OK[1]])
+    compile_spec(Spec(POLICY), QS, INPUTS, w, review=lambda d: calls.append(d) or Ruling.pick(0), review_per_round=5)
+    first = [d for d in calls if d.round == 1]
+    assert len({json.dumps([d.answers, d.clauses]) for d in first}) == len(first) >= 2      # one input per kind
+    again = [d for d in calls if d.round == 2]                    # the same kinds still divide the drafts: asked again
+    assert again and all(d.input not in [f.input for f in first] for d in again)
+
+
+def test_the_reference_reviewer_picks_the_draft_equal_to_the_reference_or_gives_its_answer():
+    from solvi.compile import Dispute, reference_reviewer
+    rev = reference_reviewer(ship_reference)
+    x = {"zone": "world", "total": 60, "weight": 40}
+    r = rev(Dispute("disagreement", x, [{"ship": "free"}, {"ship": "refused"}], [[], []], 1))
+    assert r.verdict == "draft" and r.draft == 1
+    r = rev(Dispute("disagreement", x, [{"ship": "free"}, {"ship": "paid"}], [[], []], 1))
+    assert r.verdict == "answer" and r.expect == {"ship": "refused"}
+    r = rev(Dispute("test", {"zone": "mars"}, [{"ship": "free"}], [[]], 1, test={"expect": {"ship": "free"}}))
+    assert r.verdict == "drop"                                     # the reference cannot read the input
+
+
+def test_a_compiled_question_becomes_one_guard_policy_that_refuses_with_the_deciding_clauses():
+    from solvi.agents import Guard
+    spec = Spec("- A refund is at most 100.\n\n- A refund needs an amount.")
+    mod = '''
+def small(tool_arguments):
+    return tool_arguments["amount"] <= 100
+
+def allow(small):
+    return "yes" if small else "no"
+
+PARTS = {"small": {"kind": "fn", "clauses": ["c1"]}, "allow": {"kind": "rule", "question": "allow", "clauses": ["c1"]}}
+NOT_NORMATIVE = {"c2": "the schema requires it"}
+'''
+    q = [Question("allow", "Is the call allowed?", Answer.yes_no())]
+    inp = Inputs({"tool_arguments": dict}, samples=[{"tool_arguments": {"amount": a}} for a in (50, 100, 101, 500)])
+    c = compile_spec(spec, q, inp, Writer([[mod], [mod]], tests=[]), tests=0)
+    guard = Guard()
+
+    @guard.tool(authorize=False)
+    def refund(amount: float = 0) -> str:
+        """Refund an amount."""
+        return "done"
+    assert to_guard(c, Guard(), "refund") == []                    # no hard check: nothing in the per-check mode
+    assert to_guard(c, guard, "refund", allow="yes") == ["compiled_allow"]
+    assert guard.call({"name": "refund", "arguments": {"amount": 50}}, context="refund 50").outcome == "allow"
+    d = guard.call({"name": "refund", "arguments": {"amount": 500}}, context="refund 500")
+    assert d.outcome == "deny" and "[c1] A refund is at most 100." in " ".join(d.reasons)
+    d = guard.call({"name": "refund", "arguments": {}}, context="refund")       # the compiled policy cannot answer
+    assert d.outcome == "deny" and "cannot decide" in " ".join(d.reasons)
+
+
+def test_compile_groups_asks_the_person_per_group_and_records_it():
+    from solvi.compile import compile_groups
+    w = ByGroup({"refund": REFUND, "ship": SHIP, "lookup": LOOKUP}, SHOP_TESTS)
+    c = compile_groups(Spec(SHOP), SHOP_QS, SHOP_IN, w, by="tool", groups=SHOP_GROUPS, review=lambda d: None)
+    assert c.accepted and c.record["groups"]["refund"]["person"]["asked"] == 0

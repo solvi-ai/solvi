@@ -39,6 +39,14 @@ again with a seed of its own and told only what the stuck one was refused for �
 replacement recorded; the fresh draft meets the same checks. The record keeps the spec's hash and clauses, every
 prompt and reply, the writer, the tests, and each check's outcome per round.
 
+    c = compile_spec(spec, questions, inputs, writer, review=ask_a_person)   # a person resolves what drafts dispute
+    c.record["person"]                                    # every question asked, every answer, the tests they became
+
+A person in the loop (`review=`) is asked, within a budget, about the inputs two drafts decide differently (one input
+of each of the largest kinds of disagreement) and about disputed tests (instead of the test writer's re-check). An
+answer becomes a test (source "person"), never code: both drafts must pass it, so acceptance stays as strict as
+without the person; an answer saying the specification does not decide the input is a gap, and blocks acceptance.
+
     c = compile_groups(spec, questions, inputs, writer, by="tool_name")   # a large specification, group by group
     c.record["groups"]                                    # per group: its values, clauses, accepted or why not
 
@@ -927,6 +935,20 @@ class Compiled:
         """The catalog's fingerprint (what a stored decision records as the catalog that decided)."""
         return self.system(allow_unaccepted=True).fingerprint()["catalog"]
 
+    def reviewer(self) -> Callable:
+        """The person's recorded answers as a reviewer (`compile_spec(..., review=c.reviewer())` reruns this
+        compilation with them): a question asked before gets the same ruling; a new one gets none (None)."""
+        logs = list((self.record.get("person") or {}).get("log") or [])
+        for g in (self.groups or {}).values():
+            logs += (g.record.get("person") or {}).get("log") or []
+        table = {_key(e["kind"], e["input"], e.get("test")): e["ruling"] for e in logs if e.get("ruling")}
+
+        def review(d):
+            r = table.get(_key(d.kind, d.input, d.test))
+            return Ruling(**r) if r else None
+        review.reviewer_name = "replay"
+        return review
+
     def to_dict(self) -> dict:
         return {"spec": self.spec.to_dict(), "questions": [q.model_dump() for q in self.questions], "source": self.source,
                 "parts": self.parts, "not_normative": self.not_normative, "accepted": self.accepted,
@@ -1069,6 +1091,216 @@ def _short(x, n=700):
     return s if len(s) <= n else s[:n - 1] + "…"
 
 
+# ───────────────────────────────────────────────────────────── a person in the loop
+@dataclass
+class Dispute:
+    """What a person is asked during a compilation.
+
+    kind: "disagreement" — the two drafts answer `input` differently (`answers[i]` is draft i's answer, `clauses[i]`
+    the clauses its deciding parts cite; `similar`: how many inputs of the pool disagree the same way); "test" — every
+    draft that answers the test `test` (its clause, input, expected answer and why) fails it (`answers`: what they
+    gave). `round`: the round; `spec`: the specification's name (a group's, in compile_groups); `clause_text`: the
+    texts of the clauses involved."""
+    kind: str
+    input: dict
+    answers: list
+    clauses: list
+    round: int
+    spec: str = ""
+    test: dict | None = None
+    similar: int = 1
+    clause_text: dict = field(default_factory=dict)
+
+    def text(self) -> str:
+        """The question as a person reads it."""
+        lines = [f"[{self.spec}] round {self.round}: " + (
+            "two drafts decide this input differently" if self.kind == "disagreement" else
+            "every draft fails this test derived from the specification")]
+        lines.append("input: " + _short(self.input, 2000))
+        if self.kind == "test":
+            lines.append(f"the test expects {self.test.get('expect')} (clause {self.test.get('clause')}): "
+                         f"{self.test.get('why', '')}")
+        for i, a in enumerate(self.answers):
+            cl = self.clauses[i] if i < len(self.clauses) else []
+            lines.append(f"draft {i}: {a}" + (f" — citing {', '.join(cl)}" if cl else ""))
+        if self.similar > 1:
+            lines.append(f"({self.similar} inputs of the pool disagree this way)")
+        lines += [f"  [{c}] {t}" for c, t in self.clause_text.items()]
+        return "\n".join(lines)
+
+    def to_dict(self):
+        return {"kind": self.kind, "input": self.input, "answers": self.answers, "clauses": self.clauses,
+                "round": self.round, "spec": self.spec, "test": self.test, "similar": self.similar}
+
+
+@dataclass
+class Ruling:
+    """A person's answer to a Dispute. verdict: "draft" (draft `draft` is right), "answer" (the right answer is
+    `expect`, {question: answer}), "neither" (the specification does not decide this input: a gap — or, with `expect`,
+    the right answer neither draft gave), "keep" / "drop" (a disputed test is right / is not a test of the
+    specification). A plain value is read too: an int picks a draft, a dict is an answer, "keep" / "drop" / "neither"."""
+    verdict: str
+    draft: int | None = None
+    expect: dict | None = None
+    note: str = ""
+
+    @classmethod
+    def pick(cls, draft: int, note: str = ""):
+        return cls("draft", draft=int(draft), note=note)
+
+    @classmethod
+    def answer(cls, expect: dict, note: str = ""):
+        return cls("answer", expect=dict(expect), note=note)
+
+    @classmethod
+    def neither(cls, note: str = "", expect: dict | None = None):
+        return cls("neither", expect=dict(expect) if expect else None, note=note)
+
+    @classmethod
+    def keep(cls, note: str = ""):
+        return cls("keep", note=note)
+
+    @classmethod
+    def drop(cls, note: str = ""):
+        return cls("drop", note=note)
+
+    def to_dict(self):
+        return {"verdict": self.verdict, "draft": self.draft, "expect": self.expect, "note": self.note}
+
+
+def _as_ruling(x):
+    if x is None or isinstance(x, Ruling):
+        return x
+    if isinstance(x, bool):
+        raise ValueError("a ruling is a Ruling, a draft's index, an answer dict, or 'keep' / 'drop' / 'neither'")
+    if isinstance(x, int):
+        return Ruling.pick(x)
+    if isinstance(x, dict):
+        return Ruling.answer(x)
+    if isinstance(x, str) and x in ("keep", "drop", "neither"):
+        return Ruling(x)
+    raise ValueError(f"not a ruling: {x!r}")
+
+
+def _key(kind, x, test=None):
+    return json.dumps([kind, x, (test or {}).get("expect")], sort_keys=True, ensure_ascii=False, default=str)
+
+
+def reference_reviewer(reference: Callable) -> Callable:
+    """A simulated person for experiments: `reference(input) → {question: answer}` (a hand-written reference). On a
+    disagreement it picks the draft whose answers equal the reference's, else gives the reference's answer (an answer
+    neither draft gave); on a disputed test it keeps the test when the reference agrees, else corrects it. An input the
+    reference cannot read is skipped (a test on it: dropped)."""
+    def review(d: Dispute):
+        try:
+            want = {q: _norm(v) for q, v in reference(json.loads(json.dumps(d.input))).items()}
+        except Exception as e:  # noqa: BLE001 — the reference cannot read this input
+            return Ruling.drop(f"the reference cannot read this input: {type(e).__name__}") if d.kind == "test" else None
+        if d.kind == "test":
+            exp = d.test.get("expect") or {}
+            w = {q: want.get(q) for q in exp}
+            return Ruling.keep("the reference agrees") if w == exp else Ruling.answer(w, "the reference")
+        for i, a in enumerate(d.answers):
+            if all(_norm((a or {}).get(q)) == v for q, v in want.items()):
+                return Ruling.pick(i, "the reference")
+        return Ruling.answer(want, "the reference (neither draft)")
+    review.reviewer_name = "reference"
+    return review
+
+
+class _Person:
+    """The person of one compilation: asks within the budget, keeps every question and answer for the record."""
+
+    def __init__(self, review, budget, per_round, spec, questions):
+        self.review, self.budget, self.per_round = review, budget, per_round
+        self.spec, self.qs = spec, {q.name: q for q in questions}
+        self.decisions, self.gaps, self.skipped, self.invalid = [], [], 0, []
+        self.round, self.this_round, self.n = 0, 0, 0
+        self.decided = {}                              # json input → expect (the person tests' inputs)
+        self.sigs = set()                              # the kinds of disagreement asked about
+
+    def can_ask(self):
+        return self.review is not None and (self.budget is None or self.n < self.budget) and \
+            (self.per_round is None or self.this_round < self.per_round)
+
+    def new_round(self, rnd):
+        self.round, self.this_round = rnd, 0
+
+    def _clean(self, expect, keys=None):
+        """The answer as a test expects it (normalised; only questions and allowed options) → (expect, why not)."""
+        if not isinstance(expect, dict) or not expect:
+            return None, "no answer given"
+        out = {}
+        for q, a in expect.items():
+            if q not in self.qs:
+                return None, f"{q!r} is not a question"
+            o = options_of(self.qs[q])
+            if o is not None and _norm(a) not in [_norm(x) for x in o]:
+                return None, f"{q} = {a!r} is not one of its options"
+            if a is None:
+                return None, f"{q}: no answer"
+            out[q] = _norm(a)
+        return out, None
+
+    def ask(self, d: Dispute):
+        """→ (ruling, expect or None, gap: bool); None when the person did not answer."""
+        self.n += 1
+        self.this_round += 1
+        t0 = time.time()
+        try:
+            r = _as_ruling(self.review(d))
+            err = None
+        except Exception as e:  # noqa: BLE001 — a reviewer that fails is recorded, the loop goes on
+            r, err = None, f"{type(e).__name__}: {e}"[:300]
+        entry = {"n": self.n, **d.to_dict(), "ruling": r.to_dict() if r else None, "error": err,
+                 "seconds": round(time.time() - t0, 2)}
+        if r is None:
+            self.skipped += 1
+            entry["outcome"] = "no answer"
+            self.decisions.append(entry)
+            return None, None, False
+        expect, gap, why = None, False, None
+        if r.verdict == "draft":
+            if r.draft not in range(len(d.answers)):
+                why = f"draft {r.draft} is not one of the drafts asked about"
+            else:
+                expect, why = self._clean({q: v for q, v in (d.answers[r.draft] or {}).items() if v is not None})
+        elif r.verdict in ("answer", "neither") and r.expect:
+            expect, why = self._clean(r.expect)
+        elif r.verdict == "neither":
+            gap = True
+        elif r.verdict not in ("keep", "drop"):
+            why = f"unknown verdict {r.verdict!r}"
+        elif d.kind != "test":
+            why = f"{r.verdict!r} answers a disputed test, not a disagreement"
+        entry["expect"] = expect
+        entry["neither"] = bool(expect) and all(
+            any(_norm((a or {}).get(q)) != v for q, v in expect.items()) for a in d.answers)
+        entry["gap"] = gap
+        if why:
+            entry["outcome"] = "invalid: " + why
+            self.invalid.append(entry)
+        else:
+            entry["outcome"] = "gap" if gap else r.verdict
+        self.decisions.append(entry)
+        if why:
+            return None, None, False
+        if gap:
+            self.gaps.append({"input": d.input, "kind": d.kind, "note": r.note, "round": d.round})
+        if expect:
+            self.decided[json.dumps(d.input, sort_keys=True, default=str)] = expect
+        return r, expect, gap
+
+    def record(self):
+        dec = [x for x in self.decisions if x.get("ruling") and not str(x.get("outcome", "")).startswith("invalid")]
+        return {"reviewer": getattr(self.review, "reviewer_name", getattr(self.review, "__name__", None)),
+                "budget": self.budget, "per_round": self.per_round, "asked": self.n, "decisions": len(dec),
+                "neither": sum(bool(x.get("neither")) for x in dec), "gaps": self.gaps, "skipped": self.skipped,
+                "invalid": len(self.invalid),
+                "by_kind": {k: sum(x["kind"] == k for x in dec) for k in ("disagreement", "test")},
+                "log": self.decisions}
+
+
 @dataclass
 class _Draft:
     index: int
@@ -1108,10 +1340,11 @@ def _ran_clauses(c_parts, ran):
 
 
 def _loop(spec, questions, inputs, gens, *, rounds, tests, examples, reference, write, log, mem_mb, item_s, extra_check,
-          need_tests=False, fresh_drafts=0, stuck_after=2):
+          need_tests=False, fresh_drafts=0, stuck_after=2, person=None):
     """The write → check → rewrite loop over two drafts → (accepted draft or None, reason, per-round summary, tests).
     A draft that did not run for `stuck_after` rounds in a row is replaced by a fresh one (at most `fresh_drafts` in
-    all): its next write starts over from the task, told only what the replaced drafts were refused for."""
+    all): its next write starts over from the task, told only what the replaced drafts were refused for. `person`: a
+    _Person asked about disputed tests and disagreements; each answer becomes a test (source "person")."""
     review_gen = gens[0]
     test_list, bad_tests, terr = tests
     if need_tests and not test_list:
@@ -1122,7 +1355,28 @@ def _loop(spec, questions, inputs, gens, *, rounds, tests, examples, reference, 
     drafts = [_Draft(0), _Draft(1)]
     used = 0
     inner = inner_fields(inputs)
+    qnames = [q.name for q in questions]
+
+    def person_test(x, expect, clauses, note, rnd, k):
+        """A person's answer as a test; writer tests on the same input that contradict it are corrected."""
+        pid = f"p{sum(1 for t in test_list if t.get('source') == 'person') + 1}"
+        t = {"id": pid, "clause": ", ".join(c for c in dict.fromkeys(clauses) if c in spec.clauses),
+             "input": x, "expect": dict(expect), "why": "a person decided" + (f": {note}" if note else ""),
+             "source": "person", "round": rnd}
+        key = json.dumps(x, sort_keys=True, default=str)
+        for o in test_list:
+            if o.get("source") != "person" and not o.get("dropped") and \
+                    json.dumps(o["input"], sort_keys=True, default=str) == key:
+                clash = {q: e for q, e in o["expect"].items() if q in expect and expect[q] != e}
+                if clash:
+                    reviewed[o["id"]] = {"verdict": "fix", "by": "person", "why": f"the person's answer on {pid}",
+                                         "was": dict(o["expect"]), "now": {**o["expect"], **{q: expect[q] for q in clash}}}
+                    o["expect"] = reviewed[o["id"]]["now"]
+        test_list.append(t)
+        row_of[pid] = k
     for rnd in range(1, rounds + 1):
+        if person is not None:
+            person.new_round(rnd)
         for d in drafts:
             if rnd > 1 and not d.feedback:
                 d.caught = []
@@ -1160,6 +1414,7 @@ def _loop(spec, questions, inputs, gens, *, rounds, tests, examples, reference, 
         tin = [t["input"] for t in test_list]
         exin = [x for x, _ in examples]
         allin = pool + tin + exin
+        row_of = {t["id"]: len(pool) + j for j, t in enumerate(test_list)}
         for d in drafts:
             if d.problems:
                 continue
@@ -1170,19 +1425,48 @@ def _loop(spec, questions, inputs, gens, *, rounds, tests, examples, reference, 
             else:
                 d.rows = rows
         ok = [d for d in drafts if d.rows is not None]
-        # a test every running draft that answers it fails goes back once to the test writer: keep, fix or drop (a
-        # draft that abstains or raises on it says nothing about the test — that goes back to the draft)
+        asked = {"tests": 0, "disagreements": 0}
+        # a test every running draft that answers it fails goes back once — to the person when there is one (within
+        # the budget; deferred to a later round when this round's questions are used up), else to the test writer:
+        # keep, fix or drop (a draft that abstains or raises on it says nothing about the test — that goes back to
+        # the draft)
         if ok:
-            for j, t in enumerate(test_list):
-                if t["id"] in reviewed:
+            for t in list(test_list):
+                if t["id"] in reviewed or t.get("source") == "person" or t.get("dropped"):
                     continue
-                k = len(pool) + j
+                k = row_of[t["id"]]
                 a = [{q: _norm(r) for q, r in d.rows[k]["answers"].items()} for d in ok]
                 fails = [any(a[i].get(q) != e for q, e in t["expect"].items()) for i in range(len(ok))]
                 answered = [not d.rows[k].get("error") and all(a[i].get(q) is not None for q in t["expect"])
                             for i, d in enumerate(ok)]
                 if any(answered) and all(f for f, x in zip(fails, answered) if x):
                     got = [{q: a[i].get(q) for q in t["expect"]} for i in range(len(ok)) if answered[i]]
+                    if person is not None and person.review is not None and \
+                            (person.budget is None or person.n < person.budget):
+                        if not person.can_ask():
+                            continue                       # this round's questions are used up: ask in the next
+                        cl = [c for c in re.findall(r"\bc\d+\b", t.get("clause", "")) if c in spec.clauses]
+                        dsp = Dispute("test", t["input"], got, [cl] * len(got), rnd, spec.name,
+                                      test={x: t[x] for x in ("id", "clause", "expect", "why") if x in t},
+                                      clause_text={c: spec.clauses[c].text for c in cl})
+                        r, expect, gap = person.ask(dsp)
+                        asked["tests"] += 1
+                        if r is None:
+                            continue
+                        entry = {"verdict": None, "by": "person", "why": r.note, "was": dict(t["expect"]),
+                                 "drafts_gave": got}
+                        if gap or r.verdict == "drop":
+                            t["dropped"] = True
+                            entry["verdict"] = "drop"
+                        elif expect:
+                            t["expect"] = {q: expect[q] for q in t["expect"] if q in expect} or dict(expect)
+                            t["source"] = "person"
+                            entry["verdict"], entry["now"] = "fix", dict(t["expect"])
+                        else:
+                            t["confirmed_by"] = "person"
+                            entry["verdict"] = "keep"
+                        reviewed[t["id"]] = entry
+                        continue
                     verdict, v = _review(spec, questions, t, got, review_gen, log)
                     reviewed[t["id"]] = {"verdict": verdict, "why": v.get("why"), "was": dict(t["expect"]),
                                          "drafts_gave": got}
@@ -1191,18 +1475,58 @@ def _loop(spec, questions, inputs, gens, *, rounds, tests, examples, reference, 
                         reviewed[t["id"]]["now"] = dict(t["expect"])
                     elif verdict == "drop":
                         t["dropped"] = True
-        live = [(j, t) for j, t in enumerate(test_list) if not t.get("dropped")]
+        # the inputs the two drafts decide differently; the person is asked about one input of each of the largest
+        # kinds of disagreement (both answers and the clauses cited), and each answer becomes a test
+        dis = []
+        if len(ok) == 2:
+            for k in range(len(allin)):
+                a = {q: _norm(r) for q, r in ok[0].rows[k]["answers"].items()}
+                b = {q: _norm(r) for q, r in ok[1].rows[k]["answers"].items()}
+                if a != b or ok[0].rows[k].get("error") or ok[1].rows[k].get("error"):
+                    dis.append(k)
+            if dis and person is not None and person.can_ask():
+                kinds = {}
+                for k in dis:
+                    if json.dumps(allin[k], sort_keys=True, default=str) in person.decided:
+                        continue                           # decided already: its test tells the drafts
+                    ans = [{q: _norm(r) for q, r in d.rows[k]["answers"].items()} for d in ok]
+                    cls = [sorted(set(_ran_clauses(d.parts, d.rows[k]["ran"]))) for d in ok]
+                    sig = json.dumps([ans, cls], sort_keys=True, default=str)
+                    kinds.setdefault(sig, []).append((k, ans, cls))
+                # new kinds first (the largest first); a kind asked about in an earlier round that still divides the
+                # drafts comes after them, with another input of it
+                order = sorted(kinds.items(), key=lambda v: (v[0] in person.sigs, -len(v[1]), v[1][0][0]))
+                for sig, group in order:
+                    if not person.can_ask():
+                        break
+                    person.sigs.add(sig)
+                    k, ans, cls = group[0]
+                    if json.dumps(allin[k], sort_keys=True, default=str) in person.decided:
+                        continue
+                    for i, d in enumerate(ok):
+                        if d.rows[k].get("error"):
+                            ans[i] = {q: None for q in qnames}
+                    cl = list(dict.fromkeys(cls[0] + cls[1]))
+                    dsp = Dispute("disagreement", allin[k], ans, cls, rnd, spec.name, similar=len(group),
+                                  clause_text={c: spec.clauses[c].text for c in cl[:12] if c in spec.clauses})
+                    r, expect, gap = person.ask(dsp)
+                    asked["disagreements"] += 1
+                    if r is not None and expect:
+                        person_test(allin[k], expect, cl, r.note, rnd, k)
+        live = [(row_of[t["id"]], t) for t in test_list if not t.get("dropped")]
         summary = {"round": rnd, "pool": len(pool), "tests": len(live), "drafts": []}
+        if person is not None and person.review is not None:
+            summary["person"] = dict(asked)
         fb = {d.index: [] for d in drafts}
         for d in drafts:
             if d.problems:
                 fb[d.index].append("The module could not be used:\n- " + "\n- ".join(d.problems[:12]))
         for d in ok:
             failed = []
-            for j, t in live:
-                got = {q: _norm(r) for q, r in d.rows[len(pool) + j]["answers"].items()}
+            for k, t in live:
+                got = {q: _norm(r) for q, r in d.rows[k]["answers"].items()}
                 if any(got.get(q) != e for q, e in t["expect"].items()):
-                    failed.append((t, got, d.rows[len(pool) + j]))
+                    failed.append((t, got, d.rows[k]))
             exfail = []
             for j, (x, want) in enumerate(examples):
                 row = d.rows[len(pool) + len(tin) + j]
@@ -1228,8 +1552,13 @@ def _loop(spec, questions, inputs, gens, *, rounds, tests, examples, reference, 
                 fb[d.index].append("\n".join(lines))
             if failed:
                 d.caught.append("tests")
+                failed.sort(key=lambda f: f[0].get("source") != "person")
                 lines = [f"{len(failed)} of {len(live)} tests derived from the specification fail (each names the clause "
                          "it checks):"]
+                if any(t.get("source") == "person" for t, _, _ in failed):
+                    lines.append("(A test whose why says \"a person decided\" is the answer of a person who read the "
+                                 "specification for this input: it is right. Change your module so it gives that answer, "
+                                 "and decide inputs like it the same way.)")
                 for t, got, row in failed[:8]:
                     lines.append(f"- test {t['id']} (clause {t.get('clause')}): input {_short(t['input'])}\n  expected "
                                  f"{t['expect']}; your module: {got}" + (f" ({row.get('error') or row.get('why')})"
@@ -1245,12 +1574,6 @@ def _loop(spec, questions, inputs, gens, *, rounds, tests, examples, reference, 
                         f"- input {_short(x)}: expected {w}; your module: {g}" for x, w, g in fl[:8]))
         agree = None
         if len(ok) == 2:
-            dis = []
-            for k in range(len(allin)):
-                a = {q: _norm(r) for q, r in ok[0].rows[k]["answers"].items()}
-                b = {q: _norm(r) for q, r in ok[1].rows[k]["answers"].items()}
-                if a != b or ok[0].rows[k].get("error") or ok[1].rows[k].get("error"):
-                    dis.append(k)
             agree = {"inputs": len(allin), "disagree": len(dis)}
             if dis:
                 for d, other in ((ok[0], ok[1]), (ok[1], ok[0])):
@@ -1270,6 +1593,17 @@ def _loop(spec, questions, inputs, gens, *, rounds, tests, examples, reference, 
                     lines.append("Re-read these clauses. Where your module follows the specification, keep it; where it "
                                  "does not, fix it.")
                     fb[d.index].append("\n".join(lines))
+        ptests = [t for t in test_list if t.get("source") == "person" and not t.get("dropped")]
+        if ptests:                                     # what a person decided so far, to every draft sent back: so a
+            block = ["What a person who read the specification decided so far (each is a test; decide inputs like "
+                     "these the same way):"]           # draft generalises from all of it, not only what it failed
+            for t in ptests[-20:]:
+                block.append(f"- input {_short(t['input'], 500)}\n  answer {t['expect']}"
+                             + (f" ({t['why'][len('a person decided: '):][:200]})"
+                                if t.get("why", "").startswith("a person decided: ") else ""))
+            for d in drafts:
+                if fb[d.index]:
+                    fb[d.index].append("\n".join(block))
         for d in drafts:
             d.feedback = "\n\n".join(fb[d.index]) or None
             summary["drafts"].append({"draft": d.index, "generation": d.generation, "problems": d.problems[:5],
@@ -1278,6 +1612,11 @@ def _loop(spec, questions, inputs, gens, *, rounds, tests, examples, reference, 
         summary["agreement"] = agree
         history.append(summary)
         if len(ok) == 2 and not any(d.feedback for d in drafts):
+            if person is not None and person.gaps:
+                history.append({"last_drafts": [{"source": d.source, "parts": d.parts, "problems": d.problems}
+                                                for d in drafts]})
+                return None, None, (f"not accepted: a person found {len(person.gaps)} input(s) the specification does "
+                                    "not decide (record['person']['gaps']): amend the specification"), history, reviewed
             return drafts[0], drafts[1], f"accepted in round {rnd}", history, reviewed
         # a draft refused before it ran, round after round, is replaced by a fresh one (bounded, recorded): a stuck
         # draft must not block a partner that works. The fresh draft meets the same checks; nothing is relaxed.
@@ -1322,16 +1661,21 @@ def _pitfalls(d):
 
 def compile_spec(spec: Spec, questions, inputs: Inputs, writer=None, *, rounds: int = 4, tests: int = 40,
                  examples=(), reference: Callable | None = None, mem_mb: int = 1024, item_s: int = 5,
-                 fresh_drafts: int = 2, stuck_after: int = 2) -> Compiled:
+                 fresh_drafts: int = 2, stuck_after: int = 2, review: Callable | None = None,
+                 review_budget: int | None = 20, review_per_round: int | None = 5) -> Compiled:
     """Compile `spec` into catalog parts answering `questions` over `inputs` (see the module docs). `writer`: a
     solvi.generate Generator (or two, for two models), or a base URL (model openai/gpt-oss-120b). `examples`: labelled
     [(input, {question: answer})] that both drafts must match; `reference(input) → {question: answer}`, compared on the
     whole pool. `fresh_drafts`: how many times in all a draft that did not run (refused by the contract or the sandbox,
     or no module in the reply) for `stuck_after` rounds in a row is replaced by a fresh draft, written from the task
-    again with a seed of its own (0: never). Never raises for a bad draft: the result says whether it was accepted."""
+    again with a seed of its own (0: never). `review(dispute) → Ruling`: a person in the loop — asked about the drafts'
+    disagreements and the disputed tests (at most `review_per_round` questions a round, `review_budget` in all; None:
+    no limit); each answer becomes a test both drafts must pass (see `Dispute`, `Ruling`). Never raises for a bad
+    draft: the result says whether it was accepted."""
     questions = list(questions)
     gens = _gens(writer)
     log = []
+    person = _Person(review, review_budget, review_per_round, spec, questions) if review is not None else None
     test_list, bad, terr = _write_tests(spec, questions, inputs, gens[0], log, tests) if tests else ([], [], None)
     base = _task_text(spec, questions, inputs)
 
@@ -1362,15 +1706,18 @@ def compile_spec(spec: Spec, questions, inputs: Inputs, writer=None, *, rounds: 
     a, b, reason, history, reviewed = _loop(spec, questions, inputs, gens, rounds=rounds,
                                             tests=(test_list, bad, terr), examples=list(examples), reference=reference,
                                             write=write, log=log, mem_mb=mem_mb, item_s=item_s, extra_check=None,
-                                            need_tests=bool(tests), fresh_drafts=fresh_drafts, stuck_after=stuck_after)
-    return _result(spec, questions, a, b, reason, history, reviewed, test_list, bad, terr, log, gens, None)
+                                            need_tests=bool(tests), fresh_drafts=fresh_drafts, stuck_after=stuck_after,
+                                            person=person)
+    return _result(spec, questions, a, b, reason, history, reviewed, test_list, bad, terr, log, gens, None, person)
 
 
-def _result(spec, questions, a, b, reason, history, reviewed, test_list, bad, terr, log, gens, changes):
+def _result(spec, questions, a, b, reason, history, reviewed, test_list, bad, terr, log, gens, changes, person=None):
     record = {"spec_hash": spec.hash, "writer": [g.model_id for g in gens], "writer_fp": [g.fingerprint() for g in gens],
               "rounds": history, "tests": test_list, "tests_invalid": bad, "tests_error": terr, "reviews": reviewed,
               "replaced": [{"round": h["round"], **r} for h in history for r in h.get("replaced", [])],
               "calls": log, "time": time.time()}
+    if person is not None:
+        record["person"] = person.record()
     if a is not None:
         record["other_source"] = b.source
         if a.patch is not None:
@@ -1393,11 +1740,13 @@ def _effective(patch, pparts, old_parts):
 
 def recompile(old: Compiled, spec: Spec, inputs: Inputs, writer=None, *, rounds: int = 4, tests: int = 40,
               examples=(), reference: Callable | None = None, mem_mb: int = 1024, item_s: int = 5,
-              fresh_drafts: int = 2, stuck_after: int = 2) -> Compiled:
+              fresh_drafts: int = 2, stuck_after: int = 2, review: Callable | None = None,
+              review_budget: int | None = 20, review_per_round: int | None = 5) -> Compiled:
     """Recompile an accepted compilation for a revised specification (`old.spec.revise(...)`): the writer returns only
     the parts it adds, replaces or removes — each citing a changed or added clause — and the rest stays byte-identical.
     Accepted by the same checks as compile_spec (two independent patches agree, tests written for the new
-    specification). The result's `changes`: the clauses' changes and the parts added / replaced / removed / kept."""
+    specification; `review=` a person in the loop, as for compile_spec). The result's `changes`: the clauses' changes
+    and the parts added / replaced / removed / kept."""
     if spec.changes is None:
         raise ValueError("recompile needs a revised specification: old.spec.revise(new_text)")
     if not old.accepted:
@@ -1414,6 +1763,7 @@ def recompile(old: Compiled, spec: Spec, inputs: Inputs, writer=None, *, rounds:
                      "the specification did not change", {"spec_hash": spec.hash, "calls": []},
                      {"clauses": ch, "parts": {"added": [], "replaced": [], "removed": [], "kept": list(old.parts)}})
         return c
+    person = _Person(review, review_budget, review_per_round, spec, questions) if review is not None else None
     test_list, bad, terr = _write_tests(spec, questions, inputs, gens[0], log, tests) if tests else ([], [], None)
     marks = {**{c: "changed" for c in ch["changed"]}, **{c: "added" for c in ch["added"]}}
     removed = [old.spec.clauses[c] for c in ch["removed"] if c in old.spec.clauses]
@@ -1467,7 +1817,8 @@ def recompile(old: Compiled, spec: Spec, inputs: Inputs, writer=None, *, rounds:
     a, b, reason, history, reviewed = _loop(spec, questions, inputs, gens, rounds=rounds,
                                             tests=(test_list, bad, terr), examples=list(examples), reference=reference,
                                             write=write, log=log, mem_mb=mem_mb, item_s=item_s, extra_check=None,
-                                            need_tests=bool(tests), fresh_drafts=fresh_drafts, stuck_after=stuck_after)
+                                            need_tests=bool(tests), fresh_drafts=fresh_drafts, stuck_after=stuck_after,
+                                            person=person)
     changes = {"clauses": ch}
     if a is not None:
         pparts, _, rm, _ = read_module(a.patch, spec, questions, patch=True)
@@ -1475,7 +1826,7 @@ def recompile(old: Compiled, spec: Spec, inputs: Inputs, writer=None, *, rounds:
         changes["parts"] = {"added": [n for n in pparts if n not in old.parts],
                             "replaced": [n for n in pparts if n in old.parts], "removed": list(rm),
                             "kept": [n for n in old.parts if n not in pparts and n not in rm]}
-    c = _result(spec, questions, a, b, reason, history, reviewed, test_list, bad, terr, log, gens, changes)
+    c = _result(spec, questions, a, b, reason, history, reviewed, test_list, bad, terr, log, gens, changes, person)
     c.record["parent"] = {"spec_hash": old.spec.hash, "source_sha": hashlib.sha256(old.source.encode()).hexdigest()}
     return c
 
@@ -1790,7 +2141,8 @@ def compile_groups(spec: Spec, questions, inputs: Inputs, writer=None, *, by: st
     with the writer. values: the values of `by` (default: the field's declared values, else those of the samples).
     partial: False — the whole is accepted only when every group is; True — the accepted groups are assembled, and an
     input of a refused group abstains with the reason (the result says which groups). kw: compile_spec's options
-    (rounds, tests, examples, reference, mem_mb, item_s, fresh_drafts, stuck_after).
+    (rounds, tests, examples, reference, mem_mb, item_s, fresh_drafts, stuck_after, review, review_budget,
+    review_per_round — a person in the loop is asked per group, each group with its own budget).
     The result is an ordinary `Compiled` (system(), to_guard, Versions); `c.groups` holds each group's own compilation
     and `c.record["groups"]` what each accepted."""
     questions = list(questions)
@@ -1828,6 +2180,10 @@ def compile_groups(spec: Spec, questions, inputs: Inputs, writer=None, *, by: st
                                                                              if "round" in h]),
                   "replaced": len(c.record.get("replaced", [])), "tests": len(c.record.get("tests", [])),
                   "parts": len(c.parts)})
+        if c.record.get("person"):
+            p = c.record["person"]
+            r["person"] = {k: p[k] for k in ("asked", "decisions", "neither", "skipped", "by_kind")}
+            r["person"]["gaps"] = len(p["gaps"])
         rec[g] = r
     record = {"grouped": True, "by": by, "grouping": groups.to_dict(), "groups": rec,
               "spec_hash": spec.hash, "calls": groups.record.get("calls", [])}
@@ -2070,11 +2426,18 @@ class Versions:
 
 
 # ───────────────────────────────────────────────────────────── into an agent guard
-def to_guard(compiled: Compiled, guard, tools=None, *, question: str | None = None, on_fail: str = "deny") -> list:
-    """Register the compiled hard checks as policies of a `solvi.agents.Guard` → their names. Each policy reads the
-    compiled catalog's inputs (they must be facts the guard gives: tool_name, tool_arguments, conversation, ... or your
-    declared facts), runs the compiled System on them and fails with the check's reasons when the check is false.
-    `question`: the compiled question whose hard checks become policies (default: the only one)."""
+def to_guard(compiled: Compiled, guard, tools=None, *, question: str | None = None, on_fail: str = "deny",
+             allow=None, name: str | None = None) -> list:
+    """Register the compiled policy with a `solvi.agents.Guard` → the names of the policies added. The policies read
+    the compiled catalog's inputs (they must be facts the guard gives: tool_name, tool_arguments, conversation, ... or
+    your declared facts) and run the compiled System on them.
+
+    allow=None: each compiled hard check that names `question` becomes a policy, which fails with the check's reasons
+    when the check is false. allow="yes" (the answer that lets a call through): one policy (`name`, default
+    `compiled_<question>`) that asks the compiled question and fails when the answer is anything else — with the
+    clauses of the parts that decided (the false hard checks, else the question's rule) as the reasons — or when the
+    compiled policy cannot answer (it abstains: an input it cannot read, or a group that was not accepted).
+    `question`: the compiled question (default: the only one)."""
     from .system import System
     cat, qs = compiled.catalog()
     q = question or (qs[0].name if len(qs) == 1 else None)
@@ -2082,27 +2445,55 @@ def to_guard(compiled: Compiled, guard, tools=None, *, question: str | None = No
         raise ValueError("to_guard: name the compiled question (question=...)")
     system = System(cat, qs)
     given = sorted({i for p in cat.parts.values() for i in p.inputs} - set(cat.parts))
+    import inspect
+    sig = inspect.Signature([inspect.Parameter(g, inspect.Parameter.KEYWORD_ONLY) for g in given])
+    texts = compiled.spec.clauses
+    if allow is not None:
+        hard = [n for n, p in compiled.parts.items() if p.get("kind") == "check" and p.get("hard")
+                and q in (p.get("then") or {})]
+        rules = [n for n, p in compiled.parts.items() if (p.get("kind") == "rule" and p.get("question") == q)
+                 or p.get("rule_of") == q]
+
+        def policy(**facts):
+            res = system.ask({k: facts[k] for k in given if k in facts}, [q])
+            a = res[q]
+            if a.status == "abstain":
+                return Fail(f"the compiled policy cannot decide this call: {a.why}"[:300])
+            if _norm(a.answer) == _norm(allow):
+                return True
+            ran = {compiled.part_of(r.name) or r.name for r in res.trace.records}
+            failed = [n for n in hard if n in ran and res.values.get(n) is not None and not res.values.get(n)]
+            by = failed if a.status == "forced" and failed else [n for n in rules if n in ran]
+            cl = list(dict.fromkeys(c for n in by for c in compiled.parts[n].get("clauses") or [] if c in texts))
+            if not cl:
+                return Fail(f"{q} = {a.answer}: {a.why}"[:300])
+            return Fail("; ".join(f"[{c}] {texts[c].text}" for c in cl[:6])[:600])
+        policy.__signature__ = sig
+        policy.__name__ = name or f"compiled_{q}"
+        policy.__doc__ = f"The compiled {compiled.spec.name} must answer {q} = {allow}."
+        policy.show_fail_reasons = True               # the guard's reason names the clauses that decided this call
+        guard.policy(tools, on_fail=on_fail)(policy)
+        return [policy.__name__]
     fp = compiled.fingerprint
     names = []
-    import inspect
-    for name, p in compiled.parts.items():
+    for pname, p in compiled.parts.items():
         if p.get("kind") != "check" or not p.get("hard") or q not in (p.get("then") or {}):
             continue
 
-        def policy(_name=name, _fp=fp, **facts):
+        def policy(_name=pname, _fp=fp, **facts):
             res = system.ask({k: facts[k] for k in given if k in facts})
             v = res.values.get(_name)
             if v is None:
                 return Fail(f"{_name} could not be evaluated")
             return v if not v else True
-        policy.__signature__ = inspect.Signature([inspect.Parameter(g, inspect.Parameter.KEYWORD_ONLY) for g in given])
-        policy.__name__ = name
-        policy.__doc__ = "; ".join(compiled.spec.clauses[c].text for c in p.get("clauses") or [] if c in compiled.spec.clauses)[:300]
+        policy.__signature__ = sig
+        policy.__name__ = pname
+        policy.__doc__ = "; ".join(texts[c].text for c in p.get("clauses") or [] if c in texts)[:300]
         guard.policy(tools, on_fail=on_fail)(policy)
-        names.append(name)
+        names.append(pname)
     return names
 
 
-__all__ = ["Clause", "Compiled", "DecisionDiff", "Groups", "Inputs", "Rejected", "Spec", "Versions", "assemble",
-           "compile_groups", "compile_spec", "coverage", "decision_diff", "group_clauses", "merge", "numbers_in",
-           "read_module", "recompile", "split_clauses", "to_guard"]
+__all__ = ["Clause", "Compiled", "DecisionDiff", "Dispute", "Groups", "Inputs", "Rejected", "Ruling", "Spec", "Versions",
+           "assemble", "compile_groups", "compile_spec", "coverage", "decision_diff", "group_clauses", "merge",
+           "numbers_in", "read_module", "recompile", "reference_reviewer", "split_clauses", "to_guard"]
