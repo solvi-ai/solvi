@@ -523,7 +523,7 @@ def test_a_disputed_test_goes_to_the_person_instead_of_the_test_writer():
     assert c.accepted and not any(p.startswith("# Re-check") for p, _ in w.prompts)
     r = c.record["reviews"]["t3"]
     assert r["by"] == "person" and r["verdict"] == "fix" and r["now"] == {"ship": "paid"}
-    assert c.record["person"]["by_kind"] == {"disagreement": 0, "test": 1, "agreed": 0}
+    assert c.record["person"]["by_kind"] == {"disagreement": 0, "test": 1}
 
 
 def test_the_person_is_asked_within_the_budget_and_the_answers_replay():
@@ -589,32 +589,3 @@ NOT_NORMATIVE = {"c2": "the schema requires it"}
     assert d.outcome == "deny" and "[c1] A refund is at most 100." in " ".join(d.reasons)
     d = guard.call({"name": "refund", "arguments": {}}, context="refund")       # the compiled policy cannot answer
     assert d.outcome == "deny" and "cannot decide" in " ".join(d.reasons)
-
-
-ALWAYS_PAID = GOOD.replace("return total >= 50", "return False")      # both drafts agree, and are wrong above 50
-
-
-def test_a_spot_check_of_agreed_decisions_shows_the_person_what_both_drafts_got_wrong():
-    from solvi.compile import reference_reviewer
-    w = Writer([[ALWAYS_PAID], [ALWAYS_PAID]], tests=[TEST_OK[1]])
-    c = compile_spec(Spec(POLICY), QS, INPUTS, w, rounds=2)
-    assert c.accepted                                              # nothing disputed: accepted without the spot check
-    w = Writer([[ALWAYS_PAID], [ALWAYS_PAID]], tests=[TEST_OK[1]])
-    c = compile_spec(Spec(POLICY), QS, INPUTS, w, rounds=2, review=reference_reviewer(ship_reference), review_agreed=5)
-    assert not c.accepted and "spot check" in c.record["rounds"][0]["drafts"][0]["caught"]
-    p = c.record["person"]
-    assert p["agreed"]["asked"] >= 5 and p["agreed"]["confirmed"] < p["agreed"]["asked"] and p["asked"] == 0
-    assert any(t.get("source") == "person" and t["expect"] == {"ship": "free"} for t in c.record["tests"])
-    assert c.record["rounds"][0]["spot_check"]["not_confirmed"] >= 1
-    rewrite = [q for q, t in w.prompts if "Your previous module" in q][0]
-    assert "both implementations agree" in rewrite
-
-
-def test_a_spot_check_the_person_confirms_lets_the_right_drafts_through():
-    from solvi.compile import reference_reviewer
-    seen = []
-    rev = reference_reviewer(ship_reference)
-    c = compile_spec(Spec(POLICY), QS, INPUTS, Writer([[GOOD], [GOOD]]),
-                     review=lambda d: seen.append(d) or rev(d), review_agreed=3)
-    assert c.accepted and c.record["person"]["agreed"] == {"k": 3, "asked": 3, "confirmed": 3}
-    assert [d.kind for d in seen] == ["agreed"] * 3 and len({json.dumps(d.answers[0]) for d in seen}) >= 2  # strata
