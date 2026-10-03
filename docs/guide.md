@@ -1238,28 +1238,9 @@ better one.
 
 A decider reads the question — task, options, descriptions — and the input in one sequence. Thirty catalog rows as
 options do not fit, and twenty that fit leave the input a few dozen tokens (the decision's `extra["truncated"]` shows
-it). `solvi.many` chooses among dozens or hundreds, with any decider (a local checkpoint, `solvi.llm`,
-`solvi.systemone`), and records what it did:
-
-```python
-from solvi.many import Many, decide_many
-d = decide_many(model, text, "Which action achieves the goal?", actions, many=Many(mode="shortlist", query=goal))
-d.value                 # one of the actions
-d.extra["many"]         # {"mode": "shortlist", "considered": 8, "of": 45, "unconsidered": 37, "gap": ..., "calls": [...], ...}
-```
-
-`mode="direct"`: one ordinary decision, when everything fits. `"shortlist"`: a selector (BM25 over the options' labels
-and descriptions against `query`, or your function) ranks the options, the decider chooses among the best `k`; the
-options left out were not considered — the record says how many, and the decision escalates when the best one left
-out scores close to the last one kept. `"tournament"`: blocks of `block` options, winners meet, the last round
-decides; every option is considered, in about N / (block − 1) calls. `"auto"` (default): direct when the question fits
-and leaves the input at least half of `max_len`, else shortlist, else (no selector) tournament. The calls are in the
-record, and the same input gives the same record.
-
-A threshold calibrated on one set of options does not carry over to options that change, and a shortlist's accuracy
-is bounded by the selector's recall. Prefer `"direct"` whenever the question fits, and compare the modes on labelled
-examples of your own. Where numbers decide (a price within a budget), no mode helps: narrow the candidates in code
-first and give the model what is left.
+it). Narrow the candidates in code first — a filter, a ranking by what decides (a price within a budget, a distance) —
+and ask among what is left; when the options fit, one ordinary decision is the most accurate way (see
+[best practices](best_practices.md#choosing-among-options)).
 
 ### Several questions in one pass
 

@@ -81,7 +81,6 @@ nav:
       - solvi.specialist: api/specialist.md
       - solvi.charts: api/charts.md
       - solvi.longdoc: api/longdoc.md
-      - solvi.many: api/many.md
       - solvi.episode: api/episode.md
       - solvi.worldmap: api/worldmap.md
       - solvi.drift: api/drift.md

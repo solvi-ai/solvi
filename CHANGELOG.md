@@ -1,5 +1,16 @@
 # Changelog
 
+## 1.0.0 — unreleased
+
+### Removed
+
+What leaves solvi on the way to 1.0: parts that measured worse than the plain way, that nothing used, or that never
+had a measured run. Importing a removed module raises ModuleNotFoundError.
+
+| removed | why | use instead |
+|---|---|---|
+| `solvi.many` (`Many`, `decide_many`) | measured worse: one direct decision over the options was more accurate than its shortlist and its tournament | narrow the options in code (filter, rank), then one ordinary decision |
+
 ## 0.9.0 — 2026-10-03 — System 1 and System 2
 
 0.9 is about two ways of deciding in one system, in Kahneman's sense: **System 1**, fast and cheap — rules, checks, a
