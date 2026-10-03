@@ -1,0 +1,24 @@
+{
+ "gallery/10_procurement_3way_match": {
+  "catalog": "a1d7b79b2eb1953a",
+  "models": {},
+  "parts": {
+   "answer:duplicate": "8de7a588096e712a",
+   "answer:escalate_approval": "7cea8e4d086532bc",
+   "answer:payment": "4fbb8ee01ac1588d",
+   "duplicate_of": "7ccf9d0005610a9f",
+   "fx_rate": "522af251209a02bb",
+   "header_total_ok": "f7b26ccd3ad0842d",
+   "invoice_matches_po": "07bd3bbab9bdb79f",
+   "invoice_total_base": "6659846c9f5e8842",
+   "line_match": "9189c250cee44360",
+   "lines_failing": "016a1e108572daee",
+   "not_duplicate": "224c4686b96dc06f",
+   "po_fx_rate": "eca0d8b4f16be84b",
+   "supplier_payable": "7f0f5a224c98df7f",
+   "supplier_status": "0fbfdfee321851cf",
+   "within_approval_limit": "fa6c51ba6dc1d0b2"
+  },
+  "questions": "9f0549b1f9c2f698"
+ }
+}

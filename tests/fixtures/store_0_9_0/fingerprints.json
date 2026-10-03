@@ -1,0 +1,32 @@
+{
+ "calibrated_part": "5c68715b828d5ab5",
+ "dispatch_system": {
+  "catalog": "2940e4bf37c6d350",
+  "models": {},
+  "parts": {
+   "answer:refund": "e1c9e53942dbbae1",
+   "share_left": "6e84ac8b61555560",
+   "small": "feb2ff1a8e26bbd4"
+  },
+  "questions": "90ae36c43d282aa3"
+ },
+ "part": "4298f8a17a6cdd22",
+ "system": {
+  "catalog": "0059651b91b94218",
+  "models": {
+   "answer:category": "5c68715b828d5ab5"
+  },
+  "parts": {
+   "answer:approve": "228373a7a5294d57",
+   "answer:category": "9ce06df1574e122e",
+   "answer:channels": "18f67f278c05fc9b",
+   "answer:receipt_total": "af85e40ffd6b706d",
+   "answer:refund_days": "e5d16ca18c7ca674",
+   "answer:team_trip": "0de26e45a437bd12",
+   "days_old": "d34c4f002490f0e9",
+   "n_words": "4d9b7f56c73bed8b",
+   "within_limit": "74844d61da1354f7"
+  },
+  "questions": "aae1a18a12c96913"
+ }
+}

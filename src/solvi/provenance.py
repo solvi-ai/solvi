@@ -19,6 +19,8 @@ import hashlib
 import re
 import sys
 
+from ._deprecate import MOVED as _FP_MODULE   # new module (or "module:Name") → its 0.9 module; filled as code moves
+
 GIVEN, COMPUTED, QUOTED, DECIDED, LEARNED, PROPOSED = "given", "computed", "quoted", "decided", "learned", "proposed"
 KINDS = (GIVEN, COMPUTED, QUOTED, DECIDED, LEARNED, PROPOSED)
 FUZZY = {DECIDED, LEARNED, PROPOSED}          # a model's output (a quote by a model is fuzzy too, but grounded)
@@ -149,8 +151,21 @@ def torch_fingerprint(modules, files_dir=None, samples=256):
     return h.hexdigest()[:16]
 
 
+def fp_module(module, qualname=None):
+    """The module name a fingerprint records for an object defined in `module` (named `qualname` there): its 0.9 module
+    when the object moved since (the table solvi._deprecate.MOVED), so that a move changes no fingerprint; otherwise
+    `module` itself."""
+    if not _FP_MODULE or not module:
+        return module
+    if qualname:
+        old = _FP_MODULE.get(f"{module}:{qualname.split('.', 1)[0]}")
+        if old is not None:
+            return old
+    return _FP_MODULE.get(module, module)
+
+
 # --- catalog fingerprints: what the parts are (code and declarations), so a stored decision knows which catalog made it
-_CODE = None                                  # function → (its fingerprint): weak, so a dropped catalog is not kept alive
+_CODE = None                                 # function → (its fingerprint): weak, so a dropped catalog is not kept alive
 _SIMPLE = (str, int, float, bool, type(None))
 _ADDR = re.compile(r" at 0x[0-9a-fA-F]+")
 
@@ -241,7 +256,7 @@ def code_fingerprint(f, _seen=None):
     if not inspect.isfunction(f):
         if inspect.ismethod(f):
             return digest("method", type(f.__self__).__qualname__, code_fingerprint(f.__func__, _seen))
-        return digest("object", type(f).__module__, type(f).__qualname__)
+        return digest("object", fp_module(type(f).__module__, type(f).__qualname__), type(f).__qualname__)
     top = _seen is None
     try:
         if top and f in _CODE:
@@ -268,7 +283,10 @@ def code_fingerprint(f, _seen=None):
     g = getattr(f, "__globals__", {}) or {}
     for name in sorted(_code_names(co)):
         if name in g:
-            v = _value_fp(g[name], f, seen, module_only=True)
+            # co_names holds attribute names too: `type(x).__name__` reads the module's own __name__ here, recorded
+            # as its 0.9 name
+            v = _value_fp(fp_module(g[name]) if name == "__name__" and isinstance(g[name], str) else g[name], f, seen,
+                          module_only=True)
             if v is not None:
                 glob.append([name, v])
     parts.append(glob)
@@ -291,7 +309,7 @@ def _value_fp(v, owner, seen, module_only=False):
         from .runtime import srepr
         return srepr(v)
     if inspect.isfunction(v):
-        if module_only and v.__module__ != owner.__module__:
+        if module_only and fp_module(v.__module__, v.__qualname__) != fp_module(owner.__module__, owner.__qualname__):
             return None
         return code_fingerprint(v, seen)
     if module_only:
@@ -316,12 +334,12 @@ def type_fingerprint(t, depth=0):
     if isinstance(t, type):
         fields = getattr(t, "model_fields", None)
         if isinstance(fields, dict):
-            return ["model", t.__module__, t.__qualname__,
+            return ["model", fp_module(t.__module__, t.__qualname__), t.__qualname__,
                     {k: [type_fingerprint(fi.annotation, depth + 1), _r(fi.metadata), _r(fi.default)]
                      for k, fi in fields.items()}]
         if issubclass(t, enum.Enum):
-            return ["enum", t.__module__, t.__qualname__, [[m.name, _r(m.value)] for m in t]]
-        return [t.__module__, t.__qualname__]
+            return ["enum", fp_module(t.__module__, t.__qualname__), t.__qualname__, [[m.name, _r(m.value)] for m in t]]
+        return [fp_module(t.__module__, t.__qualname__), t.__qualname__]
     return _r(t)
 
 

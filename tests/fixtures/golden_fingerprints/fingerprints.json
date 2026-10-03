@@ -1,0 +1,921 @@
+{
+ "examples/11_answer_types_and_constraints": {
+  "catalog": "680ff6186fa3adb7",
+  "models": {},
+  "parts": {
+   "answer:risks": "11604089ab423474",
+   "constraint:high_if_injection": "2365c59d1c99ea1d",
+   "constraint:none_means_low": "d3b41fc98c173c07",
+   "found": "d3ddaf0ade9c68e5",
+   "length": "89d6d60ba4694afc",
+   "n_found": "36e505591c1e9d07"
+  },
+  "questions": "2ba005352832615a"
+ },
+ "examples/12_grounded_audit": {
+  "catalog": "6324437264c77f07",
+  "models": {},
+  "parts": {
+   "amount": "1aff5fcab7fc7b75",
+   "amount_positive": "1c77614abab4b6bb",
+   "answer:approve": "b9ce00e663be1fcc",
+   "answer:category": "5b909d12f00d0a17",
+   "category": "71919635c5062a3f",
+   "total": "283174adcbbd2b13"
+  },
+  "questions": "4f9a73342fe801b8"
+ },
+ "examples/13_decide_model": {
+  "catalog": "b9ade8ceab1da781",
+  "models": {
+   "answer:team": "5b6c7299a1f7249c"
+  },
+  "parts": {
+   "answer:refund": "10eec4ab74446d10",
+   "answer:team": "c18b1f54ca263888",
+   "constraint:refunds_go_to_billing": "ddb729405b915516",
+   "legal_threat": "2349bfdb64964c19",
+   "mentions_refund": "601be08b0e2c7229",
+   "no_legal_threat": "f5d0361874ef75ed"
+  },
+  "questions": "a0247fafdfeab997"
+ },
+ "examples/14_typed_catalog": {
+  "catalog": "9c215a8cb8665032",
+  "models": {},
+  "parts": {
+   "answer:duty": "df68ddf8ad0e48d6",
+   "answer:flags": "6928e91f8fd9b219",
+   "answer:release": "53581bc3992a2777",
+   "heavy": "c5a21f7f6149f8c6",
+   "restricted": "28e150b9bdf3af14",
+   "total_value": "9a9032dcd81b8591",
+   "weight_kg": "dc86950235684dd5"
+  },
+  "questions": "2bf0ca7448cf179e"
+ },
+ "examples/15_typed_decisions": {
+  "catalog": "264db16f14e88447",
+  "models": {
+   "answer:angry": "05a4bbbff3fb33a0",
+   "answer:team": "fe86011e54305fa2",
+   "answer:topics": "ea5036c018aeec1f",
+   "answer:urgency": "6fa52911eb3bd80f"
+  },
+  "parts": {
+   "answer:angry": "49a21c197f7b22aa",
+   "answer:priority_support": "3bd74b2f5b31aab9",
+   "answer:team": "b09e59b16092aea2",
+   "answer:topics": "89b9aa9c48864eae",
+   "answer:urgency": "f8d31573914d6626",
+   "constraint:refunds_go_to_billing": "803fb0fb6fbe6b14",
+   "legal_threat": "4ca52e08b0ae96db",
+   "no_legal_threat": "31dd81fb69e2c899"
+  },
+  "questions": "b554bf50d790234b"
+ },
+ "examples/16_primitives:decider": {
+  "catalog": "4ab9f151a499c4c2",
+  "models": {
+   "answer:amount": "e8bcab82891d638a",
+   "answer:contact": "25ee407f6bc302d4",
+   "answer:damaged": "7ccea49fa78ca104",
+   "answer:repair": "6b4b6fbf9f7ab078",
+   "answer:signed": "4dd76afac8bfa9d8"
+  },
+  "parts": {
+   "answer:amount": "e2d7e4b236ac615b",
+   "answer:contact": "f96680d054ab3844",
+   "answer:damaged": "34eef3bfe4a83c6d",
+   "answer:repair": "72286424f97260e8",
+   "answer:signed": "c856a037edbbcbc0"
+  },
+  "questions": "37d2fc8c65db0e6c"
+ },
+ "examples/16_primitives:rules": {
+  "catalog": "24f4ef0953ee5b68",
+  "models": {},
+  "parts": {
+   "answer:amount": "c72bab133c7857ed",
+   "answer:contact": "cc01a63c50edb725",
+   "answer:damaged": "8e15a4fe7678bda7",
+   "answer:repair": "a49bf8dcb77ddd27",
+   "answer:signed": "887f2e6f3d4600d7",
+   "constraint:phone_first_only_when_signed": "473fe04c6ee03e6e"
+  },
+  "questions": "f9a4bcb291304e9a"
+ },
+ "gallery/01_support_triage": {
+  "catalog": "a005290db1d58427",
+  "models": {
+   "intent_class": "1555c164950e5955",
+   "intent_rule_line": "1555c164950e5955"
+  },
+  "parts": {
+   "anger": "6c24ec9e788932d2",
+   "answer:intent": "26b3e1fa4a633fd7",
+   "answer:priority": "3d328bac82fe55f6",
+   "answer:refund_requested": "e609c56d3e279293",
+   "answer:route": "b50d24b0e2bd0ad0",
+   "answer:tags": "d9b90da18821c55f",
+   "answer:urgent": "dca36eda459af6fc",
+   "chargeback_threat": "d6d736ba427f1006",
+   "constraint:threat_means_high": "434fd587e7fb9c24",
+   "cue_words": "1433593ffab4f3f1",
+   "intent_class": "f8ace5084a85a42a",
+   "intent_rule_line": "ddc8327a432cea6c",
+   "legal_threat": "f7366711c6ed3ce8",
+   "no_chargeback_threat": "6656dca26f53e3be",
+   "no_legal_threat": "2f04ae47bb21cb00",
+   "refund_ask": "eb5bf9a47eb76d91",
+   "urgency": "add71115194aea78",
+   "vip_sla_ok": "f8f60078f88831aa",
+   "waiting_hours": "6244c4207ff0d80d"
+  },
+  "questions": "be438e4b22afe264"
+ },
+ "gallery/02_email_routing": {
+  "catalog": "dfec4235c0d870ed",
+  "models": {
+   "team_votes": "a66dde49e5b19e0e"
+  },
+  "parts": {
+   "answer:needs_human": "89dad585ebb587b0",
+   "answer:team": "775c934a59b3a2f3",
+   "clear_winner": "73bec2b6b945559c",
+   "credential_ask": "1ccb904369466438",
+   "payment_change_ask": "fab6791dc1989014",
+   "sender_domain": "4e98bd8377693cb6",
+   "sender_kind": "2ef44391342420a7",
+   "sender_not_lookalike": "0a1b373a9365b075",
+   "team_votes": "9dbf03290427f398",
+   "words": "0b41a4e020d5fdd5"
+  },
+  "questions": "e6fc3c7f1351b71d"
+ },
+ "gallery/03_content_guard": {
+  "catalog": "81c0398fb2bf7b80",
+  "models": {},
+  "parts": {
+   "answer:harm": "f757d3ccf59a6d00",
+   "answer:prompt_injection": "58b4883145135a70",
+   "answer:sensitive_data": "fd93c55a71f15a48",
+   "answer:verdict": "25df4cf81f61a339",
+   "card_number": "5ae445cbd6bd165d",
+   "constraint:block_if_card_or_secret": "0fc7abc4a4506acd",
+   "constraint:never_allow_serious_harm": "ca4ac232909992a1",
+   "constraint:sensitive_iff_data_harm": "550e6c78f9b21097",
+   "email_address": "776300871c853c84",
+   "iban": "5d73a4b2b900f26b",
+   "injection": "8f043b037a3fdb06",
+   "insult": "2896cc2df0c1dae1",
+   "link_count": "778a14dab5207354",
+   "no_card_number": "a6a10ee784da6b57",
+   "no_direct_injection": "75c72e4af5944c8c",
+   "no_secret": "1982b3e210c1dbd9",
+   "phone_number": "823daeb12eda9230",
+   "risk_points": "050e30dc3525137f",
+   "risk_score": "ac1dc9862165ed3f",
+   "secret_token": "144bab10906c4378"
+  },
+  "questions": "9abec11ff8c6b7da"
+ },
+ "gallery/04_security_alert": {
+  "catalog": "826cc8b9e4e5e867",
+  "models": {},
+  "parts": {
+   "admin_travel_plausible": "c88e70bfb810dd16",
+   "answer:action": "99964254d7f7db64",
+   "answer:suspicious": "69a2b9ed69c29cc6",
+   "distance_km": "bf32fa632fafa8fe",
+   "failed_spike_pct": "611fb812ead5f72b",
+   "hours_between": "2ebe1197476ac5ac",
+   "impossible_travel": "d7d255e7a60fb5e4",
+   "ip_denylisted": "aa30aeef87d6bb6d",
+   "ip_not_denylisted": "3ee06dadfeee8f5b",
+   "last_success": "8c74c79e5987e6df",
+   "new_device": "44c29d122d316271",
+   "travel_kmh": "14ea4d7b4a308a78"
+  },
+  "questions": "6b31f312f4c9194f"
+ },
+ "gallery/05_agent_trace_audit": {
+  "catalog": "ddab1cd53d1ddc72",
+  "models": {},
+  "parts": {
+   "answer:rotate_secrets": "43a6e9cd062425b3",
+   "answer:verdict": "502ed28b30d74118",
+   "costly_steps": "14a5c8ada7a61860",
+   "credentials_not_exposed": "820c74d4c53e75b5",
+   "destruction_recoverable": "36d650dcb1553717",
+   "destructive_steps": "bbeea3a65dce8244",
+   "failed_steps": "40991d64fdfdd95c",
+   "nothing_destroyed": "9d023f0b36cc0bdb",
+   "off_allowlist": "5bc4f268ea38c457",
+   "partial_change": "6ec43650fdf86939",
+   "rollback_plan": "4d41d614f942e7e1",
+   "secrets_in_args": "7f07edddc8b2239a",
+   "total_cost": "df2e341f77f7b694",
+   "unrecoverable_steps": "dafb89ab2cb0bf2f"
+  },
+  "questions": "fc85956bc415f464"
+ },
+ "gallery/06_release_rollout": {
+  "catalog": "25e86d4979dd1f06",
+  "models": {},
+  "parts": {
+   "answer:decision": "1e573514b8eb9292",
+   "answer:page_oncall": "ffb3182eb7671f21",
+   "baseline_error_pct": "07eb86be63efeb1a",
+   "baseline_p95_ms": "5dc1cf30e49a0e8d",
+   "canary_error_pct": "dc6ecaff1cefa3cf",
+   "canary_errors_under_ceiling": "875b0f690d725258",
+   "canary_p95_ms": "848ca775bf678e19",
+   "enough_canary_traffic": "ce0f513d1ae37e92",
+   "error_increase_pct": "07e224b52631ee3a",
+   "error_z": "e257de4ca616bf0a",
+   "latency_increase_pct": "9a81a061b20ccfcc",
+   "slo_burn_rate": "1eb59fb0911c98b8"
+  },
+  "questions": "da455c71a0dd2431"
+ },
+ "gallery/07_kyc_aml": {
+  "catalog": "6b816560c113a752",
+  "models": {},
+  "parts": {
+   "adverse_media": "57668060aeefb66a",
+   "answer:file_sar": "1b7ba15b04494c0f",
+   "answer:freeze": "11382a1a33dbde10",
+   "answer:risk": "0ba42eb21eaeae99",
+   "counterparty_screening": "74c099633f336045",
+   "customer_not_sanctioned": "3dd290b5274fc958",
+   "high_risk_share": "4a177119bd9b7d10",
+   "is_pep": "9aead1fa69564b78",
+   "pass_through": "97d97e5e1d9408d7",
+   "pep_screen": "99f92374d89fe1c7",
+   "risk_factors": "568f528127263bec",
+   "sanctions_screen": "f8a1b6d1b2b30a86",
+   "sar_grounds": "37c35503df9b6533",
+   "structuring": "8820d1a0c0d33b73",
+   "velocity_ratio": "46a634c3b8c12663"
+  },
+  "questions": "265765b3ec432f37"
+ },
+ "gallery/08_clinical_screening": {
+  "catalog": "0fb61175802a9151",
+  "models": {},
+  "parts": {
+   "acvpu_score": "f713a96ffa502a3a",
+   "answer:escalation": "34ec6aac257564b1",
+   "answer:news2_band": "780d4386781659bd",
+   "answer:sepsis_screen": "7d50c001c266171d",
+   "constraint:escalation_covers_band": "fce084c1b2c5bb07",
+   "lactate_high": "c8f4da5539395ae6",
+   "news2": "15fb378dcc5208b4",
+   "not_shocked": "8644aa217f227e72",
+   "oxygen_score": "4eb78dec14f8878c",
+   "pulse_score": "e136d4600425a95e",
+   "qsofa": "8acbb7ff1983737f",
+   "rr_score": "7973b5e7da6ec24c",
+   "sbp_score": "ede6a118a4674405",
+   "spo2_not_critical": "1a7dfc49946dc048",
+   "spo2_score": "9ae564f04ec73ff1",
+   "temp_score": "51144aa57287b4a9"
+  },
+  "questions": "874c12d30d353f1c"
+ },
+ "gallery/09_credit_adverse_action": {
+  "catalog": "7de381c0f424829d",
+  "models": {},
+  "parts": {
+   "adult": "40877a2df2c1e001",
+   "adverse_action_reasons": "46acef5870f334b1",
+   "answer:decision": "378e8f64b86c1d5c",
+   "answer:principal_reason": "862c376129182428",
+   "dti": "149e8893d52d0980",
+   "knockouts": "caf5f3a17ec55475",
+   "loan_to_income": "4a0b3deffd4e3d1e",
+   "monthly_payment": "2c1dcc5099c7aecd",
+   "points": "c8109e1a93987b9c",
+   "resident": "af0c09606d4856dc",
+   "scorecard": "ac737a58a74eed3f"
+  },
+  "questions": "2a5c8368a306117f"
+ },
+ "gallery/10_procurement_3way_match": {
+  "catalog": "5cfabb23bb23f766",
+  "models": {},
+  "parts": {
+   "answer:duplicate": "8de7a588096e712a",
+   "answer:escalate_approval": "7cea8e4d086532bc",
+   "answer:payment": "4fbb8ee01ac1588d",
+   "duplicate_of": "7ccf9d0005610a9f",
+   "fx_rate": "522af251209a02bb",
+   "header_total_ok": "f7b26ccd3ad0842d",
+   "invoice_matches_po": "07bd3bbab9bdb79f",
+   "invoice_total_base": "6659846c9f5e8842",
+   "line_match": "3dd000cbbeb3d983",
+   "lines_failing": "f36ee6a584d8e6ba",
+   "not_duplicate": "224c4686b96dc06f",
+   "po_fx_rate": "eca0d8b4f16be84b",
+   "supplier_payable": "7f0f5a224c98df7f",
+   "supplier_status": "0fbfdfee321851cf",
+   "within_approval_limit": "fa6c51ba6dc1d0b2"
+  },
+  "questions": "9f0549b1f9c2f698"
+ },
+ "gallery/11_refund_double_charge": {
+  "catalog": "46b6fcda67020e73",
+  "models": {},
+  "parts": {
+   "answer:customer_claims_double": "796de181f0b2cc49",
+   "answer:is_double_charge": "9421b4bfa0746f1b",
+   "answer:refund": "8eea7103b1e1495a",
+   "answer:reply": "5cd79fd0ff54ae33",
+   "balance_covers": "d95b8a336741ce7f",
+   "claimed_amount": "f18902bc443f6dcf",
+   "double_charge_claim": "6120441f33fbb58f",
+   "duplicate_pairs": "e3b456759a201353",
+   "free_balance": "c6347fe4fed35526",
+   "no_open_chargeback": "03fcafcda493bf28",
+   "outstanding_duplicates": "41512e81f2d9e319",
+   "refund_amount": "a7fe5a023478a711",
+   "within_auto_limit": "eec6d073086a10dc"
+  },
+  "questions": "8737cba82289bd59"
+ },
+ "gallery/12_predictive_maintenance": {
+  "catalog": "1f0a3b1bf8d3370c",
+  "models": {},
+  "parts": {
+   "answer:health": "63b0318cb5d33ed7",
+   "current_latest": "40e1af4241400bb9",
+   "current_level": "78787aba9530b9d8",
+   "current_z": "c995ba7e7f0773fb",
+   "hours_to_vib_alert": "5fa36523ad3dfe0a",
+   "temp_latest": "24d3b6b36b998b26",
+   "temp_level": "f5cb720b907b86f3",
+   "temp_slope": "50e80d5ec6b982bf",
+   "temp_trend": "51a030774682a793",
+   "temp_z": "92c4c34148bbc7d7",
+   "temperature_below_trip": "aaf16c34febd25fa",
+   "vib_latest": "517a270f0f829b9c",
+   "vib_level": "8497ed9f93638aeb",
+   "vib_slope": "e1a524c2b24fc30e",
+   "vib_trend": "12dab4094e6dabcb",
+   "vib_z": "29df7867f2292236",
+   "vibration_below_trip": "3e247bbff1dc31b0"
+  },
+  "questions": "b221ddf8930f4a3d"
+ },
+ "gallery/13_pre_edit_rule_check": {
+  "catalog": "fae64d36745f78d8",
+  "models": {
+   "no_pii_in_logs (no_pii_in_logs_decider)": "da76c912c62fb4c2",
+   "require_role (require_role_decider)": "3bf7635d369f34ef"
+  },
+  "parts": {
+   "added_lines": "539471b497c371ba",
+   "answer:broken_rules": "400b2e65267f4192",
+   "answer:decision": "f905ff1d31827902",
+   "auth_lines": "b2e1f85bdaa39984",
+   "browser_storage_lines": "36e4761bbc15bb22",
+   "findings": "12ffe1c6a30d152d",
+   "instruction_lines": "bce7d2db614cdc62",
+   "log_lines": "2056ef2e674fbf89",
+   "migration_problems": "1fc20e9771ad923c",
+   "migration_readable": "005a9003cfa9a5fb",
+   "migration_reversible": "1f21668e9a7815c1",
+   "no_browser_storage_in_api": "656c17269f5adb32",
+   "no_pii_in_logs": "7f7eb16043e4eff6",
+   "no_pii_in_logs_view": "e6ce077a2d477455",
+   "no_secrets": "34ecdb93573cadbb",
+   "not_a_protected_path": "f471068038425f3e",
+   "require_role": "8bf71b8a18a17e18",
+   "require_role_view": "813265356be77ba6",
+   "rules_in_scope": "570ce7495ab80772",
+   "secret_lines": "cba205bfcd91d67b"
+  },
+  "questions": "da61329913030f90"
+ },
+ "gallery/14_review_triage": {
+  "catalog": "67fa52f7b64b5e2f",
+  "models": {
+   "migration_or_deletion (migration_or_deletion_decider)": "03fac8bacc1699e9",
+   "public_api (public_api_decider)": "5c26583860267f0b",
+   "security_sensitive (security_sensitive_decider)": "5ac88f6dca6f260f",
+   "touches_auth (touches_auth_decider)": "fe128f2e0bfdd824"
+  },
+  "parts": {
+   "answer:dependency_changes": "8df06c8b202e5dbf",
+   "answer:large_or_unfocused": "4b8a2ecd7a1469bb",
+   "answer:migration_or_deletion": "5526ee6ca44fbd13",
+   "answer:missing_tests": "6b4e1492d0262887",
+   "answer:public_api": "e23586c332425ca9",
+   "answer:review": "6684241208e8a94c",
+   "answer:security_sensitive": "8d4c64f0508835eb",
+   "answer:touches_auth": "597f6156d1ff9598",
+   "areas": "f96ae5ac613f75b3",
+   "change_text": "12b55b8c73799c20",
+   "changed_lines": "9a0f90bff69acdfa",
+   "dependency_changes": "eda28b78063702c1",
+   "dependency_files": "c6f5182c1127cfb0",
+   "files": "7995db4948f7cdc3",
+   "large_or_unfocused": "674ce81c5119148e",
+   "logic_files": "c1b0cafe64c3b7a0",
+   "migration_or_deletion": "5660966b10020028",
+   "missing_tests": "eaa20b95c45a431d",
+   "public_api": "e5ade92c926e4628",
+   "risk_reasons": "4c2d2c9bcfae125e",
+   "security_sensitive": "4dd301e854b8c85e",
+   "test_files": "95186966de02f262",
+   "touches_auth": "c0714753ad65c576"
+  },
+  "questions": "2813235024a34e19"
+ },
+ "gallery/15_skill_picker": {
+  "catalog": "0b743c494193307b",
+  "models": {
+   "picked (skill_decider)": "9af75be603b8fe16"
+  },
+  "parts": {
+   "answer:outcome": "f2184208198ca8dd",
+   "answer:skill": "428fd2b84a2c6b7e",
+   "picked": "4688a6ab640b76e5",
+   "production_deploy_asked_for": "3b1fc3a2b5842e76"
+  },
+  "questions": "2fe3e87e1b2fc497"
+ },
+ "golden/auto_built": {
+  "catalog": "0a6336d0ef5e20f4",
+  "models": {},
+  "parts": {
+   "answer:ok": "08c97a0dba5364fd",
+   "large": "492eec4a80f4184b",
+   "late": "569370981783f8db",
+   "small_share": "e5e4d3fa23db5051"
+  },
+  "questions": "b7331e3e6ca9a310"
+ },
+ "golden/auto_built:slow": "80ef0a05b9f9a389",
+ "golden/decisions": {
+  "catalog": "5dd8636bd71cb4d4",
+  "models": {
+   "answer:amount": "53784a661af3c448",
+   "answer:channels": "5873d501ea4a4e9b",
+   "answer:damaged": "976c0822e912b72b",
+   "answer:days": "8f385e6f18a1f21c",
+   "answer:kind": "797a725356d03f87",
+   "answer:level": "51acc33730022a18",
+   "answer:route": "96533809a04ae5e3",
+   "answer:signed": "224f5ad3de3cec9e",
+   "answer:tags": "a556584bfd38c41b",
+   "answer:team": "9e8b0fa2ce35585d",
+   "urgent": "24b48a7a71ae0c95"
+  },
+  "parts": {
+   "answer:amount": "3bfeaec327565215",
+   "answer:channels": "c625397ed6da0f87",
+   "answer:damaged": "431a86ca754a8285",
+   "answer:days": "b8e0bb3fdbd8b1d9",
+   "answer:kind": "9d67b22e6f113d6a",
+   "answer:level": "8291b0605c640ed5",
+   "answer:route": "a76bff1fda54bdf2",
+   "answer:signed": "e9b93915ddae89dc",
+   "answer:tags": "a72c269c7753aac4",
+   "answer:team": "b717f95ca6217858",
+   "urgent": "41556de2c4850070"
+  },
+  "questions": "f7d789747682afc4"
+ },
+ "golden/head": {
+  "catalog": "3d004d37cadd114f",
+  "models": {
+   "answer:ok": "246ddf5b09980104"
+  },
+  "parts": {
+   "large": "492eec4a80f4184b",
+   "late": "569370981783f8db",
+   "small_share": "e5e4d3fa23db5051"
+  },
+  "questions": "478c90e635450a50"
+ },
+ "golden/llm_decider": {
+  "catalog": "99b6e9403554b9a6",
+  "models": {
+   "answer:kind": "a25f748449b08a1e"
+  },
+  "parts": {
+   "answer:kind": "e8d796337af20cfe"
+  },
+  "questions": "141ed1993f263716"
+ },
+ "golden/rule_list": {
+  "catalog": "d08a4952645160c4",
+  "models": {
+   "answer:ok": "4fe31d9407610f78"
+  },
+  "parts": {
+   "answer:ok": "0c6d6ba1352bc247",
+   "large": "492eec4a80f4184b",
+   "late": "569370981783f8db",
+   "small_share": "e5e4d3fa23db5051"
+  },
+  "questions": "9d68c4b708196274"
+ },
+ "golden/typed_rules": {
+  "catalog": "89b7d6511164c85e",
+  "models": {},
+  "parts": {
+   "amount_text": "b4555040022cfd04",
+   "answer:channels": "1c844a0b41b234e7",
+   "answer:days": "aa2687994b679827",
+   "answer:level": "670f2afbbc5b0f6d",
+   "answer:level_num": "3b86895ee2c9602b",
+   "answer:paid": "5821888195c133ac",
+   "answer:refund": "c317339f7a6eed04",
+   "answer:severity": "0f07c013c51cbad5",
+   "answer:total": "8e1d72c921fe5ed9",
+   "answer:weeks": "6db809788b0eae0b",
+   "constraint:major_is_not_refunded": "922c64590b498afa",
+   "maybe_text": "57788f1f49c969b5",
+   "n_words": "1fc3ac54993cb755",
+   "order": "6fc2777e4bde8179",
+   "small": "035c84f68b59dd61"
+  },
+  "questions": "1b25790f867761b3"
+ },
+ "objects/cascade": "0eb650348d8c540b",
+ "objects/decision_part": "cda257b0a133cd67",
+ "objects/generator_part": "eb3983b73088f511",
+ "objects/vote": "7f1ca1c3041e5663",
+ "stand/abtbuy": {
+  "catalog": "e59b2da3a7e4ba7c",
+  "models": {},
+  "parts": {
+   "a_brand": "b9fa0fd9f84aa04f",
+   "a_codes": "41e1ac7d9553a8f5",
+   "a_key": "1522b3691d4dd03f",
+   "a_model": "0dbadc0bf1b14ceb",
+   "b_brand": "fcf4825e1df51d94",
+   "b_code_in_a": "df675eb5459a2d4a",
+   "b_codes": "42a88f5c7d110906",
+   "b_desc_codes": "314efe100d17bc83",
+   "b_has_code": "f07706c79fb3c840",
+   "b_in_a": "e2e02c2d3f1b044d",
+   "both_priced": "23761d2ef9355223",
+   "char_sim": "81739c4f02a12c41",
+   "colour_conflict": "400f99cdaadecfef",
+   "digit_conflict": "8c91815a94c97434",
+   "model_equal": "7ec338d8cf32d80b",
+   "model_in_b": "8835d329cb4af80a",
+   "model_sim": "490ffe6ddd9367bf",
+   "name_in_b": "5a8905138fbf4ed4",
+   "name_overlap": "21aca1912f16afaf",
+   "price_gap": "4009915f7d9ed11d",
+   "same_brand": "86bbb5fd2e8ab4b8",
+   "shared_codes": "7dd42b668c96a3b4",
+   "size_conflict": "ffc0a356f2d7ec8c",
+   "stem_equal": "1a1e24f1842c228c"
+  },
+  "questions": "08a66f81d7d9bb26"
+ },
+ "stand/bird": {
+  "catalog": "64de5705c558b964",
+  "models": {
+   "candidates": "150ee8f6aad4caba"
+  },
+  "parts": {
+   "agreement": "3a12467a2bb43500",
+   "candidates": "ef956158a0d286b2",
+   "computes_ratio": "8fec1c0b42cb6d00",
+   "execution": "a2637a83dcd903f4",
+   "has_subquery": "22adf69a561e5816",
+   "is_aggregate": "91b6d476883ce5e7",
+   "n_cols": "835dc88369950969",
+   "query_runs": "43f913358f5cf6fe",
+   "returns_rows": "8fc79e12e075c33b",
+   "sql": "1eca6c8db85d7632",
+   "sql_tally": "89961fa511deeb54"
+  },
+  "questions": "7271b74cfef4e63e"
+ },
+ "stand/credit:v1": {
+  "catalog": "1ea4af4c45735cb4",
+  "models": {},
+  "parts": {
+   "amount_points": "1c9262aca0f9dc69",
+   "answer:decision": "856b937cd7dce4fc",
+   "checking_points": "fdc8e6fdc8095976",
+   "duration_points": "9bb27304db87051c",
+   "employment_points": "899612490b1f40c1",
+   "history_points": "88ba0c73365402e7",
+   "not_too_large": "26b77ae7a9a28ea6",
+   "other_plans_points": "4b50f84071a59541",
+   "points": "9bebeca09f7c2aee",
+   "property_points": "160b6062ccb025d3",
+   "savings_points": "64916093af7e2667"
+  },
+  "questions": "437be53c870a9d2b"
+ },
+ "stand/credit:v2": {
+  "catalog": "a94160acbf634bdc",
+  "models": {},
+  "parts": {
+   "amount_points": "1c9262aca0f9dc69",
+   "answer:decision": "5c7e1eef228a245c",
+   "checking_points": "fdc8e6fdc8095976",
+   "duration_points": "9bb27304db87051c",
+   "employment_points": "899612490b1f40c1",
+   "guarantor_points": "396caa9cfd6519ee",
+   "history_points": "88ba0c73365402e7",
+   "not_too_large": "26b77ae7a9a28ea6",
+   "other_plans_points": "4b50f84071a59541",
+   "points": "288bf1fb12adf1c6",
+   "purpose_points": "5b5bd9a31949483f",
+   "savings_points": "64916093af7e2667"
+  },
+  "questions": "437be53c870a9d2b"
+ },
+ "stand/credit:v2_young": {
+  "catalog": "c02112eb51076c38",
+  "models": {},
+  "parts": {
+   "amount_points": "1c9262aca0f9dc69",
+   "answer:decision": "5c7e1eef228a245c",
+   "checking_points": "fdc8e6fdc8095976",
+   "duration_points": "9bb27304db87051c",
+   "employment_points": "899612490b1f40c1",
+   "guarantor_points": "396caa9cfd6519ee",
+   "history_points": "88ba0c73365402e7",
+   "not_too_large": "26b77ae7a9a28ea6",
+   "other_plans_points": "4b50f84071a59541",
+   "points": "933648ff4e7c4649",
+   "purpose_points": "5b5bd9a31949483f",
+   "savings_points": "64916093af7e2667",
+   "young_points": "1a53cd3d0ff05b6d"
+  },
+  "questions": "437be53c870a9d2b"
+ },
+ "stand/cuad": {
+  "catalog": "da4c5c7233feac5c",
+  "models": {},
+  "parts": {
+   "answer:clause": "b270bcfaf92d0415",
+   "trust": "e857344271eff960"
+  },
+  "questions": "c9cf0cd4a2466364"
+ },
+ "stand/nab": {
+  "catalog": "4ab856b2e652dd7b",
+  "models": {},
+  "parts": {
+   "above_floor": "0a8edadac530f611",
+   "answer:alert": "d5bdea85250f3d02",
+   "day_profile": "1c43780b7d54a100",
+   "enough_history": "b82e06a0a906978b",
+   "level": "ff25b72c5d5cdc27",
+   "score": "1c954cd0e5fd37d9",
+   "threshold": "2f80604abbb189a8"
+  },
+  "questions": "a12c0978795c5942"
+ },
+ "stand/naturalplan:calendar": {
+  "catalog": "a2ce6fea0e39bdb3",
+  "models": {},
+  "parts": {
+   "answer:accept": "f354c8e2d6c938ae",
+   "answer_text": "189bf7f12a66e5c6",
+   "day_allowed": "2b484828c6298af5",
+   "facts": "e12bad56b5feb195",
+   "inside_work_hours": "036a65114f07335e",
+   "nobody_busy": "79e007f8f7bd4074",
+   "right_length": "c72699ddfa0e0e13",
+   "slot": "bb08b339fa1d2890",
+   "violations": "02b89a4e0f699c77",
+   "wishes_kept": "890410fc592d761c"
+  },
+  "questions": "74908a3f7b747c73"
+ },
+ "stand/naturalplan:meeting": {
+  "catalog": "14fb8fbfa0630574",
+  "models": {},
+  "parts": {
+   "answer:accept": "f354c8e2d6c938ae",
+   "answer_text": "5fc20ff022fbabf8",
+   "every_meeting_fits": "be88ea39bc9df3e2",
+   "facts": "26c4df584f52bb00",
+   "meets_somebody": "34eaa46bb9da894a",
+   "violations": "43fc945ff6263b18",
+   "walk": "53fa0e6d853917f8"
+  },
+  "questions": "cea1f163c78d54f5"
+ },
+ "stand/naturalplan:trip": {
+  "catalog": "e4a98d5d272f5a21",
+  "models": {},
+  "parts": {
+   "all_cities": "8e79b8e90979cc58",
+   "answer:accept": "f354c8e2d6c938ae",
+   "answer_text": "e550824214199760",
+   "cities_once": "2ed5b8291b89b407",
+   "direct_flights": "241df3096f402d10",
+   "events_kept": "ca79fbfc5af953b2",
+   "facts": "0b6cf221da5c6e6a",
+   "fits_total": "3ee8921cea357ed6",
+   "violations": "abc8e8599e428b0a",
+   "walk": "fc5da30378483994",
+   "within_days": "f67ae086915151c9"
+  },
+  "questions": "0b49dff7b3b8b159"
+ },
+ "types/bins": [
+  "Annotated",
+  [
+   "builtins",
+   "float"
+  ],
+  [
+   "Bins([0, 2, 4], coverage=0.9, unit='weeks')"
+  ]
+ ],
+ "types/claim": [
+  "solvi.core",
+  "Claim"
+ ],
+ "types/decision": [
+  "solvi.core",
+  "Decision"
+ ],
+ "types/estimate": [
+  "Annotated",
+  [
+   "builtins",
+   "float"
+  ],
+  [
+   "Bins([0, 3, 7, 14], coverage=0.8, unit=None)"
+  ]
+ ],
+ "types/list_literal": [
+  "<class 'list'>",
+  [
+   [
+    "typing.Literal",
+    [
+     "'a'",
+     "'b'"
+    ]
+   ]
+  ]
+ ],
+ "types/maybe_bool": [
+  "typing.Union",
+  [
+   [
+    "builtins",
+    "bool"
+   ],
+   [
+    "solvi.core",
+    "NotStated"
+   ]
+  ]
+ ],
+ "types/maybe_estimate": [
+  "typing.Union",
+  [
+   [
+    "Annotated",
+    [
+     "builtins",
+     "float"
+    ],
+    [
+     "Bins([0, 7], coverage=0.8, unit=None)"
+    ]
+   ],
+   [
+    "solvi.core",
+    "NotStated"
+   ]
+  ]
+ ],
+ "types/maybe_span_float": [
+  "typing.Union",
+  [
+   [
+    "Annotated",
+    [
+     "builtins",
+     "float"
+    ],
+    [
+     "SpanOf('doc')"
+    ]
+   ],
+   [
+    "solvi.core",
+    "NotStated"
+   ]
+  ]
+ ],
+ "types/not_stated": [
+  "solvi.core",
+  "NotStated"
+ ],
+ "types/quote": [
+  "solvi.core",
+  "Quote"
+ ],
+ "types/rank_2": [
+  "Annotated",
+  [
+   "<class 'tuple'>",
+   [
+    [
+     "typing.Literal",
+     [
+      "'email'",
+      "'phone'",
+      "'letter'"
+     ]
+    ],
+    "Ellipsis"
+   ]
+  ],
+  [
+   "RankOf(2)"
+  ]
+ ],
+ "types/rank_all": [
+  "Annotated",
+  [
+   "<class 'tuple'>",
+   [
+    [
+     "typing.Literal",
+     [
+      "'a'",
+      "'b'"
+     ]
+    ],
+    "Ellipsis"
+   ]
+  ],
+  [
+   "RankOf(None)"
+  ]
+ ],
+ "types/scale_literal": [
+  "Annotated",
+  [
+   "typing.Literal",
+   [
+    "'low'",
+    "'medium'",
+    "'high'"
+   ]
+  ],
+  [
+   "Ordinal()"
+  ]
+ ],
+ "types/scale_values": [
+  "Annotated",
+  [
+   "typing.Literal",
+   [
+    "1",
+    "2",
+    "3"
+   ]
+  ],
+  [
+   "Ordinal()"
+  ]
+ ],
+ "types/span_float_note": [
+  "Annotated",
+  [
+   "builtins",
+   "float"
+  ],
+  [
+   "SpanOf('note')"
+  ]
+ ],
+ "types/str_or_not_stated": [
+  "<class 'types.UnionType'>",
+  [
+   [
+    "builtins",
+    "str"
+   ],
+   [
+    "solvi.core",
+    "NotStated"
+   ]
+  ]
+ ]
+}
