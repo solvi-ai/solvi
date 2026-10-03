@@ -1,34 +1,25 @@
-"""Model strategist (experimental): the typed decomposer from research as a solvi strategist.
+"""The code strategist: dead ends dropped, the cheapest verified plan by declared (or measured) costs — no model.
 
 The deterministic strategist (solvi.strategist) walks back from each question's targets by exact names and, for a fact with
 alternative producers (`provides=`), needs the inputs of ALL of them (a fallback chain). This module plans differently:
 
-1. **Points — code.** A branch-and-bound search picks ONE producer per needed fact so that the plan is valid and cheapest
-   (declared `cost=`; a part without a declared cost counts as `unit`). A producer whose inputs cannot be computed from the
-   given facts (a dead end) is never chosen. Hard checks that govern a question (its `then` names the question, it has no
-   `then`, or the question requires it) and that the deterministic flow over the usable producers contains
-   are **mandatory milestones**: every plan must keep them.
-2. **Segments — the model.** Where the choice is not settled by declared costs (a fact with several usable producers, not
-   all of them with a declared cost), the model gets a short task — "produce this fact from these available facts; these are
-   the candidate parts (narrowed by code)" — and proposes 1–4 parts, in order. All segments of a plan go through the model in
-   one batch.
-3. **Verification — code.** Each segment is checked (every part is a candidate, the last one provides the fact, every input is
-   available or made earlier in the segment, types fit); an accepted segment fixes those choices and the search completes
-   the rest; the whole plan is checked again (inputs bound, acyclic, types, every mandatory hard check kept). A rejected
-   segment falls back to the code choice for that fact; a plan that fails the final check falls back to the code plan
-   (`on_failure="code"`), to the deterministic strategist (`"deterministic"`) or abstains (`"abstain"`).
+1. **Points.** A search (an exact 0/1 program; branch and bound as a fallback) picks ONE producer per needed fact so that
+   the plan is valid and cheapest (declared `cost=`; a part without a declared cost counts as `unit`). A producer whose
+   inputs cannot be computed from the given facts (a dead end) is never chosen. Hard checks that govern a question (its
+   `then` names the question, it has no `then`, or the question requires it) and that the deterministic flow over the
+   usable producers contains are **mandatory milestones**: every plan must keep them.
+2. **Verification.** The whole plan is checked (inputs bound, acyclic, types, every mandatory hard check kept); a plan that
+   fails the check is used with the failure recorded (`on_failure="code"`), or falls back to the deterministic strategist
+   (`"deterministic"`), or every question abstains (`"abstain"`).
 
-So a model error costs cost or coverage, never a silent wrong wiring: every candidate of a segment provides the same fact
-(that is what `provides=` declares) and runs its own validator at run time, names bind exactly, and only verified plans run.
-The plan is recorded in the trace as one hashed record (kind "plan"; provenance "proposed" when the model chose any part,
-with the model's fingerprint and, per segment, what was proposed and why it was accepted or rejected); `trace.replay`
-re-verifies it against the catalog.
+The plan is recorded in the trace as one hashed record (kind "plan"); `trace.replay` re-verifies it against the catalog.
 
-    from solvi.strategy import CostStrategist, ModelStrategist
-    system = System(cat, questions, strategist=CostStrategist())      # code only: cheapest verified plan, no model
-    system = System(cat, questions, strategist=ModelStrategist.load("path/to/strategist-checkpoint"))   # experimental
+    from solvi.strategy import CostStrategist
+    system = System(cat, questions, strategist=CostStrategist())                          # dead ends dropped
+    system = System(cat, questions, strategist=CostStrategist(producers="equivalent"))    # the cheapest verified plan
 
-Experimental: no strategist checkpoint is published; see docs/strategist.md for its status and when the model helps at all."""
+(The model strategist, `ModelStrategist`, that proposed producers where declared costs did not settle the choice, was
+removed in 1.0: it gained nothing over declaring `cost=`.)"""
 from __future__ import annotations
 
 import dataclasses
@@ -40,7 +31,6 @@ from .core import Catalog, _group_func
 from .runtime import narrowed, replay_plan             # defined there (the runtime replays plan records); re-exported
 
 UNIT = 1.0
-MAX_NODES = 4
 MAX_EXPAND = 20000               # branch and bound (search(method="bnb"), or no scipy milp): nodes before it stops
 
 
@@ -120,7 +110,7 @@ class Selection:
 def search(catalog, questions, init_keys, costs=None, heads=None, fixed=None, extra=(), unit=UNIT,
            method="auto"):
     """Cheapest valid selection for the questions' targets, their required parts and `extra` parts (e.g. mandatory checks).
-    fixed: {fact: producer name} choices that must be kept (a model's accepted segments).
+    fixed: {fact: producer name} choices that must be kept.
     method: "milp" (exact: a 0/1 program solved by scipy's HiGHS), "bnb" (branch and bound, capped at MAX_EXPAND nodes)
     or "auto" (milp when scipy has it). Ties go to the producer declared first.
     → Selection (feasible=False when a target cannot be computed; `why` says which)."""
@@ -481,171 +471,36 @@ def build(catalog, questions, init_keys, sel, heads=None, fallbacks=True, gov=No
                     qs, init_keys, heads)
 
 
-# ---------------------------------------------------------------------------------------------------------------- segments
-def segments(catalog, questions, init_keys, sel, costs=None, depth=3, all_facts=False):
-    """The facts whose producer the model should choose, each as a short task (narrowed by code):
-    {"fact", "type", "question", "available": [(fact, type, how)], "candidates": [part info], "code": [code's parts]}.
-    A fact is a segment when it has ≥ 2 usable producers and not all of them declare a cost (else code decides);
-    all_facts=True: every fact with ≥ 2 producers (training / evaluation)."""
-    from .typed import type_name
-    init = set(init_keys)
-    reach = reachable(catalog, init)
-    ch = sel.choice
-    # what depends on what in the code plan (to keep a segment's available facts upstream of its fact)
-    ins = {f: set(producer(catalog, f, n).inputs) for f, n in ch.items()}
-    down = {}
-
-    def downstream(f):
-        if f not in down:
-            down[f] = {g for g, xs in ins.items() if f in xs}
-            for g in list(down[f]):
-                down[f] |= downstream(g)
-        return down[f]
-    qtext = "; ".join(q.text for q in questions)
-    out = []
-    for f in sorted(ch, key=lambda f: list(catalog.parts).index(f)):
-        g = catalog.parts[f]
-        if g.alternatives is None:
-            continue
-        us = usable(catalog, f, reach)
-        declared = all(a.cost is not None or (costs and a.name in costs) for a in us)
-        if not all_facts and (len(us) < 2 or declared):
-            continue
-        avail = (init | set(ch)) - {f} - downstream(f)
-        cand, seen_f = [], set()
-        frontier, d = [f], 0
-        while frontier and d < depth:
-            nxt = []
-            for x in frontier:
-                if x in seen_f or x not in catalog.parts:
-                    continue
-                seen_f.add(x)
-                for a in alternatives(catalog.parts[x]):
-                    cand.append(_info(catalog, a, x, d + 1, costs))
-                    nxt += [y for y in a.inputs if y not in avail and y not in init]
-            frontier, d = nxt, d + 1
-        how = {x: ("given" if x in init else "computed") for x in avail}
-        av = sorted((x, type_name(catalog.types[x]) if x in catalog.types else _given_type(catalog, x), how[x])
-                    for x in avail if x in init or x in catalog.parts)
-        code_nodes = _code_nodes(catalog, f, ch, avail)
-        out.append({"fact": f, "type": type_name(catalog.types[f]) if f in catalog.types else "any", "question": qtext,
-                    "available": av, "candidates": cand, "code": code_nodes})
-    return out
-
-
-def _given_type(catalog, x):
-    from .typed import type_name
-    rs = catalog.readers.get(x)
-    return type_name(next(iter(rs.values()))) if rs else "any"
-
-
-def _info(catalog, a, fact, depth, costs):
-    from .typed import type_name
-    c = costs.get(a.name) if costs and a.name in costs else a.cost
-    return {"name": a.name, "fact": fact, "kind": a.kind, "provides": a.provides,
-            "params": [(x, type_name((a.types or {}).get(x)) if (a.types or {}).get(x) is not None else "any") for x in a.inputs],
-            "returns": type_name(a.returns) if a.returns is not None else "any", "doc": a.doc or "", "cost": c, "depth": depth}
-
-
-def _code_nodes(catalog, f, choice, avail):
-    """The code plan's parts for this segment: the chosen producer of f and, before it, those of its inputs not available."""
-    out, seen = [], set()
-
-    def visit(x):
-        if x in seen or x in avail or x not in choice:
-            return
-        seen.add(x)
-        a = producer(catalog, x, choice[x])
-        for y in a.inputs:
-            visit(y)
-        out.append(a.name)
-    visit(f)
-    return out
-
-
-def check_segment(catalog, seg, nodes):
-    """A proposed segment (part names, in order) → None if acceptable, else why not."""
-    if not nodes:
-        return "empty segment"
-    if len(nodes) > MAX_NODES:
-        return f"{len(nodes)} parts (at most {MAX_NODES})"
-    by = {c["name"]: c for c in seg["candidates"]}
-    if len(set(nodes)) != len(nodes):
-        return "a part appears twice"
-    have = {x for x, _, _ in seg["available"]}
-    made = []
-    for n in nodes:
-        if n not in by:
-            return f"{n} is not a candidate of this segment"
-        c = by[n]
-        a = producer(catalog, c["fact"], n)
-        for x in a.inputs:
-            if x not in have:
-                return f"{n}: input {x} is not available"
-            t = (a.types or {}).get(x)
-            if t is not None and not type_ok(catalog, x, t):
-                return f"{n}: {x} does not fit its type"
-        if c["fact"] in have and c["fact"] != seg["fact"]:
-            return f"{n}: {c['fact']} is already available"
-        have.add(c["fact"])
-        made.append(c["fact"])
-    if made[-1] != seg["fact"]:
-        return f"the last part does not provide {seg['fact']}"
-    if seg["fact"] in made[:-1]:
-        return f"{seg['fact']} is produced twice"
-    need = set()
-    for n in nodes[1:]:
-        need |= set(producer(catalog, by[n]["fact"], n).inputs)
-    idle = [m for m in made[:-1] if m not in need]
-    if idle:
-        return "unused parts: " + ", ".join(idle)
-    return None
-
-
 # ---------------------------------------------------------------------------------------------------------------- strategists
 class CostStrategist:
     """The code strategist for System(..., strategist=...): dead ends dropped, the cheapest verified plan by declared (or
-    measured) costs — no model. ModelStrategist is the same planner with a model that proposes segments.
+    measured) costs — no model.
 
     producers: how to treat the alternative producers of a fact (`provides=`):
       "declared" (default) — as the deterministic strategist does: a fallback chain in declaration order (the first is the
         preferred one), except that producers whose inputs cannot be computed (dead ends) are dropped instead of making the
-        whole fact unreachable. Answers are those of the deterministic strategist wherever it can answer; nothing is left
-        to choose, so a model is never asked.
+        whole fact unreachable. Answers are those of the deterministic strategist wherever it can answer.
       "equivalent" — the producers of a fact are interchangeable (any accepted output is the same fact): one is chosen as
-        the primary, the cheapest valid plan by declared `cost=` (unit when undeclared); where declared costs do not settle
-        it, the model (if any) proposes the segment; the others stay as run-time fallbacks when their inputs are already
-        computed (keep_alternatives=True).
+        the primary, the cheapest valid plan by declared `cost=` (unit when undeclared, or measured run times with
+        System(cost_policy="measured")); the others stay as run-time fallbacks when their inputs are already computed
+        (keep_alternatives=True).
     on_failure: when the verified plan cannot be built — "code" (the code plan), "deterministic" (solvi.strategist.plan)
     or "abstain" (every question abstains). keep_alternatives: keep the other producers of a fact as run-time fallbacks.
     record: write the plan record into the trace. (0.7 names, removed in 0.9: fallback= for on_failure=, fallbacks= for
     keep_alternatives=.)"""
 
-    model = None
-
     @_deprecate.removed_kwargs(fallback="on_failure", fallbacks="keep_alternatives")
     def __init__(self, producers="declared", on_failure="code", costs=None, keep_alternatives=True, record=True):
-        self._setup(None, producers, on_failure, costs, keep_alternatives, record)
-
-    def _setup(self, model, producers, on_failure, costs, keep_alternatives, record):
         if on_failure not in ("code", "deterministic", "abstain"):
             raise ValueError('on_failure must be "code", "deterministic" or "abstain"')
         if producers not in ("declared", "equivalent"):
             raise ValueError('producers must be "declared" or "equivalent"')
-        self.model, self.producers, self.on_failure, self.costs = model, producers, on_failure, costs
+        self.producers, self.on_failure, self.costs = producers, on_failure, costs
         self.keep_alternatives, self.record = keep_alternatives, record
         self.last = None
 
     fallback = _deprecate.removed_attr("fallback", "on_failure", "CostStrategist")
     fallbacks = _deprecate.removed_attr("fallbacks", "keep_alternatives", "CostStrategist")
-
-    @property
-    def fingerprint(self):
-        return None if self.model is None else self.model.fingerprint
-
-    def info(self):
-        """{"type", "id", "fp"} of the model (as in trace records), or None."""
-        return None if self.model is None else self.model.info()
 
     def plan(self, catalog, questions, init_keys, heads=None, costs=None):
         """→ Flow. costs: {producer: cost} from the caller (System(cost_policy="measured") passes measured run times), under the
@@ -673,53 +528,16 @@ class CostStrategist:
         gov = mandatory_checks(catalog, qs, init, heads)
         must = [c for cs in gov.values() for c in cs]
         code = search(catalog, qs, init, costs, heads, extra=must)
-        report = {"strategist": "model" if self.model is not None else "code", "segments": [], "fallback": None,
+        report = {"strategist": "code", "segments": [], "fallback": None,
                   "code_cost": code.cost, "proven": code.proven, "mandatory": gov}
         if not code.feasible:
             flow = det_plan(catalog, qs, init, heads)
             report["fallback"] = "no feasible selection: " + code.why
             return self._done(flow, report, t0, None)
-        sel, code_flow = code, build(catalog, qs, init, code, heads, self.keep_alternatives, gov)
-        segs = segments(catalog, qs, init, code, costs) if self.model is not None else []
-        fixed = {}
-        if segs:
-            props = self.model.propose(segs)
-            for seg, prop in zip(segs, props):
-                row = {"fact": seg["fact"], "code": seg["code"], "proposed": list(prop["nodes"]),
-                       "score": prop.get("score"), "candidates": len(seg["candidates"])}
-                why = check_segment(catalog, seg, prop["nodes"])
-                if why is not None and prop.get("second"):
-                    why2 = check_segment(catalog, seg, prop["second"])
-                    row["first_rejected"] = why
-                    if why2 is None:
-                        row["proposed"], why = list(prop["second"]), None
-                if why is None:
-                    by = {c["name"]: c["fact"] for c in seg["candidates"]}
-                    for n in row["proposed"]:
-                        fixed[by[n]] = n
-                    row["accepted"] = "verified: every input available, types fit, provides " + seg["fact"]
-                    row["by"] = "model"
-                else:
-                    row["rejected"] = why
-                    row["by"] = "code"
-                report["segments"].append(row)
-            if fixed:
-                sel = search(catalog, qs, init, costs, heads, fixed=fixed, extra=must)
-                ignored = [f for f, n in fixed.items() if sel.choice.get(f) not in (None, n)]
-                if ignored:
-                    report["overridden"] = ignored
-        flow = build(catalog, qs, init, sel, heads, self.keep_alternatives, gov) if sel is not code else code_flow
+        sel = code
+        flow = build(catalog, qs, init, code, heads, self.keep_alternatives, gov)
         bad = validate(catalog, flow, qs, init, gov)
-        if bad and sel is not code:
-            report["fallback"] = "plan rejected: " + "; ".join(bad[:3])
-            bad0 = validate(catalog, code_flow, qs, init, gov)
-            if self.on_failure == "code" and not bad0:
-                flow, sel = code_flow, code
-            elif self.on_failure == "deterministic":
-                flow, sel = det_plan(catalog, qs, init, heads), None
-            else:
-                flow, sel = _abstain(qs, "strategist: " + report["fallback"]), None
-        elif bad:
+        if bad:
             report["fallback"] = "code plan rejected: " + "; ".join(bad[:3])
             if self.on_failure == "deterministic":
                 flow, sel = det_plan(catalog, qs, init, heads), None
@@ -731,34 +549,11 @@ class CostStrategist:
     def _done(self, flow, report, t0, sel):
         report["ms"] = (time.perf_counter() - t0) * 1000
         report["choice"] = dict(sel.choice) if sel is not None else None
-        report["model"] = self.info()
+        report["model"] = None                        # the model strategist's place in the report (removed in 1.0)
         flow.strategy = report
         self.last = report
         return flow
 
-
-
-class ModelStrategist(CostStrategist):
-    """CostStrategist with a model (experimental: no checkpoint is published) that proposes the producers where declared
-    costs do not settle the choice; code verifies every proposal (see the module docs). Without a model it is
-    CostStrategist() (ModelStrategist() without one, the 0.7 spelling, was removed in 0.9)."""
-
-    @_deprecate.removed_kwargs(fallback="on_failure", fallbacks="keep_alternatives")
-    def __init__(self, model, producers="declared", on_failure="code", costs=None, keep_alternatives=True,
-                 record=True):
-        if model is None:
-            raise TypeError("ModelStrategist() needs a model: without one it is CostStrategist() (ModelStrategist() "
-                            "without a model was renamed in 0.8 and removed in 0.9)")
-        self._setup(model, producers, on_failure, costs, keep_alternatives, record)
-
-    @classmethod
-    def load(cls, path, backend="auto", producers="equivalent", threads=None, quantized=False, **kw):
-        """A trained segment model (a directory or a Hugging Face id; docs/strategist.md) behind this strategist. The model
-        chooses among interchangeable producers, so `producers` defaults to "equivalent" here.
-
-        Experimental: no checkpoint is published — it reads one you trained yourself (docs/strategist.md has the format)."""
-        from .segment_model import SegmentModel
-        return cls(SegmentModel.load(path, backend=backend, threads=threads, quantized=quantized), producers=producers, **kw)
 
 
 def _abstain(questions, why):
@@ -767,25 +562,21 @@ def _abstain(questions, why):
 
 # ---------------------------------------------------------------------------------------------------------------- trace
 def plan_record(flow):
-    """The hashed trace record of a planned flow (kind "plan"): the chosen producers, the mandatory checks and, per segment,
-    what the model proposed and why it was accepted or rejected."""
+    """The hashed trace record of a planned flow (kind "plan"): the chosen producers and the mandatory checks."""
     from .runtime import Record
     s = getattr(flow, "strategy", None)
     if s is None:
         return None
-    by_model = any(r.get("by") == "model" for r in s.get("segments", ()))
     value = {"choice": s.get("choice") or {}, "mandatory": s.get("mandatory") or {}}
-    extra = {"strategist": s["strategist"], "segments": [{k: r[k] for k in ("fact", "proposed", "code", "by", "accepted",
-                                                                               "rejected", "first_rejected") if k in r}
-                                                          for r in s.get("segments", ())]}
+    extra = {"strategist": s["strategist"], "segments": []}      # "segments": the model strategist's (removed in 1.0)
     if s.get("fallback"):
         extra["fallback"] = s["fallback"]
     if s.get("costs"):                                # costs from measurements (System(cost_policy="measured")): why each choice
         extra["costs"] = s["costs"]
-    return Record(step=0, kind="plan", name="plan:strategy", inputs={}, value=value,
-                  provenance="proposed" if by_model else "computed", model=s.get("model") if by_model else None, extra=extra)
+    return Record(step=0, kind="plan", name="plan:strategy", inputs={}, value=value, provenance="computed", model=None,
+                  extra=extra)
 
 
-__all__ = ["CostStrategist", "ModelStrategist", "Selection", "search", "segments", "check_segment", "validate", "build", "view", "reachable",
+__all__ = ["CostStrategist", "Selection", "search", "validate", "build", "view", "reachable",
            "plan_record", "replay_plan", "PlanError", "alternatives", "usable", "narrowed", "mandatory_checks", "governing",
            "producer"]

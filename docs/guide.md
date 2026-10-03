@@ -1778,9 +1778,8 @@ every request with the same keys.
 whose inputs are never given dropped (the deterministic strategist needs the inputs of every producer of a fact);
 `CostStrategist(producers="equivalent")` treats the producers of a fact as interchangeable and picks the cheapest verified
 plan by declared `cost=`, keeping every hard check that governs a question (`System(..., producers="equivalent")` is a
-shortcut for it). Both are code only. A segment model (`ModelStrategist.load`) and the name matcher of `solvi.aliases` are
-experimental: no checkpoint is published for either. Details, the
-trace record of a plan and what was measured: [docs/strategist.md](strategist.md).
+shortcut for it). Both are code only. Details and the trace record of a plan:
+[docs/strategist.md](strategist.md).
 
 **Costs from measurements.** `System(cat, questions, producers="equivalent", cost_policy="measured")` plans with the run times
 `system.cost_book` measures instead of declared costs: after a warm-up (each producer measured `min_samples` times; an

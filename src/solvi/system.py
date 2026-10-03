@@ -208,8 +208,7 @@ class System:
         catalog (ask refuses such a key: the value would replace the part), so a model field named like a part is refused
         here.
         strategist: an object with plan(catalog, questions, init_keys, heads) → Flow used by ask instead of the deterministic
-        strategist (solvi.strategy.CostStrategist, or the experimental ModelStrategist; its plan is recorded in the trace,
-        see docs/strategist.md).
+        strategist (solvi.strategy.CostStrategist; its plan is recorded in the trace, see docs/strategist.md).
         storage: a solvi.storage.TraceStorage (or a path: .db / .sqlite → SQLite, else JSON lines) — every ask saves its
         response (answers, flow, whole trace) there, hash-chained across responses, and teach saves the correction; the
         response's `stored_id` is its id in the store (journal=path, its 0.7 name, was removed in 0.9).

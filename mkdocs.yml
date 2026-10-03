@@ -46,7 +46,7 @@ nav:
   - Best practices: best_practices.md
   - Formats and tools:
       - Decider checkpoint and input format: decide_format.md
-      - Model strategist and name matching: strategist.md
+      - Code strategist: strategist.md
       - Regression tests: testing.md
       - Honesty suite: honesty.md
       - Benchmarks: benchmarks.md
@@ -91,7 +91,6 @@ nav:
       - solvi.strategy: api/strategy.md
       - solvi.costs: api/costs.md
       - solvi.rulelist: api/rulelist.md
-      - solvi.aliases: api/aliases.md
       - solvi.audit: api/audit.md
       - solvi.show: api/show.md
       - solvi.report: api/report.md

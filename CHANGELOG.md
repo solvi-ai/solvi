@@ -15,6 +15,9 @@ had a measured run. Importing a removed module raises ModuleNotFoundError.
 | `solvi.otel` and the `otel` extra | nothing in solvi used it and no user was known; one more dependency surface to keep working | `res.to_dict()` or a store (`solvi.storage`), sent to your tracing backend by your own code |
 | `solvi.pytest_plugin` (the `pytest11` entry point, `pytest gallery/`, `--solvi-fuzz`) | it loaded in every pytest session wherever solvi was installed; `solvi test` runs the same cases | `solvi test <dir>` (`--fuzz N`), or one pytest test that calls `solvi.testing.run_path` (docs: Regression tests) |
 | `solvi.counterfactual` and `Response.counterfactual()` | no measured use: nothing in the benchmarks, the gallery or the examples relied on it | ask the System on the changed inputs (`solvi.search` tries many candidate inputs against the checks) |
+| `ModelStrategist` and `solvi.segment_model` (the model strategist) | experimental, no checkpoint was ever published, and the model planned no better than a short keyword list at many times the time | `CostStrategist(producers="equivalent")` with `cost=` declared (or `cost_policy="measured"`) |
+| `solvi.aliases` (`NameMatcher`, `propose`, `accept`, `apply`, `match_names`) | experimental, no checkpoint of the matcher was ever published, no measurement | name the parameters after the facts they read, or a one-line part that renames a fact |
+| example `17_model_strategist.py` | it showed the two removed pieces with stand-in models | `examples/17_cost_strategist.py`: the code strategist alone |
 
 ## 0.9.0 — 2026-10-03 — System 1 and System 2
 

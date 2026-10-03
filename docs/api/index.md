@@ -37,10 +37,9 @@ this reference lists what each module exports and the signatures.
 | [`solvi.extract_long`](extract_long.md) | `@extract` by description for long documents (`LongSpanExtractor`; torch) |
 | [`solvi.extract_multi`](extract_multi.md) | a single-pass `@extract` over several fields (torch) |
 | [`solvi.strategist`](strategist.md) | the strategist: a flow per request (`Flow`, `PlanError`), the learned order of hard checks and producer policy |
-| [`solvi.strategy`](strategy.md) | the model strategist (experimental, `ModelStrategist`) |
+| [`solvi.strategy`](strategy.md) | the code strategist (`CostStrategist`): dead ends dropped, the cheapest verified plan |
 | [`solvi.costs`](costs.md) | measured run times (`CostBook`) and the planner's measured costs (`MeasuredCosts`) |
 | [`solvi.rulelist`](rulelist.md) | a readable rule list learned from examples (`System.learn_rule`; `solvi.rules` up to 0.7) |
-| [`solvi.aliases`](aliases.md) | name matching between parameters and facts (experimental) |
 | [`solvi.audit`](audit.md) | `res.audit()`: what each answer rests on and which safeguards fired; `to_dict()` as JSON-ready data |
 | [`solvi.show`](show.md) | printing a response |
 | [`solvi.report`](report.md) | reports of one decision or a period of stored decisions (Markdown, HTML, data) |

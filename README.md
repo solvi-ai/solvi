@@ -348,9 +348,7 @@ from solvi.strategy import CostStrategist
 system = System(cat, questions, strategist=CostStrategist(producers="equivalent"))
 ```
 
-A segment model that proposes producers when costs are not declared, and `solvi.aliases` (wiring parameter names that match
-no fact), ship as **experimental**; their weights are not published. See [docs/strategist.md](docs/strategist.md) and
-[examples/17_model_strategist.py](examples/17_model_strategist.py).
+See [docs/strategist.md](docs/strategist.md) and [examples/17_cost_strategist.py](examples/17_cost_strategist.py).
 
 ## Extract from documents
 
@@ -512,7 +510,7 @@ on documents the extractor dominates.
 | [examples/14_typed_catalog.py](examples/14_typed_catalog.py) | Typed facts: a pydantic request, type hints as fact types, answer types from the rules' return types (Enum, Literal, bool), a mismatch caught at registration, rejected values → fallback / abstention, a response as JSON that loads back and replays |
 | [examples/15_typed_decisions.py](examples/15_typed_decisions.py) | Typed decisions: a pydantic ticket, the questions as a pydantic model's fields (choice, ordinal score, yes/no, multi-label), four answers (one forward pass when the model shares passes), a hard check, a constraint and a rule over the model, an escalation in the audit and stats (the real model with `SOLVI_DECIDE_MODEL`, a stand-in otherwise) |
 | [examples/16_primitives.py](examples/16_primitives.py) | Answer primitives: "not stated" vs abstain, spans parsed into numbers, evidence quotes checked in the text (`require_evidence`), a ranking with scores, an estimate with an interval — from rules and from a decider with the answer-primitives contract; confidence per kind, JSON round trip, replay |
-| [examples/17_model_strategist.py](examples/17_model_strategist.py) | The code strategist: dead ends dropped, the cheapest verified plan by declared costs, a model's proposal checked and rejected; aliases for names that match no fact (experimental; stand-ins without weights) |
+| [examples/17_cost_strategist.py](examples/17_cost_strategist.py) | The code strategist: dead ends dropped, the cheapest verified plan by declared costs, the plan in the trace |
 | [examples/18_several_models.py](examples/18_several_models.py) | Several models, one decision: a cascade small → large, a vote of two model families, a route by code — each under one `act_guard` guarantee, with cost per question; every stage in the audit and the trace |
 | [examples/19_agent_guard.py](examples/19_agent_guard.py) | An accounts-payable agent's tool calls through a `Guard`: grounded arguments, an invented IBAN denied, a budget escalation approved by a person, an instruction hidden in an invoice, an authorizer with `act_guard` and `perturb`; every decision stored and replayed (a scripted agent, no API keys) |
 | [examples/20_vote_across_families.py](examples/20_vote_across_families.py) | A vote of two model families behind the System One API (stand-in servers started in-process): each alone and the vote under one `act_guard` guarantee; a sure mistake of one family escalates; the audit and the replay |
@@ -530,7 +528,7 @@ Run them from a clone: `python examples/01_leave_request.py`.
 - [docs/guide.md](docs/guide.md): full API walkthrough.
 - [docs/best_practices.md](docs/best_practices.md): what we learned while building on solvi, as advice.
 - [docs/decide_format.md](docs/decide_format.md): the decider checkpoint contract (for training your own).
-- [docs/strategist.md](docs/strategist.md): the code strategist and the experimental model strategist and name matching.
+- [docs/strategist.md](docs/strategist.md): the code strategist — dead ends and costs.
 - [ROADMAP.md](ROADMAP.md), [CHANGELOG.md](CHANGELOG.md), [CONTRIBUTING.md](CONTRIBUTING.md), [SECURITY.md](SECURITY.md).
 - [docs/benchmarks.md](docs/benchmarks.md): the scripts behind the numbers, what solvi adds to an ask, the dataset loaders.
 - [docs/vs_llm.md](docs/vs_llm.md): solvi vs asking an LLM (Grok 4.7, gpt-oss-120b, Qwen3, DeepSeek), with raw answers.

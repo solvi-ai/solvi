@@ -2,8 +2,7 @@
 
 This is the contract between a decider checkpoint and solvi (`solvi.decide`): what the model reads, what it outputs, and the
 fields of `solvi_decide.json` that say what a checkpoint can do. The training side builds its inputs with exactly these rules;
-solvi reads any checkpoint that declares them. How to use a decider in a catalog: [guide](guide.md#types-questions-and-model-decisions); the strategist's own checkpoint
-format is in [strategist.md](strategist.md).
+solvi reads any checkpoint that declares them. How to use a decider in a catalog: [guide](guide.md#types-questions-and-model-decisions);.
 
 ## 1. Formats solvi reads
 

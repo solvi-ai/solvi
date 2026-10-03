@@ -166,11 +166,7 @@ def test_heads_and_learned_policies():
 
 
 def test_strategists():
-    from solvi.strategy import CostStrategist, ModelStrategist
-    with pytest.raises(TypeError, match=r"ModelStrategist\(\) needs a model: without one it is CostStrategist\(\)"):
-        ModelStrategist(None)
-    with pytest.raises(TypeError, match="missing 1 required positional argument: 'model'"):
-        ModelStrategist()  # type: ignore[call-arg]
+    from solvi.strategy import CostStrategist
     for old, new in (("fallback", "on_failure"), ("fallbacks", "keep_alternatives")):
         with pytest.raises(TypeError, match=rf"CostStrategist\({old}=\) {GONE}{new}="):
             CostStrategist(**{old: False})

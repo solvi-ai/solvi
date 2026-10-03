@@ -1,41 +1,31 @@
-# The model strategist and name matching (experimental)
+# The code strategist: dead ends and costs
 
-See also: [the guide](guide.md#how-the-strategist-plans-a-flow) for the default strategist, and
-[decide_format.md](decide_format.md) for the decider checkpoint contract.
+See also: [the guide](guide.md#how-the-strategist-plans-a-flow) for the default strategist.
 
 solvi's default strategist plans a flow by exact names: a parameter's name is the fact it reads, and for a fact with several
-producers (`provides=`) it needs the inputs of all of them — a fallback chain in declaration order. Two things it cannot do:
+producers (`provides=`) it needs the inputs of all of them — a fallback chain in declaration order. So it cannot
+**plan around a dead end** — one producer of a fact whose inputs are never given makes the whole fact unreachable — nor
+**choose between interchangeable producers** by what they cost. `solvi.strategy.CostStrategist` does both, in code: no
+model takes part, and only verified plans run.
 
-- **plan around a dead end** — one producer of a fact whose inputs are never given makes the whole fact unreachable, and
-  **choose between interchangeable producers** by what they cost;
-- **wire parts whose parameter names match no fact** — parts written by different teams, each with its own naming.
+(Up to 0.9 solvi also had an experimental model strategist, `ModelStrategist` with `solvi.segment_model`, and a name
+matcher for parameters whose names match no fact, `solvi.aliases`. Neither had a published checkpoint, the segment
+model planned no better than a short keyword list over the docstrings, and declaring `cost=` makes both unnecessary;
+both were removed in 1.0.)
 
-`solvi.strategy` (`CostStrategist`, and `ModelStrategist` with a model) and `solvi.aliases` add both. The principle is the same everywhere: **a model proposes,
-code verifies, answers come only from verified plans**. A model error costs cost or coverage (the question abstains, or
-code's own plan is used); it never becomes a silent wrong wiring — as far as the checks and your examples can tell.
-
-Status (0.8): the code strategist (`CostStrategist()`, `producers="equivalent"`) is ready and needs no model. The segment
-model (`solvi.segment_model`, `solvi.strategy_model` up to 0.7) and the name matcher (`solvi.aliases.NameMatcher`) are **experimental: no checkpoint is
-published**: `ModelStrategist.load` and
-`NameMatcher.load` read a checkpoint in the format below that you trained yourself (the research repository has the recipe); without one,
-examples/17 uses stand-ins with the same interfaces. What this means in practice is summarised
-[below](#status-and-what-to-use).
-
-## Planning: `CostStrategist` and `ModelStrategist`
+## Planning: `CostStrategist`
 
 ```python
 from solvi import System
-from solvi.strategy import CostStrategist, ModelStrategist
+from solvi.strategy import CostStrategist
 
-System(cat, questions, strategist=CostStrategist())                                   # 1. code only
+System(cat, questions, strategist=CostStrategist())                                   # 1. dead ends dropped
 System(cat, questions, strategist=CostStrategist(producers="equivalent"))             # 2. cheapest verified plan
-System(cat, questions, strategist=ModelStrategist.load("path/to/strategist-checkpoint"))   # 3. + the model
 ```
 
 1. **`producers="declared"` (default).** The deterministic strategist's plan, except that producers whose inputs cannot be
    computed are dropped (they no longer make the fact unreachable). The remaining producers keep their declaration order as
-   a run-time fallback chain. By design, wherever the deterministic strategist answers, the answers are the same. No
-   model is ever asked: there is nothing to choose.
+   a run-time fallback chain. By design, wherever the deterministic strategist answers, the answers are the same.
 2. **`producers="equivalent"`.** You declare that the producers of a fact are interchangeable (any accepted output is the
    same fact). Then *points* are computed by code: an exact 0/1 program (scipy's HiGHS; branch and bound as a fallback)
    picks one producer per needed fact — the cheapest valid plan by declared `cost=` (a part without one counts 1).
@@ -49,21 +39,14 @@ any other fact — is not kept as a fallback, since the flow could not run it. `
 note `mutual_producers` for a System with a strategist (an error, `cycle`, only for the deterministic strategist, which
 cannot plan it).
 
-(`CostStrategist` was `ModelStrategist()` without a model up to 0.7, and its options `fallback=` / `fallbacks=` are
-`on_failure=` / `keep_alternatives=`; the old spellings were removed in 0.9.)
+A plan that fails the final check (inputs bound, order acyclic, producer and reader types fit, every mandatory check
+kept) is used with the failure recorded (`on_failure="code"`), or falls back to the deterministic strategist
+(`"deterministic"`), or every question abstains (`"abstain"`). (`CostStrategist` was `ModelStrategist()` without a model
+up to 0.7, and its options `fallback=` / `fallbacks=` are `on_failure=` / `keep_alternatives=`; the old spellings were
+removed in 0.9.)
 
 Everything that plans for a System uses its strategist, not only `ask`: `answers_of` / replay, `facts_for` and so the
 feature candidates of `fit`, `learn_order`, the input schemas of `solvi serve` and `solvi check`.
-3. **With a model** (`ModelStrategist(model, producers="equivalent")`, or `ModelStrategist.load(path)`, which implies
-   `"equivalent"`): where declared costs do not settle the choice (a fact with ≥ 2 usable producers, not all with a declared
-   cost), the fact becomes a **segment**: code narrows the catalog to the fact's producers and, up to 3 levels back, the
-   producers of their inputs that are not yet available; the model proposes 1–4 parts in order. All segments of a plan go
-   through the model in one batch. Every proposal is **checked** (`check_segment`: each part is a candidate, the last one
-   provides the fact, every input is available or made earlier in the segment, types fit, nothing idle); the runner-up
-   proposal is tried once; an accepted segment fixes those choices and the 0/1 program completes the rest; the whole plan is
-   **validated** again (`validate`: inputs bound, order acyclic, producer and reader types fit, every mandatory check
-   kept). A rejected segment falls back to code's choice for that fact; a plan that fails validation falls back to
-   `on_failure="code"` (code's plan), `"deterministic"` (solvi.strategist.plan) or `"abstain"`.
 
 ### Costs from measurements
 
@@ -92,109 +75,14 @@ measured 0.012 ms ×5; rate_live measured 301.448 ms ×3"`. The choice is made o
 that reads an expensive fact pays for it too). Since measured costs depend on timing, so does this record's hash — it
 says what was known when the plan was made; the rest of the trace is as always.
 
-`strategist.last` is the report of the last plan: the choice per fact, the mandatory checks, per segment what code chose,
-what the model proposed, whether it was accepted (and why) or rejected (and why), the fallback if any, and the time.
+`strategist.last` is the report of the last plan: the choice per fact, the mandatory checks, the plan's cost, the
+fallback if any, and the time.
 
 ### In the trace
 
 A planned flow adds one hashed record at the end of the trace: kind `plan`, name `plan:strategy`, value = the chosen
-producer per fact and the mandatory checks; `extra` = the strategist, and per segment `proposed`, `code`, `by`
-(model / code), `accepted` / `rejected`. Provenance is `proposed` when the model chose any part (then `model` holds its
-`{type, id, fp}` — the fingerprint of the checkpoint files), `computed` otherwise. `trace.replay(system)` re-verifies the
-record against the catalog (every chosen producer exists, provides its fact, and its inputs are given or chosen); a
-tampered record breaks the hash chain. Facts whose producer group was narrowed replay with the producers that ran.
-
-## Name matching: `solvi.aliases`
-
-```python
-from solvi.aliases import NameMatcher, propose, accept, apply, unresolved
-
-unresolved(cat, init_keys)                        # {name: [(reader part, type)]}: names that are neither given nor a fact
-m = NameMatcher.load("path/to/strategist-checkpoint/matcher")
-props = propose(cat, questions, init_keys, m, init_types={"net": float})   # [Proposal(aliases={name: fact}, score)]
-got = accept(cat, questions, props, examples, probes=states)                # 5 labelled examples + unlabelled probes
-got = accept(cat, questions, props, examples[:3], probes=states, oracle=ask_person, active=(3, 7))   # the active mode
-if got.aliases is not None:
-    cat2 = apply(cat, got.aliases)                # parts rewired to read the facts; cat2.aliases lists what was accepted
-```
-
-- **Propose.** The matcher (all-MiniLM-L6-v2 + a character CNN over identifiers, trained on a broad family of name
-  perturbations) scores every unresolved name against the given facts and the facts parts produce (type-compatible
-  only); a beam search over the names builds joint proposals (a part never reads one fact twice, no cycles; a name may stay
-  unresolved — an input nobody gives).
-- **Accept** (deterministic; the model does not take part). The first proposal whose answers match every labelled example
-  is taken; then its *neighbours* — the other proposals, one alias replaced by another of its candidates, two aliases
-  exchanged — are run on the unlabelled probes: if one of them also fits the examples but answers differently somewhere, the
-  examples cannot tell the two wirings apart and nothing is accepted ("ambiguous: ask a person"). In the **active mode**,
-  while such neighbours remain, solvi picks the probe on which most of them disagree with the proposal and asks
-  `oracle(state)` for its right answers (a person labels that one case), up to `m` questions. Aliases that change no answer
-  are dropped (the name stays unresolved).
-- **Apply.** Accepted aliases are applied by rewiring: every part that read an aliased name now reads the fact itself
-  (its docstring lists the aliases), so planning, checks, quotes into given texts, the trace and replay behave exactly as
-  for a catalog written with one naming.
-
-What acceptance can and cannot guarantee: a wiring is accepted only if it answers every example right and no nearby wiring
-that also does so answers any probe differently. A wrong alias whose correct alternative is *not* among the neighbours, or
-that differs from the right one only on inputs that no example or probe exercises, can still pass — give examples and probes
-that cover the cases that matter.
-
-## Installation and backends
-
-```bash
-pip install "solvi[model]"     # torch + transformers: ModelStrategist.load(..., backend="torch"), NameMatcher (torch)
-pip install "solvi[onnx]"      # onnxruntime + tokenizers: backend="onnx", no torch (also in the browser via onnxruntime-web)
-```
-
-`backend="auto"` (default) uses ONNX when the checkpoint has it and onnxruntime is installed, else torch. The code-only
-strategist and `accept` / `apply` need neither (scipy only).
-
-## Checkpoint format (`solvi_strategist v1`)
-
-```
-solvi_strategist.json    format and architecture (below)
-config.json              the cell encoder's transformers config (ModernBERT, 2 layers, vocabulary 8193)
-tokenizer.json           ModernBERT's tokenizer (`tokenizers`)
-model.safetensors        the whole network (fp32), incl. the `remap` table 50368 → 8193 token ids
-onnx/encoder.onnx        cell tokens → pooled states:  ids, mask [N, T] int64 → pooled [N, 768]
-onnx/decoder.onnx        pooled cells + features → logits:  pooled [B, C, 768] float32, kind, vt, depth, ready [B, C] int64,
-                         cmask [B, C] bool, fn_idx [B, F] int64, fn_mask [B, F] bool → type_logits [B, 8, 9], fn_logits [B, 8, F]
-matcher/                 the name matcher (`solvi_matcher v1`): solvi_matcher.json, config.json (BERT), tokenizer.json,
-                         model.safetensors ("text.*" BertModel, "char.*" character CNN, "logw"), onnx/matcher.onnx
-                         (input_ids, attention_mask, token_type_ids [B, T], chars [B, 40], has_char [B, 1] → emb [B, 640])
-README.md                model card
-```
-
-```json
-{"format": "solvi_strategist v1", "name": "strategist-base", "n_nodes": 8, "cell_tok": 48,
- "arch": {"d": 512, "heads": 8, "layers": 4, "passes": 3, "vocab_full": 50368, "encoder_layers": 2},
- "training": {...}}
-```
-
-**Input: a segment as cells.** Each cell is a short text, encoded on its own (≤ `cell_tok` tokens, mean-pooled):
-
-| cell | text | kind | value type |
-|---|---|---|---|
-| goal | `produce <fact>: <type> \| for: <question text>` | 0 GOAL | goal |
-| available fact (only those a candidate reads) | `<fact>: <type> \| given` / `\| computed` | 1 FACT | num, bool, str, entity, list… |
-| candidate part | `<kind> <name> -> <type> \| <docstring> \| reads <p>: <type>, … \| provides <fact> \| cost <c>` | 2 FUNC | func |
-
-Per cell also: `depth` (0 goal / facts; 1 a producer of the segment's fact; 2 a producer of an input of one; …) and
-`ready` (0 not a part; 1 all its inputs are available; 2 not) — both computed by code. **Output**: 8 query slots; slot
-*i* → a node type (0 EMPTY, 1 STEP; the other 7 of the decomposer's plan language are unused) and a pointer over the candidate cells;
-the proposal is the slots up to the first EMPTY. `solvi.segment_model.seg_cells`, `batch_arrays`, `decode` implement
-exactly this; the training side (in the research repository) uses the same functions.
-
-The fingerprint recorded in traces is a hash of `solvi_strategist.json`, `config.json`, `tokenizer.json` and the weights file
-the backend loads (`model.safetensors` or the two ONNX files): a retrained or re-exported checkpoint has another one.
-
-## Status and what to use
-
-The code planner is the ready part: `CostStrategist()` (the dead-end-aware plan) and `producers="equivalent"` with
-declared costs need no model, and with `cost=` declared code alone picks the cheapest valid plan. Validity is always
-code's: every plan goes through the segment check and the plan validation above, whoever proposed it.
-
-The segment model of `ModelStrategist` and the name matcher of `solvi.aliases` are **experimental**: no checkpoint is
-published, so `ModelStrategist.load` and `NameMatcher.load` need one you trained yourself. Where they help, the segment
-model mostly reads cost hints from docstrings, which declaring `cost=` makes unnecessary. Treat aliases that `accept`
-returns as a suggestion to review, not as proof: an accepted wiring answers every example and probe like the original,
-but can still differ from the true one in a name your cases do not exercise.
+producer per fact and the mandatory checks; `extra` = the strategist (and the fallback, and the measured costs, if
+any; `segments` is always empty since the model strategist was removed). Provenance is `computed`.
+`trace.replay(system)` re-verifies the record against the catalog (every chosen producer exists, provides its fact, and
+its inputs are given or chosen); a tampered record breaks the hash chain. Facts whose producer group was narrowed replay
+with the producers that ran.

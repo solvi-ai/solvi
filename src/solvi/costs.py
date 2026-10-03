@@ -32,7 +32,7 @@ class CostBook:
 class MeasuredCosts:
     """Costs from measurements for the cost-optimal planner (System(..., cost_policy="measured") or costs=MeasuredCosts(...)).
 
-    The planner (solvi.strategy.ModelStrategist with producers="equivalent") picks the cheapest plan by the cost of each
+    The planner (solvi.strategy.CostStrategist with producers="equivalent") picks the cheapest plan by the cost of each
     producer: its measured run time (system.cost_book, a moving average in ms) once it has run `min_samples` times; before
     that its declared `cost=`, or — undeclared — 0 ms, so that it is tried and measured (warm-up). A producer not run for
     `recheck` asks counts 0 ms again for one plan (it may have got faster; None: never). `alpha` sets the smoothing of

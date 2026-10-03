@@ -21,8 +21,8 @@ requires-python = ">=3.10"
 dependencies = ["numpy", "scipy", "pydantic>=2", "tomli>=1.1; python_version < '3.11'"]   # tomli: rules files (solvi hook) on 3.10
 
 [project.optional-dependencies]
-model = ["torch", "transformers"]   # model-based extraction from text (solvi.extract_*), the decider (solvi.decide), the model strategist and name matcher (solvi.segment_model, solvi.aliases) — torch backends
-onnx = ["onnxruntime", "tokenizers", "huggingface_hub"]   # the decider, the model strategist and the name matcher without torch (backend="onnx")
+model = ["torch", "transformers"]   # model-based extraction from text (solvi.extract_*) and the decider (solvi.decide) — torch backends
+onnx = ["onnxruntime", "tokenizers", "huggingface_hub"]   # the decider without torch (backend="onnx")
 serve = ["fastapi>=0.100", "uvicorn"]   # solvi serve: the questions over HTTP, POST /v1/systemone
 mcp = ["mcp>=2"]   # solvi serve --mcp with the official MCP SDK (without it: a built-in stdio server)
 duckdb = ["duckdb>=1.0"]   # solvi.DuckDBStorage: decisions in a DuckDB file (analytics next to JSONL / Parquet)
