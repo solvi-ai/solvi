@@ -407,3 +407,99 @@ def test_a_stored_not_stated_answer_is_unknown_again_and_its_hand_off_replays(tm
     back = d.stored()
     assert back[0].s2.answer is Unknown and back[0].candidates["s2"] is Unknown
     assert d.replay_all() == []
+
+
+# ------------------------------------------------------------------------------------------------ calibrate
+def _hard_slice(guess_right=0.95, slow_right=0.5, n=400, seed=0):
+    """System 1 sure outside 0.3 < x < 0.7 and unsure inside; on that slice its guess is right `guess_right` of the
+    time, the slow path (a stand-in with recorded tokens) `slow_right`, both with confidence 0.9."""
+    import random
+
+    from solvi.generate import Generated
+    rng = random.Random(seed)
+    data = []
+    for _ in range(n):
+        x = rng.random()
+        hard = 0.3 < x < 0.7
+        truth = "yes" if x > 0.5 else "no"
+        if hard and rng.random() > guess_right:
+            truth = "no" if truth == "yes" else "yes"
+        slow_ok = rng.random() < slow_right
+        data.append(({"x": x, "slow_ok": slow_ok}, truth))
+    cat = Catalog()
+
+    @cat.rule("label")
+    def label(x):
+        p = 0.65 if 0.3 < x < 0.7 else 0.99
+        a = "yes" if x > 0.5 else "no"
+        return Decision(a, {a: p, ("no" if a == "yes" else "yes"): 1 - p})
+    s1 = System(cat, [Question("label", "?", Answer.yes_no(), min_confidence=0.8)])
+    truth_of = {round(st["x"], 12): y for st, y in data}
+    c2 = Catalog()
+
+    @c2.fn
+    def said(x, slow_ok):
+        y = truth_of[round(x, 12)]
+        ans = y if slow_ok else ("no" if y == "yes" else "yes")
+        return Generated(ans, extra={"generated": {"model": "slow", "usage": {"input_tokens": 100, "output_tokens": 10}}})
+
+    @c2.rule("label")
+    def slow_label(said):
+        return Decision(said, {said: 0.9, ("no" if said == "yes" else "yes"): 0.1})
+    s2 = System(c2, [Question("label", "?", Answer.yes_no())])
+    return s1, s2, data
+
+
+def test_calibrate_gives_the_hard_slice_to_system_1s_own_guess_when_it_beats_the_slow_path_and_calls_nothing():
+    s1, s2, data = _hard_slice(guess_right=0.97, slow_right=0.6)
+    d = Dispatcher(s1, SlowPath(s2), price=(1.0, 1.0))
+    rep = d.calibrate(data[:300], max_risk=0.05)
+    sl = rep["slices"]["guarantee"]
+    assert sl["answer"] == "s1" and sl["accuracy"]["s1"] > sl["accuracy"]["s2"]
+    assert rep["risk"] <= 0.05 and "calibrated on 300 examples" in rep["promise"]
+    hard = next(st for st, _ in data[300:] if 0.3 < st["x"] < 0.7)
+    res = d.ask(hard)
+    assert (res.action, res.by, res.slice, res.s2) == ("think", "s1", "guarantee", None)
+    assert res.cost["s2"].calls == 0 and "System 1's own answer" in res.reasons[-1]
+    assert d.replay(res)["ok"]
+
+
+def test_calibrate_gives_the_slice_to_the_slow_path_when_it_is_the_better_one_on_that_slice():
+    s1, s2, data = _hard_slice(guess_right=0.6, slow_right=0.99)
+    d = Dispatcher(s1, SlowPath(s2))
+    rep = d.calibrate(data[:300], max_risk=0.05)
+    assert rep["slices"]["guarantee"]["answer"] in ("s2", "agree")
+    hard = next(st for st, _ in data[300:] if 0.3 < st["x"] < 0.7)
+    res = d.ask(hard)
+    assert res.slice == "guarantee" and res.s2 is not None and d.replay(res)["ok"]
+
+
+def test_a_slice_with_too_few_examples_goes_to_a_person_and_says_so():
+    s1, s2, data = _hard_slice()
+    d = Dispatcher(s1, SlowPath(s2))
+    rep = d.calibrate(data[:40], max_risk=0.2, min_slice=100)
+    sl = rep["slices"]["guarantee"]
+    assert sl["answer"] == "human" and "too few examples on this slice" in sl["why"]
+    hard = next(st for st, _ in data[300:] if 0.3 < st["x"] < 0.7)
+    res = d.ask(hard)
+    assert res.by == "human" and res.s2 is None and "too few examples" in res.reasons[-1]
+
+
+def test_when_system_1_alone_already_breaks_the_promise_every_slice_goes_to_a_person():
+    s1, s2, data = _hard_slice(guess_right=0.97, slow_right=0.97)
+    flipped = [(st, ("no" if y == "yes" else "yes") if not 0.3 < st["x"] < 0.7 else y) for st, y in data[:300]]
+    d = Dispatcher(s1, SlowPath(s2))
+    rep = d.calibrate(flipped, max_risk=0.05)
+    assert "already break the promise" in rep["why"]
+    assert all(v["answer"] == "human" for v in rep["slices"].values())
+
+
+def test_a_decision_made_before_calibrate_does_not_replay_against_the_calibrated_dispatcher():
+    s1, s2, data = _hard_slice()
+    d = Dispatcher(s1, SlowPath(s2))
+    hard = next(st for st, _ in data[300:] if 0.3 < st["x"] < 0.7)
+    before = d.ask(hard)
+    d.calibrate(data[:300], max_risk=0.05)
+    assert "config" in [w for w, _ in d.replay(before)["mismatches"]]
+    with pytest.raises(ValueError, match="max_risk"):
+        d.calibrate(data[:300])

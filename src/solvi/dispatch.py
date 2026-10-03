@@ -38,6 +38,19 @@ The slow path (`SlowPath`) is built from the existing parts and judged by a Syst
   - `space=`: `solvi.search` — the candidates of an enumerable space through the checks.
 Its answer is accepted when the System does not abstain on it (and, with refine and search, its checks accept it).
 
+Calibrating the hard slice. The inputs System 1 hands over are the hard ones, and a slow path's accuracy (or its own
+guarantee) measured on an average sample does not carry over to them: on the stand, an LLM wrong on 3% of all product
+pairs was wrong on 41% of those a fitted head was unsure of. `calibrate(examples, max_risk= | max_error=)` measures it
+where it matters: every labelled example goes through the same dispatch; the ones System 1 answers alone count as its
+answers, the ones it hands over form a slice per waking signal (below the guarantee, open-set, abstention, constraint,
+agreement), and on each slice System 1's own would-be answer, the slow path's answer and "the slow path when it agrees
+with System 1" are measured. One answerer and one threshold on its confidence is chosen per slice — or a person — so
+that all the answers given alone together (System 1's and the slices') keep the promise on these examples, answering
+as many as possible; a slice with fewer than `min_slice` examples gets a person. The choice (`policy`, with each
+slice's size and measured accuracies) is part of the config every decision records; a think then runs the slow path
+only when its slice's answerer is the slow path. Use examples System 1's own guarantee was not calibrated on: there its
+answers are tuned to the edge of the promise and leave nothing for the slices.
+
 The budget. `budget=` is per decision (the slow path's dollars, model calls and milliseconds), `total=` for the
 dispatcher's life. Dollars come from the tokens every model output records in the trace (`extra["llm"]["usage"]`,
 `extra["generated"]["usage"]`) times `price` (dollars per million input and output tokens, or a function), so a
@@ -405,6 +418,7 @@ class Dispatched:
     expected: Cost | None = None
     over_budget: str | None = None
     config: str | None = None
+    slice: str | None = None
     stored_id: str | None = None
 
     @property
@@ -419,7 +433,7 @@ class Dispatched:
                 "disagreement": _stored(self.disagreement), "cost": {k: v.to_dict() for k, v in self.cost.items()},
                 "n": self.n, "draw": self.draw, "spent_before": self.spent_before.to_dict(), "drift": self.drift,
                 "expected": None if self.expected is None else self.expected.to_dict(), "over_budget": self.over_budget,
-                "config": self.config}
+                "config": self.config, "slice": self.slice}
 
     def to_json(self, indent=None):
         return json.dumps(self.to_dict(), ensure_ascii=False, indent=indent, default=str)
@@ -436,7 +450,7 @@ class Dispatched:
                    {k: Cost.from_dict(v) for k, v in (d.get("cost") or {}).items()}, d.get("n", 0), d.get("draw", 1.0),
                    Cost.from_dict(d.get("spent_before") or {}), d.get("drift"),
                    Cost.from_dict(d["expected"]) if d.get("expected") is not None else None, d.get("over_budget"),
-                   d.get("config"))
+                   d.get("config"), d.get("slice"))
 
     def replay(self, dispatcher, trust_models=False):
         """Re-check this decision against `dispatcher` without calling a model → {"ok", "mismatches": [(what, why)]}:
@@ -527,6 +541,7 @@ class Dispatcher:
         self._runs = [0, 0.0, 0, 0.0, False]  # slow-path runs so far: count, dollars, calls, ms, a run without a price
         self.counts = {p: 0 for p in PATHS}
         self.drift = None
+        self.policy = None                # calibrate(): who answers on each slice System 1 hands over
         self._lock = threading.Lock()
 
     def _require(self, facts):
@@ -550,7 +565,8 @@ class Dispatcher:
                       code_fingerprint(self.same) if self.same is not None else None,
                       None if self.budget is None else self.budget.to_dict(),
                       None if self.total is None else self.total.to_dict(), pr,
-                      self.slow.fingerprint() if self.slow is not None else None)
+                      self.slow.fingerprint() if self.slow is not None else None,
+                      None if self.policy is None else self.policy["fingerprint"])
 
     # --- the decision
     def draw(self, init_hash, n):
@@ -612,6 +628,8 @@ class Dispatcher:
             if not all(s in self.wake for s, _ in think):
                 off = sorted({s for s, _ in think if s not in self.wake})
                 return "human", reasons + [f"{', '.join(off)} does not wake the slow path: a person decides"]
+            if self.policy is not None and not self._needs_slow(think[0][0]):
+                return "think", reasons                      # System 1's own answer or a person: no slow path, no cost
             if self.slow is None:
                 return "human", reasons + ["no slow path: a person decides"]
             why = self._no_budget(spent_before, expected)
@@ -660,7 +678,8 @@ class Dispatcher:
         cand = {"s1": would1}
         c1 = cost_of([res], self.price, res.ms)
         th, over, disagreement = None, None, None
-        if action in ("think", "check"):
+        sl = self.slice_of(res) if action == "think" else None
+        if action == "check" or (action == "think" and self._needs_slow(sl)):
             per_round = None if expected is None else _per_round(expected, self.slow)
             th = self.slow.run(state, q, price=self.price, budget=self.budget, expected_round=per_round,
                                store=self.store_responses)
@@ -672,7 +691,7 @@ class Dispatcher:
                 r[0], r[2], r[3] = r[0] + 1, r[2] + th.cost.calls, r[3] + th.cost.ms
                 r[1] += th.cost.usd or 0.0
                 r[4] = r[4] or th.cost.usd is None
-        answer, by = self._outcome(action, r1, would1, th, reasons)
+        answer, by = self._outcome(action, r1, would1, th, reasons, sl)
         if th is not None and action == "check" and not self.agrees(th.answer, would1):
             disagreement = {"s1": would1, "s2": th.answer, "s2_accepted": th.accepted}
         c2 = th.cost if th is not None else Cost(0.0 if self.price is not None else None)
@@ -681,20 +700,30 @@ class Dispatcher:
             self.spent = self.spent + c2
             self.counts[by] += 1
         d = Dispatched(q, answer, by, action, reasons, res, th, cand, disagreement, cost, n, draw, spent, self.drift,
-                       expected, over, self.config())
+                       expected, over, self.config(), slice=sl)
         if self.storage is not None:
             from .storage import FORMAT
             rec = self.storage._append({"v": FORMAT, "kind": "dispatch", **json.loads(d.to_json())})
             d.stored_id = rec["id"]
         return d
 
-    def _outcome(self, action, r1, would1, th, reasons):
+    def _needs_slow(self, sl):
+        """Does a think on this slice run the slow path? Always before calibrate(); after it, only when the slice's
+        calibrated answerer is the slow path."""
+        if self.policy is None:
+            return True
+        p = self.policy["slices"].get(sl)
+        return p is not None and p["answer"] in ("s2", "agree")
+
+    def _outcome(self, action, r1, would1, th, reasons, sl=None):
         """(answer, by) from the action and the two paths' answers; appends why a person gets it."""
         if action == "human":
             return None, "human"
         if action == "accept":
             return r1.answer, "s1"
         from .core import Unknown
+        if action == "think" and self.policy is not None:
+            return self._calibrated(sl, r1, would1, th, reasons)
         ok = th.accepted
         if ok and self.unknown == "human" and th.answer is Unknown:
             ok = False
@@ -719,6 +748,208 @@ class Dispatcher:
         if self.on_disagree == "s2" and ok:
             return th.answer, "s2"
         return r1.answer, "s1"
+
+    def _calibrated(self, sl, r1, would1, th, reasons):
+        """A think after calibrate(): the slice's answerer, above its threshold, or a person."""
+        p = self.policy["slices"].get(sl)
+        if p is None:
+            reasons.append(f"no calibrated answerer for the slice {sl!r}: a person decides")
+            return None, "human"
+        a, t = p["answer"], p["threshold"]
+        where = f"calibrated on the slice {sl!r} ({p['n']} examples)"
+        if a == "human":
+            reasons.append(f"{where}: a person decides ({p['why']})")
+            return None, "human"
+        if a == "s1":
+            sig = _s1_signal(r1)
+            if would1 is not None and sig >= t:
+                reasons.append(f"{where}: System 1's own answer, {sig:.4g} ≥ {t:.4g}")
+                return would1, "s1"
+            reasons.append(f"{where}: System 1's own answer, {sig:.4g} < {t:.4g}: a person decides")
+            return None, "human"
+        sig = self._s2_signal(th)
+        agree = a == "s2" or self.agrees(th.answer, would1)
+        if sig >= t and agree:
+            reasons.append(f"{where}: the slow path's answer" + (" (it agrees with System 1)" if a == "agree" else "")
+                           + f", {sig:.4g} ≥ {t:.4g}")
+            return th.answer, "s2"
+        why = (f"{sig:.4g} < {t:.4g}" if sig < t else f"it says {th.answer!r}, System 1 {would1!r}")
+        reasons.append(f"{where}: the slow path's answer is not taken ({why}): a person decides")
+        return None, "human"
+
+    def _s2_signal(self, th):
+        """The slow path's signal: its answer's confidence (ask), 1 for an accepted refinement or search; −inf when it
+        has no answer, or says "not stated" with unknown="human"."""
+        from .core import Unknown
+        if th is None or th.answer is None or (self.unknown == "human" and th.answer is Unknown):
+            return -math.inf
+        if th.mode != "ask":
+            return 1.0 if th.accepted else -math.inf
+        res = th.record
+        if res is None:
+            return -math.inf
+        r = res[self.slow._q(self.question)]
+        if r.status == "abstain" and r.guard not in ("low_confidence", None):
+            return -math.inf
+        return float(r.confidence)
+
+    def slice_of(self, res):
+        """The slice of System 1's response: the first signal that wakes the slow path (None: none does)."""
+        kinds = [s for s, _ in self.signals(res) if s in THINK]
+        return kinds[0] if kinds else None
+
+    # --- calibrating who answers on the hard slice
+    def calibrate(self, examples, *, max_risk=None, max_error=None, method=None, delta=0.10, correct=None,
+                  answerers=("s1", "s2", "agree"), min_slice=20, min_support=5):
+        """Choose who answers on each slice System 1 hands over, and with what threshold, so that the dispatcher's
+        answers given alone keep a promise — calibrated on labelled examples drawn through this same dispatch, not on
+        an average sample. See the module docs ("Calibrating the hard slice").
+
+        examples: [(state, correct answer)] — not the ones System 1's own guarantee was calibrated on (its answers
+        must be out of sample here, or they use up the promise). correct(answer, label, response) → bool for
+        answers judged otherwise than by equality (response: the Response that produced the answer). max_risk= (crc,
+        a share of all examples) or max_error= (ltt: among the answers given alone; method="empirical" possible): the
+        promise for all the dispatcher's answers given alone — System 1's within its guarantee and the slices' together.
+        answerers: who may answer a slice — "s1" (System 1's own answer, thresholded on its confidence), "s2" (the slow
+        path's, on its confidence), "agree" (the slow path's when it equals System 1's); a person is always possible.
+        min_slice: a slice with fewer examples gets a person (the record says so); min_support: an answerer's threshold
+        must let at least this many examples of the slice through. → the report; the choice is kept as `policy` (in
+        the config every decision records) and every later think follows it. Calling the slow path on the slice's
+        examples costs what it costs (report["cost"])."""
+        from .calibration import _binom_cdf, check_rate
+        from .core import Unknown
+        from .guarantee import promise_text
+        from .provenance import digest
+        if (max_risk is None) == (max_error is None):
+            raise ValueError("give the promise as max_risk= (crc) or max_error= (ltt; method=\"empirical\" possible)")
+        method = method or ("crc" if max_risk is not None else "ltt")
+        if method not in ("crc", "ltt", "empirical") or (method == "crc") != (max_risk is not None):
+            raise ValueError('method: "crc" with max_risk=, "ltt" or "empirical" with max_error=')
+        level = check_rate("risk" if method == "crc" else "error", max_risk if method == "crc" else max_error)
+        bad = [a for a in answerers if a not in ("s1", "s2", "agree")]
+        if bad:
+            raise ValueError(f"unknown answerer(s) {bad}: s1, s2, agree")
+        if self.slow is None and any(a != "s1" for a in answerers):
+            answerers = tuple(a for a in answerers if a == "s1")
+        examples = list(examples)
+        if not examples:
+            raise ValueError("calibrate needs labelled examples [(state, correct answer)]")
+        q = self.question
+        at = self.system.questions[q].answer
+
+        def judge(ans, label, res):
+            if ans is None:
+                return False
+            if correct is not None:
+                return bool(correct(ans, label, res))
+            try:
+                return _vh(ans) == _vh(at.normalize(label))
+            except ValueError:
+                return _vh(ans) == _vh(label)
+        saved, self.policy = self.policy, None
+        n_all, a1, w1, people = len(examples), 0, 0, 0
+        slices, cost = {}, Cost(0.0 if self.price is not None else None)
+        try:
+            for state, label in examples:
+                res = self.system.ask(state, self.asked, store=False)
+                r1 = res[q]
+                kinds = [s for s, _ in self.signals(res) if s in THINK]
+                if not kinds:
+                    if r1.status == "abstain":
+                        people += 1
+                    else:
+                        a1 += 1
+                        w1 += not judge(r1.answer, label, res)
+                    continue
+                if not all(k in self.wake for k in kinds):
+                    people += 1
+                    continue
+                would1 = _would(r1)
+                row = {"s1": (_s1_signal(r1) if would1 is not None else -math.inf, judge(would1, label, res))}
+                if any(a in ("s2", "agree") for a in answerers):
+                    th = self.slow.run(state, q, price=self.price, store=False)
+                    cost = cost + th.cost
+                    sig = self._s2_signal(th)
+                    rec = th.responses[-1] if th.responses else None
+                    ok2 = th.answer is not Unknown or self.unknown != "human"
+                    right2 = judge(th.answer, label, rec) if ok2 else False
+                    row["s2"] = (sig, right2)
+                    row["agree"] = (sig if self.agrees(th.answer, would1) else -math.inf, right2)
+                slices.setdefault(kinds[0], []).append(row)
+        finally:
+            self.policy = saved
+        # per slice: the options (answerer, threshold) → (answered, wrong); a person: (0, 0)
+        options, info = {}, {}
+        for k, rows in slices.items():
+            n = len(rows)
+            acc = {a: round(sum(r[a][1] for r in rows) / n, 4) for a in answerers}
+            info[k] = {"n": n, "accuracy": acc}
+            opts = [("human", None, 0, 0)]
+            if n < min_slice:
+                info[k]["why"] = f"too few examples on this slice ({n} < min_slice {min_slice}): a person decides"
+                options[k] = opts
+                continue
+            for a in answerers:
+                pts = sorted(((r[a][0], r[a][1]) for r in rows if math.isfinite(r[a][0])), key=lambda x: -x[0])
+                m = w = 0
+                for i, (sg, ok) in enumerate(pts):
+                    m, w = m + 1, w + (not ok)
+                    if (i + 1 == len(pts) or pts[i + 1][0] != sg) and m >= min_support:
+                        opts.append((a, sg, m, w))
+            options[k] = opts
+        # every combination of one option per slice, kept on its Pareto front (fewest wrong for each number answered)
+        front = {(0, 0): {}}
+        for k, opts in options.items():
+            nxt = {}
+            for (m0, w0), ch in front.items():
+                for a, t, m, w in opts:
+                    key = (m0 + m, w0 + w)
+                    if key not in nxt:
+                        nxt[key] = {**ch, k: (a, t, m, w)}
+            best = {}
+            for (m, w), ch in nxt.items():
+                if m not in best or w < best[m][0]:
+                    best[m] = (w, ch)
+            front = {(m, w): ch for m, (w, ch) in best.items()}
+        g = max(1, len(front))
+
+        def keeps(m, w):
+            ans, wrong = a1 + m, w1 + w
+            if method == "crc":
+                return (wrong + 1) / (n_all + 1) <= level + 1e-12
+            if method == "empirical":
+                return ans > 0 and wrong <= level * ans + 1e-9
+            return ans > 0 and _binom_cdf(wrong, ans, level) <= delta / g
+        ok = [(m, w) for (m, w) in front if keeps(m, w)]
+        why_none = None
+        if ok:
+            m, w = max(ok, key=lambda x: (x[0], -x[1]))
+            choice = front[(m, w)]
+        else:
+            m, w, choice = 0, 0, {}
+            why_none = ("System 1's own answers already break the promise on these examples: every slice goes to a "
+                        "person")
+        pol = {}
+        for k in slices:
+            a, t, mk, wk = choice.get(k, ("human", None, 0, 0))
+            e = {**info[k], "answer": a, "threshold": t, "answered": mk, "wrong": wk}
+            if a == "human":
+                e["why"] = info[k].get("why") or why_none or "no answerer keeps the promise on this slice"
+            pol[k] = e
+        promise = promise_text(method, level, delta if method == "ltt" else None)
+        report = {"method": method, "level": level, "delta": delta if method == "ltt" else None, "n": n_all,
+                  "s1_answered": a1, "s1_wrong": w1, "to_person": people, "slices": pol,
+                  "answered": (a1 + m) / n_all, "wrong": w1 + w,
+                  "risk": (w1 + w) / n_all, "error": (w1 + w) / max(1, a1 + m), "cost": cost.to_dict(),
+                  "promise": f"the dispatcher's answers given alone: {promise} — calibrated on {n_all} examples "
+                             f"through this dispatch, each slice System 1 hands over on its own examples"}
+        if why_none:
+            report["why"] = why_none
+        report["fingerprint"] = digest("DispatchPolicy", method, level, report["delta"],
+                                       sorted((k, v["answer"], v["threshold"]) for k, v in pol.items()), n_all,
+                                       digest(*[_vh(s) for s, _ in examples]))
+        self.policy = report
+        return report
 
     def agrees(self, a, b):
         """Are two answers the same? same(a, b) when given (overlapping quotes, numbers within a tolerance), else
@@ -793,16 +1024,18 @@ class Dispatcher:
                 if _cost_key(c) != _cost_key(d.s2.cost):
                     bad.append(("cost", f"the slow path's recorded cost {d.s2.cost.to_dict()} is not what its record "
                                         f"gives {c.to_dict()}"))
-        elif d.action in ("think", "check"):
-            bad.append(("s2", f"action {d.action} without the slow path's record"))
         c1 = cost_of([d.s1], self.price, d.s1.ms)
         if "s1" in d.cost and _cost_key(c1) != _cost_key(d.cost["s1"]):
             bad.append(("cost", "System 1's recorded cost is not what its trace gives"))
         if d.action == action:
             r1 = d.s1[self.question]
             would1 = r1.answer if r1.status != "abstain" else _would(r1)
-            ans, by = self._outcome(d.action, r1, would1, d.s2, []) if d.s2 is not None or d.action in ("accept", "human") \
-                else (None, "human")
+            sl = self.slice_of(d.s1) if d.action == "think" else None
+            if sl != d.slice:
+                bad.append(("slice", f"recorded {d.slice!r}, the response gives {sl!r}"))
+            if d.s2 is None and d.action in ("think", "check") and self._needs_slow(sl):
+                bad.append(("s2", f"action {d.action} without the slow path's record"))
+            ans, by = self._outcome(d.action, r1, would1, d.s2, [], sl)
             if by != d.by or _vh(ans) != _vh(d.answer):
                 bad.append(("answer", f"recorded {d.answer!r} by {d.by}, the record gives {ans!r} by {by}"))
         return {"ok": not bad, "mismatches": bad, "s1": rep1, "s2": rep2}
@@ -829,6 +1062,12 @@ def _per_round(expected, slow):
 
 def _cost_key(c):
     return (None if c.usd is None else round(c.usd, 9), c.calls, c.input_tokens, c.output_tokens)
+
+
+def _s1_signal(r):
+    """System 1's signal for its own answer on the slice: the answer's confidence (kept when it abstained)."""
+    c = getattr(r, "confidence", None)
+    return float(c) if isinstance(c, (int, float)) and math.isfinite(c) else -math.inf
 
 
 def _would(r):
