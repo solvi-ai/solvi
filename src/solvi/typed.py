@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import inspect
 import sys
+import types
 import typing
 import warnings
 from enum import Enum
@@ -51,7 +52,7 @@ def _strip(t):
 
 def _is_union(t):
     o = get_origin(t)
-    return o is Union or (sys.version_info >= (3, 10) and o is __import__("types").UnionType)
+    return o is Union or o is types.UnionType
 
 
 def _members(t):

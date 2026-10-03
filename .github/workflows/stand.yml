@@ -24,7 +24,7 @@ jobs:
       - run: echo "STAND_CACHE=$RUNNER_TEMP/stand-cache" >> "$GITHUB_ENV"
       - uses: astral-sh/setup-uv@v6
         with:
-          python-version: "3.10"
+          python-version: "3.12"
       - run: uv sync
       - name: the docs quote results.json (no run, a second)
         run: uv run python benchmarks/tasks/stand.py check

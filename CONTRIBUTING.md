@@ -32,8 +32,8 @@ CI runs on every pull request: a broken link, a missing anchor or a docstring th
   another module changes them unless the move adds a line to `MOVED` in `solvi/_deprecate.py` (new location → the 0.9
   module). `tests/test_golden_fingerprints.py` pins the fingerprints of the gallery, the examples, the stand's catalogs
   and `tests/fixtures/golden_fingerprints/catalogs.py`; `tests/test_store_0_9_0.py` replays stores written by 0.9.0.
-  An intended change: `uv run python tests/test_golden_fingerprints.py --write` (on Python 3.10, then on 3.11 or
-  later) and say which fingerprints changed and why.
+  An intended change: `uv run python tests/test_golden_fingerprints.py --write` (one set for every
+  supported Python) and say which fingerprints changed and why.
 - Numbers in the README and the docs come from `benchmarks/` or a model card; update both, and never round in your favour.
 - New examples: one self-contained script in `examples/`, a line in `examples/README.md` and in the README table; it must run
   in CI (core only, a stand-in for any model) or say which extra it needs.
@@ -72,4 +72,4 @@ CI runs on every pull request: a broken link, a missing anchor or a docstring th
 ## Pull requests
 
 Small and focused is best. Describe what changes for a user, how you tested it, and anything that changes a trace hash or
-an answer. CI runs the tests on Python 3.10–3.13, the gallery and the core examples.
+an answer. CI runs the tests on Python 3.11–3.14, the gallery and the core examples.

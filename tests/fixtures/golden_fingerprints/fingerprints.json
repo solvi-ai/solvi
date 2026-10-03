@@ -303,7 +303,7 @@
   "questions": "2a5c8368a306117f"
  },
  "gallery/10_procurement_3way_match": {
-  "catalog": "5cfabb23bb23f766",
+  "catalog": "a1d7b79b2eb1953a",
   "models": {},
   "parts": {
    "answer:duplicate": "8de7a588096e712a",
@@ -314,8 +314,8 @@
    "header_total_ok": "f7b26ccd3ad0842d",
    "invoice_matches_po": "07bd3bbab9bdb79f",
    "invoice_total_base": "6659846c9f5e8842",
-   "line_match": "3dd000cbbeb3d983",
-   "lines_failing": "f36ee6a584d8e6ba",
+   "line_match": "9189c250cee44360",
+   "lines_failing": "016a1e108572daee",
    "not_duplicate": "224c4686b96dc06f",
    "po_fx_rate": "eca0d8b4f16be84b",
    "supplier_payable": "7f0f5a224c98df7f",
@@ -524,7 +524,7 @@
   "questions": "9d68c4b708196274"
  },
  "golden/typed_rules": {
-  "catalog": "89b7d6511164c85e",
+  "catalog": "a66bf9a827f7f14f",
   "models": {},
   "parts": {
    "amount_text": "b4555040022cfd04",
@@ -538,7 +538,7 @@
    "answer:total": "8e1d72c921fe5ed9",
    "answer:weeks": "6db809788b0eae0b",
    "constraint:major_is_not_refunded": "922c64590b498afa",
-   "maybe_text": "57788f1f49c969b5",
+   "maybe_text": "1c177bf7f052890d",
    "n_words": "1fc3ac54993cb755",
    "order": "6fc2777e4bde8179",
    "small": "035c84f68b59dd61"
@@ -681,18 +681,18 @@
   "questions": "a12c0978795c5942"
  },
  "stand/naturalplan:calendar": {
-  "catalog": "a2ce6fea0e39bdb3",
+  "catalog": "ebdea1bf7ed141d5",
   "models": {},
   "parts": {
    "answer:accept": "f354c8e2d6c938ae",
    "answer_text": "189bf7f12a66e5c6",
    "day_allowed": "2b484828c6298af5",
-   "facts": "e12bad56b5feb195",
+   "facts": "0d8ea97f8968c513",
    "inside_work_hours": "036a65114f07335e",
    "nobody_busy": "79e007f8f7bd4074",
    "right_length": "c72699ddfa0e0e13",
-   "slot": "bb08b339fa1d2890",
-   "violations": "02b89a4e0f699c77",
+   "slot": "8742a897d072d015",
+   "violations": "26919c76b9c31647",
    "wishes_kept": "890410fc592d761c"
   },
   "questions": "74908a3f7b747c73"
@@ -906,7 +906,7 @@
   ]
  ],
  "types/str_or_not_stated": [
-  "<class 'types.UnionType'>",
+  "typing.Union",
   [
    [
     "builtins",

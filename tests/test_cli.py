@@ -4,6 +4,7 @@ when it and onnxruntime are there."""
 import http.server
 import io
 import json
+import re
 import sys
 import threading
 import types
@@ -778,7 +779,8 @@ def test_help_and_the_unknown_command_error_list_every_command(capsys):
         assert f" {cmd} " in listed or f"{cmd}," in listed, cmd
     assert main(["bogus"]) == 2
     err = capsys.readouterr().err
-    assert all(f"'{c}'" in err for c in ("test", "honesty", "hook", "init"))
+    choices = err.split("choose from", 1)[1].replace("'", "")    # argparse quotes them on some Pythons (3.11, 3.14), not on 3.12.8+
+    assert all(re.search(rf"\b{c}\b", choices) for c in ("test", "honesty", "hook", "init"))
     with pytest.raises(SystemExit):
         main(["replay", "x.db", "--system", "os:getcwd"])
     assert "os:getcwd: not a solvi System" in capsys.readouterr().err   # no "--system" for commands that have none
