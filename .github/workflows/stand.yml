@@ -19,9 +19,9 @@ jobs:
     timeout-minutes: 90
     env:
       STAND_DATA: ${{ github.workspace }}/stand-data
-      STAND_CACHE: ${{ runner.temp }}/stand-cache
     steps:
       - uses: actions/checkout@v4
+      - run: echo "STAND_CACHE=$RUNNER_TEMP/stand-cache" >> "$GITHUB_ENV"
       - uses: astral-sh/setup-uv@v6
         with:
           python-version: "3.10"
