@@ -32,13 +32,17 @@
   answer, or says the text does not decide it. Each answer becomes a test both drafts must pass — never code — so
   acceptance is as strict as before, and a wrong answer cannot make a wrong draft pass. Every question and answer is
   in `c.record["person"]`; `c.reviewer()` replays them. `reference_reviewer(fn)` simulates the person with a
-  hand-written reference, for experiments.
+  hand-written reference, for experiments. In our runs a meeting-plan checker that was refused before (one draft
+  right, the other not) was accepted after two answers and matched its reference on 2,400 of 2,400 cases. But the
+  person only sees what the drafts dispute: on a customer-service policy two tool groups were accepted wrong, because
+  both drafts read "explicit confirmation (yes)" as a message that is exactly "yes" and so never disagreed.
 - `to_guard(c, guard, allow="yes")`: a policy compiled as one question ("may this call be made?") becomes one Guard
   policy that refuses any other answer and names the clauses that decided; with `decision_diff` you see which calls
   a changed policy text moves before the new guard goes live.
 - `compile_groups` (experimental): a large specification is split into groups of clauses, each compiled and accepted
   on its own, then assembled and checked again as a whole. On a 56-clause customer-service policy no group was
-  accepted — the drafts added rules the policy does not state, and acceptance refused them.
+  accepted — the drafts added rules the policy does not state, and acceptance refused them; with a person in the loop
+  2 of 8 groups were accepted, and both were wrong (see above).
 - The nine-task benchmark stand reruns offline in CI from the published run's packed model replies (weekly
   workflow `stand.yml`), and fails on any published number in the docs that moved.
 

@@ -3996,6 +3996,11 @@ answer from the person makes the compilation fail, it cannot make a wrong draft 
 specification does not decide an input (`Ruling.neither` without an answer) is a gap: the compilation is not accepted
 until the text is amended.
 
+**What the person does not see.** Only what the drafts dispute. A misreading both drafts share — say, both accept a
+confirmation only when the user's message is exactly "yes", where the policy means any explicit yes — gives no
+disagreement and passes the tests, so nobody is asked and it is accepted. In our runs that happened to two tool groups
+of a customer-service policy. Look at some decisions the drafts agree on before you rely on a compiled policy.
+
 `reference_reviewer(fn)` is a simulated person for experiments: `fn(input) → {question: answer}`, a hand-written
 reference. It picks the draft equal to the reference, else gives the reference's answer; it keeps a disputed test the
 reference agrees with, else corrects it. `recompile` takes the same options, and `compile_groups` passes them to every
