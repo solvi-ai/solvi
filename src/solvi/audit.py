@@ -334,7 +334,8 @@ class AnswerAudit:
             lines.append(col("col.quoted") + f"{q['name']} = {_short(q['value'])}  {q['source']}[{q['start']}:{q['end']}] "
                          f"{how} {q['text']!r}" + (t("au.confidence", lang, c=f"{q['confidence']:.2f}")
                                                    if q["confidence"] < 1 else "")
-                         + (f"  [{q['model']}]" if q.get("model") else ""))
+                         + (f"  [{q['model']}]" if q.get("model") else "")
+                         + (f"  (written {_short(q['written'])})" if q.get("written") is not None else ""))
         for d in self.decided:
             if d.get("error"):
                 lines.append(col("col.decided") + f"{d['name']}: " + t("au.rejected", lang, err=m(d["error"]))
@@ -533,7 +534,8 @@ def _one(res, q, events, catalog):
             full = init.get(src)[s:e] if r.quote and isinstance(init.get(src), str) else None
             au.quoted.append({"name": f, "value": None if _missing(r.value) else r.value, "start": s, "end": e, "source": src,
                               "text": text, "match": None if (_missing(r.value) or full is None) else matches(r.value, full),
-                              "confidence": r.confidence, "model": m, "error": err, "producer": r.producer})
+                              "confidence": r.confidence, "model": m, "error": err, "producer": r.producer,
+                              **_written(r)})
             count("quoted_by_model" if r.model is not None else "quoted")
         elif origin == "decided":
             au.decided.append({"name": f, "value": None if _missing(r.value) else r.value, "probs": r.probs, "model": m,
@@ -584,6 +586,13 @@ def _one(res, q, events, catalog):
                     if isinstance(qg, dict) and qg.get("promise") else _guarantee(au))
     au.counts = counts
     return au
+
+
+def _written(r):
+    """A quote matched in the normalized view (1.0, extra["quote_match"]): what the part wrote → {"written": text}."""
+    qm = r.extra.get("quote_match") if isinstance(r.extra, dict) else None
+    w = (qm.get("written") or {}).get("value") if isinstance(qm, dict) else None
+    return {"written": w} if w is not None else {}
 
 
 __all__ = ["AnswerAudit", "Audit", "build", "collect", "LABEL", "QUIET", "STAT_KEYS", "STATS"]

@@ -617,7 +617,7 @@ class System:
                 return Result(None, 0.0, f"the rule abstained (returned None); {why}", "abstain", provenance=r.origin,
                               source=src, guard="rule_abstained")
             if q.answer.primitive or q.require_evidence or (r.extra is not None and "evidence" in r.extra):
-                return _resolved(q, r, pc, why, src, trace.init)
+                return _resolved(q, r, pc, why, src, trace.init, getattr(rule, "quotes", "normalized"))
             try:
                 return Result(q.answer.normalize(r.value), conf, why, probs=dict(r.probs or {}), provenance=r.origin,
                               source=src)
@@ -1079,12 +1079,12 @@ def _caused_by(by, r):
     return "; caused by " + " and ".join(f"{x}: {e}" for x, e in roots.items()) if roots else ""
 
 
-def _resolved(q, r, pc, why, src, init):
+def _resolved(q, r, pc, why, src, init, quotes="normalized"):
     """An answer primitive (not stated, span, rank, estimate) or an answer with evidence, from the rule's record (see
     solvi.primitives)."""
     from .primitives import NO_EVIDENCE, Rejected, fmt, resolve
     try:
-        out = resolve(q.answer, r, init)
+        out = resolve(q.answer, r, init, quotes)
     except Rejected as e:
         return Result(None, 0.0, f"{e.why}; {why}", "abstain", dict(r.probs or {}), r.origin, src, e.guard)
     a, ev = out["answer"], out["evidence"]

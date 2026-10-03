@@ -218,33 +218,142 @@ def cuts_number(t, i, j):
     return left or right
 
 
+def _sources(part, v, init_state):
+    """The labelled texts a string of evidence may come from, in the order they are searched: Claim.source / the part's
+    `source` when set (a name, or a list of names), else "doc" if the part reads it, else its only given text input, else
+    "doc" — and after that (since 1.0) the part's other given text inputs, in argument order."""
+    src = getattr(v, "source", None) or part.source
+    if src is not None:
+        return [src] if isinstance(src, str) else list(src)
+    texts = [x for x in part.inputs if isinstance(init_state.get(x), str)]
+    first = "doc" if ("doc" in texts or len(texts) != 1) else texts[0]
+    return [first] + [x for x in texts if x != first]
+
+
+def find_quote(quote, sources, *, quotes="normalized", whole=True):
+    """Where a quote is in one or several labelled texts → Quote(the source's own substring, start, end, label) or None.
+    sources: a text (labelled "doc") or {label: text}, searched in order ("notes", "dialogues", "map", ...); the first
+    text that holds the quote wins. A literal occurrence is preferred in every text before the normalized view is tried
+    (quotes="normalized", the default: Unicode NFKC, no-break spaces and hyphens, dash variants, "…" for "...",
+    whitespace runs, curly quotes — see solvi.provenance.norm_view); quotes="literal" finds the text as written only.
+    whole: as whole words and numbers ("3" is not found in "30")."""
+    from .provenance import find_normalized, quote_mode
+    quote_mode(quotes)
+    srcs = {"doc": sources} if isinstance(sources, str) else dict(sources)
+    q = str(quote)
+    for label, t in srcs.items():
+        if isinstance(t, str) and q:
+            i = find_whole(q, t) if whole else t.find(q)
+            if i >= 0:
+                return Quote(q, i, i + len(q), label)
+    if quotes == "normalized":
+        for label, t in srcs.items():
+            at = find_normalized(t, q, whole)
+            if at is not None:
+                return Quote(t[at[0]:at[1]], at[0], at[1], label)
+    return None
+
+
+def _kept(written, src, s, e, mode):
+    """A quote with offsets whose written text is not literally the source text there (0.9's matches is False): in the
+    normalized view, is it that text? → the source's own text at [s:e], or None."""
+    if mode != "normalized" or not isinstance(written, str) or not isinstance(src, str) or not 0 <= s <= e <= len(src):
+        return None
+    from .provenance import matches_normalized
+    t = src[s:e]
+    return t if matches_normalized(written, t) else None
+
+
+def _normalized_quote(part, v, init_state, mode, written):
+    """A model-backed part's quoted value (a Quote, or one inside a Claim / Decision) written otherwise than its source
+    text at its offsets, but the same in the normalized view → the output with the source's own text as its value
+    (`written` gets what the part wrote). Anything else: as it is."""
+    import dataclasses
+    from .provenance import matches
+    q = v.value if isinstance(v, (Claim, Decision)) and isinstance(v.value, Quote) else v
+    if not isinstance(q, Quote) or not isinstance(q.value, str) or not part.strict():
+        return v
+    src = init_state.get(q.source)
+    if not isinstance(src, str) or not 0 <= q.start <= q.end <= len(src) or matches(q.value, src[q.start:q.end]) \
+            is not False:
+        return v
+    t = _kept(q.value, src, q.start, q.end, mode)
+    if t is None:
+        return v
+    written["value"] = q.value
+    q = dataclasses.replace(q, value=t)
+    return dataclasses.replace(v, value=q) if q is not v and not isinstance(v, Quote) else q
+
+
 def locate(part, v, init_state):
     """A Claim's / Decision's evidence with every item as a Quote: a string is located in the output's source text —
-    Claim.source, else the part's `source`, else "doc" if the part reads it, else its only given text input, else "doc" —
-    at its first occurrence as whole words and numbers (find_whole: "3" does not quote "30"); a string that is not there
-    becomes Quote(text, -1, -1, source), which ground rejects. An item given as a Quote keeps its own offsets.
-    Outputs without evidence are returned as they are (no work)."""
-    if not has_evidence(v) or init_state is None:
+    Claim.source, else the part's `source`, else "doc" if the part reads it, else its only given text input, else "doc";
+    then the part's other text inputs (several labelled sources: "notes", "dialogues", "map" — the Quote records which
+    one) — at its first occurrence as whole words and numbers (find_whole: "3" does not quote "30"); a string that is
+    not there becomes Quote(text, -1, -1, source), which ground rejects. An item given as a Quote keeps its own offsets.
+
+    Quote matching (the part's `quotes`, Catalog(quotes=...)): "normalized" (default) — a quote that is not literally in
+    its text is looked for, and compared at its offsets, in the normalized view (solvi.provenance.norm_view: NFKC,
+    no-break spaces and hyphens, dashes, "…", whitespace runs, curly quotes); the Quote kept is then the source's own
+    substring at offsets into the original text, and the output carries extra["quote_match"] = {"form", "written"} —
+    what the part wrote — so the record says so and a replay re-checks it. A literal match never needs the view and
+    leaves the output as it was. "literal": as 0.9 (the text as written, up to whitespace runs at given offsets).
+    Outputs without evidence or quotes are returned as they are (no work)."""
+    if init_state is None:
         return v
+    mode = getattr(part, "quotes", "normalized")
+    written = {}
+    if isinstance(v, (Quote, Claim, Decision)):
+        v = _normalized_quote(part, v, init_state, mode, written)
+    if not has_evidence(v):
+        return _noted(v, written)
     import dataclasses
-    src = getattr(v, "source", None) or part.source
-    if src is None:
-        texts = [x for x in part.inputs if isinstance(init_state.get(x), str)]
-        src = "doc" if ("doc" in texts or len(texts) != 1) else texts[0]
+    from .provenance import matches
+    srcs = None
     out = []
-    for e in v.evidence:
+    for k, e in enumerate(v.evidence):
         if isinstance(e, Quote):
+            t = init_state.get(e.source)
             if e.value is None:
-                t = init_state.get(e.source)
                 e = dataclasses.replace(e, value=t[e.start:e.end] if isinstance(t, str) and 0 <= e.start <= e.end <= len(t)
                                         else "")
+            elif isinstance(t, str) and 0 <= e.start <= e.end <= len(t) and matches(str(e.value), t[e.start:e.end]) \
+                    is False:
+                kept = _kept(str(e.value), t, e.start, e.end, mode)
+                if kept is not None:
+                    written[f"evidence {k}"] = str(e.value)
+                    e = dataclasses.replace(e, value=kept)
             out.append(e)
             continue
         text = str(e)
-        t = init_state.get(src)
+        if srcs is None:
+            srcs = _sources(part, v, init_state)
+        t = init_state.get(srcs[0])                   # 0.9: the first source, literally — the same quote as before
         i = find_whole(text, t) if isinstance(t, str) else -1
-        out.append(Quote(text, i, i + len(text) if i >= 0 else -1, src))
-    return dataclasses.replace(v, evidence=out)
+        if i >= 0:
+            out.append(Quote(text, i, i + len(text), srcs[0]))
+            continue
+        q = find_quote(text, {s: init_state.get(s) for s in srcs}, quotes=mode)
+        if q is None:
+            out.append(Quote(text, -1, -1, srcs[0]))
+            continue
+        if q.value != text:
+            written[f"evidence {k}"] = text
+        out.append(q)
+    return _noted(dataclasses.replace(v, evidence=out), written)
+
+
+def _noted(v, written):
+    """An output whose quotes needed the normalized view, with that recorded: extra["quote_match"] (a bare Quote becomes
+    a Claim of it, which unwraps to the same value, offsets and confidence)."""
+    if not written:
+        return v
+    import dataclasses
+    from .provenance import NORM_FORM
+    note = {"quote_match": {"form": NORM_FORM, "written": written}}
+    if isinstance(v, Quote):
+        return Claim(v, confidence=v.confidence, extra=note)
+    return dataclasses.replace(v, extra={**(v.extra or {}), **note})
 
 
 def evidence_rows(v):
@@ -485,6 +594,9 @@ class Part:
     returns: Any = None                  # the return type (the fact's type; for a Quote / Decision, of its value); None — untyped
     timeout: float | None = None         # System.aask: seconds a call may take (else System(timeout=)); then the step fails
     blocking: bool = False               # System.aask: a sync part that blocks (I/O, a model) runs in a worker thread
+    quotes: str = "normalized"           # quote matching: "normalized" (1.0 default) or "literal" (0.9); Catalog(quotes=)
+    then_parts: dict | None = field(default=None, repr=False, compare=False)   # check only: question → Part of a `then`
+    #                                                                            function (its typed inputs; see check)
     tin: dict | None = field(default=None, repr=False, compare=False)   # compiled validators of the typed arguments
     tout: Any = field(default=None, repr=False, compare=False)          # ... and of the return type
 
@@ -492,6 +604,32 @@ class Part:
         """Must a Quote from this part be literally at its offsets? Yes for model-backed parts (unless exact=False)."""
         from .provenance import FUZZY
         return self.exact if self.exact is not None else (self.model is not None or self.provenance in FUZZY)
+
+
+def _then_parts(check):
+    """A check's `then` functions as parts (question → Part): their argument names are the facts they read, their type
+    hints validate / coerce those facts as for any part. Constants need none."""
+    out = {}
+    for q, fn in check.then.items():
+        if not callable(fn):
+            continue
+        try:
+            params = inspect.signature(fn).parameters
+        except (TypeError, ValueError):
+            raise ValueError(f"check {check.name}: the `then` function for {q!r} has no signature to read its facts "
+                             "from") from None
+        bad = [x for x, p in params.items() if p.kind in (p.VAR_POSITIONAL, p.VAR_KEYWORD)]
+        if bad:
+            raise ValueError(f"check {check.name}: the `then` function for {q!r} takes *{bad[0]}: its arguments are "
+                             "the facts it reads, by name")
+        tp = Part(kind="fn", name=f"{check.name}.then[{q}]", inputs=list(params), func=fn)
+        if getattr(fn, "__annotations__", None):
+            from .typed import compile_part, hints
+            tp.types, _ = hints(fn, "fn")
+            if tp.types:
+                compile_part(tp)
+        out[q] = tp
+    return out or None
 
 
 def _group_func(group):
@@ -711,7 +849,13 @@ def plain_json(v):
 class Catalog:
     """Everything the system can do; the strategist decides which parts each question needs."""
 
-    def __init__(self):
+    def __init__(self, *, quotes="normalized"):
+        """quotes: how quotes and evidence are matched against their source text — "normalized" (default since 1.0: a
+        quote that differs from its text only in Unicode form, no-break spaces or hyphens, dashes, "…", whitespace
+        runs or curly quotes is found, and the source's own substring is kept, see solvi.core.locate) or "literal"
+        (0.9: the text as written, up to whitespace runs). It applies to the parts registered after it is set."""
+        from .provenance import quote_mode
+        self.quotes = quote_mode(quotes)
         self.parts: dict[str, Part] = {}
         self.rules: dict[str, Part] = {}
         self.constraints: dict[str, Part] = {}     # rules between answers of different questions
@@ -738,9 +882,12 @@ class Catalog:
             src = _quote_source(f, sig, kw.get("source"))
             kw["source"] = None if src == "doc" else src
         kw = {k: v for k, v in kw.items() if v is not None or k in ("then",)}
-        p = Part(kind=kind, name=f.__name__, inputs=list(sig.parameters), func=f, doc=(f.__doc__ or "").strip(), **kw)
+        p = Part(kind=kind, name=f.__name__, inputs=list(sig.parameters), func=f, doc=(f.__doc__ or "").strip(),
+                 quotes=getattr(self, "quotes", "normalized"), **kw)
         if p.source is not None:                       # a Quote without its own source points into this text
             p.func = _sourced(f, p.source)
+        if kind == "check" and p.then:
+            p.then_parts = _then_parts(p)
         commit = None
         if getattr(f, "__annotations__", None) and kind != "constraint":      # typed facts (untyped parts skip all this)
             from .typed import compile_part, hints, register

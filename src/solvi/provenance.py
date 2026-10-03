@@ -352,12 +352,15 @@ def part_fingerprint(part):
     model's type) and its code; a fact with alternative producers — each producer's, in order. The model's weights are not
     here: they are the model's own fingerprint, recorded with each step it produced."""
     d = {"kind": part.kind, "name": part.name, "inputs": list(part.inputs), "hard": part.hard,
-         "then": sorted([str(k), _r(v)] for k, v in (part.then or {}).items()), "question": part.question,
+         "then": sorted([str(k), code_fingerprint(v) if callable(v) else _r(v)] for k, v in (part.then or {}).items()),
+         "question": part.question,
          "provides": part.provides, "options": None if part.options is None else [_r(o) for o in part.options],
          "exact": part.exact, "source": part.source, "min_confidence": part.min_confidence, "provenance": part.provenance,
          "validate": code_fingerprint(part.validate), "model": None if part.model is None else type(part.model).__qualname__,
          "types": None if part.types is None else {k: type_fingerprint(t) for k, t in part.types.items()},
          "returns": None if part.returns is None else type_fingerprint(part.returns)}
+    if getattr(part, "quotes", "normalized") != "normalized":   # only when set otherwise: 0.9's fingerprints stay as
+        d["quotes"] = part.quotes                                # they were
     if part.alternatives is not None:
         d["alternatives"] = [part_fingerprint(a) for a in part.alternatives]
         d["features"] = code_fingerprint(part.features)
@@ -447,6 +450,103 @@ def matches(value, snippet):
     return None
 
 
+# --- quote matching on a normalized view (solvi 1.0). A quote a model writes may differ from its source in how characters
+# are typed, not in what they say: NFKC forms (ligatures, full-width letters), no-break spaces, no-break and other
+# hyphens / dashes, "…" for "...", runs of whitespace, curly for straight quotes, zero-width characters. QUOTES_NORMALIZED
+# compares both texts in one normalized view; the quote that is kept is always the source's own substring at offsets
+# into the ORIGINAL text, and a record whose quote needed the view says so (extra["quote_match"], see quote_match_problem).
+QUOTES_LITERAL, QUOTES_NORMALIZED = "literal", "normalized"
+QUOTE_MODES = (QUOTES_LITERAL, QUOTES_NORMALIZED)
+NORM_FORM = "nfkc-ws-dash-quote/1"            # the normalization a record names: its rules never change under this name
+_DASHES = dict.fromkeys(map(ord, "‐‑‒–—―⁃−﹘﹣－"), "-")
+_QUOTE_CHARS = {**dict.fromkeys(map(ord, "‘’‚‛‹›"), "'"),
+                **dict.fromkeys(map(ord, "“”„‟«»"), '"')}
+_CHAR_MAP = {**_DASHES, **_QUOTE_CHARS}
+_ZERO_WIDTH = frozenset("­​‌‍⁠﻿")
+
+
+def quote_mode(mode):
+    """A quote-matching mode, checked: "normalized" (default) or "literal" (0.9: the text as written, up to whitespace)."""
+    if mode not in QUOTE_MODES:
+        raise ValueError(f'quotes must be "normalized" or "literal", not {mode!r}')
+    return mode
+
+
+def norm_view(s):
+    """A text in the normalized view → (view, starts, ends): view[i] comes from s[starts[i]:ends[i]]. Each character with
+    the combining marks after it is NFKC-normalized as a unit; dashes and hyphens become "-", curly and angle quotes
+    straight ones, zero-width characters and soft hyphens go, and every run of whitespace is one space."""
+    import unicodedata
+    out, starts, ends = [], [], []
+    i, n = 0, len(s)
+    while i < n:
+        j = i + 1
+        while j < n and unicodedata.combining(s[j]):
+            j += 1
+        unit = s[i:j]
+        if not unit.isascii():
+            unit = unicodedata.normalize("NFKC", unit).translate(_CHAR_MAP)
+        for c in unit:
+            if c in _ZERO_WIDTH:
+                continue
+            if c.isspace():
+                if out and out[-1] == " ":
+                    ends[-1] = j                  # a run of whitespace: one space for all of it
+                    continue
+                c = " "
+            out.append(c)
+            starts.append(i)
+            ends.append(j)
+        i = j
+    return "".join(out), starts, ends
+
+
+def normalized(s):
+    """The normalized view of a text, without the offsets and without leading / trailing space."""
+    return norm_view(s)[0].strip(" ")
+
+
+def find_normalized(text, quote, whole=True):
+    """Where `quote` is in `text` in the normalized view → (start, end) in the ORIGINAL text — text[start:end] is the
+    source's own substring — or None. whole: as whole words and numbers (solvi.core.find_whole)."""
+    q = normalized(quote)
+    if not q or not isinstance(text, str):
+        return None
+    view, starts, ends = norm_view(text)
+    if whole:
+        from .core import find_whole
+        i = find_whole(q, view)
+    else:
+        i = view.find(q)
+    if i < 0:
+        return None
+    return starts[i], ends[i + len(q) - 1]
+
+
+def matches_normalized(value, snippet):
+    """Is the string `value` the text `snippet` in the normalized view?"""
+    return isinstance(value, str) and isinstance(snippet, str) and normalized(value) == normalized(snippet)
+
+
+def quote_match_problem(extra, value=None, rows=()):
+    """A record's quote_match note (what a part wrote, matched in the normalized view) re-checked on replay → None, or why
+    it does not hold: the form must be one this version knows, and each written text must be, in that view, the quote
+    the record keeps (`value`: the record's quoted value; `rows`: its evidence rows [start, end, source, text])."""
+    qm = extra.get("quote_match") if isinstance(extra, dict) else None
+    if qm is None:
+        return None
+    if not isinstance(qm, dict) or qm.get("form") != NORM_FORM:
+        return f"{NOT_GROUNDED}: quote matched in an unknown normalization {qm!r} (this version knows {NORM_FORM!r})"
+    for where, written in (qm.get("written") or {}).items():
+        kept = value if where == "value" else None
+        if where.startswith("evidence "):
+            k = int(where.split()[1])
+            kept = rows[k][3] if 0 <= k < len(rows) else None
+        if not matches_normalized(written, kept):
+            return f"{NOT_GROUNDED}: {where} written as {written!r} is not {kept!r} in the normalized view"
+    return None
+
+
 def snippet(init, quote, width=60):
     """The quoted text doc[start:end] for a record's (start, end, source), shortened for display."""
     if not quote:
@@ -459,6 +559,8 @@ def snippet(init, quote, width=60):
     return t if len(t) <= width else t[: width - 1] + "…"
 
 
-__all__ = ["catalog_fingerprint", "classify", "code_fingerprint", "digest", "ESCALATED", "fingerprint", "FUZZY",
-           "INSTRUCTION", "KINDS", "matches", "MEMORY", "model_id", "model_info", "NOT_GROUNDED", "OUTSIDE_OPTIONS",
-           "QUOTE_OUTSIDE", "snippet", "TIMED_OUT", "torch_fingerprint", "TYPE_REJECTED", "VALIDATE"]
+__all__ = ["catalog_fingerprint", "classify", "code_fingerprint", "digest", "ESCALATED", "find_normalized", "fingerprint",
+           "FUZZY", "INSTRUCTION", "KINDS", "matches", "matches_normalized", "MEMORY", "model_id", "model_info",
+           "NORM_FORM", "norm_view", "normalized", "NOT_GROUNDED", "OUTSIDE_OPTIONS", "QUOTE_MODES", "QUOTE_OUTSIDE",
+           "quote_match_problem", "quote_mode", "QUOTES_LITERAL", "QUOTES_NORMALIZED", "snippet", "TIMED_OUT",
+           "torch_fingerprint", "TYPE_REJECTED", "VALIDATE"]

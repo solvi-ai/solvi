@@ -181,9 +181,12 @@ def evidence_of(rec):
     return [Quote(t, s, e, src) for s, e, src, t in rows]
 
 
-def resolve(at, rec, init):
-    """The rule's record → {"answer", "confidence" (the answer's own), "probs", "evidence", "extra"}; raises Rejected."""
-    from .provenance import NOT_GROUNDED, QUOTE_OUTSIDE, matches
+def resolve(at, rec, init, quotes="normalized"):
+    """The rule's record → {"answer", "confidence" (the answer's own), "probs", "evidence", "extra"}; raises Rejected.
+    quotes: how a span is matched against its text (the rule's Catalog(quotes=)): "normalized" — a span written otherwise
+    than its text (Unicode form, no-break spaces and hyphens, dashes, "…", whitespace runs, curly quotes) is found in the
+    normalized view, and the span is the text's own substring at offsets into the original; "literal" — as 0.9."""
+    from .provenance import NOT_GROUNDED, QUOTE_OUTSIDE, find_normalized, matches, matches_normalized
     v, probs = rec.value, dict(rec.probs) if rec.probs else None
     ev = evidence_of(rec)
     conf = float(rec.confidence)
@@ -201,14 +204,19 @@ def resolve(at, rec, init):
             if not (isinstance(text, str) and 0 <= s <= e <= len(text)):
                 raise Rejected(GROUNDING, f"{QUOTE_OUTSIDE}: span [{s}:{e}] of {src}")
             t = text[s:e]
-            if v is not None and matches(v, t) is False:
+            if v is not None and matches(v, t) is False and not (quotes == "normalized" and matches_normalized(v, t)):
                 raise Rejected(GROUNDING, f"{NOT_GROUNDED}: span {_short(v)!r} is not the text at {src}[{s}:{e}] ({_short(t)!r})")
         elif isinstance(v, str) and v:
             text = init.get(src)
             s = text.find(v) if isinstance(text, str) else -1
-            if s < 0:
-                raise Rejected(GROUNDING, f"{NOT_GROUNDED}: span {_short(v)!r} is not in {src}")
-            e, t = s + len(v), v
+            if s >= 0:
+                e, t = s + len(v), v
+            else:
+                at_ = find_normalized(text, v, whole=False) if quotes == "normalized" else None
+                if at_ is None:
+                    raise Rejected(GROUNDING, f"{NOT_GROUNDED}: span {_short(v)!r} is not in {src}")
+                s, e = at_
+                t = text[s:e]                         # the text's own substring, not the rule's spelling of it
         else:
             raise Rejected(GROUNDING, f"{NOT_GROUNDED}: a span answer is a Quote or a text in {src}, not {_short(v)}")
         value = t

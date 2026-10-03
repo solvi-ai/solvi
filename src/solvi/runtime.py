@@ -606,6 +606,11 @@ def _recompute(part, r, args, init, catalog=None):
             was = [list(x) for x in (r.extra or {}).get("evidence") or ()]
             if got != was:
                 return [(r.step, r.name, f"evidence {was} ≠ recomputed {got}")]
+        if not why and r.error is None:               # quotes matched in the normalized view: the same note (1.0)
+            got = (v.extra or {}).get("quote_match") if isinstance(v, (Claim, Decision)) else None
+            was = r.extra.get("quote_match") if isinstance(r.extra, dict) else None
+            if got != was:
+                return [(r.step, r.name, f"quote match {was} ≠ recomputed {got}")]
         if not why and r.error is None and (isinstance(v, Claim) or (r.extra or {}).get("reasons")):
             got = (v.extra or {}).get("reasons") if isinstance(v, Claim) else None   # a check's reasons (refine.Fail)
             was = (r.extra or {}).get("reasons")
@@ -658,6 +663,11 @@ def _grounded(part, r, init):
     if isinstance(r.extra, dict) and r.extra.get("evidence"):
         from .core import check_evidence
         why = check_evidence([Quote(t, s, e, src) for s, e, src, t in r.extra["evidence"]], init)
+        if why:
+            return [(r.step, r.name, f"recorded {why}")]
+    if isinstance(r.extra, dict) and "quote_match" in r.extra:     # quotes matched in the normalized view (1.0): what
+        from .provenance import quote_match_problem               # the part wrote is the kept quote in that view
+        why = quote_match_problem(r.extra, r.value, r.extra.get("evidence") or ())
         if why:
             return [(r.step, r.name, f"recorded {why}")]
     opts = part.options if part.options is not None else (list(r.probs) if r.probs else None)
