@@ -1100,6 +1100,48 @@ and the decision escalates with its message. The trade-off is speed: thinking ad
 request, `max_think` / `nothink_threshold` cap them, and the time per request is worth measuring on your own hardware;
 claims about its accuracy are its authors'. How it does inside solvi's checks is on the [benchmark page](vs_llm.md).
 
+**Reference.** The whole signature: `systemone(base_url, model, api_key=None, *, timeout=30.0, opener=None,
+extra_body=None, deterministic=False, retries=2, backoff=1.0, sleep=None, max_len=None)` → a `DecideModel` (backend
+`"systemone"`, id `systemone:<model>`), whose `decision(...)` / `decisions(...)` build parts as for a local checkpoint
+(the signature is in [the decider](#the-model-proposes-decisions-with-a-decider)); every option after `api_key` is
+keyword-only.
+
+| Argument | What it does |
+|---|---|
+| `base_url`, `model` | the server (`POST {base_url}/v1/systemone`) and the model name it serves; both enter the fingerprint |
+| `api_key` | sent as `Authorization: Bearer …`, never recorded, never in the fingerprint or `repr` |
+| `timeout` | seconds per request |
+| `retries`, `backoff`, `sleep` | more attempts after network errors, timeouts, a broken connection, 408 / 409 / 429 / 5xx, `backoff · 2^k` seconds apart (`sleep`: for tests) |
+| `extra_body` | request fields merged into every request (provider routing, `user`, a thinking model's `options`); `model`, `state`, `questions` are refused; it enters the fingerprint except Jeeves's `options.return_reasoning` |
+| `deterministic` | False (default): replay checks the recorded output instead of calling the service; True: replay re-runs it and compares (a local server whose output is reproducible) |
+| `opener` | a replacement for urllib's `urlopen` (tests, proxies) |
+| `max_len` | the tokens one request reads under `long="retrieve"` (words and punctuation × 1.3; default 512, at least 64) |
+
+One question is one request: a System and `decide_pass` ask a remote model their questions about an input one after
+another (the items one scorer call is handed about one text — a multi-label question's options — share a request). The request
+body is `extra_body` plus `{"state": <the text>, "model": <model>, "questions": {name: question}}`; a question is
+`{"type": "choice", "instructions": <task>, "criteria": {option: description or null}}` for a choice or a score (over
+its levels), `{"type": "noul", "instructions": <task>}` for yes / no, one `noul` per option for a multi-label question
+("Does the option … apply?", chosen at 0.5), and with "not stated" allowed one more option (or one more `noul`)
+described as "The input does not state it: …". The reply must be a JSON object whose `answers` holds, per question
+name, `{"probabilities": {option: p}}` (every option, each in [0, 1]) or `{"noul": p}`; the probabilities become the
+decider's logits. `usage`, `cost`, `latency_ms`, `model` and `reasoning` (per question, Jeeves) are read when present.
+
+Each decision records `extra["systemone"]`: `endpoint` (the URL without credentials or query), `model`, `served_by`
+(when the reply names another model), `ms` (the request's time here), `questions` (how many questions the request
+answered — the next fields are for the whole request), `usage` (`input_tokens`, `output_tokens`, `reasoning_tokens`, as
+the service gives them), `cost` (the service's own number), `latency_ms` (the service's own time) and `reasoning` (the
+question's chain, cut to 1,000 characters, with its `tokens`, `thought`, `closed` and `truncated` — for the audit; the
+answer comes from the probabilities). The scorer (`model.scorer`) keeps the totals: `requests`, `usage` and `cost`.
+
+| What happens | Result |
+|---|---|
+| no answer after the retries (network, timeout, 408 / 409 / 429 / 5xx) | the decision escalates ("did not answer after N attempts: …"); not cached, asked again next time |
+| HTTP 400 / 413 / 422 | the decision escalates with the service's error text (and a gateway's wrapped cause, OpenRouter's `error.metadata.raw`) |
+| 401, 403, 404 and any other 4xx (a wrong key, model or URL) | `SystemOneError` is raised |
+| a reply that is not a JSON object, lacks a question's answer or a probability, or gives a number outside [0, 1] | the decision escalates ("invalid System One output — …"); never a guess |
+| a span or an evidence question | `ValueError`: the API has no spans or evidence quotes |
+
 #### Any LLM as a decider
 
 ```python
@@ -2074,6 +2116,43 @@ of=res.stored_id)` — `source` is `"human"` (the default: a person corrected or
 really happened) or `"rule"` (your code rejected a model's proposal and decided instead); anything else raises
 `UntrustedLabel`. `of` is the stored id of the decision it corrects; `corrections()` returns all three.
 
+### Outcomes as labels: `system.outcome`
+
+An agent often sees what its decision led to a few steps later — the parcel was lost, the loan defaulted, Link lost a
+heart after the move. `outcome` turns that into a label of the decision, without a separate labelling pass:
+
+```python
+res = system.ask(state)                                    # stored: System(storage=...)
+...
+system.outcome(res, "west", note="Link lost a heart going east", by="env")   # → the label's stored id
+system.outcome(res.stored_id, "west")                      # by id, from another process on the same store
+system.guarantee("move", examples, max_risk=0.05, corrections=True)          # recalibrate, explicitly, with them
+```
+
+`outcome(decision, value, *, question=None, note=None, by=None)`: `decision` is the Response saved by the system's
+storage, or its stored id (also of a compact record); `value` the correct answer the outcome shows (as for `teach`);
+`question` which of the decision's questions (default: its only one); `note` what happened, in words — kept with the
+label (`corrections()` gives it as `"note"`; `redact` erases it with the content); `by` who or what saw it. It is
+stored as a correction with source `"outcome"` through the same source check as every label, with `of` = the decision
+and the decision's recorded input, so the system report counts it against the decision it labels.
+
+Nothing learns from an outcome and no promise moves by itself. Use the labels explicitly: recalibrate a guarantee on a
+schedule or after a drift flag (`System.guarantee(..., corrections=True)` — the report's `"labels"` counts them by
+source), refit (`fit` on `storage.corrections()`), or keep them as knowledge. Recalibrating on every outcome as it
+arrives is not in the stable path: measured, it broke the promises — the outcomes an agent sees are not a random sample
+of its decisions (a decision that abstained has none), and a threshold moved after every label is no longer the one the
+promise was calibrated for. The experimental `solvi.oncalib` does it, with that risk in its documentation:
+
+```python
+from solvi.oncalib import OnTheFly                          # ExperimentalWarning on import
+live = OnTheFly(system, "move", max_risk=0.05, every=50, window=500, min_labels=30)
+live.outcome(res, "west")          # stored as above; every 50 new labels: System.guarantee on the last 500
+live.drifted()                     # a drift flag: from now on only later labels count, recalibrated at once
+live.history                       # each recalibration: when, why, the label ids, the report
+```
+
+Use it to explore, never to make a promise you report.
+
 ### System 2's answers as labels: `label_source="verified"`
 
 When a slower, stronger solver (an LLM, a person-in-the-loop service — "System 2") handles what your fast system
@@ -2342,12 +2421,14 @@ Each mismatch is the triple with a `.kind`, so a report can tell damaged data fr
 removed since: a mismatch, not an exception, and the steps after it are still checked), `missing_input` (a part now
 reads an input the trace does not hold), `flow` (a planned step is not recorded), `not_restored` (a hash or a step does
 not verify because a value it rests on did not come back from storage as it was — its type is neither one the dump
-restores nor declared: no verdict on the data, see [serialization](#typed-input-state-and-serialization)) and `error`
-(`replay_all`: a stored record could not be loaded, or the replay raised). When there are mismatches the result also has `"kinds"`, the count
+restores nor declared: no verdict on the data, see [serialization](#typed-input-state-and-serialization)), `not_kept`
+(a compact stored record does not keep what checking this step needs — see [compact records](#compact-records-and-rotation):
+no verdict on the data past it) and `error` (`replay_all`: a stored record could not be loaded, or the replay raised). When there are mismatches the result also has `"kinds"`, the count
 per kind, and `"summary"`, one line: `"data damaged: the hash chain or a record does not verify"`, `"data intact,
 catalog changed (parts missing)"`, `"data intact, catalog changed"`, `"data intact, model changed"`, `"data intact,
-steps do not recompute"`, `"not verified: values stored without their type did not come back as they were (no verdict
-on the data)"` or `"replay failed (no verdict on the data)"`. `replay_all` gives the same two keys and the
+steps do not recompute"`, `"not verified: a compact record does not keep this step's surroundings (no verdict on the
+data)"`, `"not verified: values stored without their type did not come back as they were (no verdict on the data)"` or
+`"replay failed (no verdict on the data)"`. `replay_all` gives the same two keys and the
 catalog verdict for every stored decision that does not replay, and `solvi replay` prints them.
 
 Continuing the README quickstart:
@@ -2409,15 +2490,80 @@ index rows and the new head): durable once `save` returns, and slower than an un
 `DuckDBStorage` and `PostgresStorage` commit per record too; with PostgreSQL the cost is mostly the round trip to the
 server. Measure on your machine before storing every decision of a high-volume stream.
 
+#### Compact records and rotation
+
+A full record holds the whole response: every step's value and inputs, the planned flow, the timings. That is 6–38 KB
+a decision on the gallery (median 12.4 KB over its 15 entries), 10 KB on the credit task and on a game-like loop that
+decides every step — a file of a gigabyte in an evening of play. For frequent decisions keep them compact:
+
+```python
+store = JSONLStorage("game.jsonl", record="compact", rotate_bytes=200_000_000)   # or SQLiteStorage(..., record=...)
+store = JSONLStorage("game.jsonl", record="sample:100")    # one decision in 100 in full, the others compact
+```
+
+| record= | What a decision's record holds |
+|---|---|
+| `"full"` (default) | the whole response (`res.to_dict()`): every step's value, inputs and hash, the flow, the timings |
+| `"compact"` | the given facts (the input, with the types that restore it); each answer with its why, guard, source, evidence and guarantee (not its probabilities); each check's result and reasons; every model-backed step whole (its value, probabilities, model id and fingerprint, tokens, the generator's reply) and the answer heads, guarantees, plan and text records; every step's hash; the catalog's and questions' fingerprints and the time. Not the computed values, the other steps' records, the planned flow, the timings or the per-part fingerprints |
+| `"sample:N"` | one decision in N (counted by the store object) in full, the others compact |
+
+Bytes a decision in a `JSONLStorage` file ([benchmarks/journal_size.py](../benchmarks/journal_size.py); every store also
+verifies and every decision replays):
+
+| Decisions | full | compact | sample:10 |
+|---|---|---|---|
+| gallery, 15 entries, each entry's cases asked three times | 5.8–38.1 KB (median 12.4) | 2.4–10.2 KB (median 3.2); 2.0–4.7× smaller | 3.2–12.3 KB |
+| credit task, 300 applications (rules, every rule's points: `early_exit=False`) | 10.1 KB | 1.9 KB | 2.8 KB |
+| a game-like loop, 300 steps (a 40×16 screen and 1.1 KB of notes as input) | 10.2 KB | 3.7 KB | 4.4 KB |
+
+What is left is mostly the input: a compact record keeps every given fact, so 1.1 KB of notes given with every step
+costs 1.1 KB a decision — give a long constant text once (a hash or a key as the input) when it does not change.
+
+**What a compact record still proves, and what it cannot.** It is hashed into the chain like any other record:
+`verify()` checks it, that each kept step sits in the record's chain of step hashes and is linked to the step before,
+and that its answers are the record's. `replay_all(system)` re-runs it: the flow is planned again for the recorded
+questions on the recorded input and run, every step's hash is chained again and compared with the recorded one — a
+step's hash covers its inputs, value, error and the link to the step before, so equal hashes mean every step gave what
+it gave then — and then the decision is replayed like a full one (heads, guarantees, plan, answers). A model is not
+called again where a full record's replay would not call it either (`trust_models=True`, a generator, a model marked
+`deterministic=False` such as a hosted System One model): its kept output is given back to the step instead and must
+give the recorded record again; a model that full replay re-runs is re-run here too. What it cannot do, and says instead of passing:
+
+| Replay of a compact record | Full record | Compact record |
+|---|---|---|
+| a deterministic step (rule, check, function) | re-computed from its recorded inputs, compared with the recorded value | re-computed from the recorded input, compared by its hash |
+| a model step | re-run, or its recorded output verified (`trust_models=True`, non-deterministic models) | the same: re-run, or its kept output given back and verified |
+| a step that no longer gives the recorded value (the catalog changed) | the old and the new value | kind `recompute`: the step and the new value; the old value is not kept, only its hash |
+| a model step whose kept output is missing, or does not give its record again | — | kind `not_kept`: "not verified … (no verdict on the data)"; nothing after it is checked |
+| `get(id)` | the Response | `CompactRecord`; `store.rederive(id, system)` rebuilds it (the same re-run) |
+| `quarantine(fact)` | from the recorded inputs | re-derived with the store's System; one that cannot be is not searched, and a warning names it |
+| `where_is(fact)` | decisions resting on the fact, records holding it | compact decisions holding it in their input are listed under "stored" |
+| `diff(store, system)` | changed answers and the steps that changed them | changed answers only (`"record": "compact"`, no causes) |
+| reports (`store.report`, `system.report`) | everything | answers, safeguards, guarantees, models and model costs from what is kept |
+
+`Stored.compact` says which kind a record is, `Stored.input` gives the input of either. `redact` works on both.
+
+**Rotation.** `JSONLStorage(path, rotate_bytes=..., rotate_records=...)`: when the file has reached that size (or that
+many records), the next append moves it to a closed segment `<name>.000001.jsonl` (with its head; the number counts up)
+and starts `path` again with a record of kind `"segment"` that names the closed segment, its record count and its last
+hash. Each file verifies on its own; `store.verify_segments()` checks every segment and every link — a segment removed,
+replaced or cut short breaks a link and is named. `store.segments()` lists the closed files, each readable as a
+`JSONLStorage` of its own; `iter`, `query`, `get`, `replay_all` and `redact` work on the current file. A closed segment
+is not written to: redacting a record of it in place would append to it and break the next file's link (not supported
+yet — erase before the file rotates, or keep personal data out of the input). Writers of a rotated store lock
+`<path>.lock` (a file that is never moved), so every process that writes it must open it with rotation on.
+
 | Method | Returns |
 |---|---|
 | `save(res, meta=None)` | the id of the stored record (`System(storage=...)` calls it on every ask) |
-| `get(id)`, `record(id)` | the stored `Response`; the stored record as a dict |
+| `get(id)`, `record(id)` | the stored `Response` (`CompactRecord` for a compact one); the stored record as a dict |
+| `rederive(id, system=None, trust_models=False)` | the stored `Response`; a compact one re-run from its input and checked step by step against its hashes |
 | `iter()`, `query(question=, answer=, status=, safeguard=, model=, since=, until=)` | `Stored` records (`.id`, `.time`, `.answers`, `.response()`) in stored order; `since <= time < until` |
 | `head()` | `{"count", "hash"}` of the chain |
 | `verify(anchor=None, signature=None, candidates=None)` | `{"ok", "count", "head", "legacy", "problems": [(seq, id, reason)]}` (+ `"signature"`) |
 | `signature(alg="syndrome")` | 64 bytes that later name the one changed record (see below) |
-| `replay_all(system)` | the stored decisions whose trace no longer replays, with the mismatches |
+| `replay_all(system)` | the stored decisions whose trace no longer replays, with the mismatches (`"record": "compact"` for a compact one) |
+| `segments()`, `verify_segments(anchor=None)` (`JSONLStorage`) | the closed segments of a rotated store; every file and every link verified: `{"ok", "files", "count", "problems": [(path, seq, id, reason)]}` |
 | `quarantine(fact, value=...)` | the stored decisions whose answers rest on this fact (with this value), and the path from the fact to each answer |
 | `where_is(fact, value=...)` (`forget` in 0.7) | a report: decisions resting on a given fact, and records that only hold it; nothing is deleted |
 | `redact(id, by=, note=)` | erase a stored record's content (the response, its input and trace, the meta) and keep the chain: the record keeps its place, hash and id, is marked `redacted`, and a record of kind `redaction` naming it is appended; `verify()` — also with an earlier anchor or signature — still passes, and iter / query / replay pass the record over. What is left (the answers, the time, the safeguards) is still covered by the record's hash, which is taken over the lasting fields and the digests of the answers and of the content: an answer edited in an erased record does not verify. `keep_answers=False` erases the answers too |
@@ -3631,6 +3777,29 @@ Replay does not call the model again (`part(..., replay="rerun")` does, for a se
 same way): it reads the recorded reply again through the parser and the schema and names a recorded value that does not
 follow from it. The key is never recorded.
 
+**Costs and budgets.** Every request records its tokens (`usage`) and its latency (`ms`, in the request's record).
+`generator(..., price=, budget=, total=)` adds the rest:
+
+```python
+from solvi.costs import Budget, BudgetStop
+writer = generator(url, model, api_key=KEY, price=(0.15, 0.60),          # dollars per million input / output tokens
+                   budget=Budget(usd=0.002, tokens=4000),                # one call of generate / sample: one decision
+                   total=Budget(usd=5.0))                                # the generator's whole life
+writer.spent                                                             # Cost: dollars, calls, ms, input / output tokens
+```
+
+`price`: dollars per million (input, output) tokens, or a function `(model, usage) → dollars`; each request then
+records its dollars too (`usage["usd"]`), so the system report sums them without being told the price. A budget in
+dollars without a price is refused. Before each request, what was spent plus the expected cost of one more request (the
+mean of the requests so far) must fit `total` and, within one call of `generate` / `sample` (one decision when the
+generator is a catalog part), `budget`; otherwise `BudgetStop` is raised and nothing is sent. In a catalog the part then
+fails ("BudgetStop: no budget left in total (usd 4.9993 + 0.0012 expected > 5)") and its questions abstain with that
+cause; in `solvi.refine` the loop ends as a proposer failure. A reply is not stopped half-way: a call that went over its
+budget keeps its output and records it — with a budget the output's `extra["budget"]` holds `"budget"`, `"total"`
+(the limits), `"spent"` (the call's cost) and `"over"` (how far over, or None), and the trace keeps it. `sample`'s
+requests run in parallel: each is admitted against what was spent when it starts. Measure the cost of one request
+before you set a per-decision budget below two of them.
+
 ### Agreement of candidates: solvi.agree
 
 ```python
@@ -3655,31 +3824,88 @@ empty result). When nothing votes, `sql` is missing — its error lists each can
 ```python
 from solvi.refine import refine
 run = refine(system, {"problem": text}, "accept", propose=writer.proposer(messages, schema=Plan), into="plan",
-             rounds=3, accept="yes", feedback=lambda r: my_wording(r.reasons))
+             rounds=3, accept="yes", feedback=lambda r: my_wording(r.reasons), budget=Budget(tokens=20_000))
 run.accepted, run.proposal, run.escalation, run.rounds        # stored rounds: r.stored_id
+run.cost, run.stopped                                          # what the loop cost; why its budget stopped it
 run.replay(system)                                             # {"ok", "mismatches": [(round, what, why)], ...}
 ```
 
-One round: `propose(state, earlier_rounds)` returns a proposal — a value, or a `Generated` whose record is kept in the
-round — which is given to the System under `into`; the System is asked. `accept`: `"checks"` (default: every hard check
-that governs the question was evaluated and passed, whatever the answer), an answer or a list of answers, or a function
-of the Response. A round not accepted has `reasons` — the reasons of the failed hard checks that govern the question, in
-catalog order; when the question could not be decided at all, the errors of the parts that failed ("spec: ValueError:
-no slot in the plan"). `feedback(round)` turns them into what the proposer is told (default: the list of reasons).
-The loop stops at the first accepted round or after `rounds`, and escalates: `run.escalation` is "not accepted after 3
-round(s): <the last reasons>". A reply the generator rejects (not JSON, outside the schema, a quote not in the text) is
-a round too, and its reason is fed back; a proposer that fails otherwise (the server does not answer) ends the loop with
-"the proposer failed: …". `Generator.proposer(messages, schema=…, first=…)` builds the proposer: the first round asks
-the messages (or `first`, another generator — a stronger setting for the first try); each later round appends, per
-earlier round, its reply as the assistant's turn and its feedback as the user's.
+The whole signature: `refine(system, state, question, propose=None, *, into="proposal", rounds=3, accept="checks",
+feedback=None, feedback_into=None, history=None, store=True, budget=None, price=None)`.
 
-Without a proposer the System generates itself: each round gives the earlier rounds' feedback as the fact
-`feedback_into` (default `"feedback"`, a list of reasons) and the generating part reads it — the example above.
-`history=` continues an earlier refinement. `run.to_dict()` / `Refinement.from_dict(d, catalog=cat)` store and load it;
-`run.replay(system)` replays every round's trace and checks that the loop did what its record says: each round's
-acceptance, failed checks and causes follow from its response, the feedback is what the feedback function gives (pass a
-custom one again; `accept` too when it was a function), each round's input holds its proposal and the feedback before
-it, nothing ran after an accepted round, and the escalation matches.
+**What each round sees.** Round i calls `propose(state, earlier)`: `state` is a copy of the given facts as you passed
+them (without the feedback fact), `earlier` the list of `Round`s before it — the rounds of `history=` (an earlier
+`Refinement`, or its rounds, to continue it) first, then this call's. A proposer reads from them what it needs:
+`r.proposal`, `r.said` (its reply as text), `r.feedback`, `r.reasons`, `r.failed`. It returns a proposal — a value, or a
+`Generated`, whose request record is kept in the round (`r.generated`) and whose value is the proposal. The System is
+then asked `state` plus the proposal as the fact `into` (and, with `feedback_into`, the list of every earlier round's
+feedback items as that fact), stored when `store=True` and the System has a storage.
+`Generator.proposer(messages, *, schema=None, parse=None, text=None, quotes=None, first=None, template=FEEDBACK)` is the
+proposer for a model: the first round asks `messages` (or `messages(state)` when it is a function; `first`: another
+generator for the first round only); each later round asks the same messages followed, per earlier round, by its reply
+as the assistant's turn (left out when empty) and its feedback as the user's turn. `text` may be a function of the state
+(the text the quotes must be in).
+
+Without a proposer (`propose=None`) the System generates itself: each round gives the earlier rounds' feedback as the
+fact `feedback_into` (default `"feedback"`, a flat list of reasons) and the generating part reads it.
+
+**Feedback.** A round that is not accepted has `reasons`: the reasons of the failed hard checks that govern the question
+(a check's `Fail("...")` reasons, else its docstring's first line, else "<name> is false"), in catalog order; when the
+question could not be decided at all, its `causes` — the errors of the parts that failed by themselves ("spec:
+ValueError: no slot in the plan"), not the steps that only lacked their inputs. `feedback(round)` turns them into what
+the proposer is told — a text, or a list of reasons; default: `round.reasons`. A generator's proposer renders a list
+through its `template` — by default `solvi.generate.FEEDBACK`, "Your answer was checked by a program, and it does not
+work:\n{reasons}\nGive a corrected answer.", with one "- reason" per line — and passes a text as it is
+(`solvi.generate.render_feedback`). The round asked as the last of `rounds` gets no feedback: there is no next round to
+tell.
+
+**Stopping.** A round is accepted when `accept` says so: `"checks"` (default: every hard check that governs the
+question was evaluated and passed, whatever the answer — it may still abstain for low confidence), an answer or a list /
+tuple / set of answers (the answer is one of them and not an abstention), or a function of the Response → bool. The
+loop ends:
+
+| When | `run.accepted` | `run.escalation` |
+|---|---|---|
+| a round is accepted | True | None |
+| `rounds` rounds were asked, none accepted | False | "not accepted after 3 round(s): <the last round's first three reasons>" |
+| the proposer's reply was rejected (`InvalidOutput`: not JSON, outside the schema, a quote not in the text) | — | not an end: a round of its own with `error` "the reply was rejected: …", its reason fed back |
+| the proposer failed otherwise (the server did not answer, `BudgetStop` from a generator's total) | False | "the proposer failed: <type>: <message>" |
+| `budget` would not cover another round | False | "no budget for another round (<the limit>): <the last reasons>"; `run.stopped` holds the first part |
+
+**Costs and a budget.** Each round records what it cost (`round.cost`, a `solvi.costs.Cost`): the model calls its
+response's trace records (a model in the System, a generating part) and its proposer's request (`round.generated`, also
+for a rejected reply), their tokens and dollars — from `price` (dollars per million input and output tokens, or a
+function), else the dollars a generator built with `price=` recorded, else unknown (None) — and the round's time.
+`run.cost` is their sum. `budget` (a `solvi.costs.Budget`: `usd`, `calls`, `ms`, `tokens`) limits the whole loop — one
+decision: before each round after the first, the spend so far plus the expected cost of one more round (the mean of
+the rounds so far) must fit, else the loop stops and escalates. A budget in dollars whose rounds' dollars are unknown
+stops after the first round ("dollars unknown …") rather than run unpriced. A round is not stopped half-way: a loop that
+went over records how far (`run.over_budget`). A limit across many loops is the proposer's: `generator(...,
+total=Budget(...))` raises `BudgetStop` when it is used up, which ends the loop as a proposer failure.
+
+**The record.** A `Round` has `index`, `proposal` (the value given to the System, None when it generates itself),
+`generated` (the proposer's request record), `response` (the System's Response, None when the proposer failed),
+`accepted`, `failed` (every check False in the question's flow: `Failed(check, hard, reasons, governs)`), `causes`,
+`feedback` (what the next round is told; None: no next round), `error` (the proposer's failure), `said` (the reply as
+text, for the next re-ask) and `cost`; `reasons` and `stored_id` are read from them. A `Refinement` has `question`,
+`rounds`, `accepted`, `escalation`, `max_rounds`, `into`, `feedback_into`, `accept`, `feedback_fn`, `budget`, `stopped`,
+`over_budget` and `stored_id`; `proposal`, `response`, `result` and `cost` are read from them. `run.to_dict()` gives
+`question`, `accepted`, `escalation`, `max_rounds`, `into`, `feedback_into`, `accept` (a function as its name),
+`feedback`, `rounds` (each round's `index`, `proposal`, `generated`, `response`, `accepted`, `failed`, `causes`,
+`feedback`, `error`, `said`, `stored_id`, `cost`), `cost`, `budget`, `stopped` and `over_budget`;
+`Refinement.from_dict(d, catalog=cat)` loads it back. With a System that has a storage (and `store=True`), refine also
+stores one record of kind `"refine"` next to the rounds' responses — `question`, `accepted`, `escalation`, `stopped`,
+`over_budget`, `budget`, `cost` and per round its `index`, `stored_id`, `accepted`, `error`, `feedback`, `generated` and
+`cost` — so the system report counts the loops, how they ended and what their proposals cost
+([the system report](#the-system-report-systemreport-solvi-report---overview)).
+
+**Replay.** `run.replay(system)` replays every round's trace and checks that the loop did what its record says: each
+round's acceptance, failed checks and causes follow from its response, the feedback is what the feedback function gives
+(pass a custom one again, and `accept` too when it was a function), each round's input holds its proposal and the
+feedback before it, nothing ran after an accepted round, the escalation matches the outcome, each round's recorded
+model calls and tokens are those its response and proposer record hold, and a stop by the budget follows from the
+recorded costs (the time is taken as recorded) → `{"ok", "rounds", "mismatches": [(round, what, why)], "feedback":
+"checked" / "unchecked", "traces"}`.
 
 What to expect. Re-asking with the violated constraints quoted lowers the share of wrong answers among those given,
 and more of the hard cases go to a person instead; the model often trades one violation for another, so a re-ask is
@@ -3688,10 +3914,9 @@ does not see a row left out. Agreement of several samples is not correctness: sa
 question that is not the intended one.
 
 **Not done here.** No search: a loop re-asks one proposer, it does not enumerate alternatives or keep the best of two
-valid ones — that is `solvi.search` (below). No promise that
-re-asks converge. The
-share of agreement is a signal; calibrate it on labelled examples before you trust a threshold. No streaming, no tool
-calls, no caching of replies (put a caching proxy in front of the server).
+valid ones — that is `solvi.search` (below). No promise that re-asks converge. The share of agreement is a signal;
+calibrate it on labelled examples before you trust a threshold. No streaming, no tool calls, no caching of replies (put
+a caching proxy in front of the server).
 
 ### Search over alternatives: solvi.search
 
@@ -4123,7 +4348,9 @@ accepted, why, record, cost) — the "slow path alone" arm of a comparison.
 
 ### Budget and cost
 
-`budget=Budget(usd=, calls=, ms=)` is per decision, `total=Budget(...)` for the dispatcher's life. Dollars are the
+`budget=Budget(usd=, calls=, ms=, tokens=)` is per decision, `total=Budget(...)` for the dispatcher's life (`Budget`
+and `Cost` live in `solvi.costs` since 1.0 and are the same ones `solvi.generate` and `solvi.refine` take; `tokens` counts
+input + output tokens). Dollars are the
 tokens each model output records in the trace (`extra["llm"]["usage"]`, `extra["generated"]["usage"]`) times `price`
 — dollars per million input and output tokens, or a function `(model, usage) → dollars`; a budget in dollars without a
 price is refused. Before the slow path starts, its expected cost (the mean of its runs so far) must fit what is left of
@@ -4548,8 +4775,12 @@ What it shows, per question:
   back. With a dispatcher (`solvi.dispatch`, `storage=`), who gave the final answer: System 1, the slow path or a
   person, by action (accept, think, check) and by the slice System 1 handed over.
 - **What it cost.** The time of every decision, the model calls and tokens the traces record, and dollars where they
-  are known (the dispatcher records them; for System 1's own model calls pass `price=`). The dispatcher's spend is split
-  between System 1 and the slow path.
+  are known (the dispatcher records them, and so does a generator built with `price=`; for other model calls pass
+  `price=`). The dispatcher's spend is split between System 1 and the slow path. Refinement loops (`solvi.refine` with
+  a System that has a storage) are counted in `cost["refine"]`: how many, accepted, escalated, stopped by their budget
+  and over it, their rounds, the whole loops' cost and their proposals' model calls (which no System trace holds).
+  Compact records are read as full ones for all of this: they keep the answers, the guarantees, the models and every
+  model call.
 - **The promise against the labels.** Every guarantee the decisions were gated by (`System.guarantee`, an open-set
   gate: its method, level and text, how many decisions it let through) and every calibrated dispatch policy
   (`Dispatcher.calibrate`: who answers each slice, at what threshold), next to the error measured on the decisions

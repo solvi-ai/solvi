@@ -73,6 +73,7 @@ nav:
       - solvi.memory: api/memory.md
       - solvi.lora: api/lora.md
       - solvi.learning: api/learning.md
+      - solvi.oncalib: api/oncalib.md
       - solvi.serve: api/serve.md
       - solvi.agents: api/agents.md
       - solvi.hooks: api/hooks.md

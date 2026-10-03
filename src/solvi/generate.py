@@ -34,6 +34,16 @@ output is not reproducible bit for bit, so replay does not call it again (`repla
 the recorded output instead — the recorded reply read again through the same parse and schema must give the recorded
 value, and the quotes must be in the recorded text. The API key is never recorded.
 
+Costs and budgets. Every request records its tokens (`usage`) and its latency (`ms`); with `price=` (dollars per
+million input and output tokens, or a function (model, usage) → dollars) also its dollars (`usage["usd"]`), so the
+system report sums them without being told the price. `budget=` (a solvi.costs.Budget: usd, calls, ms, tokens) limits
+one call of generate / sample — one decision when the generator is a catalog part — and `total=` the generator's whole
+life (`generator.spent`, a Cost). Before each request the spend so far plus the expected cost of one more request (the
+mean of the requests so far) must fit both, else `BudgetStop` is raised and the request is not sent: in a catalog the
+part fails ("no budget left in total ..."), its questions abstain with that cause; in solvi.refine the loop ends with an
+escalation. A reply cannot be stopped half-way: a call that went over its budget keeps its output and records how far
+over in `extra["budget"]` (with the limits and the call's cost), which the trace keeps.
+
 Not done here: no retries on an invalid reply (that is solvi.refine's loop: the reasons go back to the model), no
 response caching (put a caching proxy in front of the server), no streaming, no tool calls."""
 from __future__ import annotations
@@ -47,6 +57,7 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 
 from .core import Claim, find_whole
+from .costs import Budget, BudgetStop, Cost, price_of
 from .llm import InvalidOutput, LLMScorer
 from .remote import NoAnswer, Refused
 from .provenance import code_fingerprint, digest
@@ -303,7 +314,8 @@ class Generator:
 
     deterministic = False                              # replay checks the recorded output instead of calling the model
 
-    def __init__(self, client, *, max_tokens=1024, temperature=0.0, seed=None, response_format="prompt", workers=4):
+    def __init__(self, client, *, max_tokens=1024, temperature=0.0, seed=None, response_format="prompt", workers=4,
+                 price=None, budget=None, total=None):
         if not isinstance(client, LLMScorer):
             raise TypeError("Generator(client): an LLMScorer — `solvi.llm.llm(...).scorer`, or use generator(...)")
         if response_format not in RESPONSE_FORMATS:
@@ -314,6 +326,8 @@ class Generator:
         self.workers = max(1, int(workers))
         self.model_id = client.model_id
         self.calls = 0
+        self.price, self.budget, self.total = check_budget(price, budget, total)
+        self.spent = Cost(0.0 if self.price is not None else None)    # every request so far (not counted in a fingerprint)
         self._lock = threading.Lock()
 
     @classmethod
@@ -354,15 +368,55 @@ class Generator:
             b["response_format"] = {"type": "json_object"}
         return b
 
-    def _send(self, body):
-        """POST with the client's retries and backoff → the response dict; Unanswered / LLMError (see the module docs)."""
+    def expected(self):
+        """The expected Cost of one more request: the mean of the requests so far (None before the first)."""
+        with self._lock:
+            n = self.calls
+            return None if not n else self.spent * (1.0 / n)
+
+    def _admit(self, call):
+        """Before a request: the spend so far plus one more expected request must fit `total` and the call's `budget`
+        (module docs) → None, or BudgetStop."""
+        if self.budget is None and self.total is None:
+            return
+        exp = self.expected()
+        with self._lock:
+            if self.total is not None:
+                why = self.total.used_up(self.spent) or (self.total.over(self.spent, exp) if exp is not None else None)
+                if why:
+                    raise BudgetStop(f"no budget left in total ({why})")
+            if self.budget is not None and call is not None:
+                why = self.budget.used_up(call.spent) or (self.budget.over(call.spent, exp) if exp is not None else None)
+                if why:
+                    raise BudgetStop(f"no budget left for this decision ({why})")
+
+    def _send(self, body, call=None, meta=None):
+        """POST with the client's retries and backoff → the response dict; Unanswered / LLMError (see the module docs);
+        BudgetStop before sending when the budget would not cover it."""
+        import time
+        self._admit(call)
+        t0 = time.perf_counter()
         try:
             resp = self.client.send(body)
         except (NoAnswer, Refused) as e:
             raise Unanswered(str(e)) from None
+        if meta is not None:
+            meta["ms"] = round((time.perf_counter() - t0) * 1000, 3)
         with self._lock:
             self.calls += 1
         return resp
+
+    def _account(self, meta, call):
+        """After a reply: its cost (tokens, latency, dollars with a price) added to `spent` and to the call's."""
+        u = meta.get("usage") or {}
+        usd = price_of(self.price, [(meta.get("model"), u)]) if self.price is not None else None
+        if usd is not None:
+            u["usd"] = round(usd, 9)
+        c = Cost(usd, 1, float(meta.get("ms") or 0.0), int(u.get("input_tokens", 0)), int(u.get("output_tokens", 0)))
+        with self._lock:
+            self.spent = self.spent + c
+            if call is not None:
+                call.spent = call.spent + c
 
     def _content(self, resp, meta):
         """A response → the reply's text; InvalidOutput for a refusal, a cut-off or empty reply, or no choices."""
@@ -404,20 +458,28 @@ class Generator:
             value = schema.check(_json_in(value) if isinstance(value, str) else value)
         return value, quoted(value, quotes, text)
 
-    def _one(self, messages, schema, parse, text, quotes, temperature, seed, max_tokens):
-        """One request → (value, quotes, meta); raises InvalidOutput / Unanswered / LLMError."""
+    def _one(self, messages, schema, parse, text, quotes, temperature, seed, max_tokens, call=None):
+        """One request → (value, quotes, meta); raises InvalidOutput / Unanswered / LLMError / BudgetStop."""
         body = self.body(messages, schema, temperature, seed, max_tokens)
         meta = {"model": self.model_id, "request": request_fp(body), "temperature": body["temperature"],
                 "seed": body.get("seed")}
         if schema is not None:
             meta["schema"] = schema.fp
-        content = self._content(self._send(body), meta)
+        resp = self._send(body, call, meta)
+        try:
+            content = self._content(resp, meta)
+        except InvalidOutput as e:
+            e.generated = meta                         # the request's record (what it cost), for solvi.refine
+            raise
+        finally:
+            self._account(meta, call)
         if schema is not None or parse is not None:
             meta["text"] = content
         try:
             value, qs = self.read(content, schema, parse, text, quotes)
         except InvalidOutput as e:
             e.reply = content                          # what the model said, for the next turn of a re-ask
+            e.generated = meta                         # the request's record (what it cost), for solvi.refine
             raise
         return value, qs, meta
 
@@ -428,8 +490,19 @@ class Generator:
         `text` as written; they become the evidence (`source`: the given fact holding the text, for a catalog part).
         Raises InvalidOutput, Unanswered or LLMError (module docs) — an invalid reply is never repaired."""
         sch = _schema(schema)
-        value, qs, meta = self._one(messages, sch, parse, text, quotes, temperature, seed, max_tokens)
-        return Generated(value, evidence=qs, source=source, extra={"generated": meta})
+        call = _Call()
+        value, qs, meta = self._one(messages, sch, parse, text, quotes, temperature, seed, max_tokens, call)
+        return Generated(value, evidence=qs, source=source, extra=self._extra({"generated": meta}, call))
+
+    def _extra(self, extra, call):
+        """A call's record, with its budget's line when the generator has a budget: the limits, what the call cost and
+        how far over the per-decision budget it went (None: within it)."""
+        if self.budget is not None or self.total is not None:
+            extra["budget"] = {"budget": None if self.budget is None else self.budget.to_dict(),
+                               "total": None if self.total is None else self.total.to_dict(),
+                               "spent": call.spent.to_dict(),
+                               "over": self.budget.over(call.spent) if self.budget is not None else None}
+        return extra
 
     def sample(self, messages, k=3, *, temperature=0.8, schema=None, parse=None, text=None, quotes=None, source=None,
                max_tokens=None, first_greedy=True):
@@ -441,12 +514,13 @@ class Generator:
             raise ValueError("k must be at least 1")
         sch = _schema(schema)
         k = int(k)
+        call = _Call()
 
         def one(i):
             t, s = (None, None) if (i == 0 and first_greedy) else (temperature, i)
             try:
-                return self._one(messages, sch, parse, text, quotes, t, s, max_tokens)
-            except (InvalidOutput, Unanswered) as e:
+                return self._one(messages, sch, parse, text, quotes, t, s, max_tokens, call)
+            except (InvalidOutput, Unanswered, BudgetStop) as e:
                 body = self.body(messages, sch, t, s, max_tokens)
                 return None, [], {"model": self.model_id, "request": request_fp(body), "temperature": body["temperature"],
                                   "seed": body.get("seed"), "error": f"{type(e).__name__}: {e}"[:300], "exc": e}
@@ -458,7 +532,7 @@ class Generator:
             raise type(e)(f"all {k} replies failed; the first: {e}")
         metas = [{x: y for x, y in m.items() if x != "exc"} for _, _, m in outs]
         return Generated([v for v, _, _ in outs], evidence=[q for _, qs, _ in outs for q in qs], source=source,
-                         extra={"generated": metas})
+                         extra=self._extra({"generated": metas}, call))
 
     # --- in a catalog, and in a loop
     def part(self, name, prompt, *, schema=None, parse=None, k=1, temperature=0.8, text=None, quotes=None,
@@ -515,6 +589,29 @@ class Generator:
                               quotes=quotes)
         propose.__solvi_model__ = self
         return propose
+
+
+class _Call:
+    """What one call of generate / sample spent (its requests), for the per-decision budget."""
+
+    def __init__(self):
+        self.spent = Cost(0.0)
+
+
+def check_budget(price, budget, total):
+    """price, budget, total as a generator or a refinement takes them → (price, budget, total), checked: Budgets,
+    and a price (dollars per million input and output tokens, or a function) wherever a limit is in dollars."""
+    for b in (budget, total):
+        if b is not None and not isinstance(b, Budget):
+            raise TypeError("budget= and total= take a solvi.costs.Budget(usd=, calls=, ms=, tokens=)")
+        if b is not None and b.usd is not None and price is None:
+            raise ValueError("a budget in dollars needs price= (dollars per million input and output tokens, or a "
+                             "function (model, usage) → dollars)")
+    if price is not None and not callable(price):
+        if not (isinstance(price, (tuple, list)) and len(price) == 2 and all(isinstance(x, (int, float)) for x in price)):
+            raise ValueError("price is (dollars per million input tokens, per million output tokens) or a function")
+        price = (float(price[0]), float(price[1]))
+    return price, budget, total
 
 
 def render_feedback(feedback, template=FEEDBACK):
@@ -606,7 +703,8 @@ def _short(v, n=60):
 
 
 def generator(base_url, model, api_key=None, *, max_tokens=1024, temperature=0.0, seed=None, response_format="prompt",
-              timeout=120.0, retries=2, backoff=1.0, headers=None, extra_body=None, workers=4, opener=None, sleep=None):
+              timeout=120.0, retries=2, backoff=1.0, headers=None, extra_body=None, workers=4, opener=None, sleep=None,
+              price=None, budget=None, total=None):
     """A Generator over an OpenAI-compatible chat-completions server (see the module docs). The connection settings are
     solvi.llm's (`llm(...)` takes the same: base_url, api_key — sent as a Bearer token, never recorded — timeout, retries
     and backoff for network errors, timeouts and 408 / 409 / 429 / 5xx, headers, extra_body — refused when it sets a field
@@ -614,11 +712,12 @@ def generator(base_url, model, api_key=None, *, max_tokens=1024, temperature=0.0
     max_tokens: per reply (reasoning tokens count against it on reasoning models). temperature: 0 by default; `sample`
     sets its own for the extra replies. seed: sent only when set. response_format: "prompt" (default: the contract is in
     your prompt, the request carries none), "json_object" or "json_schema" (the schema's JSON schema is sent) — for a
-    structured reply only; whatever the server enforces, the reply is validated here."""
+    structured reply only; whatever the server enforces, the reply is validated here. price / budget / total: the
+    dollars of a request and the limits per call (one decision) and in total (module docs, "Costs and budgets")."""
     client = LLMScorer(base_url, model, api_key, timeout=timeout, retries=retries, backoff=backoff, max_tokens=max_tokens,
                        seed=seed, headers=headers, extra_body=extra_body, opener=opener, sleep=sleep)
     return Generator(client, max_tokens=max_tokens, temperature=temperature, seed=seed, response_format=response_format,
-                     workers=workers)
+                     workers=workers, price=price, budget=budget, total=total)
 
 
 def several(generators, messages, **kw):
@@ -632,7 +731,7 @@ def several(generators, messages, **kw):
         try:
             got = g.generate(messages, **kw)
             return got.value, list(got.evidence), got.meta
-        except (InvalidOutput, Unanswered) as e:
+        except (InvalidOutput, Unanswered, BudgetStop) as e:
             return None, [], {"model": g.model_id, "error": f"{type(e).__name__}: {e}"[:300], "exc": e}
     with ThreadPoolExecutor(len(gens)) as ex:
         outs = list(ex.map(one, gens))
@@ -644,5 +743,5 @@ def several(generators, messages, **kw):
                      extra={"generated": [{x: y for x, y in m.items() if x != "exc"} for _, _, m in outs]})
 
 
-__all__ = ["Generated", "GenerationPart", "Generator", "generator", "json_errors", "quoted", "Schema", "several",
-           "Unanswered"]
+__all__ = ["BudgetStop", "Generated", "GenerationPart", "Generator", "generator", "json_errors", "quoted", "Schema",
+           "several", "Unanswered"]

@@ -44,6 +44,7 @@ except ImportError:                           # Windows, the browser (Pyodide): 
     fcntl = None
 
 GENESIS = ""                                  # prev of the first record
+_SAMPLE_LOCK = threading.Lock()
 FORMAT = 2                                    # the record format ("v"): 2 — dicts are written with their keys in their
                                               # own order (1, solvi ≤ 0.7.1: sorted, the order a decider read is lost)
 LEGACY_ORDER = ("stored by solvi 0.7.1 or earlier, which wrote dict keys sorted: a model that read a dict may have read "
@@ -86,7 +87,7 @@ def _body(rec):
 
 
 KEPT = ("v", "kind", "seq", "time", "prev", "init_hash", "catalog", "records", "flow", "producers", "models", "guards",
-        "safeguards", "teach", "source", "of", "of_hash", "by", "note")
+        "safeguards", "teach", "source", "of", "of_hash", "by", "note", "segment")
 """The fields of a record that are never erased (redact leaves them; a redaction record is made of them)."""
 
 
@@ -148,8 +149,69 @@ def _when(t):
 
 
 # --- the record of a response
-def entry(resp, meta=None):
-    """The stored content of a response (without seq, time, prev, hash)."""
+RECORD_MODES = ("full", "compact", "sample:N")
+
+
+def record_mode(record):
+    """A store's `record=` → ("full", None), ("compact", None) or ("sample", N); ValueError for anything else."""
+    if record in ("full", "compact"):
+        return record, None
+    if isinstance(record, str) and record.startswith("sample:"):
+        try:
+            n = int(record[7:])
+        except ValueError:
+            n = 0
+        if n >= 1:
+            return "sample", n
+    raise ValueError(f'record must be "full", "compact" or "sample:N" (N ≥ 1: one decision in N kept in full, the '
+                     f"others compact), not {record!r}")
+
+
+KEPT_STEPS = ("head", "guard", "plan", "textin")
+"""The trace records a compact record keeps whole besides every model-backed step: answer heads, guarantees, the
+strategist's plan and the text an ask_text read (they are small, and a re-run of the flow does not produce them)."""
+
+
+def _kept_step(r):
+    return r.get("kind") in KEPT_STEPS or r.get("model") is not None or bool(r.get("tried_models"))
+
+
+_RESULT_DEFAULTS = {"status": "ok", "probs": {}, "provenance": None, "source": None, "guard": None, "repaired": None,
+                    "kind": None, "not_stated": False, "evidence": [], "extra": None}
+
+
+def compact_content(d):
+    """A response's dict (Response.to_dict()) → what a compact record keeps of it (see TraceStorage, record="compact"):
+    the given facts (the input as read, with the types that restore it), each answer with its why / guard / source /
+    evidence / guarantee (not its probabilities), each check's result and reasons, the model-backed steps and the
+    answer heads, guarantees, plan and text records whole (with the models' ids, fingerprints and token usage), the
+    steps skipped, the catalog's and questions' fingerprints, and the time. Left out: the values of the computed facts
+    (they are re-computed), the other steps' records (their hashes stay in the record's `records`), the planned flow,
+    the timings and the per-part fingerprints."""
+    tr = d.get("trace") or {}
+    recs = tr.get("records") or []
+    trace = {k: v for k, v in tr.items() if k not in ("records", "timings", "schedule", "fingerprint")}
+    fp = tr.get("fingerprint") or {}
+    trace["fingerprint"] = {k: v for k, v in fp.items() if k != "parts"}
+    trace["records"] = [r for r in recs if _kept_step(r)]
+    results = {}
+    for q, r in (d.get("results") or {}).items():
+        results[q] = {k: v for k, v in r.items() if k != "probs" and not (k in _RESULT_DEFAULTS and v == _RESULT_DEFAULTS[k])}
+    checks = {}
+    for r in recs:
+        if r.get("kind") == "check":
+            checks[r["name"]] = [None if r.get("missing") else r.get("value"), (r.get("extra") or {}).get("reasons")]
+    c = {"trace": trace, "results": results, "checks": checks, "ms": d.get("ms"), "safeguards": d.get("safeguards") or []}
+    if d.get("feasible") is False:
+        c["feasible"], c["violations"] = False, d.get("violations")
+    if d.get("model_outputs"):
+        c["model_outputs"] = d["model_outputs"]
+    return c
+
+
+def entry(resp, meta=None, record="full"):
+    """The stored content of a response (without seq, time, prev, hash). record: "full" (the whole response) or
+    "compact" (compact_content: the input, answers, checks and model steps — see TraceStorage)."""
     d = resp.to_dict()
     tr = resp.trace
     e = {"v": FORMAT, "kind": "ask", "init_hash": tr.init_hash,
@@ -174,8 +236,33 @@ def entry(resp, meta=None):
         e["meta"] = plain(meta)
     from .schema import tag_floats
     e = tag_floats(e)                                 # strict JSON: an inf threshold is {"$float": "inf"}
-    e["response"] = d                                 # to_dict() has tagged it already
+    if record == "compact":
+        e["record"] = "compact"
+        e["compact"] = compact_content(d)             # to_dict() has tagged it already
+    else:
+        e["response"] = d
     return e
+
+
+class CompactRecord(ValueError):
+    """A stored decision kept compact (record="compact"): its trace is not in the store, so it cannot be loaded as a
+    Response. TraceStorage.rederive(id, system) re-runs it from the recorded input and checks every step against the
+    recorded hashes; replay_all does so too."""
+
+
+def view(d):
+    """A stored decision's response as a dict, for readers that do not need the whole trace (reports): the stored
+    response, or for a compact record what it kept, shaped the same way ("results", "trace" with "init" and the kept
+    "records", "ms", "safeguards"). None for a record without either (a redacted one)."""
+    if isinstance(d.get("response"), dict):
+        return d["response"]
+    c = d.get("compact")
+    if not isinstance(c, dict):
+        return None
+    res = {q: {**_RESULT_DEFAULTS, **r} for q, r in (c.get("results") or {}).items()}
+    return {"results": res, "trace": c.get("trace") or {}, "ms": c.get("ms"), "safeguards": c.get("safeguards") or [],
+            "feasible": c.get("feasible", True), "violations": c.get("violations") or [], "values": {},
+            "model_outputs": c.get("model_outputs", 0)}
 
 
 @dataclass
@@ -200,14 +287,30 @@ class Stored:
         from .schema import untag_floats
         return untag_floats(self.data.get("meta"))
 
+    @property
+    def compact(self):
+        """Was this decision stored compact (record="compact", or not drawn for a full record under "sample:N")?"""
+        return self.data.get("record") == "compact"
+
+    @property
+    def input(self):
+        """The given facts of a stored decision as JSON data (full or compact; None for a redacted one)."""
+        from .schema import untag_floats
+        v = view(self.data)
+        return None if v is None else untag_floats((v.get("trace") or {}).get("init"))
+
     def response(self, catalog=None):
         """The stored response, loaded back (typed values restored from `catalog` — a Catalog or a System — or from the
-        store's own)."""
+        store's own). A compact record raises CompactRecord: re-derive it with TraceStorage.rederive(id, system)."""
         from .response import Response
         if self.kind != "ask":
             raise ValueError(f"record {self.id} is a {self.kind} record, not a response")
         if self.data.get("redacted"):
             raise ValueError(f"record {self.id} was redacted: its response is gone")
+        if self.compact:
+            raise CompactRecord(f"record {self.id} was stored compact: its input, answers, checks and model steps are "
+                                "kept, its other steps only as hashes — store.rederive(id, system) re-runs it from the "
+                                "recorded input and checks every step against them")
         r = Response.model_validate(self.data["response"], catalog=catalog if catalog is not None else self.catalog)
         r.stored_id = self.id
         return r
@@ -249,6 +352,8 @@ def _summary_problems(d):
     """A stored response agrees with its own summary: the answers, the input hash and the trace records' hashes, and the
     trace's own chain links (no catalog needed; replay_all re-computes the steps)."""
     out = []
+    if d.get("record") == "compact":
+        return _compact_problems(d)
     resp = d.get("response")
     if not isinstance(resp, dict):
         return ["no stored response"]
@@ -272,6 +377,179 @@ def _summary_problems(d):
     return out
 
 
+def _compact_problems(d):
+    """A compact record agrees with its own summary: the input hash, each kept step's place, hash and link in the
+    recorded chain of step hashes, and the answers (no catalog needed; replay_all re-runs the steps)."""
+    c = d.get("compact")
+    if not isinstance(c, dict):
+        return ["a compact record without its compact content"]
+    out = []
+    tr = c.get("trace") or {}
+    if tr.get("init_hash") != d.get("init_hash"):
+        out.append("compact record holds another init_hash than its record")
+    steps = d.get("records") or []
+    where = {(s[0], s[1], s[2]): i for i, s in enumerate(steps) if isinstance(s, list) and len(s) == 3}
+    for r in tr.get("records") or []:
+        i = where.get((r.get("step"), r.get("name"), r.get("hash")))
+        if i is None:
+            out.append(f"kept step {r.get('step')} ({r.get('name')}) is not in the record's step hashes")
+            continue
+        if r.get("prev") != (steps[i - 1][2] if i else d.get("init_hash")):
+            out.append(f"kept step {r.get('step')} ({r.get('name')}) is not linked to the step before it")
+    res = c.get("results") or {}
+    got = {q: [r.get("status", "ok"), _cj(None if r.get("not_stated") else r.get("answer"))] for q, r in res.items()}
+    want = {q: [a[2], _cj(None if a[0] == "<not stated>" else a[0])] for q, a in (d.get("answers") or {}).items()}
+    if got != want:
+        out.append("compact answers differ from the record's answers")
+    return out
+
+
+def _not_rerun(flow, recorded, trust_models):
+    """The model-backed steps of a flow that ran in the recorded decision and whose model is not re-run on replay
+    (trust_models=True, a model marked deterministic=False such as a generator, or one not available) → {name: why}."""
+    out = {}
+    for st in flow.steps:
+        p = st.part
+        if p.name not in recorded:
+            continue
+        for a in (p.alternatives if p.alternatives is not None else [p]):
+            m = a.model
+            if m is None:
+                continue
+            if getattr(m, "available", True) is False:
+                out[p.name] = f"its model {a.name} is not available"
+            elif trust_models:
+                out[p.name] = "trust_models=True: its model is not re-run"
+            elif getattr(m, "deterministic", True) is False:
+                out[p.name] = f"its model ({type(m).__name__}) is not re-run on replay"
+            else:
+                continue
+            break
+    return out
+
+
+def _recorded_output(k):
+    """A kept model step's record → an output that gives the recorded value again (its quote, confidence,
+    probabilities, evidence and details), for a re-run that must not call the model."""
+    from .core import Claim, Decision, Quote
+    from .runtime import MISSING
+    if k.value is MISSING:
+        raise RuntimeError(k.error or "no value recorded")
+    ex = dict(k.extra or {})
+    ev = [Quote(t, a, b, src) for a, b, src, t in ex.pop("evidence", None) or ()]
+    val = Quote(k.value, k.quote[0], k.quote[1], k.quote[2], k.confidence) if k.quote else k.value
+    if k.probs is not None:
+        return Decision(val, dict(k.probs), confidence=k.confidence, extra=ex, evidence=ev)
+    return Claim(val, evidence=ev, confidence=k.confidence, extra=ex)
+
+
+def _same_output(r, k):
+    """Did a re-run step give what the kept record says (value, quote, error, inputs, producer)? Its details (a model's
+    latency, usage) may differ."""
+    from .runtime import vhash
+    return (r.name == k.name and r.step == k.step and vhash(r.value) == vhash(k.value) and r.error == k.error
+            and (None if r.quote is None else list(r.quote)) == (None if k.quote is None else list(k.quote))
+            and r.inputs == k.inputs and r.producer == k.producer)
+
+
+def rederive(d, system, trust_models=False):
+    """A compact record (dict) → (Response or None, [Mismatch]): its decision rebuilt with `system` from the recorded
+    input. The flow is planned again for the recorded questions and run; a model-backed step whose model is not re-run
+    on replay (trust_models=True, a generator, a model not available) gives its kept output instead of calling the
+    model (a compact record keeps every model step whole), and a model step that is re-run and gives the kept output
+    takes the kept record (its latency and usage); then every step's hash is chained again and compared with the
+    recorded one — a hash covers the step's inputs, value, error and the link to the step before, so equal hashes mean
+    the step gave what it gave then — and the kept records after the flow (answer heads, guarantees, plan, text) are
+    appended. The Response is the decision as it was: replay it like a stored one. None, with the reasons, when it
+    cannot be rebuilt: a step whose hash differs (kind "recompute": the catalog changed since — the old value is not
+    kept, only its hash), a kept model output that does not give its record again or a model step of several producers
+    that is not re-run (kind "not_kept": no verdict past it), the input not restored."""
+    import dataclasses
+    from .response import Response
+    from .runtime import MISSING, Mismatch, Trace, execute, vhash
+    from .schema import load
+    if not (hasattr(system, "catalog") and hasattr(system, "questions") and hasattr(system, "_prepare")):
+        return None, [Mismatch(0, "load", "a compact record is re-run from its input: replay it with the System, not a "
+                                          "Catalog", "error")]
+    c = d["compact"]
+    kept = load(Trace, c["trace"], system)
+    steps = [tuple(s) for s in d.get("records") or []]
+    lost = sorted(q for q in d.get("answers") or {} if q not in system.questions)
+    if lost:
+        return None, [Mismatch(0, f"answer:{q}", "the question is not in the system (renamed or removed)", "missing_part")
+                      for q in lost]
+    p = system._prepare(dict(kept.init), list(d.get("answers") or {}), None)
+    at = {s[1]: s for s in steps}
+    have = {(r.step, r.name, r.hash): r for r in kept.records}
+    by_name = {r.name: r for r in kept.records}
+    skip = _not_rerun(p.flow, set(at), trust_models)
+    flow = p.flow
+    if skip:
+        new_steps = []
+        for st in flow.steps:
+            k = by_name.get(st.part.name)
+            if st.part.name in skip:
+                if k is None or st.part.alternatives is not None:
+                    why = ("its record is not kept" if k is None else "several producers: the recorded one cannot be "
+                           "given without running the others")
+                    return None, [Mismatch(at[st.part.name][0], st.part.name, f"not re-run ({skip[st.part.name]}) and "
+                                           f"{why} — the decision is not checked past this step", "not_kept")]
+                st = dataclasses.replace(st, part=dataclasses.replace(st.part, func=lambda _k=k, **_: _recorded_output(_k)))
+            new_steps.append(st)
+        flow = dataclasses.replace(flow, steps=new_steps,
+                                   batches=[b for b in flow.batches if not any(n in skip for n in b)])
+    trace, vals = execute(system.catalog, flow, p.state, workers=1, order=p.order, costs=system.cost_book,
+                          policy=p.policy, known=p.known, early_exit=kept.early_exit)
+    lossy = getattr(kept, "unrestored", None) or {}
+    if trace.init_hash != d.get("init_hash"):
+        if lossy:
+            return None, [Mismatch(0, "init", "the recorded input cannot be checked: " + "; ".join(
+                f"{k} came back from storage as JSON gave it — {v}" for k, v in lossy.items()), "not_restored")]
+        return None, [Mismatch(0, "init", "init_hash does not match the recorded input", "integrity")]
+    prev = trace.init_hash
+    for i, r in enumerate(trace.records):
+        want = steps[i] if i < len(steps) else None
+        k = have.get(want) if want is not None else None
+        if k is not None and vhash(k.body()) != k.hash:
+            return None, [Mismatch(k.step, k.name, "kept record modified after execution", "integrity")]
+        if k is not None and _same_output(r, k) and k.prev == prev:
+            r = trace.records[i] = k                  # the kept record: the model's details as they were
+        else:
+            r.prev = prev
+            r.hash = vhash(r.body())
+        if want != (r.step, r.name, r.hash):
+            kind = "not_kept" if r.name in skip else "recompute"
+            why = (f"re-run gives step {r.step} {r.name} #{r.hash[:16]}, the record has "
+                   + (f"step {want[0]} {want[1]} #{want[2][:16]}" if want else "no such step")
+                   + (" — the kept model output does not give its record again" if kind == "not_kept" else
+                      " — a compact record keeps the hash of the old step, not its value"))
+            return None, [Mismatch(r.step, r.name, why, kind)]
+        prev = r.hash
+    for s in steps[len(trace.records):]:
+        r = have.get(s)
+        if r is None:
+            return None, [Mismatch(s[0], s[1], "a step recorded after the flow is not kept in the compact record",
+                                   "not_kept")]
+        trace.records.append(r)
+    trace.fingerprint = dict(kept.fingerprint or {})
+    trace.rejected = list(kept.rejected or [])
+    results = {q: load(_result_cls(), {**_RESULT_DEFAULTS, **r}) for q, r in (c.get("results") or {}).items()}
+    values = {k: v for k, v in vals.items() if v is not MISSING}
+    for r in trace.records:                           # the kept records' values (a model step given back, a head)
+        if r.value is not MISSING and r.kind not in KEPT_STEPS and not r.name.startswith("answer:"):
+            values.setdefault(r.name, r.value)
+    resp = Response(results, p.flow, trace, values, float(c.get("ms") or 0.0), c.get("feasible", True),
+                    c.get("violations"), system.catalog, list(c.get("safeguards") or []), int(c.get("model_outputs") or 0))
+    resp._system, resp._heads = system, system.heads
+    resp.stored_id = d.get("id")
+    return resp, []
+
+
+def _result_cls():
+    from .runtime import Result
+    return Result
+
+
 class TraceStorage:
     """A store of responses and their traces with a hash chain across the stored records (see the module docstring).
 
@@ -281,12 +559,26 @@ class TraceStorage:
     quarantine(fact, value=...); where_is(fact, value=...).
 
     `system`: the System (or a Catalog) used to restore typed values (dates, enums, models) when loading responses;
-    System(storage=...) sets it to that system when it is not set. `clock`: a function → seconds since the epoch."""
+    System(storage=...) sets it to that system when it is not set. `clock`: a function → seconds since the epoch.
+
+    record: what a decision's record holds — "full" (default: the whole response, every step's value and inputs),
+    "compact" (for frequent decisions: the input, the answers, every check's result and reasons, the model-backed steps
+    whole with the models' ids, fingerprints and tokens, and every step's hash; not the computed values, the planned
+    flow or the timings — see compact_content) or "sample:N" (one decision in N, counted by this store object, in full,
+    the others compact). A compact record is hashed into the chain like any other: verify() checks it, its kept steps'
+    places and links in the chain of step hashes, and its answers. What it does not keep is re-computed, not read:
+    replay_all re-runs the decision from the recorded input and compares every step's hash (rederive); a model step
+    that is not re-run on replay (trust_models=True, a generator) leaves the decision unchecked past the chain, and the
+    replay says so (mismatch kind "not_kept") instead of passing it. get(id) raises CompactRecord; the reports read the
+    answers, checks, models and costs from what is kept; quarantine re-derives compact decisions when the store knows
+    the System; diff compares their answers only (no steps are kept to say what changed them)."""
 
     @_deprecate.removed_kwargs(catalog="system")
-    def __init__(self, system=None, clock=None):
+    def __init__(self, system=None, clock=None, record="full"):
         self.catalog = system                         # the System (or Catalog) typed values are restored with
         self.clock = clock or _time.time
+        self.record_mode = record_mode(record)   # ("full" | "compact" | "sample", N): what save() keeps of a decision
+        self._saved = 0                               # decisions saved by this object ("sample:N" draws every N-th)
 
     # --- a backend implements these
     def _append(self, body):
@@ -322,13 +614,19 @@ class TraceStorage:
     # --- writing
     def save(self, response, meta=None):
         """Store a response (its answers, flow and whole trace) → its id. `meta`: your own JSON data kept with it (a
-        ticket id, a user) — hashed into the chain like the rest."""
-        rec = self._append(entry(response, meta))
+        ticket id, a user) — hashed into the chain like the rest. What the record holds follows the store's `record=`."""
+        mode, n = self.record_mode
+        if mode == "sample":
+            with _SAMPLE_LOCK:
+                k, self._saved = self._saved, self._saved + 1
+            mode = "full" if k % n == 0 else "compact"
+        rec = self._append(entry(response, meta, mode))
         response.stored_id = rec["id"]
         return rec["id"]
 
     @_deprecate.removed_kwargs(source="label_source")
-    def save_correction(self, question, init_state, answer, meta=None, *, label_source="human", by=None, of=None):
+    def save_correction(self, question, init_state, answer, meta=None, *, label_source="human", by=None, of=None,
+                        note=None):
         """Store a correction (what System.teach records) → its id. label_source (`source=` in 0.7; stored as the
         record's "source"): where the label comes from — "human" (a person
         corrected or confirmed the answer), "outcome" (what really happened: the parcel was lost, the loan defaulted) or
@@ -337,8 +635,9 @@ class TraceStorage:
         alone (status "ok", not escalated or abstained) under a guarantee (System.guarantee) with this very answer;
         anything else raises UntrustedLabel, and the label is not stored. Anything else is refused (UntrustedLabel):
         the system's own unverified answers are never labels. by: who (a user, a reviewer, a process); of: the stored id
-        of the decision it corrects (for "verified", the one it is). Records of 0.6 have no source: they are human
-        corrections. Storing a verified label teaches nothing by itself: which channel may read it, see check_source."""
+        of the decision it corrects (for "verified", the one it is); note: a line of text kept with it (what happened —
+        System.outcome writes it). Records of 0.6 have no source: they are human corrections. Storing a verified label
+        teaches nothing by itself: which channel may read it, see check_source."""
         source = label_source
         check_source(source, accept=(VERIFIED,))
         if source == VERIFIED:
@@ -350,6 +649,8 @@ class TraceStorage:
             body["by"] = str(by)
         if of is not None:
             body["of"] = str(of)
+        if note is not None:                          # content (redact erases it), not a lasting field like a mark's note
+            body["happened"] = str(note)
         if meta is not None:
             body["meta"] = plain(meta)
         return self._append(body)["id"]
@@ -389,6 +690,18 @@ class TraceStorage:
     def get(self, id, system=None):
         """The stored response with this id, loaded back with `system` (default: the store's; see Stored.response)."""
         return _stored(self.record(id), self.catalog).response(system)
+
+    def rederive(self, id, system=None, trust_models=False):
+        """A stored decision as a Response — a full record loaded as get() loads it; a compact one re-run with `system`
+        (default: the store's) from its recorded input, every step checked against the recorded hashes (see the module
+        function rederive). Raises CompactRecord with the reasons when a compact decision cannot be rebuilt."""
+        d = self.record(id)
+        if d.get("record") != "compact":
+            return self.get(id, system)
+        resp, bad = rederive(d, system if system is not None else self.catalog, trust_models)
+        if resp is None:
+            raise CompactRecord(f"record {id} cannot be re-derived: " + "; ".join(f"{m[1]}: {m[2]}" for m in bad))
+        return resp
 
     def iter(self, kind="ask", redacted=False):
         """Stored records in order (kind "ask": responses; "teach": corrections; None: all) → iterator of Stored. A
@@ -444,7 +757,7 @@ class TraceStorage:
         from .schema import untag_floats                # stored tagged ({"$float": "inf"}), read back as the float
         return [{"id": s.id, "time": s.time, "question": s.data["teach"], "init": untag_floats(s.data["init"]),
                  "answer": untag_floats(s.data["answer"]), "source": s.data.get("source", "human"), "by": s.data.get("by"),
-                 "of": s.data.get("of")}
+                 "of": s.data.get("of"), **({"note": s.data["happened"]} if "happened" in s.data else {})}
                 for s in self.iter("teach")]
 
     @_deprecate.removed_kwargs(catalog="catalog_fp")
@@ -629,7 +942,11 @@ class TraceStorage:
         when all replay. Each mismatch has a `.kind`, and "summary" tells damaged data from a catalog or a model that
         changed since (see solvi.runtime.Mismatch). A stored record that cannot be loaded is one mismatch (0, "load", ...),
         a replay that raises is (0, "replay", ...): both of kind "error", no verdict on the data. "note" (a record of
-        format 1 whose model step does not recompute): it was stored with sorted dict keys, see LEGACY_ORDER."""
+        format 1 whose model step does not recompute): it was stored with sorted dict keys, see LEGACY_ORDER.
+        A compact record (record="compact") is re-run from its recorded input and every step compared with its recorded
+        hash (rederive), then replayed like a full one; one that cannot be — a model step not re-run (kind "not_kept":
+        no verdict on the data past the chain), a step whose hash differs (kind "recompute": the old value is not kept)
+        — is listed with "record": "compact"."""
         from .runtime import Mismatch, mismatch_summary
         bad = []
 
@@ -639,13 +956,25 @@ class TraceStorage:
                         **mismatch_summary(ms)})
 
         for s in (self.query(**filters) if filters else self.iter()):
-            try:
-                r = s.response(system)
-            except Exception as e:  # noqa: BLE001
-                failed(s, "load", e)
-                continue
-            try:
-                rep = r.trace.replay(system, r.flow, trust_models=trust_models)
+            if s.compact:
+                try:
+                    r, ms = rederive(s.data, system, trust_models)
+                except Exception as e:  # noqa: BLE001
+                    failed(s, "rederive", e)
+                    bad[-1]["record"] = "compact"
+                    continue
+                if r is None:
+                    bad.append({"id": s.id, "seq": s.seq, "time": s.time, "mismatches": ms, "models": [],
+                                "catalog": None, "record": "compact", **mismatch_summary(ms)})
+                    continue
+            else:
+                try:
+                    r = s.response(system)
+                except Exception as e:  # noqa: BLE001
+                    failed(s, "load", e)
+                    continue
+            try:                                      # a compact decision's steps (and models) were just re-run by
+                rep = r.trace.replay(system, r.flow, trust_models=trust_models or s.compact)   # rederive: not again
             except Exception as e:  # noqa: BLE001
                 failed(s, "replay", e)
                 continue
@@ -655,6 +984,8 @@ class TraceStorage:
                 rerun = {step for step, _, verdict in rep["models"] if verdict == "recomputed"}
                 if int(s.data.get("v") or 1) < 2 and any(m.kind == "recompute" and m[0] in rerun for m in rep["mismatches"]):
                     b["note"] = LEGACY_ORDER          # a model step of an old record did not recompute: maybe only this
+                if s.compact:
+                    b["record"] = "compact"
                 bad.append(b)
         return bad
 
@@ -664,14 +995,30 @@ class TraceStorage:
         provenance graph (each step's recorded inputs, from the answer back to the fact; a hard check that decided an
         answer counts). `value`: only where the fact had this value (compared by its hash as the consumers recorded it).
         → [{"id", "seq", "time", "questions": {question: {"answer", "status", "path": [fact, ..., "answer:question"]}}}].
-        Nothing is changed: re-decide or review these."""
+        Nothing is changed: re-decide or review these.
+        A compact record keeps no step inputs: it is re-derived with the store's System (rederive) and its rebuilt
+        trace is searched; one that cannot be (no System, a model step not re-run, a step that no longer recomputes) is
+        not searched, and a UserWarning names how many and their ids."""
         from .runtime import vhash
         vh = None if value is ANY else vhash(value)
-        out = []
+        out, unchecked = [], []
         for s in self.iter():
-            hit = _dependents(s.data["response"], fact, vh)
+            d = s.data.get("response")
+            if s.compact:
+                r, _ = rederive(s.data, self.catalog) if self.catalog is not None else (None, None)
+                if r is None:
+                    unchecked.append(s.id)
+                    continue
+                d = r.to_dict()
+            hit = _dependents(d, fact, vh)
             if hit:
                 out.append({"id": s.id, "seq": s.seq, "time": s.time, "questions": hit})
+        if unchecked:
+            import warnings
+            warnings.warn(f"quarantine({fact!r}): {len(unchecked)} compact record(s) could not be re-derived and were not "
+                          f"searched ({', '.join(unchecked[:5])}{', ...' if len(unchecked) > 5 else ''}): a compact record "
+                          "keeps no step inputs — give the store its System (TraceStorage(system=...)), or review them",
+                          UserWarning, stacklevel=2)
         return out
 
     forget = _deprecate.removed_attr("forget()", "where_is(fact, value) (forget never deleted anything)", "TraceStorage")
@@ -682,15 +1029,18 @@ class TraceStorage:
         stored record breaks the chain by design; keep the report as the record of the request, and erase the records it
         lists with redact).
         → {"fact", "value", "dependent": the stored decisions whose answers rest on it (as quarantine), "stored": ids of the
-        stored records that hold it without an answer resting on it (responses and corrections), "deleted": 0}."""
+        stored records that hold it without an answer resting on it (responses and corrections), "deleted": 0}. A compact
+        record that holds it in its input is listed under "stored": it keeps no step inputs to say what rests on it
+        (quarantine re-derives it for that)."""
         from .runtime import vhash
         from .schema import untag_floats
         vh = None if value is ANY else {vhash(value), vhash(plain(value))}
         dependent, stored = [], []
         for s in self.iter(None):
             if s.kind == "ask":
-                init = (s.data["response"].get("trace") or {}).get("init") or {}
-                hit = _dependents(s.data["response"], fact, None if vh is None else vhash(value))
+                v = view(s.data) or {}
+                init = (v.get("trace") or {}).get("init") or {}
+                hit = _dependents(v, fact, None if vh is None else vhash(value)) if not s.compact else None
                 if hit:
                     dependent.append({"id": s.id, "seq": s.seq, "time": s.time, "questions": hit})
                     continue
@@ -750,14 +1100,31 @@ class JSONLStorage(TraceStorage):
     fsync=True: flush every record to disk before save returns (slower; without it a power failure can lose the last
     records, which the OS had not yet written). index=False: open from the stored head (checked
     against the file's last line) without reading every record — a long file opens at once, for a process that only
-    appends; get(id) then scans the file. A head that does not match the last line is not trusted: the file is read."""
+    appends; get(id) then scans the file. A head that does not match the last line is not trusted: the file is read.
+    record: "full", "compact" or "sample:N" (see TraceStorage).
+
+    Rotation. rotate_bytes / rotate_records: when the file has reached that many bytes (or chained records), the next
+    append first moves it to a closed segment `<name>.000001.jsonl` (with its head; the number counts up) and starts
+    `path` again with a record of kind "segment" that names the closed segment, its record count and its last hash —
+    so each file verifies on its own, the first record of a file is linked to the head of the one before it, and
+    verify_segments() checks every segment and every link (a segment replaced, cut short or removed breaks a link).
+    Reads (iter, query, get, replay_all) and redact see the current file; segments() lists the closed ones, each
+    readable as a JSONLStorage of its own. A closed segment is not written to: redacting one of its records there would
+    append to it and break the link of the file after it (not supported yet). With rotation, writers of the same path
+    lock `<path>.lock` (a file that is never moved): every process writing a rotated store must open it with rotation
+    on."""
 
     @_deprecate.removed_kwargs(catalog="system")
-    def __init__(self, path, system=None, clock=None, fsync=False, index=True):
-        super().__init__(system, clock)
+    def __init__(self, path, system=None, clock=None, fsync=False, index=True, *, record="full", rotate_bytes=None,
+                 rotate_records=None):
+        super().__init__(system, clock, record)
         self.path = os.fspath(path)
         self.head_path = self.path + ".head"
         self.fsync = fsync
+        for k, v in (("rotate_bytes", rotate_bytes), ("rotate_records", rotate_records)):
+            if v is not None and (isinstance(v, bool) or not isinstance(v, int) or v < 1):
+                raise ValueError(f"{k} is a positive int or None, not {v!r}")
+        self.rotate_bytes, self.rotate_records = rotate_bytes, rotate_records
         self._lock = threading.Lock()
         self._reset()
         with self._lock:
@@ -780,6 +1147,7 @@ class JSONLStorage(TraceStorage):
     def _reset(self):
         self._offsets = {}
         self._count, self._last, self._n_legacy, self._size = 0, GENESIS, 0, 0
+        self._ino = None
 
     def _refresh(self):
         """Catch up with the file (another process, or another store object on the same path, may have appended): under
@@ -793,11 +1161,16 @@ class JSONLStorage(TraceStorage):
     def _sync(self, fh):
         """Read the lines appended since this store last looked (all of them the first time; again from the start when
         the file got shorter: it was replaced). Called under the thread lock and the file's lock."""
-        size = os.fstat(fh.fileno()).st_size
+        st = os.fstat(fh.fileno())
+        size = st.st_size
+        if self._ino is not None and st.st_ino != self._ino:
+            self._reset()                             # the file was rotated (or replaced): read the new one from the start
+        self._ino = st.st_ino
         if size == self._size:
             return
         if size < self._size:
             self._reset()
+            self._ino = st.st_ino
         fh.seek(self._size)
         off = self._size
         for line in fh:
@@ -813,30 +1186,112 @@ class JSONLStorage(TraceStorage):
             off += len(line)
         self._size = off
 
+    @property
+    def rotates(self):
+        return self.rotate_bytes is not None or self.rotate_records is not None
+
+    @contextlib.contextmanager
+    def _writing(self):
+        """The data file open for appending, under the thread lock and the file locks (with rotation also `<path>.lock`,
+        which is never moved, so a writer never appends to a file another writer has just rotated away)."""
+        with self._lock, contextlib.ExitStack() as stack:
+            if self.rotates:
+                lk = stack.enter_context(open(self.path + ".lock", "a+b"))
+                stack.enter_context(_flock(lk))
+            fh = stack.enter_context(open(self.path, "a+b"))
+            stack.enter_context(_flock(fh))
+            yield fh
+
+    def _due(self):
+        return self._count > 0 and ((self.rotate_bytes is not None and self._size >= self.rotate_bytes) or
+                                    (self.rotate_records is not None and self._count >= self.rotate_records))
+
+    def segments(self):
+        """The closed segments of a rotated store, oldest first → [path] (the current file, `path`, is not listed)."""
+        import glob
+        import re
+        stem, ext = os.path.splitext(self.path)
+        pat = re.compile(re.escape(os.path.basename(stem)) + r"\.(\d{6})" + re.escape(ext) + "$")
+        found = [(int(m.group(1)), f) for f in glob.glob(glob.escape(stem) + ".*" + ext)
+                 if (m := pat.search(os.path.basename(f)))]
+        return [f for _, f in sorted(found)]
+
+    def verify_segments(self, anchor=None):
+        """Verify a rotated store whole: every closed segment and the current file (each as verify() checks it) and
+        every link — the first record of each file after the first is a "segment" record naming the file before it, its
+        record count and its last hash, which must be that file's. `anchor`: a head() of the current file kept
+        elsewhere. → {"ok", "files": [{"path", "ok", "count", "head"}], "count": records in all files, "problems":
+        [(path, seq, id, reason)]}."""
+        files = self.segments() + [self.path]
+        out, problems, before = [], [], None
+        for i, f in enumerate(files):
+            st = self if f == self.path else JSONLStorage(f, self.catalog)
+            v = st.verify(anchor=anchor if f == self.path else None)
+            problems += [(f, *p) for p in v["problems"]]
+            first = next((d for _, d in st._raw() if chained(d)), None)
+            link = (first or {}).get("segment") if (first or {}).get("kind") == "segment" else None
+            if before is not None:
+                want = {"previous": os.path.basename(before[0]), "count": before[1]["count"], "hash": before[1]["hash"]}
+                if link is None:
+                    problems.append((f, 0, None, f"the file does not start with the link to {os.path.basename(before[0])}"))
+                elif link != want:
+                    problems.append((f, 0, first.get("id"), f"the link names {link}, the segment before it is {want}"))
+            elif link is not None:
+                problems.append((f, 0, first.get("id"), f"the first file links to {link.get('previous')!r}, which is "
+                                                         "not among the segments (removed?)"))
+            out.append({"path": f, "ok": v["ok"], "count": v["count"], "head": v["head"]})
+            before = (f, v["head"])
+        return {"ok": not problems, "files": out, "count": sum(x["count"] for x in out), "problems": problems}
+
+    def _rotate(self):
+        """Close the current file as the next segment and start `path` with the segment record (under _writing's
+        locks) → the link the new file's first record carries: the closed segment's name, record count and last hash."""
+        segs = self.segments()
+        stem, ext = os.path.splitext(self.path)
+        n = int(os.path.basename(segs[-1])[len(os.path.basename(stem)) + 1:][:6]) + 1 if segs else 1
+        seg = f"{stem}.{n:06d}{ext}"
+        link = {"previous": os.path.basename(seg), "count": self._count, "hash": self._last}
+        os.replace(self.path, seg)
+        if os.path.exists(self.head_path):
+            os.replace(self.head_path, seg + ".head")
+        self._reset()
+        return link
+
     def _append(self, body):
-        with self._lock, open(self.path, "a+b") as fh, _flock(fh):
+        with self._writing() as fh:
             self._sync(fh)                            # what other writers appended: the chain goes on from their last
-            rec = dict(body, seq=self._count, time=float(self.clock()), prev=self._last)
-            rec["hash"] = record_hash(rec)
-            rec["id"] = rec["hash"][:16]
-            line = (_body(rec) + "\n").encode()
-            off = fh.seek(0, os.SEEK_END)
-            if off:                                   # a crash cut the last line short: end it, never glue onto it
-                fh.seek(off - 1)
-                if fh.read(1) != b"\n":
-                    fh.write(b"\n")                    # the fragment stays a line of its own: verify reports it
-                    off += 1
-            fh.write(line)
-            fh.flush()
-            if self.fsync:
-                os.fsync(fh.fileno())
-            self._offsets[rec["id"]] = off
-            self._count, self._last, self._size = self._count + 1, rec["hash"], off + len(line)
-            tmp = self.head_path + ".tmp"             # still under the file's lock: one writer of the head at a time
-            with open(tmp, "w") as hf:
-                json.dump({"count": self._count, "hash": self._last}, hf)
-            os.replace(tmp, self.head_path)
-            return rec
+            if self.rotates and self._due() and body.get("kind") != "redaction":   # an erasure stays in the file of
+                                                                                   # the record it erases
+                link = self._rotate()
+                with open(self.path, "a+b") as nf, _flock(nf):
+                    self._sync(nf)
+                    self._write(nf, {"v": FORMAT, "kind": "segment", "segment": link})
+                    return self._write(nf, body)
+            return self._write(fh, body)
+
+    def _write(self, fh, body):
+        """Append one record to the open, locked file → the record (seq, time, prev, hash, id assigned)."""
+        rec = dict(body, seq=self._count, time=float(self.clock()), prev=self._last)
+        rec["hash"] = record_hash(rec)
+        rec["id"] = rec["hash"][:16]
+        line = (_body(rec) + "\n").encode()
+        off = fh.seek(0, os.SEEK_END)
+        if off:                                   # a crash cut the last line short: end it, never glue onto it
+            fh.seek(off - 1)
+            if fh.read(1) != b"\n":
+                fh.write(b"\n")                    # the fragment stays a line of its own: verify reports it
+                off += 1
+        fh.write(line)
+        fh.flush()
+        if self.fsync:
+            os.fsync(fh.fileno())
+        self._offsets[rec["id"]] = off
+        self._count, self._last, self._size = self._count + 1, rec["hash"], off + len(line)
+        tmp = self.head_path + ".tmp"             # still under the file's lock: one writer of the head at a time
+        with open(tmp, "w") as hf:
+            json.dump({"count": self._count, "hash": self._last}, hf)
+        os.replace(tmp, self.head_path)
+        return rec
 
     def head(self):
         with self._lock:
@@ -846,7 +1301,11 @@ class JSONLStorage(TraceStorage):
     def _rewrite(self, rec):
         """In place, under the append lock: other writers hold this very file open, so it is not swapped for a new one.
         The new content is first written whole to `<path>.rewrite` (a crash while copying it back leaves that file)."""
-        with self._lock, open(self.path, "r+b") as fh, _flock(fh):
+        with self._lock, contextlib.ExitStack() as stack:
+            if self.rotates:                          # the lock every writer of a rotated store takes
+                stack.enter_context(_flock(stack.enter_context(open(self.path + ".lock", "a+b"))))
+            fh = stack.enter_context(open(self.path, "r+b"))
+            stack.enter_context(_flock(fh))
             tmp = self.path + ".rewrite"
             with open(tmp, "wb") as out:
                 for line in fh:
@@ -1231,9 +1690,9 @@ class SQLiteStorage(_SQLStorage):
     types = {"INT": "INTEGER", "REAL": "REAL", "TEXT": "TEXT"}
 
     @_deprecate.removed_kwargs(catalog="system")
-    def __init__(self, path, system=None, clock=None, timeout=30.0):
+    def __init__(self, path, system=None, clock=None, timeout=30.0, *, record="full"):
         import sqlite3
-        super().__init__(system, clock)
+        super().__init__(system, clock, record)
         self.path = os.fspath(path)
         self._open(sqlite3.connect(self.path, timeout=timeout, isolation_level=None, check_same_thread=False))
 
@@ -1249,8 +1708,8 @@ class PostgresStorage(_SQLStorage):
     lock = "LOCK TABLE {p}meta IN SHARE ROW EXCLUSIVE MODE"
 
     @_deprecate.removed_kwargs(catalog="system")
-    def __init__(self, conninfo, system=None, clock=None, prefix="solvi_"):
-        super().__init__(system, clock)
+    def __init__(self, conninfo, system=None, clock=None, prefix="solvi_", *, record="full"):
+        super().__init__(system, clock, record)
         if isinstance(conninfo, str):
             try:
                 import psycopg
@@ -1272,12 +1731,12 @@ class DuckDBStorage(_SQLStorage):
     types = {"INT": "BIGINT", "REAL": "DOUBLE", "TEXT": "VARCHAR"}
 
     @_deprecate.removed_kwargs(catalog="system")
-    def __init__(self, path, system=None, clock=None, prefix=""):
+    def __init__(self, path, system=None, clock=None, prefix="", *, record="full"):
         try:
             import duckdb
         except ImportError as e:
             raise ImportError("DuckDBStorage needs duckdb: pip install 'solvi[duckdb]'") from e
-        super().__init__(system, clock)
+        super().__init__(system, clock, record)
         self.path = os.fspath(path)
         self._open(duckdb.connect(self.path), prefix)
 
@@ -1299,6 +1758,7 @@ def open_storage(where, system=None):
     return JSONLStorage(p, system)
 
 
-__all__ = ["chained", "check_source", "DuckDBStorage", "entry", "FORMAT", "JSONLStorage", "open_storage", "plain",
-           "PostgresStorage", "record_body", "record_hash", "SQLiteStorage", "Stored", "TraceStorage",
-           "TRUSTED_SOURCES", "UntrustedLabel", "VERIFIED", "VERIFIED_REFUSED"]
+__all__ = ["chained", "check_source", "compact_content", "CompactRecord", "DuckDBStorage", "entry", "FORMAT",
+           "JSONLStorage", "open_storage", "plain", "PostgresStorage", "record_body", "record_hash", "record_mode",
+           "RECORD_MODES", "rederive", "SQLiteStorage", "Stored", "TraceStorage", "TRUSTED_SOURCES", "UntrustedLabel",
+           "VERIFIED", "VERIFIED_REFUSED", "view"]

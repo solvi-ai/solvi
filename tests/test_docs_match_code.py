@@ -190,3 +190,80 @@ def test_every_measured_number_names_a_script_or_a_model_card():
         assert "not in this repository" not in flat and "cannot be reproduced from it" not in flat
     results = README.split("## Results")[1].split("## ")[0]
     assert "comes from a script in [benchmarks/](benchmarks/) or from a published model card" in _flat(results)
+
+
+def _sig(fn, name):
+    sig = inspect.signature(fn)
+    sig = sig.replace(parameters=[p for p in sig.parameters.values() if p.name != "self"])
+    return f"`{name}{str(sig).replace(chr(39), chr(34))}`"
+
+
+def _section(start, end):
+    return _flat(GUIDE[GUIDE.index(start):GUIDE.index(end, GUIDE.index(start))])
+
+
+def test_the_guide_gives_the_whole_refine_reference():
+    """The rounds of refine — what each sees, the feedback, when the loop stops, what it records — were learned from the
+    source; the guide's reference section is checked against the code."""
+    import dataclasses
+    from solvi.generate import FEEDBACK, Generator
+    from solvi.refine import Refinement, Round, refine
+    sec = _section("### The loop: solvi.refine", "### Search over alternatives")
+    assert _sig(refine, "refine") in sec
+    shown = _sig(Generator.proposer, "Generator.proposer").replace(json.dumps(FEEDBACK), "FEEDBACK")
+    assert shown in sec, shown
+    for f in dataclasses.fields(Round):
+        assert f"`{f.name}`" in sec, f"Round.{f.name} is not described"
+    for f in dataclasses.fields(Refinement):
+        assert f"`{f.name}`" in sec, f"Refinement.{f.name} is not described"
+    for p in ("reasons", "stored_id", "proposal", "response", "result", "cost"):
+        assert f"`{p}`" in sec
+    run = Refinement("q", [Round(0)], False, "x", 3, "p", None)
+    for k in run.to_dict():
+        assert f"`{k}`" in sec, f"to_dict key {k!r} is not listed"
+    for k in Round(0).to_dict():
+        assert f"`{k}`" in sec
+    from solvi.refine import _stored_record
+    rec = _stored_record(run)
+    for k in rec:
+        if k not in ("v", "kind"):
+            assert f"`{k}`" in sec, f"refine record key {k!r} is not listed"
+    for k in rec["rounds"][0]:
+        assert f"`{k}`" in sec
+    assert FEEDBACK.replace("\n", "\\n") in sec
+    for k in ("usd", "calls", "ms", "tokens"):
+        assert f"`{k}`" in sec
+
+
+def test_the_guide_gives_the_whole_systemone_reference():
+    from solvi import systemone as so
+    sec = _section("#### Any System One model as a decider", "#### Any LLM as a decider")
+    assert _sig(so.systemone, "systemone") in sec
+    for p in inspect.signature(so.systemone).parameters:
+        assert f"`{p}`" in sec, f"systemone({p}=) is not described"
+    for k in so.RESERVED:
+        assert f"`{k}`" in sec
+    for k in ("endpoint", "model", "served_by", "ms", "questions", "usage", "cost", "latency_ms", "reasoning"):
+        assert f"`{k}`" in sec, f'extra["systemone"]["{k}"] is not described'
+    from solvi.remote import USAGE
+    for k in USAGE:
+        assert f"`{k}`" in sec
+    assert f"{so.REASONING_CHARS:,} characters" in sec
+    for k in ("requests", "usage", "cost"):
+        assert f"`{k}`" in sec
+
+
+def test_the_guide_lists_every_replay_mismatch_kind_and_the_record_modes():
+    from solvi.runtime import MISMATCH_KINDS
+    from solvi.storage import RECORD_MODES, TraceStorage
+    from solvi.system import System
+    flat = _flat(GUIDE)
+    for k in MISMATCH_KINDS:
+        assert f"`{k}`" in flat, k
+    sec = _section("#### Compact records and rotation", "| Method | Returns |")
+    for m in RECORD_MODES:
+        assert f'`"{m}"`' in sec
+    assert "`rederive(id, system=None, trust_models=False)`" in flat
+    assert str(inspect.signature(TraceStorage.rederive)) == "(self, id, system=None, trust_models=False)"
+    out = _sig(System.outcome, "outcome").replace("`outcome(", "`outcome(")
+    assert out.replace("`", "") in flat.replace("`", "")

@@ -174,7 +174,7 @@ LOW_TIERS = {
     "knowledge": "worldmap episode memory",
 }
 HIGH = "__init__ __main__ auto calibrate check cli command honesty models scaffold serve show testing agents"
-EXPERIMENTAL = "compile sandbox hooks learning lora specialist charts agents.mcp"
+EXPERIMENTAL = "compile sandbox hooks learning lora specialist charts agents.mcp oncalib"
 # stable → experimental imports that are meant: the command-line entries for an experimental feature (LAYOUT §6), and
 # auto's compiled slow path (LAYOUT risk 3: `slow=` will take a compiled System; until then it is listed here)
 ALLOWED_EXPERIMENTAL = {("solvi.serve", "solvi.agents.mcp"), ("solvi.auto", "solvi.compile")}

@@ -274,8 +274,42 @@ changed once. Model and question fingerprints, and a decision part's, are unchan
   check` fails when a published number it lists in the README or the docs differs from `benchmarks/tasks/results.json`;
   the weekly workflow `stand.yml` runs both.
 
+- **A compact journal for frequent decisions.** Every store takes `record="full"` (the default, as before),
+  `"compact"` or `"sample:N"` (one decision in N in full). A compact record keeps the input, the answers, each check's
+  result and reasons, every model step whole (with the model's id, fingerprint and tokens) and every step's hash — not
+  the computed values, the planned flow or the timings: 2.0–5.2× smaller on the gallery, a game-like loop and the credit
+  task (a game step: 10.2 KB → 3.7 KB; `benchmarks/journal_size.py`). It sits in the hash chain like any record and
+  `verify()` checks it. `replay_all` re-runs it from its input and compares every step's hash; where it cannot check (a
+  model output it did not keep) it says so — a new mismatch kind, `not_kept`, "not verified" — instead of passing.
+  `store.rederive(id, system)` rebuilds a compact decision as a Response; `get(id)` raises `CompactRecord`. Reports,
+  `quarantine`, `where_is`, `diff` and `System.outcome` read compact records (`diff` compares their answers only).
+- **Rotation of a JSON-lines store**: `JSONLStorage(path, rotate_bytes=..., rotate_records=...)` closes a full file
+  as a numbered segment and starts a new one whose first record is linked to the old file's last hash;
+  `verify_segments()` checks every file and every link.
+- **A budget for generation and refinement.** `generator(..., price=, budget=, total=)` records each request's
+  tokens, time and dollars, keeps what it spent, and refuses to send a request that its total (or one decision's
+  budget) would not cover (`BudgetStop`). `refine(..., budget=, price=)` records what each round cost, stops before a
+  round the budget would not cover, and stores one record per loop; the system report shows the loops, how they ended
+  and what they cost. The same `Budget` and `Cost` as the dispatcher, now in `solvi.costs`; `Budget` also takes
+  `tokens=`.
+- **Outcomes become labels**: `system.outcome(response_or_id, value, note=..., by=...)` records what really happened
+  after a decision as a label of it (source "outcome"). Nothing learns from it by itself; recalibrate explicitly
+  (`System.guarantee(..., corrections=True)`) on a schedule or after a drift flag.
+- **`solvi.oncalib` (experimental)**: recalibrating a guarantee on the fly from outcomes, every N labels or after a
+  drift flag. It warns on import, and its documentation says why the promise does not hold that way.
+- **Docs**: a full reference of the refine loop (what each round sees, the feedback, when it stops, what it records)
+  and of `systemone` (every argument, the request and the reply, what a decision records, what fails how), both
+  checked against the code by `tests/test_docs_match_code.py`.
+
 ### Changed
 
+- `Budget`, `Cost` and `BudgetStop` are defined in `solvi.costs` (`solvi.dispatch` re-exports them; the dispatcher's
+  configuration fingerprint is unchanged for a budget without `tokens`). `Budget.over` passes over a cost whose dollars
+  are unknown instead of failing on them.
+- A generator's request record now also holds the request's time (`ms`) and, with `price=`, its dollars
+  (`usage["usd"]`). A refinement whose System has a storage now adds a record of kind `"refine"` to it (one per loop:
+  `len(store)` counts it, `store.iter()` does not list it); `Refinement.to_dict()` gains `cost`, `budget`, `stopped` and
+  `over_budget`, and each round its `cost`.
 - `search(..., lean=None)`: candidates are decided without hashing, records or bookkeeping (the winner is still asked
   in full, stored and replayable); the same plans, in about half the time — on NATURAL PLAN's 100 meeting problems
   227,352 asks in 42 s against 78 s when every candidate was a full ask (guide: "Search over alternatives"). With

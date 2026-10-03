@@ -211,7 +211,8 @@ def compare(old, new, confidence=0.01):
 # --- solvi diff
 @dataclass
 class DiffReport:
-    """What changes when stored decisions are re-run with another system."""
+    """What changes when stored decisions are re-run with another system. A compact stored decision (see
+    TraceStorage record=) is compared on its answers only: its change has "record": "compact" and no causes."""
     total: int = 0                                # stored decisions re-run
     changed: list = field(default_factory=list)   # [{"id", "seq", "time", "questions": {question: change}}]
     errors: list = field(default_factory=list)    # [{"id", "seq", "error"}] decisions that could not be re-run
@@ -274,6 +275,41 @@ def _ans(s):
     return a if s["status"] == "ok" else f"{a} ({s['status']})"
 
 
+COMPACT_STEP = {"step": None, "name": "—", "old": "", "new": "",
+                "why": "a compact record keeps no intermediate steps: only the answers are compared"}
+
+
+def _compact_change(s, system, confidence):
+    """A compact stored decision against `system` on its recorded input: its kept answers (answer, status, guard,
+    confidence) against the new ones → compare's {question: change}, with no causes (the steps are not kept)."""
+    from .response import Response
+    from .runtime import Result, Trace
+    from .schema import load
+    from .storage import view
+    v = view(s.data)
+    tr = load(Trace, v["trace"], system)
+    names = [q for q in v["results"] if q in system.questions]
+    new = system.ask(dict(tr.init), names, store=False)
+    results = {q: load(Result, r) for q, r in v["results"].items()}
+    old = Response(results, None, tr, {}, 0.0, safeguards=list(v.get("safeguards") or []))
+    out = {}
+    for q in dict.fromkeys(list(old.results) + list(new.results)):
+        ro, rn = old.results.get(q), new.results.get(q)
+        if ro is None or rn is None:
+            out[q] = {"old": None if ro is None else _qstate(ro), "new": None if rn is None else _qstate(rn),
+                      "changed": ["question"], "first_step": None, "causes": []}
+            continue
+        a, b = _qstate(ro), _qstate(rn)
+        changed = [k for k in ("answer", "status", "guard") if a[k] != b[k]]
+        if _events(old, q) != _events(new, q):
+            changed.append("safeguards")
+        if confidence is not None and abs(a["confidence"] - b["confidence"]) > confidence:
+            changed.append("confidence")
+        if changed:
+            out[q] = {"old": a, "new": b, "changed": changed, "first_step": dict(COMPACT_STEP), "causes": []}
+    return out
+
+
 def diff(storage, system, confidence=0.01, limit=None, **filters):
     """Re-run stored decisions with `system` (e.g. a new catalog or model) and report what changes → DiffReport.
     Each stored decision is loaded (typed values restored with `system`), its recorded input is asked again for the same
@@ -291,6 +327,15 @@ def diff(storage, system, confidence=0.01, limit=None, **filters):
         if limit is not None and i >= limit:
             break
         rep.total += 1
+        if getattr(s, "compact", False):
+            try:
+                ch = _compact_change(s, system, confidence)
+            except Exception as e:  # noqa: BLE001
+                rep.errors.append({"id": s.id, "seq": s.seq, "error": f"{type(e).__name__}: {e}"})
+                continue
+            if ch:
+                rep.changed.append({"id": s.id, "seq": s.seq, "time": s.time, "questions": ch, "record": "compact"})
+            continue
         try:
             old = s.response(system)
             fp = old.trace.fingerprint or {}

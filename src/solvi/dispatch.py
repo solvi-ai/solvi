@@ -83,99 +83,12 @@ import time
 from dataclasses import dataclass, field
 from typing import Any
 
-from .costs import _usages, price_of   # noqa: F401 — re-exported (defined there since 1.0: the system report reads them)
+# defined in solvi.costs since 1.0 (the system report, solvi.generate and solvi.refine use them too); re-exported here
+from .costs import Budget, BudgetStop, Cost, _usages, cost_of, price_of, recorded_calls   # noqa: F401
 
 SIGNALS = ("guarantee", "openset", "abstain", "constraint", "agreement", "drift", "supervise")
 THINK = ("guarantee", "openset", "abstain", "constraint", "agreement")
 PATHS = ("s1", "s2", "human")
-
-
-# ------------------------------------------------------------------------------------------------ budget and cost
-@dataclass(frozen=True)
-class Budget:
-    """Limits on the slow path: dollars, model calls, milliseconds (None: no limit on that one)."""
-    usd: float | None = None
-    calls: int | None = None
-    ms: float | None = None
-
-    def __post_init__(self):
-        for k in ("usd", "calls", "ms"):
-            v = getattr(self, k)
-            if v is not None and (isinstance(v, bool) or not isinstance(v, (int, float)) or v < 0 or v != v):
-                raise ValueError(f"Budget {k} must be a number ≥ 0 or None, not {v!r}")
-
-    def over(self, cost, plus=None):
-        """The first limit that `cost` (+ `plus`, an expected further cost) goes over → its reason, or None."""
-        for k in ("usd", "calls", "ms"):
-            lim = getattr(self, k)
-            if lim is None:
-                continue
-            v = getattr(cost, k) + (getattr(plus, k) if plus is not None else 0)
-            if v > lim + 1e-12:
-                more = f" + {getattr(plus, k):.4g} expected" if plus is not None else ""
-                return f"{k} {getattr(cost, k):.4g}{more} > {lim:g}"
-        return None
-
-    def used_up(self, cost):
-        """The first limit `cost` has reached → its reason, or None."""
-        for k in ("usd", "calls", "ms"):
-            lim = getattr(self, k)
-            if lim is not None and getattr(cost, k) >= lim - 1e-12:
-                return f"{k} {getattr(cost, k):.4g} of {lim:g} used"
-        return None
-
-    def to_dict(self):
-        return {"usd": self.usd, "calls": self.calls, "ms": self.ms}
-
-
-@dataclass
-class Cost:
-    """What a decision (or a part of one) cost: dollars (None when no price is known), model calls, milliseconds and
-    tokens."""
-    usd: float | None = 0.0
-    calls: int = 0
-    ms: float = 0.0
-    input_tokens: int = 0
-    output_tokens: int = 0
-
-    def __add__(self, o):
-        usd = None if self.usd is None or o.usd is None else self.usd + o.usd
-        return Cost(usd, self.calls + o.calls, self.ms + o.ms, self.input_tokens + o.input_tokens,
-                    self.output_tokens + o.output_tokens)
-
-    def to_dict(self):
-        return {"usd": None if self.usd is None else round(self.usd, 9), "calls": self.calls, "ms": round(self.ms, 3),
-                "input_tokens": self.input_tokens, "output_tokens": self.output_tokens}
-
-    @classmethod
-    def from_dict(cls, d):
-        return cls(d.get("usd"), int(d.get("calls", 0)), float(d.get("ms", 0.0)), int(d.get("input_tokens", 0)),
-                   int(d.get("output_tokens", 0)))
-
-
-def recorded_calls(responses, generated=()):
-    """The model calls recorded in responses' traces (and in generator records outside a trace, as refine keeps the
-    proposer's) → [(model, usage)]."""
-    out = []
-    for res in responses:
-        if res is None:
-            continue
-        for r in res.trace.records:
-            out += _usages(getattr(r, "extra", None))
-    for g in generated:
-        out += _usages({"generated": g})
-    return out
-
-
-def cost_of(responses, price, ms=0.0, generated=()):
-    """The Cost of what responses (and generator records) recorded, with `ms` as the time."""
-    calls = recorded_calls(responses, generated)
-    return Cost(price_of(price, calls), len(calls), float(ms), sum(u.get("input_tokens", 0) for _, u in calls),
-                sum(u.get("output_tokens", 0) for _, u in calls))
-
-
-class BudgetStop(RuntimeError):
-    """The slow path was stopped between two steps: what is left of the budget would not cover the next one."""
 
 
 # ------------------------------------------------------------------------------------------------ the slow path

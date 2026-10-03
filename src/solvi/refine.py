@@ -33,6 +33,18 @@ that fails otherwise (the server does not answer) ends the loop with an escalati
 Without a proposer the System generates itself (a part made by `Generator.part`): each round gives the feedback of the
 earlier rounds as the fact `feedback_into` (a list of reasons), and the part reads it.
 
+Costs and a budget. Each round records what it cost (`round.cost`, a solvi.costs.Cost): the model calls its response's
+trace records (a model in the System, a generating part) and the proposer's request (a Generated's record), their tokens
+and dollars (with `price=`, or the dollars a generator built with price= recorded), and the round's time. `budget=` (a
+solvi.costs.Budget: usd, calls, ms, tokens) limits the whole loop — one decision: before each round after the first, the
+spend so far plus the expected cost of one more round (the mean of the rounds so far) must fit, else the loop stops and
+escalates ("no budget for another round (...)", `run.stopped`). A limit across many loops is the proposer's: a
+generator's `total=` raises BudgetStop when it is used up, which ends the loop as a proposer failure. A round cannot be
+stopped half-way: a loop that went over its budget records how far (`run.over_budget`). With a System that has a
+storage, refine stores one record of kind "refine" next to the rounds' responses: the question, the outcome, each
+round's stored id, feedback, proposer record and cost, the budget and the total — so the system report counts the
+loops, how they ended and what the proposals cost (solvi.sysreport).
+
 Not done here: no search over alternatives (a loop re-asks one proposer; it does not enumerate), no judgement of which
 of two accepted proposals is better, and no guarantee that a re-ask converges — measure the rounds on your own
 data: a model can trade one violation for another."""
@@ -154,6 +166,7 @@ class Round:
     feedback: Any = None                 # what the proposer is told next (a text or a list of reasons); None: no next round
     error: str | None = None             # the proposer's own failure (an invalid reply, no answer)
     said: str | None = None              # the proposer's reply as text (for the assistant's turn of a re-ask)
+    cost: Any = None                     # what the round cost (solvi.costs.Cost: the proposer's and the System's model calls)
 
     @property
     def reasons(self):
@@ -170,7 +183,8 @@ class Round:
         return {"index": self.index, "proposal": _plain(self.proposal), "generated": self.generated,
                 "response": self.response.to_dict() if self.response is not None else None, "accepted": self.accepted,
                 "failed": [f.to_dict() for f in self.failed], "causes": list(self.causes),
-                "feedback": self.feedback, "error": self.error, "said": self.said, "stored_id": self.stored_id}
+                "feedback": self.feedback, "error": self.error, "said": self.said, "stored_id": self.stored_id,
+                "cost": None if self.cost is None else self.cost.to_dict()}
 
 
 @dataclass
@@ -186,6 +200,20 @@ class Refinement:
     feedback_into: str | None
     accept: Any = "checks"
     feedback_fn: str = "reasons"
+    budget: Any = None                   # the loop's Budget (solvi.costs), None: no limit
+    stopped: str | None = None           # why the budget stopped the loop before its last round
+    over_budget: str | None = None       # how far over its budget the loop went (a round is not stopped half-way)
+    stored_id = None                     # the id of its "refine" record in the System's storage
+
+    @property
+    def cost(self):
+        """What the whole loop cost (solvi.costs.Cost): the sum of its rounds'."""
+        from .costs import Cost
+        total = Cost(0.0)
+        for r in self.rounds:
+            if r.cost is not None:
+                total = total + r.cost
+        return total
 
     @property
     def proposal(self):
@@ -205,7 +233,9 @@ class Refinement:
         return {"question": self.question, "accepted": self.accepted, "escalation": self.escalation,
                 "max_rounds": self.max_rounds, "into": self.into, "feedback_into": self.feedback_into,
                 "accept": list(acc) if isinstance(acc, (set, frozenset, tuple)) else acc, "feedback": self.feedback_fn,
-                "rounds": [r.to_dict() for r in self.rounds]}
+                "rounds": [r.to_dict() for r in self.rounds], "cost": self.cost.to_dict(),
+                "budget": None if self.budget is None else self.budget.to_dict(), "stopped": self.stopped,
+                "over_budget": self.over_budget}
 
     def to_json(self, indent=None):
         return json.dumps(self.to_dict(), ensure_ascii=False, indent=indent)
@@ -213,16 +243,19 @@ class Refinement:
     @classmethod
     def from_dict(cls, d, catalog=None):
         """A stored refinement back (responses restored with `catalog`'s types, as Response.model_validate does)."""
+        from .costs import Budget, Cost
         from .system import Response
         rounds = []
         for x in d["rounds"]:
             res = Response.model_validate(x["response"], catalog=catalog) if x.get("response") is not None else None
             fs = [Failed(f["check"], f["hard"], f["reasons"], f.get("governs", False)) for f in x.get("failed", [])]
             rd = Round(x["index"], x.get("proposal"), x.get("generated"), res, x["accepted"], fs, x.get("causes", []),
-                       x.get("feedback"), x.get("error"), x.get("said"))
+                       x.get("feedback"), x.get("error"), x.get("said"),
+                       Cost.from_dict(x["cost"]) if x.get("cost") is not None else None)
             rounds.append(rd)
         return cls(d["question"], rounds, d["accepted"], d.get("escalation"), d["max_rounds"], d.get("into"),
-                   d.get("feedback_into"), d.get("accept", "checks"), d.get("feedback", "reasons"))
+                   d.get("feedback_into"), d.get("accept", "checks"), d.get("feedback", "reasons"),
+                   Budget.from_dict(d.get("budget")), d.get("stopped"), d.get("over_budget"))
 
     def replay(self, system, accept=None, feedback=None, trust_models=False):
         """Re-check the whole loop: every round's trace replays under `system` (its own mismatches are listed), and the
@@ -230,8 +263,10 @@ class Refinement:
         was a function), the recorded failed checks and causes are those of the response, the feedback is what
         `feedback` gives for the round (with the default, the round's reasons; a custom one is checked only when passed
         again), each round's input carries the proposal recorded for it and the feedback of the rounds before it, nothing
-        ran after an accepted round, and the escalation matches the outcome. → {"ok", "rounds", "mismatches": [(round,
-        what, why)], "feedback": "checked" / "unchecked"}."""
+        ran after an accepted round, and the escalation matches the outcome. A round's recorded model calls and tokens
+        must be those its response and proposer record hold, and a stop by the budget must follow from the recorded
+        costs (the time is taken as recorded). → {"ok", "rounds", "mismatches": [(round, what, why)], "feedback":
+        "checked" / "unchecked"}."""
         acc = self.accept if accept is None else accept
         if isinstance(acc, str) and acc.startswith("function "):
             raise ValueError(f"this refinement was accepted by {acc}: pass it again, replay(system, accept=...)")
@@ -266,12 +301,26 @@ class Refinement:
             if fb is not None and not rd.accepted and rd.feedback is not None and _vh(fb(now)) != _vh(rd.feedback):
                 bad.append((i, "feedback", "the recorded feedback is not what the feedback function gives"))
             given += _items(rd.feedback)
+        for i, rd in enumerate(self.rounds):
+            if rd.cost is None:
+                continue
+            got = _round_cost(rd, None, 0.0)
+            if (got.calls, got.input_tokens, got.output_tokens) != (rd.cost.calls, rd.cost.input_tokens,
+                                                                  rd.cost.output_tokens):
+                bad.append((i, "cost", f"recorded {rd.cost.calls} call(s), {rd.cost.input_tokens}+"
+                                       f"{rd.cost.output_tokens} tokens; the round's records hold {got.calls}, "
+                                       f"{got.input_tokens}+{got.output_tokens}"))
+        if self.stopped is not None:
+            why = _no_budget(self.budget, [r.cost for r in self.rounds])
+            if why is None:
+                bad.append((len(self.rounds), "budget", "recorded as stopped by the budget, but the recorded costs fit it"))
         last = self.rounds[-1] if self.rounds else None
         if self.accepted != bool(last and last.accepted):
             bad.append((len(self.rounds), "outcome", "recorded accepted does not match the last round"))
         if not self.accepted and not self.escalation:
             bad.append((len(self.rounds), "outcome", "not accepted, and no escalation recorded"))
-        if not self.accepted and last is not None and not last.error and len(self.rounds) < self.max_rounds:
+        if not self.accepted and last is not None and not last.error and len(self.rounds) < self.max_rounds \
+                and self.stopped is None:
             bad.append((len(self.rounds), "loop", f"stopped after {len(self.rounds)} of {self.max_rounds} rounds "
                                                    "without an accepted proposal or a proposer error"))
         return {"ok": not bad, "rounds": len(self.rounds), "mismatches": bad,
@@ -299,6 +348,28 @@ def _plain(v):
     return v
 
 
+def _round_cost(rd, price, ms):
+    """What a round cost: the model calls its response's trace records and its proposer record (solvi.costs.cost_of),
+    dollars from `price` (else the dollars the calls recorded), `ms` as its time."""
+    from .costs import cost_of
+    gen = rd.generated
+    gens = [] if gen is None else (list(gen) if isinstance(gen, list) else [gen])
+    return cost_of([rd.response] if rd.response is not None else [], price, ms, gens, recorded=True)
+
+
+def _no_budget(budget, costs):
+    """Is there no budget for one more round, after rounds that cost `costs`? → the reason, or None."""
+    if budget is None or not costs or any(c is None for c in costs):
+        return None
+    from .costs import Cost
+    so_far = Cost(0.0)
+    for c in costs:
+        so_far = so_far + c
+    if budget.usd is not None and so_far.usd is None:
+        return "dollars unknown: a model call recorded no price — give price="
+    return budget.used_up(so_far) or budget.over(so_far, so_far * (1.0 / len(costs)))
+
+
 def _round_of(res, question, accept, index):
     """A response → its Round (acceptance, failed checks with whether they govern the question, causes)."""
     failed = failed_checks(res, question)
@@ -321,7 +392,7 @@ def _said(proposal, generated):
 
 
 def refine(system, state, question, propose=None, *, into="proposal", rounds=3, accept="checks", feedback=None,
-           feedback_into=None, history=None, store=True):
+           feedback_into=None, history=None, store=True, budget=None, price=None):
     """Propose → check → re-ask with the reasons → escalate (see the module docs) → a Refinement.
 
     system: the System whose checks judge a proposal; state: the given facts; question: the question whose hard checks
@@ -330,9 +401,19 @@ def refine(system, state, question, propose=None, *, into="proposal", rounds=3, 
     and reads the earlier rounds' feedback as the fact `feedback_into` (default "feedback"). rounds: proposals at most.
     accept: "checks" (default), an answer or answers, or a function of the Response. feedback: round → the text or
     the list of reasons the proposer is told (default: round.reasons). history: earlier rounds the proposer should
-    see first (a Refinement's rounds, to continue it). store: whether a System with storage stores every round."""
+    see first (a Refinement's rounds, to continue it). store: whether a System with storage stores every round and the
+    loop's "refine" record. budget: a solvi.costs.Budget for the whole loop (one decision), checked before every round
+    after the first; price: dollars per million (input, output) tokens, or a function (model, usage) → dollars — needed
+    for a budget in dollars unless the proposer records its own (module docs, "Costs and a budget")."""
+    import time
+    from .generate import check_budget
     if int(rounds) < 1:
         raise ValueError("rounds must be at least 1")
+    from .costs import Budget
+    if budget is not None and not isinstance(budget, Budget):
+        raise TypeError("budget= takes a solvi.costs.Budget(usd=, calls=, ms=, tokens=)")
+    if price is not None:                             # without one, dollars are those the calls recorded (or unknown)
+        price, _, _ = check_budget(price, None, None)
     if propose is None and feedback_into is None:
         feedback_into = "feedback"
     if propose is not None and not callable(propose):
@@ -341,8 +422,14 @@ def refine(system, state, question, propose=None, *, into="proposal", rounds=3, 
         raise ValueError(f"{question!r} is not a question of the system")
     from .llm import InvalidOutput                     # a rejected reply (solvi.generate); not imported with solvi
     prior = list(getattr(history, "rounds", history) or [])
-    out, stop = [], None
+    out, stop, stopped = [], None, None
     for i in range(int(rounds)):
+        if i and budget is not None:
+            why = _no_budget(budget, [r.cost for r in out])
+            if why:
+                stopped = f"no budget for another round ({why})"
+                break
+        t0 = time.perf_counter()
         seen = prior + out
         st = dict(state)
         if feedback_into is not None:
@@ -354,12 +441,15 @@ def refine(system, state, question, propose=None, *, into="proposal", rounds=3, 
             except InvalidOutput as e:            # a reply the generator rejected: a round whose reason is fed back
                 rd.error = rd_err = f"the reply was rejected: {e}"
                 rd.causes, rd.said = [rd_err], getattr(e, "reply", None)
+                rd.generated = getattr(e, "generated", None)          # the request's record: what it cost
+                rd.cost = _round_cost(rd, price, (time.perf_counter() - t0) * 1000)
                 out.append(rd)
                 if i < int(rounds) - 1:
                     rd.feedback = feedback(rd) if feedback is not None else rd.reasons
                 continue
             except Exception as e:  # noqa: BLE001 — the proposer could not propose: a person takes over
                 rd.error = f"the proposer failed: {type(e).__name__}: {str(e)[:200]}"
+                rd.cost = _round_cost(rd, price, (time.perf_counter() - t0) * 1000)
                 out.append(rd)
                 stop = rd.error
                 break
@@ -372,6 +462,7 @@ def refine(system, state, question, propose=None, *, into="proposal", rounds=3, 
         res = system.ask(st, store=store)
         now = _round_of(res, question, accept, i)
         rd.response, rd.accepted, rd.failed, rd.causes = res, now.accepted, now.failed, now.causes
+        rd.cost = _round_cost(rd, price, (time.perf_counter() - t0) * 1000)
         out.append(rd)
         if rd.accepted:
             break
@@ -381,11 +472,32 @@ def refine(system, state, question, propose=None, *, into="proposal", rounds=3, 
     esc = None
     if not ok:
         last = out[-1]
-        esc = stop or (f"not accepted after {len(out)} round(s)"
-                       + (": " + "; ".join(last.reasons[:3]) if last.reasons else ""))
+        esc = stop or stopped or (f"not accepted after {len(out)} round(s)"
+                                  + (": " + "; ".join(last.reasons[:3]) if last.reasons else ""))
+        if stopped and last.reasons:
+            esc += ": " + "; ".join(last.reasons[:3])
     fb_name = "reasons" if feedback is None else f"function {getattr(feedback, '__name__', '?')}"
-    return Refinement(question, out, ok, esc, int(rounds), into if propose is not None else None, feedback_into, accept,
-                      fb_name)
+    run = Refinement(question, out, ok, esc, int(rounds), into if propose is not None else None, feedback_into, accept,
+                     fb_name, budget, stopped)
+    if budget is not None:
+        run.over_budget = budget.over(run.cost)
+    if store and getattr(system, "storage", None) is not None:
+        run.stored_id = system.storage._append(_stored_record(run))["id"]
+    return run
+
+
+def _stored_record(run):
+    """The "refine" record of a loop in the System's storage: its outcome, each round's stored response id, feedback,
+    proposer record and cost, the budget and the total (the responses themselves are stored by the asks)."""
+    from .storage import FORMAT, plain
+    from .schema import tag_floats
+    rounds = [{"index": r.index, "stored_id": r.stored_id, "accepted": r.accepted, "error": r.error,
+               "feedback": plain(r.feedback) if r.feedback is not None else None, "generated": r.generated,
+               "cost": None if r.cost is None else r.cost.to_dict()} for r in run.rounds]
+    return tag_floats({"v": FORMAT, "kind": "refine", "question": run.question, "accepted": run.accepted,
+                       "escalation": run.escalation, "stopped": run.stopped, "over_budget": run.over_budget,
+                       "budget": None if run.budget is None else run.budget.to_dict(), "cost": run.cost.to_dict(),
+                       "rounds": rounds})
 
 
 __all__ = ["accepted", "causes", "Fail", "Failed", "failed_checks", "refine", "Refinement", "Round"]

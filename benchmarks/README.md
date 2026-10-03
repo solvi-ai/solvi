@@ -67,6 +67,7 @@ quoted any more: their scripts were not ported here).
 | `fast_head.py`, `strategist_scale.py` | `fit` (the answer head and its selection) and the strategist at scale |
 | `ask_speed.py` | milliseconds per `ask` on small and large inputs (the README quickstart, the gallery, random catalogs of 50 and 1 000 parts, a 3.7k-float stream input): the README's Speed table |
 | `ask_overhead.py` | what solvi adds to one `ask` (every gallery entry and a decider project, no real model) |
+| `journal_size.py` | the bytes a stored decision takes, full, compact and `sample:10` (`TraceStorage(record=...)`), on every gallery entry, a game-like loop and the credit task, and that each store verifies and replays: the guide's table under "Compact records and rotation" |
 | `trace_signature.py` | what a signature (`solvi.signature`) adds over the hash chain when one stored record is edited |
 | `octonion_signature.py` | the positional octonion signature, an experiment that left the package in 0.8 (`trace_signature.py` compares it with the syndrome code) |
 | `drift_simulation.py` | what `solvi.drift.DriftMonitor` flags on simulated streams: false flags on unchanged streams, and how many decisions after a change of the share answered alone or of the mix of answers it flags |
