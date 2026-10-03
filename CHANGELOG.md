@@ -19,10 +19,37 @@ had a measured run. Importing a removed module raises ModuleNotFoundError.
 | `solvi.aliases` (`NameMatcher`, `propose`, `accept`, `apply`, `match_names`) | experimental, no checkpoint of the matcher was ever published, no measurement | name the parameters after the facts they read, or a one-line part that renames a fact |
 | example `17_model_strategist.py` | it showed the two removed pieces with stand-in models | `examples/17_cost_strategist.py`: the code strategist alone |
 | `solvi.agents.pydantic_ai`, `solvi.agents.langgraph`, `solvi.agents.openai_agents` and the `pydantic-ai`, `langgraph`, `openai-agents` extras | no measured run went through any of them; the measured agent results (an injection benchmark, the τ-bench retail stand) call the guard directly | call `guard.check` (or `guard.call`) from your framework's tool-execution step; for MCP servers, the proxy (`solvi serve --guard --upstream`), which stays |
+| `System(cost_policy="measured")`, `solvi.costs.MeasuredCosts`, `system.freeze_costs()` / `unfreeze_costs()` | planning on measured run times showed no measured benefit | declare `cost=` on the parts; `cost_policy="declared"` is the only value left (a 0.9 plan record with measured costs still replays) |
+| `solvi.heads.Head` (the legacy answer head) | `System.fit` has built a `FastHead` since 0.8 and nothing in solvi built `Head` any more | `solvi.heads.FastHead` |
+
+### Moved off the classes (no shim)
+
+A stable class no longer imports an experimental module, so three methods became functions of their own modules. The
+old method raises an AttributeError that names the new call; what the method did is unchanged.
+
+| was | now |
+|---|---|
+| `part.adapt_lora(examples, ...)` (and on a Cascade / Vote / Route) | `solvi.lora.adapt_lora(part, examples, ...)` (experimental) |
+| `part.remove_lora()`, `combination.remove_lora()` | `solvi.lora.remove_lora(part)` (a combination: every part's) |
+| `system.learning(store, ...)` | `solvi.learning.Learning(system, store, ...)` (experimental; same arguments) |
+| `part.memory(...)`, `combination.memory(...)` | `solvi.memory.attach(part, ...)` (same settings; a combination: a memory for every part) |
+
+`part.save_lora`, `part.load_lora`, `part.lora` and calibration files that carry an adapter work as before: a part now
+has an adapter slot, and the LoRA adapter fills it.
+
+### Moved inside solvi (old imports keep working)
+
+To break the import cycle between the deciders, the System, the store and the dispatcher, some pieces moved to modules
+of their own. Every old import path still works, with no warning, and stored records, hashes, fingerprints and replay
+are unchanged: `Response` → `solvi.response`; the label-source checks (`check_source`, `TRUSTED_SOURCES`, `VERIFIED`,
+`UntrustedLabel`) → `solvi.sources`; `GroupBy` and `group_name` → `solvi.calibration`; `plan_batches` →
+`solvi.runtime`; the dollars of recorded model calls (`price_of`) → `solvi.costs`; the request limits and errors of
+`solvi serve` (`Limits`, `RequestError`, `parse_json`, ...) → `solvi._rpc`; the `solvi calibrate` command and its
+helpers (`read_rows`, `examples_of`, `label_of`, `find_part`) → `solvi.calibrate`.
 
 ### Moving into the knowledge memory
 
-`solvi.memory` (`CorrectionMemory`, `part.memory`), `solvi.episode` and `solvi.extract_multi` stay in 1.0 for now and
+`solvi.memory` (`CorrectionMemory`, `solvi.memory.attach`), `solvi.episode` and `solvi.extract_multi` stay in 1.0 for now and
 are marked "moving into the knowledge memory in 1.0" in their docs: they will be folded into solvi's knowledge memory,
 and their API may change then.
 
