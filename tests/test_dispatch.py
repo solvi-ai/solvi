@@ -503,3 +503,24 @@ def test_a_decision_made_before_calibrate_does_not_replay_against_the_calibrated
     assert "config" in [w for w, _ in d.replay(before)["mismatches"]]
     with pytest.raises(ValueError, match="max_risk"):
         d.calibrate(data[:300])
+
+
+def test_a_rule_answer_held_back_by_a_guarantee_is_still_system_1s_would_be_answer():
+    cat = Catalog()
+
+    @cat.fn
+    def trust(email) -> float:
+        return 0.1 if "hello" in email else 0.9
+
+    @cat.rule("team")
+    def team(email):
+        return "billing"
+    s1 = System(cat, [Question("team", "Which team?", Answer.choice(list(TEAMS)))])
+    from solvi.guarantee import calibrate
+    s1.guarantee("team", promise=calibrate([0.1] * 20 + [0.9] * 20, [False] * 20 + [True] * 20, max_risk=0.1,
+                                           signal="trust"), signal="trust")
+    s2, _ = slow_llm()
+    d = Dispatcher(s1, SlowPath(s2), think="agree")
+    res = d.ask({"email": "hello, a parcel"})
+    assert res.s1["team"].status == "abstain" and res.candidates["s1"] == "billing"
+    assert res.by == "human" and d.replay(res)["ok"]

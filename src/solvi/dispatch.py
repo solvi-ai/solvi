@@ -308,7 +308,7 @@ class SlowPath:
             res = self.system.ask(dict(state), [q], store=store)
             r = res[q]
             ok = r.status != "abstain"
-            th = Thought("ask", r.answer if ok else _would(r), ok, None if ok else f"the slow path abstained: {r.why}",
+            th = Thought("ask", r.answer if ok else _would(r, res, q), ok, None if ok else f"the slow path abstained: {r.why}",
                          res)
         elif self.mode == "refine":
             th = self._refine(state, q, price, budget, expected_round, t0, store)
@@ -338,7 +338,7 @@ class SlowPath:
         if last is not None and last.error and "BudgetStop" in last.error:
             stopped = last.error
         why = None if ok else (run.escalation or (f"the slow path abstained: {r.why}" if r is not None else "no answer"))
-        ans = (r.answer if ok else _would(r)) if r is not None else None
+        ans = (r.answer if ok else _would(r, run.response, q)) if r is not None else None
         return Thought("refine", ans, ok, why, run, stopped=stopped)
 
     def _search(self, state, q, store):
@@ -369,14 +369,14 @@ class SlowPath:
             qn = q or next(iter(rec.results))
             r = rec[qn]
             ok = r.status != "abstain"
-            ans = r.answer if ok else _would(r)
+            ans = r.answer if ok else _would(r, rec, qn)
         elif thought.mode == "refine":
             rep = rec.replay(self.system, accept=None if not callable(self.accept) else self.accept,
                              trust_models=trust_models)
             bad += [("refine", f"round {m[0]} {m[1]}: {m[2]}") for m in rep["mismatches"]]
             r = rec.result
             ok = bool(rec.accepted) and r is not None and r.status != "abstain"
-            ans = (r.answer if ok else _would(r)) if r is not None else None
+            ans = (r.answer if ok else _would(r, rec.response, rec.question)) if r is not None else None
         else:
             rep = rec.replay(self.system, accept=self.accept, objective=self.search_kw.get("objective"),
                              trust_models=trust_models)
@@ -674,7 +674,7 @@ class Dispatcher:
         expected = self.expected()
         action, reasons = self.decide(res, draw, spent, self.drift, expected)
         r1 = res[q]
-        would1 = r1.answer if r1.status != "abstain" else _would(r1)
+        would1 = r1.answer if r1.status != "abstain" else _would(r1, res, q)
         cand = {"s1": would1}
         c1 = cost_of([res], self.price, res.ms)
         th, over, disagreement = None, None, None
@@ -864,7 +864,7 @@ class Dispatcher:
                 if not all(k in self.wake for k in kinds):
                     people += 1
                     continue
-                would1 = _would(r1)
+                would1 = _would(r1, res, q)
                 row = {"s1": (_s1_signal(r1) if would1 is not None else -math.inf, judge(would1, label, res))}
                 if any(a in ("s2", "agree") for a in answerers):
                     th = self.slow.run(state, q, price=self.price, store=False)
@@ -1029,7 +1029,7 @@ class Dispatcher:
             bad.append(("cost", "System 1's recorded cost is not what its trace gives"))
         if d.action == action:
             r1 = d.s1[self.question]
-            would1 = r1.answer if r1.status != "abstain" else _would(r1)
+            would1 = r1.answer if r1.status != "abstain" else _would(r1, d.s1, self.question)
             sl = self.slice_of(d.s1) if d.action == "think" else None
             if sl != d.slice:
                 bad.append(("slice", f"recorded {d.slice!r}, the response gives {sl!r}"))
@@ -1070,16 +1070,22 @@ def _s1_signal(r):
     return float(c) if isinstance(c, (int, float)) and math.isfinite(c) else -math.inf
 
 
-def _would(r):
-    """What an abstained Result would have answered: its answer, else the most probable option (None when unknown)."""
+def _would(r, res=None, question=None):
+    """What an abstained Result would have answered: its answer, else the most probable option, else the answer its
+    rule or head recorded in the trace before a guarantee or a threshold held it back (None when unknown)."""
     if r is None:
         return None
     if r.answer is not None:
         return r.answer
     p = r.probs or {}
     if p:
-        best = max(p, key=lambda k: p[k])
-        return best
+        return max(p, key=lambda k: p[k])
+    if res is not None and question is not None:
+        from .runtime import MISSING
+        rec = next((x for x in res.trace.records if x.name == f"answer:{question}"), None)
+        v = getattr(rec, "value", None)
+        if v is not None and v is not MISSING and getattr(rec, "error", None) is None:
+            return getattr(v, "value", v) if hasattr(v, "probs") else v
     return None
 
 
