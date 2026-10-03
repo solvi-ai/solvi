@@ -261,5 +261,17 @@ caught only by a head or a signature you published (`verify(anchor=...)`, `verif
 **Erase with `redact`, never by editing.** It removes a record's content, keeps the chain, and records the erasure;
 editing or deleting a record is indistinguishable from tampering.
 
+**For frequent decisions, store them compact and rotate the file.** A full record keeps every step's value and
+inputs: 10 KB a decision on a game-like loop and on the credit task, up to 38 KB on the gallery. `record="compact"`
+kept 3.7 KB and 1.9 KB of those, and every decision still verified and replayed (2.0–5.2× smaller,
+[journal_size.py](../benchmarks/journal_size.py)); `rotate_bytes=` keeps each file small. What is left is mostly the
+input: a long text given unchanged with every decision is stored with every decision — give it once, and a key or a
+hash with each. Keep `"full"` (or `"sample:N"`) where you will want to see the old intermediate values after a change of
+the catalog: a compact record tells you which step changed, not what it was.
+
+**Give a model's spend a budget where it is spent.** A generator with `total=Budget(usd=...)` stops before the request
+that would exceed it, and a refinement with `budget=` before the round; a budget written on top of the provider's API
+cannot stop a request that solvi is about to send.
+
 **After a change of the catalog, replay before you trust old traces.** A renamed part, a new input or a retrained
 model each make old decisions non-reproducible; `solvi diff` shows which stored decisions would change and why.

@@ -22,6 +22,7 @@ this reference lists what each module exports and the signatures.
 | [`solvi.memory`](memory.md) | a memory of corrected cases: nearest neighbours with an abstain threshold |
 | [`solvi.lora`](lora.md) | a LoRA adapter per question, fitted on a few hundred labelled examples |
 | [`solvi.learning`](learning.md) | learning from corrections with gates and rollback (experimental) |
+| [`solvi.oncalib`](oncalib.md) | recalibration on the fly from outcomes (experimental; the promise is not kept) |
 | [`solvi.serve`](serve.md) | `solvi serve`: HTTP, MCP and the System One API |
 | [`solvi.agents`](agents.md) | guarding an agent's tool calls: `Guard`, the MCP proxy |
 | [`solvi.hooks`](hooks.md) | a coding agent's hooks: edits checked against rules, a skill picked for a prompt, install / uninstall (Claude Code; Codex, preview) |
@@ -38,7 +39,7 @@ this reference lists what each module exports and the signatures.
 | [`solvi.extract_multi`](extract_multi.md) | a single-pass `@extract` over several fields (torch) |
 | [`solvi.strategist`](strategist.md) | the strategist: a flow per request (`Flow`, `PlanError`), the learned order of hard checks and producer policy |
 | [`solvi.strategy`](strategy.md) | the code strategist (`CostStrategist`): dead ends dropped, the cheapest verified plan |
-| [`solvi.costs`](costs.md) | measured run times (`CostBook`) and the dollars of recorded model calls (`price_of`) |
+| [`solvi.costs`](costs.md) | measured run times (`CostBook`), the dollars of recorded model calls (`price_of`), `Budget` and `Cost` |
 | [`solvi.rulelist`](rulelist.md) | a readable rule list learned from examples (`System.learn_rule`; `solvi.rules` up to 0.7) |
 | [`solvi.audit`](audit.md) | `res.audit()`: what each answer rests on and which safeguards fired; `to_dict()` as JSON-ready data |
 | [`solvi.show`](show.md) | printing a response |
