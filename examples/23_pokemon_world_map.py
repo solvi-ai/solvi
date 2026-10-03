@@ -1,7 +1,7 @@
 """System 1 and System 2 on a game: solvi walks the world of Pokémon Red twice, and the second time almost every
 decision is a fast one.
 
-The game is the world map of Pokémon Red — 190 places (towns, routes, buildings, cave floors) and 452 exits, recorded
+The game is the world map of Pokémon Red — 190 places (towns, routes, buildings, cave floors) and 447 exits, recorded
 from a real playthrough as place names, exits as a player sees them ("Leave north", "Door at (12,11)") and where they
 led; no ROM bytes, no graphics. The story is the game's first fifteen goals, Pallet Town to the fourth badge; each goal
 names the place it needs ("Defeat Brock, the Pewter City Gym Leader" → PEWTER_GYM), never the way there. One decision
