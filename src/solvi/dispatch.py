@@ -65,7 +65,9 @@ spent before. `replay(dispatcher)` re-checks all of it without calling a model: 
 follows from that response, the recorded supervision draw (a hash of the seed, the input and the decision's number),
 the recorded budget and drift state; the slow path's record replays (the LLM outputs re-read through their schemas, as
 `solvi.generate` and `solvi.llm` replay them); the cost recomputes; the answer follows. With `storage=` every decision
-is one hash-chained record of kind "dispatch" in a TraceStorage (`stored()`, `replay_all()`).
+is one hash-chained record of kind "dispatch" in a TraceStorage (`stored()`, `replay_all()`), and `calibrate` adds one
+of kind "policy" (the policy and the config fingerprint the later decisions record), so that a report read from the
+store alone (`solvi.sysreport`) knows the promise each decision was made under.
 
 Not done here: the slow path does not teach System 1 (the disagreements and the slow path's accepted answers are
 recorded as material, `disagreements()`, not used); several questions at once (one dispatcher per question); parallel
@@ -950,6 +952,11 @@ class Dispatcher:
                                        sorted((k, v["answer"], v["threshold"]) for k, v in pol.items()), n_all,
                                        digest(*[_vh(s) for s, _ in examples]))
         self.policy = report
+        if self.storage is not None:              # the promise in force, for a report from the store alone
+            from .schema import tag_floats
+            from .storage import FORMAT
+            self.storage._append({"v": FORMAT, "kind": "policy", "question": q, "config": self.config(),
+                                  "policy": tag_floats(_stored(report))})
         return report
 
     def agrees(self, a, b):

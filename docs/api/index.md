@@ -44,6 +44,7 @@ this reference lists what each module exports and the signatures.
 | [`solvi.audit`](audit.md) | `res.audit()`: what each answer rests on and which safeguards fired; `to_dict()` as JSON-ready data |
 | [`solvi.show`](show.md) | printing a response |
 | [`solvi.report`](report.md) | reports of one decision or a period of stored decisions (Markdown, HTML, data) |
+| [`solvi.sysreport`](sysreport.md) | the system report: who answered, the cost, the promise against the stored labels, drift — from the store alone |
 | [`solvi.otel`](otel.md) | decisions as OpenTelemetry spans (the API, or OTLP/JSON) |
 | [`solvi.sets`](sets.md) | decisions over a set: answers of many items made consistent under at-most / exactly-one / capacity constraints |
 | [`solvi.search`](search.md) | search over alternatives: candidates through the System's checks, the best by an objective, pruned, recorded |

@@ -4137,7 +4137,9 @@ records, each decision records its slice, and a think runs the slow path only wh
 — System 1's own answer costs nothing. Calibrate on examples System 1's guarantee was not calibrated on: there its
 answers sit at the edge of the promise and leave nothing for the slices (the report then sends every slice to a person
 and says why). The promise holds for inputs like the examples: a slice calibrated without inputs of a new kind (an
-unseen intent) does not cover them.
+unseen intent) does not cover them. With `storage=`, `calibrate` also stores the policy (one record of kind "policy"),
+so that the system report (`System.report`, `solvi report --overview`) can set each later decision's answer against
+the promise it was made under.
 
 ### The record and replay
 
@@ -4505,6 +4507,60 @@ solvi report decisions.db --since 2026-09-01 --question refund          # Markdo
 solvi report decisions.db --html september.html                          # a self-contained page
 solvi report decisions.db --id 3f9a0c1d2e4b5a67 --system app.py:system   # one decision, replayed against the system
 ```
+
+### The system report: System.report, solvi report --overview
+
+A period report lists decisions; the system report answers the owner's questions about a System over a period — who
+answered, how often each part answered and handed over, what it cost, whether the promise held on the labels you
+have, and whether the stream moved. It reads the store alone: no model is called, no catalog is needed, so it runs on a
+copy of the store on another machine.
+
+```python
+rep = system.report(since="2026-09-01", until="2026-10-01")    # the System's storage; or report(store=...)
+print(rep)                                                       # plain text
+rep.to_dict()                                                    # the same as data
+
+from solvi.sysreport import system_report
+rep = system_report(SQLiteStorage("decisions.db"), question="intent", price=(0.15, 0.60), drift_window=100)
+```
+
+```
+solvi report decisions.db --overview --since 2026-09-01          # text
+solvi report decisions.db --overview --json                      # data
+```
+
+What it shows, per question:
+
+- **Who answered.** The answers given alone and what gave them — a rule (its name), a model decision (the model's id),
+  a learned head, or a hard check that forced the answer — and the inputs handed over, by the safeguard that held them
+  back. With a dispatcher (`solvi.dispatch`, `storage=`), who gave the final answer: System 1, the slow path or a
+  person, by action (accept, think, check) and by the slice System 1 handed over.
+- **What it cost.** The time of every decision, the model calls and tokens the traces record, and dollars where they
+  are known (the dispatcher records them; for System 1's own model calls pass `price=`). The dispatcher's spend is split
+  between System 1 and the slow path.
+- **The promise against the labels.** Every guarantee the decisions were gated by (`System.guarantee`, an open-set
+  gate: its method, level and text, how many decisions it let through) and every calibrated dispatch policy
+  (`Dispatcher.calibrate`: who answers each slice, at what threshold), next to the error measured on the decisions
+  that have a label in the store. A correction labels the decision it names (`of=`), else the latest decision before it
+  on the same input; corrections stored after the period still count. Labels from a person, an outcome or a rule are
+  measured; System 2's verified answers (`label_source="verified"`) are counted but not measured — they are the
+  system's own answers. The verdict says "within the promise", "above the promised level, not significantly", or
+  "above the promise" with the binomial p-value. When only some decisions are labelled, the report says the measured
+  error is that of the labelled ones: corrections are usually made where an answer looked wrong.
+- **Drift.** The flags the decisions recorded (an open-set gate's change point, the dispatcher's drift flag), and a
+  `DriftMonitor` run over the period's decisions in order, with the stored labels where there are some: the first
+  decision at which it flagged and what moved. `drift_window=` sets its window (default 100; `None` or `--no-drift`:
+  not run); a period shorter than the window and half of it again is not tested, and the report says so.
+
+The period header also lists the catalog fingerprints in use (a change of the catalog shows as two of them, with the
+dates of each) and the models that ran.
+
+On the banking stand task (2,000 requests, a promise of at most 5% wrong among the answers given alone, new kinds of
+request from request 1,000 on), with the true intents stored as outcome labels, the report gives 713 answers given
+alone by the model, 1,287 handed over, 5 of the 713 wrong (0.70%: within the promise) — the numbers the task's own
+scorer gives — the open-set gate's own flag at request 1,068, and a DriftMonitor flag on the share answered alone at
+request 1,046. On the credit task (rules only, two versions of the catalog) it gives 998 answers by the rule, 2 forced
+by a hard check, and 600 and 400 decisions under the two catalog fingerprints.
 
 ### OpenTelemetry: solvi.otel
 

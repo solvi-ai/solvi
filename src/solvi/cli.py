@@ -12,6 +12,8 @@
     solvi check  myapp.decisions:system [--strict] [--json]                                          (solvi.check)
     solvi report decisions.db [--since ISO] [--until ISO] [--question Q] [--id ID] [--html out.html] [--md out.md] [--json]
                                                                                                      (solvi.report)
+    solvi report decisions.db --overview [--since ISO] [--until ISO] [--question Q] [--drift-window N | --no-drift] [--json]
+                                                                                                     (solvi.sysreport)
     solvi init [DIR] [--template support|refunds|minimal] [--with-model] [--force]                  (solvi.scaffold)
     solvi ask myapp.decisions:system (STATE.json | - | --state '{...}' | --text "...") [--question Q] [--decider MODEL]
               [--audit] [--report md|html] [--lang ru] [--store decisions.db] [--json]
@@ -167,6 +169,8 @@ def cmd_report(a):
     from .report import decision, period, render
     system = load_system(a.system) if a.system else None
     store = _store(a.store, system)
+    if a.overview:
+        return _overview(a, store)
     if a.id:
         used = [k for k in ("question", "status", "safeguard", "model", "since", "until") if getattr(a, k, None) is not None]
         if used:
@@ -193,6 +197,25 @@ def cmd_report(a):
         print(f"wrote {a.md}", file=sys.stderr)
     if not (a.json or a.html or a.md):
         print(render(data, "md"), end="")
+    return 0
+
+
+def _overview(a, store):
+    """`solvi report STORE --overview`: the system report (solvi.sysreport) — text, or its data with --json."""
+    from .sysreport import system_report
+    bad = [k for k in ("id", "status", "safeguard", "model", "html", "md") if getattr(a, k, None) is not None]
+    if bad:
+        _fail("report --overview: the system report takes --since, --until, --question, --drift-window and --json, not "
+              + ", ".join("--" + k for k in bad))
+    _check_when(a)
+    if a.drift_window is not None and a.drift_window < 2:
+        _fail("--drift-window: at least 2 (--no-drift: do not run the DriftMonitor)")
+    rep = system_report(store, a.since, a.until, question=a.question,
+                        drift_window=None if a.no_drift else (a.drift_window or 100))
+    if a.json:
+        _dump(rep.to_dict())
+    else:
+        print(rep, end="")
     return 0
 
 
@@ -395,6 +418,11 @@ def main(argv=None):
     rp.add_argument("--html", metavar="OUT.html", help="write a self-contained HTML page")
     rp.add_argument("--md", metavar="OUT.md", help="write Markdown to a file")
     rp.add_argument("--json", action="store_true", help="print the report's data as JSON")
+    rp.add_argument("--overview", action="store_true",
+                    help="the system report: who answered, cost, the promise against the stored labels, drift "
+                         "(solvi.sysreport)")
+    rp.add_argument("--drift-window", type=int, help="--overview: the DriftMonitor's window (default 100)")
+    rp.add_argument("--no-drift", action="store_true", help="--overview: do not run the DriftMonitor")
     from .serve import add_parser as serve_parser, cmd_serve
     serve_parser(sub)
     from .check import add_parser as check_parser, cmd_check

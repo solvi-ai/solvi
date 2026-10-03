@@ -2,6 +2,19 @@
 
 ## 0.9.0 — unreleased
 
+- The system report: `System.report(since=None, until=None)` (or `solvi.sysreport.system_report(store)`, or
+  `solvi report decisions.db --overview`) tells the owner of a System what happened over a stored period, from the
+  store alone — no model is called and no catalog is needed. Per question: how many answers were given alone and by
+  what (a rule, a model, a learned head, a hard check), how many were handed over and why; with a dispatcher, who gave
+  the final answer (System 1, the slow path or a person); the time, model calls, tokens and dollars recorded; the
+  promise in force (each guarantee, a calibrated dispatch policy) next to the error measured on the decisions that have
+  a label in the store (corrections from a person, an outcome or a rule; System 2's verified answers are counted, not
+  measured); and drift — the flags the decisions recorded and a `DriftMonitor` run over the period. Prints as plain
+  text, `.to_dict()` for data. On a 2,000-request banking stream with its true intents stored as outcome labels, it
+  reports 713 answers given alone and 5 of them wrong (0.70% against a promised 5%) — the same numbers as the task's
+  own scorer — and a drop of the share answered alone 46 requests after new kinds of request start to arrive.
+  `Dispatcher.calibrate` now also stores its policy in the dispatcher's store (one record of kind "policy"), so the
+  report knows the promise each later decision was made under.
 - `solvi.dispatch`: `Dispatcher.calibrate(examples, max_risk=..., ...)` chooses who answers on each slice that System 1
   hands over (System 1 itself, the slow path, agreement of both, or a person) and promises the error on that slice.
   It measured a gain on product matching; on contract clauses it honestly sends everything to a person; after a

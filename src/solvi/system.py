@@ -725,6 +725,17 @@ class System:
         _deprecate.renamed("System.safeguard_report()", "System.safeguard_summary()")
         return self.safeguard_summary(lang)
 
+    def report(self, since=None, until=None, *, store=None, **options):
+        """What this System did over a stored period [since, until), for its owner → a solvi.sysreport.SystemReport
+        (print it; .to_dict()): who answered and how often each abstained, what it cost, the promise in force against
+        what the stored labels show, and drift. Read from the store alone (`store`, default: the System's storage);
+        options: question=, price=, drift_window=, monitor= (see solvi.sysreport.system_report)."""
+        from .sysreport import system_report
+        store = store if store is not None else self.storage
+        if store is None:
+            raise ValueError("a system report reads the stored decisions: System(storage=...) or report(store=...)")
+        return system_report(store, since, until, **options)
+
     def safeguard_summary(self, lang=None):
         """The lifetime stats as text: how many model outputs, and how many were caught by each safeguard.
         lang: solvi.i18n (default: the System's)."""
