@@ -36,6 +36,7 @@ import time as _time
 from dataclasses import dataclass
 
 from . import _deprecate
+from .sources import TRUSTED_SOURCES, VERIFIED, VERIFIED_REFUSED, UntrustedLabel, check_source   # noqa: F401 — re-exported
 
 try:
     import fcntl
@@ -47,42 +48,6 @@ FORMAT = 2                                    # the record format ("v"): 2 — d
                                               # own order (1, solvi ≤ 0.7.1: sorted, the order a decider read is lost)
 LEGACY_ORDER = ("stored by solvi 0.7.1 or earlier, which wrote dict keys sorted: a model that read a dict may have read "
                 "its keys in another order than this replay gives it — replay such records with trust_models=True")
-
-
-TRUSTED_SOURCES = ("human", "outcome", "rule")   # where a label may come from: never the system's own answers
-VERIFIED = "verified"         # a System 2 answer that passed the checks and a guarantee: a label only where accepted
-# What a channel says when it refuses a verified label: measured on three stand tasks replayed as a stream (Abt-Buy,
-# CUAD, Banking77; docs/best_practices.md), System 2's verified answers fed to it did not make System 1 answer more
-# within its promise on at least two of the three.
-VERIFIED_REFUSED = {
-    "memory": "a memory of corrections fed verified System 2 answers broke System 1's promise on a contract task (P(alone "
-              "and wrong) 3.1% against 3%) and helped on one task of three",
-    "head": "a head refitted on verified System 2 answers answered more within its promise on one task of three (contracts; "
-            "not on product matching, where it already answered 90%) — feed it human or outcome labels",
-    "learning": "the learning loop's ladder (fit, memory, adapter) was not shown to gain from verified System 2 answers on "
-                "two tasks of three; it learns from human, outcome and rule labels",
-}
-
-
-class UntrustedLabel(ValueError):
-    """A label from a source outside TRUSTED_SOURCES (the model, the system itself, an unknown process), or a
-    "verified" label offered to a channel that does not take it."""
-
-
-def check_source(source, accept=(), channel=None):
-    """A label's source → itself, when it is trusted: "human", "outcome" or "rule" — or "verified" when the channel
-    lists it in `accept` (only System.guarantee(..., sources=) does: see VERIFIED); else UntrustedLabel, with the
-    measured reason when a channel (`channel`, a key of VERIFIED_REFUSED) refuses a verified label."""
-    if source in TRUSTED_SOURCES or (source == VERIFIED and VERIFIED in tuple(accept)):
-        return source
-    if source == VERIFIED:
-        why = VERIFIED_REFUSED.get(channel, "this channel does not take verified System 2 answers")
-        raise UntrustedLabel(f"label source {VERIFIED!r} is not taken here: {why}; a verified label is stored and can "
-                             "recalibrate a guarantee (System.guarantee(question, examples, corrections=store, "
-                             f"sources=TRUSTED_SOURCES + ({VERIFIED!r},)))")
-    raise UntrustedLabel(f"label source {source!r} is not trusted: labels come only from outside the model "
-                         f"({', '.join(TRUSTED_SOURCES)}; {VERIFIED!r} for a System 2 answer that passed the checks and "
-                         "a guarantee, where a channel takes it); the system's own answers are never labels")
 
 
 class _Any:
@@ -238,7 +203,7 @@ class Stored:
     def response(self, catalog=None):
         """The stored response, loaded back (typed values restored from `catalog` — a Catalog or a System — or from the
         store's own)."""
-        from .system import Response
+        from .response import Response
         if self.kind != "ask":
             raise ValueError(f"record {self.id} is a {self.kind} record, not a response")
         if self.data.get("redacted"):

@@ -158,7 +158,7 @@ def save(part, path):
 
 
 def _group_by(rec, groups):
-    from .decide import GroupBy
+    from .calibration import GroupBy
     by = rec["by"]
     if isinstance(by, list):
         g = GroupBy(groups if groups is not None else by)

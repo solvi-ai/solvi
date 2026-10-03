@@ -128,6 +128,14 @@ class DecisionPart:
         loras = getattr(self.model, "loras", None)
         return loras.get(lora_key(self.spec)) if loras else None
 
+    def _batch_group(self):
+        """(model, facts) when this part may share a forward pass with other questions on the same facts (the strategist's
+        batches, solvi.runtime.plan_batches); None when it needs a pass of its own (a model that cannot batch, the
+        pointer)."""
+        if not self.model.batchable or self.spec.pointer:
+            return None
+        return self.model, self.facts
+
     def fingerprint(self):
         a = self.adaptation
         th = {k: v for k, v in (("escalate_below", self.escalate_below), ("act_threshold", self.act_threshold),
@@ -951,25 +959,6 @@ class DecisionPart:
                         require_evidence=require_evidence)
 
 
-def plan_batches(steps):
-    """The strategist's grouping: decision parts in a flow that read the same facts with the same model, when the model can
-    answer several questions in one forward pass → [[step name]] (chunks of at most the checkpoint's max_questions)."""
-    groups = {}
-    for st in steps:
-        p = st.part
-        if p.alternatives is not None or p.func is None:
-            continue
-        d = getattr(p.func, "__solvi_decision__", None)
-        if not isinstance(d, DecisionPart) or not d.model.batchable or d.spec.pointer:
-            continue                     # the pointer needs a pass of its own; a combination of models (solvi.multi) too
-        groups.setdefault((id(d.model), tuple(d.facts)), (d.model, []))[1].append(p.name)
-    out = []
-    for model, names in groups.values():
-        n = model.caps["max_questions"]
-        for i in range(0, len(names), n):
-            if len(names[i:i + n]) > 1:
-                out.append(names[i:i + n])
-    return out
-
+from ..runtime import plan_batches   # noqa: E402,F401 — re-exported (defined there since 1.0)
 
 __all__ = ["DecisionPart", "plan_batches"]

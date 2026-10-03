@@ -1570,7 +1570,33 @@ def now_ms():
     return time.perf_counter() * 1000
 
 
+def plan_batches(steps):
+    """The strategist's grouping: decision parts in a flow that read the same facts with the same model, when the model can
+    answer several questions in one forward pass → [[step name]] (chunks of at most the checkpoint's max_questions).
+    Moved here from solvi.decide in 1.0 (solvi.decide re-exports it): the part says whether and with what it batches
+    (DecisionPart._batch_group), so the planner does not import the deciders."""
+    groups = {}
+    for st in steps:
+        p = st.part
+        if p.alternatives is not None or p.func is None:
+            continue
+        d = getattr(p.func, "__solvi_decision__", None)
+        batch = getattr(d, "_batch_group", None)
+        g = batch() if batch is not None else None
+        if g is None:
+            continue                     # the pointer needs a pass of its own; a combination of models (solvi.multi) too
+        model, facts = g
+        groups.setdefault((id(model), tuple(facts)), (model, []))[1].append(p.name)
+    out = []
+    for model, names in groups.values():
+        n = model.caps["max_questions"]
+        for i in range(0, len(names), n):
+            if len(names[i:i + n]) > 1:
+                out.append(names[i:i + n])
+    return out
+
+
 __all__ = ["aexecute", "async_parts", "execute", "Flow", "HashMemo", "HashSeed", "is_async_func", "Mismatch",
-           "mismatch_summary", "MISSING", "narrowed", "now_ms", "PartTimeout", "path_confidence", "RECORD_KEYS", "Record",
+           "mismatch_summary", "MISSING", "narrowed", "now_ms", "PartTimeout", "path_confidence", "plan_batches", "RECORD_KEYS", "Record",
            "replay_guard", "replay_plan", "resolved", "Result", "run_sync", "scalar_row", "srepr", "Step", "StepOut",
            "Trace", "trace_hash", "vhash"]

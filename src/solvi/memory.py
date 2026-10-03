@@ -53,7 +53,7 @@ import numpy as np
 from . import _deprecate
 from .core import NOT_STATED_KEY, Unknown
 from .provenance import ESCALATED, MEMORY, digest
-from .storage import TRUSTED_SOURCES, UntrustedLabel, check_source
+from .sources import TRUSTED_SOURCES, UntrustedLabel, check_source
 MODES = ("check", "answer")
 _WORD = re.compile(r"\w{3,}", re.U)
 

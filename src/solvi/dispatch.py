@@ -248,7 +248,7 @@ class Thought:
         rec = d.get("record")
         if rec is not None:
             if d["mode"] == "ask":
-                from .system import Response
+                from .response import Response
                 rec = Response.model_validate(rec, catalog=system)
             elif d["mode"] == "refine":
                 from .refine import Refinement
@@ -445,7 +445,7 @@ class Dispatched:
     def from_dict(cls, d, system=None, slow_system=None):
         """A stored decision back: System 1's response restored with `system`'s types, the slow path's with
         `slow_system`'s (default: the same)."""
-        from .system import Response
+        from .response import Response
         s1 = Response.model_validate(d["s1"], catalog=system)
         s2 = Thought.from_dict(d["s2"], slow_system or system) if d.get("s2") is not None else None
         return cls(d["question"], _restored(d.get("answer")), d["by"], d["action"], list(d["reasons"]), s1, s2,
