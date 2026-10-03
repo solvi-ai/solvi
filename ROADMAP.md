@@ -6,6 +6,14 @@ in [Discussions → Ideas](https://github.com/solvi-ai/solvi/discussions/categor
 
 Status: `planned` · `in progress` · `research` (may not ship) · `done (version)`.
 
+## 0.10: two levels
+
+| Item | What it gives | Status |
+|---|---|---|
+| Low level: building blocks with stable extension points | Runtime, parts, questions, storage and traces, guards, deciders, slow paths and dispatch as documented base classes and protocols you can subclass or replace, with a promise of which ones stay stable; your own pieces keep tracing, replay and guarantees | planned |
+| High level: ready-made systems | A System 1 + System 2 system in one, where you choose the models and providers and state what you need (questions, examples, risk, budget); built only from the low level, so any piece can be swapped out | planned |
+| Clear split in docs and imports | A short path for the high level; a reference for the low level; experimental pieces marked as such | planned |
+
 ## Next (0.5.x)
 
 | Item | What it gives | Status |
