@@ -389,6 +389,28 @@ class System:
                               costs=self.cost_book, policy=p.policy, known=p.known, early_exit=self._early(early_exit))
         return self._respond(p, trace, vals, t0, store)
 
+    def _decide(self, init_state, questions=None, early_exit=None):
+        """The answers of `ask` without its record keeping — for answers that are never stored (the candidates of
+        solvi.search). The flow is planned and run as `ask` runs it, and the answers, hard checks, constraints, the
+        low-confidence safeguard and the guarantees are applied as `ask` applies them, so the answers are `ask`'s. Not
+        done: no hashing (the records carry no hashes, the trace no init hash), no fingerprint, plan or text record, no
+        safeguard events (`res.safeguards` is None), and nothing is observed, counted or stored — the measured costs, the
+        learned order, the producer policy, the stats and the storage stay as they were. Its trace does not replay: ask
+        the input again with `ask` for a decision to keep."""
+        t0 = now_ms()
+        p = self._prepare(init_state, questions, None)
+        trace, vals = execute(self.catalog, p.flow, p.state, workers=self.workers, order=p.order, costs=self.cost_book,
+                              policy=p.policy, known=p.known, early_exit=self._early(early_exit), hashes=False)
+        if p.rejected:
+            trace.rejected = p.rejected
+        results, feasible, violations = self._results(p.questions, p.flow, trace, vals)
+        if self.guards:
+            from .guarantee import apply_guards
+            apply_guards(self, results, trace, vals, p.flow)
+        resp = Response(results, p.flow, trace, vals, now_ms() - t0, feasible, violations, self.catalog)
+        resp._heads, resp._system = self.heads, self
+        return resp
+
     def _early(self, early_exit):
         return self.early_exit if early_exit is None else bool(early_exit)
 
