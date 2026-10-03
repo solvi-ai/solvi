@@ -79,6 +79,14 @@ def _key(body):
     return hashlib.sha256(json.dumps(body, sort_keys=True, ensure_ascii=False).encode()).hexdigest()
 
 
+def _used(kind, h):
+    """With STAND_USED set to a file, every cached answer that is read is listed there ("chat <hash>" or "raw <hash>"):
+    the requests a run needs, which `replies.py pack` puts in the replies file."""
+    if os.environ.get("STAND_USED"):
+        with open(os.environ["STAND_USED"], "a") as f:
+            f.write(f"{kind} {h}\n")
+
+
 def _post(body, retries, deadline):
     """POST the body to the upstream server → its JSON response. Retries network errors and 5xx, not a refusal."""
     key = os.environ.get("OPENROUTER_API_KEY")
@@ -134,6 +142,7 @@ def chat(model, messages, tag="", max_tokens=2000, temperature=0.0, reasoning="l
     h = _key(body)
     f = CONFIG["cache"] / "chat" / h[:2] / f"{h}.json"
     if f.exists():
+        _used("chat", h)
         out = json.loads(f.read_text())
         return out if full else out["content"]
     if CONFIG["offline"]:
@@ -158,9 +167,11 @@ def raw(body, tag="", retries=4, deadline=240):
     h = _key(body)
     f = CONFIG["cache"] / "raw" / h[:2] / f"{h}.json"
     if f.exists():
+        _used("raw", h)
         return json.loads(f.read_text())
     c = CONFIG["cache"] / "chat" / h[:2] / f"{h}.json"
     if c.exists():                     # the same request was sent by `chat` (a baseline's call): its answer, not a new one
+        _used("chat", h)
         out = json.loads(c.read_text())
         msg = {"role": "assistant", "content": out["content"], "reasoning": out.get("reasoning")}
         if out.get("tool_calls"):

@@ -1,0 +1,311 @@
+{
+ "about": "The stand's published numbers (benchmarks/tasks/README.md): each one as the script printed it, keyed step:field, and each passage of the docs that quotes them, with {step:field|format} where a number stands. stand.py check compares the docs with these numbers and, with --measured, these numbers with a run. Change a number here and in the doc together, from a run.",
+ "measured_with": "solvi 0.8.0 (published); reproduced with 0.9.0.dev0 from the packed replies",
+ "numbers": {
+  "abtbuy/baseline:conflicts": 19,
+  "abtbuy/baseline:f1": 0.872,
+  "abtbuy/llm_pair:cut_off": 26,
+  "abtbuy/llm_pair:llm + one counterpart.f1": 0.87,
+  "abtbuy/llm_pair:llm.f1": 0.86,
+  "abtbuy/llm_pair:llm.pairs": 1916,
+  "abtbuy/llm_pair_schema:llm.f1": 0.837,
+  "abtbuy/repair:baseline.jsonl + one counterpart.f1": 0.909,
+  "abtbuy/repair:baseline.jsonl as given.f1": 0.872,
+  "abtbuy/repair:head + one counterpart.f1": 0.933,
+  "abtbuy/repair:head.f1": 0.931,
+  "abtbuy/repair:head.pairs": 1916,
+  "abtbuy/solution:dev_pairs_fitted": 5743,
+  "abtbuy/solution:head + one counterpart.answered_alone": 0.9692,
+  "abtbuy/solution:head + one counterpart.conflicts": 0,
+  "abtbuy/solution:head + one counterpart.errors_answered_alone": 0.0059,
+  "abtbuy/solution:head + one counterpart.f1": 0.933,
+  "abtbuy/solution:head + one counterpart.pairs": 1916,
+  "banking77/baseline:after.answered_alone": 0.65,
+  "banking77/baseline:after.error_among_answered": 0.2246,
+  "banking77/baseline:before.answered_alone": 0.837,
+  "banking77/baseline:before.error_among_answered": 0.0394,
+  "banking77/solution:after.answered_alone": 0.137,
+  "banking77/solution:after.error_among_answered": 0.0073,
+  "banking77/solution:before.answered_alone": 0.576,
+  "banking77/solution:before.error_among_answered": 0.0069,
+  "banking77/solution:flagged_after_shift": 68,
+  "banking77/solution_plain:after.answered_alone": 0.585,
+  "banking77/solution_plain:after.error_among_answered": 0.1641,
+  "banking77/solution_plain:before.answered_alone": 0.808,
+  "banking77/solution_plain:before.error_among_answered": 0.0248,
+  "bird/baseline:answered": 1.0,
+  "bird/baseline:n": 150,
+  "bird/baseline:right": 78,
+  "bird/baseline:wrong_among_answered": 0.48,
+  "bird/solution:solution.answered": 0.747,
+  "bird/solution:solution.right": 73,
+  "bird/solution:solution.wrong_among_answered": 0.348,
+  "bird/solution:unanimous.answered": 0.633,
+  "bird/solution:unanimous.wrong_among_answered": 0.284,
+  "credit/baseline:decisions": 2000,
+  "credit/baseline:equal_to_policy": 2000,
+  "credit/solution:decisions": 2000,
+  "credit/solution:equal_to_policy": 2000,
+  "cuad/baseline:accuracy": 0.882,
+  "cuad/baseline:answered_alone": 1.0,
+  "cuad/baseline:false_claims_where_absent": 60,
+  "cuad/baseline:false_claims_where_absent/of": 721,
+  "cuad/baseline:found_of_present": 243,
+  "cuad/baseline:found_of_present/of": 304,
+  "cuad/baseline:n": 1025,
+  "cuad/baseline:quotes_verbatim": 260,
+  "cuad/baseline:quotes_verbatim/of": 398,
+  "cuad/baseline:wrong_among_answered_alone": 0.118,
+  "cuad/solution:accuracy": 0.899,
+  "cuad/solution:answered_alone": 0.676098,
+  "cuad/solution:dev_answered_llm_confidence": 0.1402439024390244,
+  "cuad/solution:dev_auroc_llm_confidence": 0.625,
+  "cuad/solution:dev_auroc_trust": 0.831,
+  "cuad/solution:false_claims_where_absent": 27,
+  "cuad/solution:found_of_present": 227,
+  "cuad/solution:quotes_verbatim": 263,
+  "cuad/solution:quotes_verbatim/of": 263,
+  "cuad/solution:wrong_among_answered_alone": 0.04,
+  "nab/baseline:f1": 0.391,
+  "nab/baseline:false_alarms": 115,
+  "nab/baseline:found": 44,
+  "nab/baseline:series": 33,
+  "nab/baseline:windows": 71,
+  "nab/solution:f1": 0.361,
+  "nab/solution:false_alarms": 119,
+  "nab/solution:found": 40,
+  "nab/solution:ms_per_decision": 2.65,
+  "naturalplan/baseline:calendar_scheduling.right": 92,
+  "naturalplan/baseline:meeting_planning.right": 75,
+  "naturalplan/baseline:trip_planning.right": 43,
+  "naturalplan/solution:score.calendar_scheduling.right": 95,
+  "naturalplan/solution:score.meeting_planning.right": 100,
+  "naturalplan/solution:score.trip_planning.right": 98,
+  "naturalplan/solution:search.trip_planning.most asked": 11414,
+  "ragtruth/baseline:all.f1": 0.784,
+  "ragtruth/baseline:all.n": 600,
+  "ragtruth/baseline:wrong": 0.22,
+  "ragtruth/reply_format_dev:plain call (baseline.py).f1": 0.802,
+  "ragtruth/reply_format_dev:solvi.llm, response_format=auto.f1": 0.791,
+  "ragtruth/reply_format_dev:solvi.llm, response_format=json_schema.f1": 0.744,
+  "ragtruth/reply_format_dev:solvi.llm, response_format=json_schema.n": 600,
+  "ragtruth/reply_format_dev:solvi.llm, response_format=json_schema.no_reasoning": 119,
+  "ragtruth/reply_format_eval:plain call (baseline.py).f1": 0.784,
+  "ragtruth/reply_format_eval:solvi.llm, response_format=auto.f1": 0.766,
+  "ragtruth/reply_format_eval:solvi.llm, response_format=json_schema.f1": 0.733,
+  "ragtruth/solution:all.f1": 0.766,
+  "ragtruth/solution:answered_alone.all.share": 0.19,
+  "ragtruth/solution:answered_alone_and_wrong": 0.02337,
+  "ragtruth/solution:wrong_among_answered_alone": 0.123,
+  "taubench/baseline:changes_not_in_gold": 14,
+  "taubench/baseline:changes_refused_by_env": 10,
+  "taubench/baseline:solved": 18,
+  "taubench/baseline:tasks": 30,
+  "taubench/solution:changes_not_in_gold": 13,
+  "taubench/solution:changes_refused_by_env": 0,
+  "taubench/solution:guard.decisions": 437,
+  "taubench/solution:solved": 14
+ },
+ "quoted": [
+  {
+   "file": "benchmarks/tasks/README.md",
+   "text": "| τ-bench retail, {taubench/baseline:tasks} tasks | tasks solved; changes not in gold; changing calls the environment refused | {taubench/baseline:solved}; {taubench/baseline:changes_not_in_gold}; {taubench/baseline:changes_refused_by_env} | {taubench/solution:solved}; {taubench/solution:changes_not_in_gold}; {taubench/solution:changes_refused_by_env} |"
+  },
+  {
+   "file": "benchmarks/tasks/README.md",
+   "text": "| CUAD, {cuad/baseline:n|,} contract questions | accuracy; found of {cuad/baseline:found_of_present/of}; false claims of {cuad/baseline:false_claims_where_absent/of}; answered alone, wrong among answered | {cuad/baseline:accuracy}; {cuad/baseline:found_of_present}; {cuad/baseline:false_claims_where_absent}; {cuad/baseline:answered_alone|.0%}, {cuad/baseline:wrong_among_answered_alone|.1%} | {cuad/solution:accuracy}; {cuad/solution:found_of_present}; {cuad/solution:false_claims_where_absent}; {cuad/solution:answered_alone|.1%}, {cuad/solution:wrong_among_answered_alone|.1%} |"
+  },
+  {
+   "file": "benchmarks/tasks/README.md",
+   "text": "| RAGTruth, {ragtruth/baseline:all.n} responses | F1; answered alone, wrong among answered | {ragtruth/baseline:all.f1}; 100%, {ragtruth/baseline:wrong|.1%} | {ragtruth/solution:all.f1}; {ragtruth/solution:answered_alone.all.share|.1%}, {ragtruth/solution:wrong_among_answered_alone|.1%} |"
+  },
+  {
+   "file": "benchmarks/tasks/README.md",
+   "text": "| Banking77 stream, 2,000 requests (promise: ≤ 5% wrong) | answered alone, wrong among answered — before the shift / after | {banking77/baseline:before.answered_alone|.1%}, {banking77/baseline:before.error_among_answered|.1%} / {banking77/baseline:after.answered_alone|.1%}, {banking77/baseline:after.error_among_answered|.1%} (broken) | {banking77/solution:before.answered_alone|.1%}, {banking77/solution:before.error_among_answered|.1%} / {banking77/solution:after.answered_alone|.1%}, {banking77/solution:after.error_among_answered|.1%} (kept) |"
+  },
+  {
+   "file": "benchmarks/tasks/README.md",
+   "text": "| German Credit, 1,000 applications × 2 rule versions | decisions equal to the policy; of the audit checks plain code cannot do (a stored record edited without changing its decision, rules changed vs data damaged, a rule reading a sensitive field) | {credit/baseline:equal_to_policy|,} of {credit/baseline:decisions|,}; none | {credit/solution:equal_to_policy|,} of {credit/solution:decisions|,}; all three |"
+  },
+  {
+   "file": "benchmarks/tasks/README.md",
+   "text": "| BIRD mini-dev, {bird/baseline:n} questions | right; answered; wrong among answered | {bird/baseline:right}; {bird/baseline:answered|.0%}; {bird/baseline:wrong_among_answered|.1%} | {bird/solution:solution.right}; {bird/solution:solution.answered|.1%}; {bird/solution:solution.wrong_among_answered|.1%} |"
+  },
+  {
+   "file": "benchmarks/tasks/README.md",
+   "text": "| Abt-Buy, {abtbuy/solution:head + one counterpart.pairs|,} pairs | F1; offers with two counterparts | {abtbuy/baseline:f1}; {abtbuy/baseline:conflicts} | {abtbuy/solution:head + one counterpart.f1}; {abtbuy/solution:head + one counterpart.conflicts} |"
+  },
+  {
+   "file": "benchmarks/tasks/README.md",
+   "text": "| NATURAL PLAN, 3 × 100 problems | right: calendar / meetings / trips | {naturalplan/baseline:calendar_scheduling.right} / {naturalplan/baseline:meeting_planning.right} / {naturalplan/baseline:trip_planning.right} | {naturalplan/solution:score.calendar_scheduling.right} / {naturalplan/solution:score.meeting_planning.right} / {naturalplan/solution:score.trip_planning.right} |"
+  },
+  {
+   "file": "benchmarks/tasks/README.md",
+   "text": "| NAB, {nab/baseline:series} series | F1; windows found of {nab/baseline:windows}; false alarms | {nab/baseline:f1}; {nab/baseline:found}; {nab/baseline:false_alarms} | {nab/solution:f1}; {nab/solution:found}; {nab/solution:false_alarms} |"
+  },
+  {
+   "file": "benchmarks/tasks/README.md",
+   "text": "The guard did not solve more tasks ({taubench/solution:solved} against {taubench/baseline:solved}; one run, a simulated customer — a few tasks are noise). It stopped every call the environment would have refused before it was made, and recorded {taubench/solution:guard.decisions} decisions that all replay."
+  },
+  {
+   "file": "benchmarks/tasks/README.md",
+   "text": "Every quote is literally in the contract ({cuad/solution:quotes_verbatim} of {cuad/solution:quotes_verbatim/of}; the baseline's {cuad/baseline:quotes_verbatim} of {cuad/baseline:quotes_verbatim/of}), fewer false claims, and `System.guarantee` on a trust score answers two thirds alone at {cuad/solution:wrong_among_answered_alone|.1%} wrong, where the baseline cannot say \"not sure\". It finds fewer clauses ({cuad/solution:found_of_present} against {cuad/baseline:found_of_present})."
+  },
+  {
+   "file": "benchmarks/tasks/README.md",
+   "text": "The judge inside solvi is not better than the plain call (F1 {ragtruth/solution:all.f1} against {ragtruth/baseline:all.f1}). Under a 10% risk promise only {ragtruth/solution:answered_alone.all.share|.0%} is answered alone, with {ragtruth/solution:answered_alone_and_wrong|.1%} of all responses answered alone and wrong"
+  },
+  {
+   "file": "benchmarks/tasks/README.md",
+   "text": "A plain threshold (the baseline, or solvi's `System.guarantee` without new intents: {banking77/solution_plain:after.answered_alone|.1%} answered, {banking77/solution_plain:after.error_among_answered|.1%} wrong after the shift) breaks the promise; `OpenSetGate` keeps it and flags the shift {banking77/solution:flagged_after_shift} requests after it starts"
+  },
+  {
+   "file": "benchmarks/tasks/README.md",
+   "text": "solvi does not write better queries ({bird/solution:solution.right} against {bird/baseline:right} right). It decides which ones can go out alone: wrong among those {bird/solution:solution.wrong_among_answered|.1%} instead of {bird/baseline:wrong_among_answered|.1%}. Answering only when all three sampled queries return the same rows: {bird/solution:unanimous.answered|.1%} answered, {bird/solution:unanimous.wrong_among_answered|.1%} wrong (same script)."
+  },
+  {
+   "file": "benchmarks/tasks/README.md",
+   "text": "give {abtbuy/solution:head + one counterpart.f1}. It is supervised ({abtbuy/solution:dev_pairs_fitted|,} labelled pairs), the baseline is zero-shot. Under a 1% risk promise {abtbuy/solution:head + one counterpart.answered_alone|.1%} of pairs are answered alone, {abtbuy/solution:head + one counterpart.errors_answered_alone|.2%} wrong."
+  },
+  {
+   "file": "benchmarks/tasks/README.md",
+   "text": "(the largest search, a 10-city trip, took {naturalplan/solution:search.trip_planning.most asked|,} asks;"
+  },
+  {
+   "file": "benchmarks/tasks/README.md",
+   "text": "solvi adds nothing to the alerts; it stores, replays and diffs them ({nab/solution:ms_per_decision|.1f} ms a decision on an input of 3.7k floats)."
+  },
+  {
+   "file": "benchmarks/tasks/README.md",
+   "text": "| `abtbuy/solution.py --repair runs/baseline.jsonl` | \"one counterpart\" on the plain LLM's answers: F1 {abtbuy/repair:baseline.jsonl as given.f1} → {abtbuy/repair:baseline.jsonl + one counterpart.f1}; on the head's: {abtbuy/repair:head.f1} → {abtbuy/repair:head + one counterpart.f1} |"
+  },
+  {
+   "file": "benchmarks/tasks/README.md",
+   "text": "| `abtbuy/llm_pair.py` | the same LLM asked each pair through `solvi.llm`: F1 {abtbuy/llm_pair:llm.f1|.3f} with the reply contract in the prompt (the default with reasoning), {abtbuy/llm_pair_schema:llm.f1|.3f} with `response_format=\"json_schema\"` (plain call {abtbuy/baseline:f1}); \"one counterpart\" on it {abtbuy/llm_pair:llm.f1|.3f} → {abtbuy/llm_pair:llm + one counterpart.f1|.3f}; at `max_tokens=400`, {abtbuy/llm_pair:cut_off} of {abtbuy/llm_pair:llm.pairs|,} replies were cut off |"
+  },
+  {
+   "file": "benchmarks/tasks/README.md",
+   "text": "| `ragtruth/reply_format.py` | the judge through `solvi.llm` with the format enforced / with the contract in the prompt / the plain call: dev {ragtruth/reply_format_dev:solvi.llm, response_format=json_schema.f1} / {ragtruth/reply_format_dev:solvi.llm, response_format=auto.f1} / {ragtruth/reply_format_dev:plain call (baseline.py).f1}, eval {ragtruth/reply_format_eval:solvi.llm, response_format=json_schema.f1} / {ragtruth/reply_format_eval:solvi.llm, response_format=auto.f1} / {ragtruth/reply_format_eval:plain call (baseline.py).f1}; under the enforced format about a fifth of the replies had no reasoning ({ragtruth/reply_format_dev:solvi.llm, response_format=json_schema.no_reasoning} of {ragtruth/reply_format_dev:solvi.llm, response_format=json_schema.n} on dev) |"
+  },
+  {
+   "file": "benchmarks/tasks/README.md",
+   "text": "| `cuad/solution.py` | on dev, the trust score separates right from wrong answers with AUROC {cuad/solution:dev_auroc_trust|.2f}, the LLM's own confidence with {cuad/solution:dev_auroc_llm_confidence|.2f} ({cuad/solution:dev_answered_llm_confidence|.0%} answered alone at the same risk) |"
+  },
+  {
+   "file": "benchmarks/tasks/README.md",
+   "text": "| `banking77/solution.py --plain` | the plain promise without new intents: {banking77/solution_plain:before.answered_alone|.1%} answered, {banking77/solution_plain:before.error_among_answered|.1%} wrong before the shift; {banking77/solution_plain:after.answered_alone|.1%}, {banking77/solution_plain:after.error_among_answered|.1%} after |"
+  },
+  {
+   "file": "benchmarks/tasks/README.md",
+   "text": "| `bird/solution.py` | `runs/solution_unanimous.jsonl`: answer only when all three queries agree — {bird/solution:unanimous.answered|.1%} answered, {bird/solution:unanimous.wrong_among_answered|.1%} wrong |"
+  },
+  {
+   "file": "docs/benchmarks.md",
+   "text": "| τ-bench retail, {taubench/baseline:tasks} tasks | solved; changes not in gold; calls the environment refused | {taubench/baseline:solved}; {taubench/baseline:changes_not_in_gold}; {taubench/baseline:changes_refused_by_env} | {taubench/solution:solved}; {taubench/solution:changes_not_in_gold}; {taubench/solution:changes_refused_by_env} | `taubench/solution.py` |"
+  },
+  {
+   "file": "docs/benchmarks.md",
+   "text": "| CUAD, {cuad/baseline:n|,} questions | accuracy; quotes in the contract; answered alone, wrong among them | {cuad/baseline:accuracy}; {cuad/baseline:quotes_verbatim} of {cuad/baseline:quotes_verbatim/of}; {cuad/baseline:answered_alone|.0%}, {cuad/baseline:wrong_among_answered_alone|.1%} | {cuad/solution:accuracy}; {cuad/solution:quotes_verbatim} of {cuad/solution:quotes_verbatim/of}; {cuad/solution:answered_alone|.1%}, {cuad/solution:wrong_among_answered_alone|.1%} | `cuad/solution.py` |"
+  },
+  {
+   "file": "docs/benchmarks.md",
+   "text": "| RAGTruth, {ragtruth/baseline:all.n} responses | F1; answered alone, wrong among them | {ragtruth/baseline:all.f1}; 100%, {ragtruth/baseline:wrong|.1%} | {ragtruth/solution:all.f1}; {ragtruth/solution:answered_alone.all.share|.1%}, {ragtruth/solution:wrong_among_answered_alone|.1%} | `ragtruth/solution.py` |"
+  },
+  {
+   "file": "docs/benchmarks.md",
+   "text": "| Banking77 stream, 2,000 | before / after the shift: answered alone, wrong among them (promise 5%) | {banking77/baseline:before.answered_alone|.1%}, {banking77/baseline:before.error_among_answered|.1%} / {banking77/baseline:after.answered_alone|.1%}, {banking77/baseline:after.error_among_answered|.1%} | {banking77/solution:before.answered_alone|.1%}, {banking77/solution:before.error_among_answered|.1%} / {banking77/solution:after.answered_alone|.1%}, {banking77/solution:after.error_among_answered|.1%} | `banking77/solution.py` |"
+  },
+  {
+   "file": "docs/benchmarks.md",
+   "text": "| German Credit, 1,000 × 2 versions | decisions equal to the policy | {credit/baseline:equal_to_policy|,} of {credit/baseline:decisions|,} | {credit/solution:equal_to_policy|,} of {credit/solution:decisions|,}, with the audit | `credit/solution.py` |"
+  },
+  {
+   "file": "docs/benchmarks.md",
+   "text": "| BIRD mini-dev, {bird/baseline:n} | right; answered; wrong among answered | {bird/baseline:right}; {bird/baseline:answered|.0%}; {bird/baseline:wrong_among_answered|.1%} | {bird/solution:solution.right}; {bird/solution:solution.answered|.1%}; {bird/solution:solution.wrong_among_answered|.1%} | `bird/solution.py` |"
+  },
+  {
+   "file": "docs/benchmarks.md",
+   "text": "| Abt-Buy, {abtbuy/solution:head + one counterpart.pairs|,} pairs | F1; offers with two counterparts | {abtbuy/baseline:f1}; {abtbuy/baseline:conflicts} | {abtbuy/solution:head + one counterpart.f1}; {abtbuy/solution:head + one counterpart.conflicts} | `abtbuy/solution.py` |"
+  },
+  {
+   "file": "docs/benchmarks.md",
+   "text": "| NATURAL PLAN, 3 × 100 | right: calendar / meetings / trips | {naturalplan/baseline:calendar_scheduling.right} / {naturalplan/baseline:meeting_planning.right} / {naturalplan/baseline:trip_planning.right} | {naturalplan/solution:score.calendar_scheduling.right} / {naturalplan/solution:score.meeting_planning.right} / {naturalplan/solution:score.trip_planning.right} | `naturalplan/solution.py` |"
+  },
+  {
+   "file": "docs/benchmarks.md",
+   "text": "| NAB, {nab/baseline:series} series | F1; false alarms | {nab/baseline:f1}; {nab/baseline:false_alarms} | {nab/solution:f1}; {nab/solution:false_alarms} | `nab/solution.py` |"
+  },
+  {
+   "file": "docs/benchmarks.md",
+   "text": "(Abt-Buy, supervised on {abtbuy/solution:dev_pairs_fitted|,} labelled pairs against a zero-shot baseline)"
+  },
+  {
+   "file": "README.md",
+   "text": "| CUAD contracts, {cuad/baseline:n|,} questions: accuracy; answered alone, wrong among them | {cuad/baseline:accuracy}; {cuad/baseline:answered_alone|.0%}, {cuad/baseline:wrong_among_answered_alone|.1%} | {cuad/solution:accuracy}; {cuad/solution:answered_alone|.1%}, {cuad/solution:wrong_among_answered_alone|.1%} |"
+  },
+  {
+   "file": "README.md",
+   "text": "promise ≤ 5% wrong: wrong after the shift | {banking77/baseline:after.error_among_answered|.1%} (broken) | {banking77/solution:after.error_among_answered|.1%} (kept), at {banking77/solution:after.answered_alone|.1%} answered alone |"
+  },
+  {
+   "file": "README.md",
+   "text": "| Abt-Buy, {abtbuy/solution:head + one counterpart.pairs|,} product pairs: F1 | {abtbuy/baseline:f1} (LLM per pair) | {abtbuy/solution:head + one counterpart.f1} (code reads the offers; a head fitted on {abtbuy/solution:dev_pairs_fitted|,} labelled pairs) |"
+  },
+  {
+   "file": "README.md",
+   "text": "| NATURAL PLAN, right of 100: calendar / meetings / trips | {naturalplan/baseline:calendar_scheduling.right} / {naturalplan/baseline:meeting_planning.right} / {naturalplan/baseline:trip_planning.right} (LLM plans) | {naturalplan/solution:score.calendar_scheduling.right} / {naturalplan/solution:score.meeting_planning.right} / {naturalplan/solution:score.trip_planning.right} (`solvi.search`, no LLM) |"
+  },
+  {
+   "file": "README.md",
+   "text": "| BIRD mini-dev, {bird/baseline:n} questions: right; wrong among answered | {bird/baseline:right}; {bird/baseline:wrong_among_answered|.1%} | {bird/solution:solution.right}; {bird/solution:solution.wrong_among_answered|.1%} at {bird/solution:solution.answered|.1%} answered |"
+  },
+  {
+   "file": "README.md",
+   "text": "| RAGTruth, {ragtruth/baseline:all.n} responses: F1 | {ragtruth/baseline:all.f1} | {ragtruth/solution:all.f1} |"
+  },
+  {
+   "file": "README.md",
+   "text": "| τ-bench retail, {taubench/baseline:tasks} tasks: solved; calls the environment refused | {taubench/baseline:solved}; {taubench/baseline:changes_refused_by_env} | {taubench/solution:solved}; {taubench/solution:changes_refused_by_env} |"
+  },
+  {
+   "file": "README.md",
+   "text": "| NAB, {nab/baseline:series} series: F1 | {nab/baseline:f1} | {nab/solution:f1} |"
+  },
+  {
+   "file": "docs/best_practices.md",
+   "text": "on Abt-Buy ({abtbuy/repair:head.pairs|,} pairs) {abtbuy/repair:baseline.jsonl as given.f1} → {abtbuy/repair:baseline.jsonl + one counterpart.f1} for an LLM asked each pair, {abtbuy/llm_pair:llm.f1|.3f} → {abtbuy/llm_pair:llm + one counterpart.f1|.3f} for the same LLM through `solvi.llm`, {abtbuy/repair:head.f1} → {abtbuy/repair:head + one counterpart.f1} for a fitted head"
+  },
+  {
+   "file": "docs/best_practices.md",
+   "text": "on NATURAL PLAN {naturalplan/solution:score.calendar_scheduling.right} / {naturalplan/solution:score.meeting_planning.right} / {naturalplan/solution:score.trip_planning.right} of 100 calendar, meeting and trip problems against {naturalplan/baseline:calendar_scheduling.right} / {naturalplan/baseline:meeting_planning.right} / {naturalplan/baseline:trip_planning.right} for gpt-oss-120b's own plans"
+  },
+  {
+   "file": "docs/best_practices.md",
+   "text": "separated right from wrong answers with AUROC {cuad/solution:dev_auroc_trust|.2f} on dev, the LLM's own confidence with {cuad/solution:dev_auroc_llm_confidence|.2f}; at a 3% risk the trust score answered {cuad/solution:answered_alone|.1%} of the eval questions alone with {cuad/solution:wrong_among_answered_alone|.1%} wrong, while the confidence answered {cuad/solution:dev_answered_llm_confidence|.0%} of dev"
+  },
+  {
+   "file": "docs/best_practices.md",
+   "text": "a \"≤ 5% wrong\" threshold calibrated without them gave {banking77/solution_plain:after.error_among_answered|.1%} wrong after the shift; an `OpenSetGate` calibrated with `leave_out` kept {banking77/solution:after.error_among_answered|.1%} ({banking77/solution:before.answered_alone|.1%} answered alone before the shift, {banking77/solution:after.answered_alone|.1%} after) and flagged the change {banking77/solution:flagged_after_shift} requests in"
+  },
+  {
+   "file": "docs/best_practices.md",
+   "text": "(about a fifth of the judge's replies below had no reasoning under json_schema); a yes/no hallucination judge asked through `solvi.llm` scored F1 {ragtruth/reply_format_dev:solvi.llm, response_format=json_schema.f1} on RAGTruth dev with the schema enforced and {ragtruth/reply_format_dev:solvi.llm, response_format=auto.f1} with the contract in the prompt (the plain call to the model: {ragtruth/reply_format_dev:plain call (baseline.py).f1}), on eval {ragtruth/reply_format_eval:solvi.llm, response_format=json_schema.f1} → {ragtruth/reply_format_eval:solvi.llm, response_format=auto.f1} (plain {ragtruth/reply_format_eval:plain call (baseline.py).f1})"
+  },
+  {
+   "file": "docs/best_practices.md",
+   "text": "a product-matching question on Abt-Buy {abtbuy/llm_pair_schema:llm.f1|.3f} → {abtbuy/llm_pair:llm.f1|.3f} (plain {abtbuy/baseline:f1},"
+  },
+  {
+   "file": "docs/best_practices.md",
+   "text": "at 400, {abtbuy/llm_pair:cut_off} of {abtbuy/llm_pair:llm.pairs|,} product-pair replies were cut off"
+  },
+  {
+   "file": "docs/best_practices.md",
+   "text": "cut the wrong answers of a text-to-SQL model from {bird/baseline:wrong_among_answered|.0%} to {bird/solution:unanimous.wrong_among_answered|.0%} at {bird/solution:unanimous.answered|.0%} answered (BIRD mini-dev, {bird/baseline:n} questions,"
+  },
+  {
+   "file": "docs/best_practices.md",
+   "text": "on the {taubench/baseline:tasks} clean τ-bench tasks a guard with confirmation solved {taubench/solution:solved} against {taubench/baseline:solved} without a guard"
+  }
+ ]
+}
