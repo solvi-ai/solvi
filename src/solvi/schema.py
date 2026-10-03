@@ -157,6 +157,7 @@ class ResponseModel(BaseModel):
     safeguards: list[SafeguardEvent] = []
     model_outputs: int = 0
     overall: dict[str, Any] = {}                      # derived on dump (Response.overall); ignored on load
+    checks: list[dict[str, Any]] = []                 # derived on dump (Response.checks, 1.0); ignored on load
 
 
 MODELS = {"AnswerType": AnswerSpec, "Question": QuestionSpec, "Result": ResultModel, "Record": RecordModel,
@@ -538,7 +539,8 @@ def _to_dict(obj):
         return {"results": {q: _result(r) for q, r in obj.results.items()}, "flow": _flow(obj.flow),
                 "trace": _trace(obj.trace), "values": dict(obj.values), "ms": obj.ms, "feasible": obj.feasible,
                 "violations": list(obj.violations or []), "safeguards": [{k: e.get(k) for k in ("kind", "fact", "detail", "questions")} for e in obj.safeguards or []],
-                "model_outputs": obj.model_outputs, "overall": obj.overall}
+                "model_outputs": obj.model_outputs, "overall": obj.overall,
+                "checks": [c.to_dict() for c in obj.checks]}
     raise TypeError(f"no schema for {n}")
 
 

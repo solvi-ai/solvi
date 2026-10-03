@@ -11,6 +11,80 @@ from .runtime import MISSING
 
 
 @dataclass
+class CheckResult:
+    """One check of a decision (`res.checks`): its name, the questions whose flow ran it, its status — "passed",
+    "failed", "skipped" (not run: a failed hard check settled every question that needed it) or "error" (it could not
+    be evaluated: a missing input, an exception, not a bool) — whether it is hard, the reason (a failed check: the
+    reasons it gave with `Fail(...)`, else its docstring's first line, else "<name> is false"; an error: the error;
+    skipped: why) and, for a failed hard check, the answers its `then` set: {question: answer}."""
+    name: str
+    questions: list
+    status: str
+    hard: bool
+    reason: str | None = None
+    then: dict | None = None
+
+    @property
+    def passed(self):
+        return self.status == "passed"
+
+    def to_dict(self):
+        """As JSON data (an answer as stored: a tuple as a list, "not stated" as "<not stated>")."""
+        return {"name": self.name, "questions": list(self.questions), "status": self.status, "hard": self.hard,
+                "reason": self.reason, "then": None if self.then is None else {q: _plain(a) for q, a in self.then.items()}}
+
+
+def _plain(v):
+    """An answer as stored (solvi.storage.plain): JSON data, "not stated" as "<not stated>"."""
+    from .core import NOT_STATED_KEY, Unknown
+    if v is Unknown:
+        return NOT_STATED_KEY
+    if isinstance(v, (list, tuple)):
+        return [_plain(x) for x in v]
+    from .schema import jsonable
+    return jsonable(v)
+
+
+def _reasons(r, part):
+    """A failed check's reasons (as solvi.refine.reasons_of): what Fail recorded, else its docstring's first line, else
+    "<name> is false"."""
+    rs = r.extra.get("reasons") if isinstance(r.extra, dict) else None
+    if rs:
+        return list(rs)
+    doc = (getattr(part, "doc", "") or "").strip().splitlines()
+    return [doc[0]] if doc else [f"{r.name} is false"]
+
+
+def checks_of(resp):
+    """The checks of a response's flow, in flow order → [CheckResult] (see Response.checks). Read from the flow, the trace
+    and the answers alone, so a stored response loaded back (with or without its catalog) gives the same list."""
+    by = {r.name: r for r in resp.trace.records}
+    skipped = dict(getattr(resp.trace, "skipped", None) or ())
+    per_q = getattr(resp.flow, "per_question", None) or {}
+    out = []
+    for st in resp.flow.steps:
+        p = st.part
+        if p.kind != "check":
+            continue
+        name, hard = p.name, bool(p.hard)
+        qs = [q for q, fs in per_q.items() if name in fs]
+        r = by.get(name)
+        then = None
+        if r is None:
+            status, reason = "skipped", skipped.get(name, "not run")
+        elif r.value is MISSING:
+            status, reason = "error", r.error or "no value"
+        elif r.value is False:
+            status, reason = "failed", "; ".join(_reasons(r, p))
+            if hard:
+                then = {q: x.answer for q, x in resp.results.items() if x.status == "forced" and x.source == name} or None
+        else:
+            status, reason = "passed", None
+        out.append(CheckResult(name, qs, status, hard, reason, then))
+    return out
+
+
+@dataclass
 class Response(Serial):
     """The answers of one ask, with the flow, the trace, every fact's value and the safeguards.
 
@@ -41,6 +115,13 @@ class Response(Serial):
 
     def __getitem__(self, q):
         return self.results[q]
+
+    @property
+    def checks(self):
+        """Every check of this decision's flow as data, in flow order → [CheckResult]: name, questions, status ("passed",
+        "failed", "skipped", "error"), hard, reason (what `Fail(...)` said), and the answers a failed hard check's `then`
+        set. In `to_dict()` (and so in a stored decision) as "checks"; derived from the trace, never parsed from text."""
+        return checks_of(self)
 
     @property
     def confidence(self):
@@ -145,4 +226,4 @@ class Response(Serial):
         return render(decision(self, question, system, replay), format)
 
 
-__all__ = ["Response"]
+__all__ = ["CheckResult", "checks_of", "Response"]
