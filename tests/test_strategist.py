@@ -141,4 +141,4 @@ def test_a_cycle_in_the_catalog_leaves_its_question_unresolved_and_the_strategis
     assert not hasattr(cat, "producer") and not hasattr(strategy, "fact_of")
     assert "expanded" not in strategy.Selection.__dataclass_fields__
     import inspect
-    assert "max_expand" not in inspect.signature(strategy.ModelStrategist).parameters
+    assert "max_expand" not in inspect.signature(strategy.CostStrategist).parameters

@@ -21,23 +21,16 @@ requires-python = ">=3.10"
 dependencies = ["numpy", "scipy", "pydantic>=2", "tomli>=1.1; python_version < '3.11'"]   # tomli: rules files (solvi hook) on 3.10
 
 [project.optional-dependencies]
-model = ["torch", "transformers"]   # model-based extraction from text (solvi.extract_*), the decider (solvi.decide), the model strategist and name matcher (solvi.segment_model, solvi.aliases) — torch backends
-onnx = ["onnxruntime", "tokenizers", "huggingface_hub"]   # the decider, the model strategist and the name matcher without torch (backend="onnx")
+model = ["torch", "transformers"]   # model-based extraction from text (solvi.extract_*) and the decider (solvi.decide) — torch backends
+onnx = ["onnxruntime", "tokenizers", "huggingface_hub"]   # the decider without torch (backend="onnx")
 serve = ["fastapi>=0.100", "uvicorn"]   # solvi serve: the questions over HTTP, POST /v1/systemone
 mcp = ["mcp>=2"]   # solvi serve --mcp with the official MCP SDK (without it: a built-in stdio server)
-otel = ["opentelemetry-api>=1.20", "opentelemetry-sdk>=1.20"]   # solvi.otel.export: traces as OpenTelemetry spans (without it: to_otlp_json)
 duckdb = ["duckdb>=1.0"]   # solvi.DuckDBStorage: decisions in a DuckDB file (analytics next to JSONL / Parquet)
 postgres = ["psycopg>=3.1"]   # solvi.PostgresStorage: decisions in PostgreSQL, several services writing
-pydantic-ai = ["pydantic-ai-slim>=1.0"]   # solvi.agents.pydantic_ai: GuardedToolset (tested with pydantic-ai 2.51)
-langgraph = ["langgraph>=1.0"]   # solvi.agents.langgraph: a guarded ToolNode (tested with langgraph 1.2.12, langchain-core 1.6.5)
-openai-agents = ["openai-agents>=0.22"]   # solvi.agents.openai_agents: a tool input guardrail (tested with openai-agents 0.22.3)
 lora = ["torch", "transformers", "peft>=0.13"]   # part.adapt_lora (experimental): a LoRA adapter on the decider for one question (torch backend)
 
 [project.scripts]
 solvi = "solvi.cli:main"
-
-[project.entry-points.pytest11]
-solvi = "solvi.pytest_plugin"
 
 [project.urls]
 Homepage = "https://github.com/solvi-ai/solvi"
@@ -50,10 +43,8 @@ requires = ["uv_build>=0.9.17,<0.10.0"]
 build-backend = "uv_build"
 
 [dependency-groups]
-dev = ["pytest>=8", "fastapi>=0.141.1", "uvicorn>=0.54.0", "mcp>=2.2.0", "httpx2>=2.13.1", "opentelemetry-sdk>=1.20",
-       "duckdb>=1.0"]   # httpx2: FastAPI's TestClient; duckdb: DuckDBStorage's tests
+dev = ["pytest>=8", "fastapi>=0.141.1", "uvicorn>=0.54.0", "mcp>=2.2.0", "httpx2>=2.13.1", "duckdb>=1.0"]   # httpx2: FastAPI's TestClient; duckdb: DuckDBStorage's tests
 docs = ["mkdocs>=1.6,<2", "mkdocs-material>=9.5", "mkdocstrings[python]>=0.26"]   # the documentation site: uv run mkdocs serve
-agents = ["pydantic-ai-slim>=1.0", "langgraph>=1.0", "openai-agents>=0.22"]   # solvi.agents adapters: tests/test_agents_frameworks.py
 lora = ["torch", "transformers", "peft>=0.13"]   # part.adapt_lora: tests/test_lora.py (skipped without them; torch is too big for the dev group)
 
 [tool.pytest.ini_options]

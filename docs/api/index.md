@@ -23,14 +23,13 @@ this reference lists what each module exports and the signatures.
 | [`solvi.lora`](lora.md) | a LoRA adapter per question, fitted on a few hundred labelled examples |
 | [`solvi.learning`](learning.md) | learning from corrections with gates and rollback (experimental) |
 | [`solvi.serve`](serve.md) | `solvi serve`: HTTP, MCP and the System One API |
-| [`solvi.agents`](agents.md) | guarding an agent's tool calls: `Guard`, the MCP proxy (adapters for PydanticAI, LangGraph, the OpenAI Agents SDK) |
+| [`solvi.agents`](agents.md) | guarding an agent's tool calls: `Guard`, the MCP proxy |
 | [`solvi.hooks`](hooks.md) | a coding agent's hooks: edits checked against rules, a skill picked for a prompt, install / uninstall (Claude Code; Codex, preview) |
 | [`solvi.textin`](textin.md) | text in: a message → the question it asks and its typed input state, read with quotes |
 | [`solvi.inputs`](inputs.md) | what a question reads: its given facts, the model and JSON schema of its input state, entry points |
 | [`solvi.specialist`](specialist.md) | the specialist contract (preview): propose a typed spec, check it against the source, render, replay |
 | [`solvi.charts`](charts.md) | verified charts (preview): a text with numbers → an SVG in which every number is quoted from the text |
 | [`solvi.longdoc`](longdoc.md) | long texts: sections, BM25 retrieval, the window a decider reads |
-| [`solvi.many`](many.md) | a choice among many options: a shortlist, then the decider |
 | [`solvi.episode`](episode.md) | an agent's memory (what was tried, what failed, what worked) as an input |
 | [`solvi.worldmap`](worldmap.md) | a map of an environment an agent builds by acting: claims with provenance |
 | [`solvi.drift`](drift.md) | drift: has the stream moved away from the one the thresholds were calibrated on? |
@@ -38,20 +37,17 @@ this reference lists what each module exports and the signatures.
 | [`solvi.extract_long`](extract_long.md) | `@extract` by description for long documents (`LongSpanExtractor`; torch) |
 | [`solvi.extract_multi`](extract_multi.md) | a single-pass `@extract` over several fields (torch) |
 | [`solvi.strategist`](strategist.md) | the strategist: a flow per request (`Flow`, `PlanError`), the learned order of hard checks and producer policy |
-| [`solvi.strategy`](strategy.md) | the model strategist (experimental, `ModelStrategist`) |
+| [`solvi.strategy`](strategy.md) | the code strategist (`CostStrategist`): dead ends dropped, the cheapest verified plan |
 | [`solvi.costs`](costs.md) | measured run times (`CostBook`) and the planner's measured costs (`MeasuredCosts`) |
 | [`solvi.rulelist`](rulelist.md) | a readable rule list learned from examples (`System.learn_rule`; `solvi.rules` up to 0.7) |
-| [`solvi.aliases`](aliases.md) | name matching between parameters and facts (experimental) |
 | [`solvi.audit`](audit.md) | `res.audit()`: what each answer rests on and which safeguards fired; `to_dict()` as JSON-ready data |
 | [`solvi.show`](show.md) | printing a response |
 | [`solvi.report`](report.md) | reports of one decision or a period of stored decisions (Markdown, HTML, data) |
 | [`solvi.sysreport`](sysreport.md) | the system report: who answered, the cost, the promise against the stored labels, drift — from the store alone |
-| [`solvi.otel`](otel.md) | decisions as OpenTelemetry spans (the API, or OTLP/JSON) |
 | [`solvi.sets`](sets.md) | decisions over a set: answers of many items made consistent under at-most / exactly-one / capacity constraints |
 | [`solvi.search`](search.md) | search over alternatives: candidates through the System's checks, the best by an objective, pruned, recorded |
 | [`solvi.auto`](auto.md) | one entry point: a question, labelled examples, a promise and a slow path → System 1 fitted, its guarantee and the dispatcher calibrated, the store wired, the choices explained (preview) |
 | [`solvi.dispatch`](dispatch.md) | who answers: System 1 within its guarantee, a slow path (a System, refine or search) or a person — one recorded decision per input, with a budget (experimental) |
-| [`solvi.counterfactual`](counterfactual.md) | counterfactuals: the smallest change of the given inputs that changes an answer |
 | [`solvi.perturb`](perturb.md) | instruction-like sentences in an input and the variants without them (`perturb=k`) |
 | [`solvi.storage`](storage.md) | TraceStorage: JSONL, SQLite, PostgreSQL and DuckDB stores, queries, replay |
 | [`solvi.signature`](signature.md) | a signature of a trace or a store that names the one changed record (preview) |

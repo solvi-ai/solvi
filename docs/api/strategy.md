@@ -1,6 +1,6 @@
 # `solvi.strategy`
 
-The code strategist `ModelStrategist`: dead ends dropped, the cheapest verified plan by declared costs (no model). The
-segment model behind `ModelStrategist.load` (`solvi.segment_model`, `solvi.strategy_model` up to 0.7) is **experimental**: no checkpoint is published.
+The code strategist `CostStrategist`: dead ends dropped, the cheapest verified plan by declared (or measured) costs — no
+model. See [the strategist page](../strategist.md).
 
 ::: solvi.strategy

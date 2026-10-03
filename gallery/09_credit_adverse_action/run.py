@@ -66,7 +66,7 @@ def _refit(data):
 
 def system():
     """The system cases.json expects: refer_to_underwriter learned with fit from the same 200 past files as below
-    (what `solvi test` and the pytest plugin build, via "system": "run.py:system" in cases.json)."""
+    (what `solvi test` builds, via "system": "run.py:system" in cases.json)."""
     rng = random.Random(3)
     return _refit([past_file(rng, i) for i in range(200)])
 

@@ -1,4 +1,4 @@
-# Decision regression tests: `solvi test` and the pytest plugin
+# Decision regression tests: `solvi test`
 
 A catalog changes over time: a rule is edited, a threshold moves, a model is swapped. The cases you have already decided
 should keep their answers. solvi runs them from `cases.json` files. This is the format every
@@ -42,21 +42,24 @@ solvi test gallery/07_kyc_aml/cases.json -q
 solvi test gallery/ --json                # results as data
 solvi test gallery/ --fuzz 30             # also 30 mutated inputs per case (see below)
 solvi test . --store                      # also save the cases' decisions to the system's own store
-
-pytest gallery/                           # the pytest plugin: one test item per case
-pytest gallery/ --solvi-fuzz 30
 ```
 
-The plugin is registered under the `pytest11` entry point as `solvi`, so it loads in every pytest session of an
-environment where solvi is installed. It decides what is its own by reading, without running anything: a file is
-collected only when its cases are solvi cases (a list of objects, each with a `"state"` object) and the source of its
-task module imports solvi. Other JSON files are left alone, and a `task.py` of another project next to a `cases.json`
-is not executed. Cases that look like solvi's next to a task module that does not import solvi are not collected, with
-a warning that says so (`solvi test` runs them). Turn the plugin off with `-p no:solvi`. From Python, use
-`solvi.testing.run_path(paths)` to get a `FileResult` per file and a `CaseResult` per case (`ok`, `problems`,
-`answers`).
+From Python, use `solvi.testing.run_path(paths)` to get a `FileResult` per file and a `CaseResult` per case (`ok`,
+`problems`, `answers`). To run the cases inside your own pytest suite, one test is enough:
 
-A test input is not a decision: when the System has a store (`System(storage=...)`), `solvi test`, the pytest plugin,
+```python
+from solvi.testing import run_path
+
+def test_decision_cases():
+    files = run_path(["cases/"])
+    bad = [(str(f.path), f.error, [c.problems for c in f.cases if not c.ok]) for f in files if not f.ok]
+    assert files and not bad, bad
+```
+
+(solvi had a pytest plugin that collected every case as a test item; it was removed in 1.0 because it loaded in every
+pytest session wherever solvi was installed.)
+
+A test input is not a decision: when the System has a store (`System(storage=...)`), `solvi test`,
 `--fuzz` and `solvi honesty` write nothing to it. `solvi test --store` (`run_path(paths, store=True)`) saves the cases'
 decisions — never the fuzz mutations.
 

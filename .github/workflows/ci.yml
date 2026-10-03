@@ -31,11 +31,6 @@ jobs:
       - name: run core examples
         run: |
           for f in examples/0[1-69]_*.py examples/1[0-7]_*.py examples/19_*.py examples/23_*.py; do echo "== $f"; uv run python "$f" > /dev/null; done
-      - name: agent frameworks (solvi.agents adapters)
-        if: matrix.python == '3.12'
-        run: |
-          uv sync --group dev --group agents
-          uv run pytest -q tests/test_agents*.py
       - name: LoRA adapters (part.adapt_lora, CPU torch), long texts with a real tokenizer (long="full", torch and ONNX)
         if: matrix.python == '3.12'
         run: |

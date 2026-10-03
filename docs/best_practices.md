@@ -42,10 +42,9 @@ city twice. One question over ready pairs ("which route?") did much better.
 **Up to a few dozen short options: ask directly.** When the options fit and leave the input at least half of the
 window, one ordinary decision is the most accurate way; on a text game it beat both a shortlist and a tournament.
 
-**More than fit: narrow by code first, then ask.** `solvi.many` makes hundreds of options a recorded decision instead
-of an error, but it does not make the model choose well among hundreds of catalog rows — where a number decides (a price
-within a budget, a level, a distance), filter and rank in code and give the model what is left. Give a shortlist a
-short query (the goal, the request), not the whole input: it ranks better.
+**More than fit: narrow by code first, then ask.** Where a number decides (a price within a budget, a level, a
+distance), filter and rank in code and give the model what is left. The model-run shortlist and tournament
+(`solvi.many`) were removed in 1.0: they lost to one direct decision.
 
 **Do not score candidates one by one.** Asking "how good is this option?" per candidate does not separate them: the
 model rates nearly everything "partly good", and a direct choice among them is far more accurate.

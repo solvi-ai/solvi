@@ -8,7 +8,7 @@ every answer) and a README that shows what solvi does that an answer-only model 
 
 ```bash
 uv run python gallery/07_kyc_aml/run.py          # any entry; exits non-zero if an answer differs from cases.json
-uv run solvi test gallery/                       # every entry's cases.json as regression tests (or: uv run pytest gallery/)
+uv run solvi test gallery/                       # every entry's cases.json as regression tests
 ```
 
 **Audited (solvi 0.4).** Every runner calls `res.audit()` on every response — what each answer rests on (given inputs,

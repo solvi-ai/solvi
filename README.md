@@ -70,7 +70,6 @@ pip install "solvi[model]"     # + torch, transformers: ModernBERT field extract
 pip install "solvi[onnx]"      # + onnxruntime, tokenizers: the decider (solvi.decide) on CPU without torch
 pip install "solvi[serve]"     # + fastapi, uvicorn: `solvi serve app.py:system` — the questions over HTTP (also --mcp)
 pip install "solvi[mcp]"       # + the official MCP SDK for solvi serve --mcp (without it, a built-in stdio server)
-pip install "solvi[otel]"      # + opentelemetry: decisions as OpenTelemetry spans (solvi.otel)
 pip install "solvi[duckdb]"    # + duckdb: stored decisions in a DuckDB file (solvi.DuckDBStorage); [postgres] for PostgreSQL
 pip install "solvi[lora]"      # + torch, transformers, peft: part.adapt_lora, a LoRA adapter per question (experimental)
 ```
@@ -78,8 +77,7 @@ pip install "solvi[lora]"      # + torch, transformers, peft: part.adapt_lora, a
 Two words mark what is not settled yet: **preview** — it works and is tested, and its API may still change;
 **experimental** — no published model or measurement backs it yet, and it may change or go.
 
-`solvi.agents` (guarding an agent's tool calls) needs only the core; its adapters use the PydanticAI, LangGraph or OpenAI
-Agents SDK you already have ("solvi[pydantic-ai]", "solvi[langgraph]", "solvi[openai-agents]" install them).
+`solvi.agents` (guarding an agent's tool calls) needs only the core.
 
 Requires Python 3.10+.
 
@@ -270,16 +268,14 @@ Every answer is a value and a confidence, and the types also declare answer prim
   lets the planner pick the fastest equivalent source and switch when it slows down. `TraceStorage` keeps decisions with a
   hash chain across them; `solvi diff` shows which stored decisions a rule or model change would flip; `solvi test`,
   `solvi check` and the honesty suite (`solvi honesty`) belong in CI; `res.report(format="html")` and
-  `solvi report decisions.db --html out.html` give an auditor one page per decision or per period, and `solvi.otel.export(res)` puts every step in
-  your OpenTelemetry traces. `res.counterfactual("approve")` says what would have changed the answer ("approve if
-  amount ≤ 1000 (now 1200)"), re-running only the code with the models' recorded proposals held.
+  `solvi report decisions.db --html out.html` give an auditor one page per decision or per period.
 - **Guarding an agent's tool calls (preview).** The agent proposes `{"name": tool, "arguments": {...}}`; `solvi.agents.Guard` checks
   it — the tool is in the catalog, the arguments validate against its types, the values that must come from the
   conversation are quoted there (and not only from a tool output that says "ignore previous instructions"), your policies
   (limits, roles, allow-lists) are ordinary hard checks, and an optional decider asks "did the user ask for this?" under
   `act_guard` and `perturb` — then allows it (solvi runs the function), denies it with the reasons, or escalates it to a
-  person. Every decision is a stored, replayable trace. Adapters for PydanticAI, LangGraph and the OpenAI Agents SDK, and
-  `solvi serve --guard catalog.py:guard --upstream CMD` in front of an MCP server
+  person. Every decision is a stored, replayable trace. Any framework's tool calls go through `guard.check` / `guard.call`, and
+  `solvi serve --guard catalog.py:guard --upstream CMD` puts the guard in front of an MCP server
   ([guide](docs/guide.md#guarding-an-agents-tool-calls), [examples/19_agent_guard.py](examples/19_agent_guard.py)).
 - **Behind a coding agent's hooks (preview).** `solvi hook install` puts solvi in front of Claude Code's edits and prompts:
   every Edit / Write is checked against a rules file (forbidden patterns, required functions, Python calls read from the
@@ -351,9 +347,7 @@ from solvi.strategy import CostStrategist
 system = System(cat, questions, strategist=CostStrategist(producers="equivalent"))
 ```
 
-A segment model that proposes producers when costs are not declared, and `solvi.aliases` (wiring parameter names that match
-no fact), ship as **experimental**; their weights are not published. See [docs/strategist.md](docs/strategist.md) and
-[examples/17_model_strategist.py](examples/17_model_strategist.py).
+See [docs/strategist.md](docs/strategist.md) and [examples/17_cost_strategist.py](examples/17_cost_strategist.py).
 
 ## Extract from documents
 
@@ -381,7 +375,7 @@ from its model card (held-out fields and data sets, one seed): CORD receipt fiel
 2%). With per-field thresholds from 40 labeled contracts it reached 85.5% on CUAD; fine-tuned on 25–100 SROIE
 receipts, 86–89%. So describing a field is a start, not a finished extractor: label 25–100 documents and fine-tune.
 `solvi.extract_multi.MultiSpanExtractor` (a fixed field list, one pass per document for all fields) is the extractor
-behind the receipt numbers below; it has no save / load. See
+behind the receipt numbers below; it has no save / load, and it is moving into the knowledge memory in 1.0. See
 [docs/guide.md](docs/guide.md#extracting-fields-from-documents).
 
 ## Results
@@ -515,7 +509,7 @@ on documents the extractor dominates.
 | [examples/14_typed_catalog.py](examples/14_typed_catalog.py) | Typed facts: a pydantic request, type hints as fact types, answer types from the rules' return types (Enum, Literal, bool), a mismatch caught at registration, rejected values → fallback / abstention, a response as JSON that loads back and replays |
 | [examples/15_typed_decisions.py](examples/15_typed_decisions.py) | Typed decisions: a pydantic ticket, the questions as a pydantic model's fields (choice, ordinal score, yes/no, multi-label), four answers (one forward pass when the model shares passes), a hard check, a constraint and a rule over the model, an escalation in the audit and stats (the real model with `SOLVI_DECIDE_MODEL`, a stand-in otherwise) |
 | [examples/16_primitives.py](examples/16_primitives.py) | Answer primitives: "not stated" vs abstain, spans parsed into numbers, evidence quotes checked in the text (`require_evidence`), a ranking with scores, an estimate with an interval — from rules and from a decider with the answer-primitives contract; confidence per kind, JSON round trip, replay |
-| [examples/17_model_strategist.py](examples/17_model_strategist.py) | The code strategist: dead ends dropped, the cheapest verified plan by declared costs, a model's proposal checked and rejected; aliases for names that match no fact (experimental; stand-ins without weights) |
+| [examples/17_cost_strategist.py](examples/17_cost_strategist.py) | The code strategist: dead ends dropped, the cheapest verified plan by declared costs, the plan in the trace |
 | [examples/18_several_models.py](examples/18_several_models.py) | Several models, one decision: a cascade small → large, a vote of two model families, a route by code — each under one `act_guard` guarantee, with cost per question; every stage in the audit and the trace |
 | [examples/19_agent_guard.py](examples/19_agent_guard.py) | An accounts-payable agent's tool calls through a `Guard`: grounded arguments, an invented IBAN denied, a budget escalation approved by a person, an instruction hidden in an invoice, an authorizer with `act_guard` and `perturb`; every decision stored and replayed (a scripted agent, no API keys) |
 | [examples/20_vote_across_families.py](examples/20_vote_across_families.py) | A vote of two model families behind the System One API (stand-in servers started in-process): each alone and the vote under one `act_guard` guarantee; a sure mistake of one family escalates; the audit and the replay |
@@ -533,7 +527,7 @@ Run them from a clone: `python examples/01_leave_request.py`.
 - [docs/guide.md](docs/guide.md): full API walkthrough.
 - [docs/best_practices.md](docs/best_practices.md): what we learned while building on solvi, as advice.
 - [docs/decide_format.md](docs/decide_format.md): the decider checkpoint contract (for training your own).
-- [docs/strategist.md](docs/strategist.md): the code strategist and the experimental model strategist and name matching.
+- [docs/strategist.md](docs/strategist.md): the code strategist — dead ends and costs.
 - [ROADMAP.md](ROADMAP.md), [CHANGELOG.md](CHANGELOG.md), [CONTRIBUTING.md](CONTRIBUTING.md), [SECURITY.md](SECURITY.md).
 - [docs/benchmarks.md](docs/benchmarks.md): the scripts behind the numbers, what solvi adds to an ask, the dataset loaders.
 - [docs/vs_llm.md](docs/vs_llm.md): solvi vs asking an LLM (Grok 4.7, gpt-oss-120b, Qwen3, DeepSeek), with raw answers.

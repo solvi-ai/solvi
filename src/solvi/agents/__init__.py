@@ -6,10 +6,9 @@
     def send_payment(iban: str, amount: float) -> str: ...
     d = guard.call({"name": "send_payment", "arguments": {...}}, context=messages)   # allow / deny / escalate
 
-Adapters (each imports its framework only when used): solvi.agents.pydantic_ai (a toolset wrapper),
-solvi.agents.langgraph (a ToolNode with the guard around every call), solvi.agents.openai_agents (a tool input guardrail
-plus needs_approval for escalations); `solvi serve --guard catalog.py:guard --upstream CMD` puts the guard in front of an
-MCP server (solvi.agents.mcp)."""
+A framework that runs the tools itself calls `guard.check` (the PydanticAI, LangGraph and OpenAI Agents SDK adapters were
+removed in 1.0); `solvi serve --guard catalog.py:guard --upstream CMD` puts the guard in front of an MCP server
+(solvi.agents.mcp)."""
 from .guard import (AUTHORIZE_TASK, VERDICTS, Guard, GuardDecision, Session, Tool, ToolCall, arguments_model,
                     conversation, messages, model_from_json_schema, same_url, url_parts)
 from .confirm import accepted_proposals, accepts

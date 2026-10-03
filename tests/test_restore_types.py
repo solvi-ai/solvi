@@ -48,9 +48,9 @@ STATE = {"start": datetime.date(2026, 10, 19), "end": datetime.date(2026, 10, 23
 
 
 @pytest.mark.parametrize("kind", ["jsonl", "sqlite"])
-def test_the_quickstart_with_untyped_dates_replays_diffs_and_explains_itself_from_a_store(kind, tmp_path):
+def test_the_quickstart_with_untyped_dates_replays_and_diffs_from_a_store(kind, tmp_path):
     """Its stored records used to be reported "data damaged" by replay_all and "2 changed" by diff against the very same
-    system, and counterfactual on a loaded response concluded that no change of balance changes the answer."""
+    system."""
     store = JSONLStorage(tmp_path / "q.jsonl") if kind == "jsonl" else SQLiteStorage(tmp_path / "q.db")
     cat, qs = quickstart()
     s = System(cat, qs, storage=store)
@@ -63,8 +63,6 @@ def test_the_quickstart_with_untyped_dates_replays_diffs_and_explains_itself_fro
     d = diff(store, s)
     assert d.ok and d.total == 2
     assert got.report(format="data")["replay"]["status"] == "ok"
-    cf = got.counterfactual("approve", system=s)
-    assert any(c.changes[0].fact == "balance" and c.answer == "reject" for c in cf) and cf.inconclusive is None
 
 
 def test_a_trace_with_untyped_dates_replays_after_json_without_any_declared_type():
@@ -136,12 +134,6 @@ def test_an_untyped_enum_from_a_store_is_not_restored_and_that_is_not_called_dam
     d = diff(store, s)
     assert not d.changed and len(d.errors) == 1 and "the stored input was not restored (color" in d.errors[0]["error"]
     assert "1 could not be re-run" in str(d)
-    cf = got.counterfactual("go", system=s)                # re-run on "red" the decision says no: nothing is concluded
-    assert not cf.found and "color" in cf.inconclusive and "no conclusion" in str(cf) and "color" in cf.not_searched
-    assert cf.to_dict()["inconclusive"] == cf.inconclusive
-    cold = store.get(s.ask({"color": Color.BLUE, "n": 1}).stored_id)   # on "blue" it still says no, as recorded: the
-    cf = cold.counterfactual("go", system=s)                           # other inputs are searched, the lost one is not
-    assert cf.inconclusive is None and cf.searched == ["n"] and "color" in cf.not_searched
 
 
 def test_a_record_stored_without_the_types_is_not_restored_and_an_edited_one_is_still_damage(tmp_path):

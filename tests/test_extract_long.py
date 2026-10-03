@@ -144,8 +144,8 @@ def test_a_labelled_span_maps_to_the_tokens_that_cover_it():
 
 
 def test_a_missing_optional_dependency_names_the_extra_to_install(monkeypatch):
-    """The extractors, SegmentModel and NameMatcher failed with a bare ModuleNotFoundError (with backend="auto" and no
-    runtime: "No module named 'torch'"), while storage, otel and serve name the extra."""
+    """The extractors failed with a bare ModuleNotFoundError (with backend="auto" and no
+    runtime: "No module named 'torch'"), while storage and serve name the extra."""
     import sys
     from solvi.extract_long import LongSpanExtractor
     from solvi.extract_multi import MultiSpanExtractor
@@ -153,25 +153,6 @@ def test_a_missing_optional_dependency_names_the_extra_to_install(monkeypatch):
     for make in (lambda: MultiSpanExtractor(["total"], "m"), lambda: LongSpanExtractor("m")):
         with pytest.raises(ImportError, match=r"Extractor needs torch: pip install 'solvi\[model\]'"):
             make()
-
-
-def test_the_model_loaders_check_the_backend_and_the_folder_first_and_name_both_runtimes(monkeypatch, tmp_path):
-    import sys
-    from solvi.aliases import NameMatcher
-    from solvi.segment_model import SegmentModel
-    for load in (NameMatcher.load, SegmentModel.load):
-        with pytest.raises(ValueError, match="backend must be"):
-            load(str(tmp_path), backend="tensorflow")
-    with pytest.raises(FileNotFoundError, match="no solvi_matcher.json: not a solvi name matcher checkpoint"):
-        NameMatcher.load(str(tmp_path))
-    (tmp_path / "solvi_matcher.json").write_text("{}")
-    monkeypatch.setitem(sys.modules, "onnxruntime", None)
-    monkeypatch.setitem(sys.modules, "torch", None)
-    import importlib.util
-    real = importlib.util.find_spec
-    monkeypatch.setattr(importlib.util, "find_spec", lambda m, *a: None if m in ("onnxruntime", "torch") else real(m, *a))
-    with pytest.raises(ImportError, match=r"needs a runtime: pip install 'solvi\[onnx\]'.*'solvi\[model\]'"):
-        NameMatcher.load(str(tmp_path))
 
 
 def test_one_extractor_protocol_and_no_training_target_past_the_encoded_text():

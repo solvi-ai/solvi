@@ -87,9 +87,7 @@ pip install "solvi[model]"     # + torch, transformers, for the ModernBERT extra
 pip install "solvi[onnx]"      # + onnxruntime, tokenizers: the decider (solvi.decide) on CPU without torch
 pip install "solvi[serve]"     # + fastapi, uvicorn: solvi serve over HTTP
 pip install "solvi[mcp]"       # + the official MCP SDK for solvi serve --mcp (without it, a built-in stdio server is used)
-pip install "solvi[otel]"      # + opentelemetry: decisions as OpenTelemetry spans (solvi.otel)
 pip install "solvi[duckdb]"    # + duckdb: stored decisions in a DuckDB file; "solvi[postgres]" for PostgreSQL
-pip install "solvi[langgraph]" # the solvi.agents adapters: also "solvi[pydantic-ai]", "solvi[openai-agents]"
 pip install "solvi[lora]"      # + torch, transformers, peft: part.adapt_lora, a LoRA adapter per question (experimental)
 ```
 
@@ -582,8 +580,7 @@ knows `input_model=`) restores them from the producer's return type, the type th
 so the restored trace hashes and replays exactly. A value that is neither — an untyped enum or object, an aware
 datetime whose zone its text does not carry, an untyped date in a record stored by solvi 0.7.1 or earlier — comes back
 as JSON gave it and is named in the loaded trace's `unrestored`: replay reports the steps that rest on it as
-`not_restored` ("no verdict on the data"), `solvi diff` lists the decision under "could not be re-run", and
-`counterfactual` draws no conclusion from it. A span answer's value type is written by name — a built-in one (`str`,
+`not_restored` ("no verdict on the data"), and `solvi diff` lists the decision under "could not be re-run". A span answer's value type is written by name — a built-in one (`str`,
 `int`, `float`, `bool`, `date`, `datetime`, `Decimal`) as such, any other class as `module:qualname` — and a name that
 cannot be imported again (a class defined inside a function) makes `from_json` raise `ValueError`. Option descriptions
 are keyed by the option's text in JSON and come back on the options themselves (`Answer.ordinal({1: "bad", 2: "ok"})`).
@@ -1159,6 +1156,9 @@ default.
 
 ### An agent's memory as an input: episodes
 
+> **Moving into the knowledge memory in 1.0.** This module will be folded into solvi's knowledge memory, and its API
+> may change then.
+
 A decision replays because it depends on its recorded input only. An agent that takes many steps keeps state between
 them — what it tried, where it has been — and when that state lives in the harness, the decisions stop replaying, the
 model does not see what was already tried, and every agent writes its own loop detection. `solvi.episode` keeps that
@@ -1238,28 +1238,9 @@ better one.
 
 A decider reads the question — task, options, descriptions — and the input in one sequence. Thirty catalog rows as
 options do not fit, and twenty that fit leave the input a few dozen tokens (the decision's `extra["truncated"]` shows
-it). `solvi.many` chooses among dozens or hundreds, with any decider (a local checkpoint, `solvi.llm`,
-`solvi.systemone`), and records what it did:
-
-```python
-from solvi.many import Many, decide_many
-d = decide_many(model, text, "Which action achieves the goal?", actions, many=Many(mode="shortlist", query=goal))
-d.value                 # one of the actions
-d.extra["many"]         # {"mode": "shortlist", "considered": 8, "of": 45, "unconsidered": 37, "gap": ..., "calls": [...], ...}
-```
-
-`mode="direct"`: one ordinary decision, when everything fits. `"shortlist"`: a selector (BM25 over the options' labels
-and descriptions against `query`, or your function) ranks the options, the decider chooses among the best `k`; the
-options left out were not considered — the record says how many, and the decision escalates when the best one left
-out scores close to the last one kept. `"tournament"`: blocks of `block` options, winners meet, the last round
-decides; every option is considered, in about N / (block − 1) calls. `"auto"` (default): direct when the question fits
-and leaves the input at least half of `max_len`, else shortlist, else (no selector) tournament. The calls are in the
-record, and the same input gives the same record.
-
-A threshold calibrated on one set of options does not carry over to options that change, and a shortlist's accuracy
-is bounded by the selector's recall. Prefer `"direct"` whenever the question fits, and compare the modes on labelled
-examples of your own. Where numbers decide (a price within a budget), no mode helps: narrow the candidates in code
-first and give the model what is left.
+it). Narrow the candidates in code first — a filter, a ranking by what decides (a price within a budget, a distance) —
+and ask among what is left; when the options fit, one ordinary decision is the most accurate way (see
+[best practices](best_practices.md#choosing-among-options)).
 
 ### Several questions in one pass
 
@@ -1380,6 +1361,9 @@ on one checkpoint for one question, and its holdout recalibrates that part's own
 for parts of one model). After changing a part, calibrate the combination again.
 
 ### A memory of corrections: part.memory
+
+> **Moving into the knowledge memory in 1.0.** This module will be folded into solvi's knowledge memory, and its API
+> may change then.
 
 The cases people corrected are the best evidence of where a decider goes wrong. A memory of corrected cases keeps them
 and, at decision time, finds the nearest ones — a second signal next to the model, never a silent override:
@@ -1799,9 +1783,8 @@ every request with the same keys.
 whose inputs are never given dropped (the deterministic strategist needs the inputs of every producer of a fact);
 `CostStrategist(producers="equivalent")` treats the producers of a fact as interchangeable and picks the cheapest verified
 plan by declared `cost=`, keeping every hard check that governs a question (`System(..., producers="equivalent")` is a
-shortcut for it). Both are code only. A segment model (`ModelStrategist.load`) and the name matcher of `solvi.aliases` are
-experimental: no checkpoint is published for either. Details, the
-trace record of a plan and what was measured: [docs/strategist.md](strategist.md).
+shortcut for it). Both are code only. Details and the trace record of a plan:
+[docs/strategist.md](strategist.md).
 
 **Costs from measurements.** `System(cat, questions, producers="equivalent", cost_policy="measured")` plans with the run times
 `system.cost_book` measures instead of declared costs: after a warm-up (each producer measured `min_samples` times; an
@@ -2356,7 +2339,7 @@ store.verify()                                  # the chain across stored record
 A stored response loaded without a catalog (`store.get(id)` on a store opened with no `catalog=`, or
 `Stored.response()`) still audits and reports: its flow keeps each part's name, kind and inputs and, for a check,
 whether it is a hard one — a record stored before that was kept shows such a check as "hard or soft: not recorded".
-Replay, diff and counterfactuals need the System.
+Replay and diff need the System.
 
 Two backends ship without dependencies: `JSONLStorage` (an append-only file, one record per line; several
 processes may append on POSIX systems, where each append holds a file lock — on Windows one writing process) and `SQLiteStorage` (stdlib `sqlite3`; index tables by question, answer, status, safeguard kind, model and time;
@@ -2790,10 +2773,8 @@ in a long session a value the user named many requests ago, for another purpose,
 ("read notes.txt" earlier, a `delete_file("notes.txt")` later). `guard.tool(..., ground_last=1)` lets only the user's
 last message ground a value (2: the last two): the reason then says the value is from an earlier request. `once=True`
 escalates a call of the tool with exactly the arguments of a call already made — a second refund of the same order —
-unless the first one failed. The calls made are the given fact `calls_made`: a `Session`, the MCP proxy and the three
-framework adapters keep it (PydanticAI and LangGraph per conversation, the OpenAI Agents SDK per process — see
-"`once=True` behind an adapter" below; add calls made earlier through
-`facts={"calls_made": [...]}`). For a tool the framework runs, `session.call` counts an allowed call as
+unless the first one failed. The calls made are the given fact `calls_made`: a `Session` and the MCP proxy keep it (add calls made
+earlier through `facts={"calls_made": [...]}`). For a tool the framework runs, `session.call` counts an allowed call as
 made and `session.record(decision, result)` (or `error=`: not made after all) reports how it went. With a bare
 `guard.check` / `guard.call` you give the fact yourself (`[]` when nothing was made); a `once=True` call checked without
 it escalates, since the check cannot be evaluated.
@@ -2848,7 +2829,7 @@ d.evidence      # [("iban", "DE89370400440532013000", 84, 106, "tool"), ...] —
 d.audit()       # the solvi audit; d.response is the Response (trace, replay), d.stored_id its id in the store
 ```
 
-`guard.check(call, context, facts)` decides without running anything (the adapters use it); `guard.acall` / `acheck`
+`guard.check(call, context, facts)` decides without running anything (for a framework that runs the tools itself); `guard.acall` / `acheck`
 await `async def` tools and policies. A call is read in the shapes agents write it (`ToolCall.parse`): `{"name",
 "arguments"}` (MCP), OpenAI's `{"type": "function", "function": {"name", "arguments": "<json>"}}`, LangChain's `{"name",
 "args", "id"}`, Anthropic's `{"type": "tool_use", "name", "input"}`. The context is a string (one user message) or a list
@@ -3179,15 +3160,13 @@ probabilities, its fingerprint, the promise of its threshold and the perturb rec
 correction of the verdict, with the reviewer, a note and the stored id it answers) and, when approved, makes the call. An
 escalation is resolved once: resolving the same decision again (or, with a store, a stored decision that already has a
 resolution) raises `ValueError`, so an approved call is never made twice. `execute=False` records the answer without
-making the call (the adapters use it: the framework makes the call); the stored resolution then says `executed: false`,
-and the framework's result is not recorded by the guard. The adapters map an escalation to their framework's
-human-in-the-loop mechanism (below).
+making the call (when your framework makes it); the stored resolution then says `executed: false`, and the
+framework's result is not recorded by the guard. Map an escalation to your framework's human-in-the-loop mechanism.
 
 An approval covers *one call and the reasons it was shown for*: `d.approval_key()` hashes the tool, the call's id, its
-arguments and its reasons. When a framework resumes an approved call, the adapter checks the call again; if it now
-escalates for other reasons (a budget spent meanwhile, a new tool output with instructions, other arguments), the old
-approval does not cover it and the call is asked again (LangGraph, PydanticAI) or rejected with the new reasons
-(OpenAI Agents). A standing approval ("always approve this tool") covers only escalations by your policies
+arguments and its reasons. When your framework resumes an approved call, check the call again and compare the keys; if
+it now escalates for other reasons (a budget spent meanwhile, a new tool output with instructions, other arguments),
+the old approval does not cover it: ask again or reject it with the new reasons. A standing approval ("always approve this tool") covers only escalations by your policies
 (`d.policy_only`); an escalation by provenance or instruction-like text, an unreadable schema, the authorizer or a
 check that could not be evaluated always needs a person for that very call.
 
@@ -3243,112 +3222,8 @@ print(g.definition("refund", policies=True)["description"])
 # - A refund is at most 100. (else a person decides)
 ```
 
-The adapters take the same flag for the tools they offer the model: `GuardedToolset(..., show_policies=True)`
-(PydanticAI), `guard_tools(..., show_policies=True)` (OpenAI Agents SDK), and for LangGraph, whose node does not choose
-what the model sees, `model.bind_tools(with_policies(tools, guard))`. The reasons are written for refusals and every
-line goes into each request, so it stays off unless you turn it on; the checks themselves are the same either way.
-
-### PydanticAI
-
-```python
-from pydantic_ai import Agent, DeferredToolRequests, DeferredToolResults, FunctionToolset
-from solvi.agents.pydantic_ai import GuardedToolset
-
-toolset = GuardedToolset(FunctionToolset([send_payment, search_invoices]), guard,
-                         facts=lambda ctx: {"role": ctx.deps.role, "spent_today": ctx.deps.spent})
-agent = Agent(model, toolsets=[toolset], output_type=[str, DeferredToolRequests])
-result = agent.run_sync("Please pay INV-7.", deps=deps)
-if isinstance(result.output, DeferredToolRequests):          # escalated calls wait for a person
-    approvals = {c.tool_call_id: True for c in result.output.approvals}   # metadata[id]["solvi"]: the reasons
-    result = agent.run_sync(message_history=result.all_messages(), deferred_tool_results=DeferredToolResults(approvals=approvals))
-```
-
-`GuardedToolset` is a `WrapperToolset`: each call is checked against `ctx.messages` (a user-prompt part in a request that
-also holds a tool return is a tool output: that is how PydanticAI sends `ToolReturn(content=...)` and MCP tool content;
-a prompt the user sends in the same request as a tool return is read that way too — fail closed); allow → the wrapped toolset runs it;
-deny → `ModelRetry` with the reasons (`on_deny="fail"`: `ToolFailed`); escalate → `ApprovalRequired` (the output type must
-allow `DeferredToolRequests`; `on_escalate="fail"`: `ToolFailed`), and a resumed, approved call is recorded as approved by
-a person. The approval covers the reasons in `metadata[id]["solvi"]` (`metadata[id]["approval_key"]`): a resumed call
-that escalates for others is deferred again (in the process that asked). A tool function's first `RunContext`
-parameter is not an argument. Tested with pydantic-ai 2.51.
-
-### LangGraph
-
-```python
-from langchain_core.messages import HumanMessage
-from langchain_core.tools import tool
-from langgraph.checkpoint.memory import InMemorySaver
-from langgraph.graph import START, MessagesState, StateGraph
-from langgraph.prebuilt import tools_condition
-from langgraph.types import Command
-from solvi.agents.langgraph import guarded_tool_node
-
-
-class State(MessagesState):
-    role: str
-    spent: float
-
-
-tools = guarded_tool_node([tool(send_payment), tool(search_invoices)], guard,
-                          facts=lambda state: {"role": state["role"], "spent_today": state["spent"]})
-builder = StateGraph(State)
-builder.add_node("agent", agent)                             # your model node, which proposes the tool calls
-builder.add_node("tools", tools)
-builder.add_edge(START, "agent")
-builder.add_conditional_edges("agent", tools_condition)
-builder.add_edge("tools", "agent")
-graph = builder.compile(checkpointer=InMemorySaver())        # escalate → interrupt: it needs a checkpointer
-cfg = {"configurable": {"thread_id": "inv-7"}}
-out = graph.invoke({"messages": [HumanMessage("Please pay INV-7.")], "role": "clerk", "spent": 0.0}, cfg)
-if "__interrupt__" in out:                                   # an escalated call: out["__interrupt__"][0].value["solvi"]
-    ask = out["__interrupt__"][0].value                      # {"solvi", "id", "args_hash", "key", "reasons"}
-    out = graph.invoke(Command(resume={"approved": True, "id": ask["id"], "key": ask["key"]}), cfg)
-```
-
-The guard wraps the ToolNode's execution (`wrap_tool_call` / `awrap_tool_call`, langgraph ≥ 1.0) and reads the graph's
-messages; deny → a `ToolMessage` with `status="error"`, the reasons and `artifact={"solvi": ...}`; escalate →
-`interrupt(...)` (it needs a checkpointer; `on_escalate="message"` answers with a ToolMessage instead).
-`guard_wrappers(guard)` gives the two wrappers for your own ToolNode. Tested with langgraph 1.2.12 (langchain-core 1.6.5).
-
-Approvals name their call. The parallel calls of one model message run in one node task and share one sequence of
-resume values, so a bare `Command(resume=True)` could be read by a call the person never saw: when the message holds
-several calls, only `{"approved": True, "id": "<tool_call_id>"}` or a map `{"<tool_call_id>": True, ...}` approves (one
-resume value may answer all of them), a bare `True` rejects, and an answer naming another call is not this call's.
-With a single call a bare `True` still approves. With `"key"` in the answer, an approval given for other reasons (the
-call escalated anew since) interrupts again; without it that holds in the process that asked. On resume LangGraph
-re-runs the whole node; a call of the message that already ran (allowed at once, or approved while another call
-waited) is not made again — the wrapper returns its result (in the same process; after a restart keep such tools
-idempotent).
-
-### OpenAI Agents SDK
-
-```python
-from agents import Agent, Runner, function_tool
-from solvi.agents.openai_agents import guard_run_config, guard_tools
-
-agent = Agent(name="payer", tools=guard_tools([function_tool(send_payment), function_tool(search_invoices)], guard,
-                                              facts=lambda ctx: {"role": ctx.context.role, "spent_today": ctx.context.spent}))
-result = await Runner.run(agent, "Please pay INV-7.", context=app_ctx, run_config=guard_run_config())
-if result.interruptions:                                     # escalated calls wait for a person
-    state = result.to_state()
-    for item in result.interruptions:
-        state.approve(item)                                  # or state.reject(item)
-    result = await Runner.run(agent, state, run_config=guard_run_config())
-```
-
-`guard_tool` returns a copy of a `FunctionTool` with a tool input guardrail (deny → `reject_content` with the reasons as
-the tool's output) and a `needs_approval` function (escalate → the run stops with an interruption; an approved call is
-recorded as approved by a person). The SDK gives a tool's context only the run's input items (`turn_input`), not the
-tool outputs the run generated since; `guard_run_config(run_config=None)` returns a `RunConfig` whose
-`call_model_input_filter` records each model input (your own filter runs first), and the guard then reads the whole
-input the model saw — an in-run tool output grounds values, taints them, and `injections="any"` sees it. Without it the
-guard reads the run's input alone: a value found only in an in-run tool output is denied, an instruction in one is not
-seen. A standing approval (`state.approve(item, always_approve=True)`) covers later calls only when policies alone
-escalated them; a call escalated by provenance or instruction-like text is rejected unless its own call is approved.
-After a handoff the SDK may nest or filter the history the next agent gets; the guard fails closed — a value the user
-wrote before the handoff may no longer read as the user's, and a user-grounded call is then denied. When a tool has a `needs_approval`
-function, the SDK itself asks for approval if validation changes the arguments (an integer given for a float argument):
-have the model write numbers as the schema says. Tested with openai-agents 0.22.3.
+The reasons are written for refusals and every line goes into each request, so it stays off unless you turn it on; the
+checks themselves are the same either way.
 
 ### An MCP proxy
 
@@ -3377,29 +3252,14 @@ itself it is any object); a tool whose arguments collide with the guard's facts 
                                                        "--upstream", "npx -y @modelcontextprotocol/server-filesystem /work"]}}}
 ```
 
-**`once=True` behind an adapter.** An adapter has no `Session`, so it keeps the calls made itself and gives them as the
-fact `calls_made` — per conversation where the framework names the conversation:
-
-| adapter | remembers per | `made` | a call counts when |
-|---|---|---|---|
-| PydanticAI `GuardedToolset` | `RunContext.conversation_id` (runs continuing one `message_history` and a resumed deferred call share it; a run without history starts a new one) | `{conversation id: [calls]}` | the tool returned without raising |
-| LangGraph `guarded_tool_node` | the run config's `thread_id` (calls run without one share the key `None`) | `solvi_guard.made`, `{thread id: [calls]}` | the ToolNode ran the tool and its message is not an error |
-| OpenAI Agents `guard_tools` | the process: the SDK gives `needs_approval`, where the guard first decides, no conversation id | `tool.solvi_guard.made`, one list shared by the tools of the call | the guardrail allowed it (it sees a call before the SDK runs it, so even when the tool then fails) |
-
-So with PydanticAI and LangGraph a repeat in another conversation (another user's thread) is not a repeat; with the
-OpenAI Agents SDK it is, unless you build the guarded tools per conversation (each `guard_tools(...)` call has its own
-memory). The memory lives in this process: nothing is remembered after a restart. For another scope keep the calls
-yourself (a database row per conversation) and pass them as `facts=lambda ctx: {"calls_made": [...]}` — they are added
-to the adapter's own.
-
-**Which frameworks.** Each adapter has an extra — `pip install "solvi[pydantic-ai]"`, `"solvi[langgraph]"`,
-`"solvi[openai-agents]"` — and importing one without its framework says which. Supported and tested with real runs (`tests/test_agents_frameworks.py`,
-`tests/test_agents_user_words_and_approvals.py`): PydanticAI (2.51), LangGraph (1.2.12 with langchain-core 1.6.5), the OpenAI Agents SDK
-(0.22.3) and MCP (the proxy). Other frameworks — LlamaIndex, AutoGen, smolagents, CrewAI — have no adapter; their
-histories can be passed to `guard.check` as messages, and shapes the guard does not recognise are read fail-closed
-(unknown blocks are tool outputs), but formats that merge the user's text with tool text (smolagents' "Observation:"
-user turns, AutoGen's and LlamaIndex's flattened chat memories) cannot be read back into roles: a user-grounded call
-may be denied there, and history compression (above) must be avoided.
+**Which frameworks.** solvi ships no framework adapter (the PydanticAI, LangGraph and OpenAI Agents SDK adapters were
+removed in 1.0: none had a measured run). The measured runs put the agent's tool calls through `guard.check` / `guard.call` directly, from the framework's
+own tool-execution step, and so can you: pass the framework's history to `guard.check` as messages, map an escalation to
+its human-in-the-loop mechanism, and keep `calls_made` per conversation for `once=True`. MCP has the proxy (above).
+Message shapes the guard does not recognise are read fail-closed (unknown blocks are tool outputs), but formats that
+merge the user's text with tool text (smolagents' "Observation:" user turns, AutoGen's and LlamaIndex's flattened chat
+memories) cannot be read back into roles: a user-grounded call may be denied there, and history compression (above)
+must be avoided.
 
 **Limits.** Grounding is literal: a paraphrased value ("two hundred fifty") is denied, and a value that appears in the
 conversation for another reason passes grounding (a policy or the authorizer has to catch it). The instruction-like rules
@@ -3875,7 +3735,7 @@ eval set (`benchmarks/tasks/naturalplan/solution.py`, no model) the 100 meeting 
 the 100 trips 73,543 asks in 14 s — 78 s and 28 s when every candidate was a full ask, with the same plans (95 / 100 /
 98 right); one CPU core, Intel i7-12700H shared with other jobs: about 0.2 ms per candidate.
 
-**Not done here:** no proposals by a model, no bisection over numbers (`res.counterfactual` does that), no parallel
+**Not done here:** no proposals by a model, no bisection over numbers, no parallel
 asks, no proof of the prune and bound promises. A candidate still runs every part it needs, as an ask does (lean
 saves the hashing and the bookkeeping, about half of a full ask's time there), so a space of millions is for code,
 not for this search.
@@ -4568,51 +4428,6 @@ approve = 'yes'  [ok]  confidence 0.60  ← computed by approve
               · fallback producer: total — total_regex used after total_model rejected
 ```
 
-### Counterfactual explanations: res.counterfactual
-
-"What would have changed the answer?" — the smallest change of the given inputs, for adverse-action reasons in lending and
-clear answers in support:
-
-```python
-res = system.ask({"amount": 1200.0, "debt": 1000, "income": 5000, "history": "on time", "age": 30})
-cf = res.counterfactual("approve")
-print(cf)
-# approve = decline [ok]
-#   approve if amount ≤ 1000 (now 1200)
-#   held at their recorded proposals (no model called): risk
-#   not searched: history (str: no domain (pass domains={'history': [...]}))
-cf.best.changes[0]            # Change(fact="amount", now=1200.0, to=1000.0, op="≤", cost=0.17)
-cf.to_dict()
-```
-
-Only the deterministic flow is re-run, on the recorded plan: every model-backed part — an extractor, a model decision, a
-learned answer head — is **held at the proposal it recorded in this trace**, and no model is called. The explanation is
-"what the code would decide if the models said what they said"; the result lists the parts held. A model part that did not
-run in the recorded decision (a hard check failed first) has no proposal: inputs that need it make the question abstain and
-do not count as a change (listed as "without a recorded proposal"). Learned rule lists (`learn_rule`) are code and re-run.
-
-What is searched (`over=`: default, the given facts the question's flow reads):
-
-- numbers and dates — outward from the current value in both directions with doubling steps, then bisection between the
-  last unchanged and the first changed value: the nearest threshold crossing, exact for inputs the answer is monotone in
-  (a non-monotone input can hide a nearer crossing between two probes). A direction where no probe changes the answer
-  is tried again on an even grid up to the farthest probe, which finds the band of a two-sided rule (`abs(value + 20) >
-  5` at 40 → `no if value ≤ -15`); a narrower band can still be missed, so when nothing is found the result says "no
-  change ... was found", not that none exists. Integers and dates give exact bounds
-  (`debt ≤ 1999`, `purchase_date ≥ 2026-08-20`); floats are shown at the shortest decimal that holds, `≤` or `<` as the
-  rule has it. A non-negative input stays non-negative; a domain `(lo, hi)` that does not contain the current value is
-  refused for that input (`cf.not_searched` says why);
-- booleans, Enums and `Literal` fields of `System(input_model=...)` — every other value;
-- anything else only with `domains={"history": ["on time", "late"]}`; a tuple bounds a number: `domains={"amount": (0, 5000)}`.
-
-`max_changes=2` (the default) tries two inputs together when no single input changes the answer ("approve if amount ≤ 1000
-(now 1200) and debt ≤ 1999 (now 2500)" — each bound holds with the other change made); `max_changes=1` does not.
-`target="approve"` looks only for that answer. Results are ranked by the number of changes, then their size (the relative
-change of a number; for a date the days moved over 30, or over the width of its domain; 1 for an enumerated value).
-A given input read only by a part that did not run (a soft check skipped after a hard check failed) is listed in
-`cf.not_searched`. `max_evals=5000` caps the re-runs (`cf.exhausted`). A response loaded from
-a store with its System works the same; one loaded without it needs `system=`.
-
 ### Reports for people: res.report, store.report, solvi report
 
 The audit is for developers; a report is for an auditor or a customer — one page per decision or per period, as Markdown,
@@ -4710,36 +4525,6 @@ scorer gives — the open-set gate's own flag at request 1,068, and a DriftMonit
 request 1,046. On the credit task (rules only, two versions of the catalog) it gives 998 answers by the rule, 2 forced
 by a hard check, and 600 and 400 decisions under the two catalog fingerprints.
 
-### OpenTelemetry: solvi.otel
-
-`solvi.otel.export(res_or_store, tracer=None, **filters)` sends decisions to your tracing backend as OpenTelemetry spans
-(`pip install "solvi[otel]"`): per decision a root span `solvi.decision`, a child span per step of the trace
-(`solvi.fn risk`, `solvi.extract total`, `solvi.rule answer:pay`, …) and one per answer (`solvi.answer pay`). A store
-exports every stored decision, or those matching the query filters (`export(store, question="refund", since=...)`).
-The root span is a child of the span current in your code, so a decision sits inside the request that asked it.
-
-```python
-from solvi.otel import export, to_otlp_json
-
-with tracer.start_as_current_span("POST /refund"):
-    res = system.ask(state)
-    export(res)                               # the global tracer provider's "solvi" tracer, or tracer=...
-
-body = to_otlp_json(res, service_name="refunds")   # OTLP/JSON without OpenTelemetry: POST it to a collector's /v1/traces
-```
-
-| Span | Attributes |
-|---|---|
-| step | `solvi.step`, `solvi.kind`, `solvi.fact`, `solvi.provenance`, `solvi.value` (a short repr), `solvi.confidence`, `solvi.error`, `solvi.producer`, `solvi.tried`, `solvi.quote.source` / `.start` / `.end`, `solvi.model.type` / `.id` / `.fingerprint`, `solvi.probs` (JSON), `solvi.safeguard` (kinds that fired on this fact), `solvi.inputs`, `solvi.hash`, `solvi.prev` |
-| answer | `solvi.question`, `solvi.answer`, `solvi.status`, `solvi.confidence`, `solvi.why`, `solvi.guard`, `solvi.provenance`, `solvi.source`, `solvi.safeguard` |
-| root | `solvi.questions`, `solvi.trace.init_hash`, `solvi.trace.head`, `solvi.trace.steps`, `solvi.catalog.fingerprint`, `solvi.questions.fingerprint`, `solvi.stored_id`, `solvi.ms`, `solvi.confidence`, `solvi.complete`, `solvi.model_outputs`; an event `solvi.skipped` per step skipped at run time |
-
-A failed or rejected step has status ERROR with the reason; an abstention is not an error. The trace records each step's
-run time, not its start: step spans are laid end to end from the decision's start (durations measured, start times not;
-parallel steps appear one after another). A stored decision ends at its stored time; a fresh one when exported (or at
-`end_ns=`). In the OTLP JSON the trace and span ids are derived from the trace's hashes; through the API the SDK assigns
-them — `solvi.hash` ties a span to its trace record either way.
-
 ### Lifetime stats
 
 `system.stats` counts, over the system's lifetime: `asks`, `answers`, `abstained`, `model_outputs` (outputs of model-backed
@@ -4803,6 +4588,9 @@ the field is absent. extract-base's model card suggests labelling about 25–100
 GPU is recommended for training and for fast inference.
 
 ### MultiSpanExtractor: all fields in one pass
+
+> **Moving into the knowledge memory in 1.0.** This module will be folded into solvi's knowledge memory, and its API
+> may change then.
 
 `solvi.extract_multi.MultiSpanExtractor` reads a document once and has a start/end head pair per field. Use it for
 documents that fit into one window (receipts, invoices, forms).

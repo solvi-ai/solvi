@@ -20,7 +20,7 @@ reasons, which the agent sees) or escalate (to a person, with the candidate call
   7. the store: every decision with its trace, hash-chained; replay; the audit of one decision.
 
 The agent is scripted and the authorizer is a keyword stand-in, so the example runs without API keys or a model. With a
-real LLM, put its tool calls through `guard.call` (or an adapter: solvi.agents.pydantic_ai, .langgraph, .openai_agents).
+real LLM, put its tool calls through `guard.call` (or `guard.check`, when the framework runs the tool).
 
 Run:  uv run python examples/19_agent_guard.py"""
 from __future__ import annotations

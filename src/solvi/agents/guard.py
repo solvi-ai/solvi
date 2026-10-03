@@ -478,7 +478,7 @@ def _camel(name):
 @dataclasses.dataclass
 class Tool:
     """A tool in the guard's catalog: its name, the function solvi runs when a call is allowed (None: the framework runs
-    it — adapters, the MCP proxy), the pydantic model of its arguments (None until a schema is known — MCP), which
+    it — your framework, the MCP proxy), the pydantic model of its arguments (None until a schema is known — MCP), which
     arguments must be quoted from the conversation, and from which roles."""
     name: str
     func: Callable | None
@@ -1208,7 +1208,7 @@ class GuardDecision:
     def approval_key(self):
         """What a person's approval of this escalation covers: a hash of the tool, the call's id, its arguments and the
         reasons it escalated for. An approval given for one key does not cover a call whose key differs — other
-        arguments, another call, or new reasons (the adapters re-escalate)."""
+        arguments, another call, or new reasons."""
         import hashlib
 
         from ..decide import jsonable
@@ -1306,8 +1306,8 @@ class Guard:
         ground_last=1 the call must rest on the current request (a call the user confirms with "yes, go ahead" then
         finds nothing and is denied: the agent restates the value, or use a larger N).
         once: a call of this tool with exactly the arguments of a call already made escalates (a second refund of the
-        same order, a file deleted twice). The calls made are the given fact `calls_made` — a Session, the MCP proxy
-        and the framework adapters keep it; with guard.check / guard.call pass facts={"calls_made": [...]} (strings
+        same order, a file deleted twice). The calls made are the given fact `calls_made` — a Session and the MCP proxy
+        keep it; with guard.check / guard.call pass facts={"calls_made": [...]} (strings
         from solvi.agents.guard.proposal; [] when none was made). A call checked without it escalates: the check
         cannot be evaluated."""
         def add(f):
@@ -1689,8 +1689,7 @@ class Guard:
 
     def described(self, name, description):
         """`description` (a tool's description as a framework shows it) with the reasons of the policies that check the
-        tool appended, as `definition(name, policies=True)` writes them; unchanged when no policy checks it. The
-        adapters' `show_policies=True` use it."""
+        tool appended, as `definition(name, policies=True)` writes them; unchanged when no policy checks it."""
         lines = [f"- {r}" + (" (else a person decides)" if of == "escalate" else "") for _, r, of in self.policies_of(name)]
         if not lines:
             return description
@@ -1963,14 +1962,6 @@ def _reason(f):
     return doc[0] if doc else f.__name__
 
 
-def with_calls_made(facts, made):
-    """The facts of a call plus the calls an adapter made (the given fact `calls_made` a once=True tool reads), joined
-    with any `calls_made` the app's own facts give."""
-    facts = dict(facts or {})
-    facts["calls_made"] = list(facts.get("calls_made") or ()) + list(made)
-    return facts
-
-
 def _names(tools):
     if tools is None:
         return None
@@ -2090,4 +2081,4 @@ def _clip(text, n):
 __all__ = ["arguments_from_user", "arguments_grounded", "arguments_model", "arguments_valid", "AUTHORIZE_TASK",
            "conversation", "Guard", "GuardDecision", "MATCHERS", "Message", "messages", "no_injected_arguments",
            "no_instructions_in_tool_outputs", "proposal", "request_authorizes", "same_url", "Session", "Tool",
-           "ToolCall", "url_parts", "VERDICTS", "with_calls_made"]
+           "ToolCall", "url_parts", "VERDICTS"]
