@@ -405,9 +405,8 @@ def read_module(source: str, spec: Spec, questions, patch=False) -> tuple[dict, 
         if kind not in KINDS:
             problems.append(f"{name}: kind must be one of {KINDS}, not {kind!r}")
         cl = p.get("clauses")
-        if not isinstance(cl, list) or (not cl and kind != "rule"):      # a rule giving only a default may cite none
-            problems.append(f"{name}: 'clauses' must list the clauses it implements (a helper that implements no "
-                            "clause is not a part: leave it out of PARTS)")
+        if not isinstance(cl, list) or (not cl and kind == "check"):     # a rule giving only a default, or a fact that
+            problems.append(f"{name}: 'clauses' must list the clauses it implements")  # only reads an input, cites none
         else:
             problems += [f"{name} cites {c!r}, which is not a clause" for c in cl if c not in spec.clauses]
         if kind == "check":
@@ -431,7 +430,7 @@ def read_module(source: str, spec: Spec, questions, patch=False) -> tuple[dict, 
             n = [k for k, p in parts.items() if isinstance(p, dict) and p.get("kind") == "rule" and p.get("question") == q]
             if len(n) != 1:
                 problems.append(f"question {q!r} needs exactly one rule (found {len(n)})")
-    problems += [f"NOT_NORMATIVE names {c!r}, which is not a clause" for c in nn if c not in spec.clauses]
+    nn = {c: r for c, r in nn.items() if c in spec.clauses}    # a name that is no clause declares nothing: left out
     return parts, nn, rm, problems
 
 
@@ -519,6 +518,47 @@ def demote_helpers(source: str, parts: dict, given) -> tuple[dict, list[str]]:
             parts[u]["clauses"] = list(dict.fromkeys(list(parts[u].get("clauses") or []) + list(cl)))
         notes.append(f"{name} reads names no input or part gives and is called by {', '.join(users)}: treated as a "
                      f"helper, its clauses ({', '.join(cl) or 'none'}) go to {', '.join(users)}")
+
+
+def inner_fields(inputs) -> dict:
+    """{key: input field} for the keys inside dict-valued inputs (seen in the samples, else in the pool), each key found
+    in one field only — what `add_accessors` may read for a part."""
+    xs = inputs.samples
+    if not xs:
+        try:
+            xs = inputs.pool()[:200]
+        except ValueError:
+            xs = []
+    seen = {}
+    for x in xs:
+        for f, v in x.items():
+            if isinstance(v, dict):
+                for k in v:
+                    if isinstance(k, str) and k.isidentifier():
+                        seen.setdefault(k, set()).add(f)
+    return {k: next(iter(fs)) for k, fs in seen.items() if len(fs) == 1}
+
+
+def add_accessors(source: str, parts: dict, given, inner: dict, questions=()) -> tuple[str, dict, list[str]]:
+    """Parts that read a key of a dict-valued input by its own name (`friends` inside `facts`) get that fact: an
+    accessor part `def friends(facts): return facts["friends"]` is added to the module (citing no clause) →
+    (source, parts, notes). Only keys found in one input field, never a name an input, a part or a question has. A
+    missing key raises in the accessor, so the decision abstains — and an abstention is a failure of the draft."""
+    if given is None or not inner:
+        return source, parts, []
+    taken = set(given) | set(parts) | {q.name for q in questions} | _funcs(source)
+    want = {}
+    for node in ast.parse(source).body:
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name in parts:
+            for a in node.args.posonlyargs + node.args.args + node.args.kwonlyargs:
+                if a.arg not in taken and a.arg in inner:
+                    want.setdefault(a.arg, inner[a.arg])
+    if not want:
+        return source, parts, []
+    defs = "\n\n".join(f"def {k}({f}):\n    return {f}[{k!r}]\n" for k, f in want.items())
+    parts = {**parts, **{k: {"kind": "fn", "clauses": [], "accessor": f} for k, f in want.items()}}
+    notes = [f"{k} read inside the input {f}: accessor part added" for k, f in want.items()]
+    return with_parts(source.rstrip() + "\n\n\n" + defs, parts), parts, notes
 
 
 def with_parts(source: str, parts: dict) -> str:
@@ -1079,6 +1119,7 @@ def _loop(spec, questions, inputs, gens, *, rounds, tests, examples, reference, 
     history = []
     drafts = [_Draft(0), _Draft(1)]
     used = 0
+    inner = inner_fields(inputs)
     for rnd in range(1, rounds + 1):
         for d in drafts:
             if rnd > 1 and not d.feedback:
@@ -1094,9 +1135,12 @@ def _loop(spec, questions, inputs, gens, *, rounds, tests, examples, reference, 
             if src is not None and not why:
                 parts, nn, _, problems = read_module(src, spec, questions)
                 if not problems:
-                    parts, d.notes = demote_helpers(src, parts, given_names(inputs))
-                    if d.notes:
-                        src = d.source = with_parts(src, parts)
+                    src, parts, d.notes = add_accessors(src, parts, given_names(inputs), inner, questions)
+                    parts, demoted = demote_helpers(src, parts, given_names(inputs))
+                    if demoted:
+                        src = with_parts(src, parts)
+                    d.notes += demoted
+                    d.source = src
                 d.parts, d.nn = parts, nn
                 d.problems += problems
                 if not problems:
@@ -1228,7 +1272,7 @@ def _loop(spec, questions, inputs, gens, *, rounds, tests, examples, reference, 
             d.feedback = "\n\n".join(fb[d.index]) or None
             summary["drafts"].append({"draft": d.index, "generation": d.generation, "problems": d.problems[:5],
                                       "caught": list(d.caught), "feedback": bool(d.feedback),
-                                      **({"demoted": list(d.notes)} if d.notes else {})})
+                                      **({"notes": list(d.notes)} if d.notes else {})})
         summary["agreement"] = agree
         history.append(summary)
         if len(ok) == 2 and not any(d.feedback for d in drafts):

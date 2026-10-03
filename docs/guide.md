@@ -3879,8 +3879,12 @@ the first at temperature 0, the second at 0.7 with seed 1; `writer=[a, b]` takes
 **What the writer is asked for.** A module of plain functions — a part's name is the fact it sets, its argument names
 are the inputs or facts it reads (a part that reads a name nothing gives is refused before it runs, unless other parts
 call it as a plain function: then it is a helper the writer listed in PARTS — it leaves PARTS, its clauses go to the
-parts that call it, recorded under "demoted"; a hard check is never treated so) — and two
-literal dicts: `PARTS` (kind `fn` / `check` / `rule`, for a hard check its `then`, for a rule its question, the clauses)
+parts that call it, recorded in the round's "notes"; a hard check is never treated so; and a part that reads a key
+of a dict-valued input by its own name — `friends` inside the input `facts` — gets an accessor part
+`def friends(facts): return facts["friends"]`, added and noted, which raises (so the decision abstains) when the key
+is missing) — and two
+literal dicts: `PARTS` (kind `fn` / `check` / `rule`, for a hard check its `then`, for a rule its question, the clauses;
+a check must cite one, a fact that only reads an input or a rule giving a default may cite none)
 and `NOT_NORMATIVE`. A hard check that names a question is required in that question's flow. A check may return
 `Fail("why")`. The prompts ask for one part per quantity a clause defines, so a stored decision shows each.
 

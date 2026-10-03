@@ -542,8 +542,28 @@ def test_a_part_that_is_really_a_helper_called_by_another_part_leaves_parts_and_
     assert c.accepted and c.reason == "accepted in round 1"
     assert "fee_of" not in c.parts and c.parts["ship"]["clauses"] == ["c3", "c1", "c2"]
     assert '"fee_of"' not in c.source and "def fee_of(z):" in c.source           # still in the module, as a helper
-    assert "treated as a helper" in c.record["rounds"][0]["drafts"][0]["demoted"][0]
+    assert "treated as a helper" in c.record["rounds"][0]["drafts"][0]["notes"][0]
     # a part nobody calls stays a contract problem
     lonely = HELPER_LISTED.replace("    fee_of(zone)\n", "")
     c = compile_spec(Spec(POLICY), QS, INPUTS, Writer([[lonely], [GOOD]]), rounds=1)
     assert not c.accepted and "part fee_of reads z" in c.record["rounds"][0]["drafts"][0]["problems"][0]
+
+
+NESTED_IN = Inputs({"order": dict}, samples=[{"order": {"zone": z, "total": t, "weight": w}}
+                                             for z in ("domestic", "world") for t in (10, 50, 120) for w in (5, 31)],
+                   n=0)
+READS_INSIDE = GOOD                  # its parts read zone, total, weight: keys inside the input `order`
+NESTED_TESTS = [{"clause": "c3", "input": {"order": {"zone": "domestic", "total": 50, "weight": 1}},
+                 "expect": {"ship": "free"}, "why": "50 or more"}]
+
+
+def test_a_part_reading_a_key_inside_a_dict_input_by_its_name_gets_an_accessor_part():
+    c = compile_spec(Spec(POLICY), QS, NESTED_IN, Writer([[READS_INSIDE], [READS_INSIDE]], tests=NESTED_TESTS))
+    assert c.accepted, c.reason
+    assert c.parts["zone"] == {"kind": "fn", "clauses": [], "accessor": "order"}
+    assert "def total(order):\n    return order['total']" in c.source
+    assert any("total read inside the input order" in n for n in c.record["rounds"][0]["drafts"][0]["notes"])
+    s = c.system()
+    assert s.ask({"order": {"zone": "world", "total": 60, "weight": 40}})["ship"].answer == "refused"
+    # a key missing from an input makes the accessor raise: the decision abstains, it is never guessed
+    assert s.ask({"order": {"zone": "world", "total": 60}})["ship"].status == "abstain"
