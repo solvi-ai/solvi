@@ -119,6 +119,27 @@ differs from the stream from the start. Treat a quiet monitor as "no large chang
 calibration and the mix of answers, and level off within a few dozen examples. When a question needs the model to read
 the input differently, use a LoRA adapter (`adapt_lora`), a head over computed facts, or a rule.
 
+**Let a second system's verified answers recalibrate a guarantee — and nothing else, unless you measured it.** When
+an LLM handles what a fast system escalates, its answers that passed the checks and its own guarantee can be stored
+as labels (`label_source="verified"`) and read by `System.guarantee(..., corrections=store, sources=...)`. We replayed
+three stand tasks as a stream (the LLM's recorded answers; the fast system re-measured every 200 or so items): calibrating on
+the human set plus every verified LLM answer raised the share answered alone in the second half of the stream from
+90.7% to 96.7% on product matching (error among them 1.4%, promise 2%) and from 47.2% to 52.0% on contract clauses
+(answered alone and wrong: 2.4% of the questions, promise 3%), within the promise both times. The same
+answers fed to a head helped on contracts only (it already answered 90% of the pairs), fed to a memory of corrections
+they helped on product matching but broke the contract promise (3.1% answered alone and wrong against 3%), and a per-answer "route" built from them
+never helped. Feeding only the cases where the LLM disagreed with the fast system gave almost no material (5 verified
+disagreements in 1,916 pairs) and no gain — feed everything it vouched for. Verification itself is the safeguard: on
+bank requests with new intents the LLM was right on 75% and its guarantee vouched for none of its answers, so nothing
+was learned; its unverified answers, fed to all four channels at once, raised the share answered alone after the shift
+from 53% to 71% and the error among those from 16% to 20% (promise 5%), with more of the LLM's own mistakes copied.
+
+**Fix a head's ridge strength when its answers go through a guarantee.** `fit` chooses λ by leave-one-out accuracy; a
+refit on more labels can choose a much smaller one, and the head's ranking of its own answers gets worse even when the
+added labels are right: on product matching, a head refitted on 808 instead of 300 pairs picked λ 0.1 and the error
+among its surest half went from 0.6% to 2.1%, so no threshold met a 2% promise. With `lam=100, pairs=False` held fixed
+the guarantee kept answering about 90%. Recalibrate the guarantee after every refit in any case.
+
 ## An LLM as a decider
 
 **With a reasoning LLM, let it think: do not force a reply format on it.** A server that enforces `response_format`

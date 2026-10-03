@@ -448,7 +448,7 @@ def _fold_heads(system, question, examples, folds, seed):
 
 def guard_question(system, question, examples=None, *, max_error=None, max_risk=None, method=None, delta=0.10, signal=None,
                    answer=None, groups=None, min_group=100, min_support=10, correct=None, folds=None, seed=0,
-                   weak="raise", promise=None):
+                   weak="raise", promise=None, corrections=None, sources=None):
     """Put a calibrated threshold with a stated promise on a question of `system` (System.guarantee): every later answer
     is let through alone only when its signal ≥ the threshold, else the question abstains with the reason; the promise,
     the signal and the threshold are recorded with every answer. examples: [(init_state, correct answer)], not used to fit
@@ -462,6 +462,12 @@ def guard_question(system, question, examples=None, *, max_error=None, max_risk=
     P(right) ≥ 0.43"). correct: a function (result, label) → bool for answers judged otherwise than by equality (a quote
     that overlaps the gold one). groups: a fact name, a hierarchy of fact names, a function of facts, or "answer".
     promise: an already calibrated Promise to attach instead of calibrating here.
+    corrections: a TraceStorage (True: the system's storage) whose stored corrections of this question are added to
+    `examples` — those from `sources` (default TRUSTED_SOURCES: "human", "outcome", "rule"); sources may add "verified",
+    System 2 answers that passed the checks and a guarantee (TraceStorage.save_correction checks that when it stores
+    them). This is the one channel that takes verified labels: fed every System 2 answer it vouched for, it let System 1
+    answer more within its promise on two tasks of three (docs/best_practices.md). The report's "labels" says
+    how many came from where and their stored ids (calibrate again without them to undo it).
     The other arguments, the methods and their promises: calibrate() and the module docstring.
     → the calibration report ({"threshold", "n", "answered", "error", "risk", "support", "separation", "promise", ...};
     for an attached promise, its report)."""
@@ -479,6 +485,11 @@ def guard_question(system, question, examples=None, *, max_error=None, max_risk=
         _drop_checkpoints(system, old)
     guard = QuestionGuard(question, None, signal, answer, groups)
     _add_checkpoints(system, guard)               # the signal's and the groups' facts are computed in every flow
+    labels = None
+    if corrections is not None:
+        examples, labels = _with_corrections(system, question, examples, corrections, sources)
+    elif sources is not None:
+        raise ValueError("sources= says which stored corrections to read: give corrections= (a TraceStorage, or True)")
     if promise is None:
         if examples is None:
             raise ValueError("give labelled examples [(init_state, correct answer)] to calibrate on, or promise=")
@@ -509,9 +520,37 @@ def guard_question(system, question, examples=None, *, max_error=None, max_risk=
             promise.report["warnings"].append(f"cross-fitted ({folds} folds): the thresholds were set on heads fitted "
                                               "without each example; the head that answers saw them all, so the promise "
                                               "is approximate")
+    if labels is not None:
+        promise.report["labels"] = labels
     guard.promise = promise
     system.guards[question] = guard
     return promise.report
+
+
+def _with_corrections(system, question, examples, corrections, sources):
+    """examples + the stored corrections of `question` from `sources` → (examples, {"examples", "corrections":
+    {source: n}, "ids"}); a correction from another source is left out (counted in "skipped")."""
+    from .storage import TRUSTED_SOURCES, VERIFIED, UntrustedLabel, check_source
+    store = system.storage if corrections is True else corrections
+    if store is None or not hasattr(store, "corrections"):
+        raise ValueError("corrections= is a TraceStorage (or True: the system's storage, which it does not have)")
+    sources = TRUSTED_SOURCES if sources is None else tuple([sources] if isinstance(sources, str) else sources)
+    bad = [x for x in sources if x not in TRUSTED_SOURCES + (VERIFIED,)]
+    if bad:
+        raise UntrustedLabel(f"sources= {bad} are not label sources ({', '.join(TRUSTED_SOURCES + (VERIFIED,))})")
+    out = list(examples or [])
+    n0, by, ids, skipped = len(out), {}, [], 0
+    for c in store.corrections():
+        if c["question"] != question:
+            continue
+        if c["source"] not in sources:
+            skipped += 1
+            continue
+        check_source(c["source"], accept=sources)
+        out.append((c["init"], c["answer"]))
+        by[c["source"]] = by.get(c["source"], 0) + 1
+        ids.append(c["id"])
+    return out, {"examples": n0, "corrections": by, "skipped": skipped, "ids": ids}
 
 
 def _add_checkpoints(system, guard):
