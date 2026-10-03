@@ -1,6 +1,6 @@
 """A sandbox for code a model wrote: only pure functions over facts.
 
-    from solvi.sandbox import check, load, run
+    from solvi.experimental.compile.sandbox import check, load, run
     check(source)                                   # [] when allowed, else the reasons it is refused
     ns = load(source)                               # the module's namespace, in this process (refuses what check refuses)
     out = run(source, "mypkg.driver:main", payload) # the module run in a subprocess by a trusted driver → its JSON
@@ -144,7 +144,7 @@ src_path, driver, payload_path, out_path = sys.argv[4], sys.argv[5], sys.argv[6]
 mod, fn = driver.split(":")
 import importlib
 drv = importlib.import_module(mod)
-from solvi.sandbox import load
+from solvi.experimental.compile.sandbox import load
 source = open(src_path).read()
 payload = json.load(open(payload_path))
 try:

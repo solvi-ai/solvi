@@ -75,7 +75,7 @@ def test_system_and_response_attributes(tmp_path):
     with pytest.raises(TypeError, match=rf"{GONE}System.calibrate\(question, \[\(state, answer\), \.\.\.\]\)"):
         s.calibrate("q", [{"x": 9}], [True])
     with pytest.raises(TypeError, match="unexpected keyword argument 'harvest_rules'"):
-        from solvi.learning import Learning
+        from solvi.experimental.learning import Learning
         Learning(s, harvest_rules=True)
 
 
@@ -200,14 +200,15 @@ def test_storage_tooling_and_agents(tmp_path):
         CorrectionMemory.calibrate(None, risk=0.1)
     import solvi.serve as serve
     assert not hasattr(serve, "Guard") and serve.AccessGuard
-    from solvi.agents.mcp import run_proxy
+    from solvi.experimental.mcp import run_proxy
     for old, new in (("context_messages", "max_messages"), ("context_chars", "max_chars")):
         with pytest.raises(TypeError, match=rf"run_proxy\({old}=\) {GONE}{new}="):
             run_proxy(None, **{old: 5})
 
 
 def test_files_and_command_lines(tmp_path, monkeypatch, capsys):
-    from solvi import honesty, hooks
+    from solvi import honesty
+    from solvi.experimental import hooks
     p = tmp_path / "set.json"
     p.write_text(json.dumps({"cases": [{"name": "a", "state": {}, "gold": {"q": "yes"}}]}))
     with pytest.raises(ValueError, match=r'has "gold", the key before 0.8 \(removed in 0.9\): name its right answers "expected"'):

@@ -54,7 +54,7 @@ Contents:
 13. [Guarding an agent's tool calls (preview)](#guarding-an-agents-tool-calls)
 14. [solvi behind a coding agent's hooks (preview)](#solvi-behind-a-coding-agents-hooks)
 15. [A model that writes: generation, agreement and the re-ask loop](#a-model-that-writes-generation-agreement-and-the-re-ask-loop)
-16. [A specification compiled into the catalog: solvi.compile (experimental)](#a-specification-compiled-into-the-catalog-solvicompile)
+16. [A specification compiled into the catalog: solvi.experimental.compile (experimental)](#a-specification-compiled-into-the-catalog-solvicompile)
 17. [Who answers: System 1, the slow path or a person (solvi.core.dispatch, experimental)](#who-answers-system-1-the-slow-path-or-a-person-solvidispatch)
 18. [System 1 and System 2 on a game: the Pokémon world map](#system-1-and-system-2-on-a-game-the-pokémon-world-map)
 19. [Verified charts: a specialist that checks every number (preview)](#verified-charts-a-specialist-that-checks-every-number)
@@ -88,7 +88,7 @@ pip install "solvi[onnx]"      # + onnxruntime, tokenizers: the decider (solvi.c
 pip install "solvi[serve]"     # + fastapi, uvicorn: solvi serve over HTTP
 pip install "solvi[mcp]"       # + the official MCP SDK for solvi serve --mcp (without it, a built-in stdio server is used)
 pip install "solvi[duckdb]"    # + duckdb: stored decisions in a DuckDB file; "solvi[postgres]" for PostgreSQL
-pip install "solvi[lora]"      # + torch, transformers, peft: solvi.lora.adapt_lora, a LoRA adapter per question (experimental)
+pip install "solvi[lora]"      # + torch, transformers, peft: solvi.experimental.lora.adapt_lora, a LoRA adapter per question (experimental)
 ```
 
 For development, from a clone: `uv sync`, then `uv run pytest`.
@@ -1433,7 +1433,7 @@ result keys, so code written for one takes the other. `decide`, `score`, `act_gu
 threshold for a target error among the answered, `method="empirical"` or `"ltt"`), `conformal` and the calibration
 files act on the combination as a whole; `fit`, `adapt`, `teach` and `reset` go to every part and return one result
 per part (so do `solvi.core.knowledge.memory.attach(combination)` — a memory for every part, which inside a combination only checks —
-and `solvi.lora.remove_lora(combination)`); `calls()` counts the models called (a part's `calls()` counts its own decisions the same way). What belongs to one part raises
+and `solvi.experimental.lora.remove_lora(combination)`); `calls()` counts the models called (a part's `calls()` counts its own decisions the same way). What belongs to one part raises
 `NotImplementedError` naming the part to call it on: `save_lora` and `load_lora` (an adapter is trained
 on one checkpoint for one question, and its holdout recalibrates that part's own threshold), `budget`, `sections_k`,
 `long_key` and `long_input` (each part reads long texts by its own `long=`), and `in_pass` (a shared forward pass is
@@ -1573,7 +1573,7 @@ different checkpoint is refused unless `strict=False`); `part.reset()` forgets o
 #### A LoRA adapter per question: adapt_lora (experimental)
 
 ```python
-from solvi.lora import adapt_lora, remove_lora
+from solvi.experimental.lora import adapt_lora, remove_lora
 
 model = DecideModel.load("solvi-ai/solvi-base", backend="torch")    # pip install "solvi[lora]"
 team = model.decision("team", "Which team?", "email", TEAMS)
@@ -1583,7 +1583,7 @@ team.save_calibration("team.calib.json")            # writes team.calib.lora.saf
 remove_lora(team)                                   # roll back: the checkpoint answers again, thresholds as before
 ```
 
-Training and rolling back are functions of `solvi.lora`, not methods of the part (in 1.0 `part.adapt_lora` and
+Training and rolling back are functions of `solvi.experimental.lora`, not methods of the part (in 1.0 `part.adapt_lora` and
 `part.remove_lora` raise an AttributeError naming them): a stable part does not import the experimental module. The
 part keeps an adapter slot — `part.lora`, `part.save_lora`, `part.load_lora` and the calibration file work as before.
 
@@ -1595,7 +1595,7 @@ rest of the checkpoint frozen. **Which one to use:**
 | labelled examples of the question | use |
 |---|---|
 | fewer than ~100 | `part.fit` (milliseconds; for a question without a model, `system.fit`) |
-| ~100 or more, solvi-base | `solvi.lora.adapt_lora(part, ...)`, with `act_guard` on ~300 other labels |
+| ~100 or more, solvi-base | `solvi.experimental.lora.adapt_lora(part, ...)`, with `act_guard` on ~300 other labels |
 | solvi-large, or thousands of examples | [`tools/adapt_lora_gpu.py`](../tools/adapt_lora_gpu.py) from the repository (not installed by pip) on a GPU, then `part.load_lora(path)` |
 
 What to expect:
@@ -1607,7 +1607,7 @@ What to expect:
   (about 300) fixes what matters for escalation: the risk holds at the target on new answers like them. That is why
   `holdout=` exists, and why `adapt_lora` warns when it is not given.
 - **Time.** On a CPU, training takes minutes and grows with the examples; a GPU is much faster. `adapt_lora` times one
-  update on your machine and reports the estimate (a `solvi.lora.LoraWarning`) before training.
+  update on your machine and reports the estimate (a `solvi.experimental.lora.LoraWarning`) before training.
 - **Other questions.** The adapter is active only while its own question is scored; the model's other questions are
   answered by the checkpoint exactly as before.
 
@@ -1626,7 +1626,7 @@ unless `strict=False`); `save_calibration` writes it next to the calibration fil
 were before the first adapter. It is refused for a decider that is not a torch encoder (an ONNX one: load it with
 `backend="torch"`; an LLM or a rule has no weights to adapt), for checkpoints larger than solvi-base (use the GPU script)
 and for rank / number / span questions. **Experimental:** the API, the recipe and the file format may change; the first
-use warns (`solvi.learning.ExperimentalWarning`).
+use warns (`solvi.experimental.learning.ExperimentalWarning`).
 
 ### "Other" as an abstain threshold
 
@@ -2068,7 +2068,7 @@ fit on all of them; with refits it catches up. The cost:
   length), up to `refit_until` examples (2000). Past that no refit is due, the rows are dropped and the head goes on with
   rank-one steps only;
 - a refit is a change like any update: `teach` makes it at once and it is not gated. The learning loop
-  (`solvi.learning.Learning`) manages decision parts, not fitted heads: while it is attached with `gate_teach=True`, `teach`
+  (`solvi.experimental.learning.Learning`) manages decision parts, not fitted heads: while it is attached with `gate_teach=True`, `teach`
   only stores the correction and the head (and its refit schedule) does not move. The head depends only on its first
   fit and the sequence of corrections, so replaying them gives the same head (the same fingerprint); keep a
   `copy.deepcopy(head)` to go back.
@@ -2141,10 +2141,10 @@ schedule or after a drift flag (`System.guarantee(..., corrections=True)` — th
 source), refit (`fit` on `storage.corrections()`), or keep them as knowledge. Recalibrating on every outcome as it
 arrives is not in the stable path: measured, it broke the promises — the outcomes an agent sees are not a random sample
 of its decisions (a decision that abstained has none), and a threshold moved after every label is no longer the one the
-promise was calibrated for. The experimental `solvi.oncalib` does it, with that risk in its documentation:
+promise was calibrated for. The experimental `solvi.experimental.oncalib` does it, with that risk in its documentation:
 
 ```python
-from solvi.oncalib import OnTheFly                          # ExperimentalWarning on import
+from solvi.experimental.oncalib import OnTheFly                          # ExperimentalWarning on import
 live = OnTheFly(system, "move", max_risk=0.05, every=50, window=500, min_labels=30)
 live.outcome(res, "west")          # stored as above; every 50 new labels: System.guarantee on the last 500
 live.drifted()                     # a drift flag: from now on only later labels count, recalibrated at once
@@ -2202,7 +2202,7 @@ requests with new intents — System 2 = an LLM's recorded answers; the details 
 | a guarantee's calibration: `System.guarantee(..., corrections=store, sources=...)` | yes, when `sources` names it | fed every verified answer, System 1 answered more within its promise on two tasks of three |
 | a head (`fit` / `teach`) | no — `teach(label_source="verified")` only stores the label | gained on one task of three |
 | a memory of corrections | no — `UntrustedLabel` | broke System 1's promise on the contract task |
-| the learning loop (`solvi.learning.Learning`) | no — listed in `labels()["rejected"]` | its ladder is a head and a memory |
+| the learning loop (`solvi.experimental.learning.Learning`) | no — listed in `labels()["rejected"]` | its ladder is a head and a memory |
 
 Feed the calibration **every** answer System 2 vouched for, not only the cases where it disagreed with System 1: a
 threshold calibrated on disagreements alone sees only System 1's mistakes, and the verified disagreements were too few
@@ -2210,13 +2210,13 @@ to move anything. The report's `labels` lists the stored ids it read; calibratin
 
 ### Learning from corrections with gates and rollback (experimental)
 
-`Learning(system, ...)` (from `solvi.learning`; until 1.0 `system.learning(...)`, which now raises an AttributeError
+`Learning(system, ...)` (from `solvi.experimental.learning`; until 1.0 `system.learning(...)`, which now raises an AttributeError
 naming it) turns the stored corrections into updates of the model decisions — only through gates, recorded,
 and reversible. It is off until you call it, and experimental (it warns `ExperimentalWarning`; its API and defaults may
 change):
 
 ```python
-from solvi.learning import Learning
+from solvi.experimental.learning import Learning
 
 loop = Learning(system, store, gates={"honesty": "tests/honesty/core_v1.json"})
 # ... the system runs; people correct escalations with system.teach(...) — now stored only, not learned at once
@@ -3589,7 +3589,7 @@ for a violation), calibrate with the model the hook uses, and name the file in t
 
 ```bash
 SOLVI_HOOK_RULES=.claude/solvi-rules.toml SOLVI_HOOK_DECIDER=systemone:http://127.0.0.1:8765#solvi-large \
-  solvi calibrate solvi.hooks:rules_system no_employee_data_from_browser_answer labels.jsonl --risk 0.1 \
+  solvi calibrate solvi.experimental.hooks:rules_system no_employee_data_from_browser_answer labels.jsonl --risk 0.1 \
   --out .claude/no_employee_data_from_browser.calib.json
 # then in the rule: calibration = "no_employee_data_from_browser.calib.json"   (relative to the rules file)
 ```
@@ -4013,17 +4013,17 @@ asks, no proof of the prune and bound promises. A candidate still runs every par
 saves the hashing and the bookkeeping, about half of a full ask's time there), so a space of millions is for code,
 not for this search.
 
-## A specification compiled into the catalog: solvi.compile
+## A specification compiled into the catalog: solvi.experimental.compile
 
 > **Experimental.** The API may change. What it promises is the procedure below, not correctness: a compiled part is
 > as right as the drafts and the tests that agreed on it.
 
-A policy, a regulation or a constraint description says what to decide; solvi decides with catalog parts. `solvi.compile`
+A policy, a regulation or a constraint description says what to decide; solvi decides with catalog parts. `solvi.experimental.compile`
 lets an LLM write those parts from the text and accepts them only after checks that need no labelled examples:
 
 1. the text is split into numbered **clauses** (`Spec`); every part the writer returns names the clauses it implements,
    and every clause is cited by a part or declared not normative with a reason;
-2. the module is **pure functions** checked by `solvi.sandbox` (an `ast` allowlist of standard-library imports, no
+2. the module is **pure functions** checked by `solvi.experimental.compile.sandbox` (an `ast` allowlist of standard-library imports, no
    files, reflection or dunders) and run there — in a subprocess with memory and time limits — before anything of it
    enters your process;
 3. **two drafts are written independently** and must give the same answer to every question on every input of a pool:
@@ -4051,7 +4051,7 @@ above; it only keeps a draft stuck on the contract from blocking a partner that 
 import json
 
 from solvi import Answer, Question
-from solvi.compile import Inputs, Spec, compile_spec
+from solvi.experimental.compile import Inputs, Spec, compile_spec
 
 POLICY = """# Shipping
 - An order of 50 or more ships free; otherwise shipping costs 5.
@@ -4134,7 +4134,7 @@ Two drafts that disagree, or a test every draft fails, can stop a compilation th
 a clause, or the derived test is wrong. `review=` puts a person where the loop cannot settle it alone:
 
 ```python
-from solvi.compile import Ruling, compile_spec, reference_reviewer
+from solvi.experimental.compile import Ruling, compile_spec, reference_reviewer
 
 def ask_a_person(d):                     # d: a Dispute
     print(d.text())                      # the input, each draft's answer and the clauses it cites
@@ -4194,7 +4194,7 @@ clauses its part cites — as fine as the parts are: a rule that cites every cla
 ### Versions and replay
 
 ```python
-from solvi.compile import Versions
+from solvi.experimental.compile import Versions
 versions = Versions("policy_versions")      # v1/, v2/ ... each module.py + compiled.json + version.json
 n = versions.add(c2, "after the change")    # accepted compilations only
 system = versions.system()                  # the latest; versions.system(1) the first
@@ -4233,7 +4233,7 @@ from the same model — a wrong reading that both drafts and the tests share is 
 meaning. "Agree" covers the pool only: inputs nobody generates are not compared, so declare the domains and give
 samples of the real inputs. The parts read structured inputs: nothing here writes extractors from text, a search, or
 features for a head. Once loaded, a compiled module runs in your process with restricted builtins; the subprocess
-limits hold only during compilation (see `solvi.sandbox`). Labels, when you have them, are the stronger check —
+limits hold only during compilation (see `solvi.experimental.compile.sandbox`). Labels, when you have them, are the stronger check —
 pass them.
 
 ## Who answers: System 1, the slow path or a person (solvi.core.dispatch)
@@ -4451,8 +4451,8 @@ reachable from the stage at which the recorded player first reached it. The repl
 > the proposer's (a warning says when the label's words are not near the number).
 
 Chart makers and LLMs get numbers wrong: a swapped digit, a share that was never in the text, a percentage drawn as a
-count, a pie of answers that add up to 108%. `solvi.charts` turns a text into an SVG chart in four steps — the contract
-of every specialist (`solvi.specialist.Specialist`):
+count, a pie of answers that add up to 108%. `solvi.experimental.charts` turns a text into an SVG chart in four steps — the contract
+of every specialist (`solvi.experimental.specialist.Specialist`):
 
 1. **propose** — a proposer writes a typed `ChartSpec` (pydantic): the chart type (`bar`, `line`, `pie`), a title, a unit
    and a scale, series of labelled values, and for every value the passage of the text it was read from;
@@ -4463,7 +4463,7 @@ of every specialist (`solvi.specialist.Specialist`):
    recorded proposal and re-renders it: the same issues and identical bytes, or a list of what differs.
 
 ```python
-from solvi.charts import chart, ChartSpecialist, LLMProposer
+from solvi.experimental.charts import chart, ChartSpecialist, LLMProposer
 
 run = chart(press_release, "revenue by region")      # the rule-based proposer, no model
 run.output                                           # the SVG (a str), or None when nothing verified
@@ -4703,6 +4703,53 @@ approve = 'yes'  [ok]  confidence 0.60  ← computed by approve
               · grounding rejected: total — total_model: not grounded: '488.60' is not the text at [100:105] ('48.60')
               · fallback producer: total — total_regex used after total_model rejected
 ```
+
+### Counterfactual explanations (experimental): solvi.experimental.counterfactual
+
+"What would have changed the answer?" — the smallest change of the given inputs, for adverse-action reasons in lending and
+clear answers in support. Experimental: importing it warns, its API may change, and it has no measured use yet
+(`solvi.experimental.STATUS["counterfactual"]`).
+
+```python
+from solvi.experimental.counterfactual import search
+res = system.ask({"amount": 1200.0, "debt": 1000, "income": 5000, "history": "on time", "age": 30})
+cf = search(res, "approve")
+print(cf)
+# approve = decline [ok]
+#   approve if amount ≤ 1000 (now 1200)
+#   held at their recorded proposals (no model called): risk
+#   not searched: history (str: no domain (pass domains={'history': [...]}))
+cf.best.changes[0]            # Change(fact="amount", now=1200.0, to=1000.0, op="≤", cost=0.17)
+cf.to_dict()
+```
+
+Only the deterministic flow is re-run, on the recorded plan: every model-backed part — an extractor, a model decision, a
+learned answer head — is **held at the proposal it recorded in this trace**, and no model is called. The explanation is
+"what the code would decide if the models said what they said"; the result lists the parts held. A model part that did not
+run in the recorded decision (a hard check failed first) has no proposal: inputs that need it make the question abstain and
+do not count as a change (listed as "without a recorded proposal"). Learned rule lists (`learn_rule`) are code and re-run.
+
+What is searched (`over=`: default, the given facts the question's flow reads):
+
+- numbers and dates — outward from the current value in both directions with doubling steps, then bisection between the
+  last unchanged and the first changed value: the nearest threshold crossing, exact for inputs the answer is monotone in
+  (a non-monotone input can hide a nearer crossing between two probes). A direction where no probe changes the answer
+  is tried again on an even grid up to the farthest probe, which finds the band of a two-sided rule (`abs(value + 20) >
+  5` at 40 → `no if value ≤ -15`); a narrower band can still be missed, so when nothing is found the result says "no
+  change ... was found", not that none exists. Integers and dates give exact bounds
+  (`debt ≤ 1999`, `purchase_date ≥ 2026-08-20`); floats are shown at the shortest decimal that holds, `≤` or `<` as the
+  rule has it. A non-negative input stays non-negative; a domain `(lo, hi)` that does not contain the current value is
+  refused for that input (`cf.not_searched` says why);
+- booleans, Enums and `Literal` fields of `System(input_model=...)` — every other value;
+- anything else only with `domains={"history": ["on time", "late"]}`; a tuple bounds a number: `domains={"amount": (0, 5000)}`.
+
+`max_changes=2` (the default) tries two inputs together when no single input changes the answer ("approve if amount ≤ 1000
+(now 1200) and debt ≤ 1999 (now 2500)" — each bound holds with the other change made); `max_changes=1` does not.
+`target="approve"` looks only for that answer. Results are ranked by the number of changes, then their size (the relative
+change of a number; for a date the days moved over 30, or over the width of its domain; 1 for an enumerated value).
+A given input read only by a part that did not run (a soft check skipped after a hard check failed) is listed in
+`cf.not_searched`. `max_evals=5000` caps the re-runs (`cf.exhausted`). A response loaded from
+a store with its System works the same; one loaded without it needs `system=` (`search(res, "approve", system=system)`).
 
 ### Reports for people: res.report, store.report, solvi report
 

@@ -40,14 +40,15 @@ def rewrite_dotted(text, paths=None):
     return _dotted_pattern(paths).sub(lambda m: paths[m.group(1)], text)
 
 
-def _split_import(names, indent, paths, top_names):
-    """The names of one `from solvi import ...` → the statements that import them in 1.0 (None: nothing to change)."""
+def _split_import(module, names, indent, paths, top_names):
+    """The names of one `from <module> import ...` → the statements that import them in 1.0 (None: nothing to
+    change)."""
     kept, moved = [], []
     for name, asname in names:
-        if f"solvi.{name}" in paths:                                  # a module: from solvi import storage
-            parent, _, leaf = paths[f"solvi.{name}"].rpartition(".")
+        if f"{module}.{name}" in paths:                               # a module: from solvi import storage
+            parent, _, leaf = paths[f"{module}.{name}"].rpartition(".")
             moved.append((parent, leaf, asname or (name if leaf != name else None)))
-        elif name in top_names:                                       # a name that left the package's surface
+        elif module == "solvi" and name in top_names:                 # a name that left the package's surface
             moved.append((top_names[name], name, asname))
         else:
             kept.append((name, asname))
@@ -58,12 +59,12 @@ def _split_import(names, indent, paths, top_names):
         groups.setdefault(parent, []).append(f"{leaf} as {asname}" if asname and asname != leaf else leaf)
     out = []
     if kept:
-        out.append("from solvi import " + ", ".join(f"{n} as {a}" if a else n for n, a in kept))
+        out.append(f"from {module} import " + ", ".join(f"{n} as {a}" if a else n for n, a in kept))
     out += [f"from {parent} import {', '.join(items)}" for parent, items in groups.items()]
     return ("\n" + indent).join(out)
 
 
-_FROM_SOLVI = re.compile(r"^([ \t]*)from solvi import (\([^)]*\)|[^\n#]*?)([ \t]*(?:#[^\n]*)?)$", re.M)
+_FROM_SOLVI = re.compile(r"^([ \t]*)from (solvi(?:\.\w+)*) import (\([^)]*\)|[^\n#]*?)([ \t]*(?:#[^\n]*)?)$", re.M)
 
 
 def _names(spec):
@@ -83,10 +84,10 @@ def rewrite(text, paths=None, top_names=None):
     top_names = _deprecate.TOP_LEVEL_MOVED if top_names is None else top_names
 
     def from_solvi(m):
-        indent, spec, tail = m.group(1), m.group(2), m.group(3)
+        indent, module, spec, tail = m.group(1), m.group(2), m.group(3), m.group(4)
         if not re.fullmatch(r"\(?[\w\s,]*\)?", re.sub(r"#[^\n]*", "", spec)):
             return m.group(0)                                         # not a plain list of names: leave it
-        new = _split_import(_names(spec), indent, paths, top_names)
+        new = _split_import(module, _names(spec), indent, paths, top_names)
         return m.group(0) if new is None else indent + new + tail
 
     return rewrite_dotted(_FROM_SOLVI.sub(from_solvi, text), paths)

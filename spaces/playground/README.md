@@ -54,7 +54,7 @@ Tabs:
   its fields, each with a quote; `system.ask_text` answers it), the agent guard (preview: `solvi.agents.Guard` allows a
   refund to the account the user wrote, denies one to an account found only in a tool output, escalates the same call
   with `tool_values="escalate"`; the URL matcher accepts the address the user named and refuses look-alike hosts), a
-  verified chart (preview: `solvi.charts.chart(text)` → an SVG where every number is quoted from the text; a careless
+  verified chart (preview: `solvi.experimental.charts.chart(text)` → an SVG where every number is quoted from the text; a careless
   proposal checked value by value; replay and an edited record), which record changed (preview: `store.signature()`
   names the one rewritten decision of six after every hash and the head were recomputed), learning from corrections
   (`fit` on 10 tickets, then 290 `teach` corrections, with 0.7's refit on doubling and without it) and a report for

@@ -78,7 +78,7 @@ class DecideModel:
         self.act_thresholds = {float(k): float(v) for k, v in (a.get("threshold_for_error") or {}).items()}
         self.escalate_below = th.get("escalate_below")          # a default for parts that set none (None: no default)
         self.adaptations: dict[tuple, Adaptation] = {}
-        self.loras: dict = {}                # lora_key → an Adapter (solvi.lora.LoraAdapter; experimental: solvi.lora.adapt_lora)
+        self.loras: dict = {}                # lora_key → an Adapter (solvi.experimental.lora.LoraAdapter; experimental: solvi.experimental.lora.adapt_lora)
         self._cache, self._cache_size, self._lock = OrderedDict(), cache_size, threading.Lock()
         self._pass_lock = threading.Lock()
         self._block_failed = False
@@ -376,7 +376,7 @@ class DecideModel:
                 del self._cache[k]
 
     def _score(self, pairs, read_len=0):
-        """[(spec, text)] → scorer outputs, in order; the questions with a LoRA adapter (solvi.lora) are scored with it
+        """[(spec, text)] → scorer outputs, in order; the questions with a LoRA adapter (solvi.experimental.lora) are scored with it
         active, apart from the others. read_len: see _score_plain."""
         if not self.loras:
             return self._score_plain(pairs, read_len)

@@ -993,14 +993,14 @@ def _limits(a):
 
 
 def _serve_guard(a, _fail, load_object):
-    """`solvi serve --guard catalog.py:guard --upstream CMD`: the MCP proxy with a Guard (solvi.agents.mcp)."""
+    """`solvi serve --guard catalog.py:guard --upstream CMD`: the MCP proxy with a Guard (solvi.experimental.mcp)."""
     if not (a.guard and a.upstream):
         _fail("serve --guard / --upstream: both are needed — the guard (module:attr or file.py:attr) and the MCP server's "
               "command line")
     if a.system or a.decider:
         _fail("serve --guard: a proxy serves the upstream server's tools; drop the System / --decider")
     from .agents import Guard
-    from .agents.mcp import run_proxy
+    from .experimental.mcp import run_proxy
     guard = load_object(a.guard)
     if not isinstance(guard, Guard):
         _fail(f"--guard {a.guard}: not a solvi.agents.Guard")
@@ -1064,13 +1064,13 @@ def add_parser(sub):
     s.add_argument("--mcp-impl", default="auto", choices=["auto", "sdk", "builtin"],
                    help="the official MCP SDK (auto: when installed) or the built-in JSON-RPC subset")
     s.add_argument("--guard", help="module:attr or file.py:attr — a solvi.agents.Guard: an MCP proxy that checks every "
-                                   "tools/call of --upstream (solvi.agents.mcp)")
+                                   "tools/call of --upstream (solvi.experimental.mcp)")
     s.add_argument("--upstream", help="the command line of the MCP server (stdio) behind the guard")
     s.add_argument("--facts", help="a JSON object of facts the guard's policies read (with --guard)")
     s.add_argument("--escalate", default="elicit", choices=["elicit", "deny"],
                    help="with --guard: ask the user about an escalated call (MCP elicitation, when the client supports it) "
                         "or return it as an error")
-    from .agents.mcp import CONTEXT_CHARS, CONTEXT_MESSAGES
+    from .experimental.mcp import CONTEXT_CHARS, CONTEXT_MESSAGES
     s.add_argument("--context-messages", type=int, default=CONTEXT_MESSAGES, metavar="N",
                    help=f"with --guard: the tool outputs the session keeps for checking (default {CONTEXT_MESSAGES}; 0: all)")
     s.add_argument("--context-chars", type=int, default=CONTEXT_CHARS, metavar="N",

@@ -50,7 +50,7 @@ OpenAI-compatible endpoint `llm:URL#model` (key in $SOLVI_LLM_API_KEY), a System
 $SOLVI_SYSTEMONE_API_KEY) or `module:attr`. Calibrate a fuzzy rule with the same model:
 
     SOLVI_HOOK_RULES=.claude/solvi-rules.toml SOLVI_HOOK_DECIDER=MODEL \\
-        solvi calibrate solvi.hooks:rules_system RULE_answer labels.jsonl --risk 0.1 --out .claude/RULE.calib.json
+        solvi calibrate solvi.experimental.hooks:rules_system RULE_answer labels.jsonl --risk 0.1 --out .claude/RULE.calib.json
 
 and name the file in the rule (`calibration = "RULE.calib.json"`, relative to the rules file). RULE is the rule's id with
 `-` as `_`; the labels are changes (`text`) with `label` true for a violation.
@@ -63,6 +63,9 @@ import os
 import re
 import sys
 from dataclasses import dataclass, field
+from . import mark, warn_on_import
+
+warn_on_import(__name__)
 
 HOOK_STORE = os.path.join(".solvi", "traces", "hooks.jsonl")
 DEFAULT_RULES = os.path.join(".claude", "solvi-rules.toml")
@@ -495,7 +498,7 @@ def instruction_lines(added):
         if _ADDRESSED.search(t):
             out.append([n, t])
         elif _CUES.search(t):                          # solvi.core.deciders.perturb only where one of its cue words is
-            from .core.deciders.perturb import injection_spans
+            from ..core.deciders.perturb import injection_spans
             if injection_spans(t, actions=False):
                 out.append([n, t])
     return out
@@ -670,8 +673,8 @@ def fuzzy_part(model, rule):
 def edit_system(rules, change, model=None, instructions=True):
     """The System for one change: the rules that apply to its path (and, for a question, whose `when` an added line
     matches), each rule's checks as hard checks of the question `edit`, deny checks first."""
-    from .core.catalog import Answer, Catalog, Question
-    from .core.system import System
+    from ..core.catalog import Answer, Catalog, Question
+    from ..core.system import System
     cat = Catalog()
     deny, ask, used = [], [], []
     for r in rules:
@@ -704,31 +707,31 @@ def edit_system(rules, change, model=None, instructions=True):
         checks.append(f.__name__)
     cat.rule("edit")(edit_verdict)
     q = Question("edit", "May the agent make this change?", Answer.choice(list(OUTCOMES)), requires=checks)
-    return System(cat, [q]), used
+    return mark(System(cat, [q]), "hooks"), used
 
 
 def rules_system():
     """Every question of the rules file in $SOLVI_HOOK_RULES (default .claude/solvi-rules.toml) as decision parts of one
     System, with the decider in $SOLVI_HOOK_DECIDER ($SOLVI_HOOK_MODEL in 0.7, removed in 0.9): for `solvi calibrate
-    solvi.hooks:rules_system RULE_answer ...`."""
-    from .core.catalog import Catalog
-    from .models import load as load_model
-    from .core.system import System
-    from ._loader import LoadError                      # the command prints it; a library caller gets an exception
+    solvi.experimental.hooks:rules_system RULE_answer ...`."""
+    from ..core.catalog import Catalog
+    from ..models import load as load_model
+    from ..core.system import System
+    from .._loader import LoadError                      # the command prints it; a library caller gets an exception
     spec = os.environ.get("SOLVI_HOOK_DECIDER")
     if not spec and os.environ.get("SOLVI_HOOK_MODEL"):
-        raise LoadError("solvi.hooks:rules_system: $SOLVI_HOOK_MODEL was renamed in 0.8 and removed in 0.9: set "
+        raise LoadError("solvi.experimental.hooks:rules_system: $SOLVI_HOOK_MODEL was renamed in 0.8 and removed in 0.9: set "
                         "$SOLVI_HOOK_DECIDER")
     if not spec:
-        raise LoadError("solvi.hooks:rules_system: set SOLVI_HOOK_DECIDER to the decider the hook uses (--decider)")
+        raise LoadError("solvi.experimental.hooks:rules_system: set SOLVI_HOOK_DECIDER to the decider the hook uses (--decider)")
     model = load_model(spec)
     cat, qs = Catalog(), []
     for r in load_rules(os.environ.get("SOLVI_HOOK_RULES", DEFAULT_RULES)):
         if r.question is not None:
             qs.append(fuzzy_part(model, r).question(cat))
     if not qs:
-        raise LoadError("solvi.hooks:rules_system: no rule with a question")
-    return System(cat, qs)
+        raise LoadError("solvi.experimental.hooks:rules_system: no rule with a question")
+    return mark(System(cat, qs), "hooks")
 
 
 # --------------------------------------------------------------------------------------------------- the store
@@ -736,7 +739,7 @@ def open_store(where, root):
     """The hook's TraceStorage: a JSON-lines file opens from its head (the count and last hash, checked against the last
     line) rather than by reading every record, so a long store stays fast; other kinds as open_storage opens them. Hooks
     may run in parallel: each append locks the file and continues the chain from what the others wrote (JSONLStorage)."""
-    from .core.store import JSONLStorage, open_storage
+    from ..core.store import JSONLStorage, open_storage
     path = where if os.path.isabs(where) or "://" in where else os.path.join(root, where)
     if "://" in path or path.endswith((".db", ".sqlite", ".sqlite3", ".duckdb")):
         return open_storage(path)
@@ -1014,8 +1017,8 @@ def skill_rule(skill_scores):
 
 
 def skill_system(skills, model=None, min_score=1.5, margin=0.25, calibration=None):
-    from .core.catalog import Answer, Catalog, Question
-    from .core.system import System
+    from ..core.catalog import Answer, Catalog, Question
+    from ..core.system import System
     cat = Catalog()
     names = [n for n, _ in skills]
     if model is None:
@@ -1030,7 +1033,8 @@ def skill_system(skills, model=None, min_score=1.5, margin=0.25, calibration=Non
         if calibration:
             part.load_calibration(calibration)
         part.question(cat)
-    return System(cat, [Question("skill", "Which skill does this request need?", Answer.choice(names + ["none"]))])
+    return mark(System(cat, [Question("skill", "Which skill does this request need?", Answer.choice(names + ["none"]))]),
+                "hooks")
 
 
 def pick_skill(prompt, skills, model=None, min_score=1.5, margin=0.25, calibration=None, store=None, meta=None):
@@ -1096,7 +1100,7 @@ def cmd_audit(a):
     if not os.path.exists(path):
         print(f"solvi: no store at {path}", file=sys.stderr)
         return 2
-    from .core.store import open_storage
+    from ..core.store import open_storage
     store = open_storage(path)
     recs = [r for r in store.iter() if (r.meta or {}).get("hook") == "pre-edit"]
     pick = [r for r in recs if r.id == a.id] if a.id else recs[-1:]
@@ -1134,7 +1138,7 @@ def _payload():
 def _model(spec):
     if not spec:
         return None
-    from .models import load
+    from ..models import load
     return load(spec)
 
 

@@ -73,7 +73,7 @@ def has_agents():
 
 def has_charts():
     try:
-        from solvi.charts import chart  # noqa: F401
+        from solvi.experimental.charts import chart  # noqa: F401
         return True
     except ImportError:
         return False
@@ -492,11 +492,11 @@ def demo_chart(text, risk=None):
     """A text with numbers → an SVG in which every number is quoted from the text; a careless proposal on the same text
     is checked value by value; the recorded run replays to the same bytes, an edited record does not."""
     if not has_charts():
-        return needs("solvi.charts", "0.7"), "", "", "", ""
+        return needs("solvi.experimental.charts", "0.7"), "", "", "", ""
     import json
-    from solvi.charts import ChartSpecialist, FixedProposer, chart
+    from solvi.experimental.charts import ChartSpecialist, FixedProposer, chart
     r = chart(text)
-    lines = ["**Verified chart (preview)** — `solvi.charts.chart(text)`: a proposer writes a typed chart spec with a quote "
+    lines = ["**Verified chart (preview)** — `solvi.experimental.charts.chart(text)`: a proposer writes a typed chart spec with a quote "
              "for every value, code checks each value against the text and draws only what verified. Here the proposer "
              "is the rule-based one (no model).", "", "```", r.report(), "```"]
     pics = [_svg_box(r.output, "Rule-based proposer: every drawn number is quoted from the text.")] if r.output else []

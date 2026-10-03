@@ -22,7 +22,7 @@ import sys
 import tempfile
 from pathlib import Path
 
-from solvi.charts import ChartSpecialist, FixedProposer, chart
+from solvi.experimental.charts import ChartSpecialist, FixedProposer, chart
 
 PRESS = """ACME Corp. reports third-quarter 2025 results
 

@@ -6,7 +6,7 @@ from pathlib import Path
 import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
-GONE = ["solvi.many", "solvi.otel", "solvi.pytest_plugin", "solvi.counterfactual", "solvi.segment_model",
+GONE = ["solvi.many", "solvi.otel", "solvi.pytest_plugin", "solvi.segment_model",
         "solvi.aliases", "solvi.agents.pydantic_ai", "solvi.agents.langgraph", "solvi.agents.openai_agents"]
 
 

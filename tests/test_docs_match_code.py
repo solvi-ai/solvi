@@ -77,7 +77,7 @@ def test_every_module_the_docs_import_from_has_an_api_page_in_the_index_and_the_
         page = api_page(mod)
         assert page is not None, mod
         assert f"[`{mod}`]({page.name})" in index and f"{mod}: api/{page.name}" in nav, mod
-    assert "[`solvi.lora`](lora.md)" in index
+    assert "[`solvi.experimental.lora`](lora.md)" in index
 
 
 def test_the_api_pages_render_what_the_guide_tells_users_to_call_on_combinations_and_memories():

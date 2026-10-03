@@ -158,7 +158,7 @@ def test_the_learning_loop_runs_on_duckdb(tmp_path):
     s.storage = store
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
-        from solvi.learning import Learning
+        from solvi.experimental.learning import Learning
         loop = Learning(s, gates={"max_change": 0.9})
     stream(s, 10)
     rep = loop.run()

@@ -8,7 +8,7 @@
     solvi replay decisions.db --system myapp.decisions:system
     solvi diff   decisions.db --system myapp.decisions_v2:build_system [--question Q] [--since ISO] [--limit N] [--json]
     solvi serve  myapp.decisions:system [--store decisions.db] [--decider ID] [--port 8000] [--mcp]   (solvi.serve)
-    solvi serve  --guard catalog.py:guard --upstream "MCP SERVER COMMAND" [--store calls.db]         (solvi.agents.mcp)
+    solvi serve  --guard catalog.py:guard --upstream "MCP SERVER COMMAND" [--store calls.db]         (solvi.experimental.mcp)
     solvi check  myapp.decisions:system [--strict] [--json]                                          (solvi.check)
     solvi report decisions.db [--since ISO] [--until ISO] [--question Q] [--id ID] [--html out.html] [--md out.md] [--json]
                                                                                                      (solvi.core.store.report)
@@ -20,7 +20,7 @@
     solvi calibrate myapp.decisions:system PART labels.csv --risk 0.1 [--groups a,b] [--method crc|ltt] [--out F]
                                                                                                      (solvi.calibrate)
     solvi models [list | pull ID | check MODEL --examples labels.jsonl --task Q]                       (solvi.models)
-    solvi hook [install | uninstall | pre-edit --rules rules.toml | pick-skill --skills-dir DIR]        (solvi.hooks)
+    solvi hook [install | uninstall | pre-edit --rules rules.toml | pick-skill --skills-dir DIR]        (solvi.experimental.hooks)
     solvi migrate PATH [--check]     rewrite the 0.9 import paths of your code to the 1.0 ones          (solvi._migrate)
 
 --system names a System: "package.module:attribute" or "path/to/file.py:attribute", where the attribute is a System or a
@@ -41,6 +41,7 @@ import importlib
 import json
 import os
 import sys
+import warnings
 
 from .command import dump as _dump, fail as _fail, load_module, load_object, load_system  # noqa: F401
 
@@ -368,7 +369,8 @@ def ask_parser(sub):
 
 COMMANDS = {"test": ("solvi.testing", "decision regression tests from cases.json files"),
             "honesty": ("solvi.honesty", "honesty numbers of a labelled set, gated against a baseline"),
-            "hook": ("solvi.hooks", "a coding agent's hooks: check edits against rules, pick a skill, install them")}
+            "hook": ("solvi.experimental.hooks", "a coding agent's hooks (experimental): check edits against rules, pick a "
+                     "skill, install them")}
 
 
 def main(argv=None):
@@ -378,7 +380,13 @@ def main(argv=None):
         print(f"solvi {__version__}")
         return 0
     if argv and argv[0] in COMMANDS:                  # commands with their own option parsers
-        return importlib.import_module(COMMANDS[argv[0]][0]).main(argv[1:])
+        module = COMMANDS[argv[0]][0]
+        with warnings.catch_warnings():
+            if module.startswith("solvi.experimental."):  # an experimental command asked for by name (`solvi hook`):
+                from .core.catalog import ExperimentalWarning   # its help says so, no warning on every run
+                warnings.simplefilter("ignore", ExperimentalWarning)
+            module = importlib.import_module(module)
+        return module.main(argv[1:])
     p = argparse.ArgumentParser(prog="solvi", description="solvi: init a project; ask, check, serve a system; test, "
                                                           "honesty; calibrate a model decision; models; verify, replay, "
                                                           "diff and report stored decisions",

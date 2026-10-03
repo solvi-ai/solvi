@@ -68,20 +68,20 @@ nav:
       - solvi.core.slow.generate: api/generate.md
       - solvi.core.slow.agree: api/agree.md
       - solvi.core.slow.refine: api/refine.md
-      - solvi.compile: api/compile.md
-      - solvi.sandbox: api/sandbox.md
+      - solvi.experimental.compile: api/compile.md
+      - solvi.experimental.compile.sandbox: api/sandbox.md
       - solvi.core.deciders.combine: api/multi.md
       - solvi.core.knowledge.memory: api/memory.md
-      - solvi.lora: api/lora.md
-      - solvi.learning: api/learning.md
-      - solvi.oncalib: api/oncalib.md
+      - solvi.experimental.lora: api/lora.md
+      - solvi.experimental.learning: api/learning.md
+      - solvi.experimental.oncalib: api/oncalib.md
       - solvi.serve: api/serve.md
       - solvi.agents: api/agents.md
-      - solvi.hooks: api/hooks.md
+      - solvi.experimental.hooks: api/hooks.md
       - solvi.core.textin: api/textin.md
       - solvi.core._inputs: api/inputs.md
-      - solvi.specialist: api/specialist.md
-      - solvi.charts: api/charts.md
+      - solvi.experimental.specialist: api/specialist.md
+      - solvi.experimental.charts: api/charts.md
       - solvi.core.deciders.longdoc: api/longdoc.md
       - solvi.core.knowledge.episodes: api/episode.md
       - solvi.core.knowledge.worldmap: api/worldmap.md
@@ -101,6 +101,7 @@ nav:
       - solvi.core.slow.search: api/search.md
       - solvi.auto: api/auto.md
       - solvi.core.dispatch: api/dispatch.md
+      - solvi.experimental.counterfactual: api/counterfactual.md
       - solvi.core.deciders.perturb: api/perturb.md
       - solvi.core.store: api/storage.md
       - solvi.core.store.signature: api/signature.md

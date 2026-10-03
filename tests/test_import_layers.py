@@ -6,7 +6,8 @@ the tiers are package prefixes of the 1.0 layout: solvi.core.<area>):
 - the execution layer (solvi.core: catalog, types, provenance, primitives, runtime, schema, textin) imports nothing
   above it, not even
   inside a function: what it needs of the modules above (the flow, the replay of their records) is defined in it;
-- nothing below the server and agent layer (solvi.cli, solvi.serve, solvi.hooks, solvi.agents) imports from it;
+- nothing below the server and agent layer (solvi.cli, solvi.serve, solvi.experimental.hooks / mcp, solvi.agents)
+  imports from it;
 - (rule 2) an import cycle — any import, inside a function too — stays inside one tier: the cross-tier cycle of 0.9
   (24 modules from decide to system and dispatch) was broken in 1.0 by the moves of LAYOUT §6, and the cycles left
   inside a tier are listed (INTRA_TIER_CYCLES), so a new one is a decision, not an accident;
@@ -23,7 +24,7 @@ from pathlib import Path
 SRC = Path(__file__).resolve().parents[1] / "src"
 BASE = {"solvi.core"} | {f"solvi.core.{m}" for m in ("catalog", "types", "provenance", "primitives", "runtime", "schema",
                                                      "textin")}
-TOP = ("solvi.cli", "solvi.serve", "solvi.hooks", "solvi.__main__", "solvi.agents")
+TOP = ("solvi.cli", "solvi.serve", "solvi.experimental.hooks", "solvi.experimental.mcp", "solvi.__main__", "solvi.agents")
 
 
 def _modules():
@@ -175,10 +176,14 @@ LOW_TIERS = {
     "knowledge": "core.knowledge",
 }
 HIGH = "__init__ __main__ auto calibrate check cli command honesty models scaffold serve show testing agents"
-EXPERIMENTAL = "compile sandbox hooks learning lora specialist charts agents.mcp oncalib"
-# stable → experimental imports that are meant: the command-line entries for an experimental feature (LAYOUT §6), and
-# auto's compiled slow path (LAYOUT risk 3: `slow=` will take a compiled System; until then it is listed here)
-ALLOWED_EXPERIMENTAL = {("solvi.serve", "solvi.agents.mcp"), ("solvi.auto", "solvi.compile")}
+EXPERIMENTAL = "experimental"                                           # solvi.experimental.*
+# stable → experimental imports that are meant: the command-line entries for an experimental feature (LAYOUT §6:
+# `solvi serve --upstream`), and auto's compiled slow path (LAYOUT risk 3: `slow=` will take a compiled System; until
+# then it is listed here)
+ALLOWED_EXPERIMENTAL = {("solvi.serve", "solvi.experimental.mcp"), ("solvi.auto", "solvi.experimental.compile")}
+# stable modules that load an experimental module by its name, on request: `solvi hook`, and a calibration file that
+# carries a LoRA adapter (the adapter's own loader)
+ALLOWED_BY_NAME = {("solvi.cli", "solvi.experimental.hooks"), ("solvi.core.deciders.adapt", "solvi.experimental.lora")}
 # the import cycles left in 1.0, each inside one tier
 INTRA_TIER_CYCLES = [
     {"solvi.core.catalog", "solvi.core.primitives", "solvi.core.provenance", "solvi.core.runtime", "solvi.core.schema",
@@ -195,7 +200,6 @@ def _level(m):
     table.update({x: ("high", None) for x in HIGH.split()})
     for i, (_, mods) in enumerate(LOW_TIERS.items()):
         table.update({x: ("low", i) for x in mods.split()})
-    table["agents.mcp"] = ("experimental", None)
     parts = name.split(".")
     for k in range(len(parts), 0, -1):
         if ".".join(parts[:k]) in table:
@@ -229,7 +233,8 @@ def test_tier_order_and_levels():
             lt, it = _level(t)
             if lm == "low" and (lt != "low" or it > im):
                 bad.append(f"{m} ({_tier(m)}) → {t} ({_tier(t)})")
-            elif lm == "high" and lt == "experimental" and (m, t) not in ALLOWED_EXPERIMENTAL:
+            elif lm == "high" and lt == "experimental" and (m, t) not in ALLOWED_EXPERIMENTAL and not (
+                    t == "solvi.experimental" and any(a == m for a, _ in ALLOWED_EXPERIMENTAL)):   # the package on the way
                 bad.append(f"{m} (high) → {t} (experimental)")
     assert not bad, f"imports against the tier order: {sorted(bad)}"
 
@@ -251,3 +256,40 @@ def test_the_names_moved_by_the_import_cycle_lane_are_the_same_objects():
         assert getattr(serve, name) is getattr(_rpc, name)
     for name in ("add_parser", "cmd_calibrate", "examples_of", "find_part", "label_of", "read_rows"):
         assert getattr(calibfile, name) is getattr(calibrate, name)
+
+
+def test_stable_modules_name_an_experimental_module_only_where_allowed():
+    """A string that is an experimental module's path ("solvi.experimental.hooks", to import it later) in a stable
+    module: only the allowlisted command-line entry and adapter loader."""
+    found = set()
+    for m, (path, _) in _modules().items():
+        if _level(m)[0] == "experimental" or m == "solvi._deprecate":          # _deprecate: the table of moves
+            continue
+        for n in ast.walk(ast.parse(path.read_text())):
+            if isinstance(n, ast.Constant) and isinstance(n.value, str) and n.value.startswith("solvi.experimental.") \
+                    and n.value[-1].isalnum() and n.value.replace(".", "").replace("_", "").replace(":", "").isalnum():
+                found.add((m, n.value.split(":")[0]))
+    assert found == ALLOWED_BY_NAME, sorted(found)
+
+
+def test_experimental_modules_warn_on_import_and_say_their_status():
+    import subprocess
+    import sys
+
+    from solvi import experimental
+    mods = sorted(m for m in _modules() if m.startswith("solvi.experimental.") and m.count(".") == 2)
+    names = {m.split(".")[2] for m in mods}
+    assert names == set(experimental.STATUS), names ^ set(experimental.STATUS)
+    for st in experimental.STATUS.values():
+        assert {"since", "what", "missing", "script", "deadline"} <= set(st) and st["deadline"] == "1.2"
+    code = ("import importlib, sys, warnings\nfrom solvi.core.catalog import ExperimentalWarning\n"
+            "with warnings.catch_warnings(record=True) as w:\n"
+            "    warnings.simplefilter('always')\n"
+            "    for m in sys.argv[1:]:\n"
+            "        importlib.import_module(m)\n"
+            "said = ' '.join(str(x.message) for x in w if x.category is ExperimentalWarning)\n"
+            "assert all(f'{m} is experimental' in said for m in sys.argv[1:]), said\n")
+    run = subprocess.run([sys.executable, "-c", code, *mods], capture_output=True, text=True)
+    assert run.returncode == 0, run.stderr[-2000:]
+    quiet = subprocess.run([sys.executable, "-W", "error", "-c", "import solvi, solvi.experimental"], capture_output=True)
+    assert quiet.returncode == 0, quiet.stderr

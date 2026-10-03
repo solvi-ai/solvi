@@ -1,12 +1,12 @@
 """Verified charts: a text with numbers → a chart in which every number is quoted from the text.
 
-    from solvi.charts import chart, RuleProposer, LLMProposer
+    from solvi.experimental.charts import chart, RuleProposer, LLMProposer
     run = chart(text, "revenue by region")                 # the rule-based proposer by default
     run = chart(text, proposer=LLMProposer("http://127.0.0.1:8080/v1", "qwen2.5-7b-instruct"))
     open("chart.svg", "w").write(run.output)               # None when nothing verified
     print(run.report())                                     # kept / dropped / changed, and why
 
-The first specialist of `solvi.specialist`: a proposer writes a ChartSpec (a chart type, series of labelled values,
+The first specialist of `solvi.experimental.specialist`: a proposer writes a ChartSpec (a chart type, series of labelled values,
 each value with its quote in the text, a unit, a scale, a title); the checker verifies every value — the quote is in
 the text, it holds that number (thousands separators, decimals, "4.2 billion", "15%", "1 500 000 руб" are read; an
 ambiguous "1.000" or "3 100" is not), with the chart's unit (percent is not percentage points, dollars are not euros,
@@ -21,6 +21,9 @@ from .check import ChartChecker, canon_unit
 from .propose import FixedProposer, LLMProposer, RuleProposer, spec_json_schema
 from .render import PALETTE, Drawing, contrast, render_svg
 from .spec import ChartSpec, Point, Series, SourceQuote, VerifiedChart, VerifiedPoint, VerifiedSeries
+from .. import warn_on_import
+
+warn_on_import(__name__)
 
 
 class ChartSpecialist(Specialist):

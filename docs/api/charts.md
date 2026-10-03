@@ -1,13 +1,13 @@
-# `solvi.charts`
+# `solvi.experimental.charts`
 
 Verified charts (preview): a text with numbers → an SVG in which every number is quoted from the text; the proposers, the checker, the renderer.
 
-::: solvi.charts
+::: solvi.experimental.charts
 
-::: solvi.charts.spec
+::: solvi.experimental.charts.spec
 
-::: solvi.charts.check
+::: solvi.experimental.charts.check
 
-::: solvi.charts.propose
+::: solvi.experimental.charts.propose
 
-::: solvi.charts.render
+::: solvi.experimental.charts.render

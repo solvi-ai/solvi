@@ -55,27 +55,27 @@ had a measured run. Importing a removed module raises ModuleNotFoundError.
 | `solvi.many` (`Many`, `decide_many`) | measured worse: one direct decision over the options was more accurate than its shortlist and its tournament | narrow the options in code (filter, rank), then one ordinary decision |
 | Space `documents-server` (Gradio) | never deployed: Gradio Spaces need a paid plan; the browser Space `documents-web` does the same | the `documents-web` Space |
 | `tools/smoke_decide.py` | a one-off script for checking a decider checkpoint; no CI or docs ran it | `solvi models check <checkpoint>` and the `model` tests (`pytest -m model`) |
-| `solvi.otel` and the `otel` extra | nothing in solvi used it and it had no measured use | `res.to_dict()` or a store (`solvi.storage`), sent to your tracing backend by your own code |
+| `solvi.otel` and the `otel` extra | nothing in solvi used it and it had no measured use | `res.to_dict()` or a store (`solvi.core.store`), sent to your tracing backend by your own code |
 | `solvi.pytest_plugin` (the `pytest11` entry point, `pytest gallery/`, `--solvi-fuzz`) | it loaded in every pytest session wherever solvi was installed; `solvi test` runs the same cases | `solvi test <dir>` (`--fuzz N`), or one pytest test that calls `solvi.testing.run_path` (docs: Regression tests) |
-| `solvi.counterfactual` and `Response.counterfactual()` | no measured use: nothing in the benchmarks, the gallery or the examples relied on it | ask the System on the changed inputs (`solvi.search` tries many candidate inputs against the checks) |
 | `ModelStrategist` and `solvi.segment_model` (the model strategist) | experimental, no checkpoint was ever published, and the model planned no better than a short keyword list, and far slower | `CostStrategist(producers="equivalent")` with `cost=` declared |
 | `solvi.aliases` (`NameMatcher`, `propose`, `accept`, `apply`, `match_names`) | experimental, no checkpoint of the matcher was ever published, no measurement | name the parameters after the facts they read, or a one-line part that renames a fact |
 | example `17_model_strategist.py` | it showed the two removed pieces with stand-in models | `examples/17_cost_strategist.py`: the code strategist alone |
 | `solvi.agents.pydantic_ai`, `solvi.agents.langgraph`, `solvi.agents.openai_agents` and the `pydantic-ai`, `langgraph`, `openai-agents` extras | no measured run went through any of them; the measured agent results (an injection benchmark, the τ-bench retail stand) call the guard directly | call `guard.check` (or `guard.call`) from your framework's tool-execution step; for MCP servers, the proxy (`solvi serve --guard --upstream`), which stays |
-| `System(cost_policy="measured")`, `solvi.costs.MeasuredCosts`, `system.freeze_costs()` / `unfreeze_costs()` | planning on measured run times showed no measured benefit | declare `cost=` on the parts; `cost_policy="declared"` is the only value left (a 0.9 plan record with measured costs still replays) |
-| `solvi.heads.Head` (the legacy answer head) | `System.fit` has built a `FastHead` since 0.8 and nothing in solvi built `Head` any more | `solvi.heads.FastHead` |
+| `System(cost_policy="measured")`, `solvi.core.costs.MeasuredCosts`, `system.freeze_costs()` / `unfreeze_costs()` | planning on measured run times showed no measured benefit | declare `cost=` on the parts; `cost_policy="declared"` is the only value left (a 0.9 plan record with measured costs still replays) |
+| `solvi.core.deciders.heads.Head` (the legacy answer head) | `System.fit` has built a `FastHead` since 0.8 and nothing in solvi built `Head` any more | `solvi.core.deciders.heads.FastHead` |
 
 ### Moved off the classes (no shim)
 
-A stable class no longer imports an experimental module, so three methods became functions of their own modules. The
+A stable class no longer imports an experimental module, so these methods became functions of their own modules. The
 old method raises an AttributeError that names the new call; what the method did is unchanged.
 
 | was | now |
 |---|---|
-| `part.adapt_lora(examples, ...)` (and on a Cascade / Vote / Route) | `solvi.lora.adapt_lora(part, examples, ...)` (experimental) |
-| `part.remove_lora()`, `combination.remove_lora()` | `solvi.lora.remove_lora(part)` (a combination: every part's) |
-| `system.learning(store, ...)` | `solvi.learning.Learning(system, store, ...)` (experimental; same arguments) |
-| `part.memory(...)`, `combination.memory(...)` | `solvi.memory.attach(part, ...)` (same settings; a combination: a memory for every part) |
+| `part.adapt_lora(examples, ...)` (and on a Cascade / Vote / Route) | `solvi.experimental.lora.adapt_lora(part, examples, ...)` (experimental) |
+| `part.remove_lora()`, `combination.remove_lora()` | `solvi.experimental.lora.remove_lora(part)` (a combination: every part's) |
+| `system.learning(store, ...)` | `solvi.experimental.learning.Learning(system, store, ...)` (experimental; same arguments) |
+| `part.memory(...)`, `combination.memory(...)` | `solvi.core.knowledge.memory.attach(part, ...)` (same settings; a combination: a memory for every part) |
+| `res.counterfactual(question, ...)` | `solvi.experimental.counterfactual.search(res, question, ...)` (experimental; same arguments; `res.counterfactual` no longer exists). The module was first removed for 1.0 (no measured use) and is kept as experimental instead |
 
 `part.save_lora`, `part.load_lora`, `part.lora` and calibration files that carry an adapter work as before: a part now
 has an adapter slot, and the LoRA adapter fills it.
@@ -93,6 +93,13 @@ the very same module and warns (`SolviDeprecationWarning`) with the path to use;
 - Stored decisions, calibration files and fingerprints do not change: a fingerprint records the 0.9 module of a moved
   class or function (the table `solvi._deprecate.MOVED`), so decisions stored by 0.7–0.9 replay, and a store written by
   1.0 is read by 0.9 tools the same way. A stored `module:qualname` that names a 0.9 module loads without a warning.
+- **`solvi.experimental`** holds what works and is tested but has no measured gain or use yet: the learning loop,
+  LoRA adapters, compile (with its sandbox), the coding-agent hooks, the specialist and verified charts, the MCP proxy,
+  on-the-fly calibration and counterfactuals. Importing one warns (`ExperimentalWarning`); `solvi.experimental.STATUS`
+  says for each one since when it exists, what it is missing to graduate, the script that measures it and its deadline
+  (1.2: it graduates or is removed); a decision made by a System that uses one records it in the stored decision
+  (`meta["experimental"]`, e.g. `["lora"]`) and `solvi report --overview` counts them. Nothing stable imports them,
+  except on request: `solvi hook` and `solvi serve --upstream`.
 - `solvi.core` itself keeps the names it exported in 0.9 (`Catalog`, `Quote`, `find_quote`, ...); its private helpers
   are in `solvi.core.catalog`.
 
@@ -101,11 +108,19 @@ Where each module went:
 <!-- migration table: tools/migration_table.py -->
 | you imported (0.9) | import now (1.0) | level |
 |---|---|---|
+| `solvi.agents.mcp` | `solvi.experimental.mcp` | experimental: may change; removed in 1.2 unless it graduates |
 | `solvi.agree` | `solvi.core.slow.agree` | low level: building blocks |
 | `solvi.audit` | `solvi.core.store.audit` | low level: building blocks |
 | `solvi.calibfile` | `solvi.core.calibfile` | low level: building blocks |
 | `solvi.calibration` | `solvi.core.calibration` | low level: building blocks |
+| `solvi.charts` | `solvi.experimental.charts` | experimental: may change; removed in 1.2 unless it graduates |
+| `solvi.charts.check` | `solvi.experimental.charts.check` | experimental: may change; removed in 1.2 unless it graduates |
+| `solvi.charts.propose` | `solvi.experimental.charts.propose` | experimental: may change; removed in 1.2 unless it graduates |
+| `solvi.charts.render` | `solvi.experimental.charts.render` | experimental: may change; removed in 1.2 unless it graduates |
+| `solvi.charts.spec` | `solvi.experimental.charts.spec` | experimental: may change; removed in 1.2 unless it graduates |
+| `solvi.compile` | `solvi.experimental.compile` | experimental: may change; removed in 1.2 unless it graduates |
 | `solvi.costs` | `solvi.core.costs` | low level: building blocks |
+| `solvi.counterfactual` | `solvi.experimental.counterfactual` | experimental: may change; removed in 1.2 unless it graduates |
 | `solvi.decide` | `solvi.core.deciders` | low level: building blocks |
 | `solvi.decide.adapt` | `solvi.core.deciders.adapt` | low level: building blocks |
 | `solvi.decide.backends` | `solvi.core.deciders.backends` | low level: building blocks |
@@ -125,11 +140,14 @@ Where each module went:
 | `solvi.generate` | `solvi.core.slow.generate` | low level: building blocks |
 | `solvi.guarantee` | `solvi.core.guarantees.guarantee` | low level: building blocks |
 | `solvi.heads` | `solvi.core.deciders.heads` | low level: building blocks |
+| `solvi.hooks` | `solvi.experimental.hooks` | experimental: may change; removed in 1.2 unless it graduates |
 | `solvi.i18n` | `solvi.core._i18n` | internal |
 | `solvi.inputs` | `solvi.core._inputs` | internal |
+| `solvi.learning` | `solvi.experimental.learning` | experimental: may change; removed in 1.2 unless it graduates |
 | `solvi.llm` | `solvi.core.deciders.llm` | low level: building blocks |
 | `solvi.loader` | `solvi._loader` | internal |
 | `solvi.longdoc` | `solvi.core.deciders.longdoc` | low level: building blocks |
+| `solvi.lora` | `solvi.experimental.lora` | experimental: may change; removed in 1.2 unless it graduates |
 | `solvi.memory` | `solvi.core.knowledge.memory` | low level: building blocks |
 | `solvi.multi` | `solvi.core.deciders.combine` | low level: building blocks |
 | `solvi.openset` | `solvi.core.guarantees.openset` | low level: building blocks |
@@ -141,10 +159,12 @@ Where each module went:
 | `solvi.report` | `solvi.core.store.report` | low level: building blocks |
 | `solvi.rulelist` | `solvi.core.deciders.rulelist` | low level: building blocks |
 | `solvi.runtime` | `solvi.core.runtime` | low level: building blocks |
+| `solvi.sandbox` | `solvi.experimental.compile.sandbox` | experimental: may change; removed in 1.2 unless it graduates |
 | `solvi.schema` | `solvi.core.schema` | low level: building blocks |
 | `solvi.search` | `solvi.core.slow.search` | low level: building blocks |
 | `solvi.sets` | `solvi.core.sets` | low level: building blocks |
 | `solvi.signature` | `solvi.core.store.signature` | low level: building blocks |
+| `solvi.specialist` | `solvi.experimental.specialist` | experimental: may change; removed in 1.2 unless it graduates |
 | `solvi.storage` | `solvi.core.store` | low level: building blocks |
 | `solvi.strategist` | `solvi.core.plan.strategist` | low level: building blocks |
 | `solvi.strategy` | `solvi.core.plan.cost` | low level: building blocks |
@@ -161,14 +181,14 @@ Where each module went:
 To break the import cycle between the deciders, the System, the store and the dispatcher, some pieces moved to modules
 of their own. Every old import path still works, with no warning, and stored records, hashes, fingerprints and replay
 are unchanged: `Response` → `solvi.response`; the label-source checks (`check_source`, `TRUSTED_SOURCES`, `VERIFIED`,
-`UntrustedLabel`) → `solvi.sources`; `GroupBy` and `group_name` → `solvi.calibration`; `plan_batches` →
-`solvi.runtime`; the dollars of recorded model calls (`price_of`) → `solvi.costs`; the request limits and errors of
+`UntrustedLabel`) → `solvi.sources`; `GroupBy` and `group_name` → `solvi.core.calibration`; `plan_batches` →
+`solvi.core.runtime`; the dollars of recorded model calls (`price_of`) → `solvi.core.costs`; the request limits and errors of
 `solvi serve` (`Limits`, `RequestError`, `parse_json`, ...) → `solvi._rpc`; the `solvi calibrate` command and its
 helpers (`read_rows`, `examples_of`, `label_of`, `find_part`) → `solvi.calibrate`.
 
 ### Moving into the knowledge memory
 
-`solvi.memory` (`CorrectionMemory`, `solvi.memory.attach`), `solvi.episode` and `solvi.extract_multi` stay in 1.0 for now and
+`solvi.core.knowledge.memory` (`CorrectionMemory`, `solvi.core.knowledge.memory.attach`), `solvi.core.knowledge.episodes` and `solvi.core.extract.multi` stay in 1.0 for now and
 are marked "moving into the knowledge memory in 1.0" in their docs: they will be folded into solvi's knowledge memory,
 and their API may change then.
 

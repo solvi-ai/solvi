@@ -1,4 +1,4 @@
-"""LoRA adapters on the decider, one per question (experimental): `solvi.lora.adapt_lora(part, examples)`.
+"""LoRA adapters on the decider, one per question (experimental): `solvi.experimental.lora.adapt_lora(part, examples)`.
 
 When a question has a hundred labelled answers or more, a shift and a scale on the logits (`part.fit`) stop improving: they
 cannot change what the model reads in the input. A LoRA adapter can: low-rank updates (rank 8) of the encoder's attention
@@ -8,7 +8,7 @@ milliseconds), and compare the two on held-out labels. The adapter is 3.2 MB (bf
 minutes (adapt_lora estimates the time after its first update and says so before training), on a GPU seconds.
 
     part = model.decision("team", "Which team?", "email", TEAMS)      # DecideModel.load(..., backend="torch")
-    from solvi.lora import adapt_lora, remove_lora
+    from solvi.experimental.lora import adapt_lora, remove_lora
     report = adapt_lora(part, labelled, holdout=300)                  # 300 of the examples calibrate act_guard
     part.save_calibration("team.calib.json")                          # + team.calib.lora.safetensors beside it
     ...
@@ -46,7 +46,10 @@ import time
 import warnings
 from dataclasses import dataclass, field
 
-from . import _deprecate
+from .. import _deprecate
+from . import warn_on_import
+
+warn_on_import(__name__)
 
 FORMAT = "solvi lora v1"
 TARGET = r".*layers\.\d+\.(attn\.(Wqkv|Wo)|mlp\.(Wi|Wo))"     # ModernBERT: attention and MLP of every layer
@@ -67,13 +70,13 @@ class LoraWarning(UserWarning):
 def _experimental():
     if not _warned[0]:
         _warned[0] = True
-        from .core.catalog import ExperimentalWarning
-        warnings.warn("solvi.lora (adapt_lora, part.load_lora) is experimental: the API, the recipe and the file format may change",
+        from ..core.catalog import ExperimentalWarning
+        warnings.warn("solvi.experimental.lora (adapt_lora, part.load_lora) is experimental: the API, the recipe and the file format may change",
                       ExperimentalWarning, stacklevel=4)
 
 
 def _lora_key(part):
-    from .core.deciders import lora_key
+    from ..core.deciders import lora_key
     return lora_key(part.spec)
 
 
@@ -144,7 +147,7 @@ def _peft_config(config):
 # ------------------------------------------------------------------------------------------------ scope
 def check(part, allow_large=False):
     """Refuse what adapt_lora cannot adapt (ValueError / TypeError / ImportError with what to do instead)."""
-    from .core.deciders import DecisionPart, TorchScorer
+    from ..core.deciders import DecisionPart, TorchScorer
     if not isinstance(part, DecisionPart):
         raise TypeError(f"adapt_lora adapts a model decision (a DecisionPart), not a {type(part).__name__}: a rule or a "
                         "learned head has no encoder to adapt (use fit)")
@@ -440,7 +443,7 @@ def train(part, rows, *, r=8, alpha=None, epochs=6, lr=3e-4, seed=0, device=None
             tensors[n.replace(".solvi_training.", ".")] = p.detach().to("cpu", torch.bfloat16).float()
         elif n.startswith(HEAD):
             tensors[n] = p.detach().to("cpu", torch.bfloat16).float()
-    from . import __version__
+    from .. import __version__
     info = {"k": k, "updates": U, "epochs": epochs, "lr": lr, "seed": seed, "batch": BS, "device": str(dev),
             "seconds": round(seconds, 1), "loss_first": round(sum(losses[:5]) / len(losses[:5]), 4),
             "loss_last": round(sum(losses[-5:]) / len(losses[-5:]), 4), "weights": model.weights_fingerprint(),
@@ -476,7 +479,7 @@ def adapt(part, examples, *, r=8, epochs=6, holdout=None, seed=0, device=None, l
           signal="confidence", max_updates=400, allow_large=False):
     """adapt_lora (see there). allow_large: in-process training of a checkpoint larger than solvi-base (what
     tools/adapt_lora_gpu.py passes, on a GPU)."""
-    from .core.catalog import Unknown
+    from ..core.catalog import Unknown
     _experimental()
     check(part, allow_large)
     sp = part.spec

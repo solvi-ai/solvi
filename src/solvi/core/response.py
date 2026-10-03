@@ -105,6 +105,7 @@ class Response(Serial):
     model_outputs: int = 0              # outputs produced by models in this response
     stored_id = None                    # its id in a TraceStorage once saved (System(storage=...) saves every ask)
     read = None                         # ask_text: the solvi.core.textin.TextRead the question and state were read from
+    experimental = ()                   # the solvi.experimental pieces its System decided with (stored as meta["experimental"])
     textin = _deprecate.removed_attr("textin", "read", "Response")                # 0.7 name
     _system = None                      # the System that answered (reports; see the class docs)
     _heads = None                       # its answer heads (the audit)

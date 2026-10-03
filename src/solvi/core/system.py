@@ -55,6 +55,35 @@ def _clash(catalog, names, head):
                f"after what it computes (e.g. {own[0]}_points), not after the input it reads" if own else ""))
 
 
+def _experimental_name(obj):
+    """The solvi.experimental piece an object comes from ("lora", "compile", ...) by its module or its type's, or None.
+    Read from the module name only: stable code never imports an experimental module."""
+    for x in (obj, type(obj)):
+        mod = getattr(x, "__module__", None)
+        if isinstance(mod, str) and mod.startswith("solvi.experimental."):
+            return mod.split(".")[2]
+    return None
+
+
+def experimental_of(system):
+    """The experimental pieces a System decides with → sorted names (solvi.experimental.STATUS keys): those the
+    experimental module that wraps the System marked (`system.experimental`), and those found among its parts — a
+    part's function, model or adapter (a LoRA adapter on a decision part) defined in solvi.experimental."""
+    names = set(getattr(system, "experimental", None) or ())
+    for g in system.catalog.parts.values():
+        for p in (g, *(g.alternatives or ())):
+            for obj in (p.func, p.model, getattr(p.func, "lora", None), getattr(p.model, "lora", None)):
+                if obj is not None:
+                    n = _experimental_name(obj)
+                    if n:
+                        names.add(n)
+    for h in (getattr(system, "heads", None) or {}).values():
+        n = _experimental_name(h)
+        if n:
+            names.add(n)
+    return sorted(names)
+
+
 class System:
     inputs = _deprecate.removed_attr("inputs", "input_model", "System")       # 0.7 names
     costs = _deprecate.removed_attr("costs", "cost_book", "System")
@@ -433,6 +462,7 @@ class System:
         resp._heads = self.heads                      # for the audit: which features a learned head could not use
         resp._system = self                           # for reports (questions, answer heads, replay)
         resp.read = p.textin
+        resp.experimental = experimental_of(self)      # solvi.experimental pieces it decided with: in the stored meta
         if self.lang != "en":
             resp.lang = self.lang                     # rendering only (audit, show): nothing recorded depends on it
         self._count(resp)
@@ -989,7 +1019,7 @@ class System:
         from .guarantees.guarantee import guard_question
         return guard_question(self, question, examples, **kw)
 
-    learning = gone_in_1_0("learning()", "solvi.learning.Learning(system, storage, parts, ladder, gates, ...) — the "
+    learning = gone_in_1_0("learning()", "solvi.experimental.learning.Learning(system, storage, parts, ladder, gates, ...) — the "
                            "learning loop is experimental (solvi.experimental.learning later)", "System")
 
     @_deprecate.removed_kwargs(source="label_source")
@@ -1001,7 +1031,7 @@ class System:
         are stored with it (TraceStorage.save_correction). label_source="verified" (with of= the stored System 2 decision
         that answered alone under a guarantee — save_correction checks it): the label is only stored, for
         System.guarantee(..., corrections=, sources=); no head or decision learns from it (a head fed such labels gained
-        on one task of three), and a system without storage raises ValueError. With a learning loop (solvi.learning.Learning(system, ..., gate_teach=True))
+        on one task of three), and a system without storage raises ValueError. With a learning loop (solvi.experimental.learning.Learning(system, ..., gate_teach=True))
         nothing learns at once: the correction is only stored, and the loop's gates decide whether it is learned.
         An unknown question raises KeyError and an answer that is not one of the question's options ValueError, before
         anything is learned or stored; the answer is stored normalized (True → "yes"). When nothing learned at once and
@@ -1065,7 +1095,7 @@ class System:
         flag), refit (`fit` on `storage.corrections()`), or keep it as knowledge. Recalibrating on every outcome as it
         arrives is not done here: measured, it broke the promises (the outcomes seen are not a random sample of the
         decisions, and a threshold moved after every label is no longer the calibrated one) — the experimental
-        solvi.oncalib does it, with that risk stated. A system without storage raises ValueError (the label has
+        solvi.experimental.oncalib does it, with that risk stated. A system without storage raises ValueError (the label has
         nowhere to go); an unknown question KeyError; an answer outside the options ValueError, before anything is
         stored."""
         from .store import view

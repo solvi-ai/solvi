@@ -18,19 +18,19 @@ this reference lists what each module exports and the signatures.
 | [`solvi.core.slow.generate`](generate.md) | generation by an LLM: a text or validated JSON, quotes checked in a text, recorded as a model's output |
 | [`solvi.core.slow.agree`](agree.md) | agreement of generated candidates under a key: the chosen one, its share as a fact, the tally |
 | [`solvi.core.slow.refine`](refine.md) | a check that says why (`Fail`); the loop propose → check → re-ask with the reasons → escalate |
-| [`solvi.compile`](compile.md) | a specification compiled by an LLM into catalog parts citing its clauses, accepted when two drafts agree and the spec's tests pass; a person for what the drafts dispute; versions, recompile, the decisions a change moves, an agent guard |
-| [`solvi.sandbox`](sandbox.md) | code a model wrote, held to pure functions: ast allowlist, a subprocess with limits, a restricted load |
+| [`solvi.experimental.compile`](compile.md) | a specification compiled by an LLM into catalog parts citing its clauses, accepted when two drafts agree and the spec's tests pass; a person for what the drafts dispute; versions, recompile, the decisions a change moves, an agent guard |
+| [`solvi.experimental.compile.sandbox`](sandbox.md) | code a model wrote, held to pure functions: ast allowlist, a subprocess with limits, a restricted load |
 | [`solvi.core.knowledge.memory`](memory.md) | a memory of corrected cases: nearest neighbours with an abstain threshold |
-| [`solvi.lora`](lora.md) | a LoRA adapter per question, fitted on a few hundred labelled examples |
-| [`solvi.learning`](learning.md) | learning from corrections with gates and rollback (experimental) |
-| [`solvi.oncalib`](oncalib.md) | recalibration on the fly from outcomes (experimental; the promise is not kept) |
+| [`solvi.experimental.lora`](lora.md) | a LoRA adapter per question, fitted on a few hundred labelled examples |
+| [`solvi.experimental.learning`](learning.md) | learning from corrections with gates and rollback (experimental) |
+| [`solvi.experimental.oncalib`](oncalib.md) | recalibration on the fly from outcomes (experimental; the promise is not kept) |
 | [`solvi.serve`](serve.md) | `solvi serve`: HTTP, MCP and the System One API |
 | [`solvi.agents`](agents.md) | guarding an agent's tool calls: `Guard`, the MCP proxy |
-| [`solvi.hooks`](hooks.md) | a coding agent's hooks: edits checked against rules, a skill picked for a prompt, install / uninstall (Claude Code; Codex, preview) |
+| [`solvi.experimental.hooks`](hooks.md) | a coding agent's hooks: edits checked against rules, a skill picked for a prompt, install / uninstall (Claude Code; Codex, preview) |
 | [`solvi.core.textin`](textin.md) | text in: a message → the question it asks and its typed input state, read with quotes |
 | [`solvi.core._inputs`](inputs.md) | what a question reads: its given facts, the model and JSON schema of its input state, entry points |
-| [`solvi.specialist`](specialist.md) | the specialist contract (preview): propose a typed spec, check it against the source, render, replay |
-| [`solvi.charts`](charts.md) | verified charts (preview): a text with numbers → an SVG in which every number is quoted from the text |
+| [`solvi.experimental.specialist`](specialist.md) | the specialist contract (preview): propose a typed spec, check it against the source, render, replay |
+| [`solvi.experimental.charts`](charts.md) | verified charts (preview): a text with numbers → an SVG in which every number is quoted from the text |
 | [`solvi.core.deciders.longdoc`](longdoc.md) | long texts: sections, BM25 retrieval, the window a decider reads |
 | [`solvi.core.knowledge.episodes`](episode.md) | an agent's memory (what was tried, what failed, what worked) as an input |
 | [`solvi.core.knowledge.worldmap`](worldmap.md) | a map of an environment an agent builds by acting: claims with provenance |
@@ -50,6 +50,7 @@ this reference lists what each module exports and the signatures.
 | [`solvi.core.slow.search`](search.md) | search over alternatives: candidates through the System's checks, the best by an objective, pruned, recorded |
 | [`solvi.auto`](auto.md) | one entry point: a question, labelled examples, a promise and a slow path → System 1 fitted, its guarantee and the dispatcher calibrated, the store wired, the choices explained (preview) |
 | [`solvi.core.dispatch`](dispatch.md) | who answers: System 1 within its guarantee, a slow path (a System, refine or search) or a person — one recorded decision per input, with a budget (experimental) |
+| [`solvi.experimental.counterfactual`](counterfactual.md) | counterfactuals: the smallest change of the given inputs that changes an answer (experimental) |
 | [`solvi.core.deciders.perturb`](perturb.md) | instruction-like sentences in an input and the variants without them (`perturb=k`) |
 | [`solvi.core.store`](storage.md) | TraceStorage: JSONL, SQLite, PostgreSQL and DuckDB stores, queries, replay |
 | [`solvi.core.store.signature`](signature.md) | a signature of a trace or a store that names the one changed record (preview) |

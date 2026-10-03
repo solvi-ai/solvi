@@ -305,7 +305,7 @@ def _from_type(t, kind=None, options=None, descriptions=None):
 
 
 def lora_key(sp_or_key):
-    """The question a LoRA adapter (solvi.lora) belongs to: the task, the scored options with their descriptions (in any
+    """The question a LoRA adapter (solvi.experimental.lora) belongs to: the task, the scored options with their descriptions (in any
     order — option_order="average" asks rotations of the same question) and the kind. A _Spec or a _Spec.key."""
     k = sp_or_key.key if isinstance(sp_or_key, _Spec) else sp_or_key
     return (k[0], tuple(sorted(zip(map(str, k[1]), k[2]))), k[3])
@@ -314,7 +314,7 @@ def lora_key(sp_or_key):
 # The adapter kinds a decision part's adapter slot can load from a file (part.load_lora, a calibration file that names
 # its adapter): kind → the module that reads it (its load(part, path, strict, expect=)). Looked up by name when a file
 # of that kind is loaded, so solvi.core.deciders imports no adapter module (LoRA is experimental).
-ADAPTERS = {"lora": "solvi.lora"}
+ADAPTERS = {"lora": "solvi.experimental.lora"}
 
 
 __all__ = ["ADAPTERS", "Adaptation", "lora_key"]

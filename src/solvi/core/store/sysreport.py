@@ -181,8 +181,10 @@ def system_report(store, since=None, until=None, *, question=None, price=None, d
     s1, cost1 = _system1(asks, labels, question, price, drift_window, monitor)
     dp, cost2 = _dispatch(disp, labels, policies)
     times = [s.time for s in asks + disp]
-    catalogs, models = {}, {}
+    catalogs, models, experimental = {}, {}, {}
     for s in asks:
+        for name in ((s.data.get("meta") or {}) if isinstance(s.data.get("meta"), dict) else {}).get("experimental") or ():
+            experimental[name] = experimental.get(name, 0) + 1
         c = s.data.get("catalog") or "not recorded"
         e = catalogs.setdefault(c, {"decisions": 0, "first": _iso(s.time)})
         e["decisions"] += 1
@@ -201,7 +203,7 @@ def system_report(store, since=None, until=None, *, question=None, price=None, d
         period={"since": _iso(min(times)) if times else None, "until": _iso(max(times)) if times else None,
                 "filters": {k: str(v) for k, v in (("since", since), ("until", until), ("question", question)) if v is not None},
                 "decisions": len(asks), "dispatched": len(disp), "erased": erased, "catalogs": catalogs,
-                "models": models},
+                "models": models, **({"experimental": experimental} if experimental else {})},
         system1=s1, dispatch=dp, cost={"system1": cost1, "dispatch": cost2, **({"refine": _refine(loops, price)} if loops
                                                                               else {})},
         corrections={"total": len(teach), "in_period": in_period, "by_source": sources,
@@ -456,6 +458,9 @@ def render(d):
             f"{fp} — {e['decisions']} decision(s), {e['first']} to {e['last']}" for fp, e in P["catalogs"].items()) + ".")
     if P["models"]:
         L.append("Models that ran: " + "; ".join(f"{k} ({n} decisions)" for k, n in P["models"].items()) + ".")
+    if P.get("experimental"):
+        L.append("Made with experimental pieces (solvi.experimental: the API may change): " + "; ".join(
+            f"{k} ({n} decisions)" for k, n in sorted(P["experimental"].items())) + ".")
     L.append("")
     C = d["corrections"]
     L.append(f"Labels: {C['total']} correction(s) in the store"

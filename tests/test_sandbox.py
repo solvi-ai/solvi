@@ -1,4 +1,4 @@
-"""solvi.sandbox: the ast allowlist refuses imports outside the pure standard library, reflection names and dunders;
+"""solvi.experimental.compile.sandbox: the ast allowlist refuses imports outside the pure standard library, reflection names and dunders;
 `run` executes a module in a subprocess under a trusted driver with limits; `load` gives the namespace in this process
 with the source registered, so a part's fingerprint is taken from its syntax tree."""
 import inspect
@@ -7,7 +7,7 @@ import pytest
 
 from solvi import Catalog
 from solvi.core.provenance import code_fingerprint
-from solvi.sandbox import Refused, check, load, run
+from solvi.experimental.compile.sandbox import Refused, check, load, run
 
 GOOD = "import math\n\ndef area(r):\n    return math.pi * r * r\n"
 
@@ -52,7 +52,7 @@ def test_a_loaded_function_has_its_source_so_its_fingerprint_is_the_same_for_the
 
 
 def test_the_builtins_of_a_loaded_module_admit_only_the_allowed_imports():
-    from solvi.sandbox import safe_builtins
+    from solvi.experimental.compile.sandbox import safe_builtins
     b = safe_builtins()
     assert "open" not in b and "getattr" not in b
     assert b["__import__"]("json").dumps(1) == "1"

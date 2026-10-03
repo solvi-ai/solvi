@@ -215,8 +215,8 @@ class LLMProposer:
 
     def __init__(self, base_url, model, api_key=None, *, timeout=60.0, max_tokens=1500, json_mode=True, opener=None,
                  retries=2, backoff=1.0, sleep=None):
-        from ..core.deciders.llm import LLMError
-        from ..core.deciders._remote import RemoteClient
+        from ...core.deciders.llm import LLMError
+        from ...core.deciders._remote import RemoteClient
 
         class _Client(RemoteClient):
             service, error = "the LLM server", LLMError
@@ -238,7 +238,7 @@ class LLMProposer:
             body["response_format"] = {"type": "json_object"}
         resp = self.client.send(body)
         content = resp["choices"][0]["message"]["content"]
-        from ..core.deciders.llm import _json
+        from ...core.deciders.llm import _json
         return _json(content)
 
 

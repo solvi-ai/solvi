@@ -264,7 +264,7 @@ def test_calibration_reads_what_a_decision_reads(ckpt):
 
 def test_lora_refuses_full(ckpt):
     pytest.importorskip("peft")
-    from solvi.lora import check
+    from solvi.experimental.lora import check
     part = load(ckpt).decision("team", "Which team?", "email", TEAMS, long="full")
     with pytest.raises(ValueError, match='long="retrieve"'):
         check(part)

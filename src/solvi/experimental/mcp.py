@@ -54,7 +54,10 @@ import subprocess
 import sys
 
 from .. import _deprecate
-from .guard import Guard, ToolCall, _text, proposal
+from ..agents.guard import Guard, ToolCall, _text, proposal
+from . import warn_on_import
+
+warn_on_import(__name__)
 
 CONTEXT_MESSAGES = 50            # the tool outputs the proxy's session keeps for checking
 CONTEXT_CHARS = 100_000          # ... and their characters in all

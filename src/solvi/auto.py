@@ -41,7 +41,7 @@ its own would-be answer, the slow path's, the slow path's when it agrees, or a p
 The slow path (slow=): a SlowPath or a System as they are; a decision part (`model.decision(...)`); a model from
 `solvi.core.deciders.llm` (a decision part is made from the question's text and options, reading `reads` — default: every given key
 of the examples; with the open-set gate on, "not stated" is an option and goes to a person); a function
-state → answer; a compiled specification (`solvi.compile`: a Compiled, or a Spec with `writer=` and `inputs=` —
+state → answer; a compiled specification (`solvi.experimental.compile`: a Compiled, or a Spec with `writer=` and `inputs=` —
 compiled from the written text, never from the examples). Inputs the open-set gate holds back go to a person, not to
 the slow path: a slice calibrated on known kinds of input says nothing about a new kind (an LLM given unseen intents
 put most of them on a known one). After the gate flags a change of the stream, System 1's answers are checked by the
@@ -217,12 +217,12 @@ def _slow_path(slow, q, reads, novel_on, writer, inputs):
         if kind == "Spec":
             if writer is None or inputs is None:
                 raise ValueError("a Spec as the slow path is compiled here: give writer= (the model that writes the parts) "
-                                 "and inputs= (solvi.compile.Inputs)")
-            from .compile import compile_spec
+                                 "and inputs= (solvi.experimental.compile.Inputs)")
+            from .experimental.compile import compile_spec
             c = compile_spec(slow, [q], inputs, writer)
         if not c.accepted:
             raise ValueError(f"the compiled specification was not accepted: {c.reason}")
-        return SlowPath(c.system()), "the rules compiled from the written specification (solvi.compile)"
+        return SlowPath(c.system()), "the rules compiled from the written specification (solvi.experimental.compile)"
     cat = Catalog()
     if hasattr(slow, "question") and hasattr(slow, "decide"):          # a decision part
         sq = slow.question(cat, name=q.name, text=q.text)

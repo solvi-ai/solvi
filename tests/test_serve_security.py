@@ -244,7 +244,7 @@ def test_ask_text_goes_through_the_token_limits_and_error_hiding(monkeypatch, ca
 def test_the_mcp_proxy_bounds_messages_and_hides_its_own_errors(tmp_path, monkeypatch):
     from test_agents_mcp import guard, rpc, run
 
-    from solvi.agents.mcp import Proxy
+    from solvi.experimental.mcp import Proxy
     g = guard(tmp_path)
     init = rpc(1, "initialize", {"protocolVersion": "2025-06-18", "capabilities": {}})
     big = rpc(2, "tools/call", {"name": "read_file", "arguments": {"path": "/work/" + "x" * 500}})

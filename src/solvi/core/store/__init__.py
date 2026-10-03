@@ -10,8 +10,9 @@ Every stored decision is one record (a dict of plain JSON):
   kind "teach"    a correction (System.teach): {"teach": question, "init": ..., "answer": ...} and, when given, its
                   "source" ("outcome", "rule", "verified"; none: a human), "by" and "of" (the stored id of the decision it
                   corrects; for "verified", the System 2 decision the label is);
-  kind "update"   a learning update (solvi.learning.Learning): what changed, the gates' results, the state to roll back to;
-  every record    seq (0, 1, 2, ...), time (seconds since the epoch), meta (optional, yours), prev and hash.
+  kind "update"   a learning update (solvi.experimental.learning.Learning): what changed, the gates' results, the state to roll back to;
+  every record    seq (0, 1, 2, ...), time (seconds since the epoch), meta (optional, yours; a decision made with
+                  solvi.experimental pieces has meta["experimental"]: their names), prev and hash.
 
 A record is written with every dict's keys in their own order (a decider reads a dict's keys in that order, so a
 stored trace gives its dicts back as they were). `hash` is the SHA-256 of the record's canonical JSON (keys sorted,
@@ -232,6 +233,9 @@ def entry(resp, meta=None, record="full"):
     fp = getattr(tr, "fingerprint", None) or {}
     if fp.get("catalog"):
         e["catalog"] = fp["catalog"]                  # the catalog that decided (System.fingerprint)
+    exp = list(getattr(resp, "experimental", None) or ())
+    if exp and (meta is None or isinstance(meta, dict)):       # made with solvi.experimental pieces: said in the record
+        meta = {**(meta or {}), "experimental": exp}
     if meta is not None:
         e["meta"] = plain(meta)
     from ..schema import tag_floats
@@ -750,9 +754,9 @@ class TraceStorage:
 
     def corrections(self):
         """The stored corrections → [{"id", "time", "question", "init", "answer", "source", "by", "of"}] (feed them to fit /
-        learn_rule, a CorrectionMemory or solvi.learning.Learning). source: "human" (also every record without one), "outcome",
+        learn_rule, a CorrectionMemory or solvi.experimental.learning.Learning). source: "human" (also every record without one), "outcome",
         "rule", "verified" — or, for a record written around save_correction, whatever it says (solvi.core.knowledge.memory and
-        solvi.learning.Learning refuse anything outside TRUSTED_SOURCES, "verified" included; System.guarantee takes "verified"
+        solvi.experimental.learning.Learning refuse anything outside TRUSTED_SOURCES, "verified" included; System.guarantee takes "verified"
         when told to)."""
         from ..schema import untag_floats                # stored tagged ({"$float": "inf"}), read back as the float
         return [{"id": s.id, "time": s.time, "question": s.data["teach"], "init": untag_floats(s.data["init"]),

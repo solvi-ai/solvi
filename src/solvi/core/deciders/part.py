@@ -124,7 +124,7 @@ class DecisionPart:
 
     @property
     def lora(self):
-        """This question's adapter (its Adapter slot: a solvi.lora.LoraAdapter, experimental) or None."""
+        """This question's adapter (its Adapter slot: a solvi.experimental.lora.LoraAdapter, experimental) or None."""
         loras = getattr(self.model, "loras", None)
         return loras.get(lora_key(self.spec)) if loras else None
 
@@ -630,10 +630,10 @@ class DecisionPart:
         return {"asked": self.asked, "calls": {f"0:{self.__name__}": self.asked},
                 "calls_per_question": 1.0 if self.asked else 0.0}
 
-    # --- an adapter for this question (the Adapter slot; LoRA: experimental, solvi.lora)
-    adapt_lora = gone_in_1_0("adapt_lora()", "solvi.lora.adapt_lora(part, examples, ...) — training an adapter is "
-                             "experimental and lives in solvi.lora (solvi.experimental.lora later)", "DecisionPart")
-    remove_lora = gone_in_1_0("remove_lora()", "solvi.lora.remove_lora(part)", "DecisionPart")
+    # --- an adapter for this question (the Adapter slot; LoRA: experimental, solvi.experimental.lora)
+    adapt_lora = gone_in_1_0("adapt_lora()", "solvi.experimental.lora.adapt_lora(part, examples, ...) — training an adapter is "
+                             "experimental and lives in solvi.experimental.lora (solvi.experimental.lora later)", "DecisionPart")
+    remove_lora = gone_in_1_0("remove_lora()", "solvi.experimental.lora.remove_lora(part)", "DecisionPart")
 
     def save_lora(self, path):
         """Write this question's adapter (a .safetensors file with its config, the question and the checkpoint it was
@@ -647,7 +647,7 @@ class DecisionPart:
         """Load an adapter written by save_lora (or tools/adapt_lora_gpu.py) for this question: afterwards the part
         answers exactly as right after training. Refuses (ValueError) an adapter for another question or checkpoint
         unless strict=False; needs the torch backend and peft (`solvi[lora]`). Clears the question's adaptation and
-        thresholds like solvi.lora.adapt_lora (load the calibration after it). → self."""
+        thresholds like solvi.experimental.lora.adapt_lora (load the calibration after it). → self."""
         self._load_adapter("lora", path, strict)
         return self
 

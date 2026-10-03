@@ -166,7 +166,7 @@ def test_invisible_characters_in_nested_arguments_and_keys():
 
 
 def test_the_mcp_proxy_refuses_invisible_characters(tmp_path):
-    from solvi.agents.mcp import Proxy
+    from solvi.experimental.mcp import Proxy
 
     class Up:
         def __init__(self):
@@ -179,7 +179,7 @@ def test_the_mcp_proxy_refuses_invisible_characters(tmp_path):
         def request(self, method, params):
             self.calls.append(params)
             return {"content": [{"type": "text", "text": "ok"}]}
-    from solvi.agents.mcp import Upstream
+    from solvi.experimental.mcp import Upstream
     up = Up()
     up.__class__ = type("U", (Up, Upstream), {})
     g = Guard()
@@ -201,7 +201,7 @@ def test_mcp_elicitation_approves_only_true(tmp_path, content, approved):
     import sys
     from pathlib import Path
 
-    from solvi.agents.mcp import run_proxy
+    from solvi.experimental.mcp import run_proxy
     upstream = f"{sys.executable} {Path(__file__).parent / 'mcp_upstream.py'}"
     g = Guard()
     g.declare("write_file")

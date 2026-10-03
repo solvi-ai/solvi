@@ -16,7 +16,7 @@ import tempfile
 import time
 from pathlib import Path
 
-from solvi import hooks
+from solvi.experimental import hooks
 
 ROUTE = """import { auth } from "@/lib/auth"
 

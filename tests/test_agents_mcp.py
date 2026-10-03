@@ -6,7 +6,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-from solvi.agents.mcp import run_proxy
+from solvi.experimental.mcp import run_proxy
 
 UPSTREAM = f"{sys.executable} {Path(__file__).parent / 'mcp_upstream.py'}"
 CATALOG = '''

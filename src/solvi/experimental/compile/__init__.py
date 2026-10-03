@@ -1,7 +1,7 @@
 """Compile a specification into catalog parts: an LLM writes the rules, hard checks and computed facts a policy, a
 regulation or a constraint description states; solvi accepts them only after checks that need no labels.
 
-    from solvi.compile import Inputs, Spec, compile_spec, recompile, Versions
+    from solvi.experimental.compile import Inputs, Spec, compile_spec, recompile, Versions
     from solvi.core.slow.generate import generator
 
     spec = Spec(policy_text)                                  # split into numbered clauses: spec.clauses, spec.hash
@@ -17,7 +17,7 @@ regulation or a constraint description states; solvi accepts them only after che
 What the writer produces. A module of plain functions: each catalog part is a function whose name is the fact it sets
 and whose argument names are what it reads, and a literal `PARTS` dict gives each part's kind ("fn", "check", "rule"),
 for a hard check its `then`, for a rule its question, and the clauses it implements. Clauses no part implements are
-listed in `NOT_NORMATIVE` with the reason. The module is checked by `solvi.sandbox` (pure functions, standard-library
+listed in `NOT_NORMATIVE` with the reason. The module is checked by `solvi.experimental.compile.sandbox` (pure functions, standard-library
 imports only) and run there, in a subprocess with limits, before anything of it enters this process.
 
 Acceptance needs no labels. Two drafts are written independently (by default two samples of one writer: the first at
@@ -70,8 +70,11 @@ from pathlib import Path
 from typing import Any, Callable
 
 from . import sandbox
-from .core.catalog import Catalog, Question
-from .core.slow.refine import Fail
+from ...core.catalog import Catalog, Question
+from ...core.slow.refine import Fail
+from .. import mark, warn_on_import
+
+warn_on_import(__name__)
 
 DEFAULT_MODEL = "openai/gpt-oss-120b"
 SANDBOX_EXTRA = {"Fail": Fail}                        # trusted names a compiled module may use without an import
@@ -603,7 +606,7 @@ def decide_rows(system, inputs, alarm=None, item_s=5):
 
 def box_main(ns, payload, signal):
     """The sandbox driver: build the catalog from the module's namespace and decide every input of the payload."""
-    from .core.system import System
+    from ...core.system import System
     qs = [Question.model_validate(q) for q in payload["questions"]]
     cat, qs = build_catalog(ns, payload["parts"], qs)
     system = System(cat, qs)
@@ -867,7 +870,7 @@ def merge(old_source: str, old_parts: dict, old_nn: dict, patch_source: str, pat
 class Compiled:
     """A compilation: the module, its parts with the clauses each implements, whether it was accepted and why, and the
     record (spec, prompts and replies, writer, tests, checks per round). `catalog()` / `system()` load the module (through
-    `solvi.sandbox.load`) and refuse an unaccepted compilation unless `allow_unaccepted=True`."""
+    `solvi.experimental.compile.sandbox.load`) and refuse an unaccepted compilation unless `allow_unaccepted=True`."""
     spec: Spec
     questions: list
     source: str
@@ -904,9 +907,9 @@ class Compiled:
 
     def system(self, allow_unaccepted: bool = False, **kw):
         """An ordinary System over the compiled catalog (kw: System's own — storage, ...)."""
-        from .core.system import System
+        from ...core.system import System
         cat, qs = self.catalog(allow_unaccepted)
-        return System(cat, qs, **kw)
+        return mark(System(cat, qs, **kw), "compile")
 
     @property
     def fingerprint(self) -> str:
@@ -958,7 +961,7 @@ def _writer_of(writer):
         raise ValueError("compile_spec needs a writer: a solvi.core.slow.generate Generator (or a base URL string, then the model "
                          f"is {DEFAULT_MODEL})")
     if isinstance(writer, str):
-        from .core.slow.generate import generator
+        from ...core.slow.generate import generator
         return generator(writer, DEFAULT_MODEL, max_tokens=24000, timeout=900,
                          extra_body={"reasoning": {"effort": "medium"}})
     return writer
@@ -1295,7 +1298,7 @@ class _Draft:
 
 def _run_draft(d, questions, inputs, mem_mb, item_s):
     payload = {"parts": d.parts, "questions": [q.model_dump() for q in questions], "inputs": inputs, "item_s": item_s}
-    r = sandbox.run(d.source, "solvi.compile:box_main", payload, mem_mb=mem_mb, cpu_s=60 + len(inputs),
+    r = sandbox.run(d.source, "solvi.experimental.compile:box_main", payload, mem_mb=mem_mb, cpu_s=60 + len(inputs),
                     wall_s=120 + 2 * len(inputs))
     if "rows" not in r:
         return None, r.get("load_error") or r.get("crash") or "no result"
@@ -1843,8 +1846,8 @@ def decision_diff(old: Compiled, new: Compiled, *, store=None, inputs=None, **fi
     """Which decisions `new` would change: the stored ones (`store`, decided by `old`'s catalog — filters as for
     solvi.core.store.diff.diff) or `inputs` (each decided by `old` first, in a temporary store). Each change's causes are the steps
     solvi.core.store.diff names, with the clauses their parts implement (in the new compilation, else the old one)."""
-    from .core.store.diff import diff
-    from .core.store import JSONLStorage
+    from ...core.store.diff import diff
+    from ...core.store import JSONLStorage
     tmp = None
     if store is None:
         if inputs is None:
@@ -1951,7 +1954,7 @@ def to_guard(compiled: Compiled, guard, tools=None, *, question: str | None = No
     clauses of the parts that decided (the false hard checks, else the question's rule) as the reasons — or when the
     compiled policy cannot answer (it abstains: an input it cannot read).
     `question`: the compiled question (default: the only one)."""
-    from .core.system import System
+    from ...core.system import System
     cat, qs = compiled.catalog()
     q = question or (qs[0].name if len(qs) == 1 else None)
     if q is None:

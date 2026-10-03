@@ -921,9 +921,9 @@ class Combination:
     memory = gone_in_1_0("memory()", "solvi.core.knowledge.memory.attach(combination, ...) (a memory for every part) — the memory of "
                          "corrections moves into the knowledge memory", "Combination")
 
-    remove_lora = gone_in_1_0("remove_lora()", "solvi.lora.remove_lora(combination) (every part's, in leaves order)",
+    remove_lora = gone_in_1_0("remove_lora()", "solvi.experimental.lora.remove_lora(combination) (every part's, in leaves order)",
                               "Combination")
-    adapt_lora = gone_in_1_0("adapt_lora()", "solvi.lora.adapt_lora(part, examples, ...) on one of its parts, then "
+    adapt_lora = gone_in_1_0("adapt_lora()", "solvi.experimental.lora.adapt_lora(part, examples, ...) on one of its parts, then "
                              "calibrate the combination again", "Combination")
 
     # --- what belongs to one part, not to a combination: each raises, saying where it is

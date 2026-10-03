@@ -9,4 +9,4 @@ in front of an MCP server. See the [guide](../guide.md#guarding-an-agents-tool-c
 
 ::: solvi.agents.confirm
 
-::: solvi.agents.mcp
+::: solvi.experimental.mcp

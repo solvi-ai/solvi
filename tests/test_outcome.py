@@ -1,6 +1,6 @@
 """System.outcome: what really happened after a decision, stored as an "outcome" label of it (the same source check as
 every label) that nothing learns from by itself; an explicit recalibration reads it (System.guarantee(...,
-corrections=True)). Recalibration on the fly lives in the experimental solvi.oncalib, which warns on import."""
+corrections=True)). Recalibration on the fly lives in the experimental solvi.experimental.oncalib, which warns on import."""
 import importlib
 import random
 import sys
@@ -76,9 +76,9 @@ def test_explicit_recalibration_reads_the_outcomes(tmp_path):
 
 def test_oncalib_is_experimental_and_recalibrates_every_n_outcomes_and_after_a_drift_flag(tmp_path):
     from solvi.core import ExperimentalWarning
-    sys.modules.pop("solvi.oncalib", None)
+    sys.modules.pop("solvi.experimental.oncalib", None)
     with pytest.warns(ExperimentalWarning, match="does not keep a guarantee's promise"):
-        oncalib = importlib.import_module("solvi.oncalib")
+        oncalib = importlib.import_module("solvi.experimental.oncalib")
     assert "RISK" in oncalib.__doc__
     s, store, rng = _guarded(tmp_path)
     live = oncalib.OnTheFly(s, "label", every=20, window=30, min_labels=10, max_risk=0.10)

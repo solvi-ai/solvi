@@ -89,14 +89,14 @@ def test_calibrate_for_and_score_and_memory_route_to_every_part_of_a_combination
     with pytest.raises(ValueError, match="belongs to one part"):
         attach(c, mems[0])
     assert attach(c, False) is None and s.correction_memory is None and l_.correction_memory is None
-    from solvi.lora import remove_lora
-    assert remove_lora(c) == [None, None]                     # 1.0: solvi.lora.remove_lora(combination), every part's
+    from solvi.experimental.lora import remove_lora
+    assert remove_lora(c) == [None, None]                     # 1.0: solvi.experimental.lora.remove_lora(combination), every part's
     for d in (c, s):                                          # 1.0: solvi.core.knowledge.memory.attach, not a method any more
         with pytest.raises(AttributeError, match=r"memory\(\) was removed in 1.0: use solvi.core.knowledge.memory.attach\("):
             d.memory()
     for name in ("adapt_lora", "remove_lora"):                # not methods any more, on a part nor on a combination
         for d in (c, s):
-            with pytest.raises(AttributeError, match=rf"{name}\(\) was removed in 1.0: use solvi.lora.{name}\("):
+            with pytest.raises(AttributeError, match=rf"{name}\(\) was removed in 1.0: use solvi.experimental.lora.{name}\("):
                 getattr(d, name)
     assert c.labels == s.labels and c.task == s.task and c.multi is False and c.adaptation == [None, None]
 

@@ -1,4 +1,4 @@
-"""solvi.lora.adapt_lora (experimental): a LoRA adapter per question on a tiny random ModernBERT decider built in a
+"""solvi.experimental.lora.adapt_lora (experimental): a LoRA adapter per question on a tiny random ModernBERT decider built in a
 temporary folder (no downloads). Skipped without torch, transformers, tokenizers and peft (`uv sync --group lora`)."""
 import json
 import warnings
@@ -13,8 +13,8 @@ pytest.importorskip("peft")
 
 from solvi import Catalog, System  # noqa: E402
 from solvi.core.deciders import DecideModel  # noqa: E402
-from solvi.learning import ExperimentalWarning  # noqa: E402
-from solvi.lora import LoraWarning, adapt_lora, remove_lora  # noqa: E402
+from solvi.experimental.learning import ExperimentalWarning  # noqa: E402
+from solvi.experimental.lora import LoraWarning, adapt_lora, remove_lora  # noqa: E402
 
 TEAMS = ["billing", "technical"]
 BILLING = ["invoice", "refund", "charged", "payment", "card", "price", "bill", "money"]
@@ -147,7 +147,7 @@ def test_other_questions_are_not_affected(ckpt):
 
 
 def test_small_k_warning_no_holdout_warning_and_experimental_marker(ckpt):
-    import solvi.lora as L
+    import solvi.experimental.lora as L
     L._warned[0] = False
     m, part = _part(ckpt)
     rep, w = _adapt(part, _toy(24, 1))
@@ -206,7 +206,7 @@ def _calib_without_lora(part, tmp_path):
 
 
 def test_refusals(ckpt, monkeypatch):
-    import solvi.lora as L
+    import solvi.experimental.lora as L
     from solvi.core.deciders.llm import LLMScorer
     m, part = _part(ckpt)
     with pytest.raises(ValueError, match="needs at least 8"):
@@ -231,7 +231,7 @@ def test_refusals(ckpt, monkeypatch):
     onnx = type("OnnxScorer", (), {"logits": Fake.logits})
     with pytest.raises(ValueError, match="runs on ONNX"):
         adapt_lora(DecideModel(onnx()).decision("team", "Which team?", "email", TEAMS), _toy(40, 1))
-    from solvi.lora import adapt
+    from solvi.experimental.lora import adapt
     with pytest.raises(TypeError, match="DecisionPart"):
         adapt(lambda email: "billing", _toy(40, 1))
 
@@ -250,12 +250,12 @@ def test_missing_peft_is_a_clear_error(ckpt, monkeypatch):
         adapt_lora(part, _toy(40, 1))
 
 
-@pytest.mark.filterwarnings("ignore::solvi.lora.LoraWarning")
+@pytest.mark.filterwarnings("ignore::solvi.experimental.lora.LoraWarning")
 def test_offline_script_trains_an_adapter_the_part_loads(ckpt, tmp_path, monkeypatch, capsys):
     import importlib.util
     from pathlib import Path
 
-    import solvi.lora as L
+    import solvi.experimental.lora as L
     spec = importlib.util.spec_from_file_location("adapt_lora_gpu", Path(__file__).resolve().parents[1] / "tools" /
                                                   "adapt_lora_gpu.py")
     tool = importlib.util.module_from_spec(spec)
@@ -280,9 +280,9 @@ def test_the_part_has_an_adapter_slot_not_the_training_calls(ckpt):
     """1.0: training and rolling back an adapter left the part (a stable class does not import an experimental module):
     part.adapt_lora / remove_lora raise an AttributeError naming the function; the adapter itself is a solvi Adapter."""
     m, part = _part(ckpt)
-    with pytest.raises(AttributeError, match=r"adapt_lora\(\) was removed in 1.0: use solvi.lora.adapt_lora\(part"):
+    with pytest.raises(AttributeError, match=r"adapt_lora\(\) was removed in 1.0: use solvi.experimental.lora.adapt_lora\(part"):
         part.adapt_lora(_toy(40, 1))
-    with pytest.raises(AttributeError, match=r"use solvi.lora.remove_lora\(part\)"):
+    with pytest.raises(AttributeError, match=r"use solvi.experimental.lora.remove_lora\(part\)"):
         part.remove_lora()
     rep, _ = _adapt(part, _toy(40, 1))
     ad = part.lora

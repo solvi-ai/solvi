@@ -61,9 +61,12 @@ import json
 import warnings
 from dataclasses import asdict, dataclass, field
 
-from .core import catalog as core
-from .core.store import FORMAT, TRUSTED_SOURCES, UntrustedLabel, check_source, plain
-from .core.store import open_storage
+from ..core import catalog as core
+from ..core.store import FORMAT, TRUSTED_SOURCES, UntrustedLabel, check_source, plain
+from ..core.store import open_storage
+from . import mark, warn_on_import
+
+warn_on_import(__name__)
 
 LADDER = {"fit_below": 50, "memory_below": 1000, "adapter": None,
           "memory": {"k": 7, "radius": 0.15, "min_strength": 1.0, "min_agreement": 0.8, "mode": "check"}}
@@ -75,8 +78,8 @@ def _check_settings(ladder, gates, holdout, calibration):
     """The learning loop's settings → ValueError naming the first that is wrong: an unknown ladder, memory or gate key
     (a typo would be ignored), a memory mode that does not exist, a gate rate outside [0, 1] (risk strictly inside),
     a negative count, or holdout / calibration shares that leave no label to train on."""
-    from .core.calibration import check_rate
-    from .core.knowledge.memory import _settings
+    from ..core.calibration import check_rate
+    from ..core.knowledge.memory import _settings
     unknown = set(ladder or ()) - set(LADDER)
     if unknown:
         raise ValueError(f"unknown ladder settings: {sorted(unknown)} (known: {sorted(LADDER)})")
@@ -118,7 +121,7 @@ OPEN_KINDS = ("span", "rank", "number")        # answers not from a closed list:
 def content_key(question, init):
     """What a label's split is decided by: the question and a hash of its input — never a stored id, whose hash covers
     measured timings and so differs from run to run."""
-    from .core.runtime import vhash
+    from ..core.runtime import vhash
     return f"{question}|{vhash(dict(init or {}))}"
 
 
@@ -186,9 +189,9 @@ class Learning:
 
     def __init__(self, system, storage=None, parts=None, ladder=None, gates=None, changelog=None, holdout=0.3,
                  calibration=0.2, gate_teach=True):
-        from .core.deciders import DecisionPart, decision_of
-        warnings.warn("solvi.learning is experimental: its API and gates may change", ExperimentalWarning, stacklevel=2)
-        self.system = system
+        from ..core.deciders import DecisionPart, decision_of
+        warnings.warn("solvi.experimental.learning is experimental: its API and gates may change", ExperimentalWarning, stacklevel=2)
+        self.system = mark(system, "learning")
         self.storage = open_storage(storage, system) if storage is not None else system.storage
         if self.storage is None:
             raise ValueError("the learning loop reads labels from a TraceStorage: pass storage= or System(storage=...)")
@@ -248,7 +251,7 @@ class Learning:
         return {"labels": out, "rejected": rejected}
 
     def _normalize(self, q, answer):
-        from .core.catalog import NOT_STATED_KEY, Unknown
+        from ..core.catalog import NOT_STATED_KEY, Unknown
         at = self.system.questions[q].answer
         ans = Unknown if answer == NOT_STATED_KEY else at.normalize(answer)
         if ans is not Unknown:
@@ -267,11 +270,11 @@ class Learning:
 
     @staticmethod
     def _fingerprint_of(parts):
-        from .core.provenance import digest
+        from ..core.provenance import digest
         return digest("learning", sorted((q, p.fingerprint()) for q, p in parts.items()))
 
     def _snapshot(self, parts=None):
-        from .core.deciders import Adaptation
+        from ..core.deciders import Adaptation
         out = {}
         for q, p in (parts or self.parts).items():
             a = p.adaptation
@@ -299,8 +302,8 @@ class Learning:
         its own thresholds; the catalog and the System are shallow copies whose parts point at the copies."""
         import dataclasses
 
-        from .core.catalog import _group_func
-        from .core.deciders import DecisionPart
+        from ..core.catalog import _group_func
+        from ..core.deciders import DecisionPart
         models = {}
         for p in self.parts.values():
             if id(p.model) not in models:
@@ -350,8 +353,8 @@ class Learning:
                                "a part changed in a way the loop cannot carry over")
 
     def _restore(self, state, live=None):
-        from .core.deciders import Adaptation
-        from .core.knowledge.memory import CorrectionMemory
+        from ..core.deciders import Adaptation
+        from ..core.knowledge.memory import CorrectionMemory
         for q, p in self.parts.items():
             st = state.get(q)
             if st is None:
@@ -527,8 +530,8 @@ class Learning:
     def _apply(self, q, rung, train, part=None):
         """Apply one question's update to `part` (the shadow part of the candidate; default: the live part) → a JSON-able
         description."""
-        from .core.catalog import Unknown
-        from .core.knowledge.memory import CorrectionMemory, attach
+        from ..core.catalog import Unknown
+        from ..core.knowledge.memory import CorrectionMemory, attach
         part = self.parts[q] if part is None else part
         ex = self._examples(q, train)
         fit_ex = [(t, y) for t, y in ex if y is not Unknown]
@@ -548,7 +551,7 @@ class Learning:
 
     def _consistency(self, plan, by, trained):
         """New training labels against a memory of the labels already learned (B9)."""
-        from .core.knowledge.memory import CorrectionMemory
+        from ..core.knowledge.memory import CorrectionMemory
         per, n_new, n_bad = {}, 0, 0
         for q in plan:
             old = [lab for lab in by[q]["train"] if lab.id in trained.get(q, set())]
@@ -642,13 +645,13 @@ class Learning:
             return None
         if isinstance(h, (list, tuple)):
             return list(h)
-        from .honesty import load_set
+        from ..honesty import load_set
         return load_set(h)["cases"]
 
     def _evaluate(self, holdout, shadow, system=None):
         """The held-out labels, the honesty set and the shadow rows asked through `system` (the candidate's shadow; default:
         the live system)."""
-        from .honesty import run
+        from ..honesty import run
         system = self.system if system is None else system
         cases = [{"name": lab.id, "state": dict(lab.init), "gold": {lab.question: plain(lab.answer)}} for lab in holdout]
         out = {"heldout": run(system, cases, store=False) if cases else []}
@@ -668,7 +671,7 @@ class Learning:
         return out
 
     def _gate_heldout(self, before, after, n):
-        from .honesty import metrics
+        from ..honesty import metrics
         a, b = metrics(before["heldout"], self.gates["risk"]), metrics(after["heldout"], self.gates["risk"])
         if n < self.gates["min_holdout"]:
             return {"ok": False, "n": n, "why": f"{n} held-out label(s) < {self.gates['min_holdout']}: an improvement "
@@ -682,7 +685,7 @@ class Learning:
                        f"(gain {gain:+.3f}, needed {self.gates['min_gain']:+.3f})"}
 
     def _gate_honesty(self, before, after):
-        from .honesty import compare, metrics
+        from ..honesty import compare, metrics
         tol, risk = self.gates["tolerance"], self.gates["risk"]
         out, regs = {}, []
         for name in ("heldout", "honesty_set"):
@@ -698,7 +701,7 @@ class Learning:
                 "why": "no honesty number got worse" if not regs else "; ".join(regs)}
 
     def _gate_size(self, before, after):
-        from .core.store.diff import DiffReport, compare
+        from ..core.store.diff import DiffReport, compare
         rep = DiffReport()
         for sid, old in before["shadow"].items():
             new = after["shadow"].get(sid)

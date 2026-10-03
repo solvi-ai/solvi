@@ -11,7 +11,7 @@ One contract for every specialist (charts first; slides, tables, speech later):
      `Specialist.replay` re-checks the recorded proposal and re-renders it: identical issues and identical bytes, or
      it says what differs.
 
-    from solvi.charts import ChartSpecialist, RuleProposer
+    from solvi.experimental.charts import ChartSpecialist, RuleProposer
     run = ChartSpecialist(RuleProposer()).run(text, "revenue by region")
     run.output          # the SVG, or None when nothing verified
     print(run.report()) # what was kept, dropped, changed and why
@@ -30,6 +30,9 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from pydantic import BaseModel, ValidationError
+from . import warn_on_import
+
+warn_on_import(__name__)
 
 # what happened to a part of the proposal
 DROPPED = "dropped"       # not verified: left out of the result

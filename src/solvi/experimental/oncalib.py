@@ -1,7 +1,7 @@
 """EXPERIMENTAL — calibration on the fly from the outcomes the agent sees. Importing it warns (ExperimentalWarning); its
 API may change or it may be removed, and nothing stable in solvi imports it.
 
-    from solvi.oncalib import OnTheFly                  # ExperimentalWarning
+    from solvi.experimental.oncalib import OnTheFly                  # ExperimentalWarning
     live = OnTheFly(system, "move", max_risk=0.05, every=50, window=500)
     res = system.ask(state)
     ...                                                 # later, the environment shows what the decision led to
@@ -30,12 +30,10 @@ Use it to explore, never to make a promise you report. For a promise: calibrate 
 corrections=True)` — and say on what it was calibrated."""
 from __future__ import annotations
 
-import warnings
+from . import mark, warn_on_import
 
-from .core.catalog import ExperimentalWarning
-
-warnings.warn("solvi.oncalib is experimental: calibration on the fly from outcomes does not keep a guarantee's promise "
-              "(see its module docs); its API may change", ExperimentalWarning, stacklevel=2)
+warn_on_import(__name__, "calibration on the fly from outcomes does not keep a guarantee's promise (see its "
+                         "module docs)")
 
 
 class OnTheFly:
@@ -57,7 +55,7 @@ class OnTheFly:
         if "examples" in guarantee or "corrections" in guarantee:
             raise ValueError("OnTheFly calibrates on the outcome labels it reads from the storage: no examples= / "
                              "corrections=")
-        self.system, self.question = system, question
+        self.system, self.question = mark(system, "oncalib"), question
         self.every, self.window, self.min_labels = int(every), None if window is None else int(window), int(min_labels)
         self.guarantee = dict(guarantee)
         self.new = 0                      # outcome labels since the last recalibration

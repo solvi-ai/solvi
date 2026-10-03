@@ -1,4 +1,4 @@
-"""solvi.charts / solvi.specialist: every number of a chart is checked against the source; traps are caught; the SVG is
+"""solvi.experimental.charts / solvi.experimental.specialist: every number of a chart is checked against the source; traps are caught; the SVG is
 deterministic, accessible and replays."""
 import io
 import json
@@ -7,10 +7,10 @@ from itertools import combinations
 
 import pytest
 
-from solvi.charts import (PALETTE, ChartSpecialist, FixedProposer, LLMProposer, chart, contrast,
+from solvi.experimental.charts import (PALETTE, ChartSpecialist, FixedProposer, LLMProposer, chart, contrast,
                           render_svg)
-from solvi.charts.render import BG, INK, MIN_FONT, MUTED
-from solvi.specialist import BLOCKED, CHANGED, DROPPED, WARNING, Trace
+from solvi.experimental.charts.render import BG, INK, MIN_FONT, MUTED
+from solvi.experimental.specialist import BLOCKED, CHANGED, DROPPED, WARNING, Trace
 
 PRESS = """ACME Corp. reports third-quarter 2025 results
 
@@ -380,7 +380,7 @@ YEARS = "Net income: 2023 $120 million, 2024 -$45 million, 2025 $80 million."
 
 
 def test_a_currency_sign_before_the_next_number_is_not_the_unit_of_the_year_before_it():
-    from solvi.charts.check import SourceIndex
+    from solvi.experimental.charts.check import SourceIndex
     got = [(r.as_written, str(r.value), r.unit) for r in SourceIndex(YEARS).readings]
     assert got == [("2023", "2023", ""), ("$120 million", "120000000", "USD"), ("2024", "2024", ""),
                    ("-$45 million", "-45000000", "USD"), ("2025", "2025", ""), ("$80 million.", "80000000", "USD")]
@@ -407,8 +407,8 @@ def test_the_rule_proposer_charts_the_amounts_by_year_and_a_negative_amount_with
 
 def test_a_number_that_shares_characters_with_a_drawn_one_is_not_drawn_again():
     from decimal import Decimal
-    from solvi.charts.check import ChartChecker, Reading, SourceIndex
-    from solvi.charts.spec import ChartSpec
+    from solvi.experimental.charts.check import ChartChecker, Reading, SourceIndex
+    from solvi.experimental.charts.spec import ChartSpec
     idx = SourceIndex("a 10 $20 b")
     idx.readings[0] = Reading(2, 6, "10 $", Decimal(10), "USD", ())                     # as the checker once read it
     pt = ChartSpec.model_validate(spec([("a", 10, "10 $")], unit="USD")).series[0].points[0]
@@ -450,8 +450,8 @@ def test_render_svg_draws_a_one_point_line_and_refuses_what_it_cannot_draw():
     """render_svg is exported: a one-category line, a pie of zeros, a chart without categories or values raised
     ZeroDivisionError / ValueError: max() arg is an empty sequence."""
     from decimal import Decimal
-    from solvi.charts import render_svg
-    from solvi.charts.check import VerifiedChart, VerifiedPoint, VerifiedSeries
+    from solvi.experimental.charts import render_svg
+    from solvi.experimental.charts.check import VerifiedChart, VerifiedPoint, VerifiedSeries
 
     def chart_of(kind, cats, values):
         pts = [None if v is None else VerifiedPoint(label=c, value=Decimal(v), start=0, end=1, as_written=str(v))

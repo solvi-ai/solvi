@@ -159,3 +159,64 @@ def test_the_changelog_migration_table_is_generated_from_the_table():
     run = subprocess.run([sys.executable, str(root / "tools" / "migration_table.py"), "--check"], capture_output=True,
                          text=True)
     assert run.returncode == 0, run.stdout
+
+
+# --- solvi.experimental: what a decision made with an experimental piece records
+def _store_system(tmp_path, **kw):
+    from solvi import Answer, Catalog, JSONLStorage, Question, System
+    cat = Catalog()
+
+    @cat.fn
+    def m(n: int) -> int:
+        return n
+
+    @cat.rule("ok")
+    def ok(m: int) -> str:
+        return "yes" if m > 1 else "no"
+    return System(cat, [Question("ok", "OK?", Answer.choice(["yes", "no"]))], storage=JSONLStorage(tmp_path / "d.jsonl"),
+                  **kw)
+
+
+def test_a_decision_made_with_an_experimental_piece_says_so_in_its_record(tmp_path):
+    from solvi.core.store.sysreport import render, system_report
+    from solvi.experimental import mark
+    s = _store_system(tmp_path)
+    plain = s.ask({"n": 2})
+    assert plain.experimental == [] and s.storage.record(plain.stored_id).get("meta") is None
+    mark(s, "learning")
+    res = s.ask({"n": 2})
+    assert res.experimental == ["learning"]
+    assert s.storage.record(res.stored_id)["meta"] == {"experimental": ["learning"]}
+    mine = s.storage.save(s.ask({"n": 3}, store=False), meta={"run": 7})
+    assert s.storage.record(mine)["meta"] == {"run": 7, "experimental": ["learning"]}
+    assert s.storage.verify()["ok"]
+    rep = system_report(s.storage)
+    assert rep.to_dict()["period"]["experimental"] == {"learning": 2}
+    assert "Made with experimental pieces" in render(rep.to_dict()) and "learning (2 decisions)" in render(rep.to_dict())
+
+
+def test_an_experimental_part_is_found_by_its_module(tmp_path):
+    from solvi.core.system import experimental_of
+    s = _store_system(tmp_path)
+
+    class Adapter:                                         # stands for an adapter class defined in an experimental module
+        pass
+    Adapter.__module__ = "solvi.experimental.lora"
+    part = s.catalog.parts["m"]
+    part.func.lora = Adapter()
+    try:
+        assert experimental_of(s) == ["lora"]
+    finally:
+        del part.func.lora
+
+
+def test_the_hook_command_does_not_warn(tmp_path):
+    run = subprocess.run([sys.executable, "-W", "error::UserWarning", "-m", "solvi", "hook", "--help"],
+                         capture_output=True, text=True)
+    assert run.returncode == 0 and "ExperimentalWarning" not in run.stderr
+
+
+def test_migrate_a_module_imported_from_an_old_package():
+    assert _migrate.rewrite("from solvi.agents import mcp\nfrom solvi.decide import part, DecideModel\n") == (
+        "from solvi.experimental import mcp\nfrom solvi.core.deciders import DecideModel\n"
+        "from solvi.core.deciders import part\n")

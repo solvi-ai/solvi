@@ -1,5 +1,5 @@
-# `solvi.lora`
+# `solvi.experimental.lora`
 
-A LoRA adapter on the decider for one question (experimental): `solvi.lora.adapt_lora(part, examples)`, `part.load_lora`, `solvi.lora.remove_lora(part)`.
+A LoRA adapter on the decider for one question (experimental): `solvi.experimental.lora.adapt_lora(part, examples)`, `part.load_lora`, `solvi.experimental.lora.remove_lora(part)`.
 
-::: solvi.lora
+::: solvi.experimental.lora

@@ -13,7 +13,7 @@ from pathlib import Path
 
 import pytest
 
-from solvi import hooks
+from solvi.experimental import hooks
 
 ROOT = Path(__file__).resolve().parents[1]
 STANDIN = '''
@@ -200,7 +200,7 @@ def calibrate(proj):
         rows.append({"text": f"File: app/api/r{i}.ts\nAdded lines:\n3: {line}", "label": bad})
     (proj / "labels.jsonl").write_text("\n".join(json.dumps(r) for r in rows) + "\n")
     env = dict(env_for(proj), SOLVI_HOOK_RULES=".claude/solvi-rules.toml", SOLVI_HOOK_DECIDER="standin.py:model")
-    r = subprocess.run([sys.executable, "-m", "solvi", "calibrate", "solvi.hooks:rules_system",
+    r = subprocess.run([sys.executable, "-m", "solvi", "calibrate", "solvi.experimental.hooks:rules_system",
                         "no_employee_data_from_browser_answer", "labels.jsonl", "--risk", "0.1", "--out",
                         ".claude/employee.calib.json"], capture_output=True, text=True, env=env, cwd=proj, timeout=120)
     assert r.returncode == 0, r.stdout + r.stderr
@@ -588,7 +588,7 @@ def test_library_functions_of_hooks_raise_ordinary_exceptions_not_system_exit(pr
     assert settings.read_text() == "{broken"
     r = solvi(proj, "hook", "install", "--project", proj)              # the command: one line, no traceback
     assert r.returncode != 0 and "not JSON" in r.stderr and "Traceback" not in r.stderr
-    r = subprocess.run([sys.executable, "-m", "solvi", "calibrate", "solvi.hooks:rules_system", "x", "labels.csv"],
+    r = subprocess.run([sys.executable, "-m", "solvi", "calibrate", "solvi.experimental.hooks:rules_system", "x", "labels.csv"],
                        capture_output=True, text=True, cwd=proj, env={k: v for k, v in env_for(proj).items()
                                                                       if k not in ("SOLVI_HOOK_MODEL", "SOLVI_HOOK_DECIDER")}, timeout=120)
     assert r.returncode == 2 and "set SOLVI_HOOK_DECIDER" in r.stderr and "Traceback" not in r.stderr
@@ -612,7 +612,7 @@ def test_install_leaves_alone_a_command_that_only_prints_solvis_words(proj):
 
 def test_the_0_7_spelling_of_the_decider_option_still_works_for_hooks_installed_then(tmp_path):
     """--model was the option's name before 0.8 and is written in installed hooks: it is read as --decider."""
-    from solvi.hooks import main as hook_main
+    from solvi.experimental.hooks import main as hook_main
     import io
     import contextlib
     out = io.StringIO()

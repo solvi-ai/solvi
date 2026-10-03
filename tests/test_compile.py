@@ -1,4 +1,4 @@
-"""solvi.compile: a specification split into clauses, catalog parts written by a model (a stand-in here) and accepted
+"""solvi.experimental.compile: a specification split into clauses, catalog parts written by a model (a stand-in here) and accepted
 only when two drafts agree on generated inputs, pass the tests derived from the specification and keep the module
 contract; a revised specification recompiled part by part; the decisions a change moves, with the clauses why; versions
 that replay old decisions with the catalog that made them; compiled hard checks as guard policies."""
@@ -7,7 +7,7 @@ import json
 import pytest
 
 from solvi import Answer, JSONLStorage, Question
-from solvi.compile import (Inputs, Rejected, Spec, Versions, compile_spec, coverage, decision_diff, read_module,
+from solvi.experimental.compile import (Inputs, Rejected, Spec, Versions, compile_spec, coverage, decision_diff, read_module,
                            recompile, split_clauses, to_guard)
 
 POLICY = """# Shipping
@@ -460,7 +460,7 @@ def test_a_test_the_answering_draft_fails_is_reviewed_even_when_the_other_draft_
 
 
 def test_datetime_strptime_works_in_the_sandbox_and_its_helper_module_cannot_be_imported_directly():
-    from solvi import sandbox
+    from solvi.experimental.compile import sandbox
     src = "import datetime\n\ndef f(t):\n    return datetime.datetime.strptime(t, '%I:%M%p').hour\n"
     ns = sandbox.load(src)
     assert ns["f"]("3:45PM") == 15
@@ -481,7 +481,7 @@ def ship_reference(x):
 
 
 def test_a_person_resolves_a_disagreement_and_the_answer_becomes_a_test_both_drafts_must_pass():
-    from solvi.compile import Ruling
+    from solvi.experimental.compile import Ruling
     asked = []
 
     def person(d):
@@ -505,7 +505,7 @@ def test_a_person_resolves_a_disagreement_and_the_answer_becomes_a_test_both_dra
 
 
 def test_a_persons_answer_is_a_test_and_never_relaxes_acceptance():
-    from solvi.compile import Ruling
+    from solvi.experimental.compile import Ruling
     w = Writer([[GOOD], [OFF_BY_ONE, GOOD]], tests=[TEST_OK[1]])
     c = compile_spec(Spec(POLICY), QS, INPUTS, w, review=lambda d: Ruling.pick(1), rounds=2)  # a wrong answer
     assert not c.accepted and "tests" in c.reason                  # both drafts now agree, and both fail the person
@@ -515,7 +515,7 @@ def test_a_persons_answer_is_a_test_and_never_relaxes_acceptance():
 
 
 def test_a_disputed_test_goes_to_the_person_instead_of_the_test_writer():
-    from solvi.compile import reference_reviewer
+    from solvi.experimental.compile import reference_reviewer
     wrong = {"clause": "c3", "input": {"zone": "domestic", "total": 49, "weight": 1}, "expect": {"ship": "free"},
              "why": "a wrong test"}
     w = Writer([[GOOD], [GOOD]], tests=TEST_OK + [wrong])
@@ -527,7 +527,7 @@ def test_a_disputed_test_goes_to_the_person_instead_of_the_test_writer():
 
 
 def test_the_person_is_asked_within_the_budget_and_the_answers_replay():
-    from solvi.compile import Ruling
+    from solvi.experimental.compile import Ruling
     two_kinds = OFF_BY_ONE.replace("weight > 30", "weight >= 30")
     calls = []
     w = Writer([[GOOD], [two_kinds, two_kinds, GOOD]], tests=[TEST_OK[1]])
@@ -549,7 +549,7 @@ def test_the_person_is_asked_within_the_budget_and_the_answers_replay():
 
 
 def test_the_reference_reviewer_picks_the_draft_equal_to_the_reference_or_gives_its_answer():
-    from solvi.compile import Dispute, reference_reviewer
+    from solvi.experimental.compile import Dispute, reference_reviewer
     rev = reference_reviewer(ship_reference)
     x = {"zone": "world", "total": 60, "weight": 40}
     r = rev(Dispute("disagreement", x, [{"ship": "free"}, {"ship": "refused"}], [[], []], 1))

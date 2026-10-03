@@ -1,4 +1,4 @@
-"""solvi.learning.Learning (experimental): labels only from trusted sources, the ladder, the gates (consistency, held-out, honesty,
+"""solvi.experimental.learning.Learning (experimental): labels only from trusted sources, the ladder, the gates (consistency, held-out, honesty,
 act_guard, shadow size), promotion recorded in the changelog, rejection undone, rollback to any promoted version — with a
 stand-in decider whose label bias corrections can fix."""
 import warnings
@@ -7,7 +7,7 @@ import pytest
 
 from solvi import Catalog, SQLiteStorage, System
 from solvi.core.deciders import DecideModel
-from solvi.learning import ExperimentalWarning, Learning, split_of
+from solvi.experimental.learning import ExperimentalWarning, Learning, split_of
 from solvi.core.store import UntrustedLabel
 from test_decide import TASK, TEAMS, FakeScorer, texts
 
@@ -58,7 +58,7 @@ def test_learning_is_experimental_and_off_until_asked(tmp_path):
     assert part.adaptation is None                                 # with it teach only stores: the gates decide
     loop.detach()
     assert s._learning is None
-    with pytest.raises(AttributeError, match=r"System.learning\(\) was removed in 1.0: use solvi.learning.Learning\(system"):
+    with pytest.raises(AttributeError, match=r"System.learning\(\) was removed in 1.0: use solvi.experimental.learning.Learning\(system"):
         s.learning()                                              # 1.0: a stable System does not import the loop
 
 
@@ -270,7 +270,7 @@ def test_conformal_sets_are_recalibrated_or_dropped_after_an_update(tmp_path):
 
 
 def test_the_shadow_set_uses_the_labels_split(tmp_path):
-    from solvi.learning import content_key
+    from solvi.experimental.learning import content_key
     part, s, store = build(tmp_path)
     loop = loop_of(s, gates={"max_change": 0.9})
     stream(s, 30)
@@ -286,7 +286,7 @@ def test_the_shadow_set_uses_the_labels_split(tmp_path):
 
 
 def test_the_act_guard_gate_reports_a_recalibration_with_errors(tmp_path):
-    from solvi.learning import Label
+    from solvi.experimental.learning import Label
     part, s, store = build(tmp_path)
     part.act_guard([(texts(t, 1, start=300 + i)[0], t) for t in TEAMS for i in range(10)], max_risk=0.5)
     loop = loop_of(s, gates={"min_calibration": 8})

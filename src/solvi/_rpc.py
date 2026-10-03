@@ -1,5 +1,5 @@
 """What a request may be and how a refused one is answered, shared by solvi serve (HTTP and MCP over stdio) and the MCP
-proxy (solvi.agents.mcp): Limits, the request errors, JSON parsed within the limits, the incident message for a failure
+proxy (solvi.experimental.mcp): Limits, the request errors, JSON parsed within the limits, the incident message for a failure
 of the server itself, and a line reader bounded by the limits. Moved out of solvi.serve in 1.0 (which re-exports every
 name; the logger is still "solvi.serve"), so that the proxy does not import the server."""
 from __future__ import annotations

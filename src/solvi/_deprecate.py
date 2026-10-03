@@ -91,6 +91,20 @@ MOVED: dict[str, str] = {
     "solvi.core.system": "solvi.system",
     "solvi.core.deciders.systemone": "solvi.systemone",
     "solvi.core.knowledge.worldmap": "solvi.worldmap",
+    # 1.0 layout, experimental (solvi.experimental.*)
+    "solvi.experimental.mcp": "solvi.agents.mcp",
+    "solvi.experimental.charts": "solvi.charts",
+    "solvi.experimental.charts.check": "solvi.charts.check",
+    "solvi.experimental.charts.propose": "solvi.charts.propose",
+    "solvi.experimental.charts.render": "solvi.charts.render",
+    "solvi.experimental.charts.spec": "solvi.charts.spec",
+    "solvi.experimental.compile": "solvi.compile",
+    "solvi.experimental.hooks": "solvi.hooks",
+    "solvi.experimental.learning": "solvi.learning",
+    "solvi.experimental.lora": "solvi.lora",
+    "solvi.experimental.compile.sandbox": "solvi.sandbox",
+    "solvi.experimental.specialist": "solvi.specialist",
+    "solvi.experimental.counterfactual": "solvi.counterfactual",     # removed for 1.0, restored as experimental
     # the import-cycle lane's moves (names that left a 0.9 module), at their 1.0 paths
     "solvi.core.response:Response": "solvi.system",
     "solvi.core.chain:append": "solvi.system",

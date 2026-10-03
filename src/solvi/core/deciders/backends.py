@@ -196,7 +196,7 @@ class _NetScorer:
 
     def pack(self, encs, block=False):
         """Encoded sequences → padded arrays (ids, attention mask, position ids, block masks); the last two None outside
-        the block layout. Shared by scoring and adapter training (solvi.lora)."""
+        the block layout. Shared by scoring and adapter training (solvi.experimental.lora)."""
         L = max(len(e[0]) for e in encs)
         ids = np.full((len(encs), L), self.enc.pad_id, dtype=np.int64)
         att = np.zeros((len(encs), L), dtype=np.int64)

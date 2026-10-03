@@ -112,7 +112,7 @@ def test_guarantee_reads_the_stored_verified_labels_only_when_its_sources_name_t
 
 
 def test_the_memory_and_the_learning_loop_refuse_verified_labels_with_the_measured_reason(tmp_path):
-    from solvi.learning import Learning
+    from solvi.experimental.learning import Learning
     from solvi.core.knowledge.memory import CorrectionMemory
     with pytest.raises(UntrustedLabel, match="broke its system's promise|memory of corrections fed verified"):
         CorrectionMemory.add(object.__new__(CorrectionMemory), "x", "yes", source="verified")
