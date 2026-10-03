@@ -16,7 +16,7 @@ from typing import Any
 
 from .core import Decision, Quote, Serial, Unknown, accept, evidence_rows, ground, has_evidence, locate, unwrap, validated
 from .core import Claim                                # Claim.extra is recorded (solvi.refine.Fail, solvi.generate)
-from .provenance import TIMED_OUT, model_info
+from .provenance import TIMED_OUT, fp_module, model_info
 from .provenance import NOT_GROUNDED, OUTSIDE_OPTIONS, QUOTE_OUTSIDE, catalog_fingerprint, fingerprint, matches
 from . import _deprecate
 
@@ -136,10 +136,10 @@ def _canon(v):
     if " at 0x" in r:                             # the default repr: a memory address, another one in every run
         t = type(v)
         if callable(v) and hasattr(v, "__qualname__"):
-            return {"object": "function", "name": f"{getattr(v, '__module__', '')}.{v.__qualname__}"}
+            return {"object": "function", "name": f"{fp_module(getattr(v, '__module__', ''), v.__qualname__)}.{v.__qualname__}"}
         if hasattr(v, "__dict__"):                # a plain object: by its class and attributes, so it recomputes
             try:
-                return {"object": f"{t.__module__}.{t.__qualname__}", "state": _canon(vars(v))}
+                return {"object": f"{fp_module(t.__module__, t.__qualname__)}.{t.__qualname__}", "state": _canon(vars(v))}
             except RecursionError:                # attributes that point back at it
                 return r
     return r

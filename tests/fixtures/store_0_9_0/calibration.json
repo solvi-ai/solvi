@@ -1,0 +1,32 @@
+{
+ "format": "solvi calibration v1",
+ "kind": "DecisionPart",
+ "name": "category",
+ "question": {
+  "task": "What kind of expense is it?",
+  "options": [
+   "meals",
+   "software",
+   "travel"
+  ],
+  "descriptions": {},
+  "multi": false,
+  "other": null
+ },
+ "fingerprint": "4298f8a17a6cdd22",
+ "models": {
+  "Words": "d83ef71b4d646c73"
+ },
+ "escalate_below": 0.9950669512572845,
+ "act_threshold": null,
+ "guarantee": {
+  "method": "empirical",
+  "error": 0.1,
+  "n": 80,
+  "signal": "confidence",
+  "promise": "none: the error was measured on the calibration examples only"
+ },
+ "conformal": null,
+ "groups": null,
+ "solvi": "0.9.0"
+}

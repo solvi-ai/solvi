@@ -17,6 +17,16 @@ SINCE = "0.8"
 REMOVED = "0.9"
 _seen: set = set()
 
+# Moved code keeps its fingerprints. A fingerprint records the module of a declared type, of a callable object's type and
+# of an object stored by its class (solvi.provenance.fp_module, solvi.runtime): moving a class or function to another
+# module would change every catalog, decision and store fingerprint that names it, and the decisions stored before the
+# move would no longer replay. Each move adds a line here — new location → the 0.9 module — and fingerprints record the
+# 0.9 name:
+#     "solvi.core.types": "solvi.typed",                  # a whole module moved: everything defined in it
+#     "solvi.core.response:Response": "solvi.system",     # one name moved out of a module that stays
+# A "module:Name" line wins over a module line. Entries are never removed: stored records name the 0.9 modules forever.
+MOVED: dict[str, str] = {}
+
 
 class SolviDeprecationWarning(FutureWarning):
     """An old solvi name, kept for one release. A FutureWarning, not a DeprecationWarning: Python hides a
