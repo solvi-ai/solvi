@@ -450,11 +450,13 @@ def given_names(inputs) -> set | None:
 
 
 def unknown_reads(source: str, parts: dict, given) -> list[str]:
-    """Parts that read a name which is neither a given fact nor a fact another part sets (a rule sets none)."""
+    """Parts that read a name which is neither a given fact nor a fact another part sets (a rule sets none), and parts
+    named like a given fact."""
     if given is None:
         return []
     facts = {n for n, p in parts.items() if p.get("kind") in ("fn", "check")}
-    out = []
+    out = [f"part {n} has the name of an input: a part is named after what it computes (e.g. {n}_value), the input "
+           f"keeps its name" for n in parts if n in given]
     for node in ast.parse(source).body:
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name in parts:
             if node.args.vararg or node.args.kwarg:

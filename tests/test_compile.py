@@ -584,3 +584,11 @@ def test_datetime_strptime_works_in_the_sandbox_and_its_helper_module_cannot_be_
     ns = sandbox.load(src)
     assert ns["f"]("3:45PM") == 15
     assert sandbox.check("import _strptime\n")
+
+
+def test_a_part_named_like_an_input_is_a_contract_problem_before_it_runs():
+    named = GOOD.replace("def free_shipping(total):", "def total(zone):\n    return 1\n\ndef free_shipping(total):")
+    named = named.replace('"free_shipping": {"kind": "fn", "clauses": ["c3"]},',
+                          '"free_shipping": {"kind": "fn", "clauses": ["c3"]}, "total": {"kind": "fn", "clauses": []},')
+    c = compile_spec(Spec(POLICY), QS, INPUTS, Writer([[named], [GOOD]]), rounds=1)
+    assert not c.accepted and "part total has the name of an input" in c.record["rounds"][0]["drafts"][0]["problems"][0]
