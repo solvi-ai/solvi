@@ -202,7 +202,26 @@ def _source_ast(f):
         if b and isinstance(b[0], ast.Expr) and isinstance(getattr(b[0], "value", None), ast.Constant) \
                 and isinstance(b[0].value.value, str):
             node.body = b[1:] or [ast.Pass()]
-    return ast.dump(node, include_attributes=False)
+    return _dump(node)
+
+
+def _dump(node):
+    """An AST as text, the same on every Python version: fields that are None or empty are left out (Python 3.12 adds
+    `type_params=[]` to every function and 3.13 drops empty fields from ast.dump, so its text — and every code
+    fingerprint built on it — changed with the interpreter, and a decision recorded on one Python did not replay its
+    configuration on another)."""
+    import ast
+    if isinstance(node, ast.AST):
+        fields = []
+        for k in node._fields:
+            v = getattr(node, k, None)
+            if v is None or (isinstance(v, list) and not v):
+                continue
+            fields.append(f"{k}={_dump(v)}")
+        return f"{type(node).__name__}({', '.join(fields)})"
+    if isinstance(node, list):
+        return "[" + ", ".join(_dump(x) for x in node) + "]"
+    return repr(node)
 
 
 def code_fingerprint(f, _seen=None):

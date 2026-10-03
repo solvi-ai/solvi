@@ -307,6 +307,25 @@ def test_search_as_the_slow_path_walks_the_space_through_the_checks():
     assert slow.replay(th)["ok"]
 
 
+def test_a_searching_slow_path_with_a_fact_as_its_objective_replays():
+    cat = Catalog()
+
+    @cat.fn
+    def late(slot) -> float:
+        return float(slot.split(":")[0])
+
+    @cat.rule("ok")
+    def ok(slot, late):
+        return "yes"
+    judge = System(cat, [Question("ok", "Is the slot fine?", Answer.yes_no(), requires=["late"])])
+    slow = SlowPath(judge, space=["9:00", "11:00", "10:00"], into="slot", search={"objective": "late"})
+    th = slow.run({}, "ok")
+    assert th.record.best == "11:00" and th.record.value == 11.0
+    assert slow.replay(th)["ok"]                      # the objective is the fact's name: read from the response
+    th.record.value = 9.0
+    assert ("search", "objective: recorded 9.0, recomputed 11.0") in slow.replay(th)["mismatches"]
+
+
 def test_a_slow_path_is_refused_when_it_cannot_answer_the_question_or_is_misconfigured():
     s2, _ = slow_llm()
     with pytest.raises(ValueError, match="no question"):

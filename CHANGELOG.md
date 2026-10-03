@@ -29,6 +29,9 @@
 - `compile_groups` (experimental): a large specification is split into groups of clauses, each compiled and accepted
   on its own, then assembled and checked again as a whole. On a 56-clause customer-service policy no group was
   accepted — the drafts added rules the policy does not state, and acceptance refused them.
+- A showcase of System 1 and System 2 on a game: `examples/23_pokemon_world_map.py` and a Space in `spaces/pokemon/`. A player walks the world map of Pokémon Red (190 places and 447 exits recorded from a real playthrough as place names and exits — no ROM, no graphics) through the game's first fifteen goals, twice. System 1 is two rules over routes it remembers; System 2 is a search over the world map the player writes as it goes, woken when System 1 has no route or was surprised; after each goal the routes are compiled from what the map has confirmed. The first run makes 147 slow decisions out of 183, the second 2 out of 62 (the fewest moves possible), both right after a surprise. Every decision is stored and replays without the game; the Space replays the recording in the browser with the world map, who decided and why, and the system report. With your own ROM file, the example first checks the recorded world against it.
+- A decision recorded on one Python version now replays its configuration on another: the code fingerprints of a catalog no longer change with the interpreter (Python 3.12 and 3.13 print a function's syntax tree differently). Fingerprints computed by earlier versions differ once from the new ones: a trace replay then reports the catalog as changed.
+- A searching slow path whose objective is a fact's name (`SlowPath(..., search={"objective": "score"})`) replays; its replay used to fail with a TypeError.
 - The nine-task benchmark stand reruns offline in CI from the published run's packed model replies (weekly
   workflow `stand.yml`), and fails on any published number in the docs that moved.
 

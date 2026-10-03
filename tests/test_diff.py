@@ -94,6 +94,19 @@ def test_code_fingerprint_ignores_formatting_and_sees_constants(tmp_path):
     assert code_fingerprint(e.late) != code_fingerprint(f.late)          # a helper of the same module it calls
 
 
+def test_the_code_text_behind_a_fingerprint_is_the_same_on_every_python(tmp_path):
+    """ast.dump changed with the interpreter (3.12 added `type_params=[]`, 3.13 drops empty fields), so a catalog's
+    fingerprint — and a stored dispatch's configuration — differed between Pythons: the text is now pinned."""
+    from solvi.provenance import _source_ast
+    m = _module(tmp_path, "fg", "def late(days: int, limit=None) -> bool:\n    return [d for d in days if d != limit]\n")
+    assert _source_ast(m.late) == (
+        "FunctionDef(name='late', args=arguments(args=[arg(arg='days', annotation=Name(id='int', ctx=Load())), "
+        "arg(arg='limit')], defaults=[Constant()]), body=[Return(value=ListComp(elt=Name(id='d', ctx=Load()), "
+        "generators=[comprehension(target=Name(id='d', ctx=Store()), iter=Name(id='days', ctx=Load()), "
+        "ifs=[Compare(left=Name(id='d', ctx=Load()), ops=[NotEq()], comparators=[Name(id='limit', ctx=Load())])], "
+        "is_async=0)]))], returns=Name(id='bool', ctx=Load()))")
+
+
 def test_declared_types_are_in_the_fingerprint():
     def cat_with(t):
         cat = Catalog()

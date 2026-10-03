@@ -176,8 +176,8 @@ class SearchRun:
         if not (accepted(res, self.question, accept) and res[self.question].status != "abstain"):
             bad.append(("accepted", "the recorded best is not accepted by its response"))
         if self.objective is not None:
-            if objective is None and self.objective.startswith("fact "):
-                got = res.values.get(self.objective[5:])
+            if isinstance(objective, str) or (objective is None and self.objective.startswith("fact ")):
+                got = res.values.get(objective if isinstance(objective, str) else self.objective[5:])
             elif objective is not None:
                 got = objective(self.best)
             else:
@@ -259,7 +259,7 @@ def _verdict(res, question, accept, objective, cand):
             return objective(cand), None
         if objective not in res.values:
             raise ValueError(f"the objective {objective!r} is not computed for the question {question!r}: list it in "
-                             "the question's checkpoints (or give a function of the candidate)")
+                             "the question's requires= (or give a function of the candidate)")
         return res.values[objective], None
     failed = _governing(res, question, failed_checks(res, question))
     return None, (failed[0].check if failed else

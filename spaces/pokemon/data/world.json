@@ -1,0 +1,4651 @@
+{
+"format": "pokeworld v1",
+"source": "a recorded playthrough of Pokemon Red (place names, exits as the player sees them, where they led); no ROM bytes, no graphics",
+"start": "REDS_HOUSE_2F",
+"story": [
+{
+"id": "meet_oak",
+"goal": "Leave the house and walk north out of Pallet Town toward Route 1; Professor Oak will stop you and bring you to his lab.",
+"targets": [
+"ROUTE_1"
+],
+"stage": 0
+},
+{
+"id": "starter",
+"goal": "In Oak's lab, choose a starter Pokemon from the Poke Balls on the table.",
+"targets": [
+"OAKS_LAB"
+],
+"stage": 1
+},
+{
+"id": "rival1",
+"goal": "Battle your rival in Oak's lab (he challenges you as you try to leave).",
+"targets": [
+"OAKS_LAB"
+],
+"stage": 2
+},
+{
+"id": "parcel",
+"goal": "Go north through Route 1 to Viridian City and enter the Poke Mart to receive Oak's Parcel.",
+"targets": [
+"VIRIDIAN_MART"
+],
+"stage": 3
+},
+{
+"id": "deliver_parcel",
+"goal": "Bring Oak's Parcel back to Professor Oak in his lab in Pallet Town and talk to him.",
+"targets": [
+"OAKS_LAB"
+],
+"stage": 4
+},
+{
+"id": "viridian_forest",
+"goal": "Head north from Viridian City through Route 2 and Viridian Forest toward Pewter City.",
+"targets": [
+"PEWTER_CITY"
+],
+"stage": 5
+},
+{
+"id": "brock",
+"goal": "Defeat Brock, the Pewter City Gym Leader (Rock/Ground). Water, Grass and Fighting moves are strong against him.",
+"targets": [
+"PEWTER_GYM"
+],
+"stage": 6
+},
+{
+"id": "mt_moon",
+"goal": "Travel east from Pewter City along Route 3 and through Mt. Moon to Route 4 and Cerulean City.",
+"targets": [
+"CERULEAN_CITY"
+],
+"stage": 7
+},
+{
+"id": "misty",
+"goal": "Defeat Misty, the Cerulean City Gym Leader (Water). Electric or Grass moves are strong against her.",
+"targets": [
+"CERULEAN_GYM"
+],
+"stage": 8
+},
+{
+"id": "bill",
+"goal": "Go north across Nugget Bridge (Route 24) and east on Route 25 to Bill's house; help Bill and get the S.S. Ticket.",
+"targets": [
+"BILLS_HOUSE"
+],
+"stage": 9
+},
+{
+"id": "ss_anne",
+"goal": "Go south through Route 5, the Underground Path and Route 6 to Vermilion City; board the S.S. Anne and get HM01 (Cut) from the captain.",
+"targets": [
+"SS_ANNE_CAPTAINS_ROOM"
+],
+"stage": 10
+},
+{
+"id": "surge",
+"goal": "Defeat Lt. Surge at the Vermilion City Gym (Electric; Ground moves are strong). A small tree blocks the gym entrance.",
+"targets": [
+"VERMILION_GYM"
+],
+"stage": 11
+},
+{
+"id": "rock_tunnel",
+"goal": "Go back to Cerulean, east via Route 9 to Rock Tunnel (Route 10), and through it south to Lavender Town.",
+"targets": [
+"LAVENDER_TOWN"
+],
+"stage": 12
+},
+{
+"id": "celadon",
+"goal": "Go west from Lavender Town via Route 8 and the Underground Path to Celadon City.",
+"targets": [
+"CELADON_CITY"
+],
+"stage": 13
+},
+{
+"id": "erika",
+"goal": "Defeat Erika at the Celadon City Gym (Grass; Fire, Ice, Flying moves are strong).",
+"targets": [
+"CELADON_GYM"
+],
+"stage": 14
+}
+],
+"events": [
+{
+"stage": 0,
+"place": "PALLET_TOWN",
+"exit": "Leave north",
+"to": "OAKS_LAB",
+"say": "Professor Oak stops you in the tall grass and walks you to his lab.",
+"done": "meet_oak"
+},
+{
+"stage": 11,
+"place": "SS_ANNE_1F",
+"exit": "Door at (26,0)",
+"to": "VERMILION_CITY",
+"say": "The S.S. Anne sets sail as you leave; you watch it go from the dock and walk into the city.",
+"done": null
+}
+],
+"map_ids": {
+"REDS_HOUSE_2F": 38,
+"REDS_HOUSE_1F": 37,
+"PALLET_TOWN": 0,
+"OAKS_LAB": 40,
+"ROUTE_1": 12,
+"VIRIDIAN_CITY": 1,
+"VIRIDIAN_POKECENTER": 41,
+"VIRIDIAN_MART": 42,
+"ROUTE_2": 13,
+"VIRIDIAN_FOREST_SOUTH_GATE": 50,
+"VIRIDIAN_FOREST": 51,
+"VIRIDIAN_FOREST_NORTH_GATE": 47,
+"PEWTER_CITY": 2,
+"PEWTER_GYM": 54,
+"PEWTER_MART": 56,
+"ROUTE_3": 14,
+"PEWTER_POKECENTER": 58,
+"ROUTE_4": 15,
+"MT_MOON_1F": 59,
+"MT_MOON_B1F": 60,
+"MT_MOON_B2F": 61,
+"CERULEAN_CITY": 3,
+"CERULEAN_POKECENTER": 64,
+"CERULEAN_MART": 67,
+"CERULEAN_GYM": 65,
+"ROUTE_24": 35,
+"ROUTE_25": 36,
+"BILLS_HOUSE": 88,
+"CERULEAN_TRASHED_HOUSE": 62,
+"ROUTE_5": 16,
+"UNDERGROUND_PATH_ROUTE_5": 71,
+"UNDERGROUND_PATH_NORTH_SOUTH": 119,
+"UNDERGROUND_PATH_ROUTE_6": 74,
+"ROUTE_6": 17,
+"VERMILION_CITY": 5,
+"VERMILION_DOCK": 94,
+"SS_ANNE_1F": 95,
+"SS_ANNE_2F": 96,
+"VERMILION_POKECENTER": 89,
+"SS_ANNE_CAPTAINS_ROOM": 101,
+"VERMILION_GYM": 92,
+"ROUTE_6_GATE": 73,
+"ROUTE_5_GATE": 70,
+"ROUTE_9": 20,
+"ROUTE_10": 21,
+"ROCK_TUNNEL_1F": 82,
+"ROCK_TUNNEL_B1F": 232,
+"LAVENDER_TOWN": 4,
+"ROUTE_8": 19,
+"UNDERGROUND_PATH_ROUTE_8": 80,
+"UNDERGROUND_PATH_WEST_EAST": 121,
+"UNDERGROUND_PATH_ROUTE_7": 77,
+"ROUTE_7": 18,
+"CELADON_CITY": 6,
+"CELADON_POKECENTER": 133,
+"CELADON_GYM": 134,
+"GAME_CORNER": 135,
+"ROCKET_HIDEOUT_B1F": 199,
+"ROCKET_HIDEOUT_B2F": 200,
+"ROCKET_HIDEOUT_B3F": 201,
+"ROCKET_HIDEOUT_B4F": 202,
+"ROCKET_HIDEOUT_ELEVATOR": 203,
+"LAVENDER_POKECENTER": 141,
+"POKEMON_TOWER_1F": 142,
+"POKEMON_TOWER_2F": 143,
+"POKEMON_TOWER_3F": 144,
+"POKEMON_TOWER_4F": 145,
+"POKEMON_TOWER_5F": 146,
+"POKEMON_TOWER_6F": 147,
+"POKEMON_TOWER_7F": 148,
+"MR_FUJIS_HOUSE": 149,
+"ROUTE_12": 23,
+"LAVENDER_MART": 150,
+"NAME_RATERS_HOUSE": 229,
+"LAVENDER_CUBONE_HOUSE": 151,
+"ROUTE_12_GATE_1F": 87,
+"ROUTE_13": 24,
+"ROUTE_14": 25,
+"ROUTE_15": 26,
+"ROUTE_15_GATE_1F": 184,
+"FUCHSIA_CITY": 7,
+"FUCHSIA_GYM": 157,
+"SAFARI_ZONE_GATE": 156,
+"SAFARI_ZONE_CENTER": 220,
+"SAFARI_ZONE_EAST": 217,
+"SAFARI_ZONE_NORTH": 218,
+"SAFARI_ZONE_WEST": 219,
+"SAFARI_ZONE_SECRET_HOUSE": 222,
+"WARDENS_HOUSE": 155,
+"FUCHSIA_POKECENTER": 154,
+"CELADON_MART_1F": 122,
+"CELADON_MART_ELEVATOR": 127,
+"CELADON_MART_2F": 123,
+"CELADON_MART_3F": 124,
+"CELADON_MART_4F": 125,
+"CELADON_MART_5F": 136,
+"CELADON_MART_ROOF": 126,
+"ROUTE_7_GATE": 76,
+"SAFFRON_CITY": 10,
+"SILPH_CO_1F": 181,
+"SILPH_CO_ELEVATOR": 236,
+"SILPH_CO_3F": 208,
+"SILPH_CO_5F": 210,
+"SILPH_CO_9F": 233,
+"SILPH_CO_7F": 212,
+"SILPH_CO_11F": 235,
+"SAFFRON_GYM": 178,
+"ROUTE_18": 29,
+"ROUTE_8_GATE": 79,
+"SAFFRON_MART": 180,
+"SAFFRON_POKECENTER": 182,
+"SAFFRON_PIDGEY_HOUSE": 179,
+"COPYCATS_HOUSE_1F": 175,
+"FIGHTING_DOJO": 177,
+"MR_PSYCHICS_HOUSE": 183,
+"ROUTE_11": 22,
+"DIGLETTS_CAVE_ROUTE_11": 85,
+"DIGLETTS_CAVE": 197,
+"DIGLETTS_CAVE_ROUTE_2": 46,
+"ROUTE_2_GATE": 49,
+"ROUTE_21": 32,
+"CINNABAR_ISLAND": 8,
+"POKEMON_MANSION_1F": 165,
+"POKEMON_MANSION_2F": 214,
+"POKEMON_MANSION_3F": 215,
+"POKEMON_MANSION_B1F": 216,
+"CINNABAR_GYM": 166,
+"CINNABAR_POKECENTER": 171,
+"VIRIDIAN_GYM": 45,
+"ROUTE_22": 33,
+"ROUTE_22_GATE": 193,
+"ROUTE_23": 34,
+"VICTORY_ROAD_1F": 108,
+"VICTORY_ROAD_2F": 194,
+"VICTORY_ROAD_3F": 198,
+"INDIGO_PLATEAU": 9,
+"INDIGO_PLATEAU_LOBBY": 174,
+"BLUES_HOUSE": 39,
+"VIRIDIAN_SCHOOL_HOUSE": 43,
+"VIRIDIAN_NICKNAME_HOUSE": 44,
+"ROUTE_2_TRADE_HOUSE": 48,
+"PEWTER_NIDORAN_HOUSE": 55,
+"PEWTER_SPEECH_HOUSE": 57,
+"MT_MOON_POKECENTER": 68,
+"CERULEAN_TRADE_HOUSE": 63,
+"BIKE_SHOP": 66,
+"CERULEAN_BADGE_HOUSE": 230,
+"POKEMON_FAN_CLUB": 90,
+"VERMILION_MART": 91,
+"VERMILION_PIDGEY_HOUSE": 93,
+"VERMILION_TRADE_HOUSE": 196,
+"VERMILION_OLD_ROD_HOUSE": 163,
+"SS_ANNE_1F_ROOMS": 102,
+"SS_ANNE_KITCHEN": 100,
+"SS_ANNE_2F_ROOMS": 103,
+"ROCK_TUNNEL_POKECENTER": 81,
+"GAME_CORNER_PRIZE_ROOM": 137,
+"CELADON_DINER": 138,
+"CELADON_CHIEF_HOUSE": 139,
+"CELADON_HOTEL": 140,
+"ROUTE_12_SUPER_ROD_HOUSE": 189,
+"ROUTE_12_GATE_2F": 195,
+"ROUTE_15_GATE_2F": 185,
+"FUCHSIA_MART": 152,
+"FUCHSIA_BILLS_GRANDPAS_HOUSE": 153,
+"FUCHSIA_MEETING_ROOM": 158,
+"FUCHSIA_GOOD_ROD_HOUSE": 164,
+"COPYCATS_HOUSE_2F": 176,
+"CINNABAR_MART": 172
+},
+"places": {
+"BIKE_SHOP": {
+"map": "BIKE_SHOP",
+"first": null,
+"services": [],
+"dead_end": true,
+"exits": {
+"Door at (2,7)": {
+"to": "CERULEAN_CITY",
+"open": 0,
+"pass": 7,
+"observed": false
+}
+}
+},
+"BILLS_HOUSE": {
+"map": "BILLS_HOUSE",
+"first": 9,
+"services": [],
+"dead_end": false,
+"exits": {
+"Door at (2,7)": {
+"to": "ROUTE_25",
+"open": 0,
+"pass": 9,
+"observed": true
+}
+}
+},
+"BLUES_HOUSE": {
+"map": "BLUES_HOUSE",
+"first": null,
+"services": [],
+"dead_end": true,
+"exits": {
+"Door at (2,7)": {
+"to": "PALLET_TOWN",
+"open": 0,
+"pass": 0,
+"observed": false
+}
+}
+},
+"CELADON_CHIEF_HOUSE": {
+"map": "CELADON_CHIEF_HOUSE",
+"first": null,
+"services": [],
+"dead_end": true,
+"exits": {
+"Door at (2,7)": {
+"to": "CELADON_CITY",
+"open": 0,
+"pass": 13,
+"observed": false
+}
+}
+},
+"CELADON_CITY": {
+"map": "CELADON_CITY",
+"first": 13,
+"services": [],
+"dead_end": false,
+"exits": {
+"Door at (12,27)": {
+"to": "CELADON_GYM",
+"open": 14,
+"pass": 14,
+"observed": true
+},
+"Door at (28,19)": {
+"to": "GAME_CORNER",
+"open": 14,
+"pass": 15,
+"observed": true
+},
+"Door at (31,27)": {
+"to": "CELADON_DINER",
+"open": 14,
+"pass": 14,
+"observed": false
+},
+"Door at (33,19)": {
+"to": "GAME_CORNER_PRIZE_ROOM",
+"open": 14,
+"pass": 14,
+"observed": false
+},
+"Door at (35,27)": {
+"to": "CELADON_CHIEF_HOUSE",
+"open": 14,
+"pass": 14,
+"observed": false
+},
+"Door at (41,9)": {
+"to": "CELADON_POKECENTER",
+"open": 14,
+"pass": 14,
+"observed": true
+},
+"Door at (43,27)": {
+"to": "CELADON_HOTEL",
+"open": 14,
+"pass": 14,
+"observed": false
+},
+"Door at (8,13)": {
+"to": "CELADON_MART_1F",
+"open": 14,
+"pass": 22,
+"observed": true
+},
+"Leave east": {
+"to": "ROUTE_7 (west)",
+"open": 14,
+"pass": 14,
+"observed": true
+}
+}
+},
+"CELADON_DINER": {
+"map": "CELADON_DINER",
+"first": null,
+"services": [],
+"dead_end": true,
+"exits": {
+"Door at (3,7)": {
+"to": "CELADON_CITY",
+"open": 0,
+"pass": 13,
+"observed": false
+}
+}
+},
+"CELADON_GYM": {
+"map": "CELADON_GYM",
+"first": 14,
+"services": [],
+"dead_end": false,
+"exits": {
+"Door at (4,17)": {
+"to": "CELADON_CITY",
+"open": 0,
+"pass": 13,
+"observed": true
+}
+}
+},
+"CELADON_HOTEL": {
+"map": "CELADON_HOTEL",
+"first": null,
+"services": [],
+"dead_end": true,
+"exits": {
+"Door at (3,7)": {
+"to": "CELADON_CITY",
+"open": 0,
+"pass": 13,
+"observed": false
+}
+}
+},
+"CELADON_MART_1F": {
+"map": "CELADON_MART_1F",
+"first": 22,
+"services": [],
+"dead_end": false,
+"exits": {
+"Door at (1,1)": {
+"to": "CELADON_MART_ELEVATOR (east)",
+"open": 0,
+"pass": 22,
+"observed": true
+},
+"Door at (12,1)": {
+"to": "CELADON_MART_2F",
+"open": 0,
+"pass": 22,
+"observed": true
+},
+"Door at (2,7)": {
+"to": "CELADON_CITY",
+"open": 0,
+"pass": 13,
+"observed": true
+}
+}
+},
+"CELADON_MART_2F": {
+"map": "CELADON_MART_2F",
+"first": 22,
+"services": [
+"mart"
+],
+"dead_end": false,
+"exits": {
+"Door at (1,1)": {
+"to": "CELADON_MART_ELEVATOR (east)",
+"open": 0,
+"pass": 22,
+"observed": false
+},
+"Door at (12,1)": {
+"to": "CELADON_MART_1F",
+"open": 0,
+"pass": 22,
+"observed": false
+},
+"Door at (16,1)": {
+"to": "CELADON_MART_3F",
+"open": 0,
+"pass": 22,
+"observed": true
+}
+}
+},
+"CELADON_MART_3F": {
+"map": "CELADON_MART_3F",
+"first": 22,
+"services": [
+"mart"
+],
+"dead_end": false,
+"exits": {
+"Door at (1,1)": {
+"to": "CELADON_MART_ELEVATOR (east)",
+"open": 0,
+"pass": 22,
+"observed": false
+},
+"Door at (12,1)": {
+"to": "CELADON_MART_4F",
+"open": 0,
+"pass": 22,
+"observed": true
+},
+"Door at (16,1)": {
+"to": "CELADON_MART_2F",
+"open": 0,
+"pass": 22,
+"observed": false
+}
+}
+},
+"CELADON_MART_4F": {
+"map": "CELADON_MART_4F",
+"first": 22,
+"services": [
+"mart"
+],
+"dead_end": false,
+"exits": {
+"Door at (1,1)": {
+"to": "CELADON_MART_ELEVATOR (east)",
+"open": 0,
+"pass": 22,
+"observed": false
+},
+"Door at (12,1)": {
+"to": "CELADON_MART_3F",
+"open": 0,
+"pass": 22,
+"observed": false
+},
+"Door at (16,1)": {
+"to": "CELADON_MART_5F",
+"open": 0,
+"pass": 22,
+"observed": true
+}
+}
+},
+"CELADON_MART_5F": {
+"map": "CELADON_MART_5F",
+"first": 22,
+"services": [
+"mart"
+],
+"dead_end": false,
+"exits": {
+"Door at (1,1)": {
+"to": "CELADON_MART_ELEVATOR (west)",
+"open": 0,
+"pass": 22,
+"observed": true
+},
+"Door at (12,1)": {
+"to": "CELADON_MART_ROOF",
+"open": 0,
+"pass": 22,
+"observed": true
+},
+"Door at (16,1)": {
+"to": "CELADON_MART_4F",
+"open": 0,
+"pass": 22,
+"observed": false
+}
+}
+},
+"CELADON_MART_ELEVATOR (east)": {
+"map": "CELADON_MART_ELEVATOR",
+"first": 22,
+"services": [],
+"dead_end": false,
+"exits": {
+"Door at (1,3)": {
+"to": "CELADON_MART_1F",
+"open": 0,
+"pass": 22,
+"observed": true
+}
+}
+},
+"CELADON_MART_ELEVATOR (west)": {
+"map": "CELADON_MART_ELEVATOR",
+"first": 22,
+"services": [],
+"dead_end": false,
+"exits": {}
+},
+"CELADON_MART_ROOF": {
+"map": "CELADON_MART_ROOF",
+"first": 22,
+"services": [],
+"dead_end": false,
+"exits": {
+"Door at (15,2)": {
+"to": "CELADON_MART_5F",
+"open": 0,
+"pass": 22,
+"observed": true
+}
+}
+},
+"CELADON_POKECENTER": {
+"map": "CELADON_POKECENTER",
+"first": 14,
+"services": [
+"center"
+],
+"dead_end": false,
+"exits": {
+"Door at (3,7)": {
+"to": "CELADON_CITY",
+"open": 0,
+"pass": 13,
+"observed": true
+}
+}
+},
+"CERULEAN_BADGE_HOUSE": {
+"map": "CERULEAN_BADGE_HOUSE",
+"first": null,
+"services": [],
+"dead_end": true,
+"exits": {
+"Door at (2,0)": {
+"to": "CERULEAN_CITY",
+"open": 0,
+"pass": 7,
+"observed": false
+}
+}
+},
+"CERULEAN_CITY": {
+"map": "CERULEAN_CITY",
+"first": 7,
+"services": [],
+"dead_end": false,
+"exits": {
+"Door at (13,15)": {
+"to": "CERULEAN_TRADE_HOUSE",
+"open": 8,
+"pass": 8,
+"observed": false
+},
+"Door at (13,25)": {
+"to": "BIKE_SHOP",
+"open": 8,
+"pass": 8,
+"observed": false
+},
+"Door at (19,17)": {
+"to": "CERULEAN_POKECENTER",
+"open": 8,
+"pass": 8,
+"observed": true
+},
+"Door at (25,25)": {
+"to": "CERULEAN_MART",
+"open": 8,
+"pass": 8,
+"observed": true
+},
+"Door at (27,9)": {
+"to": "CERULEAN_TRASHED_HOUSE",
+"open": 10,
+"pass": 10,
+"observed": true
+},
+"Door at (30,19)": {
+"to": "CERULEAN_GYM",
+"open": 8,
+"pass": 8,
+"observed": true
+},
+"Door at (9,9)": {
+"to": "CERULEAN_BADGE_HOUSE",
+"open": 8,
+"pass": 8,
+"observed": false
+},
+"Leave east": {
+"to": "ROUTE_9",
+"open": 10,
+"pass": 12,
+"observed": true
+},
+"Leave north": {
+"to": "ROUTE_24",
+"open": 8,
+"pass": 9,
+"observed": true
+},
+"Leave south (x 11-28)": {
+"to": "ROUTE_5",
+"open": 10,
+"pass": 10,
+"observed": true
+},
+"Leave south (x 16-23)": {
+"to": "ROUTE_5",
+"open": 10,
+"pass": 10,
+"observed": false
+},
+"Leave west": {
+"to": "ROUTE_4 (east)",
+"open": 8,
+"pass": 8,
+"observed": true
+}
+}
+},
+"CERULEAN_GYM": {
+"map": "CERULEAN_GYM",
+"first": 8,
+"services": [],
+"dead_end": false,
+"exits": {
+"Door at (4,13)": {
+"to": "CERULEAN_CITY",
+"open": 0,
+"pass": 7,
+"observed": true
+}
+}
+},
+"CERULEAN_MART": {
+"map": "CERULEAN_MART",
+"first": 8,
+"services": [
+"mart"
+],
+"dead_end": false,
+"exits": {
+"Door at (3,7)": {
+"to": "CERULEAN_CITY",
+"open": 0,
+"pass": 7,
+"observed": true
+}
+}
+},
+"CERULEAN_POKECENTER": {
+"map": "CERULEAN_POKECENTER",
+"first": 8,
+"services": [
+"center"
+],
+"dead_end": false,
+"exits": {
+"Door at (3,7)": {
+"to": "CERULEAN_CITY",
+"open": 0,
+"pass": 7,
+"observed": true
+}
+}
+},
+"CERULEAN_TRADE_HOUSE": {
+"map": "CERULEAN_TRADE_HOUSE",
+"first": null,
+"services": [],
+"dead_end": true,
+"exits": {
+"Door at (2,7)": {
+"to": "CERULEAN_CITY",
+"open": 0,
+"pass": 7,
+"observed": false
+}
+}
+},
+"CERULEAN_TRASHED_HOUSE": {
+"map": "CERULEAN_TRASHED_HOUSE",
+"first": 10,
+"services": [],
+"dead_end": false,
+"exits": {
+"Door at (2,7)": {
+"to": "CERULEAN_CITY",
+"open": 0,
+"pass": 7,
+"observed": false
+},
+"Door at (3,0)": {
+"to": "CERULEAN_CITY",
+"open": 0,
+"pass": 7,
+"observed": true
+}
+}
+},
+"CINNABAR_GYM": {
+"map": "CINNABAR_GYM",
+"first": 25,
+"services": [],
+"dead_end": false,
+"exits": {
+"Door at (16,17)": {
+"to": "CINNABAR_ISLAND",
+"open": 0,
+"pass": 24,
+"observed": true
+}
+}
+},
+"CINNABAR_ISLAND": {
+"map": "CINNABAR_ISLAND",
+"first": 24,
+"services": [],
+"dead_end": false,
+"exits": {
+"Door at (11,11)": {
+"to": "CINNABAR_POKECENTER",
+"open": 0,
+"pass": 25,
+"observed": true
+},
+"Door at (15,11)": {
+"to": "CINNABAR_MART",
+"open": 0,
+"pass": 0,
+"observed": false
+},
+"Door at (18,3)": {
+"to": "CINNABAR_GYM",
+"open": 0,
+"pass": 25,
+"observed": true
+},
+"Door at (6,3)": {
+"to": "POKEMON_MANSION_1F",
+"open": 0,
+"pass": 24,
+"observed": true
+},
+"Leave north": {
+"to": "ROUTE_21",
+"open": 0,
+"pass": 24,
+"observed": true
+}
+}
+},
+"CINNABAR_MART": {
+"map": "CINNABAR_MART",
+"first": null,
+"services": [],
+"dead_end": true,
+"exits": {
+"Door at (3,7)": {
+"to": "CINNABAR_ISLAND",
+"open": 0,
+"pass": 24,
+"observed": false
+}
+}
+},
+"CINNABAR_POKECENTER": {
+"map": "CINNABAR_POKECENTER",
+"first": 25,
+"services": [
+"center"
+],
+"dead_end": false,
+"exits": {
+"Door at (3,7)": {
+"to": "CINNABAR_ISLAND",
+"open": 0,
+"pass": 24,
+"observed": true
+}
+}
+},
+"COPYCATS_HOUSE_1F": {
+"map": "COPYCATS_HOUSE_1F",
+"first": 23,
+"services": [],
+"dead_end": false,
+"exits": {
+"Door at (2,7)": {
+"to": "SAFFRON_CITY",
+"open": 0,
+"pass": 22,
+"observed": true
+},
+"Door at (7,1)": {
+"to": "COPYCATS_HOUSE_2F",
+"open": 0,
+"pass": 0,
+"observed": false
+}
+}
+},
+"COPYCATS_HOUSE_2F": {
+"map": "COPYCATS_HOUSE_2F",
+"first": null,
+"services": [],
+"dead_end": true,
+"exits": {
+"Door at (7,1)": {
+"to": "COPYCATS_HOUSE_1F",
+"open": 0,
+"pass": 23,
+"observed": false
+}
+}
+},
+"DIGLETTS_CAVE": {
+"map": "DIGLETTS_CAVE",
+"first": 24,
+"services": [
+"grass"
+],
+"dead_end": false,
+"exits": {
+"Door at (37,31)": {
+"to": "DIGLETTS_CAVE_ROUTE_11",
+"open": 0,
+"pass": 24,
+"observed": false
+},
+"Door at (5,5)": {
+"to": "DIGLETTS_CAVE_ROUTE_2",
+"open": 0,
+"pass": 24,
+"observed": true
+}
+}
+},
+"DIGLETTS_CAVE_ROUTE_11": {
+"map": "DIGLETTS_CAVE_ROUTE_11",
+"first": 24,
+"services": [],
+"dead_end": false,
+"exits": {
+"Door at (2,7)": {
+"to": "ROUTE_11",
+"open": 0,
+"pass": 24,
+"observed": false
+},
+"Door at (4,4)": {
+"to": "DIGLETTS_CAVE",
+"open": 0,
+"pass": 24,
+"observed": true
+}
+}
+},
+"DIGLETTS_CAVE_ROUTE_2": {
+"map": "DIGLETTS_CAVE_ROUTE_2",
+"first": 24,
+"services": [],
+"dead_end": false,
+"exits": {
+"Door at (2,7)": {
+"to": "ROUTE_2",
+"open": 0,
+"pass": 5,
+"observed": true
+},
+"Door at (4,4)": {
+"to": "DIGLETTS_CAVE",
+"open": 0,
+"pass": 24,
+"observed": false
+}
+}
+},
+"FIGHTING_DOJO": {
+"map": "FIGHTING_DOJO",
+"first": 23,
+"services": [],
+"dead_end": false,
+"exits": {
+"Door at (4,11)": {
+"to": "SAFFRON_CITY",
+"open": 0,
+"pass": 22,
+"observed": true
+}
+}
+},
+"FUCHSIA_BILLS_GRANDPAS_HOUSE": {
+"map": "FUCHSIA_BILLS_GRANDPAS_HOUSE",
+"first": null,
+"services": [],
+"dead_end": true,
+"exits": {
+"Door at (2,7)": {
+"to": "FUCHSIA_CITY",
+"open": 0,
+"pass": 18,
+"observed": false
+}
+}
+},
+"FUCHSIA_CITY": {
+"map": "FUCHSIA_CITY",
+"first": 18,
+"services": [],
+"dead_end": false,
+"exits": {
+"Door at (11,27)": {
+"to": "FUCHSIA_BILLS_GRANDPAS_HOUSE",
+"open": 19,
+"pass": 19,
+"observed": false
+},
+"Door at (18,3)": {
+"to": "SAFARI_ZONE_GATE",
+"open": 19,
+"pass": 20,
+"observed": true
+},
+"Door at (19,27)": {
+"to": "FUCHSIA_POKECENTER",
+"open": 19,
+"pass": 22,
+"observed": true
+},
+"Door at (22,13)": {
+"to": "FUCHSIA_MEETING_ROOM",
+"open": 19,
+"pass": 19,
+"observed": false
+},
+"Door at (27,27)": {
+"to": "WARDENS_HOUSE",
+"open": 19,
+"pass": 21,
+"observed": true
+},
+"Door at (31,24)": {
+"to": "FUCHSIA_GOOD_ROD_HOUSE",
+"open": 19,
+"pass": 19,
+"observed": false
+},
+"Door at (5,13)": {
+"to": "FUCHSIA_MART",
+"open": 19,
+"pass": 19,
+"observed": false
+},
+"Door at (5,27)": {
+"to": "FUCHSIA_GYM",
+"open": 19,
+"pass": 19,
+"observed": true
+},
+"Leave east": {
+"to": "ROUTE_15",
+"open": 19,
+"pass": 19,
+"observed": true
+},
+"Leave west": {
+"to": "ROUTE_18",
+"open": 19,
+"pass": 23,
+"observed": true
+}
+}
+},
+"FUCHSIA_GOOD_ROD_HOUSE": {
+"map": "FUCHSIA_GOOD_ROD_HOUSE",
+"first": null,
+"services": [],
+"dead_end": true,
+"exits": {
+"Door at (2,0)": {
+"to": "FUCHSIA_CITY",
+"open": 0,
+"pass": 18,
+"observed": false
+}
+}
+},
+"FUCHSIA_GYM": {
+"map": "FUCHSIA_GYM",
+"first": 19,
+"services": [],
+"dead_end": false,
+"exits": {
+"Door at (4,17)": {
+"to": "FUCHSIA_CITY",
+"open": 0,
+"pass": 18,
+"observed": true
+}
+}
+},
+"FUCHSIA_MART": {
+"map": "FUCHSIA_MART",
+"first": null,
+"services": [],
+"dead_end": true,
+"exits": {
+"Door at (3,7)": {
+"to": "FUCHSIA_CITY",
+"open": 0,
+"pass": 18,
+"observed": false
+}
+}
+},
+"FUCHSIA_MEETING_ROOM": {
+"map": "FUCHSIA_MEETING_ROOM",
+"first": null,
+"services": [],
+"dead_end": true,
+"exits": {
+"Door at (4,7)": {
+"to": "FUCHSIA_CITY",
+"open": 0,
+"pass": 18,
+"observed": false
+}
+}
+},
+"FUCHSIA_POKECENTER": {
+"map": "FUCHSIA_POKECENTER",
+"first": 22,
+"services": [
+"center"
+],
+"dead_end": false,
+"exits": {
+"Door at (3,7)": {
+"to": "FUCHSIA_CITY",
+"open": 0,
+"pass": 18,
+"observed": true
+}
+}
+},
+"GAME_CORNER": {
+"map": "GAME_CORNER",
+"first": 15,
+"services": [],
+"dead_end": false,
+"exits": {
+"Door at (15,17)": {
+"to": "CELADON_CITY",
+"open": 0,
+"pass": 13,
+"observed": true
+},
+"Door at (17,4)": {
+"to": "ROCKET_HIDEOUT_B1F",
+"open": 0,
+"pass": 15,
+"observed": true
+}
+}
+},
+"GAME_CORNER_PRIZE_ROOM": {
+"map": "GAME_CORNER_PRIZE_ROOM",
+"first": null,
+"services": [],
+"dead_end": true,
+"exits": {
+"Door at (4,7)": {
+"to": "CELADON_CITY",
+"open": 0,
+"pass": 13,
+"observed": false
+}
+}
+},
+"INDIGO_PLATEAU": {
+"map": "INDIGO_PLATEAU",
+"first": 27,
+"services": [],
+"dead_end": false,
+"exits": {
+"Door at (9,5)": {
+"to": "INDIGO_PLATEAU_LOBBY",
+"open": 0,
+"pass": 27,
+"observed": true
+},
+"Leave south": {
+"to": "ROUTE_23 (north)",
+"open": 0,
+"pass": 27,
+"observed": false
+}
+}
+},
+"INDIGO_PLATEAU_LOBBY": {
+"map": "INDIGO_PLATEAU_LOBBY",
+"first": 27,
+"services": [
+"center",
+"mart"
+],
+"dead_end": false,
+"exits": {
+"Door at (7,11)": {
+"to": "INDIGO_PLATEAU",
+"open": 28,
+"pass": 28,
+"observed": false
+}
+}
+},
+"LAVENDER_CUBONE_HOUSE": {
+"map": "LAVENDER_CUBONE_HOUSE",
+"first": 18,
+"services": [],
+"dead_end": false,
+"exits": {
+"Door at (2,7)": {
+"to": "LAVENDER_TOWN",
+"open": 0,
+"pass": 12,
+"observed": true
+}
+}
+},
+"LAVENDER_MART": {
+"map": "LAVENDER_MART",
+"first": 18,
+"services": [
+"mart"
+],
+"dead_end": false,
+"exits": {
+"Door at (3,7)": {
+"to": "LAVENDER_TOWN",
+"open": 0,
+"pass": 12,
+"observed": true
+}
+}
+},
+"LAVENDER_POKECENTER": {
+"map": "LAVENDER_POKECENTER",
+"first": 16,
+"services": [
+"center"
+],
+"dead_end": false,
+"exits": {
+"Door at (3,7)": {
+"to": "LAVENDER_TOWN",
+"open": 0,
+"pass": 12,
+"observed": true
+}
+}
+},
+"LAVENDER_TOWN": {
+"map": "LAVENDER_TOWN",
+"first": 12,
+"services": [],
+"dead_end": false,
+"exits": {
+"Door at (14,5)": {
+"to": "POKEMON_TOWER_1F",
+"open": 13,
+"pass": 16,
+"observed": true
+},
+"Door at (15,13)": {
+"to": "LAVENDER_MART",
+"open": 13,
+"pass": 18,
+"observed": true
+},
+"Door at (3,13)": {
+"to": "LAVENDER_CUBONE_HOUSE",
+"open": 13,
+"pass": 18,
+"observed": true
+},
+"Door at (3,5)": {
+"to": "LAVENDER_POKECENTER",
+"open": 13,
+"pass": 16,
+"observed": true
+},
+"Door at (7,13)": {
+"to": "NAME_RATERS_HOUSE",
+"open": 13,
+"pass": 18,
+"observed": true
+},
+"Door at (7,9)": {
+"to": "MR_FUJIS_HOUSE",
+"open": 13,
+"pass": 17,
+"observed": true
+},
+"Leave north": {
+"to": "ROUTE_10",
+"open": 13,
+"pass": 13,
+"observed": true
+},
+"Leave south": {
+"to": "ROUTE_12",
+"open": 13,
+"pass": 18,
+"observed": true
+},
+"Leave west (y 2-15)": {
+"to": "ROUTE_8 (east)",
+"open": 13,
+"pass": 13,
+"observed": false
+},
+"Leave west (y 8-8)": {
+"to": "ROUTE_8 (east)",
+"open": 13,
+"pass": 13,
+"observed": true
+}
+}
+},
+"MR_FUJIS_HOUSE": {
+"map": "MR_FUJIS_HOUSE",
+"first": 17,
+"services": [],
+"dead_end": false,
+"exits": {
+"Door at (2,7)": {
+"to": "LAVENDER_TOWN",
+"open": 0,
+"pass": 12,
+"observed": true
+}
+}
+},
+"MR_PSYCHICS_HOUSE": {
+"map": "MR_PSYCHICS_HOUSE",
+"first": 23,
+"services": [],
+"dead_end": false,
+"exits": {
+"Door at (2,7)": {
+"to": "SAFFRON_CITY",
+"open": 0,
+"pass": 22,
+"observed": true
+}
+}
+},
+"MT_MOON_1F": {
+"map": "MT_MOON_1F",
+"first": 7,
+"services": [
+"grass"
+],
+"dead_end": false,
+"exits": {
+"Door at (14,35)": {
+"to": "ROUTE_4 (east)",
+"open": 0,
+"pass": 7,
+"observed": false
+},
+"Door at (17,11)": {
+"to": "MT_MOON_B1F",
+"open": 0,
+"pass": 7,
+"observed": false
+},
+"Door at (25,15)": {
+"to": "MT_MOON_B1F",
+"open": 0,
+"pass": 7,
+"observed": false
+},
+"Door at (5,5)": {
+"to": "MT_MOON_B1F",
+"open": 0,
+"pass": 7,
+"observed": true
+}
+}
+},
+"MT_MOON_B1F": {
+"map": "MT_MOON_B1F",
+"first": 7,
+"services": [
+"grass"
+],
+"dead_end": false,
+"exits": {
+"Door at (13,27)": {
+"to": "MT_MOON_B2F",
+"open": 0,
+"pass": 7,
+"observed": true
+},
+"Door at (27,3)": {
+"to": "ROUTE_4 (east)",
+"open": 0,
+"pass": 7,
+"observed": true
+},
+"Door at (5,5)": {
+"to": "MT_MOON_1F",
+"open": 0,
+"pass": 7,
+"observed": false
+}
+}
+},
+"MT_MOON_B2F": {
+"map": "MT_MOON_B2F",
+"first": 7,
+"services": [
+"grass"
+],
+"dead_end": false,
+"exits": {
+"Door at (21,17)": {
+"to": "MT_MOON_B1F",
+"open": 0,
+"pass": 7,
+"observed": false
+},
+"Door at (5,7)": {
+"to": "MT_MOON_B1F",
+"open": 0,
+"pass": 7,
+"observed": true
+}
+}
+},
+"MT_MOON_POKECENTER": {
+"map": "MT_MOON_POKECENTER",
+"first": null,
+"services": [],
+"dead_end": true,
+"exits": {
+"Door at (3,7)": {
+"to": "ROUTE_4 (west)",
+"open": 0,
+"pass": 7,
+"observed": false
+}
+}
+},
+"NAME_RATERS_HOUSE": {
+"map": "NAME_RATERS_HOUSE",
+"first": 18,
+"services": [],
+"dead_end": false,
+"exits": {
+"Door at (2,7)": {
+"to": "LAVENDER_TOWN",
+"open": 0,
+"pass": 12,
+"observed": true
+}
+}
+},
+"OAKS_LAB": {
+"map": "OAKS_LAB",
+"first": 1,
+"services": [],
+"dead_end": false,
+"exits": {
+"Door at (4,11)": {
+"to": "PALLET_TOWN",
+"open": 0,
+"pass": 0,
+"observed": true
+}
+}
+},
+"PALLET_TOWN": {
+"map": "PALLET_TOWN",
+"first": 0,
+"services": [
+"grass"
+],
+"dead_end": false,
+"exits": {
+"Door at (12,11)": {
+"to": "OAKS_LAB",
+"open": 0,
+"pass": 1,
+"observed": true
+},
+"Door at (13,5)": {
+"to": "BLUES_HOUSE",
+"open": 0,
+"pass": 0,
+"observed": false
+},
+"Door at (5,5)": {
+"to": "REDS_HOUSE_1F",
+"open": 0,
+"pass": 0,
+"observed": false
+},
+"Leave north": {
+"to": "ROUTE_1",
+"open": 0,
+"pass": 3,
+"observed": true
+},
+"Leave south": {
+"to": "ROUTE_21",
+"open": 0,
+"pass": 24,
+"close": 24,
+"observed": false
+},
+"Leave south (x 2-3)": {
+"to": "ROUTE_21",
+"open": 24,
+"pass": 24,
+"observed": false
+},
+"Leave south (x 5-7)": {
+"to": "ROUTE_21",
+"open": 24,
+"pass": 24,
+"observed": true
+}
+}
+},
+"PEWTER_CITY": {
+"map": "PEWTER_CITY",
+"first": 5,
+"services": [],
+"dead_end": false,
+"exits": {
+"Door at (13,25)": {
+"to": "PEWTER_POKECENTER",
+"open": 6,
+"pass": 7,
+"observed": true
+},
+"Door at (16,17)": {
+"to": "PEWTER_GYM",
+"open": 6,
+"pass": 6,
+"observed": true
+},
+"Door at (23,17)": {
+"to": "PEWTER_MART",
+"open": 6,
+"pass": 7,
+"observed": true
+},
+"Door at (29,13)": {
+"to": "PEWTER_NIDORAN_HOUSE",
+"open": 6,
+"pass": 6,
+"observed": false
+},
+"Door at (7,29)": {
+"to": "PEWTER_SPEECH_HOUSE",
+"open": 6,
+"pass": 6,
+"observed": false
+},
+"Leave east": {
+"to": "ROUTE_3",
+"open": 6,
+"pass": 7,
+"observed": true
+},
+"Leave south": {
+"to": "ROUTE_2",
+"open": 6,
+"pass": 6,
+"observed": true
+}
+}
+},
+"PEWTER_GYM": {
+"map": "PEWTER_GYM",
+"first": 6,
+"services": [],
+"dead_end": false,
+"exits": {
+"Door at (4,13)": {
+"to": "PEWTER_CITY",
+"open": 0,
+"pass": 5,
+"observed": true
+}
+}
+},
+"PEWTER_MART": {
+"map": "PEWTER_MART",
+"first": 7,
+"services": [
+"mart"
+],
+"dead_end": false,
+"exits": {
+"Door at (3,7)": {
+"to": "PEWTER_CITY",
+"open": 0,
+"pass": 5,
+"observed": true
+}
+}
+},
+"PEWTER_NIDORAN_HOUSE": {
+"map": "PEWTER_NIDORAN_HOUSE",
+"first": null,
+"services": [],
+"dead_end": true,
+"exits": {
+"Door at (2,7)": {
+"to": "PEWTER_CITY",
+"open": 0,
+"pass": 5,
+"observed": false
+}
+}
+},
+"PEWTER_POKECENTER": {
+"map": "PEWTER_POKECENTER",
+"first": 7,
+"services": [
+"center"
+],
+"dead_end": false,
+"exits": {
+"Door at (3,7)": {
+"to": "PEWTER_CITY",
+"open": 0,
+"pass": 5,
+"observed": true
+}
+}
+},
+"PEWTER_SPEECH_HOUSE": {
+"map": "PEWTER_SPEECH_HOUSE",
+"first": null,
+"services": [],
+"dead_end": true,
+"exits": {
+"Door at (2,7)": {
+"to": "PEWTER_CITY",
+"open": 0,
+"pass": 5,
+"observed": false
+}
+}
+},
+"POKEMON_FAN_CLUB": {
+"map": "POKEMON_FAN_CLUB",
+"first": null,
+"services": [],
+"dead_end": true,
+"exits": {
+"Door at (2,7)": {
+"to": "VERMILION_CITY",
+"open": 0,
+"pass": 10,
+"observed": false
+}
+}
+},
+"POKEMON_MANSION_1F": {
+"map": "POKEMON_MANSION_1F",
+"first": 24,
+"services": [
+"grass"
+],
+"dead_end": false,
+"exits": {
+"Door at (21,23)": {
+"to": "POKEMON_MANSION_B1F",
+"open": 0,
+"pass": 24,
+"observed": true
+},
+"Door at (4,27)": {
+"to": "CINNABAR_ISLAND",
+"open": 0,
+"pass": 24,
+"observed": true
+},
+"Door at (5,10)": {
+"to": "POKEMON_MANSION_2F",
+"open": 0,
+"pass": 24,
+"close": 25,
+"observed": true
+}
+}
+},
+"POKEMON_MANSION_2F": {
+"map": "POKEMON_MANSION_2F",
+"first": 24,
+"services": [
+"grass"
+],
+"dead_end": false,
+"exits": {
+"Door at (5,10)": {
+"to": "POKEMON_MANSION_1F",
+"open": 0,
+"pass": 24,
+"observed": false
+},
+"Door at (6,1)": {
+"to": "POKEMON_MANSION_3F",
+"open": 0,
+"pass": 24,
+"observed": true
+},
+"Door at (7,10)": {
+"to": "POKEMON_MANSION_3F",
+"open": 0,
+"pass": 24,
+"observed": false
+}
+}
+},
+"POKEMON_MANSION_3F": {
+"map": "POKEMON_MANSION_3F",
+"first": 24,
+"services": [
+"grass"
+],
+"dead_end": false,
+"exits": {
+"Door at (25,14)": {
+"to": "POKEMON_MANSION_2F",
+"open": 0,
+"pass": 24,
+"observed": false
+},
+"Door at (6,1)": {
+"to": "POKEMON_MANSION_2F",
+"open": 0,
+"pass": 24,
+"observed": false
+}
+}
+},
+"POKEMON_MANSION_B1F": {
+"map": "POKEMON_MANSION_B1F",
+"first": 24,
+"services": [
+"grass"
+],
+"dead_end": false,
+"exits": {
+"Door at (23,22)": {
+"to": "POKEMON_MANSION_1F",
+"open": 0,
+"pass": 24,
+"observed": true
+}
+}
+},
+"POKEMON_TOWER_1F": {
+"map": "POKEMON_TOWER_1F",
+"first": 16,
+"services": [],
+"dead_end": false,
+"exits": {
+"Door at (10,17)": {
+"to": "LAVENDER_TOWN",
+"open": 0,
+"pass": 12,
+"observed": true
+},
+"Door at (18,9)": {
+"to": "POKEMON_TOWER_2F",
+"open": 0,
+"pass": 16,
+"observed": true
+}
+}
+},
+"POKEMON_TOWER_2F": {
+"map": "POKEMON_TOWER_2F",
+"first": 16,
+"services": [],
+"dead_end": false,
+"exits": {
+"Door at (18,9)": {
+"to": "POKEMON_TOWER_1F",
+"open": 0,
+"pass": 16,
+"observed": false
+},
+"Door at (3,9)": {
+"to": "POKEMON_TOWER_3F",
+"open": 0,
+"pass": 16,
+"observed": true
+}
+}
+},
+"POKEMON_TOWER_3F": {
+"map": "POKEMON_TOWER_3F",
+"first": 16,
+"services": [
+"grass"
+],
+"dead_end": false,
+"exits": {
+"Door at (18,9)": {
+"to": "POKEMON_TOWER_4F",
+"open": 0,
+"pass": 16,
+"observed": true
+},
+"Door at (3,9)": {
+"to": "POKEMON_TOWER_2F",
+"open": 0,
+"pass": 16,
+"observed": false
+}
+}
+},
+"POKEMON_TOWER_4F": {
+"map": "POKEMON_TOWER_4F",
+"first": 16,
+"services": [
+"grass"
+],
+"dead_end": false,
+"exits": {
+"Door at (18,9)": {
+"to": "POKEMON_TOWER_3F",
+"open": 0,
+"pass": 16,
+"observed": false
+},
+"Door at (3,9)": {
+"to": "POKEMON_TOWER_5F",
+"open": 0,
+"pass": 16,
+"observed": true
+}
+}
+},
+"POKEMON_TOWER_5F": {
+"map": "POKEMON_TOWER_5F",
+"first": 16,
+"services": [
+"grass"
+],
+"dead_end": false,
+"exits": {
+"Door at (18,9)": {
+"to": "POKEMON_TOWER_6F",
+"open": 0,
+"pass": 16,
+"observed": true
+},
+"Door at (3,9)": {
+"to": "POKEMON_TOWER_4F",
+"open": 0,
+"pass": 16,
+"observed": false
+}
+}
+},
+"POKEMON_TOWER_6F": {
+"map": "POKEMON_TOWER_6F",
+"first": 16,
+"services": [
+"grass"
+],
+"dead_end": false,
+"exits": {
+"Door at (18,9)": {
+"to": "POKEMON_TOWER_5F",
+"open": 0,
+"pass": 16,
+"observed": false
+},
+"Door at (9,16)": {
+"to": "POKEMON_TOWER_7F",
+"open": 0,
+"pass": 16,
+"observed": true
+}
+}
+},
+"POKEMON_TOWER_7F": {
+"map": "POKEMON_TOWER_7F",
+"first": 16,
+"services": [
+"grass"
+],
+"dead_end": false,
+"exits": {
+"Door at (9,16)": {
+"to": "POKEMON_TOWER_6F",
+"open": 0,
+"pass": 16,
+"observed": false
+}
+}
+},
+"REDS_HOUSE_1F": {
+"map": "REDS_HOUSE_1F",
+"first": 0,
+"services": [],
+"dead_end": false,
+"exits": {
+"Door at (2,7)": {
+"to": "PALLET_TOWN",
+"open": 0,
+"pass": 0,
+"observed": true
+},
+"Door at (7,1)": {
+"to": "REDS_HOUSE_2F",
+"open": 0,
+"pass": 0,
+"observed": false
+}
+}
+},
+"REDS_HOUSE_2F": {
+"map": "REDS_HOUSE_2F",
+"first": 0,
+"services": [],
+"dead_end": false,
+"exits": {
+"Door at (7,1)": {
+"to": "REDS_HOUSE_1F",
+"open": 0,
+"pass": 0,
+"observed": true
+}
+}
+},
+"ROCKET_HIDEOUT_B1F": {
+"map": "ROCKET_HIDEOUT_B1F",
+"first": 15,
+"services": [],
+"dead_end": false,
+"exits": {
+"Door at (21,2)": {
+"to": "GAME_CORNER",
+"open": 0,
+"pass": 15,
+"observed": true
+},
+"Door at (21,24)": {
+"to": "ROCKET_HIDEOUT_B2F",
+"open": 0,
+"pass": 15,
+"observed": true
+},
+"Door at (24,19)": {
+"to": "ROCKET_HIDEOUT_ELEVATOR (part 2)",
+"open": 16,
+"pass": 16,
+"observed": false
+}
+}
+},
+"ROCKET_HIDEOUT_B2F": {
+"map": "ROCKET_HIDEOUT_B2F",
+"first": 15,
+"services": [],
+"dead_end": false,
+"exits": {
+"Door at (21,22)": {
+"to": "ROCKET_HIDEOUT_B1F",
+"open": 0,
+"pass": 15,
+"observed": false
+},
+"Door at (21,8)": {
+"to": "ROCKET_HIDEOUT_B3F",
+"open": 0,
+"pass": 15,
+"observed": true
+},
+"Door at (24,19)": {
+"to": "ROCKET_HIDEOUT_ELEVATOR (part 3)",
+"open": 0,
+"pass": 15,
+"observed": true
+},
+"Door at (27,8)": {
+"to": "ROCKET_HIDEOUT_B1F",
+"open": 0,
+"pass": 15,
+"observed": false
+}
+}
+},
+"ROCKET_HIDEOUT_B3F": {
+"map": "ROCKET_HIDEOUT_B3F",
+"first": 15,
+"services": [],
+"dead_end": false,
+"exits": {
+"Door at (19,18)": {
+"to": "ROCKET_HIDEOUT_B4F (west)",
+"open": 0,
+"pass": 15,
+"observed": true
+},
+"Door at (25,6)": {
+"to": "ROCKET_HIDEOUT_B2F",
+"open": 0,
+"pass": 15,
+"observed": true
+}
+}
+},
+"ROCKET_HIDEOUT_B4F (east)": {
+"map": "ROCKET_HIDEOUT_B4F",
+"first": 15,
+"services": [],
+"dead_end": false,
+"exits": {
+"Door at (24,15)": {
+"to": "ROCKET_HIDEOUT_ELEVATOR (part 2)",
+"open": 0,
+"pass": 15,
+"observed": true
+}
+}
+},
+"ROCKET_HIDEOUT_B4F (west)": {
+"map": "ROCKET_HIDEOUT_B4F",
+"first": 15,
+"services": [],
+"dead_end": false,
+"exits": {
+"Door at (19,10)": {
+"to": "ROCKET_HIDEOUT_B3F",
+"open": 0,
+"pass": 15,
+"observed": true
+}
+}
+},
+"ROCKET_HIDEOUT_ELEVATOR (part 1)": {
+"map": "ROCKET_HIDEOUT_ELEVATOR",
+"first": 16,
+"services": [],
+"dead_end": false,
+"exits": {
+"Door at (2,1)": {
+"to": "ROCKET_HIDEOUT_B1F",
+"open": 0,
+"pass": 15,
+"observed": true
+}
+}
+},
+"ROCKET_HIDEOUT_ELEVATOR (part 2)": {
+"map": "ROCKET_HIDEOUT_ELEVATOR",
+"first": 15,
+"services": [],
+"dead_end": false,
+"exits": {}
+},
+"ROCKET_HIDEOUT_ELEVATOR (part 3)": {
+"map": "ROCKET_HIDEOUT_ELEVATOR",
+"first": 15,
+"services": [],
+"dead_end": false,
+"exits": {}
+},
+"ROCK_TUNNEL_1F": {
+"map": "ROCK_TUNNEL_1F",
+"first": 12,
+"services": [
+"grass"
+],
+"dead_end": false,
+"exits": {
+"Door at (15,0)": {
+"to": "ROUTE_10",
+"open": 0,
+"pass": 12,
+"observed": true
+},
+"Door at (17,11)": {
+"to": "ROCK_TUNNEL_B1F (west)",
+"open": 0,
+"pass": 12,
+"observed": true
+},
+"Door at (5,3)": {
+"to": "ROCK_TUNNEL_B1F (east)",
+"open": 0,
+"pass": 12,
+"observed": true
+}
+}
+},
+"ROCK_TUNNEL_B1F (east)": {
+"map": "ROCK_TUNNEL_B1F",
+"first": 12,
+"services": [
+"grass"
+],
+"dead_end": false,
+"exits": {
+"Door at (27,3)": {
+"to": "ROCK_TUNNEL_1F",
+"open": 0,
+"pass": 12,
+"observed": true
+},
+"Door at (33,25)": {
+"to": "ROCK_TUNNEL_1F",
+"open": 0,
+"pass": 12,
+"observed": false
+}
+}
+},
+"ROCK_TUNNEL_B1F (west)": {
+"map": "ROCK_TUNNEL_B1F",
+"first": 12,
+"services": [
+"grass"
+],
+"dead_end": false,
+"exits": {
+"Door at (23,11)": {
+"to": "ROCK_TUNNEL_1F",
+"open": 0,
+"pass": 12,
+"observed": false
+},
+"Door at (3,3)": {
+"to": "ROCK_TUNNEL_1F",
+"open": 0,
+"pass": 12,
+"observed": true
+}
+}
+},
+"ROCK_TUNNEL_POKECENTER": {
+"map": "ROCK_TUNNEL_POKECENTER",
+"first": null,
+"services": [],
+"dead_end": true,
+"exits": {
+"Door at (3,7)": {
+"to": "ROUTE_10",
+"open": 0,
+"pass": 12,
+"observed": false
+}
+}
+},
+"ROUTE_1": {
+"map": "ROUTE_1",
+"first": 3,
+"services": [
+"grass"
+],
+"dead_end": false,
+"exits": {
+"Leave north": {
+"to": "VIRIDIAN_CITY",
+"open": 0,
+"pass": 3,
+"observed": true
+},
+"Leave south": {
+"to": "PALLET_TOWN",
+"open": 0,
+"pass": 0,
+"observed": true
+}
+}
+},
+"ROUTE_10": {
+"map": "ROUTE_10",
+"first": 12,
+"services": [
+"grass"
+],
+"dead_end": false,
+"exits": {
+"Door at (11,19)": {
+"to": "ROCK_TUNNEL_POKECENTER",
+"open": 0,
+"pass": 0,
+"close": 18,
+"observed": false
+},
+"Door at (8,17)": {
+"to": "ROCK_TUNNEL_1F",
+"open": 0,
+"pass": 12,
+"observed": true
+},
+"Leave south": {
+"to": "LAVENDER_TOWN",
+"open": 0,
+"pass": 12,
+"observed": true
+},
+"Leave west (y 4-7)": {
+"to": "ROUTE_9",
+"open": 0,
+"pass": 12,
+"close": 18,
+"observed": false
+},
+"Leave west (y 8-9)": {
+"to": "ROUTE_9",
+"open": 0,
+"pass": 12,
+"close": 18,
+"observed": false
+}
+}
+},
+"ROUTE_11": {
+"map": "ROUTE_11",
+"first": 24,
+"services": [
+"grass"
+],
+"dead_end": false,
+"exits": {
+"Door at (4,5)": {
+"to": "DIGLETTS_CAVE_ROUTE_11",
+"open": 0,
+"pass": 24,
+"observed": true
+},
+"Leave west": {
+"to": "VERMILION_CITY",
+"open": 0,
+"pass": 10,
+"observed": false
+}
+}
+},
+"ROUTE_12": {
+"map": "ROUTE_12",
+"first": 18,
+"services": [
+"grass"
+],
+"dead_end": false,
+"exits": {
+"Door at (10,15)": {
+"to": "ROUTE_12_GATE_1F",
+"open": 0,
+"pass": 18,
+"observed": true
+},
+"Door at (11,77)": {
+"to": "ROUTE_12_SUPER_ROD_HOUSE",
+"open": 0,
+"pass": 0,
+"observed": false
+},
+"Leave north": {
+"to": "LAVENDER_TOWN",
+"open": 0,
+"pass": 12,
+"observed": true
+},
+"Leave south (x 0-8)": {
+"to": "ROUTE_13",
+"open": 0,
+"pass": 18,
+"observed": false
+},
+"Leave south (x 10-11)": {
+"to": "ROUTE_13",
+"open": 0,
+"pass": 18,
+"observed": true
+},
+"Leave west (y 61-107)": {
+"to": "ROUTE_11",
+"open": 0,
+"pass": 24,
+"observed": false
+},
+"Leave west (y 62-62)": {
+"to": "ROUTE_11",
+"open": 0,
+"pass": 24,
+"observed": false
+}
+}
+},
+"ROUTE_12_GATE_1F": {
+"map": "ROUTE_12_GATE_1F",
+"first": 18,
+"services": [],
+"dead_end": false,
+"exits": {
+"Door at (4,0)": {
+"to": "ROUTE_12",
+"open": 0,
+"pass": 18,
+"observed": true
+},
+"Door at (4,7)": {
+"to": "ROUTE_12",
+"open": 0,
+"pass": 18,
+"observed": true
+},
+"Door at (8,6)": {
+"to": "ROUTE_12_GATE_2F",
+"open": 0,
+"pass": 0,
+"observed": false
+}
+}
+},
+"ROUTE_12_GATE_2F": {
+"map": "ROUTE_12_GATE_2F",
+"first": null,
+"services": [],
+"dead_end": true,
+"exits": {
+"Door at (7,7)": {
+"to": "ROUTE_12_GATE_1F",
+"open": 0,
+"pass": 18,
+"observed": false
+}
+}
+},
+"ROUTE_12_SUPER_ROD_HOUSE": {
+"map": "ROUTE_12_SUPER_ROD_HOUSE",
+"first": null,
+"services": [],
+"dead_end": true,
+"exits": {
+"Door at (2,7)": {
+"to": "ROUTE_12",
+"open": 0,
+"pass": 18,
+"observed": false
+}
+}
+},
+"ROUTE_13": {
+"map": "ROUTE_13",
+"first": 18,
+"services": [
+"grass"
+],
+"dead_end": false,
+"exits": {
+"Leave north": {
+"to": "ROUTE_12",
+"open": 0,
+"pass": 18,
+"observed": true
+},
+"Leave west (y 4-10)": {
+"to": "ROUTE_14",
+"open": 0,
+"pass": 18,
+"observed": true
+},
+"Leave west (y 6-6)": {
+"to": "ROUTE_14",
+"open": 0,
+"pass": 18,
+"observed": false
+}
+}
+},
+"ROUTE_14": {
+"map": "ROUTE_14",
+"first": 18,
+"services": [
+"grass"
+],
+"dead_end": false,
+"exits": {
+"Leave east (y 12-12)": {
+"to": "ROUTE_13",
+"open": 0,
+"pass": 18,
+"observed": false
+},
+"Leave east (y 4-4)": {
+"to": "ROUTE_13",
+"open": 0,
+"pass": 18,
+"observed": false
+},
+"Leave east (y 6-10)": {
+"to": "ROUTE_13",
+"open": 0,
+"pass": 18,
+"observed": true
+},
+"Leave west (y 40-42)": {
+"to": "ROUTE_15",
+"open": 0,
+"pass": 18,
+"observed": false
+},
+"Leave west (y 44-49)": {
+"to": "ROUTE_15",
+"open": 0,
+"pass": 18,
+"observed": true
+}
+}
+},
+"ROUTE_15": {
+"map": "ROUTE_15",
+"first": 18,
+"services": [
+"grass"
+],
+"dead_end": false,
+"exits": {
+"Door at (7,8)": {
+"to": "ROUTE_15_GATE_1F",
+"open": 0,
+"pass": 18,
+"observed": true
+},
+"Leave east": {
+"to": "ROUTE_14",
+"open": 0,
+"pass": 18,
+"observed": true
+},
+"Leave west": {
+"to": "FUCHSIA_CITY",
+"open": 0,
+"pass": 18,
+"observed": true
+}
+}
+},
+"ROUTE_15_GATE_1F": {
+"map": "ROUTE_15_GATE_1F",
+"first": 18,
+"services": [],
+"dead_end": false,
+"exits": {
+"Door at (0,4)": {
+"to": "ROUTE_15",
+"open": 0,
+"pass": 18,
+"close": 22,
+"observed": true
+},
+"Door at (0,5)": {
+"to": "ROUTE_15",
+"open": 22,
+"pass": 22,
+"observed": true
+},
+"Door at (6,8)": {
+"to": "ROUTE_15_GATE_2F",
+"open": 0,
+"pass": 0,
+"observed": false
+},
+"Door at (7,4)": {
+"to": "ROUTE_15",
+"open": 0,
+"pass": 18,
+"close": 22,
+"observed": false
+},
+"Door at (7,5)": {
+"to": "ROUTE_15",
+"open": 22,
+"pass": 22,
+"observed": true
+}
+}
+},
+"ROUTE_15_GATE_2F": {
+"map": "ROUTE_15_GATE_2F",
+"first": null,
+"services": [],
+"dead_end": true,
+"exits": {
+"Door at (7,7)": {
+"to": "ROUTE_15_GATE_1F",
+"open": 0,
+"pass": 18,
+"observed": false
+}
+}
+},
+"ROUTE_18": {
+"map": "ROUTE_18",
+"first": 23,
+"services": [
+"grass"
+],
+"dead_end": false,
+"exits": {
+"Leave east": {
+"to": "FUCHSIA_CITY",
+"open": 0,
+"pass": 18,
+"observed": true
+}
+}
+},
+"ROUTE_2": {
+"map": "ROUTE_2",
+"first": 5,
+"services": [
+"grass"
+],
+"dead_end": false,
+"exits": {
+"Door at (12,9)": {
+"to": "DIGLETTS_CAVE_ROUTE_2",
+"open": 24,
+"pass": 24,
+"observed": false
+},
+"Door at (15,19)": {
+"to": "ROUTE_2_TRADE_HOUSE",
+"open": 24,
+"pass": 24,
+"observed": false
+},
+"Door at (15,39)": {
+"to": "ROUTE_2_GATE",
+"open": 24,
+"pass": 24,
+"observed": true
+},
+"Door at (3,11)": {
+"to": "VIRIDIAN_FOREST_NORTH_GATE",
+"open": 0,
+"pass": 5,
+"observed": true
+},
+"Door at (3,43)": {
+"to": "VIRIDIAN_FOREST_SOUTH_GATE",
+"open": 0,
+"pass": 5,
+"observed": true
+},
+"Leave north": {
+"to": "PEWTER_CITY",
+"open": 0,
+"pass": 5,
+"observed": true
+},
+"Leave south": {
+"to": "VIRIDIAN_CITY",
+"open": 0,
+"pass": 3,
+"observed": true
+}
+}
+},
+"ROUTE_21": {
+"map": "ROUTE_21",
+"first": 24,
+"services": [
+"grass"
+],
+"dead_end": false,
+"exits": {
+"Leave north": {
+"to": "PALLET_TOWN",
+"open": 0,
+"pass": 0,
+"observed": true
+},
+"Leave south (x 1-13)": {
+"to": "CINNABAR_ISLAND",
+"open": 0,
+"pass": 24,
+"observed": true
+},
+"Leave south (x 4-19)": {
+"to": "CINNABAR_ISLAND",
+"open": 0,
+"pass": 24,
+"observed": false
+}
+}
+},
+"ROUTE_22": {
+"map": "ROUTE_22",
+"first": 27,
+"services": [
+"grass"
+],
+"dead_end": false,
+"exits": {
+"Door at (8,5)": {
+"to": "ROUTE_22_GATE",
+"open": 0,
+"pass": 27,
+"observed": true
+},
+"Leave east": {
+"to": "VIRIDIAN_CITY",
+"open": 0,
+"pass": 3,
+"observed": true
+}
+}
+},
+"ROUTE_22_GATE": {
+"map": "ROUTE_22_GATE",
+"first": 27,
+"services": [],
+"dead_end": false,
+"exits": {
+"Door at (4,0)": {
+"to": "ROUTE_23 (south)",
+"open": 0,
+"pass": 27,
+"observed": true
+}
+}
+},
+"ROUTE_23 (north)": {
+"map": "ROUTE_23",
+"first": 27,
+"services": [],
+"dead_end": false,
+"exits": {
+"Door at (14,31)": {
+"to": "VICTORY_ROAD_2F",
+"open": 0,
+"pass": 27,
+"observed": false
+},
+"Leave north": {
+"to": "INDIGO_PLATEAU",
+"open": 0,
+"pass": 27,
+"observed": true
+}
+}
+},
+"ROUTE_23 (south)": {
+"map": "ROUTE_23",
+"first": 27,
+"services": [
+"grass"
+],
+"dead_end": false,
+"exits": {
+"Door at (4,31)": {
+"to": "VICTORY_ROAD_1F",
+"open": 0,
+"pass": 27,
+"observed": true
+},
+"Door at (7,139)": {
+"to": "ROUTE_22_GATE",
+"open": 0,
+"pass": 27,
+"observed": true
+}
+}
+},
+"ROUTE_24": {
+"map": "ROUTE_24",
+"first": 9,
+"services": [
+"grass"
+],
+"dead_end": false,
+"exits": {
+"Leave east": {
+"to": "ROUTE_25",
+"open": 0,
+"pass": 9,
+"observed": true
+},
+"Leave south": {
+"to": "CERULEAN_CITY",
+"open": 0,
+"pass": 7,
+"observed": true
+}
+}
+},
+"ROUTE_25": {
+"map": "ROUTE_25",
+"first": 9,
+"services": [
+"grass"
+],
+"dead_end": false,
+"exits": {
+"Door at (45,3)": {
+"to": "BILLS_HOUSE",
+"open": 0,
+"pass": 9,
+"observed": true
+},
+"Leave west (y 11-11)": {
+"to": "ROUTE_24",
+"open": 0,
+"pass": 9,
+"observed": false
+},
+"Leave west (y 4-6)": {
+"to": "ROUTE_24",
+"open": 0,
+"pass": 9,
+"observed": false
+},
+"Leave west (y 8-9)": {
+"to": "ROUTE_24",
+"open": 0,
+"pass": 9,
+"observed": true
+}
+}
+},
+"ROUTE_2_GATE": {
+"map": "ROUTE_2_GATE",
+"first": 24,
+"services": [],
+"dead_end": false,
+"exits": {
+"Door at (5,0)": {
+"to": "ROUTE_2",
+"open": 0,
+"pass": 5,
+"observed": false
+},
+"Door at (5,7)": {
+"to": "ROUTE_2",
+"open": 0,
+"pass": 5,
+"observed": true
+}
+}
+},
+"ROUTE_2_TRADE_HOUSE": {
+"map": "ROUTE_2_TRADE_HOUSE",
+"first": null,
+"services": [],
+"dead_end": true,
+"exits": {
+"Door at (2,7)": {
+"to": "ROUTE_2",
+"open": 0,
+"pass": 5,
+"observed": false
+}
+}
+},
+"ROUTE_3": {
+"map": "ROUTE_3",
+"first": 7,
+"services": [
+"grass"
+],
+"dead_end": false,
+"exits": {
+"Leave north (x 57-61)": {
+"to": "ROUTE_4 (west)",
+"open": 0,
+"pass": 7,
+"observed": true
+},
+"Leave north (x 62-63)": {
+"to": "ROUTE_4 (west)",
+"open": 0,
+"pass": 7,
+"observed": false
+},
+"Leave west": {
+"to": "PEWTER_CITY",
+"open": 0,
+"pass": 5,
+"observed": true
+}
+}
+},
+"ROUTE_4 (east)": {
+"map": "ROUTE_4",
+"first": 7,
+"services": [
+"grass"
+],
+"dead_end": false,
+"exits": {
+"Door at (24,5)": {
+"to": "MT_MOON_B1F",
+"open": 0,
+"pass": 7,
+"close": 8,
+"observed": false
+},
+"Leave east": {
+"to": "CERULEAN_CITY",
+"open": 0,
+"pass": 7,
+"observed": true
+}
+}
+},
+"ROUTE_4 (west)": {
+"map": "ROUTE_4",
+"first": 7,
+"services": [],
+"dead_end": false,
+"exits": {
+"Door at (11,5)": {
+"to": "MT_MOON_POKECENTER",
+"open": 0,
+"pass": 0,
+"observed": false
+},
+"Door at (18,5)": {
+"to": "MT_MOON_1F",
+"open": 0,
+"pass": 7,
+"observed": true
+},
+"Leave south (x 6-89)": {
+"to": "ROUTE_3",
+"open": 0,
+"pass": 7,
+"observed": false
+},
+"Leave south (x 7-11)": {
+"to": "ROUTE_3",
+"open": 0,
+"pass": 7,
+"observed": true
+}
+}
+},
+"ROUTE_5": {
+"map": "ROUTE_5",
+"first": 10,
+"services": [],
+"dead_end": false,
+"exits": {
+"Door at (10,29)": {
+"to": "ROUTE_5_GATE (east)",
+"open": 0,
+"pass": 12,
+"close": 23,
+"observed": true
+},
+"Door at (17,27)": {
+"to": "UNDERGROUND_PATH_ROUTE_5",
+"open": 0,
+"pass": 10,
+"close": 23,
+"observed": true
+},
+"Door at (9,29)": {
+"to": "ROUTE_5_GATE (east)",
+"open": 0,
+"pass": 12,
+"observed": false
+},
+"Leave north": {
+"to": "CERULEAN_CITY",
+"open": 0,
+"pass": 7,
+"close": 23,
+"observed": true
+},
+"Leave south (x 12-19)": {
+"to": "SAFFRON_CITY",
+"open": 23,
+"pass": 23,
+"observed": false
+},
+"Leave south (x 2-11)": {
+"to": "SAFFRON_CITY",
+"open": 23,
+"pass": 23,
+"observed": true
+}
+}
+},
+"ROUTE_5_GATE (east)": {
+"map": "ROUTE_5_GATE",
+"first": 12,
+"services": [],
+"dead_end": false,
+"exits": {
+"Door at (4,0)": {
+"to": "ROUTE_5",
+"open": 0,
+"pass": 10,
+"observed": false
+},
+"Door at (4,5)": {
+"to": "ROUTE_5",
+"open": 0,
+"pass": 10,
+"observed": false
+}
+}
+},
+"ROUTE_5_GATE (west)": {
+"map": "ROUTE_5_GATE",
+"first": 12,
+"services": [],
+"dead_end": false,
+"exits": {
+"Door at (3,0)": {
+"to": "ROUTE_5",
+"open": 0,
+"pass": 10,
+"observed": true
+},
+"Door at (3,5)": {
+"to": "ROUTE_5",
+"open": 0,
+"pass": 10,
+"observed": false
+}
+}
+},
+"ROUTE_6": {
+"map": "ROUTE_6",
+"first": 10,
+"services": [
+"grass"
+],
+"dead_end": false,
+"exits": {
+"Door at (17,13)": {
+"to": "UNDERGROUND_PATH_ROUTE_6",
+"open": 0,
+"pass": 10,
+"observed": true
+},
+"Door at (9,1)": {
+"to": "ROUTE_6_GATE",
+"open": 0,
+"pass": 12,
+"observed": true
+},
+"Leave north": {
+"to": "SAFFRON_CITY",
+"open": 23,
+"pass": 23,
+"observed": true
+},
+"Leave south": {
+"to": "VERMILION_CITY",
+"open": 0,
+"pass": 10,
+"observed": true
+}
+}
+},
+"ROUTE_6_GATE": {
+"map": "ROUTE_6_GATE",
+"first": 12,
+"services": [],
+"dead_end": false,
+"exits": {
+"Door at (3,0)": {
+"to": "ROUTE_6",
+"open": 0,
+"pass": 10,
+"observed": false
+},
+"Door at (3,5)": {
+"to": "ROUTE_6",
+"open": 0,
+"pass": 10,
+"observed": true
+}
+}
+},
+"ROUTE_7 (east)": {
+"map": "ROUTE_7",
+"first": 22,
+"services": [],
+"dead_end": false,
+"exits": {
+"Door at (18,10)": {
+"to": "ROUTE_7_GATE",
+"open": 0,
+"pass": 22,
+"observed": false
+},
+"Door at (18,9)": {
+"to": "ROUTE_7_GATE",
+"open": 0,
+"pass": 22,
+"observed": false
+},
+"Leave east": {
+"to": "SAFFRON_CITY",
+"open": 0,
+"pass": 22,
+"observed": true
+}
+}
+},
+"ROUTE_7 (west)": {
+"map": "ROUTE_7",
+"first": 13,
+"services": [
+"grass"
+],
+"dead_end": false,
+"exits": {
+"Door at (11,9)": {
+"to": "ROUTE_7_GATE",
+"open": 0,
+"pass": 22,
+"observed": true
+},
+"Door at (5,13)": {
+"to": "UNDERGROUND_PATH_ROUTE_7",
+"open": 0,
+"pass": 13,
+"observed": true
+},
+"Leave west": {
+"to": "CELADON_CITY",
+"open": 0,
+"pass": 13,
+"observed": true
+}
+}
+},
+"ROUTE_7_GATE": {
+"map": "ROUTE_7_GATE",
+"first": 22,
+"services": [],
+"dead_end": false,
+"exits": {
+"Door at (0,4)": {
+"to": "ROUTE_7 (east)",
+"open": 0,
+"pass": 22,
+"observed": false
+},
+"Door at (5,4)": {
+"to": "ROUTE_7 (east)",
+"open": 0,
+"pass": 22,
+"observed": true
+}
+}
+},
+"ROUTE_8 (east)": {
+"map": "ROUTE_8",
+"first": 13,
+"services": [
+"grass"
+],
+"dead_end": false,
+"exits": {
+"Door at (13,3)": {
+"to": "UNDERGROUND_PATH_ROUTE_8",
+"open": 0,
+"pass": 13,
+"observed": true
+},
+"Door at (8,10)": {
+"to": "ROUTE_8_GATE",
+"open": 0,
+"pass": 23,
+"observed": true
+},
+"Door at (8,9)": {
+"to": "ROUTE_8_GATE",
+"open": 0,
+"pass": 23,
+"observed": false
+},
+"Leave east": {
+"to": "LAVENDER_TOWN",
+"open": 0,
+"pass": 12,
+"observed": true
+}
+}
+},
+"ROUTE_8 (west)": {
+"map": "ROUTE_8",
+"first": 23,
+"services": [],
+"dead_end": false,
+"exits": {
+"Door at (1,10)": {
+"to": "ROUTE_8_GATE",
+"open": 0,
+"pass": 23,
+"observed": false
+},
+"Door at (1,9)": {
+"to": "ROUTE_8_GATE",
+"open": 0,
+"pass": 23,
+"observed": false
+},
+"Leave west": {
+"to": "SAFFRON_CITY",
+"open": 0,
+"pass": 22,
+"observed": true
+}
+}
+},
+"ROUTE_8_GATE": {
+"map": "ROUTE_8_GATE",
+"first": 23,
+"services": [],
+"dead_end": false,
+"exits": {
+"Door at (0,4)": {
+"to": "ROUTE_8 (west)",
+"open": 0,
+"pass": 23,
+"observed": true
+},
+"Door at (5,4)": {
+"to": "ROUTE_8 (east)",
+"open": 0,
+"pass": 13,
+"observed": false
+}
+}
+},
+"ROUTE_9": {
+"map": "ROUTE_9",
+"first": 12,
+"services": [
+"grass"
+],
+"dead_end": false,
+"exits": {
+"Leave east": {
+"to": "ROUTE_10",
+"open": 0,
+"pass": 12,
+"observed": true
+},
+"Leave west": {
+"to": "CERULEAN_CITY",
+"open": 0,
+"pass": 7,
+"observed": false
+}
+}
+},
+"SAFARI_ZONE_CENTER": {
+"map": "SAFARI_ZONE_CENTER",
+"first": 20,
+"services": [],
+"dead_end": false,
+"exits": {
+"Door at (29,10)": {
+"to": "SAFARI_ZONE_EAST (south)",
+"open": 0,
+"pass": 20,
+"observed": true
+}
+}
+},
+"SAFARI_ZONE_EAST (north)": {
+"map": "SAFARI_ZONE_EAST",
+"first": 21,
+"services": [],
+"dead_end": false,
+"exits": {
+"Door at (0,22)": {
+"to": "SAFARI_ZONE_CENTER",
+"open": 0,
+"pass": 20,
+"observed": false
+}
+}
+},
+"SAFARI_ZONE_EAST (south)": {
+"map": "SAFARI_ZONE_EAST",
+"first": 20,
+"services": [],
+"dead_end": false,
+"exits": {
+"Door at (0,4)": {
+"to": "SAFARI_ZONE_NORTH (east)",
+"open": 0,
+"pass": 20,
+"observed": true
+}
+}
+},
+"SAFARI_ZONE_GATE": {
+"map": "SAFARI_ZONE_GATE",
+"first": 20,
+"services": [],
+"dead_end": false,
+"exits": {
+"Door at (3,0)": {
+"to": "SAFARI_ZONE_CENTER",
+"open": 0,
+"pass": 20,
+"observed": true
+},
+"Door at (3,5)": {
+"to": "FUCHSIA_CITY",
+"open": 0,
+"pass": 18,
+"observed": true
+}
+}
+},
+"SAFARI_ZONE_NORTH (east)": {
+"map": "SAFARI_ZONE_NORTH",
+"first": 20,
+"services": [],
+"dead_end": false,
+"exits": {
+"Door at (3,35)": {
+"to": "SAFARI_ZONE_WEST (north)",
+"open": 0,
+"pass": 20,
+"observed": true
+}
+}
+},
+"SAFARI_ZONE_NORTH (west)": {
+"map": "SAFARI_ZONE_NORTH",
+"first": 21,
+"services": [],
+"dead_end": false,
+"exits": {
+"Door at (39,30)": {
+"to": "SAFARI_ZONE_EAST (north)",
+"open": 0,
+"pass": 21,
+"observed": true
+}
+}
+},
+"SAFARI_ZONE_SECRET_HOUSE": {
+"map": "SAFARI_ZONE_SECRET_HOUSE",
+"first": 20,
+"services": [],
+"dead_end": false,
+"exits": {
+"Door at (2,7)": {
+"to": "SAFARI_ZONE_WEST (south)",
+"open": 21,
+"pass": 21,
+"observed": false
+}
+}
+},
+"SAFARI_ZONE_WEST (north)": {
+"map": "SAFARI_ZONE_WEST",
+"first": 20,
+"services": [],
+"dead_end": false,
+"exits": {
+"Door at (3,3)": {
+"to": "SAFARI_ZONE_SECRET_HOUSE",
+"open": 0,
+"pass": 20,
+"observed": true
+}
+}
+},
+"SAFARI_ZONE_WEST (south)": {
+"map": "SAFARI_ZONE_WEST",
+"first": 21,
+"services": [],
+"dead_end": false,
+"exits": {
+"Door at (20,0)": {
+"to": "SAFARI_ZONE_NORTH (west)",
+"open": 0,
+"pass": 21,
+"observed": true
+}
+}
+},
+"SAFFRON_CITY": {
+"map": "SAFFRON_CITY",
+"first": 22,
+"services": [],
+"dead_end": false,
+"exits": {
+"Door at (13,11)": {
+"to": "SAFFRON_PIDGEY_HOUSE",
+"open": 23,
+"pass": 23,
+"observed": true
+},
+"Door at (18,21)": {
+"to": "SILPH_CO_1F",
+"open": 0,
+"pass": 22,
+"observed": true
+},
+"Door at (25,11)": {
+"to": "SAFFRON_MART",
+"open": 0,
+"pass": 23,
+"observed": true
+},
+"Door at (26,3)": {
+"to": "FIGHTING_DOJO",
+"open": 0,
+"pass": 23,
+"observed": true
+},
+"Door at (29,29)": {
+"to": "MR_PSYCHICS_HOUSE",
+"open": 0,
+"pass": 23,
+"observed": true
+},
+"Door at (34,3)": {
+"to": "SAFFRON_GYM (part 3)",
+"open": 23,
+"pass": 23,
+"observed": true
+},
+"Door at (7,5)": {
+"to": "COPYCATS_HOUSE_1F",
+"open": 23,
+"pass": 23,
+"observed": true
+},
+"Door at (9,29)": {
+"to": "SAFFRON_POKECENTER",
+"open": 0,
+"pass": 23,
+"observed": true
+},
+"Leave east": {
+"to": "ROUTE_8 (west)",
+"open": 0,
+"pass": 23,
+"observed": true
+},
+"Leave north": {
+"to": "ROUTE_5",
+"open": 0,
+"pass": 10,
+"observed": true
+},
+"Leave south (x 20-20)": {
+"to": "ROUTE_6",
+"open": 0,
+"pass": 10,
+"observed": true
+},
+"Leave south (x 21-21)": {
+"to": "ROUTE_6",
+"open": 0,
+"pass": 10,
+"observed": false
+},
+"Leave west (y 10-18)": {
+"to": "ROUTE_7 (east)",
+"open": 0,
+"pass": 22,
+"observed": true
+},
+"Leave west (y 20-23)": {
+"to": "ROUTE_7 (east)",
+"open": 0,
+"pass": 22,
+"observed": true
+}
+}
+},
+"SAFFRON_GYM (part 1)": {
+"map": "SAFFRON_GYM",
+"first": 23,
+"services": [],
+"dead_end": false,
+"exits": {
+"Door at (1,11)": {
+"to": "SAFFRON_GYM (part 3)",
+"open": 0,
+"pass": 23,
+"observed": false
+},
+"Door at (1,9)": {
+"to": "SAFFRON_GYM (part 6)",
+"open": 0,
+"pass": 23,
+"observed": true
+},
+"Door at (5,11)": {
+"to": "SAFFRON_GYM (part 2)",
+"open": 0,
+"pass": 23,
+"observed": true
+},
+"Door at (5,9)": {
+"to": "SAFFRON_GYM (part 4)",
+"open": 0,
+"pass": 23,
+"observed": false
+}
+}
+},
+"SAFFRON_GYM (part 2)": {
+"map": "SAFFRON_GYM",
+"first": 23,
+"services": [],
+"dead_end": false,
+"exits": {
+"Door at (1,15)": {
+"to": "SAFFRON_GYM (part 7)",
+"open": 0,
+"pass": 23,
+"observed": true
+},
+"Door at (1,17)": {
+"to": "SAFFRON_GYM (part 4)",
+"open": 0,
+"pass": 23,
+"observed": true
+},
+"Door at (5,15)": {
+"to": "SAFFRON_GYM (part 5)",
+"open": 0,
+"pass": 23,
+"observed": true
+},
+"Door at (5,17)": {
+"to": "SAFFRON_GYM (part 1)",
+"open": 0,
+"pass": 23,
+"observed": true
+}
+}
+},
+"SAFFRON_GYM (part 3)": {
+"map": "SAFFRON_GYM",
+"first": 23,
+"services": [],
+"dead_end": false,
+"exits": {
+"Door at (1,3)": {
+"to": "SAFFRON_GYM (part 7)",
+"open": 0,
+"pass": 23,
+"observed": true
+},
+"Door at (1,5)": {
+"to": "SAFFRON_GYM (part 3)",
+"open": 0,
+"pass": 23,
+"observed": false
+},
+"Door at (5,3)": {
+"to": "SAFFRON_GYM (part 4)",
+"open": 0,
+"pass": 23,
+"observed": false
+},
+"Door at (5,5)": {
+"to": "SAFFRON_GYM (part 1)",
+"open": 0,
+"pass": 23,
+"observed": false
+},
+"Door at (8,17)": {
+"to": "SAFFRON_CITY",
+"open": 0,
+"pass": 22,
+"observed": true
+}
+}
+},
+"SAFFRON_GYM (part 4)": {
+"map": "SAFFRON_GYM",
+"first": 23,
+"services": [],
+"dead_end": false,
+"exits": {
+"Door at (11,3)": {
+"to": "SAFFRON_GYM (part 3)",
+"open": 0,
+"pass": 23,
+"observed": true
+},
+"Door at (11,5)": {
+"to": "SAFFRON_GYM (part 2)",
+"open": 0,
+"pass": 23,
+"observed": true
+},
+"Door at (9,3)": {
+"to": "SAFFRON_GYM (part 6)",
+"open": 0,
+"pass": 23,
+"observed": true
+},
+"Door at (9,5)": {
+"to": "SAFFRON_GYM (part 1)",
+"open": 0,
+"pass": 23,
+"observed": false
+}
+}
+},
+"SAFFRON_GYM (part 5)": {
+"map": "SAFFRON_GYM",
+"first": 23,
+"services": [],
+"dead_end": false,
+"exits": {
+"Door at (15,15)": {
+"to": "SAFFRON_GYM (part 7)",
+"open": 0,
+"pass": 23,
+"observed": true
+},
+"Door at (15,17)": {
+"to": "SAFFRON_GYM (part 2)",
+"open": 0,
+"pass": 23,
+"observed": true
+},
+"Door at (19,15)": {
+"to": "SAFFRON_GYM (part 6)",
+"open": 0,
+"pass": 23,
+"observed": true
+},
+"Door at (19,17)": {
+"to": "SAFFRON_GYM (part 3)",
+"open": 0,
+"pass": 23,
+"observed": true
+}
+}
+},
+"SAFFRON_GYM (part 6)": {
+"map": "SAFFRON_GYM",
+"first": 23,
+"services": [],
+"dead_end": false,
+"exits": {
+"Door at (15,11)": {
+"to": "SAFFRON_GYM (part 4)",
+"open": 0,
+"pass": 23,
+"observed": true
+},
+"Door at (15,9)": {
+"to": "SAFFRON_GYM (part 7)",
+"open": 0,
+"pass": 23,
+"observed": true
+},
+"Door at (19,11)": {
+"to": "SAFFRON_GYM (part 1)",
+"open": 0,
+"pass": 23,
+"observed": true
+},
+"Door at (19,9)": {
+"to": "SAFFRON_GYM (part 5)",
+"open": 0,
+"pass": 23,
+"observed": true
+}
+}
+},
+"SAFFRON_GYM (part 7)": {
+"map": "SAFFRON_GYM",
+"first": 23,
+"services": [],
+"dead_end": false,
+"exits": {
+"Door at (15,3)": {
+"to": "SAFFRON_GYM (part 6)",
+"open": 0,
+"pass": 23,
+"observed": true
+},
+"Door at (15,5)": {
+"to": "SAFFRON_GYM (part 3)",
+"open": 0,
+"pass": 23,
+"observed": true
+},
+"Door at (19,3)": {
+"to": "SAFFRON_GYM (part 5)",
+"open": 0,
+"pass": 23,
+"observed": true
+},
+"Door at (19,5)": {
+"to": "SAFFRON_GYM (part 2)",
+"open": 0,
+"pass": 23,
+"observed": true
+}
+}
+},
+"SAFFRON_MART": {
+"map": "SAFFRON_MART",
+"first": 23,
+"services": [
+"mart"
+],
+"dead_end": false,
+"exits": {
+"Door at (3,7)": {
+"to": "SAFFRON_CITY",
+"open": 0,
+"pass": 22,
+"observed": true
+}
+}
+},
+"SAFFRON_PIDGEY_HOUSE": {
+"map": "SAFFRON_PIDGEY_HOUSE",
+"first": 23,
+"services": [],
+"dead_end": false,
+"exits": {
+"Door at (2,7)": {
+"to": "SAFFRON_CITY",
+"open": 0,
+"pass": 22,
+"observed": true
+}
+}
+},
+"SAFFRON_POKECENTER": {
+"map": "SAFFRON_POKECENTER",
+"first": 23,
+"services": [
+"center"
+],
+"dead_end": false,
+"exits": {
+"Door at (3,7)": {
+"to": "SAFFRON_CITY",
+"open": 0,
+"pass": 22,
+"observed": true
+}
+}
+},
+"SILPH_CO_11F": {
+"map": "SILPH_CO_11F",
+"first": 22,
+"services": [],
+"dead_end": false,
+"exits": {
+"Door at (3,2)": {
+"to": "SILPH_CO_7F",
+"open": 0,
+"pass": 22,
+"observed": true
+}
+}
+},
+"SILPH_CO_1F": {
+"map": "SILPH_CO_1F",
+"first": 22,
+"services": [],
+"dead_end": false,
+"exits": {
+"Door at (10,17)": {
+"to": "SAFFRON_CITY",
+"open": 0,
+"pass": 22,
+"observed": true
+},
+"Door at (16,10)": {
+"to": "SILPH_CO_3F",
+"open": 0,
+"pass": 22,
+"observed": false
+},
+"Door at (20,0)": {
+"to": "SILPH_CO_ELEVATOR (west)",
+"open": 0,
+"pass": 22,
+"observed": true
+}
+}
+},
+"SILPH_CO_3F": {
+"map": "SILPH_CO_3F",
+"first": 22,
+"services": [],
+"dead_end": false,
+"exits": {
+"Door at (11,11)": {
+"to": "SILPH_CO_7F",
+"open": 0,
+"pass": 22,
+"observed": true
+},
+"Door at (20,0)": {
+"to": "SILPH_CO_ELEVATOR (east)",
+"open": 0,
+"pass": 22,
+"observed": true
+},
+"Door at (23,11)": {
+"to": "SILPH_CO_3F",
+"open": 0,
+"pass": 22,
+"observed": false
+},
+"Door at (3,11)": {
+"to": "SILPH_CO_9F",
+"open": 0,
+"pass": 22,
+"observed": true
+},
+"Door at (3,3)": {
+"to": "SILPH_CO_5F",
+"open": 0,
+"pass": 22,
+"observed": true
+}
+}
+},
+"SILPH_CO_5F": {
+"map": "SILPH_CO_5F",
+"first": 22,
+"services": [],
+"dead_end": false,
+"exits": {
+"Door at (20,0)": {
+"to": "SILPH_CO_ELEVATOR (east)",
+"open": 0,
+"pass": 22,
+"observed": false
+},
+"Door at (27,3)": {
+"to": "SILPH_CO_7F",
+"open": 0,
+"pass": 22,
+"observed": false
+},
+"Door at (3,15)": {
+"to": "SILPH_CO_3F",
+"open": 0,
+"pass": 22,
+"observed": false
+},
+"Door at (9,15)": {
+"to": "SILPH_CO_9F",
+"open": 0,
+"pass": 22,
+"observed": true
+}
+}
+},
+"SILPH_CO_7F": {
+"map": "SILPH_CO_7F",
+"first": 22,
+"services": [],
+"dead_end": false,
+"exits": {
+"Door at (5,3)": {
+"to": "SILPH_CO_3F",
+"open": 0,
+"pass": 22,
+"observed": true
+},
+"Door at (5,7)": {
+"to": "SILPH_CO_11F",
+"open": 0,
+"pass": 22,
+"observed": true
+}
+}
+},
+"SILPH_CO_9F": {
+"map": "SILPH_CO_9F",
+"first": 22,
+"services": [
+"center"
+],
+"dead_end": false,
+"exits": {
+"Door at (17,15)": {
+"to": "SILPH_CO_5F",
+"open": 0,
+"pass": 22,
+"observed": true
+},
+"Door at (18,0)": {
+"to": "SILPH_CO_ELEVATOR (east)",
+"open": 0,
+"pass": 22,
+"observed": false
+},
+"Door at (9,3)": {
+"to": "SILPH_CO_3F",
+"open": 0,
+"pass": 22,
+"observed": true
+}
+}
+},
+"SILPH_CO_ELEVATOR (east)": {
+"map": "SILPH_CO_ELEVATOR",
+"first": 22,
+"services": [],
+"dead_end": false,
+"exits": {}
+},
+"SILPH_CO_ELEVATOR (west)": {
+"map": "SILPH_CO_ELEVATOR",
+"first": 22,
+"services": [],
+"dead_end": false,
+"exits": {}
+},
+"SS_ANNE_1F": {
+"map": "SS_ANNE_1F",
+"first": 10,
+"services": [],
+"dead_end": false,
+"exits": {
+"Door at (11,8)": {
+"to": "SS_ANNE_1F_ROOMS",
+"open": 0,
+"pass": 0,
+"observed": false
+},
+"Door at (15,8)": {
+"to": "SS_ANNE_1F_ROOMS",
+"open": 0,
+"pass": 0,
+"observed": false
+},
+"Door at (19,8)": {
+"to": "SS_ANNE_1F_ROOMS",
+"open": 0,
+"pass": 0,
+"observed": false
+},
+"Door at (2,6)": {
+"to": "SS_ANNE_2F",
+"open": 0,
+"pass": 10,
+"observed": true
+},
+"Door at (23,8)": {
+"to": "SS_ANNE_1F_ROOMS",
+"open": 0,
+"pass": 0,
+"observed": false
+},
+"Door at (26,0)": {
+"to": "VERMILION_DOCK",
+"open": 0,
+"pass": 10,
+"observed": true
+},
+"Door at (3,16)": {
+"to": "SS_ANNE_KITCHEN",
+"open": 0,
+"pass": 0,
+"observed": false
+},
+"Door at (31,8)": {
+"to": "SS_ANNE_1F_ROOMS",
+"open": 0,
+"pass": 0,
+"observed": false
+},
+"Door at (7,8)": {
+"to": "SS_ANNE_1F_ROOMS",
+"open": 0,
+"pass": 0,
+"observed": false
+}
+}
+},
+"SS_ANNE_1F_ROOMS": {
+"map": "SS_ANNE_1F_ROOMS",
+"first": null,
+"services": [],
+"dead_end": true,
+"exits": {
+"Door at (20,10)": {
+"to": "SS_ANNE_1F",
+"open": 0,
+"pass": 10,
+"observed": false
+}
+}
+},
+"SS_ANNE_2F": {
+"map": "SS_ANNE_2F",
+"first": 10,
+"services": [],
+"dead_end": false,
+"exits": {
+"Door at (13,11)": {
+"to": "SS_ANNE_2F_ROOMS",
+"open": 0,
+"pass": 0,
+"observed": false
+},
+"Door at (17,11)": {
+"to": "SS_ANNE_2F_ROOMS",
+"open": 0,
+"pass": 0,
+"observed": false
+},
+"Door at (2,4)": {
+"to": "SS_ANNE_1F",
+"open": 0,
+"pass": 10,
+"observed": true
+},
+"Door at (21,11)": {
+"to": "SS_ANNE_2F_ROOMS",
+"open": 0,
+"pass": 0,
+"observed": false
+},
+"Door at (25,11)": {
+"to": "SS_ANNE_2F_ROOMS",
+"open": 0,
+"pass": 0,
+"observed": false
+},
+"Door at (29,11)": {
+"to": "SS_ANNE_2F_ROOMS",
+"open": 0,
+"pass": 0,
+"observed": false
+},
+"Door at (36,4)": {
+"to": "SS_ANNE_CAPTAINS_ROOM",
+"open": 0,
+"pass": 10,
+"observed": true
+},
+"Door at (9,11)": {
+"to": "SS_ANNE_2F_ROOMS",
+"open": 0,
+"pass": 0,
+"observed": false
+}
+}
+},
+"SS_ANNE_2F_ROOMS": {
+"map": "SS_ANNE_2F_ROOMS",
+"first": null,
+"services": [],
+"dead_end": true,
+"exits": {
+"Door at (22,15)": {
+"to": "SS_ANNE_2F",
+"open": 0,
+"pass": 10,
+"observed": false
+}
+}
+},
+"SS_ANNE_CAPTAINS_ROOM": {
+"map": "SS_ANNE_CAPTAINS_ROOM",
+"first": 10,
+"services": [],
+"dead_end": false,
+"exits": {
+"Door at (0,7)": {
+"to": "SS_ANNE_2F",
+"open": 0,
+"pass": 10,
+"observed": true
+}
+}
+},
+"SS_ANNE_KITCHEN": {
+"map": "SS_ANNE_KITCHEN",
+"first": null,
+"services": [],
+"dead_end": true,
+"exits": {
+"Door at (6,0)": {
+"to": "SS_ANNE_1F",
+"open": 0,
+"pass": 10,
+"observed": false
+}
+}
+},
+"UNDERGROUND_PATH_NORTH_SOUTH": {
+"map": "UNDERGROUND_PATH_NORTH_SOUTH",
+"first": 10,
+"services": [],
+"dead_end": false,
+"exits": {
+"Door at (2,41)": {
+"to": "UNDERGROUND_PATH_ROUTE_6",
+"open": 0,
+"pass": 10,
+"observed": true
+},
+"Door at (5,4)": {
+"to": "UNDERGROUND_PATH_ROUTE_5",
+"open": 0,
+"pass": 10,
+"observed": true
+}
+}
+},
+"UNDERGROUND_PATH_ROUTE_5": {
+"map": "UNDERGROUND_PATH_ROUTE_5",
+"first": 10,
+"services": [],
+"dead_end": false,
+"exits": {
+"Door at (3,7)": {
+"to": "ROUTE_5",
+"open": 0,
+"pass": 10,
+"observed": true
+},
+"Door at (4,4)": {
+"to": "UNDERGROUND_PATH_NORTH_SOUTH",
+"open": 0,
+"pass": 10,
+"observed": true
+}
+}
+},
+"UNDERGROUND_PATH_ROUTE_6": {
+"map": "UNDERGROUND_PATH_ROUTE_6",
+"first": 10,
+"services": [],
+"dead_end": false,
+"exits": {
+"Door at (3,7)": {
+"to": "ROUTE_6",
+"open": 0,
+"pass": 10,
+"observed": true
+},
+"Door at (4,4)": {
+"to": "UNDERGROUND_PATH_NORTH_SOUTH",
+"open": 0,
+"pass": 10,
+"observed": true
+}
+}
+},
+"UNDERGROUND_PATH_ROUTE_7": {
+"map": "UNDERGROUND_PATH_ROUTE_7",
+"first": 13,
+"services": [],
+"dead_end": false,
+"exits": {
+"Door at (3,7)": {
+"to": "ROUTE_7 (west)",
+"open": 0,
+"pass": 13,
+"observed": true
+},
+"Door at (4,4)": {
+"to": "UNDERGROUND_PATH_WEST_EAST",
+"open": 0,
+"pass": 13,
+"observed": true
+}
+}
+},
+"UNDERGROUND_PATH_ROUTE_8": {
+"map": "UNDERGROUND_PATH_ROUTE_8",
+"first": 13,
+"services": [],
+"dead_end": false,
+"exits": {
+"Door at (3,7)": {
+"to": "ROUTE_8 (east)",
+"open": 0,
+"pass": 13,
+"observed": true
+},
+"Door at (4,4)": {
+"to": "UNDERGROUND_PATH_WEST_EAST",
+"open": 0,
+"pass": 13,
+"observed": true
+}
+}
+},
+"UNDERGROUND_PATH_WEST_EAST": {
+"map": "UNDERGROUND_PATH_WEST_EAST",
+"first": 13,
+"services": [],
+"dead_end": false,
+"exits": {
+"Door at (2,5)": {
+"to": "UNDERGROUND_PATH_ROUTE_7",
+"open": 0,
+"pass": 13,
+"observed": true
+},
+"Door at (47,2)": {
+"to": "UNDERGROUND_PATH_ROUTE_8",
+"open": 0,
+"pass": 13,
+"observed": true
+}
+}
+},
+"VERMILION_CITY": {
+"map": "VERMILION_CITY",
+"first": 10,
+"services": [],
+"dead_end": false,
+"exits": {
+"Door at (11,3)": {
+"to": "VERMILION_POKECENTER",
+"open": 0,
+"pass": 10,
+"observed": true
+},
+"Door at (12,19)": {
+"to": "VERMILION_GYM",
+"open": 11,
+"pass": 11,
+"observed": true
+},
+"Door at (15,13)": {
+"to": "VERMILION_TRADE_HOUSE",
+"open": 0,
+"pass": 0,
+"observed": false
+},
+"Door at (18,31)": {
+"to": "VERMILION_DOCK",
+"open": 0,
+"pass": 10,
+"observed": true
+},
+"Door at (23,13)": {
+"to": "VERMILION_MART",
+"open": 0,
+"pass": 0,
+"observed": false
+},
+"Door at (23,19)": {
+"to": "VERMILION_PIDGEY_HOUSE",
+"open": 0,
+"pass": 0,
+"observed": false
+},
+"Door at (7,3)": {
+"to": "VERMILION_OLD_ROD_HOUSE",
+"open": 0,
+"pass": 0,
+"observed": false
+},
+"Door at (9,13)": {
+"to": "POKEMON_FAN_CLUB",
+"open": 0,
+"pass": 0,
+"observed": false
+},
+"Leave east": {
+"to": "ROUTE_11",
+"open": 0,
+"pass": 24,
+"observed": true
+},
+"Leave north": {
+"to": "ROUTE_6",
+"open": 0,
+"pass": 10,
+"observed": true
+}
+}
+},
+"VERMILION_DOCK": {
+"map": "VERMILION_DOCK",
+"first": 10,
+"services": [],
+"dead_end": false,
+"exits": {
+"Door at (14,0)": {
+"to": "VERMILION_CITY",
+"open": 0,
+"pass": 10,
+"observed": true
+},
+"Door at (14,2)": {
+"to": "SS_ANNE_1F",
+"open": 0,
+"pass": 10,
+"observed": true
+}
+}
+},
+"VERMILION_GYM": {
+"map": "VERMILION_GYM",
+"first": 11,
+"services": [],
+"dead_end": false,
+"exits": {
+"Door at (4,17)": {
+"to": "VERMILION_CITY",
+"open": 0,
+"pass": 10,
+"observed": true
+}
+}
+},
+"VERMILION_MART": {
+"map": "VERMILION_MART",
+"first": null,
+"services": [],
+"dead_end": true,
+"exits": {
+"Door at (3,7)": {
+"to": "VERMILION_CITY",
+"open": 0,
+"pass": 10,
+"observed": false
+}
+}
+},
+"VERMILION_OLD_ROD_HOUSE": {
+"map": "VERMILION_OLD_ROD_HOUSE",
+"first": null,
+"services": [],
+"dead_end": true,
+"exits": {
+"Door at (2,7)": {
+"to": "VERMILION_CITY",
+"open": 0,
+"pass": 10,
+"observed": false
+}
+}
+},
+"VERMILION_PIDGEY_HOUSE": {
+"map": "VERMILION_PIDGEY_HOUSE",
+"first": null,
+"services": [],
+"dead_end": true,
+"exits": {
+"Door at (2,7)": {
+"to": "VERMILION_CITY",
+"open": 0,
+"pass": 10,
+"observed": false
+}
+}
+},
+"VERMILION_POKECENTER": {
+"map": "VERMILION_POKECENTER",
+"first": 10,
+"services": [
+"center"
+],
+"dead_end": false,
+"exits": {
+"Door at (3,7)": {
+"to": "VERMILION_CITY",
+"open": 0,
+"pass": 10,
+"observed": true
+}
+}
+},
+"VERMILION_TRADE_HOUSE": {
+"map": "VERMILION_TRADE_HOUSE",
+"first": null,
+"services": [],
+"dead_end": true,
+"exits": {
+"Door at (2,7)": {
+"to": "VERMILION_CITY",
+"open": 0,
+"pass": 10,
+"observed": false
+}
+}
+},
+"VICTORY_ROAD_1F": {
+"map": "VICTORY_ROAD_1F",
+"first": 27,
+"services": [
+"grass"
+],
+"dead_end": false,
+"exits": {
+"Door at (1,1)": {
+"to": "VICTORY_ROAD_2F",
+"open": 0,
+"pass": 27,
+"observed": true
+},
+"Door at (8,17)": {
+"to": "ROUTE_23 (south)",
+"open": 0,
+"pass": 27,
+"observed": false
+}
+}
+},
+"VICTORY_ROAD_2F": {
+"map": "VICTORY_ROAD_2F",
+"first": 27,
+"services": [
+"grass"
+],
+"dead_end": false,
+"exits": {
+"Door at (0,8)": {
+"to": "VICTORY_ROAD_1F",
+"open": 0,
+"pass": 27,
+"observed": false
+},
+"Door at (1,1)": {
+"to": "VICTORY_ROAD_3F (east)",
+"open": 0,
+"pass": 27,
+"observed": true
+},
+"Door at (29,7)": {
+"to": "ROUTE_23 (north)",
+"open": 0,
+"pass": 27,
+"observed": true
+}
+}
+},
+"VICTORY_ROAD_3F (east)": {
+"map": "VICTORY_ROAD_3F",
+"first": 27,
+"services": [
+"grass"
+],
+"dead_end": false,
+"exits": {
+"Door at (26,8)": {
+"to": "VICTORY_ROAD_2F",
+"open": 0,
+"pass": 27,
+"observed": true
+},
+"Door at (27,15)": {
+"to": "VICTORY_ROAD_2F",
+"open": 0,
+"pass": 27,
+"observed": false
+}
+}
+},
+"VICTORY_ROAD_3F (west)": {
+"map": "VICTORY_ROAD_3F",
+"first": 27,
+"services": [
+"grass"
+],
+"dead_end": false,
+"exits": {
+"Door at (2,0)": {
+"to": "VICTORY_ROAD_2F",
+"open": 0,
+"pass": 27,
+"observed": true
+}
+}
+},
+"VIRIDIAN_CITY": {
+"map": "VIRIDIAN_CITY",
+"first": 3,
+"services": [],
+"dead_end": false,
+"exits": {
+"Door at (21,15)": {
+"to": "VIRIDIAN_SCHOOL_HOUSE",
+"open": 0,
+"pass": 0,
+"observed": false
+},
+"Door at (21,9)": {
+"to": "VIRIDIAN_NICKNAME_HOUSE",
+"open": 0,
+"pass": 0,
+"observed": false
+},
+"Door at (23,25)": {
+"to": "VIRIDIAN_POKECENTER",
+"open": 0,
+"pass": 3,
+"observed": true
+},
+"Door at (29,19)": {
+"to": "VIRIDIAN_MART",
+"open": 0,
+"pass": 3,
+"observed": true
+},
+"Door at (32,7)": {
+"to": "VIRIDIAN_GYM",
+"open": 0,
+"pass": 26,
+"observed": true
+},
+"Leave north": {
+"to": "ROUTE_2",
+"open": 0,
+"pass": 5,
+"observed": true
+},
+"Leave south": {
+"to": "ROUTE_1",
+"open": 0,
+"pass": 3,
+"observed": true
+},
+"Leave west": {
+"to": "ROUTE_22",
+"open": 0,
+"pass": 27,
+"observed": true
+}
+}
+},
+"VIRIDIAN_FOREST": {
+"map": "VIRIDIAN_FOREST",
+"first": 5,
+"services": [
+"grass"
+],
+"dead_end": false,
+"exits": {
+"Door at (1,0)": {
+"to": "VIRIDIAN_FOREST_NORTH_GATE",
+"open": 0,
+"pass": 5,
+"observed": true
+},
+"Door at (15,47)": {
+"to": "VIRIDIAN_FOREST_SOUTH_GATE",
+"open": 0,
+"pass": 5,
+"observed": false
+}
+}
+},
+"VIRIDIAN_FOREST_NORTH_GATE": {
+"map": "VIRIDIAN_FOREST_NORTH_GATE",
+"first": 5,
+"services": [],
+"dead_end": false,
+"exits": {
+"Door at (4,0)": {
+"to": "ROUTE_2",
+"open": 0,
+"pass": 5,
+"observed": true
+},
+"Door at (4,7)": {
+"to": "VIRIDIAN_FOREST",
+"open": 0,
+"pass": 5,
+"observed": true
+}
+}
+},
+"VIRIDIAN_FOREST_SOUTH_GATE": {
+"map": "VIRIDIAN_FOREST_SOUTH_GATE",
+"first": 5,
+"services": [],
+"dead_end": false,
+"exits": {
+"Door at (4,0)": {
+"to": "VIRIDIAN_FOREST",
+"open": 0,
+"pass": 5,
+"observed": true
+},
+"Door at (4,7)": {
+"to": "ROUTE_2",
+"open": 0,
+"pass": 5,
+"observed": false
+}
+}
+},
+"VIRIDIAN_GYM": {
+"map": "VIRIDIAN_GYM",
+"first": 26,
+"services": [],
+"dead_end": false,
+"exits": {
+"Door at (16,17)": {
+"to": "VIRIDIAN_CITY",
+"open": 0,
+"pass": 3,
+"observed": true
+}
+}
+},
+"VIRIDIAN_MART": {
+"map": "VIRIDIAN_MART",
+"first": 3,
+"services": [
+"mart"
+],
+"dead_end": false,
+"exits": {
+"Door at (3,7)": {
+"to": "VIRIDIAN_CITY",
+"open": 4,
+"pass": 4,
+"observed": true
+}
+}
+},
+"VIRIDIAN_NICKNAME_HOUSE": {
+"map": "VIRIDIAN_NICKNAME_HOUSE",
+"first": null,
+"services": [],
+"dead_end": true,
+"exits": {
+"Door at (2,7)": {
+"to": "VIRIDIAN_CITY",
+"open": 0,
+"pass": 3,
+"observed": false
+}
+}
+},
+"VIRIDIAN_POKECENTER": {
+"map": "VIRIDIAN_POKECENTER",
+"first": 3,
+"services": [
+"center"
+],
+"dead_end": false,
+"exits": {
+"Door at (3,7)": {
+"to": "VIRIDIAN_CITY",
+"open": 0,
+"pass": 3,
+"observed": true
+}
+}
+},
+"VIRIDIAN_SCHOOL_HOUSE": {
+"map": "VIRIDIAN_SCHOOL_HOUSE",
+"first": null,
+"services": [],
+"dead_end": true,
+"exits": {
+"Door at (2,7)": {
+"to": "VIRIDIAN_CITY",
+"open": 0,
+"pass": 3,
+"observed": false
+}
+}
+},
+"WARDENS_HOUSE": {
+"map": "WARDENS_HOUSE",
+"first": 21,
+"services": [],
+"dead_end": false,
+"exits": {
+"Door at (4,7)": {
+"to": "FUCHSIA_CITY",
+"open": 0,
+"pass": 18,
+"observed": true
+}
+}
+}
+}
+}

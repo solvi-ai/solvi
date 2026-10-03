@@ -1,0 +1,260 @@
+{
+ "world": "34b5543131b0ec86",
+ "llm": null,
+ "wall_ms": {
+  "run1": 596.8,
+  "run2": 113.6
+ },
+ "objectives_done": {
+  "run1": 15,
+  "run2": 15
+ },
+ "objectives": [
+  {
+   "objective": "meet_oak",
+   "run1": {
+    "moves": 3,
+    "s1": 1,
+    "s2": 2
+   },
+   "run2": {
+    "moves": 3,
+    "s1": 3,
+    "s2": 0
+   },
+   "shortest": 3
+  },
+  {
+   "objective": "starter",
+   "run1": {
+    "moves": 0,
+    "s1": 0,
+    "s2": 0
+   },
+   "run2": {
+    "moves": 0,
+    "s1": 0,
+    "s2": 0
+   },
+   "shortest": 0
+  },
+  {
+   "objective": "rival1",
+   "run1": {
+    "moves": 0,
+    "s1": 0,
+    "s2": 0
+   },
+   "run2": {
+    "moves": 0,
+    "s1": 0,
+    "s2": 0
+   },
+   "shortest": 0
+  },
+  {
+   "objective": "parcel",
+   "run1": {
+    "moves": 10,
+    "s1": 4,
+    "s2": 6
+   },
+   "run2": {
+    "moves": 4,
+    "s1": 3,
+    "s2": 1
+   },
+   "shortest": 4
+  },
+  {
+   "objective": "deliver_parcel",
+   "run1": {
+    "moves": 6,
+    "s1": 1,
+    "s2": 5
+   },
+   "run2": {
+    "moves": 4,
+    "s1": 4,
+    "s2": 0
+   },
+   "shortest": 4
+  },
+  {
+   "objective": "viridian_forest",
+   "run1": {
+    "moves": 7,
+    "s1": 1,
+    "s2": 6
+   },
+   "run2": {
+    "moves": 5,
+    "s1": 5,
+    "s2": 0
+   },
+   "shortest": 5
+  },
+  {
+   "objective": "brock",
+   "run1": {
+    "moves": 2,
+    "s1": 0,
+    "s2": 2
+   },
+   "run2": {
+    "moves": 1,
+    "s1": 1,
+    "s2": 0
+   },
+   "shortest": 1
+  },
+  {
+   "objective": "mt_moon",
+   "run1": {
+    "moves": 32,
+    "s1": 5,
+    "s2": 27
+   },
+   "run2": {
+    "moves": 6,
+    "s1": 6,
+    "s2": 0
+   },
+   "shortest": 6
+  },
+  {
+   "objective": "misty",
+   "run1": {
+    "moves": 9,
+    "s1": 4,
+    "s2": 5
+   },
+   "run2": {
+    "moves": 1,
+    "s1": 1,
+    "s2": 0
+   },
+   "shortest": 1
+  },
+  {
+   "objective": "bill",
+   "run1": {
+    "moves": 4,
+    "s1": 1,
+    "s2": 3
+   },
+   "run2": {
+    "moves": 4,
+    "s1": 4,
+    "s2": 0
+   },
+   "shortest": 4
+  },
+  {
+   "objective": "ss_anne",
+   "run1": {
+    "moves": 63,
+    "s1": 16,
+    "s2": 47
+   },
+   "run2": {
+    "moves": 13,
+    "s1": 13,
+    "s2": 0
+   },
+   "shortest": 13
+  },
+  {
+   "objective": "surge",
+   "run1": {
+    "moves": 6,
+    "s1": 2,
+    "s2": 4
+   },
+   "run2": {
+    "moves": 4,
+    "s1": 3,
+    "s2": 1
+   },
+   "shortest": 4
+  },
+  {
+   "objective": "rock_tunnel",
+   "run1": {
+    "moves": 11,
+    "s1": 1,
+    "s2": 10
+   },
+   "run2": {
+    "moves": 10,
+    "s1": 10,
+    "s2": 0
+   },
+   "shortest": 10
+  },
+  {
+   "objective": "celadon",
+   "run1": {
+    "moves": 29,
+    "s1": 0,
+    "s2": 29
+   },
+   "run2": {
+    "moves": 6,
+    "s1": 6,
+    "s2": 0
+   },
+   "shortest": 6
+  },
+  {
+   "objective": "erika",
+   "run1": {
+    "moves": 1,
+    "s1": 0,
+    "s2": 1
+   },
+   "run2": {
+    "moves": 1,
+    "s1": 1,
+    "s2": 0
+   },
+   "shortest": 1
+  }
+ ],
+ "runs": {
+  "run1": {
+   "decisions": 183,
+   "s1": 36,
+   "s2": 147,
+   "human": 0,
+   "ms": {
+    "s1": 11.6,
+    "s2": 286.2
+   },
+   "ms_per_decision": {
+    "s1": 0.322,
+    "s2": 1.947
+   },
+   "blocked": 17,
+   "surprises": 0,
+   "events": 2
+  },
+  "run2": {
+   "decisions": 62,
+   "s1": 60,
+   "s2": 2,
+   "human": 0,
+   "ms": {
+    "s1": 16.4,
+    "s2": 2.1
+   },
+   "ms_per_decision": {
+    "s1": 0.273,
+    "s2": 1.05
+   },
+   "blocked": 0,
+   "surprises": 2,
+   "events": 2
+  }
+ }
+}

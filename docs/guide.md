@@ -4282,6 +4282,39 @@ numbers depend on the order). The slow path's promise, when it has a guarantee, 
 examples — the inputs System 1 hands it are the hard ones, unlike an average calibration set, so measure the slow path's
 error on what it is actually given before you trust `think="s2"`.
 
+### On a game: System 1, System 2 and a world map that practice compiles
+
+`examples/23_pokemon_world_map.py` puts
+the pieces together on the world map of Pokémon Red: 190 places and 447 exits recorded from a real playthrough (place
+names and exits as a player sees them — "Leave north", "Door at (12,11)" — no ROM bytes, no graphics), and the game's
+first fifteen goals, each naming the place it needs and never the way there. One decision is "which exit do I take
+here?"; its input is a plain view — the exits on offer as text, the route System 1 remembers, the plans the world map
+gives — so every decision replays.
+
+- System 1 is a catalog of two rules (the remembered route's exit; the only exit there is) asked for a span of the
+  exits on offer, so an answer that is not on the screen is refused. It abstains when it remembers no route, when the
+  remembered exit is not on offer, or when the last step surprised it.
+- System 2 is `SlowPath(system2, space=..., into="plan", search={"objective": "value"})`: the known way to the goal
+  when the player's `WorldMap` has one, else every unexplored exit within reach, scored by expected value, behind a
+  hard check that the plan's first step is on offer. An LLM can add a hint as an alternative producer of one fact
+  (off by default); an invalid reply is no hint, never a guess.
+- The dispatcher stores every decision; consolidation is the application's code: after each goal it compiles System
+  1's routes from the map's confirmed claims (`WorldMap.distances(..., confirmed_only=True)`), so what System 2 found
+  by deliberating becomes what System 1 does at once. The dispatcher itself does not teach System 1.
+
+| run | moves | System 1 | System 2 | slow decisions after a surprise |
+|---|---|---|---|---|
+| 1, empty memory | 183 | 36 | 147 | — |
+| 2, run 1's memory | 62 (the fewest possible) | 60 | 2 | 2 (Professor Oak's walk to the lab, the ship leaving) |
+
+System 1 takes about 0.3 ms per decision and System 2 about 2 ms on a laptop CPU. All 245 stored decisions replay
+without the game, both world maps' journals verify, and `System.report` over each run's store gives the same counts.
+`--live` plays the runs again (the same decisions), `--rom PATH` first checks every recorded exit against your own
+ROM's map tables. What it does not show: the gain is the memory carried to a second run over the same world — a first
+exploration is not shorter; walking, battles and menus inside a place are outside the showcase; and a place counts as
+reachable from the stage at which the recorded player first reached it. The replay viewer is a static Space in
+`spaces/pokemon/`.
+
 ## Verified charts: a specialist that checks every number
 
 > **Preview** (since 0.7). The first *specialist*: a small model proposes, code checks against the source, code renders.

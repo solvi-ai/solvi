@@ -30,7 +30,7 @@ jobs:
           for f in gallery/*/run.py; do echo "== $f"; uv run python "$f" > /dev/null; done
       - name: run core examples
         run: |
-          for f in examples/0[1-69]_*.py examples/1[0-7]_*.py examples/19_*.py; do echo "== $f"; uv run python "$f" > /dev/null; done
+          for f in examples/0[1-69]_*.py examples/1[0-7]_*.py examples/19_*.py examples/23_*.py; do echo "== $f"; uv run python "$f" > /dev/null; done
       - name: agent frameworks (solvi.agents adapters)
         if: matrix.python == '3.12'
         run: |
