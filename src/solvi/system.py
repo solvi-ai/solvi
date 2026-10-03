@@ -157,13 +157,36 @@ class System:
         self.stats = {k: 0 for k in STATS}        # lifetime counts: model outputs and the safeguards that caught them
         for part in catalog.parts.values():       # a `then` answer outside the question's options would only show when the
             for qn, ans in (part.then or {}).items() if part.kind == "check" and part.hard else ():   # check fails
-                if qn in self.questions:
+                if qn in self.questions and not callable(ans):     # a `then` function: its value is checked when it runs
                     try:
                         self.questions[qn].answer.normalize(ans)
                     except ValueError as e:
                         import warnings
                         warnings.warn(f"hard check {part.name}: `then` answers {qn!r} with {ans!r}: {e} — when the check "
                                       f"fails, {qn!r} will abstain", stacklevel=2)
+
+        if self.strategist is not None:
+            self._then_wired()
+
+    def _then_wired(self):
+        """A hard check whose `then` names a question must be in that question's flow. The deterministic strategist puts
+        it there (and CostStrategist, which plans with it); a strategist of your own that leaves one out would let the
+        question be answered as if the check had passed — refused here, planned with every given fact present."""
+        from .strategist import PlanError, given_facts
+        pairs = [(p.name, qn) for p in self.catalog.parts.values() if p.kind == "check" and p.hard
+                 for qn in (p.then or {}) if qn in self.questions]
+        if not pairs:
+            return
+        try:
+            flow = self._plan(list(self.questions.values()), given_facts(self.catalog, self.questions.values()))
+        except PlanError:
+            return                                    # a plan that fails here fails at ask too, with its own reason
+        lost = [(c, qn) for c, qn in pairs if c not in flow.per_question.get(qn, ()) and not flow.unresolved.get(qn)]
+        if lost:
+            raise ValueError("; ".join(f"hard check {c} sets `then=` for {qn!r}, but the strategist's flow for {qn!r} does "
+                                       "not run it" for c, qn in lost)
+                             + " — when it fails the question would be answered as if it had passed: add it to the "
+                               "question's requires=[...] or plan it in the strategist")
 
     def _typed_question(self, q):
         """A question without an answer type takes it from its rule's return type; a typed rule must fit its question."""
@@ -566,15 +589,16 @@ class System:
                 if not governs(part, q):
                     continue
                 if q.name in part.then:
+                    because = (r.extra or {}).get("reasons") if isinstance(r.extra, dict) else None   # refine.Fail
+                    said = f"hard check {f} is false" + (": " + "; ".join(because) if because else "")
+                    if callable(part.then[q.name]):   # a function of facts gives the answer (1.0): run and recorded here
+                        return _then_answer(self.catalog, part, q, trace, vals, flow, said)
                     try:
                         forced = q.answer.normalize(part.then[q.name])
                     except ValueError as e:           # a `then` answer that is not an answer of this question: the check
                         return Result(None, 0.0, f"hard check {f} is false and its `then` answer is not usable: {e}",   # still
                                       "abstain", source=f, guard="hard_check")                                         # decides
-                    because = (r.extra or {}).get("reasons") if isinstance(r.extra, dict) else None   # refine.Fail
-                    return Result(forced, 1.0, f"hard check {f} is false" + (": " + "; ".join(because) if because else ""),
-                                  "forced",
-                                  provenance=r.origin, source=f, guard="hard_check")
+                    return Result(forced, 1.0, said, "forced", provenance=r.origin, source=f, guard="hard_check")
                 return Result(None, 0.0, f"hard check {f} is false and no answer is set for it", "abstain", source=f,
                               guard="hard_check")
         for f, part in hard:                          # a governing hard check that could not be evaluated: the answer
@@ -1116,6 +1140,46 @@ def _read_results(read, results):
         r.confidence = min([r.confidence] + confs)
     elif r.status == "abstain" and read.missing:
         r.why = f"not stated in the text: {', '.join(read.missing)}; {r.why}"
+
+
+def _then_answer(catalog, check, q, trace, vals, flow, said):
+    """A failed hard check's `then` function for question q: called on the facts it reads (typed like a part's), its value
+    normalized to an answer of q and recorded in the trace (kind "then", name "then:<question>"; replay re-runs it) →
+    Result "forced", or an abstention (guard "hard_check") when it cannot run or gives no answer of q."""
+    from .runtime import MISSING as _M
+    from .strategist import then_inputs
+    tp = (check.then_parts or {}).get(q.name)
+    fn = check.then[q.name]
+    names = then_inputs(check, q.name)
+    args = {x: vals.get(x, _M) for x in names}
+    lost = [x for x, v in args.items() if v is _M]
+    label = f"`then` of {check.name} for {q.name!r}"
+    if lost:
+        return Result(None, 0.0, f"{said}; {label} cannot run: missing {', '.join(lost)}", "abstain", source=check.name,
+                      guard="hard_check")
+    from .core import Quote
+    plain = {x: (v.value if isinstance(v, Quote) else v) for x, v in args.items()}
+    why = None
+    if tp is not None and tp.tin is not None:
+        from .typed import typed_in
+        plain, why = typed_in(tp, plain)
+    answer, err = None, why
+    if err is None:
+        try:
+            answer = q.answer.normalize(fn(**plain))
+        except ValueError as e:
+            err = f"its value is not an answer of {q.name!r}: {e}"
+        except Exception as e:  # noqa: BLE001
+            err = f"{type(e).__name__}: {str(e)[:120]}"
+    _append(trace, Record(step=0, kind="then", name="then:" + q.name, inputs={x: vhash(args[x]) for x in names},
+                          value=MISSING if err else answer, error=err, provenance="computed",
+                          extra={"check": check.name}), len(flow.steps))
+    if err:
+        return Result(None, 0.0, f"{said}; {label} gave no answer: {err}", "abstain", source=check.name,
+                      guard="hard_check")
+    return Result(answer, 1.0, f"{said}; then {getattr(fn, '__name__', 'function')}("
+                  + ", ".join(f"{x} = {srepr(plain[x])}" for x in names) + f") = {srepr(answer)}", "forced",
+                  provenance="computed", source=check.name, guard="hard_check")
 
 
 def governs(part, question):

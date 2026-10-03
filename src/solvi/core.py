@@ -987,6 +987,18 @@ class Catalog:
                           timeout=timeout, blocking=blocking)
 
     def check(self, f=None, *, hard=False, then=None, cost=None, model=None, provenance=None, timeout=None, blocking=None):
+        """A check: a function of facts that answers True or False (or `solvi.refine.Fail("why")` for False with its
+        reasons). hard=True: when it is False it decides the questions it governs — the model cannot override it.
+        then: {question: answer} — the answer a question gets when this hard check is False (a question listed here is
+        governed by it; without `then` the check governs every question whose flow runs it, and they abstain). The check
+        is put into the flow of every question its `then` names (since 1.0; no `requires=` needed). An answer may be a
+        function of facts instead of a constant — `then={"step": free_side}` with `def free_side(position, walls) ->
+        str` — whose argument names are the facts it reads (typed like any part's); it runs only when the check is
+        False, its value must be one of the question's answers (else the question abstains), and it is recorded in the
+        trace (record kind "then") and re-checked by replay."""
+        if then is not None and not isinstance(then, dict):
+            raise TypeError(f"then= is {{question: answer or function of facts}}, not {type(then).__name__}: e.g. "
+                            "then={\"step\": free_side}")
         return self._deco("check", f, hard=hard, then=then or {}, cost=cost, model=model, provenance=provenance,
                           timeout=timeout, blocking=blocking)
 

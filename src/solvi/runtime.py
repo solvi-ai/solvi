@@ -437,6 +437,9 @@ class Trace(Serial):
             if r.kind == "plan":                          # a strategist's plan record (solvi.strategy): re-verified, not re-run
                 bad += replay_plan(r, catalog, self.init)
                 continue
+            if r.kind == "then":                          # a failed hard check's `then` function (1.0): re-run
+                bad += replay_then(r, catalog, system, vals)
+                continue
             part = catalog.rules.get(r.name[7:]) if r.kind == "rule" else catalog.parts.get(r.name)
             if part is None:                              # renamed or removed since the run: a verdict, not a KeyError
                 bad.append(Mismatch(r.step, r.name, f"part {r.name} is not in the catalog (renamed or removed)",
@@ -717,6 +720,58 @@ def replay_guard(r, system, vals):
             bad.append(Mismatch(r.step, r.name, "the question's guarantee changed since this decision (recalibrated or "
                                                 "another signal)", "recompute"))
     return bad
+
+
+def then_inputs(check, question):
+    """The facts a hard check's `then` function for this question reads (its argument names); [] for a constant."""
+    import inspect
+    fn = (check.then or {}).get(question)
+    if not callable(fn):
+        return []
+    tp = (check.then_parts or {}).get(question)
+    return list(tp.inputs) if tp is not None else list(inspect.signature(fn).parameters)
+
+
+def replay_then(r, catalog, system, vals):
+    """A `then` record (kind "then": the answer a failed hard check's function gave): it reads the recorded facts, and the
+    function, re-run on them, gives the recorded answer (normalized by the question's answer type when the System is
+    given) or fails with the recorded error."""
+    q = r.name[5:]
+    name = (r.extra or {}).get("check") if isinstance(r.extra, dict) else None
+    check = catalog.parts.get(name) if name else None
+    fn = (check.then or {}).get(q) if check is not None else None
+    if not callable(fn):
+        return [Mismatch(r.step, r.name, f"hard check {name} has no `then` function for {q!r} now (changed or removed)",
+                         "missing_part")]
+    bad = []
+    names = then_inputs(check, q)
+    for x in names:
+        if x not in vals or vhash(vals[x]) != r.inputs.get(x):
+            bad.append(Mismatch(r.step, r.name, f"input {x} does not match the recorded one",
+                                "integrity" if x in r.inputs else "recompute"))
+    if bad or set(r.inputs) != set(names):
+        return bad or [Mismatch(r.step, r.name, "the `then` function reads other facts than recorded", "recompute")]
+    plain = _plain_args(vals, names)
+    tp = (check.then_parts or {}).get(q)
+    err = None
+    if tp is not None and tp.tin is not None:
+        from .typed import typed_in
+        plain, err = typed_in(tp, plain)
+    value = MISSING
+    if err is None:
+        try:
+            value = fn(**plain)
+            qq = getattr(system, "questions", {}).get(q) if system is not None else None
+            if qq is not None:
+                value = qq.answer.normalize(value)
+        except ValueError as e:
+            err, value = f"its value is not an answer of {q!r}: {e}", MISSING
+        except Exception as e:  # noqa: BLE001
+            err, value = f"{type(e).__name__}: {str(e)[:120]}", MISSING
+    if (err is None) != (r.error is None) or (err is None and vhash(value) != vhash(r.value)):
+        return [(r.step, r.name, f"`then` of {name} recomputes to {value if err is None else err!r}, recorded "
+                                 f"{r.value if r.error is None else r.error!r}")]
+    return []
 
 
 def replay_plan(r, catalog, init_keys):
@@ -1297,7 +1352,25 @@ class _Run:
             return True
         if p.kind == "rule":
             return p.question in live
-        return any(p.name in self.flow.per_question.get(q, ()) for q in live)
+        return any(p.name in self.flow.per_question.get(q, ()) for q in live) or p.name in self.then_facts()
+
+    def then_facts(self):
+        """The steps a failed hard check's `then` functions read, with what they read: they run although the questions
+        those checks settle are closed (the function gives their answer)."""
+        failed = tuple(i for i in self.hard if i in self.done and self.done[i].value is False)
+        if getattr(self, "_then", (None,))[0] != failed:
+            acc, todo = set(), []
+            for i in failed:
+                part = self.steps[i].part
+                for q in self.gov[i]:
+                    todo += [self.index[x] for x in then_inputs(part, q) if x in self.index]
+            while todo:                               # what they read, done or not (ancestors() skips done steps)
+                j = todo.pop()
+                if j not in acc:
+                    acc.add(j)
+                    todo += [self.index[x] for x in self.steps[j].part.inputs if x in self.index]
+            self._then = (failed, {self.names[j] for j in acc})
+        return self._then[1]
 
     def first(self):
         """The hard checks and every step they read (the first phase of the default order)."""

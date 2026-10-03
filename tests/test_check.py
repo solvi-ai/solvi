@@ -32,12 +32,41 @@ def test_a_clean_catalog_has_no_findings():
     assert rep.ok and rep.findings == [], str(rep)
 
 
-def test_a_hard_check_with_then_outside_its_questions_flow():
+class DropCheck:
+    """A strategist of one's own that plans as the deterministic one, then leaves a check out of every flow."""
+
+    def __init__(self, name):
+        self.name = name
+
+    def plan(self, catalog, questions, init_keys, heads=None):
+        from solvi.strategist import plan
+        flow = plan(catalog, questions, init_keys, heads)
+        flow.steps = [st for st in flow.steps if st.part.name != self.name]
+        flow.per_question = {q: [f for f in fs if f != self.name] for q, fs in flow.per_question.items()}
+        return flow
+
+
+def test_a_hard_check_with_then_is_wired_into_its_questions_flow():
+    """1.0: a hard check whose `then` names a question runs in that question's flow without requires= (0.9 answered
+    the question as if the check had passed — the bug `then_not_in_flow` caught)."""
     s = refund_catalog(checkpoint=False)
+    assert lint(s).findings == []
+    res = s.ask({"purchase_day": 1, "today": 5, "customer": "blocked"})
+    assert res["refund"].answer == "no" and res["refund"].status == "forced"
+    assert "known_customer" in res.flow.per_question["refund"]
+    assert any(r == "hard check for refund (then)" for st in res.flow.steps for r in st.reasons)
+
+
+def test_a_strategist_that_leaves_out_a_then_check_is_refused():
+    import pytest
+    cat = refund_catalog(checkpoint=False).catalog
+    with pytest.raises(ValueError, match=r"hard check known_customer sets `then=` for 'refund'.*does not run it"):
+        System(cat, [Question("refund", "Refund?")], strategist=DropCheck("known_customer"))
+    s = System(cat, [Question("refund", "Refund?")])
+    s.strategist = DropCheck("known_customer")       # set after construction: `solvi check` still tells
     rep = lint(s)
     assert rep.codes("error") == ["then_not_in_flow"] and not rep.ok
     assert "requires=['known_customer']" in rep.errors[0].message
-    assert s.ask({"purchase_day": 1, "today": 5, "customer": "blocked"})["refund"].answer == "yes"   # the bug it catches
 
 
 def test_a_hard_check_on_a_computed_fact_is_in_the_flow_without_a_checkpoint():
@@ -285,8 +314,22 @@ def good():
     return System(cat, [Question("refund", "Refund?", requires=["known_customer"])])
 
 
+class DropCheck:
+    def plan(self, catalog, questions, init_keys, heads=None):
+        from solvi.strategist import plan
+        flow = plan(catalog, questions, init_keys, heads)
+        flow.per_question = {q: [f for f in fs if f != "known_customer"] for q, fs in flow.per_question.items()}
+        return flow
+
+
+def wired():
+    return System(cat, [Question("refund", "Refund?")])      # 1.0: the `then` check is in the flow without requires
+
+
 def bad():
-    return System(cat, [Question("refund", "Refund?")])
+    s = System(cat, [Question("refund", "Refund?")])
+    s.strategist = DropCheck()                    # a strategist that leaves the `then` check out (System() refuses it)
+    return s
 
 
 def warns():
@@ -352,6 +395,8 @@ def test_solvi_check_exit_statuses(tmp_path, capsys):
     f = tmp_path / "refunds.py"
     f.write_text(CATALOG)
     assert main(["check", f"{f}:good"]) == 0
+    assert "no problems found" in capsys.readouterr().out
+    assert main(["check", f"{f}:wired"]) == 0
     assert "no problems found" in capsys.readouterr().out
     assert main(["check", f"{f}:bad"]) == 1
     assert "then_not_in_flow" in capsys.readouterr().out

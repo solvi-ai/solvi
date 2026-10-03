@@ -18,7 +18,7 @@ from collections import deque
 
 from . import _deprecate
 from .core import Quote
-from .runtime import Flow, Step, scalar_row        # defined there: the runtime runs a flow; re-exported
+from .runtime import Flow, Step, scalar_row, then_inputs   # defined there: the runtime runs a flow; re-exported
 
 
 class PlanError(Exception):
@@ -39,11 +39,13 @@ def computable(catalog, init_keys):
 
 
 def given_facts(catalog, questions=()):
-    """The facts the catalog reads but no part produces — what init_state has to provide: arguments of parts and rules,
-    and the questions' `uses` hints. (A rule that reads a question's name reads a given fact: answers are not facts.)"""
+    """The facts the catalog reads but no part produces — what init_state has to provide: arguments of parts, rules and
+    hard checks' `then` functions, and the questions' `uses` hints. (A rule that reads a question's name reads a given fact: answers are not facts.)"""
     read = set()
     for p in list(catalog.parts.values()) + list(catalog.rules.values()):
         read.update(p.inputs)
+        for qn in (p.then or {}) if p.kind == "check" else ():
+            read.update(then_inputs(p, qn))          # a `then` function's arguments are facts too
     for q in questions:
         read.update(q.uses or ())
     return read - set(catalog.parts)
@@ -97,20 +99,41 @@ def plan(catalog, questions, init_keys, heads=None):
         if rule is not None:
             per_q.setdefault(q.name, set())
     # checks on computed facts — decided per question, so a question's flow does not depend on which other questions are asked
-    for p in catalog.parts.values():
-        if p.kind != "check" or p.name not in reach:
-            continue
-        for q, fs in per_q.items():
-            if p.name in fs:
+    def on_computed(qs):
+        for p in catalog.parts.values():
+            if p.kind != "check" or p.name not in reach:
                 continue
-            have = fs | init_keys
-            touched = [x for x in p.inputs if x in fs and x not in init_keys]
-            if touched and all(x in have for x in p.inputs):
-                st = chosen.setdefault(p.name, Step(p))
-                why = "check on computed: " + ", ".join(touched)
-                if why not in st.reasons:
-                    st.reasons.append(why)
-                fs.add(p.name)
+            for q, fs in per_q.items():
+                if p.name in fs or q not in qs:
+                    continue
+                have = fs | init_keys
+                touched = [x for x in p.inputs if x in fs and x not in init_keys]
+                if touched and all(x in have for x in p.inputs):
+                    st = chosen.setdefault(p.name, Step(p))
+                    why = "check on computed: " + ", ".join(touched)
+                    if why not in st.reasons:
+                        st.reasons.append(why)
+                    fs.add(p.name)
+    on_computed(per_q.keys())
+    # hard checks wired by `then` (1.0): a hard check whose `then` names a question is in that question's flow, and so are
+    # the inputs of a `then` function — added to that question alone (the other questions' flows stay as they were); a
+    # question that gained steps gets its checks on computed facts again
+    wired = set()
+    for q in questions:
+        for p in catalog.parts.values():
+            if p.kind != "check" or not p.hard or q.name not in (p.then or {}):
+                continue
+            if p.name not in per_q.get(q.name, ()):
+                need(p.name, f"hard check for {q.name} (then)", q.name)
+                wired.add(q.name)
+            fn = p.then[q.name]
+            if callable(fn):
+                for x in then_inputs(p, q.name):
+                    if x not in per_q.get(q.name, ()) and x not in init_keys:
+                        need(x, f"then of {p.name} for {q.name}", q.name)
+                        wired.add(q.name)
+    if wired:
+        on_computed(wired)
     # execution order is topological
     order, seen = [], set()
 

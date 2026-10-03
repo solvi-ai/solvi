@@ -7,10 +7,12 @@
     solvi check myapp.decisions:system [--strict] [--json]     # exit 0: no errors; 1: errors; 2: usage errors
 
 Errors (a decision is, or can be, wrong or impossible):
-  then_not_in_flow      a hard check sets `then=` for a question whose flow never runs it (the question's rule does not
-                        read it, through any fact, and the question does not list it in `requires`): when the check
-                        fails, the question is answered as if it had passed
+  then_not_in_flow      a hard check sets `then=` for a question whose flow does not run it. Since 1.0 the deterministic
+                        strategist (and CostStrategist) puts such a check into the question's flow by itself, and
+                        System() refuses a strategist of your own that leaves it out — so this fires only for a system
+                        built around that (when the check failed, the question would be answered as if it had passed)
   then_unknown / then_bad_answer   `then=` names no question / an answer that is not one of the question's options
+                        (for a `then` function: a literal it plainly returns)
   cycle                 facts that need each other: none of them can be computed unless one is given (facts derived
                         from each other, each with a producer outside the loop, are a cycle for the deterministic
                         strategist only; with System(strategist=...) they are the note `mutual_producers`)
@@ -315,15 +317,24 @@ def _hard_checks(cat, questions, flows, rep):
                 if questions:
                     rep.add("error", "then_unknown", name, f"`then=` names {qn!r}, which is not a question")
                 continue
-            try:
-                q.answer.normalize(ans)
-            except (ValueError, TypeError) as e:
-                rep.add("error", "then_bad_answer", name, f"`then=` answers {qn!r} with {ans!r}: {e}")
+            if callable(ans):                         # a `then` function: the literals it plainly returns must be answers
+                for line, vals in _returns(ans) or ():
+                    for v in vals:
+                        try:
+                            q.answer.normalize(v)
+                        except (ValueError, TypeError) as e:
+                            rep.add("error", "then_bad_answer", _where(ans, line),
+                                    f"the `then` function of {name} returns {v!r} for {qn!r}: {e}")
+            else:
+                try:
+                    q.answer.normalize(ans)
+                except (ValueError, TypeError) as e:
+                    rep.add("error", "then_bad_answer", name, f"`then=` answers {qn!r} with {ans!r}: {e}")
             if name not in flows.get(qn, ()):
                 rep.add("error", "then_not_in_flow", name,
-                        f"`then=` sets {qn!r}, but {qn!r}'s flow never runs this check (its rule does not read it through "
-                        f"any fact and it is not in the question's `requires`): when it fails, {qn!r} is answered as if "
-                        f"it had passed — add requires=[{name!r}] to the question")
+                        f"`then=` sets {qn!r}, but the system's strategist leaves this check out of {qn!r}'s flow: when "
+                        f"it fails, {qn!r} would be answered as if it had passed (System() refuses such a system) — add "
+                        f"requires=[{name!r}] to the question or plan it in the strategist")
 
 
 # --- what a function plainly returns
