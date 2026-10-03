@@ -1685,10 +1685,16 @@ def _group_module(source, parts, pre, by, given, questions):
             for x in a.posonlyargs + a.args + a.kwonlyargs:
                 x.annotation = None
             node.returns = None
-            if by not in [x.arg for x in a.posonlyargs + a.args + a.kwonlyargs]:
-                a.args.insert(0, ast.arg(arg=by))
             neutral = "True" if out_parts[node.name]["kind"] == "check" else "None"
-            node.body.insert(0, ast.parse(f"if {by} not in {pre}SCOPE:\n    return {neutral}").body[0])
+            if by not in [x.arg for x in a.posonlyargs + a.args + a.kwonlyargs]:
+                # the harness gives `by`; a call from the group's own code (a part used as a helper) does not, and
+                # gets the default: such a call is never gated
+                a.args.append(ast.arg(arg=by))
+                a.defaults.append(ast.Name(id=f"{pre}DIRECT", ctx=ast.Load()))
+                gate = f"if {by} is not {pre}DIRECT and {by} not in {pre}SCOPE:\n    return {neutral}"
+            else:
+                gate = f"if {by} not in {pre}SCOPE:\n    return {neutral}"
+            node.body.insert(0, ast.parse(gate).body[0])
     ast.fix_missing_locations(tree)
     return ast.unparse(tree), out_parts, rules
 
@@ -1696,11 +1702,13 @@ def _group_module(source, parts, pre, by, given, questions):
 def assemble(by: str, members: list, questions, given=None, refused=()) -> tuple[str, dict]:
     """The groups' modules as one module → (source, parts). `members`: [(group name, values, source, parts)] of
     accepted groups; `refused`: [(group name, values, reason)] — inputs with those values abstain with the reason. Each
-    question's rule routes by `by` to the rule of the group that decides the value; a value no group decides abstains."""
+    question's rule routes by `by` to the rule of the group that decides the value; a value no group decides abstains.
+    A part that did not read `by` gets it as a last argument with a default, so the group's own calls of it as a
+    function (a rule calling a check) still work and are not gated."""
     chunks, parts, rules = [], {}, {}
     for name, values, source, gparts in members:
         pre = f"{name}__"
-        chunks.append(f"{pre}SCOPE = frozenset({list(values)!r})")
+        chunks.append(f"{pre}SCOPE = frozenset({list(values)!r})\n{pre}DIRECT = object()")
         text, gp, gr = _group_module(source, gparts, pre, by, given, questions)
         chunks.append(text)
         parts.update(gp)

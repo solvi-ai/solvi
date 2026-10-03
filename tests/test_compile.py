@@ -429,8 +429,8 @@ import re
 def open_address(closed):
     return not closed
 
-def allow(authed, open_address):
-    return bool(authed) and open_address
+def allow(authed, closed):
+    return bool(authed) and open_address(closed)          # a part called as a function: never gated
 
 PARTS = {"open_address": {"kind": "check", "hard": True, "then": {"allow": "no"}, "clauses": ["c3"]},
          "allow": {"kind": "rule", "question": "allow", "clauses": ["c1"]}}
