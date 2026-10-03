@@ -32,7 +32,7 @@ from __future__ import annotations
 import datetime
 from dataclasses import dataclass, field
 
-from .storage import VERIFIED, _cj, _when, akey
+from .storage import VERIFIED, _cj, _when, akey, view
 
 KIND = {"computed": "rule", "decided": "model", "learned": "learned head", "proposed": "model proposal",
         "quoted": "quote", "given": "given"}
@@ -150,7 +150,7 @@ def system_report(store, since=None, until=None, *, question=None, price=None, d
     by_init, ids = {}, {}
     for s in asks:
         ids[s.id] = s
-        init = ((s.data.get("response") or {}).get("trace") or {}).get("init")
+        init = ((view(s.data) or {}).get("trace") or {}).get("init")
         by_init.setdefault(_cj(untag_floats(init)), []).append(s)
     for s in disp:
         ids[s.id] = s
@@ -219,7 +219,7 @@ def _system1(asks, labels, question, price, drift_window, monitor):
     obs = {}
     for s in asks:
         d = s.data
-        resp = d.get("response") or {}
+        resp = view(d) or {}                          # a compact record: its kept steps hold every model call
         recs = (resp.get("trace") or {}).get("records") or []
         c = _cost(_usages(recs), float(resp.get("ms") or 0.0), price)
         c["decisions"] = 1

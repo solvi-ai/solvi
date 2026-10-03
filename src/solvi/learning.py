@@ -630,7 +630,7 @@ class Learning:
         the labels' (content_key(question, input)), so an input trained on for a question is never compared on it."""
         rows = []
         for s in self.storage.iter():
-            init = ((s.data.get("response") or {}).get("trace") or {}).get("init") or {}
+            init = s.input or {}
             held = {q for q in self.parts if split_of(content_key(q, init), self.holdout, self.calibration) == "holdout"}
             if held:
                 rows.append((s, held))

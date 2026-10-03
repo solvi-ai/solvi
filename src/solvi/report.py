@@ -250,7 +250,8 @@ def period(store, since=None, until=None, question=None, examples=3, system=None
             if key in last_models and last_models[key] != m.get("fp"):
                 changes.append({"what": f"model {key}", "from": last_models[key], "to": m.get("fp"), **ref})
             last_models[key] = m.get("fp")
-        results = (d.get("response") or {}).get("results") or {}
+        from .storage import view
+        results = (view(d) or {}).get("results") or {}
         audits = None
         for q, (ans, conf, status) in (d.get("answers") or {}).items():
             if question is not None and q != question:
@@ -308,11 +309,19 @@ def _add(bucket, key, ex, n):
 
 
 def _audits(s, cat):
-    try:
-        res = s.response(cat)
+    try:                                              # a compact record is re-derived when the report has the System
+        res = s.response(cat) if not s.compact else _rederived(s, cat)
         return build_audit(res).answers
     except Exception:  # noqa: BLE001
         return None
+
+
+def _rederived(s, cat):
+    from .storage import rederive
+    res, _ = rederive(s.data, cat)
+    if res is None:
+        raise ValueError("not re-derivable")
+    return res
 
 
 def build_audit(res):

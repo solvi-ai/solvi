@@ -199,7 +199,7 @@ def srepr(v):
 MISSING = object()
 
 MISMATCH_KINDS = ("integrity", "recompute", "model_changed", "missing_part", "missing_input", "flow", "answer",
-                  "not_restored", "error")
+                  "not_restored", "not_kept", "error")
 
 
 class Mismatch(tuple):
@@ -217,6 +217,8 @@ class Mismatch(tuple):
         not_restored   a hash or a step does not verify because a value it rests on did not come back from storage as it
                        was: its type is neither one the dump restores (date, Decimal, set, ...) nor declared (an untyped
                        enum or object; an untyped date in a record stored by solvi ≤ 0.7.1) — no verdict on the data
+        not_kept       a compact record (TraceStorage(record="compact")) does not keep what checking this step needs: a
+                       model step that is not re-run on replay — no verdict on the data past the record's chain
         error          the replay itself failed (the record could not be loaded, or replay raised): no verdict on the data
 
     It compares, unpacks and serializes as the plain triple."""
@@ -249,6 +251,8 @@ def mismatch_summary(mismatches, catalog=None):
         s = "data damaged: a stored answer is not the one its trace gives"
     elif set(kinds) <= {"error"}:
         s = "replay failed (no verdict on the data)"
+    elif "not_kept" in kinds:
+        s = "not verified: a compact record does not keep this step's surroundings (no verdict on the data)"
     elif "not_restored" in kinds:
         s = "not verified: values stored without their type did not come back as they were (no verdict on the data)"
     elif "missing_part" in kinds:
