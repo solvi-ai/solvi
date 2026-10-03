@@ -16,7 +16,7 @@ and follow from it.
 | **The goal and the mission, stated** | [docs/mission.md](docs/mission.md). solvi builds decision systems from fast solvers (rules, code, small models) and LLMs: the fast ones answer where they are sure, LLMs and search deliberate where they are not, a person decides what neither can; every decision is recorded, explainable and replayable. **Accountability and safety:** see how each model solves each task — what it read, who answered, what was promised, whether the promise held — and wrap any model in checks that keep it from doing harm. **Accumulated knowledge:** the system keeps verified knowledge about its environment — rules, action conditions, a world map, goals (an agenda with code done checks and gates); a written specification is compiled into rules, otherwise rules are learned from experience, each with its source, and every item can be checked and retracted. Honest limits: on a stream of one kind of decision (classification) solvi keeps its error promise but does not promise growth over time, and the promise does not hold between an abrupt shift and its detection. **Any model**, including a small local one so much runs without the cloud (no quality promise for it). **Where to use:** single decisions (tickets, documents and contracts, policy decisions) and sequential decisions in an environment (agents with tools, planning, games). **What it is not:** a text generator, a hosted service or a replacement for LLMs; where a guarantee cannot be given it hands over to a person. **Honesty:** only what measurably helps enters the library, negative results are published next to positive ones, and a promise is a number you can check. | done |
 | **Everything that exists, landed** | Each module and feature in one of three places: works, with the measured value and the script behind the number; experimental, with what is missing; or removed. The README, the guide and the API reference follow that split. | planned |
 
-### Then: two levels (0.10)
+### Then, in 1.0: two levels and an experimental module
 
 Built on the account above: what works becomes the stable low level, and the high level is put together from it.
 
@@ -24,7 +24,8 @@ Built on the account above: what works becomes the stable low level, and the hig
 |---|---|---|
 | Low level: building blocks with stable extension points | Runtime, parts, questions, storage and traces, guards, deciders, slow paths and dispatch as documented base classes and protocols you can subclass or replace, with a promise of which ones stay stable; your own pieces keep tracing, replay and guarantees | planned |
 | High level: ready-made systems | A System 1 + System 2 system in one, where you choose the models and providers and state what you need (questions, examples, risk, budget); built only from the low level, so any piece can be swapped out | planned |
-| Clear split in docs and imports | A short path for the high level; a reference for the low level; experimental pieces marked as such | planned |
+| Clear split in docs and imports | A short path for the high level; a reference for the low level | planned |
+| `solvi.experimental` | Pieces that work but are not yet measured well enough for the stable promise live in one submodule, with what they still need to graduate | planned |
 
 ## Recipes: a separate repository
 
