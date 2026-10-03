@@ -77,8 +77,7 @@ pip install "solvi[lora]"      # + torch, transformers, peft: part.adapt_lora, a
 Two words mark what is not settled yet: **preview** — it works and is tested, and its API may still change;
 **experimental** — no published model or measurement backs it yet, and it may change or go.
 
-`solvi.agents` (guarding an agent's tool calls) needs only the core; its adapters use the PydanticAI, LangGraph or OpenAI
-Agents SDK you already have ("solvi[pydantic-ai]", "solvi[langgraph]", "solvi[openai-agents]" install them).
+`solvi.agents` (guarding an agent's tool calls) needs only the core.
 
 Requires Python 3.10+.
 
@@ -275,8 +274,8 @@ Every answer is a value and a confidence, and the types also declare answer prim
   conversation are quoted there (and not only from a tool output that says "ignore previous instructions"), your policies
   (limits, roles, allow-lists) are ordinary hard checks, and an optional decider asks "did the user ask for this?" under
   `act_guard` and `perturb` — then allows it (solvi runs the function), denies it with the reasons, or escalates it to a
-  person. Every decision is a stored, replayable trace. Adapters for PydanticAI, LangGraph and the OpenAI Agents SDK, and
-  `solvi serve --guard catalog.py:guard --upstream CMD` in front of an MCP server
+  person. Every decision is a stored, replayable trace. Any framework's tool calls go through `guard.check` / `guard.call`, and
+  `solvi serve --guard catalog.py:guard --upstream CMD` puts the guard in front of an MCP server
   ([guide](docs/guide.md#guarding-an-agents-tool-calls), [examples/19_agent_guard.py](examples/19_agent_guard.py)).
 - **Behind a coding agent's hooks (preview).** `solvi hook install` puts solvi in front of Claude Code's edits and prompts:
   every Edit / Write is checked against a rules file (forbidden patterns, required functions, Python calls read from the

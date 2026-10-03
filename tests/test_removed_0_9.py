@@ -230,7 +230,7 @@ def test_extractors():
         ex.predict_doc("a text")
 
 
-def test_the_adapters_take_auto_declare():
+def test_removed_kwargs_names_the_new_keyword():
     from solvi import _deprecate
 
     @_deprecate.removed_kwargs(declare="auto_declare")
@@ -239,11 +239,3 @@ def test_the_adapters_take_auto_declare():
     assert adapter(None, auto_declare=True) is True
     with pytest.raises(TypeError, match=rf"adapter\(declare=\) {GONE}auto_declare="):
         adapter(None, declare=True)
-    for mod, fn in (("solvi.agents.openai_agents", "guard_tool"), ("solvi.agents.langgraph", "guard_wrappers"),
-                    ("solvi.agents.langgraph", "guarded_tool_node"), ("solvi.agents.pydantic_ai", "GuardedToolset")):
-        try:
-            f = getattr(importlib.import_module(mod), fn)
-        except ImportError:                            # the framework is not installed
-            continue
-        with pytest.raises(TypeError, match=rf"{fn}\(declare=\) {GONE}auto_declare="):
-            f(None, None, declare=True)
