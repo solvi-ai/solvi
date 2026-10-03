@@ -3800,7 +3800,7 @@ run.response["ok"].answer, run.kept, run.replay(system)["ok"]
 ```
 
 `search(system, state, question, space, *, into=, objective=, maximize=True, prune=(), keep=1, budget=10_000,
-accept="checks", store=True, hold=True)`:
+accept="checks", store=True, hold=True, lean=None)`:
 
 - **The space**: a list or any iterable of candidates (given as the fact `into`); a dict `{fact: [values]}` (every
   combination, the first fact outermost, given as those facts); a `Tree(root, children, complete=, bound=)` walked depth
@@ -3821,19 +3821,29 @@ accept="checks", store=True, hold=True)`:
   take over a space too big to search).
 - **Facts computed once**: parts that do not read the candidate (the problem read into typed facts — by rules or by a
   model) run once and are held for every candidate (`run.held`); a model reading the problem is called once, not per
-  candidate. The searched asks are not stored or counted; the winner is asked again in full with the System
-  (`run.response`, stored when the System stores), and if that full ask does not accept it the search escalates instead.
-  `run.to_dict()` / `SearchRun.from_dict(d, catalog=cat)`; `run.replay(system)` replays the winner's trace and checks it
+  candidate.
+- **Candidates decided lean, the winner asked in full**: a candidate is never stored, so it is decided without an ask's
+  record keeping — the same flow, values, answers and failed checks, but no hashes, fingerprint, audit events, stats or
+  storage, and nothing observed for the measured costs or the learned order. The winner is asked again in full with
+  the System (`run.response`, stored when the System stores): its trace is byte for byte the trace of `system.ask` on
+  the same state, and if that full ask does not accept it the search escalates instead. `lean=None` (default) decides
+  lean unless `accept` is a function of the Response — it then sees ordinary responses (`lean=True` gives it lean ones:
+  no hashes, `res.safeguards` None); `lean=False` asks every candidate in full.
+- **The record**: `run.to_dict()` / `SearchRun.from_dict(d, catalog=cat)`; `run.replay(system)` replays the winner's trace and checks it
   is accepted and its objective recomputes (pass a function objective again).
 
 Where the candidates can be enumerated, prefer a search to a model's proposals: the checks decide every candidate, and
 every winner replays. What stays problem-specific is the space (a few lines per
 kind of problem) and, for an order, a walk of partial orders so the checks can judge a prefix. The price is speed:
-every candidate is a full ask, so a search runs far more asks than a hand-written search runs steps.
+every candidate runs the System's flow, so a search runs far more steps than a hand-written search. On NATURAL PLAN's
+eval set (`benchmarks/tasks/naturalplan/solution.py`, no model) the 100 meeting problems took 227,352 asks in 42 s and
+the 100 trips 73,543 asks in 14 s — 78 s and 28 s when every candidate was a full ask, with the same plans (95 / 100 /
+98 right); one CPU core, Intel i7-12700H shared with other jobs: about 0.2 ms per candidate.
 
 **Not done here:** no proposals by a model, no bisection over numbers (`res.counterfactual` does that), no parallel
-asks, no proof of the prune and bound promises. Each candidate is a full ask with the trace hashed (see the README's
-Speed table, `benchmarks/ask_speed.py`), so a space of millions is for code, not for this search.
+asks, no proof of the prune and bound promises. A candidate still runs every part it needs, as an ask does (lean
+saves the hashing and the bookkeeping, about half of a full ask's time there), so a space of millions is for code,
+not for this search.
 
 ## A specification compiled into the catalog: solvi.compile
 
