@@ -2,6 +2,14 @@
 
 ## 0.9.0 — unreleased
 
+- `solvi.dispatch`: `Dispatcher.calibrate(examples, max_risk=..., ...)` chooses who answers on each slice that System 1
+  hands over (System 1 itself, the slow path, agreement of both, or a person) and promises the error on that slice.
+  It measured a gain on product matching; on contract clauses it honestly sends everything to a person; after a
+  shift in the data the promise can be broken (5.6% against 5% on banking intents) — calibrate again after a shift.
+- `search(..., lean=None)`: candidates are asked without hashing or records (the winner is still asked in full, stored
+  and replayable); the same answers byte for byte, about half the time (42 s against 78 s on 227,352 candidates).
+  With `hold=False` candidates no longer feed the System's stats, costs or learned order.
+
 ## 0.8.0 — 2026-10-03 — one name per concept, any model first
 
 0.8 gives every concept one name, makes the surface smaller and the decider protocol one, puts any model first (an LLM
