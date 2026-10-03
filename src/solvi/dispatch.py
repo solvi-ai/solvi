@@ -320,6 +320,7 @@ class SlowPath:
     def _refine(self, state, q, price, budget, expected_round, t0, store):
         from .refine import refine
         inner = self.propose
+        assert inner is not None
 
         def propose(st, rounds):
             if budget is not None and rounds:
