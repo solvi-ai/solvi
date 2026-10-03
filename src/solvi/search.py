@@ -48,6 +48,13 @@ asked again in full with the System itself (stored when the System has storage):
 whose trace replays. If that full ask does not accept it — a held fact that should have been recomputed — the search
 escalates and says so, instead of returning it.
 
+Candidates decided lean. A candidate is never stored, so it is decided without an ask's record keeping (`lean=None`, the
+default; System._decide): the same flow, values, answers and failed checks, but no hashes, fingerprint, audit events,
+stats or storage — about half the time of a full ask on the NATURAL PLAN stand. The winner's full ask is an ordinary
+ask: its trace is byte for byte the trace `system.ask` gives for the same state. An `accept` function of the Response
+sees full responses unless lean=True is passed (a lean response has no hashes and no `safeguards`); lean=False asks
+every candidate in full.
+
 Not done here: no proposals by a model (solvi.refine re-asks one; when `run.best` is None because the space was too big
 for the budget, a refinement can take over), no search over numbers by bisection (`res.counterfactual` does that), no
 parallel asks, and no proof of the `prune` / `bound` promises."""
@@ -240,12 +247,31 @@ def _held_system(system, state, vals, keys):
     return s, held
 
 
+def _verdict(res, question, accept, objective, cand):
+    """What a search reads from a candidate's response → (accepted: its objective value, or 0 without an objective;
+    else None, why it was rejected: the deciding check, "abstained: <cause>" or "answer <x>")."""
+    from .refine import _governing, accepted, causes, failed_checks
+    r = res[question]
+    if r.status != "abstain" and accepted(res, question, accept):
+        if objective is None:
+            return 0, None
+        if callable(objective):
+            return objective(cand), None
+        if objective not in res.values:
+            raise ValueError(f"the objective {objective!r} is not computed for the question {question!r}: list it in "
+                             "the question's checkpoints (or give a function of the candidate)")
+        return res.values[objective], None
+    failed = _governing(res, question, failed_checks(res, question))
+    return None, (failed[0].check if failed else
+                  "abstained: " + (causes(res, question) or [r.why])[0][:80] if r.status == "abstain" else f"answer {r.answer!r}")
+
+
 def _better(a, b, maximize):
     return a > b if maximize else a < b
 
 
 def search(system, state, question, space, *, into=None, objective=None, maximize=True, prune=(), keep=1,
-           budget=10_000, accept="checks", store=True, hold=True):
+           budget=10_000, accept="checks", store=True, hold=True, lean=None):
     """Candidates from `space` through `system`'s checks for `question` → a SearchRun (see the module docs).
 
     space: a list / iterable of candidates, a dict {fact: [values]}, a Tree, or a function of the facts computed once
@@ -254,8 +280,11 @@ def search(system, state, question, space, *, into=None, objective=None, maximiz
     maximize: largest (default) or smallest. prune: hard checks that stay false below a Tree node (a Tree's `bound`
     cuts by the objective). keep: how many accepted candidates to keep. budget: asks at most.
     accept: as in solvi.refine (default "checks"). store: store the winner's full ask when the System has storage.
-    hold: compute the facts that do not read the candidate once (default) — False re-runs every part per candidate."""
-    from .refine import _governing, accepted, causes, failed_checks
+    hold: compute the facts that do not read the candidate once (default) — False re-runs every part per candidate.
+    lean: decide each candidate without the record keeping of an ask (no hashes, fingerprint, audit, stats or storage:
+    System._decide) — the same answers; the winner is asked in full either way. None (default): lean unless `accept` is
+    a function of the Response (it then sees an ordinary response); False: every candidate is a full ask."""
+    from .refine import accepted, failed_checks
     if question not in system.questions:
         raise ValueError(f"{question!r} is not a question of the system")
     if int(keep) < 1 or int(budget) < 1:
@@ -292,6 +321,8 @@ def search(system, state, question, space, *, into=None, objective=None, maximiz
         raise ValueError("a Tree's bound needs an objective")
     if prune and kind != "tree":
         raise ValueError("prune= cuts partial nodes: it needs a Tree")
+    if lean is None:
+        lean = not callable(accept)
     asker = system
     if hold:
         asker, held = _held_system(system, state, vals, keys)
@@ -308,25 +339,17 @@ def search(system, state, question, space, *, into=None, objective=None, maximiz
         run.asked += 1
         st = dict(state)
         st.update(cand if kind == "domains" else {into: cand})
-        return asker.ask(st, questions=[question], store=False, early_exit=False if partial or prune else None)
+        early = False if partial or prune else None
+        if lean:
+            return asker._decide(st, [question], early_exit=early)
+        return asker.ask(st, questions=[question], store=False, early_exit=early)
 
     def judge(cand, res):
         """Accepted? → its objective value (or 0 without one), else None; counts the rejections."""
-        r = res[question]
-        if r.status != "abstain" and accepted(res, question, accept):
-            if objective is None:
-                return 0
-            if callable(objective):
-                return objective(cand)
-            if objective not in res.values:
-                raise ValueError(f"the objective {objective!r} is not computed for the question {question!r}: list it in "
-                                 "the question's checkpoints (or give a function of the candidate)")
-            return res.values[objective]
-        failed = _governing(res, question, failed_checks(res, question))
-        why = (failed[0].check if failed else
-               "abstained: " + (causes(res, question) or [r.why])[0][:80] if r.status == "abstain" else f"answer {r.answer!r}")
-        rejected[why] = rejected.get(why, 0) + 1
-        return None
+        v, why = _verdict(res, question, accept, objective, cand)
+        if v is None:
+            rejected[why] = rejected.get(why, 0) + 1
+        return v
 
     def take(cand, v):
         run.accepted += 1
