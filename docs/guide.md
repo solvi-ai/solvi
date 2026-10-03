@@ -1362,7 +1362,8 @@ res.audit("route").memory                            # the proposal, what came o
 **A case** is the decider's probabilities over the options for the input — from the raw logits at the checkpoint's
 temperature, before `adapt` / `fit` / `teach`, so a later fit does not move the stored cases — optionally the input's
 words (`text=True`: hashed words, no embedding model), the label and its provenance: `source`, `by`, `time`,
-`stored_id`. Only `source="human"`, `"outcome"` or `"rule"` are accepted; anything else raises `UntrustedLabel`, so the
+`stored_id`. Only `source="human"`, `"outcome"` or `"rule"` are accepted (not `"verified"`: see "System 2's answers as
+labels"); anything else raises `UntrustedLabel`, so the
 system's own answers cannot become cases. `learn_from(store)` reads the store's corrections of the question (the
 system's stored decisions are never read) and skips, with the reason, those from another source or with an answer the
 decision cannot give.
@@ -2010,6 +2011,61 @@ Each correction keeps where it came from: `system.teach("risk", state, "high", l
 of=res.stored_id)` — `source` is `"human"` (the default: a person corrected or confirmed the answer), `"outcome"` (what
 really happened) or `"rule"` (your code rejected a model's proposal and decided instead); anything else raises
 `UntrustedLabel`. `of` is the stored id of the decision it corrects; `corrections()` returns all three.
+
+### System 2's answers as labels: `label_source="verified"`
+
+When a slower, stronger solver (an LLM, a person-in-the-loop service — "System 2") handles what your fast system
+escalates, some of its answers are worth learning from. Its own unchecked answers are not labels — learning from
+everything it says failed before — but an answer that **passed the checks and a guarantee** can be one, if you say so
+and only where it was measured to help:
+
+```python
+import random
+from solvi import Answer, Catalog, JSONLStorage, Question, System
+from solvi.storage import TRUSTED_SOURCES, VERIFIED
+
+cat = Catalog()
+
+@cat.fn
+def score(x: float) -> float:
+    return x
+
+rng = random.Random(0)
+def draw(n):                                  # (input, correct answer)
+    return [({"x": (x := rng.random())}, x + rng.gauss(0, 0.15) > 0.5) for _ in range(n)]
+
+store = JSONLStorage("decisions.jsonl")
+slow = System(cat, [Question("label", "label?", Answer.yes_no())], storage=store)   # System 2, sharing the store
+slow.fit("label", draw(300), features=["score"])
+slow.guarantee("label", draw(300), max_risk=0.05)
+
+res = slow.ask({"x": 0.97})                   # answered alone, under its guarantee → can be a verified label
+slow.teach("label", {"x": 0.97}, res["label"].answer, label_source="verified", by="system-2", of=res.stored_id)
+
+report = slow.guarantee("label", draw(300), max_risk=0.05,              # recalibrate on human + verified labels
+                        corrections=store, sources=TRUSTED_SOURCES + (VERIFIED,))
+report["labels"]                              # {"examples": 300, "corrections": {"verified": 1}, "skipped": 0, "ids": [...]}
+```
+
+What "verified" means is checked when the label is stored: `of=` must name a decision in the same store that answered
+the question **alone** (status `"ok"`: it passed the hard checks and was not escalated) **under a guarantee**
+(`System.guarantee` or a part's `act_guard`), with that very answer — otherwise `UntrustedLabel` says which condition
+failed, and nothing is stored. Human labels, outcomes and rule rejections stay the stronger sources; a verified label
+never replaces them.
+
+Where it goes, on measurement (three stand tasks replayed as a stream — product matching, contract clauses, bank
+requests with new intents — System 2 = an LLM's recorded answers; the details in the best practices):
+
+| channel | takes `"verified"`? | why |
+|---|---|---|
+| a guarantee's calibration: `System.guarantee(..., corrections=store, sources=...)` | yes, when `sources` names it | fed every verified answer, System 1 answered more within its promise on two tasks of three |
+| a head (`fit` / `teach`) | no — `teach(label_source="verified")` only stores the label | gained on one task of three |
+| a memory of corrections | no — `UntrustedLabel` | broke System 1's promise on the contract task |
+| the learning loop (`System.learning`) | no — listed in `labels()["rejected"]` | its ladder is a head and a memory |
+
+Feed the calibration **every** answer System 2 vouched for, not only the cases where it disagreed with System 1: a
+threshold calibrated on disagreements alone sees only System 1's mistakes, and the verified disagreements were too few
+to move anything. The report's `labels` lists the stored ids it read; calibrating again without them undoes it.
 
 ### Learning from corrections with gates and rollback (experimental)
 
