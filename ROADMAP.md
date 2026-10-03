@@ -73,7 +73,7 @@ Built on the account above: what works becomes the stable low level, and the hig
 | Item | What it gives | Status |
 |---|---|---|
 | **Learned strategist in realms** | A tiny learned policy behind hard laws; leads 23 of 32 new maps over 5,000 turns with zero law violations. | done (0.5.0) |
-| **System 1 + System 2 on a game** | The world map of Pokémon Red (recorded, no ROM): rules over compiled routes, a search over the player's world map when they are unsure or surprised, consolidation after each goal; 147 → 2 slow decisions from the first run to the second. Example 23 and the Space in `spaces/pokemon/` (not published yet). Next: walking and battles inside a place, a second world. | done (0.9) |
+| **System 1 + System 2 on a game** | The world map of Pokémon Red (recorded, no ROM): rules over compiled routes, a search over the player's world map when they are unsure or surprised, consolidation after each goal; 147 → 2 slow decisions from the first run to the second. Example 23; a video of the run goes to the recipes repository (the Space in `spaces/pokemon/` is not published). Next: walking and battles inside a place, a second world. | done (0.9) |
 | **Lookahead + policy mode** | Stronger (leads 29/32) but up to 0.9 s per decision; needs a faster search to fit the browser. | research |
 
 ## Docs
