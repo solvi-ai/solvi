@@ -1,0 +1,17 @@
+{
+ "calibrated_part": "5c68715b828d5ab5",
+ "part": "4298f8a17a6cdd22",
+ "system": {
+  "catalog": "26bcac4846cf3aec",
+  "models": {
+   "answer:category": "5c68715b828d5ab5"
+  },
+  "parts": {
+   "answer:approve": "513faa98fb4d0304",
+   "answer:category": "9ce06df1574e122e",
+   "days_old": "ec3e1ededcc184e8",
+   "within_limit": "7aa6835daf670de5"
+  },
+  "questions": "db5a93624849bc2b"
+ }
+}
