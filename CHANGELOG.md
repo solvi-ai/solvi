@@ -2,6 +2,16 @@
 
 ## 0.9.0 — unreleased
 
+0.9 is about two ways of deciding in one system, in Kahneman's sense: **System 1**, fast and cheap — rules, checks, a
+fitted head, a model under a guarantee — answers when it is sure; **System 2**, slow and deliberate — an LLM, a re-ask
+loop, a search — is woken when System 1 is unsure or surprised, and a person gets what neither can answer. A
+dispatcher puts both in one recorded, replayable decision within a budget and can be calibrated on the inputs System 1
+hands over; a system report tells the owner who answered, at what cost, and whether the promise held; System 2 can also
+write what System 1 then runs fast — a policy text compiled into catalog parts, with a person settling what the drafts
+dispute, and into an agent guard. Search over candidates runs about twice as fast, the nine-task benchmark stand reruns
+in CI, and a showcase on the world map of Pokémon Red puts the pieces together. The names 0.8 renamed and kept with a
+warning are removed. What was tried for this release and did not meet its bar is listed at the end.
+
 ### Breaking changes
 
 The old names that 0.8 kept working with a `SolviDeprecationWarning` are gone. An old keyword now raises a TypeError
@@ -65,8 +75,101 @@ Stores, calibration files and fingerprints are unchanged by these removals: the 
 question still hashes its `requires` under the key `checkpoints`, a part still stores `escalate_below`). A test loads,
 verifies and replays stores written by 0.8.0 and by 0.7.1 (`tests/test_store_0_8_0.py`, `tests/test_store_0_7_1.py`).
 
+One fingerprint changes once: the code fingerprint of a catalog (its rules, functions and checks) no longer depends on
+the Python version (3.12 and 3.13 print a function's syntax tree differently), so it differs from the one 0.8 computed
+for the same code. Decisions stored by 0.8 still load, verify and replay; anything that compares a stored catalog
+fingerprint with the current one (`store.query(catalog_fp=...)`, a version check of your own) sees the catalog as
+changed once. Model and question fingerprints, and a decision part's, are unchanged (`tests/test_store_0_8_0.py`).
+
+### New
+
+- **Who answers: `solvi.dispatch`** (experimental). `Dispatcher(system1, SlowPath(system2), ...)` asks System 1
+  first; when its own signals say its answer cannot be given alone (below its guarantee, outside the open-set gate,
+  an abstention, a broken constraint, low agreement), the slow path answers or checks — a System, a re-ask loop
+  (`propose=`, `solvi.refine`) or a search (`space=`, `solvi.search`) — and when that cannot answer either, or the
+  budget (`Budget(usd=, calls=, ms=)`, per decision and in total) is spent, a person gets the input with both
+  candidates and the reasons, never a guess. Drift and a sampled share (`supervise=`) make the slow path check System
+  1's answers instead. Every decision is one hash-chained record with its cost (dollars from the recorded tokens),
+  and `d.replay(res)` / `d.replay_all()` re-check it without calling a model. Guide: "Who answers".
+- **Calibrating who answers on the hard slice**: `Dispatcher.calibrate(examples, max_risk=...)` measures, on each
+  slice of the inputs System 1 hands over, System 1's own would-be answer, the slow path's, and the slow path's when it
+  agrees with System 1, and picks one answerer per slice with a threshold — or a person — so that all answers given
+  alone keep the promise. The inputs handed over are the hard ones, where an LLM that is rarely wrong on average can be
+  wrong often and System 1's own guess can be the better answer; calibrate measures that instead of assuming it. The
+  promise covers inputs like the examples, not a new kind of input: calibrate again after a shift. With `storage=` the
+  policy is stored, so the system report knows the promise each later decision was made under.
+- **The system report**: `System.report(since=None, until=None)` (or `solvi.sysreport.system_report(store)`, or
+  `solvi report decisions.db --overview`) tells the owner of a System what happened over a stored period, from the
+  store alone — no model is called and no catalog is needed. Per question: how many answers were given alone and by
+  what (a rule, a model, a learned head, a hard check), how many were handed over and why; with a dispatcher, who gave
+  the final answer (System 1, the slow path or a person); the time, model calls, tokens and dollars recorded; the
+  promise in force (each guarantee, a calibrated dispatch policy) next to the error measured on the decisions that have
+  a label in the store (corrections from a person, an outcome or a rule; System 2's verified answers are counted, not
+  measured); and drift — the flags the decisions recorded and a `DriftMonitor` run over the period. Plain text, or
+  `.to_dict()` for data. On the 2,000-request banking stand task with its true intents stored as outcome labels it
+  reports 713 answers given alone and 5 of them wrong (0.70% against a promised 5%) — the numbers of the task's own
+  scorer — and a DriftMonitor flag on the share answered alone at request 1,046, 46 requests after new kinds of request
+  start to arrive (guide: "The system report").
+- **A specification compiled into the catalog: `solvi.compile`** (experimental). `compile_spec(Spec(text), questions,
+  Inputs(...), writer)` lets an LLM write catalog parts — plain functions, hard checks, rules — from a policy, a
+  regulation or a constraint description, and accepts them without labelled examples: every part cites the clauses it
+  implements and every clause is cited or declared not normative; the module runs in `solvi.sandbox` (an allowlist of
+  standard-library imports, a subprocess with memory and time limits) before anything of it enters your process; two
+  drafts written independently must give the same answer on every input of a pool (declared domains, boundary values,
+  your samples); tests derived from the text by a separate call must pass; labelled examples or a reference function
+  are further checks when you have them. A draft stuck on the contract for two rounds is replaced by a fresh one
+  (`fresh_drafts=2`, `stuck_after=2`); a part other parts call as a function becomes a helper; a key read inside a dict
+  input gets an accessor part. Everything — prompts, replies, tests, each round's problems — is in `c.record`;
+  `c.save(folder)` writes it, and `Compiled.load` refuses a module that was edited. A changed text: `Spec.revise` and `recompile` (the writer
+  returns a patch that must cite the changed clauses; unchanged parts stay byte-identical); `decision_diff(old, new,
+  store=)` lists the stored decisions the change moves, with the clauses why, counting answer moves apart from
+  re-decisions with the same answer; `Versions` keeps each accepted version and replays every stored decision against
+  the version that made it. Agreement is not correctness: a misreading both drafts and the tests share is accepted
+  (guide: "A specification compiled into the catalog").
+- **A person in the loop of a compilation**: `compile_spec(..., review=ask_a_person)` (also `recompile`) asks a person,
+  within a budget (`review_budget=20`, `review_per_round=5`), about the inputs two drafts decide differently and about
+  tests every draft fails. The person says which draft is right, gives the right answer, or says the text does not
+  decide it (then the text must be amended). Each answer becomes a test both drafts must pass — never code; the other
+  conditions of acceptance are unchanged. The answers are trusted like labels: a wrong answer becomes a wrong test.
+  Every question and answer is in `c.record["person"]`; `c.reviewer()` replays them; `reference_reviewer(fn)` simulates
+  the person with a hand-written reference, for experiments. The person sees only what the drafts dispute: a
+  misreading both drafts share — on parts of a customer-service policy, a bare "yes" as the only confirmation, a refusal
+  after any earlier tool call — gives no dispute and is accepted. Look at some decisions the drafts agree on before you
+  rely on a compiled policy.
+- **Guards from a policy text**: `to_guard(c, guard)` registers each compiled hard check as a policy of a
+  `solvi.agents.Guard`, refusing with the clause it implements; `to_guard(c, guard, allow="yes")` makes a policy
+  compiled as one question ("may this call be made?") one Guard policy that refuses any other answer and names the
+  clauses that decided. With `recompile` and `decision_diff(old, new, inputs=calls)` you see which calls a changed
+  policy text moves before the new guard goes live.
+- **System 2's answers as labels, in one channel**: `label_source="verified"` stores an answer of the slow path that
+  passed its checks and its own guarantee; only `System.guarantee(..., corrections=store, sources=[..., "verified"])`
+  reads it, to recalibrate System 1's guarantee. On two stand tasks replayed as a stream this let System 1 answer more
+  within its promise (90.7% → 96.7% of product pairs, 47.2% → 52.0% of contract questions). Fed to the other channels
+  the gain was not general — a head gained on one task of three, a memory of corrections broke a promise, a route never
+  helped — so `teach(label_source="verified")` only stores the label (guide: "System 2's answers as labels",
+  docs/best_practices.md).
+- **`solvi.inputs`**: `question_inputs`, `input_model`, `input_schema` — the inputs each question reads and their
+  pydantic model and JSON schema, with the entry points of `System.entry_points` (also importable from `solvi.serve`).
+- **A showcase of System 1 and System 2 on a game**: `examples/23_pokemon_world_map.py` and a Space in
+  `spaces/pokemon/`. A player walks the world map of Pokémon Red (190 places and 447 exits recorded from a real
+  playthrough as place names and exits — no ROM, no graphics) through the game's first fifteen goals, twice. System 1
+  is two rules over routes it remembers; System 2 is a search over the world map the player writes as it goes
+  (`solvi.worldmap`), woken when System 1 has no route or was surprised; after each goal the routes are compiled from
+  what the map has confirmed. The first run makes 147 slow decisions out of 183, the second 2 out of 62 (the fewest
+  moves possible), both right after a surprise. Every decision is stored and replays without the game; the Space
+  replays the recording in the browser with the world map, who decided and why, and the system report. With your own
+  ROM file, the example first checks the recorded world against it.
+- **The nine-task benchmark stand in CI**: `benchmarks/tasks/stand.py run` reruns every task offline from the
+  published run's packed model replies (every task but Abt-Buy, whose replies are not redistributed), and `stand.py
+  check` fails when a published number it lists in the README or the docs differs from `benchmarks/tasks/results.json`;
+  the weekly workflow `stand.yml` runs both.
+
 ### Changed
 
+- `search(..., lean=None)`: candidates are decided without hashing, records or bookkeeping (the winner is still asked
+  in full, stored and replayable); the same plans, in about half the time — on NATURAL PLAN's 100 meeting problems
+  227,352 asks in 42 s against 78 s when every candidate was a full ask (guide: "Search over alternatives"). With
+  `hold=False` candidates no longer feed the System's stats, costs or learned order.
 - Import structure: the execution layer (`solvi.core`, `typed`, `provenance`, `primitives`, `runtime`, `schema`,
   `textin`) no longer imports anything above it, not even inside a function, and no library module imports the server
   or agent layer (`solvi.serve`, `solvi.cli`, `solvi.hooks`, `solvi.agents`); before, 48 of the package's modules
@@ -74,58 +177,37 @@ verifies and replays stores written by 0.8.0 and by 0.7.1 (`tests/test_store_0_8
   `Step`, `scalar_row` are defined in `solvi.runtime` (also in `solvi.strategist`); `replay_plan` and `narrowed` in
   `solvi.runtime` (also in `solvi.strategy`); `replay_guard` in `solvi.runtime` (also in `solvi.guarantee`);
   `RECORD_KEYS` in `solvi.runtime` (also in `solvi.multi`); `trace_hash` in `solvi.runtime` (also in `solvi.serve`);
-  `question_inputs`, `input_model`, `input_schema` in the new `solvi.inputs` (also in `solvi.serve`), with the entry
-  points of `System.entry_points`. `tests/test_import_layers.py` fails on an import cycle at module level and on an
-  import that breaks either layer.
-- The system report: `System.report(since=None, until=None)` (or `solvi.sysreport.system_report(store)`, or
-  `solvi report decisions.db --overview`) tells the owner of a System what happened over a stored period, from the
-  store alone — no model is called and no catalog is needed. Per question: how many answers were given alone and by
-  what (a rule, a model, a learned head, a hard check), how many were handed over and why; with a dispatcher, who gave
-  the final answer (System 1, the slow path or a person); the time, model calls, tokens and dollars recorded; the
-  promise in force (each guarantee, a calibrated dispatch policy) next to the error measured on the decisions that have
-  a label in the store (corrections from a person, an outcome or a rule; System 2's verified answers are counted, not
-  measured); and drift — the flags the decisions recorded and a `DriftMonitor` run over the period. Prints as plain
-  text, `.to_dict()` for data. On a 2,000-request banking stream with its true intents stored as outcome labels, it
-  reports 713 answers given alone and 5 of them wrong (0.70% against a promised 5%) — the same numbers as the task's
-  own scorer — and a drop of the share answered alone 46 requests after new kinds of request start to arrive.
-  `Dispatcher.calibrate` now also stores its policy in the dispatcher's store (one record of kind "policy"), so the
-  report knows the promise each later decision was made under.
-- `solvi.dispatch`: `Dispatcher.calibrate(examples, max_risk=..., ...)` chooses who answers on each slice that System 1
-  hands over (System 1 itself, the slow path, agreement of both, or a person) and promises the error on that slice.
-  It measured a gain on product matching; on contract clauses it honestly sends everything to a person; after a
-  shift in the data the promise can be broken (5.6% against 5% on banking intents) — calibrate again after a shift.
-- `search(..., lean=None)`: candidates are asked without hashing or records (the winner is still asked in full, stored
-  and replayable); the same answers byte for byte, about half the time (42 s against 78 s on 227,352 candidates).
-  With `hold=False` candidates no longer feed the System's stats, costs or learned order.
-- `solvi.compile`: a draft stuck on the contract for two rounds is replaced by a fresh one (`fresh_drafts=2`,
-  `stuck_after=2`); a part other parts call as a function becomes a helper; a key read inside a dict input gets an
-  accessor; `datetime.strptime` works in the sandbox. In the runs without a person everything accepted was right (5
-  of 5; with a person two accepted parts of a policy were wrong, see below); a calendar rule set that was refused
-  before is now accepted and matches its reference on 2,141 of 2,141 cases.
-- `solvi.compile` with a person in the loop: `compile_spec(..., review=ask_a_person)` (also `recompile`) asks a
-  person, within a budget (`review_budget=20`, `review_per_round=5`), about the inputs two drafts decide differently
-  and about tests every draft fails. The person says which draft is right, gives the right answer, or says the text
-  does not decide it. Each answer becomes a test both drafts must pass — never code; the other conditions of
-  acceptance are unchanged. The answers are trusted like labels: a wrong answer becomes a wrong test (it can replace a
-  derived test), and both drafts can follow it. Every question and answer is in `c.record["person"]`; `c.reviewer()`
-  replays them. `reference_reviewer(fn)` simulates the person with a hand-written reference, for experiments. In one
-  run each, with the person simulated by a hand-written reference: a meeting-plan checker refused before was accepted
-  after two answers (both corrected a derived test) and matched its reference on 2,400 of 2,400 cases; two other
-  compilations stayed refused. The person only sees what the drafts dispute: on a customer-service policy split by
-  tool, two tools' rules were accepted wrong, because both drafts added conditions the policy does not state — a bare
-  "yes" as the customer's confirmation ("Yes, I confirm!" refused), no earlier tool call in the conversation — and so
-  never disagreed.
-- Compiling a large specification in groups of clauses (`compile_groups`) was tried for this release and left out:
-  on that 56-clause policy no group was accepted without a person, and with one 2 of 8 groups were accepted, both
-  wrong.
-- `to_guard(c, guard, allow="yes")`: a policy compiled as one question ("may this call be made?") becomes one Guard
-  policy that refuses any other answer and names the clauses that decided; with `decision_diff` you see which of the
-  calls you pass a changed policy text moves, before the new guard goes live.
-- A showcase of System 1 and System 2 on a game: `examples/23_pokemon_world_map.py` and a Space in `spaces/pokemon/`. A player walks the world map of Pokémon Red (190 places and 447 exits recorded from a real playthrough as place names and exits — no ROM, no graphics) through the game's first fifteen goals, twice. System 1 is two rules over routes it remembers; System 2 is a search over the world map the player writes as it goes, woken when System 1 has no route or was surprised; after each goal the routes are compiled from what the map has confirmed. The first run makes 147 slow decisions out of 183, the second 2 out of 62 (the fewest moves possible), both right after a surprise. Every decision is stored and replays without the game; the Space replays the recording in the browser with the world map, who decided and why, and the system report. With your own ROM file, the example first checks the recorded world against it.
-- A decision recorded on one Python version now replays its configuration on another: the code fingerprints of a catalog no longer change with the interpreter (Python 3.12 and 3.13 print a function's syntax tree differently). Fingerprints computed by earlier versions differ once from the new ones: a trace replay then reports the catalog as changed.
-- A searching slow path whose objective is a fact's name (`SlowPath(..., search={"objective": "score"})`) replays; its replay used to fail with a TypeError.
-- The nine-task benchmark stand reruns offline in CI from the published run's packed model replies (weekly
-  workflow `stand.yml`), and fails on any published number in the docs that moved.
+  `question_inputs`, `input_model`, `input_schema` in `solvi.inputs`. `tests/test_import_layers.py` fails on an import
+  cycle at module level and on an import that breaks either layer.
+
+### Fixed
+
+- A decision recorded on one Python version now replays its configuration on another: the code fingerprints of a
+  catalog no longer change with the interpreter (see "Breaking changes" for the one-time change).
+- A searching slow path whose objective is a fact's name (`SlowPath(..., search={"objective": "score"})`) replays; its
+  replay used to fail with a TypeError.
+- `solvi.sandbox`: `datetime.strptime` works inside the sandbox.
+
+### Tried and left out
+
+Each of these was measured against a bar set before the run, did not meet it, and is not in the library.
+
+- **Compiling a large specification in groups of clauses** (`compile_groups`): on a customer-service policy of several
+  dozen clauses no group was accepted without a person, and the few groups accepted with a person were wrong.
+- **A rule for a new topic of requests**: when requests of a new kind arrive, the slow path writes a short
+  specification from a few of them and `compile_spec` turns it into a rule. On two streams of bank and assistant
+  requests the accepted rules were right when they answered, but they answered under a tenth of the new topic's
+  requests; most specifications never reached two agreeing drafts. New kinds of input still go to a person; teaching
+  a head from the person's labels (`teach`) is the existing path, and it was not part of this test.
+- **A better slow path on the inputs System 1 hands over**: System 1's facts and doubts in the LLM's prompt, agreement
+  of three rephrased prompts, and a stronger, much dearer model. None cut the slow path's errors there on most of the
+  tasks: System 1's notes pulled the LLM towards System 1's own mistakes, agreement of rephrased prompts separated
+  right from wrong answers no better than the model's own confidence, and the stronger model helped only on product
+  matching, where the cheaper one lacked knowledge of products. Choosing per slice between System 1's guess, the slow path and a person
+  (`Dispatcher.calibrate`) remains the measured gain.
+- **A spot check of decisions the drafts agree on** (`review_agreed`): showing the person a few inputs the two drafts
+  already agree on caught the customer-service rules that both drafts misread, but not a rarer shared misreading in a
+  small shop policy. The advice stays: look at some agreed decisions yourself before relying on a compiled policy.
 
 ## 0.8.0 — 2026-10-03 — one name per concept, any model first
 
