@@ -78,7 +78,7 @@ class DecideModel:
         self.act_thresholds = {float(k): float(v) for k, v in (a.get("threshold_for_error") or {}).items()}
         self.escalate_below = th.get("escalate_below")          # a default for parts that set none (None: no default)
         self.adaptations: dict[tuple, Adaptation] = {}
-        self.loras: dict = {}                # lora_key → solvi.lora.LoraAdapter (experimental: part.adapt_lora)
+        self.loras: dict = {}                # lora_key → an Adapter (solvi.lora.LoraAdapter; experimental: solvi.lora.adapt_lora)
         self._cache, self._cache_size, self._lock = OrderedDict(), cache_size, threading.Lock()
         self._pass_lock = threading.Lock()
         self._block_failed = False
@@ -359,12 +359,15 @@ class DecideModel:
         return None if ad is None else ad.name
 
     def _using(self, name):
-        """The scorer with this LoRA adapter active (None: none) while scoring — a no-op for a model without adapters."""
+        """The scorer with this adapter active (None: none) while scoring — a no-op for a model without adapters. An
+        adapter does the switching itself (the Adapter protocol: using(scorer, active)), so this module imports no
+        adapter's module."""
         if not self.loras:
             import contextlib
             return contextlib.nullcontext()
-        from ..lora import using
-        return using(self.scorer, name)
+        ads = list(self.loras.values())
+        ad = next((a for a in ads if a.name == name), None) if name is not None else None
+        return (ad if ad is not None else ads[0]).using(self.scorer, active=ad is not None)
 
     def _forget_cached(self, key):
         """Drop the cached logits of one question (every option order): its adapter changed."""

@@ -1,6 +1,6 @@
 """Train a LoRA adapter for one decision offline, on a GPU (experimental) — for solvi-large, or thousands of examples.
 
-`part.adapt_lora(examples)` trains in-process and only on solvi-base-sized checkpoints (on a CPU it takes minutes). This
+`solvi.lora.adapt_lora(part, examples)` trains in-process and only on solvi-base-sized checkpoints (on a CPU it takes minutes). This
 script trains the same adapter (the same recipe, solvi.lora.train) on any checkpoint and device, and writes a file that
 `part.load_lora(path)` loads wherever the decision runs — a CPU is fine for answering:
 

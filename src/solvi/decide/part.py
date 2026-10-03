@@ -10,14 +10,14 @@ import warnings
 import numpy as np
 
 from .. import _deprecate
-from ..core import Decision, Quote, Unknown
+from ..core import Decision, Quote, Unknown, gone_in_1_0
 from ..provenance import ESCALATED, INSTRUCTION
 from ..provenance import digest
 from ..core import Answer, Question
 from .state import _is_text, _single, _text, jsonable, state_text
 from .wire import Logits, _respan
 from .backends import LONG_CPU_TOKENS, SECTION_TOKENS
-from .adapt import _Spec, lora_key
+from .adapt import ADAPTERS, _Spec, lora_key
 from .gate import Facts, GroupBy, _group_guard, _group_promise, _shown, _threshold, _vkey, confidence_source, group_record, guard_promise, no_separation, one_source
 
 
@@ -124,7 +124,7 @@ class DecisionPart:
 
     @property
     def lora(self):
-        """This question's LoRA adapter (solvi.lora.LoraAdapter; experimental: adapt_lora) or None."""
+        """This question's adapter (its Adapter slot: a solvi.lora.LoraAdapter, experimental) or None."""
         loras = getattr(self.model, "loras", None)
         return loras.get(lora_key(self.spec)) if loras else None
 
@@ -630,59 +630,34 @@ class DecisionPart:
         return {"asked": self.asked, "calls": {f"0:{self.__name__}": self.asked},
                 "calls_per_question": 1.0 if self.asked else 0.0}
 
-    # --- a LoRA adapter for this question (experimental; solvi.lora)
-    @_deprecate.removed_kwargs(risk="max_risk")
-    def adapt_lora(self, examples, *, r=8, epochs=6, holdout=None, seed=0, device=None, lr=3e-4, max_risk=0.10,
-                   signal="confidence", max_updates=400):
-        """Experimental: train a small LoRA adapter on the decider's encoder for this question, from labelled examples
-        [(input, correct)] — for solvi-base (the torch backend, `pip install "solvi[lora]"`) and about 100 examples or
-        more. Below that, try `fit` (and `System.fit` for questions without a model) first: they take milliseconds;
-        the adapter can keep improving where `fit` levels off. Compare the two on held-out labels.
-
-        Cost: minutes on a CPU; the time is estimated from the first update and reported (a LoraWarning) before
-        training. r: the adapter's rank (alpha = 2r);
-        epochs: passes over the examples (updates of 8 examples, between 40 and max_updates); lr: the learning rate;
-        seed: the adapter's initialization and the order of the examples — the same seed gives the same adapter on a
-        CPU; device: None — the device the decider runs on.
-
-        After training the adapter is active for this question only (other questions of the same model are not
-        affected), its hash is in the part's fingerprint and in every decision's extra["lora"], and the question's
-        earlier adaptation (adapt / fit / teach) and escalation thresholds are cleared: they were fitted on the model
-        without it. Confidences after LoRA are overconfident, so escalation must be recalibrated on labels NOT used for
-        training: holdout — a list of [(input, correct)], a share of the examples (0.25) or a number of them split off
-        (by the seed) — runs act_guard(holdout, risk, signal) after training and reports the held-out accuracy before and
-        after; without one a LoraWarning says so (call act_guard yourself; a few hundred labels is typical). Refuses a decider that
-        is not a torch encoder (ONNX: load it with backend="torch"; an LLM or a rule has no weights to adapt), one larger
-        than solvi-base (use tools/adapt_lora_gpu.py on a GPU and load_lora), and rank / number / span questions.
-        Keep it with save_lora / load_lora or save_calibration (the adapter is written next to the calibration file);
-        remove_lora rolls back. → {"adapter", "k", "updates", "seconds", "estimate_seconds", "size_mb", "device",
-        "holdout": {"n", "accuracy_before", "accuracy_after", "act_guard"} or None, "cleared", "experimental": True}."""
-        from ..lora import adapt
-        return adapt(self, examples, r=r, epochs=epochs, holdout=holdout, seed=seed, device=device, lr=lr, max_risk=max_risk,
-                     signal=signal, max_updates=max_updates)
-
-    def remove_lora(self):
-        """Roll back adapt_lora / load_lora: the adapter is removed from the model (the question is answered by the
-        checkpoint as before, to the bit) and the part's adaptation and escalation thresholds return to what they were
-        before the first adapter in this process (after a load_lora: they are cleared — they were fitted with the
-        adapter). → the removed adapter's hash, or None when there was none."""
-        from ..lora import remove
-        return remove(self)
+    # --- an adapter for this question (the Adapter slot; LoRA: experimental, solvi.lora)
+    adapt_lora = gone_in_1_0("adapt_lora()", "solvi.lora.adapt_lora(part, examples, ...) — training an adapter is "
+                             "experimental and lives in solvi.lora (solvi.experimental.lora later)", "DecisionPart")
+    remove_lora = gone_in_1_0("remove_lora()", "solvi.lora.remove_lora(part)", "DecisionPart")
 
     def save_lora(self, path):
         """Write this question's adapter (a .safetensors file with its config, the question and the checkpoint it was
         trained on) → path. save_calibration also writes it, next to the calibration file."""
-        from ..lora import save
-        return save(self, path)
+        ad = self.lora
+        if ad is None:
+            raise ValueError(f"{self.__name__} has no LoRA adapter (adapt_lora or load_lora first)")
+        return ad.save(path)
 
     def load_lora(self, path, strict=True):
         """Load an adapter written by save_lora (or tools/adapt_lora_gpu.py) for this question: afterwards the part
         answers exactly as right after training. Refuses (ValueError) an adapter for another question or checkpoint
         unless strict=False; needs the torch backend and peft (`solvi[lora]`). Clears the question's adaptation and
-        thresholds like adapt_lora (load the calibration after it). → self."""
-        from ..lora import load
-        load(self, path, strict)
+        thresholds like solvi.lora.adapt_lora (load the calibration after it). → self."""
+        self._load_adapter("lora", path, strict)
         return self
+
+    def _load_adapter(self, kind, path, strict=True, expect=None):
+        """Read an adapter file of `kind` into this question's adapter slot (expect: the hash a calibration file names).
+        The module that reads that kind is looked up by name (ADAPTERS), so solvi.decide imports no adapter module."""
+        import importlib
+        if kind not in ADAPTERS:
+            raise ValueError(f"an adapter of an unknown kind {kind!r} (known: {', '.join(sorted(ADAPTERS))})")
+        return importlib.import_module(ADAPTERS[kind]).load(self, path, strict, expect=expect)
 
     def _answer_key(self, y):
         """An answer or a label as calibration compares them: "not stated" as itself, a span by its text (a Quote or

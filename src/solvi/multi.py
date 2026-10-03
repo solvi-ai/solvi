@@ -38,7 +38,7 @@ from collections.abc import Mapping
 import numpy as np
 
 from . import _deprecate
-from .core import Decision, Quote, Unknown
+from .core import Decision, Quote, Unknown, gone_in_1_0
 from .decide import DecisionPart, Facts, GroupBy, _group_info, _group_promise, _single, group_record, guard_promise, no_separation, one_source
 from .provenance import ESCALATED, code_fingerprint, digest
 from .runtime import RECORD_KEYS          # what a replay compares with the recomputed (defined there; re-exported)
@@ -305,9 +305,9 @@ class Combination:
 
     The decider protocol: a combination has every public method of a DecisionPart, with the same signature and result
     keys. decide / score / act_guard / calibrate_for / conformal / save_calibration / load_calibration act on the
-    combination as a whole (one threshold shared by every part); fit / adapt / teach / reset / memory / remove_lora go
+    combination as a whole (one threshold shared by every part); fit / adapt / teach / reset / memory go
     to every part (a list per part, in leaves order, where the part returns one value); calls() counts the models
-    called. What belongs to one part — adapt_lora, save_lora, load_lora (an adapter is one checkpoint's, for one
+    called. What belongs to one part — save_lora, load_lora (an adapter is one checkpoint's, for one
     question), budget, sections_k, long_key, long_input (each part reads long texts by its own long=), in_pass (a
     shared forward pass is for parts of one model) — raises NotImplementedError naming the part to call it on."""
 
@@ -891,25 +891,16 @@ class Combination:
                              "part.memory(mem); combination.memory() gives every part its own")
         return [lf.part.memory(None, **settings) for lf in self.leaves()]
 
-    def remove_lora(self):
-        """Every part's remove_lora() → [the removed adapter's hash or None], in leaves order. The combination's own
-        threshold was fitted on the parts with their adapters: calibrate it again."""
-        return [lf.part.remove_lora() for lf in self.leaves()]
+    remove_lora = gone_in_1_0("remove_lora()", "solvi.lora.remove_lora(combination) (every part's, in leaves order)",
+                              "Combination")
+    adapt_lora = gone_in_1_0("adapt_lora()", "solvi.lora.adapt_lora(part, examples, ...) on one of its parts, then "
+                             "calibrate the combination again", "Combination")
 
     # --- what belongs to one part, not to a combination: each raises, saying where it is
     def _one_part(self, what, why):
         raise NotImplementedError(f"{type(self).__name__}.{what}: {why} — call it on the part "
                                   f"({self.__name__}.parts[i].{what}), then calibrate the combination again if it "
                                   "changed the part")
-
-    @_deprecate.removed_kwargs(risk="max_risk")
-    def adapt_lora(self, examples, *, r=8, epochs=6, holdout=None, seed=0, device=None, lr=3e-4, max_risk=0.10,
-                   signal="confidence", max_updates=400):
-        """Not for a combination (raises NotImplementedError): an adapter is trained on one checkpoint's encoder for one
-        question, and its holdout recalibrates that part's own threshold, which a combination replaces with its shared
-        one. Train it on the part, then calibrate the combination."""
-        self._one_part("adapt_lora()", "a LoRA adapter is trained on one checkpoint's encoder for one question, and its "
-                                       "holdout recalibrates that part's own threshold, which the combination replaces")
 
     def save_lora(self, path):
         """Not for a combination (raises NotImplementedError): an adapter file holds one part's adapter."""

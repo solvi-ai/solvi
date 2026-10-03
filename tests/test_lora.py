@@ -1,4 +1,4 @@
-"""part.adapt_lora (experimental, solvi.lora): a LoRA adapter per question on a tiny random ModernBERT decider built in a
+"""solvi.lora.adapt_lora (experimental): a LoRA adapter per question on a tiny random ModernBERT decider built in a
 temporary folder (no downloads). Skipped without torch, transformers, tokenizers and peft (`uv sync --group lora`)."""
 import json
 import warnings
@@ -14,7 +14,7 @@ pytest.importorskip("peft")
 from solvi import Catalog, System  # noqa: E402
 from solvi.decide import DecideModel  # noqa: E402
 from solvi.learning import ExperimentalWarning  # noqa: E402
-from solvi.lora import LoraWarning  # noqa: E402
+from solvi.lora import LoraWarning, adapt_lora, remove_lora  # noqa: E402
 
 TEAMS = ["billing", "technical"]
 BILLING = ["invoice", "refund", "charged", "payment", "card", "price", "bill", "money"]
@@ -88,7 +88,7 @@ def _adapt(part, examples, **kw):
     kw.setdefault("epochs", 10)
     with warnings.catch_warnings(record=True) as w:
         warnings.simplefilter("always")
-        rep = part.adapt_lora(examples, **kw)
+        rep = adapt_lora(part, examples, **kw)
     return rep, w
 
 
@@ -125,7 +125,7 @@ def test_training_changes_predictions_fingerprint_trace_and_rollback(ckpt):
     assert rec.extra["lora"]["adapter"] == rep["adapter"] and res.trace.replay(cat)["ok"]
     assert any(x["adapter"] == rep["adapter"] for x in m.metadata()["loras"])
     # rollback: the checkpoint's logits to the bit, the fingerprint and the calibration as before
-    assert part.remove_lora() == rep["adapter"] and part.lora is None and part.remove_lora() is None
+    assert remove_lora(part) == rep["adapter"] and part.lora is None and remove_lora(part) is None
     z2 = np.array([m.logits(t, "Which team?", TEAMS)["billing"] for t, _ in test])
     assert np.array_equal(z2, z0)
     assert part.fingerprint() == fp_cal and m.fingerprint() == mfp0
@@ -143,7 +143,7 @@ def test_other_questions_are_not_affected(ckpt):
     assert "lora" not in other.decide(texts[0]).extra
     ds = m.decide_pass(texts[0], [part, other])                  # a shared pass keeps them apart too
     assert "lora" in ds[0].extra and "lora" not in ds[1].extra
-    part.remove_lora()
+    remove_lora(part)
 
 
 def test_small_k_warning_no_holdout_warning_and_experimental_marker(ckpt):
@@ -158,7 +158,7 @@ def test_small_k_warning_no_holdout_warning_and_experimental_marker(ckpt):
     assert rep["holdout"] is None
     _, w2 = _adapt(part, _toy(24, 1))
     assert not any(x.category is ExperimentalWarning for x in w2)           # once per process
-    part.remove_lora()
+    remove_lora(part)
 
 
 def test_deterministic_for_a_seed(ckpt):
@@ -187,7 +187,7 @@ def test_save_load_round_trip_and_calibration_file(ckpt, tmp_path):
     p3.load_calibration(tmp_path / "team.calib.json")
     assert p3.fingerprint() == fp and p3.guarantee == part.guarantee
     assert [p3.decide(t).probs for t, _ in test] == probs
-    p3.remove_lora()                                               # no snapshot from before: the thresholds are cleared
+    remove_lora(p3)                                               # no snapshot from before: the thresholds are cleared
     assert p3.guarantee is None and p3.escalate_below is None
     other = m2.decision("x", "Which team?", "email", ["billing", "technical", "shipping"])
     with pytest.raises(ValueError, match="another question"):
@@ -195,7 +195,7 @@ def test_save_load_round_trip_and_calibration_file(ckpt, tmp_path):
     m4, p4 = _part(ckpt)
     with pytest.raises(ValueError, match="calibrated for fingerprint|another model"):
         _calib_without_lora(p4, tmp_path)                          # made with the adapter, loaded without it
-    part.remove_lora()
+    remove_lora(part)
 
 
 def _calib_without_lora(part, tmp_path):
@@ -210,15 +210,15 @@ def test_refusals(ckpt, monkeypatch):
     from solvi.llm import LLMScorer
     m, part = _part(ckpt)
     with pytest.raises(ValueError, match="needs at least 8"):
-        part.adapt_lora(_toy(4, 1))
+        adapt_lora(part, _toy(4, 1))
     with pytest.raises(ValueError, match="holdout"):
-        part.adapt_lora(_toy(40, 1), holdout=40)
+        adapt_lora(part, _toy(40, 1), holdout=40)
     rank = m.decision("r", "Which team?", "email", TEAMS, kind="rank")
     with pytest.raises(ValueError, match="rank questions"):
-        rank.adapt_lora(_toy(40, 1))
+        adapt_lora(rank, _toy(40, 1))
     monkeypatch.setattr(L, "MAX_HIDDEN", 16)                      # the tiny model plays solvi-large
     with pytest.raises(ValueError, match="adapt_lora_gpu.py"):
-        part.adapt_lora(_toy(40, 1))
+        adapt_lora(part, _toy(40, 1))
     monkeypatch.undo()
 
     class Fake:
@@ -227,10 +227,10 @@ def test_refusals(ckpt, monkeypatch):
     for scorer, why in ((Fake(), 'backend="torch"'), (object.__new__(LLMScorer), "LLM decider")):
         p = DecideModel(scorer).decision("team", "Which team?", "email", TEAMS)
         with pytest.raises(ValueError, match=why):
-            p.adapt_lora(_toy(40, 1))
+            adapt_lora(p, _toy(40, 1))
     onnx = type("OnnxScorer", (), {"logits": Fake.logits})
     with pytest.raises(ValueError, match="runs on ONNX"):
-        DecideModel(onnx()).decision("team", "Which team?", "email", TEAMS).adapt_lora(_toy(40, 1))
+        adapt_lora(DecideModel(onnx()).decision("team", "Which team?", "email", TEAMS), _toy(40, 1))
     from solvi.lora import adapt
     with pytest.raises(TypeError, match="DecisionPart"):
         adapt(lambda email: "billing", _toy(40, 1))
@@ -247,7 +247,7 @@ def test_missing_peft_is_a_clear_error(ckpt, monkeypatch):
     m, part = _part(ckpt)
     monkeypatch.setattr(builtins, "__import__", no_peft)
     with pytest.raises(ImportError, match=r"solvi\[lora\]"):
-        part.adapt_lora(_toy(40, 1))
+        adapt_lora(part, _toy(40, 1))
 
 
 @pytest.mark.filterwarnings("ignore::solvi.lora.LoraWarning")
@@ -274,3 +274,17 @@ def test_offline_script_trains_an_adapter_the_part_loads(ckpt, tmp_path, monkeyp
     m, part = _part(ckpt)
     part.load_lora(out)
     assert part.lora.hash in printed and part.decide(_toy(2, 9)[0][0]).extra["lora"]["adapter"] == part.lora.hash
+
+
+def test_the_part_has_an_adapter_slot_not_the_training_calls(ckpt):
+    """1.0: training and rolling back an adapter left the part (a stable class does not import an experimental module):
+    part.adapt_lora / remove_lora raise an AttributeError naming the function; the adapter itself is a solvi Adapter."""
+    m, part = _part(ckpt)
+    with pytest.raises(AttributeError, match=r"adapt_lora\(\) was removed in 1.0: use solvi.lora.adapt_lora\(part"):
+        part.adapt_lora(_toy(40, 1))
+    with pytest.raises(AttributeError, match=r"use solvi.lora.remove_lora\(part\)"):
+        part.remove_lora()
+    rep, _ = _adapt(part, _toy(40, 1))
+    ad = part.lora
+    assert ad.kind == "lora" and ad.fingerprint() == ad.hash == rep["adapter"]
+    assert remove_lora(part) == rep["adapter"] and part.lora is None

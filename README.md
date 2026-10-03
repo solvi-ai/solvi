@@ -71,7 +71,7 @@ pip install "solvi[onnx]"      # + onnxruntime, tokenizers: the decider (solvi.d
 pip install "solvi[serve]"     # + fastapi, uvicorn: `solvi serve app.py:system` — the questions over HTTP (also --mcp)
 pip install "solvi[mcp]"       # + the official MCP SDK for solvi serve --mcp (without it, a built-in stdio server)
 pip install "solvi[duckdb]"    # + duckdb: stored decisions in a DuckDB file (solvi.DuckDBStorage); [postgres] for PostgreSQL
-pip install "solvi[lora]"      # + torch, transformers, peft: part.adapt_lora, a LoRA adapter per question (experimental)
+pip install "solvi[lora]"      # + torch, transformers, peft: solvi.lora.adapt_lora, a LoRA adapter per question (experimental)
 ```
 
 Two words mark what is not settled yet: **preview** — it works and is tested, and its API may still change;
@@ -295,7 +295,7 @@ Every answer is a value and a confidence, and the types also declare answer prim
   document; the trace lists the sections read. `long="full"` reads a text whole up to the length a checkpoint trained on
   long inputs declares (`max_len_long`), and retrieves within that length beyond it.
 - **Learning from corrections.** `part.memory()` escalates an answer when similar corrected cases say another one;
-  `fit` heads refit on all kept examples as corrections accumulate; `part.adapt_lora(examples, holdout=0.3)` trains
+  `fit` heads refit on all kept examples as corrections accumulate; `solvi.lora.adapt_lora(part, examples, holdout=0.3)` trains
   a small LoRA adapter for one question on solvi-base once it has ~100 labelled answers (`solvi[lora]`, experimental);
   `System.learning(store)` proposes updates from trusted corrections only and promotes one when it passes held-out,
   honesty and calibration gates, with rollback (experimental, off unless called)

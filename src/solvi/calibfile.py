@@ -147,9 +147,8 @@ def save(part, path):
     """Write a part's calibration to a JSON file (and its LoRA adapter, if it has one, next to it) → path."""
     import os
     rec = record(part)
-    if "lora" in rec:
-        from .lora import save as save_lora
-        save_lora(part, lora_path(path))
+    if "lora" in rec:                               # the part's adapter writes itself (the Adapter protocol)
+        part.lora.save(lora_path(path))
         rec["lora"]["file"] = os.path.basename(lora_path(path))
     with open(path, "w", encoding="utf-8") as fh:
         json.dump(_enc(rec), fh, ensure_ascii=False, indent=1, allow_nan=False)
@@ -189,9 +188,8 @@ def load(part, path, groups=None, strict=True):
     lo = rec.get("lora")
     if kind == "DecisionPart" and lo and (part.lora is None or part.lora.hash != lo.get("hash")):
         import os                                   # calibrated with an adapter: load it first (from beside the file)
-        from .lora import load as load_lora
         f = os.path.join(os.path.dirname(os.path.abspath(str(path))), lo.get("file") or os.path.basename(lora_path(path)))
-        load_lora(part, f, strict, expect=lo.get("hash"))
+        part._load_adapter("lora", f, strict, expect=lo.get("hash"))
     if strict:
         if rec.get("question") != _norm(part.spec.describe()):
             raise ValueError(f"{path}: made for another question ({rec.get('name')!r}: {rec.get('question')}); this part "

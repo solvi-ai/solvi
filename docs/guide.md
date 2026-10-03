@@ -88,7 +88,7 @@ pip install "solvi[onnx]"      # + onnxruntime, tokenizers: the decider (solvi.d
 pip install "solvi[serve]"     # + fastapi, uvicorn: solvi serve over HTTP
 pip install "solvi[mcp]"       # + the official MCP SDK for solvi serve --mcp (without it, a built-in stdio server is used)
 pip install "solvi[duckdb]"    # + duckdb: stored decisions in a DuckDB file; "solvi[postgres]" for PostgreSQL
-pip install "solvi[lora]"      # + torch, transformers, peft: part.adapt_lora, a LoRA adapter per question (experimental)
+pip install "solvi[lora]"      # + torch, transformers, peft: solvi.lora.adapt_lora, a LoRA adapter per question (experimental)
 ```
 
 For development, from a clone: `uv sync`, then `uv run pytest`.
@@ -1353,9 +1353,10 @@ proposals by the combination's rule. `System.teach` on a question a combination 
 result keys, so code written for one takes the other. `decide`, `score`, `act_guard`, `calibrate_for` (a shared
 threshold for a target error among the answered, `method="empirical"` or `"ltt"`), `conformal` and the calibration
 files act on the combination as a whole; `fit`, `adapt`, `teach`, `reset`, `memory()` (a memory for every part, which
-inside a combination only checks) and `remove_lora` go to every part and return one result per part; `calls()` counts
+inside a combination only checks) go to every part and return one result per part (so does
+`solvi.lora.remove_lora(combination)`); `calls()` counts
 the models called (a part's `calls()` counts its own decisions the same way). What belongs to one part raises
-`NotImplementedError` naming the part to call it on: `adapt_lora`, `save_lora` and `load_lora` (an adapter is trained
+`NotImplementedError` naming the part to call it on: `save_lora` and `load_lora` (an adapter is trained
 on one checkpoint for one question, and its holdout recalibrates that part's own threshold), `budget`, `sections_k`,
 `long_key` and `long_input` (each part reads long texts by its own `long=`), and `in_pass` (a shared forward pass is
 for parts of one model). After changing a part, calibrate the combination again.
@@ -1490,13 +1491,19 @@ different checkpoint is refused unless `strict=False`); `part.reset()` forgets o
 #### A LoRA adapter per question: adapt_lora (experimental)
 
 ```python
+from solvi.lora import adapt_lora, remove_lora
+
 model = DecideModel.load("solvi-ai/solvi-base", backend="torch")    # pip install "solvi[lora]"
 team = model.decision("team", "Which team?", "email", TEAMS)
-report = team.adapt_lora(labelled, holdout=300)     # [(input, correct)]; 300 of them calibrate act_guard, the rest train
+report = adapt_lora(team, labelled, holdout=300)    # [(input, correct)]; 300 of them calibrate act_guard, the rest train
 report["holdout"]           # {"n", "accuracy_before", "accuracy_after", "act_guard": {...}}
 team.save_calibration("team.calib.json")            # writes team.calib.lora.safetensors beside it
-team.remove_lora()                                  # roll back: the checkpoint answers again, thresholds as before
+remove_lora(team)                                   # roll back: the checkpoint answers again, thresholds as before
 ```
+
+Training and rolling back are functions of `solvi.lora`, not methods of the part (in 1.0 `part.adapt_lora` and
+`part.remove_lora` raise an AttributeError naming them): a stable part does not import the experimental module. The
+part keeps an adapter slot — `part.lora`, `part.save_lora`, `part.load_lora` and the calibration file work as before.
 
 `fit` moves the logits (a shift and a scale); it cannot change what the model reads in the input, so beyond a hundred
 examples or so it stops improving. `adapt_lora` trains a small LoRA adapter — low-rank updates of the encoder's attention
@@ -1506,7 +1513,7 @@ rest of the checkpoint frozen. **Which one to use:**
 | labelled examples of the question | use |
 |---|---|
 | fewer than ~100 | `part.fit` (milliseconds; for a question without a model, `system.fit`) |
-| ~100 or more, solvi-base | `part.adapt_lora`, with `act_guard` on ~300 other labels |
+| ~100 or more, solvi-base | `solvi.lora.adapt_lora(part, ...)`, with `act_guard` on ~300 other labels |
 | solvi-large, or thousands of examples | [`tools/adapt_lora_gpu.py`](../tools/adapt_lora_gpu.py) from the repository (not installed by pip) on a GPU, then `part.load_lora(path)` |
 
 What to expect:
@@ -1533,7 +1540,7 @@ The adapter's hash is part of the part's fingerprint (and the model's), and ever
 `extra["lora"]`, so a replay knows which weights answered. `part.save_lora(path)` / `part.load_lora(path)` keep it in a
 `.safetensors` file with the question and the checkpoint it was trained for (another question or checkpoint is refused
 unless `strict=False`); `save_calibration` writes it next to the calibration file and `load_calibration` loads it first.
-`part.remove_lora()` rolls back: the adapter leaves the model and the part's adaptation and thresholds return to what they
+`remove_lora(part)` rolls back: the adapter leaves the model and the part's adaptation and thresholds return to what they
 were before the first adapter. It is refused for a decider that is not a torch encoder (an ONNX one: load it with
 `backend="torch"`; an LLM or a rule has no weights to adapt), for checkpoints larger than solvi-base (use the GPU script)
 and for rank / number / span questions. **Experimental:** the API, the recipe and the file format may change; the first
