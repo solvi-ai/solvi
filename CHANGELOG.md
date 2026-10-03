@@ -67,6 +67,16 @@ verifies and replays stores written by 0.8.0 and by 0.7.1 (`tests/test_store_0_8
 
 ### Changed
 
+- Import structure: the execution layer (`solvi.core`, `typed`, `provenance`, `primitives`, `runtime`, `schema`,
+  `textin`) no longer imports anything above it, not even inside a function, and no library module imports the server
+  or agent layer (`solvi.serve`, `solvi.cli`, `solvi.hooks`, `solvi.agents`); before, 48 of the package's modules
+  formed one cycle through imports inside functions. What moved, with every old import path still working: `Flow`,
+  `Step`, `scalar_row` are defined in `solvi.runtime` (also in `solvi.strategist`); `replay_plan` and `narrowed` in
+  `solvi.runtime` (also in `solvi.strategy`); `replay_guard` in `solvi.runtime` (also in `solvi.guarantee`);
+  `RECORD_KEYS` in `solvi.runtime` (also in `solvi.multi`); `trace_hash` in `solvi.runtime` (also in `solvi.serve`);
+  `question_inputs`, `input_model`, `input_schema` in the new `solvi.inputs` (also in `solvi.serve`), with the entry
+  points of `System.entry_points`. `tests/test_import_layers.py` fails on an import cycle at module level and on an
+  import that breaks either layer.
 - The system report: `System.report(since=None, until=None)` (or `solvi.sysreport.system_report(store)`, or
   `solvi report decisions.db --overview`) tells the owner of a System what happened over a stored period, from the
   store alone — no model is called and no catalog is needed. Per question: how many answers were given alone and by
