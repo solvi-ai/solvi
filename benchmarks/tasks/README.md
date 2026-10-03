@@ -71,8 +71,11 @@ Further numbers the same scripts print (all eval unless said):
 
 ## Data and licences
 
-`fetch.sh` downloads every set from its own source; nothing is redistributed with solvi, and no data file is in this
-repository.
+`fetch.sh` downloads every set from its own source. The prepared splits of the sets whose licence allows passing them
+on are also in this repository, in `packed/prepared.tar.xz` (1.9 MB; `replies.py unpack-data`), with a NOTICE that
+names each set's source and licence; the files of a set stay under its licence, not solvi's, and BIRD's under CC BY-SA
+4.0. Abt-Buy states no licence: it is only ever downloaded, and neither its data nor the model's replies about it (they
+quote the offers) are in the repository.
 
 | Task | Data | Licence | eval / dev |
 |---|---|---|---|
@@ -131,7 +134,26 @@ tokens in / out):
 | banking77, credit, nab | $0 | $0 |
 
 Models answer differently from run to run and providers change, so a run from an empty cache will not give exactly the
-numbers above; the cache that produced them is not published (it holds the datasets' texts).
+numbers above. The replies that produced them are published instead.
+
+## Check the numbers without a key
+
+`packed/replies.jsonl.xz` (2.5 MB) holds every model reply the published run read — 9,458 of them, each once, keyed by
+the hash of its request; no request, key or account detail is in it — for every task but Abt-Buy. From it every script
+reruns offline, and `results.json` is the one place the published numbers are kept: `stand.py check` fails when a
+number in this README, the main README, `docs/benchmarks.md` or `docs/best_practices.md` is not the one in
+`results.json`, or (with `--measured`) when a run printed another one.
+
+```
+benchmarks/tasks/ci.sh data     # the packed splits; τ-bench, NATURAL PLAN, NAB and BIRD downloads; Abt-Buy downloaded
+benchmarks/tasks/ci.sh run      # replies.py unpack, stand.py run (offline), stand.py check: 19 min on 20 cores
+uv run python benchmarks/tasks/stand.py check                     # the docs against results.json only: a second
+```
+
+The workflow `.github/workflows/stand.yml` does this every week and on demand. Without Abt-Buy's replies its four
+steps that read a model are skipped (the baseline, `--repair`, `llm_pair.py` with both reply formats) and their 18
+numbers are not compared; its solution, which reads no model, still runs and is. A changed number goes into
+`results.json` and the doc together, from a run.
 
 ## How each task is solved
 

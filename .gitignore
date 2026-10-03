@@ -29,3 +29,6 @@ benchmarks/vs_llm/out/
 # benchmarks/tasks: the downloads (data/ above), the model-answer cache and the runs stay on the machine that made them
 benchmarks/tasks/cache/
 benchmarks/tasks/*/runs/
+benchmarks/tasks/runs/
+# Abt-Buy's model replies quote its offers, and Abt-Buy states no licence: packed on the machine that ran it, not published
+benchmarks/tasks/packed/replies_abtbuy.jsonl.xz

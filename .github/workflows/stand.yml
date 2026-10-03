@@ -1,0 +1,48 @@
+name: stand
+
+# The task stand (benchmarks/tasks): every baseline and solution rerun from the packed model replies, offline — no API
+# key, no model call, nothing paid — and every published number of the stand (its README, the README, docs/benchmarks.md,
+# docs/best_practices.md) compared with benchmarks/tasks/results.json and with the run. 19 minutes on a 20-core machine,
+# more on a hosted runner (NAB's 190k asks alone take 8.5); BIRD's 800 MB of databases stay in the Actions cache between
+# runs. Weekly and on demand, not on push.
+on:
+  schedule:
+    - cron: "0 6 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  stand:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    env:
+      STAND_DATA: ${{ github.workspace }}/stand-data
+      STAND_CACHE: ${{ runner.temp }}/stand-cache
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: "3.10"
+      - run: uv sync
+      - name: the docs quote results.json (no run, a second)
+        run: uv run python benchmarks/tasks/stand.py check
+      - name: BIRD's databases from the last run
+        uses: actions/cache@v4
+        with:
+          path: stand-data/bird/minidev
+          key: stand-bird-minidev-v1
+      - name: data — the packed splits, and the downloads the scripts read at run time
+        run: bash benchmarks/tasks/ci.sh data
+      - name: every script offline from the packed replies, then every number compared
+        run: bash benchmarks/tasks/ci.sh run
+      - name: what each script printed
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: stand-runs
+          path: |
+            benchmarks/tasks/runs/stand.json
+            benchmarks/tasks/*/runs/*.out
+          if-no-files-found: ignore
