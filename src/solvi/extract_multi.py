@@ -3,7 +3,7 @@ For solvi: extractor.field(name) returns a function doc → Quote; all fields of
 
 The extractor protocol it shares with solvi.extract_long.LongSpanExtractor: fit(items), predict(text, field),
 field(name[, description]), save(path) / load(path), fingerprint(). items here are [(text, {field: (start, end) |
-None})]; 0.7's fit(docs, spans) and predict_doc(text) still work with a SolviDeprecationWarning."""
+None})] (0.7's fit(docs, spans) and predict_doc(text) were removed in 0.9)."""
 from __future__ import annotations
 
 import hashlib
@@ -56,12 +56,13 @@ class MultiSpanExtractor:
         en = next((j for j in reversed(idx) if offs[j][0] < e_c), st)
         return st, max(st, en)
 
-    def fit(self, items, spans=None, epochs=4, lr=3e-5, bs=8, seed=0, log=print):
-        """items: [(text, {field: (start, end) | None})]. (0.7: fit(docs, spans) — still read, with a warning.) A span past
-        the encoded text (max_len tokens) is left out of training."""
-        if spans is not None:
-            _deprecate.renamed("MultiSpanExtractor.fit(docs, spans)", "MultiSpanExtractor.fit([(text, spans), ...])")
-            items = list(zip(items, spans))
+    def fit(self, items, *removed, epochs=4, lr=3e-5, bs=8, seed=0, log=print):
+        """items: [(text, {field: (start, end) | None})] (0.7's fit(docs, spans) was removed in 0.9). A span past the
+        encoded text (max_len tokens) is left out of training."""
+        items = list(items)
+        if removed or (items and isinstance(items[0], str)):
+            raise TypeError("MultiSpanExtractor.fit(docs, spans) was renamed in 0.8 and removed in 0.9: use "
+                            "fit([(text, spans), ...])")
         docs, spans = [t for t, _ in items], [dict(sp or {}) for _, sp in items]
         torch = self.torch
         random.seed(seed)
@@ -119,10 +120,7 @@ class MultiSpanExtractor:
         self._fp_weights = None
         return self
 
-    def predict_doc(self, text, max_span=64):
-        """Deprecated (removed in 0.9): predict(text)."""
-        _deprecate.renamed("MultiSpanExtractor.predict_doc()", "MultiSpanExtractor.predict()")
-        return self.predict(text, max_span=max_span)
+    predict_doc = _deprecate.removed_attr("predict_doc()", "predict(text[, field])", "MultiSpanExtractor")
 
     def predict(self, text, field=None, max_span=64):
         """→ {field: (start, end, confidence)} in a single pass, or one field's (start, end, confidence)."""

@@ -9,7 +9,7 @@ import sys
 
 import pytest
 
-from solvi import Answer, Catalog, Decision, JSONLStorage, Question, SQLiteStorage, SolviDeprecationWarning, System
+from solvi import Answer, Catalog, Decision, JSONLStorage, Question, SQLiteStorage, System
 from solvi.storage import record_hash
 
 
@@ -620,13 +620,14 @@ def test_quarantine_and_forget(filled):
     assert len(store) == 4 and store.verify()["ok"]         # a report only
 
 
-def test_journal_is_a_jsonl_store(tmp_path):
+def test_a_jsonl_store_reads_a_journal_of_0_5(tmp_path):
     path = tmp_path / "journal.jsonl"
     with open(path, "w") as fh:                           # a line written by solvi 0.5 before the chain
         fh.write(json.dumps({"init_hash": "x", "answers": {"approve": [True, 1.0, "ok"]}, "flow": [], "records": []}) + "\n")
     cat, qs = build()
-    with pytest.warns(SolviDeprecationWarning, match=r"System\(journal=\) is deprecated since 0.8 and will be removed in 0.9: use storage=JSONLStorage\(path\)"):
-        s = System(cat, qs, journal=str(path))
+    with pytest.raises(TypeError, match=r"System\(journal=\) was renamed in 0.8 and removed in 0.9: use storage=JSONLStorage\(path\)"):
+        System(cat, qs, journal=str(path))
+    s = System(cat, qs, storage=JSONLStorage(path))
     assert isinstance(s.storage, JSONLStorage) and s.storage.path == str(path)
     r = s.ask(STATES[0])
     s.teach("approve", STATES[0], False)
@@ -640,8 +641,6 @@ def test_journal_is_a_jsonl_store(tmp_path):
     v = again.verify()
     assert v["ok"] and v["legacy"] == 1 and v["count"] == 2
     assert [x.id for x in again.iter()] == [r.stored_id]
-    with pytest.raises(TypeError, match="got both journal= and storage="):
-        System(cat, qs, journal=str(path), storage=again)
 
 
 def test_storage_from_a_path(tmp_path):

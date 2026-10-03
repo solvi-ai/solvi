@@ -4,7 +4,7 @@ import random
 
 import pytest
 
-from solvi import Answer, Catalog, Question, SolviDeprecationWarning, System
+from solvi import Answer, Catalog, Question, System
 from examples_loader import load
 from solvi.runtime import vhash
 
@@ -203,8 +203,7 @@ def test_a_part_that_returns_a_plain_object_replays():
     assert isinstance(vhash(loop), str)                              # attributes that point back: no crash
 
 
-def test_trace_value_reads_a_computed_fact_then_a_given_one_then_missing():
-    from solvi.runtime import MISSING
+def test_a_computed_fact_reads_from_res_values_and_a_given_one_from_trace_init():
     cat = Catalog()
 
     @cat.fn
@@ -218,10 +217,10 @@ def test_trace_value_reads_a_computed_fact_then_a_given_one_then_missing():
     @cat.rule("big")
     def big(double, broken):
         return "yes"
-    t = System(cat, [Question("big", "Big?", Answer.yes_no())]).ask({"x": 21}).trace
-    with pytest.warns(SolviDeprecationWarning, match=r"res.values\[name\]"):
-        assert t.value("double") == 42 and t.value("x") == 21
-        assert t.value("broken") is MISSING and t.value("nothing") is MISSING
+    res = System(cat, [Question("big", "Big?", Answer.yes_no())]).ask({"x": 21})
+    assert res.values["double"] == 42 and res.trace.init["x"] == 21 and "broken" not in res.values
+    with pytest.raises(AttributeError, match=r"Trace.value\(name\) was renamed in 0.8 and removed in 0.9: use res.values\[name\]"):
+        res.trace.value("double")
 
 
 def test_a_question_changed_in_place_changes_the_questions_fingerprint():

@@ -4,7 +4,7 @@ import random
 
 import pytest
 
-from solvi import Answer, Catalog, Question, SolviDeprecationWarning, System
+from solvi import Answer, Catalog, Question, System
 
 
 def _rule_system(**kw):
@@ -61,15 +61,12 @@ def test_calibrate_takes_true_and_false_as_the_correct_answers_of_a_yes_no_quest
         _rule_system().calibrate("q", held)
 
 
-def test_calibrate_takes_examples_as_fit_does_and_the_0_7_form_with_a_warning():
+def test_calibrate_takes_examples_as_fit_does_and_the_0_7_form_is_refused():
     """calibrate(question, states, truth) took its examples apart while fit, learn_rule and guarantee take
-    [(state, answer)]; the 0.7 form still works for one release."""
+    [(state, answer)]; the 0.7 form was kept for 0.8 and removed in 0.9."""
     held, truth, _ = _held_out(0.8, 7)
-    new = _rule_system().calibrate("q", list(zip(held, truth)))
-    with pytest.warns(SolviDeprecationWarning, match=r"calibrate\(question, \[\(state, answer\), \.\.\.\]\)"):
-        assert _rule_system().calibrate("q", held, truth) == pytest.approx(new)
-    with pytest.raises(ValueError, match="300 examples and 2 correct answers"):
-        _rule_system().calibrate("q", held, truth[:2])                  # warned once already
+    with pytest.raises(TypeError, match=r"removed in 0.9: use System.calibrate\(question, \[\(state, answer\), \.\.\.\]\)"):
+        _rule_system().calibrate("q", held, truth)
 
 
 def test_calibrating_spread_confidences_reaches_the_maximum_likelihood_fit():

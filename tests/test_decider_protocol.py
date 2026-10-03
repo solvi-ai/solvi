@@ -109,15 +109,3 @@ def test_a_part_counts_its_own_decisions_as_a_combination_does():
     assert s.calls() == {"asked": 4, "calls": {"0:team": 4}, "calls_per_question": 1.0}
     Cascade([s, l_]).decide(CLEAR)                     # inside a combination it counts there, not here
     assert s.calls()["asked"] == 4
-
-
-def test_a_combination_takes_the_old_keyword_names_of_decide_teach_and_adapt_with_a_warning():
-    from solvi import SolviDeprecationWarning
-    from solvi.decide import Facts
-    s, l_, _, _ = _parts()
-    c = Cascade([s, l_])
-    with pytest.warns(SolviDeprecationWarning, match=r"decide\(x=\) is deprecated since 0.8"):
-        assert c.decide(x=CLEAR).value == c.decide(CLEAR).value
-    with pytest.warns(SolviDeprecationWarning, match=r"teach\(x=\)"):
-        c.teach(x=Facts(email=CLEAR), correct="billing")
-    assert c.text_of(facts={"email": CLEAR, "other": 1}) == Facts(email=CLEAR)

@@ -342,7 +342,7 @@ class Service:
         return bool(store) or not self.allow_client_no_store
 
     # --- a System
-    @_deprecate.kwargs(names="questions")
+    @_deprecate.removed_kwargs(names="questions")
     def ask(self, state, questions=None, store=True):
         """→ Response.to_dict() with "stored_id" and "trace_hash". questions: names (None: all). store=False is honoured only when the server allows
         clients to opt out of storing (allow_client_no_store)."""
@@ -398,7 +398,7 @@ class Service:
         s = self._checked(state, names)
         return await s.aask(state, questions=list(names) if names else None, store=store, timeout=self.part_timeout)
 
-    @_deprecate.kwargs(names="questions")
+    @_deprecate.removed_kwargs(names="questions")
     async def aask(self, state, questions=None, store=True):
         """ask, for an async System (System.aask)."""
         async with self.aslot():
@@ -1259,13 +1259,6 @@ def add_parser(sub):
                    help=f"with --guard: their characters in all (default {CONTEXT_CHARS}; 0: no limit)")
     SERVE_DEFAULTS.update({x.dest: x.default for x in s._actions if x.dest != "help"})
     return s
-
-
-def __getattr__(name):                                # 0.7 names, removed in 0.9
-    if name == "Guard":
-        _deprecate.renamed("solvi.serve.Guard", "solvi.serve.AccessGuard")
-        return AccessGuard
-    raise AttributeError(f"module 'solvi.serve' has no attribute {name!r}")
 
 
 __all__ = ["AccessGuard", "add_parser", "AskRequest", "AskTextRequest", "BadRequest", "Busy", "ChoiceAnswer",

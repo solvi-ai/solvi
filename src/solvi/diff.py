@@ -340,7 +340,7 @@ class Shadow:
         self.changed, self.errors = [], []
         self.last = None                              # (candidate response or None, diff) of the last ask
 
-    @_deprecate.kwargs(names="questions")
+    @_deprecate.removed_kwargs(names="questions")
     def ask(self, init_state, questions=None, **kw):
         resp = self.current.ask(init_state, questions, **kw)
         self.stats["asks"] += 1
@@ -368,10 +368,7 @@ class Shadow:
         self.last = (cand, ch)
         return resp
 
-    def report(self):
-        """Deprecated (removed in 0.9): summary()."""
-        _deprecate.renamed("Shadow.report()", "Shadow.summary()")
-        return self.summary()
+    report = _deprecate.removed_attr("report()", "summary()", "Shadow")
 
     def summary(self):
         """What the shadow saw, as text: asks, agreements, differences per question and answer, failures."""

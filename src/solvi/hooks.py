@@ -45,7 +45,7 @@ Every decision is stored with its trace in a TraceStorage — by default `.solvi
 `solvi verify`, `solvi report` and `TraceStorage.query` work on it. The store keeps the proposed change and the prompt
 (the decision rests on them): keep `.solvi/` out of version control.
 
---decider (0.7: --model, still read) takes what `solvi models` does: a local checkpoint folder or a cached Hugging Face id (never downloaded), an
+--decider (0.7: --model, removed in 0.9) takes what `solvi models` does: a local checkpoint folder or a cached Hugging Face id (never downloaded), an
 OpenAI-compatible endpoint `llm:URL#model` (key in $SOLVI_LLM_API_KEY), a System One service `systemone:URL#model` (key in
 $SOLVI_SYSTEMONE_API_KEY) or `module:attr`. Calibrate a fuzzy rule with the same model:
 
@@ -712,12 +712,16 @@ def edit_system(rules, change, model=None, instructions=True):
 
 def rules_system():
     """Every question of the rules file in $SOLVI_HOOK_RULES (default .claude/solvi-rules.toml) as decision parts of one
-    System, with the decider in $SOLVI_HOOK_DECIDER ($SOLVI_HOOK_MODEL in 0.7, still read): for `solvi calibrate solvi.hooks:rules_system RULE_answer ...`."""
+    System, with the decider in $SOLVI_HOOK_DECIDER ($SOLVI_HOOK_MODEL in 0.7, removed in 0.9): for `solvi calibrate
+    solvi.hooks:rules_system RULE_answer ...`."""
     from .core import Catalog
     from .models import load as load_model
     from .system import System
     from .loader import LoadError                      # the command prints it; a library caller gets an exception
-    spec = os.environ.get("SOLVI_HOOK_DECIDER") or os.environ.get("SOLVI_HOOK_MODEL")
+    spec = os.environ.get("SOLVI_HOOK_DECIDER")
+    if not spec and os.environ.get("SOLVI_HOOK_MODEL"):
+        raise LoadError("solvi.hooks:rules_system: $SOLVI_HOOK_MODEL was renamed in 0.8 and removed in 0.9: set "
+                        "$SOLVI_HOOK_DECIDER")
     if not spec:
         raise LoadError("solvi.hooks:rules_system: set SOLVI_HOOK_DECIDER to the decider the hook uses (--decider)")
     model = load_model(spec)
@@ -1342,7 +1346,7 @@ def parser():
                        help="a decider: a local checkpoint folder or cached Hugging Face id, llm:URL#model, "
                             "systemone:URL#model or module:attr (keys from $SOLVI_LLM_API_KEY / "
                             "$SOLVI_SYSTEMONE_API_KEY); default: deterministic only")
-        s.add_argument("--model", dest="model", help=argparse.SUPPRESS)   # 0.7 name: hooks installed then keep working
+        s.add_argument("--model", dest="old_model", help=argparse.SUPPRESS)   # 0.7 name: refused with what to do
         s.add_argument("--store", default=HOOK_STORE, help=f"the TraceStorage for the decisions (default {HOOK_STORE}, "
                                                             "relative to the project)")
         s.add_argument("--no-store", action="store_true", help="do not store the decisions")
@@ -1402,6 +1406,10 @@ def main(argv=None):
     if a.cmd == "sample-rules":
         print(SAMPLE_RULES, end="")
         return 0
+    if getattr(a, "old_model", None) is not None:      # status 1, not 2: an old installed hook must not block every call
+        print("solvi hook: --model was renamed in 0.8 and removed in 0.9: use --decider (reinstall the hooks with "
+              "`solvi hook install --decider ...`)", file=sys.stderr)
+        return 1
     try:
         return {"pre-edit": cmd_pre_edit, "pick-skill": cmd_pick_skill, "install": cmd_install,
                 "uninstall": cmd_uninstall, "audit": cmd_audit}[a.cmd](a)

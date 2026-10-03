@@ -33,7 +33,7 @@ class DecisionPart:
                               doc="Escalate below this calibrated confidence (stored as `escalate_below`).")
     min_act = property(lambda self: self.act_threshold, lambda self, v: setattr(self, "act_threshold", v),
                        doc="Escalate below this act probability (stored as `act_threshold`).")
-    long_len = _deprecate.attr("long_len", "max_len_long", "DecisionPart")
+    long_len = _deprecate.removed_attr("long_len", "max_len_long", "DecisionPart")
 
     def __init__(self, model, name, task, text_fact, options, descriptions=None, multi=False, other=None, *, kind=None,
                  as_bool=False, escalate_below=None, act_threshold=None, use_act=None, score_value="median",
@@ -623,7 +623,7 @@ class DecisionPart:
                 "calls_per_question": 1.0 if self.asked else 0.0}
 
     # --- a LoRA adapter for this question (experimental; solvi.lora)
-    @_deprecate.kwargs(risk="max_risk")
+    @_deprecate.removed_kwargs(risk="max_risk")
     def adapt_lora(self, examples, *, r=8, epochs=6, holdout=None, seed=0, device=None, lr=3e-4, max_risk=0.10,
                    signal="confidence", max_updates=400):
         """Experimental: train a small LoRA adapter on the decider's encoder for this question, from labelled examples
@@ -745,7 +745,7 @@ class DecisionPart:
         self.__signature__ = inspect.Signature([inspect.Parameter(f, inspect.Parameter.POSITIONAL_OR_KEYWORD)
                                                 for f in self.facts + extra])
 
-    @_deprecate.kwargs(error="max_error")
+    @_deprecate.removed_kwargs(error="max_error")
     def calibrate_for(self, examples, *, max_error=0.05, signal="auto", method="empirical", delta=0.10):
         """Choose the escalation threshold for a target error rate among the answers given alone, on labelled examples
         [(input, correct)]. method="empirical": the lowest threshold at which the calibration decisions it lets through
@@ -760,8 +760,8 @@ class DecisionPart:
         escalates (inf).
         Changes the part's fingerprint. → {"signal", "threshold", "answered" (the share answered alone on the
         examples), "error" (among them), "n", "max_error", "method", "guarantee"}. For a guarantee on the share of all
-        questions answered wrongly, see act_guard. Every option after the examples is keyword-only; error= is the 0.7
-        name of max_error=, and the result's 0.7 keys "coverage" / "target_error" still read (deprecated)."""
+        questions answered wrongly, see act_guard. Every option after the examples is keyword-only (error= and the
+        result's keys "coverage" / "target_error", the 0.7 names, were removed in 0.9)."""
         from ..calibration import accuracy_at, check_rate, ltt_threshold
         error = max_error
         examples = list(examples)
@@ -783,11 +783,10 @@ class DecisionPart:
         thr = max(thr, 0.0) if name == "confidence" else thr      # −1 marks an example the act gate escalates
         self._set_threshold(name, thr, self._sourced(g))
         acc, cov = accuracy_at(sig, ok, thr)
-        return _deprecate.Result({"signal": name, "threshold": thr, "answered": cov, "error": (1 - acc) if cov else 0.0,
-                                  "n": len(ok), "max_error": error, "method": method, "guarantee": g["promise"]},
-                                 "calibrate_for()", coverage="answered", target_error="max_error")
+        return {"signal": name, "threshold": thr, "answered": cov, "error": (1 - acc) if cov else 0.0,
+                "n": len(ok), "max_error": error, "method": method, "guarantee": g["promise"]}
 
-    @_deprecate.kwargs(risk="max_risk")
+    @_deprecate.removed_kwargs(risk="max_risk")
     def act_guard(self, examples, *, max_risk=0.10, signal="auto", groups=None, min_group=100, delta=0.10):
         """Answer alone only as far as a guarantee allows (conformal risk control), from labelled examples of your own
         stream [(input, correct)] — a few hundred is typical: the escalation threshold is set so that, for inputs like
@@ -821,7 +820,7 @@ class DecisionPart:
 
         The decider protocol: a combination (solvi.multi) takes the same act_guard(examples, *, max_risk, signal,
         groups, min_group, delta) and returns the same keys. Every option after the examples is keyword-only; risk= is
-        the 0.7 name of max_risk=."""
+        the 0.7 name of max_risk= (removed in 0.9)."""
         from ..calibration import check_rate, crc_threshold
         risk = max_risk
         check_rate("max_risk", risk)                      # risk=10 (a percent) or 1.5 would be recorded as a promise
@@ -925,7 +924,7 @@ class DecisionPart:
         self.correction_memory = memory
         return memory
 
-    @_deprecate.kwargs(checkpoints="requires")
+    @_deprecate.removed_kwargs(checkpoints="requires")
     def question(self, cat, name=None, text=None, min_confidence=None, requires=None, require_evidence=False):
         """Make this decision the answer of a question: registers it as the question's rule (`cat.rule(name)(self)`) and
         returns the Question — choice, multi, ordinal (score) or yes_no (noul), with the option descriptions. System.teach on

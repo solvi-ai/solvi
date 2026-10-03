@@ -204,7 +204,7 @@ def _approval(ctx, name, call_id, per_call=False):
         return False
 
 
-@_deprecate.kwargs(declare="auto_declare")
+@_deprecate.removed_kwargs(declare="auto_declare")
 def guard_tool(tool: FunctionTool, guard: Guard, facts: Callable | dict | None = None, on_escalate="approval",
                auto_declare=False, made: list | None = None, show_policies=False) -> FunctionTool:
     """A copy of a FunctionTool whose every call passes `guard` (see the module docs). facts: a dict, or a function of the

@@ -360,7 +360,7 @@ class Combination:
         return [] if self.groups is None else list(self.groups["by"].names)
 
     # --- the question and identity
-    @_deprecate.kwargs(checkpoints="requires")
+    @_deprecate.removed_kwargs(checkpoints="requires")
     def question(self, cat, name=None, text=None, min_confidence=None, requires=None, require_evidence=False):
         """Make this combination a question's answer (as DecisionPart.question) → the Question."""
         return DecisionPart.question(self, cat, name, text, min_confidence, requires, require_evidence)
@@ -472,7 +472,7 @@ class Combination:
         vals.update(kw)
         return self._decide(_Src(vals=vals))
 
-    @_deprecate.kwargs(x="text")
+    @_deprecate.removed_kwargs(x="text")
     def decide(self, text):
         """An input (a text, a state, or Facts by name) → Decision; a list of inputs → a list."""
         one = isinstance(text, Facts) or _single(text)
@@ -581,7 +581,7 @@ class Combination:
             return False
         return (Unknown if v is Unknown else sp.label(v)) == (Unknown if y is Unknown else sp.label(y))
 
-    @_deprecate.kwargs(risk="max_risk")
+    @_deprecate.removed_kwargs(risk="max_risk")
     def act_guard(self, examples, *, max_risk=0.10, signal="auto", groups=None, min_group=100, delta=0.10, scale="raw"):
         """Answer alone only as far as a guarantee allows, for the combination as a whole: on labelled examples of your
         stream [(input, correct)] (an input is what every part reads, or Facts(...) by name) every part is asked, and
@@ -614,9 +614,9 @@ class Combination:
         The decider protocol: the signature and the keys of DecisionPart.act_guard — "signal" ("shared", or
         "shared-rank" with scale="rank"; also guarantee["signal"]), "threshold", "answered", "error", "risk", "n",
         "guarantee", "promise", "base_error", "must_escalate_at_least", "warnings", "groups" — plus "calls_per_question"
-        (models called per question; "calls" in 0.7), "cost", "scale", "answered_by". signal: "auto" only (each part
-        brings its own; `scale` says how they share one threshold). Every option after the examples is keyword-only;
-        risk= is the 0.7 name of max_risk=."""
+        (models called per question; "calls" in 0.7, removed in 0.9), "cost", "scale", "answered_by". signal: "auto" only (each part
+        brings its own; `scale` says how they share one threshold). Every option after the examples is keyword-only
+        (risk=, the 0.7 name of max_risk=, was removed in 0.9)."""
         from .calibration import certify_groups, check_rate
         risk = max_risk
         check_rate("max_risk", risk)
@@ -669,12 +669,11 @@ class Combination:
         err = float(lo[a].sum() / a.sum()) if a.any() else 0.0
         base = float(np.mean([not self._right(self.final(st, -math.inf, rk).value, y)       # every question answered
                               for st, y in zip(states, gold)])) if n else 0.0
-        out = _deprecate.Result({"signal": _SIGNAL[scale], "threshold": t, "answered": float(a.mean()), "error": err,
-                                 "risk": float(lo.mean()), "n": n, "guarantee": self.guarantee["promise"],
-                                 "promise": guard_promise(risk, err, bool(a.any())), "base_error": base,
-                                 "must_escalate_at_least": max(0.0, (base - risk) / (1 - risk)),
-                                 "calls_per_question": float(calls[rows, gi].mean()), "scale": scale},
-                                "act_guard()", calls="calls_per_question")
+        out = {"signal": _SIGNAL[scale], "threshold": t, "answered": float(a.mean()), "error": err,
+               "risk": float(lo.mean()), "n": n, "guarantee": self.guarantee["promise"],
+               "promise": guard_promise(risk, err, bool(a.any())), "base_error": base,
+               "must_escalate_at_least": max(0.0, (base - risk) / (1 - risk)),
+               "calls_per_question": float(calls[rows, gi].mean()), "scale": scale}
         flat = [] if not a.any() else [
             no_separation([ls.sig for st in states for ls in st.walk() if ls.leaf is lf],
                           [self._right(ls.hard.value, y) for st, y in zip(states, gold) for ls in st.walk()
@@ -736,7 +735,7 @@ class Combination:
             who.append(None if answering is None else answering(st, grid, rk))
         return srcs, gold, states, ranks, rk, grid, loss, auto_all, cost, calls, who
 
-    @_deprecate.kwargs(error="max_error")
+    @_deprecate.removed_kwargs(error="max_error")
     def calibrate_for(self, examples, *, max_error=0.05, signal="auto", method="empirical", delta=0.10, scale="raw"):
         """Choose the shared threshold for a target error rate among the answers the combination gives alone, on
         labelled examples [(input, correct)] — as DecisionPart.calibrate_for, with one threshold t for every part's
@@ -751,7 +750,7 @@ class Combination:
         The decider protocol: the signature and the keys of DecisionPart.calibrate_for — "signal" ("shared" or
         "shared-rank"), "threshold", "answered", "error", "n", "max_error", "method", "guarantee" — plus
         "calls_per_question" and "scale". signal: "auto" only (each part brings its own). Every option after the
-        examples is keyword-only; error= is the 0.7 name of max_error=."""
+        examples is keyword-only (error=, the 0.7 name of max_error=, was removed in 0.9)."""
         from .calibration import _binom_cdf, check_rate, ltt_grid
         error = max_error
         if method not in ("empirical", "ltt"):
@@ -791,11 +790,10 @@ class Combination:
         self.conformal_set = None
         self._setup()
         a, lo = auto_all[:, j], loss[:, j]
-        return _deprecate.Result({"signal": _SIGNAL[scale], "threshold": t, "answered": float(a.mean()) if n else 0.0,
-                                  "error": float(lo[a].sum() / a.sum()) if a.any() else 0.0, "n": n, "max_error": error,
-                                  "method": method, "guarantee": g["promise"],
-                                  "calls_per_question": float(calls[:, j].mean()) if n else 0.0, "scale": scale},
-                                 "calibrate_for()", coverage="answered", target_error="max_error")
+        return {"signal": _SIGNAL[scale], "threshold": t, "answered": float(a.mean()) if n else 0.0,
+                "error": float(lo[a].sum() / a.sum()) if a.any() else 0.0, "n": n, "max_error": error,
+                "method": method, "guarantee": g["promise"],
+                "calls_per_question": float(calls[:, j].mean()) if n else 0.0, "scale": scale}
 
     def save_calibration(self, path):
         """Write the combination's calibration (the shared threshold, per group too, the guarantee, the conformal set) with
@@ -840,26 +838,23 @@ class Combination:
     def calls(self):
         """What the combination cost since it was made: {"asked" (decisions), "calls" (models called, per part, in
         leaves order), "calls_per_question" (models called per decision), "cost" (with costs=)}. `usage` is a scorer's
-        token count; usage() here was the 0.7 name of calls()."""
+        token count; usage() here was the 0.7 name of calls() (removed in 0.9)."""
         lv = self.leaves()
         calls = [lf.calls for lf in lv]
         out = {"asked": self.asked, "calls": {f"{i}:{lf.name}": c for i, (lf, c) in enumerate(zip(lv, calls))},
                "calls_per_question": sum(calls) / self.asked if self.asked else 0.0}
         if any(lf.cost_given for lf in lv):
             out["cost"] = sum(lf.cost * c for lf, c in zip(lv, calls)) / self.asked if self.asked else 0.0
-        return _deprecate.Result(out, "calls()", per_question="calls_per_question")
+        return out
 
-    def usage(self):
-        """Deprecated (removed in 0.9): calls() — "per_question" is "calls_per_question" there."""
-        _deprecate.renamed("Combination.usage()", "calls()")
-        return self.calls()
+    usage = _deprecate.removed_attr("usage()", "calls()", "Combination")
 
     # --- learning: every part learns
     def _each(self, x):
         for lf in self.leaves():
             yield lf.part, (lf.text(_Src(vals=dict(x))) if isinstance(x, Facts) else x)
 
-    @_deprecate.kwargs(x="text")
+    @_deprecate.removed_kwargs(x="text")
     def teach(self, text, correct):
         """One correction, absorbed by every part at once (an input, or Facts by name) → total ms."""
         return sum(p.teach(t, correct) for p, t in self._each(text))
@@ -870,7 +865,7 @@ class Combination:
         return [lf.part.fit([(lf.text(_Src(vals=dict(x))) if isinstance(x, Facts) else x, y) for x, y in ex], lam, folds)
                 for lf in self.leaves()]
 
-    @_deprecate.kwargs(inputs="texts")
+    @_deprecate.removed_kwargs(inputs="texts")
     def adapt(self, texts):
         """Label-bias correction for every part (see DecisionPart.adapt) → [per part]."""
         xs = list(texts)
@@ -907,7 +902,7 @@ class Combination:
                                   f"({self.__name__}.parts[i].{what}), then calibrate the combination again if it "
                                   "changed the part")
 
-    @_deprecate.kwargs(risk="max_risk")
+    @_deprecate.removed_kwargs(risk="max_risk")
     def adapt_lora(self, examples, *, r=8, epochs=6, holdout=None, seed=0, device=None, lr=3e-4, max_risk=0.10,
                    signal="confidence", max_updates=400):
         """Not for a combination (raises NotImplementedError): an adapter is trained on one checkpoint's encoder for one

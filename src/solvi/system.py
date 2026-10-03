@@ -5,7 +5,6 @@ from __future__ import annotations
 import dataclasses
 import math
 from dataclasses import dataclass
-from pathlib import Path
 from typing import TYPE_CHECKING
 
 from . import _deprecate
@@ -55,7 +54,7 @@ class Response(Serial):
     model_outputs: int = 0              # outputs produced by models in this response
     stored_id = None                    # its id in a TraceStorage once saved (System(storage=...) saves every ask)
     read = None                         # ask_text: the solvi.textin.TextRead the question and state were read from
-    textin = _deprecate.attr("textin", "read", "Response")                # 0.7 name, removed in 0.9
+    textin = _deprecate.removed_attr("textin", "read", "Response")                # 0.7 name
     _system = None                      # the System that answered (reports, counterfactuals; see the class docs)
     _heads = None                       # its answer heads (the audit)
 
@@ -119,16 +118,8 @@ class Response(Serial):
         from .signature import sign
         return sign(self, alg)
 
-    @property
-    def computed_state(self):
-        """Deprecated (removed in 0.9): `state_text()`."""
-        _deprecate.renamed("Response.computed_state", "Response.state_text()")
-        return self.state_text()
-
-    def computed_state_text(self, lang=None):
-        """Deprecated (removed in 0.9): `state_text(lang)`."""
-        _deprecate.renamed("Response.computed_state_text()", "Response.state_text()")
-        return self.state_text(lang)
+    computed_state = _deprecate.removed_attr("computed_state", "state_text()", "Response")
+    computed_state_text = _deprecate.removed_attr("computed_state_text()", "state_text(lang)", "Response")
 
     def state_text(self, lang=None):
         """The computed state for people: each computed fact with its value; a quote's offsets; for anything not
@@ -211,17 +202,11 @@ def _clash(catalog, names, head):
                f"after what it computes (e.g. {own[0]}_points), not after the input it reads" if own else ""))
 
 
-def _jsonl(path):
-    from .storage import JSONLStorage
-    return JSONLStorage(Path(path))
-
-
 class System:
-    inputs = _deprecate.attr("inputs", "input_model", "System")       # 0.7 names, removed in 0.9
-    costs = _deprecate.attr("costs", "cost_book", "System")
+    inputs = _deprecate.removed_attr("inputs", "input_model", "System")       # 0.7 names
+    costs = _deprecate.removed_attr("costs", "cost_book", "System")
 
-    @_deprecate.kwargs(journal=("storage", _jsonl, "storage=JSONLStorage(path)"), inputs="input_model",
-                       costs="cost_policy")
+    @_deprecate.removed_kwargs(journal="storage=JSONLStorage(path)", inputs="input_model", costs="cost_policy")
     def __init__(self, catalog: Catalog, questions, *, workers: int = 1, order: str = "default",
                  producers: str = "declared", learn: bool | None = None, input_model=None, strategist=None, storage=None,
                  timeout: float | None = None, cost_policy="declared", lang: str = "en", early_exit: bool = True):
@@ -241,8 +226,7 @@ class System:
         see docs/strategist.md).
         storage: a solvi.storage.TraceStorage (or a path: .db / .sqlite → SQLite, else JSON lines) — every ask saves its
         response (answers, flow, whole trace) there, hash-chained across responses, and teach saves the correction; the
-        response's `stored_id` is its id in the store. journal=path (deprecated, removed in 0.9) is
-        storage=JSONLStorage(path).
+        response's `stored_id` is its id in the store (journal=path, its 0.7 name, was removed in 0.9).
         Every option after `questions` is keyword-only.
         timeout: seconds a part's call may take under `aask` when the part declares no `timeout=` (None: no limit).
         producers="equivalent": the producers of a fact are interchangeable — the cost-optimal planner
@@ -369,11 +353,11 @@ class System:
         return response_schema(self)
 
     # --- answers
-    @_deprecate.kwargs(names="questions")
+    @_deprecate.removed_kwargs(names="questions")
     def ask(self, init_state, questions=None, *, workers=None, order=None, store=True, early_exit=None):
         """init_state: a dict of given facts, or a pydantic BaseModel instance (its fields). questions: the questions to
-        ask — a name or a list of names (None: all; an unknown name raises KeyError; `names=` is its deprecated
-        spelling). Every other option is keyword-only. order: override the system's
+        ask — a name or a list of names (None: all; an unknown name raises KeyError; `names=`, its 0.7
+        spelling, was removed in 0.9). Every other option is keyword-only. order: override the system's
         order for this ask — "default", "learned", or an object with p_fail(check, row) and row(vals, init_keys) (e.g. an
         oracle for experiments). store=False: do not save this response to the system's storage.
         early_exit: None — the system's (System(early_exit=), True by default: after a failed hard check the steps only
@@ -474,7 +458,7 @@ class System:
                                      speculate=speculate, early_exit=self._early(early_exit))
         return self._respond(p, trace, vals, t0, store)
 
-    @_deprecate.kwargs(names="questions")
+    @_deprecate.removed_kwargs(names="questions")
     async def aask(self, init_state, questions=None, *, order=None, store=True, timeout=None, speculate=False,
                    early_exit=None):
         """`ask` on an event loop: `async def` parts (database lookups, HTTP APIs, model servers) are awaited, parts marked
@@ -719,11 +703,7 @@ class System:
                 seen.add(key)
                 st[STAT_KEYS[e["kind"]]] += 1
 
-    def safeguard_report(self, lang=None):
-        """Deprecated (removed in 0.9): safeguard_summary(lang) — `report` names the documents (Response.report,
-        TraceStorage.report); a text summary is a summary."""
-        _deprecate.renamed("System.safeguard_report()", "System.safeguard_summary()")
-        return self.safeguard_summary(lang)
+    safeguard_report = _deprecate.removed_attr("safeguard_report()", "safeguard_summary(lang)", "System")
 
     def report(self, since=None, until=None, *, store=None, **options):
         """What this System did over a stored period [since, until), for its owner → a solvi.sysreport.SystemReport
@@ -1086,13 +1066,9 @@ class System:
         warnings.warn(f"fit({question!r}): the head has no features — every input gets the same answer. {why}",
                       stacklevel=3)
 
-    def fit_fast(self, question, examples, features=None, lam=None, refit=2.0, refit_until=2000):
-        """Deprecated (0.8; removed in 0.9): `fit(question, examples, features, select=False, ...)` — the same ridge head
-        on every feature, now built by fit."""
-        _deprecate.renamed("fit_fast", "fit (fit_fast(...) is fit(..., select=False))")
-        return self.fit(question, examples, features, select=False, lam=lam, refit=refit, refit_until=refit_until)
+    fit_fast = _deprecate.removed_attr("fit_fast()", "fit(question, examples, features, select=False)", "System")
 
-    @_deprecate.kwargs(facts="features")
+    @_deprecate.removed_kwargs(facts="features")
     def learn_rule(self, question, examples, features, **kw):
         """An answer rule learned from examples (solvi.rulelist.RuleList): a readable "if feature then answer" list, installed in the
         catalog as a regular rule (deterministic, replayable). examples: [(init_state, answer)], at least one; features: the
@@ -1118,10 +1094,10 @@ class System:
         self.learned_rules[question] = rl
         return rl
 
-    def calibrate(self, question, examples, truth=None):
+    def calibrate(self, question, examples, *removed):
         """Calibrate answer confidence (Platt scaling) on held-out examples [(init_state, correct answer)], as `fit` takes
         them (the answer written as for `fit` and `teach`: True / False for a yes/no question, an Enum member, ...); the
-        0.7 form `calibrate(question, states, truth)` still works with a SolviDeprecationWarning (removed in 0.9).
+        0.7 form `calibrate(question, states, truth)` was removed in 0.9.
         → (a, b): confidence' = σ(a·logit(confidence) + b), applied to every later answer of the question.
         The held-out examples are run without the question's current calibration (so a second call fits the same thing
         again, not a correction of the first), are not saved to the storage and do not count in `stats`. Fewer than 10
@@ -1130,13 +1106,9 @@ class System:
         import numpy as np
         q = self.questions[question]
         examples = list(examples)
-        if truth is not None:
-            _deprecate.renamed("System.calibrate(question, states, truth)",
-                               "System.calibrate(question, [(state, answer), ...])")
-            truth = list(truth)
-            if len(truth) != len(examples):
-                raise ValueError(f"calibrate: {len(examples)} examples and {len(truth)} correct answers")
-            examples = list(zip(examples, truth))
+        if removed:
+            raise TypeError("System.calibrate(question, states, truth) was renamed in 0.8 and removed in 0.9: use "
+                            "System.calibrate(question, [(state, answer), ...])")
         if not all(isinstance(e, tuple) and len(e) == 2 for e in examples):
             raise ValueError("calibrate: examples are [(init_state, correct answer), ...]")
         examples, truth = [s for s, _ in examples], [q.answer.normalize(y) for _, y in examples]
@@ -1182,7 +1154,7 @@ class System:
         from .learning import Learning
         return Learning(self, storage, parts, ladder, gates, **options)
 
-    @_deprecate.kwargs(source="label_source")
+    @_deprecate.removed_kwargs(source="label_source")
     def teach(self, question, init_state, correct, *, label_source="human", by=None, of=None):
         """Human correction. A fast head (fit_fast) absorbs it at once; so does a model decision that answers the question
         (a solvi.decide decision part as the question's rule, or a rule passing a decided fact on): its per-option shift is

@@ -1250,7 +1250,7 @@ class Guard:
     that read them apply to every tool without naming it (the types are for readers: a policy's own annotations are what
     solvi validates). scan_user, tool_values: the defaults of every tool's `scan_user` and `tool_values` (see `tool`)."""
 
-    @_deprecate.kwargs(facts="fact_names")
+    @_deprecate.removed_kwargs(facts="fact_names")
     def __init__(self, storage=None, authorizer=None, fact_names=None, lang="en", scan_user=False, tool_values="deny"):
         from ..storage import open_storage
         self.storage = open_storage(storage)
@@ -1535,7 +1535,7 @@ class Guard:
                 pass
         return Facts(conversation=text, user_request=request, proposal=proposal(c.name, args))
 
-    @_deprecate.kwargs(risk="max_risk")
+    @_deprecate.removed_kwargs(risk="max_risk")
     def calibrate_authorizer(self, examples, *, max_risk=0.10, **kw):
         """act_guard on the authorizer from labelled calls [(call, context, authorized: bool)]: P(allowed by the
         authorizer alone and wrong) ≤ max_risk for calls like these (solvi.decide.DecisionPart.act_guard). → its report."""

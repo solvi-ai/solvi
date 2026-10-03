@@ -311,13 +311,7 @@ class Trace(Serial):
                        + f" → {s['result']}")
         return "\n".join(out)
 
-    def value(self, name):
-        """Deprecated (removed in 0.9): `res.values[name]` for a computed fact, `trace.init[name]` for a given one."""
-        _deprecate.renamed("Trace.value(name)", "res.values[name] (or trace.init[name] for a given fact)")
-        for r in self.records:
-            if r.name == name:
-                return r.value
-        return self.init.get(name, MISSING)
+    value = _deprecate.removed_attr("value(name)", "res.values[name] (or trace.init[name] for a given fact)", "Trace")
 
     def replay(self, catalog, flow=None, trust_models=False):
         """Independent replay: recompute every step from its recorded inputs, verify the value, the quote, the error and the

@@ -291,7 +291,7 @@ class CorrectionMemory:
         return p
 
     # --- the abstain threshold
-    @_deprecate.kwargs(risk="max_risk")
+    @_deprecate.removed_kwargs(risk="max_risk")
     def calibrate(self, max_risk=0.05):
         """Choose min_strength by conformal risk control, leave-one-out over the stored cases: each case is proposed for by
         the others, and the lowest strength is taken at which P(the memory proposes AND is wrong) ≤ max_risk, for inputs like

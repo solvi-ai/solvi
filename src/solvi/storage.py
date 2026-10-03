@@ -318,7 +318,7 @@ class TraceStorage:
     `system`: the System (or a Catalog) used to restore typed values (dates, enums, models) when loading responses;
     System(storage=...) sets it to that system when it is not set. `clock`: a function → seconds since the epoch."""
 
-    @_deprecate.kwargs(catalog="system")
+    @_deprecate.removed_kwargs(catalog="system")
     def __init__(self, system=None, clock=None):
         self.catalog = system                         # the System (or Catalog) typed values are restored with
         self.clock = clock or _time.time
@@ -362,7 +362,7 @@ class TraceStorage:
         response.stored_id = rec["id"]
         return rec["id"]
 
-    @_deprecate.kwargs(source="label_source")
+    @_deprecate.removed_kwargs(source="label_source")
     def save_correction(self, question, init_state, answer, meta=None, *, label_source="human", by=None, of=None):
         """Store a correction (what System.teach records) → its id. label_source (`source=` in 0.7; stored as the
         record's "source"): where the label comes from — "human" (a person
@@ -420,7 +420,7 @@ class TraceStorage:
             raise KeyError(f"no stored record {id!r}")
         return d
 
-    @_deprecate.kwargs(catalog="system")
+    @_deprecate.removed_kwargs(catalog="system")
     def get(self, id, system=None):
         """The stored response with this id, loaded back with `system` (default: the store's; see Stored.response)."""
         return _stored(self.record(id), self.catalog).response(system)
@@ -482,7 +482,7 @@ class TraceStorage:
                  "of": s.data.get("of")}
                 for s in self.iter("teach")]
 
-    @_deprecate.kwargs(catalog="catalog_fp")
+    @_deprecate.removed_kwargs(catalog="catalog_fp")
     def query(self, question=None, answer=ANY, status=None, safeguard=None, model=None, since=None, until=None,
               catalog_fp=None):
         """Stored responses that match every filter given → [Stored] in stored order.
@@ -709,13 +709,11 @@ class TraceStorage:
                 out.append({"id": s.id, "seq": s.seq, "time": s.time, "questions": hit})
         return out
 
-    def forget(self, fact, value=ANY):
-        """Deprecated (removed in 0.9): where_is(fact, value) — it never deleted anything."""
-        _deprecate.renamed("TraceStorage.forget()", "TraceStorage.where_is()")
-        return self.where_is(fact, value)
+    forget = _deprecate.removed_attr("forget()", "where_is(fact, value) (forget never deleted anything)", "TraceStorage")
 
     def where_is(self, fact, value=ANY):
-        """Where a given fact (e.g. a person's data) is held, and what removing it would touch (`forget` in 0.7) a given fact (e.g. a person's data) would touch — a report only: nothing is deleted (deleting a
+        """Where a given fact (e.g. a person's data) is held, and what removing it would touch (`forget` in 0.7) — a
+        report only: nothing is deleted (deleting a
         stored record breaks the chain by design; keep the report as the record of the request, and erase the records it
         lists with redact).
         → {"fact", "value", "dependent": the stored decisions whose answers rest on it (as quarantine), "stored": ids of the
@@ -789,7 +787,7 @@ class JSONLStorage(TraceStorage):
     against the file's last line) without reading every record — a long file opens at once, for a process that only
     appends; get(id) then scans the file. A head that does not match the last line is not trusted: the file is read."""
 
-    @_deprecate.kwargs(catalog="system")
+    @_deprecate.removed_kwargs(catalog="system")
     def __init__(self, path, system=None, clock=None, fsync=False, index=True):
         super().__init__(system, clock)
         self.path = os.fspath(path)
@@ -1182,7 +1180,7 @@ class _SQLStorage(TraceStorage):
             if chained(d) and (redacted or not d.get("redacted")):
                 yield _stored(d, self.catalog)
 
-    @_deprecate.kwargs(catalog="catalog_fp")
+    @_deprecate.removed_kwargs(catalog="catalog_fp")
     def query(self, question=None, answer=ANY, status=None, safeguard=None, model=None, since=None, until=None,
               catalog_fp=None):
         since, until = _when(since), _when(until)
@@ -1267,7 +1265,7 @@ class SQLiteStorage(_SQLStorage):
     begin = "BEGIN IMMEDIATE"
     types = {"INT": "INTEGER", "REAL": "REAL", "TEXT": "TEXT"}
 
-    @_deprecate.kwargs(catalog="system")
+    @_deprecate.removed_kwargs(catalog="system")
     def __init__(self, path, system=None, clock=None, timeout=30.0):
         import sqlite3
         super().__init__(system, clock)
@@ -1285,7 +1283,7 @@ class PostgresStorage(_SQLStorage):
     placeholder = "%s"
     lock = "LOCK TABLE {p}meta IN SHARE ROW EXCLUSIVE MODE"
 
-    @_deprecate.kwargs(catalog="system")
+    @_deprecate.removed_kwargs(catalog="system")
     def __init__(self, conninfo, system=None, clock=None, prefix="solvi_"):
         super().__init__(system, clock)
         if isinstance(conninfo, str):
@@ -1308,7 +1306,7 @@ class DuckDBStorage(_SQLStorage):
     begin = "BEGIN TRANSACTION"
     types = {"INT": "BIGINT", "REAL": "DOUBLE", "TEXT": "VARCHAR"}
 
-    @_deprecate.kwargs(catalog="system")
+    @_deprecate.removed_kwargs(catalog="system")
     def __init__(self, path, system=None, clock=None, prefix=""):
         try:
             import duckdb

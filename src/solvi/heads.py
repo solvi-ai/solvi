@@ -8,7 +8,7 @@ System.fit built this head before 0.8; it now builds a FastHead (below), whose s
 squared error (accuracy kept nothing on imbalanced questions). Head stays for code that builds one itself; its
 Featurizer is shared with FastHead.
 
-FastHead, VecFeaturizer and CandidateHead were solvi.fast up to 0.7 (the module still reads, with a warning):
+FastHead, VecFeaturizer and CandidateHead were solvi.fast up to 0.7 (that module was removed in 0.9):
 
 Fast answer head: closed-form ridge regression, learned in milliseconds and updated instantly from every correction.
 
@@ -124,7 +124,7 @@ class Head:
         self.prior = None
         self._fp = None
 
-    loo_acc = _deprecate.attr("loo_acc", "cv_acc", "Head")      # 0.7: the same number under the other head's name
+    loo_acc = _deprecate.removed_attr("loo_acc", "cv_acc", "Head")      # 0.7: FastHead's number
 
     def fingerprint(self):
         """A stable hash of the head's parameters (recorded with every answer it gives)."""
@@ -338,7 +338,7 @@ class FastHead:
                               None if self.fz is None else self.fz.spec)
         return self._fp
 
-    cv_acc = _deprecate.attr("cv_acc", "loo_acc", "FastHead")   # 0.7: the leave-one-out accuracy under Head's name
+    cv_acc = _deprecate.removed_attr("cv_acc", "loo_acc", "FastHead")   # 0.7: Head's number
 
     def _x(self, row):
         b = np.array(self.fz.row(row, self.features))
@@ -387,10 +387,7 @@ class FastHead:
         import math
         return max(self.fitted_on + 1, math.ceil(self.fitted_on * self.refit))
 
-    def update(self, row, answer):
-        """Deprecated (removed in 0.9): teach(row, answer)."""
-        _deprecate.renamed("FastHead.update()", "FastHead.teach()")
-        return self.teach(row, answer)
+    update = _deprecate.removed_attr("update()", "teach()", "FastHead")
 
     def teach(self, row, answer):
         """Absorb one labeled example (rank-one update of the inverse; a refit on all kept examples when their number reaches

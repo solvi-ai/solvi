@@ -5,7 +5,7 @@ import warnings
 
 import pytest
 
-from solvi import Catalog, SQLiteStorage, SolviDeprecationWarning, System
+from solvi import Catalog, SQLiteStorage, System
 from solvi.decide import DecideModel
 from solvi.learning import ExperimentalWarning, Learning, split_of
 from solvi.storage import UntrustedLabel
@@ -384,11 +384,3 @@ def test_a_combination_question_is_left_out_by_default_instead_of_making_learnin
     q2 = Cascade([m.decision("team", TASK, "email", TEAMS)], name="team2").question(cat, "route2")
     s = System(cat, [q, q2], storage=SQLiteStorage(tmp_path / "d.db"))
     assert list(loop_of(s).parts) == ["route"]
-
-
-def test_harvest_rules_is_deprecated_and_harvests_nothing(tmp_path):
-    """harvest_rules=True harvested nothing in the usual wiring and what it harvested failed the held-out gate."""
-    part, s, store = build(tmp_path)
-    with pytest.warns(ExperimentalWarning), pytest.warns(SolviDeprecationWarning, match="harvest_rules"):
-        loop = s.learning(harvest_rules=True)
-    assert loop.labels()["labels"] == [] and not hasattr(loop, "harvest_rules")

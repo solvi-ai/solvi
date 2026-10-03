@@ -39,8 +39,7 @@ class DecideModel:
     column per mode: [:, 0] choose-one, [:, 1] multi-label, more as `meta["columns"]` says) or {"logits": array, "act":
     logit}; optionally `logits_pass(passes)` → per Pass a list of those (one per question) and `fingerprint()`."""
 
-    long_len = property(lambda self: (_deprecate.renamed("DecideModel.long_len", "max_len_long"), self.max_len_long)[1],
-                        doc="Deprecated (removed in 0.9): max_len_long.")
+    long_len = _deprecate.removed_attr("long_len", "max_len_long", "DecideModel")
 
     deterministic = True
 
@@ -190,11 +189,7 @@ class DecideModel:
         """Does the checkpoint give a "not stated" output (an l14g checkpoint's `unknown`)?"""
         return self.caps.get("unknown") is not None
 
-    @property
-    def has_unknown(self):
-        """Deprecated (removed in 0.9): has_not_stated."""
-        _deprecate.renamed("DecideModel.has_unknown", "has_not_stated")
-        return self.has_not_stated
+    has_unknown = _deprecate.removed_attr("has_unknown", "has_not_stated", "DecideModel")
 
     @property
     def has_pointer(self):
@@ -730,7 +725,7 @@ class DecideModel:
             d.escalate = f"confidence {d.conf:.2f} < {eb:.2f} (escalate_below); would have answered {d.value!r}"
         return d
 
-    @_deprecate.kwargs(escalate_below="min_confidence")
+    @_deprecate.removed_kwargs(escalate_below="min_confidence")
     @_spec_names
     def decide(self, text, task, options, descriptions=None, multi=False, other=None, kind=None, min_confidence=None,
                **spec):
@@ -932,7 +927,7 @@ class DecideModel:
         return self
 
     # --- catalog parts
-    @_deprecate.kwargs(escalate_below="min_confidence", act_threshold="min_act", target_error="max_error",
+    @_deprecate.removed_kwargs(escalate_below="min_confidence", act_threshold="min_act", target_error="max_error",
                        unknown="not_stated")
     def decision(self, name, task, text_fact="doc", options=(), descriptions=None, multi=False, other=None, *, kind=None,
                  type=None, min_confidence=None, min_act=None, use_act=None, max_error=None,
@@ -991,7 +986,7 @@ class DecideModel:
         head), and kind= that contradicts multi=True.
 
         Names (0.8): min_confidence= (0.7: escalate_below=), min_act= (act_threshold=), max_error= (target_error=),
-        not_stated= (unknown=) — the old ones work with a SolviDeprecationWarning until 0.9; the part keeps the thresholds as
+        not_stated= (unknown=) — the old ones were removed in 0.9 (a TypeError names the new one); the part keeps the thresholds as
         `part.min_confidence` / `part.min_act`."""
         escalate_below, act_threshold, target_error, unknown = min_confidence, min_act, max_error, not_stated
         given = {"score_value": score_value, "k": k, "bins": bins, "unit": unit, "coverage": coverage, "other": other,
@@ -1061,8 +1056,8 @@ class DecideModel:
         """One decision part per field of a pydantic model class: the field's type is the question (bool, Literal[...],
         an Enum, Scale[...], list[Literal[...]]), its description the task (else its title, else its name), and
         `json_schema_extra` may carry "options" ({option: description}), "min_confidence", "min_act", "use_act",
-        "max_error", "other", "score_value" (the 0.7 keys "escalate_below", "act_threshold", "target_error" still read,
-        with a SolviDeprecationWarning). → {field: DecisionPart} in field order."""
+        "max_error", "other", "score_value" (the 0.7 keys "escalate_below", "act_threshold", "target_error" were removed
+        in 0.9: a field with one raises). → {field: DecisionPart} in field order."""
         import typing
 
         from ..typed import Bins, Ordinal, RankOf, SpanOf
@@ -1077,12 +1072,14 @@ class DecideModel:
             extra = fi.json_schema_extra if isinstance(fi.json_schema_extra, dict) else {}
             args = dict(kw)
             old = {"escalate_below": "min_confidence", "act_threshold": "min_act", "target_error": "max_error"}
-            for k in ("min_confidence", "min_act", "use_act", "max_error", "other", "score_value", "kind",
-                      "evidence", "coverage", "unit", *old):
+            for k in old:
                 if k in extra:
-                    if k in old:
-                        _deprecate.renamed(f"json_schema_extra {k!r}", repr(old[k]), stacklevel=3)
-                    args[old.get(k, k)] = extra[k]
+                    raise ValueError(f"{schema.__name__}.{name}: json_schema_extra {k!r} was renamed in 0.8 and removed "
+                                     f"in 0.9: use {old[k]!r}")
+            for k in ("min_confidence", "min_act", "use_act", "max_error", "other", "score_value", "kind",
+                      "evidence", "coverage", "unit"):
+                if k in extra:
+                    args[k] = extra[k]
             task = fi.description or fi.title or name.replace("_", " ").capitalize() + "?"
             out[name] = self.decision(name, task, text_fact, options=extra.get("options") or (), type=t, **args,
                                       _shared=frozenset(kw))      # an option given to every field applies where it can

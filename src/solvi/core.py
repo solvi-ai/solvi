@@ -313,10 +313,7 @@ class AnswerType(Serial):
             raise ValueError(f"answer {v!r} is not one of {self.options}")
         return v
 
-    def rank(self, v):
-        """Deprecated (removed in 0.9; the name is `Answer.rank`'s, a ranking question): `options.index(v)`."""
-        _deprecate.renamed("AnswerType.rank(v)", "answer_type.options.index(v)")
-        return self.options.index(v)
+    rank = _deprecate.removed_attr("rank(v)", "options.index(v)", "AnswerType")
 
 
 def _opts(options):
@@ -437,11 +434,11 @@ class Answer:
         return answer_type_of(t, ordinal)
 
 
-@_deprecate.init_kwargs(checkpoints="requires")
+@_deprecate.removed_kwargs(checkpoints="requires")
 @dataclass
 class Question(Serial):
     """A question the System answers: its name, text and answer type (None: from its rule's return type), the parts
-    that must run in its flow (`requires`; `checkpoints=` in 0.7), the facts that matter for a question without a rule (`uses`), and the
+    that must run in its flow (`requires`; `checkpoints=` in 0.7, removed in 0.9), the facts that matter for a question without a rule (`uses`), and the
     abstentions it asks for (`min_confidence`, `require_evidence`)."""
     name: str
     text: str
@@ -450,7 +447,7 @@ class Question(Serial):
     uses: list | None = None                          # hint to the strategist: which facts matter (when there is no rule or fit)
     min_confidence: float | None = None               # an answer below this confidence abstains (a low-confidence safeguard)
     require_evidence: bool = False                    # an answer without supporting quotes abstains ("evidence missing")
-    checkpoints = _deprecate.attr("checkpoints", "requires", "Question")    # 0.7 name, removed in 0.9 (not a field)
+    checkpoints = _deprecate.removed_attr("checkpoints", "requires", "Question")    # 0.7 name (not a field)
 
 
 @dataclass

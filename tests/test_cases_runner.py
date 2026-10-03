@@ -223,7 +223,7 @@ def test_a_case_that_cannot_fail_is_reported(tmp_path):
     ]
     (res,) = testing.run_path(_write(tmp_path, hollow))
     p = {c.name: c.problems for c in res.cases}
-    assert p["typo in the key"] == ["unknown key(s) 'expcted' (a case has: name, state, expected, gold, status, safeguards, ask, note)"]
+    assert p["typo in the key"] == ["unknown key(s) 'expcted' (a case has: name, state, expected, status, safeguards, ask, note)"]
     assert p["nothing expected"] == ['the case expects nothing: give "expected", "status" or "safeguards"']
     assert p["status of a question not asked"][0].startswith("status of rout: not asked")
     assert p["safeguards of a question not asked"][0].startswith("safeguards of rout: not asked")
@@ -275,11 +275,13 @@ def test_one_case_format_for_solvi_test_and_solvi_honesty(tmp_path, capsys):
     assert rep["cases"] == len(json.loads(gallery.read_text())) > 5 and rep["metrics"]
     (tmp_path / "task.py").write_text(STORING_TASK)
     (tmp_path / "cases.json").write_text(json.dumps({"system": "task.py:system", "cases": [
-        {"name": "big", "state": {"amount": 500}, "gold": {"big": "yes"}},              # a honesty case ("gold")
-        {"name": "small", "state": {"amount": 5}, "gold": {"big": "yes"}}]}))
+        {"name": "big", "state": {"amount": 500}, "expected": {"big": "yes"}},
+        {"name": "small", "state": {"amount": 5}, "expected": {"big": "yes"}},
+        {"name": "old", "state": {"amount": 500}, "gold": {"big": "yes"}}]}))       # "gold": the 0.7 key, gone in 0.9
     (res,) = testing.run_path(tmp_path)
-    assert [c.ok for c in res.cases] == [True, False] and "big" in res.cases[1].problems[0]
-    with pytest.raises(ValueError, match='both "gold" and "expected"'):
+    assert [c.ok for c in res.cases] == [True, False, False] and "big" in res.cases[1].problems[0]
+    assert any('"gold" is the 0.7 key' in p and '"expected"' in p for p in res.cases[2].problems)
+    with pytest.raises(ValueError, match='has "gold", the key before 0.8 \\(removed in 0.9\\): name its right answers "expected"'):
         honesty.load_set(_both(tmp_path))
 
 

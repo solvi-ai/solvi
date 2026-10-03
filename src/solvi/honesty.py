@@ -43,7 +43,6 @@ import sys
 import types
 from pathlib import Path
 
-from . import _deprecate
 
 from .core import NOT_STATED_KEY, Unknown
 
@@ -56,18 +55,16 @@ ABSTAIN = None                                    # a gold answer of null: the h
 def load_set(path):
     """A honesty set (JSON) → its dict, with "path" and "task" (the task module's path) resolved. A case's right answers
     are its "expected", as in a `solvi test` cases.json (null or "abstain": the honest outcome is to abstain), so one file
-    serves both commands. "gold", the 0.7 key, is still read (SolviDeprecationWarning; removed in 0.9); a case with both is
-    an error."""
+    serves both commands. "gold", the 0.7 key, was removed in 0.9: a case with it is an error."""
     path = Path(path)
     data = json.loads(path.read_text())
     if isinstance(data, list):                    # a bare list of cases (e.g. a gallery cases.json with gold answers)
         data = {"cases": data}
     for i, c in enumerate(data.get("cases") or ()):
-        if "gold" in c and "expected" in c:
-            raise ValueError(f'{path}: case {c.get("name", i + 1)!r} has both "gold" and "expected" (they are one thing)')
         if "gold" in c:
-            _deprecate.renamed('a honesty case\'s "gold"', '"expected" (as in solvi test)')
-        elif "expected" in c:                       # internally the honesty code calls the right answers "gold"
+            raise ValueError(f'{path}: case {c.get("name", i + 1)!r} has "gold", the key before 0.8 (removed in 0.9): '
+                             'name its right answers "expected", as in solvi test')
+        if "expected" in c:                       # internally the honesty code calls the right answers "gold"
             c["gold"] = {q: None if v == "abstain" else v for q, v in (c["expected"] or {}).items()}
     data.setdefault("name", path.stem)
     data.setdefault("version", None)

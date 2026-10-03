@@ -226,10 +226,7 @@ class Binary:
         self.head = None
         self._since = 0
 
-    def observe(self, row, y):
-        """Deprecated (removed in 0.9): teach(row, y)."""
-        _deprecate.renamed("Binary.observe()", "Binary.teach()")
-        return self.teach(row, y)
+    observe = _deprecate.removed_attr("observe()", "teach()", "Binary")
 
     def teach(self, row, y):
         """One labelled row: y is True or False."""

@@ -19,7 +19,7 @@ import sys
 
 class LoadError(Exception):
     """A "module:attr" / "file.py:attr" name that cannot be read — or a factory it names that says it cannot build
-    its object (solvi.hooks:rules_system without SOLVI_HOOK_MODEL)."""
+    its object (solvi.hooks:rules_system without SOLVI_HOOK_DECIDER)."""
 
 
 def load_object(spec):

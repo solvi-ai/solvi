@@ -183,7 +183,7 @@ class Learning:
     experimental = True
 
     def __init__(self, system, storage=None, parts=None, ladder=None, gates=None, changelog=None, holdout=0.3,
-                 calibration=0.2, gate_teach=True, harvest_rules=None):
+                 calibration=0.2, gate_teach=True):
         from .decide import DecisionPart, decision_of
         warnings.warn("System.learning is experimental: its API and gates may change", ExperimentalWarning, stacklevel=3)
         self.system = system
@@ -218,10 +218,6 @@ class Learning:
         self.gates = {**GATES, **(gates or {})}
         self.holdout, self.calibration = float(holdout), float(calibration)
         self.gate_teach = bool(gate_teach)
-        if harvest_rules is not None:                  # 0.7: it harvested nothing in the usual wiring (a failed hard check
-            from . import _deprecate                  # answers before the model is asked) and what it did harvest failed
-            _deprecate.renamed("System.learning(harvest_rules=)",   # the held-out gate
-                               "corrections with source=\"rule\" (system.teach(..., label_source=\"rule\")); it is ignored")
         self._states = {}                              # version → in-process snapshot (keeps objects JSON cannot hold)
         system._learning = self
 

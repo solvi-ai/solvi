@@ -245,7 +245,7 @@ def with_policies(tools, guard) -> list:
     return out
 
 
-@_deprecate.kwargs(declare="auto_declare")
+@_deprecate.removed_kwargs(declare="auto_declare")
 def guard_wrappers(guard, facts: Callable | dict | None = None, on_escalate="interrupt", auto_declare=False):
     """(wrap_tool_call, awrap_tool_call) for your own ToolNode (or a create_agent middleware); the first one's
     `.decisions` lists every GuardDecision."""
@@ -253,7 +253,7 @@ def guard_wrappers(guard, facts: Callable | dict | None = None, on_escalate="int
     return w, w.acall
 
 
-@_deprecate.kwargs(declare="auto_declare")
+@_deprecate.removed_kwargs(declare="auto_declare")
 def guarded_tool_node(tools, guard, facts: Callable | dict | None = None, on_escalate="interrupt", auto_declare=False,
                       **kw) -> ToolNode:
     """A ToolNode over `tools` whose every call passes `guard` (see the module docs). facts: a dict, or a function of

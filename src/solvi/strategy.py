@@ -617,12 +617,12 @@ class CostStrategist:
         computed (keep_alternatives=True).
     on_failure: when the verified plan cannot be built — "code" (the code plan), "deterministic" (solvi.strategist.plan)
     or "abstain" (every question abstains). keep_alternatives: keep the other producers of a fact as run-time fallbacks.
-    record: write the plan record into the trace. (0.7 names: fallback= for on_failure=, fallbacks= for
-    keep_alternatives=; they still work with a SolviDeprecationWarning until 0.9.)"""
+    record: write the plan record into the trace. (0.7 names, removed in 0.9: fallback= for on_failure=, fallbacks= for
+    keep_alternatives=.)"""
 
     model = None
 
-    @_deprecate.kwargs(fallback="on_failure", fallbacks="keep_alternatives")
+    @_deprecate.removed_kwargs(fallback="on_failure", fallbacks="keep_alternatives")
     def __init__(self, producers="declared", on_failure="code", costs=None, keep_alternatives=True, record=True):
         self._setup(None, producers, on_failure, costs, keep_alternatives, record)
 
@@ -635,8 +635,8 @@ class CostStrategist:
         self.keep_alternatives, self.record = keep_alternatives, record
         self.last = None
 
-    fallback = _deprecate.attr("fallback", "on_failure", "CostStrategist")
-    fallbacks = _deprecate.attr("fallbacks", "keep_alternatives", "CostStrategist")
+    fallback = _deprecate.removed_attr("fallback", "on_failure", "CostStrategist")
+    fallbacks = _deprecate.removed_attr("fallbacks", "keep_alternatives", "CostStrategist")
 
     @property
     def fingerprint(self):
@@ -739,14 +739,15 @@ class CostStrategist:
 
 class ModelStrategist(CostStrategist):
     """CostStrategist with a model (experimental: no checkpoint is published) that proposes the producers where declared
-    costs do not settle the choice; code verifies every proposal (see the module docs). ModelStrategist() without a model
-    is CostStrategist() — that spelling of 0.7 still works, with a SolviDeprecationWarning."""
+    costs do not settle the choice; code verifies every proposal (see the module docs). Without a model it is
+    CostStrategist() (ModelStrategist() without one, the 0.7 spelling, was removed in 0.9)."""
 
-    @_deprecate.kwargs(fallback="on_failure", fallbacks="keep_alternatives")
-    def __init__(self, model=None, producers="declared", on_failure="code", costs=None, keep_alternatives=True,
+    @_deprecate.removed_kwargs(fallback="on_failure", fallbacks="keep_alternatives")
+    def __init__(self, model, producers="declared", on_failure="code", costs=None, keep_alternatives=True,
                  record=True):
         if model is None:
-            _deprecate.renamed("ModelStrategist() without a model", "CostStrategist()")
+            raise TypeError("ModelStrategist() needs a model: without one it is CostStrategist() (ModelStrategist() "
+                            "without a model was renamed in 0.8 and removed in 0.9)")
         self._setup(model, producers, on_failure, costs, keep_alternatives, record)
 
     @classmethod

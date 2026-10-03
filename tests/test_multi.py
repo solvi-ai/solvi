@@ -4,7 +4,7 @@ its threshold (checked by simulation, as test_guarantees does for one part); rep
 import numpy as np
 import pytest
 
-from solvi import Answer, Catalog, Question, SolviDeprecationWarning, System
+from solvi import Answer, Catalog, Question, System
 from solvi.decide import DecideModel, Facts
 from solvi.multi import Cascade, Route, Vote, _src
 from solvi.runtime import Trace
@@ -58,8 +58,6 @@ def test_cascade_asks_the_large_model_only_when_the_small_one_escalates():
     assert d.extra["answered_by"] is None and d.extra["calls"] == 2 and d.value == d.extra["stages"][1]["value"]
     u = c.calls()
     assert u["asked"] == 2 and u["calls"] == {"0:team": 2, "1:team": 1} and u["calls_per_question"] == 1.5
-    with pytest.warns(SolviDeprecationWarning, match=r"usage\(\) is deprecated since 0.8 and will be removed in 0.9: use calls\(\)"):
-        assert c.usage()["calls_per_question"] == 1.5                 # the 0.7 name, one release
     assert u["cost"] == pytest.approx((2 * 45 + 137) / 2)
 
 
@@ -555,7 +553,7 @@ def test_parts_and_combinations_speak_one_decider_protocol():
     assert one["signal"] in ("act", "confidence") and both["signal"] == "shared"
     with pytest.raises(ValueError, match="a combination's signal is each part's own"):
         Vote([s, l_]).act_guard(cal, max_risk=0.10, signal="act")
-    with pytest.warns(SolviDeprecationWarning, match=r"act_guard\(risk=\) is deprecated since 0.8 and will be removed in 0.9: use max_risk="):
+    with pytest.raises(TypeError, match=r"act_guard\(risk=\) was renamed in 0.8 and removed in 0.9: use max_risk="):
         Vote([s, l_]).act_guard(cal, risk=0.10)
 
 

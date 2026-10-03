@@ -142,7 +142,7 @@ class Upstream:
 class Proxy:
     """The proxy's state: the guard, the upstream server, the session (tool outputs seen so far, the facts)."""
 
-    @_deprecate.kwargs(context_messages="max_messages", context_chars="max_chars")
+    @_deprecate.removed_kwargs(context_messages="max_messages", context_chars="max_chars")
     def __init__(self, guard, upstream, facts=None, escalate="elicit", max_messages=CONTEXT_MESSAGES,
                  max_chars=CONTEXT_CHARS):
         if not isinstance(guard, Guard):
@@ -231,7 +231,7 @@ def _meta(d):
     return {"outcome": d.outcome, "stored_id": d.stored_id, "trace_hash": d.trace_hash}
 
 
-@_deprecate.kwargs(context_messages="max_messages", context_chars="max_chars")
+@_deprecate.removed_kwargs(context_messages="max_messages", context_chars="max_chars")
 def run_proxy(guard, upstream, facts=None, escalate="elicit", stdin=None, stdout=None, limits=None,
               max_messages=CONTEXT_MESSAGES, max_chars=CONTEXT_CHARS):
     """The proxy over stdio (see the module docs). upstream: a command line (or an Upstream). max_messages /

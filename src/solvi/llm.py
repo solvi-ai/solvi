@@ -137,7 +137,6 @@ class LLMError(RemoteError):
 
 _FORMAT_WORDS = re.compile(r"response_format|json_schema|json_object|logprobs|structured[ _-]?outputs?|guided",
                            re.IGNORECASE)
-_error_text = error_text                               # 0.7 name, for the modules that import it
 
 
 def _shape(it):

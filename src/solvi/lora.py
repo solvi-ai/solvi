@@ -444,7 +444,7 @@ def _accuracy(part, hold):
     return float(sum(ok) / len(ok))
 
 
-@_deprecate.kwargs(risk="max_risk")
+@_deprecate.removed_kwargs(risk="max_risk")
 def adapt(part, examples, *, r=8, epochs=6, holdout=None, seed=0, device=None, lr=3e-4, max_risk=0.10,
           signal="confidence", max_updates=400, allow_large=False):
     """part.adapt_lora (see there). allow_large: in-process training of a checkpoint larger than solvi-base (what

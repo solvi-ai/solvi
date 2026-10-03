@@ -3,7 +3,7 @@ import random
 
 import pytest
 
-from solvi import Answer, Catalog, Question, SolviDeprecationWarning, System
+from solvi import Answer, Catalog, Question, System
 
 
 def test_multi_rule_normalizes_to_option_order():
@@ -49,8 +49,8 @@ def test_ordinal_answers_with_the_median():
     from solvi.system import System as S
     at = Answer.ordinal({"low": "no action", "medium": "watch", "high": "act now"})
     assert at.options == ["low", "medium", "high"] and at.descriptions["high"] == "act now"
-    with pytest.warns(SolviDeprecationWarning, match=r"options.index"):
-        assert at.rank("medium") == 1
+    with pytest.raises(AttributeError, match=r"removed in 0.9: use options.index\(v\)"):
+        at.rank("medium")
 
     class FakeHead:                          # bimodal distribution: argmax would say "high", the median is "medium"
         features = []

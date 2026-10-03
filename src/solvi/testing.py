@@ -12,7 +12,8 @@ builds it (paths relative to the cases file). A case:
      "safeguards": {"priority": ["hard_check"]},           # optional: the safeguard kinds that fire for a question (exactly)
      "ask": ["priority", "route"]}                         # optional: ask only these questions (default: all)
 
-("gold" — the key a honesty set uses — is read as "expected", so one file serves `solvi test` and `solvi honesty`.)
+(A honesty set names its right answers "expected" too, so one file serves `solvi test` and `solvi honesty`; "gold", the
+0.7 key, was removed in 0.9.)
 An expected answer is written as in solvi's JSON: an option, a list for multi-label, a number, "<not stated>" for
 solvi.Unknown; null or "abstain" means the question must abstain. Every response's trace must also replay.
 
@@ -33,7 +34,6 @@ from pathlib import Path
 
 from .honesty import gold_of, load_task, same, system_of
 from .honesty import _plain
-from . import _deprecate
 
 ABSTAIN_WORDS = ("abstain",)
 
@@ -154,13 +154,7 @@ def _store_kw(system, store):
         return {}
 
 
-CASE_KEYS = ("name", "state", "expected", "gold", "status", "safeguards", "ask", "note")
-
-
-def check(system, case, state, store=False):
-    """Deprecated (removed in 0.9): run_case(system, case, state)."""
-    _deprecate.renamed("solvi.testing.check()", "solvi.testing.run_case()")
-    return run_case(system, case, state, store)
+CASE_KEYS = ("name", "state", "expected", "status", "safeguards", "ask", "note")
 
 
 def run_case(system, case, state, store=False):
@@ -170,12 +164,12 @@ def run_case(system, case, state, store=False):
     a question that was not asked, a case that expects nothing."""
     name = case.get("name", "?")
     out = CaseResult(name)
-    odd = sorted(k for k in case if k not in CASE_KEYS)
+    odd = sorted(k for k in case if k not in CASE_KEYS and k != "gold")
     if odd:
         out.problems.append(f"unknown key(s) {', '.join(map(repr, odd))} (a case has: {', '.join(CASE_KEYS)})")
-    if "gold" in case and "expected" in case:
-        out.problems.append('both "gold" and "expected": they are one thing (a honesty set says "gold")')
-    expected = case.get("expected") if "expected" in case else case.get("gold")
+    if "gold" in case:
+        out.problems.append('"gold" is the 0.7 key of the right answers (removed in 0.9): name them "expected"')
+    expected = case.get("expected")
     if not (expected or case.get("status") or case.get("safeguards") or isinstance(case.get("safeguards"), list)):
         out.problems.append("the case expects nothing: give \"expected\", \"status\" or \"safeguards\"")
     try:
@@ -377,5 +371,5 @@ def main(argv=None):
     return 0 if passed == n and not bad_files else 1
 
 
-__all__ = ["CaseResult", "check", "FileResult", "find", "fuzz", "is_cases_file", "load", "main", "mutations",
+__all__ = ["CaseResult", "FileResult", "find", "fuzz", "is_cases_file", "load", "main", "mutations",
            "run_case", "run_file", "run_path", "Suite"]

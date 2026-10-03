@@ -4,7 +4,6 @@ from __future__ import annotations
 import functools
 
 
-from .. import _deprecate
 
 
 
@@ -55,18 +54,16 @@ NULL_SOURCE = "text"                            # the source of a pointer quote 
 
 
 def _spec_names(fn):
-    """`not_stated=` is the name; `unknown=` (0.7) still works with a SolviDeprecationWarning. The internal spec keeps
-    `unknown` (stored adaptations and calibration files carry that key)."""
+    """`not_stated=` is the name (`unknown=` in 0.7, removed in 0.9). The internal spec keeps `unknown` (stored
+    adaptations and calibration files carry that key)."""
     where = fn.__qualname__
 
     @functools.wraps(fn)
     def wrapper(*args, **kw):
+        if "unknown" in kw:
+            raise TypeError(f"{where}(unknown=) was renamed in 0.8 and removed in 0.9: use not_stated=")
         if "not_stated" in kw:
-            if "unknown" in kw:
-                raise TypeError(f"{where}() got both unknown= and not_stated=: unknown= is the old name of not_stated=")
             kw["unknown"] = kw.pop("not_stated")
-        elif "unknown" in kw:
-            _deprecate.renamed(f"{where}(unknown=)", "not_stated=", stacklevel=3)
         return fn(*args, **kw)
     return wrapper
 

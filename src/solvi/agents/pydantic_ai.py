@@ -82,7 +82,7 @@ def context_of(messages) -> list:
     return [(r, t) for r, t in out if t]
 
 
-@_deprecate.init_kwargs(declare="auto_declare")      # 0.7 name, removed in 0.9
+@_deprecate.removed_kwargs(declare="auto_declare")      # 0.7 name, removed in 0.9
 @dataclasses.dataclass
 class GuardedToolset(WrapperToolset):
     """A toolset whose every call passes `guard` (see the module docs). facts: a dict, or a function of the RunContext

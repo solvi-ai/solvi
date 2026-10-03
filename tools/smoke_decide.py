@@ -71,12 +71,12 @@ def run(path, backend):
     t0 = time.perf_counter()
     m = DecideModel.load(path, backend=backend, device="cpu")
     print(f"  loaded in {time.perf_counter() - t0:.1f} s: {m.backend}; format {m.meta.get('format')} / "
-          f"{m.meta.get('subformat', '-')}; modes {m.caps['modes']}; not stated {m.has_unknown}; pointer {m.has_pointer}; "
+          f"{m.meta.get('subformat', '-')}; modes {m.caps['modes']}; not stated {m.has_not_stated}; pointer {m.has_pointer}; "
           f"act {m.has_act}; batchable {m.batchable}; fp {m.weights_fingerprint()}")
     out = {}
 
     # 1. answer primitives from a text: the full layout, pointer over the tokenizer's offsets
-    if m.has_unknown and m.has_pointer:
+    if m.has_not_stated and m.has_pointer:
         cat, qs = primitives_catalog(m)
         s = System(cat, qs)
         for name in ("claim", "sparse"):
