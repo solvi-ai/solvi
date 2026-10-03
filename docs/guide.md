@@ -3865,12 +3865,20 @@ lets an LLM write those parts from the text and accepts them only after checks t
    raises on one has a bug. A disagreement goes back to both writers with the input, both answers and the clauses
    their deciding parts cite;
 4. **tests derived from the text**, written by a separate call that never sees the code, each naming the clause it
-   checks; both drafts must pass them. A test that every draft which runs fails goes back once to the test writer,
-   which works the answer out again and keeps, corrects or drops it — recorded, since a test can be wrong as well;
+   checks; both drafts must pass them. A test that every draft which answers it fails (at least one answers) goes
+   back once to the test writer, which works the answer out again and keeps, corrects or drops it — recorded, since a
+   test can be wrong as well (a draft that abstains on the test's input says nothing about the test: that goes back
+   to the draft);
 5. labelled examples or a reference function, when you have them (`examples=`, `reference=`), as further checks.
 
 A draft that fails is rewritten from its module and the failures, for up to `rounds` rounds. Acceptance is automatic
 when everything passes; otherwise `c.accepted` is False, `c.reason` says why, and `c.system()` raises `Rejected`.
+
+A draft that does not run for two rounds in a row (`stuck_after=2`) — the module contract or the sandbox refuses it, or
+the reply holds no module — is **replaced by a fresh draft**: written from the task again, with a seed of its own,
+told what the stuck draft was refused for but never shown its code. At most `fresh_drafts=2` replacements per
+compilation (`0`: never); each is in `c.record["replaced"]` (round, draft, why). The fresh draft meets every check
+above; it only keeps a draft stuck on the contract from blocking a partner that works.
 
 ```python
 import json
@@ -3937,8 +3945,14 @@ With a model the stand-in is `generator(base_url, "openai/gpt-oss-120b", max_tok
 the first at temperature 0, the second at 0.7 with seed 1; `writer=[a, b]` takes two models.
 
 **What the writer is asked for.** A module of plain functions — a part's name is the fact it sets, its argument names
-are the inputs or facts it reads (a part that reads a name nothing gives is refused before it runs) — and two
-literal dicts: `PARTS` (kind `fn` / `check` / `rule`, for a hard check its `then`, for a rule its question, the clauses)
+are the inputs or facts it reads (a part that reads a name nothing gives is refused before it runs, unless other parts
+call it as a plain function: then it is a helper the writer listed in PARTS — it leaves PARTS, its clauses go to the
+parts that call it, recorded in the round's "notes"; a hard check is never treated so; and a part that reads a key
+of a dict-valued input by its own name — `friends` inside the input `facts` — gets an accessor part
+`def friends(facts): return facts["friends"]`, added and noted, which raises (so the decision abstains) when the key
+is missing) — and two
+literal dicts: `PARTS` (kind `fn` / `check` / `rule`, for a hard check its `then`, for a rule its question, the clauses;
+a check must cite one, a fact that only reads an input or a rule giving a default may cite none)
 and `NOT_NORMATIVE`. A hard check that names a question is required in that question's flow. A check may return
 `Fail("why")`. The prompts ask for one part per quantity a clause defines, so a stored decision shows each.
 
@@ -3946,6 +3960,114 @@ and `NOT_NORMATIVE`. A hard check that names a question is required in that ques
 with why), the reviews of tests, and per round each draft's problems, which check caught it ("contract", "sandbox",
 "abstained", "tests", "disagreement", "labelled examples", "the reference") and the agreement. `c.save(folder)` writes
 `module.py` and `compiled.json`; `Compiled.load(folder)` reads them back and refuses a module that was edited.
+
+### A large specification in groups: compile_groups
+
+A policy of fifty clauses over a dozen tools is too much for one draft to get right everywhere at once. `compile_groups`
+compiles it group by group: the clauses that govern each kind of decision — the values of one input field `by`, such as
+the tool's name — are compiled on their own, with the clauses every decision shares, by `compile_spec` and its whole
+acceptance (each group's drafts agree on the group's inputs, its tests come from its clauses). The accepted groups are
+assembled into one module: each group's parts keep their names under a prefix (`ship__open_address`), each answers only
+for its group's values (a check outside them is true, a fact is None), and one rule per question routes an input to the
+rule of its group. Then **the whole is checked again** on the full pool: the two assembled modules (the groups'
+accepted drafts, and their independent partners) agree on every input, every input of an accepted group gets an
+answer, each group's inputs are decided as the group's own draft decided them, and every group's tests pass. Nothing is
+rewritten at this step: a failure is a refusal with the reason.
+
+```python
+import json
+
+from solvi import Answer, Question
+from solvi.compile import Groups, Inputs, Spec, compile_groups
+
+POLICY = """# Agent policy
+- No tool is called before the user is authenticated.
+
+## Refunds
+- A refund is at most 100.
+
+## Shipping
+- Nothing ships to a closed address.
+"""
+MODULES = {                          # what the writer returns for each group (a stand-in here)
+    "refund": '''
+def small(amount):
+    return amount <= 100
+
+def allow(authed, small):
+    return bool(authed) and small
+
+PARTS = {"small": {"kind": "fn", "clauses": ["c2"]},
+         "allow": {"kind": "rule", "question": "allow", "clauses": ["c1", "c2"]}}
+NOT_NORMATIVE = {}
+''',
+    "ship": '''
+def open_address(closed):
+    return not closed
+
+def allow(authed):
+    return bool(authed)
+
+PARTS = {"open_address": {"kind": "check", "hard": True, "then": {"allow": "no"}, "clauses": ["c3"]},
+         "allow": {"kind": "rule", "question": "allow", "clauses": ["c1"]}}
+NOT_NORMATIVE = {}
+'''}
+TESTS = {"refund": {"clause": "c2", "input": {"tool": "refund", "authed": True, "amount": 101, "closed": False},
+                    "expect": {"allow": "no"}, "why": "over 100"},
+         "ship": {"clause": "c3", "input": {"tool": "ship", "authed": True, "amount": 5, "closed": True},
+                  "expect": {"allow": "no"}, "why": "a closed address"}}
+
+
+class StandIn:                       # a stand-in for generator(URL, "openai/gpt-oss-120b", ...)
+    model_id = "stand-in"
+
+    def fingerprint(self):
+        return "stand-in"
+
+    def generate(self, messages, parse=None, **kw):
+        p = messages[-1]["content"]
+        group = "refund" if 'is one of: "refund"' in p else "ship"
+        fence = "`" * 3
+        text = (f"{fence}json\n{json.dumps([TESTS[group]])}\n{fence}" if p.startswith("# Write tests")
+                else f"{fence}python\n{MODULES[group]}{fence}")
+        return type("G", (), {"value": parse(text) if parse else text, "meta": {"text": text}})()
+
+
+groups = Groups("tool", {"refund": {"values": ["refund"], "clauses": ["c2"]},
+                         "ship": {"values": ["ship"], "clauses": ["c3"]}}, shared=["c1"])
+inputs = Inputs({"tool": ["refund", "ship"], "authed": [True, False], "amount": (0, 300), "closed": [True, False]}, n=200)
+c = compile_groups(Spec(POLICY), [Question("allow", "May the call be made?", Answer.yes_no())], inputs, StandIn(),
+                   by="tool", groups=groups)
+print(c.accepted, c.reason)
+for name, g in c.record["groups"].items():
+    print(name, g["values"], g["clauses"], g["accepted"], g["reason"])
+print({k: c.record["whole"][k] for k in ("inputs", "disagree", "unfaithful", "tests_failed")})
+s = c.system()
+print(s.ask({"tool": "ship", "authed": True, "amount": 500, "closed": True})["allow"].answer,
+      s.ask({"tool": "refund", "authed": True, "amount": 500, "closed": False})["allow"].answer)
+```
+
+```
+True accepted: 2 group(s) assembled, the whole agrees on 205 inputs
+refund ['refund'] ['c2'] True accepted in round 1
+ship ['ship'] ['c3'] True accepted in round 1
+{'inputs': 205, 'disagree': 0, 'unfaithful': 0, 'tests_failed': 0}
+no no
+```
+
+Without `groups=`, `group_clauses(spec, by, values, writer)` asks the writer once to place each clause in the groups
+whose decisions it governs (or in `shared`); a grouping that leaves a clause out or puts a value in two groups is asked
+again with why, then refused. `values` default to the field's declared values, else those of the samples; a value no
+group names is decided by the shared clauses alone (group `other`). `partial=False` accepts the whole only when every
+group is accepted; `partial=True` assembles the accepted groups and lets the inputs of a refused group abstain, with
+the reason (`c.record["refused_groups"]`) — a guard that decides the tools whose rules compiled and escalates the rest.
+`c.groups` holds each group's own compilation (its record, tests, rounds); `c.record["groups"]` the summary per group.
+The result is an ordinary `Compiled`: `system()`, `to_guard`, `Versions` work as above; `recompile` does not patch it
+(compile the revised text in groups again).
+
+**Not done here.** The grouping decides what each group's drafts read: a clause left out of a group is not compiled
+for it, and neither its drafts nor its tests can notice — read `c.record["grouping"]`. A rule that ties two groups
+together (a limit summed over refunds and exchanges) belongs in `shared` or in both groups.
 
 ### A changed specification: recompile and the decisions it moves
 
