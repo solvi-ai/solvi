@@ -157,8 +157,11 @@ def ship_rule(big_order):
   A check can say why it is False: `return Fail("Harold is busy 13:30 - 15:30")` — see
   [A check that says why](#a-check-that-says-why-fail).
 
-  No rule and no model confidence can override a failed hard check. To make sure a hard check is always in a question's
-  flow, list it in the question's `requires`. When several hard checks fail, the first one declared in the catalog decides:
+  No rule and no model confidence can override a failed hard check. A hard check whose `then` names a question is put
+  into that question's flow by the strategist (since 1.0; the step's reason says `hard check for <question> (then)`), so
+  `then=` alone wires it — no `requires=` needed, and the other questions' flows stay as they were. A strategist of your
+  own that leaves such a check out is refused when the `System` is built. To make sure a hard check without `then` is
+  always in a question's flow, list it in the question's `requires`. When several hard checks fail, the first one declared in the catalog decides:
   declare the most important first. A question's flow does not depend on which other questions are asked in the same
   request, and neither does its answer — except through a constraint between answers, which applies only when all its
   questions are asked.
@@ -168,6 +171,24 @@ def ship_rule(big_order):
   part further up that failed: `hard check day_allowed could not be evaluated: missing inputs: violations; caused by
   spec: ValueError: no slot in the plan`. A rule that could not run says the same (`rule not computed: ...; caused by
   ...`).
+
+The answer `then` sets may be a **function of facts** instead of a constant: its argument names are the facts it
+reads (given or computed; type hints validate them as for any part), and it runs only when the check is False.
+
+```python
+def free_side(free_sides: list, facing: str) -> str:      # the step to take instead
+    return next((s for s in free_sides if s != facing), free_sides[0])
+
+@cat.check(hard=True, then={"step": free_side})
+def not_looping(history: list) -> bool:
+    return Fail("the same room three times") if len(history) > 2 and len(set(history[-3:])) == 1 else True
+```
+
+The facts it reads are planned into the question's flow and computed even when the failed check closes the
+question early. Its value must be one of the question's answers — else the question abstains (`guard="hard_check"`,
+the reason names the value). The value is recorded in the trace (a record of kind `"then"`, named
+`then:<question>`, with the hashes of the facts it read), stored with the decision and re-run by replay; the
+function's code is in the check's fingerprint.
 
 ### Extractors and Quote
 
@@ -193,6 +214,19 @@ def amount(doc):
   error is recorded. A quote from a model-backed part must also be literally the text at its offsets — see
   [Grounded decisions](#grounded-decisions-provenance-audit-and-safeguards). Hand-written code may return a value derived
   from the quoted text (a label, a parsed number, a date); `@cat.extract(exact=True)` makes it literal too.
+- "Literally" is measured on a **normalized view** of both texts (since 1.0, `Catalog(quotes="normalized")`, the
+  default): Unicode NFKC (ligatures, full-width letters), no-break spaces, no-break and other hyphens and dashes
+  (`‑ – — −` as `-`), `…` as `...`, runs of whitespace as one space, curly and angle quotes (`’ “ ” « »`) as straight
+  ones, zero-width characters and soft hyphens dropped. Models type these differently from the source; an honest quote
+  is no longer rejected for it. The quote that is kept is always the **source's own substring**, at offsets into the
+  original text (never into the normalized view), and a record whose quote needed the view says so:
+  `record.extra["quote_match"] = {"form": "nfkc-ws-dash-quote/1", "written": {"value" | "evidence <i>": what the part
+  wrote}}` — hashed, stored, and re-checked by replay under that form. A literal match is preferred and leaves the record
+  exactly as in 0.9. `Catalog(quotes="literal")` keeps 0.9's rule (the text as written, up to whitespace runs at given
+  offsets); the setting is in each part's fingerprint when it is not the default. Letter case is never normalized.
+- `solvi.core.find_quote(quote, sources)` does the same lookup for your own checks: `sources` is a text or
+  `{"notes": ..., "dialogues": ..., "map": ...}`, searched in order; it returns `Quote(the source's substring, start,
+  end, label)` — the label says which source the quote came from — or None.
 - `confidence` (default 1.0) is propagated to every answer that depends on this value (see
   [Confidence](#confidence-calibration-and-abstention)).
 - Downstream parts receive the plain `value`, not the `Quote`.
@@ -510,8 +544,11 @@ def repair_days(doc: str) -> Estimate[0, 3, 7, 14]:
 
 - **Evidence.** Any part may return `Claim(value, evidence=[...], confidence=1.0, source=None)`; a model decision carries
   `Decision(..., evidence=[...])`. An item is a `Quote(text, start, end, source)` — checked to be literally that text at those
-  offsets — or a string, located in `source` (default: the part's only given text input, else `doc`) at its first
-  occurrence as whole words and numbers: `"3"` is not evidence when the text says `30`, `3.5` or `1,300`, nor `"cat"`
+  offsets — or a string, located in `source` (default: the part's only given text input, else `doc`; then — since 1.0 —
+  the part's other given text inputs in argument order, so a check reading `notes`, `dialogues` and `map` may quote any
+  of them and each Quote records which; `Claim(source=[...])` names the labels to search) at its first
+  occurrence as whole words and numbers, literally first, then in the normalized view (see
+  [Extractors and Quote](#extractors-and-quote)) — the Quote kept is the source's own substring: `"3"` is not evidence when the text says `30`, `3.5` or `1,300`, nor `"cat"`
   when it says `category` (`"30"` is found in `30.` and `30%`); to quote a part of a word, give a `Quote` with its
   offsets. A `Quote` whose offsets begin or end inside a number (`Quote("3", 26, 27)` over `30`) is not that number
   and is rejected — the same holds for a model-backed part's own quote. Evidence must point into **given** text facts. An output whose evidence is not in its text is **rejected** like an
@@ -1734,6 +1771,7 @@ Every option after `questions` is keyword-only. With a JSON-lines store every `a
 | `res.trace` | the hash-chained trace (see [The trace](#the-trace-and-verification)) |
 | `res.audit(q=None)` | what each answer rests on and which safeguards fired (see [Grounded decisions](#grounded-decisions-provenance-audit-and-safeguards)) |
 | `res.safeguards` | the safeguard events of this response |
+| `res.checks` | every check of the flow as data, in flow order: `CheckResult(name, questions, status, hard, reason, then)` — status `"passed"`, `"failed"`, `"skipped"` (a failed hard check closed every question that needed it) or `"error"` (it could not be evaluated); `reason` is what `Fail(...)` said (else the docstring's first line, else "<name> is false"; for an error the error); `then` the answers a failed hard check set. Also in `to_dict()` / `to_json()` and so in a stored decision (`"checks"`, derived from the trace; ignored on load and recomputed) |
 | `res.ms` | decision time in milliseconds |
 | `res.confidence` | overall confidence: the probability that every answered question is right (product of the answers' confidences, errors taken as independent — conservative when constraints tie answers together); abstained questions are left out |
 | `res.complete`, `res.weakest` | did every question get an answer; `(question, confidence)` of the least confident answer |
@@ -1776,6 +1814,7 @@ For each asked question the strategist picks targets:
 It then walks backwards from the targets through the catalog signatures to the keys of `init_state`, and always adds:
 
 - the question's required parts (`requires`);
+- every hard check whose `then` names the question, and the facts its `then` function reads (since 1.0);
 - every check whose inputs are already available in the flow and which touches at least one computed (not input) fact,
   a "check of what was computed".
 
@@ -3548,7 +3587,8 @@ Fail(...)` is True) — and `-> bool` checks keep their type. The reasons are re
 (`record.extra["reasons"]`), added to the answer's reason when a hard check decides ("hard check nobody_busy is false:
 Harold is busy …"), shown on the check's line of the audit, and compared on replay (a check that now gives other reasons
 is a mismatch). A check that returns plain `False` keeps working: its reason is its docstring's first line, else
-"<name> is false". `solvi.refine.failed_checks(res, question)` lists the checks that are False with their reasons.
+"<name> is false". `solvi.refine.failed_checks(res, question)` lists the checks that are False with their reasons;
+`res.checks` lists every check of the decision with its status, reason and the `then` it applied.
 
 ### Generation: solvi.generate
 
@@ -4285,9 +4325,10 @@ print(rep); rep.ok; rep.errors; rep.warnings  # each finding: level, code, where
 ```
 
 Flows are planned with every given fact present. **Errors**: a hard check whose `then=` sets an answer for a question
-whose flow never runs it (`then_not_in_flow`: the question's rule does not read it through any fact and the question does
-not list it in `requires`, so when the check fails the question is answered as if it had passed — the fix is
-`requires=[...]`); `then=` naming no question or an answer outside the question's options; facts that need each other
+whose flow does not run it (`then_not_in_flow`: since 1.0 the strategist wires such a check in and `System()` refuses a
+strategist that leaves it out, so it fires only for a system whose strategist was swapped afterwards — when the check
+fails the question would be answered as if it had passed); `then=` naming no question or an answer outside the
+question's options (for a `then` function: a literal it plainly returns); facts that need each other
 (`cycle`; facts derived from each other, each with a producer outside the loop, are only a note, `mutual_producers`, for
 a System with `strategist=` — the flows are planned by the system's own strategist); a question no input can answer (a fact nothing can compute, a missing required part, a span / rank / estimate
 question without a rule); a producer's type its consumer cannot read, or a `System(input_model=...)` field its typed reader
@@ -4390,7 +4431,7 @@ Hashes: a record hashes its provenance only when it differs from the default (`q
 
 | Safeguard | Fires when | Effect |
 |---|---|---|
-| grounding | a quote lies outside its text, or a model's quote is not literally `doc[start:end]` (strings up to whitespace; numbers as written, e.g. `1250.0` ↔ `"1,250.00"` — `int`, `float`, `Decimal`, `Fraction` and numpy scalars; a `date` when the text reads as that date; a `bool`, a `datetime` or a list cannot be compared and is not checked); an evidence quote or a span is not literally in its text | the output is rejected: the fact is missing, the claim stays in the error; the next alternative producer runs, else dependent answers abstain |
+| grounding | a quote lies outside its text, or a model's quote is not literally `doc[start:end]` (strings in the normalized view, see [Extractors and Quote](#extractors-and-quote); numbers as written, e.g. `1250.0` ↔ `"1,250.00"` — `int`, `float`, `Decimal`, `Fraction` and numpy scalars; a `date` when the text reads as that date; a `bool`, a `datetime` or a list cannot be compared and is not checked); an evidence quote or a span is not literally in its text | the output is rejected: the fact is missing, the claim stays in the error; the next alternative producer runs, else dependent answers abstain |
 | closed set | a `Decision` (or a value of a part with `options=`) is not one of the options; a rule's answer is not one of the question's options | rejected / the question abstains |
 | low confidence | a `Quote` / `Decision` is below the part's `min_confidence` (a decision part's too); an answer is below the question's `min_confidence` | rejected / the question abstains, saying what it would have answered |
 | model escalated | a decider's act / escalate signal is below its threshold (see [the output](#the-output-probabilities-calibrated-confidence-act-or-escalate)) | rejected: the fact is missing, next producer, else the question abstains, saying what it would have answered |

@@ -15,6 +15,36 @@
   `Maybe[...]` keep their 3.11–3.13 fingerprints; a catalog declaring a union with `|` (`str | NotStated`) gets a new
   one (decisions stored from it by 0.9 replay as made by another catalog), and so does any union under 0.9 on 3.14.
 
+### Checks and quotes
+
+- **Quotes are matched on a normalized view.** Models type no-break spaces, no-break hyphens, `…`, curly quotes and
+  other dashes where the source has plain ones (or the other way round), and an honest quote was rejected for it. Now
+  quotes, evidence and spans are compared after Unicode NFKC, with dashes and hyphens as `-`, curly and angle quotes as
+  straight ones, `…` as `...`, every run of whitespace as one space and zero-width characters dropped (letter case is
+  kept). What is stored is always the source's own text at offsets into the original text; a record whose quote needed
+  the normalized view says so (`extra["quote_match"]`: the form's name and what the part wrote), and replay re-checks
+  it. A literal match is tried first and leaves the record exactly as before. `Catalog(quotes="literal")` keeps the 0.9
+  rule. Fingerprints are unchanged unless you set `quotes="literal"`.
+- **Several labelled sources.** A string of evidence is looked for in the part's first source as before, then in its
+  other text inputs (`notes`, `dialogues`, `map`, ...); the stored quote names the one it came from. `Claim(source=[...])`
+  lists the sources to search. `solvi.core.find_quote(quote, {"notes": ..., "map": ...})` does the same lookup for your
+  own checks.
+- **`then=` wires its hard check.** A hard check whose `then` names a question now runs in that question's flow by
+  itself; `requires=` is no longer needed for it, and other questions' flows do not change. Before, forgetting
+  `requires` let the question be answered as if the check had passed. A strategist of your own that leaves such a check
+  out is refused when the `System` is built; `solvi check` (`then_not_in_flow`) keeps reporting it for a strategist
+  swapped in afterwards. A system that relied on the check *not* running for that question now gets the forced answer
+  when it fails.
+- **`then=` can compute the answer.** `then={"step": free_side}` takes a function of facts (argument names are the facts,
+  type hints are checked like any part's) instead of a constant. It runs only when the check fails; the facts it reads
+  are computed even after an early exit; its value must be one of the question's answers, else the question abstains.
+  The value is recorded in the trace (a record of kind `"then"`) and re-run by replay; the function's code is part of
+  the check's fingerprint. `solvi check` reports literals it returns that are not answers (`then_bad_answer`).
+- **`res.checks`.** Every check of a decision as data, in flow order: name, questions, status (`passed`, `failed`,
+  `skipped`, `error`), hard or soft, the reason (what `Fail(...)` said) and the answers a failed hard check's `then`
+  set — no more parsing the audit text. It is in `res.to_dict()` and in stored decisions as `"checks"` (derived from
+  the trace, like `"overall"`); records stored before keep their hashes and get the same list when loaded.
+
 ### Removed
 
 What leaves solvi on the way to 1.0: parts that measured worse than the plain way, that nothing used, or that never
