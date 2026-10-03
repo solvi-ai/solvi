@@ -70,7 +70,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 from . import sandbox
-from .core import Catalog, Question
+from .core.catalog import Catalog, Question
 from .refine import Fail
 
 DEFAULT_MODEL = "openai/gpt-oss-120b"

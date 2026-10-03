@@ -7,7 +7,7 @@ from typing import Literal
 import pytest
 
 from solvi import Catalog, Question, System
-from solvi.provenance import part_fingerprint
+from solvi.core.provenance import part_fingerprint
 from solvi.refine import Fail
 from solvi.storage import open_storage
 

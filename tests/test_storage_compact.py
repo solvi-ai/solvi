@@ -216,7 +216,7 @@ def test_a_compact_record_with_a_generator_replays_from_the_kept_output_without_
     d["compact"]["trace"]["records"] = []                               # past it, and the replay says so
     back, why = rederive(d, s)
     assert back is None and why[0].kind == "not_kept" and "not checked past this step" in why[0][2]
-    from solvi.runtime import mismatch_summary
+    from solvi.core.runtime import mismatch_summary
     assert mismatch_summary(why)["summary"].startswith("not verified")
 
 

@@ -57,8 +57,9 @@ nav:
   - API reference:
       - api/index.md
       - solvi: api/solvi.md
+      - solvi.core: api/core.md
       - solvi.decide: api/decide.md
-      - solvi.calibration: api/calibration.md
+      - solvi.core.calibration: api/calibration.md
       - solvi.guarantee: api/guarantee.md
       - solvi.openset: api/openset.md
       - solvi.systemone: api/systemone.md
@@ -77,7 +78,7 @@ nav:
       - solvi.serve: api/serve.md
       - solvi.agents: api/agents.md
       - solvi.hooks: api/hooks.md
-      - solvi.textin: api/textin.md
+      - solvi.core.textin: api/textin.md
       - solvi.inputs: api/inputs.md
       - solvi.specialist: api/specialist.md
       - solvi.charts: api/charts.md
@@ -90,7 +91,7 @@ nav:
       - solvi.extract_multi: api/extract_multi.md
       - solvi.strategist: api/strategist.md
       - solvi.strategy: api/strategy.md
-      - solvi.costs: api/costs.md
+      - solvi.core.costs: api/costs.md
       - solvi.rulelist: api/rulelist.md
       - solvi.audit: api/audit.md
       - solvi.show: api/show.md
@@ -107,10 +108,10 @@ nav:
       - solvi.testing: api/testing.md
       - solvi.honesty: api/honesty.md
       - solvi.check: api/check.md
-      - solvi.calibfile: api/calibfile.md
+      - solvi.core.calibfile: api/calibfile.md
       - solvi.models: api/models.md
       - solvi.scaffold: api/scaffold.md
-      - solvi.i18n: api/i18n.md
+      - solvi.core._i18n: api/i18n.md
   - Changelog: changelog.md
   - Roadmap: roadmap.md
 

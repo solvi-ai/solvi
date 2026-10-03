@@ -188,6 +188,6 @@ __all__ = ["Budget", "BudgetStop", "Cost", "CostBook", "cost_of", "price_of", "r
 
 def __getattr__(name):
     if name == "MeasuredCosts":
-        raise AttributeError('solvi.costs.MeasuredCosts (System(cost_policy="measured")) was removed in 1.0: it showed no '
+        raise AttributeError('solvi.core.costs.MeasuredCosts (System(cost_policy="measured")) was removed in 1.0: it showed no '
                              "measured benefit — declare cost= on the parts")
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

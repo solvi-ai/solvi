@@ -68,7 +68,7 @@ class WorldMap:
 
     # --- the journal
     def _write(self, op, **data):
-        from .runtime import vhash
+        from .core.runtime import vhash
         rec = {"n": len(self.journal), "op": op, **data, "prev": self._prev}
         rec["hash"] = vhash(rec)
         self._prev = rec["hash"]
@@ -78,7 +78,7 @@ class WorldMap:
     def verify(self):
         """Is the journal's hash chain whole (nothing edited, removed or reordered), and is the map what the journal
         says — every claim (and, for a map whose visits are journaled, every state) the one its entries give?"""
-        from .runtime import vhash
+        from .core.runtime import vhash
         prev = ""
         for r in self.journal:
             if r.get("prev") != prev or vhash({k: v for k, v in r.items() if k != "hash"}) != r.get("hash"):
@@ -268,7 +268,7 @@ class WorldMap:
         it — the file's own `edges` are not trusted (an edge edited there changes nothing) — and so are the states of a
         map whose visits are journaled; a file written before that keeps its `states` as stored. ValueError when the
         journal's chain is broken or its entries do not replay."""
-        from .runtime import vhash
+        from .core.runtime import vhash
         data = json.loads(Path(path).read_text(encoding="utf-8"))
         if data.get("format") != "solvi.worldmap v1":
             raise ValueError(f"{path} is not a solvi.worldmap v1 file")

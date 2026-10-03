@@ -19,8 +19,8 @@ from pydantic import BaseModel, Field
 from solvi import Answer, Catalog, Decision, Question, Quote, Response, System
 from solvi.decide import (BlockUnsupported, DecideModel, Item, _basis, _Spec, act_features, block_masks, capabilities, pass_prompt, prompt,
                           state_text)
-from solvi.provenance import digest
-from solvi.typed import Scale, question_kind
+from solvi.core.provenance import digest
+from solvi.core.types import Scale, question_kind
 
 TEAMS = ["billing", "technical", "shipping"]
 LEVELS = ["low", "medium", "high", "critical"]

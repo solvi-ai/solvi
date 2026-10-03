@@ -2,7 +2,7 @@
 import numpy as np
 import pytest
 
-from solvi.calibration import conformal_quantile, crc_threshold, ltt_threshold, set_scores
+from solvi.core.calibration import conformal_quantile, crc_threshold, ltt_threshold, set_scores
 from solvi.decide import DecideModel
 from test_decide import TEAMS, model, texts
 
@@ -270,7 +270,7 @@ def _groups_stream(rng, n, share_hard=0.2):
 
 
 def test_plain_crc_breaks_the_risk_inside_a_hard_group_and_thresholds_per_group_keep_it():
-    from solvi.calibration import group_thresholds, node_of
+    from solvi.core.calibration import group_thresholds, node_of
     rng = np.random.default_rng(0)
     risk = {"plain": {"easy": [], "hard": []}, "groups": {"easy": [], "hard": []}}
     violated = {"plain": 0, "groups": 0}
@@ -293,7 +293,7 @@ def test_plain_crc_breaks_the_risk_inside_a_hard_group_and_thresholds_per_group_
 
 
 def test_small_groups_are_pooled_with_their_parent_and_the_nodes_depend_on_sizes_only():
-    from solvi.calibration import group_nodes, loss_budget, node_of
+    from solvi.core.calibration import group_nodes, loss_budget, node_of
     paths = [("a", "x")] * 120 + [("a", "y")] * 30 + [("a", "z")] * 90 + [("b", "u")] * 50
     nodes, owner = group_nodes(paths, min_group=100)
     assert set(nodes) == {("a", "x"), ("a",), ()}                # a/y + a/z (120) pool into a; b/u (50) into the rest
@@ -446,7 +446,7 @@ def test_ltt_and_calibrate_for_refuse_an_error_outside_0_1(error):
 
 
 def test_ltt_default_grid_follows_the_scores_so_confidences_near_1_can_pass():
-    from solvi.calibration import ltt_grid
+    from solvi.core.calibration import ltt_grid
     rng = np.random.default_rng(2)
     v = rng.uniform(size=3000)
     c, w = 1 - 10 ** -(3 + 4 * v), (rng.uniform(size=3000) > 0.6 + 0.39 * v).astype(float)     # an LLM: all ≥ 0.999

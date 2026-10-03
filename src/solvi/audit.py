@@ -7,8 +7,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from . import i18n
-from .provenance import FUZZY, classify, matches, snippet
+from .core import _i18n as i18n
+from .core.provenance import FUZZY, classify, matches, snippet
 
 STAT_KEYS = {"grounding": "grounding_rejected", "type_rejected": "type_rejected", "outside_options": "outside_options",
              "rule_abstained": "rule_abstained",
@@ -20,14 +20,14 @@ STAT_KEYS = {"grounding": "grounding_rejected", "type_rejected": "type_rejected"
 QUIET = {"evidence_missing", "timeout", "instruction", "memory"}      # listed in safeguard_summary only once they fire
 STATS = ["asks", "answers", "abstained", "model_outputs"] + list(STAT_KEYS.values())
 
-LABEL = {k: i18n.label(k) for k in STAT_KEYS}      # safeguard → its English label (solvi.i18n has the other languages)
+LABEL = {k: i18n.label(k) for k in STAT_KEYS}      # safeguard → its English label (solvi.core._i18n has the other languages)
 COLUMNS = ["col.given", "col.computed", "col.quoted", "col.decided", "col.learned", "col.check", "col.rule", "col.evidence",
            "col.span", "col.scores", "col.constraint", "col.not_run", "col.answer", "col.support", "col.guarantee",
            "col.safeguards"]
 
 
 def _missing(v):
-    from .runtime import MISSING
+    from .core.runtime import MISSING
     return v is MISSING
 
 
@@ -305,8 +305,8 @@ class AnswerAudit:
         return self.render()
 
     def render(self, lang=None):
-        """The audit of this answer as text, in a language (solvi.i18n; default: the one it was built with, "en")."""
-        from .primitives import fmt
+        """The audit of this answer as text, in a language (solvi.core._i18n; default: the one it was built with, "en")."""
+        from .core.primitives import fmt
         lang = i18n.check(self._lang if lang is None else lang)
         t, m = i18n.t, (lambda x: i18n.msg(x, lang))
         w = i18n.width(COLUMNS, lang)
@@ -396,7 +396,7 @@ class AnswerAudit:
         """The audit of this answer as JSON-ready data (dates as ISO text, sets as sorted lists, as every to_dict())."""
         from dataclasses import asdict
 
-        from .schema import jsonable
+        from .core.schema import jsonable
         d = asdict(self)
         d.update(deterministic=self.deterministic, fuzzy=self.fuzzy, share_deterministic=self.share_deterministic)
         return jsonable(d)
@@ -420,7 +420,7 @@ class Audit:
         return self.render()
 
     def render(self, lang=None):
-        """The whole audit as text, in a language (solvi.i18n; default: the one it was built with, "en")."""
+        """The whole audit as text, in a language (solvi.core._i18n; default: the one it was built with, "en")."""
         lang = i18n.check(self._lang if lang is None else lang)
         t = i18n.t
         lines = [t("au.head", lang, n=len(self.answers), m=self.model_outputs, k=len(self.safeguards))]
@@ -442,7 +442,7 @@ class Audit:
 
     def to_dict(self):
         """The whole audit as JSON-ready data."""
-        from .schema import jsonable
+        from .core.schema import jsonable
         return {"answers": {q: a.to_dict() for q, a in self.answers.items()}, "safeguards": jsonable(self.safeguards),
                 "model_outputs": self.model_outputs, "overall": jsonable(self.overall)}
 

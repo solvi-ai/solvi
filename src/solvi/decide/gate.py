@@ -6,10 +6,10 @@ import math
 
 import numpy as np
 
-from ..core import Quote, Unknown
+from ..core.catalog import Quote, Unknown
 from .kinds import KINDS, KINDS_V3
 from .state import jsonable
-from ..calibration import GroupBy, group_name   # noqa: F401 — re-exported (defined there since 1.0)
+from ..core.calibration import GroupBy, group_name   # noqa: F401 — re-exported (defined there since 1.0)
 
 
 class Facts(dict):
@@ -64,10 +64,10 @@ def guard_promise(risk, error, answered=True):
 
 def no_separation(sig, ok, name, error, base, who=""):
     """A warning when the signal does not tell right answers from wrong ones on the calibration examples (one-sided
-    Mann-Whitney test of its AUROC against chance at the 5% level: solvi.calibration.separation), else None — tested
+    Mann-Whitney test of its AUROC against chance at the 5% level: solvi.core.calibration.separation), else None — tested
     only with at least SEPARATION_MIN right and as many wrong examples (fewer cannot tell). The promise still holds —
     by escalating, not by choosing: what is answered alone is wrong about as often as everything."""
-    from ..calibration import separation
+    from ..core.calibration import separation
     right = int(sum(1 for o in ok if o))
     if min(right, len(ok) - right) < SEPARATION_MIN:
         return None
@@ -105,7 +105,7 @@ def _group_info(nodes, owner, paths, auto, wrong):
 
 def _group_guard(score, wrong, paths, risk, min_group, delta):
     """Thresholds per group for one signal → (nodes {path: {"threshold", "n"}}, report per node, answered alone [n])."""
-    from ..calibration import _signal_losses, certify_groups
+    from ..core.calibration import _signal_losses, certify_groups
     nodes, owner = certify_groups(_signal_losses(score, wrong), paths, risk, min_group, delta)
     nodes = {k: {"threshold": v["threshold"], "n": v["n"]} for k, v in nodes.items()}
     auto = np.array([score[i] >= nodes[owner[i]]["threshold"] for i in range(len(score))], bool)

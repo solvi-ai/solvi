@@ -14,9 +14,9 @@ from dataclasses import asdict
 import numpy as np
 
 from .. import _deprecate
-from ..core import Decision, Quote, Unknown
-from ..provenance import ESCALATED
-from ..provenance import digest
+from ..core.catalog import Decision, Quote, Unknown
+from ..core.provenance import ESCALATED
+from ..core.provenance import digest
 from .kinds import DEFAULT_T, FORMAT, LEGACY_FORMAT, NULL_SOURCE, TYPED2_FORMAT, TYPED_FORMAT, WIRE, _kind, _spec_names, _unused_options
 from .state import _single, _text
 from .wire import Logits, Pass, _typed_span, decode_pointer, pointer_evidence, prompt
@@ -215,7 +215,7 @@ class DecideModel:
 
     def fingerprint(self):
         """The checkpoint plus every adaptation (so a replay knows the calibration a decision used)."""
-        from ..provenance import digest
+        from ..core.provenance import digest
         ads = {repr(k): a.params() for k, a in sorted(self.adaptations.items(), key=repr)}
         if self.loras:                       # a model without adapters hashes as before
             return digest(self.weights_fingerprint(), ads, {repr(k): ad.hash for k, ad in sorted(self.loras.items(), key=repr)})
@@ -603,14 +603,14 @@ class DecideModel:
         if u is not None and pn >= thr:
             return Decision(Unknown, probs, confidence=pn)
         if sp.kind == "rank":
-            from ..primitives import plackett_luce
+            from ..core.primitives import plackett_luce
             order = tuple(sp.real[i] for i in sorted(range(K), key=lambda i: (-cond[i], i))[: sp.k or K])
             conf = plackett_luce(order, dict(zip(sp.real, cond))) * (1 - pn)
             return Decision(order, probs, confidence=conf, extra={"k": len(order)})
         if sp.kind == "number":
             from types import SimpleNamespace
 
-            from ..primitives import estimate_of
+            from ..core.primitives import estimate_of
             value, interval, mass = estimate_of(SimpleNamespace(bins=sp.edges, coverage=sp.coverage), list(cond))
             return Decision(value, probs, confidence=mass * (1 - pn), extra={"interval": interval, "coverage": sp.coverage})
         levels = sp.real                               # score
@@ -1063,7 +1063,7 @@ class DecideModel:
         in 0.9: a field with one raises). → {field: DecisionPart} in field order."""
         import typing
 
-        from ..typed import Bins, Ordinal, RankOf, SpanOf
+        from ..core.types import Bins, Ordinal, RankOf, SpanOf
         out = {}
         for name, fi in schema.model_fields.items():
             if fields is not None and name not in fields:

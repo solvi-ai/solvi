@@ -221,7 +221,7 @@ class FastHead:
     def fingerprint(self):
         """A stable hash of the head's parameters (recorded with every answer it gives; changes with fit and each update)."""
         if getattr(self, "_fp", None) is None:
-            from .provenance import digest
+            from .core.provenance import digest
             self._fp = digest("FastHead", self.options, self.features, self.W, self.lam, self.pairs,
                               None if self.fz is None else self.fz.spec)
         return self._fp
@@ -410,7 +410,7 @@ class CandidateHead:
         return sum(self.head.teach(r, "yes" if i in good else "no") for i, r in enumerate(self.rows(candidates)))
 
     def fingerprint(self):
-        from .provenance import digest
+        from .core.provenance import digest
         return digest("CandidateHead", self.features, self.relative, self.head.fingerprint())
 
 

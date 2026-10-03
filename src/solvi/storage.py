@@ -36,7 +36,7 @@ import time as _time
 from dataclasses import dataclass
 
 from . import _deprecate
-from .sources import TRUSTED_SOURCES, VERIFIED, VERIFIED_REFUSED, UntrustedLabel, check_source   # noqa: F401 — re-exported
+from .core.sources import TRUSTED_SOURCES, VERIFIED, VERIFIED_REFUSED, UntrustedLabel, check_source   # noqa: F401 — re-exported
 
 try:
     import fcntl
@@ -118,8 +118,8 @@ def record_hash(rec):
 
 def plain(v):
     """A value as stored: JSON data (sets sorted as vhash sorts them, dates as ISO strings, "not stated" as "<not stated>")."""
-    from .core import NOT_STATED_KEY, Unknown
-    from .schema import jsonable
+    from .core.catalog import NOT_STATED_KEY, Unknown
+    from .core.schema import jsonable
     if v is Unknown:
         return NOT_STATED_KEY
     if isinstance(v, (list, tuple)):
@@ -129,7 +129,7 @@ def plain(v):
 
 def akey(v):
     """An answer as an index key (canonical JSON of its stored form): answer=("a", "b") finds a stored ["a", "b"]."""
-    from .schema import tag_floats
+    from .core.schema import tag_floats
     return _cj(tag_floats(plain(v)))
 
 
@@ -234,7 +234,7 @@ def entry(resp, meta=None, record="full"):
         e["catalog"] = fp["catalog"]                  # the catalog that decided (System.fingerprint)
     if meta is not None:
         e["meta"] = plain(meta)
-    from .schema import tag_floats
+    from .core.schema import tag_floats
     e = tag_floats(e)                                 # strict JSON: an inf threshold is {"$float": "inf"}
     if record == "compact":
         e["record"] = "compact"
@@ -279,12 +279,12 @@ class Stored:
     @property
     def answers(self):
         """question → the stored answer (JSON form: tuples as lists, "not stated" as "<not stated>")."""
-        from .schema import untag_floats
+        from .core.schema import untag_floats
         return {q: untag_floats(a[0]) for q, a in (self.data.get("answers") or {}).items()}
 
     @property
     def meta(self):
-        from .schema import untag_floats
+        from .core.schema import untag_floats
         return untag_floats(self.data.get("meta"))
 
     @property
@@ -295,7 +295,7 @@ class Stored:
     @property
     def input(self):
         """The given facts of a stored decision as JSON data (full or compact; None for a redacted one)."""
-        from .schema import untag_floats
+        from .core.schema import untag_floats
         v = view(self.data)
         return None if v is None else untag_floats((v.get("trace") or {}).get("init"))
 
@@ -431,8 +431,8 @@ def _not_rerun(flow, recorded, trust_models):
 def _recorded_output(k):
     """A kept model step's record → an output that gives the recorded value again (its quote, confidence,
     probabilities, evidence and details), for a re-run that must not call the model."""
-    from .core import Claim, Decision, Quote
-    from .runtime import MISSING
+    from .core.catalog import Claim, Decision, Quote
+    from .core.runtime import MISSING
     if k.value is MISSING:
         raise RuntimeError(k.error or "no value recorded")
     ex = dict(k.extra or {})
@@ -446,7 +446,7 @@ def _recorded_output(k):
 def _same_output(r, k):
     """Did a re-run step give what the kept record says (value, quote, error, inputs, producer)? Its details (a model's
     latency, usage) may differ."""
-    from .runtime import vhash
+    from .core.runtime import vhash
     return (r.name == k.name and r.step == k.step and vhash(r.value) == vhash(k.value) and r.error == k.error
             and (None if r.quote is None else list(r.quote)) == (None if k.quote is None else list(k.quote))
             and r.inputs == k.inputs and r.producer == k.producer)
@@ -466,8 +466,8 @@ def rederive(d, system, trust_models=False):
     that is not re-run (kind "not_kept": no verdict past it), the input not restored."""
     import dataclasses
     from .response import Response
-    from .runtime import MISSING, Mismatch, Trace, execute, vhash
-    from .schema import load
+    from .core.runtime import MISSING, Mismatch, Trace, execute, vhash
+    from .core.schema import load
     if not (hasattr(system, "catalog") and hasattr(system, "questions") and hasattr(system, "_prepare")):
         return None, [Mismatch(0, "load", "a compact record is re-run from its input: replay it with the System, not a "
                                           "Catalog", "error")]
@@ -546,7 +546,7 @@ def rederive(d, system, trust_models=False):
 
 
 def _result_cls():
-    from .runtime import Result
+    from .core.runtime import Result
     return Result
 
 
@@ -673,7 +673,7 @@ class TraceStorage:
         if not guarded:                           # a decision part's act_guard, or a question's System.guarantee
             raise UntrustedLabel(f"the stored decision {of!r} answered {question!r} without a guarantee "
                                  "(System.guarantee): it is not verified")
-        from .schema import tag_floats
+        from .core.schema import tag_floats
         if tag_floats(plain(self._answer_key(question, answer))) != got[0]:
             raise UntrustedLabel(f"the stored decision {of!r} answered {question!r} with {got[0]!r}, not {answer!r}: a "
                                  "verified label is that decision's own answer")
@@ -754,7 +754,7 @@ class TraceStorage:
         "rule", "verified" — or, for a record written around save_correction, whatever it says (solvi.memory and
         solvi.learning.Learning refuse anything outside TRUSTED_SOURCES, "verified" included; System.guarantee takes "verified"
         when told to)."""
-        from .schema import untag_floats                # stored tagged ({"$float": "inf"}), read back as the float
+        from .core.schema import untag_floats                # stored tagged ({"$float": "inf"}), read back as the float
         return [{"id": s.id, "time": s.time, "question": s.data["teach"], "init": untag_floats(s.data["init"]),
                  "answer": untag_floats(s.data["answer"]), "source": s.data.get("source", "human"), "by": s.data.get("by"),
                  "of": s.data.get("of"), **({"note": s.data["happened"]} if "happened" in s.data else {})}
@@ -940,14 +940,14 @@ class TraceStorage:
         step is re-computed from its recorded inputs (see Trace.replay). → the ones that fail: [{"id", "seq", "time",
         "mismatches": [(step, name, reason)], "models": [(step, name, verdict)], "catalog", "kinds", "summary"}] — empty
         when all replay. Each mismatch has a `.kind`, and "summary" tells damaged data from a catalog or a model that
-        changed since (see solvi.runtime.Mismatch). A stored record that cannot be loaded is one mismatch (0, "load", ...),
+        changed since (see solvi.core.runtime.Mismatch). A stored record that cannot be loaded is one mismatch (0, "load", ...),
         a replay that raises is (0, "replay", ...): both of kind "error", no verdict on the data. "note" (a record of
         format 1 whose model step does not recompute): it was stored with sorted dict keys, see LEGACY_ORDER.
         A compact record (record="compact") is re-run from its recorded input and every step compared with its recorded
         hash (rederive), then replayed like a full one; one that cannot be — a model step not re-run (kind "not_kept":
         no verdict on the data past the chain), a step whose hash differs (kind "recompute": the old value is not kept)
         — is listed with "record": "compact"."""
-        from .runtime import Mismatch, mismatch_summary
+        from .core.runtime import Mismatch, mismatch_summary
         bad = []
 
         def failed(s, stage, e):
@@ -999,7 +999,7 @@ class TraceStorage:
         A compact record keeps no step inputs: it is re-derived with the store's System (rederive) and its rebuilt
         trace is searched; one that cannot be (no System, a model step not re-run, a step that no longer recomputes) is
         not searched, and a UserWarning names how many and their ids."""
-        from .runtime import vhash
+        from .core.runtime import vhash
         vh = None if value is ANY else vhash(value)
         out, unchecked = [], []
         for s in self.iter():
@@ -1032,8 +1032,8 @@ class TraceStorage:
         stored records that hold it without an answer resting on it (responses and corrections), "deleted": 0}. A compact
         record that holds it in its input is listed under "stored": it keeps no step inputs to say what rests on it
         (quarantine re-derives it for that)."""
-        from .runtime import vhash
-        from .schema import untag_floats
+        from .core.runtime import vhash
+        from .core.schema import untag_floats
         vh = None if value is ANY else {vhash(value), vhash(plain(value))}
         dependent, stored = [], []
         for s in self.iter(None):

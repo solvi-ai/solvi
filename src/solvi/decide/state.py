@@ -10,7 +10,7 @@ from enum import Enum
 
 import numpy as np
 
-from ..core import Quote
+from ..core.catalog import Quote
 
 
 
@@ -66,7 +66,7 @@ def jsonable(v):
         return v.isoformat()
     if isinstance(v, (bytes, bytearray)):
         return bytes(v).decode("utf-8", "replace")
-    from ..typed import is_model
+    from ..core.types import is_model
     if is_model(v):
         return jsonable(v.model_dump())
     if dataclasses.is_dataclass(v) and not isinstance(v, type):
@@ -171,7 +171,7 @@ def _single(x):
     """Is x one input (a text, a Quote, a state) rather than a list of inputs?"""
     if isinstance(x, (str, Quote, Mapping)) or (dataclasses.is_dataclass(x) and not isinstance(x, type)):
         return True
-    from ..typed import is_model
+    from ..core.types import is_model
     return is_model(x)
 
 

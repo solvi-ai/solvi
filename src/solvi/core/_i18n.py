@@ -167,7 +167,7 @@ MESSAGES_RU = [
     ("low confidence {c} < {m}; would have answered {a:any} ({w:msg})",
      "низкая уверенность {c} < {m}; ответ был бы {a} ({w})"),
     ("not stated", "не указано"),
-    # text in (System.ask_text, solvi.textin)
+    # text in (System.ask_text, solvi.core.textin)
     ("not stated in the text: {fs}", "не указано в тексте: {fs}"),
     ("not stated in the text", "не указано в тексте"),
     ("the entry point is unsure, nothing was asked: {x:msg}", "вопрос по тексту не выбран, ничего не спрошено: {x}"),

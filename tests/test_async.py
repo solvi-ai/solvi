@@ -14,7 +14,7 @@ from pathlib import Path
 import pytest
 
 from solvi import Answer, Catalog, Question, System, testing
-from solvi.runtime import MISSING, async_parts
+from solvi.core.runtime import MISSING, async_parts
 from examples_loader import load
 
 ROOT = Path(__file__).resolve().parents[1]

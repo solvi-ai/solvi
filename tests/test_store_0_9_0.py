@@ -87,7 +87,7 @@ def test_the_dispatch_store_of_solvi_build_written_by_0_9_0_verifies_and_replays
 def test_the_stores_replay_after_every_module_moved_with_the_table(task, copy):
     """Every solvi class and function moved to another module, MOVED mapping each back: what 0.9.0 stored replays."""
     from test_golden_fingerprints import _relocated
-    with _relocated(table=True):
+    with _relocated(moved=True):
         from solvi.storage import open_storage
         system = task.system(calibration=DATA / "calibration.json")
         store = open_storage(str(copy / "decisions.jsonl"))

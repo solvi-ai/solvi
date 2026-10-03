@@ -18,7 +18,7 @@ import numpy as np
 
 from solvi import Answer, Catalog, Claim, Decision, Maybe, Question, Quote, Span, System, Unknown
 from solvi.decide import DecideModel
-from solvi.provenance import ESCALATED
+from solvi.core.provenance import ESCALATED
 
 cat = Catalog()
 

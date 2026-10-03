@@ -19,7 +19,7 @@ import hashlib
 import re
 import sys
 
-from ._deprecate import MOVED as _FP_MODULE   # new module (or "module:Name") → its 0.9 module; filled as code moves
+from .._deprecate import MOVED as _FP_MODULE   # new module (or "module:Name") → its 0.9 module; filled as code moves
 
 GIVEN, COMPUTED, QUOTED, DECIDED, LEARNED, PROPOSED = "given", "computed", "quoted", "decided", "learned", "proposed"
 KINDS = (GIVEN, COMPUTED, QUOTED, DECIDED, LEARNED, PROPOSED)
@@ -30,8 +30,8 @@ QUOTE_OUTSIDE = "quote outside the text"
 NOT_GROUNDED = "not grounded"
 OUTSIDE_OPTIONS = "outside the options"
 VALIDATE = "rejected by validate"
-TYPE_REJECTED = "type rejected"               # a typed fact failed its type (solvi.typed); the guard kind of the same
-#                                               event is "type_rejected" (solvi.primitives.TYPE_REJECTED)
+TYPE_REJECTED = "type rejected"               # a typed fact failed its type (solvi.core.types); the guard kind of the same
+#                                               event is "type_rejected" (solvi.core.primitives.TYPE_REJECTED)
 ESCALATED = "model escalated"                 # a decider's own act / escalate signal said "hand it to a person" (solvi.decide)
 TIMED_OUT = "timed out"                       # a part did not finish within its timeout (System.aask)
 INSTRUCTION = "answer depends on an instruction-like sentence"   # perturb=k: the answer changed without such a sentence
@@ -157,11 +157,15 @@ def fp_module(module, qualname=None):
     `module` itself."""
     if not _FP_MODULE or not module:
         return module
-    if qualname:
-        old = _FP_MODULE.get(f"{module}:{qualname.split('.', 1)[0]}")
-        if old is not None:
-            return old
-    return _FP_MODULE.get(module, module)
+    top = qualname.split(".", 1)[0] if qualname else None
+    for _ in range(8):                       # a chain of moves (a module moved twice) ends at the 0.9 name
+        old = _FP_MODULE.get(f"{module}:{top}") if top else None
+        if old is None:
+            old = _FP_MODULE.get(module)
+        if old is None or old == module:
+            return module
+        module = old
+    return module
 
 
 # --- catalog fingerprints: what the parts are (code and declarations), so a stored decision knows which catalog made it
@@ -417,7 +421,7 @@ def _number(value):
 def matches(value, snippet):
     """Is `value` literally the quoted text? Strings: equal up to whitespace. Numbers (int, float, Decimal, Fraction, numpy
     scalars): a number in the snippet equals it (thousands separators allowed; a Decimal or a Fraction exactly, a float
-    up to rounding). A date: the snippet reads as that date (solvi.textin.parse_date) or holds it in ISO form; a snippet
+    up to rounding). A date: the snippet reads as that date (solvi.core.textin.parse_date) or holds it in ISO form; a snippet
     with no date in it is not the date, one whose date needs a year or "today" to be read is not compared (None). Other
     types (datetimes, lists, booleans) cannot be compared → None (not checked)."""
     import datetime
@@ -514,7 +518,7 @@ def find_normalized(text, quote, whole=True):
         return None
     view, starts, ends = norm_view(text)
     if whole:
-        from .core import find_whole
+        from .catalog import find_whole
         i = find_whole(q, view)
     else:
         i = view.find(q)

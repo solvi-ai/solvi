@@ -3,8 +3,8 @@
 A part's contract comes from its signature: argument names are the facts it reads, the function name is the fact it sets.
 Part kinds: extract (pull a value from text, with a quote), fn (computation), check (test → bool), rule (answer to a question).
 A part may be backed by a model (`model=`): its outputs are fuzzy, so they are grounded (a quote must be literally at its
-offsets, a decision must be among its options) and the model's identity is recorded in the trace (see solvi.provenance).
-Type hints are the facts' types (see solvi.typed): checked between producers and consumers when a part is registered,
+offsets, a decision must be among its options) and the model's identity is recorded in the trace (see solvi.core.provenance).
+Type hints are the facts' types (see solvi.core.types): checked between producers and consumers when a part is registered,
 validated / coerced with pydantic at run time; untyped parts cost nothing."""
 from __future__ import annotations
 
@@ -15,11 +15,11 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, Callable
 
-from . import _deprecate
+from .. import _deprecate
 
 
 class Serial:
-    """pydantic-backed export of solvi's data classes (see solvi.schema; pydantic is imported on first use):
+    """pydantic-backed export of solvi's data classes (see solvi.core.schema; pydantic is imported on first use):
     `x.model_dump(mode="python"|"json")`, `x.to_json()`, `Cls.model_validate(d)`, `Cls.from_json(s)`, `Cls.model_json_schema()`.
     Traces and responses take `catalog=` on load to restore typed values (dates, enums, models) from the facts' types."""
 
@@ -235,7 +235,7 @@ def find_quote(quote, sources, *, quotes="normalized", whole=True):
     sources: a text (labelled "doc") or {label: text}, searched in order ("notes", "dialogues", "map", ...); the first
     text that holds the quote wins. A literal occurrence is preferred in every text before the normalized view is tried
     (quotes="normalized", the default: Unicode NFKC, no-break spaces and hyphens, dash variants, "…" for "...",
-    whitespace runs, curly quotes — see solvi.provenance.norm_view); quotes="literal" finds the text as written only.
+    whitespace runs, curly quotes — see solvi.core.provenance.norm_view); quotes="literal" finds the text as written only.
     whole: as whole words and numbers ("3" is not found in "30")."""
     from .provenance import find_normalized, quote_mode
     quote_mode(quotes)
@@ -293,7 +293,7 @@ def locate(part, v, init_state):
     not there becomes Quote(text, -1, -1, source), which ground rejects. An item given as a Quote keeps its own offsets.
 
     Quote matching (the part's `quotes`, Catalog(quotes=...)): "normalized" (default) — a quote that is not literally in
-    its text is looked for, and compared at its offsets, in the normalized view (solvi.provenance.norm_view: NFKC,
+    its text is looked for, and compared at its offsets, in the normalized view (solvi.core.provenance.norm_view: NFKC,
     no-break spaces and hyphens, dashes, "…", whitespace runs, curly quotes); the Quote kept is then the source's own
     substring at offsets into the original text, and the output carries extra["quote_match"] = {"form", "written"} —
     what the part wrote — so the record says so and a replay re-checks it. A literal match never needs the view and
@@ -389,7 +389,7 @@ def _number_around(t, i, j):
     return t[i:j]
 
 
-PRIMITIVES = ("span", "rank", "estimate")         # answer kinds resolved by solvi.primitives (with their value's details)
+PRIMITIVES = ("span", "rank", "estimate")         # answer kinds resolved by solvi.core.primitives (with their value's details)
 
 
 @dataclass
@@ -549,7 +549,7 @@ class Answer:
     def from_type(t, ordinal=False) -> AnswerType:
         """From a Python type: bool → yes_no; Literal[...] / an Enum → choice (`ordinal=True`: ordinal, in declaration
         order); list[Literal[...]] (or set, tuple, of an Enum) → multi. `X | None` is X (None = abstain)."""
-        from .typed import answer_type_of
+        from .types import answer_type_of
         return answer_type_of(t, ordinal)
 
 
@@ -590,7 +590,7 @@ class Part:
     options: list | None = None          # a model's closed set of outputs: anything else is rejected
     exact: bool | None = None            # a Quote's value must be literally the text at its offsets (default: if model-backed)
     source: str | None = None            # extract only: the given fact its quotes point into, when it is not "doc"
-    types: dict | None = None            # typed arguments: {argument: type} (see solvi.typed); None — untyped
+    types: dict | None = None            # typed arguments: {argument: type} (see solvi.core.types); None — untyped
     returns: Any = None                  # the return type (the fact's type; for a Quote / Decision, of its value); None — untyped
     timeout: float | None = None         # System.aask: seconds a call may take (else System(timeout=)); then the step fails
     blocking: bool = False               # System.aask: a sync part that blocks (I/O, a model) runs in a worker thread
@@ -624,7 +624,7 @@ def _then_parts(check):
                              "the facts it reads, by name")
         tp = Part(kind="fn", name=f"{check.name}.then[{q}]", inputs=list(params), func=fn)
         if getattr(fn, "__annotations__", None):
-            from .typed import compile_part, hints
+            from .types import compile_part, hints
             tp.types, _ = hints(fn, "fn")
             if tp.types:
                 compile_part(tp)
@@ -640,7 +640,7 @@ def _group_func(group):
         for alt in group.alternatives:
             a = {x: args[x] for x in alt.inputs}
             if alt.tin is not None:
-                from .typed import typed_in
+                from .types import typed_in
                 a, reason = typed_in(alt, a)
                 if reason:
                     why.append(f"{alt.name}: {reason}")
@@ -793,7 +793,7 @@ def accept(alt, v, args, init_state=None):
     why = ground(alt, v, init_state)
     value = unwrap(v)[0]
     if not why and alt.tout is not None:
-        from .typed import typed_out
+        from .types import typed_out
         value, why = typed_out(alt, value)
     why = why or validated(alt, value, args)
     return (False, why, value) if why else (True, "accepted", value)
@@ -806,7 +806,7 @@ def accepts(alt, v, args, init_state=None):
 
 
 def answer_data(at):
-    """An answer type as plain data (its serialized form, solvi.schema; only what is set, so answer types of 0.4 dump
+    """An answer type as plain data (its serialized form, solvi.core.schema; only what is set, so answer types of 0.4 dump
     as before)."""
     if at is None:
         return None
@@ -816,14 +816,14 @@ def answer_data(at):
         v = getattr(at, k)
         if v not in (None, False):
             d[k] = list(v) if k == "bins" else v
-    if at.type is not None:                           # a typed span: its name as the dump writes it (solvi.schema)
+    if at.type is not None:                           # a typed span: its name as the dump writes it (solvi.core.schema)
         from .schema import _span_type_name
         d["type"] = _span_type_name(at.type)
     return d
 
 
 def question_data(q):
-    """A question as plain data (its serialized form, solvi.schema) — without importing pydantic."""
+    """A question as plain data (its serialized form, solvi.core.schema) — without importing pydantic."""
     d = {"name": q.name, "text": q.text, "answer": answer_data(q.answer), "checkpoints": list(q.requires),
          "uses": None if q.uses is None else list(q.uses), "min_confidence": q.min_confidence}
     if q.require_evidence:
@@ -833,7 +833,7 @@ def question_data(q):
 
 def plain_json(v):
     """Is v JSON data as it is — str / int / bool / None, finite floats, lists and tuples, dicts with str keys — so that
-    solvi.schema.jsonable would give it back unchanged (up to tuples as lists)?"""
+    solvi.core.schema.jsonable would give it back unchanged (up to tuples as lists)?"""
     t = type(v)
     if v is None or t in (str, int, bool):
         return True
@@ -859,7 +859,7 @@ class Catalog:
         self.parts: dict[str, Part] = {}
         self.rules: dict[str, Part] = {}
         self.constraints: dict[str, Part] = {}     # rules between answers of different questions
-        self.types: dict = {}                      # fact → type (its producer's return type; see solvi.typed)
+        self.types: dict = {}                      # fact → type (its producer's return type; see solvi.core.types)
         self.readers: dict = {}                    # fact → {typed part that reads it: the type it reads}
         self.decisions = 0                         # decision parts registered (solvi.decide): 0 — no batching work at all
 
@@ -890,7 +890,7 @@ class Catalog:
             p.then_parts = _then_parts(p)
         commit = None
         if getattr(f, "__annotations__", None) and kind != "constraint":      # typed facts (untyped parts skip all this)
-            from .typed import compile_part, hints, register
+            from .types import compile_part, hints, register
             p.types, p.returns = hints(f, kind)
             if p.types or p.returns is not None:
                 compile_part(p)
@@ -907,7 +907,7 @@ class Catalog:
         if kind == "rule":
             p.name = "answer:" + p.question
             if self.readers and commit is None:
-                from .typed import forget_rule
+                from .types import forget_rule
                 forget_rule(self, p.question)
             self.rules[p.question] = p
         elif kind == "constraint":
@@ -1030,7 +1030,7 @@ class Catalog:
         if part.kind != "rule" or not part.question:
             raise ValueError("replace_rule takes a rule part with its question")
         if self.readers:
-            from .typed import forget_rule
+            from .types import forget_rule
             forget_rule(self, part.question)
         self.rules[part.question] = part
         return part

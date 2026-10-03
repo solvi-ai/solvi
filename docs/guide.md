@@ -440,7 +440,7 @@ Question("band", "Risk band")                  # no Answer needed: choice(["low"
 **At registration.** The catalog records each fact's type (`cat.types`: fact → its producer's return type;
 `cat.readers`: fact → the typed parts that read it, with the type each expects; `res.flow.types` for the facts of a flow)
 and checks every producer against every consumer, whichever is registered first. A definite mismatch raises
-`solvi.typed.FactTypeError` naming both functions, and nothing is registered:
+`solvi.core.types.FactTypeError` naming both functions, and nothing is registered:
 
 ```
 FactTypeError: fact 'risk_score': risk_score returns float, but label reads risk_score: str
@@ -487,7 +487,7 @@ its rule's return type:
 
 `X | None` is `X` (the rule may return `None` to abstain). `solvi.Scale[...]` is
 `Annotated[Literal[...], Ordinal()]`; it also takes levels directly (`Scale[1, 2, 3, 4, 5]`) or an Enum (`Scale[Urgency]`),
-and `Answer.from_type(t, ordinal=True)` makes any closed set ordinal. `solvi.typed.question_kind(t)` gives the decision kind.
+and `Answer.from_type(t, ordinal=True)` makes any closed set ordinal. `solvi.core.types.question_kind(t)` gives the decision kind.
 
 ### Answer primitives: not stated, evidence, spans, rankings, estimates
 
@@ -561,7 +561,7 @@ def repair_days(doc: str) -> Estimate[0, 3, 7, 14]:
 - **Span** (`Span[T]`, `Answer.span(source="doc", type=None)`): the rule returns a `Quote` (its text must be literally at its
   offsets, whatever the part) or the text (located in `source`). The answer is the text read as `T`: by pydantic
   (`"149.90"` → 149.9, `"2026-07-21"`), and for a date or a number (`date`, `int`, `float`, `Decimal`) otherwise by the
-  deterministic parsers of `solvi.textin` — `"21 July 2026"`, `"18 октября 2026 г."`, `"21.07.2026"`; `"1,250.50"`,
+  deterministic parsers of `solvi.core.textin` — `"21 July 2026"`, `"18 октября 2026 г."`, `"21.07.2026"`; `"1,250.50"`,
   `"41,908.56 USD"`, `"EUR 18,851.12"`, `"1.5 million"`. What would be a guess abstains, **type rejected**, with the
   reason: `"twenty"`, a numeric date that reads both ways (`"03/04/2026"`, `"12.09.2026"`: day or month first?), a date
   without a year, two dates or numbers in the quote, a percentage. A decider's pointer is trimmed to its value
@@ -622,7 +622,7 @@ as JSON gave it and is named in the loaded trace's `unrestored`: replay reports 
 cannot be imported again (a class defined inside a function) makes `from_json` raise `ValueError`. Option descriptions
 are keyed by the option's text in JSON and come back on the options themselves (`Answer.ordinal({1: "bad", 2: "ok"})`).
 The classes stay plain dataclasses; the pydantic models are in
-`solvi.schema`.
+`solvi.core.schema`.
 
 Notes: types are resolved with `typing.get_type_hints`; a name that cannot be resolved (a class defined inside a function
 under `from __future__ import annotations`) is skipped with a warning. A pydantic model in a module loaded without an entry
@@ -907,7 +907,7 @@ than 10% of the time when few are answered (`info["error"]` is that error on the
 `info["promise"]` says it in words). For "the answers given alone are wrong at most 10% of the time" use
 `calibrate_for(max_error=0.10, method="ltt")`. A signal that does not tell right answers from wrong ones keeps the promise
 only by escalating: when its AUROC on the calibration examples is not above chance at the 5% level (a one-sided
-Mann–Whitney test, `solvi.calibration.separation`; judged with at least 10 right and 10 wrong examples), `act_guard` warns (`UserWarning`, and `info["warnings"]`) — the
+Mann–Whitney test, `solvi.core.calibration.separation`; judged with at least 10 right and 10 wrong examples), `act_guard` warns (`UserWarning`, and `info["warnings"]`) — the
 answers it lets through are then wrong about as often as all of them. A combination checks each part's signal.
 `calibrate_for(method="ltt")` tests at most 64 thresholds: quantiles of the distinct signals on the calibration
 examples (the labels are not read, so the promise holds; the Bonferroni correction is over those thresholds). Before
@@ -934,7 +934,7 @@ part.load_calibration("team.calib.json")
 questions.append(part.question(cat))
 ```
 
-The file (`solvi.calibfile`, JSON) holds the escalation thresholds (`escalate_below` / `act_threshold`, one per group
+The file (`solvi.core.calibfile`, JSON) holds the escalation thresholds (`escalate_below` / `act_threshold`, one per group
 with `groups=`), the guarantee record every decision carries, the conformal set, and what they were fitted for: the
 question (task, options, kind) and the fingerprint of the checkpoint and of this question's adaptation. A threshold on
 one model's confidence says nothing about another model's, so `load_calibration` refuses (ValueError) a file made for
@@ -1641,10 +1641,10 @@ multi-label, "none" is chosen when no option reaches the threshold. Checkpoints 
 
 ### Calibration utilities
 
-`solvi.calibration` works for any model or question:
+`solvi.core.calibration` works for any model or question:
 
 ```python
-from solvi.calibration import coverage_at, ece, evaluate, reliability, threshold_for
+from solvi.core.calibration import coverage_at, ece, evaluate, reliability, threshold_for
 
 coverage_at(conf, correct, 0.9)       # share of cases answerable automatically at ≥ 90% accuracy
 threshold_for(conf, correct, 0.9)     # the confidence threshold that gives it (e.g. for Question(min_confidence=...))
@@ -1655,7 +1655,7 @@ evaluate(system, "team", examples)    # ask on [(init_state, answer)] → accura
 Equal confidences are taken or left together (an LLM that states 0.85 / 0.90 / 0.95 gives mostly ties), so the cases
 with confidence ≥ the threshold do reach the accuracy on the examples. `threshold_for` returns `None` when fewer than
 `min_n=10` examples stand at or above the threshold — one confident right answer is not a threshold. Both are empirical:
-no promise for new inputs; `solvi.calibration.ltt_threshold` and `crc_threshold` (behind `calibrate_for(method="ltt")`
+no promise for new inputs; `solvi.core.calibration.ltt_threshold` and `crc_threshold` (behind `calibrate_for(method="ltt")`
 and `act_guard`) give one.
 
 [examples/13_decide_model.py](../examples/13_decide_model.py) routes support emails with a decision part: bias correction on
@@ -1878,7 +1878,7 @@ shortcut for it). Both are code only. Details and the trace record of a plan:
 [docs/strategist.md](strategist.md).
 
 **Costs.** The cost-optimal planner plans with the declared `cost=` of each producer. Planning on measured run times
-(`cost_policy="measured"`, `solvi.costs.MeasuredCosts`, `freeze_costs`) was removed in 1.0: it showed no measured
+(`cost_policy="measured"`, `solvi.core.costs.MeasuredCosts`, `freeze_costs`) was removed in 1.0: it showed no measured
 benefit; `cost_policy="declared"` is the only value left.
 
 ### Early exit and parallel execution
@@ -2732,7 +2732,7 @@ updates its measured costs and stats in place. A System with `async def` (or `bl
 [`aask`](#async-execution-aask) instead: its endpoints are async and asks run concurrently on the server's event loop
 (the MCP server too).
 
-**Text in.** `POST /ask_text` reads a message with `solvi.textin.TextIn(system, decider)` — `--decider` picks the entry
+**Text in.** `POST /ask_text` reads a message with `solvi.core.textin.TextIn(system, decider)` — `--decider` picks the entry
 point (any decider: a checkpoint, `systemone:URL#model`, `llm:URL#model`), and the deterministic `CueExtractor` reads
 the fields (`TextIn(extractor=DeciderExtractor(decider))` uses the decider's span pointer); `create_app(..., textin=TextIn(...))` or
 `Service(..., textin=...)` sets synonyms, patterns and cues. Without a decider a text can only go to a named `question`
@@ -2828,11 +2828,11 @@ only this endpoint. Without FastAPI, `solvi.serve.Service(system, decider)` answ
 ## Text in: from a message to a question
 
 `system.ask(state)` needs a typed state. A person writes a message instead: "please refund order A-10457, I paid 1.5
-million rubles on 12 September". `solvi.textin` turns such a text into the question it asks and that question's input
+million rubles on 12 September". `solvi.core.textin` turns such a text into the question it asks and that question's input
 state, reads every value with a quote, and leaves the decision to the catalog as before.
 
 ```python
-from solvi.textin import TextIn
+from solvi.core.textin import TextIn
 
 eps = system.entry_points()          # the questions with the typed input state each one reads
 eps[0].fields["amount"]              # EntryField(name="amount", type=float, description=..., required=True)
@@ -3781,7 +3781,7 @@ follow from it. The key is never recorded.
 `generator(..., price=, budget=, total=)` adds the rest:
 
 ```python
-from solvi.costs import Budget, BudgetStop
+from solvi.core.costs import Budget, BudgetStop
 writer = generator(url, model, api_key=KEY, price=(0.15, 0.60),          # dollars per million input / output tokens
                    budget=Budget(usd=0.002, tokens=4000),                # one call of generate / sample: one decision
                    total=Budget(usd=5.0))                                # the generator's whole life
@@ -3872,11 +3872,11 @@ loop ends:
 | the proposer failed otherwise (the server did not answer, `BudgetStop` from a generator's total) | False | "the proposer failed: <type>: <message>" |
 | `budget` would not cover another round | False | "no budget for another round (<the limit>): <the last reasons>"; `run.stopped` holds the first part |
 
-**Costs and a budget.** Each round records what it cost (`round.cost`, a `solvi.costs.Cost`): the model calls its
+**Costs and a budget.** Each round records what it cost (`round.cost`, a `solvi.core.costs.Cost`): the model calls its
 response's trace records (a model in the System, a generating part) and its proposer's request (`round.generated`, also
 for a rejected reply), their tokens and dollars — from `price` (dollars per million input and output tokens, or a
 function), else the dollars a generator built with `price=` recorded, else unknown (None) — and the round's time.
-`run.cost` is their sum. `budget` (a `solvi.costs.Budget`: `usd`, `calls`, `ms`, `tokens`) limits the whole loop — one
+`run.cost` is their sum. `budget` (a `solvi.core.costs.Budget`: `usd`, `calls`, `ms`, `tokens`) limits the whole loop — one
 decision: before each round after the first, the spend so far plus the expected cost of one more round (the mean of
 the rounds so far) must fit, else the loop stops and escalates. A budget in dollars whose rounds' dollars are unknown
 stops after the first round ("dollars unknown …") rather than run unpriced. A round is not stopped half-way: a loop that
@@ -4349,7 +4349,7 @@ accepted, why, record, cost) — the "slow path alone" arm of a comparison.
 ### Budget and cost
 
 `budget=Budget(usd=, calls=, ms=, tokens=)` is per decision, `total=Budget(...)` for the dispatcher's life (`Budget`
-and `Cost` live in `solvi.costs` since 1.0 and are the same ones `solvi.generate` and `solvi.refine` take; `tokens` counts
+and `Cost` live in `solvi.core.costs` since 1.0 and are the same ones `solvi.generate` and `solvi.refine` take; `tokens` counts
 input + output tokens). Dollars are the
 tokens each model output records in the trace (`extra["llm"]["usage"]`, `extra["generated"]["usage"]`) times `price`
 — dollars per million input and output tokens, or a function `(model, usage) → dollars`; a budget in dollars without a
@@ -4593,7 +4593,7 @@ A decision without any model and one with models are the same system; they diffe
 
 ### Provenance
 
-Every fact and answer has a provenance kind (`record.origin`, `result.provenance`, `solvi.provenance.KINDS`):
+Every fact and answer has a provenance kind (`record.origin`, `result.provenance`, `solvi.core.provenance.KINDS`):
 
 | Kind | Where the value comes from | How it is kept honest |
 |---|---|---|
@@ -4629,7 +4629,7 @@ pass `model=`.
 ### Model identity in the trace
 
 A model-backed record stores `record.model = {"type", "id", "fp"}`: the class, the model id (the Hugging Face id or path it
-was loaded from, `model.model_id`), and a fingerprint (`solvi.provenance.fingerprint`):
+was loaded from, `model.model_id`), and a fingerprint (`solvi.core.provenance.fingerprint`):
 
 - extractors: settings, thresholds / temperatures, the span head, evenly sampled encoder weights, and the names and sizes of
   the weight files — computed once, then cached until `fit` / `save`;
@@ -4853,9 +4853,9 @@ Only the rendering changes. What solvi records — the trace and its hashes, `Re
 reasons, stored responses, `to_dict()` — stays in English whatever the language, so a decision replays and verifies the
 same way, and a response stored by a Russian-speaking service is byte for byte the one an English-speaking one stores.
 solvi translates its own words: headings and labels, safeguard names, statuses, and the messages it builds from templates
-(`solvi.i18n.msg`). It never translates what came from you: fact, part and question names, values, options, quoted text,
+(`solvi.core._i18n.msg`). It never translates what came from you: fact, part and question names, values, options, quoted text,
 the text of your exceptions. A message it has no template for is shown in English. The catalog of words and templates is
-`solvi.i18n` (`EN`, `RU`, `MESSAGES_RU`); another language is one more dict of the same keys.
+`solvi.core._i18n` (`EN`, `RU`, `MESSAGES_RU`); another language is one more dict of the same keys.
 
 ## Extracting fields from documents
 

@@ -258,7 +258,7 @@ def _questions(cat, questions, heads, given, rep, planner):
     """Plan each question with every given fact present → ({question: facts in its flow}, {question: the facts that count
     as used}); unanswerable questions, rules reading question names, questions without a rule. planner(questions, given
     facts) → Flow: the system's own (System._plan)."""
-    from .core import PRIMITIVES
+    from .core.catalog import PRIMITIVES
     from .strategist import PlanError
     flows, counted = {}, {}
     for name, q in questions.items():
@@ -429,7 +429,7 @@ def _names(cat, system, questions, rep):
 
 # --- types
 def _types(cat, system, given, rep):
-    from .typed import compatible, producers, type_name
+    from .core.types import compatible, producers, type_name
     for fact, readers in cat.readers.items():
         for reader, t in readers.items():
             for prod, pt in producers(cat, fact):
@@ -460,7 +460,7 @@ def _types(cat, system, given, rep):
 # --- constraints between answers
 def _domain(at, max_multi=10):
     """The finite set of answers a question can have (what a constraint receives), or None."""
-    from .core import Unknown
+    from .core.catalog import Unknown
     if at is None:
         return None
     if at.kind in ("yes_no", "choice", "ordinal"):
@@ -639,7 +639,7 @@ def cmd_check(a):
         _fail(f"check {a.target}: not a solvi System, Catalog or Guard")
     rep = lint(obj, strict=a.strict, max_combos=a.max_combos)
     if a.json:
-        from .schema import dumps
+        from .core.schema import dumps
         print(dumps(rep.to_dict(), ensure_ascii=False, indent=2))
     else:
         print(rep)

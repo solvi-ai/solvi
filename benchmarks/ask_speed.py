@@ -77,7 +77,7 @@ def large_input(n_states=8, seed=0):
     import numpy as np
 
     from solvi import Answer, Catalog, Question, System
-    from solvi.calibration import conformal_quantile
+    from solvi.core.calibration import conformal_quantile
     W, DAY, K_DAYS, HORIZON, MIN_HIST = 576, 288, 7, 2553, 48
     cat = Catalog()
 

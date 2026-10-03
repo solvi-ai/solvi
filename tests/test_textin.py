@@ -1,4 +1,4 @@
-"""solvi.textin: a free text → the entry point (a question) and its typed input state, read with quotes; deterministic
+"""solvi.core.textin: a free text → the entry point (a question) and its typed input state, read with quotes; deterministic
 parsers; missing fields for a clarifying question; provenance in the trace and the audit (read by a model, never given);
 an unsure entry point escalates; a dialogue turn changes fields. A keyword scorer stands in for the decider."""
 import datetime as dt
@@ -9,7 +9,7 @@ import pytest
 
 from solvi import Catalog, Response, System
 from solvi.decide import DecideModel
-from solvi.textin import (CueExtractor, DeciderExtractor, ParseError, TextIn, parse_bool, parse_date, parse_enum,
+from solvi.core.textin import (CueExtractor, DeciderExtractor, ParseError, TextIn, parse_bool, parse_date, parse_enum,
                           parse_number, parse_text, replay_record)
 
 TODAY = dt.date(2026, 9, 28)
@@ -345,7 +345,7 @@ def test_cue_extractor_picks_the_number_after_its_cue():
 # --------------------------------------------------------------------------------------------------- fixes before 0.7
 def test_bool_description_words_never_decide_true():
     """A bool field's description words rank candidates but never make it True; only its name and cues= do."""
-    from solvi.textin import EntryField, field_spec
+    from solvi.core.textin import EntryField, field_spec
     fs = field_spec(EntryField("urgent", bool, "Whether the customer asked for express handling", True))
     assert fs.cues == ["urgent"] and "customer" in fs.hints
     with pytest.raises(ParseError):
@@ -489,7 +489,7 @@ def test_two_digit_year_needs_today_and_a_window():
 def test_a_spelled_out_number_that_goes_on_is_refused_not_cut():
     """Only a number with one scale word is read. "две тысячи триста" was read as 2000 and "one hundred fifty" as 100:
     the words after the scale were dropped."""
-    from solvi.textin import ParseError, parse_number
+    from solvi.core.textin import ParseError, parse_number
     for text in ("две тысячи триста", "one hundred fifty", "one hundred and fifty", "триста две тысячи",
                  "ten thousand and one nights"):
         with pytest.raises(ParseError, match="a number in several words"):
@@ -503,7 +503,7 @@ def test_a_spelled_out_number_that_goes_on_is_refused_not_cut():
 def test_fractions_of_a_scale_word_are_read_whole_or_refused_never_cut():
     """"half a million" was read as 1,000,000 (the quote "a million") and "two and a half million" as 500,000 (the
     quote "half million"), with status read."""
-    from solvi.textin import ParseError, parse_number
+    from solvi.core.textin import ParseError, parse_number
     for text, want in (("half a million", "500000"), ("half a billion euros", "500000000"), ("half a thousand", "500"),
                        ("a half million", "500000"), ("two and a half million", "2500000"),
                        ("one and a half million", "1500000"), ("ten and a half thousand", "10500"),
@@ -526,7 +526,7 @@ def test_fractions_of_a_scale_word_are_read_whole_or_refused_never_cut():
 
 
 def test_the_modal_verb_may_after_a_number_is_not_the_month():
-    from solvi.textin import ParseError, parse_date
+    from solvi.core.textin import ParseError, parse_date
     t = {"today": "2026-09-28"}
     for text in ("these 2 may be wrong", "the 3 may not arrive", "all 12 may have failed"):
         with pytest.raises(ParseError, match="no date"):
@@ -543,7 +543,7 @@ def test_the_modal_verb_may_after_a_number_is_not_the_month():
 def test_a_number_cut_out_of_a_longer_one_in_a_text_is_not_read():
     """In a text the extractor quoted "ten thousand" out of "ten thousand and one" and read 10000, and "2" out of
     "2 thirds": parse_number refused the whole phrase, but only saw the cut quote."""
-    from solvi.textin import ParseError, parse_number
+    from solvi.core.textin import ParseError, parse_number
     _, s = shop()
     tin = TextIn(s, patterns={"order_id": r"[A-Z]-\d+"}, today="2026-09-28",
                  synonyms={"currency": {"EUR": ["euro", "euros"]}})

@@ -46,16 +46,16 @@ def test_declared_costs_keep_the_declaration_order():
 
 
 def test_measured_costs_were_removed():
-    """1.0 trim: cost_policy="measured", solvi.costs.MeasuredCosts and freeze_costs / unfreeze_costs showed no measured
+    """1.0 trim: cost_policy="measured", solvi.core.costs.MeasuredCosts and freeze_costs / unfreeze_costs showed no measured
     benefit; each says so and names what to use (declared cost= on the parts)."""
-    import solvi.costs
+    import solvi.core.costs
     cat, qs = rates({"live": 0, "table": 0})
     with pytest.raises(ValueError, match=r'cost_policy="measured" .* was removed in 1.0: .* declare cost='):
         System(cat, qs, producers="equivalent", cost_policy="measured")
     with pytest.raises(ValueError, match='cost_policy must be "declared"'):
         System(cat, qs, producers="equivalent", cost_policy="fastest")
     with pytest.raises(AttributeError, match="MeasuredCosts .* was removed in 1.0"):
-        _ = solvi.costs.MeasuredCosts
+        _ = solvi.core.costs.MeasuredCosts
     s = System(cat, qs, producers="equivalent")
     for name in ("freeze_costs", "unfreeze_costs"):
         with pytest.raises(AttributeError, match=rf"System.{name}\(\) was removed in 1.0: use declared costs"):

@@ -7,7 +7,7 @@ from enum import Enum
 
 import numpy as np
 
-from ..core import Unknown
+from ..core.catalog import Unknown
 from .kinds import OTHER_NAMES, _kind
 from .wire import Item
 
@@ -150,7 +150,7 @@ class _Spec:
         if kind == "number":
             if not bins:
                 raise ValueError("a number decision needs bins (the bin edges)")
-            from ..core import bin_labels
+            from ..core.catalog import bin_labels
             self.edges = list(bins)
             if self.integer is None:
                 self.integer = all(float(b).is_integer() for b in self.edges)
@@ -277,9 +277,9 @@ def _is_type(x):
 
 
 def _from_type(t, kind=None, options=None, descriptions=None):
-    """A Python type → (kind, options, descriptions, as_bool, primitive settings) of a decision (solvi.typed.question_kind;
+    """A Python type → (kind, options, descriptions, as_bool, primitive settings) of a decision (solvi.core.types.question_kind;
     Maybe[T] — "not stated" allowed; Span[T], Rank[...], Estimate[...] — span, rank, number)."""
-    from ..typed import primitive_answer, question_kind, split_unknown
+    from ..core.types import primitive_answer, question_kind, split_unknown
     t, unknown = split_unknown(t)
     extra = {"unknown": True} if unknown else {}
     pa = primitive_answer(t)

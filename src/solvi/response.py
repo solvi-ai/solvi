@@ -6,8 +6,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from . import _deprecate
-from .core import Serial
-from .runtime import MISSING
+from .core.catalog import Serial
+from .core.runtime import MISSING
 
 
 @dataclass
@@ -36,12 +36,12 @@ class CheckResult:
 
 def _plain(v):
     """An answer as stored (solvi.storage.plain): JSON data, "not stated" as "<not stated>"."""
-    from .core import NOT_STATED_KEY, Unknown
+    from .core.catalog import NOT_STATED_KEY, Unknown
     if v is Unknown:
         return NOT_STATED_KEY
     if isinstance(v, (list, tuple)):
         return [_plain(x) for x in v]
-    from .schema import jsonable
+    from .core.schema import jsonable
     return jsonable(v)
 
 
@@ -104,7 +104,7 @@ class Response(Serial):
     safeguards: list | None = None      # safeguard events of this response (see solvi.audit.collect)
     model_outputs: int = 0              # outputs produced by models in this response
     stored_id = None                    # its id in a TraceStorage once saved (System(storage=...) saves every ask)
-    read = None                         # ask_text: the solvi.textin.TextRead the question and state were read from
+    read = None                         # ask_text: the solvi.core.textin.TextRead the question and state were read from
     textin = _deprecate.removed_attr("textin", "read", "Response")                # 0.7 name
     _system = None                      # the System that answered (reports; see the class docs)
     _heads = None                       # its answer heads (the audit)
@@ -146,7 +146,7 @@ class Response(Serial):
     def not_stated(self):
         """Questions answered "not stated" (solvi.Unknown): answered — they count in `confidence` and `complete` — but
         the text does not state the value."""
-        from .core import Unknown
+        from .core.catalog import Unknown
         return [q for q, r in self.results.items() if r.answer is Unknown and r.status != "abstain"]
 
     @property
@@ -182,9 +182,9 @@ class Response(Serial):
     def state_text(self, lang=None):
         """The computed state for people: each computed fact with its value; a quote's offsets; for anything not
         computed by plain code, its provenance (quoted by a model, decided, learned) and the model; errors, including
-        rejected (ungrounded) model outputs — in a language (solvi.i18n; default: the System's). The facts as data:
+        rejected (ungrounded) model outputs — in a language (solvi.core._i18n; default: the System's). The facts as data:
         `res.values`."""
-        from . import i18n
+        from .core import _i18n as i18n
         lang = i18n.check(self.lang if lang is None else lang)
         t = i18n.t
         lines = []
@@ -210,7 +210,7 @@ class Response(Serial):
         """What each answer rests on and which safeguards fired: given inputs → computed facts → quotes (offsets and quoted
         text) → model decisions (model, probabilities) → learned parts → checks, rule, constraints → answer; plus the share
         of the support that is deterministic. `print(res.audit())`, or `res.audit("q").to_dict()` for data.
-        lang: the language str() renders in (solvi.i18n; default: the System's, "en"); the data is the same in every one.
+        lang: the language str() renders in (solvi.core._i18n; default: the System's, "en"); the data is the same in every one.
         → an Audit of every answer, or the AnswerAudit of one question when `question` is given."""
         from .audit import build
         a = build(self, question, lang=self.lang if lang is None else lang)

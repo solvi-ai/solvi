@@ -23,9 +23,9 @@ import warnings
 from enum import Enum
 from typing import Any, Literal, Union, get_args, get_origin
 
-from .core import NotStated, Quote
+from .catalog import NotStated, Quote
 from .provenance import TYPE_REJECTED
-from .core import Answer
+from .catalog import Answer
 
 _NOHINT = object()
 
@@ -103,7 +103,7 @@ def hints(f, kind):
     if kind == "constraint":
         return None, None
     if not _untyped(ret):
-        from .core import Decision
+        from .catalog import Decision
         if all(_strip(m) in (Quote, Decision) for m in _members(_strip(ret))):
             ret = _NOHINT
     return (ins or None), (None if _untyped(ret) else ret)
@@ -154,7 +154,7 @@ def span_value(vtype, text, strict=False):
     """The value a typed span states (`Span[float]`, `Span[date]`, ...) → the value; ValueError when the text is not one.
     First the type's own reading of the text ("149.90", "2026-09-12") — except a number the guarded parser calls
     ambiguous ("2.500", "1.000": refused, as below). When that fails and the type is a date or a number
-    (date, int, float, Decimal), the deterministic parsers of solvi.textin read what people write — "21 July 2026", "July
+    (date, int, float, Decimal), the deterministic parsers of solvi.core.textin read what people write — "21 July 2026", "July
     21, 2026", "18 октября 2026 г.", "21.07.2026"; "41,908.56 USD", "EUR 18,851.12", "1 500 000 руб", "1.5 million" —
     and refuse what would be a guess: a numeric date that reads both ways ("03/04/2026", "12.09.2026": day or month
     first?), a date without a year, two dates or two numbers, "1.000", a percentage. strict=True: the type's own
@@ -563,7 +563,7 @@ def _marker(t, cls):
 
 def is_primitive(t):
     """Does a type declare an answer primitive (Maybe / NotStated, Span, Rank, Estimate)? Such a rule's output is checked
-    when the answer is resolved (solvi.primitives), not by a return-type validator."""
+    when the answer is resolved (solvi.core.primitives), not by a return-type validator."""
     if t is None:
         return False
     t2, unk = split_unknown(t)
@@ -627,7 +627,7 @@ def answer_type_of(t, ordinal=False):
     """A Python type → an AnswerType: bool → yes_no; Literal / Enum → choice (ordinal=True, or an ordinal type such as
     Scale[...]: ordinal, in declaration order; Literal["yes", "no"] → yes_no); list / set / tuple of a Literal or Enum →
     multi. `X | None` is X (None = abstain)."""
-    from .core import Answer
+    from .catalog import Answer
     t, unknown = split_unknown(t)
     if unknown:
         return Answer.maybe(answer_type_of(t, ordinal))

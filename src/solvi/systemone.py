@@ -52,7 +52,7 @@ import time
 
 import numpy as np
 
-from . import core
+from .core import catalog as core
 from .decide import DecideModel, _unknown_caps
 from .remote import NoAnswer, Refused, RemoteClient, RemoteError
 from .remote import tokens as remote_tokens

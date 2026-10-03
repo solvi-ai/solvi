@@ -184,7 +184,7 @@ class SearchRun:
             else:
                 got = None
                 bad.append(("objective", f"pass the objective again ({self.objective}) to recompute it"))
-            from .runtime import vhash
+            from .core.runtime import vhash
             from .storage import plain
             if got is not None and vhash(plain(got)) != vhash(plain(self.value)):
                 bad.append(("objective", f"recorded {self.value!r}, recomputed {got!r}"))
@@ -214,7 +214,7 @@ def _depends(catalog, keys):
 
 def _pinned(p, rec):
     """A part that returns the value its model proposed in the recorded trace (or fails as it failed), calling nothing."""
-    from .runtime import MISSING
+    from .core.runtime import MISSING
     if rec is None:
         why = f"{p.name}: a model-backed part that did not run in the recorded decision (no proposal to hold)"
 
@@ -242,8 +242,8 @@ def _held_system(system, state, vals, keys):
     `state` (`vals`), its own stats and costs (the searched candidates do not count as the System's asks), no storage."""
     from types import SimpleNamespace
 
-    from .costs import CostBook
-    from .runtime import MISSING, HashSeed
+    from .core.costs import CostBook
+    from .core.runtime import MISSING, HashSeed
     dep = _depends(system.catalog, keys)
     cat = copy.copy(system.catalog)
     cat.parts = dict(cat.parts)
@@ -322,7 +322,7 @@ def search(system, state, question, space, *, into=None, objective=None, maximiz
     if objective is not None and not (callable(objective) or isinstance(objective, str)):
         raise TypeError("objective is a function of the candidate or the name of a fact")
     t0 = time.perf_counter()
-    from .runtime import MISSING
+    from .core.runtime import MISSING
     held = []
     vals = system.facts_for(dict(state)) if hold or (callable(space) and not isinstance(space, Tree)) else None
     if callable(space) and not isinstance(space, Tree):

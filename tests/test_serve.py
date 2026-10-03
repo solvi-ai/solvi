@@ -337,7 +337,7 @@ def test_serve_usage_errors():
 # --- a free text: POST /ask_text and the ask_text tool
 def _shop():
     from test_textin import decider, shop
-    from solvi.textin import TextIn
+    from solvi.core.textin import TextIn
     _, s = shop()
     tin = TextIn(s, decider(), patterns={"order_id": r"[A-Z]-\d+"},
                  synonyms={"currency": {"EUR": ["euro", "euros", "€"], "RUB": ["rubles", "руб", "₽"]}})

@@ -37,7 +37,7 @@ from decimal import Decimal, InvalidOperation
 from enum import Enum
 from typing import Any, Literal
 
-from .core import Quote, Unknown
+from .catalog import Quote, Unknown
 from .provenance import ESCALATED, digest, model_info
 
 SOURCE = "request_text"             # the init_state key the text is given under (quotes point into it)
@@ -55,7 +55,7 @@ class EntryField:
     required: bool = False
 
     def to_dict(self):
-        from .typed import type_name
+        from .types import type_name
         return {"name": self.name, "type": type_name(self.type), "description": self.description, "required": self.required}
 
 
@@ -491,7 +491,7 @@ _BOOL_PREFIX = {"is", "are", "was", "has", "have", "had", "needs", "need", "want
 
 
 def _base_type(t):
-    from .typed import _members, _strip
+    from .types import _members, _strip
     t = _strip(t)
     ms = [m for m in _members(t) if m is not type(None)]
     return _strip(ms[0]) if len(ms) == 1 else t
@@ -620,7 +620,7 @@ class CueExtractor:
     ("order A-10457"). A field named as an identifier (…_id, …_number, …_code, …_ref) takes one token with a digit in
     it, or nothing. It never calls a model, but the choice of the span is still a guess, so a value it reads is recorded
     as quoted by it (its identity in the trace) and counted with model outputs."""
-    model_id = "solvi.textin.CueExtractor"
+    model_id = "solvi.core.textin.CueExtractor"
     version = "2"                    # 2: strings end before the next key / another field's cue; hints never anchor them
 
     def fingerprint(self):
@@ -1001,7 +1001,7 @@ class TextIn:
         is preferred ("not A-10457 but A-10475"). When no extractor reads it: the first "unsure" one, else the first
         "unparsed", else "not_stated"."""
         if fs.kind == "unsupported":
-            from .typed import type_name
+            from .types import type_name
             return FieldRead(fs.name, "unsupported", why=f"no parser reads {type_name(fs.type)}", required=fs.required)
         parser, spec = fs.kind, fs.parser_spec(self.today, self.dayfirst, self.decimal)
         first_bad = first_unsure = None

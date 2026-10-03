@@ -240,7 +240,7 @@ def run_proxy(guard, upstream, facts=None, escalate="elicit", stdin=None, stdout
     solvi.serve.Limits — a client message is at most max_body characters and max_depth levels of JSON; a failure of the
     proxy itself is logged (logger solvi.serve) and answered with an incident id, never the exception's text."""
     from .. import __version__
-    from ..schema import dumps
+    from ..core.schema import dumps
     from .._rpc import Limits, RequestError, _readline, internal_error, parse_json
     stdin, stdout = stdin or sys.stdin, stdout or sys.stdout
     lim = limits or Limits()

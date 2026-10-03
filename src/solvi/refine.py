@@ -33,10 +33,10 @@ that fails otherwise (the server does not answer) ends the loop with an escalati
 Without a proposer the System generates itself (a part made by `Generator.part`): each round gives the feedback of the
 earlier rounds as the fact `feedback_into` (a list of reasons), and the part reads it.
 
-Costs and a budget. Each round records what it cost (`round.cost`, a solvi.costs.Cost): the model calls its response's
+Costs and a budget. Each round records what it cost (`round.cost`, a solvi.core.costs.Cost): the model calls its response's
 trace records (a model in the System, a generating part) and the proposer's request (a Generated's record), their tokens
 and dollars (with `price=`, or the dollars a generator built with price= recorded), and the round's time. `budget=` (a
-solvi.costs.Budget: usd, calls, ms, tokens) limits the whole loop — one decision: before each round after the first, the
+solvi.core.costs.Budget: usd, calls, ms, tokens) limits the whole loop — one decision: before each round after the first, the
 spend so far plus the expected cost of one more round (the mean of the rounds so far) must fit, else the loop stops and
 escalates ("no budget for another round (...)", `run.stopped`). A limit across many loops is the proposer's: a
 generator's `total=` raises BudgetStop when it is used up, which ends the loop as a proposer failure. A round cannot be
@@ -54,7 +54,7 @@ import json
 from dataclasses import dataclass, field
 from typing import Any
 
-from .core import Claim
+from .core.catalog import Claim
 
 
 class Fail(Claim):
@@ -166,7 +166,7 @@ class Round:
     feedback: Any = None                 # what the proposer is told next (a text or a list of reasons); None: no next round
     error: str | None = None             # the proposer's own failure (an invalid reply, no answer)
     said: str | None = None              # the proposer's reply as text (for the assistant's turn of a re-ask)
-    cost: Any = None                     # what the round cost (solvi.costs.Cost: the proposer's and the System's model calls)
+    cost: Any = None                     # what the round cost (solvi.core.costs.Cost: the proposer's and the System's model calls)
 
     @property
     def reasons(self):
@@ -200,15 +200,15 @@ class Refinement:
     feedback_into: str | None
     accept: Any = "checks"
     feedback_fn: str = "reasons"
-    budget: Any = None                   # the loop's Budget (solvi.costs), None: no limit
+    budget: Any = None                   # the loop's Budget (solvi.core.costs), None: no limit
     stopped: str | None = None           # why the budget stopped the loop before its last round
     over_budget: str | None = None       # how far over its budget the loop went (a round is not stopped half-way)
     stored_id = None                     # the id of its "refine" record in the System's storage
 
     @property
     def cost(self):
-        """What the whole loop cost (solvi.costs.Cost): the sum of its rounds'."""
-        from .costs import Cost
+        """What the whole loop cost (solvi.core.costs.Cost): the sum of its rounds'."""
+        from .core.costs import Cost
         total = Cost(0.0)
         for r in self.rounds:
             if r.cost is not None:
@@ -243,7 +243,7 @@ class Refinement:
     @classmethod
     def from_dict(cls, d, catalog=None):
         """A stored refinement back (responses restored with `catalog`'s types, as Response.model_validate does)."""
-        from .costs import Budget, Cost
+        from .core.costs import Budget, Cost
         from .system import Response
         rounds = []
         for x in d["rounds"]:
@@ -334,7 +334,7 @@ def _items(feedback):
 
 
 def _vh(v):
-    from .runtime import vhash
+    from .core.runtime import vhash
     return vhash(_plain(v))
 
 
@@ -349,9 +349,9 @@ def _plain(v):
 
 
 def _round_cost(rd, price, ms):
-    """What a round cost: the model calls its response's trace records and its proposer record (solvi.costs.cost_of),
+    """What a round cost: the model calls its response's trace records and its proposer record (solvi.core.costs.cost_of),
     dollars from `price` (else the dollars the calls recorded), `ms` as its time."""
-    from .costs import cost_of
+    from .core.costs import cost_of
     gen = rd.generated
     gens = [] if gen is None else (list(gen) if isinstance(gen, list) else [gen])
     return cost_of([rd.response] if rd.response is not None else [], price, ms, gens, recorded=True)
@@ -361,7 +361,7 @@ def _no_budget(budget, costs):
     """Is there no budget for one more round, after rounds that cost `costs`? → the reason, or None."""
     if budget is None or not costs or any(c is None for c in costs):
         return None
-    from .costs import Cost
+    from .core.costs import Cost
     so_far = Cost(0.0)
     for c in costs:
         so_far = so_far + c
@@ -402,16 +402,16 @@ def refine(system, state, question, propose=None, *, into="proposal", rounds=3, 
     accept: "checks" (default), an answer or answers, or a function of the Response. feedback: round → the text or
     the list of reasons the proposer is told (default: round.reasons). history: earlier rounds the proposer should
     see first (a Refinement's rounds, to continue it). store: whether a System with storage stores every round and the
-    loop's "refine" record. budget: a solvi.costs.Budget for the whole loop (one decision), checked before every round
+    loop's "refine" record. budget: a solvi.core.costs.Budget for the whole loop (one decision), checked before every round
     after the first; price: dollars per million (input, output) tokens, or a function (model, usage) → dollars — needed
     for a budget in dollars unless the proposer records its own (module docs, "Costs and a budget")."""
     import time
     from .generate import check_budget
     if int(rounds) < 1:
         raise ValueError("rounds must be at least 1")
-    from .costs import Budget
+    from .core.costs import Budget
     if budget is not None and not isinstance(budget, Budget):
-        raise TypeError("budget= takes a solvi.costs.Budget(usd=, calls=, ms=, tokens=)")
+        raise TypeError("budget= takes a solvi.core.costs.Budget(usd=, calls=, ms=, tokens=)")
     if price is not None:                             # without one, dollars are those the calls recorded (or unknown)
         price, _, _ = check_budget(price, None, None)
     if propose is None and feedback_into is None:
@@ -490,7 +490,7 @@ def _stored_record(run):
     """The "refine" record of a loop in the System's storage: its outcome, each round's stored response id, feedback,
     proposer record and cost, the budget and the total (the responses themselves are stored by the asks)."""
     from .storage import FORMAT, plain
-    from .schema import tag_floats
+    from .core.schema import tag_floats
     rounds = [{"index": r.index, "stored_id": r.stored_id, "accepted": r.accepted, "error": r.error,
                "feedback": plain(r.feedback) if r.feedback is not None else None, "generated": r.generated,
                "cost": None if r.cost is None else r.cost.to_dict()} for r in run.rounds]

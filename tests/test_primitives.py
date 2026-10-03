@@ -12,7 +12,7 @@ import pytest
 from solvi import (Answer, Catalog, Claim, Decision, Estimate, FactTypeError, Maybe, Question, Quote, Rank, Response, Span,
                    System, Unknown)
 from solvi.decide import DecideModel, Item, capabilities, decode_pointer, plan_batches, pointer_evidence
-from solvi.typed import Bins
+from solvi.core.types import Bins
 
 DOC = "Invoice 17. Total due: 1,250.50 EUR. Paid by card on 2026-09-01. Delivery in about 12 days."
 
@@ -209,7 +209,7 @@ def test_replay_catches_tampered_evidence():
     r = System(cat, [Question("paid", "Paid?")]).ask({"doc": DOC})
     rec = r.trace.records[-1]
     rec.extra = {"evidence": [[0, 7, "doc", "Invoice"]]}
-    rec.hash = __import__("solvi.runtime", fromlist=["vhash"]).vhash(rec.body())      # a consistent forgery
+    rec.hash = __import__("solvi.core.runtime", fromlist=["vhash"]).vhash(rec.body())      # a consistent forgery
     bad = r.trace.replay(cat)["mismatches"]
     assert any("evidence" in why for _, _, why in bad)
 
@@ -337,7 +337,7 @@ def test_estimates_from_numbers_and_distributions():
 
 
 def test_estimate_open_bins_and_coverage():
-    from solvi.primitives import estimate_of
+    from solvi.core.primitives import estimate_of
     at = Answer.estimate([10, 20], coverage=0.5)
     assert at.options == ["less than 10", "10–19", "20 or more"]
     v, iv, mass = estimate_of(at, [0.1, 0.3, 0.6])
@@ -614,10 +614,10 @@ def test_typed_span_trims_the_best_span_never_jumps_outside_it():
 
 def test_a_typed_span_reads_dates_and_numbers_as_people_write_them():
     """Span[date] / Span[float] validated the quote with pydantic alone: '21 July 2026' and '41,908.56 USD' were "type
-    rejected". The type's own reading comes first; then solvi.textin's parsers, which refuse rather than guess."""
+    rejected". The type's own reading comes first; then solvi.core.textin's parsers, which refuse rather than guess."""
     import datetime
     from decimal import Decimal
-    from solvi.typed import span_value
+    from solvi.core.types import span_value
     d = datetime.date
     for text, want in (("2026-07-21", d(2026, 7, 21)), ("21 July 2026", d(2026, 7, 21)), ("July 21, 2026", d(2026, 7, 21)),
                        ("21.07.2026", d(2026, 7, 21)), ("12 сентября 2026", d(2026, 9, 12)),
@@ -765,7 +765,7 @@ def test_a_model_quote_with_offsets_inside_a_number_is_rejected():
 def test_a_typed_span_does_not_read_an_ambiguous_number():
     """Span[float] read "2.500" as 2.5 while the guarded parser, and the docstring, refuse it as ambiguous."""
     from decimal import Decimal
-    from solvi.typed import span_value
+    from solvi.core.types import span_value
     for t in ("2.500", "1.000", "12.345"):
         for vtype in (float, Decimal):
             with pytest.raises(ValueError, match="ambiguous"):

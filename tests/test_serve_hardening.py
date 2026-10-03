@@ -108,7 +108,7 @@ def test_an_empty_token_is_a_configuration_error(tmp_path, capsys):
 
 def slow_reader(seconds=0.3):
     """The text shop of test_serve with a TextIn whose read (the decider's passes) is slow and counts how many run at once."""
-    from solvi.textin import TextIn
+    from solvi.core.textin import TextIn
     from test_serve import _shop
     s, tin = _shop()
     seen = {"now": 0, "peak": 0, "reads": 0}

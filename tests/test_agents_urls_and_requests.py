@@ -156,7 +156,7 @@ def test_url_matcher_is_part_of_the_fingerprint():
     a, b = Guard(), Guard()
     a.tool(name="get", schema={"type": "object", "properties": {"url": {"type": "string"}}}, ground={"url": "url"})(None)
     b.tool(name="get", schema={"type": "object", "properties": {"url": {"type": "string"}}}, ground={"url": "token"})(None)
-    from solvi.provenance import catalog_fingerprint
+    from solvi.core.provenance import catalog_fingerprint
     assert catalog_fingerprint(a.catalog("get")) != catalog_fingerprint(b.catalog("get"))
 
 
@@ -357,7 +357,7 @@ def test_require_request_phrases_names_and_errors():
 
 
 def test_require_request_patterns_are_part_of_the_fingerprint():
-    from solvi.provenance import catalog_fingerprint
+    from solvi.core.provenance import catalog_fingerprint
     fps = []
     for ph in (r"\bgo\b", r"\bstart\b"):
         g = Guard()

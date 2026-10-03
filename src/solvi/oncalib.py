@@ -32,7 +32,7 @@ from __future__ import annotations
 
 import warnings
 
-from .core import ExperimentalWarning
+from .core.catalog import ExperimentalWarning
 
 warnings.warn("solvi.oncalib is experimental: calibration on the fly from outcomes does not keep a guarantee's promise "
               "(see its module docs); its API may change", ExperimentalWarning, stacklevel=2)

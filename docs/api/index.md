@@ -6,8 +6,9 @@ this reference lists what each module exports and the signatures.
 | Module | What it holds |
 |---|---|
 | [`solvi`](solvi.md) | the catalog, questions and answers, `System` and `Response`, typed facts, storage and shadow mode |
+| [`solvi.core`](core.md) | the low level: the catalog and its value classes; one module per area under `solvi.core` |
 | [`solvi.decide`](decide.md) | the decider: typed questions about a text or a state answered by a model |
-| [`solvi.calibration`](calibration.md) | reliability, expected calibration error, coverage at a target accuracy |
+| [`solvi.core.calibration`](calibration.md) | reliability, expected calibration error, coverage at a target accuracy |
 | [`solvi.guarantee`](guarantee.md) | a calibrated threshold with a stated promise on a question (`System.guarantee`), a computed fact or any scalar |
 | [`solvi.openset`](openset.md) | inputs from outside the calibration set: a threshold sized for the share of them, estimated as the stream goes, and a change flag |
 | [`solvi.systemone`](systemone.md) | a model behind the System One HTTP API as a decider |
@@ -26,7 +27,7 @@ this reference lists what each module exports and the signatures.
 | [`solvi.serve`](serve.md) | `solvi serve`: HTTP, MCP and the System One API |
 | [`solvi.agents`](agents.md) | guarding an agent's tool calls: `Guard`, the MCP proxy |
 | [`solvi.hooks`](hooks.md) | a coding agent's hooks: edits checked against rules, a skill picked for a prompt, install / uninstall (Claude Code; Codex, preview) |
-| [`solvi.textin`](textin.md) | text in: a message → the question it asks and its typed input state, read with quotes |
+| [`solvi.core.textin`](textin.md) | text in: a message → the question it asks and its typed input state, read with quotes |
 | [`solvi.inputs`](inputs.md) | what a question reads: its given facts, the model and JSON schema of its input state, entry points |
 | [`solvi.specialist`](specialist.md) | the specialist contract (preview): propose a typed spec, check it against the source, render, replay |
 | [`solvi.charts`](charts.md) | verified charts (preview): a text with numbers → an SVG in which every number is quoted from the text |
@@ -39,7 +40,7 @@ this reference lists what each module exports and the signatures.
 | [`solvi.extract_multi`](extract_multi.md) | a single-pass `@extract` over several fields (torch) |
 | [`solvi.strategist`](strategist.md) | the strategist: a flow per request (`Flow`, `PlanError`), the learned order of hard checks and producer policy |
 | [`solvi.strategy`](strategy.md) | the code strategist (`CostStrategist`): dead ends dropped, the cheapest verified plan |
-| [`solvi.costs`](costs.md) | measured run times (`CostBook`), the dollars of recorded model calls (`price_of`), `Budget` and `Cost` |
+| [`solvi.core.costs`](costs.md) | measured run times (`CostBook`), the dollars of recorded model calls (`price_of`), `Budget` and `Cost` |
 | [`solvi.rulelist`](rulelist.md) | a readable rule list learned from examples (`System.learn_rule`; `solvi.rules` up to 0.7) |
 | [`solvi.audit`](audit.md) | `res.audit()`: what each answer rests on and which safeguards fired; `to_dict()` as JSON-ready data |
 | [`solvi.show`](show.md) | printing a response |
@@ -56,7 +57,7 @@ this reference lists what each module exports and the signatures.
 | [`solvi.testing`](testing.md) | decision regression tests from `cases.json` |
 | [`solvi.honesty`](honesty.md) | the honesty suite |
 | [`solvi.check`](check.md) | `solvi check`: catalog lint |
-| [`solvi.calibfile`](calibfile.md) | calibration files (`save_calibration` / `load_calibration`) and `solvi calibrate` |
+| [`solvi.core.calibfile`](calibfile.md) | calibration files (`save_calibration` / `load_calibration`) and `solvi calibrate` |
 | [`solvi.models`](models.md) | `solvi models`: published and cached deciders, pull, check |
 | [`solvi.scaffold`](scaffold.md) | `solvi init`: a new decision project |
-| [`solvi.i18n`](i18n.md) | languages of rendering: the audit, `show` and the safeguard report in Russian |
+| [`solvi.core._i18n`](i18n.md) | languages of rendering: the audit, `show` and the safeguard report in Russian |

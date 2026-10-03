@@ -1,13 +1,13 @@
 """What every `solvi` command shares — usage errors, JSON output, a System named on the command line — in one module that
 the command line (solvi.cli) and the library modules that carry a command (solvi.serve, solvi.check, solvi.models,
-solvi.calibfile) import, so no library module imports from solvi.cli. A usage error ends the command with status 2;
-library code that is not a command uses solvi.loader, which raises LoadError."""
+solvi.core.calibfile) import, so no library module imports from solvi.cli. A usage error ends the command with status 2;
+library code that is not a command uses solvi._loader, which raises LoadError."""
 from __future__ import annotations
 
 import sys
 
-from .loader import LoadError, load_module as _load
-from .schema import dumps
+from ._loader import LoadError, load_module as _load
+from .core.schema import dumps
 
 
 def fail(msg):
@@ -28,7 +28,7 @@ def load_object(spec):
 
 def load_module(spec):
     """"module:attr" or "file.py:attr" → (the module, the attribute — called when it is a function: a System factory).
-    For the command: a name that cannot be read ends it with status 2 (library code uses solvi.loader, which raises
+    For the command: a name that cannot be read ends it with status 2 (library code uses solvi._loader, which raises
     LoadError)."""
     try:
         return _load(spec)

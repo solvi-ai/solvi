@@ -94,7 +94,7 @@ def _ltt(s, w, known_s, error, delta, min_support, size=16):
     """Learn-then-test on one mixture: the lowest threshold of the grid (`size` quantiles of the known signals) at
     which the wrong answers among those let through pass the binomial test at delta / size; min_support known
     examples above."""
-    from .calibration import _binom_cdf, ltt_grid
+    from .core.calibration import _binom_cdf, ltt_grid
     grid = ltt_grid(known_s, size)
     for t in sorted(grid):
         auto = s >= t
@@ -190,7 +190,7 @@ class OpenSetGate:
         this many decisions since the change are used for the estimate after a flag. min_support: a threshold must let
         through this many known examples. monitor: a solvi.drift.DriftMonitor whose flag also starts the estimate.
         grid: thresholds tried per share (learn-then-test, Bonferroni). → OpenSetGate"""
-        from .calibration import check_rate
+        from .core.calibration import check_rate
         error = max_error
         check_rate("max_error", error)
         check_rate("delta", delta)
@@ -352,7 +352,7 @@ class OpenSetGate:
                 "n": self.report["n_known"], "n_outside": self.report["n_outside"], "min_share": self.min_share}
 
     def fingerprint(self):
-        from .provenance import digest
+        from .core.provenance import digest
         return digest("OpenSetGate", self.error, self.delta, sorted(self.thresholds.items()), self.cut, self.f_known,
                       self.f_novel, self.q0, list(self.design), self.h, self.min_share, self.window, list(self.track),
                       self.min_track)

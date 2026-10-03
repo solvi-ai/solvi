@@ -12,7 +12,7 @@ from solvi import System
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))   # gallery/_audit.py: the audit check shared by the runners
 from _audit import Tally, check, line as audit_line  # noqa: E402
-from solvi.runtime import vhash
+from solvi.core.runtime import vhash
 
 HERE = Path(__file__).resolve().parent
 SHOW_WHY = []                                           # print the reason for these answers even when they are plain "ok"

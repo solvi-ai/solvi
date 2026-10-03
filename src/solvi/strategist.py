@@ -17,8 +17,8 @@ import random
 from collections import deque
 
 from . import _deprecate
-from .core import Quote
-from .runtime import Flow, Step, scalar_row, then_inputs   # defined there: the runtime runs a flow; re-exported
+from .core.catalog import Quote
+from .core.runtime import Flow, Step, scalar_row, then_inputs   # defined there: the runtime runs a flow; re-exported
 
 
 class PlanError(Exception):
@@ -167,7 +167,7 @@ def plan(catalog, questions, init_keys, heads=None):
                     types[x] = next(iter(catalog.readers[x].values()))
     batches = []
     if getattr(catalog, "decisions", 0):             # catalogs without decision parts do no work here
-        from .runtime import plan_batches
+        from .core.runtime import plan_batches
         batches = plan_batches(order)
     return Flow(order, {q: sorted(v) for q, v in per_q.items()}, skipped, {q: sorted(v) for q, v in unresolved.items()},
                 types, batches)
@@ -302,7 +302,7 @@ class ProducerPolicy:
         for name, (ok, _) in outcomes.items():
             self._m(self.accept, (group.name, name)).teach(row, ok)
         if ref in outcomes and outcomes[ref][0]:
-            from .runtime import vhash
+            from .core.runtime import vhash
             want = vhash(_plain(outcomes[ref][1]))
             for name, (ok, v) in outcomes.items():
                 if name != ref and ok:

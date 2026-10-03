@@ -103,7 +103,7 @@ def record(part):
     ad = part._calibration_adapter()
     if ad is not None:                              # the adapter it was calibrated with, in a file beside it
         out[ad.kind] = {"hash": ad.fingerprint()}
-    from . import __version__
+    from .. import __version__
     out["solvi"] = __version__
     return _norm(out)
 

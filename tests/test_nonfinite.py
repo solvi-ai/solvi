@@ -6,8 +6,8 @@ import math
 import pytest
 
 from solvi import Answer, Catalog, Decision, Question, System
-from solvi.runtime import vhash
-from solvi.schema import dumps, tag_floats, untag_floats
+from solvi.core.runtime import vhash
+from solvi.core.schema import dumps, tag_floats, untag_floats
 from solvi.storage import JSONLStorage, SQLiteStorage, record_hash
 from solvi.system import Response
 
@@ -89,7 +89,7 @@ def test_a_record_written_before_0_7_with_infinity_still_verifies_and_loads(tmp_
 def test_numpy_non_finite_values_are_tagged_too():
     import numpy as np
 
-    from solvi.schema import jsonable
+    from solvi.core.schema import jsonable
     d = jsonable({"a": np.float32("inf"), "b": np.float64("-inf"), "c": np.array([1.0, np.inf]), "s": {2.0, math.inf}})
     json.dumps(d, allow_nan=False)
     assert d["a"] == {"$float": "inf"} and d["b"] == {"$float": "-inf"} and d["c"] == [1.0, {"$float": "inf"}]

@@ -160,7 +160,7 @@ def test_mutations_are_deterministic_and_varied():
 
 
 def test_fuzz_reports_crashes_and_invalid_confidences(tmp_path):
-    from solvi.runtime import Result
+    from solvi.core.runtime import Result
 
     class Fragile:
         questions = {}

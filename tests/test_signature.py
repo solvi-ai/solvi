@@ -178,7 +178,7 @@ def test_store_rewrite_located_by_signature(alg, kind, tmp_path):
 # --- S6: a trace changed consistently (value and every hash recomputed)
 @alg
 def test_trace_record_located_and_value_restored(alg):
-    from solvi.runtime import vhash
+    from solvi.core.runtime import vhash
     cat, qs = build()
     res = System(cat, qs).ask(STATES[0])
     sig = res.signature(alg)

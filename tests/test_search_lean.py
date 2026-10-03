@@ -12,7 +12,7 @@ import pytest
 
 from solvi import Answer, Catalog, JSONLStorage, Question, System
 from solvi.refine import causes, failed_checks
-from solvi.runtime import vhash
+from solvi.core.runtime import vhash
 from solvi.search import Tree, _verdict, search
 
 ROOT = Path(__file__).resolve().parents[1]

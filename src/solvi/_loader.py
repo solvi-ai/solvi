@@ -1,6 +1,6 @@
 """Loading an object named on a command line or in a config: "module:attr" or "file.py:attr".
 
-    from solvi.loader import load_object
+    from solvi._loader import load_object
     system = load_object("catalog.py:system")        # a function is called: a System factory
 
 A name that cannot be read — no ":", a missing file, a missing attribute — raises LoadError (never SystemExit: this is

@@ -17,14 +17,14 @@ import time
 import numpy as np
 
 from . import _deprecate
-from .core import Quote
+from .core.catalog import Quote
 
 CACHE = 5000                                     # documents whose predictions are kept (then the cache starts again)
 
 
 class MultiSpanExtractor:
     def __init__(self, fields, model_name="answerdotai/ModernBERT-large", max_len=1024, device=None):
-        from .loader import optional
+        from ._loader import optional
         torch = optional("torch", "model", "MultiSpanExtractor")
         tf = optional("transformers", "model", "MultiSpanExtractor")
         AutoModel, AutoTokenizer = tf.AutoModel, tf.AutoTokenizer
@@ -159,7 +159,7 @@ class MultiSpanExtractor:
 
     def fingerprint(self):
         """A stable hash of this extractor: fields, settings, temperatures, sampled weights (see LongSpanExtractor)."""
-        from .provenance import digest, torch_fingerprint
+        from .core.provenance import digest, torch_fingerprint
         if self._fp_weights is None:
             import os
             files = self.model_name if os.path.isdir(str(self.model_name)) else None
@@ -218,7 +218,7 @@ class MultiSpanExtractor:
         import os
         path_or_id = path
         if not os.path.isdir(path):
-            from .loader import optional
+            from ._loader import optional
             path = optional("huggingface_hub", "model", "MultiSpanExtractor.load of a Hugging Face id").snapshot_download(path)
         with open(f"{path}/solvi_extract.json") as fh:
             cfg = json.load(fh)

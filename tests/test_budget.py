@@ -8,7 +8,7 @@ import pytest
 from pydantic import BaseModel
 
 from solvi import Answer, Catalog, JSONLStorage, Question, System
-from solvi.costs import Budget, BudgetStop, Cost
+from solvi.core.costs import Budget, BudgetStop, Cost
 from solvi.generate import generator
 from solvi.refine import Fail, Refinement, refine
 from solvi.sysreport import system_report

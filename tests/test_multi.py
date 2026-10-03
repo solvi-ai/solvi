@@ -7,7 +7,7 @@ import pytest
 from solvi import Answer, Catalog, Question, System
 from solvi.decide import DecideModel, Facts
 from solvi.multi import Cascade, Route, Vote, _src
-from solvi.runtime import Trace
+from solvi.core.runtime import Trace
 from test_decide import TEAMS, FakeScorer
 from test_guarantees import _labelled
 
@@ -361,7 +361,7 @@ def test_the_rank_threshold_maps_to_the_same_raw_threshold_per_model():
 
 def test_old_calibration_files_load_on_the_raw_scale_bit_for_bit(tmp_path):
     import json
-    from solvi.provenance import digest
+    from solvi.core.provenance import digest
     rng = np.random.default_rng(5)
     S, L, s, l_ = _scales_parts()
     cal, test = _scales_stream(rng, "c", 300, S, L), _scales_stream(rng, "t", 300, S, L)

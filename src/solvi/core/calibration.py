@@ -1,7 +1,7 @@
 """Is a confidence honest? Reliability, expected calibration error and coverage at a target accuracy — for any model or
 question (solvi answers, a decider, a head).
 
-    from solvi.calibration import coverage_at, ece, reliability, threshold_for
+    from solvi.core.calibration import coverage_at, ece, reliability, threshold_for
     coverage_at(conf, correct, 0.9)     # share of cases you can answer automatically at ≥ 90% accuracy
     threshold_for(conf, correct, 0.9)   # the confidence threshold that gives it (e.g. for Question(min_confidence=...));
                                         # None when fewer than min_n=10 cases stand behind it
@@ -410,7 +410,7 @@ class GroupBy:
         """The input's group path (a tuple), or None when the input does not give it."""
         from collections.abc import Mapping
 
-        from .core import Quote
+        from .catalog import Quote
         if vals is None:
             if isinstance(raw, Mapping) and all(n in raw for n in self.names):
                 vals = raw

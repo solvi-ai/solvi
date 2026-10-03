@@ -12,7 +12,8 @@ from pathlib import Path
 
 import pytest
 
-from solvi import calibfile, models
+from solvi import models
+from solvi.core import calibfile
 from solvi.cli import load_object, main
 from solvi.decide import Facts
 from solvi.scaffold import TEMPLATES
@@ -616,10 +617,12 @@ def test_api_reference_has_the_07_modules_and_the_guide_is_precise():
     root = Path(__file__).resolve().parents[1]
     nav = (root / "mkdocs.yml").read_text()
     index = (root / "docs" / "api" / "index.md").read_text()
+    from solvi import _deprecate
     for m in ("textin", "longdoc", "report", "perturb"):
+        mod = _deprecate.new_path(f"solvi.{m}") or f"solvi.{m}"
         page = root / "docs" / "api" / f"{m}.md"
-        assert page.exists() and f"::: solvi.{m}" in page.read_text(), m
-        assert f"solvi.{m}: api/{m}.md" in nav and f"]({m}.md)" in index, m
+        assert page.exists() and f"::: {mod}" in page.read_text(), m
+        assert f"{mod}: api/{m}.md" in nav and f"]({m}.md)" in index, m
     guide = " ".join((root / "docs" / "guide.md").read_text().split())
     assert not re.search(r'extra\["long"\]`: in the trace record, hashed, printed by the audit \([^)]*\), and re-checked by '
                          r"replay", guide)
@@ -661,7 +664,7 @@ def test_models_load_raises_model_error_not_system_exit_for_a_missing_file_or_at
     for spec, why in (("nofile.py:model", "no such file"), ("mine.py:model", "has no attribute 'model'")):
         with pytest.raises(models.ModelError, match=why):          # library code: an ordinary exception
             models.load(spec)
-    from solvi.loader import LoadError, load_object as load
+    from solvi._loader import LoadError, load_object as load
     with pytest.raises(LoadError, match="expected module:attribute"):
         load("mine.py")
     assert load("mine.py:x") == 1

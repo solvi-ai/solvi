@@ -8,15 +8,15 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from . import _deprecate
-from .core import Catalog, gone_in_1_0
-from .provenance import model_info
-from .runtime import MISSING, Record, Result, execute, now_ms, path_confidence, srepr, vhash
+from .core.catalog import Catalog, gone_in_1_0
+from .core.provenance import model_info
+from .core.runtime import MISSING, Record, Result, execute, now_ms, path_confidence, srepr, vhash
 from .strategist import computable, plan
-from .core import Part, Question, Unknown, plain_json, question_data
+from .core.catalog import Part, Question, Unknown, plain_json, question_data
 from .strategist import OrderModel, ProducerPolicy
-from .runtime import aexecute, async_parts
-from .provenance import catalog_fingerprint, digest, fingerprint
-from .chain import append as _append   # re-exported as before (defined there since 1.0)
+from .core.runtime import aexecute, async_parts
+from .core.provenance import catalog_fingerprint, digest, fingerprint
+from .core.chain import append as _append   # re-exported as before (defined there since 1.0)
 from .response import Response   # noqa: F401 — re-exported (defined there since 1.0: the stores read it)
 
 if TYPE_CHECKING:                                 # numpy loads with the heads, on first use: `import solvi` stays light
@@ -32,7 +32,7 @@ class _Prepared:
     flow: object
     order: object
     policy: object
-    textin: object = None               # a solvi.textin.TextRead (ask_text): its records go into the trace
+    textin: object = None               # a solvi.core.textin.TextRead (ask_text): its records go into the trace
 
 
 def _speculate_note(speculate, p):
@@ -91,9 +91,9 @@ class System:
         hard check still decides), `res.values` and the trace hold every fact and rule value, and the trace says so
         (`trace.early_exit` is False). `ask(..., early_exit=...)` overrides it for one ask.
         lang: the language of what solvi renders for people — res.audit(), solvi.show, safeguard_summary() — "en" (default)
-        or "ru" (solvi.i18n). Only the rendering changes: traces, stored responses, hashes and `why` stay in English."""
-        from . import i18n
-        from .costs import CostBook
+        or "ru" (solvi.core._i18n). Only the rendering changes: traces, stored responses, hashes and `why` stay in English."""
+        from .core import _i18n as i18n
+        from .core.costs import CostBook
         self.lang = i18n.check(lang)
         self.catalog = catalog
         for fact, name, lost in catalog.unreadable_validates():
@@ -102,7 +102,7 @@ class System:
                              f"every output of {name} would be rejected")
         inputs = self.input_model = input_model
         if inputs is not None:                        # a declared field named like a part could never be given (ask refuses
-            from .typed import field_types           # the key): say it now, not at the first ask
+            from .core.types import field_types           # the key): say it now, not at the first ask
             clash = sorted(k for k in field_types(inputs) if k in catalog.parts)
             if clash:
                 raise ValueError(_clash(catalog, clash, f"System(input_model={getattr(inputs, '__name__', inputs)}) declares"))
@@ -142,7 +142,7 @@ class System:
                 raise ValueError('producers="equivalent" with a strategist: give it producers="equivalent" too')
         if cost_policy != "declared":
             if cost_policy == "measured" or hasattr(cost_policy, "freeze"):
-                raise ValueError('cost_policy="measured" (and solvi.costs.MeasuredCosts) was removed in 1.0: it showed no '
+                raise ValueError('cost_policy="measured" (and solvi.core.costs.MeasuredCosts) was removed in 1.0: it showed no '
                                  'measured benefit — declare cost= on the parts (the planner plans with the declared costs)')
             raise ValueError('cost_policy must be "declared"')
         # online learning of order / producer choice costs time inside ask (periodic refits), so it is on only when a learned
@@ -197,10 +197,10 @@ class System:
                 raise ValueError(f"question {q.name!r} has no answer type: pass answer=, or give its rule a return type "
                                  "(bool, Literal[...], an Enum, list[Literal[...]])")
             from dataclasses import replace
-            from .core import Answer
+            from .core.catalog import Answer
             return replace(q, answer=Answer.from_type(rt))
         if rt is not None:
-            from .typed import check_answer
+            from .core.types import check_answer
             check_answer(rule, q)
         return q
 
@@ -208,12 +208,12 @@ class System:
         """init_state → (dict of given facts, [(fact, why)] rejected by `inputs`)."""
         if self.input_model is None and type(init_state) is dict:
             return init_state, None
-        from .typed import state_of
+        from .core.types import state_of
         return state_of(init_state, self.input_model)
 
     def response_schema(self):
         """The JSON schema of this system's responses, with each question's answer as its closed set of options."""
-        from .schema import response_schema
+        from .core.schema import response_schema
         return response_schema(self)
 
     # --- answers
@@ -266,12 +266,12 @@ class System:
     def entry_points(self, questions=None):
         """The questions as entry points: each question's name, text and the typed input state it reads — every given fact
         its flow reads, with its type, description and whether the question needs it (the schemas `solvi serve` publishes).
-        → [solvi.textin.EntryPoint]; `ep.tool()` is the function-calling form."""
+        → [solvi.core.textin.EntryPoint]; `ep.tool()` is the function-calling form."""
         from .inputs import entry_points
         return entry_points(self, questions)
 
     def _textin(self, text, decider, textin, question):
-        from .textin import TextIn, TextRead
+        from .core.textin import TextIn, TextRead
         if isinstance(text, TextRead):                # its fields are re-derived with textin's specs when given
             return text if textin is None else dataclasses.replace(text, reader=textin)
         if textin is None:
@@ -281,7 +281,7 @@ class System:
         return textin.read(text, question=question)
 
     def _prepare_text(self, read, order):
-        from .textin import rederive
+        from .core.textin import rederive
         read = rederive(self, read)                   # each value re-derived from its quote: a built TextRead is not trusted
         if read.question is not None:
             p = self._prepare(read.init_state(), [read.question], order)
@@ -293,7 +293,7 @@ class System:
 
     def ask_text(self, text, decider=None, *, textin=None, question=None, store=True, workers=None, order=None,
                  early_exit=None):
-        """A free text → the answer of the question it asks, in one trace: a solvi.textin.TextIn (made from `decider`, or
+        """A free text → the answer of the question it asks, in one trace: a solvi.core.textin.TextIn (made from `decider`, or
         `textin=`) picks the entry point and reads its input fields with quotes, then the question is asked on that state.
         `text` may be a TextRead already (TextIn.read / update): each field is re-derived from its quote with the field's
         own parser arguments (those of `textin=`, else of the TextIn that read it) before it is used. question=: skip
@@ -339,7 +339,7 @@ class System:
         and be cancelled). Cancelling `aask` itself cancels every pending call. Under a learned order speculate=True is
         ignored, with a UserWarning (the hard checks run one at a time in that order). An `async def` part is awaited
         whatever `blocking` says. early_exit: as for `ask` (False: every step runs, whatever the hard checks say)."""
-        from .runtime import aexecute
+        from .core.runtime import aexecute
         t0 = now_ms()
         p = self._prepare(init_state, questions, order)
         _speculate_note(speculate, p)
@@ -363,7 +363,7 @@ class System:
         """What ask and aask share before running: the given facts, the questions, the flow, the order and the policy."""
         known = None
         if self.input_model is not None or type(init_state) is not dict:
-            from .typed import field_types, is_model
+            from .core.types import field_types, is_model
             model = type(init_state) if is_model(init_state) else self.input_model
             init_state, rejected = self._state(init_state)
             if model is not None:                     # validated fields: typed parts reading them skip re-validation
@@ -486,7 +486,7 @@ class System:
 
     def fingerprint(self):
         """What makes this system's decisions: {"catalog": the catalog's fingerprint (every part's code and declarations,
-        see solvi.provenance.catalog_fingerprint), "questions": the questions' (answer types, thresholds, calibration),
+        see solvi.core.provenance.catalog_fingerprint), "questions": the questions' (answer types, thresholds, calibration),
         "parts": {part: fingerprint}, "models": {part or "answer:<question>": model fingerprint} for model-backed parts and
         answer heads}. Every trace records the catalog and question fingerprints and those of the parts in its flow
         (trace.fingerprint); the models it used are recorded with the steps they produced."""
@@ -505,11 +505,11 @@ class System:
         contents and the calibration are the same (a question changed in place — `q.min_confidence = 0.9` — changes
         it: the cache is keyed by what the questions hold, not by the objects)."""
 
-        def data(q):                                  # as solvi.schema.dump(q, "json"); pydantic only for other values
+        def data(q):                                  # as solvi.core.schema.dump(q, "json"); pydantic only for other values
             d = question_data(q)
             if plain_json(d):
                 return d
-            from .schema import jsonable
+            from .core.schema import jsonable
             return jsonable(d)
 
         def content(q):
@@ -528,7 +528,7 @@ class System:
 
     def _fingerprint(self, flow):
         """trace.fingerprint: the catalog's and questions' fingerprints and those of the parts in this flow."""
-        from .provenance import catalog_fingerprint
+        from .core.provenance import catalog_fingerprint
         c = catalog_fingerprint(self.catalog)
         return {"catalog": c["fp"], "questions": self._questions_fp(),
                 "parts": {s.part.name: c["parts"][s.part.name] for s in flow.steps if s.part.name in c["parts"]}}
@@ -564,8 +564,8 @@ class System:
 
     def safeguard_summary(self, lang=None):
         """The lifetime stats as text: how many model outputs, and how many were caught by each safeguard.
-        lang: solvi.i18n (default: the System's)."""
-        from . import i18n
+        lang: solvi.core._i18n (default: the System's)."""
+        from .core import _i18n as i18n
         from .audit import QUIET, STAT_KEYS
         lang = i18n.check(self.lang if lang is None else lang)
         st = self.stats
@@ -619,16 +619,16 @@ class System:
         if rule is not None:
             r = by.get(rule.name)
             if r is not None and r.value is MISSING and r.error and r.probs is not None:
-                from .provenance import classify
+                from .core.provenance import classify
                 g = classify(r.error)
                 if g in ("escalated", "low_confidence", "instruction", "memory"):  # the model's answer step escalated: abstain
                     return Result(None, r.confidence, r.error, "abstain", dict(r.probs), r.origin,
                                   rule.func.__name__ if rule.func is not None else rule.name, g)
             if r is None or r.value is MISSING:
-                from .provenance import TIMED_OUT       # a call that did not finish in time (aask): safeguard "timeout"
+                from .core.provenance import TIMED_OUT       # a call that did not finish in time (aask): safeguard "timeout"
                 late = any(TIMED_OUT in (by[f].error or "") for f in list(facts) + [rule.name]
                            if f in by and by[f].value is MISSING)
-                from .provenance import classify
+                from .core.provenance import classify
                 grounding = r is not None and classify(r.error) == "grounding"     # a model rule's quote not in the text
                 return Result(None, 0.0, "rule not computed: " + (r.error if r else "no step") +
                               (f"; missing {', '.join(missing)}" if missing else "") + _caused_by(by, r), "abstain",
@@ -764,7 +764,7 @@ class System:
             r, at = results[q], self.questions[q].answer
             rc = None
             if at.kind == "rank" and r.status == "ok" and r.probs:
-                from .primitives import rank_candidates
+                from .core.primitives import rank_candidates
                 rc = rank_candidates(at, r.probs)
             if rc is not None:
                 cands[q] = rc
@@ -1008,7 +1008,7 @@ class System:
         there is no storage, the correction is lost: a UserWarning says so."""
         from .decide import decision_of
         from .heads import FastHead
-        from .sources import VERIFIED, check_source
+        from .core.sources import VERIFIED, check_source
         source = label_source
         check_source(source, accept=(VERIFIED,))
         if question not in self.questions:
@@ -1090,7 +1090,7 @@ class System:
         if question not in asked:
             raise ValueError(f"the decision {sid} did not answer {question!r} (it answered {asked})")
         correct = self.questions[question].answer.normalize(value)       # ValueError: not one of the options
-        from .schema import untag_floats
+        from .core.schema import untag_floats
         init = untag_floats((v.get("trace") or {}).get("init") or {})
         return self.storage.save_correction(question, init, correct, label_source="outcome", by=by, of=sid, note=note)
 
@@ -1150,8 +1150,8 @@ def _caused_by(by, r):
 
 def _resolved(q, r, pc, why, src, init, quotes="normalized"):
     """An answer primitive (not stated, span, rank, estimate) or an answer with evidence, from the rule's record (see
-    solvi.primitives)."""
-    from .primitives import NO_EVIDENCE, Rejected, fmt, resolve
+    solvi.core.primitives)."""
+    from .core.primitives import NO_EVIDENCE, Rejected, fmt, resolve
     try:
         out = resolve(q.answer, r, init, quotes)
     except Rejected as e:
@@ -1191,7 +1191,7 @@ def _then_answer(catalog, check, q, trace, vals, flow, said):
     """A failed hard check's `then` function for question q: called on the facts it reads (typed like a part's), its value
     normalized to an answer of q and recorded in the trace (kind "then", name "then:<question>"; replay re-runs it) →
     Result "forced", or an abstention (guard "hard_check") when it cannot run or gives no answer of q."""
-    from .runtime import MISSING as _M
+    from .core.runtime import MISSING as _M
     from .strategist import then_inputs
     tp = (check.then_parts or {}).get(q.name)
     fn = check.then[q.name]
@@ -1202,11 +1202,11 @@ def _then_answer(catalog, check, q, trace, vals, flow, said):
     if lost:
         return Result(None, 0.0, f"{said}; {label} cannot run: missing {', '.join(lost)}", "abstain", source=check.name,
                       guard="hard_check")
-    from .core import Quote
+    from .core.catalog import Quote
     plain = {x: (v.value if isinstance(v, Quote) else v) for x, v in args.items()}
     why = None
     if tp is not None and tp.tin is not None:
-        from .typed import typed_in
+        from .core.types import typed_in
         plain, why = typed_in(tp, plain)
     answer, err = None, why
     if err is None:
@@ -1236,7 +1236,7 @@ def governs(part, question):
 def _learnable(q, examples):
     """Examples a learned head can learn from: its kinds are yes/no, choice, ordinal and multi-label, and it does not
     answer "not stated" (examples answered Unknown are left out)."""
-    from .core import PRIMITIVES, Unknown
+    from .core.catalog import PRIMITIVES, Unknown
     if q.answer.kind in PRIMITIVES:
         raise ValueError(f"question {q.name!r} is a {q.answer.kind}: answer it with a rule or a model decision (a learned "
                          "head answers yes/no, choice, ordinal and multi-label questions)")

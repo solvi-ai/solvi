@@ -1,7 +1,7 @@
 """Answer primitives: "not stated", evidence, spans, rankings and estimates — each a value with a confidence.
 
 A question's answer type says which primitive it is (`Answer.span / rank / estimate`, `Answer.maybe(...)`, or the types
-`Span[T]`, `Rank[...]`, `Estimate[...]`, `Maybe[T]` from solvi.typed); its rule, a learned part or a model decision proposes
+`Span[T]`, `Rank[...]`, `Estimate[...]`, `Maybe[T]` from solvi.core.types); its rule, a learned part or a model decision proposes
 the output, and `resolve` turns the rule's trace record into the answer, its confidence and its details — checking what
 must hold (a span is literally in its text and parses as its type, a ranking uses only the options, a distribution is over
 the declared bins). What a failure is:
@@ -31,10 +31,10 @@ import itertools
 import math
 from enum import Enum
 
-from .core import Quote, Unknown
+from .catalog import Quote, Unknown
 
 # guard kinds a primitive's abstention carries (Result.guard; the safeguard kinds of solvi.audit). Not the reason texts
-# of solvi.provenance: provenance.TYPE_REJECTED is the prefix of a rejection reason ("type rejected: ..."), this one the
+# of solvi.core.provenance: provenance.TYPE_REJECTED is the prefix of a rejection reason ("type rejected: ..."), this one the
 # guard kind ("type_rejected").
 GROUNDING, TYPE_REJECTED, OUTSIDE, NO_EVIDENCE = "grounding", "type_rejected", "outside_options", "evidence_missing"
 
@@ -221,7 +221,7 @@ def resolve(at, rec, init, quotes="normalized"):
             raise Rejected(GROUNDING, f"{NOT_GROUNDED}: a span answer is a Quote or a text in {src}, not {_short(v)}")
         value = t
         if at.type is not None and at.type is not str:
-            from .typed import _msg, span_value, type_name
+            from .types import _msg, span_value, type_name
             try:
                 value = span_value(at.type, t)        # the type's own reading, else textin's date / number parsers
             except ValueError as err:

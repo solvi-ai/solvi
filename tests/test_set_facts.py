@@ -53,7 +53,7 @@ def test_set_fact_replays_after_json_round_trip():
 def test_a_failed_step_hashes_the_same_in_every_process():
     import subprocess
     import sys
-    code = "from solvi.runtime import vhash, MISSING; print(vhash(MISSING))"
+    code = "from solvi.core.runtime import vhash, MISSING; print(vhash(MISSING))"
     outs = {subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, check=True).stdout
             for _ in range(3)}
     assert len(outs) == 1

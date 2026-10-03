@@ -717,7 +717,7 @@ def budget_rows(rows, s):
 
 def arm_inside(name, sets, out, base_url, key, budget):
     from solvi import System, Unknown
-    from solvi.calibration import crc_threshold
+    from solvi.core.calibration import crc_threshold
     model, tr = inside_model(name, out, base_url, key)
     so = tr.api == "systemone"          # a decision model: "abstain" is an option (a label), not "not stated" (Unknown)
     for s in sets:
@@ -947,7 +947,7 @@ def flips(rows, recs):
 
 def crc_for_llm(rows_cal, recs):
     """A conformal threshold (risk 0.10) on the LLM's own confidence, fitted on cal."""
-    from solvi.calibration import crc_threshold
+    from solvi.core.calibration import crc_threshold
     by = {o["id"]: o for o in recs if o.get("variant") == "base"}
     sc, wr = [], []
     for r in rows_cal:

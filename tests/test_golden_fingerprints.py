@@ -85,7 +85,7 @@ def _fp(system):
 
 def _types():
     from solvi import Bins, Claim, Decision, Estimate, Maybe, NotStated, Quote, Rank, Scale, Span
-    from solvi.provenance import type_fingerprint
+    from solvi.core.provenance import type_fingerprint
     ts = {"maybe_bool": Maybe[bool], "maybe_span_float": Maybe[Span[float]], "span_float_note": Span[float, "note"],
           "scale_literal": Scale[Literal["low", "medium", "high"]], "scale_values": Scale[1, 2, 3],
           "rank_2": Rank[Literal["email", "phone", "letter"], 2], "rank_all": Rank[Literal["a", "b"]],
@@ -99,7 +99,7 @@ def _types():
 def _objects(golden):
     from solvi.generate import generator
     from solvi.multi import Cascade, Vote
-    from solvi.provenance import code_fingerprint
+    from solvi.core.provenance import code_fingerprint
     m, m2 = golden.model(), golden.model("v2")
     parts = [m.decision("kind", "What kind?", "note", ["a", "b"]), m2.decision("kind", "What kind?", "note", ["a", "b"])]
     writer = generator("http://127.0.0.1:9/v1", "golden-model")
@@ -249,14 +249,16 @@ def _solvi_objects():
 
 
 @contextlib.contextmanager
-def _relocated(table):
+def _relocated(moved):
     """Every solvi class and function (and each module's __name__, which functions defined later read) moved to
-    "solvi.relocated.<old module>"; with table=True, MOVED maps each new module back to its old one."""
+    "solvi.relocated.<module>"; with moved=True, MOVED also maps each new module back to its current one (and the
+    table's own lines from there to 0.9), with moved=False the table is empty."""
     import pkgutil
     import warnings
 
     import solvi
-    from solvi import _deprecate, provenance
+    from solvi import _deprecate
+    from solvi.core import provenance
     with warnings.catch_warnings():                          # every module that imports without optional extras
         warnings.simplefilter("ignore")
         for info in pkgutil.walk_packages(solvi.__path__, "solvi."):
@@ -266,13 +268,16 @@ def _relocated(table):
     objs = _solvi_objects()
     mods = {m for _, m in objs}
     new = {m: "solvi.relocated." + m for m in mods}
+    table = dict(_deprecate.MOVED)
     try:
         for obj, m in objs:
             obj.__module__ = new[m]
         for m in mods:
             sys.modules[m].__dict__["__name__"] = new[m]
-        if table:
-            _deprecate.MOVED.update({v: k for k, v in new.items()})
+        if moved:
+            _deprecate.MOVED.update({v: k for k, v in new.items()})     # chained by fp_module to the 0.9 names
+        else:
+            _deprecate.MOVED.clear()
         provenance._CODE = None                              # cached code fingerprints were computed before the move
         yield
     finally:
@@ -281,11 +286,12 @@ def _relocated(table):
         for m in mods:
             sys.modules[m].__dict__["__name__"] = m
         _deprecate.MOVED.clear()
+        _deprecate.MOVED.update(table)
         provenance._CODE = None
 
 
 def test_moving_every_module_with_the_table_keeps_every_fingerprint(pinned):
-    with _relocated(table=True):
+    with _relocated(moved=True):
         moved = collect()
     changed = sorted(k for k in pinned if moved.get(k) != pinned[k])
     assert not changed, changed
@@ -293,7 +299,7 @@ def test_moving_every_module_with_the_table_keeps_every_fingerprint(pinned):
 
 def test_moving_without_the_table_changes_the_fingerprints_that_name_a_module(pinned):
     """The test above has teeth: without the table, the fingerprints that record a solvi module change."""
-    with _relocated(table=False):
+    with _relocated(moved=False):
         moved = collect()
     changed = {k for k in pinned if moved.get(k) != pinned[k]}
     assert {"types/maybe_bool", "types/quote", "objects/decision_part", "objects/cascade", "golden/typed_rules",
@@ -325,7 +331,7 @@ class Score:
 
 def _catalog_over(mod):
     from solvi import Catalog
-    from solvi.provenance import catalog_fingerprint
+    from solvi.core.provenance import catalog_fingerprint
     cat = Catalog()
     cat.fn(mod.Score())
 
@@ -338,7 +344,9 @@ def _catalog_over(mod):
 @pytest.mark.parametrize("entry", ["module", "name"])
 def test_a_type_moved_to_another_module_with_a_table_entry_keeps_the_fingerprint(entry):
     """A temporary module stands for the 0.9 location, another for the new one, with the same source."""
-    from solvi import _deprecate, provenance
+    from solvi import _deprecate
+    from solvi.core import provenance
+    table = dict(_deprecate.MOVED)
     old, new = types.ModuleType("fp_old_home"), types.ModuleType("fp_new_home")
     for m in (old, new):
         sys.modules[m.__name__] = m
@@ -359,6 +367,7 @@ def test_a_type_moved_to_another_module_with_a_table_entry_keeps_the_fingerprint
             assert _catalog_over(new) != before
     finally:
         _deprecate.MOVED.clear()
+        _deprecate.MOVED.update(table)
         provenance._CODE = None
         for m in (old, new):
             sys.modules.pop(m.__name__, None)
@@ -366,12 +375,20 @@ def test_a_type_moved_to_another_module_with_a_table_entry_keeps_the_fingerprint
 
 def test_the_table_maps_to_modules_of_0_9_0():
     """Every line of MOVED names a module 0.9.0 had (modules_0_9_0.json) — the name the stored records carry."""
-    from solvi import _deprecate, provenance
+    from solvi import _deprecate
+    from solvi.core import provenance
     assert provenance._FP_MODULE is _deprecate.MOVED
     known = set(json.loads((DATA / "modules_0_9_0.json").read_text()))
     assert "solvi.typed" in known and "solvi.core" in known
     assert not {old for old in _deprecate.MOVED.values() if old not in known}
     assert all(k.count(":") <= 1 and v.count(":") == 0 for k, v in _deprecate.MOVED.items())
+    keys = {k for k in _deprecate.MOVED if ":" not in k}
+    assert not {v for v in _deprecate.MOVED.values() if v in keys}, "a 0.9 name that is also a new location: fp_module would chain"
+    import importlib
+    for k in _deprecate.MOVED:                           # every new location exists (an entry for a module that is gone
+        module, _, name = k.partition(":")               # keeps nothing)
+        mod = importlib.import_module(module)
+        assert not name or hasattr(mod, name), k
 
 
 if __name__ == "__main__":

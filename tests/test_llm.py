@@ -334,7 +334,7 @@ def test_text_in_with_an_llm_routes_and_points_at_each_field():
 
     from test_textin import REFUND, shop
 
-    from solvi.textin import DeciderExtractor, TextIn
+    from solvi.core.textin import DeciderExtractor, TextIn
 
     def reply(body):
         c = body["messages"][1]["content"]

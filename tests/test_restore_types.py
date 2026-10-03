@@ -11,8 +11,8 @@ import pytest
 
 from solvi import Answer, Catalog, JSONLStorage, Question, SQLiteStorage, System
 from solvi.diff import diff
-from solvi.runtime import Trace, srepr, vhash
-from solvi.schema import from_tree, jsonable, restorable, type_tree
+from solvi.core.runtime import Trace, srepr, vhash
+from solvi.core.schema import from_tree, jsonable, restorable, type_tree
 from solvi.system import Response
 
 

@@ -67,7 +67,7 @@ class LoraWarning(UserWarning):
 def _experimental():
     if not _warned[0]:
         _warned[0] = True
-        from .core import ExperimentalWarning
+        from .core.catalog import ExperimentalWarning
         warnings.warn("solvi.lora (adapt_lora, part.load_lora) is experimental: the API, the recipe and the file format may change",
                       ExperimentalWarning, stacklevel=4)
 
@@ -476,7 +476,7 @@ def adapt(part, examples, *, r=8, epochs=6, holdout=None, seed=0, device=None, l
           signal="confidence", max_updates=400, allow_large=False):
     """adapt_lora (see there). allow_large: in-process training of a checkpoint larger than solvi-base (what
     tools/adapt_lora_gpu.py passes, on a GPU)."""
-    from .core import Unknown
+    from .core.catalog import Unknown
     _experimental()
     check(part, allow_large)
     sp = part.spec

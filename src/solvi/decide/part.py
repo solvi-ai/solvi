@@ -10,10 +10,10 @@ import warnings
 import numpy as np
 
 from .. import _deprecate
-from ..core import Decision, Quote, Unknown, gone_in_1_0
-from ..provenance import ESCALATED, INSTRUCTION
-from ..provenance import digest
-from ..core import Answer, Question
+from ..core.catalog import Decision, Quote, Unknown, gone_in_1_0
+from ..core.provenance import ESCALATED, INSTRUCTION
+from ..core.provenance import digest
+from ..core.catalog import Answer, Question
 from .state import _is_text, _single, _text, jsonable, state_text
 from .wire import Logits, _respan
 from .backends import LONG_CPU_TOKENS, SECTION_TOKENS
@@ -130,7 +130,7 @@ class DecisionPart:
 
     def _batch_group(self):
         """(model, facts) when this part may share a forward pass with other questions on the same facts (the strategist's
-        batches, solvi.runtime.plan_batches); None when it needs a pass of its own (a model that cannot batch, the
+        batches, solvi.core.runtime.plan_batches); None when it needs a pass of its own (a model that cannot batch, the
         pointer)."""
         if not self.model.batchable or self.spec.pointer:
             return None
@@ -232,7 +232,7 @@ class DecisionPart:
         path = (ctx or {}).get("path")
         if path is None:
             return None
-        from ..calibration import node_of
+        from ..core.calibration import node_of
         node = node_of(path, self.groups["nodes"])
         return path, node, self.groups["nodes"][node]
 
@@ -365,7 +365,7 @@ class DecisionPart:
         calibrated coverage, most probable first — a short list for the person who handles an escalation. Never empty:
         when no answer passes (an unsure decision — the one that escalates), the most probable answer is listed; a
         larger set only covers more."""
-        from ..calibration import set_scores
+        from ..core.calibration import set_scores
         keys = list(d.probs)
         s = set_scores([d.probs[k] for k in keys], self.conformal_set["ordinal"], Unknown in keys)
         keep = sorted((i for i in range(len(keys)) if s[i] <= self.conformal_set["quantile"]),
@@ -745,7 +745,7 @@ class DecisionPart:
         examples), "error" (among them), "n", "max_error", "method", "guarantee"}. For a guarantee on the share of all
         questions answered wrongly, see act_guard. Every option after the examples is keyword-only (error= and the
         result's keys "coverage" / "target_error", the 0.7 names, were removed in 0.9)."""
-        from ..calibration import accuracy_at, check_rate, ltt_threshold
+        from ..core.calibration import accuracy_at, check_rate, ltt_threshold
         error = max_error
         examples = list(examples)
         if method not in ("empirical", "ltt"):
@@ -781,7 +781,7 @@ class DecisionPart:
         ("must_escalate_at_least"; arXiv 2606.29054) — a better signal can only get closer to that bound. Changes the
         part's fingerprint; the trace of every decision records the promise. The error among the answers given alone is
         not bounded (calibrate_for(method="ltt") bounds it): with few answered it can be far above `risk`. A signal that
-        does not separate right from wrong answers (solvi.calibration.separation: AUROC not above chance at the 5%
+        does not separate right from wrong answers (solvi.core.calibration.separation: AUROC not above chance at the 5%
         level) keeps the promise only by escalating, and is warned about (UserWarning, "warnings"). → {"signal",
         "threshold", "answered" (share answered alone on the examples), "error" (among them), "risk" (answered and
         wrong, on the examples), "n", "guarantee", "promise" (in words, with that error), "base_error",
@@ -804,7 +804,7 @@ class DecisionPart:
         The decider protocol: a combination (solvi.multi) takes the same act_guard(examples, *, max_risk, signal,
         groups, min_group, delta) and returns the same keys. Every option after the examples is keyword-only; risk= is
         the 0.7 name of max_risk= (removed in 0.9)."""
-        from ..calibration import check_rate, crc_threshold
+        from ..core.calibration import check_rate, crc_threshold
         risk = max_risk
         check_rate("max_risk", risk)                      # risk=10 (a percent) or 1.5 would be recorded as a promise
         if groups is not None and delta is not None:
@@ -852,7 +852,7 @@ class DecisionPart:
         ≥ coverage for inputs like the examples (score and number questions: one contiguous interval) — and an
         escalation's message lists them for the person who takes over. It does not change what is answered alone
         (see act_guard). Choice, yes/no, score and number questions. → {"coverage", "quantile", "n", "mean_size"}."""
-        from ..calibration import check_rate, conformal_quantile, set_scores
+        from ..core.calibration import check_rate, conformal_quantile, set_scores
         check_rate("coverage", coverage)
         if self.spec.multi or self.kind in ("rank", "span"):
             raise ValueError(f"conformal sets need a single answer from a closed list; not for {self.kind!r} questions")
@@ -872,7 +872,7 @@ class DecisionPart:
             sizes.append(len(self.candidates(d)))
         return {"coverage": coverage, "quantile": q, "n": len(scores), "mean_size": float(np.mean(sizes))}
 
-    # --- the calibration file's state of this part (solvi.calibfile reads and writes only the file format)
+    # --- the calibration file's state of this part (solvi.core.calibfile reads and writes only the file format)
     _calibration_kind = "DecisionPart"
 
     def _calibration_base(self):
@@ -902,7 +902,7 @@ class DecisionPart:
         return self.lora
 
     def _apply_calibration(self, rec, grp, path):
-        """Set the thresholds a calibration file holds (solvi.calibfile.load has checked it)."""
+        """Set the thresholds a calibration file holds (solvi.core.calibfile.load has checked it)."""
         if grp is not None:
             grp["signal"] = rec["groups"].get("signal")
         self._set_threshold("act", rec.get("act_threshold"), rec.get("guarantee"), grp)   # sets groups, inputs
@@ -913,8 +913,8 @@ class DecisionPart:
     def save_calibration(self, path):
         """Write this decision's calibration — the escalation thresholds (per group too), the guarantee record, the
         conformal set — with the question and the fingerprint of the model and adaptation it was fitted on, to a JSON
-        file (solvi.calibfile; `solvi calibrate` writes the same). → path."""
-        from ..calibfile import save
+        file (solvi.core.calibfile; `solvi calibrate` writes the same). → path."""
+        from ..core.calibfile import save
         return save(self, path)
 
     def load_calibration(self, path, groups=None, strict=True):
@@ -924,7 +924,7 @@ class DecisionPart:
         Thresholds per group by a function: pass it again as groups=. Call it before registering the part in a catalog
         when the calibration has groups (the group facts join the part's inputs). While `solvi calibrate` loads a
         catalog, calibration files are not applied (the part is calibrated afresh). → self."""
-        from ..calibfile import load
+        from ..core.calibfile import load
         return load(self, path, groups, strict)
 
     memory = gone_in_1_0("memory()", "solvi.memory.attach(part, ...) — the memory of corrections moves into the "
@@ -957,6 +957,6 @@ class DecisionPart:
                         require_evidence=require_evidence)
 
 
-from ..runtime import plan_batches   # noqa: E402,F401 — re-exported (defined there since 1.0)
+from ..core.runtime import plan_batches   # noqa: E402,F401 — re-exported (defined there since 1.0)
 
 __all__ = ["DecisionPart", "plan_batches"]

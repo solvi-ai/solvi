@@ -38,10 +38,10 @@ from collections.abc import Mapping
 import numpy as np
 
 from . import _deprecate
-from .core import Decision, Quote, Unknown, gone_in_1_0
+from .core.catalog import Decision, Quote, Unknown, gone_in_1_0
 from .decide import DecisionPart, Facts, GroupBy, _group_info, _group_promise, _single, group_record, guard_promise, no_separation, one_source
-from .provenance import ESCALATED, code_fingerprint, digest
-from .runtime import RECORD_KEYS          # what a replay compares with the recomputed (defined there; re-exported)
+from .core.provenance import ESCALATED, code_fingerprint, digest
+from .core.runtime import RECORD_KEYS          # what a replay compares with the recomputed (defined there; re-exported)
 
 # guarantee["signal"]: a name, as a part's ("act", "confidence"): one threshold shared by every part, on each part's
 # own signal ("shared") or on its rank among that part's calibration signals ("shared-rank")
@@ -122,7 +122,7 @@ def _jv(v):
 
 
 def _key(v):
-    from .runtime import vhash
+    from .core.runtime import vhash
     return vhash(_jv(v))
 
 
@@ -495,7 +495,7 @@ class Combination:
     def _group(self, src):
         """With thresholds per group: (the input's group path, the node whose threshold applies, its info), or None
         when the input does not give its group."""
-        from .calibration import node_of
+        from .core.calibration import node_of
         path = self.groups["by"].path(src.vals, src.raw)
         if path is None:
             return None
@@ -617,7 +617,7 @@ class Combination:
         (models called per question; "calls" in 0.7, removed in 0.9), "cost", "scale", "answered_by". signal: "auto" only (each part
         brings its own; `scale` says how they share one threshold). Every option after the examples is keyword-only
         (risk=, the 0.7 name of max_risk=, was removed in 0.9)."""
-        from .calibration import certify_groups, check_rate
+        from .core.calibration import certify_groups, check_rate
         risk = max_risk
         check_rate("max_risk", risk)
         if signal != "auto":
@@ -751,7 +751,7 @@ class Combination:
         "shared-rank"), "threshold", "answered", "error", "n", "max_error", "method", "guarantee" — plus
         "calls_per_question" and "scale". signal: "auto" only (each part brings its own). Every option after the
         examples is keyword-only (error=, the 0.7 name of max_error=, was removed in 0.9)."""
-        from .calibration import _binom_cdf, check_rate, ltt_grid
+        from .core.calibration import _binom_cdf, check_rate, ltt_grid
         error = max_error
         if method not in ("empirical", "ltt"):
             raise ValueError('method must be "empirical" or "ltt"')
@@ -795,7 +795,7 @@ class Combination:
                 "method": method, "guarantee": g["promise"],
                 "calls_per_question": float(calls[:, j].mean()) if n else 0.0, "scale": scale}
 
-    # --- the calibration file's state of the combination (solvi.calibfile reads and writes only the file format)
+    # --- the calibration file's state of the combination (solvi.core.calibfile reads and writes only the file format)
     @property
     def _calibration_kind(self):
         return type(self).__name__
@@ -820,7 +820,7 @@ class Combination:
         return None
 
     def _apply_calibration(self, rec, grp, path):
-        """Set the threshold a calibration file holds (solvi.calibfile.load has checked it)."""
+        """Set the threshold a calibration file holds (solvi.core.calibfile.load has checked it)."""
         self.threshold, self.guarantee, self.groups = rec.get("threshold"), rec.get("guarantee"), grp
         scale = rec.get("scale", "raw")             # a file from before 0.7 has no scale: raw, as it was made
         if scale == "rank":
@@ -838,14 +838,14 @@ class Combination:
 
     def save_calibration(self, path):
         """Write the combination's calibration (the shared threshold, per group too, the guarantee, the conformal set) with
-        the question and every member's fingerprint to a JSON file (solvi.calibfile). → path."""
-        from .calibfile import save
+        the question and every member's fingerprint to a JSON file (solvi.core.calibfile). → path."""
+        from .core.calibfile import save
         return save(self, path)
 
     def load_calibration(self, path, groups=None, strict=True):
         """Apply a file written by save_calibration / `solvi calibrate`; refuses one made for other members or another
         question (strict=False loads it anyway). → self."""
-        from .calibfile import load
+        from .core.calibfile import load
         return load(self, path, groups, strict)
 
     def conformal(self, examples, coverage=0.90):
@@ -853,7 +853,7 @@ class Combination:
         stage's for a cascade, the mean of the parts' for a vote), from labelled examples at its current threshold —
         so call it after act_guard. Every decision then carries extra["candidates"]; an escalation lists them.
         Choice, yes/no, score and number questions. → {"coverage", "quantile", "n", "mean_size"}."""
-        from .calibration import check_rate, conformal_quantile, set_scores
+        from .core.calibration import check_rate, conformal_quantile, set_scores
         check_rate("coverage", coverage)
         if self.spec.multi or self.kind in ("rank", "span"):
             raise ValueError(f"conformal sets need a single answer from a closed list; not for {self.kind!r} questions")
@@ -968,7 +968,7 @@ class Combination:
         """A recorded decision of this combination, without re-running any model: does the recorded answer follow from
         the recorded proposals by this combination's rule? → [reason] (empty: it does)."""
         e = dict(r.extra or {})
-        from .runtime import MISSING
+        from .core.runtime import MISSING
         e["escalate"] = r.error
         e["value"] = None if (r.error is not None or r.value is MISSING) else _jv(r.value)
         return self.check(e, top=True)
@@ -984,7 +984,7 @@ def _escalated(e, top):
 
 
 def _same(jv_a, jv_b):
-    from .runtime import vhash
+    from .core.runtime import vhash
     if isinstance(jv_b, dict) and "quote" in jv_b and not isinstance(jv_a, dict):
         return jv_a == jv_b["quote"][0]              # a span's record value is its text
     return vhash(jv_a) == vhash(jv_b)
@@ -1173,7 +1173,7 @@ class Vote(Combination):
         bad = []
         for m, v in zip(self.members, votes):
             bad += m.check(v)
-        from .runtime import vhash
+        from .core.runtime import vhash
         K = np.array([[vhash(v["value"])] for v in votes], dtype=object)
         A = np.array([[v.get("escalate") is None] for v in votes])
         _, vk, _, auto = _rule(K, A, e.get("rule", self.rule))

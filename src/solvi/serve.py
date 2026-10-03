@@ -63,8 +63,8 @@ from . import _deprecate
 from ._rpc import BadRequest, Busy, Limits, NotFound, RequestError, _readline, internal_error, log, parse_json, too_deep  # noqa: F401
 from .command import fail as _fail, load_object, load_system
 from .inputs import _camel, _fact_type, input_model, input_schema, question_inputs   # noqa: F401 — re-exported
-from .runtime import trace_hash   # noqa: F401 — re-exported (defined there: agents read it too)
-from .schema import dump, dumps
+from .core.runtime import trace_hash   # noqa: F401 — re-exported (defined there: agents read it too)
+from .core.schema import dump, dumps
 
 REF = "#/components/schemas/{model}"          # where the OpenAPI document keeps the models (see create_app)
 
@@ -132,7 +132,7 @@ class Service:
         if system is None and decider is None:
             raise ValueError("solvi serve needs a System, a decider (--decider), or both")
         self.system, self.decider = system, decider
-        self._textin = textin                         # a solvi.textin.TextIn (synonyms, patterns, ...), else made on use
+        self._textin = textin                         # a solvi.core.textin.TextIn (synonyms, patterns, ...), else made on use
         if system is not None and storage is not None:
             from .storage import open_storage
             system.storage = open_storage(storage, system)
@@ -215,7 +215,7 @@ class Service:
         s = self._checked(state, names)
         with self.exclusive():
             if self.is_async:                         # async parts: awaited concurrently within the ask (System.aask)
-                from .runtime import run_sync
+                from .core.runtime import run_sync
                 return run_sync(s.aask(state, questions=list(names) if names else None, store=store,
                                        timeout=self.part_timeout))
             return s.ask(state, questions=list(names) if names else None, store=store)
@@ -261,7 +261,7 @@ class Service:
         import copy
         import datetime as dt
 
-        from .textin import TextIn
+        from .core.textin import TextIn
         if self.system is None:
             raise NotFound("this server has no System (only POST /v1/systemone)")
         if self._textin is None:
@@ -312,7 +312,7 @@ class Service:
         with self.exclusive():                        # the decider's passes (routing, the fields) are inside the slot
             read = tin.read(text, question=question)  # and the lock, like the ask itself
             if self.is_async:
-                from .runtime import run_sync
+                from .core.runtime import run_sync
                 resp = run_sync(self.system.aask_text(read, store=self.storing(store)))
             else:
                 resp = self.system.ask_text(read, store=self.storing(store))
@@ -538,7 +538,7 @@ def create_app(system=None, decider=None, storage=None, model_name=None, title=N
     routing texts (POST /ask_text); `storage`: a TraceStorage or a path (every ask is stored); `model_name`: the model name
     System One answers carry; `limits`: a Limits (request size, JSON depth, timeout); `token`: every request must carry
     `Authorization: Bearer <token>` (None: no authentication); `cors`: the origins browsers may call it from (None: no
-    CORS headers at all); `textin`: a solvi.textin.TextIn for POST /ask_text (default: TextIn(system, decider));
+    CORS headers at all); `textin`: a solvi.core.textin.TextIn for POST /ask_text (default: TextIn(system, decider));
     `allow_client_no_store`: honour a request's "store": false (default: with a store, every answer is saved — the
     server's policy, not the client's). A token that is empty or blank is a configuration error (ValueError)."""
     if token is not None and not str(token).strip():
@@ -592,7 +592,7 @@ def create_app(system=None, decider=None, storage=None, model_name=None, title=N
 
     documented = {}                                   # path → (request model or None, response model)
     if system is not None:
-        from .schema import response_model
+        from .core.schema import response_model
 
         def with_ids(M, name):
             return create_model(name, __base__=M, stored_id=(Optional[str], None), trace_hash=(str, ""))
@@ -842,7 +842,7 @@ def run_sdk(svc):
     from mcp.shared.exceptions import MCPError
 
     from . import __version__
-    from .schema import dumps
+    from .core.schema import dumps
 
     async def list_tools(ctx, params):
         return types.ListToolsResult(tools=[types.Tool(name=t["name"], description=t["description"],

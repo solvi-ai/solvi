@@ -234,7 +234,7 @@ def test_a_fallback_producer_is_dropped_only_when_it_would_read_its_own_fact():
 
 
 def test_path_confidence_follows_the_producer_that_ran_and_survives_a_ring_of_facts():
-    from solvi.runtime import path_confidence
+    from solvi.core.runtime import path_confidence
     cat, qs = _net_gross()
     res = System(cat, qs, strategist=CostStrategist(producers="equivalent", keep_alternatives=False)).ask({"net_in": 100.0})
     assert path_confidence(cat, res.trace, ["gross", "net"]) == 1.0            # the full catalog: net ⇄ gross

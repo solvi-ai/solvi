@@ -194,7 +194,7 @@ class Chooser:
         self.asked = 0
 
     def _catalog(self):
-        from .core import Catalog
+        from .core.catalog import Catalog
         cat, m, me = Catalog(), self.model, self
 
         def allowed(v, question, episode):
@@ -223,7 +223,7 @@ class Chooser:
         return cat
 
     def system(self, options):
-        from .core import Answer, Question
+        from .core.catalog import Answer, Question
         from .system import System
         return System(self.catalog, [Question("choice", "Choose", Answer.choice(list(options)))], storage=self.storage)
 

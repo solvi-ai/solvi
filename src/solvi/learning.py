@@ -61,7 +61,7 @@ import json
 import warnings
 from dataclasses import asdict, dataclass, field
 
-from . import core
+from .core import catalog as core
 from .storage import FORMAT, TRUSTED_SOURCES, UntrustedLabel, check_source, plain
 from .storage import open_storage
 
@@ -75,7 +75,7 @@ def _check_settings(ladder, gates, holdout, calibration):
     """The learning loop's settings → ValueError naming the first that is wrong: an unknown ladder, memory or gate key
     (a typo would be ignored), a memory mode that does not exist, a gate rate outside [0, 1] (risk strictly inside),
     a negative count, or holdout / calibration shares that leave no label to train on."""
-    from .calibration import check_rate
+    from .core.calibration import check_rate
     from .memory import _settings
     unknown = set(ladder or ()) - set(LADDER)
     if unknown:
@@ -118,7 +118,7 @@ OPEN_KINDS = ("span", "rank", "number")        # answers not from a closed list:
 def content_key(question, init):
     """What a label's split is decided by: the question and a hash of its input — never a stored id, whose hash covers
     measured timings and so differs from run to run."""
-    from .runtime import vhash
+    from .core.runtime import vhash
     return f"{question}|{vhash(dict(init or {}))}"
 
 
@@ -248,7 +248,7 @@ class Learning:
         return {"labels": out, "rejected": rejected}
 
     def _normalize(self, q, answer):
-        from .core import NOT_STATED_KEY, Unknown
+        from .core.catalog import NOT_STATED_KEY, Unknown
         at = self.system.questions[q].answer
         ans = Unknown if answer == NOT_STATED_KEY else at.normalize(answer)
         if ans is not Unknown:
@@ -267,7 +267,7 @@ class Learning:
 
     @staticmethod
     def _fingerprint_of(parts):
-        from .provenance import digest
+        from .core.provenance import digest
         return digest("learning", sorted((q, p.fingerprint()) for q, p in parts.items()))
 
     def _snapshot(self, parts=None):
@@ -299,7 +299,7 @@ class Learning:
         its own thresholds; the catalog and the System are shallow copies whose parts point at the copies."""
         import dataclasses
 
-        from .core import _group_func
+        from .core.catalog import _group_func
         from .decide import DecisionPart
         models = {}
         for p in self.parts.values():
@@ -527,7 +527,7 @@ class Learning:
     def _apply(self, q, rung, train, part=None):
         """Apply one question's update to `part` (the shadow part of the candidate; default: the live part) → a JSON-able
         description."""
-        from .core import Unknown
+        from .core.catalog import Unknown
         from .memory import CorrectionMemory, attach
         part = self.parts[q] if part is None else part
         ex = self._examples(q, train)

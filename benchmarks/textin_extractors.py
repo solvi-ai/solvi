@@ -38,7 +38,7 @@ from typing import Literal
 from pydantic import BaseModel, Field
 
 from solvi import Catalog, Question, System
-from solvi.textin import CueExtractor, DeciderExtractor, TextIn
+from solvi.core.textin import CueExtractor, DeciderExtractor, TextIn
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 TODAY = dt.date(2026, 9, 28)

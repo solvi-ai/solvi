@@ -18,9 +18,10 @@
     solvi ask myapp.decisions:system (STATE.json | - | --state '{...}' | --text "...") [--question Q] [--decider MODEL]
               [--audit] [--report md|html] [--lang ru] [--store decisions.db] [--json]
     solvi calibrate myapp.decisions:system PART labels.csv --risk 0.1 [--groups a,b] [--method crc|ltt] [--out F]
-                                                                                                     (solvi.calibfile)
+                                                                                                     (solvi.calibrate)
     solvi models [list | pull ID | check MODEL --examples labels.jsonl --task Q]                       (solvi.models)
     solvi hook [install | uninstall | pre-edit --rules rules.toml | pick-skill --skills-dir DIR]        (solvi.hooks)
+    solvi migrate PATH [--check]     rewrite the 0.9 import paths of your code to the 1.0 ones          (solvi._migrate)
 
 --system names a System: "package.module:attribute" or "path/to/file.py:attribute", where the attribute is a System or a
 function without arguments that returns one (`solvi serve` and `solvi check` take it as their first argument; check also
@@ -243,7 +244,7 @@ def _answers(res):
 
 def cmd_ask(a):
     """`solvi ask` → 0: every asked question answered; 1: at least one abstained (a person should look); 2: usage."""
-    from . import i18n
+    from .core import _i18n as i18n
     if a.report and (a.json or a.audit or a.lang):
         _fail("ask --report: a report is one document — drop " + ", ".join(
             f for f, on in (("--json", a.json), ("--audit", a.audit), ("--lang", a.lang)) if on))
@@ -281,7 +282,7 @@ def cmd_ask(a):
         tin = None
         if a.today:                                    # as `solvi serve` reads a text: year-less and relative dates
             import datetime as dt
-            from .textin import TextIn
+            from .core.textin import TextIn
             try:
                 today = dt.date.today() if a.today == "today" else dt.date.fromisoformat(a.today)
             except ValueError:
@@ -432,6 +433,8 @@ def main(argv=None):
     calibrate_parser(sub)
     from .models import add_parser as models_parser, cmd_models
     models_parser(sub)
+    from ._migrate import add_parser as migrate_parser, cmd_migrate
+    migrate_parser(sub)
     from .scaffold import add_parser as init_parser, cmd_init
     init_parser(sub)
     try:
@@ -441,7 +444,7 @@ def main(argv=None):
     try:
         return {"verify": cmd_verify, "replay": cmd_replay, "diff": cmd_diff, "serve": cmd_serve,
                 "check": cmd_check, "report": cmd_report, "ask": cmd_ask, "calibrate": cmd_calibrate,
-                "models": cmd_models, "init": cmd_init}[a.cmd](a)
+                "models": cmd_models, "init": cmd_init, "migrate": cmd_migrate}[a.cmd](a)
     except OSError as e:                               # a path that cannot be read or written: usage, not a finding
         print(f"solvi: {e.filename}: {e.strerror}" if e.filename and e.strerror else f"solvi: {e}", file=sys.stderr)
         return 2

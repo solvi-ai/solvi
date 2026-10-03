@@ -56,7 +56,7 @@ import copy
 import math
 import random
 
-from .core import Answer, Catalog, Question
+from .core.catalog import Answer, Catalog, Question
 
 SPLIT_FIT = 0.75            # the share fitted on when System 1 is fitted here
 SPLIT_SELECT = 1 / 3        # the share a signal is chosen on when a rule answers and its confidence does not vary
@@ -143,7 +143,7 @@ class AutoSystem:
 # ------------------------------------------------------------------------------------------------ helpers
 def _judge(q, correct):
     """correct(answer, label) → bool, or equality of the normalized answers."""
-    from .runtime import vhash
+    from .core.runtime import vhash
 
     def right(ans, label):
         if correct is not None:
@@ -237,7 +237,7 @@ def _slow_path(slow, q, reads, novel_on, writer, inputs):
         return SlowPath(System(cat, [sq])), (f"the model {what} asked the question, reading {', '.join(reads)}"
                                              + ("; it may say \"not stated\" (→ a person)" if novel_on and not boolean else ""))
     if callable(slow):
-        from .core import Part
+        from .core.catalog import Part
         fn = slow
 
         def answer(**given):

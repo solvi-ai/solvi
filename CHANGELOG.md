@@ -80,6 +80,40 @@ old method raises an AttributeError that names the new call; what the method did
 `part.save_lora`, `part.load_lora`, `part.lora` and calibration files that carry an adapter work as before: a part now
 has an adapter slot, and the LoRA adapter fills it.
 
+### New layout: two levels and `solvi.experimental` (old imports warn until 1.1)
+
+solvi's modules moved into packages that say what you can rely on: `solvi` and `solvi.solutions` are the ready-made
+systems, `solvi.core` and its areas (`solvi.core.types`, `solvi.core.runtime`, ...) are the building blocks they are
+made of, and `solvi.experimental` holds what may still change. Every 0.9 import path still works in 1.0.x: it imports
+the very same module and warns (`SolviDeprecationWarning`) with the path to use; 1.1 removes the old paths.
+
+- **`solvi migrate PATH`** rewrites your code (`.py` and `.md` files) to the new paths: imports, `from solvi import
+  storage`, dotted paths in strings such as `monkeypatch.setattr("solvi.llm.urlopen", ...)` or
+  `"solvi.hooks:rules_system"`. `solvi migrate PATH --check` changes nothing and exits 1 when a file would change.
+- Stored decisions, calibration files and fingerprints do not change: a fingerprint records the 0.9 module of a moved
+  class or function (the table `solvi._deprecate.MOVED`), so decisions stored by 0.7–0.9 replay, and a store written by
+  1.0 is read by 0.9 tools the same way. A stored `module:qualname` that names a 0.9 module loads without a warning.
+- `solvi.core` itself keeps the names it exported in 0.9 (`Catalog`, `Quote`, `find_quote`, ...); its private helpers
+  are in `solvi.core.catalog`.
+
+Where each module went:
+
+<!-- migration table: tools/migration_table.py -->
+| you imported (0.9) | import now (1.0) | level |
+|---|---|---|
+| `solvi.calibfile` | `solvi.core.calibfile` | low level: building blocks |
+| `solvi.calibration` | `solvi.core.calibration` | low level: building blocks |
+| `solvi.costs` | `solvi.core.costs` | low level: building blocks |
+| `solvi.i18n` | `solvi.core._i18n` | internal |
+| `solvi.loader` | `solvi._loader` | internal |
+| `solvi.primitives` | `solvi.core.primitives` | low level: building blocks |
+| `solvi.provenance` | `solvi.core.provenance` | low level: building blocks |
+| `solvi.runtime` | `solvi.core.runtime` | low level: building blocks |
+| `solvi.schema` | `solvi.core.schema` | low level: building blocks |
+| `solvi.textin` | `solvi.core.textin` | low level: building blocks |
+| `solvi.typed` | `solvi.core.types` | low level: building blocks |
+<!-- end of migration table -->
+
 ### Moved inside solvi (old imports keep working)
 
 To break the import cycle between the deciders, the System, the store and the dispatcher, some pieces moved to modules

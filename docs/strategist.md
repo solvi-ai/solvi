@@ -51,7 +51,7 @@ feature candidates of `fit`, `learn_order`, the input schemas of `solvi serve` a
 ### Costs
 
 The planner plans with the declared `cost=` of each producer; with none declared, interchangeable producers tie and the
-first declared wins. Planning on measured run times (`cost_policy="measured"`, `solvi.costs.MeasuredCosts`,
+first declared wins. Planning on measured run times (`cost_policy="measured"`, `solvi.core.costs.MeasuredCosts`,
 `freeze_costs`) was removed in 1.0: it showed no measured benefit. A plan record stored by 0.9 with measured costs
 (`extra["costs"]`) still replays.
 

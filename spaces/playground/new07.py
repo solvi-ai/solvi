@@ -52,7 +52,7 @@ def has_vote():
 
 def has_textin():
     try:
-        from solvi.textin import CueExtractor, TextIn  # noqa: F401
+        from solvi.core.textin import CueExtractor, TextIn  # noqa: F401
         return hasattr(System, "ask_text")
     except ImportError:
         return False
@@ -346,8 +346,8 @@ def demo_textin(message, risk=None):
     """A message → the question it asks (a stand-in decider picks the entry point) and each input field read with a quote
     (CueExtractor: deterministic candidates of the field's type after a cue word) → ask_text answers it in one trace."""
     if not has_textin():
-        return needs("solvi.textin.TextIn and system.ask_text", "0.7"), "", "", ""
-    from solvi.textin import CueExtractor, TextIn
+        return needs("solvi.core.textin.TextIn and system.ask_text", "0.7"), "", "", ""
+    from solvi.core.textin import CueExtractor, TextIn
     _, system = shop()
     decider = DecideModel(RouteScorer(), meta={"format": "stand-in", "temperature": 1.0})
     tin = TextIn(system, decider, CueExtractor(), today=TODAY, patterns={"order_id": r"[A-Z]-\d+"},

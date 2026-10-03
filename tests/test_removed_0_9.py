@@ -216,7 +216,7 @@ def test_files_and_command_lines(tmp_path, monkeypatch, capsys):
     assert "--model was renamed in 0.8 and removed in 0.9: use --decider" in capsys.readouterr().err
     monkeypatch.delenv("SOLVI_HOOK_DECIDER", raising=False)
     monkeypatch.setenv("SOLVI_HOOK_MODEL", "m")
-    from solvi.loader import LoadError
+    from solvi._loader import LoadError
     with pytest.raises(LoadError, match=r"\$SOLVI_HOOK_MODEL was renamed in 0.8 and removed in 0.9: set \$SOLVI_HOOK_DECIDER"):
         hooks.rules_system()
 

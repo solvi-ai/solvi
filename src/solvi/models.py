@@ -153,7 +153,7 @@ def load(spec, backend="auto", api_key=None):
         from .llm import llm
         return llm(where[0], where[1], api_key=api_key or os.environ.get("SOLVI_LLM_API_KEY"))
     if k == "code":
-        from .loader import LoadError, load_object
+        from ._loader import LoadError, load_object
         try:
             m = load_object(spec)
         except LoadError as e:

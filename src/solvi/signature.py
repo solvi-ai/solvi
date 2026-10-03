@@ -48,7 +48,7 @@ def _cj(obj):
 def record_digest(rec):
     """Content hash (32 bytes) of one signed item: a stored record (dict; without `id`, `hash`, `prev`), a trace Record
     (its hashed body without `prev`), bytes (as they are) or anything else (its canonical JSON)."""
-    from .runtime import Record, _canon
+    from .core.runtime import Record, _canon
     if isinstance(rec, (bytes, bytearray)):
         return hashlib.sha256(rec).digest()
     if isinstance(rec, Record):
@@ -69,7 +69,7 @@ def record_digest(rec):
 def items(obj):
     """What sign() signs, in order: a TraceStorage → its chained records (dicts; unreadable ones as None); a Response or
     Trace → its input (init_hash) then its records; a list → its items."""
-    from .runtime import Trace
+    from .core.runtime import Trace
     from .storage import TraceStorage
     if isinstance(obj, TraceStorage):
         from .storage import chained
@@ -217,7 +217,7 @@ def check(obj, signature, candidates=None):
 
 def _forms(candidate, current):
     """A candidate as it would be signed: itself, and for a trace record also the current record with its value."""
-    from .runtime import Record
+    from .core.runtime import Record
     yield candidate
     if isinstance(current, Record) and not isinstance(candidate, Record):
         import dataclasses

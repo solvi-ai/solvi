@@ -27,8 +27,8 @@ import time
 
 from . import _deprecate
 from .strategist import Flow, PlanError, plan as det_plan
-from .core import Catalog, _group_func
-from .runtime import narrowed, replay_plan             # defined there (the runtime replays plan records); re-exported
+from .core.catalog import Catalog, _group_func
+from .core.runtime import narrowed, replay_plan             # defined there (the runtime replays plan records); re-exported
 
 UNIT = 1.0
 MAX_EXPAND = 20000               # branch and bound (search(method="bnb"), or no scipy milp): nodes before it stops
@@ -69,7 +69,7 @@ def cost_fn(costs=None, unit=UNIT):
 
 def type_ok(catalog, fact, reader_type):
     """Does the fact's type fit a reader's declared type? (untyped on either side: yes)"""
-    from .typed import compatible
+    from .core.types import compatible
     t = catalog.types.get(fact)
     if t is None or reader_type is None:
         return True
@@ -395,7 +395,7 @@ def view(catalog, choice, fallbacks=True, reach=None):
     """A shallow copy of the catalog in which every fact with alternative producers keeps only the chosen one (first) and,
     with fallbacks, the other producers whose inputs the plan already computes (after it, in declaration order) — unless
     such a producer reads, through any fact, the fact it would produce (then the plan could not run)."""
-    from .core import Catalog
+    from .core.catalog import Catalog
     v = Catalog.__new__(Catalog)
     v.__dict__.update(catalog.__dict__)
     v.parts = dict(catalog.parts)
@@ -562,7 +562,7 @@ def _abstain(questions, why):
 # ---------------------------------------------------------------------------------------------------------------- trace
 def plan_record(flow):
     """The hashed trace record of a planned flow (kind "plan"): the chosen producers and the mandatory checks."""
-    from .runtime import Record
+    from .core.runtime import Record
     s = getattr(flow, "strategy", None)
     if s is None:
         return None

@@ -59,7 +59,7 @@ from concurrent.futures import ThreadPoolExecutor
 
 import numpy as np
 
-from . import core
+from .core import catalog as core
 from .decide import DecideModel
 from .remote import WHY_CHARS, NoAnswer, Refused, RemoteClient, RemoteError, endpoint, error_text  # noqa: F401 (endpoint: 0.7 import path)
 

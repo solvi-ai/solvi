@@ -179,7 +179,7 @@ def test_span_maps_back_into_the_whole_contract_and_the_trace_records_the_sectio
     rep = res.trace.replay(s)
     assert rep["ok"], rep["mismatches"]
     import dataclasses
-    from solvi.runtime import vhash
+    from solvi.core.runtime import vhash
     forged = dataclasses.replace(rec, extra={**rec.extra, "long": {**lg, "sections": lg["sections"][:1]}})
     forged.hash = vhash(forged.body())                       # a consistent record that claims other sections were read
     res.trace.records[res.trace.records.index(rec)] = forged

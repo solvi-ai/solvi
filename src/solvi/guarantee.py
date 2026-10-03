@@ -24,7 +24,7 @@ examples (exchangeable with them: the same stream, not a new domain):
 
 max_risk= selects "crc", max_error= selects "ltt" (method="empirical" to ask for the plain one). groups= gives a threshold per
 group (a fact name, a hierarchy of fact names, a function of facts, or "answer": the answer the question would give —
-"among the inputs answered 'match', ..."), with the promise inside every group (after HG-CRC; see solvi.calibration).
+"among the inputs answered 'match', ..."), with the promise inside every group (after HG-CRC; see solvi.core.calibration).
 
 What is checked before a threshold is set, so that a promise is never made on a signal that cannot carry it:
 - separation: the signal must rank the right answers above the wrong ones on the calibration examples (a one-sided
@@ -46,7 +46,7 @@ import warnings
 
 import numpy as np
 
-from .runtime import replay_guard        # defined there (the runtime replays guard records); re-exported
+from .core.runtime import replay_guard        # defined there (the runtime replays guard records); re-exported
 
 METHODS = ("crc", "ltt", "empirical")
 SEPARATION_P = 0.05            # the signal must separate right from wrong at this level (one-sided Mann–Whitney)
@@ -90,7 +90,7 @@ def _curve(s, w):
 def _search(s, w, method, level, delta, min_support, bound_delta=None):
     """The lowest threshold that keeps the method's promise on these examples → (threshold, why or None). bound_delta:
     conformal risk control as a binomial bound at that level (groups with delta)."""
-    from .calibration import _binom_cdf, loss_budget, ltt_grid
+    from .core.calibration import _binom_cdf, loss_budget, ltt_grid
     n = len(s)
     if n == 0:
         return math.inf, "no calibration examples"
@@ -166,7 +166,7 @@ class Promise:
         the rest of the stream) → (threshold, node, info); without groups: (threshold, None, None)."""
         if self.nodes is None:
             return self.threshold, None, None
-        from .calibration import group_path, node_of
+        from .core.calibration import group_path, node_of
         node = node_of(group_path(group), self.nodes)
         return self.nodes[node]["threshold"], node, self.nodes[node]
 
@@ -188,7 +188,7 @@ class Promise:
         return out
 
     def fingerprint(self):
-        from .provenance import digest
+        from .core.provenance import digest
         nodes = None if self.nodes is None else sorted((list(k), v["threshold"]) for k, v in self.nodes.items())
         return digest("Promise", self.method, self.level, self.delta, self.threshold, nodes, self.by, self.signal)
 
@@ -207,7 +207,7 @@ def calibrate(scores, correct, *, max_error=None, max_risk=None, method=None, de
     threshold must have this many examples at or above it. weak: "raise" (default) or "warn" when the signal does not
     separate right from wrong. → Promise (its threshold is inf — everything escalates — when none keeps the promise;
     report["why"] says why)."""
-    from .calibration import check_rate, group_nodes
+    from .core.calibration import check_rate, group_nodes
     error, risk = max_error, max_risk
     if (error is None) == (risk is None):
         raise ValueError("give the promise as max_risk= (P(answered alone and wrong), conformal risk control) or "
@@ -286,7 +286,7 @@ def calibrate(scores, correct, *, max_error=None, max_risk=None, method=None, de
 
 
 def _path(p):
-    from .calibration import group_path
+    from .core.calibration import group_path
     return group_path(p)
 
 
@@ -315,7 +315,7 @@ class QuestionGuard:
         fp = getattr(self, "_fp", None)
         if fp is not None and fp[0] is self.promise:       # cached: a guard does not change once attached
             return fp[1]
-        from .provenance import code_fingerprint, digest
+        from .core.provenance import code_fingerprint, digest
         sig = {"fn": code_fingerprint(self.signal)} if callable(self.signal) else self.signal
         grp = None if self.groups is None else ("answer" if self.groups == "answer" else self._by.describe())
         self._fp = (self.promise, digest("QuestionGuard", self.question, sig, repr(self.answer), grp,
@@ -371,7 +371,7 @@ def _number(v, name):
 
 def _calibration_rows(system, question, examples, guard, correct, folds=None, seed=0):
     """Ask the question on labelled examples with its guard off → (signals, right, groups, read failures)."""
-    from .runtime import execute, vhash
+    from .core.runtime import execute, vhash
     q = system.questions[question]
     examples = list(examples)
     if not examples:
@@ -532,7 +532,7 @@ def guard_question(system, question, examples=None, *, max_error=None, max_risk=
 def _with_corrections(system, question, examples, corrections, sources):
     """examples + the stored corrections of `question` from `sources` → (examples, {"examples", "corrections":
     {source: n}, "ids"}); a correction from another source is left out (counted in "skipped")."""
-    from .sources import TRUSTED_SOURCES, VERIFIED, UntrustedLabel, check_source
+    from .core.sources import TRUSTED_SOURCES, VERIFIED, UntrustedLabel, check_source
     store = system.storage if corrections is True else corrections
     if store is None or not hasattr(store, "corrections"):
         raise ValueError("corrections= is a TraceStorage (or True: the system's storage, which it does not have)")
@@ -581,7 +581,7 @@ def apply_guards(system, results, trace, vals, flow, live=True):
     """Gate the answers of the guarded questions (called by System.ask and System.answers_of). live: record each verdict
     in the trace (and let a stateful gate observe the signal); False — re-derive the verdicts of a recorded trace (a
     stateful gate's recorded threshold is taken as it was)."""
-    from .runtime import Record
+    from .core.runtime import Record
     for qn, guard in list(system.guards.items()):
         r = results.get(qn)
         if r is None:
@@ -614,7 +614,7 @@ def apply_guards(system, results, trace, vals, flow, live=True):
         g.update(signal=guard.describe_signal(), value=s, threshold=thr if math.isfinite(thr) else None, answered=bool(ok),
                  fingerprint=guard.fingerprint())
         if node is not None:
-            from .calibration import group_name
+            from .core.calibration import group_name
             g.update(group=list(grp), applied=list(node), n=info["n"])
             g["promise"] = (f"{g['promise']}; here: group {group_name(node)} (threshold {thr:.4g}, n = {info['n']})"
                             + (f", pooled: {group_name(grp)} had fewer than {p.min_group} examples" if tuple(node) != tuple(grp)
@@ -624,8 +624,8 @@ def apply_guards(system, results, trace, vals, flow, live=True):
         if reason is not None:
             g["reason"] = reason
         if live:
-            from .chain import append as _append
-            from .runtime import vhash
+            from .core.chain import append as _append
+            from .core.runtime import vhash
             inputs = {guard.signal: vhash(vals[guard.signal])} if isinstance(guard.signal, str) and guard.signal in vals else {}
             _append(trace, Record(step=0, kind="guard", name=f"guard:{qn}", inputs=inputs, value=bool(ok), confidence=1.0,
                                   provenance="computed", extra=_plain(g)), len(flow.steps))
@@ -640,7 +640,7 @@ def apply_guards(system, results, trace, vals, flow, live=True):
                 r.answer, r.confidence = guard.answer, float(s)
             r.extra = extra
             continue
-        from .runtime import Result
+        from .core.runtime import Result
         results[qn] = Result(None, r.confidence, f"{why}; would have answered {ans!r} ({r.why})", "abstain", r.probs,
                              r.provenance, r.source, "low_confidence", r.repaired, r.kind, r.evidence, extra)
 

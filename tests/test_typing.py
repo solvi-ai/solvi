@@ -13,8 +13,8 @@ import pytest
 from pydantic import BaseModel
 
 from solvi import Answer, Catalog, Question, Quote, Response, System
-from solvi.runtime import Trace
-from solvi.typed import FactTypeError
+from solvi.core.runtime import Trace
+from solvi.core.types import FactTypeError
 
 
 class Band(str, Enum):
@@ -436,7 +436,7 @@ def test_a_question_comes_back_from_json_equal_with_described_int_options_and_a_
 
 
 def test_an_untyped_catalog_does_not_import_pydantic_on_the_first_ask_and_the_questions_fingerprint_is_unchanged():
-    """Since 0.7 every response records trace.fingerprint, and fingerprinting the questions imported solvi.schema and
+    """Since 0.7 every response records trace.fingerprint, and fingerprinting the questions imported solvi.core.schema and
     so pydantic on the first ask of any System (~170 ms) — against "untyped parts cost nothing"."""
     code = ("import sys\nfrom solvi import Answer, Catalog, Question, System\ncat = Catalog()\n"
             "@cat.fn\ndef a(x):\n    return x + 1\n@cat.rule('q')\ndef q(a):\n    return 'yes' if a > 1 else 'no'\n"
@@ -444,8 +444,8 @@ def test_an_untyped_catalog_does_not_import_pydantic_on_the_first_ask_and_the_qu
             "print(r['q'].answer, bool(r.trace.fingerprint['questions']), 'pydantic' in sys.modules)")
     out = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, check=True).stdout.split()
     assert out == ["yes", "True", "False"]
-    from solvi.provenance import digest
-    from solvi.schema import dump
+    from solvi.core.provenance import digest
+    from solvi.core.schema import dump
 
     class Color(Enum):
         RED = "red"

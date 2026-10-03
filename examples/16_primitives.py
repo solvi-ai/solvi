@@ -28,7 +28,7 @@ import numpy as np
 
 from solvi import Catalog, Claim, Estimate, Maybe, Question, Quote, Rank, Response, Span, System, Unknown
 from solvi.decide import DecideModel
-from solvi.primitives import fmt
+from solvi.core.primitives import fmt
 
 CLAIMS = {
     "full": ("Claim 311. The parcel arrived with a cracked screen. Repair quote: 149.90 EUR. Signed by the customer. "

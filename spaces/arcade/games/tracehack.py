@@ -14,7 +14,7 @@ from __future__ import annotations
 import json
 
 from solvi import Answer, Catalog, Question, System
-from solvi.runtime import MISSING, Record, Trace, vhash
+from solvi.core.runtime import MISSING, Record, Trace, vhash
 
 cat = Catalog()
 

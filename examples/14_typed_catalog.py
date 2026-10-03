@@ -19,7 +19,7 @@ from typing import Literal, Optional
 from pydantic import BaseModel
 
 from solvi import Catalog, Question, Response, System
-from solvi.typed import FactTypeError, type_name
+from solvi.core.types import FactTypeError, type_name
 
 
 class Item(BaseModel):

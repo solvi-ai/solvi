@@ -6,8 +6,8 @@ import random
 import time
 
 from solvi import Answer, Catalog, Question, Quote, System
-from solvi.costs import CostBook
-from solvi.runtime import vhash
+from solvi.core.costs import CostBook
+from solvi.core.runtime import vhash
 
 
 def _fn(name, inputs, body):

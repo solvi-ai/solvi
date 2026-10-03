@@ -51,9 +51,9 @@ from dataclasses import asdict, dataclass, field
 import numpy as np
 
 from . import _deprecate
-from .core import NOT_STATED_KEY, Unknown
-from .provenance import ESCALATED, MEMORY, digest
-from .sources import TRUSTED_SOURCES, UntrustedLabel, check_source
+from .core.catalog import NOT_STATED_KEY, Unknown
+from .core.provenance import ESCALATED, MEMORY, digest
+from .core.sources import TRUSTED_SOURCES, UntrustedLabel, check_source
 MODES = ("check", "answer")
 _WORD = re.compile(r"\w{3,}", re.U)
 
@@ -306,7 +306,7 @@ class CorrectionMemory:
         when no case has another within the radius, "note": the memory then proposes for none of them, nothing can be
         learned about its proposals, and min_strength is inf (it does not propose) — compare `nearest` with `radius`
         (its values are None, and the note says so, when every stored case is a twin of every other)."""
-        from .calibration import check_rate, crc_threshold
+        from .core.calibration import check_rate, crc_threshold
         risk = max_risk
         check_rate("max_risk", risk)
         cases, _ = self._snapshot()
@@ -385,7 +385,7 @@ class CorrectionMemory:
             raise ValueError(f"the memory's cases were scored by checkpoint #{data.get('weights')}, this part's is "
                              f"#{self.weights}: build it again from the corrections (learn_from)")
         if strict:
-            from .calibfile import _norm           # as it reads back from a file: tuples as lists
+            from .core.calibfile import _norm           # as it reads back from a file: tuples as lists
             mine, theirs = _norm(self.part.spec.describe()), _norm(data.get("question"))
             if theirs != mine:
                 raise ValueError(f"the memory was made for another question ({theirs}); this part asks {mine}: its "
@@ -422,7 +422,7 @@ class CorrectionMemory:
 
     def save(self, path):
         """Write the memory (to_dict) to a JSON file. → path."""
-        from .schema import tag_floats
+        from .core.schema import tag_floats
         with open(path, "w") as fh:
             json.dump(tag_floats(self.to_dict()), fh, ensure_ascii=False, indent=1, allow_nan=False)
         return path
@@ -431,7 +431,7 @@ class CorrectionMemory:
         """Replace the settings and cases with a file written by save (strict: refuse a memory of another checkpoint
         or question, as load_dict). → self."""
         with open(path) as fh:
-            from .schema import untag_floats
+            from .core.schema import untag_floats
             return self.load_dict(untag_floats(json.load(fh)), strict)
 
     def __repr__(self):

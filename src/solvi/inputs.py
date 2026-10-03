@@ -1,14 +1,14 @@
 """What a question reads: the given facts its flow needs (`question_inputs`), their types, the pydantic model and JSON
 schema of its input state (`input_model`, `input_schema` — what `solvi serve` publishes) and the questions as entry points
-for a text (`entry_points`, behind System.entry_points and solvi.textin.TextIn). Moved out of solvi.serve in 0.9, which
-re-exports them, so that reading a text (solvi.textin) does not import the HTTP server."""
+for a text (`entry_points`, behind System.entry_points and solvi.core.textin.TextIn). Moved out of solvi.serve in 0.9, which
+re-exports them, so that reading a text (solvi.core.textin) does not import the HTTP server."""
 from __future__ import annotations
 
 from typing import Any
 
 from pydantic import ConfigDict, Field, create_model
 
-from .textin import EntryField, EntryPoint
+from .core.textin import EntryField, EntryPoint
 
 
 def question_inputs(system, name):
@@ -63,7 +63,7 @@ def _schema_ok(t):
 
 def input_model(system, name):
     """A pydantic model of the input state a question reads (extra keys allowed) — for the schema; solvi validates."""
-    from .typed import type_name
+    from .core.types import type_name
     info = question_inputs(system, name)
     readers = system.catalog.readers
     fields = {}

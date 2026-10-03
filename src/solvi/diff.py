@@ -46,13 +46,13 @@ def _deps(resp, q):
 
 def _out(r):
     """A record's output for comparison: (value hash or "missing", error, producer, quote)."""
-    from .runtime import MISSING, vhash
+    from .core.runtime import MISSING, vhash
     return ("missing" if r.value is MISSING else vhash(r.value), r.error, r.producer,
             None if r.quote is None else list(r.quote))
 
 
 def _show(r):
-    from .runtime import MISSING, srepr
+    from .core.runtime import MISSING, srepr
     if r is None:
         return "not run"
     if r.value is MISSING:
@@ -283,8 +283,8 @@ def _compact_change(s, system, confidence):
     """A compact stored decision against `system` on its recorded input: its kept answers (answer, status, guard,
     confidence) against the new ones → compare's {question: change}, with no causes (the steps are not kept)."""
     from .response import Response
-    from .runtime import Result, Trace
-    from .schema import load
+    from .core.runtime import Result, Trace
+    from .core.schema import load
     from .storage import view
     v = view(s.data)
     tr = load(Trace, v["trace"], system)
@@ -314,10 +314,10 @@ def diff(storage, system, confidence=0.01, limit=None, **filters):
     """Re-run stored decisions with `system` (e.g. a new catalog or model) and report what changes → DiffReport.
     Each stored decision is loaded (typed values restored with `system`), its recorded input is asked again for the same
     questions (store=False: nothing is written to the system's own storage), and the two responses are compared (see
-    compare). A stored decision whose input did not come back as it was (see solvi.schema: an untyped enum or object, an
+    compare). A stored decision whose input did not come back as it was (see solvi.core.schema: an untyped enum or object, an
     untyped date stored by solvi ≤ 0.7.1) is listed under `errors` — "could not be re-run" — not as a changed one. filters: TraceStorage.query filters (question=, since=, ...) to pick the decisions; limit: at most this many.
     The system's learned parts may learn from these asks as from any other (System(learn=...))."""
-    from .provenance import catalog_fingerprint
+    from .core.provenance import catalog_fingerprint
     rep = DiffReport()
     now = catalog_fingerprint(system.catalog)
     rep.catalog = {"new": now["fp"], "stored": {}, "changed_parts": [], "added_parts": []}

@@ -242,7 +242,7 @@ def test_fingerprint_has_the_mode_and_the_length_and_replay_rechecks(ckpt):
 
     import dataclasses
 
-    from solvi.runtime import vhash
+    from solvi.core.runtime import vhash
     forged = dataclasses.replace(rec, extra={**rec.extra, "long": {**rec.extra["long"], "tokens": 64}})
     forged.hash = vhash(forged.body())                       # a consistent record that claims less was read
     res.trace.records[res.trace.records.index(rec)] = forged

@@ -1,5 +1,5 @@
 """`solvi calibrate`: calibrate a model decision's escalation on labelled examples and write the calibration file the
-catalog loads (the file format: solvi.calibfile). Moved out of solvi.calibfile in 1.0 (which still resolves these
+catalog loads (the file format: solvi.core.calibfile). Moved out of solvi.core.calibfile in 1.0 (which still resolves these
 names), so that the file format imports no decider.
 
     solvi calibrate myapp.decisions:system team labels.csv --risk 0.1 [--groups domain,task] [--method crc|ltt]
@@ -17,8 +17,8 @@ import json
 import math
 import sys
 
-from . import calibfile
-from .calibfile import _enc, _kind_of, save
+from .core import calibfile
+from .core.calibfile import _enc, _kind_of, save
 from .command import dump as _dump, fail as _fail, load_object
 
 
@@ -53,7 +53,7 @@ def read_rows(path):
 
 def label_of(part, y):
     """A label as written in a file → an answer the part can take."""
-    from .core import NOT_STATED_KEY, Unknown
+    from .core.catalog import NOT_STATED_KEY, Unknown
     if y == NOT_STATED_KEY:
         return Unknown
     sp = part.spec
@@ -200,7 +200,7 @@ def cmd_calibrate(a):
             print("  per group:")
             print(f"    {'group':28s} {'n':>5s} {'threshold':>10s} {'answered':>9s} {'error':>7s} {'risk':>7s}  pooled")
             for p, g in sorted(info["groups"].items(), key=lambda kv: (len(kv[0]), kv[0])):
-                from .calibration import group_name
+                from .core.calibration import group_name
                 t = g["threshold"]
                 pooled = ", ".join(group_name(x) for x in g["pooled"]) if g["pooled"] else ""
                 print(f"    {group_name(p)[:28]:28s} {g['n']:5d} {t if math.isfinite(t) else float('inf'):10.4g} "

@@ -1,7 +1,7 @@
 """Print a response: answers, flow, computed_state, replay — so you can see how the system reached each answer."""
 from __future__ import annotations
 
-from . import i18n
+from .core import _i18n as i18n
 
 
 def _rule(title, en_title, n):
@@ -24,7 +24,7 @@ def _flow(flow, lang):
 
 
 def show(res, catalog=None, flow=True, state=True, audit=True, lang=None):
-    """Print a response. lang: "en" or "ru" (solvi.i18n; default: the language of the System that answered)."""
+    """Print a response. lang: "en" or "ru" (solvi.core._i18n; default: the language of the System that answered)."""
     lang = i18n.check(getattr(res, "lang", None) if lang is None else lang)
     t, m = i18n.t, (lambda x: i18n.msg(x, lang))
 

@@ -33,7 +33,7 @@ from __future__ import annotations
 import inspect
 import json
 
-from .core import Claim
+from .core.catalog import Claim
 
 
 def _jsonable(k):

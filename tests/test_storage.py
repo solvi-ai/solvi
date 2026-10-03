@@ -302,7 +302,7 @@ def test_sqlite_index_edit_is_detected(tmp_path):
 
 def test_rehashed_value_edit_is_caught_by_replay_all(filled):
     """A value inside a stored trace changed and every hash re-computed (trace and store): only re-computing the step tells."""
-    from solvi.runtime import vhash
+    from solvi.core.runtime import vhash
     kind, store, s, _ = filled
     recs = _jsonl_lines(store) if kind == "jsonl" else _sql_bodies(store)
     tr = recs[2]["response"]["trace"]
@@ -389,7 +389,7 @@ def renamed_build():
 def test_a_renamed_part_is_a_replay_verdict_not_a_key_error(filled):
     """A trace replayed against a catalog where a part was renamed: mismatches of kind missing_part / missing_input and a
     summary that says the data is intact — not a KeyError, and not what a damaged record looks like."""
-    from solvi.runtime import Mismatch
+    from solvi.core.runtime import Mismatch
     _, store, _, resps = filled
     cat, qs = renamed_build()
     rep = resps[0].trace.replay(cat)                       # used to raise KeyError: 'words'
@@ -408,7 +408,7 @@ def test_a_renamed_part_is_a_replay_verdict_not_a_key_error(filled):
 def test_replay_summary_tells_damaged_data_from_a_changed_catalog_or_model(filled):
     import copy
     import pickle
-    from solvi.runtime import Mismatch
+    from solvi.core.runtime import Mismatch
     _, store, s, resps = filled
     ok = resps[0].trace.replay(s)
     assert ok["ok"] and "summary" not in ok and "kinds" not in ok          # nothing to summarize

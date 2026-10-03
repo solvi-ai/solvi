@@ -33,7 +33,7 @@ def _short(v, n=80):
 
 
 def _answer_text(a):
-    from .primitives import fmt
+    from .core.primitives import fmt
     if a.status == "abstain" or a.answer is None:
         return "—"
     return fmt(a.answer, a.kind, a.extra)
@@ -184,7 +184,7 @@ def decision(res, question=None, system=None, replay="trusted"):
             except (KeyError, TypeError):
                 continue
             if alt is not None and alt.model is not None:
-                from .provenance import model_info
+                from .core.provenance import model_info
                 m = model_info(alt.model)
                 models.append({"step": r.step, "name": f"{r.name} ({name}, not used: {why})", "type": m["type"],
                                "id": m["id"], "fp": m["fp"], "used": False})
@@ -197,7 +197,7 @@ def decision(res, question=None, system=None, replay="trusted"):
 
 
 def _plain(v):
-    from .schema import dumps
+    from .core.schema import dumps
     return json.loads(dumps(v, ensure_ascii=False, default=repr))
 
 
@@ -207,7 +207,7 @@ def _when(t):
 
 def _shown(v):
     """A stored answer (JSON form) for people."""
-    from .schema import untag_floats
+    from .core.schema import untag_floats
     v = untag_floats(v)                               # {"$float": "inf"} as stored → inf
     if v is None:
         return "—"

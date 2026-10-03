@@ -670,7 +670,7 @@ def fuzzy_part(model, rule):
 def edit_system(rules, change, model=None, instructions=True):
     """The System for one change: the rules that apply to its path (and, for a question, whose `when` an added line
     matches), each rule's checks as hard checks of the question `edit`, deny checks first."""
-    from .core import Answer, Catalog, Question
+    from .core.catalog import Answer, Catalog, Question
     from .system import System
     cat = Catalog()
     deny, ask, used = [], [], []
@@ -711,10 +711,10 @@ def rules_system():
     """Every question of the rules file in $SOLVI_HOOK_RULES (default .claude/solvi-rules.toml) as decision parts of one
     System, with the decider in $SOLVI_HOOK_DECIDER ($SOLVI_HOOK_MODEL in 0.7, removed in 0.9): for `solvi calibrate
     solvi.hooks:rules_system RULE_answer ...`."""
-    from .core import Catalog
+    from .core.catalog import Catalog
     from .models import load as load_model
     from .system import System
-    from .loader import LoadError                      # the command prints it; a library caller gets an exception
+    from ._loader import LoadError                      # the command prints it; a library caller gets an exception
     spec = os.environ.get("SOLVI_HOOK_DECIDER")
     if not spec and os.environ.get("SOLVI_HOOK_MODEL"):
         raise LoadError("solvi.hooks:rules_system: $SOLVI_HOOK_MODEL was renamed in 0.8 and removed in 0.9: set "
@@ -1014,7 +1014,7 @@ def skill_rule(skill_scores):
 
 
 def skill_system(skills, model=None, min_score=1.5, margin=0.25, calibration=None):
-    from .core import Answer, Catalog, Question
+    from .core.catalog import Answer, Catalog, Question
     from .system import System
     cat = Catalog()
     names = [n for n, _ in skills]

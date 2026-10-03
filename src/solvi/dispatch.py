@@ -83,8 +83,8 @@ import time
 from dataclasses import dataclass, field
 from typing import Any
 
-# defined in solvi.costs since 1.0 (the system report, solvi.generate and solvi.refine use them too); re-exported here
-from .costs import Budget, BudgetStop, Cost, _usages, cost_of, price_of, recorded_calls   # noqa: F401
+# defined in solvi.core.costs since 1.0 (the system report, solvi.generate and solvi.refine use them too); re-exported here
+from .core.costs import Budget, BudgetStop, Cost, _usages, cost_of, price_of, recorded_calls   # noqa: F401
 
 SIGNALS = ("guarantee", "openset", "abstain", "constraint", "agreement", "drift", "supervise")
 THINK = ("guarantee", "openset", "abstain", "constraint", "agreement")
@@ -175,7 +175,7 @@ class SlowPath:
         return f"SlowPath({self.mode})"
 
     def fingerprint(self):
-        from .provenance import code_fingerprint, digest
+        from .core.provenance import code_fingerprint, digest
         acc = code_fingerprint(self.accept) if callable(self.accept) else repr(self.accept)
         return digest("SlowPath", self.mode, self.system.fingerprint(), self.question, self.into, self.rounds, acc,
                       sorted(self.search_kw), code_fingerprint(self.propose) if self.propose is not None else None)
@@ -446,7 +446,7 @@ class Dispatcher:
 
     def config(self):
         """The fingerprint of everything a dispatch depends on besides the input (recorded with every decision)."""
-        from .provenance import code_fingerprint, digest
+        from .core.provenance import code_fingerprint, digest
         pr = code_fingerprint(self.price) if callable(self.price) else self.price
         return digest("Dispatcher", self.question, self.wake, sorted(self.agreement.items()), self.supervise, self.seed,
                       self.think_policy, self.on_disagree, self.unknown,
@@ -609,7 +609,7 @@ class Dispatcher:
             return None, "human"
         if action == "accept":
             return r1.answer, "s1"
-        from .core import Unknown
+        from .core.catalog import Unknown
         if action == "think" and self.policy is not None:
             return self._calibrated(sl, r1, would1, th, reasons)
         ok = th.accepted
@@ -668,7 +668,7 @@ class Dispatcher:
     def _s2_signal(self, th):
         """The slow path's signal: its answer's confidence (ask), 1 for an accepted refinement or search; −inf when it
         has no answer, or says "not stated" with unknown="human"."""
-        from .core import Unknown
+        from .core.catalog import Unknown
         if th is None or th.answer is None or (self.unknown == "human" and th.answer is Unknown):
             return -math.inf
         if th.mode != "ask":
@@ -704,10 +704,10 @@ class Dispatcher:
         must let at least this many examples of the slice through. → the report; the choice is kept as `policy` (in
         the config every decision records) and every later think follows it. Calling the slow path on the slice's
         examples costs what it costs (report["cost"])."""
-        from .calibration import _binom_cdf, check_rate
-        from .core import Unknown
+        from .core.calibration import _binom_cdf, check_rate
+        from .core.catalog import Unknown
         from .guarantee import promise_text
-        from .provenance import digest
+        from .core.provenance import digest
         if (max_risk is None) == (max_error is None):
             raise ValueError("give the promise as max_risk= (crc) or max_error= (ltt; method=\"empirical\" possible)")
         method = method or ("crc" if max_risk is not None else "ltt")
@@ -838,7 +838,7 @@ class Dispatcher:
                                        digest(*[_vh(s) for s, _ in examples]))
         self.policy = report
         if self.storage is not None:              # the promise in force, for a report from the store alone
-            from .schema import tag_floats
+            from .core.schema import tag_floats
             from .storage import FORMAT
             self.storage._append({"v": FORMAT, "kind": "policy", "question": q, "config": self.config(),
                                   "policy": tag_floats(_stored(report))})
@@ -974,7 +974,7 @@ def _would(r, res=None, question=None):
     if p:
         return max(p, key=lambda k: p[k])
     if res is not None and question is not None:
-        from .runtime import MISSING
+        from .core.runtime import MISSING
         rec = next((x for x in res.trace.records if x.name == f"answer:{question}"), None)
         v = getattr(rec, "value", None)
         if v is not None and v is not MISSING and getattr(rec, "error", None) is None:
@@ -994,7 +994,7 @@ def _stored(v):
 
 def _restored(v):
     """A stored value back: "not stated" (stored as its key) is solvi.Unknown again, in dicts and lists too."""
-    from .core import NOT_STATED_KEY, Unknown
+    from .core.catalog import NOT_STATED_KEY, Unknown
     if isinstance(v, str) and v == NOT_STATED_KEY:
         return Unknown
     if isinstance(v, dict):
@@ -1005,7 +1005,7 @@ def _restored(v):
 
 
 def _vh(v):
-    from .runtime import vhash
+    from .core.runtime import vhash
     from .storage import plain
     return vhash(plain(v))
 

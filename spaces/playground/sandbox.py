@@ -138,7 +138,7 @@ def audit_dict(res, state, context=48):
 def serialize(res, cat, state, questions, show_text="", system=None):
     """Everything the UI shows about one System.ask() response. Pass the System to replay answer heads too and to include
     its lifetime safeguard stats."""
-    from solvi.runtime import MISSING
+    from solvi.core.runtime import MISSING
     rep = res.trace.replay(system if system is not None else cat)
     out = {"ok": True, "ms": res.ms, "show": show_text, "question_text": {q.name: q.text for q in questions}}
     out["answers"] = [{"question": q, "answer": _answer(r.answer),
@@ -202,7 +202,7 @@ class _Replaced:
         self._model = model
 
     def fingerprint(self):
-        from solvi.provenance import digest, fingerprint
+        from solvi.core.provenance import digest, fingerprint
         return digest("replaced after the decision", fingerprint(self._model))
 
     def __getattr__(self, k):
@@ -291,7 +291,7 @@ def run_job(job: dict) -> dict:
     stage = "loading your catalog code"
     guard = TimeGuard()
     try:
-        from solvi.runtime import MISSING, vhash
+        from solvi.core.runtime import MISSING, vhash
         from solvi.show import show
 
         with redirect_stdout(captured), guard:

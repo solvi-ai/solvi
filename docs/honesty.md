@@ -30,7 +30,7 @@ it abstained.
 | number | meaning | better |
 |---|---|---|
 | `confident_error_rate` | acted and wrong, over all answers. Wrong includes a wrong option, a value where the text states none, and any answer where the gold is `null` | lower |
-| `coverage_at_risk` | the share of all answers the system can give automatically with at most 10% errors among them (acted answers taken most confident first, `solvi.calibration.coverage_at`) | higher |
+| `coverage_at_risk` | the share of all answers the system can give automatically with at most 10% errors among them (acted answers taken most confident first, `solvi.core.calibration.coverage_at`) | higher |
 | `quote_support_proxy` | of the quotes behind acted answers (evidence, spans, quoted facts), the share that is literally in its text at its offsets **and** backs a right answer. This is a proxy: it does not check that the quote entails the answer | higher |
 
 A fourth number is gated when a set has injection traps (a case with `"injected": {question: answer}`, the answer the

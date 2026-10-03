@@ -576,7 +576,7 @@ def test_a_secret_blocked_by_a_redacting_rule_is_not_written_to_the_store(proj):
 def test_library_functions_of_hooks_raise_ordinary_exceptions_not_system_exit(proj, monkeypatch):
     monkeypatch.delenv("SOLVI_HOOK_MODEL", raising=False)
     monkeypatch.delenv("SOLVI_HOOK_DECIDER", raising=False)
-    from solvi.loader import LoadError
+    from solvi._loader import LoadError
     with pytest.raises(LoadError, match="set SOLVI_HOOK_DECIDER"):
         hooks.rules_system()
     settings = proj / ".claude" / "settings.json"

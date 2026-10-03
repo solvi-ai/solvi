@@ -6,11 +6,11 @@ import re
 from dataclasses import dataclass
 from decimal import Decimal
 
-from ..core import find_whole
+from ..core.catalog import find_whole
 from ..specialist import BLOCKED, CHANGED, DROPPED, WARNING, Checked, Issue
-from ..textin import _CUR_AFTER, NUMBER_RE, _SCALES, ParseError, _digits
+from ..core.textin import _CUR_AFTER, NUMBER_RE, _SCALES, ParseError, _digits
 from .spec import SCALES, ChartSpec, VerifiedChart, VerifiedPoint, VerifiedSeries
-from ..textin import _NUM_WORDS
+from ..core.textin import _NUM_WORDS
 
 MAX_SLICES = 8
 

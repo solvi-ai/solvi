@@ -142,7 +142,7 @@ def _required(call_arguments, args):
 
 
 def _matcher_text(m):
-    from ..provenance import code_fingerprint
+    from ..core.provenance import code_fingerprint
     return m if isinstance(m, str) else f"callable {getattr(m, '__qualname__', type(m).__name__)} {code_fingerprint(m)}"
 
 

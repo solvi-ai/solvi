@@ -10,8 +10,8 @@ from pathlib import Path
 import pytest
 
 from solvi import Answer, Catalog, Decision, Question, Quote, System
-from solvi.provenance import digest, fingerprint, matches
-from solvi.runtime import MISSING, vhash
+from solvi.core.provenance import digest, fingerprint, matches
+from solvi.core.runtime import MISSING, vhash
 
 DOC = "Invoice 7781\nVendor: Acme Tools GmbH\nTotal: 1,250.00 EUR\nDue: 2026-10-30\n"
 OLD_KEYS = {"step", "kind", "name", "inputs", "value", "quote", "error", "prev"}
@@ -433,7 +433,7 @@ def test_a_models_quote_of_a_decimal_a_numpy_number_or_a_date_is_compared_with_t
     import fractions
     from decimal import Decimal
     import numpy as np
-    from solvi.provenance import matches
+    from solvi.core.provenance import matches
     assert matches(Decimal("999.99"), "hello") is False and matches(Decimal("12.50"), "total 12.50") is True
     assert matches(Decimal("1250.5"), "1,250.50 EUR") is True and matches(Decimal("12.5"), "12.51") is False
     assert matches(fractions.Fraction(1, 2), "0.5") is True and matches(np.float64(12.5), "12.50") is True

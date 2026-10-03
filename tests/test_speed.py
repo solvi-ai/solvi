@@ -81,7 +81,7 @@ def test_parallel_same_answer_valid_trace_and_the_independent_steps_overlap():
 def test_a_given_value_is_canonicalised_and_hashed_once_per_ask_and_the_hashes_are_the_same(monkeypatch):
     """A large input was canonicalised again for the input's hash after the steps had hashed it (and before the memo,
     once per step that read it): with a 3.7k-float input most of a decision's time was hashing."""
-    import solvi.runtime as rt
+    import solvi.core.runtime as rt
     from solvi import Answer, Catalog, Question
     cat = Catalog()
 
@@ -146,7 +146,7 @@ def _reference_vhash(v):
     import numpy as np
 
     from solvi.core import Decision, Quote, Unknown
-    from solvi.runtime import MISSING
+    from solvi.core.runtime import MISSING
 
     def canon(v):
         if isinstance(v, Quote):
@@ -186,7 +186,7 @@ def test_vhash_and_the_input_hash_match_the_plain_canonical_json_on_random_value
     import pytest
     np = pytest.importorskip("numpy")
 
-    import solvi.runtime as rt
+    import solvi.core.runtime as rt
     from solvi.core import Decision, Quote, Unknown
 
     class Level(enum.IntEnum):
@@ -227,7 +227,7 @@ def test_vhash_and_the_input_hash_match_the_plain_canonical_json_on_random_value
 def test_a_hash_seed_lends_its_hashes_and_the_trace_is_byte_for_byte_the_same():
     """solvi.search asks the same given text and held facts with every candidate: a HashSeed on the catalog hashes them
     once. The values it holds are not canonicalised again, and every hash of the trace is what an unseeded ask gives."""
-    import solvi.runtime as rt
+    import solvi.core.runtime as rt
     cat = Catalog()
 
     @cat.fn

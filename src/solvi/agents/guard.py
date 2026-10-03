@@ -70,7 +70,7 @@ import re
 from typing import Any, Callable
 
 from .. import _deprecate
-from ..core import Answer, Catalog, Claim, Question, Quote
+from ..core.catalog import Answer, Catalog, Claim, Question, Quote
 
 VERDICTS = ("allow", "deny", "escalate")
 GIVEN = ("tool_name", "tool_arguments", "conversation", "conversation_roles", "user_request")
@@ -1152,7 +1152,7 @@ class GuardDecision:
 
     @property
     def trace_hash(self):
-        from ..runtime import trace_hash
+        from ..core.runtime import trace_hash
         return trace_hash(self.response)
 
     @property
@@ -1561,7 +1561,7 @@ class Guard:
         return self.system(name).catalog
 
     def _build(self, t):
-        from ..provenance import code_fingerprint
+        from ..core.provenance import code_fingerprint
         from ..system import System
         if t.model is None:
             raise ValueError(f"tool {t.name} has no argument schema yet (guard.declare(name, schema=...) or guard.adopt)")
@@ -1772,7 +1772,7 @@ class Guard:
         try:
             r = t.func(**d.arguments)
             if inspect.isawaitable(r):
-                from ..runtime import run_sync
+                from ..core.runtime import run_sync
                 r = run_sync(r)
             d.result = r
         except Exception as e:  # noqa: BLE001 — the tool's own failure: reported, not raised
@@ -1823,7 +1823,7 @@ class Guard:
         outcome = r.answer if r.status in ("ok", "forced") and r.answer in VERDICTS else "escalate"
         known = c.name in self.tools
         args = res.values.get("call_arguments", c.arguments) if known else c.arguments
-        from ..runtime import MISSING
+        from ..core.runtime import MISSING
         if args is MISSING:
             args = c.arguments
         d = GuardDecision(outcome, c.name, args, self._reasons(c, system, res, r, outcome), res, id=c.id,
@@ -1892,7 +1892,7 @@ class Guard:
                     lack = [x for x in (p.inputs if p is not None else []) if x not in have]
                     out.append(f"cannot evaluate {n}: not given: {', '.join(lack)}" if lack else f"cannot evaluate {n}")
             else:
-                from ..runtime import MISSING
+                from ..core.runtime import MISSING
                 for rec in res.trace.records:             # a fact a check reads failed: its error is the reason
                     if rec.value is MISSING and rec.error and cat.parts.get(rec.name) is not None \
                             and cat.parts[rec.name].kind != "check":
@@ -1949,7 +1949,7 @@ def _outcome_meta(d):
         return {}
     if d.error:
         return {"error": d.error}
-    from ..runtime import vhash
+    from ..core.runtime import vhash
     try:
         return {"result_hash": vhash(d.result)}
     except Exception:  # noqa: BLE001 — a result that cannot be hashed as data

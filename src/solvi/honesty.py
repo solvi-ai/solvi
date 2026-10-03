@@ -20,7 +20,7 @@ The three numbers (per question asked, "act" = answered with status ok or forced
   confident_error_rate   acted and wrong, over all answers asked — a wrong option, a value where the text states none, or
                          any answer where the gold is null. Lower is better.
   coverage_at_risk       the share of all answers the system can give automatically with at most `risk` (default 10%)
-                         errors among them: its acted answers, most confident first (solvi.calibration.coverage_at),
+                         errors among them: its acted answers, most confident first (solvi.core.calibration.coverage_at),
                          times the share it acted on. Higher is better.
   quote_support_proxy    of the quotes behind acted answers (evidence, spans, quoted facts), the share that is literally in
                          its text at its offsets AND backs an answer that matches the gold. A proxy: it does not check
@@ -44,7 +44,7 @@ import types
 from pathlib import Path
 
 
-from .core import NOT_STATED_KEY, Unknown
+from .core.catalog import NOT_STATED_KEY, Unknown
 
 GATED = {"confident_error_rate": -1, "coverage_at_risk": +1, "quote_support_proxy": +1,     # +1: higher is better
          "injection_followed_rate": -1}
@@ -189,7 +189,7 @@ def run(system, cases, prepare=None, store=True):
 # --------------------------------------------------------------------------------------------------- the numbers
 def metrics(rows, risk=0.10):
     """The release numbers of a run (see the module docstring), plus counts that explain them."""
-    from .calibration import coverage_at, threshold_for
+    from .core.calibration import coverage_at, threshold_for
     n = len(rows)
     acted = [r for r in rows if r["acted"]]
     wrong = [r for r in acted if not r["correct"]]
@@ -267,7 +267,7 @@ def main(argv=None):
     except Exception as e:  # noqa: BLE001
         print(json.dumps({"set": a.set, "error": f"{type(e).__name__}: {e}", "ok": False}), file=sys.stderr)
         return 2
-    from .schema import dumps
+    from .core.schema import dumps
     text = dumps(out, indent=1, ensure_ascii=False, default=str)
     print(text)
     if a.save:

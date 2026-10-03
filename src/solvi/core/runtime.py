@@ -14,11 +14,11 @@ from dataclasses import dataclass, field
 from json.encoder import encode_basestring as _jstr
 from typing import Any
 
-from .core import Decision, Quote, Serial, Unknown, accept, evidence_rows, ground, has_evidence, locate, unwrap, validated
-from .core import Claim                                # Claim.extra is recorded (solvi.refine.Fail, solvi.generate)
+from .catalog import Decision, Quote, Serial, Unknown, accept, evidence_rows, ground, has_evidence, locate, unwrap, validated
+from .catalog import Claim                                # Claim.extra is recorded (solvi.refine.Fail, solvi.generate)
 from .provenance import TIMED_OUT, fp_module, model_info
 from .provenance import NOT_GROUNDED, OUTSIDE_OPTIONS, QUOTE_OUTSIDE, catalog_fingerprint, fingerprint, matches
-from . import _deprecate
+from .. import _deprecate
 
 # The modules above the runtime (solvi.strategist, solvi.strategy, solvi.guarantee, solvi.multi) define the flow it runs
 # and records it replays; what the runtime itself needs of them lives here, and they re-export it, so the runtime never
@@ -41,7 +41,7 @@ class Flow:
     per_question: dict              # question → names of the parts in its flow
     skipped: dict                   # catalog part → why it was not taken
     unresolved: dict                # question → facts nothing can compute
-    types: dict = field(default_factory=dict)   # fact → type, for the typed facts of the flow (see solvi.typed)
+    types: dict = field(default_factory=dict)   # fact → type, for the typed facts of the flow (see solvi.core.types)
     batches: list = field(default_factory=list)  # [[step name]]: decision parts scored together in one forward pass
 
     def __str__(self):
@@ -280,7 +280,7 @@ class Record(Serial):
     hash: str = ""
     producer: str | None = None     # a fact with alternative producers: the one whose output was used
     tried: list | None = None       # ... and every producer that ran, in order, with its outcome
-    provenance: str | None = None   # given | computed | quoted | decided | learned | proposed (see solvi.provenance)
+    provenance: str | None = None   # given | computed | quoted | decided | learned | proposed (see solvi.core.provenance)
     model: dict | None = None       # model-backed step: {"type", "id", "fp"} of the model that produced the value
     probs: dict | None = None       # a model decision (or a learned answer head): its probabilities
     extra: dict | None = None       # a model decision's details: act probability, expected level, the shared forward pass
@@ -585,7 +585,7 @@ def _recompute(part, r, args, init, catalog=None):
     plain = _plain_args(args, part.inputs)
     why = None
     if part.tin is not None:
-        from .typed import typed_in
+        from .types import typed_in
         plain, why = typed_in(part, plain)
     sibs = _pass_siblings(catalog, r) if r.extra is not None else None
     if sibs == []:
@@ -603,7 +603,7 @@ def _recompute(part, r, args, init, catalog=None):
         value, quote, _, _ = unwrap(v)
         why = ground(part, v, init)
         if not why and part.tout is not None:
-            from .typed import typed_out
+            from .types import typed_out
             value, why = typed_out(part, value)
         if not why:
             value, why = check_value(part, value)
@@ -668,7 +668,7 @@ def _grounded(part, r, init):
         if (part.strict() or r.model is not None) and r.value is not None and matches(r.value, text[s:e]) is False:
             return [(r.step, r.name, f"{NOT_GROUNDED}: recorded {r.value!r} is not the text at [{s}:{e}]")]
     if isinstance(r.extra, dict) and r.extra.get("evidence"):
-        from .core import check_evidence
+        from .catalog import check_evidence
         why = check_evidence([Quote(t, s, e, src) for s, e, src, t in r.extra["evidence"]], init)
         if why:
             return [(r.step, r.name, f"recorded {why}")]
@@ -759,7 +759,7 @@ def replay_then(r, catalog, system, vals):
     tp = (check.then_parts or {}).get(q)
     err = None
     if tp is not None and tp.tin is not None:
-        from .typed import typed_in
+        from .types import typed_in
         plain, err = typed_in(tp, plain)
     value = MISSING
     if err is None:
@@ -802,7 +802,7 @@ def replay_plan(r, catalog, init_keys):
 
 def narrowed(group, tried):
     """A fact's producer group narrowed to the producers that ran (replay of a plan that dropped the others)."""
-    from .core import _group_func
+    from .catalog import _group_func
     names = [n for n, _ in tried]
     alts = [a for a in group.alternatives if a.name in names] or list(group.alternatives)
     g = dataclasses.replace(group, alternatives=alts, inputs=list(dict.fromkeys(x for a in alts for x in a.inputs)))
@@ -865,7 +865,7 @@ def _typed_args(part, args, known=None):
     known: fact → the type its value already passed in this run (a typed producer, System(input_model=...)): not re-validated."""
     if part.tin is None:
         return args, None
-    from .typed import typed_in
+    from .types import typed_in
     return typed_in(part, args, known)
 
 
@@ -1156,7 +1156,7 @@ def _step(p, vals, init_state, policy=None, costs=None, known=None, memo=None, b
     value, quote, conf, probs = unwrap(v)
     why = ground(p, v, init_state)
     if not why and p.tout is not None:                # typed output: validated / coerced (a closed set: outside the options)
-        from .typed import typed_out
+        from .types import typed_out
         value, why = typed_out(p, value)
     if not why:
         value, why = check_value(p, value)

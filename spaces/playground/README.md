@@ -50,7 +50,7 @@ Tabs:
   the browser): escalation with a guarantee (`act_guard` on 300 labelled emails: the answered share, the error, the risk
   on new emails, `must_escalate_at_least`, and the guarantee line of the audit; a slider sets the risk), a vote of two
   model families under one guarantee (`solvi.multi.Vote` with `act_guard`: disagreement escalates with both proposals;
-  the audit's guarantee line), text in (`solvi.textin.TextIn` with `CueExtractor`: a message → the question it asks and
+  the audit's guarantee line), text in (`solvi.core.textin.TextIn` with `CueExtractor`: a message → the question it asks and
   its fields, each with a quote; `system.ask_text` answers it), the agent guard (preview: `solvi.agents.Guard` allows a
   refund to the account the user wrote, denies one to an account found only in a tool output, escalates the same call
   with `tool_values="escalate"`; the URL matcher accepts the address the user named and refuses look-alike hosts), a

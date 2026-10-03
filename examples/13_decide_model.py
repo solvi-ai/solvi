@@ -9,7 +9,7 @@ that sends legal threats to a person whatever the model says. Then:
   1. zero-shot accuracy on 60 test emails;
   2. label-bias correction from 60 unlabelled emails (no labels: the mean score of each team is subtracted);
   3. few-shot "S" from 16 labelled emails: a per-team shift and scale plus a temperature, so confidence is calibrated
-     (ECE and coverage at 90% accuracy from solvi.calibration);
+     (ECE and coverage at 90% accuracy from solvi.core.calibration);
   4. abstention: the question's min_confidence; "other" is not a label the model scores but a threshold;
   5. an audit, a constraint repair, a hard check, and a correction absorbed at once by System.teach;
   6. escalation for a target error rate (calibrate_for), and a JSON ticket instead of a text (read as key paths).
@@ -33,7 +33,7 @@ import zlib
 import numpy as np
 
 from solvi import Answer, Catalog, Question, System
-from solvi.calibration import evaluate
+from solvi.core.calibration import evaluate
 from solvi.decide import DecideModel
 
 TASK = "Which team should handle this support email?"

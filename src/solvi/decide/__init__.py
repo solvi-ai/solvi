@@ -1,6 +1,6 @@
 """Decisions with a model: a cross-encoder that answers typed questions about a text or a state ("decider").
 
-Types declare questions, the model proposes, checks decide. A question's kind comes from its type (solvi.typed):
+Types declare questions, the model proposes, checks decide. A question's kind comes from its type (solvi.core.types):
 
   choice  Literal[...] / an Enum          one option (softmax); "other" / "none" may be an abstain threshold
   multi   list[Literal[...]]              every option that applies (a sigmoid per option)

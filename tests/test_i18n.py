@@ -1,4 +1,4 @@
-"""Languages of rendering (solvi.i18n): English stays byte for byte what it was, Russian renders, and nothing recorded —
+"""Languages of rendering (solvi.core._i18n): English stays byte for byte what it was, Russian renders, and nothing recorded —
 traces, hashes, `why`, to_dict() — depends on the language."""
 import contextlib
 import io
@@ -9,7 +9,8 @@ from pathlib import Path
 
 import pytest
 
-from solvi import Answer, Catalog, Question, System, i18n, testing
+from solvi import Answer, Catalog, Question, System, testing
+from solvi.core import _i18n as i18n
 from solvi.show import show
 
 HERE = Path(__file__).resolve().parent

@@ -428,7 +428,7 @@ def _answer(at):
 def _span_type_name(t):
     """A span's value type → its name in the dump: a built-in one by its name (str, int, float, bool, date, datetime,
     Decimal), any other class by "module:qualname" (an Enum, a model), so it can be found again on load."""
-    from .typed import type_name
+    from .types import type_name
     if t in _type_names().values():
         return type_name(t)
     if isinstance(t, type) and "<locals>" not in t.__qualname__:
@@ -443,10 +443,10 @@ def _span_type(name):
     if t is not None:
         return t
     if ":" in name:
-        import importlib
+        from .._deprecate import import_quietly
         mod, _, qual = name.partition(":")
         try:
-            t = importlib.import_module(mod)
+            t = import_quietly(mod)                     # a 0.9 store names a solvi class by its 0.9 module
             for part in qual.split("."):
                 t = getattr(t, part)
             if isinstance(t, type):
@@ -458,7 +458,7 @@ def _span_type(name):
 
 
 def _unknown(v):
-    from .core import Unknown
+    from .catalog import Unknown
     return v is Unknown
 
 
@@ -510,7 +510,7 @@ def _result(r):
 
 
 def _flow(f):
-    from .typed import type_name
+    from .types import type_name
     return {"steps": [{"name": s.part.name, "kind": s.part.kind, "inputs": list(s.part.inputs), "reasons": list(s.reasons),
                        **({"hard": None if getattr(s.part, "hard_unknown", False) else bool(s.part.hard)}
                           if s.part.kind == "check" else {})} for s in f.steps],
@@ -525,7 +525,7 @@ def _to_dict(obj):
     if n == "AnswerType":
         return _answer(obj)
     if n == "Question":
-        from .core import question_data
+        from .catalog import question_data
         return question_data(obj)
     if n == "Result":
         return _result(obj)
@@ -563,7 +563,7 @@ def _types(catalog):
 
 
 def _restore(t, v):
-    from .typed import check, spec
+    from .types import check, spec
     if t is None or v is None:
         return v
     s = spec(t, "restore")
@@ -596,7 +596,7 @@ def _fact_type(catalog, name, producer=None):
 
 
 def _load_answer(d):
-    from .core import AnswerType
+    from .catalog import AnswerType
     if d is None:
         return None
     by_text = {str(o): o for o in d.options}          # descriptions back on the options themselves (1, not "1")
@@ -606,12 +606,12 @@ def _load_answer(d):
 
 
 def _probs(p):
-    from .core import unknown_key
+    from .catalog import unknown_key
     return {unknown_key(k): v for k, v in (p or {}).items()}
 
 
 def _load_result(m):
-    from .core import Quote, Unknown
+    from .catalog import Quote, Unknown
     from .runtime import Result
     a = Unknown if m.not_stated else tuple(m.answer) if isinstance(m.answer, list) else m.answer   # multi-label, rank: tuples
     rep = None if m.repaired is None else (tuple(m.repaired[0]) if isinstance(m.repaired[0], list) else m.repaired[0],
@@ -646,7 +646,7 @@ def _load_trace(m, catalog, system):
         if why:
             lost[k] = why
     recs = []
-    from .core import Unknown
+    from .catalog import Unknown
     for r in m.records:
         if r.missing or r.not_stated:
             v = MISSING if r.missing else Unknown
@@ -669,7 +669,7 @@ def _load_trace(m, catalog, system):
 def _stub(name, kind, inputs, hard=None):
     """A part of a flow loaded from data without its catalog: its name, kind, inputs and — for a check — whether it is
     a hard one, as the flow recorded it (`hard_unknown`: it did not, so nothing may call it soft)."""
-    from .core import Part
+    from .catalog import Part
 
     def f(**_):
         raise RuntimeError("a part of a flow loaded from data: its function is not available")

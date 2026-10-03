@@ -6,7 +6,7 @@ import inspect
 import pytest
 
 from solvi import Catalog
-from solvi.provenance import code_fingerprint
+from solvi.core.provenance import code_fingerprint
 from solvi.sandbox import Refused, check, load, run
 
 GOOD = "import math\n\ndef area(r):\n    return math.pi * r * r\n"

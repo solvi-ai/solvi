@@ -36,7 +36,7 @@ value, and the quotes must be in the recorded text. The API key is never recorde
 
 Costs and budgets. Every request records its tokens (`usage`) and its latency (`ms`); with `price=` (dollars per
 million input and output tokens, or a function (model, usage) → dollars) also its dollars (`usage["usd"]`), so the
-system report sums them without being told the price. `budget=` (a solvi.costs.Budget: usd, calls, ms, tokens) limits
+system report sums them without being told the price. `budget=` (a solvi.core.costs.Budget: usd, calls, ms, tokens) limits
 one call of generate / sample — one decision when the generator is a catalog part — and `total=` the generator's whole
 life (`generator.spent`, a Cost). Before each request the spend so far plus the expected cost of one more request (the
 mean of the requests so far) must fit both, else `BudgetStop` is raised and the request is not sent: in a catalog the
@@ -56,11 +56,11 @@ import threading
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 
-from .core import Claim, find_whole
-from .costs import Budget, BudgetStop, Cost, price_of
+from .core.catalog import Claim, find_whole
+from .core.costs import Budget, BudgetStop, Cost, price_of
 from .llm import InvalidOutput, LLMScorer
 from .remote import NoAnswer, Refused
-from .provenance import code_fingerprint, digest
+from .core.provenance import code_fingerprint, digest
 
 RESPONSE_FORMATS = ("prompt", "json_object", "json_schema")
 FEEDBACK = "Your answer was checked by a program, and it does not work:\n{reasons}\nGive a corrected answer."
@@ -603,7 +603,7 @@ def check_budget(price, budget, total):
     and a price (dollars per million input and output tokens, or a function) wherever a limit is in dollars."""
     for b in (budget, total):
         if b is not None and not isinstance(b, Budget):
-            raise TypeError("budget= and total= take a solvi.costs.Budget(usd=, calls=, ms=, tokens=)")
+            raise TypeError("budget= and total= take a solvi.core.costs.Budget(usd=, calls=, ms=, tokens=)")
         if b is not None and b.usd is not None and price is None:
             raise ValueError("a budget in dollars needs price= (dollars per million input and output tokens, or a "
                              "function (model, usage) → dollars)")
@@ -628,7 +628,7 @@ def _schema(schema):
 class GenerationPart:
     """The model behind a part made by Generator.part: the generator, the prompt function's code, the schema and the
     settings — its fingerprint covers all of them, so a changed prompt or schema shows in a replay as a changed model.
-    `check_record` re-reads a recorded output on replay (solvi.runtime calls it when the model is not re-run)."""
+    `check_record` re-reads a recorded output on replay (solvi.core.runtime calls it when the model is not re-run)."""
 
     def __init__(self, gen, prompt, schema, parse, k, temperature, quotes, max_tokens, rerun):
         self.gen, self.prompt, self.schema, self.parse = gen, prompt, schema, parse
@@ -649,7 +649,7 @@ class GenerationPart:
         """A recorded output, without calling the model → the reasons it is not what this part accepts: each recorded
         reply read again through parse and the schema must give the recorded value; a failed candidate must carry its
         error. (The quotes are checked in the text by the replay's grounding check, from the recorded evidence.)"""
-        from .runtime import MISSING, vhash
+        from .core.runtime import MISSING, vhash
         if r.value is MISSING or r.error is not None:
             return []
         metas = (r.extra or {}).get("generated")

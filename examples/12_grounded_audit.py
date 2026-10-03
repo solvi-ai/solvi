@@ -14,7 +14,7 @@ from __future__ import annotations
 import re
 
 from solvi import Answer, Catalog, Decision, Question, Quote, System
-from solvi.provenance import digest
+from solvi.core.provenance import digest
 
 CATEGORIES = ["travel", "meals", "equipment"]
 KEYWORDS = {"travel": ["taxi", "train", "flight", "hotel"], "meals": ["lunch", "dinner", "restaurant"],

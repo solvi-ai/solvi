@@ -102,14 +102,14 @@ def forge_urgent(read, word, spec):
     import dataclasses
 
     from solvi.core import Quote
-    from solvi.textin import SOURCE, FieldRead
+    from solvi.core.textin import SOURCE, FieldRead
     i = read.text.index(word)
     f = FieldRead("urgent", "read", True, Quote(word, i, i + len(word), SOURCE, 1.0), 1.0, True, "bool", spec)
     return dataclasses.replace(read, fields=dict(read.fields, urgent=f))
 
 
 def test_ask_text_rebuilds_parser_specs_instead_of_trusting_the_read():
-    from solvi.textin import TextIn, TextRead
+    from solvi.core.textin import TextIn, TextRead
     s = orders()
     text = "cancel A-12 placed 2026-09-01, banana"
     read = TextIn(s).read(text, question="cancel_order")
@@ -133,7 +133,7 @@ def test_only_today_may_come_from_the_read():
     import dataclasses
     import datetime as dt
 
-    from solvi.textin import TextIn
+    from solvi.core.textin import TextIn
     s = orders()
     read = TextIn(s, today=dt.date(2026, 9, 28)).read("cancel A-12 placed 12 September, it is urgent",
                                                       question="cancel_order")
@@ -152,7 +152,7 @@ def test_only_today_may_come_from_the_read():
     ("it was urgent yesterday, not anymore", None), ("urgent-ish, not really", None),
     ("the refund is urgent but cancelling isn't", None), ("it is urgent", True)])
 def test_a_negation_or_a_no_after_the_cue_is_read(said, want):
-    from solvi.textin import TextIn
+    from solvi.core.textin import TextIn
     s = orders()
     f = TextIn(s).read(f"Cancel the order placed 2026-09-01. {said}", question="cancel_order").fields["urgent"]
     if want is None:

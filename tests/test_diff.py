@@ -5,7 +5,7 @@ import json
 from solvi import Answer, Catalog, Decision, JSONLStorage, Question, SQLiteStorage, System
 from solvi.cli import main
 from solvi.diff import Shadow, compare, diff
-from solvi.provenance import catalog_fingerprint, code_fingerprint
+from solvi.core.provenance import catalog_fingerprint, code_fingerprint
 
 
 class Scorer:
@@ -97,7 +97,7 @@ def test_code_fingerprint_ignores_formatting_and_sees_constants(tmp_path):
 def test_the_code_text_behind_a_fingerprint_is_the_same_on_every_python(tmp_path):
     """ast.dump changed with the interpreter (3.12 added `type_params=[]`, 3.13 drops empty fields), so a catalog's
     fingerprint — and a stored dispatch's configuration — differed between Pythons: the text is now pinned."""
-    from solvi.provenance import _source_ast
+    from solvi.core.provenance import _source_ast
     m = _module(tmp_path, "fg", "def late(days: int, limit=None) -> bool:\n    return [d for d in days if d != limit]\n")
     assert _source_ast(m.late) == (
         "FunctionDef(name='late', args=arguments(args=[arg(arg='days', annotation=Name(id='int', ctx=Load())), "

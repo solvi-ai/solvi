@@ -13,7 +13,7 @@ import time
 
 import numpy as np
 
-from .core import Quote
+from .core.catalog import Quote
 
 CACHE = 2000                                     # (text, description) predictions kept (then the cache starts again)
 
@@ -21,7 +21,7 @@ CACHE = 2000                                     # (text, description) predictio
 class LongSpanExtractor:
     def __init__(self, model_name="answerdotai/ModernBERT-large", max_len=1024, stride=128, max_span=96, device=None):
         """stride: overlap between adjacent windows in tokens (as in transformers); max_span: maximum answer length in tokens."""
-        from .loader import optional
+        from ._loader import optional
         torch = optional("torch", "model", "LongSpanExtractor")
         tf = optional("transformers", "model", "LongSpanExtractor")
         AutoModel, AutoTokenizer = tf.AutoModel, tf.AutoTokenizer
@@ -220,7 +220,7 @@ class LongSpanExtractor:
         import os
         path_or_id = path
         if not os.path.isdir(path):
-            from .loader import optional
+            from ._loader import optional
             path = optional("huggingface_hub", "model", "LongSpanExtractor.load of a Hugging Face id").snapshot_download(path)
         cfg = json.load(open(f"{path}/solvi_extract.json"))
         if cfg.get("kind", "long") != "long":                # files of 0.7 have no kind: they are LongSpanExtractor's
@@ -269,7 +269,7 @@ class LongSpanExtractor:
     def fingerprint(self):
         """A stable hash of this extractor: settings, thresholds, the span head, sampled encoder weights and the weight files
         it was loaded from (recorded in the trace; replay compares it with the catalog's current model)."""
-        from .provenance import digest, torch_fingerprint
+        from .core.provenance import digest, torch_fingerprint
         if self._fp_weights is None:
             import os
             files = self.model_name if os.path.isdir(str(self.model_name)) else None

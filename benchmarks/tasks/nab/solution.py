@@ -7,7 +7,7 @@ How it is solved:
     (its memory, given like an agent's episode) — so a stored alert replays from its own record;
   - the catalog: a hard check (enough history) → the trailing level and robust scale → the daily profile → the score
     (against the daily profile where it explains the series, else against the level) → the threshold, the conformal
-    quantile of the series' own earlier scores (`solvi.calibration.conformal_quantile`: at most `alpha` of points like
+    quantile of the series' own earlier scores (`solvi.core.calibration.conformal_quantile`: at most `alpha` of points like
     the earlier ones exceed it) → a floor check → the rule `alert`;
   - only the alerts are stored (SQLiteStorage); the chain is verified, every alert replayed, and `solvi.diff` says
     which alerts a three times stricter alpha would drop.
@@ -30,7 +30,7 @@ from common.llm import DATA, read_jsonl  # noqa: E402
 from score import load, score  # noqa: E402
 
 from solvi import Answer, Catalog, Question, SQLiteStorage, System  # noqa: E402
-from solvi.calibration import conformal_quantile  # noqa: E402
+from solvi.core.calibration import conformal_quantile  # noqa: E402
 from solvi.diff import diff  # noqa: E402
 
 PICKED = {"horizon": 2000, "alpha": 0.0015, "floor": 5.0}     # chosen on dev

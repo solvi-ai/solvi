@@ -30,7 +30,9 @@ CI runs on every pull request: a broken link, a missing anchor or a docstring th
   replaying; if a hash changes on purpose, say so in the CHANGELOG.
 - Fingerprints record module names (a declared type, a callable object's type), so moving a class or a function to
   another module changes them unless the move adds a line to `MOVED` in `solvi/_deprecate.py` (new location → the 0.9
-  module). `tests/test_golden_fingerprints.py` pins the fingerprints of the gallery, the examples, the stand's catalogs
+  module). The same line makes the old import path work for one release with a warning (the old-path finder) and is
+  what `solvi migrate` and the CHANGELOG's migration table (`uv run python tools/migration_table.py`) are made from.
+  `tests/test_golden_fingerprints.py` pins the fingerprints of the gallery, the examples, the stand's catalogs
   and `tests/fixtures/golden_fingerprints/catalogs.py`; `tests/test_store_0_9_0.py` replays stores written by 0.9.0.
   An intended change: `uv run python tests/test_golden_fingerprints.py --write` (one set for every
   supported Python) and say which fingerprints changed and why.

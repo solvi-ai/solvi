@@ -20,7 +20,8 @@ import ast
 from pathlib import Path
 
 SRC = Path(__file__).resolve().parents[1] / "src"
-BASE = {f"solvi.{m}" for m in ("core", "typed", "provenance", "primitives", "runtime", "schema", "textin")}
+BASE = {"solvi.core"} | {f"solvi.core.{m}" for m in ("catalog", "types", "provenance", "primitives", "runtime", "schema",
+                                                     "textin")}
 TOP = ("solvi.cli", "solvi.serve", "solvi.hooks", "solvi.__main__", "solvi.agents")
 
 
@@ -163,8 +164,7 @@ def test_nothing_below_the_server_and_agent_layer_imports_it():
 
 # --- the provisional tier map (LAYOUT §2 / §6) over the flat 1.0 module names; the package move (solvi.core.*) follows
 LOW_TIERS = {
-    "kernel": "_deprecate loader core typed provenance primitives runtime schema textin sets costs i18n calibration calibfile "
-              "sources chain _rpc",
+    "kernel": "_deprecate _loader _migrate core sets _rpc",
     "parts": "decide heads llm remote longdoc multi perturb rulelist systemone extract_long extract_multi strategist strategy "
              "inputs",
     "guarantees": "guarantee drift openset",
@@ -180,7 +180,8 @@ EXPERIMENTAL = "compile sandbox hooks learning lora specialist charts agents.mcp
 ALLOWED_EXPERIMENTAL = {("solvi.serve", "solvi.agents.mcp"), ("solvi.auto", "solvi.compile")}
 # the import cycles left in 1.0, each inside one tier
 INTRA_TIER_CYCLES = [
-    {"solvi.core", "solvi.primitives", "solvi.provenance", "solvi.runtime", "solvi.schema", "solvi.textin", "solvi.typed"},
+    {"solvi.core.catalog", "solvi.core.primitives", "solvi.core.provenance", "solvi.core.runtime", "solvi.core.schema",
+     "solvi.core.textin", "solvi.core.types"},
     {"solvi.storage", "solvi.response", "solvi.report", "solvi.signature"},
     {"solvi.agents.guard", "solvi.agents.confirm"},
 ]
@@ -232,11 +233,11 @@ def test_tier_order_and_levels():
     assert not bad, f"imports against the tier order: {sorted(bad)}"
 
 
-def test_the_old_flat_names_still_resolve():
-    """The moves of 1.0 kept every old import path working (a plain re-export, no warning yet)."""
+def test_the_names_moved_by_the_import_cycle_lane_are_the_same_objects():
+    """The cycle moves of 1.0 (LAYOUT §6) kept the names the old modules re-export: the same objects."""
     import solvi
-    from solvi import calibfile, calibrate, calibration, chain, costs, dispatch, response, runtime, serve, sources, storage, system
-    from solvi import _rpc, decide
+    from solvi import _rpc, calibrate, decide, dispatch, response, serve, storage, system
+    from solvi.core import calibfile, calibration, chain, costs, runtime, sources
     assert system.Response is response.Response is solvi.Response and system._append is chain.append
     for name in ("TRUSTED_SOURCES", "VERIFIED", "VERIFIED_REFUSED", "UntrustedLabel", "check_source"):
         assert getattr(storage, name) is getattr(sources, name)

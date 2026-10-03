@@ -6,7 +6,7 @@ import pytest
 
 from solvi import Answer, Catalog, Question, System
 from examples_loader import load
-from solvi.runtime import vhash
+from solvi.core.runtime import vhash
 
 I = load("03_invoices")
 
@@ -132,7 +132,7 @@ def test_a_failed_hard_check_skips_the_rest_by_default_and_early_exit_false_comp
     """A decision forced by a hard check had no rule values in its record, and a part listed in `checkpoints` was missing
     from res.values; System.ask had no way to ask for the whole flow."""
     import asyncio
-    from solvi.runtime import Trace
+    from solvi.core.runtime import Trace
     cat, qs = _proposal()
     s = System(cat, qs)
     res = s.ask({"text": " "})

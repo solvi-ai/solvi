@@ -52,7 +52,7 @@ from dataclasses import dataclass
 import numpy as np
 from scipy.stats import chi2, fisher_exact, norm
 
-from .calibration import coverage_at, ece, summary
+from .core.calibration import coverage_at, ece, summary
 
 SIGNALS = ("answered", "answers", "confidence", "act", "accuracy", "ece", "coverage_at")
 MIN_EXPECTED = 5          # an answer expected fewer times in a window is pooled with the other rare ones (chi-square)

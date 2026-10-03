@@ -7,7 +7,7 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from ..core import Quote
+from ..core.catalog import Quote
 from .kinds import MARKERS, NULL_SOURCE
 
 
@@ -117,11 +117,11 @@ def _typed_span(spans, vtype):
     text parses as `vtype` — the best span trimmed to its value ('149.90 EUR' → '149.90'); the mass is that of every span
     between the two (they all give this value). Never a span outside the best one, and never a piece of the best span
     that states another value ('851.12' inside 'EUR 18,851.12'): then the best span is kept and the answer's type check
-    reads it (solvi.typed.span_value: 18851.12) or rejects it. (0, None) for str / untyped spans or when the best span
+    reads it (solvi.core.types.span_value: 18851.12) or rejects it. (0, None) for str / untyped spans or when the best span
     parses."""
     if vtype is None or vtype is str:
         return 0, None
-    from ..typed import adapter, span_value
+    from ..core.types import adapter, span_value
     try:
         adapter(vtype)
     except Exception:  # noqa: BLE001
