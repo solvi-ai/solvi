@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.9.0 — unreleased
+## 0.9.0 — 2026-10-03 — System 1 and System 2
 
 0.9 is about two ways of deciding in one system, in Kahneman's sense: **System 1**, fast and cheap — rules, checks, a
 fitted head, a model under a guarantee — answers when it is sure; **System 2**, slow and deliberate — an LLM, a re-ask
