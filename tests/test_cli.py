@@ -615,7 +615,7 @@ def test_api_reference_has_the_07_modules_and_the_guide_is_precise():
     root = Path(__file__).resolve().parents[1]
     nav = (root / "mkdocs.yml").read_text()
     index = (root / "docs" / "api" / "index.md").read_text()
-    for m in ("textin", "longdoc", "report", "otel", "counterfactual", "perturb"):
+    for m in ("textin", "longdoc", "report", "counterfactual", "perturb"):
         page = root / "docs" / "api" / f"{m}.md"
         assert page.exists() and f"::: solvi.{m}" in page.read_text(), m
         assert f"solvi.{m}: api/{m}.md" in nav and f"]({m}.md)" in index, m

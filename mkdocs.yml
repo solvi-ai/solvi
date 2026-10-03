@@ -96,7 +96,6 @@ nav:
       - solvi.show: api/show.md
       - solvi.report: api/report.md
       - solvi.sysreport: api/sysreport.md
-      - solvi.otel: api/otel.md
       - solvi.sets: api/sets.md
       - solvi.search: api/search.md
       - solvi.auto: api/auto.md

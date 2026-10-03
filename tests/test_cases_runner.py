@@ -1,15 +1,12 @@
 """Decision regression tests from cases.json (solvi.testing): the gallery's cases pass, mismatches in answers, statuses and
-safeguards are reported, `solvi test` exits with the right code, the pytest plugin collects cases as items, and fuzzing
+safeguards are reported, `solvi test` exits with the right code, and fuzzing
 reports exceptions that escape solvi and answers with a non-numeric confidence."""
 import json
-from importlib.metadata import entry_points
 from pathlib import Path
 
 import pytest
 
 from solvi import cli, testing
-
-pytest_plugins = ["pytester"]
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -142,10 +139,14 @@ def test_command_line(tmp_path, capsys):
     assert cli.main(["nope"]) == 2 and cli.main(["--help"]) == 0
 
 
-def test_console_script_and_plugin_are_registered():
+def test_console_script_is_registered_and_the_pytest_plugin_is_gone():
+    """The pytest plugin was removed in 1.0 (it loaded in every pytest session of every user); `solvi test` and
+    solvi.testing.run_path run the same cases."""
     text = (ROOT / "pyproject.toml").read_text()
     assert '[project.scripts]\nsolvi = "solvi.cli:main"' in text
-    assert '[project.entry-points.pytest11]\nsolvi = "solvi.pytest_plugin"' in text
+    assert "pytest11" not in text and "pytest_plugin" not in text
+    with pytest.raises(ModuleNotFoundError):
+        __import__("solvi.pytest_plugin")
 
 
 def test_mutations_are_deterministic_and_varied():
@@ -174,40 +175,6 @@ def test_fuzz_reports_crashes_and_invalid_confidences(tmp_path):
     assert any(x.startswith("invalid — ") and "confidence nan" in x for x in out)
     suite = testing.load(_write(tmp_path))
     assert testing.fuzz(suite.system(), {"text": "invoice paid"}, 60) == []      # a plain catalog: no crash on odd input
-
-
-def test_pytest_plugin_collects_cases_as_items(pytester):
-    d = pytester.mkdir("entry")
-    (d / "task.py").write_text(TASK)
-    cases = CASES[:2] + [{"name": "wrong", "state": {"text": "invoice"}, "expected": {"route": "support"}}]
-    (d / "cases.json").write_text(json.dumps(cases))
-    (pytester.path / "other.json").write_text("[]")                  # not a cases file: ignored
-    registered = any(ep.name == "solvi" and ep.value == "solvi.pytest_plugin" for ep in entry_points(group="pytest11"))
-    args = [] if registered else ["-p", "solvi.pytest_plugin"]
-    r = pytester.runpytest(*args, "-q", "entry")
-    r.assert_outcomes(passed=2, failed=1)
-    r.stdout.fnmatch_lines(["*case 'wrong'*", "*route: expected 'support', got 'billing' ?ok?*"])
-    r = pytester.runpytest(*args, "-q", "entry", "--solvi-fuzz", "10", "-k", "invoice")
-    r.assert_outcomes(passed=1, deselected=2)
-
-
-def test_pytest_plugin_does_not_run_or_collect_another_projects_files(pytester):
-    """The plugin loads wherever solvi is installed: a cases.json next to an unrelated project's task.py used to get that
-    task.py executed during collection, and a *.cases.json with a "task" key aborted the session."""
-    jobs = pytester.mkdir("jobs")
-    (jobs / "task.py").write_text("import pathlib\npathlib.Path(__file__).with_name('RAN.txt').write_text('x')\n")
-    (jobs / "cases.json").write_text(json.dumps([{"id": 1, "input": "a", "output": "b"}]))
-    fixtures = pytester.mkdir("fixtures")
-    (fixtures / "eval.cases.json").write_text(json.dumps({"task": "sentiment", "cases": [{"text": "great", "label": "pos"}]}))
-    lookalike = pytester.mkdir("lookalike")                           # solvi-shaped cases, a module that is not solvi's
-    (lookalike / "task.py").write_text("import pathlib\npathlib.Path(__file__).with_name('RAN.txt').write_text('x')\n")
-    (lookalike / "cases.json").write_text(json.dumps(CASES[:1]))
-    pytester.makepyfile(test_own="def test_ok():\n    assert True\n")
-    registered = any(ep.name == "solvi" and ep.value == "solvi.pytest_plugin" for ep in entry_points(group="pytest11"))
-    r = pytester.runpytest(*([] if registered else ["-p", "solvi.pytest_plugin"]), "-q")
-    r.assert_outcomes(passed=1, warnings=1)
-    assert not (jobs / "RAN.txt").exists() and not (lookalike / "RAN.txt").exists()
-    r.stdout.fnmatch_lines(["*lookalike/cases.json: the cases look like solvi cases, but task.py does not import solvi*"])
 
 
 def test_a_case_that_cannot_fail_is_reported(tmp_path):

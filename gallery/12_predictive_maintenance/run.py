@@ -64,7 +64,7 @@ def got(r):
 
 def system():
     """The system cases.json expects: the 'fault' rule list learned from the same 150 past incidents as below (what
-    `solvi test` and the pytest plugin build, via "system": "run.py:system" in cases.json)."""
+    `solvi test` builds, via "system": "run.py:system" in cases.json)."""
     s = System(task.cat, task.QUESTIONS)
     s.learn_rule("fault", [(st, y) for st, y, _ in incidents(random.Random(12), 150)], task.FAULT_FACTS)
     return s

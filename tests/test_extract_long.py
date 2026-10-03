@@ -145,7 +145,7 @@ def test_a_labelled_span_maps_to_the_tokens_that_cover_it():
 
 def test_a_missing_optional_dependency_names_the_extra_to_install(monkeypatch):
     """The extractors, SegmentModel and NameMatcher failed with a bare ModuleNotFoundError (with backend="auto" and no
-    runtime: "No module named 'torch'"), while storage, otel and serve name the extra."""
+    runtime: "No module named 'torch'"), while storage and serve name the extra."""
     import sys
     from solvi.extract_long import LongSpanExtractor
     from solvi.extract_multi import MultiSpanExtractor

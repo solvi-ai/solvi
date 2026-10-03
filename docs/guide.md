@@ -87,7 +87,6 @@ pip install "solvi[model]"     # + torch, transformers, for the ModernBERT extra
 pip install "solvi[onnx]"      # + onnxruntime, tokenizers: the decider (solvi.decide) on CPU without torch
 pip install "solvi[serve]"     # + fastapi, uvicorn: solvi serve over HTTP
 pip install "solvi[mcp]"       # + the official MCP SDK for solvi serve --mcp (without it, a built-in stdio server is used)
-pip install "solvi[otel]"      # + opentelemetry: decisions as OpenTelemetry spans (solvi.otel)
 pip install "solvi[duckdb]"    # + duckdb: stored decisions in a DuckDB file; "solvi[postgres]" for PostgreSQL
 pip install "solvi[langgraph]" # the solvi.agents adapters: also "solvi[pydantic-ai]", "solvi[openai-agents]"
 pip install "solvi[lora]"      # + torch, transformers, peft: part.adapt_lora, a LoRA adapter per question (experimental)
@@ -4690,36 +4689,6 @@ alone by the model, 1,287 handed over, 5 of the 713 wrong (0.70%: within the pro
 scorer gives — the open-set gate's own flag at request 1,068, and a DriftMonitor flag on the share answered alone at
 request 1,046. On the credit task (rules only, two versions of the catalog) it gives 998 answers by the rule, 2 forced
 by a hard check, and 600 and 400 decisions under the two catalog fingerprints.
-
-### OpenTelemetry: solvi.otel
-
-`solvi.otel.export(res_or_store, tracer=None, **filters)` sends decisions to your tracing backend as OpenTelemetry spans
-(`pip install "solvi[otel]"`): per decision a root span `solvi.decision`, a child span per step of the trace
-(`solvi.fn risk`, `solvi.extract total`, `solvi.rule answer:pay`, …) and one per answer (`solvi.answer pay`). A store
-exports every stored decision, or those matching the query filters (`export(store, question="refund", since=...)`).
-The root span is a child of the span current in your code, so a decision sits inside the request that asked it.
-
-```python
-from solvi.otel import export, to_otlp_json
-
-with tracer.start_as_current_span("POST /refund"):
-    res = system.ask(state)
-    export(res)                               # the global tracer provider's "solvi" tracer, or tracer=...
-
-body = to_otlp_json(res, service_name="refunds")   # OTLP/JSON without OpenTelemetry: POST it to a collector's /v1/traces
-```
-
-| Span | Attributes |
-|---|---|
-| step | `solvi.step`, `solvi.kind`, `solvi.fact`, `solvi.provenance`, `solvi.value` (a short repr), `solvi.confidence`, `solvi.error`, `solvi.producer`, `solvi.tried`, `solvi.quote.source` / `.start` / `.end`, `solvi.model.type` / `.id` / `.fingerprint`, `solvi.probs` (JSON), `solvi.safeguard` (kinds that fired on this fact), `solvi.inputs`, `solvi.hash`, `solvi.prev` |
-| answer | `solvi.question`, `solvi.answer`, `solvi.status`, `solvi.confidence`, `solvi.why`, `solvi.guard`, `solvi.provenance`, `solvi.source`, `solvi.safeguard` |
-| root | `solvi.questions`, `solvi.trace.init_hash`, `solvi.trace.head`, `solvi.trace.steps`, `solvi.catalog.fingerprint`, `solvi.questions.fingerprint`, `solvi.stored_id`, `solvi.ms`, `solvi.confidence`, `solvi.complete`, `solvi.model_outputs`; an event `solvi.skipped` per step skipped at run time |
-
-A failed or rejected step has status ERROR with the reason; an abstention is not an error. The trace records each step's
-run time, not its start: step spans are laid end to end from the decision's start (durations measured, start times not;
-parallel steps appear one after another). A stored decision ends at its stored time; a fresh one when exported (or at
-`end_ns=`). In the OTLP JSON the trace and span ids are derived from the trace's hashes; through the API the SDK assigns
-them — `solvi.hash` ties a span to its trace record either way.
 
 ### Lifetime stats
 

@@ -45,7 +45,6 @@ this reference lists what each module exports and the signatures.
 | [`solvi.show`](show.md) | printing a response |
 | [`solvi.report`](report.md) | reports of one decision or a period of stored decisions (Markdown, HTML, data) |
 | [`solvi.sysreport`](sysreport.md) | the system report: who answered, the cost, the promise against the stored labels, drift — from the store alone |
-| [`solvi.otel`](otel.md) | decisions as OpenTelemetry spans (the API, or OTLP/JSON) |
 | [`solvi.sets`](sets.md) | decisions over a set: answers of many items made consistent under at-most / exactly-one / capacity constraints |
 | [`solvi.search`](search.md) | search over alternatives: candidates through the System's checks, the best by an objective, pruned, recorded |
 | [`solvi.auto`](auto.md) | one entry point: a question, labelled examples, a promise and a slow path → System 1 fitted, its guarantee and the dispatcher calibrated, the store wired, the choices explained (preview) |

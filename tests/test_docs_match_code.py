@@ -146,7 +146,7 @@ def test_stale_sentences_of_the_docs_stay_corrected():
         assert "the only command that downloads" not in text
     sig = _flat(GUIDE.split("`System(catalog, questions,")[1].split(")`")[0])
     assert all(f"{p}=" in sig for p in list(_inspect.signature(System).parameters)[2:]), sig
-    extras = ["model", "onnx", "serve", "mcp", "otel", "duckdb", "lora"]
+    extras = ["model", "onnx", "serve", "mcp", "duckdb", "lora"]
     for text in (README, GUIDE):
         assert all(f'"solvi[{e}]"' in text for e in extras)
     assert not re.search(r"^model = systemone\(", GUIDE, re.M)
