@@ -25,7 +25,35 @@ _seen: set = set()
 #     "solvi.core.types": "solvi.typed",                  # a whole module moved: everything defined in it
 #     "solvi.core.response:Response": "solvi.system",     # one name moved out of a module that stays
 # A "module:Name" line wins over a module line. Entries are never removed: stored records name the 0.9 modules forever.
-MOVED: dict[str, str] = {}
+MOVED: dict[str, str] = {
+    "solvi.response:Response": "solvi.system",
+    "solvi.chain:append": "solvi.system",
+    "solvi.sources:TRUSTED_SOURCES": "solvi.storage",
+    "solvi.sources:VERIFIED": "solvi.storage",
+    "solvi.sources:VERIFIED_REFUSED": "solvi.storage",
+    "solvi.sources:UntrustedLabel": "solvi.storage",
+    "solvi.sources:check_source": "solvi.storage",
+    "solvi.calibration:GroupBy": "solvi.decide.gate",
+    "solvi.calibration:group_name": "solvi.decide.gate",
+    "solvi.runtime:plan_batches": "solvi.decide.part",
+    "solvi.costs:_usages": "solvi.dispatch",
+    "solvi.costs:price_of": "solvi.dispatch",
+    "solvi._rpc:Limits": "solvi.serve",
+    "solvi._rpc:RequestError": "solvi.serve",
+    "solvi._rpc:NotFound": "solvi.serve",
+    "solvi._rpc:BadRequest": "solvi.serve",
+    "solvi._rpc:Busy": "solvi.serve",
+    "solvi._rpc:too_deep": "solvi.serve",
+    "solvi._rpc:parse_json": "solvi.serve",
+    "solvi._rpc:internal_error": "solvi.serve",
+    "solvi._rpc:_readline": "solvi.serve",
+    "solvi.calibrate:add_parser": "solvi.calibfile",
+    "solvi.calibrate:cmd_calibrate": "solvi.calibfile",
+    "solvi.calibrate:examples_of": "solvi.calibfile",
+    "solvi.calibrate:find_part": "solvi.calibfile",
+    "solvi.calibrate:label_of": "solvi.calibfile",
+    "solvi.calibrate:read_rows": "solvi.calibfile",
+}
 
 
 class SolviDeprecationWarning(FutureWarning):
