@@ -9,7 +9,8 @@ import warnings
 import pytest
 
 import solvi
-from solvi import _deprecate, _migrate
+from solvi import _deprecate
+from solvi.cli import _migrate
 
 OLD = sorted(_deprecate.old_paths())
 
@@ -163,7 +164,8 @@ def test_the_changelog_migration_table_is_generated_from_the_table():
 
 # --- solvi.experimental: what a decision made with an experimental piece records
 def _store_system(tmp_path, **kw):
-    from solvi import Answer, Catalog, JSONLStorage, Question, System
+    from solvi import Answer, Catalog, Question, System
+    from solvi.core.store import JSONLStorage
     cat = Catalog()
 
     @cat.fn
@@ -220,3 +222,33 @@ def test_migrate_a_module_imported_from_an_old_package():
     assert _migrate.rewrite("from solvi.agents import mcp\nfrom solvi.decide import part, DecideModel\n") == (
         "from solvi.experimental import mcp\nfrom solvi.core.deciders import DecideModel\n"
         "from solvi.core.deciders import part\n")
+
+
+def test_migrate_keeps_a_noqa_on_every_line_it_splits():
+    out = _migrate.rewrite("from solvi import Catalog, provenance  # noqa: E402\n")
+    assert out == "from solvi import Catalog  # noqa: E402\nfrom solvi.core import provenance  # noqa: E402\n"
+
+
+# --- the high level
+def test_decision_system_is_the_old_auto_system_and_build_does_not_compile():
+    from solvi.solutions import decisions
+    with pytest.warns(solvi.SolviDeprecationWarning, match="AutoSystem was renamed in 1.0"):
+        assert decisions.AutoSystem is decisions.DecisionSystem
+    assert solvi.build is decisions.build
+    with pytest.raises(TypeError, match="compiled first"):
+        decisions._slow_path(object(), None, [], False, "writer", None)
+
+
+def test_the_model_providers(monkeypatch):
+    from solvi import models
+    from solvi.core.deciders import DecideModel
+    assert models.DecideModel is DecideModel
+    m = models.llm("http://127.0.0.1:9/v1", "some-model")
+    assert callable(getattr(m, "decision", None))
+    seen = []
+    monkeypatch.setattr(models, "load", lambda spec, backend="auto", api_key=None: seen.append((spec, backend)) or "m")
+    assert models.decider("solvi-base") == "m" and models.decider("./ckpt", backend="onnx") == "m"
+    assert seen == [("solvi-ai/solvi-base", "auto"), ("./ckpt", "onnx")]
+    with pytest.warns(solvi.SolviDeprecationWarning, match="solvi.models.cmd_models moved in 1.0"):
+        from solvi.cli import _models
+        assert models.cmd_models is _models.cmd_models

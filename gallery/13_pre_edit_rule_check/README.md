@@ -182,7 +182,7 @@ print("\n".join(res.values.get("findings", [])) or decision)
 sys.exit({"allow": 0, "block": 2, "escalate": 3}[decision])
 ```
 
-Or as a **solvi Guard** policy on the agent's `write_file` tool (`solvi.agents`, preview): a block denies the call with
+Or as a **solvi Guard** policy on the agent's `write_file` tool (`solvi.solutions.guard`, preview): a block denies the call with
 the reasons, an escalation goes to a person (`guard.resolve`), and the guard's own store keeps both decisions.
 
 ```python

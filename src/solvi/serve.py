@@ -61,7 +61,7 @@ from . import _deprecate
 # limits, request errors, JSON within the limits, the incident message, the bounded line reader: solvi._rpc since 1.0
 # (shared with the MCP proxy, which then does not import the server); re-exported here
 from ._rpc import BadRequest, Busy, Limits, NotFound, RequestError, _readline, internal_error, log, parse_json, too_deep  # noqa: F401
-from .command import fail as _fail, load_object, load_system
+from ._command import fail as _fail, load_object, load_system
 from .core._inputs import _camel, _fact_type, input_model, input_schema, question_inputs   # noqa: F401 — re-exported
 from .core.runtime import trace_hash   # noqa: F401 — re-exported (defined there: agents read it too)
 from .core.schema import dump, dumps
@@ -1003,7 +1003,7 @@ def _serve_guard(a, _fail, load_object):
     from .experimental.mcp import run_proxy
     guard = load_object(a.guard)
     if not isinstance(guard, Guard):
-        _fail(f"--guard {a.guard}: not a solvi.agents.Guard")
+        _fail(f"--guard {a.guard}: not a solvi.Guard")
     if a.store:
         from .core.store import open_storage
         guard.storage = open_storage(a.store)
@@ -1063,7 +1063,7 @@ def add_parser(sub):
     s.add_argument("--mcp", action="store_true", help="an MCP server over stdio instead of HTTP: each question is a tool")
     s.add_argument("--mcp-impl", default="auto", choices=["auto", "sdk", "builtin"],
                    help="the official MCP SDK (auto: when installed) or the built-in JSON-RPC subset")
-    s.add_argument("--guard", help="module:attr or file.py:attr — a solvi.agents.Guard: an MCP proxy that checks every "
+    s.add_argument("--guard", help="module:attr or file.py:attr — a solvi.Guard: an MCP proxy that checks every "
                                    "tools/call of --upstream (solvi.experimental.mcp)")
     s.add_argument("--upstream", help="the command line of the MCP server (stdio) behind the guard")
     s.add_argument("--facts", help="a JSON object of facts the guard's policies read (with --guard)")

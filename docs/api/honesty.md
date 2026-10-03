@@ -1,5 +1,5 @@
-# `solvi.honesty`
+# `solvi.testing.honesty`
 
 Honesty numbers for a release gate.
 
-::: solvi.honesty
+::: solvi.testing.honesty

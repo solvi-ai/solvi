@@ -11,7 +11,7 @@ One invoice / support-message text (`doc`) and a few given facts; each question 
             it can also be confidently wrong (the suite measures that, it does not hide it)
   approve   a hard check that raises on a malformed amount — the answer abstains, never "passed"
 
-Loaded by solvi.honesty (`system()`), the way the gallery runners load a task.py."""
+Loaded by solvi.testing.honesty (`system()`), the way the gallery runners load a task.py."""
 import re
 
 import numpy as np

@@ -79,7 +79,7 @@ def measure(workloads, reps):
 
 
 def _module(path):
-    """Execute a task / runner file in a fresh module (as solvi.honesty.load_task does; that did not exist in 0.5.0)."""
+    """Execute a task / runner file in a fresh module (as solvi.testing.honesty.load_task does; that did not exist in 0.5.0)."""
     import hashlib
     import types
     path = Path(path).resolve()

@@ -1,9 +1,9 @@
 """One entry point for System 1 and System 2: a question, labelled examples, a promise and (optionally) a slow path in;
 a fitted, calibrated, stored System and Dispatcher out — with a plain account of who answers what and what is promised.
 
-    from solvi.auto import build
+    import solvi
 
-    s = build(Question("team", "Which team?", Answer.choice(TEAMS)), examples, catalog=cat, max_risk=0.02,
+    s = solvi.build(Question("team", "Which team?", Answer.choice(TEAMS)), examples, catalog=cat, max_risk=0.02,
               slow=model, price=(0.04, 0.17), storage="decisions.jsonl")
     res = s.ask({"email": "my parcel never came"})       # a solvi.core.dispatch.Dispatched: answer, by, reasons, cost
     print(s.explain())                                   # who answers which slice, what is promised, on what data
@@ -41,8 +41,8 @@ its own would-be answer, the slow path's, the slow path's when it agrees, or a p
 The slow path (slow=): a SlowPath or a System as they are; a decision part (`model.decision(...)`); a model from
 `solvi.core.deciders.llm` (a decision part is made from the question's text and options, reading `reads` — default: every given key
 of the examples; with the open-set gate on, "not stated" is an option and goes to a person); a function
-state → answer; a compiled specification (`solvi.experimental.compile`: a Compiled, or a Spec with `writer=` and `inputs=` —
-compiled from the written text, never from the examples). Inputs the open-set gate holds back go to a person, not to
+state → answer; a compiled specification (a Compiled from `solvi.experimental.compile.compile_spec`, compiled from the
+written text, never from the examples; a Spec is compiled first — build does not import the experimental compiler). Inputs the open-set gate holds back go to a person, not to
 the slow path: a slice calibrated on known kinds of input says nothing about a new kind (an LLM given unseen intents
 put most of them on a known one). After the gate flags a change of the stream, System 1's answers are checked by the
 slow path and a disagreement goes to a person.
@@ -56,13 +56,13 @@ import copy
 import math
 import random
 
-from .core.catalog import Answer, Catalog, Question
+from ..core.catalog import Answer, Catalog, Question
 
 SPLIT_FIT = 0.75            # the share fitted on when System 1 is fitted here
 SPLIT_SELECT = 1 / 3        # the share a signal is chosen on when a rule answers and its confidence does not vary
 
 
-class AutoSystem:
+class DecisionSystem:
     """What build() returns. system: System 1 (a solvi.System); dispatcher: the solvi.core.dispatch.Dispatcher that asks it;
     gate: the OpenSetGate, or None; slow: the SlowPath, or None; choices: every choice made, with its numbers (what
     explain() prints); calibration: the reports of System.guarantee / OpenSetGate / Dispatcher.calibrate."""
@@ -91,7 +91,7 @@ class AutoSystem:
     def report(self, since=None, until=None, **options):
         """What the system did over a stored period (solvi.core.store.sysreport.SystemReport: print it) — who answered, the cost,
         the promise in force against the stored labels, drift — read from the store alone."""
-        from .core.store.sysreport import system_report
+        from ..core.store.sysreport import system_report
         if self.dispatcher.storage is None:
             raise ValueError("a report reads the stored decisions: build(..., storage=path)")
         options.setdefault("price", self.dispatcher.price)
@@ -137,13 +137,13 @@ class AutoSystem:
         return self.explain()
 
     def __repr__(self):
-        return f"AutoSystem({self.question!r}, system1={self.choices['mode']}, slow={self.slow!r})"
+        return f"DecisionSystem({self.question!r}, system1={self.choices['mode']}, slow={self.slow!r})"
 
 
 # ------------------------------------------------------------------------------------------------ helpers
 def _judge(q, correct):
     """correct(answer, label) → bool, or equality of the normalized answers."""
-    from .core.runtime import vhash
+    from ..core.runtime import vhash
 
     def right(ans, label):
         if correct is not None:
@@ -157,7 +157,7 @@ def _judge(q, correct):
 
 def _rows(system, qname, examples, signal, correct):
     """System 1 (no guarantee) on labelled examples → (signals, right, lost) as System.guarantee reads them."""
-    from .core.guarantees.guarantee import QuestionGuard, _add_checkpoints, _calibration_rows, _drop_checkpoints
+    from ..core.guarantees.guarantee import QuestionGuard, _add_checkpoints, _calibration_rows, _drop_checkpoints
     guard = QuestionGuard(qname, None, signal)
     _add_checkpoints(system, guard)
     try:
@@ -171,7 +171,7 @@ def _rows(system, qname, examples, signal, correct):
 def _choose_signal(system, qname, examples, correct, q):
     """The confidence does not vary: the numeric fact that best separates right from wrong answers → (name, auroc,
     {candidate: auroc})."""
-    from .core.guarantees.guarantee import separation
+    from ..core.guarantees.guarantee import separation
     right = _judge(q, correct)
     facts, ok = [], []
     for st, y in examples:
@@ -205,21 +205,18 @@ def _constant(xs):
 
 def _slow_path(slow, q, reads, novel_on, writer, inputs):
     """slow= → (SlowPath, description)."""
-    from .core.dispatch import SlowPath
-    from .core.system import System
+    from ..core.dispatch import SlowPath
+    from ..core.system import System
     if isinstance(slow, SlowPath):
         return slow, f"the given SlowPath ({slow.mode})"
     if isinstance(slow, System):
         return SlowPath(slow, question=q.name if q.name in slow.questions else None), "the given System"
     kind = type(slow).__name__
-    if kind == "Spec" or hasattr(slow, "system") and hasattr(slow, "accepted"):
+    if kind == "Spec" or writer is not None or inputs is not None:
+        raise TypeError("a Spec as the slow path is compiled first (since 1.0 build does not compile it): c = "
+                        "solvi.experimental.compile.compile_spec(spec, [question], inputs, writer); build(..., slow=c)")
+    if hasattr(slow, "system") and hasattr(slow, "accepted"):
         c = slow
-        if kind == "Spec":
-            if writer is None or inputs is None:
-                raise ValueError("a Spec as the slow path is compiled here: give writer= (the model that writes the parts) "
-                                 "and inputs= (solvi.experimental.compile.Inputs)")
-            from .experimental.compile import compile_spec
-            c = compile_spec(slow, [q], inputs, writer)
         if not c.accepted:
             raise ValueError(f"the compiled specification was not accepted: {c.reason}")
         return SlowPath(c.system()), "the rules compiled from the written specification (solvi.experimental.compile)"
@@ -237,7 +234,7 @@ def _slow_path(slow, q, reads, novel_on, writer, inputs):
         return SlowPath(System(cat, [sq])), (f"the model {what} asked the question, reading {', '.join(reads)}"
                                              + ("; it may say \"not stated\" (→ a person)" if novel_on and not boolean else ""))
     if callable(slow):
-        from .core.catalog import Part
+        from ..core.catalog import Part
         fn = slow
 
         def answer(**given):
@@ -248,14 +245,14 @@ def _slow_path(slow, q, reads, novel_on, writer, inputs):
         return SlowPath(System(cat, [Question(q.name, q.text, q.answer)])), \
             f"the function {getattr(fn, '__name__', 'slow')} over {', '.join(reads)}"
     raise TypeError("slow= takes a SlowPath, a System, a decision part, a model (solvi.core.deciders.llm), a function state → answer, "
-                    "a compiled specification or a Spec")
+                    "or a compiled specification")
 
 
 # ------------------------------------------------------------------------------------------------ build
 def build(question, examples, *, catalog=None, learner=None, slow=None, reads=None, max_risk=None, max_error=None,
           signal=None, correct=None, novel="auto", budget=None, total=None, price=None, storage=None, split=None,
           seed=0, delta=0.10, min_slice=20, writer=None, inputs=None):
-    """Fit System 1, calibrate its guarantee and the dispatcher, wire the store → an AutoSystem (see the module docs).
+    """Fit System 1, calibrate its guarantee and the dispatcher, wire the store → a DecisionSystem (see the module docs).
 
     question: a Question, or the name of one a rule of `catalog` (or learner=) answers. examples: [(state, correct
     answer)] — a state is the dict `ask` takes. catalog: the parts System 1 computes facts with (and its answer rule, if
@@ -268,11 +265,11 @@ def build(question, examples, *, catalog=None, learner=None, slow=None, reads=No
     tokens (needed for dollars). storage: a path or a TraceStorage — every decision and the policy, hash-chained.
     split: (fit, guarantee, dispatch) shares. seed: the shuffle and the open-set simulation. delta: learn-then-test's
     confidence. min_slice: a slice of the slow path with fewer calibration examples goes to a person. writer, inputs:
-    for a Spec as the slow path."""
-    from .core.dispatch import SIGNALS, THINK, Dispatcher
-    from .core.guarantees.guarantee import promise_text
-    from .core.store import open_storage
-    from .core.system import System
+    gone in 1.0 (they compiled a Spec here): a TypeError says to compile it first."""
+    from ..core.dispatch import SIGNALS, THINK, Dispatcher
+    from ..core.guarantees.guarantee import promise_text
+    from ..core.store import open_storage
+    from ..core.system import System
     if (max_risk is None) == (max_error is None):
         raise ValueError("give the promise as max_risk= (P(answered alone and wrong)) or max_error= (the error among the "
                          "answers given alone)")
@@ -497,7 +494,7 @@ def build(question, examples, *, catalog=None, learner=None, slow=None, reads=No
         choices["dispatch_promise"] = (f"{promise_text(rep['method'], rep['level'], rep['delta'])}; on the {rep['n']} "
                                        f"calibration examples: answered alone {rep['answered']:.1%}, P(alone and wrong) "
                                        f"{rep['risk']:.2%}" + (f" ({rep['why']})" if rep.get("why") else ""))
-    return AutoSystem(qname, system, d, gate, slow_path, choices, calib)
+    return DecisionSystem(qname, system, d, gate, slow_path, choices, calib)
 
 
 def _rule_answer(cat, qname):
@@ -508,7 +505,7 @@ def _rule_answer(cat, qname):
 
 def _open_set(make_system, system, q, qname, fit_ex, g_ex, sig_name, correct, level, delta, seed, folds=3):
     """The leave-options-out simulation and the gate → (OpenSetGate, info)."""
-    from .core.guarantees.openset import OpenSetGate
+    from ..core.guarantees.openset import OpenSetGate
     norm = q.answer.normalize
     ks, kr, _ = _rows(system, qname, g_ex, sig_name, correct)
     keep = [i for i, s in enumerate(ks) if math.isfinite(s)]
@@ -532,4 +529,13 @@ def _open_set(make_system, system, q, qname, fit_ex, g_ex, sig_name, correct, le
     return gate, {"known": len(ks), "novel": len(us), "groups": " / ".join(str(len(g)) for g in groups)}
 
 
-__all__ = ["AutoSystem", "build"]
+def __getattr__(name):
+    if name == "AutoSystem":                       # the 0.9 name, until 1.1
+        from .._deprecate import _warn_from_caller
+        _warn_from_caller("solvi.auto.AutoSystem was renamed in 1.0: use solvi.solutions.decisions.DecisionSystem (what "
+                          "solvi.build returns); the old name is removed in 1.1", skip=1)
+        return DecisionSystem
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
+
+__all__ = ["DecisionSystem", "build"]

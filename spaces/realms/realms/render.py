@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import html
 
-from solvi.core.runtime import MISSING
+from solvi.runtime import MISSING
 
 from . import econ
 from .world import H, TERRAIN, W

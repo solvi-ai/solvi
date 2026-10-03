@@ -1,6 +1,6 @@
 """One entry point: a question, labelled examples, a promise and a slow path in — a ready System 1 + dispatcher out.
 
-`solvi.auto.build` fits System 1 from the examples (here a ridge head over the facts the catalog computes), splits
+`solvi.solutions.decisions.build` fits System 1 from the examples (here a ridge head over the facts the catalog computes), splits
 the examples so that every promise is calibrated on examples the fitted part did not see, calibrates System 1's
 guarantee, then who answers each slice System 1 hands over (System 1's own guess, the slow path, the slow path when it
 agrees, or a person), and stores every decision. `explain()` says what it chose; `report()` reads the store.
@@ -15,7 +15,7 @@ import tempfile
 from pathlib import Path
 
 from solvi import Answer, Catalog, Question
-from solvi.auto import build
+from solvi.solutions.decisions import build
 
 cat = Catalog()
 

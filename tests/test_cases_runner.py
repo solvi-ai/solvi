@@ -231,12 +231,12 @@ def test_the_test_runners_do_not_write_their_inputs_into_the_systems_store(tmp_p
     assert testing.main([str(tmp_path), "-q", "--store"]) == 0 and stored() == 1          # only when asked
     (tmp_path / "honesty.json").write_text(json.dumps({"task": "task.py", "cases": [
         {"name": "big", "state": {"amount": 500}, "expected": {"big": "yes"}}]}))
-    from solvi import honesty
+    from solvi.testing import honesty
     assert honesty.report(tmp_path / "honesty.json")["cases"] == 1 and stored() == 1
 
 
 def test_one_case_format_for_solvi_test_and_solvi_honesty(tmp_path, capsys):
-    from solvi import honesty
+    from solvi.testing import honesty
     gallery = Path(__file__).resolve().parents[1] / "gallery" / "01_support_triage" / "cases.json"
     rep = honesty.report(gallery)                                    # a cases.json ("expected") is a honesty set
     assert rep["cases"] == len(json.loads(gallery.read_text())) > 5 and rep["metrics"]

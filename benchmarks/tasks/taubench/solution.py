@@ -35,8 +35,8 @@ from harness import chat, run_task  # noqa: E402
 from score import score  # noqa: E402
 
 import numpy  # noqa: E402,F401 - imported once before the threads: a concurrent first import fails
-from solvi.agents import Guard  # noqa: E402
-from solvi.agents.confirm import accepts  # noqa: E402
+from solvi.solutions.guard import Guard  # noqa: E402
+from solvi.solutions.guard.confirm import accepts  # noqa: E402
 
 MODEL = "openai/gpt-oss-120b"
 ORDER_WRITES = ["cancel_pending_order", "modify_pending_order_address", "modify_pending_order_payment",

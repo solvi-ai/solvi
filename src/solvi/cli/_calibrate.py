@@ -17,9 +17,9 @@ import json
 import math
 import sys
 
-from .core import calibfile
-from .core.calibfile import _enc, _kind_of, save
-from .command import dump as _dump, fail as _fail, load_object
+from ..core import calibfile
+from ..core.calibfile import _enc, _kind_of, save
+from .._command import dump as _dump, fail as _fail, load_object
 
 
 def _cell(v):
@@ -53,7 +53,7 @@ def read_rows(path):
 
 def label_of(part, y):
     """A label as written in a file → an answer the part can take."""
-    from .core.catalog import NOT_STATED_KEY, Unknown
+    from ..core.catalog import NOT_STATED_KEY, Unknown
     if y == NOT_STATED_KEY:
         return Unknown
     sp = part.spec
@@ -83,7 +83,7 @@ def _option(sp, s):
 
 def examples_of(part, rows, group_cols=()):
     """Rows (dicts with "label") → [(Facts, label)] for act_guard / calibrate_for / conformal."""
-    from .core.deciders import Facts
+    from ..core.deciders import Facts
     facts = list(part.facts) if hasattr(part, "facts") else []
     facts = [f for f in facts if f not in group_cols]
     out = []
@@ -109,7 +109,7 @@ def examples_of(part, rows, group_cols=()):
 
 def find_part(system, name):
     """The decision behind a question (its rule) or a catalog part by name → a DecisionPart / combination, or None."""
-    from .core.deciders import decision_of
+    from ..core.deciders import decision_of
     cat = system.catalog if hasattr(system, "catalog") else system
     d = decision_of(cat, name) if name in cat.rules else None
     if d is None and name in cat.parts:
@@ -200,7 +200,7 @@ def cmd_calibrate(a):
             print("  per group:")
             print(f"    {'group':28s} {'n':>5s} {'threshold':>10s} {'answered':>9s} {'error':>7s} {'risk':>7s}  pooled")
             for p, g in sorted(info["groups"].items(), key=lambda kv: (len(kv[0]), kv[0])):
-                from .core.calibration import group_name
+                from ..core.calibration import group_name
                 t = g["threshold"]
                 pooled = ", ".join(group_name(x) for x in g["pooled"]) if g["pooled"] else ""
                 print(f"    {group_name(p)[:28]:28s} {g['n']:5d} {t if math.isfinite(t) else float('inf'):10.4g} "

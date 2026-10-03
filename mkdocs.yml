@@ -76,7 +76,7 @@ nav:
       - solvi.experimental.learning: api/learning.md
       - solvi.experimental.oncalib: api/oncalib.md
       - solvi.serve: api/serve.md
-      - solvi.agents: api/agents.md
+      - solvi.solutions.guard: api/agents.md
       - solvi.experimental.hooks: api/hooks.md
       - solvi.core.textin: api/textin.md
       - solvi.core._inputs: api/inputs.md
@@ -99,7 +99,7 @@ nav:
       - solvi.core.store.sysreport: api/sysreport.md
       - solvi.core.sets: api/sets.md
       - solvi.core.slow.search: api/search.md
-      - solvi.auto: api/auto.md
+      - solvi.solutions.decisions: api/auto.md
       - solvi.core.dispatch: api/dispatch.md
       - solvi.experimental.counterfactual: api/counterfactual.md
       - solvi.core.deciders.perturb: api/perturb.md
@@ -107,11 +107,11 @@ nav:
       - solvi.core.store.signature: api/signature.md
       - solvi.core.store.diff: api/diff.md
       - solvi.testing: api/testing.md
-      - solvi.honesty: api/honesty.md
+      - solvi.testing.honesty: api/honesty.md
       - solvi.check: api/check.md
       - solvi.core.calibfile: api/calibfile.md
       - solvi.models: api/models.md
-      - solvi.scaffold: api/scaffold.md
+      - solvi.cli._scaffold: api/scaffold.md
       - solvi.core._i18n: api/i18n.md
   - Changelog: changelog.md
   - Roadmap: roadmap.md

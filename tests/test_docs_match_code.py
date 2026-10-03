@@ -154,7 +154,7 @@ def test_stale_sentences_of_the_docs_stay_corrected():
     fmt = (ROOT / "docs" / "decide_format.md").read_text()
     assert "solvi answers yes/no and choice questions" not in GUIDE and "decide-*" not in fmt
     assert "proposed `solvi_decide v3`" not in fmt and "model_block*.onnx" in fmt
-    for text in (README, GUIDE, (ROOT / "src" / "solvi" / "scaffold.py").read_text()):
+    for text in (README, GUIDE, (ROOT / "src" / "solvi" / "cli" / "_scaffold.py").read_text()):
         assert "the only command that downloads" not in text
     sig = _flat(GUIDE.split("`System(catalog, questions,")[1].split(")`")[0])
     assert all(f"{p}=" in sig for p in list(_inspect.signature(System).parameters)[2:]), sig

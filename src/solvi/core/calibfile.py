@@ -1,4 +1,4 @@
-"""Calibrations as files (the `solvi calibrate` command: solvi.calibrate).
+"""Calibrations as files (the `solvi calibrate` command: solvi.cli._calibrate).
 
 `act_guard`, `calibrate_for` and `conformal` set a decision's thresholds in memory. A calibration file keeps them, so a
 catalog calibrated once (on a few hundred labelled examples of your stream) loads the same thresholds every time it starts:
@@ -22,7 +22,7 @@ one it had right after calibrating, so stored decisions replay against it.
 Thresholds per group by fact names load as they are; by a function, pass the same function again:
 `part.load_calibration(path, groups=my_grouping)` (its code is fingerprinted and must match).
 
-`solvi calibrate` (solvi.calibrate) calibrates a model decision on labelled examples and writes the same file."""
+`solvi calibrate` (solvi.cli._calibrate) calibrates a model decision on labelled examples and writes the same file."""
 from __future__ import annotations
 
 import json
@@ -188,15 +188,18 @@ def load(part, path, groups=None, strict=True):
     return part
 
 
-# The command's helpers lived here until 1.0; they moved to solvi.calibrate (a command imports the deciders, a file format
+# The command's helpers lived here until 1.0; they moved to solvi.cli._calibrate (a command imports the deciders, a file format
 # does not). The old names still resolve here, looked up on first use.
 _MOVED_TO_CALIBRATE = ("add_parser", "cmd_calibrate", "examples_of", "find_part", "label_of", "read_rows")
 
 
 def __getattr__(name):
-    if name in _MOVED_TO_CALIBRATE:
+    if name in _MOVED_TO_CALIBRATE:                 # until 1.1, with a SolviDeprecationWarning
         import importlib
-        return getattr(importlib.import_module("solvi.calibrate"), name)
+
+        from .._deprecate import _warn_from_caller, moved_message
+        _warn_from_caller(moved_message(f"solvi.calibfile.{name}", f"solvi.cli._calibrate.{name}"), skip=1)
+        return getattr(importlib.import_module("solvi.cli._calibrate"), name)
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 

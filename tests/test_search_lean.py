@@ -10,7 +10,8 @@ from pathlib import Path
 
 import pytest
 
-from solvi import Answer, Catalog, JSONLStorage, Question, System
+from solvi import Answer, Catalog, Question, System
+from solvi.core.store import JSONLStorage
 from solvi.core.slow.refine import causes, failed_checks
 from solvi.core.runtime import vhash
 from solvi.core.slow.search import Tree, _verdict, search

@@ -50,14 +50,14 @@ The report also includes counts that explain the numbers: acted, escalated, conf
 
 ```bash
 # the core set: no model files, runs in well under a second
-uv run python -m solvi.honesty tests/honesty/core_v1.json --baseline tests/honesty/core_v1.baseline.json
+uv run solvi honesty tests/honesty/core_v1.json --baseline tests/honesty/core_v1.baseline.json
 
 # the injection traps: no model files either
-uv run python -m solvi.honesty tests/honesty/injection_v1.json --baseline tests/honesty/injection_v1.baseline.json
+uv run solvi honesty tests/honesty/injection_v1.json --baseline tests/honesty/injection_v1.baseline.json
 
 # the model subset: solvi-ai/solvi-base from the Hugging Face cache (`solvi models pull solvi-ai/solvi-base` first), or
 # the checkpoint $SOLVI_DECIDE_MODEL names (a folder; a Hugging Face id is downloaded)
-uv run --with onnxruntime --with tokenizers python -m solvi.honesty tests/honesty/model_v1.json \
+uv run --with onnxruntime --with tokenizers solvi honesty tests/honesty/model_v1.json \
     --baseline tests/honesty/model_v1.baseline.json
 
 # the same checks as tests (the model test is marked `model` and skips without the checkpoint or onnxruntime)
@@ -76,7 +76,7 @@ A worse number fails the gate. Either fix the regression, or, if the change is i
 threshold that trades coverage for fewer confident errors), write a new baseline and commit it with a note on why:
 
 ```bash
-uv run python -m solvi.honesty tests/honesty/core_v1.json --save tests/honesty/core_v1.baseline.json
+uv run solvi honesty tests/honesty/core_v1.json --save tests/honesty/core_v1.baseline.json
 ```
 
 The model subset's baseline is of one checkpoint — its `"model"` line names it (`solvi-ai/solvi-base`, the Hugging Face
@@ -91,7 +91,7 @@ The module works on any catalog. Write a task module that defines `system()` (or
 `prepare(state)`) and a set that points to it with `"task": "task.py"`. From Python:
 
 ```python
-from solvi import honesty
+from solvi.testing import honesty
 rows = honesty.run(system, cases)          # one row per (case, question)
 m = honesty.metrics(rows, risk=0.1)
 problems = honesty.compare(m, baseline_metrics, tolerance=0.02)

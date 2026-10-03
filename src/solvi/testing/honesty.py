@@ -1,7 +1,7 @@
 """Honesty numbers for a release gate: how often a system acts and is wrong, how much it can answer at a target risk, and how
 often its quotes support a right answer — on a fixed, labelled set, compared against a stored baseline.
 
-    python -m solvi.honesty tests/honesty/core_v1.json --baseline tests/honesty/core_v1.baseline.json
+    solvi honesty tests/honesty/core_v1.json --baseline tests/honesty/core_v1.baseline.json
 
 A set is a JSON file: {"name", "version", "task": "task.py" (relative to the set file), "cases": [...]}; a case is
 {"name", "state": {...}, "expected": {question: answer}, "ask": [questions] (optional; default: the expected questions)}. A gold
@@ -44,7 +44,7 @@ import types
 from pathlib import Path
 
 
-from .core.catalog import NOT_STATED_KEY, Unknown
+from ..core.catalog import NOT_STATED_KEY, Unknown
 
 GATED = {"confident_error_rate": -1, "coverage_at_risk": +1, "quote_support_proxy": +1,     # +1: higher is better
          "injection_followed_rate": -1}
@@ -101,7 +101,7 @@ def system_of(task):
     """The System a task module describes: `task.system()`, else System(task.cat, task.QUESTIONS)."""
     if callable(getattr(task, "system", None)):
         return task.system()
-    from .core.system import System
+    from ..core.system import System
     return System(task.cat, task.QUESTIONS)
 
 
@@ -189,7 +189,7 @@ def run(system, cases, prepare=None, store=True):
 # --------------------------------------------------------------------------------------------------- the numbers
 def metrics(rows, risk=0.10):
     """The release numbers of a run (see the module docstring), plus counts that explain them."""
-    from .core.calibration import coverage_at, threshold_for
+    from ..core.calibration import coverage_at, threshold_for
     n = len(rows)
     acted = [r for r in rows if r["acted"]]
     wrong = [r for r in acted if not r["correct"]]
@@ -267,7 +267,7 @@ def main(argv=None):
     except Exception as e:  # noqa: BLE001
         print(json.dumps({"set": a.set, "error": f"{type(e).__name__}: {e}", "ok": False}), file=sys.stderr)
         return 2
-    from .core.schema import dumps
+    from ..core.schema import dumps
     text = dumps(out, indent=1, ensure_ascii=False, default=str)
     print(text)
     if a.save:

@@ -1,9 +1,9 @@
-"""solvi.agents.confirm and Guard.require_confirmation: a call goes ahead only when the user explicitly accepted a message
+"""solvi.solutions.guard.confirm and Guard.require_confirmation: a call goes ahead only when the user explicitly accepted a message
 of the assistant that names its values; the proposal and the acceptance are the decision's evidence; a refused call or
 reply comes back into the conversation with what to do next (GuardDecision.advice / feedback)."""
 import pytest
 
-from solvi.agents import Guard, accepted_proposals, accepts, conversation
+from solvi.solutions.guard import Guard, accepted_proposals, accepts, conversation
 
 
 def shop(**kw):

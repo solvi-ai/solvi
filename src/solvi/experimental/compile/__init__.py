@@ -1944,7 +1944,7 @@ class Versions:
 # ───────────────────────────────────────────────────────────── into an agent guard
 def to_guard(compiled: Compiled, guard, tools=None, *, question: str | None = None, on_fail: str = "deny",
              allow=None, name: str | None = None) -> list:
-    """Register the compiled policy with a `solvi.agents.Guard` → the names of the policies added. The policies read
+    """Register the compiled policy with a `solvi.Guard` → the names of the policies added. The policies read
     the compiled catalog's inputs (they must be facts the guard gives: tool_name, tool_arguments, conversation, ... or
     your declared facts) and run the compiled System on them.
 

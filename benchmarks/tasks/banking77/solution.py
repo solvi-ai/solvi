@@ -27,7 +27,8 @@ from classifier import decider, label  # noqa: E402
 from common.llm import DATA, read_jsonl, write_jsonl  # noqa: E402
 from score import score  # noqa: E402
 
-from solvi import Catalog, JSONLStorage, System  # noqa: E402
+from solvi import Catalog, System  # noqa: E402
+from solvi.core.store import JSONLStorage  # noqa: E402
 from solvi.core.guarantees.openset import OpenSetGate, leave_out  # noqa: E402
 
 MAX_ERROR = 0.05

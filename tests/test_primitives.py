@@ -9,8 +9,8 @@ from typing import Literal
 import numpy as np
 import pytest
 
-from solvi import (Answer, Catalog, Claim, Decision, Estimate, FactTypeError, Maybe, Question, Quote, Rank, Response, Span,
-                   System, Unknown)
+from solvi import Answer, Catalog, Claim, Decision, Estimate, Maybe, Question, Quote, Rank, Response, Span, System, Unknown
+from solvi.core.types import FactTypeError
 from solvi.core.deciders import DecideModel, Item, capabilities, decode_pointer, plan_batches, pointer_evidence
 from solvi.core.types import Bins
 

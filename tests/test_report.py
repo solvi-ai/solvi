@@ -5,7 +5,8 @@ import re
 
 import pytest
 
-from solvi import Answer, Catalog, Decision, JSONLStorage, Question, Quote, SQLiteStorage, System
+from solvi import Answer, Catalog, Decision, Question, Quote, System
+from solvi.core.store import JSONLStorage, SQLiteStorage
 from solvi.cli import main
 from solvi.core.store.report import highlight, md
 

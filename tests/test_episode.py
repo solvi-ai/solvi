@@ -5,7 +5,8 @@ import json
 import numpy as np
 import pytest
 
-from solvi import Catalog, Question, SQLiteStorage, System
+from solvi import Catalog, Question, System
+from solvi.core.store import SQLiteStorage
 from solvi.core.deciders import DecideModel
 from solvi.core.knowledge.episodes import Chooser, Episode, EpisodeView, LongMemory
 

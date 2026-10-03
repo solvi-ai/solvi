@@ -175,8 +175,9 @@ def test_strategists():
 
 
 def test_storage_tooling_and_agents(tmp_path):
-    from solvi import JSONLStorage, testing
-    from solvi.agents import Guard
+    from solvi import testing
+    from solvi.core.store import JSONLStorage
+    from solvi.solutions.guard import Guard
     from solvi.core.knowledge.memory import CorrectionMemory
     with pytest.raises(TypeError, match=rf"JSONLStorage\(catalog=\) {GONE}system="):
         JSONLStorage(tmp_path / "a.jsonl", catalog=None)
@@ -207,7 +208,7 @@ def test_storage_tooling_and_agents(tmp_path):
 
 
 def test_files_and_command_lines(tmp_path, monkeypatch, capsys):
-    from solvi import honesty
+    from solvi.testing import honesty
     from solvi.experimental import hooks
     p = tmp_path / "set.json"
     p.write_text(json.dumps({"cases": [{"name": "a", "state": {}, "gold": {"q": "yes"}}]}))

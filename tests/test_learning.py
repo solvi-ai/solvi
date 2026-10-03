@@ -5,7 +5,8 @@ import warnings
 
 import pytest
 
-from solvi import Catalog, SQLiteStorage, System
+from solvi import Catalog, System
+from solvi.core.store import SQLiteStorage
 from solvi.core.deciders import DecideModel
 from solvi.experimental.learning import ExperimentalWarning, Learning, split_of
 from solvi.core.store import UntrustedLabel

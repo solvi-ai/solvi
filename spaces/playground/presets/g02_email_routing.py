@@ -9,7 +9,7 @@ import random
 import re
 
 from solvi import Answer, Catalog, Question, Quote
-from solvi.core.deciders.rulelist import RuleList, literals
+from solvi.rulelist import RuleList, literals
 
 cat = Catalog()
 TEAMS = ["billing", "technical", "sales", "security", "hr"]

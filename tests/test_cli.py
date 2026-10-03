@@ -12,11 +12,12 @@ from pathlib import Path
 
 import pytest
 
+from solvi.cli import _calibrate as calibrate
 from solvi import models
 from solvi.core import calibfile
 from solvi.cli import load_object, main
 from solvi.core.deciders import Facts
-from solvi.scaffold import TEMPLATES
+from solvi.cli._scaffold import TEMPLATES
 
 sys.path.insert(0, str(Path(__file__).parent))
 from test_decide import TASK, TEAMS, model, texts  # noqa: E402
@@ -80,7 +81,7 @@ def test_init_into_a_path_that_is_a_file_says_so_and_writes_nothing(tmp_path, ca
     assert "is a file, not a folder" in err and "nothing written" in err and f.read_text() == "mine\n"
     assert main(["init", str(f), "--force"]) == 1 and f.read_text() == "mine\n"
     with pytest.raises(NotADirectoryError):
-        from solvi.scaffold import init
+        from solvi.cli._scaffold import init
         init(f)
 
 
@@ -329,7 +330,7 @@ model = DecideModel(Real(), meta={"format": "test", "temperature": 1.0})
 @pytest.mark.parametrize("template", TEMPLATES)
 def test_init_project_calibrated_with_a_real_model_still_passes_its_ci_with_the_stand_in(tmp_path, capsys, monkeypatch,
                                                                                          template):
-    from solvi.scaffold import SPECS
+    from solvi.cli._scaffold import SPECS
     monkeypatch.chdir(tmp_path)
     d = scaffold(tmp_path, template, with_model=True)
     q = SPECS[template]["model_question"]
@@ -347,7 +348,7 @@ def test_init_project_calibrated_with_a_real_model_still_passes_its_ci_with_the_
     assert main(["check", f"{d}/catalog.py:system"]) == 0
     code, out = run(capsys, "ask", f"{d}/catalog.py:system", d / "example.json", "--json")
     assert code == 0 and json.loads(out)["answers"]
-    part = calibfile.find_part(load_object(f"{d}/catalog.py:system"), q)
+    part = calibrate.find_part(load_object(f"{d}/catalog.py:system"), q)
     assert part.guarantee is None                                        # the real model's thresholds were not applied
     assert "stand-in" in (d / "README.md").read_text() and f"{q}.calib.json" in (d / "README.md").read_text()
 
@@ -360,7 +361,7 @@ def test_calibrate_command_writes_a_file_the_catalog_loads(tmp_path, capsys, mon
                      "--conformal", "0.9", "--out", out)
     assert code == 0 and "answered alone" in text and "must escalate at least" in text and out.exists()
     system = load_object(f"{d}/catalog.py:system")
-    part = calibfile.find_part(system, "route")
+    part = calibrate.find_part(system, "route")
     assert part.guarantee["method"] == "crc" and part.conformal_set is not None
     assert main(["test", str(d)]) == 0
     # a calibration made with another model stops the catalog from loading under a real model — but not `solvi calibrate`
@@ -425,16 +426,16 @@ def test_calibrate_with_groups_that_all_answer_alone_exits_0_and_does_not_print_
 def test_calibrate_reads_csv_labels_of_integer_options(tmp_path):
     m = model()
     stars = m.decision("stars", "How many stars?", "email", [1, 2, 3, 4, 5], kind="score")
-    assert calibfile.label_of(stars, "3") == 3 and stars.spec.label(calibfile.label_of(stars, " 5 ")) == 5
+    assert calibrate.label_of(stars, "3") == 3 and stars.spec.label(calibrate.label_of(stars, " 5 ")) == 5
     code = m.decision("code", "Which code?", "email", [10, 20])
-    assert calibfile.label_of(code, "10") == 10
-    assert calibfile.label_of(code, "30") == "30"       # not an option: left as written, refused by the part
+    assert calibrate.label_of(code, "10") == 10
+    assert calibrate.label_of(code, "30") == "30"       # not an option: left as written, refused by the part
     many = m.decision("codes", "Which codes?", "email", [10, 20, 30], kind="multi")
-    assert calibfile.label_of(many, "10|30") == [10, 30]
+    assert calibrate.label_of(many, "10|30") == [10, 30]
     team = m.decision("team", TASK, "email", TEAMS)
-    assert calibfile.label_of(team, "billing") == "billing"
+    assert calibrate.label_of(team, "billing") == "billing"
     (tmp_path / "l.csv").write_text("email,label\nfive stars,5\none star,1\n")
-    ex = calibfile.examples_of(stars, calibfile.read_rows(str(tmp_path / "l.csv")))
+    ex = calibrate.examples_of(stars, calibrate.read_rows(str(tmp_path / "l.csv")))
     assert [y for _, y in ex] == [5, 1]
 
 

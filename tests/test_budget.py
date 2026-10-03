@@ -7,7 +7,8 @@ import json
 import pytest
 from pydantic import BaseModel
 
-from solvi import Answer, Catalog, JSONLStorage, Question, System
+from solvi import Answer, Catalog, Question, System
+from solvi.core.store import JSONLStorage
 from solvi.core.costs import Budget, BudgetStop, Cost
 from solvi.core.slow.generate import generator
 from solvi.core.slow.refine import Fail, Refinement, refine

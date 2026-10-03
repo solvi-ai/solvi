@@ -100,6 +100,21 @@ the very same module and warns (`SolviDeprecationWarning`) with the path to use;
   (1.2: it graduates or is removed); a decision made by a System that uses one records it in the stored decision
   (`meta["experimental"]`, e.g. `["lora"]`) and `solvi report --overview` counts them. Nothing stable imports them,
   except on request: `solvi hook` and `solvi serve --upstream`.
+- **What `solvi` exports**: 21 names (`__all__`) — the entry points `build` (`solvi.solutions.decisions.build`, was
+  `solvi.auto.build`) and `Guard` (`solvi.solutions.guard.Guard`, was `solvi.agents.Guard`), `Budget`, and the shared
+  vocabulary `Catalog`, `Question`, `Answer`, `System`, `Response`, `Quote`, `Claim`, `Decision`, `Fail`, `Unknown`,
+  `Span`, `Maybe`, `Rank`, `Estimate`, `Scale`, `Bins`, `SolviDeprecationWarning`, `ExperimentalWarning` (`Agent` and
+  `Knowledge` come with the knowledge memory). The other 0.9 names (`JSONLStorage` and the other stores,
+  `TraceStorage`, `Trace`, `Record`, `Result`, `MISSING`, `Shadow`, `AnswerType`, `NotStated`, `FactTypeError`) are
+  imported from their modules (table below); `from solvi import JSONLStorage` works in 1.0.x with a warning.
+- `solvi.auto.AutoSystem` is now `solvi.solutions.decisions.DecisionSystem` (what `solvi.build` returns; the old name
+  works in 1.0.x with a warning). `build(slow=...)` no longer compiles a written specification itself (that would make
+  it import the experimental compiler): compile it first (`solvi.experimental.compile.compile_spec`) and pass the
+  result; `writer=` and `inputs=` raise a TypeError saying so.
+- **`solvi.models`, the providers**: `decider("solvi-base")` (a published decider from the local cache, or any name
+  `solvi models` reads), `llm(url, model)` (an OpenAI-compatible server), `systemone(url, model)` and `DecideModel`.
+- The honesty gate runs as `solvi honesty SET.json --baseline B.json` (`solvi.testing.honesty`; it was
+  `python -m solvi.honesty`).
 - `solvi.core` itself keeps the names it exported in 0.9 (`Catalog`, `Quote`, `find_quote`, ...); its private helpers
   are in `solvi.core.catalog`.
 
@@ -108,9 +123,14 @@ Where each module went:
 <!-- migration table: tools/migration_table.py -->
 | you imported (0.9) | import now (1.0) | level |
 |---|---|---|
+| `solvi.agents` | `solvi.solutions.guard` | high level: ready to use |
+| `solvi.agents.confirm` | `solvi.solutions.guard.confirm` | high level: ready to use |
+| `solvi.agents.guard` | `solvi.solutions.guard` | high level: ready to use |
+| `solvi.agents.intents` | `solvi.solutions.guard.intents` | high level: ready to use |
 | `solvi.agents.mcp` | `solvi.experimental.mcp` | experimental: may change; removed in 1.2 unless it graduates |
 | `solvi.agree` | `solvi.core.slow.agree` | low level: building blocks |
 | `solvi.audit` | `solvi.core.store.audit` | low level: building blocks |
+| `solvi.auto` | `solvi.solutions.decisions` | high level: ready to use |
 | `solvi.calibfile` | `solvi.core.calibfile` | low level: building blocks |
 | `solvi.calibration` | `solvi.core.calibration` | low level: building blocks |
 | `solvi.charts` | `solvi.experimental.charts` | experimental: may change; removed in 1.2 unless it graduates |
@@ -118,6 +138,7 @@ Where each module went:
 | `solvi.charts.propose` | `solvi.experimental.charts.propose` | experimental: may change; removed in 1.2 unless it graduates |
 | `solvi.charts.render` | `solvi.experimental.charts.render` | experimental: may change; removed in 1.2 unless it graduates |
 | `solvi.charts.spec` | `solvi.experimental.charts.spec` | experimental: may change; removed in 1.2 unless it graduates |
+| `solvi.command` | `solvi._command` | internal |
 | `solvi.compile` | `solvi.experimental.compile` | experimental: may change; removed in 1.2 unless it graduates |
 | `solvi.costs` | `solvi.core.costs` | low level: building blocks |
 | `solvi.counterfactual` | `solvi.experimental.counterfactual` | experimental: may change; removed in 1.2 unless it graduates |
@@ -140,6 +161,7 @@ Where each module went:
 | `solvi.generate` | `solvi.core.slow.generate` | low level: building blocks |
 | `solvi.guarantee` | `solvi.core.guarantees.guarantee` | low level: building blocks |
 | `solvi.heads` | `solvi.core.deciders.heads` | low level: building blocks |
+| `solvi.honesty` | `solvi.testing.honesty` | high level: ready to use |
 | `solvi.hooks` | `solvi.experimental.hooks` | experimental: may change; removed in 1.2 unless it graduates |
 | `solvi.i18n` | `solvi.core._i18n` | internal |
 | `solvi.inputs` | `solvi.core._inputs` | internal |
@@ -160,6 +182,7 @@ Where each module went:
 | `solvi.rulelist` | `solvi.core.deciders.rulelist` | low level: building blocks |
 | `solvi.runtime` | `solvi.core.runtime` | low level: building blocks |
 | `solvi.sandbox` | `solvi.experimental.compile.sandbox` | experimental: may change; removed in 1.2 unless it graduates |
+| `solvi.scaffold` | `solvi.cli._scaffold` | internal |
 | `solvi.schema` | `solvi.core.schema` | low level: building blocks |
 | `solvi.search` | `solvi.core.slow.search` | low level: building blocks |
 | `solvi.sets` | `solvi.core.sets` | low level: building blocks |
@@ -174,17 +197,33 @@ Where each module went:
 | `solvi.textin` | `solvi.core.textin` | low level: building blocks |
 | `solvi.typed` | `solvi.core.types` | low level: building blocks |
 | `solvi.worldmap` | `solvi.core.knowledge.worldmap` | low level: building blocks |
+| `from solvi import AnswerType` | `from solvi.core import AnswerType` | low level: building blocks |
+| `from solvi import DuckDBStorage` | `from solvi.core.store import DuckDBStorage` | low level: building blocks |
+| `from solvi import FactTypeError` | `from solvi.core.types import FactTypeError` | low level: building blocks |
+| `from solvi import JSONLStorage` | `from solvi.core.store import JSONLStorage` | low level: building blocks |
+| `from solvi import MISSING` | `from solvi.core.runtime import MISSING` | low level: building blocks |
+| `from solvi import NotStated` | `from solvi.core import NotStated` | low level: building blocks |
+| `from solvi import PostgresStorage` | `from solvi.core.store import PostgresStorage` | low level: building blocks |
+| `from solvi import Record` | `from solvi.core.runtime import Record` | low level: building blocks |
+| `from solvi import Result` | `from solvi.core.runtime import Result` | low level: building blocks |
+| `from solvi import SQLiteStorage` | `from solvi.core.store import SQLiteStorage` | low level: building blocks |
+| `from solvi import Shadow` | `from solvi.core.store.diff import Shadow` | low level: building blocks |
+| `from solvi import Trace` | `from solvi.core.runtime import Trace` | low level: building blocks |
+| `from solvi import TraceStorage` | `from solvi.core.store import TraceStorage` | low level: building blocks |
 <!-- end of migration table -->
 
-### Moved inside solvi (old imports keep working)
+### Moved between modules (the names stay where they were too)
 
 To break the import cycle between the deciders, the System, the store and the dispatcher, some pieces moved to modules
-of their own. Every old import path still works, with no warning, and stored records, hashes, fingerprints and replay
-are unchanged: `Response` → `solvi.response`; the label-source checks (`check_source`, `TRUSTED_SOURCES`, `VERIFIED`,
-`UntrustedLabel`) → `solvi.sources`; `GroupBy` and `group_name` → `solvi.core.calibration`; `plan_batches` →
-`solvi.core.runtime`; the dollars of recorded model calls (`price_of`) → `solvi.core.costs`; the request limits and errors of
-`solvi serve` (`Limits`, `RequestError`, `parse_json`, ...) → `solvi._rpc`; the `solvi calibrate` command and its
-helpers (`read_rows`, `examples_of`, `label_of`, `find_part`) → `solvi.calibrate`.
+of their own; the modules they left still have them (the same objects, no warning), and stored records, hashes,
+fingerprints and replay are unchanged: `Response` → `solvi.core.response`; the label-source checks (`check_source`,
+`TRUSTED_SOURCES`, `VERIFIED`, `UntrustedLabel`) → `solvi.core.sources`; `GroupBy` and `group_name` →
+`solvi.core.calibration`; `plan_batches` → `solvi.core.runtime`; the dollars of recorded model calls (`price_of`) →
+`solvi.core.costs`; the request limits and errors of `solvi serve` (`Limits`, `RequestError`, `parse_json`, ...) →
+`solvi._rpc`. The `solvi calibrate` command's helpers (`read_rows`, `examples_of`, `label_of`, `find_part`) left the
+calibration-file format for the command (`solvi.cli._calibrate`): `solvi.calibfile.read_rows` and the others still
+work in 1.0.x with a warning. The `solvi models` command's code moved to `solvi.cli._models` (`solvi.models` keeps
+the library: `load`, `resolve`, `pull`, `cached`, and the providers below).
 
 ### Moving into the knowledge memory
 

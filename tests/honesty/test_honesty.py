@@ -1,13 +1,13 @@
 """The honesty suite (a release gate): a fixed, versioned set of cases where the honest outcome is pinned down — abstaining,
 "not stated", act vs escalate, and traps (the answer is absent, the sources conflict, the answer is outside the options,
-a quote is not in the text, a hard check raises) — and solvi.honesty's three numbers on it, compared with the stored
+a quote is not in the text, a hard check raises) — and solvi.testing.honesty's three numbers on it, compared with the stored
 baseline. The core set runs without model files; the model-backed subset (@pytest.mark.model) skips without them."""
 import json
 from pathlib import Path
 
 import pytest
 
-from solvi import honesty
+from solvi.testing import honesty
 from solvi.core import NOT_STATED_KEY, Unknown
 
 HERE = Path(__file__).resolve().parent

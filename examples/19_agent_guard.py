@@ -32,7 +32,7 @@ from typing import Literal
 
 import numpy as np
 
-from solvi.agents import Guard
+from solvi.solutions.guard import Guard
 from solvi.core.deciders import DecideModel
 
 ACME, GLOBEX, EVIL = "DE89370400440532013000", "FR7630006000011234567890189", "GB33BUKB20201555555555"

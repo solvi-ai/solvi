@@ -7,7 +7,8 @@ import math
 import pytest
 from test_llm import TEAMS, FakeLLM
 
-from solvi import Answer, Catalog, Decision, Fail, JSONLStorage, Question, System
+from solvi import Answer, Catalog, Decision, Fail, Question, System
+from solvi.core.store import JSONLStorage
 from solvi.core.dispatch import Budget, Cost, Dispatcher, SlowPath, cost_of
 from solvi.core.deciders.llm import llm
 

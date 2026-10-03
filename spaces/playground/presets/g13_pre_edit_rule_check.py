@@ -23,8 +23,8 @@ import zlib
 import numpy as np
 
 from solvi import Answer, Catalog, Question
-from solvi.core.deciders import DecideModel
-from solvi.core.deciders.perturb import injection_spans
+from solvi.decide import DecideModel
+from solvi.perturb import injection_spans
 
 cat = Catalog()
 RISK = 0.05        # act_guard: P(a fuzzy rule answered alone and wrongly) <= 5% for edits like the labelled examples
@@ -154,7 +154,7 @@ def migration_problems(path, new):
 
 @cat.fn
 def instruction_lines(added_lines):
-    """added lines with instruction-like text addressed to a reviewer or a model (solvi.core.deciders.perturb's detector): reported,
+    """added lines with instruction-like text addressed to a reviewer or a model (solvi.perturb's detector): reported,
     never obeyed — code checks do not read them, and the deciders are asked again without them (perturb)"""
     return [(n, text.strip()) for n, text in added_lines if injection_spans(text)]
 

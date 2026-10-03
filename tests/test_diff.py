@@ -2,7 +2,8 @@
 import importlib.util
 import json
 
-from solvi import Answer, Catalog, Decision, JSONLStorage, Question, SQLiteStorage, System
+from solvi import Answer, Catalog, Decision, Question, System
+from solvi.core.store import JSONLStorage, SQLiteStorage
 from solvi.cli import main
 from solvi.core.store.diff import Shadow, compare, diff
 from solvi.core.provenance import catalog_fingerprint, code_fingerprint

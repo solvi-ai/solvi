@@ -423,7 +423,7 @@ def test_a_question_comes_back_from_json_equal_with_described_int_options_and_a_
     """Question.from_json(q.to_json()) == q failed for Answer.ordinal({1: "bad", 2: "ok"}) (the keys came back as
     strings) and for a span of an Enum (it loaded with type None: a span of any text)."""
     import datetime
-    from solvi import AnswerType
+    from solvi.core import AnswerType
     for at in (Answer.ordinal({1: "bad", 2: "ok"}), Answer.span(type=_Tier), Answer.span(type=datetime.date),
                Answer.choice({"a": "the first", "b": "the second"})):
         q = Question("q", "?", at)

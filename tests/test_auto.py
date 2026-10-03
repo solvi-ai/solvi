@@ -1,4 +1,4 @@
-"""solvi.auto.build: one entry point that fits System 1 from examples, calibrates its guarantee (or an open-set gate)
+"""solvi.solutions.decisions.build: one entry point that fits System 1 from examples, calibrates its guarantee (or an open-set gate)
 and the dispatcher, wires the store, and says what it chose."""
 import hashlib
 import random
@@ -7,7 +7,7 @@ import numpy as np
 import pytest
 
 from solvi import Answer, Catalog, Question, System
-from solvi.auto import build
+from solvi.solutions.decisions import build
 from solvi.core.dispatch import Budget, SlowPath
 
 

@@ -6,7 +6,7 @@ the tiers are package prefixes of the 1.0 layout: solvi.core.<area>):
 - the execution layer (solvi.core: catalog, types, provenance, primitives, runtime, schema, textin) imports nothing
   above it, not even
   inside a function: what it needs of the modules above (the flow, the replay of their records) is defined in it;
-- nothing below the server and agent layer (solvi.cli, solvi.serve, solvi.experimental.hooks / mcp, solvi.agents)
+- nothing below the server and agent layer (solvi.cli, solvi.serve, solvi.experimental.hooks / mcp, solvi.solutions.guard)
   imports from it;
 - (rule 2) an import cycle — any import, inside a function too — stays inside one tier: the cross-tier cycle of 0.9
   (24 modules from decide to system and dispatch) was broken in 1.0 by the moves of LAYOUT §6, and the cycles left
@@ -24,7 +24,7 @@ from pathlib import Path
 SRC = Path(__file__).resolve().parents[1] / "src"
 BASE = {"solvi.core"} | {f"solvi.core.{m}" for m in ("catalog", "types", "provenance", "primitives", "runtime", "schema",
                                                      "textin")}
-TOP = ("solvi.cli", "solvi.serve", "solvi.experimental.hooks", "solvi.experimental.mcp", "solvi.__main__", "solvi.agents")
+TOP = ("solvi.cli", "solvi.serve", "solvi.experimental.hooks", "solvi.experimental.mcp", "solvi.__main__", "solvi.solutions.guard")
 
 
 def _modules():
@@ -159,7 +159,7 @@ def test_the_execution_layer_imports_nothing_above_it():
 
 def test_nothing_below_the_server_and_agent_layer_imports_it():
     def top(m):
-        return any(m == p or m.startswith(p + ".") for p in TOP)
+        return m == "solvi" or any(m == p or m.startswith(p + ".") for p in TOP)
     g = graph(module_level=False)
     up = {f"{m} → {t}" for m, ts in g.items() if not top(m) for t in ts if top(t)}
     assert not up, f"a library module imports the server / agent layer: {sorted(up)}"
@@ -175,12 +175,11 @@ LOW_TIERS = {
     "deliberate": "core.slow core.dispatch",
     "knowledge": "core.knowledge",
 }
-HIGH = "__init__ __main__ auto calibrate check cli command honesty models scaffold serve show testing agents"
+HIGH = "__init__ __main__ _command solutions check cli models serve show testing"
 EXPERIMENTAL = "experimental"                                           # solvi.experimental.*
-# stable → experimental imports that are meant: the command-line entries for an experimental feature (LAYOUT §6:
-# `solvi serve --upstream`), and auto's compiled slow path (LAYOUT risk 3: `slow=` will take a compiled System; until
-# then it is listed here)
-ALLOWED_EXPERIMENTAL = {("solvi.serve", "solvi.experimental.mcp"), ("solvi.auto", "solvi.experimental.compile")}
+# stable → experimental imports that are meant: the command-line entry for an experimental feature (LAYOUT §6:
+# `solvi serve --upstream`). solvi.build takes a compiled specification and no longer compiles one (LAYOUT risk 3).
+ALLOWED_EXPERIMENTAL = {("solvi.serve", "solvi.experimental.mcp")}
 # stable modules that load an experimental module by its name, on request: `solvi hook`, and a calibration file that
 # carries a LoRA adapter (the adapter's own loader)
 ALLOWED_BY_NAME = {("solvi.cli", "solvi.experimental.hooks"), ("solvi.core.deciders.adapt", "solvi.experimental.lora")}
@@ -189,7 +188,7 @@ INTRA_TIER_CYCLES = [
     {"solvi.core.catalog", "solvi.core.primitives", "solvi.core.provenance", "solvi.core.runtime", "solvi.core.schema",
      "solvi.core.textin", "solvi.core.types"},
     {"solvi.core.store", "solvi.core.response", "solvi.core.store.report", "solvi.core.store.signature"},
-    {"solvi.agents.guard", "solvi.agents.confirm"},
+    {"solvi.solutions.guard", "solvi.solutions.guard.confirm"},
 ]
 
 
@@ -242,7 +241,8 @@ def test_tier_order_and_levels():
 def test_the_names_moved_by_the_import_cycle_lane_are_the_same_objects():
     """The cycle moves of 1.0 (LAYOUT §6) kept the names the old modules re-export: the same objects."""
     import solvi
-    from solvi import _rpc, calibrate, serve
+    from solvi import _rpc, serve
+    from solvi.cli import _calibrate as calibrate
     from solvi.core import deciders as decide, dispatch, response, store as storage, system
     from solvi.core import calibfile, calibration, chain, costs, runtime, sources
     assert system.Response is response.Response is solvi.Response and system._append is chain.append
@@ -254,8 +254,10 @@ def test_the_names_moved_by_the_import_cycle_lane_are_the_same_objects():
     for name in ("Limits", "RequestError", "NotFound", "BadRequest", "Busy", "too_deep", "parse_json", "internal_error",
                  "_readline"):
         assert getattr(serve, name) is getattr(_rpc, name)
+    import pytest
     for name in ("add_parser", "cmd_calibrate", "examples_of", "find_part", "label_of", "read_rows"):
-        assert getattr(calibfile, name) is getattr(calibrate, name)
+        with pytest.warns(solvi.SolviDeprecationWarning, match=f"solvi.calibfile.{name} moved in 1.0"):
+            assert getattr(calibfile, name) is getattr(calibrate, name)
 
 
 def test_stable_modules_name_an_experimental_module_only_where_allowed():
@@ -293,3 +295,63 @@ def test_experimental_modules_warn_on_import_and_say_their_status():
     assert run.returncode == 0, run.stderr[-2000:]
     quiet = subprocess.run([sys.executable, "-W", "error", "-c", "import solvi, solvi.experimental"], capture_output=True)
     assert quiet.returncode == 0, quiet.stderr
+
+
+# --- (rule 5) the public surfaces are pinned: a name added to or dropped from one is a decision, made here
+SURFACES = {
+    "solvi": ["build", "Guard", "Budget", "Catalog", "Question", "Answer", "System", "Response", "Quote", "Claim",
+              "Decision", "Fail", "Unknown", "Span", "Maybe", "Rank", "Estimate", "Scale", "Bins",
+              "SolviDeprecationWarning", "ExperimentalWarning"],          # LAYOUT §1; Agent, Knowledge come in L6
+    "solvi.core": ["ExperimentalWarning", "NOT_STATED", "accept", "accepts", "Answer", "AnswerType", "bin_labels",
+                   "Catalog", "check_evidence", "Claim", "cuts_number", "Decision", "evidence_rows", "find_quote",
+                   "find_whole", "ground", "has_evidence", "locate", "NOT_STATED_KEY", "NotStated", "Part", "plain_json",
+                   "PRIMITIVES", "Question", "question_data", "Quote", "Serial", "Unknown", "unknown_key", "unwrap",
+                   "validated"],
+    "solvi.models": ["cached", "cached_path", "decider", "DecideModel", "kind_of", "llm", "load", "ModelError",
+                     "PUBLISHED", "pull", "resolve", "systemone"],
+    "solvi.solutions.decisions": ["DecisionSystem", "build"],
+    "solvi.solutions.guard": ["accepted_proposals", "accepts", "INTENTS", "model_from_json_schema", "arguments_from_user",
+                              "arguments_grounded", "arguments_model", "arguments_valid", "AUTHORIZE_TASK",
+                              "conversation", "Guard", "GuardDecision", "MATCHERS", "Message", "messages",
+                              "no_injected_arguments", "no_instructions_in_tool_outputs", "proposal",
+                              "request_authorizes", "same_url", "Session", "Tool", "ToolCall", "url_parts", "VERDICTS"],
+    "solvi.experimental": ["DEADLINE", "STATUS", "mark", "warn_on_import"],
+}
+
+
+def test_the_public_surfaces_are_the_pinned_ones():
+    import importlib
+    import warnings
+    for name, pinned in SURFACES.items():
+        mod = importlib.import_module(name)
+        assert sorted(mod.__all__) == sorted(pinned), (name, sorted(set(mod.__all__) ^ set(pinned)))
+        with warnings.catch_warnings():
+            warnings.simplefilter("error")
+            for n in mod.__all__:
+                assert getattr(mod, n) is not None, (name, n)
+    import solvi
+    assert solvi.build.__module__ == "solvi.solutions.decisions" and solvi.Guard.__module__ == "solvi.solutions.guard"
+
+
+# --- (rule 6) the 1.0 shims resolve: every 0.9 module path and every name solvi no longer exports reach the same object,
+# with a SolviDeprecationWarning (tests/test_layout_1_0.py imports each path). In 1.1 this flips: they are gone.
+def test_the_names_solvi_no_longer_exports_resolve_with_a_warning():
+    import importlib
+
+    import pytest
+
+    import solvi
+    from solvi import _deprecate
+    assert set(_deprecate.TOP_LEVEL_MOVED).isdisjoint(solvi.__all__)
+    for name, home in _deprecate.TOP_LEVEL_MOVED.items():
+        with pytest.warns(solvi.SolviDeprecationWarning, match=rf"solvi\.{name} moved in 1\.0: use {home}\.{name}"):
+            obj = getattr(solvi, name)
+        assert obj is getattr(importlib.import_module(home), name)
+
+
+def test_every_old_path_names_a_module_that_exists_now():
+    import importlib
+
+    from solvi import _deprecate
+    for old, new in _deprecate.old_paths().items():
+        assert importlib.import_module(new).__name__ == new, (old, new)

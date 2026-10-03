@@ -3,14 +3,15 @@
     solvi migrate src/            # rewrites .py and .md files in place, prints each file it changed
     solvi migrate src/ --check    # changes nothing; lists what would change and exits 1 when anything would
 
-1.0 moved most modules (`solvi.core.types` → `solvi.core.types`, `solvi.core.store` → `solvi.core.store`, ...). The old paths
+1.0 moved most modules (`solvi.typed` → `solvi.core.types`, `solvi.storage` → `solvi.core.store`, ...). The old paths
 still import for one release with a SolviDeprecationWarning; this rewrites them, from the same table the warnings come
 from (solvi._deprecate: MOVED and the names that left `solvi` itself):
 
 - dotted paths anywhere in the file — imports, `import solvi.x as y`, attribute chains, strings such as
   `monkeypatch.setattr("solvi.llm.urlopen", ...)` or `"solvi.hooks:rules_system"`, comments;
 - `from solvi import storage` (a module imported from the package) → `from solvi.core import store as storage`;
-- `from solvi import JSONLStorage` (a name `solvi` no longer exports) → `from solvi.core.store import JSONLStorage`.
+- `from solvi import JSONLStorage` (a name `solvi` no longer exports) → `from solvi.core.store import JSONLStorage`,
+  and `solvi.JSONLStorage` → `solvi.core.store.JSONLStorage`.
 
 Code that reaches a moved module some other way (`getattr(solvi, name)`, `importlib.import_module(f"solvi.{x}")`) is not
 seen: run your tests with `-W error::solvi.SolviDeprecationWarning` after migrating."""
@@ -21,7 +22,7 @@ import os
 import re
 import sys
 
-from . import _deprecate
+from .. import _deprecate
 
 SUFFIXES = (".py", ".md")
 _SKIP_DIRS = {".git", ".venv", "venv", "__pycache__", "node_modules", ".tox", ".mypy_cache", ".ruff_cache", "site"}
@@ -88,9 +89,17 @@ def rewrite(text, paths=None, top_names=None):
         if not re.fullmatch(r"\(?[\w\s,]*\)?", re.sub(r"#[^\n]*", "", spec)):
             return m.group(0)                                         # not a plain list of names: leave it
         new = _split_import(module, _names(spec), indent, paths, top_names)
-        return m.group(0) if new is None else indent + new + tail
+        if new is None:
+            return m.group(0)
+        if "noqa" in tail:                                            # each import line keeps the suppression
+            new = new.replace("\n", tail + "\n")
+        return indent + new + tail
 
-    return rewrite_dotted(_FROM_SOLVI.sub(from_solvi, text), paths)
+    text = rewrite_dotted(_FROM_SOLVI.sub(from_solvi, text), paths)
+    if top_names:                                                     # solvi.JSONLStorage → solvi.core.store.JSONLStorage
+        names = "|".join(sorted(map(re.escape, top_names), key=len, reverse=True))
+        text = re.sub(rf"(?<![\w.])solvi\.({names})(?!\w)", lambda m: f"{top_names[m.group(1)]}.{m.group(1)}", text)
+    return text
 
 
 def files(path):

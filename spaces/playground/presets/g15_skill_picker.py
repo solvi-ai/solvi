@@ -21,8 +21,8 @@ import zlib
 import numpy as np
 
 from solvi import Answer, Catalog, Question, Quote
-from solvi.core.deciders import DecideModel
-from solvi.core.deciders.perturb import injection_spans
+from solvi.decide import DecideModel
+from solvi.perturb import injection_spans
 
 cat = Catalog()
 RISK = 0.05

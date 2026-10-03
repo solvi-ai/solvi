@@ -48,7 +48,7 @@ def said(text, patterns) -> bool:
     """Does the text match any of the patterns (NFKC-normalised, format characters dropped, case-folded)?"""
     if not isinstance(text, str) or not text:
         return False
-    from ..core.deciders.perturb import normalize
+    from ...core.deciders.perturb import normalize
     t = normalize(text, confusables=False)[0].casefold()
     return any(re.search(p, t) for p in patterns)
 

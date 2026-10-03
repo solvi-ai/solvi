@@ -137,7 +137,7 @@ def slow(state):
 
 def dispatch(storage=None):
     """A fresh AutoSystem (solvi.build) over the refund rule."""
-    from solvi.auto import build
+    from solvi.solutions.decisions import build
     cat = Catalog()
 
     @cat.fn

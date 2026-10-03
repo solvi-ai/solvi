@@ -1,6 +1,6 @@
 """Guarding an agent's tool calls: the agent proposes a call, solvi checks it and makes it.
 
-    from solvi.agents import Guard
+    from solvi.solutions.guard import Guard
 
     guard = Guard(storage="calls.db")
 
@@ -41,7 +41,7 @@ catalog, in this order (a failed hard check decides; when several fail, the firs
   no_instructions_in_tool_outputs   tools with injections="any": no tool output in the conversation carries such text → escalate
   not_made_before              tools with once=True: a call with these arguments was already made → escalate
   user_confirmed               tools with require_confirmation: the user explicitly accepted a message of the assistant
-                               that names the call's values (solvi.agents.confirm) → deny
+                               that names the call's values (solvi.solutions.guard.confirm) → deny
   your policies                ordinary solvi hard checks over the arguments and the facts your app gives (deny first,
                                then escalate); `guard.fn` adds computations they read
   request_authorizes           with an authorizer (a decider's yes / no, act_guard, perturb): "does the conversation
@@ -69,8 +69,8 @@ import json
 import re
 from typing import Any, Callable
 
-from .. import _deprecate
-from ..core.catalog import Answer, Catalog, Claim, Question, Quote
+from ... import _deprecate
+from ...core.catalog import Answer, Catalog, Claim, Question, Quote
 
 VERDICTS = ("allow", "deny", "escalate")
 GIVEN = ("tool_name", "tool_arguments", "conversation", "conversation_roles", "user_request")
@@ -587,7 +587,7 @@ def _grounding(spec, matchers=None):
         is injected. With scan_user, a value the user wrote only within NEAR characters of an override in their own
         message (injection_spans(actions=False): "ignore previous instructions", role tags — pasted content, not the
         user's own requests to pay or send) is injected too."""
-        from ..core.deciders.perturb import injection_spans
+        from ...core.deciders.perturb import injection_spans
         rules = json.loads(spec)
         roles = [(x[0], x[1], x[2]) for x in conversation_roles]
         taints = _taints(conversation, conversation_roles)
@@ -689,7 +689,7 @@ def _grounding(spec, matchers=None):
 def _taints(conversation, conversation_roles):
     """The instruction-like passages of each tool output in the conversation → {message index: [text]} (only tainted
     ones): solvi.core.deciders.perturb.injection_spans, or — for an output a Session flagged before cutting it — a note saying so."""
-    from ..core.deciders.perturb import injection_spans
+    from ...core.deciders.perturb import injection_spans
     out = {}
     for i, x in enumerate(conversation_roles):
         s, e, r = x[0], x[1], x[2]
@@ -1062,7 +1062,7 @@ def not_made_before(tool_name, call_arguments, calls_made) -> bool:
 
 def proposal(tool_name, call_arguments) -> str:
     """The call as the authorizer reads it: the tool's name and its arguments as JSON."""
-    from ..core.deciders import jsonable
+    from ...core.deciders import jsonable
     return f"{tool_name}({json.dumps(jsonable(call_arguments), ensure_ascii=False, sort_keys=True, default=str)})"
 
 
@@ -1152,7 +1152,7 @@ class GuardDecision:
 
     @property
     def trace_hash(self):
-        from ..core.runtime import trace_hash
+        from ...core.runtime import trace_hash
         return trace_hash(self.response)
 
     @property
@@ -1211,7 +1211,7 @@ class GuardDecision:
         arguments, another call, or new reasons."""
         import hashlib
 
-        from ..core.deciders import jsonable
+        from ...core.deciders import jsonable
         blob = json.dumps({"tool": self.tool, "id": self.id, "arguments": jsonable(self.arguments),
                            "reasons": sorted(str(r) for r in self.reasons)}, sort_keys=True, ensure_ascii=False,
                           default=str)
@@ -1227,7 +1227,7 @@ class GuardDecision:
 
     def to_dict(self):
         """The decision as JSON data (without the trace: `response.to_dict()` has it)."""
-        from ..core.deciders import jsonable
+        from ...core.deciders import jsonable
         d = {"outcome": self.outcome, "tool": self.tool, "arguments": jsonable(self.arguments), "reasons": self.reasons,
              "evidence": [list(e) for e in self.evidence], "executed": self.executed, "error": self.error,
              "stored_id": self.stored_id, "trace_hash": self.trace_hash}
@@ -1252,7 +1252,7 @@ class Guard:
 
     @_deprecate.removed_kwargs(facts="fact_names")
     def __init__(self, storage=None, authorizer=None, fact_names=None, lang="en", scan_user=False, tool_values="deny"):
-        from ..core.store import open_storage
+        from ...core.store import open_storage
         self.storage = open_storage(storage)
         self.tools: dict[str, Tool] = {}
         facts = fact_names                   # the names (and types) of the facts the app gives (`facts=` in 0.7); their
@@ -1308,7 +1308,7 @@ class Guard:
         once: a call of this tool with exactly the arguments of a call already made escalates (a second refund of the
         same order, a file deleted twice). The calls made are the given fact `calls_made` — a Session and the MCP proxy
         keep it; with guard.check / guard.call pass facts={"calls_made": [...]} (strings
-        from solvi.agents.guard.proposal; [] when none was made). A call checked without it escalates: the check
+        from solvi.solutions.guard.proposal; [] when none was made). A call checked without it escalates: the check
         cannot be evaluated."""
         def add(f):
             n = name or (f.__name__ if f is not None else None)
@@ -1440,7 +1440,7 @@ class Guard:
     def require_request(self, tools, intent=None, *, phrases=None, on_fail="escalate"):
         """A policy for actions that carry no value the user must give (book a hotel, create an event, read a URL a
         document names): the call goes ahead only when the user's own messages (`user_request`, never tool outputs)
-        ask for this kind of action — `intent`, a key of solvi.agents.intents.INTENTS ("reserve", "event", "visit",
+        ask for this kind of action — `intent`, a key of solvi.solutions.guard.intents.INTENTS ("reserve", "event", "visit",
         "pay", "send", "delete", "invite", "post", "share"; English and Russian word patterns) or a list of them, and /
         or `phrases`, your own regular expressions. Otherwise the call escalates (on_fail="deny": is denied). It is an
         ordinary policy named `user_asked_to_<intent>`: in the catalog, the trace and the reasons. It checks that the
@@ -1455,7 +1455,7 @@ class Guard:
 
     def require_confirmation(self, tools, arguments=None, *, match=None, reads=(), last=None, on_fail="deny"):
         """"The user confirmed this": a call of these tools goes ahead only when a message of the assistant proposed
-        its values and the user's next message explicitly accepted it (solvi.agents.confirm: "yes", "go ahead",
+        its values and the user's next message explicitly accepted it (solvi.solutions.guard.confirm: "yes", "go ahead",
         "please proceed", "да", "подтверждаю", ...; "yes, but ..." and "no" do not). The check `user_confirmed`
         (deny; on_fail="escalate": a person decides) runs after grounding and once, before your policies; its reason
         says what was missing, and an allowed call carries the accepted proposal and the acceptance as evidence. For
@@ -1523,7 +1523,7 @@ class Guard:
 
     def authorizer_input(self, call, context=None):
         """The input the authorizer reads for a call (decide.Facts) — for fit / act_guard / conformal examples."""
-        from ..core.deciders import Facts
+        from ...core.deciders import Facts
         c = ToolCall.parse(call)
         text, _, request = conversation(context)
         t = self.tools.get(c.name)
@@ -1561,8 +1561,8 @@ class Guard:
         return self.system(name).catalog
 
     def _build(self, t):
-        from ..core.provenance import code_fingerprint
-        from ..core.system import System
+        from ...core.provenance import code_fingerprint
+        from ...core.system import System
         if t.model is None:
             raise ValueError(f"tool {t.name} has no argument schema yet (guard.declare(name, schema=...) or guard.adopt)")
         if t.authorize is True and self.authorizer is None:
@@ -1698,7 +1698,7 @@ class Guard:
 
     def _unknown_system(self):
         if self._unknown is None:
-            from ..core.system import System
+            from ...core.system import System
             cat = Catalog()
             cat.check(hard=True, then={"verdict": "deny"})(known_tool)
             cat.rule("verdict")(unknown_verdict)
@@ -1772,7 +1772,7 @@ class Guard:
         try:
             r = t.func(**d.arguments)
             if inspect.isawaitable(r):
-                from ..core.runtime import run_sync
+                from ...core.runtime import run_sync
                 r = run_sync(r)
             d.result = r
         except Exception as e:  # noqa: BLE001 — the tool's own failure: reported, not raised
@@ -1823,7 +1823,7 @@ class Guard:
         outcome = r.answer if r.status in ("ok", "forced") and r.answer in VERDICTS else "escalate"
         known = c.name in self.tools
         args = res.values.get("call_arguments", c.arguments) if known else c.arguments
-        from ..core.runtime import MISSING
+        from ...core.runtime import MISSING
         if args is MISSING:
             args = c.arguments
         d = GuardDecision(outcome, c.name, args, self._reasons(c, system, res, r, outcome), res, id=c.id,
@@ -1892,7 +1892,7 @@ class Guard:
                     lack = [x for x in (p.inputs if p is not None else []) if x not in have]
                     out.append(f"cannot evaluate {n}: not given: {', '.join(lack)}" if lack else f"cannot evaluate {n}")
             else:
-                from ..core.runtime import MISSING
+                from ...core.runtime import MISSING
                 for rec in res.trace.records:             # a fact a check reads failed: its error is the reason
                     if rec.value is MISSING and rec.error and cat.parts.get(rec.name) is not None \
                             and cat.parts[rec.name].kind != "check":
@@ -1949,7 +1949,7 @@ def _outcome_meta(d):
         return {}
     if d.error:
         return {"error": d.error}
-    from ..core.runtime import vhash
+    from ...core.runtime import vhash
     try:
         return {"result_hash": vhash(d.result)}
     except Exception:  # noqa: BLE001 — a result that cannot be hashed as data
@@ -2025,7 +2025,7 @@ class Session:
     def _append(self, role, text, tainted=False):
         if self.max_chars is not None and len(text) > self.max_chars:
             if role == "tool" and not tainted:
-                from ..core.deciders.perturb import injection_spans
+                from ...core.deciders.perturb import injection_spans
                 tainted = bool(injection_spans(text))      # on the whole message, before the cut
             text = _clip(text, self.max_chars)
         self.context.append(Message(role, text, tainted and role == "tool"))
@@ -2056,7 +2056,7 @@ def _clip(text, n):
     survive the cut) — every passage that does not end inside the kept beginning, whole (from its own start, so the cut
     never halves it); a long one by its overlapping windows (up to 400 characters, at most half the cap) that are
     instruction-like themselves. What still does not fit is cut; the session's taint flag carries what was lost."""
-    from ..core.deciders.perturb import injection_spans, instruction_rule
+    from ...core.deciders.perturb import injection_spans, instruction_rule
     spans = injection_spans(text)
     w = max(40, min(400, n // 2))
     head, tail = n, "\n[…]"
@@ -2078,7 +2078,12 @@ def _clip(text, n):
     return text[:max(0, n - len(tail))] + tail
 
 
-__all__ = ["arguments_from_user", "arguments_grounded", "arguments_model", "arguments_valid", "AUTHORIZE_TASK",
+# the rest of the guard: the confirmation step and the intents of a user's words (they import this module's names, so
+# they come after them)
+from .confirm import accepted_proposals, accepts  # noqa: E402
+from .intents import INTENTS  # noqa: E402
+
+__all__ = ["accepted_proposals", "accepts", "INTENTS", "model_from_json_schema", "arguments_from_user", "arguments_grounded", "arguments_model", "arguments_valid", "AUTHORIZE_TASK",
            "conversation", "Guard", "GuardDecision", "MATCHERS", "Message", "messages", "no_injected_arguments",
            "no_instructions_in_tool_outputs", "proposal", "request_authorizes", "same_url", "Session", "Tool",
            "ToolCall", "url_parts", "VERDICTS"]

@@ -5,7 +5,8 @@ import random
 
 import pytest
 
-from solvi import Answer, Catalog, JSONLStorage, Question, System
+from solvi import Answer, Catalog, Question, System
+from solvi.core.store import JSONLStorage
 from solvi.core.store import TRUSTED_SOURCES, VERIFIED, UntrustedLabel, check_source
 
 

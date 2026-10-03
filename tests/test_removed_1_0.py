@@ -7,7 +7,8 @@ import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
 GONE = ["solvi.many", "solvi.otel", "solvi.pytest_plugin", "solvi.segment_model",
-        "solvi.aliases", "solvi.agents.pydantic_ai", "solvi.agents.langgraph", "solvi.agents.openai_agents"]
+        "solvi.aliases", "solvi.agents.pydantic_ai", "solvi.agents.langgraph",
+        "solvi.agents.openai_agents"]
 
 
 @pytest.mark.parametrize("module", GONE)

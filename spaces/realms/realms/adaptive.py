@@ -31,7 +31,7 @@ from collections import deque
 
 import numpy as np
 from solvi import System
-from solvi.core.deciders.heads import FastHead, VecFeaturizer
+from solvi.heads import FastHead, VecFeaturizer
 
 from . import econ
 from .brains import (DERIVED, MIL_OPTS, STANCE_OPTS, _arr, _rng_from, _rng_to, _unarr, make_catalog, random_city_state)

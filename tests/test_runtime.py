@@ -157,7 +157,7 @@ def test_a_failed_hard_check_skips_the_rest_by_default_and_early_exit_false_comp
 
 
 def test_a_stored_decision_made_with_early_exit_false_holds_the_rule_values_and_replays(tmp_path):
-    from solvi import JSONLStorage
+    from solvi.core.store import JSONLStorage
     cat, qs = _proposal()
     store = JSONLStorage(tmp_path / "d.jsonl")
     s = System(cat, qs, storage=store, early_exit=False)

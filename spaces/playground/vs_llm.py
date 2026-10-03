@@ -629,7 +629,7 @@ def _tampered(res, sysm):
     """Change one recorded value in a copy of the trace (the first computed number, else the first check), recompute
     every hash after it, and replay the copy."""
     try:
-        from solvi.core.runtime import MISSING, vhash
+        from solvi.runtime import MISSING, vhash
     except ImportError:
         return ""
     t = copy.deepcopy(res.trace, {id(MISSING): MISSING})    # keep the "not computed" sentinel itself: it is hashed by identity

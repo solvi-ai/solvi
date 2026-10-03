@@ -75,8 +75,8 @@ _NEAR = 3                                                 # words between a nega
 
 
 def _plain(text):
-    from ..core.deciders.perturb import normalize
-    from .guard import _TYPO
+    from ...core.deciders.perturb import normalize
+    from . import _TYPO
     return normalize(text, confusables=False)[0].casefold().translate(_TYPO)
 
 
@@ -142,7 +142,7 @@ def _required(call_arguments, args):
 
 
 def _matcher_text(m):
-    from ..core.provenance import code_fingerprint
+    from ...core.provenance import code_fingerprint
     return m if isinstance(m, str) else f"callable {getattr(m, '__qualname__', type(m).__name__)} {code_fingerprint(m)}"
 
 
@@ -156,7 +156,7 @@ def confirmation_fn(spec, matchers=None):
 
     def confirmation(call_arguments, conversation, conversation_roles, **facts):
         _ = spec
-        from .guard import _occurrences
+        from . import _occurrences
         need = _required(call_arguments, rules.get("args"))
         pairs = accepted_proposals(conversation, conversation_roles, rules.get("last"))
         if not pairs:
@@ -216,7 +216,7 @@ def _arity(f):
 
 
 def _short(v, n=60):
-    from .guard import _short as short
+    from . import _short as short
     return short(v, n)
 
 
@@ -227,7 +227,7 @@ def user_confirmed(confirmation) -> bool:
 
 def confirm_spec(tool, arguments=None, match=None, reads=(), last=None):
     """A tool's confirmation rule → (spec JSON, {argument: callable matcher}) — checked against the tool's arguments."""
-    from .guard import MATCHERS
+    from . import MATCHERS
     args = None if arguments is None else [arguments] if isinstance(arguments, str) else list(arguments)
     match = dict(match or {})
     known = set(tool.arguments)

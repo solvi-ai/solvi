@@ -1,9 +1,9 @@
-"""solvi.agents.Guard after the AgentDojo measurement: the URL matcher, the middle mode (tool_values="escalate"), policies
+"""solvi.solutions.guard.Guard after the AgentDojo measurement: the URL matcher, the middle mode (tool_values="escalate"), policies
 for actions without a user-given value (require_request) and the wider detector of such commands in tool outputs."""
 import pytest
 
-from solvi.agents import INTENTS, Guard, same_url, url_parts
-from solvi.agents.guard import _occurrences
+from solvi.solutions.guard import INTENTS, Guard, same_url, url_parts
+from solvi.solutions.guard import _occurrences
 from solvi.core.deciders.perturb import injection_spans
 
 SYS = {"role": "system", "content": "You are a helpful assistant."}
@@ -667,7 +667,7 @@ def test_the_framework_adapters_are_gone_with_their_extras(module):
     import re
     from pathlib import Path
     with pytest.raises(ModuleNotFoundError):
-        importlib.import_module(f"solvi.agents.{module}")
+        importlib.import_module(f"solvi.solutions.guard.{module}")
     text = (Path(__file__).parent.parent / "pyproject.toml").read_text()
     extras = text.split("[project.optional-dependencies]")[1].split("\n[")[0]
     assert not {"pydantic-ai", "langgraph", "openai-agents"} & set(re.findall(r"^([\w-]+) = ", extras, re.M))

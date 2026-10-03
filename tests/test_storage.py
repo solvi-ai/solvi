@@ -9,7 +9,8 @@ import sys
 
 import pytest
 
-from solvi import Answer, Catalog, Decision, JSONLStorage, Question, SQLiteStorage, System
+from solvi import Answer, Catalog, Decision, Question, System
+from solvi.core.store import JSONLStorage, SQLiteStorage
 from solvi.core.store import record_hash
 
 
@@ -686,7 +687,8 @@ CODE = """
 import sys
 sys.path.insert(0, {tests!r})
 from test_storage import build, STATES
-from solvi import JSONLStorage, System
+from solvi import System
+from solvi.core.store import JSONLStorage
 store = JSONLStorage({path!r}, clock=lambda: 1000.0)
 cat, qs = build()
 s = System(cat, qs)

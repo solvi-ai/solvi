@@ -11,7 +11,7 @@ under". Two questions ask it the same thing about the same message:
                 escalates. It misses a wording its rules do not know ("please put this under X"): the suite counts that
                 too.
 
-Loaded by solvi.honesty (`system()`)."""
+Loaded by solvi.testing.honesty (`system()`)."""
 import re
 
 import numpy as np

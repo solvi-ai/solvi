@@ -70,25 +70,25 @@ pip install "solvi[model]"     # + torch, transformers: ModernBERT field extract
 pip install "solvi[onnx]"      # + onnxruntime, tokenizers: the decider (solvi.core.deciders) on CPU without torch
 pip install "solvi[serve]"     # + fastapi, uvicorn: `solvi serve app.py:system` — the questions over HTTP (also --mcp)
 pip install "solvi[mcp]"       # + the official MCP SDK for solvi serve --mcp (without it, a built-in stdio server)
-pip install "solvi[duckdb]"    # + duckdb: stored decisions in a DuckDB file (solvi.DuckDBStorage); [postgres] for PostgreSQL
+pip install "solvi[duckdb]"    # + duckdb: stored decisions in a DuckDB file (solvi.core.store.DuckDBStorage); [postgres] for PostgreSQL
 pip install "solvi[lora]"      # + torch, transformers, peft: solvi.experimental.lora.adapt_lora, a LoRA adapter per question (experimental)
 ```
 
 Two words mark what is not settled yet: **preview** — it works and is tested, and its API may still change;
 **experimental** — no published model or measurement backs it yet, and it may change or go.
 
-`solvi.agents` (guarding an agent's tool calls) needs only the core.
+`solvi.solutions.guard` (guarding an agent's tool calls) needs only the core.
 
 Requires Python 3.11+ (tested on 3.11–3.14).
 
 ## From labelled examples to a system with a promise (preview)
 
-Give the question, labelled examples and the promise — and a slow path if you have one; `solvi.auto.build` fits
+Give the question, labelled examples and the promise — and a slow path if you have one; `solvi.solutions.decisions.build` fits
 System 1, calibrates its guarantee and who answers what it hands over on examples it did not see, stores every
 decision, and says what it chose:
 
 ```python
-from solvi.auto import build
+from solvi.solutions.decisions import build
 
 s = build(question, examples, catalog=cat, max_risk=0.02,     # examples: [(state, correct answer)]
           slow=llm(URL, "openai/gpt-oss-120b"), price=(0.037, 0.17), storage="decisions.jsonl")
@@ -98,7 +98,7 @@ print(s.explain())              # System 1, its signal and promise, who answers 
 
 On four tasks of the stand (Banking77, Abt-Buy, CUAD, RAGTruth) the defaults matched or beat the hand-written setups
 with every promise kept on eval, in a quarter to half of the code — closer to the promised level than the hand-written
-ones, and the slow path was rarely given anything ([guide](docs/guide.md#quick-start-one-entry-point-solviauto-preview),
+ones, and the slow path was rarely given anything ([guide](docs/guide.md#quick-start-one-entry-point-solvisolutionsdecisions-preview),
 [examples/24_one_entry_point.py](examples/24_one_entry_point.py)).
 
 ## Quickstart (core only, no model)
@@ -269,7 +269,7 @@ Every answer is a value and a confidence, and the types also declare answer prim
   hash chain across them; `solvi diff` shows which stored decisions a rule or model change would flip; `solvi test`,
   `solvi check` and the honesty suite (`solvi honesty`) belong in CI; `res.report(format="html")` and
   `solvi report decisions.db --html out.html` give an auditor one page per decision or per period.
-- **Guarding an agent's tool calls (preview).** The agent proposes `{"name": tool, "arguments": {...}}`; `solvi.agents.Guard` checks
+- **Guarding an agent's tool calls (preview).** The agent proposes `{"name": tool, "arguments": {...}}`; `solvi.solutions.guard.Guard` checks
   it — the tool is in the catalog, the arguments validate against its types, the values that must come from the
   conversation are quoted there (and not only from a tool output that says "ignore previous instructions"), your policies
   (limits, roles, allow-lists) are ordinary hard checks, and an optional decider asks "did the user ask for this?" under
@@ -299,7 +299,7 @@ Every answer is a value and a confidence, and the types also declare answer prim
   a small LoRA adapter for one question on solvi-base once it has ~100 labelled answers (`solvi[lora]`, experimental);
   `solvi.experimental.learning.Learning(system, store)` proposes updates from trusted corrections only and promotes one when it passes held-out,
   honesty and calibration gates, with rollback (experimental, off unless called)
-  ([guide](docs/guide.md#a-memory-of-corrections-solvimemory)).
+  ([guide](docs/guide.md#a-memory-of-corrections-solvicoreknowledgememory)).
 - **Records you can check later.** `store.signature()` — 64 bytes kept next to the chain's head — later names the one
   stored record that was edited and restores its hash (preview). `solvi.experimental.charts` draws a chart in which every number is
   quoted from the text and checked (unit, scale, a pie that adds up), as a deterministic SVG that replays to the same
@@ -317,7 +317,7 @@ search is slow and costs money per input: System 2. solvi puts them in one syste
   reasons. `Dispatcher.calibrate(examples, max_risk=...)` chooses, on each slice of what System 1 hands over, whether
   System 1's own guess, the slow path, their agreement or a person answers, under one promise. Every decision is one
   stored record with its cost and replays without calling a model
-  ([guide](docs/guide.md#who-answers-system-1-the-slow-path-or-a-person-solvidispatch)).
+  ([guide](docs/guide.md#who-answers-system-1-the-slow-path-or-a-person-solvicoredispatch)).
 - **What happened** (`System.report`, `solvi report decisions.db --overview`). From the store alone: who answered and
   how often each handed over, the time, calls, tokens and dollars, the promise in force next to the error the stored
   labels show, and drift ([guide](docs/guide.md#the-system-report-systemreport-solvi-report---overview)).
@@ -327,7 +327,7 @@ search is slow and costs money per input: System 2. solvi puts them in one syste
   settles what the drafts dispute (`review=`), a changed text is recompiled with the stored decisions it moves listed,
   and a compiled policy can guard an agent's tool calls (`to_guard`). Agreement is not correctness: a misreading both
   drafts share is accepted, so look at some decisions before relying on it
-  ([guide](docs/guide.md#a-specification-compiled-into-the-catalog-solvicompile)).
+  ([guide](docs/guide.md#a-specification-compiled-into-the-catalog-solviexperimentalcompile)).
 - **A showcase.** A player walks the world map of Pokémon Red (recorded from a real playthrough: place names and exits,
   no ROM) through the first fifteen goals twice; System 1 is two rules over remembered routes, System 2 a search over
   the world map it writes as it goes, and after each goal what System 2 found becomes System 1's routes. The first run
@@ -516,7 +516,7 @@ on documents the extractor dominates.
 | [examples/21_verified_chart.py](examples/21_verified_chart.py) | A verified chart (`solvi.experimental.charts`, preview): every number quoted from the text and checked; a careless model's swapped digit, invented share and unquoted value dropped with reasons; a deterministic SVG that replays to identical bytes |
 | [examples/22_coding_agent_hooks.py](examples/22_coding_agent_hooks.py) | A coding agent's session behind `solvi hook`: the hooks installed in a temporary project, a clean edit allowed, an edit that takes an employee id from the browser denied with the rule and the line, a migration with an empty downgrade and a comment that tries to talk past the rules denied, a skill picked for one prompt and none for another; the store verified and one decision audited and replayed |
 | [examples/23_pokemon_world_map.py](examples/23_pokemon_world_map.py) | System 1 and System 2 on the world map of Pokémon Red (recorded, no ROM): rules over remembered routes, a search over the player's world map when they are unsure or surprised, routes compiled after each goal; 147 → 2 slow decisions from the first run to the second; every decision stored, replayed and reported (`System.report`) |
-| [examples/24_one_entry_point.py](examples/24_one_entry_point.py) | one entry point (`solvi.auto.build`): System 1 fitted from labelled examples, its guarantee and the slow path's slice calibrated on examples it did not see, every decision stored; `explain()` prints the choices (no model) |
+| [examples/24_one_entry_point.py](examples/24_one_entry_point.py) | one entry point (`solvi.solutions.decisions.build`): System 1 fitted from labelled examples, its guarantee and the slow path's slice calibrated on examples it did not see, every decision stored; `explain()` prints the choices (no model) |
 | [examples/07_receipts_model.py](examples/07_receipts_model.py) | Expense check on a scanned receipt: a receipts-tuned extractor cites each field, rules and a hard check decide (needs `solvi[model]`) |
 | [examples/08_contracts_by_description.py](examples/08_contracts_by_description.py) | Contract review with fields defined only in words: the general extractor reads the whole contract, cites clauses or says "absent" (needs `solvi[model]`) |
 

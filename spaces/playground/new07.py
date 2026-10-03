@@ -20,7 +20,7 @@ from typing import Literal
 import numpy as np
 
 from solvi import Catalog, Question, System
-from solvi.core.deciders import DecideModel
+from solvi.decide import DecideModel
 
 
 def solvi_version():
@@ -33,18 +33,18 @@ def solvi_version():
 
 # ---------------------------------------------------------------------------------------------- feature detection
 def has_act_guard():
-    from solvi.core.deciders import DecisionPart
+    from solvi.decide import DecisionPart
     return hasattr(DecisionPart, "act_guard")
 
 
 def has_groups():
-    from solvi.core.deciders import DecisionPart
+    from solvi.decide import DecisionPart
     return has_act_guard() and "groups" in inspect.signature(DecisionPart.act_guard).parameters
 
 
 def has_vote():
     try:
-        from solvi.core.deciders.combine import Vote  # noqa: F401
+        from solvi.multi import Vote  # noqa: F401
         return True
     except ImportError:
         return False
@@ -52,7 +52,7 @@ def has_vote():
 
 def has_textin():
     try:
-        from solvi.core.textin import CueExtractor, TextIn  # noqa: F401
+        from solvi.textin import CueExtractor, TextIn  # noqa: F401
         return hasattr(System, "ask_text")
     except ImportError:
         return False
@@ -73,7 +73,7 @@ def has_agents():
 
 def has_charts():
     try:
-        from solvi.experimental.charts import chart  # noqa: F401
+        from solvi.charts import chart  # noqa: F401
         return True
     except ImportError:
         return False
@@ -81,8 +81,8 @@ def has_charts():
 
 def has_signature():
     try:
-        from solvi.core.store.signature import check  # noqa: F401
-        from solvi.core.store import TraceStorage
+        from solvi.signature import check  # noqa: F401
+        from solvi.storage import TraceStorage
         return hasattr(TraceStorage, "signature")
     except ImportError:
         return False
@@ -241,8 +241,8 @@ def demo_vote(email, risk=0.10):
     """Two stand-in "families" answer the same question; Vote(rule="all") answers only when both agree and both are sure,
     else it escalates with both proposals. One act_guard for the vote as a whole."""
     if not has_vote():
-        return needs("solvi.core.deciders.combine.Vote", "0.6"), "", "", ""
-    from solvi.core.deciders.combine import Vote
+        return needs("solvi.multi.Vote", "0.6"), "", "", ""
+    from solvi.multi import Vote
     risk = float(risk)
     a_part = stand_in("family-a", **FAMILY_A).decision("team", TASK, "email", TEAMS)
     b_part = stand_in("family-b", **FAMILY_B).decision("team", TASK, "email", TEAMS)
@@ -346,8 +346,8 @@ def demo_textin(message, risk=None):
     """A message → the question it asks (a stand-in decider picks the entry point) and each input field read with a quote
     (CueExtractor: deterministic candidates of the field's type after a cue word) → ask_text answers it in one trace."""
     if not has_textin():
-        return needs("solvi.core.textin.TextIn and system.ask_text", "0.7"), "", "", ""
-    from solvi.core.textin import CueExtractor, TextIn
+        return needs("solvi.textin.TextIn and system.ask_text", "0.7"), "", "", ""
+    from solvi.textin import CueExtractor, TextIn
     _, system = shop()
     decider = DecideModel(RouteScorer(), meta={"format": "stand-in", "temperature": 1.0})
     tin = TextIn(system, decider, CueExtractor(), today=TODAY, patterns={"order_id": r"[A-Z]-\d+"},
@@ -492,11 +492,11 @@ def demo_chart(text, risk=None):
     """A text with numbers → an SVG in which every number is quoted from the text; a careless proposal on the same text
     is checked value by value; the recorded run replays to the same bytes, an edited record does not."""
     if not has_charts():
-        return needs("solvi.experimental.charts", "0.7"), "", "", "", ""
+        return needs("solvi.charts", "0.7"), "", "", "", ""
     import json
-    from solvi.experimental.charts import ChartSpecialist, FixedProposer, chart
+    from solvi.charts import ChartSpecialist, FixedProposer, chart
     r = chart(text)
-    lines = ["**Verified chart (preview)** — `solvi.experimental.charts.chart(text)`: a proposer writes a typed chart spec with a quote "
+    lines = ["**Verified chart (preview)** — `solvi.charts.chart(text)`: a proposer writes a typed chart spec with a quote "
              "for every value, code checks each value against the text and draws only what verified. Here the proposer "
              "is the rule-based one (no model).", "", "```", r.report(), "```"]
     pics = [_svg_box(r.output, "Rule-based proposer: every drawn number is quoted from the text.")] if r.output else []
@@ -547,12 +547,12 @@ def demo_signature(which, risk=None):
     """Six decisions in a store; someone rewrites one and recomputes every hash and the stored head. The chain is
     consistent again, a head kept elsewhere says "rewritten", the signature names the record and a backup matches it."""
     if not has_signature():
-        return needs("solvi.core.store.signature and store.signature()", "0.7"), "", "", ""
+        return needs("solvi.signature and store.signature()", "0.7"), "", "", ""
     import json
     import os
     import re
     import tempfile
-    from solvi.core.store import JSONLStorage, record_hash
+    from solvi.storage import JSONLStorage, record_hash
     m = re.search(r"\d+", which or "")
     k = min(int(m.group(0)) if m else 4, len(REFUNDS) - 1)
 

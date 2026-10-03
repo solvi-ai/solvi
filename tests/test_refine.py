@@ -190,7 +190,7 @@ def test_without_a_proposer_the_system_generates_and_reads_the_earlier_feedback_
 
 
 def test_replay_names_a_round_whose_record_was_edited_and_a_round_after_an_accepted_one():
-    from solvi import JSONLStorage
+    from solvi.core.store import JSONLStorage
     import tempfile
     import os
     with tempfile.TemporaryDirectory() as d:

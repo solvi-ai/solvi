@@ -25,7 +25,7 @@ The gates (every one must pass, else the update is undone and recorded as reject
   heldout      on the held-out labels, asked through the whole system: the share answered alone and right, minus the
                share answered alone and wrong, must improve by at least `min_gain` (0.01), with at least `min_holdout`
                (5) held-out labels;
-  honesty      the honesty numbers (solvi.honesty: confident errors, coverage at `risk`, quote support) on the held-out
+  honesty      the honesty numbers (solvi.testing.honesty: confident errors, coverage at `risk`, quote support) on the held-out
                labels — and on your own honesty set when given (gates={"honesty": cases or a set file}) — must not get
                worse by more than `tolerance` (0.02);
   act_guard    a part calibrated with act_guard / calibrate_for is recalibrated on the calibration labels (at least
@@ -645,13 +645,13 @@ class Learning:
             return None
         if isinstance(h, (list, tuple)):
             return list(h)
-        from ..honesty import load_set
+        from ..testing.honesty import load_set
         return load_set(h)["cases"]
 
     def _evaluate(self, holdout, shadow, system=None):
         """The held-out labels, the honesty set and the shadow rows asked through `system` (the candidate's shadow; default:
         the live system)."""
-        from ..honesty import run
+        from ..testing.honesty import run
         system = self.system if system is None else system
         cases = [{"name": lab.id, "state": dict(lab.init), "gold": {lab.question: plain(lab.answer)}} for lab in holdout]
         out = {"heldout": run(system, cases, store=False) if cases else []}
@@ -671,7 +671,7 @@ class Learning:
         return out
 
     def _gate_heldout(self, before, after, n):
-        from ..honesty import metrics
+        from ..testing.honesty import metrics
         a, b = metrics(before["heldout"], self.gates["risk"]), metrics(after["heldout"], self.gates["risk"])
         if n < self.gates["min_holdout"]:
             return {"ok": False, "n": n, "why": f"{n} held-out label(s) < {self.gates['min_holdout']}: an improvement "
@@ -685,7 +685,7 @@ class Learning:
                        f"(gain {gain:+.3f}, needed {self.gates['min_gain']:+.3f})"}
 
     def _gate_honesty(self, before, after):
-        from ..honesty import compare, metrics
+        from ..testing.honesty import compare, metrics
         tol, risk = self.gates["tolerance"], self.gates["risk"]
         out, regs = {}, []
         for name in ("heldout", "honesty_set"):

@@ -500,7 +500,7 @@ def head_to_dict(h):
 
 
 def head_from_dict(d):
-    from solvi.core.deciders.heads import FastHead, VecFeaturizer
+    from solvi.heads import FastHead, VecFeaturizer
     h = FastHead(d["options"], lam=d["lam"], pairs=d["pairs"])
     h.features, h.n, h.loo_acc = d["features"], d["n"], d["loo_acc"]
     h.fz = VecFeaturizer()

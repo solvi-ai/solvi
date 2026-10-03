@@ -6,7 +6,8 @@ import json
 
 import pytest
 
-from solvi import Answer, JSONLStorage, Question
+from solvi import Answer, Question
+from solvi.core.store import JSONLStorage
 from solvi.experimental.compile import (Inputs, Rejected, Spec, Versions, compile_spec, coverage, decision_diff, read_module,
                            recompile, split_clauses, to_guard)
 
@@ -250,7 +251,7 @@ def test_versions_replay_each_stored_decision_with_the_catalog_that_made_it(tmp_
 
 
 def test_compiled_hard_checks_become_guard_policies_with_the_reasons_of_the_check():
-    from solvi.agents import Guard
+    from solvi.solutions.guard import Guard
     spec = Spec("- A refund is at most 100.")
     mod = '''
 def refund_small(tool_arguments):
@@ -561,7 +562,7 @@ def test_the_reference_reviewer_picks_the_draft_equal_to_the_reference_or_gives_
 
 
 def test_a_compiled_question_becomes_one_guard_policy_that_refuses_with_the_deciding_clauses():
-    from solvi.agents import Guard
+    from solvi.solutions.guard import Guard
     spec = Spec("- A refund is at most 100.\n\n- A refund needs an amount.")
     mod = '''
 def small(tool_arguments):

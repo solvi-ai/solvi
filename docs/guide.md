@@ -8,14 +8,14 @@ building on solvi, see [best practices](best_practices.md). Every measured numbe
 script in `benchmarks/` or an example, which you can re-run from this repository, or the model card of a published
 model (solvi-base, solvi-large, solvi-large-long, extract-base, extract-receipts).
 
-## Quick start: one entry point (solvi.auto, preview)
+## Quick start: one entry point (solvi.solutions.decisions, preview)
 
 The question, labelled examples, the promise and — if you have one — a slow path in; System 1 fitted, its guarantee
 and who answers what it hands over calibrated on examples it did not see, the store wired, and a plain account of
 every choice out:
 
 ```python
-from solvi.auto import build
+from solvi.solutions.decisions import build
 
 s = build(question, examples, catalog=cat, max_risk=0.02,          # examples: [(state, correct answer)]
           slow=llm(URL, "openai/gpt-oss-120b"), price=(0.037, 0.17), total=Budget(usd=5),   # optional
@@ -54,8 +54,8 @@ Contents:
 13. [Guarding an agent's tool calls (preview)](#guarding-an-agents-tool-calls)
 14. [solvi behind a coding agent's hooks (preview)](#solvi-behind-a-coding-agents-hooks)
 15. [A model that writes: generation, agreement and the re-ask loop](#a-model-that-writes-generation-agreement-and-the-re-ask-loop)
-16. [A specification compiled into the catalog: solvi.experimental.compile (experimental)](#a-specification-compiled-into-the-catalog-solvicompile)
-17. [Who answers: System 1, the slow path or a person (solvi.core.dispatch, experimental)](#who-answers-system-1-the-slow-path-or-a-person-solvidispatch)
+16. [A specification compiled into the catalog: solvi.experimental.compile (experimental)](#a-specification-compiled-into-the-catalog-solviexperimentalcompile)
+17. [Who answers: System 1, the slow path or a person (solvi.core.dispatch, experimental)](#who-answers-system-1-the-slow-path-or-a-person-solvicoredispatch)
 18. [System 1 and System 2 on a game: the Pokémon world map](#system-1-and-system-2-on-a-game-the-pokémon-world-map)
 19. [Verified charts: a specialist that checks every number (preview)](#verified-charts-a-specialist-that-checks-every-number)
 20. [Checking a catalog: solvi check](#checking-a-catalog-solvi-check)
@@ -2162,7 +2162,8 @@ and only where it was measured to help:
 
 ```python
 import random
-from solvi import Answer, Catalog, JSONLStorage, Question, System
+from solvi import Answer, Catalog, Question, System
+from solvi.core.store import JSONLStorage
 from solvi.core.store import TRUSTED_SOURCES, VERIFIED
 
 cat = Catalog()
@@ -2450,7 +2451,8 @@ replay, or their steps will be reported as mismatches.
 ### Storing decisions: TraceStorage
 
 ```python
-from solvi import SQLiteStorage, System
+from solvi import System
+from solvi.core.store import SQLiteStorage
 
 store = SQLiteStorage("decisions.db")          # or JSONLStorage("decisions.jsonl"); storage="decisions.db" also works
 system = System(cat, questions, storage=store)
@@ -2686,7 +2688,8 @@ works too.
 **Shadow mode.** Run a new version next to the current one before switching:
 
 ```python
-from solvi import Shadow, SQLiteStorage
+from solvi.core.store.diff import Shadow
+from solvi.core.store import SQLiteStorage
 
 shadow = Shadow(current, candidate, storage=SQLiteStorage("shadow.db"))
 res = shadow.ask(state)                    # the current system's response, exactly as current.ask(state)
@@ -2974,7 +2977,7 @@ it escalates, since the check cannot be evaluated.
 What neither catches: a path the user gave as a destination, used as a source — grounding does not know an argument's
 role.
 
-An LLM agent calls tools: it pays invoices, writes files, sends e-mails. With `solvi.agents` the agent does not call
+An LLM agent calls tools: it pays invoices, writes files, sends e-mails. With `solvi.solutions.guard` the agent does not call
 them: it **proposes** a call — `{"name": "send_payment", "arguments": {...}}`, data and never code — and a `Guard` checks
 the proposal like any other model output, then decides: **allow** (solvi runs the registered function and returns its
 result), **deny** (with the reasons, which the agent sees and can act on) or **escalate** (to a person, with the candidate
@@ -2983,7 +2986,7 @@ audit. Nothing in it is random: the same call in the same conversation gives the
 
 ```python
 from typing import Literal
-from solvi.agents import Guard
+from solvi.solutions.guard import Guard
 
 guard = Guard(storage="calls.db", fact_names={"role": str, "spent_today": float})   # facts your app gives with each call
 
@@ -3194,7 +3197,7 @@ The text is scanned for URL-like runs (split at whitespace, quotes, brackets, `,
 dropped). A label glued in front is skipped: `Link:https://x.com`. `ground={"url": "url_prefix"}` also lets the call's
 path continue a written one at a `/`: `x.com/docs` covers `x.com/docs/intro`, but not `x.com/docsevil` and not
 `x.com/docs/../admin`. The query must still be as written. Use it only for reading: for an argument that sends
-something (a URL to post to), a path can carry the data out. `solvi.agents.same_url(a, b, path="exact")` and
+something (a URL to post to), a path can carry the data out. `solvi.solutions.guard.same_url(a, b, path="exact")` and
 `url_parts(u)` are the same comparison for your own policies. Use it for any URL argument: models add `http://` to
 addresses the user typed without it, and token matching then refuses honest page reads.
 
@@ -3237,7 +3240,7 @@ guard.require_request("launch_job", phrases=[r"\blaunch\b", r"(?<!\w)запус�
 
 The call goes ahead only when the user's own messages (`user_request`: never tool outputs, never the assistant's
 words) ask for this kind of action. Otherwise it escalates (or is denied with `on_fail="deny"`). The built-in intents
-are in `solvi.agents.INTENTS`: `reserve`, `event`, `visit`, `pay`, `send`, `delete`, `invite`, `post` and `share`,
+are in `solvi.solutions.guard.INTENTS`: `reserve`, `event`, `visit`, `pay`, `send`, `delete`, `invite`, `post` and `share`,
 with English and Russian word patterns over the NFKC-normalised text. Each is an ordinary policy named
 `user_asked_to_<intent>`: in the catalog, the trace and the reasons, and fingerprinted with its patterns. It says the
 user asked for *such* an action, not for this very call. A user who asked to book one hotel has also "asked" for a
@@ -3254,7 +3257,7 @@ policies pass (it is their order, it is pending), and a wording the injection de
 these values and the user's next message accepted it explicitly. Nothing in a tool output can write the user's yes.
 
 ```python
-from solvi.agents import Guard
+from solvi.solutions.guard import Guard
 
 guard = Guard()
 
@@ -3304,7 +3307,7 @@ the first sentence that says yes decides, and a reservation in it ("but", "thoug
 conditional, so not an acceptance — while "Yes, please proceed... but could I also get a coupon?" is one (the
 reservation is about something else). A weak word — "ok", "sure", "fine", "alright", "хорошо", "ладно" — accepts only
 as the whole message, with courtesy words at most and no question: "OK, thanks!" accepts, "Okay, glad you found it.
-Which refund is faster?" does not. `solvi.agents.accepts(text)` is the test; `accepted_proposals(conversation, roles)`
+Which refund is faster?" does not. `solvi.solutions.guard.accepts(text)` is the test; `accepted_proposals(conversation, roles)`
 gives the pairs. Narrow by design: "yes, but change the address" is not a yes, and a user who accepts in other words is
 asked again. The allowed decision's evidence quotes the proposal and the acceptance (checked literally at their
 offsets, replayable); the refusal's reason says what was missing.
@@ -4207,7 +4210,7 @@ here is reported.
 
 ### Into an agent guard
 
-`to_guard(c, guard, tools)` registers each compiled hard check as a policy of a `solvi.agents.Guard`: the policy reads
+`to_guard(c, guard, tools)` registers each compiled hard check as a policy of a `solvi.solutions.guard.Guard`: the policy reads
 the compiled catalog's inputs (they must be facts the guard gives — `tool_name`, `tool_arguments`, `conversation`,
 `conversation_roles` or your declared facts), runs the compiled System and refuses with the clause the check
 implements as the reason.

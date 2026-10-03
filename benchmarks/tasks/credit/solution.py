@@ -37,7 +37,9 @@ sys.path.insert(0, str(HERE))
 from common.llm import read_jsonl, write_jsonl  # noqa: E402
 from score import D, score  # noqa: E402
 
-from solvi import Catalog, Question, Shadow, SQLiteStorage, System  # noqa: E402
+from solvi import Catalog, Question, System  # noqa: E402
+from solvi.core.store.diff import Shadow  # noqa: E402
+from solvi.core.store import SQLiteStorage  # noqa: E402
 from solvi.check import lint  # noqa: E402
 from solvi.core.store.diff import diff  # noqa: E402
 

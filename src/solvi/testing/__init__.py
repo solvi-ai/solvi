@@ -348,7 +348,7 @@ def main(argv=None):
     passed = sum(f.passed for f in files)
     bad_files = [f for f in files if f.error]
     if a.json:
-        from .core.schema import dumps
+        from ..core.schema import dumps
         print(dumps({"files": [{"path": str(f.path), "error": f.error, "cases": [
             {"name": c.name, "ok": c.ok, "problems": c.problems, "answers": c.answers} for c in f.cases]} for f in files],
             "cases": n, "passed": passed, "ok": passed == n and not bad_files}, indent=1, ensure_ascii=False, default=str))

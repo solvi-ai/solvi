@@ -9,7 +9,8 @@ import tempfile
 import pytest
 from pydantic import BaseModel
 
-from solvi import Answer, Catalog, JSONLStorage, Question, System
+from solvi import Answer, Catalog, Question, System
+from solvi.core.store import JSONLStorage
 from solvi.core.slow.refine import Fail
 from solvi.core.slow.search import SearchRun, Tree, search
 

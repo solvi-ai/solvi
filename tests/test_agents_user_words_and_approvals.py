@@ -1,4 +1,4 @@
-"""Fixes from the third adversarial re-check before 0.7 in solvi.agents: what counts as the user's words (framework
+"""Fixes from the third adversarial re-check before 0.7 in solvi.solutions.guard: what counts as the user's words (framework
 summaries, Responses API items, hand-built blocks), exact number grounding and locale-ambiguous numbers, invisible
 characters in arguments, `scan_user`, tool-agnostic policies that read an undeclared fact, approvals bound to the call
 and its reasons. (The framework adapters' cases left with the adapters in 1.0.)"""
@@ -7,7 +7,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from solvi.agents import Guard, messages
+from solvi.solutions.guard import Guard, messages
 
 IB = "DE89370400440532013000"
 EVIL = "GB33BUKB20201555555555"

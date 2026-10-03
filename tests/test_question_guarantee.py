@@ -6,7 +6,8 @@ import random
 import numpy as np
 import pytest
 
-from solvi import Answer, Catalog, JSONLStorage, Question, System
+from solvi import Answer, Catalog, Question, System
+from solvi.core.store import JSONLStorage
 from solvi.core.guarantees.guarantee import GuaranteeWarning, calibrate
 
 

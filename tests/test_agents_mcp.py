@@ -10,7 +10,7 @@ from solvi.experimental.mcp import run_proxy
 
 UPSTREAM = f"{sys.executable} {Path(__file__).parent / 'mcp_upstream.py'}"
 CATALOG = '''
-from solvi.agents import Guard
+from solvi.solutions.guard import Guard
 guard = Guard()
 guard.declare("read_file")
 guard.declare("write_file", ground=["path"], injections="any")
@@ -119,7 +119,7 @@ def test_solvi_serve_guard_command(tmp_path):
 
 
 def test_proxy_escalates_the_repeat_of_a_once_tool_and_not_a_call_that_failed(tmp_path):
-    from solvi.agents import Guard
+    from solvi.solutions.guard import Guard
     g = Guard()
     g.declare("write_file", once=True)
     g.declare("read_file", once=True)
@@ -135,7 +135,7 @@ def test_proxy_escalates_the_repeat_of_a_once_tool_and_not_a_call_that_failed(tm
 
 
 def test_proxy_reports_a_dead_upstream_as_an_upstream_error():
-    from solvi.agents import Guard
+    from solvi.solutions.guard import Guard
     g = Guard()
     g.declare("read_file")
     dead = f"{sys.executable} -c pass"                       # a server that exits at once

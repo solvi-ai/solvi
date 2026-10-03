@@ -106,7 +106,7 @@ def test_over_http_the_key_is_a_bad_request():
 
 
 def test_a_fact_named_like_a_policy_does_not_switch_the_policy_off():
-    from solvi.agents import Guard
+    from solvi.solutions.guard import Guard
     paid = []
     g = Guard(fact_names={"role": str})
 
@@ -129,7 +129,7 @@ def test_a_fact_named_like_a_policy_does_not_switch_the_policy_off():
 
 @pytest.mark.parametrize("body", [lambda amount: None, lambda amount: 0, lambda amount: []])
 def test_an_untyped_policy_that_returns_a_falsy_non_bool_does_not_allow_the_call(body):
-    from solvi.agents import Guard
+    from solvi.solutions.guard import Guard
     paid = []
     g = Guard()
 
@@ -168,7 +168,7 @@ def test_a_then_answer_outside_the_options_warns_at_build_and_abstains_instead_o
 
 
 def _payments():
-    from solvi.agents import Guard
+    from solvi.solutions.guard import Guard
     paid = []
     g = Guard()
 
@@ -197,7 +197,7 @@ def test_a_policy_for_a_tool_the_guard_does_not_have_is_an_error_not_a_silent_no
 
 
 def test_authorize_true_without_an_authorizer_is_an_error():
-    from solvi.agents import Guard
+    from solvi.solutions.guard import Guard
     g = Guard()
 
     @g.tool(authorize=True)
@@ -214,7 +214,7 @@ def test_tool_declared_by_name_and_schema_is_registered_without_a_second_call():
     nothing: calls of the tool were "unknown tool"."""
     from pydantic import BaseModel
 
-    from solvi.agents import Guard
+    from solvi.solutions.guard import Guard
 
     class RefundArgs(BaseModel):
         order: str

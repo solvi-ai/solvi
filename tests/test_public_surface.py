@@ -18,9 +18,9 @@ def test_every_module_declares_its_public_names():
 def test_no_library_module_imports_from_the_command_line():
     bad = []
     for p in SRC.rglob("*.py"):
-        if p.name in ("cli.py", "__main__.py"):
+        if p.name == "__main__.py" or p.parent.name == "cli":
             continue
         for n in ast.walk(ast.parse(p.read_text())):
-            if isinstance(n, ast.ImportFrom) and n.module in ("cli",) and n.level:
+            if isinstance(n, ast.ImportFrom) and n.level and (n.module or "").split(".")[0] == "cli":
                 bad.append(str(p.relative_to(SRC)))
     assert bad == []

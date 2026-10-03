@@ -29,7 +29,8 @@ import facts as F  # noqa: E402
 from common.llm import DATA, read_jsonl  # noqa: E402
 from score import load, score  # noqa: E402
 
-from solvi import Answer, Catalog, Question, SQLiteStorage, System  # noqa: E402
+from solvi import Answer, Catalog, Question, System  # noqa: E402
+from solvi.core.store import SQLiteStorage  # noqa: E402
 from solvi.core.calibration import conformal_quantile  # noqa: E402
 from solvi.core.store.diff import diff  # noqa: E402
 

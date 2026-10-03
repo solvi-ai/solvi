@@ -67,7 +67,7 @@ import itertools
 import textwrap
 from dataclasses import asdict, dataclass, field, replace
 
-from .command import fail as _fail, load_object
+from ._command import fail as _fail, load_object
 
 LEVELS = ("error", "warning", "note")
 
@@ -128,7 +128,7 @@ def lint(obj, strict=False, max_combos=100_000):
     """A System (or a Catalog) → Report. `max_combos`: the largest number of answer combinations tried per group of
     constraints that share questions."""
     from .core.plan.strategist import given_facts
-    if hasattr(obj, "tools") and hasattr(obj, "system") and not hasattr(obj, "questions"):   # a solvi.agents.Guard
+    if hasattr(obj, "tools") and hasattr(obj, "system") and not hasattr(obj, "questions"):   # a solvi.Guard
         rep = Report(strict=strict)
         for name, t in obj.tools.items():
             if t.model is None:
@@ -651,7 +651,7 @@ def _target(spec):
     p = Path(spec)
     task = p / "task.py" if p.is_dir() else p if p.is_file() and p.suffix == ".py" else None
     if task is not None and task.is_file():
-        from .honesty import load_task, system_of
+        from .testing.honesty import load_task, system_of
         mod = load_task(task)
         if not callable(getattr(mod, "system", None)) and not (hasattr(mod, "cat") and hasattr(mod, "QUESTIONS")):
             _fail(f"check {spec}: a task module defines system() or cat and QUESTIONS (else give module:attr)")
@@ -663,7 +663,7 @@ def add_parser(sub):
     c = sub.add_parser("check", help="lint a catalog: hard checks outside their question's flow, unused parts, cycles, "
                                      "type conflicts, constraints that cannot hold, silent defaults")
     c.add_argument("target", help="module:attr or file.py:attr — a System (or a function returning one), a Catalog, or a "
-                                  "solvi.agents.Guard (each tool's checks); or a task file / a directory with task.py, "
+                                  "solvi.Guard (each tool's checks); or a task file / a directory with task.py, "
                                   "as for solvi test")
     c.add_argument("--strict", action="store_true", help="warnings fail too (exit status 1)")
     c.add_argument("--max-combos", type=int, default=100_000,

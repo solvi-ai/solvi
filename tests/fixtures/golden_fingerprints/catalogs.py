@@ -14,8 +14,8 @@ from typing import Annotated, Literal
 import numpy as np
 from pydantic import BaseModel
 
-from solvi import (Answer, Bins, Catalog, Claim, Estimate, Maybe, NotStated, Question, Quote, Rank, Scale, Span,
-                   System, Unknown)
+from solvi import Answer, Bins, Catalog, Claim, Estimate, Maybe, Question, Quote, Rank, Scale, Span, System, Unknown
+from solvi.core import NotStated
 from solvi.core.deciders import DecideModel
 from solvi.core.deciders.combine import Cascade, Vote
 
@@ -216,7 +216,7 @@ def rule_list():
 
 def auto_built():
     """solvi.build over a catalog whose rule answers the question: the promise on a computed fact, a slow path."""
-    from solvi.auto import build
+    from solvi.solutions.decisions import build
     cat = _numbers()
 
     @cat.rule("ok")

@@ -1,4 +1,4 @@
-"""solvi.agents.Guard: an agent proposes a tool call, solvi checks it (catalog, types, grounding, injections, policies,
+"""solvi.solutions.guard.Guard: an agent proposes a tool call, solvi checks it (catalog, types, grounding, injections, policies,
 an authorizer) and makes it — allow / deny / escalate, each a full solvi trace in the store."""
 import asyncio
 import json
@@ -9,7 +9,7 @@ import numpy as np
 import pytest
 from pydantic import BaseModel
 
-from solvi.agents import Guard, ToolCall, conversation, messages, model_from_json_schema
+from solvi.solutions.guard import Guard, ToolCall, conversation, messages, model_from_json_schema
 from solvi.core.deciders import DecideModel
 
 IBAN = "DE89370400440532013000"

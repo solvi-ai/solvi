@@ -7,7 +7,8 @@ from collections import Counter
 import pytest
 from test_dispatch import _hard_slice
 
-from solvi import Answer, Catalog, Decision, JSONLStorage, Question, SQLiteStorage, System
+from solvi import Answer, Catalog, Decision, Question, System
+from solvi.core.store import JSONLStorage, SQLiteStorage
 from solvi.cli import main
 from solvi.core.dispatch import Dispatcher, SlowPath
 from solvi.core.guarantees.guarantee import calibrate

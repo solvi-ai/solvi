@@ -1,4 +1,4 @@
-"""Fixes before the 0.7 release in solvi.agents: tool results inside user messages, grounding on token boundaries,
+"""Fixes before the 0.7 release in solvi.solutions.guard: tool results inside user messages, grounding on token boundaries,
 normalised injection patterns, recursive schemas, the MCP proxy's forwarded arguments and context, resolutions and
 the framework adapters' small edges."""
 import dataclasses
@@ -6,7 +6,7 @@ import re
 
 import pytest
 
-from solvi.agents import Guard, messages
+from solvi.solutions.guard import Guard, messages
 
 IBAN = "DE89370400440532013000"
 
@@ -93,7 +93,7 @@ TREE = {"type": "object", "properties": {"root": {"$ref": "#/$defs/Node"}, "n": 
 def test_recursive_schemas_are_finite_and_non_finite_numbers_are_refused():
     from pydantic import ValidationError
 
-    from solvi.agents import model_from_json_schema
+    from solvi.solutions.guard import model_from_json_schema
     M = model_from_json_schema("tree", TREE)
     m = M.model_validate({"root": {"name": "a", "children": [{"name": "b", "children": [{"name": "c"}]}]}})
     assert m.root.children[0]["name"] == "b"                   # inside itself: any object

@@ -54,7 +54,7 @@ import subprocess
 import sys
 
 from .. import _deprecate
-from ..agents.guard import Guard, ToolCall, _text, proposal
+from ..solutions.guard import Guard, ToolCall, _text, proposal
 from . import warn_on_import
 
 warn_on_import(__name__)
@@ -149,7 +149,7 @@ class Proxy:
     def __init__(self, guard, upstream, facts=None, escalate="elicit", max_messages=CONTEXT_MESSAGES,
                  max_chars=CONTEXT_CHARS):
         if not isinstance(guard, Guard):
-            raise TypeError("--guard names a solvi.agents.Guard")
+            raise TypeError("--guard names a solvi.Guard")
         if escalate not in ("elicit", "deny"):
             raise ValueError('escalate: "elicit" | "deny"')
         self.guard = guard

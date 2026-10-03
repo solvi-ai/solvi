@@ -5,7 +5,7 @@ this reference lists what each module exports and the signatures.
 
 | Module | What it holds |
 |---|---|
-| [`solvi`](solvi.md) | the catalog, questions and answers, `System` and `Response`, typed facts, storage and shadow mode |
+| [`solvi`](solvi.md) | the entry points `build` and `Guard`, `Budget`, and the shared vocabulary: catalog, questions and answers, `System` and `Response`, typed answers |
 | [`solvi.core`](core.md) | the low level: the catalog and its value classes; one module per area under `solvi.core` |
 | [`solvi.core.deciders`](decide.md) | the decider: typed questions about a text or a state answered by a model |
 | [`solvi.core.calibration`](calibration.md) | reliability, expected calibration error, coverage at a target accuracy |
@@ -25,7 +25,7 @@ this reference lists what each module exports and the signatures.
 | [`solvi.experimental.learning`](learning.md) | learning from corrections with gates and rollback (experimental) |
 | [`solvi.experimental.oncalib`](oncalib.md) | recalibration on the fly from outcomes (experimental; the promise is not kept) |
 | [`solvi.serve`](serve.md) | `solvi serve`: HTTP, MCP and the System One API |
-| [`solvi.agents`](agents.md) | guarding an agent's tool calls: `Guard`, the MCP proxy |
+| [`solvi.solutions.guard`](agents.md) | guarding an agent's tool calls: `Guard`, the MCP proxy |
 | [`solvi.experimental.hooks`](hooks.md) | a coding agent's hooks: edits checked against rules, a skill picked for a prompt, install / uninstall (Claude Code; Codex, preview) |
 | [`solvi.core.textin`](textin.md) | text in: a message → the question it asks and its typed input state, read with quotes |
 | [`solvi.core._inputs`](inputs.md) | what a question reads: its given facts, the model and JSON schema of its input state, entry points |
@@ -48,7 +48,7 @@ this reference lists what each module exports and the signatures.
 | [`solvi.core.store.sysreport`](sysreport.md) | the system report: who answered, the cost, the promise against the stored labels, drift — from the store alone |
 | [`solvi.core.sets`](sets.md) | decisions over a set: answers of many items made consistent under at-most / exactly-one / capacity constraints |
 | [`solvi.core.slow.search`](search.md) | search over alternatives: candidates through the System's checks, the best by an objective, pruned, recorded |
-| [`solvi.auto`](auto.md) | one entry point: a question, labelled examples, a promise and a slow path → System 1 fitted, its guarantee and the dispatcher calibrated, the store wired, the choices explained (preview) |
+| [`solvi.solutions.decisions`](auto.md) | one entry point: a question, labelled examples, a promise and a slow path → System 1 fitted, its guarantee and the dispatcher calibrated, the store wired, the choices explained (preview) |
 | [`solvi.core.dispatch`](dispatch.md) | who answers: System 1 within its guarantee, a slow path (a System, refine or search) or a person — one recorded decision per input, with a budget (experimental) |
 | [`solvi.experimental.counterfactual`](counterfactual.md) | counterfactuals: the smallest change of the given inputs that changes an answer (experimental) |
 | [`solvi.core.deciders.perturb`](perturb.md) | instruction-like sentences in an input and the variants without them (`perturb=k`) |
@@ -56,9 +56,9 @@ this reference lists what each module exports and the signatures.
 | [`solvi.core.store.signature`](signature.md) | a signature of a trace or a store that names the one changed record (preview) |
 | [`solvi.core.store.diff`](diff.md) | `solvi diff` and shadow mode |
 | [`solvi.testing`](testing.md) | decision regression tests from `cases.json` |
-| [`solvi.honesty`](honesty.md) | the honesty suite |
+| [`solvi.testing.honesty`](honesty.md) | the honesty suite |
 | [`solvi.check`](check.md) | `solvi check`: catalog lint |
 | [`solvi.core.calibfile`](calibfile.md) | calibration files (`save_calibration` / `load_calibration`) and `solvi calibrate` |
-| [`solvi.models`](models.md) | `solvi models`: published and cached deciders, pull, check |
-| [`solvi.scaffold`](scaffold.md) | `solvi init`: a new decision project |
+| [`solvi.models`](models.md) | the models by name — `decider("solvi-base")`, `llm(url, model)`, `systemone(url, model)` — and the published and cached deciders (`solvi models`: list, pull, check) |
+| [`solvi.cli._scaffold`](scaffold.md) | `solvi init`: a new decision project |
 | [`solvi.core._i18n`](i18n.md) | languages of rendering: the audit, `show` and the safeguard report in Russian |

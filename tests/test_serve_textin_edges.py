@@ -201,7 +201,7 @@ def test_async_systems_respect_max_inflight():
 def test_mcp_proxy_denies_arguments_given_as_a_json_string():
     from test_agents_hardening import SCHEMA, make_proxy
 
-    from solvi.agents import Guard
+    from solvi.solutions.guard import Guard
     g = Guard()
     g.declare("delete")
     px, up = make_proxy(g, [{"name": "delete", "inputSchema": SCHEMA}])
@@ -215,7 +215,7 @@ def test_mcp_proxy_denies_arguments_given_as_a_json_string():
 def test_mcp_proxy_records_a_forward_that_failed(tmp_path):
     from test_agents_hardening import SCHEMA, make_proxy
 
-    from solvi.agents import Guard
+    from solvi.solutions.guard import Guard
 
     def boom(name, args):
         raise RuntimeError("the pipe broke")

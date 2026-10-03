@@ -24,7 +24,7 @@ from typing import Literal
 import numpy as np
 
 from solvi import Answer, Catalog, Question
-from solvi.core.deciders import DecideModel
+from solvi.decide import DecideModel
 
 cat = Catalog()
 RISK = 0.10                     # P(a risky change goes to quick review) <= 10%

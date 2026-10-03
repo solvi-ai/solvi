@@ -84,7 +84,8 @@ def _fp(system):
 
 
 def _types():
-    from solvi import Bins, Claim, Decision, Estimate, Maybe, NotStated, Quote, Rank, Scale, Span
+    from solvi import Bins, Claim, Decision, Estimate, Maybe, Quote, Rank, Scale, Span
+    from solvi.core import NotStated
     from solvi.core.provenance import type_fingerprint
     ts = {"maybe_bool": Maybe[bool], "maybe_span_float": Maybe[Span[float]], "span_float_note": Span[float, "note"],
           "scale_literal": Scale[Literal["low", "medium", "high"]], "scale_values": Scale[1, 2, 3],

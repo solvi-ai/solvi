@@ -1,7 +1,7 @@
 """The `solvi` command (also `python -m solvi ...`).
 
     solvi test PATH...        decision regression tests from cases.json files (solvi.testing)
-    solvi honesty SET.json    honesty numbers of a labelled set, gated against a baseline (solvi.honesty)
+    solvi honesty SET.json    honesty numbers of a labelled set, gated against a baseline (solvi.testing.honesty)
     solvi verify | replay | diff over a TraceStorage:
 
     solvi verify decisions.db [--anchor COUNT:HASH] [--signature SIG.json] [--sign SIG.json]
@@ -14,14 +14,14 @@
                                                                                                      (solvi.core.store.report)
     solvi report decisions.db --overview [--since ISO] [--until ISO] [--question Q] [--drift-window N | --no-drift] [--json]
                                                                                                      (solvi.core.store.sysreport)
-    solvi init [DIR] [--template support|refunds|minimal] [--with-model] [--force]                  (solvi.scaffold)
+    solvi init [DIR] [--template support|refunds|minimal] [--with-model] [--force]                  (solvi.cli._scaffold)
     solvi ask myapp.decisions:system (STATE.json | - | --state '{...}' | --text "...") [--question Q] [--decider MODEL]
               [--audit] [--report md|html] [--lang ru] [--store decisions.db] [--json]
     solvi calibrate myapp.decisions:system PART labels.csv --risk 0.1 [--groups a,b] [--method crc|ltt] [--out F]
-                                                                                                     (solvi.calibrate)
-    solvi models [list | pull ID | check MODEL --examples labels.jsonl --task Q]                       (solvi.models)
+                                                                                                     (solvi.cli._calibrate)
+    solvi models [list | pull ID | check MODEL --examples labels.jsonl --task Q]                       (solvi.cli._models)
     solvi hook [install | uninstall | pre-edit --rules rules.toml | pick-skill --skills-dir DIR]        (solvi.experimental.hooks)
-    solvi migrate PATH [--check]     rewrite the 0.9 import paths of your code to the 1.0 ones          (solvi._migrate)
+    solvi migrate PATH [--check]     rewrite the 0.9 import paths of your code to the 1.0 ones          (solvi.cli._migrate)
 
 --system names a System: "package.module:attribute" or "path/to/file.py:attribute", where the attribute is a System or a
 function without arguments that returns one (`solvi serve` and `solvi check` take it as their first argument; check also
@@ -43,7 +43,7 @@ import os
 import sys
 import warnings
 
-from .command import dump as _dump, fail as _fail, load_module, load_object, load_system  # noqa: F401
+from .._command import dump as _dump, fail as _fail, load_module, load_object, load_system  # noqa: F401
 
 
 STORE_KINDS = (".db / .sqlite / .sqlite3 (SQLite), .duckdb (DuckDB), a postgresql:// URL (PostgreSQL), else a "
@@ -52,7 +52,7 @@ STORE_HELP = "a TraceStorage: " + STORE_KINDS
 
 
 def _store(path, system=None):
-    from .core.store import open_storage
+    from ..core.store import open_storage
     if not path.startswith(("postgresql://", "postgres://")) and not os.path.exists(path):
         _fail(f"no such store: {path}")
     return open_storage(path, system)
@@ -70,7 +70,7 @@ def _filters(a):
 
 def _check_when(a):
     """--since / --until that cannot be read as a time are usage errors."""
-    from .core.store import _when
+    from ..core.store import _when
     for k in ("since", "until"):
         v = getattr(a, k, None)
         if v is not None:
@@ -91,7 +91,7 @@ def cmd_verify(a):
     store = _store(a.store)
     sig = None
     if a.signature:
-        from .core.store.signature import load
+        from ..core.store.signature import load
         try:
             sig = load(a.signature)
         except (OSError, ValueError) as e:
@@ -153,7 +153,7 @@ def cmd_replay(a):
 
 
 def cmd_diff(a):
-    from .core.store.diff import diff
+    from ..core.store.diff import diff
     system = load_system(a.system)
     if a.limit is not None and a.limit < 1:
         _fail(f"--limit {a.limit}: at least 1")
@@ -168,7 +168,7 @@ def cmd_diff(a):
 
 
 def cmd_report(a):
-    from .core.store.report import decision, period, render
+    from ..core.store.report import decision, period, render
     system = load_system(a.system) if a.system else None
     store = _store(a.store, system)
     if a.overview:
@@ -204,7 +204,7 @@ def cmd_report(a):
 
 def _overview(a, store):
     """`solvi report STORE --overview`: the system report (solvi.core.store.sysreport) — text, or its data with --json."""
-    from .core.store.sysreport import system_report
+    from ..core.store.sysreport import system_report
     bad = [k for k in ("id", "status", "safeguard", "model", "html", "md") if getattr(a, k, None) is not None]
     if bad:
         _fail("report --overview: the system report takes --since, --until, --question, --drift-window and --json, not "
@@ -234,7 +234,7 @@ def _read_json(src, what):
 
 
 def _answers(res):
-    from .core.store import plain
+    from ..core.store import plain
     out = {}
     for q, r in res.results.items():
         out[q] = {"answer": plain(r.answer), "status": r.status, "confidence": r.confidence, "why": r.why}
@@ -245,7 +245,7 @@ def _answers(res):
 
 def cmd_ask(a):
     """`solvi ask` → 0: every asked question answered; 1: at least one abstained (a person should look); 2: usage."""
-    from .core import _i18n as i18n
+    from ..core import _i18n as i18n
     if a.report and (a.json or a.audit or a.lang):
         _fail("ask --report: a report is one document — drop " + ", ".join(
             f for f, on in (("--json", a.json), ("--audit", a.audit), ("--lang", a.lang)) if on))
@@ -274,16 +274,16 @@ def cmd_ask(a):
         text = sys.stdin.read() if a.text == "-" else a.text
         decider = None
         if a.decider:
-            from .models import ModelError, load as load_model
+            from ..models import ModelError, load as load_model
             try:
                 decider = load_model(a.decider, a.backend, api_key=a.api_key)
             except ModelError as e:
                 _fail(str(e))
-        from .core.deciders._remote import RemoteError
+        from ..core.deciders._remote import RemoteError
         tin = None
         if a.today:                                    # as `solvi serve` reads a text: year-less and relative dates
             import datetime as dt
-            from .core.textin import TextIn
+            from ..core.textin import TextIn
             try:
                 today = dt.date.today() if a.today == "today" else dt.date.fromisoformat(a.today)
             except ValueError:
@@ -315,7 +315,7 @@ def cmd_ask(a):
         res = system.ask(state, names)
     stored = None
     if a.store:
-        from .core.store import open_storage
+        from ..core.store import open_storage
         stored = open_storage(a.store, system).save(res)
     lang = a.lang or getattr(system, "lang", None)
     if a.json:
@@ -330,7 +330,7 @@ def cmd_ask(a):
     elif a.report:
         print(res.report(a.report), end="")
     else:
-        from .show import show
+        from ..show import show
         show(res, flow=False, state=False, audit=False, lang=lang)
         tin = res.read
         if tin is not None and tin.missing:
@@ -368,7 +368,7 @@ def ask_parser(sub):
 
 
 COMMANDS = {"test": ("solvi.testing", "decision regression tests from cases.json files"),
-            "honesty": ("solvi.honesty", "honesty numbers of a labelled set, gated against a baseline"),
+            "honesty": ("solvi.testing.honesty", "honesty numbers of a labelled set, gated against a baseline"),
             "hook": ("solvi.experimental.hooks", "a coding agent's hooks (experimental): check edits against rules, pick a "
                      "skill, install them")}
 
@@ -376,14 +376,14 @@ COMMANDS = {"test": ("solvi.testing", "decision regression tests from cases.json
 def main(argv=None):
     argv = list(sys.argv[1:] if argv is None else argv)
     if argv and argv[0] in ("--version", "-V"):
-        from . import __version__
+        from .. import __version__
         print(f"solvi {__version__}")
         return 0
     if argv and argv[0] in COMMANDS:                  # commands with their own option parsers
         module = COMMANDS[argv[0]][0]
         with warnings.catch_warnings():
             if module.startswith("solvi.experimental."):  # an experimental command asked for by name (`solvi hook`):
-                from .core.catalog import ExperimentalWarning   # its help says so, no warning on every run
+                from ..core.catalog import ExperimentalWarning   # its help says so, no warning on every run
                 warnings.simplefilter("ignore", ExperimentalWarning)
             module = importlib.import_module(module)
         return module.main(argv[1:])
@@ -432,18 +432,18 @@ def main(argv=None):
                          "(solvi.core.store.sysreport)")
     rp.add_argument("--drift-window", type=int, help="--overview: the DriftMonitor's window (default 100)")
     rp.add_argument("--no-drift", action="store_true", help="--overview: do not run the DriftMonitor")
-    from .serve import add_parser as serve_parser, cmd_serve
+    from ..serve import add_parser as serve_parser, cmd_serve
     serve_parser(sub)
-    from .check import add_parser as check_parser, cmd_check
+    from ..check import add_parser as check_parser, cmd_check
     check_parser(sub)
     ask_parser(sub)
-    from .calibrate import add_parser as calibrate_parser, cmd_calibrate
+    from ._calibrate import add_parser as calibrate_parser, cmd_calibrate
     calibrate_parser(sub)
-    from .models import add_parser as models_parser, cmd_models
+    from ._models import add_parser as models_parser, cmd_models
     models_parser(sub)
     from ._migrate import add_parser as migrate_parser, cmd_migrate
     migrate_parser(sub)
-    from .scaffold import add_parser as init_parser, cmd_init
+    from ._scaffold import add_parser as init_parser, cmd_init
     init_parser(sub)
     try:
         a = p.parse_args(argv)

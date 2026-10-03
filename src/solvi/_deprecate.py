@@ -105,6 +105,25 @@ MOVED: dict[str, str] = {
     "solvi.experimental.compile.sandbox": "solvi.sandbox",
     "solvi.experimental.specialist": "solvi.specialist",
     "solvi.experimental.counterfactual": "solvi.counterfactual",     # removed for 1.0, restored as experimental
+    # 1.0 layout, the high level (solvi.solutions.*, the cli and testing packages)
+    "solvi.solutions.decisions": "solvi.auto",
+    "solvi.solutions.guard": "solvi.agents.guard",
+    "solvi.solutions.guard.confirm": "solvi.agents.confirm",
+    "solvi.solutions.guard.intents": "solvi.agents.intents",
+    "solvi._command": "solvi.command",
+    "solvi.cli._scaffold": "solvi.scaffold",
+    "solvi.testing.honesty": "solvi.honesty",
+    "solvi.cli._models:_question": "solvi.models",
+    "solvi.cli._models:_input": "solvi.models",
+    "solvi.cli._models:measure": "solvi.models",
+    "solvi.cli._models:_read_examples": "solvi.models",
+    "solvi.cli._models:_mb": "solvi.models",
+    "solvi.cli._models:cmd_list": "solvi.models",
+    "solvi.cli._models:cmd_pull": "solvi.models",
+    "solvi.cli._models:cmd_check": "solvi.models",
+    "solvi.cli._models:_report": "solvi.models",
+    "solvi.cli._models:add_parser": "solvi.models",
+    "solvi.cli._models:cmd_models": "solvi.models",
     # the import-cycle lane's moves (names that left a 0.9 module), at their 1.0 paths
     "solvi.core.response:Response": "solvi.system",
     "solvi.core.chain:append": "solvi.system",
@@ -132,21 +151,28 @@ MOVED: dict[str, str] = {
     "solvi._rpc:parse_json": "solvi.serve",
     "solvi._rpc:internal_error": "solvi.serve",
     "solvi._rpc:_readline": "solvi.serve",
-    "solvi.calibrate:add_parser": "solvi.calibfile",
-    "solvi.calibrate:cmd_calibrate": "solvi.calibfile",
-    "solvi.calibrate:examples_of": "solvi.calibfile",
-    "solvi.calibrate:find_part": "solvi.calibfile",
-    "solvi.calibrate:label_of": "solvi.calibfile",
-    "solvi.calibrate:read_rows": "solvi.calibfile",
+    "solvi.cli._calibrate:add_parser": "solvi.calibfile",
+    "solvi.cli._calibrate:cmd_calibrate": "solvi.calibfile",
+    "solvi.cli._calibrate:examples_of": "solvi.calibfile",
+    "solvi.cli._calibrate:find_part": "solvi.calibfile",
+    "solvi.cli._calibrate:label_of": "solvi.calibfile",
+    "solvi.cli._calibrate:read_rows": "solvi.calibfile",
 }
 
 
 # --- old module paths (the 1.0 layout): a 0.9 path still imports for one release, with a warning, as the same module
 # The table is MOVED itself: a module line maps a 1.0 path to the 0.9 path it replaces. What it does not say:
 OLD_PATHS_REMOVED_IN = "1.1"
-EXTRA_PATHS: dict[str, str] = {}       # a 0.9 package that only re-exported → the 1.0 module that exports the same names
+EXTRA_PATHS: dict[str, str] = {"solvi.agents": "solvi.solutions.guard"}   # a 0.9 package that only re-exported → its 1.0 module
 KEPT = {"solvi.core"}                  # a 0.9 path that is still a module in 1.0 (solvi.core: the package, re-exporting)
-TOP_LEVEL_MOVED: dict[str, str] = {}   # a name `solvi` exported in 0.9 and no longer does → the 1.0 module it is in
+# a name `solvi` exported in 0.9 and no longer does → the 1.0 module to import it from
+TOP_LEVEL_MOVED: dict[str, str] = {
+    "AnswerType": "solvi.core", "NotStated": "solvi.core", "FactTypeError": "solvi.core.types",
+    "MISSING": "solvi.core.runtime", "Record": "solvi.core.runtime", "Result": "solvi.core.runtime",
+    "Trace": "solvi.core.runtime", "Shadow": "solvi.core.store.diff", "TraceStorage": "solvi.core.store",
+    "JSONLStorage": "solvi.core.store", "SQLiteStorage": "solvi.core.store", "PostgresStorage": "solvi.core.store",
+    "DuckDBStorage": "solvi.core.store",
+}
 
 
 def old_paths():
@@ -227,10 +253,14 @@ def import_quietly(path):
 
 def old_attribute(package, name):
     """`package.name` for a name the package no longer has: a module that moved in 1.0 (imported through its old path,
-    which warns) → that module; anything else → AttributeError."""
+    which warns) → that module; a name `solvi` no longer exports (TOP_LEVEL_MOVED) → it, with the warning; anything
+    else → AttributeError."""
     old = f"{package}.{name}"
     if old in old_paths():
         return importlib.import_module(old)
+    if package == "solvi" and name in TOP_LEVEL_MOVED:
+        _warn_from_caller(moved_message(old, f"{TOP_LEVEL_MOVED[name]}.{name}"), skip=2)
+        return getattr(importlib.import_module(TOP_LEVEL_MOVED[name]), name)
     raise AttributeError(f"module {package!r} has no attribute {name!r}")
 
 
