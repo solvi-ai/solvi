@@ -257,16 +257,16 @@ def _held_system(system, state, vals, keys):
     for v in [*state.values(), *(vals[n] for n in held)]:      # objects in every candidate's ask: hashed once here
         seed.add(v)
     s = copy.copy(system)
-    s.catalog, s.storage, s.learn, s.cost_policy = cat, None, False, None
+    s.catalog, s.storage, s.learn = cat, None, False
     s.stats = {k: 0 for k in system.stats}
     s.cost_book = CostBook()
     plans = {}
     plan = s._plan
 
-    def cached(questions, init_keys, why_costs=False):           # the same keys every time: plan once
+    def cached(questions, init_keys):                            # the same keys every time: plan once
         k = (tuple(q.name for q in questions), tuple(sorted(init_keys)))
         if k not in plans:
-            plans[k] = plan(questions, init_keys, why_costs)
+            plans[k] = plan(questions, init_keys)
         return plans[k]
     s._plan = cached
     return s, held

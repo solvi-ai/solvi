@@ -264,8 +264,8 @@ Every answer is a value and a confidence, and the types also declare answer prim
   only when models of different families agree, or a model picked by code — under one guarantee
   ([examples/20_vote_across_families.py](examples/20_vote_across_families.py) shows a vote with stand-in servers).
 - **Serving and operations.** `solvi serve module:system` exposes the questions over HTTP (OpenAPI from the same types),
-  MCP and the System One API; `await system.aask(...)` runs async parts concurrently with timeouts; `cost_policy="measured"`
-  lets the planner pick the fastest equivalent source and switch when it slows down. `TraceStorage` keeps decisions with a
+  MCP and the System One API; `await system.aask(...)` runs async parts concurrently with timeouts; `CostStrategist`
+  plans the cheapest verified flow from the declared `cost=` of equivalent sources. `TraceStorage` keeps decisions with a
   hash chain across them; `solvi diff` shows which stored decisions a rule or model change would flip; `solvi test`,
   `solvi check` and the honesty suite (`solvi honesty`) belong in CI; `res.report(format="html")` and
   `solvi report decisions.db --html out.html` give an auditor one page per decision or per period.

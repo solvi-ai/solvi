@@ -237,7 +237,7 @@ def total_features(doc):
   (`record.tried`, e.g. `[["total_regex", "no value"], ["total_model", "accepted"]]`). Both are hashed into the chain.
   `replay` recomputes the value with the producer that was used, checks it still passes its validator, and checks that the
   producers tried before it are still rejected (shadow runs are not re-checked).
-- `cost=` (ms) is a prior; measured run times replace it (`system.cost_book`).
+- `cost=` (ms) is what the cost-optimal planner plans with (`system.cost_book` measures run times for reports only).
 
 ## Questions and answer types
 
@@ -1796,14 +1796,9 @@ plan by declared `cost=`, keeping every hard check that governs a question (`Sys
 shortcut for it). Both are code only. Details and the trace record of a plan:
 [docs/strategist.md](strategist.md).
 
-**Costs from measurements.** `System(cat, questions, producers="equivalent", cost_policy="measured")` plans with the run times
-`system.cost_book` measures instead of declared costs: after a warm-up (each producer measured `min_samples` times; an
-undeclared one is tried at 0 ms, a declared one keeps its `cost=` until measured) it picks the fastest of equivalent
-producers — a local table over a 300 ms feed — and switches when that one slows down; a producer unused for `recheck`
-asks gets one more trial. `system.freeze_costs()` stops the switching (`unfreeze_costs()` resumes). The plan record of each
-trace says, per fact, which cost decided and where it came from (declared, warm-up, measured, recheck, frozen). Settings:
-`costs=solvi.costs.MeasuredCosts(min_samples=3, recheck=50, alpha=None)`; see
-[docs/strategist.md](strategist.md#costs-from-measurements).
+**Costs.** The cost-optimal planner plans with the declared `cost=` of each producer. Planning on measured run times
+(`cost_policy="measured"`, `solvi.costs.MeasuredCosts`, `freeze_costs`) was removed in 1.0: it showed no measured
+benefit; `cost_policy="declared"` is the only value left.
 
 ### Early exit and parallel execution
 
