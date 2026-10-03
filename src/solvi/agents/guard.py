@@ -1880,7 +1880,10 @@ class Guard:
                            + (f" (authorizer: P(yes) = {py:.2f})" if isinstance(py, (int, float)) else ""))
             else:
                 doc = (inspect.getdoc(p.func) or "").strip().splitlines()
-                out.append(f"{n}" + (f": {doc[0]}" if doc else " is false") + f" [{p.then.get('verdict', 'deny')}]")
+                why = (rec.extra or {}).get("reasons") if isinstance(rec.extra, dict) else None
+                more = ("; ".join(why) if why and getattr(p.func, "show_fail_reasons", False) else "")  # its Fail's words
+                out.append(f"{n}" + (f": {doc[0]}" if doc else " is false") + (f" — {more}" if more else "")
+                           + f" [{p.then.get('verdict', 'deny')}]")
         if not out:
             unresolved = res.flow.unresolved.get("verdict") or []
             if unresolved:                            # a check reads a fact nobody gave: name the facts

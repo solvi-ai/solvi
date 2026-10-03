@@ -24,11 +24,28 @@
   With `hold=False` candidates no longer feed the System's stats, costs or learned order.
 - `solvi.compile`: a draft stuck on the contract for two rounds is replaced by a fresh one (`fresh_drafts=2`,
   `stuck_after=2`); a part other parts call as a function becomes a helper; a key read inside a dict input gets an
-  accessor; `datetime.strptime` works in the sandbox. Everything accepted in our runs was right (5 of 5); a calendar
-  rule set that was refused before is now accepted and matches its reference on 2,141 of 2,141 cases.
-- `compile_groups` (experimental): a large specification is split into groups of clauses, each compiled and accepted
-  on its own, then assembled and checked again as a whole. On a 56-clause customer-service policy no group was
-  accepted — the drafts added rules the policy does not state, and acceptance refused them.
+  accessor; `datetime.strptime` works in the sandbox. In the runs without a person everything accepted was right (5
+  of 5; with a person two accepted parts of a policy were wrong, see below); a calendar rule set that was refused
+  before is now accepted and matches its reference on 2,141 of 2,141 cases.
+- `solvi.compile` with a person in the loop: `compile_spec(..., review=ask_a_person)` (also `recompile`) asks a
+  person, within a budget (`review_budget=20`, `review_per_round=5`), about the inputs two drafts decide differently
+  and about tests every draft fails. The person says which draft is right, gives the right answer, or says the text
+  does not decide it. Each answer becomes a test both drafts must pass — never code; the other conditions of
+  acceptance are unchanged. The answers are trusted like labels: a wrong answer becomes a wrong test (it can replace a
+  derived test), and both drafts can follow it. Every question and answer is in `c.record["person"]`; `c.reviewer()`
+  replays them. `reference_reviewer(fn)` simulates the person with a hand-written reference, for experiments. In one
+  run each, with the person simulated by a hand-written reference: a meeting-plan checker refused before was accepted
+  after two answers (both corrected a derived test) and matched its reference on 2,400 of 2,400 cases; two other
+  compilations stayed refused. The person only sees what the drafts dispute: on a customer-service policy split by
+  tool, two tools' rules were accepted wrong, because both drafts added conditions the policy does not state — a bare
+  "yes" as the customer's confirmation ("Yes, I confirm!" refused), no earlier tool call in the conversation — and so
+  never disagreed.
+- Compiling a large specification in groups of clauses (`compile_groups`) was tried for this release and left out:
+  on that 56-clause policy no group was accepted without a person, and with one 2 of 8 groups were accepted, both
+  wrong.
+- `to_guard(c, guard, allow="yes")`: a policy compiled as one question ("may this call be made?") becomes one Guard
+  policy that refuses any other answer and names the clauses that decided; with `decision_diff` you see which of the
+  calls you pass a changed policy text moves, before the new guard goes live.
 - A showcase of System 1 and System 2 on a game: `examples/23_pokemon_world_map.py` and a Space in `spaces/pokemon/`. A player walks the world map of Pokémon Red (190 places and 447 exits recorded from a real playthrough as place names and exits — no ROM, no graphics) through the game's first fifteen goals, twice. System 1 is two rules over routes it remembers; System 2 is a search over the world map the player writes as it goes, woken when System 1 has no route or was surprised; after each goal the routes are compiled from what the map has confirmed. The first run makes 147 slow decisions out of 183, the second 2 out of 62 (the fewest moves possible), both right after a surprise. Every decision is stored and replays without the game; the Space replays the recording in the browser with the world map, who decided and why, and the system report. With your own ROM file, the example first checks the recorded world against it.
 - A decision recorded on one Python version now replays its configuration on another: the code fingerprints of a catalog no longer change with the interpreter (Python 3.12 and 3.13 print a function's syntax tree differently). Fingerprints computed by earlier versions differ once from the new ones: a trace replay then reports the catalog as changed.
 - A searching slow path whose objective is a fact's name (`SlowPath(..., search={"objective": "score"})`) replays; its replay used to fail with a TypeError.
