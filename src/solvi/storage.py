@@ -536,7 +536,7 @@ def rederive(d, system, trust_models=False):
     results = {q: load(_result_cls(), {**_RESULT_DEFAULTS, **r}) for q, r in (c.get("results") or {}).items()}
     values = {k: v for k, v in vals.items() if v is not MISSING}
     for r in trace.records:                           # the kept records' values (a model step given back, a head)
-        if r.value is not MISSING and not r.name.startswith(("answer:", "guard:", "plan", "textin")):
+        if r.value is not MISSING and r.kind not in KEPT_STEPS and not r.name.startswith("answer:"):
             values.setdefault(r.name, r.value)
     resp = Response(results, p.flow, trace, values, float(c.get("ms") or 0.0), c.get("feasible", True),
                     c.get("violations"), system.catalog, list(c.get("safeguards") or []), int(c.get("model_outputs") or 0))
@@ -973,8 +973,8 @@ class TraceStorage:
                 except Exception as e:  # noqa: BLE001
                     failed(s, "load", e)
                     continue
-            try:                                      # a compact decision was just re-run step by step (its models too,
-                rep = r.trace.replay(system, r.flow, trust_models=trust_models or s.compact)   # unless trusted): the rest
+            try:                                      # a compact decision's steps (and models) were just re-run by
+                rep = r.trace.replay(system, r.flow, trust_models=trust_models or s.compact)   # rederive: not again
             except Exception as e:  # noqa: BLE001
                 failed(s, "replay", e)
                 continue
@@ -1108,9 +1108,11 @@ class JSONLStorage(TraceStorage):
     `path` again with a record of kind "segment" that names the closed segment, its record count and its last hash —
     so each file verifies on its own, the first record of a file is linked to the head of the one before it, and
     verify_segments() checks every segment and every link (a segment replaced, cut short or removed breaks a link).
-    Reads (iter, query, get, replay_all) see the current file; segments() lists the closed ones, each readable as a
-    JSONLStorage of its own. With rotation, writers of the same path lock `<path>.lock` (a file that is never moved):
-    every process writing a rotated store must open it with rotation on."""
+    Reads (iter, query, get, replay_all) and redact see the current file; segments() lists the closed ones, each
+    readable as a JSONLStorage of its own. A closed segment is not written to: redacting one of its records there would
+    append to it and break the link of the file after it (not supported yet). With rotation, writers of the same path
+    lock `<path>.lock` (a file that is never moved): every process writing a rotated store must open it with rotation
+    on."""
 
     @_deprecate.removed_kwargs(catalog="system")
     def __init__(self, path, system=None, clock=None, fsync=False, index=True, *, record="full", rotate_bytes=None,
@@ -1258,7 +1260,8 @@ class JSONLStorage(TraceStorage):
     def _append(self, body):
         with self._writing() as fh:
             self._sync(fh)                            # what other writers appended: the chain goes on from their last
-            if self.rotates and self._due():
+            if self.rotates and self._due() and body.get("kind") != "redaction":   # an erasure stays in the file of
+                                                                                   # the record it erases
                 link = self._rotate()
                 with open(self.path, "a+b") as nf, _flock(nf):
                     self._sync(nf)
@@ -1298,7 +1301,11 @@ class JSONLStorage(TraceStorage):
     def _rewrite(self, rec):
         """In place, under the append lock: other writers hold this very file open, so it is not swapped for a new one.
         The new content is first written whole to `<path>.rewrite` (a crash while copying it back leaves that file)."""
-        with self._lock, open(self.path, "r+b") as fh, _flock(fh):
+        with self._lock, contextlib.ExitStack() as stack:
+            if self.rotates:                          # the lock every writer of a rotated store takes
+                stack.enter_context(_flock(stack.enter_context(open(self.path + ".lock", "a+b"))))
+            fh = stack.enter_context(open(self.path, "r+b"))
+            stack.enter_context(_flock(fh))
             tmp = self.path + ".rewrite"
             with open(tmp, "wb") as out:
                 for line in fh:
@@ -1751,6 +1758,7 @@ def open_storage(where, system=None):
     return JSONLStorage(p, system)
 
 
-__all__ = ["chained", "check_source", "DuckDBStorage", "entry", "FORMAT", "JSONLStorage", "open_storage", "plain",
-           "PostgresStorage", "record_body", "record_hash", "SQLiteStorage", "Stored", "TraceStorage",
-           "TRUSTED_SOURCES", "UntrustedLabel", "VERIFIED", "VERIFIED_REFUSED"]
+__all__ = ["chained", "check_source", "compact_content", "CompactRecord", "DuckDBStorage", "entry", "FORMAT",
+           "JSONLStorage", "open_storage", "plain", "PostgresStorage", "record_body", "record_hash", "record_mode",
+           "RECORD_MODES", "rederive", "SQLiteStorage", "Stored", "TraceStorage", "TRUSTED_SOURCES", "UntrustedLabel",
+           "VERIFIED", "VERIFIED_REFUSED", "view"]

@@ -275,3 +275,17 @@ def test_two_writers_of_a_rotated_store_keep_one_chain(tmp_path):
     assert v["ok"], v["problems"][:3]
     segs = len(JSONLStorage(p).segments())
     assert v["count"] == 40 + segs
+
+
+def test_redact_in_the_current_file_of_a_rotated_store_keeps_every_link(tmp_path):
+    store = JSONLStorage(tmp_path / "d.jsonl", record="compact", rotate_records=4)
+    s = _game(store)
+    for st in STATES * 2:
+        s.ask(st)                                         # the current file is full: the next append would rotate
+    assert len(store) == 4
+    last = list(store.iter())[-1]
+    store.redact(last.id, by="dpo")                       # the erasure stays next to the record it erases
+    assert store.record(last.id)["redacted"] and store.verify_segments()["ok"]
+    old = JSONLStorage(store.segments()[0]).query()[0]
+    with pytest.raises(KeyError):                         # a record of a closed segment: not here
+        store.redact(old.id)
