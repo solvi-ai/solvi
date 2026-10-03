@@ -39,8 +39,8 @@ The slow path (`SlowPath`) is built from the existing parts and judged by a Syst
 Its answer is accepted when the System does not abstain on it (and, with refine and search, its checks accept it).
 
 Calibrating the hard slice. The inputs System 1 hands over are the hard ones, and a slow path's accuracy (or its own
-guarantee) measured on an average sample does not carry over to them: on the stand, an LLM wrong on 3% of all product
-pairs was wrong on 41% of those a fitted head was unsure of. `calibrate(examples, max_risk= | max_error=)` measures it
+guarantee) calibrated on an average sample does not carry over to them: an LLM rarely wrong on product pairs overall can
+be wrong on many of those a fitted head is unsure of. `calibrate(examples, max_risk= | max_error=)` measures it
 where it matters: every labelled example goes through the same dispatch; the ones System 1 answers alone count as its
 answers, the ones it hands over form a slice per waking signal (below the guarantee, open-set, abstention, constraint,
 agreement), and on each slice System 1's own would-be answer, the slow path's answer and "the slow path when it agrees

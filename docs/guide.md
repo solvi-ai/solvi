@@ -4103,6 +4103,32 @@ goes to a person, and the reason says which limit. A single System ask is not st
 per-decision budget keeps its answer and records how far over (`res.over_budget`). Every `Dispatched` carries
 `cost = {"s1", "s2", "total"}` (dollars, calls, ms, tokens); `d.spent`, `d.summary()` the totals.
 
+### Calibrating who answers on the hard slice
+
+The inputs System 1 hands over are the hard ones, and a slow path judged on an average sample can do much worse
+there — an LLM that is rarely wrong on product pairs overall can be wrong on many of the pairs a fitted head is unsure
+of, where the head's own guess is the better answer. `calibrate` measures each answerer where it will be used:
+
+```python
+report = d.calibrate(examples, max_risk=0.01)       # [(state, correct answer)], not those S1's guarantee saw
+report["slices"]["guarantee"]       # {"n", "accuracy": {"s1", "s2", "agree"}, "answer", "threshold", "answered", ...}
+report["promise"], report["risk"]   # for all the answers given alone together, on these examples
+```
+
+Each example goes through the same dispatch. What System 1 answers alone counts as its answers; what it hands over
+forms a slice per waking signal (`guarantee`, `openset`, `abstain`, `constraint`, `agreement`). On each slice the
+dispatcher measures System 1's own would-be answer (`"s1"`), the slow path's (`"s2"`) and the slow path's when it
+equals System 1's (`"agree"`), and picks one answerer with a threshold on its confidence — or a person — so that all
+answers given alone together keep the promise (`max_risk=`: conformal risk control; `max_error=`: learn-then-test, or
+`method="empirical"`) while answering as many as possible. A slice with fewer than `min_slice` examples (default 20)
+goes to a person, and the report says so. `correct(answer, label, response)` judges answers that equality cannot (a
+quote that overlaps the gold one). The choice is the dispatcher's `policy`: it is part of the config every decision
+records, each decision records its slice, and a think runs the slow path only when its slice's answerer is the slow path
+— System 1's own answer costs nothing. Calibrate on examples System 1's guarantee was not calibrated on: there its
+answers sit at the edge of the promise and leave nothing for the slices (the report then sends every slice to a person
+and says why). The promise holds for inputs like the examples: a slice calibrated without inputs of a new kind (an
+unseen intent) does not cover them.
+
 ### The record and replay
 
 `res = d.ask(state)` is a `Dispatched`: `answer`, `by` (`"s1"`, `"s2"`, `"human"`), `action`, `reasons`, `s1` (System 1's
