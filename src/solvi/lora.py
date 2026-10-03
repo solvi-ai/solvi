@@ -61,7 +61,7 @@ class LoraWarning(UserWarning):
 def _experimental():
     if not _warned[0]:
         _warned[0] = True
-        from .learning import ExperimentalWarning
+        from .core import ExperimentalWarning
         warnings.warn("part.adapt_lora / load_lora are experimental: the API, the recipe and the file format may change",
                       ExperimentalWarning, stacklevel=4)
 

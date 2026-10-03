@@ -41,13 +41,13 @@ from . import _deprecate
 from .core import Decision, Quote, Unknown
 from .decide import DecisionPart, Facts, GroupBy, _group_info, _group_promise, _single, group_record, guard_promise, no_separation, one_source
 from .provenance import ESCALATED, code_fingerprint, digest
+from .runtime import RECORD_KEYS          # what a replay compares with the recomputed (defined there; re-exported)
 
 # guarantee["signal"]: a name, as a part's ("act", "confidence"): one threshold shared by every part, on each part's
 # own signal ("shared") or on its rank among that part's calibration signals ("shared-rank")
 _SIGNAL = {"rank": "shared-rank", "raw": "shared"}
 _SIGNAL_0_7 = {"shared-rank": "shared threshold on each model's rank among the calibration examples",
                "shared": "shared threshold on each model's signal"}
-RECORD_KEYS = ("stages", "answered_by", "votes", "route", "routed")      # what a replay compares with the recomputed
 MAX_RANKS = 1024        # calibration signals kept per model for scale="rank" (more examples: this many evenly spaced ones)
 SCALES = ("rank", "raw")
 STAGE_FLOOR = 0.05      # act_guard on a cascade warns when a stage answers alone on less than this share

@@ -37,6 +37,7 @@ import time
 from . import _deprecate
 from .strategist import Flow, PlanError, plan as det_plan
 from .core import Catalog, _group_func
+from .runtime import narrowed, replay_plan             # defined there (the runtime replays plan records); re-exported
 
 UNIT = 1.0
 MAX_NODES = 4
@@ -783,38 +784,6 @@ def plan_record(flow):
         extra["costs"] = s["costs"]
     return Record(step=0, kind="plan", name="plan:strategy", inputs={}, value=value,
                   provenance="proposed" if by_model else "computed", model=s.get("model") if by_model else None, extra=extra)
-
-
-def replay_plan(r, catalog, init_keys):
-    """Re-verify a plan record against the catalog: every chosen producer exists and provides its fact, and its inputs are
-    given or chosen facts → [(step, name, reason)]."""
-    bad = []
-    v = r.value if isinstance(r.value, dict) else {}
-    ch = v.get("choice") or {}
-    init = set(init_keys)
-    for f, n in ch.items():
-        if f not in catalog.parts:
-            bad.append((r.step, r.name, f"plan chose a producer of {f}, which is not in the catalog"))
-            continue
-        try:
-            a = producer(catalog, f, n)
-        except KeyError:
-            bad.append((r.step, r.name, f"{n} is not a producer of {f}"))
-            continue
-        lost = [x for x in a.inputs if x not in init and x not in ch]
-        if lost:
-            bad.append((r.step, r.name, f"{n}: inputs {', '.join(lost)} are neither given nor chosen"))
-    return bad
-
-
-def narrowed(group, tried):
-    """A fact's producer group narrowed to the producers that ran (replay of a plan that dropped the others)."""
-    from .core import _group_func
-    names = [n for n, _ in tried]
-    alts = [a for a in group.alternatives if a.name in names] or list(group.alternatives)
-    g = dataclasses.replace(group, alternatives=alts, inputs=list(dict.fromkeys(x for a in alts for x in a.inputs)))
-    g.func = _group_func(g)
-    return g
 
 
 __all__ = ["CostStrategist", "ModelStrategist", "Selection", "search", "segments", "check_segment", "validate", "build", "view", "reachable",

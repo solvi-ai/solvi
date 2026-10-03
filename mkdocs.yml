@@ -76,6 +76,7 @@ nav:
       - solvi.agents: api/agents.md
       - solvi.hooks: api/hooks.md
       - solvi.textin: api/textin.md
+      - solvi.inputs: api/inputs.md
       - solvi.specialist: api/specialist.md
       - solvi.charts: api/charts.md
       - solvi.longdoc: api/longdoc.md

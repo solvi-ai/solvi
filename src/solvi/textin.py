@@ -82,27 +82,10 @@ class EntryPoint:
 
 
 def entry_points(system, questions=None):
-    """The questions of a system as entry points (see System.entry_points)."""
-    names = questions
-    from .serve import _fact_type, input_schema, question_inputs
-    out = []
-    for q in system.questions.values():
-        if names is not None and q.name not in names:
-            continue
-        info = question_inputs(system, q.name)
-        fields = {}
-        for f in info["properties"]:
-            t, desc = _fact_type(system, f)
-            fields[f] = EntryField(f, t, desc, f in info["required"])
-        out.append(EntryPoint(q.name, q.text, fields, input_schema(system, q.name)))
-    if names is not None:
-        missing = [n for n in names if n not in system.questions]
-        if missing:
-            raise KeyError(f"no such question: {', '.join(missing)}")
-    return out
+    """The questions of a system as entry points: system.entry_points(questions) (solvi.inputs builds them)."""
+    return system.entry_points(questions)
 
 
-_entry_points = entry_points           # TextIn has an attribute of that name
 
 
 # ------------------------------------------------------------------------------------------------ deterministic parsers
@@ -938,7 +921,7 @@ class TextIn:
         if extractor is None:
             extractor = CueExtractor()
         self.extractors = list(extractor) if isinstance(extractor, (list, tuple)) else [extractor]
-        self.entry_points = {e.name: e for e in _entry_points(system, entry_points)}
+        self.entry_points = {e.name: e for e in system.entry_points(entry_points)}
         self.descriptions = dict(descriptions or {})
         self.synonyms, self.cues, self.patterns = dict(synonyms or {}), dict(cues or {}), dict(patterns or {})
         self.negatives = dict(negatives or {})

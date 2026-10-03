@@ -61,88 +61,11 @@ from pydantic import BaseModel, ConfigDict, Field, create_model
 
 from . import _deprecate
 from .command import fail as _fail, load_object, load_system
+from .inputs import _camel, _fact_type, input_model, input_schema, question_inputs   # noqa: F401 — re-exported
+from .runtime import trace_hash   # noqa: F401 — re-exported (defined there: agents read it too)
 from .schema import dump, dumps
 
 REF = "#/components/schemas/{model}"          # where the OpenAPI document keeps the models (see create_app)
-
-
-# ------------------------------------------------------------------------------------------------ what a question reads
-def question_inputs(system, name):
-    """The given facts a question's flow reads → {"properties": [fact], "required": [fact]}. Planned with every given fact
-    of the catalog present; a fact is required when the question cannot be answered without it (the strategist leaves it
-    unresolved), so the inputs of alternative producers are optional. Planned by the system's own strategist
-    (System(strategist=)), as `ask` plans."""
-    from .strategist import PlanError, given_facts
-    cat, q = system.catalog, system.questions[name]
-    given = given_facts(cat, system.questions.values())
-    try:
-        flow = system._plan([q], given)
-    except PlanError:
-        return {"properties": [], "required": []}
-    used = {x for s in flow.steps for x in s.part.inputs if x in given}
-    used |= set(q.uses or ()) & given
-    head = system.heads.get(name)
-    if head is not None:
-        used |= set(head.features) & given
-    required = []
-    for f in sorted(used):
-        try:
-            if system._plan([q], given - {f}).unresolved.get(name):
-                required.append(f)
-        except PlanError:
-            pass
-    return {"properties": sorted(used), "required": required}
-
-
-def _fact_type(system, fact):
-    """The type of a given fact → (type or Any, description): System(input_model=...)'s field, else the one type its typed
-    readers declare (Any when they disagree or nobody declares one)."""
-    readers = system.catalog.readers.get(fact) or {}
-    m = system.input_model
-    if m is not None and fact in m.model_fields:
-        return m.model_fields[fact].annotation, m.model_fields[fact].description
-    types = []
-    for t in readers.values():
-        if t not in types:
-            types.append(t)
-    return (types[0] if len(types) == 1 else Any), None
-
-
-def _schema_ok(t):
-    from pydantic import TypeAdapter
-    try:
-        TypeAdapter(t).json_schema()
-        return True
-    except Exception:  # noqa: BLE001 — a type with no JSON schema (an arbitrary class): documented as any value
-        return False
-
-
-def input_model(system, name):
-    """A pydantic model of the input state a question reads (extra keys allowed) — for the schema; solvi validates."""
-    from .typed import type_name
-    info = question_inputs(system, name)
-    readers = system.catalog.readers
-    fields = {}
-    for i, f in enumerate(info["properties"]):
-        t, desc = _fact_type(system, f)
-        if t is not Any and not _schema_ok(t):
-            desc, t = f"{type_name(t)} (no JSON schema)", Any
-        who = sorted(readers.get(f) or ())
-        desc = desc or (f"read by {', '.join(who)}" if who else None)
-        default = ... if f in info["required"] else None
-        fields[f"f{i}"] = (t, Field(default, alias=f, title=f, description=desc))
-    return create_model(_camel(name) + "Input", __config__=ConfigDict(extra="allow", arbitrary_types_allowed=True),
-                        __doc__=f"The input state of question {name!r}", **fields)
-
-
-def input_schema(system, name, ref_template="#/$defs/{model}"):
-    """The JSON schema of the input state a question reads."""
-    return input_model(system, name).model_json_schema(ref_template=ref_template)
-
-
-def _camel(name):
-    s = "".join(w[:1].upper() + w[1:] for w in str(name).replace("-", "_").split("_") if w)
-    return s if s.isidentifier() else "Question"
 
 
 def questions_info(system):
@@ -571,12 +494,6 @@ class Service:
         p = [float(d.probs[o]) for o in opts]
         return {"type": "score", "score": sum(i * x for i, x in enumerate(p)), "confidence": float(d.conf),
                 "legend": opts, "probabilities": dict(zip(opts, p))}
-
-
-def trace_hash(resp):
-    """The hash at the end of a response's trace (its last record's; the input's hash when nothing ran)."""
-    tr = resp.trace
-    return tr.records[-1].hash if tr.records else tr.init_hash
 
 
 # --- the System One API (the wire format solvi.systemone speaks as a client)

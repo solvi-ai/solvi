@@ -1152,7 +1152,7 @@ class GuardDecision:
 
     @property
     def trace_hash(self):
-        from ..serve import trace_hash
+        from ..runtime import trace_hash
         return trace_hash(self.response)
 
     @property

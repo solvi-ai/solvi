@@ -680,7 +680,7 @@ def _stub(name, kind, inputs, hard=None):
 
 
 def _load_flow(m, catalog):
-    from .strategist import Flow, Step
+    from .runtime import Flow, Step
     steps = []
     for s in m.steps:
         p = None
@@ -697,9 +697,8 @@ def load(cls, data, catalog=None):
     catalog, system = _types(catalog)
     if n == "AnswerType":
         return _load_answer(m)
-    if n == "Question":
-        from .core import Question
-        return Question(m.name, m.text, _load_answer(m.answer), list(m.checkpoints), m.uses, m.min_confidence,
+    if n == "Question":                               # cls is solvi.core.Question
+        return cls(m.name, m.text, _load_answer(m.answer), list(m.checkpoints), m.uses, m.min_confidence,
                         m.require_evidence)
     if n == "Result":
         return _load_result(m)
@@ -709,14 +708,13 @@ def load(cls, data, catalog=None):
         return _load_trace(m, catalog, system)
     if n == "Flow":
         return _load_flow(m, catalog)
-    if n == "Response":
+    if n == "Response":                               # cls is solvi.system.Response (schema sits below system)
         from .runtime import MISSING
-        from .system import Response
         tr = _load_trace(m.trace, catalog, system)
         known = dict(tr.init)
         known.update({r.name: r.value for r in tr.records if r.value is not MISSING})
         values = {k: known.get(k, v) for k, v in m.values.items()}
-        resp = Response({q: _load_result(r) for q, r in m.results.items()}, _load_flow(m.flow, catalog), tr, values, m.ms,
+        resp = cls({q: _load_result(r) for q, r in m.results.items()}, _load_flow(m.flow, catalog), tr, values, m.ms,
                         m.feasible, list(m.violations), catalog, [e.model_dump() for e in m.safeguards], m.model_outputs)
         if system is not None:
             resp._system = system                     # loaded with a System: reports and counterfactuals use it

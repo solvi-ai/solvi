@@ -15,39 +15,14 @@ from __future__ import annotations
 
 import random
 from collections import deque
-from dataclasses import dataclass, field
 
 from . import _deprecate
 from .core import Quote
+from .runtime import Flow, Step, scalar_row        # defined there: the runtime runs a flow; re-exported
 
 
 class PlanError(Exception):
     pass
-
-
-@dataclass
-class Step:
-    part: object
-    reasons: list = field(default_factory=list)
-
-
-@dataclass
-class Flow:
-    steps: list                     # in execution order
-    per_question: dict              # question → names of the parts in its flow
-    skipped: dict                   # catalog part → why it was not taken
-    unresolved: dict                # question → facts nothing can compute
-    types: dict = field(default_factory=dict)   # fact → type, for the typed facts of the flow (see solvi.typed)
-    batches: list = field(default_factory=list)  # [[step name]]: decision parts scored together in one forward pass
-
-    def __str__(self):
-        lines = []
-        for i, s in enumerate(self.steps, 1):
-            p = s.part
-            lines.append(f"{i:2d}. {p.kind:7s} {p.name:24s} ← {', '.join(p.inputs) or '—'}   [{'; '.join(s.reasons)}]")
-        if self.skipped:
-            lines.append("not taken: " + ", ".join(f"{k} ({v})" for k, v in sorted(self.skipped.items())))
-        return "\n".join(lines)
 
 
 def computable(catalog, init_keys):
@@ -186,33 +161,6 @@ def plan(catalog, questions, init_keys, heads=None):
 # producer's own validator; the policy only chooses who goes first. It learns from the outcomes of past runs, instantly.
 # Every probability is an online model on cheap features (Binary): Laplace counts until `min_rows` labelled rows, then a
 # FastHead (closed-form ridge, solvi.heads) refitted every `refit_every` rows and updated by a rank-one step in between.
-
-
-def scalar_row(values, keys=None):
-    """Cheap features from a dict of facts: numbers, booleans and short strings as they are; a long string gives its length;
-    a list / tuple / dict gives its length. Anything else is left out."""
-    out = {}
-    for k in (values if keys is None else keys):
-        if k not in values:
-            continue
-        v = values[k]
-        if isinstance(v, Quote):
-            v = v.value
-        if isinstance(v, bool) or (isinstance(v, (int, float)) and not isinstance(v, bool)):
-            out[k] = v
-        elif isinstance(v, str):
-            if len(v) <= 40:
-                out[k] = v
-            else:
-                out[k + "#len"] = float(len(v))
-        elif isinstance(v, dict):                         # one level down: {"invoice": {"currency": "EUR"}} → invoice.currency
-            out[k + "#len"] = float(len(v))
-            for kk, x in list(v.items())[:50]:
-                if isinstance(x, bool) or isinstance(x, (int, float)) or (isinstance(x, str) and len(x) <= 40):
-                    out[f"{k}.{kk}"] = x
-        elif isinstance(v, (list, tuple, set)):
-            out[k + "#len"] = float(len(v))
-    return out
 
 
 class Binary:

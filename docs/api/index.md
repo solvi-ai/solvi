@@ -26,6 +26,7 @@ this reference lists what each module exports and the signatures.
 | [`solvi.agents`](agents.md) | guarding an agent's tool calls: `Guard`, the MCP proxy (adapters for PydanticAI, LangGraph, the OpenAI Agents SDK) |
 | [`solvi.hooks`](hooks.md) | a coding agent's hooks: edits checked against rules, a skill picked for a prompt, install / uninstall (Claude Code; Codex, preview) |
 | [`solvi.textin`](textin.md) | text in: a message → the question it asks and its typed input state, read with quotes |
+| [`solvi.inputs`](inputs.md) | what a question reads: its given facts, the model and JSON schema of its input state, entry points |
 | [`solvi.specialist`](specialist.md) | the specialist contract (preview): propose a typed spec, check it against the source, render, replay |
 | [`solvi.charts`](charts.md) | verified charts (preview): a text with numbers → an SVG in which every number is quoted from the text |
 | [`solvi.longdoc`](longdoc.md) | long texts: sections, BM25 retrieval, the window a decider reads |

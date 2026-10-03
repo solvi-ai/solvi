@@ -46,6 +46,8 @@ import warnings
 
 import numpy as np
 
+from .runtime import replay_guard        # defined there (the runtime replays guard records); re-exported
+
 METHODS = ("crc", "ltt", "empirical")
 SEPARATION_P = 0.05            # the signal must separate right from wrong at this level (one-sided Mann–Whitney)
 MIN_CLASS = 5                  # separation is tested only with at least this many right and wrong examples
@@ -654,30 +656,6 @@ def _plain(d):
     if isinstance(d, (np.floating, np.integer)):
         return d.item()
     return d
-
-
-def replay_guard(r, system, vals):
-    """A recorded guard verdict (kind "guard"): its inputs must be the recorded facts, the verdict must follow from the
-    recorded signal and threshold, and with the System its guarantee must be the one the question has now."""
-    from .runtime import Mismatch, vhash
-    bad = []
-    for f, h in r.inputs.items():
-        if f not in vals or vhash(vals[f]) != h:
-            bad.append(Mismatch(r.step, r.name, f"input {f} does not match the recorded one", "integrity"))
-    e = r.extra or {}
-    s, t = e.get("value"), e.get("threshold")
-    follows = False if e.get("reason") or s is None else float(s) >= (math.inf if t is None else float(t))
-    if bool(r.value) != follows:
-        bad.append(Mismatch(r.step, r.name, f"verdict {r.value!r} does not follow from the recorded signal {s} and "
-                                            f"threshold {t}" + (f" ({e['reason']})" if e.get("reason") else ""), "integrity"))
-    if system is not None:
-        g = getattr(system, "guards", {}).get(r.name[6:])
-        if g is None:
-            bad.append(Mismatch(r.step, r.name, "the question has no guarantee now (removed since this decision)", "recompute"))
-        elif g.fingerprint() != e.get("fingerprint"):
-            bad.append(Mismatch(r.step, r.name, "the question's guarantee changed since this decision (recalibrated or "
-                                                "another signal)", "recompute"))
-    return bad
 
 
 __all__ = ["GuaranteeWarning", "Promise", "QuestionGuard", "apply_guards", "calibrate", "guard_question", "promise_text",

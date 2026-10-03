@@ -403,7 +403,7 @@ class System:
         """The questions as entry points: each question's name, text and the typed input state it reads — every given fact
         its flow reads, with its type, description and whether the question needs it (the schemas `solvi serve` publishes).
         → [solvi.textin.EntryPoint]; `ep.tool()` is the function-calling form."""
-        from .textin import entry_points
+        from .inputs import entry_points
         return entry_points(self, questions)
 
     def _textin(self, text, decider, textin, question):
