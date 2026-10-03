@@ -227,7 +227,7 @@ Question("route", "Which team?", Answer.choice(["a", "b"]), uses=["country", "to
 - `text`: human-readable wording;
 - `answer`: `Answer.yes_no()` (options `["yes", "no"]`) or `Answer.choice(options)` (and the types below); leave it out
   when the question's rule has a return type — the answer type then comes from it (see [Types](#types-questions-and-model-decisions));
-- `requires` (`checkpoints=` in 0.7, deprecated): parts that must be in this question's flow in every request (a missing name raises
+- `requires` (`checkpoints=` in 0.7, removed in 0.9): parts that must be in this question's flow in every request (a missing name raises
   `solvi.strategist.PlanError`). In the flow is not the same as run: when a hard check settles the question first, a
   required part after it is skipped — `ask(state, early_exit=False)` runs it anyway (see
   [Early exit](#early-exit-and-parallel-execution));
@@ -1678,8 +1678,8 @@ res = system.ask(init_state, ["ship"])         # a subset: questions=["ship"] (o
 ```
 
 `system.ask(init_state, questions=None, *, workers=None, order=None, store=True, early_exit=None)`; `aask` takes the same
-`questions` and keyword-only `order`, `store`, `timeout`, `speculate`, `early_exit`. (`names=` is the 0.7 spelling of
-`questions=`: deprecated, removed in 0.9.)
+`questions` and keyword-only `order`, `store`, `timeout`, `speculate`, `early_exit`. (`names=`, the 0.7 spelling of
+`questions=`, was removed in 0.9.)
 
 `System(catalog, questions, *, workers=1, order="default", producers="declared", learn=None, input_model=None,
 strategist=None, storage=None, timeout=None, cost_policy="declared", lang="en", early_exit=True)`; `learn`: after every ask,
@@ -1688,7 +1688,7 @@ update the parts' measured costs and the learned order / producer policies from 
 response with its whole trace, hash-chained across responses (see [Storing decisions](#storing-decisions-tracestorage)).
 Every option after `questions` is keyword-only. With a JSON-lines store every `ask` appends one line with the hash of
 `init_state`, the answers, the flow and the hash of every trace record, plus the whole response and the chain fields
-(`journal="file.jsonl"`, the older spelling of `storage="file.jsonl"`, is deprecated and goes in 0.9). `ask(..., store=False)` skips saving one response. `inputs`: a pydantic model of
+(`journal="file.jsonl"`, the older spelling of `storage="file.jsonl"`, was removed in 0.9). `ask(..., store=False)` skips saving one response. `input_model`: a pydantic model of
 `init_state` (see [Types](#types-questions-and-model-decisions)); `ask` also takes a `BaseModel` instance.
 
 ### Response
@@ -1937,7 +1937,7 @@ the ridge head on every feature. Accuracy is a poor guide when one answer is mos
 no fact. The selection by squared error keeps the facts that matter for a rare answer too. On very few examples (a few
 dozen) choosing among many facts overfits: pass `select=False` there. `benchmarks/fast_head.py` compares the selection
 with every fact on the example tasks — accuracy on fresh examples and the fitting time; re-run it on your own data.
-`fit_fast(...)` still works in 0.8, with a SolviDeprecationWarning: it is `fit(..., select=False)`; it goes in 0.9.
+`fit_fast(...)` was `fit(..., select=False)` in 0.8 and was removed in 0.9.
 
 Its other property is online learning: `system.teach(question, init_state, correct)` updates the head immediately with
 a rank-one Sherman–Morrison step (about 0.1–0.2 ms: `benchmarks/fast_head.py`, `examples/10_learn_in_milliseconds.py`) and returns the time in ms. Other questions, rules and hard checks
@@ -2196,11 +2196,11 @@ Which promise each method makes, for inputs like the calibration examples (the s
 
 | method | given as | promise |
 |---|---|---|
-| `"crc"` (conformal risk control) | `risk=r` | P(answered alone and wrong) ≤ r — a share of **all** inputs, answered or escalated, on average over calibration sets |
-| `"ltt"` (learn-then-test) | `error=e` | the error **among the answers given alone** ≤ e, with probability ≥ 1 − delta over the calibration set |
-| `"empirical"` | `error=e, method="empirical"` | none: the error among the answered was ≤ e on the calibration examples only |
+| `"crc"` (conformal risk control) | `max_risk=r` | P(answered alone and wrong) ≤ r — a share of **all** inputs, answered or escalated, on average over calibration sets |
+| `"ltt"` (learn-then-test) | `max_error=e` | the error **among the answers given alone** ≤ e, with probability ≥ 1 − delta over the calibration set |
+| `"empirical"` | `max_error=e, method="empirical"` | none: the error among the answered was ≤ e on the calibration examples only |
 
-Which one to use: "≤ 5% of the answers we give are wrong" is `error=` (learn-then-test). `risk=` is the cheaper
+Which one to use: "≤ 5% of the answers we give are wrong" is `max_error=` (learn-then-test). `max_risk=` is the cheaper
 promise and the weaker one when most inputs are easy: when most pairs are non-matches, "1% of all pairs" can be met
 while a predicted match given alone is wrong far more often — `groups="answer"` puts the promise inside each answer. groups also takes a fact name, a hierarchy or a function of facts, as `act_guard` does.
 
@@ -4792,8 +4792,8 @@ def total_value(total):
   `Quote(doc[s:e], s, e, confidence=c)`.
 - `ex.predict(text)` returns `{field: (start, end, confidence)}` (`ex.predict(text, field)` one of them). Results are
   cached per text, so all fields of one document cost a single forward pass. The two extractors share one protocol —
-  `fit(items)`, `predict(text, field)`, `field(name[, description])`, `save` / `load`, `fingerprint()`; 0.7's
-  `fit(docs, spans)` and `predict_doc(text)` still work with a deprecation warning. A labelled span past the encoded
+  `fit(items)`, `predict(text, field)`, `field(name[, description])`, `save` / `load`, `fingerprint()` (0.7's
+  `fit(docs, spans)` and `predict_doc(text)` were removed in 0.9). A labelled span past the encoded
   text (`max_len` tokens) is left out of training.
 - `fit_temperature(docs, gold_ok)` picks a softmax temperature per field that minimizes log loss of "confidence vs.
   correct" on held-out documents; `gold_ok(field, doc_index, (start, end))` tells whether a prediction is correct.
@@ -4844,8 +4844,8 @@ def governing_state(governing_law):
 ### SpanExtractor (removed in 0.8)
 
 `solvi.extract_model.SpanExtractor`, one field per pass with no `field()` helper and no save / load, had no caller and
-is gone: importing `SpanExtractor` from `solvi.extract_model` still works in 0.8, warns, and gives `LongSpanExtractor`
-(removed in 0.9). It trains on the same items, `fit([(text, description, (s, e) or None), ...])`; `predict(text,
+is gone, and so is `solvi.extract_model` (in 0.8 importing `SpanExtractor` from it warned and gave
+`LongSpanExtractor`; removed in 0.9). Use `solvi.extract_long.LongSpanExtractor`: it trains on the same items, `fit([(text, description, (s, e) or None), ...])`; `predict(text,
 description)` returns one `(start, end, score, no_answer_score)`, and `field(name, description)` is the `@extract` part.
 
 ### Hardware notes

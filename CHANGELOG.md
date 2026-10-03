@@ -2,6 +2,71 @@
 
 ## 0.9.0 — unreleased
 
+### Breaking changes
+
+The old names that 0.8 kept working with a `SolviDeprecationWarning` are gone. An old keyword now raises a TypeError
+and an old attribute or method an AttributeError; both say "X was renamed in 0.8 and removed in 0.9: use Y". The five
+old modules are gone (importing one raises ModuleNotFoundError). If your code ran under 0.8 without a
+`SolviDeprecationWarning` (`pytest -W error::solvi.SolviDeprecationWarning` finds them all), it runs under 0.9
+unchanged. `solvi.SolviDeprecationWarning` itself stays, for later renames.
+
+Removed (old → what to use):
+
+| removed | use |
+|---|---|
+| module `solvi.fast` | `solvi.heads` |
+| module `solvi.learned` | `solvi.costs` (`CostBook`, `MeasuredCosts`) and `solvi.strategist` (`OrderModel`, `ProducerPolicy`, `Binary`, `scalar_row`) |
+| module `solvi.rules` | `solvi.rulelist` |
+| module `solvi.strategy_model` | `solvi.segment_model` |
+| module `solvi.extract_model` (`SpanExtractor`) | `solvi.extract_long.LongSpanExtractor` |
+| `System(inputs=)`, `system.inputs` | `System(input_model=)`, `system.input_model` |
+| `System(costs=)`, `system.costs` | `System(cost_policy=)`, `system.cost_book` |
+| `System(journal=path)` | `System(storage=JSONLStorage(path))` or `storage="file.jsonl"` |
+| `ask(names=)`, `aask(names=)`, `Service.ask(names=)` / `aask(names=)`, `Shadow.ask(names=)` | `questions=` |
+| `Question(checkpoints=)`, `q.checkpoints`, `part.question(cat, checkpoints=)` (also on a combination) | `requires=`, `q.requires` |
+| `res.computed_state`, `res.computed_state_text(lang)` | `res.state_text(lang)` |
+| `res.textin` | `res.read` |
+| `system.teach(source=)`, `store.save_correction(source=)` | `label_source=` |
+| `system.learn_rule(facts=)` | `features=` |
+| `system.calibrate(question, states, truth)` | `system.calibrate(question, [(state, answer), ...])` |
+| `system.safeguard_report()` | `system.safeguard_summary()` |
+| `shadow.report()` | `shadow.summary()` |
+| `system.fit_fast(...)` | `system.fit(..., select=False)` |
+| `System.learning(harvest_rules=)` (ignored in 0.8) | — (teach rule outcomes with `label_source="rule"`) |
+| `trace.value(name)` | `res.values[name]`; a given fact: `trace.init[name]` |
+| `answer_type.rank(v)` | `answer_type.options.index(v)` |
+| `model.decision(escalate_below=, act_threshold=, target_error=, unknown=)` and the same in `decide`, `adapt`, `fit`, `teach`, `reset`, `decisions`, `questions` | `min_confidence=`, `min_act=`, `max_error=`, `not_stated=` |
+| a pydantic field's `json_schema_extra` keys `"escalate_below"`, `"act_threshold"`, `"target_error"` (now a ValueError) | `"min_confidence"`, `"min_act"`, `"max_error"` |
+| `model.has_unknown` | `model.has_not_stated` |
+| `model.long_len`, `part.long_len` | `max_len_long` |
+| `act_guard(risk=)` (a part and a combination), `adapt_lora(risk=)`, `CorrectionMemory.calibrate(risk=)`, `Guard.calibrate_authorizer(risk=)` | `max_risk=` |
+| `calibrate_for(error=)` (a part and a combination) | `max_error=` |
+| the result keys `"coverage"` and `"target_error"` of `calibrate_for` | `"answered"`, `"max_error"` |
+| the result key `"calls"` of a combination's `act_guard`; `combination.usage()` and its key `"per_question"` | `"calls_per_question"`; `combination.calls()` |
+| a combination's `decide(x=)`, `teach(x=)`, `adapt(inputs=)` | `text=`, `text=`, `texts=` |
+| `FastHead.update(row, answer)`, `Binary.observe(row, y)` | `teach(...)` |
+| `FastHead.cv_acc`, `Head.loo_acc` (each head's number under the other's name) | `FastHead.loo_acc`, `Head.cv_acc` |
+| `ModelStrategist()` without a model | `CostStrategist()` (`ModelStrategist` now needs its model) |
+| `CostStrategist(fallback=, fallbacks=)` / `ModelStrategist(...)`, `.fallback`, `.fallbacks` | `on_failure=`, `keep_alternatives=` |
+| `MultiSpanExtractor.fit(docs, spans)`, `predict_doc(text)` | `fit([(text, spans), ...])`, `predict(text[, field])` |
+| `store.forget(fact, value)` | `store.where_is(fact, value)` |
+| `JSONLStorage(path, catalog=)` (every backend), `store.get(id, catalog=)` | `system=` |
+| `store.query(catalog=fingerprint)` | `query(catalog_fp=)` |
+| `solvi.testing.check(system, case, state)` | `solvi.testing.run_case(...)` |
+| a honesty case's `"gold"` (now a ValueError); a `solvi test` case's `"gold"` (now reported as a problem of the case) | `"expected"` |
+| `solvi hook ... --model M` (exits 1 with what to do, so an old installed hook blocks nothing), `$SOLVI_HOOK_MODEL` | `--decider M` (reinstall the hooks), `$SOLVI_HOOK_DECIDER` |
+| `solvi.serve.Guard` (the ASGI middleware) | `solvi.serve.AccessGuard` |
+| `agents.Guard(facts=[names])` | `Guard(fact_names=[names])` |
+| the agent adapters' `declare=` (`guard_tool`, `guard_wrappers`, `guarded_tool_node`, `GuardedToolset`) | `auto_declare=` |
+| `run_proxy(context_messages=, context_chars=)`, `solvi.agents.mcp.Proxy(...)` the same | `max_messages=`, `max_chars=` |
+| `solvi.llm._error_text` (private) | `solvi.llm.error_text` |
+
+Stores, calibration files and fingerprints are unchanged by these removals: the stored keys stay as they were (a
+question still hashes its `requires` under the key `checkpoints`, a part still stores `escalate_below`). A test loads,
+verifies and replays stores written by 0.8.0 and by 0.7.1 (`tests/test_store_0_8_0.py`, `tests/test_store_0_7_1.py`).
+
+### Changed
+
 - The system report: `System.report(since=None, until=None)` (or `solvi.sysreport.system_report(store)`, or
   `solvi report decisions.db --overview`) tells the owner of a System what happened over a stored period, from the
   store alone — no model is called and no catalog is needed. Per question: how many answers were given alone and by

@@ -49,8 +49,8 @@ any other fact — is not kept as a fallback, since the flow could not run it. `
 note `mutual_producers` for a System with a strategist (an error, `cycle`, only for the deterministic strategist, which
 cannot plan it).
 
-(`CostStrategist` was `ModelStrategist()` without a model up to 0.7; that spelling still works, with a
-SolviDeprecationWarning, and so do its options `fallback=` / `fallbacks=`, now `on_failure=` / `keep_alternatives=`.)
+(`CostStrategist` was `ModelStrategist()` without a model up to 0.7, and its options `fallback=` / `fallbacks=` are
+`on_failure=` / `keep_alternatives=`; the old spellings were removed in 0.9.)
 
 Everything that plans for a System uses its strategist, not only `ask`: `answers_of` / replay, `facts_for` and so the
 feature candidates of `fit`, `learn_order`, the input schemas of `solvi serve` and `solvi check`.
@@ -63,7 +63,7 @@ feature candidates of `fit`, `learn_order`, the input schemas of `solvi serve` a
    proposal is tried once; an accepted segment fixes those choices and the 0/1 program completes the rest; the whole plan is
    **validated** again (`validate`: inputs bound, order acyclic, producer and reader types fit, every mandatory check
    kept). A rejected segment falls back to code's choice for that fact; a plan that fails validation falls back to
-   `fallback="code"` (code's plan), `"deterministic"` (solvi.strategist.plan) or `"abstain"`.
+   `on_failure="code"` (code's plan), `"deterministic"` (solvi.strategist.plan) or `"abstain"`.
 
 ### Costs from measurements
 

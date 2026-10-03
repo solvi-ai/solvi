@@ -88,8 +88,8 @@ the cases it would have answered correctly. Calibrate per question, with the num
 itself (`system.guarantee`), not only the model under it — and on the signal that separates right from wrong: on CUAD
 contract clauses a trust score built from three facts separated right from wrong answers with AUROC 0.83 on dev, the
 LLM's own confidence with 0.63; at a 3% risk the trust score answered 67.6% of the eval questions alone with 4.0% wrong,
-while the confidence answered 14% of dev ([cuad/solution.py](../benchmarks/tasks/cuad/solution.py)). Use `error=` for "≤ e of what
-we answer is wrong" and `risk=` for "≤ r of all inputs": on a stream of mostly easy non-matches the risk held overall
+while the confidence answered 14% of dev ([cuad/solution.py](../benchmarks/tasks/cuad/solution.py)). Use `max_error=` for "≤ e of what
+we answer is wrong" and `max_risk=` for "≤ r of all inputs": on a stream of mostly easy non-matches the risk held overall
 while the matches an LLM gave alone were wrong far more often — `groups="answer"` puts the promise inside each answer.
 
 **Size thresholds for inputs the decider has no answer for — when new kinds can come.** New kinds of input break every
