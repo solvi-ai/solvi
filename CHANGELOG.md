@@ -2,6 +2,19 @@
 
 ## 1.0.0 — unreleased
 
+### Python
+
+- Python 3.11 or newer; tested on 3.11–3.14. Python 3.10 is no longer supported (`tomli` is no longer a dependency:
+  rules files are read with the standard `tomllib`).
+- One fingerprint everywhere: on Python 3.10, `typing.Any` was not a class, so a catalog that declares `Any` had a
+  different fingerprint there than on 3.11+. With 3.10 gone, every supported Python computes the same fingerprints. A
+  decision stored by 0.9 or earlier **on Python 3.10** from a catalog that declares `Any` replays as made by another
+  catalog (a fingerprint mismatch).
+- Unions fingerprint as one form: Python 3.14 made `Optional[X]`, `Union[X, Y]` and `X | Y` one class, so a declared
+  union now records `typing.Union` whatever its spelling and Python. Catalogs declaring `Optional[...]`, `Union[...]` or
+  `Maybe[...]` keep their 3.11–3.13 fingerprints; a catalog declaring a union with `|` (`str | NotStated`) gets a new
+  one (decisions stored from it by 0.9 replay as made by another catalog), and so does any union under 0.9 on 3.14.
+
 ### Removed
 
 What leaves solvi on the way to 1.0: parts that measured worse than the plain way, that nothing used, or that never

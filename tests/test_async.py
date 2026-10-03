@@ -4,6 +4,7 @@ writes — the same hashes on every gallery case and on the examples, with stora
 Cascade / Vote / Route."""
 import asyncio
 import copy
+import inspect
 import random
 import threading
 import time
@@ -400,7 +401,7 @@ def test_serve_answers_an_async_system_with_aask(tmp_path):
 
     from solvi.serve import create_app
     app = create_app(system=s)
-    assert all(asyncio.iscoroutinefunction(r.endpoint) for r in app.routes if getattr(r, "path", "").startswith("/ask"))
+    assert all(inspect.iscoroutinefunction(r.endpoint) for r in app.routes if getattr(r, "path", "").startswith("/ask"))
     c = TestClient(app)
     r = c.post("/ask", json={"state": {"customer_id": "g-3"}}).json()
     assert r["results"]["refund"]["answer"] == "yes" and r["trace_hash"] == r["trace"]["records"][-1]["hash"]

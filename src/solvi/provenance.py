@@ -323,6 +323,7 @@ def type_fingerprint(t, depth=0):
     """A declared type as data: generics by their arguments, a pydantic model by its fields, an Enum by its members,
     Annotated by its constraints, any other class by module and name."""
     import enum
+    import types
     import typing
     if depth > 6:
         return _r(t)
@@ -330,7 +331,10 @@ def type_fingerprint(t, depth=0):
     if o is typing.Annotated:
         return ["Annotated", type_fingerprint(a[0], depth + 1), [_r(m) for m in a[1:]]]
     if o is not None:
-        return [_r(o), [type_fingerprint(x, depth + 1) if not isinstance(x, _SIMPLE) else _r(x) for x in a]]
+        # every union as "typing.Union": Python 3.14 made Optional[X], Union[X, Y] and X | Y one class, so the spelling
+        # (typing.Union or types.UnionType on 3.11-3.13) can no longer be told apart
+        head = "typing.Union" if o is typing.Union or o is types.UnionType else _r(o)
+        return [head, [type_fingerprint(x, depth + 1) if not isinstance(x, _SIMPLE) else _r(x) for x in a]]
     if isinstance(t, type):
         fields = getattr(t, "model_fields", None)
         if isinstance(fields, dict):

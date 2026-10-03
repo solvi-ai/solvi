@@ -3,7 +3,7 @@ computed them, must not change when solvi's code moves (the 1.0 layout moves mos
 
 A stored decision records these fingerprints; a replay compares them with the system it is given. A fingerprint that
 changes with a refactor makes every decision stored before it look as if another system had made it. What is pinned
-(tests/fixtures/golden_fingerprints/fingerprints.json; fingerprints_py311.json: the few that differ on Python 3.11+):
+(tests/fixtures/golden_fingerprints/fingerprints.json, the same on every supported Python):
 
 - types/*: the fingerprint data of solvi's typed answers (Maybe, Span, Scale, Rank, Estimate, Bins, NotStated) and of
   its value classes, as plain lists — a diff shows which module name moved;
@@ -20,7 +20,7 @@ A module that moves keeps its fingerprints through the table solvi._deprecate.MO
 test_moving_every_module_with_the_table_keeps_every_fingerprint moves every solvi class and function at once.
 
 An intended change (a gallery task edited, a fingerprint fixed on purpose): rewrite the pinned values with
-`uv run python tests/test_golden_fingerprints.py --write` (on Python 3.10, then on 3.11 or later) and say in the commit which ones changed and why."""
+`uv run python tests/test_golden_fingerprints.py --write` and say in the commit which ones changed and why."""
 import contextlib
 import importlib
 import importlib.util
@@ -36,11 +36,11 @@ import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
 DATA = Path(__file__).parent / "fixtures" / "golden_fingerprints"
+# One set for every supported Python (3.11+). Python 3.10, supported until 1.0, recorded typing.Any (not yet a class
+# there) as "typing.Any", so a catalog declaring Any had another fingerprint on 3.10; these are the 3.11+ values. Since
+# 1.0 a union records "typing.Union" whatever its spelling (3.14 made X | Y and Union[X, Y] one class): the entries that
+# declare `X | Y` (types/str_or_not_stated, golden/typed_rules, stand/naturalplan:calendar) differ from 0.9.0's.
 PINNED = DATA / "fingerprints.json"
-# Python 3.11 made typing.Any a class: a type fingerprint records it as ["typing", "Any"] there and as "typing.Any" on
-# 3.10, so a catalog that declares Any has one fingerprint on 3.10 and another on 3.11+ (0.9.0 behaviour, pinned as it
-# is). The values that differ on 3.11+ are kept here, written by --write on 3.11 or later.
-PINNED_311 = DATA / "fingerprints_py311.json"
 GALLERY = ROOT / "gallery"
 EXAMPLES = ROOT / "examples"
 STAND = ROOT / "benchmarks" / "tasks"
@@ -199,10 +199,7 @@ def collect():
 
 
 def _pinned():
-    out = json.loads(PINNED.read_text())
-    if sys.version_info >= (3, 11):
-        out.update(json.loads(PINNED_311.read_text()))
-    return out
+    return json.loads(PINNED.read_text())
 
 
 @pytest.fixture(scope="module")
@@ -380,12 +377,5 @@ def test_the_table_maps_to_modules_of_0_9_0():
 if __name__ == "__main__":
     if sys.argv[1:] != ["--write"]:
         sys.exit("usage: python tests/test_golden_fingerprints.py --write   (rewrites the pinned fingerprints)")
-    now = collect()
-    if sys.version_info < (3, 11):
-        PINNED.write_text(json.dumps(now, indent=1, sort_keys=True) + "\n")
-        print(f"wrote {PINNED}; run it on 3.11+ too, for {PINNED_311.name}")
-    else:
-        base = json.loads(PINNED.read_text())
-        PINNED_311.write_text(json.dumps({k: v for k, v in now.items() if base.get(k) != v}, indent=1, sort_keys=True)
-                              + "\n")
-        print(f"wrote {PINNED_311}")
+    PINNED.write_text(json.dumps(collect(), indent=1, sort_keys=True) + "\n")
+    print(f"wrote {PINNED}")

@@ -11,14 +11,19 @@ classifiers = [
     "Intended Audience :: Developers",
     "Intended Audience :: Science/Research",
     "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3 :: Only",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
     "Topic :: Scientific/Engineering :: Artificial Intelligence",
     "Topic :: Software Development :: Libraries",
 ]
 authors = [
     { name = "mxkuzn", email = "hi@mxkuzn.dev" }
 ]
-requires-python = ">=3.10"
-dependencies = ["numpy", "scipy", "pydantic>=2", "tomli>=1.1; python_version < '3.11'"]   # tomli: rules files (solvi hook) on 3.10
+requires-python = ">=3.11"
+dependencies = ["numpy", "scipy", "pydantic>=2"]
 
 [project.optional-dependencies]
 model = ["torch", "transformers"]   # model-based extraction from text (solvi.extract_*) and the decider (solvi.decide) — torch backends
@@ -58,7 +63,7 @@ filterwarnings = ["error::solvi.SolviDeprecationWarning"]   # an old name used i
 
 [tool.ruff]
 line-length = 120
-target-version = "py310"
+target-version = "py311"
 extend-exclude = ["spaces"]          # the Hugging Face Space apps: deployed on their own, with their own requirements
 
 [tool.ruff.lint]
@@ -87,7 +92,7 @@ extend-immutable-calls = ["fastapi.Body"]
 
 [tool.pyright]
 include = ["src/solvi"]
-pythonVersion = "3.10"
+pythonVersion = "3.11"
 typeCheckingMode = "basic"
 reportMissingImports = "warning"      # the optional extras (torch, transformers, onnxruntime, mcp, ...) may be missing
 reportMissingModuleSource = "none"

@@ -223,10 +223,7 @@ class Rule:
 
 
 def _toml(text):
-    try:
-        import tomllib
-    except ImportError:                                 # Python 3.10
-        import tomli as tomllib
+    import tomllib
     return tomllib.loads(text)
 
 

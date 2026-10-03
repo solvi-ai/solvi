@@ -79,7 +79,7 @@ Two words mark what is not settled yet: **preview** — it works and is tested, 
 
 `solvi.agents` (guarding an agent's tool calls) needs only the core.
 
-Requires Python 3.10+.
+Requires Python 3.11+ (tested on 3.11–3.14).
 
 ## From labelled examples to a system with a promise (preview)
 
