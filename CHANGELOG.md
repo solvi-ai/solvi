@@ -22,6 +22,15 @@
 - `search(..., lean=None)`: candidates are asked without hashing or records (the winner is still asked in full, stored
   and replayable); the same answers byte for byte, about half the time (42 s against 78 s on 227,352 candidates).
   With `hold=False` candidates no longer feed the System's stats, costs or learned order.
+- `solvi.compile`: a draft stuck on the contract for two rounds is replaced by a fresh one (`fresh_drafts=2`,
+  `stuck_after=2`); a part other parts call as a function becomes a helper; a key read inside a dict input gets an
+  accessor; `datetime.strptime` works in the sandbox. Everything accepted in our runs was right (5 of 5); a calendar
+  rule set that was refused before is now accepted and matches its reference on 2,141 of 2,141 cases.
+- `compile_groups` (experimental): a large specification is split into groups of clauses, each compiled and accepted
+  on its own, then assembled and checked again as a whole. On a 56-clause customer-service policy no group was
+  accepted — the drafts added rules the policy does not state, and acceptance refused them.
+- The nine-task benchmark stand reruns offline in CI from the published run's packed model replies (weekly
+  workflow `stand.yml`), and fails on any published number in the docs that moved.
 
 ## 0.8.0 — 2026-10-03 — one name per concept, any model first
 
