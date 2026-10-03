@@ -8,8 +8,8 @@ import pytest
 from solvi import Answer, Catalog, Decision, Question, System
 from solvi.core.runtime import vhash
 from solvi.core.schema import dumps, tag_floats, untag_floats
-from solvi.storage import JSONLStorage, SQLiteStorage, record_hash
-from solvi.system import Response
+from solvi.core.store import JSONLStorage, SQLiteStorage, record_hash
+from solvi.core.system import Response
 
 
 class M:

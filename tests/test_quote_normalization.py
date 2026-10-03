@@ -8,7 +8,7 @@ import pytest
 from solvi import Answer, Catalog, Claim, Decision, Question, Quote, System
 from solvi.core import find_quote
 from solvi.core.provenance import NORM_FORM, find_normalized, matches_normalized, norm_view, normalized, part_fingerprint
-from solvi.storage import open_storage
+from solvi.core.store import open_storage
 from solvi.core.types import Span
 
 NOTES = "Link said: the key is under the‑stone…  “really”."     # nbsp, nb hyphen, …, curly

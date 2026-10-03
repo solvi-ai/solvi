@@ -3,7 +3,7 @@ import random
 
 from solvi import Answer, Catalog, Question, System
 from examples_loader import load
-from solvi.strategist import plan
+from solvi.core.plan.strategist import plan
 
 I = load("03_invoices")
 
@@ -122,7 +122,7 @@ def test_answers_do_not_depend_on_which_other_questions_are_asked():
 def test_a_cycle_in_the_catalog_leaves_its_question_unresolved_and_the_strategist_has_no_dead_helpers():
     """The guide said a cycle raises PlanError; the branch could not be reached (a fact on a cycle is never computable)."""
     from solvi import Answer, Catalog, Question, System
-    from solvi import strategy
+    from solvi.core.plan import cost as strategy
     cat = Catalog()
 
     @cat.fn

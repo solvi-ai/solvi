@@ -9,7 +9,7 @@ How it is solved:
     (against the daily profile where it explains the series, else against the level) → the threshold, the conformal
     quantile of the series' own earlier scores (`solvi.core.calibration.conformal_quantile`: at most `alpha` of points like
     the earlier ones exceed it) → a floor check → the rule `alert`;
-  - only the alerts are stored (SQLiteStorage); the chain is verified, every alert replayed, and `solvi.diff` says
+  - only the alerts are stored (SQLiteStorage); the chain is verified, every alert replayed, and `solvi.core.store.diff` says
     which alerts a three times stricter alpha would drop.
 The settings (score, horizon, alpha, floor) are the ones chosen on the dev series. The arithmetic is facts.py.
 
@@ -31,7 +31,7 @@ from score import load, score  # noqa: E402
 
 from solvi import Answer, Catalog, Question, SQLiteStorage, System  # noqa: E402
 from solvi.core.calibration import conformal_quantile  # noqa: E402
-from solvi.diff import diff  # noqa: E402
+from solvi.core.store.diff import diff  # noqa: E402
 
 PICKED = {"horizon": 2000, "alpha": 0.0015, "floor": 5.0}     # chosen on dev
 

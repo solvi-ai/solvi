@@ -5,12 +5,12 @@
     nums = numbers(out_dir)            # decisions by System 1 / System 2 per run and per objective, time, moves
 
 The files of a recording (data/runs/):
-    run1.decisions.jsonl.gz, run2.decisions...   every decision: one hash-chained solvi.dispatch record (System 1's
+    run1.decisions.jsonl.gz, run2.decisions...   every decision: one hash-chained solvi.core.dispatch record (System 1's
                                                  response with its trace; System 2's search with the winner's trace),
                                                  a solvi JSONL store, gzipped (open_store() unpacks it)
     run1.moves.jsonl, run2.moves.jsonl           the same decisions as the viewer shows them (where, which exit, who,
                                                  why, where it led)
-    run1.map.json, run2.map.json                 the world map after each run (solvi.worldmap: journal with hashes)
+    run1.map.json, run2.map.json                 the world map after each run (solvi.core.knowledge.worldmap: journal with hashes)
     memory.json                                  System 1's routes after run 2, every consolidation, the episode notes
     summary.json                                 the numbers"""
 from __future__ import annotations
@@ -24,8 +24,8 @@ import time
 from collections import deque
 from pathlib import Path
 
-from solvi.storage import JSONLStorage
-from solvi.worldmap import WorldMap
+from solvi.core.store import JSONLStorage
+from solvi.core.knowledge.worldmap import WorldMap
 
 from .agent import Memory, dispatcher, play
 from .world import DATA, World, place_map
@@ -192,7 +192,7 @@ def replay(out=RUNS, llm=None):
 
 
 def report(out=RUNS, run="run2"):
-    """The system report (System.report, solvi.sysreport) over one run's stored decisions — read from the store
+    """The system report (System.report, solvi.core.store.sysreport) over one run's stored decisions — read from the store
     alone."""
     from .agent import system1
     return system1().report(store=open_store(out, run))

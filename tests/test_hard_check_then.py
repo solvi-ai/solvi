@@ -8,8 +8,8 @@ import pytest
 
 from solvi import Catalog, Question, System
 from solvi.core.provenance import part_fingerprint
-from solvi.refine import Fail
-from solvi.storage import open_storage
+from solvi.core.slow.refine import Fail
+from solvi.core.store import open_storage
 
 
 def free_side(free: list, facing: str) -> str:
@@ -67,7 +67,7 @@ def test_wiring_does_not_change_the_flows_of_other_questions():
 
 
 def test_a_cost_strategist_keeps_the_wired_check():
-    from solvi.strategy import CostStrategist
+    from solvi.core.plan.cost import CostStrategist
     s = agent()
     s2 = System(s.catalog, list(s.questions.values()), strategist=CostStrategist())
     res = s2.ask(dict(LOOP, hearts=0))
@@ -77,7 +77,7 @@ def test_a_cost_strategist_keeps_the_wired_check():
 def test_a_strategist_that_drops_a_then_check_is_refused():
     class Drop:
         def plan(self, catalog, questions, init_keys, heads=None):
-            from solvi.strategist import plan
+            from solvi.core.plan.strategist import plan
             flow = plan(catalog, questions, init_keys, heads)
             flow.per_question = {q: [f for f in fs if f != "has_hearts"] for q, fs in flow.per_question.items()}
             return flow

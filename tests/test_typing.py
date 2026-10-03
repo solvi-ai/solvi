@@ -356,7 +356,7 @@ def test_a_typed_input_comes_in_the_declared_field_order():
     the model's, whoever built the dict; without a model the dict is taken as it comes."""
     from pydantic import BaseModel
 
-    from solvi.decide import state_text
+    from solvi.core.deciders import state_text
 
     class Order(BaseModel):
         customer: str

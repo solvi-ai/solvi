@@ -1,5 +1,5 @@
 """solvi serve: the questions over HTTP (FastAPI TestClient), the input schemas and the OpenAPI document from the same
-types, stored answers, POST /v1/systemone backed by a decider (round trip with the solvi.systemone client), and the MCP
+types, stored answers, POST /v1/systemone backed by a decider (round trip with the solvi.core.deciders.systemone client), and the MCP
 server over stdio (the built-in JSON-RPC subset and the official SDK) in a subprocess."""
 import io
 import json
@@ -12,9 +12,9 @@ import pytest
 
 from solvi import Answer, Catalog, Question, System
 from solvi.cli import main
-from solvi.decide import DecideModel
+from solvi.core.deciders import DecideModel
 from solvi.serve import Service, question_inputs, sdk_available
-from solvi.systemone import systemone
+from solvi.core.deciders.systemone import systemone
 
 CATALOG = '''
 from typing import Literal

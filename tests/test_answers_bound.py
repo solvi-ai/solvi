@@ -3,7 +3,7 @@ An answer edited after the run — in a response's JSON, or in a store whose eve
 import json
 
 from solvi import Answer, Catalog, Question, Response, System
-from solvi.storage import JSONLStorage, record_hash
+from solvi.core.store import JSONLStorage, record_hash
 
 OVER = {"amount": 9000, "limit": 100}
 

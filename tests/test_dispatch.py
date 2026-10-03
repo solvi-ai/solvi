@@ -1,4 +1,4 @@
-"""solvi.dispatch: System 1 first, the slow path or a person by a recorded dispatch, within a budget — against a fake
+"""solvi.core.dispatch: System 1 first, the slow path or a person by a recorded dispatch, within a budget — against a fake
 chat-completions server (no network): which signal wakes the slow path, the budget per decision and in total, supervision
 with recorded disagreements, refine and search as the slow path, the cost from the recorded tokens, replay without
 calling the model, stored decisions."""
@@ -8,8 +8,8 @@ import pytest
 from test_llm import TEAMS, FakeLLM
 
 from solvi import Answer, Catalog, Decision, Fail, JSONLStorage, Question, System
-from solvi.dispatch import Budget, Cost, Dispatcher, SlowPath, cost_of
-from solvi.llm import llm
+from solvi.core.dispatch import Budget, Cost, Dispatcher, SlowPath, cost_of
+from solvi.core.deciders.llm import llm
 
 URL = "http://127.0.0.1:9/v1"
 
@@ -434,7 +434,7 @@ def _hard_slice(guess_right=0.95, slow_right=0.5, n=400, seed=0):
     time, the slow path (a stand-in with recorded tokens) `slow_right`, both with confidence 0.9."""
     import random
 
-    from solvi.generate import Generated
+    from solvi.core.slow.generate import Generated
     rng = random.Random(seed)
     data = []
     for _ in range(n):
@@ -535,7 +535,7 @@ def test_a_rule_answer_held_back_by_a_guarantee_is_still_system_1s_would_be_answ
     def team(email):
         return "billing"
     s1 = System(cat, [Question("team", "Which team?", Answer.choice(list(TEAMS)))])
-    from solvi.guarantee import calibrate
+    from solvi.core.guarantees.guarantee import calibrate
     s1.guarantee("team", promise=calibrate([0.1] * 20 + [0.9] * 20, [False] * 20 + [True] * 20, max_risk=0.1,
                                            signal="trust"), signal="trust")
     s2, _ = slow_llm()

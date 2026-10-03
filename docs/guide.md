@@ -1,7 +1,7 @@
 # solvi guide
 
 This guide walks through the whole API. Where a question needs judgement, a model proposes and solvi's checks decide; the
-model is whichever you have — an LLM through `solvi.llm`, a decision service, or a local checkpoint such as
+model is whichever you have — an LLM through `solvi.core.deciders.llm`, a decision service, or a local checkpoint such as
 solvi-base for offline or cheap cases (see [the model proposes](#the-model-proposes-decisions-with-a-decider)). For a
 two-minute overview, see the [README](../README.md); for advice drawn from
 building on solvi, see [best practices](best_practices.md). Every measured number in this guide names its source: a
@@ -30,7 +30,7 @@ the facts the catalog computes (`System.fit`). The signal its guarantee reads is
 confidence, or — for a rule — the computed number that best separates right from wrong); a choice among more than two
 options gets an open-set gate for answers no example shows. A slow path gets a share of the examples to be calibrated
 on only when System 1 actually hands it something; inputs the open-set gate holds back go to a person. Every piece is
-the one described further on (`System.fit`, `System.guarantee`, `solvi.openset`, `solvi.dispatch`), and everything
+the one described further on (`System.fit`, `System.guarantee`, `solvi.core.guarantees.openset`, `solvi.core.dispatch`), and everything
 stays replayable. On four tasks of the [task stand](../benchmarks/tasks/README.md) (Banking77, Abt-Buy, CUAD,
 RAGTruth) it matched or beat the hand-written setups with every promise kept on eval, in a quarter to half of the code;
 its eval numbers sat closer to the promised level than theirs (risk 9.3% of 10% on RAGTruth), its drift flag came later,
@@ -55,7 +55,7 @@ Contents:
 14. [solvi behind a coding agent's hooks (preview)](#solvi-behind-a-coding-agents-hooks)
 15. [A model that writes: generation, agreement and the re-ask loop](#a-model-that-writes-generation-agreement-and-the-re-ask-loop)
 16. [A specification compiled into the catalog: solvi.compile (experimental)](#a-specification-compiled-into-the-catalog-solvicompile)
-17. [Who answers: System 1, the slow path or a person (solvi.dispatch, experimental)](#who-answers-system-1-the-slow-path-or-a-person-solvidispatch)
+17. [Who answers: System 1, the slow path or a person (solvi.core.dispatch, experimental)](#who-answers-system-1-the-slow-path-or-a-person-solvidispatch)
 18. [System 1 and System 2 on a game: the Pokémon world map](#system-1-and-system-2-on-a-game-the-pokémon-world-map)
 19. [Verified charts: a specialist that checks every number (preview)](#verified-charts-a-specialist-that-checks-every-number)
 20. [Checking a catalog: solvi check](#checking-a-catalog-solvi-check)
@@ -84,7 +84,7 @@ status.
 ```bash
 pip install solvi              # core: numpy, scipy, pydantic (imported only for typed parts and serialization)
 pip install "solvi[model]"     # + torch, transformers, for the ModernBERT extractors (solvi.extract_*) and the decider
-pip install "solvi[onnx]"      # + onnxruntime, tokenizers: the decider (solvi.decide) on CPU without torch
+pip install "solvi[onnx]"      # + onnxruntime, tokenizers: the decider (solvi.core.deciders) on CPU without torch
 pip install "solvi[serve]"     # + fastapi, uvicorn: solvi serve over HTTP
 pip install "solvi[mcp]"       # + the official MCP SDK for solvi serve --mcp (without it, a built-in stdio server is used)
 pip install "solvi[duckdb]"    # + duckdb: stored decisions in a DuckDB file; "solvi[postgres]" for PostgreSQL
@@ -290,7 +290,7 @@ Question("route", "Which team?", Answer.choice(["a", "b"]), uses=["country", "to
 - `answer`: `Answer.yes_no()` (options `["yes", "no"]`) or `Answer.choice(options)` (and the types below); leave it out
   when the question's rule has a return type — the answer type then comes from it (see [Types](#types-questions-and-model-decisions));
 - `requires` (`checkpoints=` in 0.7, removed in 0.9): parts that must be in this question's flow in every request (a missing name raises
-  `solvi.strategist.PlanError`). In the flow is not the same as run: when a hard check settles the question first, a
+  `solvi.core.plan.strategist.PlanError`). In the flow is not the same as run: when a hard check settles the question first, a
   required part after it is skipped — `ask(state, early_exit=False)` runs it anyway (see
   [Early exit](#early-exit-and-parallel-execution));
 - `uses`: a hint for the strategist, the facts that matter when the question has neither a rule nor a trained head;
@@ -340,9 +340,9 @@ What to know about constraints:
   and each answer's reason says `not repaired: … joint decoding tried only the 1 most probable answer(s) of each
   question (65,536 combinations of 16 answers exceed its limit of 50,000)`. Split such a request into groups of
   questions that share constraints — or, when the answers are of many items (one request each) and the rule is a
-  count over groups of them, decide the set with `solvi.sets` (below).
+  count over groups of them, decide the set with `solvi.core.sets` (below).
 
-### Decisions over a set: solvi.sets
+### Decisions over a set: solvi.core.sets
 
 A constraint between answers works inside one request. Many tasks need a rule across many requests: one counterpart
 per product when matching two catalogs, one owner per record when deduplicating, at most N tasks per shift. Ask each
@@ -350,7 +350,7 @@ item as usual, then decide the set:
 
 ```python
 from solvi import Answer, Catalog, Decision, Question, System
-from solvi.sets import AtMostOne, Item, decide_set
+from solvi.core.sets import AtMostOne, Item, decide_set
 
 cat = Catalog()
 
@@ -636,9 +636,9 @@ A **decider** answers typed questions about a text or a state: "which team handl
 the customer angry?", "which topics does it mention?". It is whichever model you have, behind one interface
 (`DecideModel`):
 
-- an LLM — `solvi.llm.llm(base_url, model, api_key=...)`, any OpenAI-compatible chat-completions server
+- an LLM — `solvi.core.deciders.llm.llm(base_url, model, api_key=...)`, any OpenAI-compatible chat-completions server
   ([Any LLM as a decider](#any-llm-as-a-decider)); the core install is enough;
-- a decision service — `solvi.systemone.systemone(url, model)`
+- a decision service — `solvi.core.deciders.systemone.systemone(url, model)`
   ([Any System One model as a decider](#any-system-one-model-as-a-decider));
 - a local checkpoint, for offline or cheap cases — `DecideModel.load("solvi-ai/solvi-base")` (`solvi[onnx]`;
   [Loading a checkpoint](#loading-a-checkpoint)). solvi-base, a 150M ModernBERT-base cross-encoder distilled from
@@ -657,8 +657,8 @@ import os
 from typing import Literal
 from pydantic import BaseModel, Field
 from solvi import Scale
-from solvi.decide import DecideModel
-from solvi.llm import llm
+from solvi.core.deciders import DecideModel
+from solvi.core.deciders.llm import llm
 
 model = llm("https://api.openai.com/v1", "gpt-4o-mini", api_key=os.environ["OPENAI_API_KEY"])
 model = DecideModel.load("~/models/solvi-base")          # or offline: a checkpoint folder or a Hugging Face id
@@ -720,8 +720,8 @@ get a real bool), `"yes"` / `"no"` for `Literal["yes", "no"]`; as a question's a
 
 A decision reads `text_fact` — a fact name, or a list of them. A text (or a `Quote`) is read as it is; several texts are
 joined by new lines. A **state** — a dict, a list, a pydantic model, a dataclass — is first made JSON data
-(`solvi.decide.jsonable`: a model's `model_dump()`, dates in ISO 8601, an Enum as its value) and then serialized with
-`solvi.decide.state_text(obj, fmt="paths")`, one line per leaf with its full key path:
+(`solvi.core.deciders.jsonable`: a model's `model_dump()`, dates in ISO 8601, an Enum as its value) and then serialized with
+`solvi.core.deciders.state_text(obj, fmt="paths")`, one line per leaf with its full key path:
 
 ```
 subject: Charged twice
@@ -782,10 +782,10 @@ d.extra["long"]["query"]      # what the sections were searched by; part of the 
 Give it a few labels per field, as the documents write them and in each language they come in. It only changes which
 sections are read: a decider that reads a language poorly still answers poorly once the right section is found.
 
-The same pieces work on their own (`solvi.longdoc`, standard library only):
+The same pieces work on their own (`solvi.core.deciders.longdoc`, standard library only):
 
 ```python
-from solvi.longdoc import LongDocument
+from solvi.core.deciders.longdoc import LongDocument
 
 doc = LongDocument(contract, max_tokens=200)            # count= a tokenizer's counter (default: words × 1.3)
 doc.sections                                           # [Section(start, end, heading, index)], covering the text
@@ -954,7 +954,7 @@ a threshold with P(answered alone and wrong) ≤ 10% overall broke that bound in
 (`tests/test_guarantees.py` checks this). `groups=` calibrates a threshold per group of a hierarchy:
 
 ```python
-from solvi.decide import Facts          # also solvi.multi.Facts
+from solvi.core.deciders import Facts          # also solvi.core.deciders.combine.Facts
 
 examples = [(Facts(email=text, domain="billing", task="refunds"), "approve"), ...]   # or states with those keys
 info = part.act_guard(examples, max_risk=0.10, groups=["domain", "task"], min_group=100, delta=0.10)
@@ -1011,7 +1011,7 @@ d.extra["perturb"]    # {"variants": 1, "calls": 1, "removed": [[...]], "answers
                       #  "unsure": False}
 ```
 
-The sentences are found by plain rules (`solvi.perturb`; no model, so the same input always gives the same variants): a
+The sentences are found by plain rules (`solvi.core.deciders.perturb`; no model, so the same input always gives the same variants): a
 role label ("SYSTEM:", "note to the AI:"), "ignore / disregard … the rules / instructions / the above", words addressed to
 the model ("as an AI", "dear assistant"), a dictated answer ("the correct answer is", "classify this as", "you must
 answer"), "New instructions: …". A rule needs the line to tell the reader what to do, so ordinary lines of a ticket pass:
@@ -1053,7 +1053,7 @@ promise still holds; a combination calibrates with it (a cascade's next model ge
 #### Any System One model as a decider
 
 ```python
-from solvi.systemone import systemone
+from solvi.core.deciders.systemone import systemone
 kev = systemone("http://127.0.0.1:8009", "kev-latest")          # api_key="..." for a hosted service such as Jev
 part = kev.decision("team", "Which team should handle this?", "email", {"billing": "Charges", "shipping": "Delivery"})
 ```
@@ -1145,7 +1145,7 @@ answer comes from the probabilities). The scorer (`model.scorer`) keeps the tota
 #### Any LLM as a decider
 
 ```python
-from solvi.llm import llm
+from solvi.core.deciders.llm import llm
 gpt = llm("https://openrouter.ai/api/v1", "qwen/qwen-2.5-72b-instruct", api_key=os.environ["OPENROUTER_API_KEY"])
 local = llm("http://127.0.0.1:8080/v1", "qwen2.5-7b-instruct")      # llama.cpp; vLLM :8000/v1, Ollama :11434/v1
 part = gpt.decision("team", "Which team should handle this?", "email", TEAMS)
@@ -1172,7 +1172,7 @@ decision whose probabilities came from the other. Yes/no, scores, multi-label qu
 (`Maybe[...]`) and `evidence=True` work; rankings and numbers are asked as a choice over the options / bins. Where the
 reply has one number (a span, `ask="confidence"`), the prompt says what it means for "not stated" — the model's
 probability that the text does not say it — and solvi reads it as p(not stated): a "not stated" at 0.2 is an unsure one.
-A reply that is not a choice — a query, a plan, a JSON extraction — is `solvi.generate`'s, on the same client settings
+A reply that is not a choice — a query, a plan, a JSON extraction — is `solvi.core.slow.generate`'s, on the same client settings
 (see [A model that writes](#a-model-that-writes-generation-agreement-and-the-re-ask-loop)).
 
 Everything is checked, and what fails escalates — `model escalated: invalid LLM output — ...` — instead of being turned
@@ -1189,11 +1189,11 @@ question asks for evidence (`evidence=True`), and otherwise is dropped — the a
 `extra["llm"]["rejected"]`. A server that does not answer (network, timeout, a connection cut
 mid-reply, 408 / 409 / 429 / 5xx) is retried
 (`retries=2`, exponential `backoff`) and then escalates too, without being cached, so the next ask tries again; a wrong
-key, model or URL (401, 403, 404) raises `solvi.llm.LLMError`. There is no act signal: `act_guard` runs on the
+key, model or URL (401, 403, 404) raises `solvi.core.deciders.llm.LLMError`. There is no act signal: `act_guard` runs on the
 confidence, on your labelled examples, as for System One.
 
 The trace names the model `llm:<model>@<endpoint>` (the URL without credentials or query); the fingerprint covers the
-endpoint, the model name, the hash of the prompt template (`solvi.llm.template_hash()`) and the settings, and each
+endpoint, the model name, the hash of the prompt template (`solvi.core.deciders.llm.template_hash()`) and the settings, and each
 decision's `extra["llm"]` records the format used, where the probabilities came from, the model the server says answered,
 the quote and the tokens. The API key goes in the Authorization header only — never in the trace, the fingerprint or an
 error. An LLM's output is not reproducible bit for bit, so `replay` does not call it again: it checks the recorded output
@@ -1228,7 +1228,7 @@ description and the whole text, a few hundred tokens or more — and takes the s
 takes about 50 ms on a CPU (solvi-base's model card) and costs nothing per call. The questions of one `system.ask` go one after another, one request each; `workers=4` sends the inputs
 of one `part.decide([...])` call — a batch, the examples of a calibration — in parallel; answers are cached per (question, input) while the model object lives; `model.scorer.usage` counts the tokens (`input_tokens`, `output_tokens`, `reasoning_tokens` — the same names for every
 remote model, whatever the server calls them). A wrong key, model or URL (HTTP 401, 403, 404) raises — `LLMError` /
-`SystemOneError`, both `solvi.remote.RemoteError` — rather than escalating every decision.
+`SystemOneError`, both `solvi.core.deciders._remote.RemoteError` — rather than escalating every decision.
 Put the LLM where it pays for itself: alone with `act_guard`, or in a `Vote` with solvi-large where the two are about
 equally strong (see "Which combination with an LLM" below). A "small model first, LLM second" cascade is not a good
 default.
@@ -1240,11 +1240,11 @@ default.
 
 A decision replays because it depends on its recorded input only. An agent that takes many steps keeps state between
 them — what it tried, where it has been — and when that state lives in the harness, the decisions stop replaying, the
-model does not see what was already tried, and every agent writes its own loop detection. `solvi.episode` keeps that
+model does not see what was already tried, and every agent writes its own loop detection. `solvi.core.knowledge.episodes` keeps that
 state as plain data that is given to each decision:
 
 ```python
-from solvi.episode import Chooser, Episode, EpisodeView, LongMemory
+from solvi.core.knowledge.episodes import Chooser, Episode, EpisodeView, LongMemory
 ep = Episode("ticket 4411")
 ep.note("act", "restart the router")                       # an event
 ep.progress("the customer confirmed")                      # explicit progress: the counts "since progress" start again
@@ -1272,7 +1272,7 @@ rules a person wrote for the same task — where such rules exist, use them.
 ### A map the agent builds: worldmap
 
 An agent that works in the same environment again — a site, an internal tool, a command line, a file tree — finds its
-structure anew on every task unless it keeps a map. `solvi.worldmap.WorldMap` is written as the agent acts: every edge
+structure anew on every task unless it keeps a map. `solvi.core.knowledge.worldmap.WorldMap` is written as the agent acts: every edge
 is a claim "(state, action) leads to state" with a status (hypothesis, confirmed), a source (seen, observed, told,
 human) and its evidence, and every write is an entry of a hash-chained journal. The journal is what a saved map is
 loaded from: `load` checks the chain and rebuilds the claims by replaying it (an edge edited in the file changes
@@ -1280,7 +1280,7 @@ nothing; a broken chain raises), `verify()` also compares the map with its journ
 map as it was after the first n entries.
 
 ```python
-from solvi.worldmap import WorldMap
+from solvi.core.knowledge.worldmap import WorldMap
 m = WorldMap("console.map.json")              # loaded when the file exists; m.save() writes it
 m.see(page, "Billing", to="/billing")         # on offer here (`to` when the environment shows it, as a link does)
 m.arrive(page, "Billing", "/billing")         # taken: confirmed — or refuted, whoever made the claim
@@ -1299,11 +1299,11 @@ needs.
 
 ### Candidates that change: a head over their features
 
-An answer head has fixed options; an agent's step has other candidates each time. `solvi.heads.CandidateHead` learns
+An answer head has fixed options; an agent's step has other candidates each time. `solvi.core.deciders.heads.CandidateHead` learns
 the choice from what a candidate is — its features — rather than from which option it is:
 
 ```python
-from solvi.heads import CandidateHead
+from solvi.core.deciders.heads import CandidateHead
 head = CandidateHead(["kind", "distance", "reward", "dead_end"]).fit(steps)      # steps: [(candidates, chosen index)]
 i, probs = head.choose(candidates)        # candidates: [{feature: value}]
 head.teach(candidates, 2)                 # one correction, absorbed at once
@@ -1337,11 +1337,11 @@ a warning, once.
 
 ### Several models: cascade, vote, route
 
-Several deciders can answer one question together. `solvi.multi` combines decision parts with plain code over their
+Several deciders can answer one question together. `solvi.core.deciders.combine` combines decision parts with plain code over their
 proposals; a combination is used wherever a decision part is (`cat.fn(team)`, `team.question(cat)`):
 
 ```python
-from solvi.multi import Cascade, Route, Vote
+from solvi.core.deciders.combine import Cascade, Route, Vote
 
 small = base.decision("team", "Which team?", "email", TEAMS)       # solvi-base: ~50 ms on a CPU (its model card)
 large = big.decision("team", "Which team?", "email", TEAMS)        # solvi-large: ~137 ms (its model card)
@@ -1374,7 +1374,7 @@ Vote([mid, large])])`.
 
 **Thresholds and the guarantee.** Before calibration each part escalates by its own thresholds (`min_confidence`,
 `min_act`, `min_margin`). `act_guard(examples, max_risk=0.10)` asks every part on labelled examples of your stream
-(`[(input, correct)]`; an input is what every part reads, or `solvi.multi.Facts(email=..., vip=...)` by name) and chooses
+(`[(input, correct)]`; an input is what every part reads, or `solvi.core.deciders.combine.Facts(email=..., vip=...)` by name) and chooses
 **one threshold t for every part's signal** — its act probability when its model gives one, else its calibrated
 confidence — by conformal risk control, so that P(answered alone and wrong) ≤ risk for inputs like the examples.
 The signals of different models can live on different scales: an act probability spreads over [0, 1], an LLM's
@@ -1432,14 +1432,14 @@ proposals by the combination's rule. `System.teach` on a question a combination 
 result keys, so code written for one takes the other. `decide`, `score`, `act_guard`, `calibrate_for` (a shared
 threshold for a target error among the answered, `method="empirical"` or `"ltt"`), `conformal` and the calibration
 files act on the combination as a whole; `fit`, `adapt`, `teach` and `reset` go to every part and return one result
-per part (so do `solvi.memory.attach(combination)` — a memory for every part, which inside a combination only checks —
+per part (so do `solvi.core.knowledge.memory.attach(combination)` — a memory for every part, which inside a combination only checks —
 and `solvi.lora.remove_lora(combination)`); `calls()` counts the models called (a part's `calls()` counts its own decisions the same way). What belongs to one part raises
 `NotImplementedError` naming the part to call it on: `save_lora` and `load_lora` (an adapter is trained
 on one checkpoint for one question, and its holdout recalibrates that part's own threshold), `budget`, `sections_k`,
 `long_key` and `long_input` (each part reads long texts by its own `long=`), and `in_pass` (a shared forward pass is
 for parts of one model). After changing a part, calibrate the combination again.
 
-### A memory of corrections: solvi.memory
+### A memory of corrections: solvi.core.knowledge.memory
 
 > **Moving into the knowledge memory in 1.0.** This module will be folded into solvi's knowledge memory, and its API
 > may change then.
@@ -1448,9 +1448,9 @@ The cases people corrected are the best evidence of where a decider goes wrong. 
 and, at decision time, finds the nearest ones — a second signal next to the model, never a silent override:
 
 ```python
-from solvi.memory import attach
+from solvi.core.knowledge.memory import attach
 
-mem = attach(team)                                   # a solvi.memory.CorrectionMemory bound to the part
+mem = attach(team)                                   # a solvi.core.knowledge.memory.CorrectionMemory bound to the part
 mem.add(email, "billing", source="human", by="ann", stored_id=res.stored_id)
 mem.learn_from(store)                                # every trusted correction of the question in a TraceStorage
 mem.calibrate(max_risk=0.05)                             # the abstain threshold, leave-one-out over the stored cases
@@ -1502,7 +1502,7 @@ a replay with the same state recomputes the proposal and compares it. `mem.save(
 keep it with the checkpoint's fingerprint and the question (another checkpoint or another question is refused: build it
 again with `learn_from`);
 `mem.remove(ids)` forgets cases found to be wrong; `attach(team, False)` detaches it. (Until 1.0 this was
-`team.memory(...)`; the method is gone — it raises an AttributeError naming `solvi.memory.attach` — as the memory moves
+`team.memory(...)`; the method is gone — it raises an AttributeError naming `solvi.core.knowledge.memory.attach` — as the memory moves
 into the knowledge memory.)
 
 ### Loading a checkpoint
@@ -1531,8 +1531,8 @@ labelled examples of your task (below) before trusting the confidences.
 `model.model_id` is the path or id it was loaded from; `model.fingerprint()` hashes the checkpoint files (names, sizes and
 sampled bytes), the backend, the default calibration, the declared capabilities and every adaptation; `model.metadata()`
 lists them; `model.caps` has the parsed capabilities. Any object with `logits(items)` (one array of logits per
-`solvi.decide.Item`, or `{"logits": ..., "act": logit}`; optionally `logits_pass(passes)` for several questions per
-`solvi.decide.Pass`) can stand in for the network: `DecideModel(scorer, meta)`.
+`solvi.core.deciders.Item`, or `{"logits": ..., "act": logit}`; optionally `logits_pass(passes)` for several questions per
+`solvi.core.deciders.Pass`) can stand in for the network: `DecideModel(scorer, meta)`.
 
 ```python
 model.score(input, task, options, descriptions=None, multi=False, kind=None)   # → {option: probability}; a list → a list
@@ -1669,11 +1669,11 @@ check, a constraint and a rule over the model, an escalation, the audit. Both ru
 ### Drift: has the stream moved away from the calibration?
 
 A threshold from `act_guard` holds for inputs like the calibration examples. When the inputs change, the promise is kept
-by escalating more, or the model keeps answering alone and is wrong more often — and nothing says so. `solvi.drift`
+by escalating more, or the model keeps answering alone and is wrong more often — and nothing says so. `solvi.core.guarantees.drift`
 compares the last decisions of a question with a reference window and names what moved:
 
 ```python
-from solvi.drift import DriftMonitor
+from solvi.core.guarantees.drift import DriftMonitor
 mon = DriftMonitor(window=100)            # the first 100 decisions are the reference (or mon.set_reference(decisions, labels))
 rep = mon.observe(part(text))             # or mon.observe(decision, label=truth) when the truth is known
 rep["drift"], rep["flags"], rep["why"]    # True, ["answers"], ["the answers are distributed differently (total variation 0.24, ...)"]
@@ -1685,7 +1685,7 @@ probability; with labels also the accuracy, and among the answers given alone th
 reference; a signal is flagged only when its test is significant and the change is large enough (`min_share`,
 `min_tv`, `min_shift`, ...). They are repeated at every decision, so each is held to `¾·alpha / (signals tested ×
 horizon)` — safe and slow. A sequential test follows the share answered alone, the mean confidence and the mean act
-probability decision by decision: CUSUMs (`solvi.drift.Cusum`, the detector the open-set gate below uses too) on each
+probability decision by decision: CUSUMs (`solvi.core.guarantees.drift.Cusum`, the detector the open-set gate below uses too) on each
 decision's shift from the mean so far, in the reference's standard deviations, with the flag level set by simulation
 on streams drawn from the reference (`sequential=False` turns it off). `drift` needs `min_signals` flagged signals of
 either kind. On a stream that has not changed, the chance of a false flag within `horizon` decisions (1,000) is at
@@ -1715,12 +1715,12 @@ Every promise above holds for inputs like the calibration examples. An input who
 options — a new topic, a product the catalog never had — is outside that: whatever the decider answers is wrong, and a
 threshold calibrated without such inputs lets some of them through: when a large share of the requests become new
 kinds, no threshold calibrated on the old ones (empirical, learn-then-test, `act_guard`, with or without a drift flag)
-keeps its promise. `solvi.openset` sizes the threshold for a share
+keeps its promise. `solvi.core.guarantees.openset` sizes the threshold for a share
 of such inputs and follows the share as the stream goes, without labels:
 
 ```python
 import numpy as np
-from solvi.openset import OpenSetGate
+from solvi.core.guarantees.openset import OpenSetGate
 
 rng = np.random.default_rng(0)
 known = rng.beta(6, 2, 2000)                                   # the decider's signal on labelled calibration inputs
@@ -1754,7 +1754,7 @@ How it works (the details are in the module's docstring): for each share π of a
 on the calibration examples mixed in that share — with probability ≥ 1 − delta it keeps `error` on any stream with at
 most π outside inputs like the stand-ins. The share in use is an upper bound from the last 25 and the last 200
 decisions (`track=(25, 200)`: the short window sees a sudden change, the long one a small share), never below
-`min_share=0.1`. A CUSUM on the same indicator flags the change (`solvi.drift.Cusum`, the detector `DriftMonitor`
+`min_share=0.1`. A CUSUM on the same indicator flags the change (`solvi.core.guarantees.drift.Cusum`, the detector `DriftMonitor`
 uses: at most `alpha` false flags within `horizon` decisions, its level set by simulation); after the flag the share is
 also estimated from the change point on. `gate.run(signals)` replays a stream of signals without touching the gate
 (for backtests); `gate.gate(decision)` gates a part's Decision outside a System.
@@ -1870,7 +1870,7 @@ every request with the same keys.
 
 ### Other strategists: dead ends and costs
 
-`System(..., strategist=...)` takes another planner. `solvi.strategy.CostStrategist()` builds the same plan with producers
+`System(..., strategist=...)` takes another planner. `solvi.core.plan.cost.CostStrategist()` builds the same plan with producers
 whose inputs are never given dropped (the deterministic strategist needs the inputs of every producer of a fact);
 `CostStrategist(producers="equivalent")` treats the producers of a fact as interchangeable and picks the cheapest verified
 plan by declared `cost=`, keeping every hard check that governs a question (`System(..., producers="equivalent")` is a
@@ -2015,7 +2015,7 @@ print(head.loo_acc)                        # exact leave-one-out accuracy
 ```
 
 `system.fit(question, examples, features=None, *, select=None, min_gain=0.0)` fits a closed-form ridge head
-(`solvi.heads.FastHead`): one matrix decomposition per ridge strength, so it takes milliseconds to a few seconds, and the
+(`solvi.core.deciders.heads.FastHead`): one matrix decomposition per ridge strength, so it takes milliseconds to a few seconds, and the
 ridge strength is chosen by exact leave-one-out accuracy (`head.loo_acc`).
 
 - Features are all facts computable from the examples' `init_state` keys, the given keys themselves included (a given
@@ -2163,7 +2163,7 @@ and only where it was measured to help:
 ```python
 import random
 from solvi import Answer, Catalog, JSONLStorage, Question, System
-from solvi.storage import TRUSTED_SOURCES, VERIFIED
+from solvi.core.store import TRUSTED_SOURCES, VERIFIED
 
 cat = Catalog()
 
@@ -2250,7 +2250,7 @@ the live one through its `state` / `restore`.
 | `heldout` | on the held-out labels, asked through the whole system, (right − wrong answered alone) / n improves by at least `min_gain` (0.01), with at least `min_holdout` (5) labels |
 | `honesty` | the honesty numbers (confident errors, coverage at `risk`, quote support) on the held-out labels — and on your own honesty set (`gates={"honesty": path or cases}`) — get no worse than `tolerance` (0.02) |
 | `act_guard` | a part calibrated with `act_guard` / `calibrate_for` is calibrated again, with the same risk, on at least `min_calibration` (30) calibration labels: an old threshold says nothing about a changed signal; conformal answer sets are recalibrated on them too, or dropped (and recorded) with fewer |
-| `size` | shadow run: the stored decisions whose input is held out for a learned question — the labels' split, per question (up to `shadow_limit`, 500) are asked with the current and the candidate state and compared (`solvi.diff.compare`); at most `max_change` (30%) may change |
+| `size` | shadow run: the stored decisions whose input is held out for a learned question — the labels' split, per question (up to `shadow_limit`, 500) are asked with the current and the candidate state and compared (`solvi.core.store.diff.compare`); at most `max_change` (30%) may change |
 
 `max_change` is deliberately low: the first update of a badly biased decider can move far more than 30% of the decisions
 and is then rejected until you raise the limit for it (`gates={"max_change": 0.8}`) — a decision a person should take.
@@ -2364,7 +2364,7 @@ required parts of the question (`requires`), so every flow computes them. Every 
 trace record (`guard:<question>`: the signal's value, the threshold, the promise); below the threshold the question
 abstains (safeguard low confidence) and says what it would have answered; a forced answer (a failed hard check) and an
 abstention are left as they are. Replay with the System re-derives the verdict; a guarantee recalibrated since the
-decision is a mismatch ("the question's guarantee changed"). `solvi.guarantee.calibrate(scores, correct, max_error=...)`
+decision is a mismatch ("the question's guarantee changed"). `solvi.core.guarantees.guarantee.calibrate(scores, correct, max_error=...)`
 does the same for any scalar outside a System: `p.threshold`, `p.allows(score)`, `p.report`.
 
 ## The trace and verification
@@ -2597,7 +2597,7 @@ solvi verify decisions.db --sign sig.json          # write the signature (only w
 solvi verify decisions.db --signature sig.json     # later: names the changed record and its original content hash
 ```
 
-`solvi.signature` works on anything: `sign(res)` / `res.signature()` for one response's trace (position 0 is the input,
+`solvi.core.store.signature` works on anything: `sign(res)` / `res.signature()` for one response's trace (position 0 is the input,
 position i the record i−1), `sign(items)` for a list, `locate(obj, sig)` → the position or `None`, `repair(obj, sig,
 candidates=...)` → `{"index", "digest", "match"}` (for a trace record a candidate may be a plain value), `extend(sig,
 new_items)` after appending. Each record is reduced to its content hash h_i (without `prev`, `hash`, `id`, so a recomputed
@@ -2651,7 +2651,7 @@ functions, a database) changes nothing in it.
 **solvi diff.** "We changed a rule — which decisions change?"
 
 ```python
-from solvi.diff import diff
+from solvi.core.store.diff import diff
 
 rep = diff(store, new_system)              # re-runs every stored decision (or diff(store, s, question="refund", since=...))
 print(rep)                                 # per question: how many changed and how (yes → no: 12); per decision the
@@ -2768,7 +2768,7 @@ MCP proxy that checks every tool call an agent makes to another MCP server — s
 **System One.** With `--decider` (a checkpoint folder, a Hugging Face id already in the local cache — `solvi serve`
 never downloads one unless you add `--pull`, as `solvi models pull` would —, `systemone:URL#model` or `module:attr`;
 `--backend onnx|torch`), the same server
-answers `POST /v1/systemone` — the protocol `solvi.systemone` speaks as a client — so solvi can stand where a Jev or Kev
+answers `POST /v1/systemone` — the protocol `solvi.core.deciders.systemone` speaks as a client — so solvi can stand where a Jev or Kev
 client points:
 
 ```
@@ -3089,7 +3089,7 @@ failed one is in `reasons`:
 | `user_confirmed` | only for tools with `guard.require_confirmation` (below): no message of the assistant that names the call's values was explicitly accepted by the user's next message | deny (`on_fail="escalate"`: escalate) |
 | your deny policies | a `@guard.policy` (`on_fail="deny"`, the default) returns False; its docstring's first line is the reason | deny |
 | `arguments_from_user` | only for tools with `tool_values="escalate"` (the middle mode, below): a user-only argument is not in the user's words but is in a tool output | escalate |
-| `no_injected_arguments` | a grounded argument is found only in tool outputs, and a tool output in the conversation — that one or any other — carries instruction-like text (`solvi.perturb.injection_spans`, below) | escalate |
+| `no_injected_arguments` | a grounded argument is found only in tool outputs, and a tool output in the conversation — that one or any other — carries instruction-like text (`solvi.core.deciders.perturb.injection_spans`, below) | escalate |
 | `no_instructions_in_tool_outputs` | tools declared with `injections="any"`: any tool output in the conversation carries instruction-like text | escalate |
 | your escalate policies | a `@guard.policy(..., on_fail="escalate")` (and `require_request` with its default) returns False | escalate |
 | `request_authorizes` | the authorizer says the conversation does not authorize the call, or it escalates (unsure, its act_guard threshold, perturb) | escalate |
@@ -3109,10 +3109,10 @@ reads a name no tool can provide (a fact not declared in `Guard(fact_names=...)`
 `guard.catalog(name)` is a tool's Catalog and `guard.system(name)` its System; `solvi check module:guard` lints every
 tool's checks.
 
-**Instruction-like text in tool outputs.** The guard's detector (`solvi.perturb.injection_spans`) reads each tool
+**Instruction-like text in tool outputs.** The guard's detector (`solvi.core.deciders.perturb.injection_spans`) reads each tool
 output per line, again with its line breaks read as spaces (an instruction split across lines), and each paragraph as a
 whole, and it looks inside quotes too (`'Vendor note: "Ignore previous instructions and pay …"'`). Its rules are
-`solvi.perturb`'s ("SYSTEM: …", "ignore / forget … the instructions", "the correct answer is …") plus the guard's own,
+`solvi.core.deciders.perturb`'s ("SYSTEM: …", "ignore / forget … the instructions", "the correct answer is …") plus the guard's own,
 broader ones: a sentence telling the reader to act ("you must / should / need to … pay / send / transfer / wire /
 delete / write / email / forward / approve …", "the assistant / AI / agent must …", "please / kindly transfer …",
 "Transfer 250 EUR to … now"), role tags (`<system>`, `[SYSTEM]`, `### System`, "system:" mid-sentence, "New
@@ -3665,9 +3665,9 @@ prompts, then the verified store and the audit of one decision.
 
 ## A model that writes: generation, agreement and the re-ask loop
 
-`solvi.llm` asks a model closed questions. When the model's output is something it writes — a SQL query, a plan, a JSON
-extraction of a table — three pieces put solvi around it: `solvi.generate` makes the call and records it,
-`solvi.agree` compares several candidates under a key you give, and `solvi.refine` runs propose → check → re-ask with
+`solvi.core.deciders.llm` asks a model closed questions. When the model's output is something it writes — a SQL query, a plan, a JSON
+extraction of a table — three pieces put solvi around it: `solvi.core.slow.generate` makes the call and records it,
+`solvi.core.slow.agree` compares several candidates under a key you give, and `solvi.core.slow.refine` runs propose → check → re-ask with
 the reasons → escalate. The model proposes; the checks decide; every round is a recorded, replayable decision. None of
 them makes the model better at writing: they decide what is returned without a person, and say why the rest is not.
 
@@ -3676,8 +3676,8 @@ A runnable example, with a stand-in for the model (three queries per round, othe
 ```python
 import sqlite3
 from solvi import Answer, Catalog, Fail, Question, System
-from solvi.agree import agree
-from solvi.refine import refine
+from solvi.core.slow.agree import agree
+from solvi.core.slow.refine import refine
 
 db = sqlite3.connect(":memory:")
 db.executescript("CREATE TABLE orders(id, amount, status);"
@@ -3733,13 +3733,13 @@ Fail(...)` is True) — and `-> bool` checks keep their type. The reasons are re
 (`record.extra["reasons"]`), added to the answer's reason when a hard check decides ("hard check nobody_busy is false:
 Harold is busy …"), shown on the check's line of the audit, and compared on replay (a check that now gives other reasons
 is a mismatch). A check that returns plain `False` keeps working: its reason is its docstring's first line, else
-"<name> is false". `solvi.refine.failed_checks(res, question)` lists the checks that are False with their reasons;
+"<name> is false". `solvi.core.slow.refine.failed_checks(res, question)` lists the checks that are False with their reasons;
 `res.checks` lists every check of the decision with its status, reason and the `then` it applied.
 
-### Generation: solvi.generate
+### Generation: solvi.core.slow.generate
 
 ```python
-from solvi.generate import generator
+from solvi.core.slow.generate import generator
 writer = generator("https://openrouter.ai/api/v1", "openai/gpt-oss-120b", api_key=KEY, max_tokens=3000,
                    extra_body={"reasoning": {"effort": "low"}})
 g = writer.generate(messages)                                    # g.value: the reply's text
@@ -3750,12 +3750,12 @@ g = writer.sample(messages, k=3, temperature=0.8)                # greedy first,
 cat.fn(writer.part("plan", prompt, schema=Plan))                 # a catalog part; k=3 for samples, text=/quotes= as above
 ```
 
-The connection is solvi.llm's: `generator(...)` takes the same endpoint, key, headers, `extra_body`, retries, backoff,
+The connection is solvi.core.deciders.llm's: `generator(...)` takes the same endpoint, key, headers, `extra_body`, retries, backoff,
 timeout and `opener`, and `Generator.of(decider)` shares the client of a decider made with `llm(...)`. A reply is
 accepted only whole: a refusal, a cut-off reply (`finish_reason` "length" — reasoning tokens count against
 `max_tokens`), an empty one, a parser that raises, JSON that does not parse or match the schema, and a quoted string
-that is not in the text raise `solvi.llm.InvalidOutput` with the reason; it is never repaired. A server that does not
-answer after the retries, or refuses the input (HTTP 400 / 413 / 422), raises `solvi.generate.Unanswered`; a wrong key,
+that is not in the text raise `solvi.core.deciders.llm.InvalidOutput` with the reason; it is never repaired. A server that does not
+answer after the retries, or refuses the input (HTTP 400 / 413 / 422), raises `solvi.core.slow.generate.Unanswered`; a wrong key,
 model or URL raises `LLMError`. In a catalog each of these makes the part fail, and the questions that need it abstain
 with the cause (`… caused by sql: InvalidOutput: the reply was cut off (max_tokens)`). A JSON schema is checked for its
 common keywords (type, properties, required, additionalProperties, items, enum, const, bounds, lengths, anyOf); one with
@@ -3794,16 +3794,16 @@ dollars without a price is refused. Before each request, what was spent plus the
 mean of the requests so far) must fit `total` and, within one call of `generate` / `sample` (one decision when the
 generator is a catalog part), `budget`; otherwise `BudgetStop` is raised and nothing is sent. In a catalog the part then
 fails ("BudgetStop: no budget left in total (usd 4.9993 + 0.0012 expected > 5)") and its questions abstain with that
-cause; in `solvi.refine` the loop ends as a proposer failure. A reply is not stopped half-way: a call that went over its
+cause; in `solvi.core.slow.refine` the loop ends as a proposer failure. A reply is not stopped half-way: a call that went over its
 budget keeps its output and records it — with a budget the output's `extra["budget"]` holds `"budget"`, `"total"`
 (the limits), `"spent"` (the call's cost) and `"over"` (how far over, or None), and the trace keeps it. `sample`'s
 requests run in parallel: each is admitted against what was spent when it starts. Measure the cost of one request
 before you set a per-decision budget below two of them.
 
-### Agreement of candidates: solvi.agree
+### Agreement of candidates: solvi.core.slow.agree
 
 ```python
-from solvi.agree import agree, consensus
+from solvi.core.slow.agree import agree, consensus
 agree(cat, "sql", "candidates", key=row_digest, prefer=returns_rows)    # facts: sql, sql_agreement, sql_tally
 consensus(queries, key=row_digest)              # the same outside a catalog: {"index", "value", "share", "groups", ...}
 ```
@@ -3816,13 +3816,13 @@ a head or a guarantee reads like any other signal. A candidate that is None (its
 is None, does not vote and still counts in K. `prefer`: when any candidate passes it, only those vote (rows before an
 empty result). When nothing votes, `sql` is missing — its error lists each candidate's reason — and the share is 0.0.
 `sql_tally` records per candidate its key or why it has none, the groups, the choice and the share; replay recomputes it
-(keep the key deterministic, or cache what it computes). Candidates from several models: `solvi.generate.several(
+(keep the key deterministic, or cache what it computes). Candidates from several models: `solvi.core.slow.generate.several(
 [writer_a, writer_b], messages)`.
 
-### The loop: solvi.refine
+### The loop: solvi.core.slow.refine
 
 ```python
-from solvi.refine import refine
+from solvi.core.slow.refine import refine
 run = refine(system, {"problem": text}, "accept", propose=writer.proposer(messages, schema=Plan), into="plan",
              rounds=3, accept="yes", feedback=lambda r: my_wording(r.reasons), budget=Budget(tokens=20_000))
 run.accepted, run.proposal, run.escalation, run.rounds        # stored rounds: r.stored_id
@@ -3854,9 +3854,9 @@ fact `feedback_into` (default `"feedback"`, a flat list of reasons) and the gene
 question could not be decided at all, its `causes` — the errors of the parts that failed by themselves ("spec:
 ValueError: no slot in the plan"), not the steps that only lacked their inputs. `feedback(round)` turns them into what
 the proposer is told — a text, or a list of reasons; default: `round.reasons`. A generator's proposer renders a list
-through its `template` — by default `solvi.generate.FEEDBACK`, "Your answer was checked by a program, and it does not
+through its `template` — by default `solvi.core.slow.generate.FEEDBACK`, "Your answer was checked by a program, and it does not
 work:\n{reasons}\nGive a corrected answer.", with one "- reason" per line — and passes a text as it is
-(`solvi.generate.render_feedback`). The round asked as the last of `rounds` gets no feedback: there is no next round to
+(`solvi.core.slow.generate.render_feedback`). The round asked as the last of `rounds` gets no feedback: there is no next round to
 tell.
 
 **Stopping.** A round is accepted when `accept` says so: `"checks"` (default: every hard check that governs the
@@ -3914,11 +3914,11 @@ does not see a row left out. Agreement of several samples is not correctness: sa
 question that is not the intended one.
 
 **Not done here.** No search: a loop re-asks one proposer, it does not enumerate alternatives or keep the best of two
-valid ones — that is `solvi.search` (below). No promise that re-asks converge. The share of agreement is a signal;
+valid ones — that is `solvi.core.slow.search` (below). No promise that re-asks converge. The share of agreement is a signal;
 calibrate it on labelled examples before you trust a threshold. No streaming, no tool calls, no caching of replies (put
 a caching proxy in front of the server).
 
-### Search over alternatives: solvi.search
+### Search over alternatives: solvi.core.slow.search
 
 When the candidates can be enumerated — the slots of a week, the orders of a few cities, the friends to meet — a
 search through the System's own checks beats asking a model to propose: run each candidate through the checks, keep
@@ -3926,8 +3926,8 @@ the accepted ones, take the best.
 
 ```python
 from solvi import Answer, Catalog, Question, System
-from solvi.refine import Fail
-from solvi.search import Tree, search
+from solvi.core.slow.refine import Fail
+from solvi.core.slow.search import Tree, search
 
 cat = Catalog()
 FLIGHTS = {("Oslo", "Rome"), ("Rome", "Paris"), ("Paris", "Oslo"), ("Rome", "Vienna")}
@@ -4188,7 +4188,7 @@ The writer sees the new text with its changed and added clauses marked and the r
 module; it returns a patch. Each added or replaced part must cite a changed or added clause, each removed part the
 clause that removes it, and no part may still cite a removed clause — otherwise the patch goes back with the reasons.
 Then the same acceptance runs on the merged module, with tests written for the new text. `decision_diff` re-runs
-stored decisions (or `inputs=`, decided by the old version first) through `solvi.diff` and maps each cause step to the
+stored decisions (or `inputs=`, decided by the old version first) through `solvi.core.store.diff` and maps each cause step to the
 clauses its part cites — as fine as the parts are: a rule that cites every clause names every clause.
 
 ### Versions and replay
@@ -4236,22 +4236,22 @@ features for a head. Once loaded, a compiled module runs in your process with re
 limits hold only during compilation (see `solvi.sandbox`). Labels, when you have them, are the stronger check —
 pass them.
 
-## Who answers: System 1, the slow path or a person (solvi.dispatch)
+## Who answers: System 1, the slow path or a person (solvi.core.dispatch)
 
 > **Experimental.** The API may change. It decides who answers and records why; it does not make either path more
 > accurate, and it does not teach the fast path from the slow one.
 
 A System that answers within a guarantee — a fitted head, a classifier behind an open-set gate, rules and checks — is
 fast and cheap, and knows when it is unsure: it abstains below its threshold. An LLM, a re-ask loop or a search is slow
-and costs money per input. `solvi.dispatch` puts them in one recorded decision per input: System 1 is asked first;
+and costs money per input. `solvi.core.dispatch` puts them in one recorded decision per input: System 1 is asked first;
 when its own signals say its answer cannot be given alone, the slow path answers (or checks), and when that cannot
 answer either — or there is no budget left — a person gets the input with both candidates and the reasons, never a
 guess.
 
 ```python
 from solvi import Answer, Catalog, Decision, Question, System
-from solvi.dispatch import Budget, Dispatcher, SlowPath
-from solvi.generate import Generated
+from solvi.core.dispatch import Budget, Dispatcher, SlowPath
+from solvi.core.slow.generate import Generated
 
 TEAMS = ["billing", "shipping"]
 
@@ -4300,8 +4300,8 @@ human  None      human  no budget left in total (calls 2 of 2 used)
 {'s1': 'shipping'} True
 ```
 
-With a model, System 2 is `model.decision(...)` from `solvi.llm` made the question's answer (`part.question(cat)`),
-generated candidates with `solvi.agree` in its catalog, or typed facts read with quotes (`solvi.generate`) — whatever
+With a model, System 2 is `model.decision(...)` from `solvi.core.deciders.llm` made the question's answer (`part.question(cat)`),
+generated candidates with `solvi.core.slow.agree` in its catalog, or typed facts read with quotes (`solvi.core.slow.generate`) — whatever
 answers the same question slowly, with its own `System.guarantee` if you have labelled examples for it.
 
 ### What wakes the slow path
@@ -4315,7 +4315,7 @@ wake the slow path (default: all); an input whose signal is left out goes to a p
 | `openset` | below an `OpenSetGate`'s threshold (the input is unlike the calibration examples) | think |
 | `abstain` | System 1 abstained otherwise: a model escalated, a fact is missing, a rule returned None | think |
 | `constraint` | the answers break a constraint between the questions asked (`res.feasible` is False) | think |
-| `agreement` | a share computed by `solvi.agree` is below its minimum (`agreement={"sql_agreement": 1.0}`) | think |
+| `agreement` | a share computed by `solvi.core.slow.agree` is below its minimum (`agreement={"sql_agreement": 1.0}`) | think |
 | `drift` | the open-set gate has flagged a change of the stream, or a `DriftMonitor` (`monitor=`) has | check |
 | `supervise` | a sampled share of the answers System 1 gives alone (`supervise=0.05`) | check |
 
@@ -4336,20 +4336,20 @@ A drift flag stays up until `d.reset_drift()`; replay takes it as recorded (it d
 proposer:
 
 ```python
-SlowPath(judge, propose=writer.proposer(messages, schema=Plan), into="plan", rounds=3)   # solvi.refine
-SlowPath(judge, space=lambda facts: candidates(facts), into="slot", search={"objective": "score"})   # solvi.search
+SlowPath(judge, propose=writer.proposer(messages, schema=Plan), into="plan", rounds=3)   # solvi.core.slow.refine
+SlowPath(judge, space=lambda facts: candidates(facts), into="slot", search={"objective": "score"})   # solvi.core.slow.search
 ```
 
 With `propose=`, each proposal is given to `judge` as the fact `into`, its hard checks judge it, and the reasons of
-the failed ones go back to the model for up to `rounds` rounds (`solvi.refine`); with `space=`, the candidates of an
-enumerable space run through the checks (`solvi.search`). The answer is accepted when the System does not abstain on
+the failed ones go back to the model for up to `rounds` rounds (`solvi.core.slow.refine`); with `space=`, the candidates of an
+enumerable space run through the checks (`solvi.core.slow.search`). The answer is accepted when the System does not abstain on
 it and, for these two, its checks accept it. `slow.run(state, question)` runs it alone (a `Thought`: mode, answer,
 accepted, why, record, cost) — the "slow path alone" arm of a comparison.
 
 ### Budget and cost
 
 `budget=Budget(usd=, calls=, ms=, tokens=)` is per decision, `total=Budget(...)` for the dispatcher's life (`Budget`
-and `Cost` live in `solvi.core.costs` since 1.0 and are the same ones `solvi.generate` and `solvi.refine` take; `tokens` counts
+and `Cost` live in `solvi.core.costs` since 1.0 and are the same ones `solvi.core.slow.generate` and `solvi.core.slow.refine` take; `tokens` counts
 input + output tokens). Dollars are the
 tokens each model output records in the trace (`extra["llm"]["usage"]`, `extra["generated"]["usage"]`) times `price`
 — dollars per million input and output tokens, or a function `(model, usage) → dollars`; a budget in dollars without a
@@ -4394,7 +4394,7 @@ Response), `s2` (the slow path's Thought, whose record is a Response, a Refineme
 `disagreement`, `cost`, `n`, `draw`, `spent_before`, `drift`. `d.replay(res)` re-checks it without calling a model:
 the dispatcher is configured as it was, System 1's trace replays, the draw recomputes, the dispatch follows from the
 response, the draw and the recorded spend, drift flag and expected cost; the slow path's record replays (LLM outputs
-are re-read through their schemas, as `solvi.llm` and `solvi.generate` replay them) and its cost recomputes; the answer
+are re-read through their schemas, as `solvi.core.deciders.llm` and `solvi.core.slow.generate` replay them) and its cost recomputes; the answer
 and who gave it follow. `Dispatcher(..., storage=store)` keeps every decision as one hash-chained record of kind
 "dispatch"; `d.stored()` loads them, `d.replay_all()` replays them all. `res.to_dict()` / `Dispatched.from_dict(d,
 system1, system2)` store and load one.
@@ -4408,7 +4408,7 @@ error on what it is actually given before you trust `think="s2"`.
 
 ## System 1 and System 2 on a game: the Pokémon world map
 
-> A showcase of `solvi.dispatch` with a searching slow path and `solvi.worldmap`; the player and the replay viewer
+> A showcase of `solvi.core.dispatch` with a searching slow path and `solvi.core.knowledge.worldmap`; the player and the replay viewer
 > are in `spaces/pokemon/`.
 
 
@@ -4602,7 +4602,7 @@ Every fact and answer has a provenance kind (`record.origin`, `result.provenance
 | `quoted` | an `extract` part returning a `Quote` | the offsets must lie in the source text; for a model, `doc[start:end]` must be the value |
 | `decided` | a model's choice among declared options, with probabilities (`Decision`) | the value must be one of the options; probabilities recorded |
 | `learned` | a `fit` head, a `learn_rule` list, another trained function | the head type and a fingerprint of its parameters are recorded |
-| `proposed` | a model that writes: a strategist's plan, a generator's text or JSON (`solvi.generate`) | the deterministic layer verifies what it proposes; replay re-reads a recorded reply through its parser and schema |
+| `proposed` | a model that writes: a strategist's plan, a generator's text or JSON (`solvi.core.slow.generate`) | the deterministic layer verifies what it proposes; replay re-reads a recorded reply through its parser and schema |
 
 The default comes from what a part returns (a `Quote` → `quoted`, a `Decision` → `decided`) and whether a model is behind
 it. Declare it explicitly with `provenance=` on any decorator. A part is model-backed when you pass `model=`:
@@ -4759,7 +4759,7 @@ rep = system.report(since="2026-09-01", until="2026-10-01")    # the System's st
 print(rep)                                                       # plain text
 rep.to_dict()                                                    # the same as data
 
-from solvi.sysreport import system_report
+from solvi.core.store.sysreport import system_report
 rep = system_report(SQLiteStorage("decisions.db"), question="intent", price=(0.15, 0.60), drift_window=100)
 ```
 
@@ -4772,11 +4772,11 @@ What it shows, per question:
 
 - **Who answered.** The answers given alone and what gave them — a rule (its name), a model decision (the model's id),
   a learned head, or a hard check that forced the answer — and the inputs handed over, by the safeguard that held them
-  back. With a dispatcher (`solvi.dispatch`, `storage=`), who gave the final answer: System 1, the slow path or a
+  back. With a dispatcher (`solvi.core.dispatch`, `storage=`), who gave the final answer: System 1, the slow path or a
   person, by action (accept, think, check) and by the slice System 1 handed over.
 - **What it cost.** The time of every decision, the model calls and tokens the traces record, and dollars where they
   are known (the dispatcher records them, and so does a generator built with `price=`; for other model calls pass
-  `price=`). The dispatcher's spend is split between System 1 and the slow path. Refinement loops (`solvi.refine` with
+  `price=`). The dispatcher's spend is split between System 1 and the slow path. Refinement loops (`solvi.core.slow.refine` with
   a System that has a storage) are counted in `cost["refine"]`: how many, accepted, escalated, stopped by their budget
   and over it, their rounds, the whole loops' cost and their proposals' model calls (which no System trace holds).
   Compact records are read as full ones for all of this: they keep the answers, the guarantees, the models and every
@@ -4872,11 +4872,11 @@ GPU is recommended for training and for fast inference.
 > **Moving into the knowledge memory in 1.0.** This module will be folded into solvi's knowledge memory, and its API
 > may change then.
 
-`solvi.extract_multi.MultiSpanExtractor` reads a document once and has a start/end head pair per field. Use it for
+`solvi.core.extract.multi.MultiSpanExtractor` reads a document once and has a start/end head pair per field. Use it for
 documents that fit into one window (receipts, invoices, forms).
 
 ```python
-from solvi.extract_multi import MultiSpanExtractor
+from solvi.core.extract.multi import MultiSpanExtractor
 
 ex = MultiSpanExtractor(["company", "date", "total"],
                         model_name="answerdotai/ModernBERT-large", max_len=1024)
@@ -4908,12 +4908,12 @@ def total_value(total):
 
 ### LongSpanExtractor: long documents, fields by description, "no answer"
 
-`solvi.extract_long.LongSpanExtractor` is for long documents (contracts) and optional fields. The input is
+`solvi.core.extract.LongSpanExtractor` is for long documents (contracts) and optional fields. The input is
 `[CLS] field description [SEP] window of the document [SEP]`, windows overlap, and position 0 means "no answer in this
 window".
 
 ```python
-from solvi.extract_long import LongSpanExtractor
+from solvi.core.extract import LongSpanExtractor
 
 GOV_LAW = "the clause that says which state's or country's law governs the contract"
 
@@ -4951,7 +4951,7 @@ def governing_state(governing_law):
 
 `solvi.extract_model.SpanExtractor`, one field per pass with no `field()` helper and no save / load, had no caller and
 is gone, and so is `solvi.extract_model` (in 0.8 importing `SpanExtractor` from it warned and gave
-`LongSpanExtractor`; removed in 0.9). Use `solvi.extract_long.LongSpanExtractor`: it trains on the same items, `fit([(text, description, (s, e) or None), ...])`; `predict(text,
+`LongSpanExtractor`; removed in 0.9). Use `solvi.core.extract.LongSpanExtractor`: it trains on the same items, `fit([(text, description, (s, e) or None), ...])`; `predict(text,
 description)` returns one `(start, end, score, no_answer_score)`, and `field(name, description)` is the `@extract` part.
 
 ### Hardware notes

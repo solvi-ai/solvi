@@ -1,4 +1,4 @@
-"""The open-set gate (solvi.openset): a threshold sized for a share of inputs from outside the calibration set, a
+"""The open-set gate (solvi.core.guarantees.openset): a threshold sized for a share of inputs from outside the calibration set, a
 detector with a bounded false-flag rate, the share estimate after a change, and the gate on a System's question."""
 import math
 
@@ -6,7 +6,7 @@ import numpy as np
 import pytest
 
 from solvi import Answer, Catalog, Decision, Question, System
-from solvi.openset import OpenSetGate, leave_out
+from solvi.core.guarantees.openset import OpenSetGate, leave_out
 
 
 def _known(rng, n):
@@ -143,7 +143,7 @@ def test_leave_out_gives_known_and_outside_signals():
 
 
 def test_a_drift_monitor_passed_in_also_starts_the_estimate():
-    from solvi.drift import DriftMonitor
+    from solvi.core.guarantees.drift import DriftMonitor
     rng = np.random.default_rng(7)
     ks, kr = _known(rng, 3000)
     g = OpenSetGate.calibrate(ks, kr, _outside(rng, 3000), alpha=1e-4, design=(0.01,), monitor=DriftMonitor(window=50))

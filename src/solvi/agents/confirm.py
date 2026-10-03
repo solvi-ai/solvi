@@ -75,7 +75,7 @@ _NEAR = 3                                                 # words between a nega
 
 
 def _plain(text):
-    from ..perturb import normalize
+    from ..core.deciders.perturb import normalize
     from .guard import _TYPO
     return normalize(text, confusables=False)[0].casefold().translate(_TYPO)
 

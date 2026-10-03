@@ -1,9 +1,10 @@
-"""The import structure of solvi, read from the source (ast), so that a cycle or a layer break fails here (LAYOUT §6,
-on a provisional tier map over the flat module names until the 1.0 package move):
+"""The import structure of solvi, read from the source (ast), so that a cycle or a layer break fails here (LAYOUT §6;
+the tiers are package prefixes of the 1.0 layout: solvi.core.<area>):
 
 - no import cycle at module level (the imports a module runs when it is imported, nested in `if` / `try` included,
   `if TYPE_CHECKING:` and function bodies not): such a cycle makes the import order matter and breaks on a refactor;
-- the execution layer (core, typed, provenance, primitives, runtime, schema, textin) imports nothing above it, not even
+- the execution layer (solvi.core: catalog, types, provenance, primitives, runtime, schema, textin) imports nothing
+  above it, not even
   inside a function: what it needs of the modules above (the flow, the replay of their records) is defined in it;
 - nothing below the server and agent layer (solvi.cli, solvi.serve, solvi.hooks, solvi.agents) imports from it;
 - (rule 2) an import cycle — any import, inside a function too — stays inside one tier: the cross-tier cycle of 0.9
@@ -65,7 +66,7 @@ def _imports(tree, module_level):
 
 def graph(module_level):
     """{module: {solvi modules it imports}}. Importing a.b.c imports the packages a and a.b first (unless the importer
-    is inside them: they are being imported already)."""
+    is inside them: they are being imported already); a module that imports names from its own package depends on it."""
     mods = _modules()
     g = {m: set() for m in mods}
     for m, (path, package) in mods.items():
@@ -88,7 +89,8 @@ def graph(module_level):
                 parts = t.split(".")
                 for i in range(1, len(parts) + 1):
                     x = ".".join(parts[:i])
-                    if x != m and not m.startswith(x + ".") and x in mods:
+                    implicit = i < len(parts)                # a package imported on the way to the named module
+                    if x != m and x in mods and not (implicit and m.startswith(x + ".")):
                         g[m].add(x)
     if not module_level:                              # the root, imported inside a function: see the module docs
         for m in g:
@@ -162,16 +164,15 @@ def test_nothing_below_the_server_and_agent_layer_imports_it():
     assert not up, f"a library module imports the server / agent layer: {sorted(up)}"
 
 
-# --- the provisional tier map (LAYOUT §2 / §6) over the flat 1.0 module names; the package move (solvi.core.*) follows
+# --- the tier map (LAYOUT §2 / §6): a module belongs to the tier of its longest listed prefix (after "solvi.")
 LOW_TIERS = {
-    "kernel": "_deprecate _loader _migrate core sets _rpc",
-    "parts": "decide heads llm remote longdoc multi perturb rulelist systemone extract_long extract_multi strategist strategy "
-             "inputs",
-    "guarantees": "guarantee drift openset",
-    "records": "storage response signature audit diff report sysreport",
-    "system": "system",
-    "deliberate": "agree generate refine search dispatch",
-    "knowledge": "worldmap episode memory",
+    "kernel": "_deprecate _loader _migrate _rpc core",                  # solvi.core.* unless listed below
+    "parts": "core.deciders core.extract core.plan core._inputs",
+    "guarantees": "core.guarantees",
+    "records": "core.store core.response",
+    "system": "core.system",
+    "deliberate": "core.slow core.dispatch",
+    "knowledge": "core.knowledge",
 }
 HIGH = "__init__ __main__ auto calibrate check cli command honesty models scaffold serve show testing agents"
 EXPERIMENTAL = "compile sandbox hooks learning lora specialist charts agents.mcp oncalib"
@@ -182,7 +183,7 @@ ALLOWED_EXPERIMENTAL = {("solvi.serve", "solvi.agents.mcp"), ("solvi.auto", "sol
 INTRA_TIER_CYCLES = [
     {"solvi.core.catalog", "solvi.core.primitives", "solvi.core.provenance", "solvi.core.runtime", "solvi.core.schema",
      "solvi.core.textin", "solvi.core.types"},
-    {"solvi.storage", "solvi.response", "solvi.report", "solvi.signature"},
+    {"solvi.core.store", "solvi.core.response", "solvi.core.store.report", "solvi.core.store.signature"},
     {"solvi.agents.guard", "solvi.agents.confirm"},
 ]
 
@@ -236,7 +237,8 @@ def test_tier_order_and_levels():
 def test_the_names_moved_by_the_import_cycle_lane_are_the_same_objects():
     """The cycle moves of 1.0 (LAYOUT §6) kept the names the old modules re-export: the same objects."""
     import solvi
-    from solvi import _rpc, calibrate, decide, dispatch, response, serve, storage, system
+    from solvi import _rpc, calibrate, serve
+    from solvi.core import deciders as decide, dispatch, response, store as storage, system
     from solvi.core import calibfile, calibration, chain, costs, runtime, sources
     assert system.Response is response.Response is solvi.Response and system._append is chain.append
     for name in ("TRUSTED_SOURCES", "VERIFIED", "VERIFIED_REFUSED", "UntrustedLabel", "check_source"):

@@ -37,7 +37,7 @@ catalog, in this order (a failed hard check decides; when several fail, the firs
   arguments_from_user          tools with tool_values="escalate": a user-only argument written only in a tool output
                                (not by the user) → escalate instead of deny (a person decides; never allowed on its own)
   no_injected_arguments        ... and not only in tool outputs when any tool output in the conversation carries
-                               instruction-like text (solvi.perturb.injection_spans) → escalate
+                               instruction-like text (solvi.core.deciders.perturb.injection_spans) → escalate
   no_instructions_in_tool_outputs   tools with injections="any": no tool output in the conversation carries such text → escalate
   not_made_before              tools with once=True: a call with these arguments was already made → escalate
   user_confirmed               tools with require_confirmation: the user explicitly accepted a message of the assistant
@@ -583,11 +583,11 @@ def _grounding(spec, matchers=None):
         list item by item; an empty or whitespace-only string is never grounded (an optional argument left at its ""
         default is not asked for). The first occurrence in a message of
         an allowed role wins (an untainted one before a tainted one). Taint is context-wide: when any tool output in the
-        conversation carries instruction-like text (solvi.perturb.injection_spans), a value found only in tool outputs
+        conversation carries instruction-like text (solvi.core.deciders.perturb.injection_spans), a value found only in tool outputs
         is injected. With scan_user, a value the user wrote only within NEAR characters of an override in their own
         message (injection_spans(actions=False): "ignore previous instructions", role tags — pasted content, not the
         user's own requests to pay or send) is injected too."""
-        from ..perturb import injection_spans
+        from ..core.deciders.perturb import injection_spans
         rules = json.loads(spec)
         roles = [(x[0], x[1], x[2]) for x in conversation_roles]
         taints = _taints(conversation, conversation_roles)
@@ -688,8 +688,8 @@ def _grounding(spec, matchers=None):
 
 def _taints(conversation, conversation_roles):
     """The instruction-like passages of each tool output in the conversation → {message index: [text]} (only tainted
-    ones): solvi.perturb.injection_spans, or — for an output a Session flagged before cutting it — a note saying so."""
-    from ..perturb import injection_spans
+    ones): solvi.core.deciders.perturb.injection_spans, or — for an output a Session flagged before cutting it — a note saying so."""
+    from ..core.deciders.perturb import injection_spans
     out = {}
     for i, x in enumerate(conversation_roles):
         s, e, r = x[0], x[1], x[2]
@@ -1046,7 +1046,7 @@ def no_injected_arguments(grounding) -> bool:
 
 
 def no_instructions_in_tool_outputs(conversation, conversation_roles) -> bool:
-    """No tool output in the conversation carries instruction-like text (solvi.perturb.injection_spans)."""
+    """No tool output in the conversation carries instruction-like text (solvi.core.deciders.perturb.injection_spans)."""
     return not _taints(conversation, conversation_roles)
 
 
@@ -1062,7 +1062,7 @@ def not_made_before(tool_name, call_arguments, calls_made) -> bool:
 
 def proposal(tool_name, call_arguments) -> str:
     """The call as the authorizer reads it: the tool's name and its arguments as JSON."""
-    from ..decide import jsonable
+    from ..core.deciders import jsonable
     return f"{tool_name}({json.dumps(jsonable(call_arguments), ensure_ascii=False, sort_keys=True, default=str)})"
 
 
@@ -1211,7 +1211,7 @@ class GuardDecision:
         arguments, another call, or new reasons."""
         import hashlib
 
-        from ..decide import jsonable
+        from ..core.deciders import jsonable
         blob = json.dumps({"tool": self.tool, "id": self.id, "arguments": jsonable(self.arguments),
                            "reasons": sorted(str(r) for r in self.reasons)}, sort_keys=True, ensure_ascii=False,
                           default=str)
@@ -1227,7 +1227,7 @@ class GuardDecision:
 
     def to_dict(self):
         """The decision as JSON data (without the trace: `response.to_dict()` has it)."""
-        from ..decide import jsonable
+        from ..core.deciders import jsonable
         d = {"outcome": self.outcome, "tool": self.tool, "arguments": jsonable(self.arguments), "reasons": self.reasons,
              "evidence": [list(e) for e in self.evidence], "executed": self.executed, "error": self.error,
              "stored_id": self.stored_id, "trace_hash": self.trace_hash}
@@ -1252,7 +1252,7 @@ class Guard:
 
     @_deprecate.removed_kwargs(facts="fact_names")
     def __init__(self, storage=None, authorizer=None, fact_names=None, lang="en", scan_user=False, tool_values="deny"):
-        from ..storage import open_storage
+        from ..core.store import open_storage
         self.storage = open_storage(storage)
         self.tools: dict[str, Tool] = {}
         facts = fact_names                   # the names (and types) of the facts the app gives (`facts=` in 0.7); their
@@ -1523,7 +1523,7 @@ class Guard:
 
     def authorizer_input(self, call, context=None):
         """The input the authorizer reads for a call (decide.Facts) — for fit / act_guard / conformal examples."""
-        from ..decide import Facts
+        from ..core.deciders import Facts
         c = ToolCall.parse(call)
         text, _, request = conversation(context)
         t = self.tools.get(c.name)
@@ -1538,7 +1538,7 @@ class Guard:
     @_deprecate.removed_kwargs(risk="max_risk")
     def calibrate_authorizer(self, examples, *, max_risk=0.10, **kw):
         """act_guard on the authorizer from labelled calls [(call, context, authorized: bool)]: P(allowed by the
-        authorizer alone and wrong) ≤ max_risk for calls like these (solvi.decide.DecisionPart.act_guard). → its report."""
+        authorizer alone and wrong) ≤ max_risk for calls like these (solvi.core.deciders.DecisionPart.act_guard). → its report."""
         if self._authorizer is None:
             raise ValueError("the guard has no authorizer: make_authorizer(decider) first")
         ex = [(self.authorizer_input(c, ctx), bool(y)) for c, ctx, y in examples]
@@ -1562,7 +1562,7 @@ class Guard:
 
     def _build(self, t):
         from ..core.provenance import code_fingerprint
-        from ..system import System
+        from ..core.system import System
         if t.model is None:
             raise ValueError(f"tool {t.name} has no argument schema yet (guard.declare(name, schema=...) or guard.adopt)")
         if t.authorize is True and self.authorizer is None:
@@ -1698,7 +1698,7 @@ class Guard:
 
     def _unknown_system(self):
         if self._unknown is None:
-            from ..system import System
+            from ..core.system import System
             cat = Catalog()
             cat.check(hard=True, then={"verdict": "deny"})(known_tool)
             cat.rule("verdict")(unknown_verdict)
@@ -2025,7 +2025,7 @@ class Session:
     def _append(self, role, text, tainted=False):
         if self.max_chars is not None and len(text) > self.max_chars:
             if role == "tool" and not tainted:
-                from ..perturb import injection_spans
+                from ..core.deciders.perturb import injection_spans
                 tainted = bool(injection_spans(text))      # on the whole message, before the cut
             text = _clip(text, self.max_chars)
         self.context.append(Message(role, text, tainted and role == "tool"))
@@ -2056,7 +2056,7 @@ def _clip(text, n):
     survive the cut) — every passage that does not end inside the kept beginning, whole (from its own start, so the cut
     never halves it); a long one by its overlapping windows (up to 400 characters, at most half the cap) that are
     instruction-like themselves. What still does not fit is cut; the session's taint flag carries what was lost."""
-    from ..perturb import injection_spans, instruction_rule
+    from ..core.deciders.perturb import injection_spans, instruction_rule
     spans = injection_spans(text)
     w = max(40, min(400, n // 2))
     head, tail = n, "\n[…]"

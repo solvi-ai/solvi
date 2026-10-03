@@ -7,7 +7,7 @@ import pytest
 
 from solvi.agents import Guard, messages
 from solvi.agents.guard import Message, conversation
-from solvi.perturb import injection_spans, instruction_like, variants
+from solvi.core.deciders.perturb import injection_spans, instruction_like, variants
 
 IB = "DE89370400440532013000"
 EVIL = "GB33BUKB20201555555555"

@@ -73,7 +73,7 @@ def _experimental():
 
 
 def _lora_key(part):
-    from .decide import lora_key
+    from .core.deciders import lora_key
     return lora_key(part.spec)
 
 
@@ -103,8 +103,8 @@ class LoraAdapter:
         return {"adapter": self.hash, "r": self.config.get("r"), "k": self.info.get("k"),
                 "updates": self.info.get("updates"), "size_mb": round(self.size_bytes / 2 ** 20, 2), "experimental": True}
 
-    # --- the Adapter protocol a decision part's adapter slot reads (solvi.decide never imports this module)
-    kind = "lora"                         # the adapter's kind: a calibration file names it, solvi.decide.ADAPTERS reads it
+    # --- the Adapter protocol a decision part's adapter slot reads (solvi.core.deciders never imports this module)
+    kind = "lora"                         # the adapter's kind: a calibration file names it, solvi.core.deciders.ADAPTERS reads it
 
     def fingerprint(self):
         """The adapter's identity in the part's and the model's fingerprints: its hash."""
@@ -144,7 +144,7 @@ def _peft_config(config):
 # ------------------------------------------------------------------------------------------------ scope
 def check(part, allow_large=False):
     """Refuse what adapt_lora cannot adapt (ValueError / TypeError / ImportError with what to do instead)."""
-    from .decide import DecisionPart, TorchScorer
+    from .core.deciders import DecisionPart, TorchScorer
     if not isinstance(part, DecisionPart):
         raise TypeError(f"adapt_lora adapts a model decision (a DecisionPart), not a {type(part).__name__}: a rule or a "
                         "learned head has no encoder to adapt (use fit)")
@@ -152,7 +152,7 @@ def check(part, allow_large=False):
     if not isinstance(scorer, TorchScorer):
         name = type(scorer).__name__
         if name == "LLMScorer":
-            why = "an LLM decider (solvi.llm) has no encoder weights here to adapt; use fit and act_guard on its answers"
+            why = "an LLM decider (solvi.core.deciders.llm) has no encoder weights here to adapt; use fit and act_guard on its answers"
         elif name == "OnnxScorer":
             why = ('the decider runs on ONNX, and LoRA trains the torch weights: load it with DecideModel.load(..., '
                    'backend="torch") (pip install "solvi[lora]")')

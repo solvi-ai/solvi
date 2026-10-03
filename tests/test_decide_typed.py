@@ -1,4 +1,4 @@
-"""solvi.decide, the typed decider contract: questions declared by types (choice, multi, score, noul), text or JSON / pydantic
+"""solvi.core.deciders, the typed decider contract: questions declared by types (choice, multi, score, noul), text or JSON / pydantic
 state (state_text, "kv1"), probabilities + calibrated confidence + act / escalate per question, several questions in one
 forward pass (flow.batches), adapt / fit / teach per question type, the checkpoint capability fields and backward
 compatibility with the 'l14b_decider v1' format; also the quote source of hand-written extract parts. Stub scorers stand in for the network; a slow test runs the published
@@ -17,7 +17,7 @@ import pytest
 from pydantic import BaseModel, Field
 
 from solvi import Answer, Catalog, Decision, Question, Quote, Response, System
-from solvi.decide import (BlockUnsupported, DecideModel, Item, _basis, _Spec, act_features, block_masks, capabilities, pass_prompt, prompt,
+from solvi.core.deciders import (BlockUnsupported, DecideModel, Item, _basis, _Spec, act_features, block_masks, capabilities, pass_prompt, prompt,
                           state_text)
 from solvi.core.provenance import digest
 from solvi.core.types import Scale, question_kind
@@ -421,7 +421,7 @@ def test_a_block_checkpoint_loads_its_block_export_and_a_fallback_is_said_once(t
     """multi_question (declared, or load(multi_question=True)) scores in the block layout. The ONNX loader took the plain
     export, which has no block inputs, and every pass fell back to one question per sequence without a word."""
     import warnings
-    from solvi.decide import _onnx_file
+    from solvi.core.deciders import _onnx_file
     d = tmp_path / "onnx"
     d.mkdir()
     for f in ("model_fp16.onnx", "model_block_fp16.onnx"):
@@ -626,7 +626,7 @@ def test_catalogs_without_decisions_do_no_batching_work():
     code = ("import sys\nfrom solvi import Answer, Catalog, Question, System\ncat = Catalog()\n"
             "@cat.fn\ndef a(x):\n    return x + 1\n@cat.rule('q')\ndef q(a):\n    return 'yes' if a > 1 else 'no'\n"
             "r = System(cat, [Question('q', 'q', Answer.yes_no())]).ask({'x': 1})\n"
-            "print(r['q'].answer, cat.decisions, r.flow.batches, 'solvi.decide' in sys.modules)")
+            "print(r['q'].answer, cat.decisions, r.flow.batches, 'solvi.core.deciders' in sys.modules)")
     out = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, check=True).stdout.split()
     assert out == ["yes", "0", "[]", "False"]
 

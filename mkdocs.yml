@@ -58,20 +58,20 @@ nav:
       - api/index.md
       - solvi: api/solvi.md
       - solvi.core: api/core.md
-      - solvi.decide: api/decide.md
+      - solvi.core.deciders: api/decide.md
       - solvi.core.calibration: api/calibration.md
-      - solvi.guarantee: api/guarantee.md
-      - solvi.openset: api/openset.md
-      - solvi.systemone: api/systemone.md
-      - solvi.llm: api/llm.md
-      - solvi.remote: api/remote.md
-      - solvi.generate: api/generate.md
-      - solvi.agree: api/agree.md
-      - solvi.refine: api/refine.md
+      - solvi.core.guarantees.guarantee: api/guarantee.md
+      - solvi.core.guarantees.openset: api/openset.md
+      - solvi.core.deciders.systemone: api/systemone.md
+      - solvi.core.deciders.llm: api/llm.md
+      - solvi.core.deciders._remote: api/remote.md
+      - solvi.core.slow.generate: api/generate.md
+      - solvi.core.slow.agree: api/agree.md
+      - solvi.core.slow.refine: api/refine.md
       - solvi.compile: api/compile.md
       - solvi.sandbox: api/sandbox.md
-      - solvi.multi: api/multi.md
-      - solvi.memory: api/memory.md
+      - solvi.core.deciders.combine: api/multi.md
+      - solvi.core.knowledge.memory: api/memory.md
       - solvi.lora: api/lora.md
       - solvi.learning: api/learning.md
       - solvi.oncalib: api/oncalib.md
@@ -79,32 +79,32 @@ nav:
       - solvi.agents: api/agents.md
       - solvi.hooks: api/hooks.md
       - solvi.core.textin: api/textin.md
-      - solvi.inputs: api/inputs.md
+      - solvi.core._inputs: api/inputs.md
       - solvi.specialist: api/specialist.md
       - solvi.charts: api/charts.md
-      - solvi.longdoc: api/longdoc.md
-      - solvi.episode: api/episode.md
-      - solvi.worldmap: api/worldmap.md
-      - solvi.drift: api/drift.md
-      - solvi.heads: api/heads.md
-      - solvi.extract_long: api/extract_long.md
-      - solvi.extract_multi: api/extract_multi.md
-      - solvi.strategist: api/strategist.md
-      - solvi.strategy: api/strategy.md
+      - solvi.core.deciders.longdoc: api/longdoc.md
+      - solvi.core.knowledge.episodes: api/episode.md
+      - solvi.core.knowledge.worldmap: api/worldmap.md
+      - solvi.core.guarantees.drift: api/drift.md
+      - solvi.core.deciders.heads: api/heads.md
+      - solvi.core.extract: api/extract_long.md
+      - solvi.core.extract.multi: api/extract_multi.md
+      - solvi.core.plan.strategist: api/strategist.md
+      - solvi.core.plan.cost: api/strategy.md
       - solvi.core.costs: api/costs.md
-      - solvi.rulelist: api/rulelist.md
-      - solvi.audit: api/audit.md
+      - solvi.core.deciders.rulelist: api/rulelist.md
+      - solvi.core.store.audit: api/audit.md
       - solvi.show: api/show.md
-      - solvi.report: api/report.md
-      - solvi.sysreport: api/sysreport.md
-      - solvi.sets: api/sets.md
-      - solvi.search: api/search.md
+      - solvi.core.store.report: api/report.md
+      - solvi.core.store.sysreport: api/sysreport.md
+      - solvi.core.sets: api/sets.md
+      - solvi.core.slow.search: api/search.md
       - solvi.auto: api/auto.md
-      - solvi.dispatch: api/dispatch.md
-      - solvi.perturb: api/perturb.md
-      - solvi.storage: api/storage.md
-      - solvi.signature: api/signature.md
-      - solvi.diff: api/diff.md
+      - solvi.core.dispatch: api/dispatch.md
+      - solvi.core.deciders.perturb: api/perturb.md
+      - solvi.core.store: api/storage.md
+      - solvi.core.store.signature: api/signature.md
+      - solvi.core.store.diff: api/diff.md
       - solvi.testing: api/testing.md
       - solvi.honesty: api/honesty.md
       - solvi.check: api/check.md

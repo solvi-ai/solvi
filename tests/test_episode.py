@@ -1,4 +1,4 @@
-"""solvi.episode: an agent's memory as a given fact of its decisions — counts since the last progress, loop detectors,
+"""solvi.core.knowledge.episodes: an agent's memory as a given fact of its decisions — counts since the last progress, loop detectors,
 a chooser whose stored decisions replay, and outcomes kept across episodes."""
 import json
 
@@ -6,8 +6,8 @@ import numpy as np
 import pytest
 
 from solvi import Catalog, Question, SQLiteStorage, System
-from solvi.decide import DecideModel
-from solvi.episode import Chooser, Episode, EpisodeView, LongMemory
+from solvi.core.deciders import DecideModel
+from solvi.core.knowledge.episodes import Chooser, Episode, EpisodeView, LongMemory
 
 
 def test_events_counts_and_progress():

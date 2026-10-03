@@ -209,14 +209,14 @@ Rules:
 
 class LLMProposer:
     """A ChartSpec from any OpenAI-compatible `POST {base_url}/chat/completions`, over the shared client of
-    solvi.remote (retries with backoff; a wrong key, model or URL raises solvi.llm.LLMError; no answer raises
-    solvi.remote.NoAnswer). The API key is sent in the Authorization header only, never recorded. opener: a replacement
+    solvi.core.deciders._remote (retries with backoff; a wrong key, model or URL raises solvi.core.deciders.llm.LLMError; no answer raises
+    solvi.core.deciders._remote.NoAnswer). The API key is sent in the Authorization header only, never recorded. opener: a replacement
     for urllib's urlopen (tests)."""
 
     def __init__(self, base_url, model, api_key=None, *, timeout=60.0, max_tokens=1500, json_mode=True, opener=None,
                  retries=2, backoff=1.0, sleep=None):
-        from ..llm import LLMError
-        from ..remote import RemoteClient
+        from ..core.deciders.llm import LLMError
+        from ..core.deciders._remote import RemoteClient
 
         class _Client(RemoteClient):
             service, error = "the LLM server", LLMError
@@ -238,7 +238,7 @@ class LLMProposer:
             body["response_format"] = {"type": "json_object"}
         resp = self.client.send(body)
         content = resp["choices"][0]["message"]["content"]
-        from ..llm import _json
+        from ..core.deciders.llm import _json
         return _json(content)
 
 

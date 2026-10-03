@@ -1,5 +1,5 @@
-# `solvi.extract_long`
+# `solvi.core.extract`
 
 `@extract` for long, general-purpose documents: a field defined by its description (`LongSpanExtractor`; needs torch).
 
-::: solvi.extract_long
+::: solvi.core.extract

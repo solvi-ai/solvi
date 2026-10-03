@@ -17,8 +17,8 @@ def test_the_module_is_gone(module):
 
 
 def test_the_names_are_gone():
-    from solvi import strategy
-    from solvi.system import Response
+    from solvi.core.plan import cost as strategy
+    from solvi.core.system import Response
     assert not hasattr(Response, "counterfactual") and not hasattr(strategy, "ModelStrategist")
 
 

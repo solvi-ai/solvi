@@ -8,7 +8,7 @@ import numpy as np
 import pytest
 
 from solvi import Catalog, Response, System
-from solvi.decide import DecideModel
+from solvi.core.deciders import DecideModel
 from solvi.core.textin import (CueExtractor, DeciderExtractor, ParseError, TextIn, parse_bool, parse_date, parse_enum,
                           parse_number, parse_text, replay_record)
 

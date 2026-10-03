@@ -10,9 +10,9 @@ import urllib.error  # noqa: F401 — the fake server below mirrors tests/test_g
 import pytest
 
 from solvi import Answer, Catalog, Question, System
-from solvi.diff import diff
-from solvi.refine import Fail
-from solvi.storage import CompactRecord, JSONLStorage, SQLiteStorage, record_mode
+from solvi.core.store.diff import diff
+from solvi.core.slow.refine import Fail
+from solvi.core.store import CompactRecord, JSONLStorage, SQLiteStorage, record_mode
 
 
 def _game(storage=None, threshold=0.9):
@@ -182,7 +182,7 @@ class FakeServer:
 
 
 def _planner(storage, server, rerun=False):
-    from solvi.generate import generator
+    from solvi.core.slow.generate import generator
     g = generator("http://127.0.0.1:9/v1", "m-1", opener=server, sleep=lambda s: None)
     cat = Catalog()
     cat.fn(g.part("plan", lambda goal: f"plan for {goal}", replay="rerun" if rerun else "trust"))
@@ -207,7 +207,7 @@ def test_a_compact_record_with_a_generator_replays_from_the_kept_output_without_
     n = srv.n
     assert store.replay_all(s) == [] and srv.n == n                    # not called again
     assert store.rederive(res.stored_id, s).values["plan"] == "go north"
-    from solvi.storage import rederive
+    from solvi.core.store import rederive
     d = store.record(res.stored_id)                                     # the kept output edited
     d["compact"]["trace"]["records"][0]["value"] = "go south"
     back, why = rederive(d, s)

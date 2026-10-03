@@ -101,17 +101,59 @@ Where each module went:
 <!-- migration table: tools/migration_table.py -->
 | you imported (0.9) | import now (1.0) | level |
 |---|---|---|
+| `solvi.agree` | `solvi.core.slow.agree` | low level: building blocks |
+| `solvi.audit` | `solvi.core.store.audit` | low level: building blocks |
 | `solvi.calibfile` | `solvi.core.calibfile` | low level: building blocks |
 | `solvi.calibration` | `solvi.core.calibration` | low level: building blocks |
 | `solvi.costs` | `solvi.core.costs` | low level: building blocks |
+| `solvi.decide` | `solvi.core.deciders` | low level: building blocks |
+| `solvi.decide.adapt` | `solvi.core.deciders.adapt` | low level: building blocks |
+| `solvi.decide.backends` | `solvi.core.deciders.backends` | low level: building blocks |
+| `solvi.decide.capabilities` | `solvi.core.deciders.capabilities` | low level: building blocks |
+| `solvi.decide.gate` | `solvi.core.deciders.gate` | low level: building blocks |
+| `solvi.decide.kinds` | `solvi.core.deciders.kinds` | low level: building blocks |
+| `solvi.decide.model` | `solvi.core.deciders.model` | low level: building blocks |
+| `solvi.decide.part` | `solvi.core.deciders.part` | low level: building blocks |
+| `solvi.decide.state` | `solvi.core.deciders.state` | low level: building blocks |
+| `solvi.decide.wire` | `solvi.core.deciders.wire` | low level: building blocks |
+| `solvi.diff` | `solvi.core.store.diff` | low level: building blocks |
+| `solvi.dispatch` | `solvi.core.dispatch` | low level: building blocks |
+| `solvi.drift` | `solvi.core.guarantees.drift` | low level: building blocks |
+| `solvi.episode` | `solvi.core.knowledge.episodes` | low level: building blocks |
+| `solvi.extract_long` | `solvi.core.extract` | low level: building blocks |
+| `solvi.extract_multi` | `solvi.core.extract.multi` | low level: building blocks |
+| `solvi.generate` | `solvi.core.slow.generate` | low level: building blocks |
+| `solvi.guarantee` | `solvi.core.guarantees.guarantee` | low level: building blocks |
+| `solvi.heads` | `solvi.core.deciders.heads` | low level: building blocks |
 | `solvi.i18n` | `solvi.core._i18n` | internal |
+| `solvi.inputs` | `solvi.core._inputs` | internal |
+| `solvi.llm` | `solvi.core.deciders.llm` | low level: building blocks |
 | `solvi.loader` | `solvi._loader` | internal |
+| `solvi.longdoc` | `solvi.core.deciders.longdoc` | low level: building blocks |
+| `solvi.memory` | `solvi.core.knowledge.memory` | low level: building blocks |
+| `solvi.multi` | `solvi.core.deciders.combine` | low level: building blocks |
+| `solvi.openset` | `solvi.core.guarantees.openset` | low level: building blocks |
+| `solvi.perturb` | `solvi.core.deciders.perturb` | low level: building blocks |
 | `solvi.primitives` | `solvi.core.primitives` | low level: building blocks |
 | `solvi.provenance` | `solvi.core.provenance` | low level: building blocks |
+| `solvi.refine` | `solvi.core.slow.refine` | low level: building blocks |
+| `solvi.remote` | `solvi.core.deciders._remote` | internal |
+| `solvi.report` | `solvi.core.store.report` | low level: building blocks |
+| `solvi.rulelist` | `solvi.core.deciders.rulelist` | low level: building blocks |
 | `solvi.runtime` | `solvi.core.runtime` | low level: building blocks |
 | `solvi.schema` | `solvi.core.schema` | low level: building blocks |
+| `solvi.search` | `solvi.core.slow.search` | low level: building blocks |
+| `solvi.sets` | `solvi.core.sets` | low level: building blocks |
+| `solvi.signature` | `solvi.core.store.signature` | low level: building blocks |
+| `solvi.storage` | `solvi.core.store` | low level: building blocks |
+| `solvi.strategist` | `solvi.core.plan.strategist` | low level: building blocks |
+| `solvi.strategy` | `solvi.core.plan.cost` | low level: building blocks |
+| `solvi.sysreport` | `solvi.core.store.sysreport` | low level: building blocks |
+| `solvi.system` | `solvi.core.system` | low level: building blocks |
+| `solvi.systemone` | `solvi.core.deciders.systemone` | low level: building blocks |
 | `solvi.textin` | `solvi.core.textin` | low level: building blocks |
 | `solvi.typed` | `solvi.core.types` | low level: building blocks |
+| `solvi.worldmap` | `solvi.core.knowledge.worldmap` | low level: building blocks |
 <!-- end of migration table -->
 
 ### Moved inside solvi (old imports keep working)

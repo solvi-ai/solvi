@@ -1,7 +1,7 @@
 """What the CUAD solution adds before solvi checks a quote: a passage that is almost literal is cut to its longest
 literal piece.
 
-solvi.llm accepts a span answer only when it is literally in the text the model read (up to whitespace, typographic
+solvi.core.deciders.llm accepts a span answer only when it is literally in the text the model read (up to whitespace, typographic
 quotes and letter case), and rejects the whole answer otherwise. An LLM asked for a clause often writes "..." in the
 middle, stitches two passages, or adds a heading — the clause is there, the answer is rejected. The opener below sees
 the reply before solvi does and replaces such an answer with its longest piece that is in the text; solvi then checks
@@ -12,7 +12,7 @@ import json
 import re
 import urllib.request
 
-from solvi.llm import locate
+from solvi.core.deciders.llm import locate
 
 
 def literal_piece(answer, text, least=15):
@@ -47,7 +47,7 @@ class _Reply:
 
 
 def opener(req, timeout=None):
-    """urlopen for solvi.llm's `opener=`: a span answer that is not literally in the text the model read is replaced by
+    """urlopen for solvi.core.deciders.llm's `opener=`: a span answer that is not literally in the text the model read is replaced by
     its longest literal piece before solvi reads the reply. Anything this does not understand is passed on unchanged."""
     with urllib.request.urlopen(req, timeout=timeout) as r:
         raw = r.read()

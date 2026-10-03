@@ -4,7 +4,7 @@ import subprocess
 import sys
 
 from solvi import Answer, Catalog, Question, System
-from solvi.system import Response
+from solvi.core.system import Response
 
 CODE = """
 from solvi import Answer, Catalog, Question, System

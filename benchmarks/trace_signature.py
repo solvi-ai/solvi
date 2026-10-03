@@ -1,4 +1,4 @@
-"""What a signature (solvi.signature) adds over the hash chain: its syndrome code, and the octonion experiment next to it.
+"""What a signature (solvi.core.store.signature) adds over the hash chain: its syndrome code, and the octonion experiment next to it.
 
     uv run python benchmarks/trace_signature.py            # ~30 seconds
     uv run python benchmarks/trace_signature.py --json out.json
@@ -6,7 +6,7 @@
 The attack: one stored record is edited, and every hash after it and the stored head are recomputed (an attacker with
 write access to the store). Kept elsewhere before the attack: the head (count, last hash) and a signature. The hash chain
 with that anchor (TraceStorage.verify(anchor=head)) says the store was rewritten, not which record. Compared:
-- "syndrome" (solvi.signature): S0 = Σ h_i, S1 = Σ (i+1) h_i mod a 256-bit prime — 64 bytes; restores the whole hash;
+- "syndrome" (solvi.core.store.signature): S0 = Σ h_i, S1 = Σ (i+1) h_i mod a 256-bit prime — 64 bytes; restores the whole hash;
 - "octonion" (benchmarks/octonion_signature.py, out of the package since 0.8): the positional octonion product —
   32 float64 = 256 bytes; restores 28 bytes of the hash;
 - (not a code) all record hashes kept elsewhere: 32 bytes per record, locates any number of changes.
@@ -22,7 +22,7 @@ import os
 import sys
 import time
 
-from solvi import signature as syndrome
+from solvi.core.store import signature as syndrome
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import octonion_signature as octonion  # noqa: E402

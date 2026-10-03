@@ -3,7 +3,7 @@ where a calibrated promise allows, with a verbatim pointer at the unsupported pa
 
 How it works:
   1. The judge reads one text fact, `doc`: the source material, the writer's task and the response. Two wordings of the
-     same yes/no question are asked of one LLM through `solvi.llm` — `judge_a` (the baseline's question) and `judge_c`
+     same yes/no question are asked of one LLM through `solvi.core.deciders.llm` — `judge_a` (the baseline's question) and `judge_c`
      (strict: any detail the source does not state counts as unsupported). solvi validates every reply and keeps the
      judge's quote only when it is literally in the text.
   2. The answer is the judge with the higher F1 on dev parts A and B (chosen here, on dev, never on eval).
@@ -62,8 +62,8 @@ def main():
     p.add_argument("--out", default=None)
     a = parse(p)
     from solvi import Answer, Catalog, Question, System
-    from solvi.llm import llm
-    from solvi.multi import Vote
+    from solvi.core.deciders.llm import llm
+    from solvi.core.deciders.combine import Vote
 
     # logprobs off: OpenRouter serves one model from several providers, some with log-probabilities and some without,
     # and the two kinds of confidence cannot share one threshold. Reasoning on: solvi then puts the reply contract in the

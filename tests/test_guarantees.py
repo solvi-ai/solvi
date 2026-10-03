@@ -3,7 +3,7 @@ import numpy as np
 import pytest
 
 from solvi.core.calibration import conformal_quantile, crc_threshold, ltt_threshold, set_scores
-from solvi.decide import DecideModel
+from solvi.core.deciders import DecideModel
 from test_decide import TEAMS, model, texts
 
 
@@ -171,7 +171,7 @@ class PositionBiased:
 
 
 def _biased():
-    from solvi.decide import DecideModel
+    from solvi.core.deciders import DecideModel
     return DecideModel(PositionBiased(), meta={"format": "test", "temperature": 1.0})
 
 
@@ -318,7 +318,7 @@ class Table:
 
 
 def _table_stream(rng, tab, tag, n):
-    from solvi.multi import Facts
+    from solvi.core.deciders.combine import Facts
     c, w, g = _groups_stream(rng, n)
     out = []
     for i in range(n):
@@ -331,7 +331,7 @@ def _table_stream(rng, tab, tag, n):
 
 def test_act_guard_per_group_on_a_decision_part_records_the_group_and_holds_inside_it():
     from solvi import Answer, Catalog, Question, System
-    from solvi.decide import DecideModel
+    from solvi.core.deciders import DecideModel
     rng = np.random.default_rng(3)
     tab = Table()
     m = DecideModel(tab, meta={"format": "test", "temperature": 1.0})
@@ -418,7 +418,7 @@ class KeywordAct:
 
 
 def test_switching_the_signal_clears_the_other_threshold():
-    from solvi.decide import DecideModel
+    from solvi.core.deciders import DecideModel
     from test_primitives import L14G
     part = DecideModel(KeywordAct(), L14G).decision("team", "Which team?", "email", TEAMS, min_act=0.99)
     ex = [(t, team) for team in TEAMS for t in texts(team, 100)]
@@ -480,7 +480,7 @@ def test_act_guard_states_its_promise_with_the_error_among_the_answered_and_warn
     one-line summaries read like a bound on the error among the answers."""
     import warnings
 
-    from solvi.multi import Vote
+    from solvi.core.deciders.combine import Vote
     rng = np.random.default_rng(3)
     ex = [(f"case {i} about item {rng.integers(10**6)}", "yes" if rng.uniform() < 0.5 else "no") for i in range(400)]
     coin = DecideModel(_Coin(), meta={"format": "test", "temperature": 1.0})
@@ -508,8 +508,8 @@ def test_act_guard_states_its_promise_with_the_error_among_the_answered_and_warn
 def test_a_risk_or_coverage_outside_0_1_is_refused_everywhere_not_recorded_as_a_promise(bad):
     """Only calibrate_for checked its rate: act_guard(max_risk=1.5) was recorded as the promise "≤ 1.5" in every decision,
     risk=1.0 divided by zero, coverage=-1 raised IndexError."""
-    from solvi.memory import CorrectionMemory
-    from solvi.multi import Cascade
+    from solvi.core.knowledge.memory import CorrectionMemory
+    from solvi.core.deciders.combine import Cascade
     part = model(noise=2.0).decision("team", "Which team?", "email", TEAMS)
     for call in (lambda: part.act_guard(_labelled(), max_risk=bad), lambda: part.conformal(_labelled(), coverage=bad),
                  lambda: Cascade([part]).act_guard(_labelled(), max_risk=bad),

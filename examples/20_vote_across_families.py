@@ -17,7 +17,7 @@ risk (Julia's number there is in-distribution: it was trained on data like that 
 questions and were right on 80% of those.
 
 The servers here are keyword stand-ins that speak the System One HTTP API, so the example runs anywhere without a
-network; point `systemone(URL, MODEL)` at real servers (or use `solvi.llm.llm(...)` for an LLM) and nothing else changes.
+network; point `systemone(URL, MODEL)` at real servers (or use `solvi.core.deciders.llm.llm(...)` for an LLM) and nothing else changes.
 
 Run:  uv run python examples/20_vote_across_families.py"""
 from __future__ import annotations
@@ -31,8 +31,8 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import numpy as np
 
 from solvi import Catalog, System
-from solvi.multi import Cascade, Vote
-from solvi.systemone import systemone
+from solvi.core.deciders.combine import Cascade, Vote
+from solvi.core.deciders.systemone import systemone
 
 TASK = "Which team should handle this ticket?"
 TEAMS = {"billing": "payments, invoices, refunds", "technical": "bugs, errors, crashes",

@@ -11,7 +11,7 @@ import re
 from datetime import date
 
 from solvi import Answer, Catalog, Question, System
-from solvi.extract_long import LongSpanExtractor
+from solvi.core.extract import LongSpanExtractor
 from solvi.show import show
 
 RECEIPT = """SANYU STATIONERY SHOP

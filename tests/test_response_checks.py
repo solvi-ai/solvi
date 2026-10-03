@@ -7,9 +7,9 @@ import sys
 from pathlib import Path
 
 from solvi import Catalog, Question, Response, System
-from solvi.refine import Fail
-from solvi.response import CheckResult
-from solvi.storage import open_storage
+from solvi.core.slow.refine import Fail
+from solvi.core.response import CheckResult
+from solvi.core.store import open_storage
 
 
 def refunds():

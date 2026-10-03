@@ -9,8 +9,8 @@ from pathlib import Path
 import pytest
 
 from solvi import Answer, Catalog, Question, System, Unknown
-from solvi.multi import Vote
-from solvi.systemone import REASONING_CHARS, systemone
+from solvi.core.deciders.combine import Vote
+from solvi.core.deciders.systemone import REASONING_CHARS, systemone
 
 sys.path.insert(0, str(Path(__file__).parent))
 from jeeves_mock import CHAIN, JeevesMock  # noqa: E402

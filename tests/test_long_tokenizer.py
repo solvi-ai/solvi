@@ -8,7 +8,7 @@ pytest.importorskip("torch")
 pytest.importorskip("transformers")
 pytest.importorskip("tokenizers")
 
-from solvi.decide import DecideModel  # noqa: E402
+from solvi.core.deciders import DecideModel  # noqa: E402
 
 TEAMS = ["billing", "technical"]
 BILLING = ["invoice", "refund", "charged", "payment", "card", "price", "bill", "money"]
@@ -80,7 +80,7 @@ def test_an_input_read_cut_is_marked_in_the_decision_and_warned_once(ckpt):
     sure as ever about a text whose end it had not read. The decision now says how much was read."""
     import warnings
     from solvi import Catalog, System
-    from solvi.decide import LongInputWarning, pass_prompt
+    from solvi.core.deciders import LongInputWarning, pass_prompt
     m = DecideModel.load(ckpt, backend="torch", device="cpu")
     part = m.decision("team", "Which team?", "email", TEAMS)
     enc = m.scorer.enc

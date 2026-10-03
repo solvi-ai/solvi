@@ -1,4 +1,4 @@
-"""solvi.signature: a signature of a trace / a store names the one changed record and restores its content hash; its
+"""solvi.core.store.signature: a signature of a trace / a store names the one changed record and restores its content hash; its
 limits are pinned too. Up to 0.7 every test ran for two codes, "syndrome" (the default) and "octonion"; the octonion code
 is an experiment in benchmarks/octonion_signature.py since 0.8 (its self-check runs at the end of this file).
 
@@ -39,7 +39,7 @@ import pytest
 from test_storage import STATES, Clock, _edit_answer, _jsonl_lines, _jsonl_write, _rehash, _sql_bodies, build, make_store
 
 from solvi import System
-from solvi.signature import ALGS, NotLocatable, check, extend, load, locate, record_digest, repair, sign
+from solvi.core.store.signature import ALGS, NotLocatable, check, extend, load, locate, record_digest, repair, sign
 
 alg = pytest.mark.parametrize("alg", ALGS)
 

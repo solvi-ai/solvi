@@ -182,7 +182,7 @@ def _part(name):
 
 
 def planned_names(init):
-    from solvi.strategist import plan
+    from solvi.core.plan.strategist import plan
     flow = plan(cat, QUESTIONS, init.keys())
     return [s.part.name for s in flow.steps]
 

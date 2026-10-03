@@ -5,7 +5,7 @@ a fitted, calibrated, stored System and Dispatcher out — with a plain account 
 
     s = build(Question("team", "Which team?", Answer.choice(TEAMS)), examples, catalog=cat, max_risk=0.02,
               slow=model, price=(0.04, 0.17), storage="decisions.jsonl")
-    res = s.ask({"email": "my parcel never came"})       # a solvi.dispatch.Dispatched: answer, by, reasons, cost
+    res = s.ask({"email": "my parcel never came"})       # a solvi.core.dispatch.Dispatched: answer, by, reasons, cost
     print(s.explain())                                   # who answers which slice, what is promised, on what data
     print(s.report())                                    # what it did, read from the store
 
@@ -29,7 +29,7 @@ computes that best separates right from wrong answers on the fit share (AUROC), 
 
 New kinds of input (novel="auto"): when the answer is a choice among more than two options and System 1 is fitted here
 (a head or learner=), answers no example shows can come — an intent nobody labelled. The leave-options-out simulation
-(`solvi.openset.leave_out`: System 1 fitted three times without a third of the options) sizes an `OpenSetGate` that
+(`solvi.core.guarantees.openset.leave_out`: System 1 fitted three times without a third of the options) sizes an `OpenSetGate` that
 keeps max_error (or max_risk, as the stricter max_error at the same level) on a stream with a share of such inputs and
 flags the change. novel=False: a plain guarantee; novel=True: the gate or an error.
 
@@ -39,7 +39,7 @@ slow path on all the answers given alone together by `Dispatcher.calibrate`, whi
 its own would-be answer, the slow path's, the slow path's when it agrees, or a person.
 
 The slow path (slow=): a SlowPath or a System as they are; a decision part (`model.decision(...)`); a model from
-`solvi.llm` (a decision part is made from the question's text and options, reading `reads` — default: every given key
+`solvi.core.deciders.llm` (a decision part is made from the question's text and options, reading `reads` — default: every given key
 of the examples; with the open-set gate on, "not stated" is an option and goes to a person); a function
 state → answer; a compiled specification (`solvi.compile`: a Compiled, or a Spec with `writer=` and `inputs=` —
 compiled from the written text, never from the examples). Inputs the open-set gate holds back go to a person, not to
@@ -63,7 +63,7 @@ SPLIT_SELECT = 1 / 3        # the share a signal is chosen on when a rule answer
 
 
 class AutoSystem:
-    """What build() returns. system: System 1 (a solvi.System); dispatcher: the solvi.dispatch.Dispatcher that asks it;
+    """What build() returns. system: System 1 (a solvi.System); dispatcher: the solvi.core.dispatch.Dispatcher that asks it;
     gate: the OpenSetGate, or None; slow: the SlowPath, or None; choices: every choice made, with its numbers (what
     explain() prints); calibration: the reports of System.guarantee / OpenSetGate / Dispatcher.calibrate."""
 
@@ -89,9 +89,9 @@ class AutoSystem:
         return self.dispatcher.storage
 
     def report(self, since=None, until=None, **options):
-        """What the system did over a stored period (solvi.sysreport.SystemReport: print it) — who answered, the cost,
+        """What the system did over a stored period (solvi.core.store.sysreport.SystemReport: print it) — who answered, the cost,
         the promise in force against the stored labels, drift — read from the store alone."""
-        from .sysreport import system_report
+        from .core.store.sysreport import system_report
         if self.dispatcher.storage is None:
             raise ValueError("a report reads the stored decisions: build(..., storage=path)")
         options.setdefault("price", self.dispatcher.price)
@@ -157,7 +157,7 @@ def _judge(q, correct):
 
 def _rows(system, qname, examples, signal, correct):
     """System 1 (no guarantee) on labelled examples → (signals, right, lost) as System.guarantee reads them."""
-    from .guarantee import QuestionGuard, _add_checkpoints, _calibration_rows, _drop_checkpoints
+    from .core.guarantees.guarantee import QuestionGuard, _add_checkpoints, _calibration_rows, _drop_checkpoints
     guard = QuestionGuard(qname, None, signal)
     _add_checkpoints(system, guard)
     try:
@@ -171,7 +171,7 @@ def _rows(system, qname, examples, signal, correct):
 def _choose_signal(system, qname, examples, correct, q):
     """The confidence does not vary: the numeric fact that best separates right from wrong answers → (name, auroc,
     {candidate: auroc})."""
-    from .guarantee import separation
+    from .core.guarantees.guarantee import separation
     right = _judge(q, correct)
     facts, ok = [], []
     for st, y in examples:
@@ -205,8 +205,8 @@ def _constant(xs):
 
 def _slow_path(slow, q, reads, novel_on, writer, inputs):
     """slow= → (SlowPath, description)."""
-    from .dispatch import SlowPath
-    from .system import System
+    from .core.dispatch import SlowPath
+    from .core.system import System
     if isinstance(slow, SlowPath):
         return slow, f"the given SlowPath ({slow.mode})"
     if isinstance(slow, System):
@@ -227,7 +227,7 @@ def _slow_path(slow, q, reads, novel_on, writer, inputs):
     if hasattr(slow, "question") and hasattr(slow, "decide"):          # a decision part
         sq = slow.question(cat, name=q.name, text=q.text)
         return SlowPath(System(cat, [sq])), f"the decision part {getattr(slow, '__name__', q.name)!r}"
-    if hasattr(slow, "decision") and hasattr(slow, "scorer"):         # a model (solvi.llm, a DecideModel)
+    if hasattr(slow, "decision") and hasattr(slow, "scorer"):         # a model (solvi.core.deciders.llm, a DecideModel)
         opts = list(q.answer.options or [])
         boolean = sorted(map(str, opts)) == ["no", "yes"]
         part = slow.decision(q.name, q.text, reads if len(reads) > 1 else reads[0], () if boolean else opts,
@@ -247,7 +247,7 @@ def _slow_path(slow, q, reads, novel_on, writer, inputs):
                               doc=(getattr(fn, "__doc__", "") or "").strip()))
         return SlowPath(System(cat, [Question(q.name, q.text, q.answer)])), \
             f"the function {getattr(fn, '__name__', 'slow')} over {', '.join(reads)}"
-    raise TypeError("slow= takes a SlowPath, a System, a decision part, a model (solvi.llm), a function state → answer, "
+    raise TypeError("slow= takes a SlowPath, a System, a decision part, a model (solvi.core.deciders.llm), a function state → answer, "
                     "a compiled specification or a Spec")
 
 
@@ -264,15 +264,15 @@ def build(question, examples, *, catalog=None, learner=None, slow=None, reads=No
     model slow path reads. max_risk= or max_error=: the promise. signal: the guarantee's signal (default: chosen, see
     the module docs). correct: a function (answer, label) → bool when a label is not simply the right answer (a label
     that says "right" / "wrong" of System 1's answer, a quote that overlaps). novel: "auto", True or False. budget /
-    total: solvi.dispatch.Budget per decision / for the dispatcher's life; price: dollars per million input and output
+    total: solvi.core.dispatch.Budget per decision / for the dispatcher's life; price: dollars per million input and output
     tokens (needed for dollars). storage: a path or a TraceStorage — every decision and the policy, hash-chained.
     split: (fit, guarantee, dispatch) shares. seed: the shuffle and the open-set simulation. delta: learn-then-test's
     confidence. min_slice: a slice of the slow path with fewer calibration examples goes to a person. writer, inputs:
     for a Spec as the slow path."""
-    from .dispatch import SIGNALS, THINK, Dispatcher
-    from .guarantee import promise_text
-    from .storage import open_storage
-    from .system import System
+    from .core.dispatch import SIGNALS, THINK, Dispatcher
+    from .core.guarantees.guarantee import promise_text
+    from .core.store import open_storage
+    from .core.system import System
     if (max_risk is None) == (max_error is None):
         raise ValueError("give the promise as max_risk= (P(answered alone and wrong)) or max_error= (the error among the "
                          "answers given alone)")
@@ -508,7 +508,7 @@ def _rule_answer(cat, qname):
 
 def _open_set(make_system, system, q, qname, fit_ex, g_ex, sig_name, correct, level, delta, seed, folds=3):
     """The leave-options-out simulation and the gate → (OpenSetGate, info)."""
-    from .openset import OpenSetGate
+    from .core.guarantees.openset import OpenSetGate
     norm = q.answer.normalize
     ks, kr, _ = _rows(system, qname, g_ex, sig_name, correct)
     keep = [i for i, s in enumerate(ks) if math.isfinite(s)]

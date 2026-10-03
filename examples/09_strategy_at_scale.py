@@ -11,7 +11,7 @@ import time
 from datetime import date
 
 from solvi import Answer, Catalog, Question, System
-from solvi.strategist import plan
+from solvi.core.plan.strategist import plan
 
 cat = Catalog()
 SLOW = {}                                                  # part -> simulated latency, seconds

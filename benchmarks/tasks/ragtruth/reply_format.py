@@ -1,4 +1,4 @@
-"""RAGTruth: the same LLM judge asked through solvi.llm with the reply format enforced (`response_format="json_schema"`)
+"""RAGTruth: the same LLM judge asked through solvi.core.deciders.llm with the reply format enforced (`response_format="json_schema"`)
 and with the default for a reasoning request (the reply contract in the prompt), next to the plain call of baseline.py.
 
 Some providers behind one model name apply an enforced format from the first token and skip the thinking; this
@@ -36,7 +36,7 @@ def main():
     p.add_argument("--model", default=DEFAULT)
     p.add_argument("--split", default="dev")
     a = parse(p)
-    from solvi.llm import llm
+    from solvi.core.deciders.llm import llm
     rows = load(a.split)
     gold = [r["hallucinated"] for r in rows]
     out = {}
@@ -51,7 +51,7 @@ def main():
                     response_format=fmt, extra_body={"reasoning": {"effort": "low"}})
         ds = model.decision("judge_a", TASK_A, "doc", bool).decide([doc_of(r) for r in rows])
         unthought = sum((d.extra.get("llm") or {}).get("reasoning") == "none" for d in ds)
-        out[f"solvi.llm, response_format={fmt}"] = {**prf([(g, bool(d.value)) for g, d in zip(gold, ds)]),
+        out[f"solvi.core.deciders.llm, response_format={fmt}"] = {**prf([(g, bool(d.value)) for g, d in zip(gold, ds)]),
                                                     "escalated": sum(bool(d.escalate) for d in ds), "no_reasoning": unthought}
     print(json.dumps(out, indent=1))
 

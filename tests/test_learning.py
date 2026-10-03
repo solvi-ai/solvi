@@ -6,9 +6,9 @@ import warnings
 import pytest
 
 from solvi import Catalog, SQLiteStorage, System
-from solvi.decide import DecideModel
+from solvi.core.deciders import DecideModel
 from solvi.learning import ExperimentalWarning, Learning, split_of
-from solvi.storage import UntrustedLabel
+from solvi.core.store import UntrustedLabel
 from test_decide import TASK, TEAMS, FakeScorer, texts
 
 BIAS = {"shipping": 5.0}                     # the stand-in prefers "shipping": billing and technical emails go wrong
@@ -379,7 +379,7 @@ def test_a_learning_setting_that_would_be_ignored_or_leave_nothing_to_train_is_r
 
 
 def test_a_combination_question_is_left_out_by_default_instead_of_making_learning_raise(tmp_path):
-    from solvi.multi import Cascade
+    from solvi.core.deciders.combine import Cascade
     m = DecideModel(FakeScorer(bias=BIAS, noise=0.3), meta={"format": "test", "temperature": 1.0})
     cat = Catalog()
     q = m.decision("team", TASK, "email", TEAMS).question(cat, "route")

@@ -50,9 +50,9 @@ What each row says, in a sentence:
   answered, 28.4% wrong (same script). About a quarter stays wrong even when all checks pass — readings of the
   question that differ from the reference's.
 - **Abt-Buy.** The offers are read by comparison code (`pairfacts.py`), not by solvi; a head fitted on the labelled dev
-  pairs (`System.fit`) and "one counterpart per offer" (`solvi.sets.decide_set`) give 0.933. It is supervised (5,743
+  pairs (`System.fit`) and "one counterpart per offer" (`solvi.core.sets.decide_set`) give 0.933. It is supervised (5,743
   labelled pairs), the baseline is zero-shot. Under a 1% risk promise 96.9% of pairs are answered alone, 0.59% wrong.
-- **NATURAL PLAN.** No model proposes a plan: the problem is read into typed facts by rules and `solvi.search` walks the
+- **NATURAL PLAN.** No model proposes a plan: the problem is read into typed facts by rules and `solvi.core.slow.search` walks the
   candidates through the same hard checks (the largest search, a 10-city trip, took 11,414 asks; 10 cities have 3.6
   million orders).
 - **NAB.** The detector picked on dev is below the z-score baseline on eval. solvi adds nothing to the alerts; it
@@ -63,8 +63,8 @@ Further numbers the same scripts print (all eval unless said):
 | Script | What it shows |
 |---|---|
 | `abtbuy/solution.py --repair runs/baseline.jsonl` | "one counterpart" on the plain LLM's answers: F1 0.872 → 0.909; on the head's: 0.931 → 0.933 |
-| `abtbuy/llm_pair.py` | the same LLM asked each pair through `solvi.llm`: F1 0.860 with the reply contract in the prompt (the default with reasoning), 0.837 with `response_format="json_schema"` (plain call 0.872); "one counterpart" on it 0.860 → 0.870; at `max_tokens=400`, 26 of 1,916 replies were cut off |
-| `ragtruth/reply_format.py` | the judge through `solvi.llm` with the format enforced / with the contract in the prompt / the plain call: dev 0.744 / 0.791 / 0.802, eval 0.733 / 0.766 / 0.784; under the enforced format about a fifth of the replies had no reasoning (119 of 600 on dev) |
+| `abtbuy/llm_pair.py` | the same LLM asked each pair through `solvi.core.deciders.llm`: F1 0.860 with the reply contract in the prompt (the default with reasoning), 0.837 with `response_format="json_schema"` (plain call 0.872); "one counterpart" on it 0.860 → 0.870; at `max_tokens=400`, 26 of 1,916 replies were cut off |
+| `ragtruth/reply_format.py` | the judge through `solvi.core.deciders.llm` with the format enforced / with the contract in the prompt / the plain call: dev 0.744 / 0.791 / 0.802, eval 0.733 / 0.766 / 0.784; under the enforced format about a fifth of the replies had no reasoning (119 of 600 on dev) |
 | `cuad/solution.py` | on dev, the trust score separates right from wrong answers with AUROC 0.83, the LLM's own confidence with 0.63 (14% answered alone at the same risk) |
 | `banking77/solution.py --plain` | the plain promise without new intents: 80.8% answered, 2.5% wrong before the shift; 58.5%, 16.4% after |
 | `bird/solution.py` | `runs/solution_unanimous.jsonl`: answer only when all three queries agree — 63.3% answered, 28.4% wrong |
@@ -161,11 +161,11 @@ numbers are not compared; its solution, which reads no model, still runs and is.
   every value in the conversation, policies over what the tools returned, `guard.require_confirmation` on every change,
   `once=True`; a refused call goes back to the model with the reasons (`feedback()`). `harness.py` runs the benchmark's
   environment and simulated customer.
-- `cuad/solution.py` — a `Maybe[Span[str]]` question per clause kind through `solvi.llm` with `long="retrieve"`,
+- `cuad/solution.py` — a `Maybe[Span[str]]` question per clause kind through `solvi.core.deciders.llm` with `long="retrieve"`,
   `retrieve_query` (`queries.py`) and `max_len=3000`; a yes / no check of each quoted passage; a trust fact (dev
   reliability × confidence × the check); `System.guarantee(signal="trust", max_risk=0.03)`. `repair.py` cuts an
   almost-literal quote to its longest literal piece before solvi checks it.
-- `ragtruth/solution.py` — two wordings of the judge through `solvi.llm`; the answer from the one better on dev, the
+- `ragtruth/solution.py` — two wordings of the judge through `solvi.core.deciders.llm`; the answer from the one better on dev, the
   escalation from `Vote(rule="all")` under `act_guard(max_risk=0.10)`; every decision stored.
 - `banking77/solution.py` — the baseline's classifier with an act head as a decision part (`classifier.py`),
   `openset.leave_out` on calib, `OpenSetGate.calibrate(max_error=0.05)`, `System.guarantee(promise=gate)`, a stored
@@ -174,12 +174,12 @@ numbers are not compared; its solution, which reads no model, still runs and is.
   within the promise.
 - `credit/solution.py` — the policy of `POLICY.md` as one function per rule, `SQLiteStorage`, `replay_all`, `diff`,
   `verify`, `Shadow`, `solvi.check.lint`.
-- `bird/solution.py` — `solvi.generate` (three queries), `solvi.agree` (key: the digest of the rows), hard checks that
-  return `Fail` with the reason, one `solvi.refine` round, `System.fit` over agreement and the query's shape, and
+- `bird/solution.py` — `solvi.core.slow.generate` (three queries), `solvi.core.slow.agree` (key: the digest of the rows), hard checks that
+  return `Fail` with the reason, one `solvi.core.slow.refine` round, `System.fit` over agreement and the query's shape, and
   `System.guarantee(method="empirical")` — an empirical target, not a promise.
 - `abtbuy/solution.py` — typed facts from `pairfacts.py`, `System.fit(select=False)`, `System.guarantee(max_risk=0.01)`,
   `sets.decide_set` with `AtMostOne` per offer.
-- `naturalplan/solution.py` — typed facts by rules (`plans.py`), one System of hard checks per kind, `solvi.search`
+- `naturalplan/solution.py` — typed facts by rules (`plans.py`), one System of hard checks per kind, `solvi.core.slow.search`
   over a dict of domains (calendar) or a `Tree` with `prune=` (meetings, trips).
 - `nab/solution.py` — every point after the warm-up is one `ask` over the trailing window (`facts.py`); the threshold is
   `calibration.conformal_quantile` of the series' own earlier scores; alerts stored, replayed, diffed.

@@ -1,4 +1,4 @@
-"""The budget of solvi.dispatch (Budget, Cost) on solvi.generate and solvi.refine: tokens, dollars, latency recorded per
+"""The budget of solvi.core.dispatch (Budget, Cost) on solvi.core.slow.generate and solvi.core.slow.refine: tokens, dollars, latency recorded per
 request and per round; a stop by the total or per decision before a request or a round is sent; the record in the trace,
 in the refinement and in the system report."""
 import io
@@ -9,9 +9,9 @@ from pydantic import BaseModel
 
 from solvi import Answer, Catalog, JSONLStorage, Question, System
 from solvi.core.costs import Budget, BudgetStop, Cost
-from solvi.generate import generator
-from solvi.refine import Fail, Refinement, refine
-from solvi.sysreport import system_report
+from solvi.core.slow.generate import generator
+from solvi.core.slow.refine import Fail, Refinement, refine
+from solvi.core.store.sysreport import system_report
 
 
 class FakeServer:
@@ -34,7 +34,7 @@ def gen(*replies, **kw):
 
 
 def test_budget_and_cost_are_the_dispatchers_and_take_tokens():
-    from solvi import dispatch
+    from solvi.core import dispatch
     assert dispatch.Budget is Budget and dispatch.Cost is Cost and dispatch.BudgetStop is BudgetStop
     assert Budget(usd=1.0).to_dict() == {"usd": 1.0, "calls": None, "ms": None}      # Dispatcher.config unchanged
     b = Budget(tokens=200)

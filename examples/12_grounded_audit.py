@@ -6,7 +6,7 @@ the same; only the provenance of the facts differs, and `res.audit()` shows it. 
 "hallucinates" a total that is not in the text (grounding rejects it and the regular expression takes over), and the classifier
 answers with a category outside its options (rejected, the question abstains). Finally the extractor is retrained and replay
 reports that the model changed since the decision. The models here are small stand-ins, so the example runs without torch;
-a real extractor (solvi.extract_long.LongSpanExtractor.field) is recorded the same way.
+a real extractor (solvi.core.extract.LongSpanExtractor.field) is recorded the same way.
 
 Run:  uv run python examples/12_grounded_audit.py"""
 from __future__ import annotations

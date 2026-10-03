@@ -11,7 +11,7 @@ import uuid
 import pytest
 
 from solvi import System
-from solvi.storage import DuckDBStorage, PostgresStorage, SQLiteStorage, open_storage
+from solvi.core.store import DuckDBStorage, PostgresStorage, SQLiteStorage, open_storage
 from test_storage import STATES, Clock, _edit_answer, _rehash, build
 
 

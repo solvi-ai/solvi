@@ -8,7 +8,7 @@ import pytest
 
 from solvi import Answer, Catalog, Question, System
 from solvi.auto import build
-from solvi.dispatch import Budget, SlowPath
+from solvi.core.dispatch import Budget, SlowPath
 
 
 def _pairs(n, seed=0):
@@ -180,7 +180,7 @@ class _Scorer:
 
 
 def _learner(ex):
-    from solvi.decide import DecideModel
+    from solvi.core.deciders import DecideModel
     opts = sorted({y for _, y in ex})
     model = DecideModel(_Scorer(opts), meta={"format": "stand-in", "temperature": 1.0, "act": {}})
     return model.decision("topic", "Which word?", "text", opts, min_act=0.0)

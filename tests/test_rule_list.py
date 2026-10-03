@@ -1,10 +1,10 @@
-"""solvi.rulelist.RuleList and System.learn_rule: the literals of a text, fitting twice, arguments that cannot work."""
+"""solvi.core.deciders.rulelist.RuleList and System.learn_rule: the literals of a text, fitting twice, arguments that cannot work."""
 from typing import Literal
 
 import pytest
 
 from solvi import Answer, Catalog, Question, System
-from solvi.rulelist import RuleList, literals
+from solvi.core.deciders.rulelist import RuleList, literals
 
 
 def _zones():
@@ -77,7 +77,7 @@ def test_a_learned_rule_that_replaces_a_typed_rule_takes_its_typed_bookkeeping_w
 
 
 def test_learned_rules_are_deterministic():
-    from solvi.rulelist import RuleList
+    from solvi.core.deciders.rulelist import RuleList
     rows = [{"a": f"W{i % 3} X{i % 2}"} for i in range(60)]
     ys = ["p" if i % 3 == 0 else "q" for i in range(60)]
     assert str(RuleList(["a"]).fit(rows, ys)) == str(RuleList(["a"]).fit(list(rows), list(ys)))

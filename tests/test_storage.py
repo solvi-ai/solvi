@@ -10,7 +10,7 @@ import sys
 import pytest
 
 from solvi import Answer, Catalog, Decision, JSONLStorage, Question, SQLiteStorage, System
-from solvi.storage import record_hash
+from solvi.core.store import record_hash
 
 
 class Scorer:
@@ -138,7 +138,7 @@ def test_teach_is_stored_and_chained(filled):
 
 
 def test_corrections_carry_their_source_and_untrusted_sources_are_refused(filled):
-    from solvi.storage import UntrustedLabel
+    from solvi.core.store import UntrustedLabel
     _, store, s, _ = filled
     rid = s.ask(STATES[0]).stored_id
     s.teach("approve", STATES[0], False, label_source="outcome", by="ledger", of=rid)
@@ -470,7 +470,7 @@ class FirstLine:
 def test_a_stored_trace_keeps_the_order_of_dict_keys_so_model_steps_replay(kind, tmp_path):
     """The store wrote its JSON with sorted keys: a dict a decider had read came back in another order, the decider read
     another text on replay and a sound trace did not replay ("value 'status' ≠ recomputed 'amount'")."""
-    from solvi.decide import DecideModel
+    from solvi.core.deciders import DecideModel
     store = make_store(kind, tmp_path)
     m = DecideModel(FirstLine(), meta={"format": "test", "temperature": 1.0})
     cat = Catalog()
@@ -578,7 +578,7 @@ def test_jsonl_opens_from_its_head_without_reading_every_record(tmp_path, monkey
 
 
 def test_processes_writing_one_jsonl_file_at_once(tmp_path):
-    from solvi import storage
+    from solvi.core import store as storage
     if storage.fcntl is None:
         pytest.skip("no advisory file locks on this system: one writing process at a time")
     path = tmp_path / "shared.jsonl"
@@ -811,7 +811,7 @@ def test_what_is_left_of_a_redacted_record_is_still_verified(filled):
     """The hash of a record covers its lasting fields, the digest of its answers and the digest of its content, so an
     erased record verifies like any other. Its kept answer edited by hand, its time changed, another "who" in the mark,
     a record passed off as redacted with other answers: each is reported — with nothing kept elsewhere."""
-    from solvi.storage import record_body
+    from solvi.core.store import record_body
     kind, store, s, resps = filled
     if kind != "jsonl":
         pytest.skip("the stored body is edited through the JSONL file")
@@ -940,7 +940,7 @@ def test_the_audit_of_a_stored_decision_without_its_catalog_knows_which_checks_a
     old = json.loads(json.dumps(store.record(passed.stored_id)["response"]))   # as solvi ≤ 0.7.1 stored it: no hardness
     for st in old["flow"]["steps"]:
         st.pop("hard", None)
-    from solvi.system import Response
+    from solvi.core.system import Response
     text = str(Response.model_validate(old).audit("alert"))
     assert "enough_history = True (hard or soft: not recorded)" in text and "(soft)" not in text
     old_failed = json.loads(json.dumps(store.record(failed.stored_id)["response"]))
@@ -962,7 +962,7 @@ def test_query_finds_a_yes_no_answer_given_as_a_bool_on_every_backend(filled):
 def test_every_store_closes_and_is_a_context_manager_and_the_extension_is_read_in_any_case(tmp_path):
     import sqlite3
 
-    from solvi.storage import open_storage
+    from solvi.core.store import open_storage
     with open_storage(tmp_path / "a.DB") as store:
         assert isinstance(store, SQLiteStorage)
         System(*build(), storage=store).ask(STATES[0])

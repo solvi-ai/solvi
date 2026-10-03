@@ -181,11 +181,11 @@
   },
   {
    "file": "benchmarks/tasks/README.md",
-   "text": "| `abtbuy/llm_pair.py` | the same LLM asked each pair through `solvi.llm`: F1 {abtbuy/llm_pair:llm.f1|.3f} with the reply contract in the prompt (the default with reasoning), {abtbuy/llm_pair_schema:llm.f1|.3f} with `response_format=\"json_schema\"` (plain call {abtbuy/baseline:f1}); \"one counterpart\" on it {abtbuy/llm_pair:llm.f1|.3f} → {abtbuy/llm_pair:llm + one counterpart.f1|.3f}; at `max_tokens=400`, {abtbuy/llm_pair:cut_off} of {abtbuy/llm_pair:llm.pairs|,} replies were cut off |"
+   "text": "| `abtbuy/llm_pair.py` | the same LLM asked each pair through `solvi.core.deciders.llm`: F1 {abtbuy/llm_pair:llm.f1|.3f} with the reply contract in the prompt (the default with reasoning), {abtbuy/llm_pair_schema:llm.f1|.3f} with `response_format=\"json_schema\"` (plain call {abtbuy/baseline:f1}); \"one counterpart\" on it {abtbuy/llm_pair:llm.f1|.3f} → {abtbuy/llm_pair:llm + one counterpart.f1|.3f}; at `max_tokens=400`, {abtbuy/llm_pair:cut_off} of {abtbuy/llm_pair:llm.pairs|,} replies were cut off |"
   },
   {
    "file": "benchmarks/tasks/README.md",
-   "text": "| `ragtruth/reply_format.py` | the judge through `solvi.llm` with the format enforced / with the contract in the prompt / the plain call: dev {ragtruth/reply_format_dev:solvi.llm, response_format=json_schema.f1} / {ragtruth/reply_format_dev:solvi.llm, response_format=auto.f1} / {ragtruth/reply_format_dev:plain call (baseline.py).f1}, eval {ragtruth/reply_format_eval:solvi.llm, response_format=json_schema.f1} / {ragtruth/reply_format_eval:solvi.llm, response_format=auto.f1} / {ragtruth/reply_format_eval:plain call (baseline.py).f1}; under the enforced format about a fifth of the replies had no reasoning ({ragtruth/reply_format_dev:solvi.llm, response_format=json_schema.no_reasoning} of {ragtruth/reply_format_dev:solvi.llm, response_format=json_schema.n} on dev) |"
+   "text": "| `ragtruth/reply_format.py` | the judge through `solvi.core.deciders.llm` with the format enforced / with the contract in the prompt / the plain call: dev {ragtruth/reply_format_dev:solvi.llm, response_format=json_schema.f1} / {ragtruth/reply_format_dev:solvi.llm, response_format=auto.f1} / {ragtruth/reply_format_dev:plain call (baseline.py).f1}, eval {ragtruth/reply_format_eval:solvi.llm, response_format=json_schema.f1} / {ragtruth/reply_format_eval:solvi.llm, response_format=auto.f1} / {ragtruth/reply_format_eval:plain call (baseline.py).f1}; under the enforced format about a fifth of the replies had no reasoning ({ragtruth/reply_format_dev:solvi.llm, response_format=json_schema.no_reasoning} of {ragtruth/reply_format_dev:solvi.llm, response_format=json_schema.n} on dev) |"
   },
   {
    "file": "benchmarks/tasks/README.md",
@@ -253,7 +253,7 @@
   },
   {
    "file": "README.md",
-   "text": "| NATURAL PLAN, right of 100: calendar / meetings / trips | {naturalplan/baseline:calendar_scheduling.right} / {naturalplan/baseline:meeting_planning.right} / {naturalplan/baseline:trip_planning.right} (LLM plans) | {naturalplan/solution:score.calendar_scheduling.right} / {naturalplan/solution:score.meeting_planning.right} / {naturalplan/solution:score.trip_planning.right} (`solvi.search`, no LLM) |"
+   "text": "| NATURAL PLAN, right of 100: calendar / meetings / trips | {naturalplan/baseline:calendar_scheduling.right} / {naturalplan/baseline:meeting_planning.right} / {naturalplan/baseline:trip_planning.right} (LLM plans) | {naturalplan/solution:score.calendar_scheduling.right} / {naturalplan/solution:score.meeting_planning.right} / {naturalplan/solution:score.trip_planning.right} (`solvi.core.slow.search`, no LLM) |"
   },
   {
    "file": "README.md",
@@ -273,7 +273,7 @@
   },
   {
    "file": "docs/best_practices.md",
-   "text": "on Abt-Buy ({abtbuy/repair:head.pairs|,} pairs) {abtbuy/repair:baseline.jsonl as given.f1} → {abtbuy/repair:baseline.jsonl + one counterpart.f1} for an LLM asked each pair, {abtbuy/llm_pair:llm.f1|.3f} → {abtbuy/llm_pair:llm + one counterpart.f1|.3f} for the same LLM through `solvi.llm`, {abtbuy/repair:head.f1} → {abtbuy/repair:head + one counterpart.f1} for a fitted head"
+   "text": "on Abt-Buy ({abtbuy/repair:head.pairs|,} pairs) {abtbuy/repair:baseline.jsonl as given.f1} → {abtbuy/repair:baseline.jsonl + one counterpart.f1} for an LLM asked each pair, {abtbuy/llm_pair:llm.f1|.3f} → {abtbuy/llm_pair:llm + one counterpart.f1|.3f} for the same LLM through `solvi.core.deciders.llm`, {abtbuy/repair:head.f1} → {abtbuy/repair:head + one counterpart.f1} for a fitted head"
   },
   {
    "file": "docs/best_practices.md",
@@ -289,7 +289,7 @@
   },
   {
    "file": "docs/best_practices.md",
-   "text": "(about a fifth of the judge's replies below had no reasoning under json_schema); a yes/no hallucination judge asked through `solvi.llm` scored F1 {ragtruth/reply_format_dev:solvi.llm, response_format=json_schema.f1} on RAGTruth dev with the schema enforced and {ragtruth/reply_format_dev:solvi.llm, response_format=auto.f1} with the contract in the prompt (the plain call to the model: {ragtruth/reply_format_dev:plain call (baseline.py).f1}), on eval {ragtruth/reply_format_eval:solvi.llm, response_format=json_schema.f1} → {ragtruth/reply_format_eval:solvi.llm, response_format=auto.f1} (plain {ragtruth/reply_format_eval:plain call (baseline.py).f1})"
+   "text": "(about a fifth of the judge's replies below had no reasoning under json_schema); a yes/no hallucination judge asked through `solvi.core.deciders.llm` scored F1 {ragtruth/reply_format_dev:solvi.llm, response_format=json_schema.f1} on RAGTruth dev with the schema enforced and {ragtruth/reply_format_dev:solvi.llm, response_format=auto.f1} with the contract in the prompt (the plain call to the model: {ragtruth/reply_format_dev:plain call (baseline.py).f1}), on eval {ragtruth/reply_format_eval:solvi.llm, response_format=json_schema.f1} → {ragtruth/reply_format_eval:solvi.llm, response_format=auto.f1} (plain {ragtruth/reply_format_eval:plain call (baseline.py).f1})"
   },
   {
    "file": "docs/best_practices.md",

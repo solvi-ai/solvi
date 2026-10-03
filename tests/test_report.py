@@ -7,7 +7,7 @@ import pytest
 
 from solvi import Answer, Catalog, Decision, JSONLStorage, Question, Quote, SQLiteStorage, System
 from solvi.cli import main
-from solvi.report import highlight, md
+from solvi.core.store.report import highlight, md
 
 DOC = 'Invoice 7781\nVendor: Acme <Tools> & "Sons"\nTotal: 1,250.00 EUR\n<script>alert(1)</script>\n'
 
@@ -284,7 +284,7 @@ def test_period_report_shows_non_finite_answers_untagged(tmp_path):
     s.ask({"x": 1.0})
     text = st.report()
     assert "$float" not in text and "inf" in text
-    from solvi.report import period
+    from solvi.core.store.report import period
     assert "$float" not in json.dumps(period(st), default=str)
 
 
@@ -299,7 +299,7 @@ def test_report_stays_english_for_a_system_in_another_language():
 
 
 def test_period_report_escapes_a_stored_seq_that_is_not_a_number(store):
-    from solvi.report import period, render
+    from solvi.core.store.report import period, render
     data = period(store)
     evil = "<img src=x onerror=alert(2)>"
     data["changes"] = [{"what": "catalog", "from": "a" * 16, "to": "b" * 16, "id": "r1", "seq": evil, "time": "t"}]

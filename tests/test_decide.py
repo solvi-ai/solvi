@@ -1,4 +1,4 @@
-"""solvi.decide: a decider model as a catalog part (closed set, provenance, model identity, safeguards), label-bias
+"""solvi.core.deciders: a decider model as a catalog part (closed set, provenance, model identity, safeguards), label-bias
 correction without labels, few-shot shift / scale with teach, "other" as a threshold, and solvi.core.calibration.
 A tiny fake scorer stands in for the ModernBERT decider; one optional test runs the real ONNX checkpoint if present."""
 import io
@@ -14,7 +14,7 @@ import pytest
 
 from solvi import Answer, Catalog, Decision, Question, System
 from solvi.core.calibration import accuracy_at, coverage_at, ece, reliability, summary, threshold_for
-from solvi.decide import DecideModel, DecisionPart, Item, decision_of, prompt
+from solvi.core.deciders import DecideModel, DecisionPart, Item, decision_of, prompt
 
 KW = {"billing": ["charged", "refund", "invoice"], "technical": ["crash", "error", "bug"],
       "shipping": ["parcel", "delivery", "tracking"]}

@@ -12,7 +12,7 @@ compared with those numbers. Needs `solvi[onnx]`.
 import os
 
 from solvi import Catalog, System, models
-from solvi.decide import DecideModel
+from solvi.core.deciders import DecideModel
 
 TEAMS = {"billing": "payments, invoices, charges, refunds", "technical": "bugs, crashes, errors, the app or site not working",
          "shipping": "delivery, parcels, tracking, couriers", "other": "anything else"}

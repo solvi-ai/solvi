@@ -10,10 +10,10 @@ import uuid
 import pytest
 
 from solvi import Answer, Catalog, JSONLStorage, Question, SQLiteStorage, System
-from solvi.diff import diff
+from solvi.core.store.diff import diff
 from solvi.core.runtime import Trace, srepr, vhash
 from solvi.core.schema import from_tree, jsonable, restorable, type_tree
-from solvi.system import Response
+from solvi.core.system import Response
 
 
 def quickstart():

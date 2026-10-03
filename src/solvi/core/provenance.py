@@ -7,7 +7,7 @@ Principle: fuzzy proposes, deterministic decides, everything is in the trace. Ev
   quoted    — an extract part returning a Quote: the value is grounded at offsets in the source text
   decided   — a model's choice among declared options, with probabilities (a Decision)
   learned   — a fit answer head, a learn_rule list, or another trained function
-  proposed  — a model that writes: a strategist's plan, a generator's text or JSON (solvi.generate); the deterministic
+  proposed  — a model that writes: a strategist's plan, a generator's text or JSON (solvi.core.slow.generate); the deterministic
               layer verifies what it proposes
 
 A part backed by a model (an extractor, a head, a rule list, any object) records the model's identity in the trace:
@@ -32,10 +32,10 @@ OUTSIDE_OPTIONS = "outside the options"
 VALIDATE = "rejected by validate"
 TYPE_REJECTED = "type rejected"               # a typed fact failed its type (solvi.core.types); the guard kind of the same
 #                                               event is "type_rejected" (solvi.core.primitives.TYPE_REJECTED)
-ESCALATED = "model escalated"                 # a decider's own act / escalate signal said "hand it to a person" (solvi.decide)
+ESCALATED = "model escalated"                 # a decider's own act / escalate signal said "hand it to a person" (solvi.core.deciders)
 TIMED_OUT = "timed out"                       # a part did not finish within its timeout (System.aask)
 INSTRUCTION = "answer depends on an instruction-like sentence"   # perturb=k: the answer changed without such a sentence
-MEMORY = "memory of corrections disagrees"    # solvi.memory: similar corrected cases say another answer
+MEMORY = "memory of corrections disagrees"    # solvi.core.knowledge.memory: similar corrected cases say another answer
 
 
 def classify(reason):

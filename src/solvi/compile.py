@@ -2,7 +2,7 @@
 regulation or a constraint description states; solvi accepts them only after checks that need no labels.
 
     from solvi.compile import Inputs, Spec, compile_spec, recompile, Versions
-    from solvi.generate import generator
+    from solvi.core.slow.generate import generator
 
     spec = Spec(policy_text)                                  # split into numbered clauses: spec.clauses, spec.hash
     inputs = Inputs({"amount": (0, 20000), "country": ["DE", "FR", "US"]})    # what a decision reads, and its values
@@ -71,7 +71,7 @@ from typing import Any, Callable
 
 from . import sandbox
 from .core.catalog import Catalog, Question
-from .refine import Fail
+from .core.slow.refine import Fail
 
 DEFAULT_MODEL = "openai/gpt-oss-120b"
 SANDBOX_EXTRA = {"Fail": Fail}                        # trusted names a compiled module may use without an import
@@ -603,7 +603,7 @@ def decide_rows(system, inputs, alarm=None, item_s=5):
 
 def box_main(ns, payload, signal):
     """The sandbox driver: build the catalog from the module's namespace and decide every input of the payload."""
-    from .system import System
+    from .core.system import System
     qs = [Question.model_validate(q) for q in payload["questions"]]
     cat, qs = build_catalog(ns, payload["parts"], qs)
     system = System(cat, qs)
@@ -904,7 +904,7 @@ class Compiled:
 
     def system(self, allow_unaccepted: bool = False, **kw):
         """An ordinary System over the compiled catalog (kw: System's own — storage, ...)."""
-        from .system import System
+        from .core.system import System
         cat, qs = self.catalog(allow_unaccepted)
         return System(cat, qs, **kw)
 
@@ -955,10 +955,10 @@ class Compiled:
 # ───────────────────────────────────────────────────────────── the loop
 def _writer_of(writer):
     if writer is None:
-        raise ValueError("compile_spec needs a writer: a solvi.generate Generator (or a base URL string, then the model "
+        raise ValueError("compile_spec needs a writer: a solvi.core.slow.generate Generator (or a base URL string, then the model "
                          f"is {DEFAULT_MODEL})")
     if isinstance(writer, str):
-        from .generate import generator
+        from .core.slow.generate import generator
         return generator(writer, DEFAULT_MODEL, max_tokens=24000, timeout=900,
                          extra_body={"reasoning": {"effort": "medium"}})
     return writer
@@ -1638,7 +1638,7 @@ def compile_spec(spec: Spec, questions, inputs: Inputs, writer=None, *, rounds: 
                  fresh_drafts: int = 2, stuck_after: int = 2, review: Callable | None = None,
                  review_budget: int | None = 20, review_per_round: int | None = 5) -> Compiled:
     """Compile `spec` into catalog parts answering `questions` over `inputs` (see the module docs). `writer`: a
-    solvi.generate Generator (or two, for two models), or a base URL (model openai/gpt-oss-120b). `examples`: labelled
+    solvi.core.slow.generate Generator (or two, for two models), or a base URL (model openai/gpt-oss-120b). `examples`: labelled
     [(input, {question: answer})] that both drafts must match; `reference(input) → {question: answer}`, compared on the
     whole pool. `fresh_drafts`: how many times in all a draft that did not run (refused by the contract or the sandbox,
     or no module in the reply) for `stuck_after` rounds in a row is replaced by a fresh draft, written from the task
@@ -1806,7 +1806,7 @@ def recompile(old: Compiled, spec: Spec, inputs: Inputs, writer=None, *, rounds:
 @dataclass
 class DecisionDiff:
     """The decisions a new compilation changes: `changed` = [{"id", "question", "old", "new", "causes": [{"step",
-    "part", "clauses", "why"}]}]; `report` is solvi.diff's own report."""
+    "part", "clauses", "why"}]}]; `report` is solvi.core.store.diff's own report."""
     changed: list
     report: Any
     total: int
@@ -1841,10 +1841,10 @@ def _status(a):
 
 def decision_diff(old: Compiled, new: Compiled, *, store=None, inputs=None, **filters) -> DecisionDiff:
     """Which decisions `new` would change: the stored ones (`store`, decided by `old`'s catalog — filters as for
-    solvi.diff.diff) or `inputs` (each decided by `old` first, in a temporary store). Each change's causes are the steps
-    solvi.diff names, with the clauses their parts implement (in the new compilation, else the old one)."""
-    from .diff import diff
-    from .storage import JSONLStorage
+    solvi.core.store.diff.diff) or `inputs` (each decided by `old` first, in a temporary store). Each change's causes are the steps
+    solvi.core.store.diff names, with the clauses their parts implement (in the new compilation, else the old one)."""
+    from .core.store.diff import diff
+    from .core.store import JSONLStorage
     tmp = None
     if store is None:
         if inputs is None:
@@ -1951,7 +1951,7 @@ def to_guard(compiled: Compiled, guard, tools=None, *, question: str | None = No
     clauses of the parts that decided (the false hard checks, else the question's rule) as the reasons — or when the
     compiled policy cannot answer (it abstains: an input it cannot read).
     `question`: the compiled question (default: the only one)."""
-    from .system import System
+    from .core.system import System
     cat, qs = compiled.catalog()
     q = question or (qs[0].name if len(qs) == 1 else None)
     if q is None:

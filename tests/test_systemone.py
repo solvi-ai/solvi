@@ -7,8 +7,8 @@ import urllib.error
 import pytest
 
 from solvi import Answer, Catalog, Question, System, Unknown
-from solvi.decide import Item
-from solvi.systemone import systemone
+from solvi.core.deciders import Item
+from solvi.core.deciders.systemone import systemone
 
 TEAMS = {"billing": "Charges, invoices, refunds", "shipping": "Delivery, parcels, tracking"}
 
@@ -268,9 +268,9 @@ def test_a_refused_request_escalates_at_once_with_the_services_error_text():
 def test_a_wrong_key_model_or_url_raises_as_solvi_llm_does_instead_of_escalating_every_decision(code):
     """0.7 escalated every decision on a 401: `solvi models check systemone:... --api-key BAD` exited 0 with "answered
     alone 0.0%" computed from placeholders, while the same command for llm: exited 1."""
-    from solvi.llm import LLMError
-    from solvi.remote import RemoteError
-    from solvi.systemone import SystemOneError
+    from solvi.core.deciders.llm import LLMError
+    from solvi.core.deciders._remote import RemoteError
+    from solvi.core.deciders.systemone import SystemOneError
     svc = Flaky(http_error(code, b'{"error": {"message": "bad key"}}'))
     m = systemone("http://localhost:8009", "kev-latest", api_key="sekret", opener=svc, sleep=lambda s: pytest.fail("no retry"))
     with pytest.raises(SystemOneError, match=f"HTTP {code} from http://localhost:8009/v1/systemone") as e:
@@ -324,7 +324,7 @@ def test_a_yes_no_reply_that_is_not_a_probability_escalates(p):
 def test_nothing_is_learned_while_the_service_does_not_answer():
     """A service that is down gives placeholder zeros marked `escalate`: fit, teach, adapt and the memory used to learn
     from the zeros without a word."""
-    from solvi.memory import CorrectionMemory
+    from solvi.core.knowledge.memory import CorrectionMemory
     svc = Scripted(None, down=urllib.error.HTTPError("http://localhost:8009/v1/systemone", 503, "x", {}, io.BytesIO(b"{}")))
     m = systemone("http://localhost:8009", "kev-latest", opener=svc, retries=0)
     part = m.decision("team", "Which team?", "email", TEAMS)

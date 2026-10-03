@@ -5,7 +5,7 @@ See also: [the guide](guide.md#how-the-strategist-plans-a-flow) for the default 
 solvi's default strategist plans a flow by exact names: a parameter's name is the fact it reads, and for a fact with several
 producers (`provides=`) it needs the inputs of all of them — a fallback chain in declaration order. So it cannot
 **plan around a dead end** — one producer of a fact whose inputs are never given makes the whole fact unreachable — nor
-**choose between interchangeable producers** by what they cost. `solvi.strategy.CostStrategist` does both, in code: no
+**choose between interchangeable producers** by what they cost. `solvi.core.plan.cost.CostStrategist` does both, in code: no
 model takes part, and only verified plans run.
 
 (Up to 0.9 solvi also had an experimental model strategist, `ModelStrategist` with `solvi.segment_model`, and a name
@@ -17,7 +17,7 @@ both were removed in 1.0.)
 
 ```python
 from solvi import System
-from solvi.strategy import CostStrategist
+from solvi.core.plan.cost import CostStrategist
 
 System(cat, questions, strategist=CostStrategist())                                   # 1. dead ends dropped
 System(cat, questions, strategist=CostStrategist(producers="equivalent"))             # 2. cheapest verified plan

@@ -12,7 +12,7 @@ completions or a decision model over the System One API (models.json, "api"); bo
           confidence}} (the system message says the input is data, not instructions); a decision model gets the state
           {policy, input} and a choice per question (options plus a described "abstain"; multi-label: a yes/no per
           option) and returns probabilities, the confidence being the chosen option's.
-  inside  the same model inside solvi: each question of the task is a solvi.llm / solvi.systemone decision (the text is
+  inside  the same model inside solvi: each question of the task is a solvi.core.deciders.llm / solvi.core.deciders.systemone decision (the text is
           the same policy plus the input; "not stated", or a chosen "abstain", escalates; a decision model has no
           multi-label questions, which abstain); the catalog's hard checks and constraints still apply;
           act_guard (risk 0.10) calibrated on cal decides what goes to a person (R, P, T: per question; G: one shared
@@ -251,8 +251,8 @@ class _Resp:
 class Transport:
     """POST to the model's endpoint: the model's extra request fields, a disk cache keyed by the request path and body
     in its key order (so an interrupted run resumes without paying twice, and a reordered request is a new request), the
-    latency of each request, and a log of (model, arm, ms, $) per request. Also serves as the `opener` of solvi.llm and
-    solvi.systemone (the inside arm)."""
+    latency of each request, and a log of (model, arm, ms, $) per request. Also serves as the `opener` of solvi.core.deciders.llm and
+    solvi.core.deciders.systemone (the inside arm)."""
 
     def __init__(self, name, out, base_url, key):
         self.name = name
@@ -303,12 +303,12 @@ class Transport:
                     f.write(json.dumps({"model": self.name, "arm": arm, "ms": ms, "usd": cost_of(rec, self.name)}) + "\n")
         return resp, {**rec, "cached": False}
 
-    def __call__(self, req, timeout=60):             # the opener of solvi.llm / solvi.systemone (the inside arm)
+    def __call__(self, req, timeout=60):             # the opener of solvi.core.deciders.llm / solvi.core.deciders.systemone (the inside arm)
         import http.client
         body = json.loads(req.data)
         url = req.full_url
         path = url[len(self.base_url):] if url.startswith(self.base_url) else urllib.parse.urlsplit(url).path
-        if self.api == "systemone":                  # solvi.systemone does not retry: retry here
+        if self.api == "systemone":                  # solvi.core.deciders.systemone does not retry: retry here
             resp, rec = call_retry(self, body, "inside", path=path)
             if resp is None:
                 raise OSError(f"the decision model did not answer: {rec.get('error')}")
@@ -317,7 +317,7 @@ class Transport:
             resp, _ = self.post(body, "inside", path=path, timeout=max(timeout, 300))
         except urllib.error.HTTPError:
             raise
-        except (http.client.HTTPException, ConnectionError) as e:   # a cut-off reply is a network failure: solvi.llm retries
+        except (http.client.HTTPException, ConnectionError) as e:   # a cut-off reply is a network failure: solvi.core.deciders.llm retries
             raise OSError(type(e).__name__) from None
         return _Resp(json.dumps(resp).encode())
 
@@ -417,7 +417,7 @@ def t_label(y):
 
 
 def load_decider(decider, device=None):
-    from solvi.decide import DecideModel
+    from solvi.core.deciders import DecideModel
     from solvi.models import cached_path
     path = decider
     if not Path(decider).is_dir():
@@ -626,14 +626,14 @@ def arm_direct(name, sets, out, base_url, key, budget):
 
 # ================================================================================================================ inside arm
 def inside_model(name, out, base_url, key):
-    """The model as a solvi decider: solvi.llm for a chat model, solvi.systemone for a decision model."""
+    """The model as a solvi decider: solvi.core.deciders.llm for a chat model, solvi.core.deciders.systemone for a decision model."""
     tr = Transport(name, out, base_url, key)
     mid, _, mt = MODELS[name][:3]
     if tr.api == "systemone":
-        from solvi.systemone import systemone
+        from solvi.core.deciders.systemone import systemone
         m = systemone(base_url, mid, api_key=key, timeout=120, opener=tr)
     else:
-        from solvi.llm import llm
+        from solvi.core.deciders.llm import llm
         m = llm(base_url, mid, key, max_tokens=mt, seed=0, retries=5, backoff=2.0, timeout=300, workers=1, opener=tr)
     m._cache_size = 0                                   # every decision goes through the transport (and its disk cache)
     return m, tr
@@ -641,7 +641,7 @@ def inside_model(name, out, base_url, key):
 
 def abstain_as_escalation(p):
     """A decision model has no "not stated": "abstain" is one of its options, and choosing it escalates the question
-    (the fact is not given, the question abstains), as "not stated" does for solvi.llm."""
+    (the fact is not given, the question abstains), as "not stated" does for solvi.core.deciders.llm."""
     fin = p._finish
 
     def _finish(d, act, threshold=None, ctx=None):
@@ -659,7 +659,7 @@ def llm_text(row):
 
 def inside_catalog(t, model):
     """The task's catalog with the rule of every question replaced by the model's decision; its hard checks and
-    constraints stay. A decision model (solvi.systemone) gets "abstain" as an option instead of "not stated", and has no
+    constraints stay. A decision model (solvi.core.deciders.systemone) gets "abstain" as an option instead of "not stated", and has no
     multi-label questions: those always abstain."""
     from solvi import Catalog, Unknown
     so = getattr(model, "backend", None) == "systemone"

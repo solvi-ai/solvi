@@ -44,7 +44,7 @@ def test_the_fingerprints_of_0_8_0_hold_except_the_code_ones(task):
 @pytest.mark.parametrize("name", ["decisions.jsonl", "decisions.db"])
 def test_a_store_written_by_0_8_0_verifies_loads_and_replays(task, tmp_path, name):
     from solvi.cli import main
-    from solvi.storage import open_storage
+    from solvi.core.store import open_storage
     for f in DATA.glob("decisions*"):
         shutil.copy(f, tmp_path / f.name)                    # replay never writes, but keep the fixtures untouched
     store = open_storage(str(tmp_path / name))

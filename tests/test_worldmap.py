@@ -1,10 +1,10 @@
-"""solvi.worldmap: a map an agent builds by acting — claims with a status, a source and evidence, a hash-chained journal,
+"""solvi.core.knowledge.worldmap: a map an agent builds by acting — claims with a status, a source and evidence, a hash-chained journal,
 ways over what is known, what is left to check; an observation refutes a claim whoever made it."""
 import json
 
 import pytest
 
-from solvi.worldmap import WorldMap
+from solvi.core.knowledge.worldmap import WorldMap
 
 SITE = {"home": {"Billing": "billing", "Settings": "settings", "Help": "help"},
         "billing": {"Payments": "payments", "Home": "home"}, "payments": {"Refunds": "refunds", "Billing": "billing"},
@@ -79,7 +79,7 @@ def test_journal_snapshot_and_file(tmp_path):
     m.journal[1]["to"] = "elsewhere"                                                   # an edited entry is found
     assert not m.verify()
     (tmp_path / "other.json").write_text("{}")
-    with pytest.raises(ValueError, match="not a solvi.worldmap"):
+    with pytest.raises(ValueError, match="not a solvi.worldmap v1 file"):
         WorldMap(tmp_path / "other.json")
     with pytest.raises(ValueError):
         WorldMap().save()

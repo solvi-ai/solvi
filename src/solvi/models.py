@@ -6,7 +6,7 @@
 
 MODEL (here, and `solvi ask --decider`): a local checkpoint folder; a Hugging Face id already in the local cache (nothing
 is downloaded outside `pull`); `systemone:URL#model` — a System One service (`--api-key`, or $SOLVI_SYSTEMONE_API_KEY);
-`llm:URL#model` — an OpenAI-compatible chat-completions server (solvi.llm), e.g. llm:http://127.0.0.1:8080/v1#qwen2.5-7b
+`llm:URL#model` — an OpenAI-compatible chat-completions server (solvi.core.deciders.llm), e.g. llm:http://127.0.0.1:8080/v1#qwen2.5-7b
 (`--api-key`, or $SOLVI_LLM_API_KEY); or `module:attr` / `file.py:attr` — a DecideModel your code builds.
 
 `check` prints what the checkpoint declares (solvi_decide.json: format, question kinds, act head, questions per pass,
@@ -132,7 +132,7 @@ def resolve(spec):
 
 def declaration(path):
     """A checkpoint folder's solvi_decide.json → (meta, parsed capabilities)."""
-    from .decide import capabilities
+    from .core.deciders import capabilities
     f = Path(path) / "solvi_decide.json"
     if not f.is_file():
         raise ModelError(f"{path} has no solvi_decide.json: not a solvi decider checkpoint")
@@ -144,13 +144,13 @@ def load(spec, backend="auto", api_key=None):
     """A MODEL spec → a DecideModel (see the module docs). Never downloads. ModelError for a name that cannot be read
     (a `file.py:attr` whose file or attribute is missing included — never SystemExit); other exceptions (a missing
     runtime, a broken checkpoint, an error inside your module) pass through."""
-    from .decide import DecideModel
+    from .core.deciders import DecideModel
     k, where = resolve(spec)
     if k == "systemone":
-        from .systemone import systemone
+        from .core.deciders.systemone import systemone
         return systemone(where[0], where[1], api_key=api_key or os.environ.get("SOLVI_SYSTEMONE_API_KEY"))
     if k == "llm":
-        from .llm import llm
+        from .core.deciders.llm import llm
         return llm(where[0], where[1], api_key=api_key or os.environ.get("SOLVI_LLM_API_KEY"))
     if k == "code":
         from ._loader import LoadError, load_object

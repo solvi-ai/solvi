@@ -328,7 +328,7 @@ def catalog_py(template, with_model):
     head += '"""\n'
     lines = [head, imports + ("\n" if imports else ""), "from solvi import Answer, Catalog, Question, System\n"]
     if with_model:
-        lines.append("from solvi.decide import DecideModel\n\nHERE = Path(__file__).parent\n")
+        lines.append("from solvi.core.deciders import DecideModel\n\nHERE = Path(__file__).parent\n")
     lines.append("\ncat = Catalog()\n")
     body = t["body"]
     if template == "support":

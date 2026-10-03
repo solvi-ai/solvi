@@ -11,7 +11,7 @@ How each check is done:
   2 record       System(storage=SQLiteStorage(...)): input, catalog fingerprint and every rule's points, also when the
                  hard check decides (early_exit=False);
   3 replay       store.replay_all(v1, catalog_fp=...);
-  4 diff         solvi.diff.diff(store, v2): the changed decisions and, per decision, the steps that changed it;
+  4 diff         solvi.core.store.diff.diff(store, v2): the changed decisions and, per decision, the steps that changed it;
   5 tamper       store.verify() names the edited record;
   6 moved rules  replay_all under v2 tells "catalog changed" from "data damaged";
   7 sensitive    the input is a pydantic model without the sensitive fields; solvi.check.lint reports a rule that reads
@@ -39,7 +39,7 @@ from score import D, score  # noqa: E402
 
 from solvi import Catalog, Question, Shadow, SQLiteStorage, System  # noqa: E402
 from solvi.check import lint  # noqa: E402
-from solvi.diff import diff  # noqa: E402
+from solvi.core.store.diff import diff  # noqa: E402
 
 
 class Application(BaseModel):

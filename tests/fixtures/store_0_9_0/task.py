@@ -15,7 +15,7 @@ import numpy as np
 from pydantic import BaseModel
 
 from solvi import Answer, Catalog, Claim, Estimate, Maybe, Question, Quote, Rank, Span, System, Unknown
-from solvi.decide import DecideModel
+from solvi.core.deciders import DecideModel
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 OPTIONS = ["travel", "meals", "software"]

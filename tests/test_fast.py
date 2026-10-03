@@ -6,7 +6,7 @@ import pytest
 
 from examples_loader import load
 from solvi import Answer, Catalog, Question, System
-from solvi.heads import FastHead
+from solvi.core.deciders.heads import FastHead
 
 S = load("02_shop_order")
 
@@ -173,7 +173,7 @@ def test_a_candidate_head_learns_a_choice_among_candidates_that_change():
     import random
 
     import pytest
-    from solvi.heads import CandidateHead
+    from solvi.core.deciders.heads import CandidateHead
     kinds = {"door": 1.0, "npc": 0.0, "item": 2.0, "route": 0.5}
 
     def steps(n, seed):
@@ -288,7 +288,7 @@ def test_a_given_number_is_a_feature_of_fit_and_fit_fast_as_the_guide_says():
 def test_teach_refuses_an_unknown_question_or_an_answer_outside_the_options_before_storing(tmp_path):
     """teach("no_such_question", state, "banana") returned None and stored a correction for a question that does not
     exist with an answer that is not an option."""
-    from solvi.storage import JSONLStorage
+    from solvi.core.store import JSONLStorage
     store = JSONLStorage(tmp_path / "s.jsonl")
     s = System(S.cat, S.QUESTIONS, storage=store)
     state = data(0, 1)[0][0]

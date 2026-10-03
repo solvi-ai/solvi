@@ -20,7 +20,7 @@ from typing import Literal
 import numpy as np
 
 from solvi import Catalog, Question, System
-from solvi.decide import DecideModel
+from solvi.core.deciders import DecideModel
 
 
 def solvi_version():
@@ -33,18 +33,18 @@ def solvi_version():
 
 # ---------------------------------------------------------------------------------------------- feature detection
 def has_act_guard():
-    from solvi.decide import DecisionPart
+    from solvi.core.deciders import DecisionPart
     return hasattr(DecisionPart, "act_guard")
 
 
 def has_groups():
-    from solvi.decide import DecisionPart
+    from solvi.core.deciders import DecisionPart
     return has_act_guard() and "groups" in inspect.signature(DecisionPart.act_guard).parameters
 
 
 def has_vote():
     try:
-        from solvi.multi import Vote  # noqa: F401
+        from solvi.core.deciders.combine import Vote  # noqa: F401
         return True
     except ImportError:
         return False
@@ -81,8 +81,8 @@ def has_charts():
 
 def has_signature():
     try:
-        from solvi.signature import check  # noqa: F401
-        from solvi.storage import TraceStorage
+        from solvi.core.store.signature import check  # noqa: F401
+        from solvi.core.store import TraceStorage
         return hasattr(TraceStorage, "signature")
     except ImportError:
         return False
@@ -241,8 +241,8 @@ def demo_vote(email, risk=0.10):
     """Two stand-in "families" answer the same question; Vote(rule="all") answers only when both agree and both are sure,
     else it escalates with both proposals. One act_guard for the vote as a whole."""
     if not has_vote():
-        return needs("solvi.multi.Vote", "0.6"), "", "", ""
-    from solvi.multi import Vote
+        return needs("solvi.core.deciders.combine.Vote", "0.6"), "", "", ""
+    from solvi.core.deciders.combine import Vote
     risk = float(risk)
     a_part = stand_in("family-a", **FAMILY_A).decision("team", TASK, "email", TEAMS)
     b_part = stand_in("family-b", **FAMILY_B).decision("team", TASK, "email", TEAMS)
@@ -547,12 +547,12 @@ def demo_signature(which, risk=None):
     """Six decisions in a store; someone rewrites one and recomputes every hash and the stored head. The chain is
     consistent again, a head kept elsewhere says "rewritten", the signature names the record and a backup matches it."""
     if not has_signature():
-        return needs("solvi.signature and store.signature()", "0.7"), "", "", ""
+        return needs("solvi.core.store.signature and store.signature()", "0.7"), "", "", ""
     import json
     import os
     import re
     import tempfile
-    from solvi.storage import JSONLStorage, record_hash
+    from solvi.core.store import JSONLStorage, record_hash
     m = re.search(r"\d+", which or "")
     k = min(int(m.group(0)) if m else 4, len(REFUNDS) - 1)
 

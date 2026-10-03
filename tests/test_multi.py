@@ -1,12 +1,12 @@
-"""solvi.multi: several models, one decision — a cascade, a vote and a route over decision parts, every proposal in the
+"""solvi.core.deciders.combine: several models, one decision — a cascade, a vote and a route over decision parts, every proposal in the
 trace; act_guard on the combination keeps P(answered alone and wrong) ≤ risk although a cascade's loss is not monotone in
 its threshold (checked by simulation, as test_guarantees does for one part); replay re-runs or verifies the proposals."""
 import numpy as np
 import pytest
 
 from solvi import Answer, Catalog, Question, System
-from solvi.decide import DecideModel, Facts
-from solvi.multi import Cascade, Route, Vote, _src
+from solvi.core.deciders import DecideModel, Facts
+from solvi.core.deciders.combine import Cascade, Route, Vote, _src
 from solvi.core.runtime import Trace
 from test_decide import TEAMS, FakeScorer
 from test_guarantees import _labelled
@@ -349,7 +349,7 @@ def test_rank_scale_lets_a_cascade_use_both_models_when_their_signals_differ_in_
 
 
 def test_the_rank_threshold_maps_to_the_same_raw_threshold_per_model():
-    from solvi.multi import _rank, _raw_t, _table
+    from solvi.core.deciders.combine import _rank, _raw_t, _table
     rng = np.random.default_rng(0)
     tbl = _table(np.round(rng.uniform(size=300), 2))           # ties
     assert len(_table(rng.uniform(size=5000))) == 1024 and np.all(np.diff(_table(rng.uniform(size=5000))) >= 0)
@@ -463,7 +463,7 @@ def test_example_20_vote_of_two_families_answers_more_than_either_alone():
 
 def _group_stream(rng, tag, n, S, L):
     """As _stream, in two groups: in "hard" both models are right far less often (0.3–0.8), in "easy" more (0.8–1.0)."""
-    from solvi.multi import Facts
+    from solvi.core.deciders.combine import Facts
     out = []
     for i in range(n):
         grp = "hard" if rng.uniform() < 0.25 else "easy"
@@ -537,8 +537,8 @@ def test_parts_and_combinations_speak_one_decider_protocol():
     for a combination."""
     import inspect
 
-    from solvi.decide import DecisionPart
-    from solvi.multi import Combination
+    from solvi.core.deciders import DecisionPart
+    from solvi.core.deciders.combine import Combination
     shared = ["examples", "max_risk", "signal", "groups", "min_group", "delta"]
     for cls in (DecisionPart, Combination):
         ps = list(inspect.signature(cls.act_guard).parameters.values())[1:]

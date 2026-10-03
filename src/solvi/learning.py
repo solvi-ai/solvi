@@ -14,7 +14,7 @@ Each label is put, by a hash of its stored id, into "train", "calibration" or "h
 held-out label is never trained on, in this update or any later one.
 
 The ladder, per question, by the number of training labels: fewer than `fit_below` (50) — the shift / scale of the decider
-(DecisionPart.fit); up to `memory_below` (1000) — fit plus a memory of the corrected cases (solvi.memory, mode "check" by
+(DecisionPart.fit); up to `memory_below` (1000) — fit plus a memory of the corrected cases (solvi.core.knowledge.memory, mode "check" by
 default); beyond — the `adapter` hook when you give one (a callable (part, [(text, answer)]) → a JSON-able description; an
 object with state(part) / restore(part, state) is rolled back too), else the memory.
 
@@ -34,7 +34,7 @@ The gates (every one must pass, else the update is undone and recorded as reject
                gate's record says so — they no longer hold for the changed probabilities);
   size         shadow run: the stored decisions whose input is held out for a learned question (the same split as the
                labels: per question, by content_key) — at most `shadow_limit`, 500 — are asked with the current and the
-               candidate state and compared (solvi.diff.compare) on those questions and the unlearned ones; at most
+               candidate state and compared (solvi.core.store.diff.compare) on those questions and the unlearned ones; at most
                `max_change` (30%) of them may change — one update may not move more.
 
 The candidate is built and gated on a shadow of the system: copies of the decision parts (their thresholds, memory,
@@ -62,8 +62,8 @@ import warnings
 from dataclasses import asdict, dataclass, field
 
 from .core import catalog as core
-from .storage import FORMAT, TRUSTED_SOURCES, UntrustedLabel, check_source, plain
-from .storage import open_storage
+from .core.store import FORMAT, TRUSTED_SOURCES, UntrustedLabel, check_source, plain
+from .core.store import open_storage
 
 LADDER = {"fit_below": 50, "memory_below": 1000, "adapter": None,
           "memory": {"k": 7, "radius": 0.15, "min_strength": 1.0, "min_agreement": 0.8, "mode": "check"}}
@@ -76,7 +76,7 @@ def _check_settings(ladder, gates, holdout, calibration):
     (a typo would be ignored), a memory mode that does not exist, a gate rate outside [0, 1] (risk strictly inside),
     a negative count, or holdout / calibration shares that leave no label to train on."""
     from .core.calibration import check_rate
-    from .memory import _settings
+    from .core.knowledge.memory import _settings
     unknown = set(ladder or ()) - set(LADDER)
     if unknown:
         raise ValueError(f"unknown ladder settings: {sorted(unknown)} (known: {sorted(LADDER)})")
@@ -186,7 +186,7 @@ class Learning:
 
     def __init__(self, system, storage=None, parts=None, ladder=None, gates=None, changelog=None, holdout=0.3,
                  calibration=0.2, gate_teach=True):
-        from .decide import DecisionPart, decision_of
+        from .core.deciders import DecisionPart, decision_of
         warnings.warn("solvi.learning is experimental: its API and gates may change", ExperimentalWarning, stacklevel=2)
         self.system = system
         self.storage = open_storage(storage, system) if storage is not None else system.storage
@@ -271,7 +271,7 @@ class Learning:
         return digest("learning", sorted((q, p.fingerprint()) for q, p in parts.items()))
 
     def _snapshot(self, parts=None):
-        from .decide import Adaptation
+        from .core.deciders import Adaptation
         out = {}
         for q, p in (parts or self.parts).items():
             a = p.adaptation
@@ -300,7 +300,7 @@ class Learning:
         import dataclasses
 
         from .core.catalog import _group_func
-        from .decide import DecisionPart
+        from .core.deciders import DecisionPart
         models = {}
         for p in self.parts.values():
             if id(p.model) not in models:
@@ -350,8 +350,8 @@ class Learning:
                                "a part changed in a way the loop cannot carry over")
 
     def _restore(self, state, live=None):
-        from .decide import Adaptation
-        from .memory import CorrectionMemory
+        from .core.deciders import Adaptation
+        from .core.knowledge.memory import CorrectionMemory
         for q, p in self.parts.items():
             st = state.get(q)
             if st is None:
@@ -528,7 +528,7 @@ class Learning:
         """Apply one question's update to `part` (the shadow part of the candidate; default: the live part) → a JSON-able
         description."""
         from .core.catalog import Unknown
-        from .memory import CorrectionMemory, attach
+        from .core.knowledge.memory import CorrectionMemory, attach
         part = self.parts[q] if part is None else part
         ex = self._examples(q, train)
         fit_ex = [(t, y) for t, y in ex if y is not Unknown]
@@ -548,7 +548,7 @@ class Learning:
 
     def _consistency(self, plan, by, trained):
         """New training labels against a memory of the labels already learned (B9)."""
-        from .memory import CorrectionMemory
+        from .core.knowledge.memory import CorrectionMemory
         per, n_new, n_bad = {}, 0, 0
         for q in plan:
             old = [lab for lab in by[q]["train"] if lab.id in trained.get(q, set())]
@@ -698,7 +698,7 @@ class Learning:
                 "why": "no honesty number got worse" if not regs else "; ".join(regs)}
 
     def _gate_size(self, before, after):
-        from .diff import DiffReport, compare
+        from .core.store.diff import DiffReport, compare
         rep = DiffReport()
         for sid, old in before["shadow"].items():
             new = after["shadow"].get(sid)

@@ -1,4 +1,4 @@
-"""What solvi.drift.DriftMonitor flags on simulated streams of decisions (the window tests and the sequential test):
+"""What solvi.core.guarantees.drift.DriftMonitor flags on simulated streams of decisions (the window tests and the sequential test):
   stationary  1,152 unchanged streams of 1,000 decisions (four parts of 288): answers 3 / 12 / 57, reference 1,500 calibration decisions or
               the stream's first 100, three shapes of confidence (beta(5,2), beta(2,2), beta(20,2)), act beta(8,2);
               every flag is false (the promise: at most alpha = 1% of streams flagged within the horizon)
@@ -15,7 +15,7 @@ import sys
 
 import numpy as np
 
-from solvi.drift import DriftMonitor
+from solvi.core.guarantees.drift import DriftMonitor
 
 SHAPES = ((5, 2), (2, 2), (20, 2))
 

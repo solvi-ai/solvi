@@ -5,8 +5,8 @@ import json
 import re
 from pathlib import Path
 
-from solvi.audit import STATS
-from solvi.decide import DecideModel
+from solvi.core.store.audit import STATS
+from solvi.core.deciders import DecideModel
 
 ROOT = Path(__file__).resolve().parents[1]
 GUIDE = (ROOT / "docs" / "guide.md").read_text()
@@ -42,9 +42,9 @@ def test_the_readme_does_not_promise_one_forward_pass_for_the_published_checkpoi
 
 def test_decide_format_says_what_a_bare_solvi_decide_v3_gets():
     """docs/decide_format.md promised the answer-primitives defaults for "format": "solvi_decide v3"; the code gives them
-    with the l14g format or subformat only (solvi.llm and solvi.systemone declare v3 and their own fields, and their
+    with the l14g format or subformat only (solvi.core.deciders.llm and solvi.core.deciders.systemone declare v3 and their own fields, and their
     fingerprints rest on that)."""
-    from solvi.decide import capabilities
+    from solvi.core.deciders import capabilities
     bare = capabilities({"format": "solvi_decide v3"})
     assert bare["modes"] == ["single", "multi"] and bare["unknown"] is None and bare["pointer"] is None and bare["act"] is None
     typed = capabilities({"format": "solvi_decide v3", "subformat": "l14g typed v2"})
@@ -55,20 +55,22 @@ def test_decide_format_says_what_a_bare_solvi_decide_v3_gets():
 
 
 def api_page(mod):
-    """The API reference page that renders module `mod` (`::: mod`, or its submodules), or None."""
-    for page in sorted((ROOT / "docs" / "api").glob("*.md")):
-        if re.search(rf"^::: {re.escape(mod)}(\.|$)", page.read_text(), re.M):
-            return page
+    """The API reference page that renders module `mod` (`::: mod`; else one that renders its submodules), or None."""
+    pages = sorted((ROOT / "docs" / "api").glob("*.md"))
+    for pattern in (rf"^::: {re.escape(mod)}$", rf"^::: {re.escape(mod)}\."):
+        for page in pages:
+            if re.search(pattern, page.read_text(), re.M):
+                return page
     return None
 
 
 def test_every_module_the_docs_import_from_has_an_api_page_in_the_index_and_the_nav():
-    """29 of 63 modules had no API page, among them solvi.drift, solvi.episode and solvi.worldmap that the
+    """29 of 63 modules had no API page, among them solvi.core.guarantees.drift, solvi.core.knowledge.episodes and solvi.core.knowledge.worldmap that the
     guide tells users to import from."""
     from solvi import _deprecate
     docs = README + GUIDE + "".join(p.read_text() for p in (ROOT / "docs").glob("*.md"))
     used = set(re.findall(r"from (solvi(?:\.[a-z_]+)+) import", docs))
-    used |= {_deprecate.new_path(m) or m for m in ("solvi.drift", "solvi.episode", "solvi.worldmap")}
+    used |= {_deprecate.new_path(m) or m for m in ("solvi.core.guarantees.drift", "solvi.core.knowledge.episodes", "solvi.core.knowledge.worldmap")}
     index = (ROOT / "docs" / "api" / "index.md").read_text()
     nav = (ROOT / "mkdocs.yml").read_text()
     for mod in sorted(used):
@@ -83,21 +85,22 @@ def test_the_api_pages_render_what_the_guide_tells_users_to_call_on_combinations
     a memory's save / load had no docstring, so the page left them out."""
     import ast
     assert "inherited_members: true" in (ROOT / "docs" / "api" / "multi.md").read_text()
-    tree = ast.parse((ROOT / "src" / "solvi" / "multi.py").read_text())
+    from solvi.core.deciders import combine
+    tree = ast.parse(Path(combine.__file__).read_text())
     base = next(c for c in tree.body if isinstance(c, ast.ClassDef) and c.name == "Combination")
     for name in ("act_guard", "conformal", "decide", "calls", "fit", "teach", "save_calibration", "fingerprint"):
         f = next(f for f in base.body if isinstance(f, ast.FunctionDef) and f.name == name)
         assert ast.get_docstring(f), name
-    from solvi.memory import CorrectionMemory
+    from solvi.core.knowledge.memory import CorrectionMemory
     for name in ("save", "load", "load_dict", "to_dict", "apply"):
         assert getattr(CorrectionMemory, name).__doc__, name
 
 
 def test_the_llm_docs_give_the_measured_advice_not_the_llm_as_the_last_stage_of_a_cascade():
-    """solvi.llm's docstring and the guide's first LLM sample recommended "the LLM as the last, most expensive stage"
+    """solvi.core.deciders.llm's docstring and the guide's first LLM sample recommended "the LLM as the last, most expensive stage"
     of a Cascade, against the guide's own measurement ("Do not make 'a small model first, the LLM second' the default")."""
-    import solvi.llm
-    assert "last" not in solvi.llm.__doc__.split("Cost and latency")[1] and "most expensive stage" not in solvi.llm.__doc__
+    import solvi.core.deciders.llm
+    assert "last" not in solvi.core.deciders.llm.__doc__.split("Cost and latency")[1] and "most expensive stage" not in solvi.core.deciders.llm.__doc__
     assert "Cascade([small, large, part])" not in GUIDE
 
 
@@ -183,9 +186,9 @@ def test_the_readme_shows_the_published_extractor_and_says_what_it_does_without_
     and its code block used MultiSpanExtractor, which cannot be saved and is used by nothing."""
     block = README.split("## Extract from documents")[1].split("## ")[0]
     assert "LongSpanExtractor.load(\"solvi-ai/extract-base\")" in block and "ex.save(" in block
-    assert "from solvi.extract_multi import MultiSpanExtractor" not in block and "46.5%" in block
+    assert "from solvi.core.extract.multi import MultiSpanExtractor" not in block and "46.5%" in block
     assert "does not work yet" not in README
-    from solvi.extract_long import LongSpanExtractor
+    from solvi.core.extract import LongSpanExtractor
     assert all(hasattr(LongSpanExtractor, n) for n in ("load", "save", "fit", "field", "tune_threshold"))
 
 
@@ -215,9 +218,9 @@ def test_the_guide_gives_the_whole_refine_reference():
     """The rounds of refine — what each sees, the feedback, when the loop stops, what it records — were learned from the
     source; the guide's reference section is checked against the code."""
     import dataclasses
-    from solvi.generate import FEEDBACK, Generator
-    from solvi.refine import Refinement, Round, refine
-    sec = _section("### The loop: solvi.refine", "### Search over alternatives")
+    from solvi.core.slow.generate import FEEDBACK, Generator
+    from solvi.core.slow.refine import Refinement, Round, refine
+    sec = _section("### The loop: solvi.core.slow.refine", "### Search over alternatives")
     assert _sig(refine, "refine") in sec
     shown = _sig(Generator.proposer, "Generator.proposer").replace(json.dumps(FEEDBACK), "FEEDBACK")
     assert shown in sec, shown
@@ -232,7 +235,7 @@ def test_the_guide_gives_the_whole_refine_reference():
         assert f"`{k}`" in sec, f"to_dict key {k!r} is not listed"
     for k in Round(0).to_dict():
         assert f"`{k}`" in sec
-    from solvi.refine import _stored_record
+    from solvi.core.slow.refine import _stored_record
     rec = _stored_record(run)
     for k in rec:
         if k not in ("v", "kind"):
@@ -245,7 +248,7 @@ def test_the_guide_gives_the_whole_refine_reference():
 
 
 def test_the_guide_gives_the_whole_systemone_reference():
-    from solvi import systemone as so
+    from solvi.core.deciders import systemone as so
     sec = _section("#### Any System One model as a decider", "#### Any LLM as a decider")
     assert _sig(so.systemone, "systemone") in sec
     for p in inspect.signature(so.systemone).parameters:
@@ -254,7 +257,7 @@ def test_the_guide_gives_the_whole_systemone_reference():
         assert f"`{k}`" in sec
     for k in ("endpoint", "model", "served_by", "ms", "questions", "usage", "cost", "latency_ms", "reasoning"):
         assert f"`{k}`" in sec, f'extra["systemone"]["{k}"] is not described'
-    from solvi.remote import USAGE
+    from solvi.core.deciders._remote import USAGE
     for k in USAGE:
         assert f"`{k}`" in sec
     assert f"{so.REASONING_CHARS:,} characters" in sec
@@ -264,8 +267,8 @@ def test_the_guide_gives_the_whole_systemone_reference():
 
 def test_the_guide_lists_every_replay_mismatch_kind_and_the_record_modes():
     from solvi.core.runtime import MISMATCH_KINDS
-    from solvi.storage import RECORD_MODES, TraceStorage
-    from solvi.system import System
+    from solvi.core.store import RECORD_MODES, TraceStorage
+    from solvi.core.system import System
     flat = _flat(GUIDE)
     for k in MISMATCH_KINDS:
         assert f"`{k}`" in flat, k

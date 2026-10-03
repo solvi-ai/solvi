@@ -46,7 +46,7 @@ def test_multi_learned_with_fit_fast_and_teach():
 
 
 def test_ordinal_answers_with_the_median():
-    from solvi.system import System as S
+    from solvi.core.system import System as S
     at = Answer.ordinal({"low": "no action", "medium": "watch", "high": "act now"})
     assert at.options == ["low", "medium", "high"] and at.descriptions["high"] == "act now"
     with pytest.raises(AttributeError, match=r"removed in 0.9: use options.index\(v\)"):

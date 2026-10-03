@@ -27,7 +27,7 @@ from typing import Literal
 import numpy as np
 
 from solvi import Catalog, Claim, Estimate, Maybe, Question, Quote, Rank, Response, Span, System, Unknown
-from solvi.decide import DecideModel
+from solvi.core.deciders import DecideModel
 from solvi.core.primitives import fmt
 
 CLAIMS = {

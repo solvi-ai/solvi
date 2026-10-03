@@ -15,15 +15,15 @@ from json.encoder import encode_basestring as _jstr
 from typing import Any
 
 from .catalog import Decision, Quote, Serial, Unknown, accept, evidence_rows, ground, has_evidence, locate, unwrap, validated
-from .catalog import Claim                                # Claim.extra is recorded (solvi.refine.Fail, solvi.generate)
+from .catalog import Claim                                # Claim.extra is recorded (solvi.core.slow.refine.Fail, solvi.core.slow.generate)
 from .provenance import TIMED_OUT, fp_module, model_info
 from .provenance import NOT_GROUNDED, OUTSIDE_OPTIONS, QUOTE_OUTSIDE, catalog_fingerprint, fingerprint, matches
 from .. import _deprecate
 
-# The modules above the runtime (solvi.strategist, solvi.strategy, solvi.guarantee, solvi.multi) define the flow it runs
+# The modules above the runtime (solvi.core.plan.strategist, solvi.core.plan.cost, solvi.core.guarantees.guarantee, solvi.core.deciders.combine) define the flow it runs
 # and records it replays; what the runtime itself needs of them lives here, and they re-export it, so the runtime never
 # imports them (tests/test_import_layers.py).
-RECORD_KEYS = ("stages", "answered_by", "votes", "route", "routed")      # a combination's decision record (solvi.multi):
+RECORD_KEYS = ("stages", "answered_by", "votes", "route", "routed")      # a combination's decision record (solvi.core.deciders.combine):
                                                                          # what a replay compares with the recomputed
 
 
@@ -36,7 +36,7 @@ class Step:
 
 @dataclass
 class Flow:
-    """The parts a request runs, in order (solvi.strategist.plan builds it)."""
+    """The parts a request runs, in order (solvi.core.plan.strategist.plan builds it)."""
     steps: list                     # in execution order
     per_question: dict              # question → names of the parts in its flow
     skipped: dict                   # catalog part → why it was not taken
@@ -435,10 +435,10 @@ class Trace(Serial):
                 if r.model is not None:
                     models.append((r.step, r.name, "trusted"))
                 continue
-            if r.kind == "guard":                         # a question's calibrated threshold (solvi.guarantee): re-verified
+            if r.kind == "guard":                         # a question's calibrated threshold (solvi.core.guarantees.guarantee): re-verified
                 bad += replay_guard(r, system, vals)
                 continue
-            if r.kind == "plan":                          # a strategist's plan record (solvi.strategy): re-verified, not re-run
+            if r.kind == "plan":                          # a strategist's plan record (solvi.core.plan.cost): re-verified, not re-run
                 bad += replay_plan(r, catalog, self.init)
                 continue
             if r.kind == "then":                          # a failed hard check's `then` function (1.0): re-run
@@ -595,8 +595,8 @@ def _recompute(part, r, args, init, catalog=None):
             v = resolved(part.func(**plain) if sibs is None else part.func.in_pass(sibs, plain, r.extra["pass"]["with"]))
         except Exception as e:  # noqa: BLE001
             return [] if r.error is not None else [(r.step, r.name, f"recompute failed: {type(e).__name__}")]
-        if isinstance(v, Decision) and isinstance(r.extra, dict):     # several models (solvi.multi): every proposal;
-            for k in RECORD_KEYS + ("long", "memory"):           # "long": the sections read (solvi.longdoc)
+        if isinstance(v, Decision) and isinstance(r.extra, dict):     # several models (solvi.core.deciders.combine): every proposal;
+            for k in RECORD_KEYS + ("long", "memory"):           # "long": the sections read (solvi.core.deciders.longdoc)
                 if (k in r.extra or k in v.extra) and vhash(r.extra.get(k)) != vhash(v.extra.get(k)):
                     return [(r.step, r.name, f"recorded {k} differ from the recomputed ones")]
         v = locate(part, v, init)
@@ -690,7 +690,7 @@ def _grounded(part, r, init):
 
 
 def _checked(model, r):
-    """Without re-running the models: a model that can check its own record (a combination of models, solvi.multi: the
+    """Without re-running the models: a model that can check its own record (a combination of models, solvi.core.deciders.combine: the
     answer follows from the recorded proposals by its rule) → mismatches."""
     chk = getattr(model, "check_record", None)
     return [(r.step, r.name, f"recorded proposals: {why}") for why in chk(r)] if callable(chk) else []
@@ -703,7 +703,7 @@ def trace_hash(resp):
 
 
 def replay_guard(r, system, vals):
-    """A recorded guard verdict (kind "guard", solvi.guarantee): its inputs must be the recorded facts, the verdict must
+    """A recorded guard verdict (kind "guard", solvi.core.guarantees.guarantee): its inputs must be the recorded facts, the verdict must
     follow from the recorded signal and threshold, and with the System its guarantee must be the one the question has
     now."""
     bad = []
@@ -779,7 +779,7 @@ def replay_then(r, catalog, system, vals):
 
 
 def replay_plan(r, catalog, init_keys):
-    """Re-verify a plan record (kind "plan", solvi.strategy) against the catalog: every chosen producer exists and provides
+    """Re-verify a plan record (kind "plan", solvi.core.plan.cost) against the catalog: every chosen producer exists and provides
     its fact, and its inputs are given or chosen facts → [(step, name, reason)]."""
     bad = []
     v = r.value if isinstance(r.value, dict) else {}
@@ -957,7 +957,7 @@ class HashMemo(dict):
     """vhash of the values of one run, by object: a value read by several steps — and then recorded, and hashed as part
     of the input — is canonicalised and hashed once (each entry keeps its value alive, so an id is not reused within
     the run). The hashes are vhash's own, byte for byte. seed: a HashSeed of values hashed before the run (the same
-    objects asked again and again, e.g. by solvi.search): a value found there is not hashed again."""
+    objects asked again and again, e.g. by solvi.core.slow.search): a value found there is not hashed again."""
 
     def __init__(self, init_state=None, seed=None):
         super().__init__()
@@ -1258,7 +1258,7 @@ def execute(catalog, flow, init_state, workers=1, early_exit=True, order=None, c
     of its own (aexecute runs such catalogs concurrently).
 
     order: None — all hard checks (and their inputs) first, together. An object with `p_fail(check, row)` and `row(vals,
-    init_keys)` (solvi.strategist.OrderModel, or an oracle) — hard checks one at a time, most expected saving first, stopping
+    init_keys)` (solvi.core.plan.strategist.OrderModel, or an oracle) — hard checks one at a time, most expected saving first, stopping
     as soon as the failed ones settle every question they govern; answers are the same as with the default order.
     costs: a CostBook (ms per part) for the learned order and the producer policy. policy: a ProducerPolicy for facts with
     alternative producers (without one they are tried in declaration order). known: given fact → the type its value was
@@ -1266,7 +1266,7 @@ def execute(catalog, flow, init_state, workers=1, early_exit=True, order=None, c
     early_exit=False: every step of the flow runs, whatever the hard checks say (the answers are the same: a failed hard
     check still decides); the trace records it (`trace.early_exit`). hashes=False: a lean run — the same steps, values and
     records, but nothing is hashed (no input hashes, no record hashes, an empty init hash): for answers that are never
-    stored or replayed (the candidates of solvi.search); such a trace does not replay."""
+    stored or replayed (the candidates of solvi.core.slow.search); such a trace does not replay."""
     run = _Run(catalog, flow, init_state, early_exit, order, costs, policy, known, hashes)
     for idxs in run.phases():
         run.run_sync(idxs, workers)
@@ -1660,7 +1660,7 @@ def now_ms():
 def plan_batches(steps):
     """The strategist's grouping: decision parts in a flow that read the same facts with the same model, when the model can
     answer several questions in one forward pass → [[step name]] (chunks of at most the checkpoint's max_questions).
-    Moved here from solvi.decide in 1.0 (solvi.decide re-exports it): the part says whether and with what it batches
+    Moved here from solvi.core.deciders in 1.0 (solvi.core.deciders re-exports it): the part says whether and with what it batches
     (DecisionPart._batch_group), so the planner does not import the deciders."""
     groups = {}
     for st in steps:
@@ -1671,7 +1671,7 @@ def plan_batches(steps):
         batch = getattr(d, "_batch_group", None)
         g = batch() if batch is not None else None
         if g is None:
-            continue                     # the pointer needs a pass of its own; a combination of models (solvi.multi) too
+            continue                     # the pointer needs a pass of its own; a combination of models (solvi.core.deciders.combine) too
         model, facts = g
         groups.setdefault((id(model), tuple(facts)), (model, []))[1].append(p.name)
     out = []

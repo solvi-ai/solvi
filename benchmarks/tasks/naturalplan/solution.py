@@ -3,7 +3,7 @@
 Three kinds of problem: a meeting slot that fits everyone's calendar, a day of meetings with friends across a city, a
 trip through several cities by direct flights. Each problem is read into typed facts by rules (plans.py), and one small
 solvi System per kind accepts a candidate only when every hard check passes: the day is allowed, nobody is busy, every
-meeting can be reached in time, every city is visited once, the flights are direct, the days add up. `solvi.search`
+meeting can be reached in time, every city is visited once, the flights are direct, the days add up. `solvi.core.slow.search`
 walks the candidates:
 
   calendar   every allowed day x every start on a 30-minute grid, earliest first; the first accepted slot wins
@@ -31,7 +31,7 @@ from plans import (KINDS, RULES, CalendarFacts, MeetingFacts, Slot, TripFacts, c
 from score import D, score  # noqa: E402
 
 from solvi import Answer, Catalog, Question, System  # noqa: E402
-from solvi.search import Tree, search  # noqa: E402
+from solvi.core.slow.search import Tree, search  # noqa: E402
 
 QUESTION = "accept"
 

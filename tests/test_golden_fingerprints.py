@@ -97,8 +97,8 @@ def _types():
 
 
 def _objects(golden):
-    from solvi.generate import generator
-    from solvi.multi import Cascade, Vote
+    from solvi.core.slow.generate import generator
+    from solvi.core.deciders.combine import Cascade, Vote
     from solvi.core.provenance import code_fingerprint
     m, m2 = golden.model(), golden.model("v2")
     parts = [m.decision("kind", "What kind?", "note", ["a", "b"]), m2.decision("kind", "What kind?", "note", ["a", "b"])]
@@ -379,7 +379,7 @@ def test_the_table_maps_to_modules_of_0_9_0():
     from solvi.core import provenance
     assert provenance._FP_MODULE is _deprecate.MOVED
     known = set(json.loads((DATA / "modules_0_9_0.json").read_text()))
-    assert "solvi.typed" in known and "solvi.core" in known
+    assert "solvi" ".typed" in known and "solvi.core" in known          # 0.9 names (split: solvi migrate leaves them)
     assert not {old for old in _deprecate.MOVED.values() if old not in known}
     assert all(k.count(":") <= 1 and v.count(":") == 0 for k, v in _deprecate.MOVED.items())
     keys = {k for k in _deprecate.MOVED if ":" not in k}

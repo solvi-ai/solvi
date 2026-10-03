@@ -1,4 +1,4 @@
-"""solvi.memory: a memory of corrected cases next to a decider — nearest neighbours with an abstain threshold, only trusted
+"""solvi.core.knowledge.memory: a memory of corrected cases next to a decider — nearest neighbours with an abstain threshold, only trusted
 sources, a second signal that escalates (check) or answers where the decider escalated (answer), the cases it rests on in
 the trace and the audit, its fingerprint in the part's, deterministic and replayable."""
 import random
@@ -6,10 +6,10 @@ import random
 import pytest
 
 from solvi import Catalog, System
-from solvi.decide import Facts
-from solvi.memory import CorrectionMemory, attach, words
-from solvi.multi import Cascade
-from solvi.storage import JSONLStorage, UntrustedLabel
+from solvi.core.deciders import Facts
+from solvi.core.knowledge.memory import CorrectionMemory, attach, words
+from solvi.core.deciders.combine import Cascade
+from solvi.core.store import JSONLStorage, UntrustedLabel
 from test_decide import TASK, TEAMS, model, texts
 
 

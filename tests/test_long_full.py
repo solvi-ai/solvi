@@ -12,9 +12,9 @@ pytest.importorskip("torch")
 pytest.importorskip("transformers")
 pytest.importorskip("tokenizers")
 
-import solvi.decide as sd  # noqa: E402
+import solvi.core.deciders as sd  # noqa: E402
 from solvi import Catalog, Span, System  # noqa: E402
-from solvi.decide import DecideModel, LongInputWarning  # noqa: E402
+from solvi.core.deciders import DecideModel, LongInputWarning  # noqa: E402
 
 TEAMS = ["billing", "technical"]
 BILLING = ["invoice", "refund", "charged", "payment", "card", "price", "bill", "money"]

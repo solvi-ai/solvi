@@ -1,4 +1,4 @@
-"""solvi.longdoc and decisions with long="retrieve": a long synthetic contract is split into sections, BM25 (and optionally
+"""solvi.core.deciders.longdoc and decisions with long="retrieve": a long synthetic contract is split into sections, BM25 (and optionally
 the decider's own relevance) selects the ones that bear on the question, the decider reads only those, spans map back into
 the whole contract, and the sections read are in the trace. Stand-in scorers as in test_primitives."""
 from typing import Literal
@@ -7,9 +7,9 @@ import numpy as np
 import pytest
 
 from solvi import Catalog, Span, System
-from solvi.decide import DecideModel
-from solvi.longdoc import BM25, LongDocument, approx_tokens, terms
-from solvi.memory import attach
+from solvi.core.deciders import DecideModel
+from solvi.core.deciders.longdoc import BM25, LongDocument, approx_tokens, terms
+from solvi.core.knowledge.memory import attach
 from test_primitives import L14G, L14gStub
 
 FILLER = ("The parties shall cooperate in good faith and keep accurate records of every order, shipment and invoice "
@@ -209,7 +209,7 @@ def test_long_parts_in_a_shared_pass_and_bad_option():
 
 # --- fixes before 0.7
 def test_short_lowercase_lines_are_not_headings():
-    from solvi.longdoc import LongDocument
+    from solvi.core.deciders.longdoc import LongDocument
     text = "ARTICLE 1. DEFINITIONS\n\nthe goods are delivered\nshort line here\n\nPAYMENT TERMS\n\nthe buyer pays\n"
     doc = LongDocument(text, max_tokens=8)
     heads = {s.heading for s in doc.sections}
@@ -219,7 +219,7 @@ def test_short_lowercase_lines_are_not_headings():
 def test_splitting_a_megabyte_is_fast():
     import time
 
-    from solvi.longdoc import LongDocument
+    from solvi.core.deciders.longdoc import LongDocument
     para = ("The supplier shall deliver the goods within thirty days of the order and\ninvoice the buyer at the agreed "
             "price.\nshort line here\n\n")
     heads = "".join(f"## Section {i}\n\nThe buyer pays within {i} days.\n\n" for i in range(12000))
@@ -237,7 +237,7 @@ def _law(m, **kw):
 
 
 def test_a_long_input_keeps_its_group_under_per_group_thresholds():
-    from solvi.decide import Facts
+    from solvi.core.deciders import Facts
     part = _law(model())
     part.act_guard([(Facts(contract=TEXT, domain="supply"), "France")] * 3, max_risk=0.10, groups="domain", min_group=1)
     d = part(contract=TEXT, domain="supply")                  # the group is given: no "group unknown" escalation
@@ -272,8 +272,8 @@ def test_calibration_and_fit_read_a_long_input_as_a_decision_does():
 
 
 def test_combinations_read_a_long_input_by_its_window():
-    from solvi.decide import Facts
-    from solvi.multi import Cascade, Vote
+    from solvi.core.deciders import Facts
+    from solvi.core.deciders.combine import Cascade, Vote
     m = model()
     a, b = _law(m), m.decision("law", "Which country's law governs this agreement?", "contract", LAW, long="retrieve",
                                 top_k=1, option_order="given")
@@ -285,7 +285,7 @@ def test_combinations_read_a_long_input_by_its_window():
 
 
 def test_decide_pass_reads_a_long_input_by_its_window_with_its_context():
-    from solvi.decide import Facts
+    from solvi.core.deciders import Facts
     m = model()
     a = _law(m)
     paid = m.decision("paid", "Is it paid?", "contract", bool)

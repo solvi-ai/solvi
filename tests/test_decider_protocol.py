@@ -6,8 +6,8 @@ import math
 
 import pytest
 
-from solvi.decide import DecisionPart
-from solvi.multi import Cascade, Combination, Route, Vote
+from solvi.core.deciders import DecisionPart
+from solvi.core.deciders.combine import Cascade, Combination, Route, Vote
 from test_guarantees import _labelled
 from test_multi import CLEAR, _parts
 
@@ -79,7 +79,7 @@ def test_calibrate_for_on_a_combination_returns_the_parts_keys_and_sets_its_shar
 
 
 def test_calibrate_for_and_score_and_memory_route_to_every_part_of_a_combination():
-    from solvi.memory import attach
+    from solvi.core.knowledge.memory import attach
     s, l_, _, _ = _parts()
     c = Cascade([s, l_])
     p = c.score(CLEAR)
@@ -91,8 +91,8 @@ def test_calibrate_for_and_score_and_memory_route_to_every_part_of_a_combination
     assert attach(c, False) is None and s.correction_memory is None and l_.correction_memory is None
     from solvi.lora import remove_lora
     assert remove_lora(c) == [None, None]                     # 1.0: solvi.lora.remove_lora(combination), every part's
-    for d in (c, s):                                          # 1.0: solvi.memory.attach, not a method any more
-        with pytest.raises(AttributeError, match=r"memory\(\) was removed in 1.0: use solvi.memory.attach\("):
+    for d in (c, s):                                          # 1.0: solvi.core.knowledge.memory.attach, not a method any more
+        with pytest.raises(AttributeError, match=r"memory\(\) was removed in 1.0: use solvi.core.knowledge.memory.attach\("):
             d.memory()
     for name in ("adapt_lora", "remove_lora"):                # not methods any more, on a part nor on a combination
         for d in (c, s):

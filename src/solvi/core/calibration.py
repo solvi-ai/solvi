@@ -379,7 +379,7 @@ def group_thresholds(score, wrong, groups, risk=0.10, min_group=100, delta=0.10)
 
 
 # --------------------------------------------------------------------------------------------------- groups
-# GroupBy and group_name moved here from solvi.decide in 1.0 (solvi.decide re-exports them): a calibration file reads a
+# GroupBy and group_name moved here from solvi.core.deciders in 1.0 (solvi.core.deciders re-exports them): a calibration file reads a
 # grouping back without importing the deciders.
 class GroupBy:
     """Which group an input belongs to, for thresholds per group (act_guard(groups=...)): a fact name ("domain"), a list of

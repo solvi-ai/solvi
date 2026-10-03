@@ -45,11 +45,11 @@ Tabs:
   these rules nearly perfectly and solvi is not more accurate there; the differences are cost, speed, repeatability,
   replay and the guarantee.
 - **New in 0.8**: the 0.8 highlights (one name per concept, any model as the decider, `System.guarantee`, `Fail` and
-  `solvi.refine`, `decide_set`, `solvi.openset`, `store.redact`, the audit fixes) with a link to the CHANGELOG, then
+  `solvi.core.slow.refine`, `decide_set`, `solvi.core.guarantees.openset`, `store.redact`, the audit fixes) with a link to the CHANGELOG, then
   small live demos, with keyword stand-ins in place of models and a scripted agent (no model runs in
   the browser): escalation with a guarantee (`act_guard` on 300 labelled emails: the answered share, the error, the risk
   on new emails, `must_escalate_at_least`, and the guarantee line of the audit; a slider sets the risk), a vote of two
-  model families under one guarantee (`solvi.multi.Vote` with `act_guard`: disagreement escalates with both proposals;
+  model families under one guarantee (`solvi.core.deciders.combine.Vote` with `act_guard`: disagreement escalates with both proposals;
   the audit's guarantee line), text in (`solvi.core.textin.TextIn` with `CueExtractor`: a message → the question it asks and
   its fields, each with a quote; `system.ask_text` answers it), the agent guard (preview: `solvi.agents.Guard` allows a
   refund to the account the user wrote, denies one to an account found only in a tool output, escalates the same call

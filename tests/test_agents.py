@@ -10,7 +10,7 @@ import pytest
 from pydantic import BaseModel
 
 from solvi.agents import Guard, ToolCall, conversation, messages, model_from_json_schema
-from solvi.decide import DecideModel
+from solvi.core.deciders import DecideModel
 
 IBAN = "DE89370400440532013000"
 CTX = [{"role": "system", "content": "You pay invoices for ACME."},

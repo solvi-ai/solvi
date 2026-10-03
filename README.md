@@ -67,7 +67,7 @@ skill picker with an honest "none".
 ```bash
 pip install solvi              # core: rules, checks, learned answer heads (numpy, scipy, pydantic)
 pip install "solvi[model]"     # + torch, transformers: ModernBERT field extractors for documents and the decider
-pip install "solvi[onnx]"      # + onnxruntime, tokenizers: the decider (solvi.decide) on CPU without torch
+pip install "solvi[onnx]"      # + onnxruntime, tokenizers: the decider (solvi.core.deciders) on CPU without torch
 pip install "solvi[serve]"     # + fastapi, uvicorn: `solvi serve app.py:system` — the questions over HTTP (also --mcp)
 pip install "solvi[mcp]"       # + the official MCP SDK for solvi serve --mcp (without it, a built-in stdio server)
 pip install "solvi[duckdb]"    # + duckdb: stored decisions in a DuckDB file (solvi.DuckDBStorage); [postgres] for PostgreSQL
@@ -196,10 +196,10 @@ the kinds (one option, several, an ordered score, yes/no); a **decider** answers
 state with probabilities, a calibrated confidence and act / escalate, and hard checks, constraints and rules still
 decide. The decider is whichever model you have:
 
-- **An LLM** — `solvi.llm.llm(base_url, model, api_key=...)`: any OpenAI-compatible chat-completions server (OpenAI,
+- **An LLM** — `solvi.core.deciders.llm.llm(base_url, model, api_key=...)`: any OpenAI-compatible chat-completions server (OpenAI,
   OpenRouter, vLLM, llama.cpp, Ollama). Nothing to install beyond the core; its JSON replies are validated, and an invalid
   one escalates, never a guess.
-- **A decision service** — `solvi.systemone.systemone(url, model)`: anything that speaks the System One API.
+- **A decision service** — `solvi.core.deciders.systemone.systemone(url, model)`: anything that speaks the System One API.
 - **A local checkpoint, for offline or cheap cases** — `DecideModel.load("solvi-ai/solvi-base")` (`solvi[onnx]`, no
   GPU). solvi-base is a 150M ModernBERT-base cross-encoder distilled from solvi-large: about 50 ms per question on a CPU
   (ONNX fp16, 4 threads). Its card is honest about where it stands: 54.5% zero-shot on typed questions over JSON states
@@ -212,7 +212,7 @@ import os
 from typing import Literal
 from pydantic import BaseModel, Field
 from solvi import Catalog, Scale, System
-from solvi.llm import llm
+from solvi.core.deciders.llm import llm
 
 class Triage(BaseModel):
     team: Literal["billing", "technical", "shipping"] = Field(description="Which team should handle this ticket?")
@@ -221,7 +221,7 @@ class Triage(BaseModel):
     topics: list[Literal["refund", "delay", "bug"]] = Field(description="What does the ticket mention?")
 
 model = llm("https://api.openai.com/v1", "gpt-4o-mini", api_key=os.environ["OPENAI_API_KEY"])
-# offline: model = solvi.decide.DecideModel.load("solvi-ai/solvi-base")   — the same questions, the same checks
+# offline: model = solvi.core.deciders.DecideModel.load("solvi-ai/solvi-base")   — the same questions, the same checks
 cat = Catalog()
 questions = model.questions(cat, Triage, text_fact="ticket", min_confidence=0.6)
 
@@ -260,7 +260,7 @@ Every answer is a value and a confidence, and the types also declare answer prim
   list of candidates. Near ties escalate (`min_margin=`), and the answer does not depend on the order the options are listed
   in (sorted by default).
 - **Several models.** Any decider above — an LLM, a System One service (Jev, Kev, Von, Laya-serve, …), a local
-  checkpoint — combines with the others: `Cascade`, `Vote` and `Route` (`solvi.multi`) combine models — the next model only when one escalates, an answer
+  checkpoint — combines with the others: `Cascade`, `Vote` and `Route` (`solvi.core.deciders.combine`) combine models — the next model only when one escalates, an answer
   only when models of different families agree, or a model picked by code — under one guarantee
   ([examples/20_vote_across_families.py](examples/20_vote_across_families.py) shows a vote with stand-in servers).
 - **Serving and operations.** `solvi serve module:system` exposes the questions over HTTP (OpenAPI from the same types),
@@ -294,7 +294,7 @@ Every answer is a value and a confidence, and the types also declare answer prim
   sections, BM25 picks the few that bear on the question, the decider reads only those, and quotes point into the whole
   document; the trace lists the sections read. `long="full"` reads a text whole up to the length a checkpoint trained on
   long inputs declares (`max_len_long`), and retrieves within that length beyond it.
-- **Learning from corrections.** `solvi.memory.attach(part)` escalates an answer when similar corrected cases say another one;
+- **Learning from corrections.** `solvi.core.knowledge.memory.attach(part)` escalates an answer when similar corrected cases say another one;
   `fit` heads refit on all kept examples as corrections accumulate; `solvi.lora.adapt_lora(part, examples, holdout=0.3)` trains
   a small LoRA adapter for one question on solvi-base once it has ~100 labelled answers (`solvi[lora]`, experimental);
   `solvi.learning.Learning(system, store)` proposes updates from trusted corrections only and promotes one when it passes held-out,
@@ -311,7 +311,7 @@ Every answer is a value and a confidence, and the types also declare answer prim
 A System under a guarantee is fast, cheap and knows when it is unsure: that is System 1. An LLM, a re-ask loop or a
 search is slow and costs money per input: System 2. solvi puts them in one system, and both are experimental in 0.9:
 
-- **Who answers** (`solvi.dispatch`). System 1 is asked first; when its own signals say its answer cannot be given
+- **Who answers** (`solvi.core.dispatch`). System 1 is asked first; when its own signals say its answer cannot be given
   alone — below its guarantee, unlike the calibration examples, an abstention, a broken constraint — the slow path
   answers, and when that cannot either, or the budget is spent, a person gets the input with both candidates and the
   reasons. `Dispatcher.calibrate(examples, max_risk=...)` chooses, on each slice of what System 1 hands over, whether
@@ -337,13 +337,13 @@ search is slow and costs money per input: System 2. solvi puts them in one syste
 
 ## Planning around dead ends and costs (code strategist)
 
-The default strategist needs the inputs of every producer of a fact. `solvi.strategy.CostStrategist()` plans around
+The default strategist needs the inputs of every producer of a fact. `solvi.core.plan.cost.CostStrategist()` plans around
 producers whose inputs are never given, and with `producers="equivalent"` picks the cheapest verified plan by declared
 `cost=` (an exact 0/1 program; hard checks that govern a question always stay in the plan). No model is involved; the plan
 is one hashed record in the trace and replay re-verifies it.
 
 ```python
-from solvi.strategy import CostStrategist
+from solvi.core.plan.cost import CostStrategist
 system = System(cat, questions, strategist=CostStrategist(producers="equivalent"))
 ```
 
@@ -355,7 +355,7 @@ With `solvi[model]`, fields are found by a fine-tuned ModernBERT extractor. The 
 document, so every answer built on it can be cited.
 
 ```python
-from solvi.extract_long import LongSpanExtractor
+from solvi.core.extract import LongSpanExtractor
 
 ex = LongSpanExtractor.load("solvi-ai/extract-base")      # a field is a description; long texts in 1024-token windows
 ex.fit([(text, "the total amount paid", (start, end)), ...], epochs=3)   # a few dozen labeled documents of your task
@@ -374,7 +374,7 @@ from its model card (held-out fields and data sets, one seed): CORD receipt fiel
 67.9%; five never-trained CUAD clause types, 73.1%; Kleister-NDA and SROIE, never seen, 2–95% by field (addresses
 2%). With per-field thresholds from 40 labeled contracts it reached 85.5% on CUAD; fine-tuned on 25–100 SROIE
 receipts, 86–89%. So describing a field is a start, not a finished extractor: label 25–100 documents and fine-tune.
-`solvi.extract_multi.MultiSpanExtractor` (a fixed field list, one pass per document for all fields) is the extractor
+`solvi.core.extract.multi.MultiSpanExtractor` (a fixed field list, one pass per document for all fields) is the extractor
 behind the receipt numbers below; it has no save / load, and it is moving into the knowledge memory in 1.0. See
 [docs/guide.md](docs/guide.md#extracting-fields-from-documents).
 
@@ -398,7 +398,7 @@ scored on a held-out split ([benchmarks/tasks/](benchmarks/tasks/), solvi 0.8.0,
 | CUAD contracts, 1,025 questions: accuracy; answered alone, wrong among them | 0.882; 100%, 11.8% | 0.899; 67.6%, 4.0% |
 | Banking77 stream, 20 unseen intents from request 1,000, promise ≤ 5% wrong: wrong after the shift | 22.5% (broken) | 0.7% (kept), at 13.7% answered alone |
 | Abt-Buy, 1,916 product pairs: F1 | 0.872 (LLM per pair) | 0.933 (code reads the offers; a head fitted on 5,743 labelled pairs) |
-| NATURAL PLAN, right of 100: calendar / meetings / trips | 92 / 75 / 43 (LLM plans) | 95 / 100 / 98 (`solvi.search`, no LLM) |
+| NATURAL PLAN, right of 100: calendar / meetings / trips | 92 / 75 / 43 (LLM plans) | 95 / 100 / 98 (`solvi.core.slow.search`, no LLM) |
 | BIRD mini-dev, 150 questions: right; wrong among answered | 78; 48.0% | 73; 34.8% at 74.7% answered |
 | RAGTruth, 600 responses: F1 | 0.784 | 0.766 |
 | τ-bench retail, 30 tasks: solved; calls the environment refused | 18; 10 | 14; 0 |
@@ -482,8 +482,8 @@ on documents the extractor dominates.
 
 - Open-ended free-text questions or generated answers. solvi answers typed questions only: yes/no, choices, scores,
   multi-label, "not stated", exact spans of the text, rankings and number ranges. Around a model that writes (a query,
-  a plan, a JSON extraction) it checks, compares and re-asks — `solvi.generate`, `solvi.agree`, `solvi.refine` — but
-  does not make the writing better. It searches for a plan only over a space you enumerate (`solvi.search`).
+  a plan, a JSON extraction) it checks, compares and re-asks — `solvi.core.slow.generate`, `solvi.core.slow.agree`, `solvi.core.slow.refine` — but
+  does not make the writing better. It searches for a plan only over a space you enumerate (`solvi.core.slow.search`).
 - New fields with no labeled examples. Extracting a field from its description alone is not reliable yet: the
   published extract-base gets 2–95% by field on data sets it never saw (see "Extract from documents"); label 25–100
   documents and fine-tune.

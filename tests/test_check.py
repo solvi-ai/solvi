@@ -39,7 +39,7 @@ class DropCheck:
         self.name = name
 
     def plan(self, catalog, questions, init_keys, heads=None):
-        from solvi.strategist import plan
+        from solvi.core.plan.strategist import plan
         flow = plan(catalog, questions, init_keys, heads)
         flow.steps = [st for st in flow.steps if st.part.name != self.name]
         flow.per_question = {q: [f for f in fs if f != self.name] for q, fs in flow.per_question.items()}
@@ -316,7 +316,7 @@ def good():
 
 class DropCheck:
     def plan(self, catalog, questions, init_keys, heads=None):
-        from solvi.strategist import plan
+        from solvi.core.plan.strategist import plan
         flow = plan(catalog, questions, init_keys, heads)
         flow.per_question = {q: [f for f in fs if f != "known_customer"] for q, fs in flow.per_question.items()}
         return flow

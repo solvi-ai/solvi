@@ -11,7 +11,7 @@ import pytest
 
 from solvi import (Answer, Catalog, Claim, Decision, Estimate, FactTypeError, Maybe, Question, Quote, Rank, Response, Span,
                    System, Unknown)
-from solvi.decide import DecideModel, Item, capabilities, decode_pointer, plan_batches, pointer_evidence
+from solvi.core.deciders import DecideModel, Item, capabilities, decode_pointer, plan_batches, pointer_evidence
 from solvi.core.types import Bins
 
 DOC = "Invoice 17. Total due: 1,250.50 EUR. Paid by card on 2026-09-01. Delivery in about 12 days."
@@ -558,7 +558,7 @@ def test_pointer_questions_use_the_full_layout_and_are_not_batched():
     seq = [c for c in m.scorer.calls if c[0] == "seq"]
     assert seq and all(all(p) for _, _, p in seq)                  # only pointer questions go one per sequence
     assert all("span" not in modes for c in m.scorer.calls if c[0] == "pass" for modes in c[1])
-    from solvi.strategist import Step
+    from solvi.core.plan.strategist import Step
     assert plan_batches([Step(cat.rules["total"], []), Step(cat.rules["ranked"], [])]) == []
 
 
@@ -598,7 +598,7 @@ def test_pointer_temperature_divides_every_score():
 
 
 def test_typed_span_trims_the_best_span_never_jumps_outside_it():
-    from solvi.decide import _typed_span
+    from solvi.core.deciders import _typed_span
     spans = [(0.6, 10, 20, "149.90 EUR"), (0.2, 0, 3, "313"), (0.1, 10, 16, "149.90"), (0.05, 10, 13, "149")]
     k, mass = _typed_span(spans, float)
     assert k == 2 and mass == pytest.approx(0.7)                   # '149.90' and every span up to '149.90 EUR'
@@ -659,7 +659,7 @@ def test_a_typed_span_reads_dates_and_numbers_as_people_write_them():
 
 
 def test_act_features_always_carry_the_l14g_features():
-    from solvi.decide import _Spec, act_features
+    from solvi.core.deciders import _Spec, act_features
     x = act_features(_Spec("?", ["yes", "no"], kind="noul"), Decision("yes", {"yes": 0.9, "no": 0.1}, confidence=0.9), 1.0)
     assert x["p_unknown"] == 0.0 and x["kind=span"] == 0.0 and x["kind=noul"] == 1.0
 

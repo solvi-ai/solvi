@@ -18,7 +18,7 @@ import numpy as np
 
 def export(model, out):
     import torch
-    from solvi.extract_long import LongSpanExtractor
+    from solvi.core.extract import LongSpanExtractor
     ex = LongSpanExtractor.load(model, device="cpu")
 
     class Span(torch.nn.Module):

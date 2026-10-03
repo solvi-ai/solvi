@@ -1,4 +1,4 @@
-"""solvi.refine: a check that says why (Fail — falsy, recorded, in the answer's why, the audit and the replay; a plain
+"""solvi.core.slow.refine: a check that says why (Fail — falsy, recorded, in the answer's why, the audit and the replay; a plain
 False still works), and the loop propose → check → re-ask with the reasons → escalate: stops at the first accepted
 proposal, escalates after N rounds with the last reasons, feeds back a rejected reply, ends on a proposer that fails,
 lets the System generate with the feedback as a fact, and replays — every round's trace and what the loop did."""
@@ -9,8 +9,8 @@ import pytest
 from pydantic import BaseModel
 
 from solvi import Answer, Catalog, Question, System
-from solvi.generate import generator
-from solvi.refine import Fail, Refinement, failed_checks, refine
+from solvi.core.slow.generate import generator
+from solvi.core.slow.refine import Fail, Refinement, failed_checks, refine
 
 
 class Slot(BaseModel):

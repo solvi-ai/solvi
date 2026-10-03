@@ -3,7 +3,7 @@
     solvi migrate src/            # rewrites .py and .md files in place, prints each file it changed
     solvi migrate src/ --check    # changes nothing; lists what would change and exits 1 when anything would
 
-1.0 moved most modules (`solvi.core.types` → `solvi.core.types`, `solvi.storage` → `solvi.core.store`, ...). The old paths
+1.0 moved most modules (`solvi.core.types` → `solvi.core.types`, `solvi.core.store` → `solvi.core.store`, ...). The old paths
 still import for one release with a SolviDeprecationWarning; this rewrites them, from the same table the warnings come
 from (solvi._deprecate: MOVED and the names that left `solvi` itself):
 

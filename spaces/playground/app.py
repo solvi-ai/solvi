@@ -29,7 +29,7 @@ import vs_llm
 from audit_view import audit_html, fmt_answer
 from sandbox import LIMITS_NOTE, run_job, serialize
 from solvi import System
-from solvi.strategist import plan
+from solvi.core.plan.strategist import plan
 
 IN_BROWSER = sys.platform == "emscripten"
 
@@ -839,11 +839,11 @@ with gr.Blocks(title="solvi playground", theme=THEME, css=CSS + vs_llm.CSS) as d
     with gr.Tab("New in 0.8"):
         gr.Markdown("**New in solvi 0.8** (the [CHANGELOG](https://github.com/solvi-ai/solvi/blob/main/CHANGELOG.md) has "
                     "the full list): one name for every concept (the 0.7 names still work, with a warning, until 0.9); "
-                    "any model as the decider (an LLM through `solvi.llm`, a System One service, or a local checkpoint); "
+                    "any model as the decider (an LLM through `solvi.core.deciders.llm`, a System One service, or a local checkpoint); "
                     "a calibrated guarantee with a stated promise on any question (`System.guarantee`); checks that say "
-                    "why (`Fail`) and a propose → check → re-ask loop (`solvi.refine`); the answers of many items made "
-                    "consistent under set rules (`solvi.sets.decide_set`); inputs from outside the calibration set "
-                    "(`solvi.openset`); erasure that keeps the hash chain verifiable (`store.redact`); and the fixes of "
+                    "why (`Fail`) and a propose → check → re-ask loop (`solvi.core.slow.refine`); the answers of many items made "
+                    "consistent under set rules (`solvi.core.sets.decide_set`); inputs from outside the calibration set "
+                    "(`solvi.core.guarantees.openset`); erasure that keeps the hash chain verifiable (`store.redact`); and the fixes of "
                     "an independent audit (a failed hard check always overrides; replay checks the stored answers).",
                     elem_classes="note")
         gr.Markdown("The demos below run live on the solvi this tab loaded. **No model runs here:** the deciders are "

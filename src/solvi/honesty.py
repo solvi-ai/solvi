@@ -101,7 +101,7 @@ def system_of(task):
     """The System a task module describes: `task.system()`, else System(task.cat, task.QUESTIONS)."""
     if callable(getattr(task, "system", None)):
         return task.system()
-    from .system import System
+    from .core.system import System
     return System(task.cat, task.QUESTIONS)
 
 

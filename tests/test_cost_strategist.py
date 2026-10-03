@@ -1,4 +1,4 @@
-"""The code strategist (solvi.strategy.CostStrategist): code plans, dead ends, mandatory checks, the plan record in the
+"""The code strategist (solvi.core.plan.cost.CostStrategist): code plans, dead ends, mandatory checks, the plan record in the
 trace and its replay, facts derivable from each other. (The model strategist and name matching were removed in 1.0.)"""
 import time
 from typing import Literal
@@ -6,8 +6,8 @@ from typing import Literal
 import pytest
 
 from solvi import Catalog, Question, System
-from solvi.strategist import plan as det_plan
-from solvi.strategy import CostStrategist, mandatory_checks, search, validate
+from solvi.core.plan.strategist import plan as det_plan
+from solvi.core.plan.cost import CostStrategist, mandatory_checks, search, validate
 
 
 def chain():
@@ -128,7 +128,7 @@ def test_the_plan_is_recorded_replayed_and_a_tampered_plan_does_not_verify():
 def test_the_model_strategist_and_name_matching_are_gone():
     import importlib
 
-    from solvi import strategy
+    from solvi.core.plan import cost as strategy
     for mod in ("solvi.segment_model", "solvi.aliases"):
         with pytest.raises(ModuleNotFoundError):
             importlib.import_module(mod)
@@ -173,7 +173,7 @@ def test_cost_strategist_record_false_keeps_the_plan_out_of_the_trace_and_fallba
 
 
 def test_plan_raises_plan_error_for_a_checkpoint_that_is_not_in_the_catalog():
-    from solvi.strategist import PlanError
+    from solvi.core.plan.strategist import PlanError
     cat, _ = chain()
     with pytest.raises(PlanError, match="requires .nope., which is not in the catalog"):
         det_plan(cat, [Question("ok", "", None, requires=["nope"])], set(ST))

@@ -46,7 +46,7 @@ def leaky(tmp_path=None):
           Question("limit", "Within limit?", Answer.choice(["ok", "no"]))]
     s = System(cat, qs)
     if tmp_path is not None:
-        from solvi.storage import open_storage
+        from solvi.core.store import open_storage
         s.storage = open_storage(tmp_path / "t.jsonl", s)
     return s
 

@@ -225,7 +225,7 @@ def test_vhash_and_the_input_hash_match_the_plain_canonical_json_on_random_value
 
 
 def test_a_hash_seed_lends_its_hashes_and_the_trace_is_byte_for_byte_the_same():
-    """solvi.search asks the same given text and held facts with every candidate: a HashSeed on the catalog hashes them
+    """solvi.core.slow.search asks the same given text and held facts with every candidate: a HashSeed on the catalog hashes them
     once. The values it holds are not canonicalised again, and every hash of the trace is what an unseeded ask gives."""
     import solvi.core.runtime as rt
     cat = Catalog()

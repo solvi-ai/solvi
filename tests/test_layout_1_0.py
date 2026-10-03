@@ -94,7 +94,7 @@ from solvi.core import Quote
 
 def patch(monkeypatch):
     monkeypatch.setattr("solvi.runtime.now_ms", lambda: 0)
-    return solvi.schema.dump, "solvi.typed:Maybe", solvi.systemone
+    return solvi.schema.dump, "solvi.typed:Maybe", solvi.show, solvi.systemone
 '''
 
 EXPECTED = '''\
@@ -109,7 +109,7 @@ from solvi.core import Quote
 
 def patch(monkeypatch):
     monkeypatch.setattr("solvi.core.runtime.now_ms", lambda: 0)
-    return solvi.core.schema.dump, "solvi.core.types:Maybe", solvi.systemone
+    return solvi.core.schema.dump, "solvi.core.types:Maybe", solvi.show, solvi.core.deciders.systemone
 '''
 
 

@@ -10,11 +10,11 @@ is "which exit do I take here?".
 - **System 1** is a catalog of two rules: take the exit of the route it remembers to the goal, or the only exit there
   is. No search. It abstains when it remembers no route, when the remembered exit is not on offer, or when the last
   step surprised it (it led somewhere else, or nowhere).
-- **System 2** is a search over the world map the player builds as it goes (`solvi.worldmap.WorldMap`): the known way
+- **System 2** is a search over the world map the player builds as it goes (`solvi.core.knowledge.worldmap.WorldMap`): the known way
   to the goal when the map has one, else every unexplored exit within reach, scored by expected value (the kind of
   place the goal needs behind it, the goal's direction, the steps to get there). An LLM can add a hint (off by
   default: `--llm URL MODEL`, key in SOLVI_LLM_KEY).
-- **The dispatcher** (`solvi.dispatch.Dispatcher`) asks System 1 first and System 2 when System 1 abstains; every
+- **The dispatcher** (`solvi.core.dispatch.Dispatcher`) asks System 1 first and System 2 when System 1 abstains; every
   decision is one hash-chained record that replays without the game.
 - **Consolidation**, after each goal, compiles System 1's routes from the map's confirmed claims (a route to every place
   a goal has named and the player has reached): what System 2 found by deliberating becomes what System 1 does at once.
@@ -98,7 +98,7 @@ def main():
 
     llm = None
     if a.llm:
-        from solvi.llm import llm as make_llm
+        from solvi.core.deciders.llm import llm as make_llm
         llm = make_llm(a.llm[0], a.llm[1], api_key=os.environ.get("SOLVI_LLM_KEY"))
     out = rec.RUNS
     if a.rom:

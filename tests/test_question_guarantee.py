@@ -1,4 +1,4 @@
-"""A guarantee on any signal (solvi.guarantee): a calibrated threshold with a stated promise on a question's answer, a
+"""A guarantee on any signal (solvi.core.guarantees.guarantee): a calibrated threshold with a stated promise on a question's answer, a
 computed fact or any scalar — the promise, the checks before it is made, ask time, the trace and replay."""
 import math
 import random
@@ -7,7 +7,7 @@ import numpy as np
 import pytest
 
 from solvi import Answer, Catalog, JSONLStorage, Question, System
-from solvi.guarantee import GuaranteeWarning, calibrate
+from solvi.core.guarantees.guarantee import GuaranteeWarning, calibrate
 
 
 def _draw(rng, n, noise=0.15):

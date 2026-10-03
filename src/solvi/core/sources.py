@@ -1,5 +1,5 @@
 """Where a label may come from: the trusted sources (a person, an outcome, a rule), the "verified" System 2 answer that
-only some channels take, and the check every channel runs (check_source). Moved out of solvi.storage in 1.0, which
+only some channels take, and the check every channel runs (check_source). Moved out of solvi.core.store in 1.0, which
 re-exports every name, so that the guarantees and the memory of corrections check a label without importing the store."""
 from __future__ import annotations
 

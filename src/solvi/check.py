@@ -57,7 +57,7 @@ Notes (never fail):
                         outside the loop: the system's strategist plans around it
   no_rule               a question without a rule answers only after fit (it abstains until then)
 
-The flows are planned with every given fact present (`solvi.strategist.given_facts`), as `solvi serve` does, by the
+The flows are planned with every given fact present (`solvi.core.plan.strategist.given_facts`), as `solvi serve` does, by the
 system's own strategist (System(strategist=)) — the deterministic one when none is set."""
 from __future__ import annotations
 
@@ -127,7 +127,7 @@ class Report:
 def lint(obj, strict=False, max_combos=100_000):
     """A System (or a Catalog) → Report. `max_combos`: the largest number of answer combinations tried per group of
     constraints that share questions."""
-    from .strategist import given_facts
+    from .core.plan.strategist import given_facts
     if hasattr(obj, "tools") and hasattr(obj, "system") and not hasattr(obj, "questions"):   # a solvi.agents.Guard
         rep = Report(strict=strict)
         for name, t in obj.tools.items():
@@ -146,7 +146,7 @@ def lint(obj, strict=False, max_combos=100_000):
     if system is not None:                            # planned as the system's ask plans (its strategist, if any)
         planner = system._plan
     else:
-        from .strategist import plan
+        from .core.plan.strategist import plan
 
         def planner(qs, keys):
             return plan(cat, qs, keys, heads)
@@ -230,7 +230,7 @@ def _cycles(cat, rep, strategist=None):
                 rep.add("error", "cycle", where,
                         "these facts are derived from each other; each has a producer outside the loop, but the "
                         "deterministic strategist needs the inputs of every producer of a fact, so none of them can be "
-                        "computed — plan with System(..., strategist=solvi.strategy.CostStrategist()), which uses the "
+                        "computed — plan with System(..., strategist=solvi.core.plan.cost.CostStrategist()), which uses the "
                         "producers whose inputs are there")
             else:
                 rep.add("note", "mutual_producers", where,
@@ -242,7 +242,7 @@ def _cycles(cat, rep, strategist=None):
 def _breakable(cat, comp):
     """Can every fact of a loop be computed without going round it: some producer of it reads only facts outside the loop
     or facts of the loop already settled that way?"""
-    from .strategy import alternatives
+    from .core.plan.cost import alternatives
     done, changed = set(), True
     while changed:
         changed = False
@@ -259,7 +259,7 @@ def _questions(cat, questions, heads, given, rep, planner):
     as used}); unanswerable questions, rules reading question names, questions without a rule. planner(questions, given
     facts) → Flow: the system's own (System._plan)."""
     from .core.catalog import PRIMITIVES
-    from .strategist import PlanError
+    from .core.plan.strategist import PlanError
     flows, counted = {}, {}
     for name, q in questions.items():
         try:

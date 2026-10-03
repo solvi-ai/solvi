@@ -34,7 +34,7 @@ import numpy as np
 
 from solvi import Answer, Catalog, Question, System
 from solvi.core.calibration import evaluate
-from solvi.decide import DecideModel
+from solvi.core.deciders import DecideModel
 
 TASK = "Which team should handle this support email?"
 TEAMS = {"billing": "payments, invoices, refunds, double charges",

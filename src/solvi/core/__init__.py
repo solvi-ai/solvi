@@ -3,9 +3,14 @@
     from solvi.core import Catalog, Question, Answer, Quote, Decision   # the catalog and its value classes
     from solvi.core.types import Maybe, Span                           # one area: solvi.core.<area>
 
-The areas (solvi.core.<area>): catalog (parts, questions, answers, quotes), types (typed answers), runtime (flows,
-traces, replay), provenance (fingerprints, grounding), schema (export), textin (reading a text), primitives, calibration
-and calibfile, costs, sources, chain. In 0.9 `solvi.core` was the catalog module; its public names are still here."""
+The areas (solvi.core.<area>), bottom to top: the kernel — catalog (parts, questions, answers, quotes), types (typed
+answers), runtime (flows, traces, replay), provenance (fingerprints, grounding), schema (export), textin (reading a
+text), primitives, sets, calibration and calibfile, costs, sources, chain; deciders (models as catalog parts: the
+decider, LLMs, System One, cascades and votes, learned heads, rule lists), extract (long texts), plan (strategists);
+guarantees (calibrated promises, drift, open-set); store (the decision store, audit, diff, reports, signatures) and
+response; system (System); slow (generation, agreement, refine, search) and dispatch (the fast and the slow path);
+knowledge (world map, episodes, memory). A module imports only its own area's tier or the ones below it.
+In 0.9 `solvi.core` was the catalog module; its public names are still here."""
 from .catalog import (NOT_STATED, NOT_STATED_KEY, PRIMITIVES, Answer, AnswerType, Catalog, Claim, Decision,
                       ExperimentalWarning, NotStated, Part, Question, Quote, Serial, Unknown, accept, accepts, bin_labels,
                       check_evidence, cuts_number, evidence_rows, find_quote, find_whole, ground, has_evidence, locate,

@@ -1,5 +1,5 @@
 """A local OpenAI-compatible endpoint in front of OpenRouter, with the cache, ledger and budget of common/llm.py, for
-the solvi solutions: `solvi.llm` and `solvi.generate` talk to it as to any chat-completions server. The key stays here.
+the solvi solutions: `solvi.core.deciders.llm` and `solvi.core.slow.generate` talk to it as to any chat-completions server. The key stays here.
 
     OPENROUTER_API_KEY=... python common/proxy.py --cache cache          # listens on 127.0.0.1:8765
     base_url = "http://127.0.0.1:8765/<tag>/v1"     # the path before /v1 is the tag of the call in the ledger

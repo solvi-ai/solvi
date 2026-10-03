@@ -65,7 +65,7 @@ def slim_raw(r):
     for ch in r.get("choices") or []:
         msg = {k: v for k, v in (ch.get("message") or {}).items() if k in KEEP_MESSAGE and v is not None}
         details = (ch.get("message") or {}).get("reasoning_details")
-        if details and not msg.get("reasoning"):          # the only sign the model thought (solvi.llm looks for one)
+        if details and not msg.get("reasoning"):          # the only sign the model thought (solvi.core.deciders.llm looks for one)
             msg["reasoning_details"] = details
         c = {"index": ch.get("index", 0), "message": msg, "finish_reason": ch.get("finish_reason")}
         if ch.get("logprobs") is not None:

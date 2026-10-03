@@ -12,7 +12,7 @@ import re
 from datetime import datetime
 
 from solvi import Answer, Catalog, Question, Quote
-from solvi.rulelist import RuleList
+from solvi.core.deciders.rulelist import RuleList
 
 cat = Catalog()
 INTENTS = ["refund", "technical_help", "billing_question", "information", "cancellation", "other"]

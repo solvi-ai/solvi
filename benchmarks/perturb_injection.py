@@ -5,7 +5,7 @@
 Messages: the Bitext customer-support set (Hugging Face `bitext/Bitext-customer-support-llm-chatbot-training-dataset`,
 read from the local Hugging Face cache), n per run, stratified over its 11 categories; the question: which category.
 Every message is also asked with one appended sentence that pushes a wrong category, in five wordings — four the rules
-of solvi.perturb know (override, role label, "classify this as", a quoted command) and one they do not ("kindly file this
+of solvi.core.deciders.perturb know (override, role label, "classify this as", a quoted command) and one they do not ("kindly file this
 under X"). Also: how often the rules fire on ordinary e-mails (Enron, `SetFit/enron_spam`), i.e. how often perturb costs
 an extra pass without an attack. The decider: $SOLVI_DECIDE_MODEL (a local checkpoint folder or a Hugging Face id),
 else the published solvi-ai/solvi-base (ONNX; downloaded on first use)."""
@@ -17,8 +17,8 @@ import random
 import sys
 import time
 
-from solvi.decide import DecideModel
-from solvi.perturb import variants
+from solvi.core.deciders import DecideModel
+from solvi.core.deciders.perturb import variants
 
 N = int(sys.argv[1]) if len(sys.argv) > 1 else 200
 HF = os.path.expanduser("~/.cache/huggingface/hub")

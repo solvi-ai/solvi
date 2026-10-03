@@ -35,8 +35,8 @@ ROOT = Path(__file__).resolve().parents[1]
 MODES = ("full", "compact", "sample:10")
 
 from solvi import Answer, Catalog, Question, System  # noqa: E402
-from solvi.refine import Fail  # noqa: E402
-from solvi.storage import JSONLStorage  # noqa: E402
+from solvi.core.slow.refine import Fail  # noqa: E402
+from solvi.core.store import JSONLStorage  # noqa: E402
 
 
 def _module(name, path):

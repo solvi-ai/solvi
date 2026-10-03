@@ -35,7 +35,7 @@ import numpy as np
 from pydantic import BaseModel, Field
 
 from solvi import Answer, Catalog, Question, Scale, System
-from solvi.decide import DecideModel
+from solvi.core.deciders import DecideModel
 
 
 # --- the input: a ticket

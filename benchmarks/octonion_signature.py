@@ -1,13 +1,13 @@
-"""The positional octonion signature: an experiment, moved out of solvi.signature in 0.8.
+"""The positional octonion signature: an experiment, moved out of solvi.core.store.signature in 0.8.
 
     uv run python benchmarks/octonion_signature.py           # its self-check: algebra, one change located, limits
 
-Each content hash (solvi.signature.record_digest) is written into 4 octonions (7 bytes and an anchor each) times an
+Each content hash (solvi.core.store.signature.record_digest) is written into 4 octonions (7 bytes and an anchor each) times an
 element of its position; the signature is the ordered product ((L0 L1) L2)... — 32 floats. Octonions have no zero
 divisors (one change always moves the product) and are alternative (a leaf is divided back out exactly); the solved leaf
 decodes to a hash (28 bytes) at the changed position only. It comes from a trace-signature experiment where derivation
 TREES were signed and the non-associativity saw a change of brackets. On a flat store it locates exactly as the syndrome
-code of solvi.signature does, 4x larger and ~60x slower (benchmarks/trace_signature.py compares the two), so the package
+code of solvi.core.store.signature does, 4x larger and ~60x slower (benchmarks/trace_signature.py compares the two), so the package
 keeps the syndrome code only. The position elements come from numpy's seeded normal generator, which NumPy does not
 promise to keep across versions: a signature taken with one NumPy may not check with another.
 
@@ -17,7 +17,7 @@ from __future__ import annotations
 import hashlib
 
 import numpy as np
-from solvi.signature import digests
+from solvi.core.store.signature import digests
 
 ALG = "solvi-octonion-pos/1"            # seeds the position elements of the octonion code
 BLOCKS = 4                       # octonions per element: 4 x 8 = 32 numbers
@@ -148,7 +148,7 @@ def _oct_hits(ds, bad, sig):
 
 
 def sign(obj):
-    """The octonion signature of what solvi.signature.sign would sign (a trace, a Response, a store, a list)."""
+    """The octonion signature of what solvi.core.store.signature.sign would sign (a trace, a Response, a store, a list)."""
     ds = digests(obj)
     if any(d is None for d in ds):
         raise ValueError("the store has unreadable records: verify() it first")
@@ -157,7 +157,7 @@ def sign(obj):
 
 def extend(signature, new_items, start=None):
     """The signature after appending `new_items`, in O(len(new_items))."""
-    from solvi.signature import record_digest
+    from solvi.core.store.signature import record_digest
     n = signature["count"] if start is None else start
     new = [record_digest(x) for x in new_items]
     acc = np.asarray(signature["root"], dtype=np.float64).reshape(BLOCKS, 8) if signature["count"] else None
@@ -169,7 +169,7 @@ def extend(signature, new_items, start=None):
 
 def check(obj, signature):
     """→ {"ok", "index", "digest" (hex of the first 28 bytes of the original content hash), "reason"}."""
-    from solvi.signature import items, record_digest
+    from solvi.core.store.signature import items, record_digest
     its = items(obj)
     n = int(signature["count"])
     out = {"ok": False, "index": None, "digest": None, "reason": None}

@@ -100,7 +100,7 @@ class Scorer:
 def decider(rows, intents):
     """A solvi decision part over `intents`, fitted on `rows`: it never escalates by itself (min_act=0), so whatever
     gates it — a guarantee, an open-set gate — decides alone."""
-    from solvi.decide import DecideModel
+    from solvi.core.deciders import DecideModel
     rows = [r for r in rows if r["intent"] in set(intents)]
     model = DecideModel(Scorer(Clf(rows), act_head(rows, intents)), meta={"format": "stand-in", "temperature": 1.0, "act": {}},
                         cache_size=10 ** 6)

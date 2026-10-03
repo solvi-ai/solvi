@@ -4,7 +4,7 @@ import pytest
 
 from solvi.agents import INTENTS, Guard, same_url, url_parts
 from solvi.agents.guard import _occurrences
-from solvi.perturb import injection_spans
+from solvi.core.deciders.perturb import injection_spans
 
 SYS = {"role": "system", "content": "You are a helpful assistant."}
 
@@ -407,7 +407,7 @@ def test_detector_leaves_ordinary_statements(text):
 
 
 def test_detector_widening_is_only_the_guards():
-    from solvi.perturb import instruction_like
+    from solvi.core.deciders.perturb import instruction_like
     assert instruction_like("Make a reservation for the Riverside View Hotel.", actions=True)
     assert not instruction_like("Make a reservation for the Riverside View Hotel.")   # a decider's perturb: unchanged
 

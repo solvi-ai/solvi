@@ -1,4 +1,4 @@
-"""solvi.sets: decisions over a set — the most probable combination of the items' answers under at-most / exactly /
+"""solvi.core.sets: decisions over a set — the most probable combination of the items' answers under at-most / exactly /
 capacity / exclusion constraints, solved per connected component (exact) or greedily (the stated approximation); fixed
 answers never change; every change cites its group; a set that cannot be repaired says so; the record replays."""
 import json
@@ -7,7 +7,7 @@ import time
 import pytest
 
 from solvi import Answer, Catalog, Decision, Question, System
-from solvi.sets import EACH, AtMostOne, Capacity, Exclusive, ExactlyOne, Item, SetDecision, decide_set
+from solvi.core.sets import EACH, AtMostOne, Capacity, Exclusive, ExactlyOne, Item, SetDecision, decide_set
 
 
 def _pair(a, b, p, **kw):

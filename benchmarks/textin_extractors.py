@@ -306,7 +306,7 @@ def main():
     ap.add_argument("--backend", default="onnx")
     ap.add_argument("--json")
     a = ap.parse_args()
-    from solvi.decide import DecideModel
+    from solvi.core.deciders import DecideModel
     t0 = time.perf_counter()
     m = DecideModel.load(a.model, backend=a.backend)
     print(f"{a.model} ({m.backend}) loaded in {time.perf_counter() - t0:.1f} s; pointer {m.has_pointer}")

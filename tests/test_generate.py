@@ -1,5 +1,5 @@
-"""solvi.generate against a fake chat-completions server (no network): a text or a validated structure, quotes checked
-literally in a text, an invalid reply escalated (never repaired), the client settings of solvi.llm reused, K samples, a
+"""solvi.core.slow.generate against a fake chat-completions server (no network): a text or a validated structure, quotes checked
+literally in a text, an invalid reply escalated (never repaired), the client settings of solvi.core.deciders.llm reused, K samples, a
 catalog part recorded as a model's output, and the replay that re-reads the recorded reply instead of calling the model."""
 import io
 import json
@@ -9,8 +9,8 @@ import pytest
 from pydantic import BaseModel
 
 from solvi import Answer, Catalog, Question, System
-from solvi.generate import Generated, Generator, Schema, Unanswered, generator, json_errors, several
-from solvi.llm import InvalidOutput, LLMError, llm
+from solvi.core.slow.generate import Generated, Generator, Schema, Unanswered, generator, json_errors, several
+from solvi.core.deciders.llm import InvalidOutput, LLMError, llm
 
 KEY = "sk-secret-123"
 

@@ -4,11 +4,11 @@ Type hints on catalog functions are the facts' types (solvi.core.types), validat
 from . import _deprecate
 from ._deprecate import SolviDeprecationWarning
 from .core.catalog import Answer, AnswerType, Catalog, Claim, Decision, NotStated, Question, Quote, Unknown
-from .diff import Shadow
-from .refine import Fail
+from .core.store.diff import Shadow
+from .core.slow.refine import Fail
 from .core.runtime import MISSING, Record, Result, Trace
-from .storage import DuckDBStorage, JSONLStorage, PostgresStorage, SQLiteStorage, TraceStorage
-from .system import Response, System
+from .core.store import DuckDBStorage, JSONLStorage, PostgresStorage, SQLiteStorage, TraceStorage
+from .core.system import Response, System
 from .core.types import Bins, Estimate, FactTypeError, Maybe, Rank, Scale, Span
 
 __version__ = "0.9.0"

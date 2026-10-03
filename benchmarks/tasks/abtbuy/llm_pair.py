@@ -1,10 +1,10 @@
-"""Abt-Buy, the comparison arm: the baseline's LLM asked about each raw pair through `solvi.llm` (a typed yes/no
-decision with a confidence) instead of a plain call, and the same "one counterpart" step (`solvi.sets.decide_set`) on its
+"""Abt-Buy, the comparison arm: the baseline's LLM asked about each raw pair through `solvi.core.deciders.llm` (a typed yes/no
+decision with a confidence) instead of a plain call, and the same "one counterpart" step (`solvi.core.sets.decide_set`) on its
 answers. Not the solution (solution.py is): it shows what solvi's LLM decider gives on a task where code reads better.
 
-With reasoning asked for, solvi.llm sends the reply contract in the prompt and no response_format; --response-format
+With reasoning asked for, solvi.core.deciders.llm sends the reply contract in the prompt and no response_format; --response-format
 json_schema has the server enforce the format instead (the 0.7 default). A reply cut off at max_tokens escalates with no
-value and counts as "no" here. The runs measured in the README used max_tokens=400; solvi.llm's default with reasoning is
+value and counts as "no" here. The runs measured in the README used max_tokens=400; solvi.core.deciders.llm's default with reasoning is
 2,048, which leaves room for the thinking.
 
     python common/proxy.py --cache cache &                  # the stand's caching endpoint (OPENROUTER_API_KEY)
@@ -24,7 +24,7 @@ from pairfacts import PREPARED, load  # noqa: E402
 from score import score  # noqa: E402
 from solution import one_counterpart  # noqa: E402
 
-from solvi.llm import llm  # noqa: E402
+from solvi.core.deciders.llm import llm  # noqa: E402
 
 TASK = "Are offer A and offer B the same product (the same model, not just the same kind)?"
 ABT, BUY = load()

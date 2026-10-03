@@ -71,7 +71,7 @@ def test_calibrate_takes_examples_as_fit_does_and_the_0_7_form_is_refused():
 
 def test_calibrating_spread_confidences_reaches_the_maximum_likelihood_fit():
     np = pytest.importorskip("numpy")
-    from solvi.system import _platt_fit
+    from solvi.core.system import _platt_fit
     rnd = np.random.default_rng(0)
     xs = rnd.uniform(0.1, 5.5, 400)
     ys = (rnd.uniform(size=400) < 1 / (1 + np.exp(-(0.4 * xs + 0.3)))).astype(float)
@@ -83,7 +83,7 @@ def test_calibrating_spread_confidences_reaches_the_maximum_likelihood_fit():
 
 def test_calibrating_perfectly_separated_confidences_stays_finite():
     np = pytest.importorskip("numpy")
-    from solvi.system import _platt_fit
+    from solvi.core.system import _platt_fit
     xs = np.array([0.5] * 10 + [3.0] * 10)
     ys = np.array([0.0] * 10 + [1.0] * 10)
     a, b = _platt_fit(xs, ys)

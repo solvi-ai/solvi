@@ -1,7 +1,7 @@
 """Several models, one decision: a cascade, a vote and a route over deciders, with one guarantee for the whole.
 
 A support desk routes emails to a team. It has a small decider (fast, ~45 ms, often sure on easy emails), a large one
-(better, ~137 ms) and a decider of another family (different mistakes). Each is a decision part; solvi.multi combines
+(better, ~137 ms) and a decider of another family (different mistakes). Each is a decision part; solvi.core.deciders.combine combines
 them with plain code, and act_guard puts one guarantee on the combination: P(answered alone and wrong) ≤ 10%.
 
   1. each model alone under the guarantee: how much it answers, its error, its cost;
@@ -28,8 +28,8 @@ import zlib
 import numpy as np
 
 from solvi import Catalog, System
-from solvi.decide import DecideModel
-from solvi.multi import Cascade, Route, Vote
+from solvi.core.deciders import DecideModel
+from solvi.core.deciders.combine import Cascade, Route, Vote
 
 TASK = "Which team should handle this support email?"
 TEAMS = {"billing": "payments, invoices, refunds", "technical": "bugs, errors, crashes",

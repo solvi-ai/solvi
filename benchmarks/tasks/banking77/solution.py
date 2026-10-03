@@ -4,7 +4,7 @@ never shown.
 
 How it is solved:
   - the decider is the baseline's classifier with an act head (classifier.py), as a solvi decision part;
-  - `solvi.openset.leave_out` simulates new intents on calib only: three times a third of the known intents is taken
+  - `solvi.core.guarantees.openset.leave_out` simulates new intents on calib only: three times a third of the known intents is taken
     away from the decider, and its signals on their requests stand in for requests it has no answer for;
   - `OpenSetGate.calibrate` sizes the threshold for a share of such requests and follows the share as the stream goes
     (it raises the threshold before any flag, and flags the change with its CUSUM);
@@ -28,7 +28,7 @@ from common.llm import DATA, read_jsonl, write_jsonl  # noqa: E402
 from score import score  # noqa: E402
 
 from solvi import Catalog, JSONLStorage, System  # noqa: E402
-from solvi.openset import OpenSetGate, leave_out  # noqa: E402
+from solvi.core.guarantees.openset import OpenSetGate, leave_out  # noqa: E402
 
 MAX_ERROR = 0.05
 SEED = 100                     # which intents are left out together in the simulation (fixed before the stream was run)

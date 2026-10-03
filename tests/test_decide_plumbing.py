@@ -6,13 +6,13 @@ import numpy as np
 import pytest
 
 from solvi import Unknown
-from solvi.decide import DecideModel
+from solvi.core.deciders import DecideModel
 
 V2 = {"format": "solvi_decide v2", "subformat": "l14g typed v2"}
 
 
 class Words:
-    """Says "not stated" strongly — when the question allows it, as a model asked in words does (solvi.llm, systemone)."""
+    """Says "not stated" strongly — when the question allows it, as a model asked in words does (solvi.core.deciders.llm, systemone)."""
     tag = "words"
 
     def __init__(self):

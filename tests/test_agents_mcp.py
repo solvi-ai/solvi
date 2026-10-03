@@ -39,7 +39,7 @@ def guard(tmp_path):
     ns = {}
     exec(CATALOG, ns)
     g = ns["guard"]
-    from solvi.storage import open_storage
+    from solvi.core.store import open_storage
     g.storage = open_storage(tmp_path / "calls.jsonl")
     return g
 
@@ -111,7 +111,7 @@ def test_solvi_serve_guard_command(tmp_path):
     assert p.returncode == 0, p.stderr
     out = {m["id"]: m for m in map(json.loads, p.stdout.splitlines())}
     assert len(out[2]["result"]["tools"]) == 2 and not out[3]["result"].get("isError") and out[4]["result"]["isError"]
-    from solvi.storage import open_storage
+    from solvi.core.store import open_storage
     assert len(open_storage(tmp_path / "calls.db")) == 2
     bad = subprocess.run([sys.executable, "-m", "solvi", "serve", "--guard", f"{cat}:guard"], capture_output=True,
                          text=True, timeout=60)

@@ -82,7 +82,7 @@ class EntryPoint:
 
 
 def entry_points(system, questions=None):
-    """The questions of a system as entry points: system.entry_points(questions) (solvi.inputs builds them)."""
+    """The questions of a system as entry points: system.entry_points(questions) (solvi.core._inputs builds them)."""
     return system.entry_points(questions)
 
 
@@ -620,7 +620,7 @@ class CueExtractor:
     ("order A-10457"). A field named as an identifier (…_id, …_number, …_code, …_ref) takes one token with a digit in
     it, or nothing. It never calls a model, but the choice of the span is still a guess, so a value it reads is recorded
     as quoted by it (its identity in the trace) and counted with model outputs."""
-    model_id = "solvi.core.textin.CueExtractor"
+    model_id = "solvi.textin.CueExtractor"           # a recorded identity: its 0.9 name, kept across the 1.0 move
     version = "2"                    # 2: strings end before the next key / another field's cue; hints never anchor them
 
     def fingerprint(self):

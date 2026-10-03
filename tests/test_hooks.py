@@ -19,7 +19,7 @@ ROOT = Path(__file__).resolve().parents[1]
 STANDIN = '''
 import re
 import numpy as np
-from solvi.decide import DecideModel
+from solvi.core.deciders import DecideModel
 
 CUE = re.compile(r"(?i)(request|searchParams|req\\.body|req\\.query|cookie)")
 
@@ -471,7 +471,7 @@ def test_latency(proj):
     print(f"\npre-edit latency: median {statistics.median(ms):.0f} ms, min {min(ms):.0f} ms")
     assert statistics.median(ms) < 1500
     r = subprocess.run([sys.executable, "-c", "import sys, json; from solvi import hooks; "
-                        "from solvi.core import Catalog; from solvi.system import System; "
+                        "from solvi.core import Catalog; from solvi.core.system import System; "
                         "print(json.dumps('numpy' in sys.modules))"], capture_output=True, text=True, env=env_for(proj))
     assert r.stdout.strip() == "false"
 
@@ -567,7 +567,7 @@ def test_a_secret_blocked_by_a_redacting_rule_is_not_written_to_the_store(proj):
     assert key not in store.read_text()                                  # was there in clear: the stored input state
     recs = [json.loads(ln) for ln in store.read_text().splitlines()]
     assert recs[0].get("redacted") and recs[-1]["kind"] == "redaction"
-    from solvi.storage import open_storage
+    from solvi.core.store import open_storage
     assert open_storage(str(store)).verify()["ok"]
     hook(proj, write(proj, "tools/x.py", "eval('1')\n"), "pre-edit")    # a rule that does not redact: stored whole
     assert "eval('1')" in store.read_text()

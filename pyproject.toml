@@ -26,7 +26,7 @@ requires-python = ">=3.11"
 dependencies = ["numpy", "scipy", "pydantic>=2"]
 
 [project.optional-dependencies]
-model = ["torch", "transformers"]   # model-based extraction from text (solvi.extract_*) and the decider (solvi.decide) — torch backends
+model = ["torch", "transformers"]   # model-based extraction from text (solvi.extract_*) and the decider (solvi.core.deciders) — torch backends
 onnx = ["onnxruntime", "tokenizers", "huggingface_hub"]   # the decider without torch (backend="onnx")
 serve = ["fastapi>=0.100", "uvicorn"]   # solvi serve: the questions over HTTP, POST /v1/systemone
 mcp = ["mcp>=2"]   # solvi serve --mcp with the official MCP SDK (without it: a built-in stdio server)

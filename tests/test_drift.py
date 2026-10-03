@@ -1,4 +1,4 @@
-"""solvi.drift: a window of decisions against a reference — what moved (the share answered alone, the answers, the
+"""solvi.core.guarantees.drift: a window of decisions against a reference — what moved (the share answered alone, the answers, the
 confidence, with labels the accuracy and the calibration), flagged only when significant and large enough."""
 import random
 
@@ -6,8 +6,8 @@ import numpy as np
 import pytest
 
 from solvi import Catalog, Decision, System
-from solvi.decide import DecideModel
-from solvi.drift import DriftMonitor, Observation, window_stats
+from solvi.core.deciders import DecideModel
+from solvi.core.guarantees.drift import DriftMonitor, Observation, window_stats
 
 CATS = ["billing", "shipping", "technical"]
 
@@ -174,7 +174,7 @@ def test_the_sequential_test_flags_a_fall_of_the_share_answered_alone_sooner_tha
 
 
 def test_a_cusum_level_is_set_by_simulation_and_its_simulated_rate_kept():
-    from solvi.drift import Cusum
+    from solvi.core.guarantees.drift import Cusum
 
     def null(rng, sims):
         return lambda: rng.standard_normal((sims, 2)) - 0.5

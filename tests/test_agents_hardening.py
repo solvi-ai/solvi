@@ -192,7 +192,7 @@ def test_proxy_lists_tools_when_one_schema_is_recursive_or_unreadable():
 
 
 def test_proxy_context_is_capped_and_long_outputs_keep_their_instructions(tmp_path):
-    from solvi.storage import open_storage
+    from solvi.core.store import open_storage
     g = Guard(storage=open_storage(tmp_path / "calls.jsonl"))
     g.declare("fetch")
     g.declare("write", ground=["path"], injections="any")

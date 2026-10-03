@@ -52,7 +52,7 @@ TEST_OK = [{"clause": "c3", "input": {"zone": "domestic", "total": 50, "weight":
 
 
 class Writer:
-    """A stand-in for solvi.generate's Generator: scripted replies by what is asked (tests, review, a draft and its
+    """A stand-in for solvi.core.slow.generate's Generator: scripted replies by what is asked (tests, review, a draft and its
     round), every prompt kept."""
     model_id = "stand-in"
 

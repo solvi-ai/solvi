@@ -321,7 +321,7 @@ def test_storage_audit_and_concurrent_asks(tmp_path):
 
 
 def test_cascade_vote_route_and_one_pass_decisions_under_aask():
-    from solvi.multi import Cascade, Route, Vote
+    from solvi.core.deciders.combine import Cascade, Route, Vote
     from test_multi import CLEAR, HARD, _parts, _system
     for make in (lambda s, l_: Cascade([s, l_]), lambda s, l_: Vote([s, l_]), lambda s, l_: Route({"vip": l_}, default=s)):
         s, l_, _, _ = _parts()

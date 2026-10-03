@@ -22,7 +22,7 @@ DEFAULT = "en"
 
 # --- words and templates: key → text. English here is exactly what solvi printed before languages existed.
 EN = {
-    # safeguards (solvi.audit.LABEL)
+    # safeguards (solvi.core.store.audit.LABEL)
     "sg.grounding": "grounding rejected", "sg.type_rejected": "type rejected", "sg.outside_options": "outside the options",
     "sg.rule_abstained": "rule abstained", "sg.low_confidence": "low confidence", "sg.validator": "rejected by validate",
     "sg.hard_check": "hard check decided", "sg.constraint_repair": "constraint repair", "sg.fallback": "fallback producer",
@@ -56,12 +56,12 @@ EN = {
     "x.act": "act {x}", "x.expected": "expected {x}", "x.margin": "margin {x}", "x.candidates": "candidates {x}",
     "x.pass": "one pass with {x}", "x.own_pass": "own pass (shared pass fell back)",
     "x.truncated": "read {read} of {of} input tokens (the rest was cut)",
-    # several models (solvi.multi) in the audit
+    # several models (solvi.core.deciders.combine) in the audit
     "m.cascade": "cascade     ", "m.stage_answered": "stage {i} answered", "m.every_stage": "every stage escalated",
     "m.calls": "; {n} model(s) called", "m.stage": "  stage {i}   ", "m.answered": "answered",
     "m.escalated": "escalated — {e}", "m.alone": "answers alone", "m.vote": "vote        rule {rule}: ",
     "m.all_agree": "all agree", "m.disagree": "they disagree", "m.one_vote": "  vote      ", "m.route": "route       by {by} → ",
-    # a memory of corrections (solvi.memory) in the audit
+    # a memory of corrections (solvi.core.knowledge.memory) in the audit
     "mem.head": "memory      {n} case(s) stored, {k} near: ", "mem.proposes": "proposes {v} (strength {s}, agreement {a})",
     "mem.abstains": "abstains: {why}", "mem.agrees": " → agrees with the model", "mem.escalated": " → escalated the decision",
     "mem.answered": " → answered in place of the model ({x})", "mem.disagrees": " → disagrees (already escalated)",

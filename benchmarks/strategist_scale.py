@@ -10,7 +10,7 @@ import statistics
 import time
 
 from solvi import Answer, Catalog, Question, System
-from solvi.strategist import plan
+from solvi.core.plan.strategist import plan
 
 
 def make_catalog(n_parts, n_inputs=20, layers=12, seed=0):

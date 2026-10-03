@@ -1,7 +1,7 @@
 """Run-time costs: CostBook, the moving average of each part's run time (ms) that every System keeps (`system.cost_book`)
 and updates after every ask; the model calls a trace record holds and their dollars (_usages, price_of, recorded_calls,
 cost_of); Cost (what a decision or a part of one cost: dollars, model calls, milliseconds, tokens) and Budget (limits
-on them) with BudgetStop — shared by solvi.dispatch, solvi.generate and solvi.refine (defined in solvi.dispatch until
+on them) with BudgetStop — shared by solvi.core.dispatch, solvi.core.slow.generate and solvi.core.slow.refine (defined in solvi.core.dispatch until
 1.0, which re-exports them). Moved out of solvi.learned in 0.8 (nothing here is learned). MeasuredCosts
 (System(cost_policy="measured")) was removed in 1.0: it showed no measured benefit."""
 from __future__ import annotations
@@ -36,7 +36,7 @@ class CostBook:
 
 # --------------------------------------------------------------------------------------------------- recorded calls
 # The model calls a trace record's extra holds, and their dollars: plain functions over the record's dicts (moved here
-# from solvi.dispatch in 1.0, which re-exports them), so the system report reads them without importing the dispatcher.
+# from solvi.core.dispatch in 1.0, which re-exports them), so the system report reads them without importing the dispatcher.
 def _usages(extra):
     """The model calls recorded in one trace record's extra → [(model, usage)]."""
     out = []
@@ -77,7 +77,7 @@ _LIMITS = ("usd", "calls", "ms", "tokens")
 @dataclass(frozen=True)
 class Budget:
     """Limits on model calls: dollars, calls, milliseconds and tokens (input + output) — None: no limit on that one.
-    The same Budget is per decision or in total, wherever it is given (solvi.dispatch, solvi.generate, solvi.refine)."""
+    The same Budget is per decision or in total, wherever it is given (solvi.core.dispatch, solvi.core.slow.generate, solvi.core.slow.refine)."""
     usd: float | None = None
     calls: int | None = None
     ms: float | None = None

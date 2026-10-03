@@ -18,7 +18,7 @@ from __future__ import annotations
 import json
 from collections import Counter
 
-from solvi.audit import LABEL
+from solvi.core.store.audit import LABEL
 
 
 def _strict(catalog, fact, producer):

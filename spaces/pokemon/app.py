@@ -17,7 +17,7 @@ from pokeworld import record as rec
 from pokeworld.agent import dispatcher, system2
 from pokeworld.render import COLORS, layout, map_svg, strip_svg
 from pokeworld.world import World
-from solvi.worldmap import WorldMap
+from solvi.core.knowledge.worldmap import WorldMap
 
 REPO = "https://github.com/solvi-ai/solvi"
 RUNS = rec.RUNS
@@ -175,10 +175,10 @@ needs, never the way there.
 - **System 1** is a catalog of two rules: take the exit of the route it remembers to the goal, or the only exit there
   is. No search; a fraction of a millisecond. It stands back when it remembers no route, when the remembered exit is not
   on offer, or when the last step surprised it.
-- **System 2** is a search over the player's world map (`solvi.worldmap`): the known way to the goal when the map has
+- **System 2** is a search over the player's world map (`solvi.core.knowledge.worldmap`): the known way to the goal when the map has
   one, else every unexplored exit within reach, scored by expected value. A hard check keeps only plans whose first step
   is on offer. (An LLM can add a hint; it is off here.)
-- **The dispatcher** (`solvi.dispatch`) asks System 1 first and System 2 when System 1 abstains. Every decision is a
+- **The dispatcher** (`solvi.core.dispatch`) asks System 1 first and System 2 when System 1 abstains. Every decision is a
   hash-chained record that replays without the game (tab "Check").
 - **Consolidation**, after each goal, compiles System 1's routes from the map's confirmed claims: what System 2 found by
   deliberating becomes what System 1 does at once. Run 2 starts with run 1's memory.

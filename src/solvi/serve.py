@@ -16,7 +16,7 @@ HTTP (`solvi[serve]`: fastapi, uvicorn):
   GET  /questions        each question: its text, answer type and the JSON schema of the input state it reads
   GET  /health           solvi's version, the catalog's fingerprint, the store, the decider
   POST /v1/systemone     the System One API, answered by a solvi decider (`--decider`): a drop-in for a Jev / Kev client
-                         (solvi.systemone is the client side)
+                         (solvi.core.deciders.systemone is the client side)
 
 The OpenAPI schema (/openapi.json, /docs) comes from the same pydantic types: each question's input schema from the types of
 the given facts its flow reads (System(input_model=...) fields, else the types its typed readers declare) and each response's
@@ -62,7 +62,7 @@ from . import _deprecate
 # (shared with the MCP proxy, which then does not import the server); re-exported here
 from ._rpc import BadRequest, Busy, Limits, NotFound, RequestError, _readline, internal_error, log, parse_json, too_deep  # noqa: F401
 from .command import fail as _fail, load_object, load_system
-from .inputs import _camel, _fact_type, input_model, input_schema, question_inputs   # noqa: F401 — re-exported
+from .core._inputs import _camel, _fact_type, input_model, input_schema, question_inputs   # noqa: F401 — re-exported
 from .core.runtime import trace_hash   # noqa: F401 — re-exported (defined there: agents read it too)
 from .core.schema import dump, dumps
 
@@ -134,7 +134,7 @@ class Service:
         self.system, self.decider = system, decider
         self._textin = textin                         # a solvi.core.textin.TextIn (synonyms, patterns, ...), else made on use
         if system is not None and storage is not None:
-            from .storage import open_storage
+            from .core.store import open_storage
             system.storage = open_storage(storage, system)
         self.model_name = model_name or (getattr(decider, "model_id", None) if decider is not None else None)
         self.limits = limits or Limits()
@@ -408,7 +408,7 @@ class Service:
                 "legend": opts, "probabilities": dict(zip(opts, p))}
 
 
-# --- the System One API (the wire format solvi.systemone speaks as a client)
+# --- the System One API (the wire format solvi.core.deciders.systemone speaks as a client)
 class SystemOneQuestion(BaseModel):
     type: Literal["choice", "noul", "score"]
     instructions: str
@@ -1005,7 +1005,7 @@ def _serve_guard(a, _fail, load_object):
     if not isinstance(guard, Guard):
         _fail(f"--guard {a.guard}: not a solvi.agents.Guard")
     if a.store:
-        from .storage import open_storage
+        from .core.store import open_storage
         guard.storage = open_storage(a.store)
     try:
         facts = json.loads(a.facts) if a.facts else None

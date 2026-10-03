@@ -15,7 +15,7 @@ import pytest
 from solvi import models
 from solvi.core import calibfile
 from solvi.cli import load_object, main
-from solvi.decide import Facts
+from solvi.core.deciders import Facts
 from solvi.scaffold import TEMPLATES
 
 sys.path.insert(0, str(Path(__file__).parent))
@@ -132,7 +132,7 @@ def test_ask_abstention_exits_1(tmp_path, capsys):
 
 TEXT_TASK = '''
 from solvi import Answer, Catalog, Question, System
-from solvi.decide import DecideModel
+from solvi.core.deciders import DecideModel
 import numpy as np
 
 cat = Catalog()
@@ -290,7 +290,7 @@ def test_calibration_with_groups_and_everything_escalated(tmp_path):
 
 
 def test_combination_calibration_round_trip(tmp_path):
-    from solvi.multi import Cascade
+    from solvi.core.deciders.combine import Cascade
     a, b = model(noise=3.0), model(version="b")
 
     def cascade():
@@ -308,7 +308,7 @@ def test_combination_calibration_round_trip(tmp_path):
 
 # --------------------------------------------------------------------------------------------------- solvi calibrate
 REAL_MODEL = '''import numpy as np
-from solvi.decide import DecideModel
+from solvi.core.deciders import DecideModel
 
 
 class Real:
@@ -606,7 +606,8 @@ def test_store_help_names_every_backend(cmd, capsys):
 
 
 def test_a_postgres_url_is_not_a_missing_file(monkeypatch):
-    from solvi import cli, storage
+    from solvi import cli
+    from solvi.core import store as storage
     seen = []
     monkeypatch.setattr(storage, "PostgresStorage", lambda url, catalog=None: seen.append(url) or "pg")
     assert cli._store("postgresql://u@h/db") == "pg" and seen == ["postgresql://u@h/db"]

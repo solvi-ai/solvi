@@ -16,8 +16,8 @@ from pydantic import BaseModel
 
 from solvi import (Answer, Bins, Catalog, Claim, Estimate, Maybe, NotStated, Question, Quote, Rank, Scale, Span,
                    System, Unknown)
-from solvi.decide import DecideModel
-from solvi.multi import Cascade, Vote
+from solvi.core.deciders import DecideModel
+from solvi.core.deciders.combine import Cascade, Vote
 
 LEVELS = ["low", "medium", "high"]
 
@@ -164,7 +164,7 @@ def decisions():
 
 def llm_decider():
     """An LLM decider part (an OpenAI-compatible server; built, never called)."""
-    from solvi.llm import llm
+    from solvi.core.deciders.llm import llm
     m = llm("http://127.0.0.1:9/v1", "golden-model", seed=1)
     cat = Catalog()
     return System(cat, [m.decision("kind", "What kind?", "note", ["travel", "meals"]).question(cat)])
@@ -197,7 +197,7 @@ def _numbers():
 
 
 def head():
-    """A fitted answer head (solvi.heads.FastHead) with its weights rounded — as a head restored from a file carries
+    """A fitted answer head (solvi.core.deciders.heads.FastHead) with its weights rounded — as a head restored from a file carries
     fixed numbers: fitted ones differ in the last bits between numpy versions — and a guarantee on a computed fact."""
     s = System(_numbers(), [Question("ok", "OK?", Answer.yes_no())])
     ex = _examples()

@@ -12,7 +12,7 @@ pytest.importorskip("tokenizers")
 pytest.importorskip("peft")
 
 from solvi import Catalog, System  # noqa: E402
-from solvi.decide import DecideModel  # noqa: E402
+from solvi.core.deciders import DecideModel  # noqa: E402
 from solvi.learning import ExperimentalWarning  # noqa: E402
 from solvi.lora import LoraWarning, adapt_lora, remove_lora  # noqa: E402
 
@@ -207,7 +207,7 @@ def _calib_without_lora(part, tmp_path):
 
 def test_refusals(ckpt, monkeypatch):
     import solvi.lora as L
-    from solvi.llm import LLMScorer
+    from solvi.core.deciders.llm import LLMScorer
     m, part = _part(ckpt)
     with pytest.raises(ValueError, match="needs at least 8"):
         adapt_lora(part, _toy(4, 1))

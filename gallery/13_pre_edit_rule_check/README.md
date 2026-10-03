@@ -138,9 +138,9 @@ not how well any model reads code. Put a real decider in front (below) and calib
 Add a producer before the stand-in in `fuzzy_rule` (the rest of the catalog does not change; the options are the same):
 
 ```python
-from solvi.decide import DecideModel
-from solvi.llm import llm
-from solvi.systemone import systemone
+from solvi.core.deciders import DecideModel
+from solvi.core.deciders.llm import llm
+from solvi.core.deciders.systemone import systemone
 
 model = DecideModel.load("solvi-ai/solvi-large")      # a local decider (pip install "solvi[model]")
 # model = llm("https://openrouter.ai/api/v1", "openai/gpt-oss-120b", api_key=os.environ["OPENROUTER_API_KEY"])

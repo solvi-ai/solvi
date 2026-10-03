@@ -8,7 +8,7 @@ and how A's and B's compare), and solvi does the rest:
 2. `System.guarantee(max_risk=0.01)` calibrates a threshold on the dev-valid pairs: a pair is answered alone only when
    the head is sure enough that P(answered alone and wrong) ≤ 1% of all pairs, for pairs like these; the others are
    handed to a person (still with the head's answer).
-3. `solvi.sets.decide_set` makes the answers consistent: an offer has at most one counterpart in the other catalog, so
+3. `solvi.core.sets.decide_set` makes the answers consistent: an offer has at most one counterpart in the other catalog, so
    the most probable combination of the pairs' answers with at most one match per offer is kept.
 
 No model reads the text and no LLM is called. Everything is fitted and calibrated on dev; eval is only scored.
@@ -30,7 +30,7 @@ from pairfacts import PREPARED, Idf, build, load, state  # noqa: E402
 from score import score  # noqa: E402
 
 from solvi import System  # noqa: E402
-from solvi.sets import AtMostOne, Item, decide_set  # noqa: E402
+from solvi.core.sets import AtMostOne, Item, decide_set  # noqa: E402
 
 ABT, BUY = load()
 ONE_COUNTERPART = [AtMostOne("abt"), AtMostOne("buy")]

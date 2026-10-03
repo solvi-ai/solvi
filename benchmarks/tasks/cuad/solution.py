@@ -2,7 +2,7 @@
 literally in the contract, and a question handed to a person when the answer is not trusted enough.
 
 How it works:
-  1. Propose. One span question per kind of clause, `Maybe[Span[str]]`, asked of an LLM through `solvi.llm` with
+  1. Propose. One span question per kind of clause, `Maybe[Span[str]]`, asked of an LLM through `solvi.core.deciders.llm` with
      `long="retrieve"`: solvi finds the contract's sections by the words of `queries.py` (`retrieve_query`) and the
      model reads about `max_len=3000` tokens of them, not the whole contract. solvi keeps an answer only when it is
      literally in the contract; `repair.py` first cuts an almost-literal passage to its longest literal piece.
@@ -44,7 +44,7 @@ def slug(category):
 def propose(model, rows):
     """→ {id: state}: the LLM's answer for every question of `rows`, checked by solvi and by the yes / no question."""
     from solvi import Maybe, Span, Unknown
-    from solvi.llm import locate
+    from solvi.core.deciders.llm import locate
     from repair import literal_piece
     out = {}
     for c in sorted({r["contract"] for r in rows}):
@@ -136,7 +136,7 @@ def main():
     p.add_argument("--out", default=None)
     a = parse(p)
     from repair import opener
-    from solvi.llm import llm
+    from solvi.core.deciders.llm import llm
     model = llm(a.llm, a.model, api_key="stand", timeout=240, retries=2, response_format="json_schema", max_tokens=2000,
                 extra_body={"reasoning": {"effort": "low"}}, workers=6, max_len=3000, opener=opener)
 

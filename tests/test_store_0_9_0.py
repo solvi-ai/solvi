@@ -45,7 +45,7 @@ def test_every_fingerprint_of_0_9_0_holds(task):
 @pytest.mark.parametrize("name", ["decisions.jsonl", "decisions.db"])
 def test_a_store_written_by_0_9_0_verifies_loads_and_replays(task, copy, name):
     from solvi.cli import main
-    from solvi.storage import open_storage
+    from solvi.core.store import open_storage
     store = open_storage(str(copy / name))
     system = task.system(calibration=DATA / "calibration.json")
     store.catalog = system
@@ -71,7 +71,7 @@ def test_a_store_written_by_0_9_0_verifies_loads_and_replays(task, copy, name):
 
 
 def test_the_dispatch_store_of_solvi_build_written_by_0_9_0_verifies_and_replays(task, copy):
-    from solvi.storage import open_storage
+    from solvi.core.store import open_storage
     store = open_storage(str(copy / "dispatch.jsonl"))
     assert store.verify()["ok"]
     store.close()
@@ -88,7 +88,7 @@ def test_the_stores_replay_after_every_module_moved_with_the_table(task, copy):
     """Every solvi class and function moved to another module, MOVED mapping each back: what 0.9.0 stored replays."""
     from test_golden_fingerprints import _relocated
     with _relocated(moved=True):
-        from solvi.storage import open_storage
+        from solvi.core.store import open_storage
         system = task.system(calibration=DATA / "calibration.json")
         store = open_storage(str(copy / "decisions.jsonl"))
         assert store.verify()["ok"] and store.replay_all(system) == []

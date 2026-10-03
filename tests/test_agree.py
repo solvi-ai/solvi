@@ -1,11 +1,11 @@
-"""solvi.agree: K generated candidates grouped by a user-given key, the largest group chosen, its share a plain fact —
+"""solvi.core.slow.agree: K generated candidates grouped by a user-given key, the largest group chosen, its share a plain fact —
 failed candidates counted in K, `prefer` before the rest, ties to the earliest, nothing voted → the chosen fact missing;
 the tally recorded in the trace and recomputed on replay."""
 import pytest
 
 from solvi import Answer, Catalog, Question, System
-from solvi.agree import agree, consensus
-from solvi.refine import Fail
+from solvi.core.slow.agree import agree, consensus
+from solvi.core.slow.refine import Fail
 
 ROWS = {"select 1": ("A",), "select one": ("A",), "select 2": ("B",), "select none": ()}
 

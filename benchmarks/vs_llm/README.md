@@ -136,9 +136,9 @@ are put to it differently from an LLM:
   question is a choice among its options plus an `abstain` option with a description, because the API has no "not
   stated". A multi-label question becomes one yes/no question per option (an option applies at probability ≥ 0.5). The
   confidence is the probability of the chosen option.
-- Inside solvi, each question is a `solvi.systemone` decision over the same text as for an LLM, with the same
+- Inside solvi, each question is a `solvi.core.deciders.systemone` decision over the same text as for an LLM, with the same
   `abstain` option; choosing it escalates. Multi-label questions always abstain (the API has none). The runner is the
-  `opener` of `solvi.systemone`: it adds the provider pin, retries, caches and logs cost and latency.
+  `opener` of `solvi.core.deciders.systemone`: it adds the provider pin, retries, caches and logs cost and latency.
 
 Jev is not deterministic: the same request sent again changed 1-3% of its answers on the rule sets, all near ties. The
 published run marked its repeat requests with another `user` value than the runner's, so a rerun draws new repeats, and
@@ -188,7 +188,7 @@ roughly $47 instead of $23.64. Rerunning everything as published costs about $40
 exclude a pilot of about $0.002.
 
 Rerunning the inside-solvi arm on the released 0.7.0 may not give exactly the published numbers. The prompts of
-`solvi.llm` are the same, but a quote that is not in the text no longer escalates a question that asks for no
+`solvi.core.deciders.llm` are the same, but a quote that is not in the text no longer escalates a question that asks for no
 evidence. Models behind a name also change over time.
 
 ## The sets

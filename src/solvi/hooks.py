@@ -488,14 +488,14 @@ _CUES = re.compile(r"(?i)ignor|disregard|forget|overrid|system|instruct|assistan
 
 def instruction_lines(added):
     """Added lines with instruction-like text addressed to a reviewer or an agent: overrides and role tags
-    (solvi.perturb, without its action rules: code says "send" and "delete" all the time) and claims of an approval
+    (solvi.core.deciders.perturb, without its action rules: code says "send" and "delete" all the time) and claims of an approval
     ("pre-approved", "ignore the rules", "note for the AI reviewer"). A heuristic: it tells a person, it never allows."""
     out = []
     for n, t in added:
         if _ADDRESSED.search(t):
             out.append([n, t])
-        elif _CUES.search(t):                          # solvi.perturb only where one of its cue words is
-            from .perturb import injection_spans
+        elif _CUES.search(t):                          # solvi.core.deciders.perturb only where one of its cue words is
+            from .core.deciders.perturb import injection_spans
             if injection_spans(t, actions=False):
                 out.append([n, t])
     return out
@@ -671,7 +671,7 @@ def edit_system(rules, change, model=None, instructions=True):
     """The System for one change: the rules that apply to its path (and, for a question, whose `when` an added line
     matches), each rule's checks as hard checks of the question `edit`, deny checks first."""
     from .core.catalog import Answer, Catalog, Question
-    from .system import System
+    from .core.system import System
     cat = Catalog()
     deny, ask, used = [], [], []
     for r in rules:
@@ -713,7 +713,7 @@ def rules_system():
     solvi.hooks:rules_system RULE_answer ...`."""
     from .core.catalog import Catalog
     from .models import load as load_model
-    from .system import System
+    from .core.system import System
     from ._loader import LoadError                      # the command prints it; a library caller gets an exception
     spec = os.environ.get("SOLVI_HOOK_DECIDER")
     if not spec and os.environ.get("SOLVI_HOOK_MODEL"):
@@ -736,7 +736,7 @@ def open_store(where, root):
     """The hook's TraceStorage: a JSON-lines file opens from its head (the count and last hash, checked against the last
     line) rather than by reading every record, so a long store stays fast; other kinds as open_storage opens them. Hooks
     may run in parallel: each append locks the file and continues the chain from what the others wrote (JSONLStorage)."""
-    from .storage import JSONLStorage, open_storage
+    from .core.store import JSONLStorage, open_storage
     path = where if os.path.isabs(where) or "://" in where else os.path.join(root, where)
     if "://" in path or path.endswith((".db", ".sqlite", ".sqlite3", ".duckdb")):
         return open_storage(path)
@@ -1015,7 +1015,7 @@ def skill_rule(skill_scores):
 
 def skill_system(skills, model=None, min_score=1.5, margin=0.25, calibration=None):
     from .core.catalog import Answer, Catalog, Question
-    from .system import System
+    from .core.system import System
     cat = Catalog()
     names = [n for n, _ in skills]
     if model is None:
@@ -1096,7 +1096,7 @@ def cmd_audit(a):
     if not os.path.exists(path):
         print(f"solvi: no store at {path}", file=sys.stderr)
         return 2
-    from .storage import open_storage
+    from .core.store import open_storage
     store = open_storage(path)
     recs = [r for r in store.iter() if (r.meta or {}).get("hook") == "pre-edit"]
     pick = [r for r in recs if r.id == a.id] if a.id else recs[-1:]

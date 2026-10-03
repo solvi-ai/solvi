@@ -1,4 +1,4 @@
-"""solvi.search decides its candidates lean (System._decide: no hashes, fingerprint, audit, stats or storage): every
+"""solvi.core.slow.search decides its candidates lean (System._decide: no hashes, fingerprint, audit, stats or storage): every
 candidate's verdict — accepted or not, its objective, what rejected it, which checks failed, every fact's value — equals
 the verdict of a full ask of the same state; the winner is still asked in full, and its trace is byte for byte the trace
 of an ordinary ask. The NATURAL PLAN check (every candidate of the dev problems, both paths) runs with `-m stand` when
@@ -11,9 +11,9 @@ from pathlib import Path
 import pytest
 
 from solvi import Answer, Catalog, JSONLStorage, Question, System
-from solvi.refine import causes, failed_checks
+from solvi.core.slow.refine import causes, failed_checks
 from solvi.core.runtime import vhash
-from solvi.search import Tree, _verdict, search
+from solvi.core.slow.search import Tree, _verdict, search
 
 ROOT = Path(__file__).resolve().parents[1]
 

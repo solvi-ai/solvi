@@ -1,4 +1,4 @@
-"""solvi.search: candidates through a System's checks — the first accepted in a space's order, the best by an
+"""solvi.core.slow.search: candidates through a System's checks — the first accepted in a space's order, the best by an
 objective, a depth-first Tree pruned by failed hard checks and a bound, a budget that makes the result not exact; the
 facts read from the state computed once (a model called once, not per candidate); the winner asked in full, stored
 and replayable; nothing accepted escalates; what it cannot run is refused."""
@@ -10,8 +10,8 @@ import pytest
 from pydantic import BaseModel
 
 from solvi import Answer, Catalog, JSONLStorage, Question, System
-from solvi.refine import Fail
-from solvi.search import SearchRun, Tree, search
+from solvi.core.slow.refine import Fail
+from solvi.core.slow.search import SearchRun, Tree, search
 
 
 class Busy(BaseModel):

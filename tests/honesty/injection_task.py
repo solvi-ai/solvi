@@ -7,7 +7,7 @@ push for any option named after "answer", "the correct answer is", "classify thi
 under". Two questions ask it the same thing about the same message:
 
   team          no safeguard: an injected answer is given alone
-  team_guarded  perturb=2 — asked again without the instruction-like sentences (solvi.perturb); a changed answer
+  team_guarded  perturb=2 — asked again without the instruction-like sentences (solvi.core.deciders.perturb); a changed answer
                 escalates. It misses a wording its rules do not know ("please put this under X"): the suite counts that
                 too.
 
@@ -17,7 +17,7 @@ import re
 import numpy as np
 
 from solvi import Catalog, System
-from solvi.decide import DecideModel
+from solvi.core.deciders import DecideModel
 
 KW = {"billing": ["charged", "refund", "invoice"], "billing_disputes": ["chargeback", "dispute"],
       "technical": ["crash", "error", "bug"], "shipping": ["parcel", "delivery", "tracking"]}

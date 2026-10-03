@@ -11,9 +11,9 @@
     solvi serve  --guard catalog.py:guard --upstream "MCP SERVER COMMAND" [--store calls.db]         (solvi.agents.mcp)
     solvi check  myapp.decisions:system [--strict] [--json]                                          (solvi.check)
     solvi report decisions.db [--since ISO] [--until ISO] [--question Q] [--id ID] [--html out.html] [--md out.md] [--json]
-                                                                                                     (solvi.report)
+                                                                                                     (solvi.core.store.report)
     solvi report decisions.db --overview [--since ISO] [--until ISO] [--question Q] [--drift-window N | --no-drift] [--json]
-                                                                                                     (solvi.sysreport)
+                                                                                                     (solvi.core.store.sysreport)
     solvi init [DIR] [--template support|refunds|minimal] [--with-model] [--force]                  (solvi.scaffold)
     solvi ask myapp.decisions:system (STATE.json | - | --state '{...}' | --text "...") [--question Q] [--decider MODEL]
               [--audit] [--report md|html] [--lang ru] [--store decisions.db] [--json]
@@ -51,7 +51,7 @@ STORE_HELP = "a TraceStorage: " + STORE_KINDS
 
 
 def _store(path, system=None):
-    from .storage import open_storage
+    from .core.store import open_storage
     if not path.startswith(("postgresql://", "postgres://")) and not os.path.exists(path):
         _fail(f"no such store: {path}")
     return open_storage(path, system)
@@ -69,7 +69,7 @@ def _filters(a):
 
 def _check_when(a):
     """--since / --until that cannot be read as a time are usage errors."""
-    from .storage import _when
+    from .core.store import _when
     for k in ("since", "until"):
         v = getattr(a, k, None)
         if v is not None:
@@ -90,7 +90,7 @@ def cmd_verify(a):
     store = _store(a.store)
     sig = None
     if a.signature:
-        from .signature import load
+        from .core.store.signature import load
         try:
             sig = load(a.signature)
         except (OSError, ValueError) as e:
@@ -152,7 +152,7 @@ def cmd_replay(a):
 
 
 def cmd_diff(a):
-    from .diff import diff
+    from .core.store.diff import diff
     system = load_system(a.system)
     if a.limit is not None and a.limit < 1:
         _fail(f"--limit {a.limit}: at least 1")
@@ -167,7 +167,7 @@ def cmd_diff(a):
 
 
 def cmd_report(a):
-    from .report import decision, period, render
+    from .core.store.report import decision, period, render
     system = load_system(a.system) if a.system else None
     store = _store(a.store, system)
     if a.overview:
@@ -202,8 +202,8 @@ def cmd_report(a):
 
 
 def _overview(a, store):
-    """`solvi report STORE --overview`: the system report (solvi.sysreport) — text, or its data with --json."""
-    from .sysreport import system_report
+    """`solvi report STORE --overview`: the system report (solvi.core.store.sysreport) — text, or its data with --json."""
+    from .core.store.sysreport import system_report
     bad = [k for k in ("id", "status", "safeguard", "model", "html", "md") if getattr(a, k, None) is not None]
     if bad:
         _fail("report --overview: the system report takes --since, --until, --question, --drift-window and --json, not "
@@ -233,7 +233,7 @@ def _read_json(src, what):
 
 
 def _answers(res):
-    from .storage import plain
+    from .core.store import plain
     out = {}
     for q, r in res.results.items():
         out[q] = {"answer": plain(r.answer), "status": r.status, "confidence": r.confidence, "why": r.why}
@@ -278,7 +278,7 @@ def cmd_ask(a):
                 decider = load_model(a.decider, a.backend, api_key=a.api_key)
             except ModelError as e:
                 _fail(str(e))
-        from .remote import RemoteError
+        from .core.deciders._remote import RemoteError
         tin = None
         if a.today:                                    # as `solvi serve` reads a text: year-less and relative dates
             import datetime as dt
@@ -314,7 +314,7 @@ def cmd_ask(a):
         res = system.ask(state, names)
     stored = None
     if a.store:
-        from .storage import open_storage
+        from .core.store import open_storage
         stored = open_storage(a.store, system).save(res)
     lang = a.lang or getattr(system, "lang", None)
     if a.json:
@@ -399,7 +399,7 @@ def main(argv=None):
     common(v, system=False, filters=False)
     v.add_argument("--anchor", help="COUNT:HASH — a head() kept elsewhere")
     v.add_argument("--signature", help="SIG.json (a file or the JSON) — a signature() kept elsewhere: names the one changed "
-                                       "record and its original content hash (solvi.signature)")
+                                       "record and its original content hash (solvi.core.store.signature)")
     v.add_argument("--sign", metavar="OUT.json", help="write the store's current signature() to this file")
     r = sub.add_parser("replay", help="re-compute every stored trace against a system")
     common(r)
@@ -421,7 +421,7 @@ def main(argv=None):
     rp.add_argument("--json", action="store_true", help="print the report's data as JSON")
     rp.add_argument("--overview", action="store_true",
                     help="the system report: who answered, cost, the promise against the stored labels, drift "
-                         "(solvi.sysreport)")
+                         "(solvi.core.store.sysreport)")
     rp.add_argument("--drift-window", type=int, help="--overview: the DriftMonitor's window (default 100)")
     rp.add_argument("--no-drift", action="store_true", help="--overview: do not run the DriftMonitor")
     from .serve import add_parser as serve_parser, cmd_serve

@@ -131,7 +131,7 @@ class Claim:
     input, or "doc" — as whole words and numbers: "3" is not evidence when the text says "30"); an item not in its text
     rejects the output (safeguard "grounding rejected"). The provenance stays the part's own (a hand-written rule:
     computed). `extra`: details recorded in the trace with the fact (`record.extra`) — a check's reasons
-    (solvi.refine.Fail), a generator's request (solvi.generate.Generated)."""
+    (solvi.core.slow.refine.Fail), a generator's request (solvi.core.slow.generate.Generated)."""
     value: Any
     evidence: list = field(default_factory=list)
     confidence: float = 1.0
@@ -861,7 +861,7 @@ class Catalog:
         self.constraints: dict[str, Part] = {}     # rules between answers of different questions
         self.types: dict = {}                      # fact → type (its producer's return type; see solvi.core.types)
         self.readers: dict = {}                    # fact → {typed part that reads it: the type it reads}
-        self.decisions = 0                         # decision parts registered (solvi.decide): 0 — no batching work at all
+        self.decisions = 0                         # decision parts registered (solvi.core.deciders): 0 — no batching work at all
 
     def _add(self, kind, f, **kw):
         sig = inspect.signature(f)
@@ -987,7 +987,7 @@ class Catalog:
                           timeout=timeout, blocking=blocking)
 
     def check(self, f=None, *, hard=False, then=None, cost=None, model=None, provenance=None, timeout=None, blocking=None):
-        """A check: a function of facts that answers True or False (or `solvi.refine.Fail("why")` for False with its
+        """A check: a function of facts that answers True or False (or `solvi.core.slow.refine.Fail("why")` for False with its
         reasons). hard=True: when it is False it decides the questions it governs — the model cannot override it.
         then: {question: answer} — the answer a question gets when this hard check is False (a question listed here is
         governed by it; without `then` the check governs every question whose flow runs it, and they abstain). The check

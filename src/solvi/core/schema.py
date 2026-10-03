@@ -710,7 +710,7 @@ def load(cls, data, catalog=None):
         return _load_trace(m, catalog, system)
     if n == "Flow":
         return _load_flow(m, catalog)
-    if n == "Response":                               # cls is solvi.response.Response (schema sits below it)
+    if n == "Response":                               # cls is solvi.core.response.Response (schema sits below it)
         from .runtime import MISSING
         tr = _load_trace(m.trace, catalog, system)
         known = dict(tr.init)

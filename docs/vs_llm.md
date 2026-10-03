@@ -81,16 +81,16 @@ gallery is scored whole.
   exception and hard check in words; they are in [policies.py](../benchmarks/vs_llm/policies.py). Two gallery questions
   have no written rule: a senior underwriter's habit, learned from past files, and a pump's likely fault. For those the
   LLM gets 30 past files and a description of the fault signatures.
-- **The same LLM inside solvi.** Each question goes to the LLM as a `solvi.llm` decision over the same policy and
+- **The same LLM inside solvi.** Each question goes to the LLM as a `solvi.core.deciders.llm` decision over the same policy and
   input. The catalog's hard checks and constraints still apply, and `act_guard` at risk 0.10 decides which answers go to
   a person.
 - **A decision model, directly and inside solvi.** Jev writes no text: it picks one of the options it is given and
-  returns a probability for each. It is served on OpenRouter through the System One API, which `solvi.systemone`
+  returns a probability for each. It is served on OpenRouter through the System One API, which `solvi.core.deciders.systemone`
   speaks. Directly, one request per case carries the same written policy and the input as JSON, and every question
   with its options. The API has no "not stated", so each question gets an explicit "abstain" option with a description
   ("a fact this question needs is missing..."). It has no multi-label questions either, so a multi-label question
   becomes one yes/no question per option. The confidence is the probability of the chosen option. Inside solvi, each
-  question is a `solvi.systemone` decision over the same policy and input, with the same "abstain" option; choosing it
+  question is a `solvi.core.deciders.systemone` decision over the same policy and input, with the same "abstain" option; choosing it
   escalates. The two multi-label gallery questions (20 of 347 decisions) always abstain there. Hard checks and
   `act_guard` are the same as for the LLMs. Jeeves takes the same request plus an `options` object. It ran twice: with
   the authors' recommended fast setting (reasoning of up to 768 tokens, skipped when the model is already 90% sure of
@@ -118,9 +118,9 @@ Jev ran on 2026-09-29, with the released solvi 0.7.0 and its gallery, on the sam
 went to OpenRouter with the provider pinned to TypeSafe and no fallbacks; every answer came from
 `typesafe/jev-1.13-20260917`. It costs $0.042 per million input tokens, and output is free. The direct requests used
 OpenRouter's Decisions API, which takes the same request as the System One API that solvi uses inside. The provider
-pin is not a parameter of `solvi.systemone` in 0.7.0, so the runner adds it to each request.
+pin is not a parameter of `solvi.core.deciders.systemone` in 0.7.0, so the runner adds it to each request.
 
-Jeeves ran on 2026-09-29, with solvi at commit 191a417 (0.7.1 plus Jeeves support in `solvi.systemone`) and its
+Jeeves ran on 2026-09-29, with solvi at commit 191a417 (0.7.1 plus Jeeves support in `solvi.core.deciders.systemone`) and its
 gallery, on the same sets, splits and scoring. The weights (Apache-2.0, fine-tuned from Qwen3.5-9B) and the server code
 ([github.com/PostHog/jeeves](https://github.com/PostHog/jeeves) at f04ec55) are PostHog's; we served them with their own
 code on one Colab A100 40 GB. That GPU has no FP8, so the model ran in bf16, slower than the authors' H100 numbers. To
@@ -469,7 +469,7 @@ the claim, with the rule as the fallback.
 - **Short rules.** Each policy is about one page. Long, conflicting or rarely used rules may behave differently.
 - **One run.** Each case ran once, at temperature 0, on one day's model versions behind OpenRouter. Providers can change
   the weights behind a name.
-- **Two library changes since the run.** In the released 0.7.0, a `solvi.llm` quote that is not in the text no longer
+- **Two library changes since the run.** In the released 0.7.0, a `solvi.core.deciders.llm` quote that is not in the text no longer
   escalates a question that asks for no evidence. The inside-solvi arm on 0.7.0 may therefore escalate a little less
   than in the tables. The solvi-alone arm is unaffected; it reproduces exactly, see below.
 

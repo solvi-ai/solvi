@@ -83,7 +83,7 @@ def _option(sp, s):
 
 def examples_of(part, rows, group_cols=()):
     """Rows (dicts with "label") → [(Facts, label)] for act_guard / calibrate_for / conformal."""
-    from .decide import Facts
+    from .core.deciders import Facts
     facts = list(part.facts) if hasattr(part, "facts") else []
     facts = [f for f in facts if f not in group_cols]
     out = []
@@ -109,7 +109,7 @@ def examples_of(part, rows, group_cols=()):
 
 def find_part(system, name):
     """The decision behind a question (its rule) or a catalog part by name → a DecisionPart / combination, or None."""
-    from .decide import decision_of
+    from .core.deciders import decision_of
     cat = system.catalog if hasattr(system, "catalog") else system
     d = decision_of(cat, name) if name in cat.rules else None
     if d is None and name in cat.parts:

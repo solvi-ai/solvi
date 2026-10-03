@@ -13,7 +13,7 @@ from __future__ import annotations
 from typing import Literal
 
 from solvi import Catalog, Question, System
-from solvi.strategy import CostStrategist
+from solvi.core.plan.cost import CostStrategist
 
 
 def catalog():

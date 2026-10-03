@@ -1,6 +1,6 @@
 # solvi-decide: checkpoint and input format
 
-This is the contract between a decider checkpoint and solvi (`solvi.decide`): what the model reads, what it outputs, and the
+This is the contract between a decider checkpoint and solvi (`solvi.core.deciders`): what the model reads, what it outputs, and the
 fields of `solvi_decide.json` that say what a checkpoint can do. The training side builds its inputs with exactly these rules;
 solvi reads any checkpoint that declares them. How to use a decider in a catalog: [guide](guide.md#types-questions-and-model-decisions);.
 
@@ -14,7 +14,7 @@ solvi reads any checkpoint that declares them. How to use a decider in a catalog
 | `l14f typed v1` | the first typed checkpoints | modes `single`, `multi`, `score`, `noul`; columns `single` / `score` / `noul` 0, `multi` 1, `act` 2; states `paths`, `tree`, `json`; act head in column 2; noul labels `true` / `false`; one question per pass unless `multi_question` is declared |
 | `solvi_decide v2` | any other model | the `l14b_decider v1` defaults; everything else declared |
 | `solvi_decide v2` with `"subformat": "l14g typed v2"` (also `format` `l14g typed v2`) | the answer-primitives checkpoints and later (the published solvi-base, solvi-large and solvi-large-long) | the answer primitives, §9: the `l14f typed v1` defaults plus modes `rank`, `number`, `span`, "not stated" (column 3), a pointer (columns 4 / 5) |
-| `solvi_decide v3` (without that subformat) | none published; what `solvi.llm` and `solvi.systemone` declare for themselves | the answer-primitives fields are read (§9), but the defaults are the `l14b_decider v1` ones: no "not stated", no pointer, no act head unless declared — declare `modes`, `unknown`, `pointer`, `act`, or add `"subformat": "l14g typed v2"` for the row above |
+| `solvi_decide v3` (without that subformat) | none published; what `solvi.core.deciders.llm` and `solvi.core.deciders.systemone` declare for themselves | the answer-primitives fields are read (§9), but the defaults are the `l14b_decider v1` ones: no "not stated", no pointer, no act head unless declared — declare `modes`, `unknown`, `pointer`, `act`, or add `"subformat": "l14g typed v2"` for the row above |
 
 `l14f typed v1.N`, `l14g typed v2.N` and `solvi_decide v2.N` / `v3.N` (a minor version) load the same way; any other format is refused
 (`ValueError: unknown decider format`). A checkpoint without `format` is read as `l14b_decider v1`. An `l14b_decider v1`
@@ -166,11 +166,11 @@ Then, per question (task, options, descriptions, kind):
 ## 7. The input: text or state
 
 A text is sent as it is. A state (a dict, a list, a pydantic model, a dataclass) is first made JSON data, then serialized.
-Reference implementations: `solvi.decide.state_text(obj, fmt)` and `serialize(state, fmt)` in
+Reference implementations: `solvi.core.deciders.state_text(obj, fmt)` and `serialize(state, fmt)` in
 the training code of the first typed checkpoints (in the research repository) — identical on JSON data (checked on 7 644 random states,
 all three formats).
 
-**To JSON data** (`solvi.decide.jsonable`; the training side starts from JSON already): a pydantic model → its
+**To JSON data** (`solvi.core.deciders.jsonable`; the training side starts from JSON already): a pydantic model → its
 `model_dump()` (field order); a dataclass → its fields; `date` / `datetime` / `time` → `isoformat()`; an Enum → its value;
 `Decimal`, `UUID` and other objects → `str()`; bytes → UTF-8 text; tuples → lists; sets → lists sorted by their JSON text;
 numpy → Python numbers. Mapping keys keep their order.
@@ -204,10 +204,10 @@ several text facts are joined by new lines. A scalar fact (a number, a date) is 
 
 `DecideModel(scorer, meta)` accepts any object with:
 
-- `logits(items)`: `items` are `solvi.decide.Item(task, options, descriptions, text, multi, kind)` (`item.mode` is the wire
+- `logits(items)`: `items` are `solvi.core.deciders.Item(task, options, descriptions, text, multi, kind)` (`item.mode` is the wire
   mode: `single`, `multi`, `score`, `noul`); return one array per item — `[K]` or `[K, C]` (the kind's column is taken) — or
   `{"logits": array, "act": logit}`;
-- optionally `logits_pass(passes)`: `solvi.decide.Pass(text, items)` → per pass a list of the same per-question outputs
+- optionally `logits_pass(passes)`: `solvi.core.deciders.Pass(text, items)` → per pass a list of the same per-question outputs
   (several questions in one forward pass; raise `ValueError` when they do not fit together);
 - optionally `fingerprint()` (else the model is "unversioned") and `model_id`.
 

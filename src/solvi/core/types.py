@@ -433,7 +433,7 @@ class Ordinal:
 class Scale:
     """An ordinal type from its levels, lowest first: `Scale[Literal["low", "medium", "high"]]` (type checkers and linters
     read it as the Literal), `Scale["low", "medium", "high"]`, `Scale[1, 2, 3, 4, 5]`, or `Scale[AnEnum]` — that is
-    `Annotated[Literal[...], Ordinal()]`. As a question: Answer.ordinal; as a decision: a score (see solvi.decide)."""
+    `Annotated[Literal[...], Ordinal()]`. As a question: Answer.ordinal; as a decision: a score (see solvi.core.deciders)."""
 
     def __class_getitem__(cls, levels):
         if get_origin(levels) is Literal or (isinstance(levels, type) and issubclass(levels, Enum)):

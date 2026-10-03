@@ -33,7 +33,7 @@ from enum import Enum
 
 from .catalog import Quote, Unknown
 
-# guard kinds a primitive's abstention carries (Result.guard; the safeguard kinds of solvi.audit). Not the reason texts
+# guard kinds a primitive's abstention carries (Result.guard; the safeguard kinds of solvi.core.store.audit). Not the reason texts
 # of solvi.core.provenance: provenance.TYPE_REJECTED is the prefix of a rejection reason ("type rejected: ..."), this one the
 # guard kind ("type_rejected").
 GROUNDING, TYPE_REJECTED, OUTSIDE, NO_EVIDENCE = "grounding", "type_rejected", "outside_options", "evidence_missing"

@@ -42,8 +42,8 @@ ROOT = Path(__file__).resolve().parents[1]
 @contextlib.contextmanager
 def settings(fingerprint=True, order="canonical"):
     """Patch the per-ask features 0.5.0 did not have: the trace fingerprint and the canonical option order."""
-    from solvi.decide import DecideModel
-    from solvi.system import System
+    from solvi.core.deciders import DecideModel
+    from solvi.core.system import System
     if fingerprint and order == "canonical":          # nothing to patch (and an old release may lack what is patched)
         yield
         return
@@ -120,10 +120,10 @@ def gallery_jobs(root):
 
 
 def gallery_workloads(tmp, root):
-    from solvi.system import System
+    from solvi.core.system import System
     if not hasattr(System, "_fingerprint"):           # a release before 0.5.1 (--gallery with an old solvi): as it is
         return {"installed": ({}, [(build(), states) for _, build, states in gallery_jobs(root)])}
-    from solvi.storage import open_storage
+    from solvi.core.store import open_storage
     configs = [("0.5.0-style", dict(fingerprint=False), None), ("0.7 default", {}, None),
                ("- fingerprint", dict(fingerprint=False), None),
                ("+ store jsonl", {}, "jsonl"), ("+ store sqlite", {}, "db")]
@@ -147,7 +147,7 @@ def decider_workloads(tmp):
     import csv
 
     from solvi.cli import main
-    from solvi.storage import open_storage
+    from solvi.core.store import open_storage
     from solvi.testing import load
     proj = Path(tmp) / "support"
     quiet = open(os.devnull, "w")

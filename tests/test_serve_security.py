@@ -203,12 +203,12 @@ def test_serve_never_downloads_a_decider_without_pull(tmp_path, monkeypatch, cap
 
 
 def test_the_system_one_client_speaks_http_only():
-    from solvi.systemone import systemone
+    from solvi.core.deciders.systemone import systemone
     for bad in ("file:///etc/passwd", "ftp://x", "/etc/passwd"):
         with pytest.raises(ValueError, match="http"):
             systemone(bad, "m")
     assert systemone("https://solvi.example", "m").model_id == "systemone:m"
-    from solvi.llm import llm
+    from solvi.core.deciders.llm import llm
     for bad in ("file:///etc/passwd", "ftp://x/v1"):
         with pytest.raises(ValueError, match="http"):
             llm(bad, "m")

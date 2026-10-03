@@ -129,7 +129,7 @@ rest of the catalog does not change, and an `unclear` answer from the model abst
 `double_charge_claim` extractor in `task.py` with:
 
 ```python
-from solvi.llm import llm      # or a local decider: DecideModel.load("solvi-ai/solvi-large").decision(...)
+from solvi.core.deciders.llm import llm      # or a local decider: DecideModel.load("solvi-ai/solvi-large").decision(...)
 
 model = llm("https://openrouter.ai/api/v1", "openai/gpt-oss-120b", api_key=os.environ["OPENROUTER_API_KEY"])
 claim_llm = model.decision(

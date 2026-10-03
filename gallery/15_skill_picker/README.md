@@ -107,16 +107,16 @@ act_guard, risk 0.05, on 400 labelled prompts (synthetic, seeded): threshold 0.4
 - **A different skill list is a different question.** The threshold and the candidate sets were calibrated for these
   eleven options: add, remove or reword a skill, and calibrate again.
 - **Naming is a pattern.** "/name" and "use the name skill" are read; "run backup-db" (the words reversed) is not.
-  Instruction-like passages are found by solvi.perturb's wordings; a paraphrase it does not know is read as the user's.
+  Instruction-like passages are found by solvi.core.deciders.perturb's wordings; a paraphrase it does not know is read as the user's.
 
 ## In production: a model in front, the keywords as the fallback
 
 One more producer between the named skill and the stand-in; the rest of the catalog does not change:
 
 ```python
-from solvi.decide import DecideModel
-from solvi.llm import llm
-from solvi.systemone import systemone
+from solvi.core.deciders import DecideModel
+from solvi.core.deciders.llm import llm
+from solvi.core.deciders.systemone import systemone
 
 model = DecideModel.load("solvi-ai/solvi-large")      # a local decider (pip install "solvi[model]")
 # model = llm("https://openrouter.ai/api/v1", "openai/gpt-oss-120b", api_key=os.environ["OPENROUTER_API_KEY"])

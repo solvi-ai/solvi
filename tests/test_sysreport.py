@@ -1,4 +1,4 @@
-"""The system report (System.report, solvi.sysreport, `solvi report --overview`): read from the store alone, its numbers
+"""The system report (System.report, solvi.core.store.sysreport, `solvi report --overview`): read from the store alone, its numbers
 equal the ones recomputed from the raw records — who answered, the promise against the labels, the dispatcher's final
 answers and cost, drift — on an empty store, a store with corrections, a dispatcher's store, a period."""
 import json
@@ -9,10 +9,10 @@ from test_dispatch import _hard_slice
 
 from solvi import Answer, Catalog, Decision, JSONLStorage, Question, SQLiteStorage, System
 from solvi.cli import main
-from solvi.dispatch import Dispatcher, SlowPath
-from solvi.guarantee import calibrate
-from solvi.storage import open_storage
-from solvi.sysreport import SystemReport, system_report
+from solvi.core.dispatch import Dispatcher, SlowPath
+from solvi.core.guarantees.guarantee import calibrate
+from solvi.core.store import open_storage
+from solvi.core.store.sysreport import SystemReport, system_report
 
 
 def guarded(storage):

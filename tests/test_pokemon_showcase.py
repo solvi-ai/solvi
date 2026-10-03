@@ -85,7 +85,7 @@ def test_consolidation_compiles_routes_from_confirmed_claims_only():
 
 def test_an_llm_hint_that_fails_falls_back_to_no_hint(world):
     """System 2 with an LLM (off by default): an invalid reply is no hint, never a guess — same decisions as without."""
-    from solvi.llm import llm
+    from solvi.core.deciders.llm import llm
 
     def broken(req, timeout=None):
         ch = {"index": 0, "message": {"role": "assistant", "content": "not json"}, "finish_reason": "stop"}

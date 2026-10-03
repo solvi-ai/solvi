@@ -3,12 +3,12 @@ without a person.
 
 solvi does not make the query writer better; it decides which queries can go out alone, and records why.
 
-1. `solvi.generate`: the writer (the baseline's model and prompt) proposes three queries — the baseline's request at
+1. `solvi.core.slow.generate`: the writer (the baseline's model and prompt) proposes three queries — the baseline's request at
    temperature 0 and two samples at 0.8 (`Generator.part(..., k=3)`).
-2. `solvi.agree`: each query is run read-only; queries that return the same rows are one group, the first query of the
+2. `solvi.core.slow.agree`: each query is run read-only; queries that return the same rows are one group, the first query of the
    largest group is chosen, and its share of the three (`agreement`: 1/3, 2/3, 1) is a fact.
 3. Hard checks: the chosen query runs, and returns rows that are not all NULL. A failed check says why (`Fail`), and
-   `solvi.refine` asks the writer once more with those reasons (two rounds at most).
+   `solvi.core.slow.refine` asks the writer once more with those reasons (two rounds at most).
 4. The question `correct` ("can this query be returned without a person?") is answered by a head fitted on the 100 dev
    questions over the agreement and the query's shape (`System.fit`), behind `System.guarantee`: a query goes out alone
    only when P(right) clears a threshold set on dev (out of fold) for at most 30% wrong among the answered — an
@@ -38,9 +38,9 @@ from common.llm import DEFAULT, read_jsonl, write_jsonl  # noqa: E402
 from score import questions, run_sql, schema, score  # noqa: E402
 
 from solvi import Answer, Catalog, Fail, Question, System  # noqa: E402
-from solvi.agree import agree  # noqa: E402
-from solvi.generate import generator  # noqa: E402
-from solvi.refine import refine  # noqa: E402
+from solvi.core.slow.agree import agree  # noqa: E402
+from solvi.core.slow.generate import generator  # noqa: E402
+from solvi.core.slow.refine import refine  # noqa: E402
 
 SHAPE = ["agreement", "n_cols", "has_subquery", "is_aggregate", "computes_ratio"]
 FEEDBACK = """

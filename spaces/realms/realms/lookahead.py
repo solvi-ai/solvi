@@ -57,8 +57,8 @@ import time
 from collections import deque
 
 import numpy as np
-from solvi.strategist import plan
-from solvi.system import governs
+from solvi.core.plan.strategist import plan
+from solvi.core.system import governs
 
 from . import econ
 from .adaptive import LAM, LEARNED, ValueHead

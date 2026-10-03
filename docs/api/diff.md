@@ -1,5 +1,5 @@
-# `solvi.diff`
+# `solvi.core.store.diff`
 
 `solvi diff` and shadow mode.
 
-::: solvi.diff
+::: solvi.core.store.diff

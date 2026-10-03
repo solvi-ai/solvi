@@ -5,7 +5,7 @@ import time
 import pytest
 
 from solvi import Answer, Catalog, Question, System
-from solvi.strategy import CostStrategist
+from solvi.core.plan.cost import CostStrategist
 
 
 def rates(delay):

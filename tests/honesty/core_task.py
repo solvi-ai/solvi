@@ -7,7 +7,7 @@ One invoice / support-message text (`doc`) and a few given facts; each question 
   currency  a choice of EUR / USD — a code outside the options (GBP) abstains instead of being forced into one
   method    a stub model proposer with an act signal and a quote: it escalates when unsure, and a quote it paraphrases
             instead of copying from the text is rejected (grounding)
-  team      a decider (solvi.decide) over a keyword stub scorer with escalate_below — acts when sure, escalates when not;
+  team      a decider (solvi.core.deciders) over a keyword stub scorer with escalate_below — acts when sure, escalates when not;
             it can also be confidently wrong (the suite measures that, it does not hide it)
   approve   a hard check that raises on a malformed amount — the answer abstains, never "passed"
 
@@ -17,7 +17,7 @@ import re
 import numpy as np
 
 from solvi import Answer, Catalog, Claim, Decision, Maybe, Question, Quote, Span, System, Unknown
-from solvi.decide import DecideModel
+from solvi.core.deciders import DecideModel
 from solvi.core.provenance import ESCALATED
 
 cat = Catalog()

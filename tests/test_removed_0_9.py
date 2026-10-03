@@ -92,7 +92,7 @@ def test_question_and_answer_type():
 
 
 def test_decider_options_and_names():
-    from solvi.decide import DecideModel
+    from solvi.core.deciders import DecideModel
     from test_decide_plumbing import V2, Words
     m = DecideModel(Words(), {**V2, "act": False})
     for old, new in (("escalate_below", "min_confidence"), ("act_threshold", "min_act"),
@@ -130,8 +130,8 @@ def pydantic_field(**kw):
 
 
 def test_combination_names():
-    from solvi.decide import Facts
-    from solvi.multi import Cascade
+    from solvi.core.deciders import Facts
+    from solvi.core.deciders.combine import Cascade
     from test_multi import CLEAR, _parts
     s, l_, _, _ = _parts()
     c = Cascade([s, l_])
@@ -149,8 +149,8 @@ def test_combination_names():
 
 
 def test_heads_and_learned_policies():
-    from solvi.heads import FastHead
-    from solvi.strategist import Binary
+    from solvi.core.deciders.heads import FastHead
+    from solvi.core.plan.strategist import Binary
     rows = [{"x": float(i)} for i in range(20)]
     ans = ["a" if i < 10 else "b" for i in range(20)]
     fh = FastHead(["a", "b"]).fit(rows, ans, ["x"])
@@ -158,15 +158,15 @@ def test_heads_and_learned_policies():
         fh.cv_acc  # noqa: B018
     with pytest.raises(AttributeError, match=rf"FastHead.update\(\) {GONE}teach\(\)"):
         fh.update({"x": 3.0}, "a")
-    import solvi.heads                                     # the legacy Head itself was removed in 1.0
-    with pytest.raises(AttributeError, match=r"solvi.heads.Head .* was removed in 1.0: use FastHead"):
-        _ = solvi.heads.Head
+    import solvi.core.deciders.heads                                     # the legacy Head itself was removed in 1.0
+    with pytest.raises(AttributeError, match=r"solvi.core.deciders.heads.Head .* was removed in 1.0: use FastHead"):
+        _ = solvi.core.deciders.heads.Head
     with pytest.raises(AttributeError, match=rf"Binary.observe\(\) {GONE}teach\(\)"):
         Binary().observe({"x": 1.0}, True)
 
 
 def test_strategists():
-    from solvi.strategy import CostStrategist
+    from solvi.core.plan.cost import CostStrategist
     for old, new in (("fallback", "on_failure"), ("fallbacks", "keep_alternatives")):
         with pytest.raises(TypeError, match=rf"CostStrategist\({old}=\) {GONE}{new}="):
             CostStrategist(**{old: False})
@@ -177,7 +177,7 @@ def test_strategists():
 def test_storage_tooling_and_agents(tmp_path):
     from solvi import JSONLStorage, testing
     from solvi.agents import Guard
-    from solvi.memory import CorrectionMemory
+    from solvi.core.knowledge.memory import CorrectionMemory
     with pytest.raises(TypeError, match=rf"JSONLStorage\(catalog=\) {GONE}system="):
         JSONLStorage(tmp_path / "a.jsonl", catalog=None)
     st = JSONLStorage(tmp_path / "a.jsonl")
@@ -222,7 +222,7 @@ def test_files_and_command_lines(tmp_path, monkeypatch, capsys):
 
 
 def test_extractors():
-    from solvi.extract_multi import MultiSpanExtractor
+    from solvi.core.extract.multi import MultiSpanExtractor
     ex = MultiSpanExtractor.__new__(MultiSpanExtractor)
     with pytest.raises(TypeError, match=rf"MultiSpanExtractor.fit\(docs, spans\) {GONE}fit\(\[\(text, spans\), \.\.\.\]\)"):
         ex.fit(["a text"], [{"total": None}])  # type: ignore[call-arg]

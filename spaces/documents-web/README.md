@@ -46,7 +46,7 @@ A use case is one file in `usecases/` (fields as `[name, description]`, document
 1. **Tokenizer** (`tokenizer.js`): ModernBERT byte-level BPE reimplemented in JavaScript so every token has character
    offsets (Python code-point offsets for solvi quotes, UTF-16 offsets for highlighting). Identical ids and offsets to
    Hugging Face `tokenizers` on all sample documents and descriptions.
-2. **Extractor** (`extractor.worker.js`): reproduces `solvi.extract_long.LongSpanExtractor.predict`: windows
+2. **Extractor** (`extractor.worker.js`): reproduces `solvi.core.extract.LongSpanExtractor.predict`: windows
    `[CLS] description [SEP] chunk [SEP]` (1024 tokens, stride 128), softmax of start/end logits per window, best span
    `start ≤ end < start + 256` by `p_start · p_end`, best over windows, present if the score reaches the threshold from
    `solvi_extract.json`. The model file (790 MB) is cached with the Cache API. WebGPU is used when the GPU supports
