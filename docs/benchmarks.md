@@ -74,7 +74,9 @@ are in [benchmarks/vs_llm/](../benchmarks/vs_llm/).
 baseline that does not use solvi and one solution with solvi: the variant chosen on dev, on the library's current
 pieces. Five are the kind of task solvi is built for; four were picked because they fit it badly. `fetch.sh` downloads
 the data from its sources, `prepare.py` makes the fixed splits, and every LLM answer is cached by its request, so a
-rerun of the published numbers costs nothing once the cache is filled. All on eval, solvi 0.8.0, `openai/gpt-oss-120b`
+rerun of the published numbers costs nothing once the cache is filled. The replies of the published run are in the
+repository (all but Abt-Buy's, whose data has no licence), and a weekly workflow reruns every script from them offline
+and checks each number below against `benchmarks/tasks/results.json`. All on eval, solvi 0.8.0, `openai/gpt-oss-120b`
 where an LLM is used:
 
 | Task | Metric | Baseline | solvi | Script |
