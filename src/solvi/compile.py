@@ -1070,7 +1070,8 @@ def _short(x, n=700):
 class Dispute:
     """What a person is asked during a compilation.
 
-    kind: "disagreement" — the two drafts answer `input` differently (`answers[i]` is draft i's answer, `clauses[i]`
+    kind: "agreed" — a spot check: both drafts give `answers[0]` on `input` (a pick of either draft confirms it);
+    "disagreement" — the two drafts answer `input` differently (`answers[i]` is draft i's answer, `clauses[i]`
     the clauses its deciding parts cite; `similar`: how many inputs of the pool disagree the same way); "test" — every
     draft that answers the test `test` (its clause, input, expected answer and why) fails it (`answers`: what they
     gave). `round`: the round; `spec`: the specification's name; `clause_text`: the
@@ -1089,6 +1090,7 @@ class Dispute:
         """The question as a person reads it."""
         lines = [f"[{self.spec}] round {self.round}: " + (
             "two drafts decide this input differently" if self.kind == "disagreement" else
+            "both drafts decide this input the same way: is it right? (a spot check)" if self.kind == "agreed" else
             "every draft fails this test derived from the specification")]
         lines.append("input: " + _short(self.input, 2000))
         if self.kind == "test":
@@ -1185,8 +1187,9 @@ def reference_reviewer(reference: Callable) -> Callable:
 class _Person:
     """The person of one compilation: asks within the budget, keeps every question and answer for the record."""
 
-    def __init__(self, review, budget, per_round, spec, questions):
-        self.review, self.budget, self.per_round = review, budget, per_round
+    def __init__(self, review, budget, per_round, spec, questions, agreed=0):
+        self.review, self.budget, self.per_round, self.agreed = review, budget, per_round, int(agreed or 0)
+        self.agreed_n, self.agreed_seen = 0, set()     # spot checks of agreed decisions: counted apart
         self.spec, self.qs = spec, {q.name: q for q in questions}
         self.decisions, self.gaps, self.skipped, self.invalid = [], [], 0, []
         self.round, self.this_round, self.n = 0, 0, 0
@@ -1218,8 +1221,11 @@ class _Person:
 
     def ask(self, d: Dispute):
         """→ (ruling, expect or None, gap: bool); None when the person did not answer."""
-        self.n += 1
-        self.this_round += 1
+        if d.kind == "agreed":
+            self.agreed_n += 1                         # a spot check: outside the budget and the round's limit
+        else:
+            self.n += 1
+            self.this_round += 1
         t0 = time.time()
         try:
             r = _as_ruling(self.review(d))
@@ -1271,7 +1277,10 @@ class _Person:
                 "budget": self.budget, "per_round": self.per_round, "asked": self.n, "decisions": len(dec),
                 "neither": sum(bool(x.get("neither")) for x in dec), "gaps": self.gaps, "skipped": self.skipped,
                 "invalid": len(self.invalid),
-                "by_kind": {k: sum(x["kind"] == k for x in dec) for k in ("disagreement", "test")},
+                "by_kind": {k: sum(x["kind"] == k for x in dec) for k in ("disagreement", "test", "agreed")},
+                "agreed": {"k": self.agreed, "asked": self.agreed_n,
+                           "confirmed": sum(x["kind"] == "agreed" and x.get("outcome") == "draft"
+                                            and not x.get("neither") for x in dec)},
                 "log": self.decisions}
 
 
@@ -1311,6 +1320,55 @@ def _ran_clauses(c_parts, ran):
             name = next((n for n, p in c_parts.items() if p.get("kind") == "rule" and p.get("question") == q), step)
         out += (c_parts.get(name) or {}).get("clauses") or []
     return out
+
+
+def _spot_check(person, ok, pool, allin, spec, rnd, person_test, summary):
+    """Before a round accepts: the person sees up to `person.agreed` pool inputs both drafts answer alike (stratified by
+    the answer and the clauses cited, the largest strata first, one input of each in turn) → the feedback for the
+    drafts when an answer was not confirmed (None: all confirmed)."""
+    strata = {}
+    for k in range(len(pool)):
+        r0, r1 = ok[0].rows[k], ok[1].rows[k]
+        a = {q: _norm(v) for q, v in r0["answers"].items()}
+        if r0.get("error") or r1.get("error") or a != {q: _norm(v) for q, v in r1["answers"].items()} or \
+                any(v is None for v in a.values()):
+            continue
+        key = json.dumps(pool[k], sort_keys=True, default=str)
+        if key in person.decided or key in person.agreed_seen:
+            continue
+        cls = sorted(set(_ran_clauses(ok[0].parts, r0["ran"])) | set(_ran_clauses(ok[1].parts, r1["ran"])))
+        strata.setdefault(json.dumps([a, cls], sort_keys=True), []).append((k, a, cls))
+    rng = random.Random(1000 + rnd)
+    order = [list(v) for _, v in sorted(strata.items(), key=lambda kv: (-len(kv[1]), kv[0]))]
+    sizes = [len(v) for v in order]
+    picks, i = [], 0
+    while len(picks) < person.agreed and any(order):
+        j = i % len(order)
+        if order[j]:
+            picks.append((order[j].pop(rng.randrange(len(order[j]))), sizes[j]))
+        i += 1
+    wrong = []
+    for (k, a, cls), size in picks:
+        person.agreed_seen.add(json.dumps(pool[k], sort_keys=True, default=str))
+        d = Dispute("agreed", pool[k], [a, a], [cls, cls], rnd, spec.name, similar=size,
+                    clause_text={c: spec.clauses[c].text for c in cls[:12] if c in spec.clauses})
+        r, expect, gap = person.ask(d)
+        if r is None or gap:
+            wrong.append((pool[k], a, None, cls))
+        elif expect and any(expect.get(q) != v for q, v in a.items() if q in expect):
+            person_test(pool[k], expect, cls, r.note, rnd, k)
+            wrong.append((pool[k], a, expect, cls))
+    summary["spot_check"] = {"asked": len(picks), "not_confirmed": len(wrong)}
+    if not wrong:
+        return None
+    lines = [f"A person checked {len(picks)} inputs on which both implementations agree; {len(wrong)} not confirmed:"]
+    for x, a, e, _ in wrong:
+        lines.append(f"- input {_short(x, 500)}\n  both modules answer {a}; " +
+                     (f"the right answer is {e} (a person decided; it is now a test)" if e else
+                      "the person did not confirm it"))
+    lines.append("Decide inputs like these the right way; the clauses involved:\n"
+                 + _clauses_text(spec, [c for *_, cl in wrong for c in cl], 12))
+    return "\n".join(lines)
 
 
 def _loop(spec, questions, inputs, gens, *, rounds, tests, examples, reference, write, log, mem_mb, item_s, extra_check,
@@ -1586,12 +1644,20 @@ def _loop(spec, questions, inputs, gens, *, rounds, tests, examples, reference, 
         summary["agreement"] = agree
         history.append(summary)
         if len(ok) == 2 and not any(d.feedback for d in drafts):
+            if person is not None and person.agreed and person.review is not None and not person.gaps:
+                wrong = _spot_check(person, ok, pool, allin, spec, rnd, person_test, summary)
+                if wrong:
+                    for d, row in zip(drafts, summary["drafts"]):
+                        d.feedback = wrong
+                        d.caught.append("spot check")
+                        row["caught"], row["feedback"] = list(d.caught), True
             if person is not None and person.gaps:
                 history.append({"last_drafts": [{"source": d.source, "parts": d.parts, "problems": d.problems}
                                                 for d in drafts]})
                 return None, None, (f"not accepted: a person found {len(person.gaps)} input(s) the specification does "
                                     "not decide (record['person']['gaps']): amend the specification"), history, reviewed
-            return drafts[0], drafts[1], f"accepted in round {rnd}", history, reviewed
+            if not any(d.feedback for d in drafts):
+                return drafts[0], drafts[1], f"accepted in round {rnd}", history, reviewed
         # a draft refused before it ran, round after round, is replaced by a fresh one (bounded, recorded): a stuck
         # draft must not block a partner that works. The fresh draft meets the same checks; nothing is relaxed.
         for d in drafts:
@@ -1636,7 +1702,7 @@ def _pitfalls(d):
 def compile_spec(spec: Spec, questions, inputs: Inputs, writer=None, *, rounds: int = 4, tests: int = 40,
                  examples=(), reference: Callable | None = None, mem_mb: int = 1024, item_s: int = 5,
                  fresh_drafts: int = 2, stuck_after: int = 2, review: Callable | None = None,
-                 review_budget: int | None = 20, review_per_round: int | None = 5) -> Compiled:
+                 review_budget: int | None = 20, review_per_round: int | None = 5, review_agreed: int = 0) -> Compiled:
     """Compile `spec` into catalog parts answering `questions` over `inputs` (see the module docs). `writer`: a
     solvi.generate Generator (or two, for two models), or a base URL (model openai/gpt-oss-120b). `examples`: labelled
     [(input, {question: answer})] that both drafts must match; `reference(input) → {question: answer}`, compared on the
@@ -1649,7 +1715,8 @@ def compile_spec(spec: Spec, questions, inputs: Inputs, writer=None, *, rounds: 
     questions = list(questions)
     gens = _gens(writer)
     log = []
-    person = _Person(review, review_budget, review_per_round, spec, questions) if review is not None else None
+    person = _Person(review, review_budget, review_per_round, spec, questions, review_agreed) \
+        if review is not None else None
     test_list, bad, terr = _write_tests(spec, questions, inputs, gens[0], log, tests) if tests else ([], [], None)
     base = _task_text(spec, questions, inputs)
 
@@ -1715,7 +1782,7 @@ def _effective(patch, pparts, old_parts):
 def recompile(old: Compiled, spec: Spec, inputs: Inputs, writer=None, *, rounds: int = 4, tests: int = 40,
               examples=(), reference: Callable | None = None, mem_mb: int = 1024, item_s: int = 5,
               fresh_drafts: int = 2, stuck_after: int = 2, review: Callable | None = None,
-              review_budget: int | None = 20, review_per_round: int | None = 5) -> Compiled:
+              review_budget: int | None = 20, review_per_round: int | None = 5, review_agreed: int = 0) -> Compiled:
     """Recompile an accepted compilation for a revised specification (`old.spec.revise(...)`): the writer returns only
     the parts it adds, replaces or removes — each citing a changed or added clause — and the rest stays byte-identical.
     Accepted by the same checks as compile_spec (two independent patches agree, tests written for the new
@@ -1734,7 +1801,8 @@ def recompile(old: Compiled, spec: Spec, inputs: Inputs, writer=None, *, rounds:
                      "the specification did not change", {"spec_hash": spec.hash, "calls": []},
                      {"clauses": ch, "parts": {"added": [], "replaced": [], "removed": [], "kept": list(old.parts)}})
         return c
-    person = _Person(review, review_budget, review_per_round, spec, questions) if review is not None else None
+    person = _Person(review, review_budget, review_per_round, spec, questions, review_agreed) \
+        if review is not None else None
     test_list, bad, terr = _write_tests(spec, questions, inputs, gens[0], log, tests) if tests else ([], [], None)
     marks = {**{c: "changed" for c in ch["changed"]}, **{c: "added" for c in ch["added"]}}
     removed = [old.spec.clauses[c] for c in ch["removed"] if c in old.spec.clauses]
