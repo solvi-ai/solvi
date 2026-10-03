@@ -47,7 +47,7 @@ def main(argv=None):
 
     import torch
 
-    from solvi.calibfile import examples_of, read_rows
+    from solvi.calibrate import examples_of, read_rows
     from solvi.decide import DecideModel
     from solvi.lora import adapt
     device = a.device or ("cuda" if torch.cuda.is_available() else "cpu")
