@@ -1,10 +1,18 @@
-"""The import structure of solvi, read from the source (ast), so that a cycle or a layer break fails here:
+"""The import structure of solvi, read from the source (ast), so that a cycle or a layer break fails here (LAYOUT §6,
+on a provisional tier map over the flat module names until the 1.0 package move):
 
 - no import cycle at module level (the imports a module runs when it is imported, nested in `if` / `try` included,
   `if TYPE_CHECKING:` and function bodies not): such a cycle makes the import order matter and breaks on a refactor;
 - the execution layer (core, typed, provenance, primitives, runtime, schema, textin) imports nothing above it, not even
   inside a function: what it needs of the modules above (the flow, the replay of their records) is defined in it;
-- nothing below the server and agent layer (solvi.cli, solvi.serve, solvi.hooks, solvi.agents) imports from it.
+- nothing below the server and agent layer (solvi.cli, solvi.serve, solvi.hooks, solvi.agents) imports from it;
+- (rule 2) an import cycle — any import, inside a function too — stays inside one tier: the cross-tier cycle of 0.9
+  (24 modules from decide to system and dispatch) was broken in 1.0 by the moves of LAYOUT §6, and the cycles left
+  inside a tier are listed (INTRA_TIER_CYCLES), so a new one is a decision, not an accident;
+- (rule 3) tier order: a low-level module imports only its own tier or the ones below it (kernel → parts → guarantees →
+  records → system → deliberate → knowledge); a high-level module imports low and high; an experimental one anything;
+  nothing stable imports an experimental module (except the allowlisted command-line entries). Every module is placed:
+  a new one has to be put in a tier.
 
 Inside a function, importing the package root itself (`from . import __version__`) is not counted: the root has finished
 importing before any function of a submodule runs."""
@@ -151,3 +159,92 @@ def test_nothing_below_the_server_and_agent_layer_imports_it():
     g = graph(module_level=False)
     up = {f"{m} → {t}" for m, ts in g.items() if not top(m) for t in ts if top(t)}
     assert not up, f"a library module imports the server / agent layer: {sorted(up)}"
+
+
+# --- the provisional tier map (LAYOUT §2 / §6) over the flat 1.0 module names; the package move (solvi.core.*) follows
+LOW_TIERS = {
+    "kernel": "_deprecate loader core typed provenance primitives runtime schema textin sets costs i18n calibration calibfile "
+              "sources chain _rpc",
+    "parts": "decide heads llm remote longdoc multi perturb rulelist systemone extract_long extract_multi strategist strategy "
+             "inputs",
+    "guarantees": "guarantee drift openset",
+    "records": "storage response signature audit diff report sysreport",
+    "system": "system",
+    "deliberate": "agree generate refine search dispatch",
+    "knowledge": "worldmap episode memory",
+}
+HIGH = "__init__ __main__ auto calibrate check cli command honesty models scaffold serve show testing agents"
+EXPERIMENTAL = "compile sandbox hooks learning lora specialist charts agents.mcp"
+# stable → experimental imports that are meant: the command-line entries for an experimental feature (LAYOUT §6), and
+# auto's compiled slow path (LAYOUT risk 3: `slow=` will take a compiled System; until then it is listed here)
+ALLOWED_EXPERIMENTAL = {("solvi.serve", "solvi.agents.mcp"), ("solvi.auto", "solvi.compile")}
+# the import cycles left in 1.0, each inside one tier
+INTRA_TIER_CYCLES = [
+    {"solvi.core", "solvi.primitives", "solvi.provenance", "solvi.runtime", "solvi.schema", "solvi.textin", "solvi.typed"},
+    {"solvi.storage", "solvi.response", "solvi.report", "solvi.signature"},
+    {"solvi.agents.guard", "solvi.agents.confirm"},
+]
+
+
+def _level(m):
+    """A module → ("low", tier index) / ("high", None) / ("experimental", None), by its longest listed prefix."""
+    name = "__init__" if m == "solvi" else m.split(".", 1)[1]
+    table = {x: ("experimental", None) for x in EXPERIMENTAL.split()}
+    table.update({x: ("high", None) for x in HIGH.split()})
+    for i, (_, mods) in enumerate(LOW_TIERS.items()):
+        table.update({x: ("low", i) for x in mods.split()})
+    table["agents.mcp"] = ("experimental", None)
+    parts = name.split(".")
+    for k in range(len(parts), 0, -1):
+        if ".".join(parts[:k]) in table:
+            return table[".".join(parts[:k])]
+    return None
+
+
+def _tier(m):
+    lvl, i = _level(m)
+    return list(LOW_TIERS)[i] if lvl == "low" else lvl
+
+
+def test_every_module_is_placed_in_a_tier():
+    missing = sorted(m for m in graph(module_level=False) if _level(m) is None)
+    assert not missing, f"put these modules in a tier (LOW_TIERS, HIGH or EXPERIMENTAL): {missing}"
+
+
+def test_import_cycles_stay_inside_one_tier_and_are_the_known_ones():
+    found = cycles(graph(module_level=False))
+    across = [sorted(c) for c in found if len({_tier(m) for m in c}) > 1]
+    assert not across, f"an import cycle across tiers: {across}"
+    assert sorted(map(sorted, found)) == sorted(map(sorted, INTRA_TIER_CYCLES)), \
+        f"the cycles inside a tier changed (update INTRA_TIER_CYCLES if it is meant): {sorted(map(sorted, found))}"
+
+
+def test_tier_order_and_levels():
+    bad = []
+    for m, ts in graph(module_level=False).items():
+        lm, im = _level(m)
+        for t in ts:
+            lt, it = _level(t)
+            if lm == "low" and (lt != "low" or it > im):
+                bad.append(f"{m} ({_tier(m)}) → {t} ({_tier(t)})")
+            elif lm == "high" and lt == "experimental" and (m, t) not in ALLOWED_EXPERIMENTAL:
+                bad.append(f"{m} (high) → {t} (experimental)")
+    assert not bad, f"imports against the tier order: {sorted(bad)}"
+
+
+def test_the_old_flat_names_still_resolve():
+    """The moves of 1.0 kept every old import path working (a plain re-export, no warning yet)."""
+    import solvi
+    from solvi import calibfile, calibrate, calibration, chain, costs, dispatch, response, runtime, serve, sources, storage, system
+    from solvi import _rpc, decide
+    assert system.Response is response.Response is solvi.Response and system._append is chain.append
+    for name in ("TRUSTED_SOURCES", "VERIFIED", "VERIFIED_REFUSED", "UntrustedLabel", "check_source"):
+        assert getattr(storage, name) is getattr(sources, name)
+    assert decide.GroupBy is calibration.GroupBy and decide.group_name is calibration.group_name
+    assert decide.plan_batches is runtime.plan_batches
+    assert dispatch.price_of is costs.price_of and dispatch._usages is costs._usages
+    for name in ("Limits", "RequestError", "NotFound", "BadRequest", "Busy", "too_deep", "parse_json", "internal_error",
+                 "_readline"):
+        assert getattr(serve, name) is getattr(_rpc, name)
+    for name in ("add_parser", "cmd_calibrate", "examples_of", "find_part", "label_of", "read_rows"):
+        assert getattr(calibfile, name) is getattr(calibrate, name)
