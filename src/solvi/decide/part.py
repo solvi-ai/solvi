@@ -872,6 +872,44 @@ class DecisionPart:
             sizes.append(len(self.candidates(d)))
         return {"coverage": coverage, "quantile": q, "n": len(scores), "mean_size": float(np.mean(sizes))}
 
+    # --- the calibration file's state of this part (solvi.calibfile reads and writes only the file format)
+    _calibration_kind = "DecisionPart"
+
+    def _calibration_base(self):
+        """What a calibration is fitted to: the fingerprint without the thresholds (the checkpoint, the question, this
+        question's adaptation, and how the part computes its signal — option_order="average" with its permutations,
+        long= with top_k and rerank, the adapter)."""
+        a = self.adaptation
+        signal = {k: v for k, v in (("option_order", None if self.option_order != "average" else
+                                     (self.option_order, self.permutations)),
+                                    ("long", self.long_key()),
+                                    ("lora", None if self.lora is None else self.lora.hash))
+                  if v is not None}
+        if signal:                                  # a part with the default signal keeps the fingerprint it had
+            return digest("DecisionPart", self.model.weights_fingerprint(), self.spec.describe(), a.params() if a else None,
+                          signal)
+        return digest("DecisionPart", self.model.weights_fingerprint(), self.spec.describe(), a.params() if a else None)
+
+    def _calibration_models(self):
+        """{model id: weights fingerprint} of the model behind the part (for the message when they differ)."""
+        return {str(self.model_id): self.model.weights_fingerprint()}
+
+    def _calibration_thresholds(self):
+        return {"escalate_below": self.escalate_below, "act_threshold": self.act_threshold}
+
+    def _calibration_adapter(self):
+        """The adapter the calibration was made with (written beside the file), or None."""
+        return self.lora
+
+    def _apply_calibration(self, rec, grp, path):
+        """Set the thresholds a calibration file holds (solvi.calibfile.load has checked it)."""
+        if grp is not None:
+            grp["signal"] = rec["groups"].get("signal")
+        self._set_threshold("act", rec.get("act_threshold"), rec.get("guarantee"), grp)   # sets groups, inputs
+        self.escalate_below, self.act_threshold = rec.get("escalate_below"), rec.get("act_threshold")   # both, as saved
+        self.guarantee = rec.get("guarantee")
+        self.conformal_set = rec.get("conformal")
+
     def save_calibration(self, path):
         """Write this decision's calibration — the escalation thresholds (per group too), the guarantee record, the
         conformal set — with the question and the fingerprint of the model and adaptation it was fitted on, to a JSON

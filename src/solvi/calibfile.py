@@ -72,40 +72,28 @@ def _norm(v):
 
 
 # --------------------------------------------------------------------------------------------------- what is saved
+# The file's format is here; what a part puts in it and takes from it is the part's own (DecisionPart and Combination:
+# _calibration_kind, _calibration_base, _calibration_models, _calibration_thresholds, _calibration_adapter,
+# _apply_calibration), so this module imports no decider (1.0).
 def _kind_of(part):
-    from .decide import DecisionPart
-    if isinstance(part, DecisionPart):
-        return "DecisionPart"
-    from .multi import Combination
-    if isinstance(part, Combination):
-        return type(part).__name__
-    raise TypeError(f"a calibration file is made from a DecisionPart or a Cascade / Vote / Route, not {type(part).__name__}")
+    kind = getattr(part, "_calibration_kind", None)
+    if kind is None:
+        raise TypeError(f"a calibration file is made from a DecisionPart or a Cascade / Vote / Route, not "
+                        f"{type(part).__name__}")
+    return kind
 
 
 def base_fingerprint(part):
     """What a calibration is fitted to: the part's fingerprint without its thresholds (the checkpoint, the question, this
     question's adaptation, and how the part computes its signal — option_order="average" with its permutations, long=
     with top_k and rerank; for a combination every member)."""
-    from .provenance import digest
-    if _kind_of(part) == "DecisionPart":
-        a = part.adaptation
-        signal = {k: v for k, v in (("option_order", None if part.option_order != "average" else
-                                     (part.option_order, part.permutations)),
-                                    ("long", part.long_key()),
-                                    ("lora", None if part.lora is None else part.lora.hash))
-                  if v is not None}
-        if signal:                                  # a part with the default signal keeps the fingerprint it had
-            return digest("DecisionPart", part.model.weights_fingerprint(), part.spec.describe(), a.params() if a else None,
-                          signal)
-        return digest("DecisionPart", part.model.weights_fingerprint(), part.spec.describe(), a.params() if a else None)
-    return digest(type(part).__name__, part._describe(), [m.fingerprint() for m in part.members], {})
+    _kind_of(part)
+    return part._calibration_base()
 
 
 def _models(part):
     """{model id: weights fingerprint} of the models behind a part (for the message when they differ)."""
-    if _kind_of(part) == "DecisionPart":
-        return {str(part.model_id): part.model.weights_fingerprint()}
-    return {str(lf.part.model_id): lf.part.model.weights_fingerprint() for lf in part.leaves()}
+    return part._calibration_models()
 
 
 def _groups_record(groups):
@@ -121,17 +109,11 @@ def record(part):
     kind = _kind_of(part)
     out = {"format": FORMAT, "kind": kind, "name": part.__name__, "question": _norm(part.spec.describe()),
            "fingerprint": base_fingerprint(part), "models": _models(part)}
-    if kind == "DecisionPart":
-        out.update(escalate_below=part.escalate_below, act_threshold=part.act_threshold)
-    else:
-        out["threshold"] = part.threshold
-        if part.scale is not None:
-            out["scale"] = part.scale
-        if part.scale == "rank":                    # each member's sorted calibration signals (at most multi.MAX_RANKS)
-            out["ranks"] = [[float(x) for x in r] for r in part.ranks]
+    out.update(part._calibration_thresholds())
     out.update(guarantee=part.guarantee, conformal=part.conformal_set, groups=_groups_record(part.groups))
-    if kind == "DecisionPart" and part.lora is not None:     # the adapter it was calibrated with, in a file beside it
-        out["lora"] = {"hash": part.lora.hash}
+    ad = part._calibration_adapter()
+    if ad is not None:                              # the adapter it was calibrated with, in a file beside it
+        out[ad.kind] = {"hash": ad.fingerprint()}
     from . import __version__
     out["solvi"] = __version__
     return _norm(out)
@@ -148,7 +130,7 @@ def save(part, path):
     import os
     rec = record(part)
     if "lora" in rec:                               # the part's adapter writes itself (the Adapter protocol)
-        part.lora.save(lora_path(path))
+        part._calibration_adapter().save(lora_path(path))
         rec["lora"]["file"] = os.path.basename(lora_path(path))
     with open(path, "w", encoding="utf-8") as fh:
         json.dump(_enc(rec), fh, ensure_ascii=False, indent=1, allow_nan=False)
@@ -186,10 +168,12 @@ def load(part, path, groups=None, strict=True):
     if rec.get("kind") != kind:
         raise ValueError(f"{path}: a calibration of a {rec.get('kind')}, not of a {kind}")
     lo = rec.get("lora")
-    if kind == "DecisionPart" and lo and (part.lora is None or part.lora.hash != lo.get("hash")):
-        import os                                   # calibrated with an adapter: load it first (from beside the file)
-        f = os.path.join(os.path.dirname(os.path.abspath(str(path))), lo.get("file") or os.path.basename(lora_path(path)))
-        part._load_adapter("lora", f, strict, expect=lo.get("hash"))
+    if lo and callable(getattr(part, "_load_adapter", None)):
+        ad = part._calibration_adapter()
+        if ad is None or ad.hash != lo.get("hash"):
+            import os                               # calibrated with an adapter: load it first (from beside the file)
+            f = os.path.join(os.path.dirname(os.path.abspath(str(path))), lo.get("file") or os.path.basename(lora_path(path)))
+            part._load_adapter("lora", f, strict, expect=lo.get("hash"))
     if strict:
         if rec.get("question") != _norm(part.spec.describe()):
             raise ValueError(f"{path}: made for another question ({rec.get('name')!r}: {rec.get('question')}); this part "
@@ -211,29 +195,7 @@ def load(part, path, groups=None, strict=True):
     if rec.get("groups") is not None:
         g = rec["groups"]
         grp = {"by": _group_by(g, groups), "nodes": {tuple(k): dict(v) for k, v in g["nodes"]}}
-        if kind == "DecisionPart":
-            grp["signal"] = g.get("signal")
-    if kind == "DecisionPart":
-        part._set_threshold("act", rec.get("act_threshold"), rec.get("guarantee"), grp)   # sets groups, inputs
-        part.escalate_below, part.act_threshold = rec.get("escalate_below"), rec.get("act_threshold")   # both, as saved
-        part.guarantee = rec.get("guarantee")
-        part.conformal_set = rec.get("conformal")
-    else:
-        part.threshold, part.guarantee, part.groups = rec.get("threshold"), rec.get("guarantee"), grp
-        scale = rec.get("scale", "raw")             # a file from before 0.7 has no scale: raw, as it was made
-        if scale == "rank":
-            import numpy as np
-            ranks = rec.get("ranks")
-            if not isinstance(ranks, list) or len(ranks) != len(part.leaves()):
-                raise ValueError(f"{path}: a rank-scale calibration needs the calibration signals of each of the "
-                                 f"{len(part.leaves())} models (\"ranks\")")
-            part.scale, part.ranks = "rank", [np.asarray(r, float) for r in ranks]
-        elif scale == "raw":
-            part.scale, part.ranks = "raw", None
-        else:
-            raise ValueError(f"{path}: unknown scale {scale!r} (rank or raw)")
-        part.conformal_set = rec.get("conformal")
-        part._setup()
+    part._apply_calibration(rec, grp, path)
     return part
 
 

@@ -795,6 +795,47 @@ class Combination:
                 "method": method, "guarantee": g["promise"],
                 "calls_per_question": float(calls[:, j].mean()) if n else 0.0, "scale": scale}
 
+    # --- the calibration file's state of the combination (solvi.calibfile reads and writes only the file format)
+    @property
+    def _calibration_kind(self):
+        return type(self).__name__
+
+    def _calibration_base(self):
+        """What a calibration is fitted to: every member's fingerprint and the combination's rule, without its thresholds."""
+        return digest(type(self).__name__, self._describe(), [m.fingerprint() for m in self.members], {})
+
+    def _calibration_models(self):
+        """{model id: weights fingerprint} of the models behind the combination (for the message when they differ)."""
+        return {str(lf.part.model_id): lf.part.model.weights_fingerprint() for lf in self.leaves()}
+
+    def _calibration_thresholds(self):
+        out = {"threshold": self.threshold}
+        if self.scale is not None:
+            out["scale"] = self.scale
+        if self.scale == "rank":                    # each member's sorted calibration signals (at most multi.MAX_RANKS)
+            out["ranks"] = [[float(x) for x in r] for r in self.ranks]
+        return out
+
+    def _calibration_adapter(self):
+        return None
+
+    def _apply_calibration(self, rec, grp, path):
+        """Set the threshold a calibration file holds (solvi.calibfile.load has checked it)."""
+        self.threshold, self.guarantee, self.groups = rec.get("threshold"), rec.get("guarantee"), grp
+        scale = rec.get("scale", "raw")             # a file from before 0.7 has no scale: raw, as it was made
+        if scale == "rank":
+            ranks = rec.get("ranks")
+            if not isinstance(ranks, list) or len(ranks) != len(self.leaves()):
+                raise ValueError(f"{path}: a rank-scale calibration needs the calibration signals of each of the "
+                                 f"{len(self.leaves())} models (\"ranks\")")
+            self.scale, self.ranks = "rank", [np.asarray(r, float) for r in ranks]
+        elif scale == "raw":
+            self.scale, self.ranks = "raw", None
+        else:
+            raise ValueError(f"{path}: unknown scale {scale!r} (rank or raw)")
+        self.conformal_set = rec.get("conformal")
+        self._setup()
+
     def save_calibration(self, path):
         """Write the combination's calibration (the shared threshold, per group too, the guarantee, the conformal set) with
         the question and every member's fingerprint to a JSON file (solvi.calibfile). → path."""
