@@ -41,6 +41,7 @@ theme:
 
 nav:
   - Home: index.md
+  - Mission: mission.md
   - Guide: guide/index.md          # expanded into one page per chapter by the hook
   - Best practices: best_practices.md
   - Formats and tools:
