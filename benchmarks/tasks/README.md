@@ -151,7 +151,7 @@ uv run python benchmarks/tasks/stand.py check                     # the docs aga
 ```
 
 The workflow `.github/workflows/stand.yml` does this every week and on demand. Without Abt-Buy's replies its four
-steps that read a model are skipped (the baseline, `--repair`, `llm_pair.py` with both reply formats) and their 18
+steps that read a model are skipped (the baseline, `--repair`, `llm_pair.py` with both reply formats) and their 12
 numbers are not compared; its solution, which reads no model, still runs and is. A changed number goes into
 `results.json` and the doc together, from a run.
 
