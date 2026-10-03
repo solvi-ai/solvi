@@ -46,7 +46,6 @@ request data; `--decider` never downloads without `--pull`."""
 import contextlib
 import hmac
 import json
-import logging
 import os
 import re
 import sys
@@ -54,12 +53,14 @@ import threading
 import time
 import typing
 import uuid
-from dataclasses import dataclass
 from typing import Any, Literal, Optional
 
 from pydantic import BaseModel, ConfigDict, Field, create_model
 
 from . import _deprecate
+# limits, request errors, JSON within the limits, the incident message, the bounded line reader: solvi._rpc since 1.0
+# (shared with the MCP proxy, which then does not import the server); re-exported here
+from ._rpc import BadRequest, Busy, Limits, NotFound, RequestError, _readline, internal_error, log, parse_json, too_deep  # noqa: F401
 from .command import fail as _fail, load_object, load_system
 from .inputs import _camel, _fact_type, input_model, input_schema, question_inputs   # noqa: F401 — re-exported
 from .runtime import trace_hash   # noqa: F401 — re-exported (defined there: agents read it too)
@@ -76,95 +77,6 @@ def questions_info(system):
         d["input_schema"] = input_schema(system, q.name)
         out.append(d)
     return out
-
-
-# ------------------------------------------------------------------------------------------------ limits and errors
-log = logging.getLogger("solvi.serve")
-
-
-@dataclass
-class Limits:
-    """What one request may be (see the module docs, Security). max_body: bytes of an HTTP body / an MCP message;
-    max_depth: nesting of JSON objects and arrays in it; timeout: seconds a request may take (None: no limit) — HTTP
-    answers 504 after it, an MCP tool call an error; an async System's parts are given 80% of it as System.aask's timeout
-    (unless System(timeout=) or the part sets one), so a slow part makes its questions abstain (safeguard `timeout`) and
-    the request still answers. max_questions / max_options: questions in one System One request, options (criteria) of
-    one of them — more is refused (422). max_inflight: requests answered at once — by a worker thread (running or
-    waiting for the System; a request whose thread timed out still counts until the thread ends) or, for an async
-    System, on the event loop — more are refused at once
-    with 503 "busy"; queue_timeout: seconds a request waits for the System while another is being answered (None: as
-    long as it takes) — then 503 "busy", instead of piling up threads behind a slow one."""
-    max_body: int = 1_000_000
-    max_depth: int = 32
-    timeout: Optional[float] = 60.0
-    max_questions: int = 32
-    max_options: int = 64
-    max_inflight: int = 8
-    queue_timeout: Optional[float] = 10.0
-
-
-class RequestError(Exception):
-    """A request the server refuses; its message is written by solvi (never an exception text from the catalog's code) and
-    is safe to return to the client. `status`: the HTTP status."""
-    status = 422
-
-    def __init__(self, message, status=None):
-        super().__init__(message)
-        if status is not None:
-            self.status = status
-
-
-class NotFound(RequestError, LookupError):
-    status = 404
-
-
-class BadRequest(RequestError, ValueError, TypeError):
-    status = 422
-
-
-class Busy(RequestError):
-    """The server is answering as many requests as it may (Limits.max_inflight), or the System stayed busy longer than
-    Limits.queue_timeout: try again later."""
-    status = 503
-
-
-def too_deep(v, max_depth):
-    """Does a JSON value nest objects / arrays deeper than max_depth? (Iterative: no recursion on hostile input.)"""
-    stack = [(v, 1)]
-    while stack:
-        x, d = stack.pop()
-        if isinstance(x, dict):
-            if d > max_depth:
-                return True
-            stack.extend((y, d + 1) for y in x.values())
-        elif isinstance(x, (list, tuple)):
-            if d > max_depth:
-                return True
-            stack.extend((y, d + 1) for y in x)
-    return False
-
-
-def parse_json(data, limits):
-    """Bytes / text of a request → the JSON value, within the limits (BadRequest / RequestError 413 otherwise)."""
-    if len(data) > limits.max_body:
-        raise RequestError(f"the request is larger than {limits.max_body} bytes", 413)
-    try:
-        v = json.loads(data)
-    except RecursionError:
-        raise BadRequest(f"the request nests JSON deeper than {limits.max_depth} levels") from None
-    except ValueError:
-        raise BadRequest("the request is not JSON") from None
-    if too_deep(v, limits.max_depth):
-        raise BadRequest(f"the request nests JSON deeper than {limits.max_depth} levels")
-    return v
-
-
-def internal_error(where):
-    """Log the exception being handled (with its traceback) on the server → the message for the client: an incident id,
-    nothing of the exception (its text may carry paths, data or code)."""
-    incident = uuid.uuid4().hex[:12]
-    log.exception("solvi serve: %s failed (incident %s)", where, incident)
-    return f"internal error (incident {incident}; the details are in the server log)"
 
 
 # an exception's text as the runtime records it: "Type: message" (a step), "error: Type: message" (an alternative tried)
@@ -829,17 +741,6 @@ async def acall_tool(svc, name, arguments):
             return {"error": internal_error(f"tools/call {name}")}, True
     except asyncio.TimeoutError:
         return {"error": f"the call did not finish within {t:g} s"}, True
-
-
-def _readline(stdin, limit):
-    """One line of at most `limit` characters → (line, too_long): a longer line is read to its end and dropped."""
-    line = stdin.readline(limit + 1)
-    if len(line) <= limit or line.endswith("\n"):
-        return line, False
-    while True:                                       # the rest of an over-long line: read and discard, a chunk at a time
-        more = stdin.readline(65536)
-        if not more or more.endswith("\n"):
-            return "", True
 
 
 MCP_INSTRUCTIONS = ("Each tool is a question of a solvi decision system: pass the input state, get the answer with its "

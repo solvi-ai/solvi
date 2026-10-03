@@ -241,7 +241,7 @@ def run_proxy(guard, upstream, facts=None, escalate="elicit", stdin=None, stdout
     proxy itself is logged (logger solvi.serve) and answered with an incident id, never the exception's text."""
     from .. import __version__
     from ..schema import dumps
-    from ..serve import Limits, RequestError, _readline, internal_error, parse_json
+    from .._rpc import Limits, RequestError, _readline, internal_error, parse_json
     stdin, stdout = stdin or sys.stdin, stdout or sys.stdout
     lim = limits or Limits()
     px = Proxy(guard, upstream, facts, escalate, max_messages, max_chars)
