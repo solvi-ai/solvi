@@ -1026,6 +1026,51 @@ class System:
         return ms
 
 
+    def outcome(self, decision, value, *, question=None, note=None, by=None):
+        """Record what really happened after an earlier decision, as a label of it: `system.outcome(res, "lost")`.
+
+        decision: the stored decision — its Response (saved by this system's storage) or its stored id. value: the
+        correct answer the outcome shows (as for `teach`: True / False for a yes/no question, an option, an Enum
+        member); question: which of the decision's questions (default: its only one); note: what happened, in words
+        ("Link lost a heart two steps later"), kept with the label; by: who or what saw it (a process, an environment).
+        The label is stored as a correction with source "outcome" (through the same source check as every label),
+        `of` = the decision's stored id and its recorded input → the correction's stored id.
+
+        Nothing learns from it and no promise changes by itself: an outcome is a label for an explicit step — recalibrate
+        a guarantee with it (`System.guarantee(question, examples, corrections=True)`, on a schedule or after a drift
+        flag), refit (`fit` on `storage.corrections()`), or keep it as knowledge. Recalibrating on every outcome as it
+        arrives is not done here: measured, it broke the promises (the outcomes seen are not a random sample of the
+        decisions, and a threshold moved after every label is no longer the calibrated one) — the experimental
+        solvi.oncalib does it, with that risk stated. A system without storage raises ValueError (the label has
+        nowhere to go); an unknown question KeyError; an answer outside the options ValueError, before anything is
+        stored."""
+        from .storage import view
+        if self.storage is None:
+            raise ValueError("outcome() stores a label of a stored decision: System(storage=...)")
+        sid = getattr(decision, "stored_id", decision)
+        if not isinstance(sid, str):
+            raise ValueError("outcome(decision, ...): the decision's Response saved by this system's storage, or its "
+                             f"stored id — not {type(decision).__name__} (a response asked with store=False has no id)")
+        d = self.storage.record(sid)                  # KeyError: not in this store
+        v = view(d) if d.get("kind", "ask") == "ask" else None
+        if v is None:
+            raise ValueError(f"record {sid} is not a stored decision with its input (kind {d.get('kind')!r}"
+                             + (", redacted" if d.get("redacted") else "") + ")")
+        asked = list(d.get("answers") or {})
+        if question is None:
+            if len(asked) != 1:
+                raise ValueError(f"the decision answered {asked}: say which with question=")
+            question = asked[0]
+        if question not in self.questions:
+            raise KeyError(f"outcome: no question {question!r} in this system ({', '.join(self.questions)})")
+        if question not in asked:
+            raise ValueError(f"the decision {sid} did not answer {question!r} (it answered {asked})")
+        correct = self.questions[question].answer.normalize(value)       # ValueError: not one of the options
+        from .schema import untag_floats
+        init = untag_floats((v.get("trace") or {}).get("init") or {})
+        return self.storage.save_correction(question, init, correct, label_source="outcome", by=by, of=sid, note=note)
+
+
 class MultiHead:
     """A multi-label answer as one yes/no head per option (each learned with fit or fit_fast)."""
 

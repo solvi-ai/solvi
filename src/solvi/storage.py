@@ -625,7 +625,8 @@ class TraceStorage:
         return rec["id"]
 
     @_deprecate.removed_kwargs(source="label_source")
-    def save_correction(self, question, init_state, answer, meta=None, *, label_source="human", by=None, of=None):
+    def save_correction(self, question, init_state, answer, meta=None, *, label_source="human", by=None, of=None,
+                        note=None):
         """Store a correction (what System.teach records) → its id. label_source (`source=` in 0.7; stored as the
         record's "source"): where the label comes from — "human" (a person
         corrected or confirmed the answer), "outcome" (what really happened: the parcel was lost, the loan defaulted) or
@@ -634,8 +635,9 @@ class TraceStorage:
         alone (status "ok", not escalated or abstained) under a guarantee (System.guarantee) with this very answer;
         anything else raises UntrustedLabel, and the label is not stored. Anything else is refused (UntrustedLabel):
         the system's own unverified answers are never labels. by: who (a user, a reviewer, a process); of: the stored id
-        of the decision it corrects (for "verified", the one it is). Records of 0.6 have no source: they are human
-        corrections. Storing a verified label teaches nothing by itself: which channel may read it, see check_source."""
+        of the decision it corrects (for "verified", the one it is); note: a line of text kept with it (what happened —
+        System.outcome writes it). Records of 0.6 have no source: they are human corrections. Storing a verified label
+        teaches nothing by itself: which channel may read it, see check_source."""
         source = label_source
         check_source(source, accept=(VERIFIED,))
         if source == VERIFIED:
@@ -647,6 +649,8 @@ class TraceStorage:
             body["by"] = str(by)
         if of is not None:
             body["of"] = str(of)
+        if note is not None:                          # content (redact erases it), not a lasting field like a mark's note
+            body["happened"] = str(note)
         if meta is not None:
             body["meta"] = plain(meta)
         return self._append(body)["id"]
@@ -753,7 +757,7 @@ class TraceStorage:
         from .schema import untag_floats                # stored tagged ({"$float": "inf"}), read back as the float
         return [{"id": s.id, "time": s.time, "question": s.data["teach"], "init": untag_floats(s.data["init"]),
                  "answer": untag_floats(s.data["answer"]), "source": s.data.get("source", "human"), "by": s.data.get("by"),
-                 "of": s.data.get("of")}
+                 "of": s.data.get("of"), **({"note": s.data["happened"]} if "happened" in s.data else {})}
                 for s in self.iter("teach")]
 
     @_deprecate.removed_kwargs(catalog="catalog_fp")
