@@ -311,4 +311,10 @@ def lora_key(sp_or_key):
     return (k[0], tuple(sorted(zip(map(str, k[1]), k[2]))), k[3])
 
 
-__all__ = ["Adaptation", "lora_key"]
+# The adapter kinds a decision part's adapter slot can load from a file (part.load_lora, a calibration file that names
+# its adapter): kind → the module that reads it (its load(part, path, strict, expect=)). Looked up by name when a file
+# of that kind is loaded, so solvi.decide imports no adapter module (LoRA is experimental).
+ADAPTERS = {"lora": "solvi.lora"}
+
+
+__all__ = ["ADAPTERS", "Adaptation", "lora_key"]

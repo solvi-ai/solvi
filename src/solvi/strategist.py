@@ -144,7 +144,7 @@ def plan(catalog, questions, init_keys, heads=None):
                     types[x] = next(iter(catalog.readers[x].values()))
     batches = []
     if getattr(catalog, "decisions", 0):             # catalogs without decision parts do no work here
-        from .decide import plan_batches
+        from .runtime import plan_batches
         batches = plan_batches(order)
     return Flow(order, {q: sorted(v) for q, v in per_q.items()}, skipped, {q: sorted(v) for q, v in unresolved.items()},
                 types, batches)

@@ -4,7 +4,7 @@ of them — a second signal next to the decider, with an abstain threshold, reco
 Moving into the knowledge memory in 1.0: this module will be folded into solvi's knowledge memory, and its API may
 change then.
 
-    mem = team.memory()                          # a CorrectionMemory bound to the decision part `team`
+    mem = attach(team)                           # solvi.memory.attach: a CorrectionMemory bound to the part `team`
     mem.add(email, "billing", source="human", by="ann", stored_id=res.stored_id)
     mem.learn_from(store)                        # or every trusted correction of the question in a TraceStorage
     mem.calibrate(max_risk=0.05)                     # the abstain threshold, leave-one-out over the stored corrections
@@ -53,7 +53,7 @@ import numpy as np
 from . import _deprecate
 from .core import NOT_STATED_KEY, Unknown
 from .provenance import ESCALATED, MEMORY, digest
-from .storage import TRUSTED_SOURCES, UntrustedLabel, check_source
+from .sources import TRUSTED_SOURCES, UntrustedLabel, check_source
 MODES = ("check", "answer")
 _WORD = re.compile(r"\w{3,}", re.U)
 
@@ -128,7 +128,7 @@ def _settings(**kw):
 
 class CorrectionMemory:
     """Corrected cases of one decision part and their nearest neighbours (see the module docstring). Usually made by
-    `part.memory(...)`, which also attaches it to the part."""
+    `solvi.memory.attach(part, ...)`, which also attaches it to the part."""
 
     def __init__(self, part, k=7, radius=0.15, min_strength=1.0, min_agreement=0.8, text=False, text_weight=0.5,
                  mode="check"):
@@ -494,4 +494,36 @@ def _threshold_escalation(reason):
     return bool(reason) and (reason.startswith(ESCALATED + ": act") or reason.startswith(("confidence ", "margin ")))
 
 
-__all__ = ["Case", "CorrectionMemory", "MEMORY", "Proposal", "TRUSTED_SOURCES", "UntrustedLabel", "words"]
+def attach(part, memory=None, **settings):
+    """A memory of corrected cases consulted on every decision of `part` (until 1.0: `part.memory(...)`): its proposal,
+    the cases it rests on and its fingerprint go into extra["memory"]; mode="check" (default) escalates when similar
+    corrected cases say another answer, mode="answer" may also answer where the part escalated by its own threshold.
+    settings: k, radius, min_strength, min_agreement, text, text_weight, mode. memory: an existing CorrectionMemory of
+    this part to attach; False detaches. Its fingerprint is part of the part's. → the memory.
+
+    A combination (Cascade / Vote / Route): a memory for every part with these settings → [CorrectionMemory], in leaves
+    order; False detaches every part's → None. Inside a combination a part's memory only checks (it can escalate, never
+    answer). A memory belongs to one part, so an existing one is attached on that part (attach(part, mem)), not on the
+    combination — that raises."""
+    if callable(getattr(part, "leaves", None)):
+        if memory is False:
+            for lf in part.leaves():
+                attach(lf.part, False)
+            return None
+        if memory is not None:
+            raise ValueError(f"a CorrectionMemory belongs to one part ({memory.part.__name__!r}): attach it with "
+                             "attach(part, mem); attach(combination) gives every part its own")
+        return [attach(lf.part, None, **settings) for lf in part.leaves()]
+    if memory is False:
+        part.correction_memory = None
+        return None
+    if memory is None:
+        memory = part.correction_memory if part.correction_memory is not None and not settings else \
+            CorrectionMemory(part, **settings)
+    elif memory.part is not part:
+        raise ValueError(f"this memory belongs to {memory.part.__name__!r}, not {part.__name__!r}")
+    part.correction_memory = memory
+    return memory
+
+
+__all__ = ["Case", "CorrectionMemory", "attach", "MEMORY", "Proposal", "TRUSTED_SOURCES", "UntrustedLabel", "words"]

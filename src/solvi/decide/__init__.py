@@ -40,7 +40,7 @@ from .state import SERIALIZATIONS, _KEY_OK, _is_text, _jkey, _paths, _pkey, _sca
 from .wire import Item, Logits, Pass, _respan, _typed_span, decode_pointer, pass_prompt, pointer_evidence, prompt  # noqa: F401
 from .capabilities import _DEFAULTS, _max_len_long, _multi_question, _pointer_caps, _unknown_caps, _v3, capabilities  # noqa: F401
 from .backends import BlockUnsupported, LONG_CPU_TOKENS, LongInputWarning, OnnxScorer, SECTION_TOKENS, TorchScorer, _Encoder, _NetScorer, _batches, _file_fingerprint, _onnx_file, block_masks, need  # noqa: F401
-from .adapt import Adaptation, _Spec, _basis, _fit_shift, _fit_temperature, _from_type, _given, _is_type, _sig, _softmax, _usable, lora_key  # noqa: F401
+from .adapt import ADAPTERS, Adaptation, _Spec, _basis, _fit_shift, _fit_temperature, _from_type, _given, _is_type, _sig, _softmax, _usable, lora_key  # noqa: F401
 from .gate import Facts, GroupBy, SEPARATION_MIN, _group_guard, _group_info, _group_promise, _shown, _threshold, _vkey, act_features, confidence_source, decision_of, group_name, group_record, guard_promise, no_separation, one_source  # noqa: F401
 from .part import DecisionPart, plan_batches  # noqa: F401
 from .model import DecideModel, _json_default  # noqa: F401

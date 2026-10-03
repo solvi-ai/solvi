@@ -532,7 +532,7 @@ def guard_question(system, question, examples=None, *, max_error=None, max_risk=
 def _with_corrections(system, question, examples, corrections, sources):
     """examples + the stored corrections of `question` from `sources` → (examples, {"examples", "corrections":
     {source: n}, "ids"}); a correction from another source is left out (counted in "skipped")."""
-    from .storage import TRUSTED_SOURCES, VERIFIED, UntrustedLabel, check_source
+    from .sources import TRUSTED_SOURCES, VERIFIED, UntrustedLabel, check_source
     store = system.storage if corrections is True else corrections
     if store is None or not hasattr(store, "corrections"):
         raise ValueError("corrections= is a TraceStorage (or True: the system's storage, which it does not have)")
@@ -614,7 +614,7 @@ def apply_guards(system, results, trace, vals, flow, live=True):
         g.update(signal=guard.describe_signal(), value=s, threshold=thr if math.isfinite(thr) else None, answered=bool(ok),
                  fingerprint=guard.fingerprint())
         if node is not None:
-            from .decide import group_name
+            from .calibration import group_name
             g.update(group=list(grp), applied=list(node), n=info["n"])
             g["promise"] = (f"{g['promise']}; here: group {group_name(node)} (threshold {thr:.4g}, n = {info['n']})"
                             + (f", pooled: {group_name(grp)} had fewer than {p.min_group} examples" if tuple(node) != tuple(grp)
@@ -624,7 +624,7 @@ def apply_guards(system, results, trace, vals, flow, live=True):
         if reason is not None:
             g["reason"] = reason
         if live:
-            from .system import _append
+            from .chain import append as _append
             from .runtime import vhash
             inputs = {guard.signal: vhash(vals[guard.signal])} if isinstance(guard.signal, str) and guard.signal in vals else {}
             _append(trace, Record(step=0, kind="guard", name=f"guard:{qn}", inputs=inputs, value=bool(ok), confidence=1.0,

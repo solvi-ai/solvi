@@ -1,4 +1,4 @@
-"""LoRA adapters on the decider, one per question (experimental): `part.adapt_lora(examples)`.
+"""LoRA adapters on the decider, one per question (experimental): `solvi.lora.adapt_lora(part, examples)`.
 
 When a question has a hundred labelled answers or more, a shift and a scale on the logits (`part.fit`) stop improving: they
 cannot change what the model reads in the input. A LoRA adapter can: low-rank updates (rank 8) of the encoder's attention
@@ -8,10 +8,16 @@ milliseconds), and compare the two on held-out labels. The adapter is 3.2 MB (bf
 minutes (adapt_lora estimates the time after its first update and says so before training), on a GPU seconds.
 
     part = model.decision("team", "Which team?", "email", TEAMS)      # DecideModel.load(..., backend="torch")
-    report = part.adapt_lora(labelled, holdout=300)                   # 300 of the examples calibrate act_guard
+    from solvi.lora import adapt_lora, remove_lora
+    report = adapt_lora(part, labelled, holdout=300)                  # 300 of the examples calibrate act_guard
     part.save_calibration("team.calib.json")                          # + team.calib.lora.safetensors beside it
     ...
-    part.remove_lora()                                                # roll back
+    remove_lora(part)                                                 # roll back
+
+In 1.0 training and rolling back left the part (`part.adapt_lora` / `part.remove_lora` raise AttributeError naming
+these functions): a stable part does not import an experimental module. The part keeps an adapter slot — its LoRA
+adapter is a solvi Adapter (kind, fingerprint(), using(scorer), save(path)) — so `part.save_lora` / `part.load_lora`,
+the fingerprint, the trace and the calibration file work as before.
 
 What changes and what does not:
 
@@ -62,7 +68,7 @@ def _experimental():
     if not _warned[0]:
         _warned[0] = True
         from .core import ExperimentalWarning
-        warnings.warn("part.adapt_lora / load_lora are experimental: the API, the recipe and the file format may change",
+        warnings.warn("solvi.lora (adapt_lora, part.load_lora) is experimental: the API, the recipe and the file format may change",
                       ExperimentalWarning, stacklevel=4)
 
 
@@ -96,6 +102,27 @@ class LoraAdapter:
         """What the trace and the metadata show."""
         return {"adapter": self.hash, "r": self.config.get("r"), "k": self.info.get("k"),
                 "updates": self.info.get("updates"), "size_mb": round(self.size_bytes / 2 ** 20, 2), "experimental": True}
+
+    # --- the Adapter protocol a decision part's adapter slot reads (solvi.decide never imports this module)
+    kind = "lora"                         # the adapter's kind: a calibration file names it, solvi.decide.ADAPTERS reads it
+
+    def fingerprint(self):
+        """The adapter's identity in the part's and the model's fingerprints: its hash."""
+        return self.hash
+
+    def using(self, scorer, active=True):
+        """A context in which the scorer scores with this adapter active (active=False: with no adapter); one thread at
+        a time."""
+        return using(scorer, self.name if active else None)
+
+    def save(self, path):
+        """Write the adapter (a .safetensors file with its config, the question and the checkpoint) → path."""
+        import torch
+        from safetensors.torch import save_file
+        meta = {"format": FORMAT, "hash": self.hash, "config": json.dumps(self.config, sort_keys=True),
+                "info": json.dumps(self.info, default=str)}
+        save_file({k: v.to(torch.bfloat16).contiguous() for k, v in self.tensors.items()}, str(path), metadata=meta)
+        return path
 
 
 def _hash(tensors, config):
@@ -289,7 +316,7 @@ def _set(part, ad):
 
 
 def remove(part):
-    """part.remove_lora (see there)."""
+    """remove_lora (see there)."""
     ad = part.lora
     if ad is None:
         return None
@@ -447,7 +474,7 @@ def _accuracy(part, hold):
 @_deprecate.removed_kwargs(risk="max_risk")
 def adapt(part, examples, *, r=8, epochs=6, holdout=None, seed=0, device=None, lr=3e-4, max_risk=0.10,
           signal="confidence", max_updates=400, allow_large=False):
-    """part.adapt_lora (see there). allow_large: in-process training of a checkpoint larger than solvi-base (what
+    """adapt_lora (see there). allow_large: in-process training of a checkpoint larger than solvi-base (what
     tools/adapt_lora_gpu.py passes, on a GPU)."""
     from .core import Unknown
     _experimental()
@@ -499,15 +526,10 @@ def adapt(part, examples, *, r=8, epochs=6, holdout=None, seed=0, device=None, l
 # ------------------------------------------------------------------------------------------------ files
 def save(part, path):
     """part.save_lora (see there) → path."""
-    import torch
-    from safetensors.torch import save_file
     ad = part.lora
     if ad is None:
         raise ValueError(f"{part.__name__} has no LoRA adapter (adapt_lora or load_lora first)")
-    meta = {"format": FORMAT, "hash": ad.hash, "config": json.dumps(ad.config, sort_keys=True),
-            "info": json.dumps(ad.info, default=str)}
-    save_file({k: v.to(torch.bfloat16).contiguous() for k, v in ad.tensors.items()}, str(path), metadata=meta)
-    return path
+    return ad.save(path)
 
 
 def read(path):
@@ -542,4 +564,50 @@ def load(part, path, strict=True, expect=None):
     return ad
 
 
-__all__ = ["LoraAdapter", "LoraWarning", "adapt", "check", "load", "n_updates", "read", "remove", "save", "train"]
+# ------------------------------------------------------------------------------------------------ the calls (1.0)
+@_deprecate.removed_kwargs(risk="max_risk")
+def adapt_lora(part, examples, *, r=8, epochs=6, holdout=None, seed=0, device=None, lr=3e-4, max_risk=0.10,
+               signal="confidence", max_updates=400):
+    """Experimental: train a small LoRA adapter on the decider's encoder for this question (`part`, a DecisionPart), from
+    labelled examples [(input, correct)] — for solvi-base (the torch backend, `pip install "solvi[lora]"`) and about 100
+    examples or more. Below that, try `part.fit` (and `System.fit` for questions without a model) first: they take
+    milliseconds; the adapter can keep improving where `fit` levels off. Compare the two on held-out labels. (Was
+    `part.adapt_lora(examples, ...)` before 1.0.)
+
+    Cost: minutes on a CPU; the time is estimated from the first update and reported (a LoraWarning) before
+    training. r: the adapter's rank (alpha = 2r);
+    epochs: passes over the examples (updates of 8 examples, between 40 and max_updates); lr: the learning rate;
+    seed: the adapter's initialization and the order of the examples — the same seed gives the same adapter on a
+    CPU; device: None — the device the decider runs on.
+
+    After training the adapter is active for this question only (other questions of the same model are not
+    affected), its hash is in the part's fingerprint and in every decision's extra["lora"], and the question's
+    earlier adaptation (adapt / fit / teach) and escalation thresholds are cleared: they were fitted on the model
+    without it. Confidences after LoRA are overconfident, so escalation must be recalibrated on labels NOT used for
+    training: holdout — a list of [(input, correct)], a share of the examples (0.25) or a number of them split off
+    (by the seed) — runs act_guard(holdout, risk, signal) after training and reports the held-out accuracy before and
+    after; without one a LoraWarning says so (call act_guard yourself; a few hundred labels is typical). Refuses a decider that
+    is not a torch encoder (ONNX: load it with backend="torch"; an LLM or a rule has no weights to adapt), one larger
+    than solvi-base (use tools/adapt_lora_gpu.py on a GPU and part.load_lora), a combination (train the adapter on one
+    of its parts, then calibrate the combination) and rank / number / span questions. Keep it with part.save_lora /
+    part.load_lora or part.save_calibration (the adapter is written next to the calibration file); remove_lora rolls
+    back. → {"adapter", "k", "updates", "seconds", "estimate_seconds", "size_mb", "device",
+    "holdout": {"n", "accuracy_before", "accuracy_after", "act_guard"} or None, "cleared", "experimental": True}."""
+    return adapt(part, examples, r=r, epochs=epochs, holdout=holdout, seed=seed, device=device, lr=lr, max_risk=max_risk,
+                 signal=signal, max_updates=max_updates)
+
+
+def remove_lora(part):
+    """Roll back adapt_lora / load_lora on `part`: the adapter is removed from the model (the question is answered by the
+    checkpoint as before, to the bit) and the part's adaptation and escalation thresholds return to what they were
+    before the first adapter in this process (after a load_lora: they are cleared — they were fitted with the
+    adapter). → the removed adapter's hash, or None when there was none. A combination (Cascade / Vote / Route): every
+    part's → [hash or None], in leaves order; its own threshold was fitted on the parts with their adapters: calibrate
+    it again. (Was `part.remove_lora()` before 1.0.)"""
+    if callable(getattr(part, "leaves", None)):
+        return [remove(lf.part) for lf in part.leaves()]
+    return remove(part)
+
+
+__all__ = ["LoraAdapter", "LoraWarning", "adapt", "adapt_lora", "check", "load", "n_updates", "read", "remove", "remove_lora",
+           "save", "train"]

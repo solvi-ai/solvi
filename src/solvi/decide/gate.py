@@ -2,66 +2,20 @@
 solvi.decide, which re-exports every name.)"""
 from __future__ import annotations
 
-import inspect
 import math
-from collections.abc import Mapping
 
 import numpy as np
 
 from ..core import Quote, Unknown
-from ..provenance import code_fingerprint
 from .kinds import KINDS, KINDS_V3
 from .state import jsonable
+from ..calibration import GroupBy, group_name   # noqa: F401 — re-exported (defined there since 1.0)
 
 
 class Facts(dict):
     """An example input given as facts by name (`Facts(email=..., tier=...)`): each part reads its own facts, a route's
     predicates and a grouping (act_guard(groups=...)) read theirs. Any other input is the one input every part reads (a
     text or a state)."""
-
-
-class GroupBy:
-    """Which group an input belongs to, for thresholds per group (act_guard(groups=...)): a fact name ("domain"), a list of
-    fact names — a hierarchy, top first (["domain", "task"]) — or a function whose parameters are fact names and which
-    returns a group or a path (domain, task). A function with one parameter also takes an input that is not given as
-    facts (a text or a state): it is called with the input itself. A state (dict) input gives facts by its keys."""
-
-    def __init__(self, by):
-        if isinstance(by, str):
-            self.names, self.fn = [by], None
-        elif isinstance(by, (list, tuple)) and by and all(isinstance(x, str) for x in by):
-            self.names, self.fn = list(by), None
-        elif callable(by):
-            self.names, self.fn = list(inspect.signature(by).parameters), by
-        else:
-            raise TypeError(f"groups: a fact name, a list of fact names or a function, not {by!r}")
-        self.by = by
-
-    def describe(self):
-        return list(self.names) if self.fn is None else {"fn": code_fingerprint(self.fn), "reads": self.names}
-
-    def label(self):
-        return " → ".join(self.names) if self.fn is None else getattr(self.fn, "__name__", "a function")
-
-    def path(self, vals=None, raw=None):
-        """The input's group path (a tuple), or None when the input does not give it."""
-        from ..calibration import group_path
-        if vals is None:
-            if isinstance(raw, Mapping) and all(n in raw for n in self.names):
-                vals = raw
-            elif self.fn is not None and len(self.names) == 1:
-                return group_path(self.fn(raw))
-            else:
-                return None
-        if any(n not in vals for n in self.names):
-            return None
-        args = {n: (vals[n].value if isinstance(vals[n], Quote) else vals[n]) for n in self.names}
-        return group_path(self.fn(**args) if self.fn is not None else tuple(args[n] for n in self.names))
-
-
-def group_name(path):
-    """A group path as people read it: "billing / refunds"; the whole stream: "(the rest of the stream)"."""
-    return " / ".join(path) if path else "(the rest of the stream)"
 
 
 def group_record(g, path, node, info):

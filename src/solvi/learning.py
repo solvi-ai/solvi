@@ -1,6 +1,6 @@
-"""Learning from corrections, with gates and rollback (experimental): System.learning(...).
+"""Learning from corrections, with gates and rollback (experimental): Learning(system, ...).
 
-    loop = system.learning(store)              # nothing happens until you run it; System.teach now only stores
+    loop = Learning(system, store)             # nothing happens until you run it; System.teach now only stores
     rep = loop.run()                           # labels → a proposed update → gates → promoted or rejected, recorded
     print(rep)                                 # what changed, each gate's numbers
     loop.versions()                            # every promoted state; loop.rollback(2) restores one
@@ -72,7 +72,7 @@ GATES = {"min_gain": 0.01, "min_holdout": 5, "tolerance": 0.02, "risk": 0.10, "m
 
 
 def _check_settings(ladder, gates, holdout, calibration):
-    """System.learning's settings → ValueError naming the first that is wrong: an unknown ladder, memory or gate key
+    """The learning loop's settings → ValueError naming the first that is wrong: an unknown ladder, memory or gate key
     (a typo would be ignored), a memory mode that does not exist, a gate rate outside [0, 1] (risk strictly inside),
     a negative count, or holdout / calibration shares that leave no label to train on."""
     from .calibration import check_rate
@@ -178,14 +178,16 @@ class UpdateReport:
 
 
 class Learning:
-    """The learning loop of a System (see the module docstring). Made by System.learning(...); experimental."""
+    """The learning loop of a System (see the module docstring): Learning(system, storage=None, parts=None, ladder=None,
+    gates=None, ...) — until 1.0 made by System.learning(...), which is gone (a stable System does not import an
+    experimental module); experimental."""
 
     experimental = True
 
     def __init__(self, system, storage=None, parts=None, ladder=None, gates=None, changelog=None, holdout=0.3,
                  calibration=0.2, gate_teach=True):
         from .decide import DecisionPart, decision_of
-        warnings.warn("System.learning is experimental: its API and gates may change", ExperimentalWarning, stacklevel=3)
+        warnings.warn("solvi.learning is experimental: its API and gates may change", ExperimentalWarning, stacklevel=2)
         self.system = system
         self.storage = open_storage(storage, system) if storage is not None else system.storage
         if self.storage is None:
@@ -526,7 +528,7 @@ class Learning:
         """Apply one question's update to `part` (the shadow part of the candidate; default: the live part) → a JSON-able
         description."""
         from .core import Unknown
-        from .memory import CorrectionMemory
+        from .memory import CorrectionMemory, attach
         part = self.parts[q] if part is None else part
         ex = self._examples(q, train)
         fit_ex = [(t, y) for t, y in ex if y is not Unknown]
@@ -538,7 +540,7 @@ class Learning:
             mem = CorrectionMemory(part, **self.ladder["memory"])
             for (t, y), lab in zip(ex, train):
                 mem.add(t, y, source=lab.source, by=lab.by, time=lab.time, stored_id=lab.id)
-            part.memory(mem)
+            attach(part, mem)
             out["memory"] = {"cases": len(mem), "fp": mem.fingerprint(), "mode": mem.mode}
         if rung == "adapter":
             out["adapter"] = self.ladder["adapter"](part, ex)

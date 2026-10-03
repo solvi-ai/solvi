@@ -19,7 +19,7 @@ PART_ONLY_PROPERTIES = {"min_confidence", "min_act", "long_len"}
 STRUCTURE = {"leaves", "parts", "state", "vec", "final", "entry", "check", "check_record", "same_question", "usage",
              "pick", "option_order"}
 # what a part cannot do in a combination's place: raises NotImplementedError naming the part
-ONE_PART_ONLY = {"adapt_lora": ([],), "save_lora": ("x",), "load_lora": ("x",), "budget": (), "sections_k": (),
+ONE_PART_ONLY = {"save_lora": ("x",), "load_lora": ("x",), "budget": (), "sections_k": (),
                  "long_key": (), "long_input": ("x",), "in_pass": ([], {})}
 
 
@@ -79,16 +79,25 @@ def test_calibrate_for_on_a_combination_returns_the_parts_keys_and_sets_its_shar
 
 
 def test_calibrate_for_and_score_and_memory_route_to_every_part_of_a_combination():
+    from solvi.memory import attach
     s, l_, _, _ = _parts()
     c = Cascade([s, l_])
     p = c.score(CLEAR)
     assert p == c.decide(CLEAR).probs and c.score([CLEAR, CLEAR]) == [p, p]
-    mems = c.memory(k=3)
+    mems = attach(c, k=3)
     assert [m.part for m in mems] == [s, l_] and s.correction_memory is mems[0] and mems[1].k == 3
     with pytest.raises(ValueError, match="belongs to one part"):
-        c.memory(mems[0])
-    assert c.memory(False) is None and s.correction_memory is None and l_.correction_memory is None
-    assert c.remove_lora() == [None, None]
+        attach(c, mems[0])
+    assert attach(c, False) is None and s.correction_memory is None and l_.correction_memory is None
+    from solvi.lora import remove_lora
+    assert remove_lora(c) == [None, None]                     # 1.0: solvi.lora.remove_lora(combination), every part's
+    for d in (c, s):                                          # 1.0: solvi.memory.attach, not a method any more
+        with pytest.raises(AttributeError, match=r"memory\(\) was removed in 1.0: use solvi.memory.attach\("):
+            d.memory()
+    for name in ("adapt_lora", "remove_lora"):                # not methods any more, on a part nor on a combination
+        for d in (c, s):
+            with pytest.raises(AttributeError, match=rf"{name}\(\) was removed in 1.0: use solvi.lora.{name}\("):
+                getattr(d, name)
     assert c.labels == s.labels and c.task == s.task and c.multi is False and c.adaptation == [None, None]
 
 

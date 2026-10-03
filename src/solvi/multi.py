@@ -38,7 +38,7 @@ from collections.abc import Mapping
 import numpy as np
 
 from . import _deprecate
-from .core import Decision, Quote, Unknown
+from .core import Decision, Quote, Unknown, gone_in_1_0
 from .decide import DecisionPart, Facts, GroupBy, _group_info, _group_promise, _single, group_record, guard_promise, no_separation, one_source
 from .provenance import ESCALATED, code_fingerprint, digest
 from .runtime import RECORD_KEYS          # what a replay compares with the recomputed (defined there; re-exported)
@@ -305,9 +305,9 @@ class Combination:
 
     The decider protocol: a combination has every public method of a DecisionPart, with the same signature and result
     keys. decide / score / act_guard / calibrate_for / conformal / save_calibration / load_calibration act on the
-    combination as a whole (one threshold shared by every part); fit / adapt / teach / reset / memory / remove_lora go
+    combination as a whole (one threshold shared by every part); fit / adapt / teach / reset go
     to every part (a list per part, in leaves order, where the part returns one value); calls() counts the models
-    called. What belongs to one part — adapt_lora, save_lora, load_lora (an adapter is one checkpoint's, for one
+    called. What belongs to one part — save_lora, load_lora (an adapter is one checkpoint's, for one
     question), budget, sections_k, long_key, long_input (each part reads long texts by its own long=), in_pass (a
     shared forward pass is for parts of one model) — raises NotImplementedError naming the part to call it on."""
 
@@ -795,6 +795,47 @@ class Combination:
                 "method": method, "guarantee": g["promise"],
                 "calls_per_question": float(calls[:, j].mean()) if n else 0.0, "scale": scale}
 
+    # --- the calibration file's state of the combination (solvi.calibfile reads and writes only the file format)
+    @property
+    def _calibration_kind(self):
+        return type(self).__name__
+
+    def _calibration_base(self):
+        """What a calibration is fitted to: every member's fingerprint and the combination's rule, without its thresholds."""
+        return digest(type(self).__name__, self._describe(), [m.fingerprint() for m in self.members], {})
+
+    def _calibration_models(self):
+        """{model id: weights fingerprint} of the models behind the combination (for the message when they differ)."""
+        return {str(lf.part.model_id): lf.part.model.weights_fingerprint() for lf in self.leaves()}
+
+    def _calibration_thresholds(self):
+        out = {"threshold": self.threshold}
+        if self.scale is not None:
+            out["scale"] = self.scale
+        if self.scale == "rank":                    # each member's sorted calibration signals (at most multi.MAX_RANKS)
+            out["ranks"] = [[float(x) for x in r] for r in self.ranks]
+        return out
+
+    def _calibration_adapter(self):
+        return None
+
+    def _apply_calibration(self, rec, grp, path):
+        """Set the threshold a calibration file holds (solvi.calibfile.load has checked it)."""
+        self.threshold, self.guarantee, self.groups = rec.get("threshold"), rec.get("guarantee"), grp
+        scale = rec.get("scale", "raw")             # a file from before 0.7 has no scale: raw, as it was made
+        if scale == "rank":
+            ranks = rec.get("ranks")
+            if not isinstance(ranks, list) or len(ranks) != len(self.leaves()):
+                raise ValueError(f"{path}: a rank-scale calibration needs the calibration signals of each of the "
+                                 f"{len(self.leaves())} models (\"ranks\")")
+            self.scale, self.ranks = "rank", [np.asarray(r, float) for r in ranks]
+        elif scale == "raw":
+            self.scale, self.ranks = "raw", None
+        else:
+            raise ValueError(f"{path}: unknown scale {scale!r} (rank or raw)")
+        self.conformal_set = rec.get("conformal")
+        self._setup()
+
     def save_calibration(self, path):
         """Write the combination's calibration (the shared threshold, per group too, the guarantee, the conformal set) with
         the question and every member's fingerprint to a JSON file (solvi.calibfile). → path."""
@@ -877,39 +918,19 @@ class Combination:
         for lf in self.leaves():
             lf.part.reset()
 
-    def memory(self, memory=None, **settings):
-        """A memory of corrected cases for every part (DecisionPart.memory with these settings) → [CorrectionMemory],
-        in leaves order; False detaches every part's → None. Inside a combination a part's memory only checks (it can
-        escalate, never answer). A memory belongs to one part, so an existing one is attached on that part
-        (part.memory(mem)), not here — that raises."""
-        if memory is False:
-            for lf in self.leaves():
-                lf.part.memory(False)
-            return None
-        if memory is not None:
-            raise ValueError(f"a CorrectionMemory belongs to one part ({memory.part.__name__!r}): attach it with "
-                             "part.memory(mem); combination.memory() gives every part its own")
-        return [lf.part.memory(None, **settings) for lf in self.leaves()]
+    memory = gone_in_1_0("memory()", "solvi.memory.attach(combination, ...) (a memory for every part) — the memory of "
+                         "corrections moves into the knowledge memory", "Combination")
 
-    def remove_lora(self):
-        """Every part's remove_lora() → [the removed adapter's hash or None], in leaves order. The combination's own
-        threshold was fitted on the parts with their adapters: calibrate it again."""
-        return [lf.part.remove_lora() for lf in self.leaves()]
+    remove_lora = gone_in_1_0("remove_lora()", "solvi.lora.remove_lora(combination) (every part's, in leaves order)",
+                              "Combination")
+    adapt_lora = gone_in_1_0("adapt_lora()", "solvi.lora.adapt_lora(part, examples, ...) on one of its parts, then "
+                             "calibrate the combination again", "Combination")
 
     # --- what belongs to one part, not to a combination: each raises, saying where it is
     def _one_part(self, what, why):
         raise NotImplementedError(f"{type(self).__name__}.{what}: {why} — call it on the part "
                                   f"({self.__name__}.parts[i].{what}), then calibrate the combination again if it "
                                   "changed the part")
-
-    @_deprecate.removed_kwargs(risk="max_risk")
-    def adapt_lora(self, examples, *, r=8, epochs=6, holdout=None, seed=0, device=None, lr=3e-4, max_risk=0.10,
-                   signal="confidence", max_updates=400):
-        """Not for a combination (raises NotImplementedError): an adapter is trained on one checkpoint's encoder for one
-        question, and its holdout recalibrates that part's own threshold, which a combination replaces with its shared
-        one. Train it on the part, then calibrate the combination."""
-        self._one_part("adapt_lora()", "a LoRA adapter is trained on one checkpoint's encoder for one question, and its "
-                                       "holdout recalibrates that part's own threshold, which the combination replaces")
 
     def save_lora(self, path):
         """Not for a combination (raises NotImplementedError): an adapter file holds one part's adapter."""

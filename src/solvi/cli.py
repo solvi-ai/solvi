@@ -428,7 +428,7 @@ def main(argv=None):
     from .check import add_parser as check_parser, cmd_check
     check_parser(sub)
     ask_parser(sub)
-    from .calibfile import add_parser as calibrate_parser, cmd_calibrate
+    from .calibrate import add_parser as calibrate_parser, cmd_calibrate
     calibrate_parser(sub)
     from .models import add_parser as models_parser, cmd_models
     models_parser(sub)

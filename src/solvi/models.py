@@ -219,7 +219,7 @@ def measure(model, rows, task, options, kind=None):
             first = dt
         else:
             ms.append(dt)
-        from .calibfile import label_of
+        from .calibrate import label_of
         y = label_of(part, r["label"])
         try:
             ok = part.spec.label(d.value) == part.spec.label(y)
@@ -237,7 +237,7 @@ def measure(model, rows, task, options, kind=None):
 
 
 def _read_examples(path, limit):
-    from .calibfile import read_rows
+    from .calibrate import read_rows
     try:
         rows = read_rows(path)
     except FileNotFoundError:

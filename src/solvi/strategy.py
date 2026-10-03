@@ -481,8 +481,7 @@ class CostStrategist:
         preferred one), except that producers whose inputs cannot be computed (dead ends) are dropped instead of making the
         whole fact unreachable. Answers are those of the deterministic strategist wherever it can answer.
       "equivalent" — the producers of a fact are interchangeable (any accepted output is the same fact): one is chosen as
-        the primary, the cheapest valid plan by declared `cost=` (unit when undeclared, or measured run times with
-        System(cost_policy="measured")); the others stay as run-time fallbacks when their inputs are already computed
+        the primary, the cheapest valid plan by declared `cost=` (unit when undeclared); the others stay as run-time fallbacks when their inputs are already computed
         (keep_alternatives=True).
     on_failure: when the verified plan cannot be built — "code" (the code plan), "deterministic" (solvi.strategist.plan)
     or "abstain" (every question abstains). keep_alternatives: keep the other producers of a fact as run-time fallbacks.
@@ -503,8 +502,8 @@ class CostStrategist:
     fallbacks = _deprecate.removed_attr("fallbacks", "keep_alternatives", "CostStrategist")
 
     def plan(self, catalog, questions, init_keys, heads=None, costs=None):
-        """→ Flow. costs: {producer: cost} from the caller (System(cost_policy="measured") passes measured run times), under the
-        strategist's own `costs=` (which wins where both name a producer)."""
+        """→ Flow. costs: {producer: cost} from the caller (until 1.0 System(cost_policy="measured") passed measured run times),
+        under the strategist's own `costs=` (which wins where both name a producer)."""
         t0 = time.perf_counter()
         init = set(init_keys)
         qs = list(questions)
@@ -571,7 +570,7 @@ def plan_record(flow):
     extra = {"strategist": s["strategist"], "segments": []}      # "segments": the model strategist's (removed in 1.0)
     if s.get("fallback"):
         extra["fallback"] = s["fallback"]
-    if s.get("costs"):                                # costs from measurements (System(cost_policy="measured")): why each choice
+    if s.get("costs"):                                # costs from measurements (0.9's cost_policy="measured"): why each choice
         extra["costs"] = s["costs"]
     return Record(step=0, kind="plan", name="plan:strategy", inputs={}, value=value, provenance="computed", model=None,
                   extra=extra)

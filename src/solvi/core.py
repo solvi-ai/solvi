@@ -53,6 +53,16 @@ class ExperimentalWarning(UserWarning):
     """A feature whose API and behaviour may still change (solvi.learning, solvi.lora)."""
 
 
+def gone_in_1_0(old, new, owner=""):
+    """A method or attribute that left its class in 1.0 (it would make a stable class import an experimental module, or
+    it moves into the knowledge memory): reading it raises an AttributeError that names the call to use instead."""
+    label = f"{owner}.{old}" if owner else old
+
+    def gone(self, *_):
+        raise AttributeError(f"{label} was removed in 1.0: use {new}")
+    return property(gone, gone, doc=f"Removed in 1.0: use {new}.")
+
+
 class NotStated:
     """The type of `solvi.Unknown`: the answer "the text does not state it". It is a real answer — the evidence says the
     input does not state the value, with a confidence — unlike an abstention (None: solvi refuses to answer). Declare it

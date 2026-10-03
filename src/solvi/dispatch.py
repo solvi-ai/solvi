@@ -83,6 +83,8 @@ import time
 from dataclasses import dataclass, field
 from typing import Any
 
+from .costs import _usages, price_of   # noqa: F401 — re-exported (defined there since 1.0: the system report reads them)
+
 SIGNALS = ("guarantee", "openset", "abstain", "constraint", "agreement", "drift", "supervise")
 THINK = ("guarantee", "openset", "abstain", "constraint", "agreement")
 PATHS = ("s1", "s2", "human")
@@ -151,21 +153,6 @@ class Cost:
                    int(d.get("output_tokens", 0)))
 
 
-def _usages(extra):
-    """The model calls recorded in one trace record's extra → [(model, usage)]."""
-    out = []
-    if not isinstance(extra, dict):
-        return out
-    lm = extra.get("llm")
-    if isinstance(lm, dict) and isinstance(lm.get("usage"), dict):
-        out.append((lm.get("model"), lm["usage"]))
-    gen = extra.get("generated")
-    for m in gen if isinstance(gen, list) else [gen] if isinstance(gen, dict) else []:
-        if isinstance(m, dict) and isinstance(m.get("usage"), dict):
-            out.append((m.get("model"), m["usage"]))
-    return out
-
-
 def recorded_calls(responses, generated=()):
     """The model calls recorded in responses' traces (and in generator records outside a trace, as refine keeps the
     proposer's) → [(model, usage)]."""
@@ -178,21 +165,6 @@ def recorded_calls(responses, generated=()):
     for g in generated:
         out += _usages({"generated": g})
     return out
-
-
-def price_of(price, calls):
-    """Dollars of recorded calls: price (dollars per million input and output tokens), a function (model, usage) →
-    dollars, or None (unknown → None)."""
-    if price is None:
-        return None if calls else 0.0
-    total = 0.0
-    for model, u in calls:
-        if callable(price):
-            total += float(price(model, u))
-        else:
-            pin, pout = price
-            total += (u.get("input_tokens", 0) * pin + u.get("output_tokens", 0) * pout) / 1e6
-    return total
 
 
 def cost_of(responses, price, ms=0.0, generated=()):
@@ -248,7 +220,7 @@ class Thought:
         rec = d.get("record")
         if rec is not None:
             if d["mode"] == "ask":
-                from .system import Response
+                from .response import Response
                 rec = Response.model_validate(rec, catalog=system)
             elif d["mode"] == "refine":
                 from .refine import Refinement
@@ -445,7 +417,7 @@ class Dispatched:
     def from_dict(cls, d, system=None, slow_system=None):
         """A stored decision back: System 1's response restored with `system`'s types, the slow path's with
         `slow_system`'s (default: the same)."""
-        from .system import Response
+        from .response import Response
         s1 = Response.model_validate(d["s1"], catalog=system)
         s2 = Thought.from_dict(d["s2"], slow_system or system) if d.get("s2") is not None else None
         return cls(d["question"], _restored(d.get("answer")), d["by"], d["action"], list(d["reasons"]), s1, s2,

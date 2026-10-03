@@ -48,32 +48,12 @@ removed in 0.9.)
 Everything that plans for a System uses its strategist, not only `ask`: `answers_of` / replay, `facts_for` and so the
 feature candidates of `fit`, `learn_order`, the input schemas of `solvi serve` and `solvi check`.
 
-### Costs from measurements
+### Costs
 
-With no `cost=` declared, interchangeable producers tie and the first declared wins. `System(cat, questions,
-producers="equivalent", cost_policy="measured")` (the same as `strategist=CostStrategist(producers="equivalent")` plus
-`cost_policy="measured"`) plans with the run times solvi measures anyway (`system.cost_book`, a moving average in ms per part):
-
-- **Warm-up.** A producer counts its measured time once it has run `min_samples` times (default 3); before that its
-  declared `cost=`, or 0 ms when it declares none — so each undeclared producer gets chosen, and measured, in turn.
-- **Smoothing and adapting.** The moving average weighs the newest run by `alpha` (CostBook's 0.3 unless set). When the
-  producer in use slows down, its average rises above the others' and the next plans switch.
-- **Recheck.** A producer not run for `recheck` asks (default 50) counts 0 ms for one plan, so a source that got faster
-  again is noticed (`recheck=None`: never).
-- **Freeze.** `system.freeze_costs()` fixes the planner's costs at what was measured (a producer that never ran: its
-  declared cost, else 1) — the choice stops changing, measuring goes on; `system.unfreeze_costs()` resumes.
-
-```python
-from solvi.costs import MeasuredCosts
-system = System(cat, questions, producers="equivalent", cost_policy=MeasuredCosts(min_samples=5, recheck=100, alpha=0.2))
-```
-
-Every plan record then carries `extra["costs"]`: `{"mode": "measured" | "frozen", "facts": {fact: {"chosen",
-"producers": {name: {"ms", "from", "runs"}}, "why"}}}` — per fact with several usable producers, the cost of each and where
-it came from (`measured`, `declared`, `warm-up`, `recheck`, `frozen: measured` ...), e.g. `"why": "cheapest plan: rate_table
-measured 0.012 ms ×5; rate_live measured 301.448 ms ×3"`. The choice is made on the costs of the whole plan (a producer
-that reads an expensive fact pays for it too). Since measured costs depend on timing, so does this record's hash — it
-says what was known when the plan was made; the rest of the trace is as always.
+The planner plans with the declared `cost=` of each producer; with none declared, interchangeable producers tie and the
+first declared wins. Planning on measured run times (`cost_policy="measured"`, `solvi.costs.MeasuredCosts`,
+`freeze_costs`) was removed in 1.0: it showed no measured benefit. A plan record stored by 0.9 with measured costs
+(`extra["costs"]`) still replays.
 
 `strategist.last` is the report of the last plan: the choice per fact, the mandatory checks, the plan's cost, the
 fallback if any, and the time.
@@ -81,7 +61,7 @@ fallback if any, and the time.
 ### In the trace
 
 A planned flow adds one hashed record at the end of the trace: kind `plan`, name `plan:strategy`, value = the chosen
-producer per fact and the mandatory checks; `extra` = the strategist (and the fallback, and the measured costs, if
+producer per fact and the mandatory checks; `extra` = the strategist (and the fallback, and — in records stored by 0.9 — the measured costs, if
 any; `segments` is always empty since the model strategist was removed). Provenance is `computed`.
 `trace.replay(system)` re-verifies the record against the catalog (every chosen producer exists, provides its fact, and
 its inputs are given or chosen); a tampered record breaks the hash chain. Facts whose producer group was narrowed replay

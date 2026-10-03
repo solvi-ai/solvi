@@ -75,7 +75,8 @@ def test_system_and_response_attributes(tmp_path):
     with pytest.raises(TypeError, match=rf"{GONE}System.calibrate\(question, \[\(state, answer\), \.\.\.\]\)"):
         s.calibrate("q", [{"x": 9}], [True])
     with pytest.raises(TypeError, match="unexpected keyword argument 'harvest_rules'"):
-        s.learning(harvest_rules=True)
+        from solvi.learning import Learning
+        Learning(s, harvest_rules=True)
 
 
 def test_question_and_answer_type():
@@ -148,7 +149,7 @@ def test_combination_names():
 
 
 def test_heads_and_learned_policies():
-    from solvi.heads import FastHead, Head
+    from solvi.heads import FastHead
     from solvi.strategist import Binary
     rows = [{"x": float(i)} for i in range(20)]
     ans = ["a" if i < 10 else "b" for i in range(20)]
@@ -157,10 +158,9 @@ def test_heads_and_learned_policies():
         fh.cv_acc  # noqa: B018
     with pytest.raises(AttributeError, match=rf"FastHead.update\(\) {GONE}teach\(\)"):
         fh.update({"x": 3.0}, "a")
-    h = Head(["a", "b"]).fit(rows, ans, ["x"])
-    assert h.cv_acc is not None
-    with pytest.raises(AttributeError, match=rf"Head.loo_acc {GONE}cv_acc"):
-        h.loo_acc  # noqa: B018
+    import solvi.heads                                     # the legacy Head itself was removed in 1.0
+    with pytest.raises(AttributeError, match=r"solvi.heads.Head .* was removed in 1.0: use FastHead"):
+        _ = solvi.heads.Head
     with pytest.raises(AttributeError, match=rf"Binary.observe\(\) {GONE}teach\(\)"):
         Binary().observe({"x": 1.0}, True)
 

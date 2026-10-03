@@ -88,7 +88,7 @@ pip install "solvi[onnx]"      # + onnxruntime, tokenizers: the decider (solvi.d
 pip install "solvi[serve]"     # + fastapi, uvicorn: solvi serve over HTTP
 pip install "solvi[mcp]"       # + the official MCP SDK for solvi serve --mcp (without it, a built-in stdio server is used)
 pip install "solvi[duckdb]"    # + duckdb: stored decisions in a DuckDB file; "solvi[postgres]" for PostgreSQL
-pip install "solvi[lora]"      # + torch, transformers, peft: part.adapt_lora, a LoRA adapter per question (experimental)
+pip install "solvi[lora]"      # + torch, transformers, peft: solvi.lora.adapt_lora, a LoRA adapter per question (experimental)
 ```
 
 For development, from a clone: `uv sync`, then `uv run pytest`.
@@ -237,7 +237,7 @@ def total_features(doc):
   (`record.tried`, e.g. `[["total_regex", "no value"], ["total_model", "accepted"]]`). Both are hashed into the chain.
   `replay` recomputes the value with the producer that was used, checks it still passes its validator, and checks that the
   producers tried before it are still rejected (shadow runs are not re-checked).
-- `cost=` (ms) is a prior; measured run times replace it (`system.cost_book`).
+- `cost=` (ms) is what the cost-optimal planner plans with (`system.cost_book` measures run times for reports only).
 
 ## Questions and answer types
 
@@ -1352,15 +1352,15 @@ proposals by the combination's rule. `System.teach` on a question a combination 
 **The same methods as a part.** A combination has every public method of a decision part, with the same signature and
 result keys, so code written for one takes the other. `decide`, `score`, `act_guard`, `calibrate_for` (a shared
 threshold for a target error among the answered, `method="empirical"` or `"ltt"`), `conformal` and the calibration
-files act on the combination as a whole; `fit`, `adapt`, `teach`, `reset`, `memory()` (a memory for every part, which
-inside a combination only checks) and `remove_lora` go to every part and return one result per part; `calls()` counts
-the models called (a part's `calls()` counts its own decisions the same way). What belongs to one part raises
-`NotImplementedError` naming the part to call it on: `adapt_lora`, `save_lora` and `load_lora` (an adapter is trained
+files act on the combination as a whole; `fit`, `adapt`, `teach` and `reset` go to every part and return one result
+per part (so do `solvi.memory.attach(combination)` — a memory for every part, which inside a combination only checks —
+and `solvi.lora.remove_lora(combination)`); `calls()` counts the models called (a part's `calls()` counts its own decisions the same way). What belongs to one part raises
+`NotImplementedError` naming the part to call it on: `save_lora` and `load_lora` (an adapter is trained
 on one checkpoint for one question, and its holdout recalibrates that part's own threshold), `budget`, `sections_k`,
 `long_key` and `long_input` (each part reads long texts by its own `long=`), and `in_pass` (a shared forward pass is
 for parts of one model). After changing a part, calibrate the combination again.
 
-### A memory of corrections: part.memory
+### A memory of corrections: solvi.memory
 
 > **Moving into the knowledge memory in 1.0.** This module will be folded into solvi's knowledge memory, and its API
 > may change then.
@@ -1369,7 +1369,9 @@ The cases people corrected are the best evidence of where a decider goes wrong. 
 and, at decision time, finds the nearest ones — a second signal next to the model, never a silent override:
 
 ```python
-mem = team.memory()                                  # a solvi.memory.CorrectionMemory bound to the part
+from solvi.memory import attach
+
+mem = attach(team)                                   # a solvi.memory.CorrectionMemory bound to the part
 mem.add(email, "billing", source="human", by="ann", stored_id=res.stored_id)
 mem.learn_from(store)                                # every trusted correction of the question in a TraceStorage
 mem.calibrate(max_risk=0.05)                             # the abstain threshold, leave-one-out over the stored cases
@@ -1420,7 +1422,9 @@ fingerprint is part of the part's, so a replay of a decision made with another m
 a replay with the same state recomputes the proposal and compares it. `mem.save(path)` / `CorrectionMemory(part).load(path)`
 keep it with the checkpoint's fingerprint and the question (another checkpoint or another question is refused: build it
 again with `learn_from`);
-`mem.remove(ids)` forgets cases found to be wrong; `team.memory(False)` detaches it.
+`mem.remove(ids)` forgets cases found to be wrong; `attach(team, False)` detaches it. (Until 1.0 this was
+`team.memory(...)`; the method is gone — it raises an AttributeError naming `solvi.memory.attach` — as the memory moves
+into the knowledge memory.)
 
 ### Loading a checkpoint
 
@@ -1490,13 +1494,19 @@ different checkpoint is refused unless `strict=False`); `part.reset()` forgets o
 #### A LoRA adapter per question: adapt_lora (experimental)
 
 ```python
+from solvi.lora import adapt_lora, remove_lora
+
 model = DecideModel.load("solvi-ai/solvi-base", backend="torch")    # pip install "solvi[lora]"
 team = model.decision("team", "Which team?", "email", TEAMS)
-report = team.adapt_lora(labelled, holdout=300)     # [(input, correct)]; 300 of them calibrate act_guard, the rest train
+report = adapt_lora(team, labelled, holdout=300)    # [(input, correct)]; 300 of them calibrate act_guard, the rest train
 report["holdout"]           # {"n", "accuracy_before", "accuracy_after", "act_guard": {...}}
 team.save_calibration("team.calib.json")            # writes team.calib.lora.safetensors beside it
-team.remove_lora()                                  # roll back: the checkpoint answers again, thresholds as before
+remove_lora(team)                                   # roll back: the checkpoint answers again, thresholds as before
 ```
+
+Training and rolling back are functions of `solvi.lora`, not methods of the part (in 1.0 `part.adapt_lora` and
+`part.remove_lora` raise an AttributeError naming them): a stable part does not import the experimental module. The
+part keeps an adapter slot — `part.lora`, `part.save_lora`, `part.load_lora` and the calibration file work as before.
 
 `fit` moves the logits (a shift and a scale); it cannot change what the model reads in the input, so beyond a hundred
 examples or so it stops improving. `adapt_lora` trains a small LoRA adapter — low-rank updates of the encoder's attention
@@ -1506,7 +1516,7 @@ rest of the checkpoint frozen. **Which one to use:**
 | labelled examples of the question | use |
 |---|---|
 | fewer than ~100 | `part.fit` (milliseconds; for a question without a model, `system.fit`) |
-| ~100 or more, solvi-base | `part.adapt_lora`, with `act_guard` on ~300 other labels |
+| ~100 or more, solvi-base | `solvi.lora.adapt_lora(part, ...)`, with `act_guard` on ~300 other labels |
 | solvi-large, or thousands of examples | [`tools/adapt_lora_gpu.py`](../tools/adapt_lora_gpu.py) from the repository (not installed by pip) on a GPU, then `part.load_lora(path)` |
 
 What to expect:
@@ -1533,7 +1543,7 @@ The adapter's hash is part of the part's fingerprint (and the model's), and ever
 `extra["lora"]`, so a replay knows which weights answered. `part.save_lora(path)` / `part.load_lora(path)` keep it in a
 `.safetensors` file with the question and the checkpoint it was trained for (another question or checkpoint is refused
 unless `strict=False`); `save_calibration` writes it next to the calibration file and `load_calibration` loads it first.
-`part.remove_lora()` rolls back: the adapter leaves the model and the part's adaptation and thresholds return to what they
+`remove_lora(part)` rolls back: the adapter leaves the model and the part's adaptation and thresholds return to what they
 were before the first adapter. It is refused for a decider that is not a torch encoder (an ONNX one: load it with
 `backend="torch"`; an LLM or a rule has no weights to adapt), for checkpoints larger than solvi-base (use the GPU script)
 and for rank / number / span questions. **Experimental:** the API, the recipe and the file format may change; the first
@@ -1786,14 +1796,9 @@ plan by declared `cost=`, keeping every hard check that governs a question (`Sys
 shortcut for it). Both are code only. Details and the trace record of a plan:
 [docs/strategist.md](strategist.md).
 
-**Costs from measurements.** `System(cat, questions, producers="equivalent", cost_policy="measured")` plans with the run times
-`system.cost_book` measures instead of declared costs: after a warm-up (each producer measured `min_samples` times; an
-undeclared one is tried at 0 ms, a declared one keeps its `cost=` until measured) it picks the fastest of equivalent
-producers — a local table over a 300 ms feed — and switches when that one slows down; a producer unused for `recheck`
-asks gets one more trial. `system.freeze_costs()` stops the switching (`unfreeze_costs()` resumes). The plan record of each
-trace says, per fact, which cost decided and where it came from (declared, warm-up, measured, recheck, frozen). Settings:
-`costs=solvi.costs.MeasuredCosts(min_samples=3, recheck=50, alpha=None)`; see
-[docs/strategist.md](strategist.md#costs-from-measurements).
+**Costs.** The cost-optimal planner plans with the declared `cost=` of each producer. Planning on measured run times
+(`cost_policy="measured"`, `solvi.costs.MeasuredCosts`, `freeze_costs`) was removed in 1.0: it showed no measured
+benefit; `cost_policy="declared"` is the only value left.
 
 ### Early exit and parallel execution
 
@@ -1982,7 +1987,7 @@ fit on all of them; with refits it catches up. The cost:
   length), up to `refit_until` examples (2000). Past that no refit is due, the rows are dropped and the head goes on with
   rank-one steps only;
 - a refit is a change like any update: `teach` makes it at once and it is not gated. The learning loop
-  (`System.learning`) manages decision parts, not fitted heads: while it is attached with `gate_teach=True`, `teach`
+  (`solvi.learning.Learning`) manages decision parts, not fitted heads: while it is attached with `gate_teach=True`, `teach`
   only stores the correction and the head (and its refit schedule) does not move. The head depends only on its first
   fit and the sequence of corrections, so replaying them gives the same head (the same fingerprint); keep a
   `copy.deepcopy(head)` to go back.
@@ -2079,7 +2084,7 @@ requests with new intents — System 2 = an LLM's recorded answers; the details 
 | a guarantee's calibration: `System.guarantee(..., corrections=store, sources=...)` | yes, when `sources` names it | fed every verified answer, System 1 answered more within its promise on two tasks of three |
 | a head (`fit` / `teach`) | no — `teach(label_source="verified")` only stores the label | gained on one task of three |
 | a memory of corrections | no — `UntrustedLabel` | broke System 1's promise on the contract task |
-| the learning loop (`System.learning`) | no — listed in `labels()["rejected"]` | its ladder is a head and a memory |
+| the learning loop (`solvi.learning.Learning`) | no — listed in `labels()["rejected"]` | its ladder is a head and a memory |
 
 Feed the calibration **every** answer System 2 vouched for, not only the cases where it disagreed with System 1: a
 threshold calibrated on disagreements alone sees only System 1's mistakes, and the verified disagreements were too few
@@ -2087,12 +2092,15 @@ to move anything. The report's `labels` lists the stored ids it read; calibratin
 
 ### Learning from corrections with gates and rollback (experimental)
 
-`system.learning(...)` turns the stored corrections into updates of the model decisions — only through gates, recorded,
+`Learning(system, ...)` (from `solvi.learning`; until 1.0 `system.learning(...)`, which now raises an AttributeError
+naming it) turns the stored corrections into updates of the model decisions — only through gates, recorded,
 and reversible. It is off until you call it, and experimental (it warns `ExperimentalWarning`; its API and defaults may
 change):
 
 ```python
-loop = system.learning(store, gates={"honesty": "tests/honesty/core_v1.json"})
+from solvi.learning import Learning
+
+loop = Learning(system, store, gates={"honesty": "tests/honesty/core_v1.json"})
 # ... the system runs; people correct escalations with system.teach(...) — now stored only, not learned at once
 rep = loop.run()                  # labels → a proposed update → gates → promoted or undone; recorded either way
 print(rep)                        # the rung per question and each gate's numbers

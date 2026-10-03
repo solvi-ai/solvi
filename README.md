@@ -71,7 +71,7 @@ pip install "solvi[onnx]"      # + onnxruntime, tokenizers: the decider (solvi.d
 pip install "solvi[serve]"     # + fastapi, uvicorn: `solvi serve app.py:system` — the questions over HTTP (also --mcp)
 pip install "solvi[mcp]"       # + the official MCP SDK for solvi serve --mcp (without it, a built-in stdio server)
 pip install "solvi[duckdb]"    # + duckdb: stored decisions in a DuckDB file (solvi.DuckDBStorage); [postgres] for PostgreSQL
-pip install "solvi[lora]"      # + torch, transformers, peft: part.adapt_lora, a LoRA adapter per question (experimental)
+pip install "solvi[lora]"      # + torch, transformers, peft: solvi.lora.adapt_lora, a LoRA adapter per question (experimental)
 ```
 
 Two words mark what is not settled yet: **preview** — it works and is tested, and its API may still change;
@@ -264,8 +264,8 @@ Every answer is a value and a confidence, and the types also declare answer prim
   only when models of different families agree, or a model picked by code — under one guarantee
   ([examples/20_vote_across_families.py](examples/20_vote_across_families.py) shows a vote with stand-in servers).
 - **Serving and operations.** `solvi serve module:system` exposes the questions over HTTP (OpenAPI from the same types),
-  MCP and the System One API; `await system.aask(...)` runs async parts concurrently with timeouts; `cost_policy="measured"`
-  lets the planner pick the fastest equivalent source and switch when it slows down. `TraceStorage` keeps decisions with a
+  MCP and the System One API; `await system.aask(...)` runs async parts concurrently with timeouts; `CostStrategist`
+  plans the cheapest verified flow from the declared `cost=` of equivalent sources. `TraceStorage` keeps decisions with a
   hash chain across them; `solvi diff` shows which stored decisions a rule or model change would flip; `solvi test`,
   `solvi check` and the honesty suite (`solvi honesty`) belong in CI; `res.report(format="html")` and
   `solvi report decisions.db --html out.html` give an auditor one page per decision or per period.
@@ -294,12 +294,12 @@ Every answer is a value and a confidence, and the types also declare answer prim
   sections, BM25 picks the few that bear on the question, the decider reads only those, and quotes point into the whole
   document; the trace lists the sections read. `long="full"` reads a text whole up to the length a checkpoint trained on
   long inputs declares (`max_len_long`), and retrieves within that length beyond it.
-- **Learning from corrections.** `part.memory()` escalates an answer when similar corrected cases say another one;
-  `fit` heads refit on all kept examples as corrections accumulate; `part.adapt_lora(examples, holdout=0.3)` trains
+- **Learning from corrections.** `solvi.memory.attach(part)` escalates an answer when similar corrected cases say another one;
+  `fit` heads refit on all kept examples as corrections accumulate; `solvi.lora.adapt_lora(part, examples, holdout=0.3)` trains
   a small LoRA adapter for one question on solvi-base once it has ~100 labelled answers (`solvi[lora]`, experimental);
-  `System.learning(store)` proposes updates from trusted corrections only and promotes one when it passes held-out,
+  `solvi.learning.Learning(system, store)` proposes updates from trusted corrections only and promotes one when it passes held-out,
   honesty and calibration gates, with rollback (experimental, off unless called)
-  ([guide](docs/guide.md#a-memory-of-corrections-partmemory)).
+  ([guide](docs/guide.md#a-memory-of-corrections-solvimemory)).
 - **Records you can check later.** `store.signature()` — 64 bytes kept next to the chain's head — later names the one
   stored record that was edited and restores its hash (preview). `solvi.charts` draws a chart in which every number is
   quoted from the text and checked (unit, scale, a pie that adds up), as a deterministic SVG that replays to the same

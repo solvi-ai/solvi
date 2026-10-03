@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from . import _deprecate
-from .core import Catalog, Serial
+from .core import Catalog, gone_in_1_0
 from .provenance import model_info
 from .runtime import MISSING, Record, Result, execute, now_ms, path_confidence, srepr, vhash
 from .strategist import computable, plan
@@ -16,6 +16,8 @@ from .core import Part, Question, Unknown, plain_json, question_data
 from .strategist import OrderModel, ProducerPolicy
 from .runtime import aexecute, async_parts
 from .provenance import catalog_fingerprint, digest, fingerprint
+from .chain import append as _append   # re-exported as before (defined there since 1.0)
+from .response import Response   # noqa: F401 — re-exported (defined there since 1.0: the stores read it)
 
 if TYPE_CHECKING:                                 # numpy loads with the heads, on first use: `import solvi` stays light
     from .heads import FastHead
@@ -31,141 +33,6 @@ class _Prepared:
     order: object
     policy: object
     textin: object = None               # a solvi.textin.TextRead (ask_text): its records go into the trace
-
-
-@dataclass
-class Response(Serial):
-    """The answers of one ask, with the flow, the trace, every fact's value and the safeguards.
-
-    A response keeps a strong reference to the System that answered it (for `report()`: the questions, the answer heads,
-    the replay). Deliberately not a weak one: `System(cat, qs).ask(state).report()` is common
-    and the temporary System would be gone before the report runs. A response you keep for long keeps its System (and its
-    models) alive; keep `res.to_dict()` or the stored record instead, or drop the reference with `res._system = None`
-    (then pass `system=` to report)."""
-    results: dict
-    flow: object
-    trace: object
-    values: dict
-    ms: float
-    feasible: bool = True               # do the answers satisfy every applicable constraint?
-    violations: list | None = None      # names of the constraints still broken (fixed answers that conflict)
-    catalog: object = None              # the catalog that answered (for the audit)
-    safeguards: list | None = None      # safeguard events of this response (see solvi.audit.collect)
-    model_outputs: int = 0              # outputs produced by models in this response
-    stored_id = None                    # its id in a TraceStorage once saved (System(storage=...) saves every ask)
-    read = None                         # ask_text: the solvi.textin.TextRead the question and state were read from
-    textin = _deprecate.removed_attr("textin", "read", "Response")                # 0.7 name
-    _system = None                      # the System that answered (reports; see the class docs)
-    _heads = None                       # its answer heads (the audit)
-
-    def __post_init__(self):
-        if hasattr(self.trace, "records") and isinstance(self.results, dict):
-            self.trace.answers = self.results      # replay(system) checks that these are the answers the trace gives
-
-    def __getitem__(self, q):
-        return self.results[q]
-
-    @property
-    def confidence(self):
-        """Overall confidence: the probability that every answered question is right — the product of the answers'
-        confidences (errors taken as independent, so it is conservative when answers agree through constraints). Abstained
-        questions are left out; see `complete`. 1.0 when nothing was answered by a model or a learned part."""
-        import math
-        return math.prod(r.confidence for r in self.results.values() if r.status != "abstain")
-
-    @property
-    def complete(self):
-        """Did every question get an answer (none abstained)?"""
-        return all(r.status != "abstain" for r in self.results.values())
-
-    @property
-    def weakest(self):
-        """(question, confidence) of the least confident answer, or None when every question abstained."""
-        got = [(q, r.confidence) for q, r in self.results.items() if r.status != "abstain"]
-        return min(got, key=lambda t: t[1]) if got else None
-
-    @property
-    def not_stated(self):
-        """Questions answered "not stated" (solvi.Unknown): answered — they count in `confidence` and `complete` — but
-        the text does not state the value."""
-        from .core import Unknown
-        return [q for q, r in self.results.items() if r.answer is Unknown and r.status != "abstain"]
-
-    @property
-    def overall(self):
-        """The whole response in one line of data: confidence, weakest answer, answered / abstained, complete, feasible;
-        the questions answered "not stated"; and per answer kind the answered count and the product of their confidences."""
-        ab = [q for q, r in self.results.items() if r.status == "abstain"]
-        kinds = {}
-        for r in self.results.values():
-            if r.status != "abstain":
-                k = kinds.setdefault(r.kind or "?", [0, 1.0])
-                k[0] += 1
-                k[1] *= r.confidence
-        return {"confidence": self.confidence, "weakest": self.weakest, "answered": len(self.results) - len(ab),
-                "abstained": ab, "complete": not ab, "feasible": self.feasible, "not_stated": self.not_stated,
-                "by_kind": {k: {"answered": n, "confidence": c} for k, (n, c) in sorted(kinds.items())}}
-
-    def to_dict(self):
-        """model_dump(mode="json"): answers, flow, trace, values, safeguards as JSON-ready data (see Serial)."""
-        return self.model_dump("json")
-
-    lang = "en"                         # the language of rendering (System(lang=...)); not a field: never serialized or hashed
-
-    def signature(self, alg="syndrome"):
-        """The signature of this response's trace (solvi.signature.sign: the input, then every record) — a few numbers to
-        keep next to the stored id; solvi.signature.locate(res, sig) later names the one record that changed."""
-        from .signature import sign
-        return sign(self, alg)
-
-    computed_state = _deprecate.removed_attr("computed_state", "state_text()", "Response")
-    computed_state_text = _deprecate.removed_attr("computed_state_text()", "state_text(lang)", "Response")
-
-    def state_text(self, lang=None):
-        """The computed state for people: each computed fact with its value; a quote's offsets; for anything not
-        computed by plain code, its provenance (quoted by a model, decided, learned) and the model; errors, including
-        rejected (ungrounded) model outputs — in a language (solvi.i18n; default: the System's). The facts as data:
-        `res.values`."""
-        from . import i18n
-        lang = i18n.check(self.lang if lang is None else lang)
-        t = i18n.t
-        lines = []
-        for r in self.trace.records:
-            if r.kind in ("rule", "head"):
-                continue
-            v = "—" if r.value is MISSING else repr(r.value)
-            extra = t("cs.quote", lang, s=r.quote[0], e=r.quote[1]) if r.quote else ""
-            if r.confidence < 1:
-                extra += t("cs.confidence", lang, c=f"{r.confidence:.2f}")
-            if r.origin not in ("computed", "quoted"):
-                extra += f"   {i18n.provenance(r.origin, lang)}"
-                if r.probs:
-                    extra += " (" + ", ".join(f"{k} {float(p):.2f}" for k, p in sorted(r.probs.items(), key=lambda t_: -t_[1])[:3]) + ")"
-            if r.model is not None:
-                extra += t("cs.model", lang, m=f"{r.model['type']} {r.model['id']} #{r.model['fp'][:8]}")
-            if r.error:
-                extra += t("cs.error", lang, err=i18n.msg(r.error, lang))
-            lines.append(f"{r.name:24s} = {v}{extra}")
-        return "\n".join(lines)
-
-    def audit(self, question=None, lang=None):
-        """What each answer rests on and which safeguards fired: given inputs → computed facts → quotes (offsets and quoted
-        text) → model decisions (model, probabilities) → learned parts → checks, rule, constraints → answer; plus the share
-        of the support that is deterministic. `print(res.audit())`, or `res.audit("q").to_dict()` for data.
-        lang: the language str() renders in (solvi.i18n; default: the System's, "en"); the data is the same in every one.
-        → an Audit of every answer, or the AnswerAudit of one question when `question` is given."""
-        from .audit import build
-        a = build(self, question, lang=self.lang if lang is None else lang)
-        return a[question] if isinstance(question, str) else a
-
-    def report(self, format="md", question=None, system=None, replay="trusted"):
-        """A human-readable report of this decision for an auditor or a customer: each answer, what it rests on, the quotes
-        highlighted in the source text with their offsets, the safeguards that fired, the guarantee line, the models'
-        fingerprints, the trace's hashes and the replay status. format: "md" (Markdown), "html" (one self-contained page,
-        every value escaped) or "data" (a dict). replay: "trusted" (default: deterministic steps re-run, model outputs
-        verified from the record — no model is called), "full" (models re-run too) or False. See solvi.report."""
-        from .report import decision, render
-        return render(decision(self, question, system, replay), format)
 
 
 def _speculate_note(speculate, p):
@@ -216,9 +83,8 @@ class System:
         timeout: seconds a part's call may take under `aask` when the part declares no `timeout=` (None: no limit).
         producers="equivalent": the producers of a fact are interchangeable — the cost-optimal planner
         (solvi.strategy.CostStrategist(producers="equivalent")) picks one per fact, the cheapest valid plan.
-        cost_policy: what that planner's costs are — "declared" (`cost=`, 1 when undeclared) or "measured" (the run times
-        system.cost_book measures, after a warm-up; or a solvi.costs.MeasuredCosts with its settings; `costs=` in 0.7). freeze_costs() fixes
-        them; the plan record in each trace says which cost decided each choice.
+        cost_policy: what that planner's costs are — "declared" (`cost=`, 1 when undeclared; `costs=` in 0.7), the only
+        one since 1.0 ("measured" was removed: it showed no measured benefit).
         early_exit: True (default) — when a hard check fails, the steps only the questions it settles needed are skipped
         (the expensive rest is not paid for); the decision's record then holds no values for them, and a part listed in
         `requires` may not have run. False — every step of the flow runs anyway: the answers are the same (the failed
@@ -274,27 +140,17 @@ class System:
                 self.strategist = strategist = CostStrategist(producers="equivalent")
             elif getattr(strategist, "producers", None) != "equivalent":
                 raise ValueError('producers="equivalent" with a strategist: give it producers="equivalent" too')
-        from .costs import MeasuredCosts
-        costs = cost_policy
-        if isinstance(costs, MeasuredCosts):
-            self.cost_policy = costs
-        elif costs == "measured":
-            self.cost_policy = MeasuredCosts()
-        elif costs == "declared":
-            self.cost_policy = None
-        else:
-            raise ValueError('cost_policy must be "declared", "measured" or a MeasuredCosts')
-        if self.cost_policy is not None and getattr(self.strategist, "producers", None) != "equivalent":
-            raise ValueError('cost_policy="measured" needs the cost-optimal planner: System(..., producers="equivalent") or '
-                             'strategist=CostStrategist(producers="equivalent")')
+        if cost_policy != "declared":
+            if cost_policy == "measured" or hasattr(cost_policy, "freeze"):
+                raise ValueError('cost_policy="measured" (and solvi.costs.MeasuredCosts) was removed in 1.0: it showed no '
+                                 'measured benefit — declare cost= on the parts (the planner plans with the declared costs)')
+            raise ValueError('cost_policy must be "declared"')
         # online learning of order / producer choice costs time inside ask (periodic refits), so it is on only when a learned
         # policy will use it (or when asked explicitly); plain systems keep flat, predictable decision times
         if learn is None:
             learn = order != "default" or producers == "learned"
         self.order, self.producers, self.learn = order, producers, learn
         self.cost_book = CostBook()               # moving average of each part's run time, ms
-        if self.cost_policy is not None and self.cost_policy.alpha is not None:
-            self.cost_book.alpha = self.cost_policy.alpha
         self.order_model = OrderModel()           # P(hard check fails | cheap facts)
         self.producer_policy = ProducerPolicy()   # which producer of a fact to try first
         from .audit import STATS
@@ -475,19 +331,10 @@ class System:
         answers with aask."""
         return bool(async_parts(self.catalog))
 
-    def freeze_costs(self):
-        """Fix the costs the planner uses (System(cost_policy="measured")) at what was measured so far — a producer that never
-        ran: its declared cost, else 1 — so the choice of producers stops changing; measuring goes on. → {producer: ms}"""
-        return self._measured().freeze(self.cost_book, _producers(self.catalog))
-
-    def unfreeze_costs(self):
-        """Back to the measured costs (see freeze_costs)."""
-        self._measured().frozen = None
-
-    def _measured(self):
-        if self.cost_policy is None:
-            raise ValueError('costs are declared: freeze_costs needs System(..., cost_policy="measured")')
-        return self.cost_policy
+    freeze_costs = gone_in_1_0("freeze_costs()", 'declared costs (cost= on the parts): cost_policy="measured" was removed '
+                               "(no measured benefit)", "System")
+    unfreeze_costs = gone_in_1_0("unfreeze_costs()", 'declared costs (cost= on the parts): cost_policy="measured" was '
+                                 "removed (no measured benefit)", "System")
 
     def _prepare(self, init_state, names, order):
         """What ask and aask share before running: the given facts, the questions, the flow, the order and the policy."""
@@ -505,7 +352,7 @@ class System:
         if clash:                                     # the planner would take the given value for the part's own: a check
             raise ValueError(_clash(self.catalog, clash, "the input has"))   # named in the input would never run
         qs = [self.questions[n] for n in self._names(names)]
-        flow = self._plan(qs, init_state.keys(), why_costs=True)
+        flow = self._plan(qs, init_state.keys())
         if not (order is None or order in ("default", "learned") or hasattr(order, "p_fail")):
             raise ValueError(f'order must be "default", "learned" or an object with p_fail(check, row), not {order!r}')
         mode = self.order if order is None else order
@@ -523,18 +370,11 @@ class System:
             raise KeyError(f"no question {', '.join(map(repr, lost))} in this system ({', '.join(self.questions)})")
         return names
 
-    def _plan(self, questions, init_keys, why_costs=False):
+    def _plan(self, questions, init_keys):
         """The flow of these questions on these given facts, planned as `ask` plans it: by System(strategist=) (the
-        deterministic solvi.strategist.plan when none is set), with measured costs under System(cost_policy="measured").
+        deterministic solvi.strategist.plan when none is set), with the declared costs.
         Everything that plans for this system goes through here — ask, answers_of, facts_for / fit, learn_order, the input
-        schemas of `solvi serve` and `solvi check` — so they all see the same flow. why_costs: note in the plan record
-        which cost decided each choice (ask)."""
-        if self.cost_policy is not None:              # costs from measurements (see MeasuredCosts)
-            c, src = self.cost_policy.costs(self.cost_book, _producers(self.catalog))
-            flow = self.strategist.plan(self.catalog, questions, init_keys, self.heads, costs=c)
-            if why_costs:
-                _why_costs(self.catalog, flow, init_keys, c, src, self.cost_policy.frozen is not None)
-            return flow
+        schemas of `solvi serve` and `solvi check` — so they all see the same flow."""
         return (plan if self.strategist is None else self.strategist.plan)(self.catalog, questions, init_keys, self.heads)
 
     def _computable(self, init_keys):
@@ -560,8 +400,6 @@ class System:
         trace.fingerprint = self._fingerprint(flow)
         for name, ms in trace.timings.items():         # cost tracking is cheap: always on
             self.cost_book.observe(name, ms)
-        if self.cost_policy is not None:
-            self.cost_policy.observe(trace.timings)
         if self.learn:
             self._observe(trace, init_state, vals, policy)
         results, feasible, violations = self._results(qs, flow, trace, vals, p.textin)
@@ -1127,17 +965,8 @@ class System:
         from .guarantee import guard_question
         return guard_question(self, question, examples, **kw)
 
-    def learning(self, storage=None, parts=None, ladder=None, gates=None, **options):
-        """Learning from corrections with gates and rollback — experimental, off until you call this (see
-        solvi.learning): → a Learning loop over `storage` (default: this system's) for the questions answered by the
-        decision parts in `parts` (default: all of them). Labels come only from human corrections, outcomes and rule
-        rejections; loop.run() proposes an update by the ladder (ladder=: fit_below, memory_below, adapter, memory), runs
-        the gates (gates=: min_gain, min_holdout, tolerance, risk, max_change, shadow_limit, max_conflict,
-        min_calibration, honesty) and promotes it only when all pass; loop.rollback(version) restores any promoted
-        version. options: changelog= (another TraceStorage for the update records), holdout=0.3, calibration=0.2,
-        gate_teach=True (teach only stores corrections while the loop is attached)."""
-        from .learning import Learning
-        return Learning(self, storage, parts, ladder, gates, **options)
+    learning = gone_in_1_0("learning()", "solvi.learning.Learning(system, storage, parts, ladder, gates, ...) — the "
+                           "learning loop is experimental (solvi.experimental.learning later)", "System")
 
     @_deprecate.removed_kwargs(source="label_source")
     def teach(self, question, init_state, correct, *, label_source="human", by=None, of=None):
@@ -1148,14 +977,14 @@ class System:
         are stored with it (TraceStorage.save_correction). label_source="verified" (with of= the stored System 2 decision
         that answered alone under a guarantee — save_correction checks it): the label is only stored, for
         System.guarantee(..., corrections=, sources=); no head or decision learns from it (a head fed such labels gained
-        on one task of three), and a system without storage raises ValueError. With a learning loop (System.learning(..., gate_teach=True))
+        on one task of three), and a system without storage raises ValueError. With a learning loop (solvi.learning.Learning(system, ..., gate_teach=True))
         nothing learns at once: the correction is only stored, and the loop's gates decide whether it is learned.
         An unknown question raises KeyError and an answer that is not one of the question's options ValueError, before
         anything is learned or stored; the answer is stored normalized (True → "yes"). When nothing learned at once and
         there is no storage, the correction is lost: a UserWarning says so."""
         from .decide import decision_of
         from .heads import FastHead
-        from .storage import VERIFIED, check_source
+        from .sources import VERIFIED, check_source
         source = label_source
         check_source(source, accept=(VERIFIED,))
         if question not in self.questions:
@@ -1225,15 +1054,6 @@ class MultiHead:
 
     def teach(self, row, answer):
         return sum(h.teach(row, "yes" if o in answer else "no") for o, h in self.heads.items())
-
-
-def _append(trace, rec, n_steps):
-    """Add a record after the flow's steps (an answer head's decision), chained to the last one."""
-    last = trace.records[-1] if trace.records else None
-    rec.step = max(n_steps, last.step if last else 0) + 1
-    rec.prev = last.hash if last else trace.init_hash
-    rec.hash = vhash(rec.body())
-    trace.records.append(rec)
 
 
 MISSING_INPUTS = "missing inputs: "
@@ -1374,38 +1194,6 @@ def _platt_fit(xs, ys):
     if not (math.isfinite(a) and math.isfinite(b)) or abs(a) > 1e3 or abs(b) > 1e3:   # separable data: no finite optimum
         return _platt_shift(xs, ys)
     return float(a), float(b)
-
-
-def _producers(catalog):
-    """Every producer in a catalog: plain parts and each alternative producer of a fact."""
-    return [a for p in catalog.parts.values() for a in (p.alternatives if p.alternatives is not None else [p])]
-
-
-def _why_costs(catalog, flow, init_keys, costs, src, frozen):
-    """Record in the flow's strategy (and so in the trace's plan record) the costs behind each choice among producers."""
-    s = getattr(flow, "strategy", None)
-    if s is None or not s.get("choice"):
-        return
-    from .strategy import reachable, usable
-    reach = reachable(catalog, set(init_keys))
-
-    def say(n):
-        how, runs = src.get(n, ("declared", 0))
-        return f"{n} {how} {costs.get(n, 1.0):.3f} ms" + (f" ×{runs}" if runs else "")
-    facts = {}
-    for f, chosen in s["choice"].items():
-        p = catalog.parts.get(f)
-        if p is None or p.alternatives is None:
-            continue
-        us = usable(catalog, f, reach)
-        if len(us) < 2:
-            continue
-        others = sorted((a.name for a in us if a.name != chosen), key=lambda n: costs.get(n, 1.0))
-        facts[f] = {"chosen": chosen,
-                    "producers": {a.name: {"ms": round(costs.get(a.name, 1.0), 3), "from": src.get(a.name, ("declared",))[0],
-                                           "runs": src.get(a.name, (None, 0))[1]} for a in us},
-                    "why": "cheapest plan: " + "; ".join(say(n) for n in [chosen] + others)}
-    s["costs"] = {"mode": "frozen" if frozen else "measured", "facts": facts}
 
 
 __all__ = ["governs", "MultiHead", "Response", "System"]
