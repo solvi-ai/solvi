@@ -14,7 +14,9 @@ What it shows, per question, from the records the library already writes:
   hard check that forced the answer) and how many were handed over (abstained), by the safeguard that held them back;
   with `solvi.dispatch`, who gave the final answer (System 1, the slow path, a person), by which action and slice;
 - what it cost: the time of every decision, the model calls and tokens the traces record (dollars where the
-  dispatcher recorded them, or with `price=`), and the dispatcher's spend split between System 1 and the slow path;
+  dispatcher or a generator built with `price=` recorded them, or with `price=`), the dispatcher's spend split between
+  System 1 and the slow path, and the refinement loops (solvi.refine): how many, how they ended (accepted, escalated,
+  stopped by their budget, over it), their rounds and what their proposals and rounds cost;
 - the promise in force against what the labels show: every guarantee the decisions were gated by (its method, level
   and text) and every calibrated dispatch policy (who answers each slice), next to the error found on the decisions
   that have a label — the corrections in the store (`System.teach`, `save_correction`). Labels from a person, an outcome
@@ -56,7 +58,7 @@ def _cost(calls, ms, price):
     from .costs import price_of
     return {"decisions": 0, "ms": ms, "calls": len(calls), "input_tokens": sum(int(u.get("input_tokens", 0)) for _, u in calls),
             "output_tokens": sum(int(u.get("output_tokens", 0)) for _, u in calls),
-            "usd": price_of(price, calls) if price is not None else (0.0 if not calls else None)}
+            "usd": price_of(price, calls, recorded=True)}
 
 
 def _add_cost(a, b):
@@ -131,7 +133,7 @@ def system_report(store, since=None, until=None, *, question=None, price=None, d
 
     def within(t):
         return (t0 is None or t >= t0) and (t1 is None or t < t1)
-    asks, disp, policies, teach, erased = [], [], {}, [], 0
+    asks, disp, policies, teach, erased, loops = [], [], {}, [], 0, []
     for s in store.iter(None, redacted=True):
         d = s.data
         if s.kind == "teach":
@@ -146,6 +148,8 @@ def system_report(store, since=None, until=None, *, question=None, price=None, d
             asks.append(s)
         elif s.kind == "dispatch" and (question is None or d.get("question") == question):
             disp.append(s)
+        elif s.kind == "refine" and (question is None or d.get("question") == question):
+            loops.append(s)
     # the labels: a correction names its decision (of=), else the latest decision before it on the same input
     by_init, ids = {}, {}
     for s in asks:
@@ -198,7 +202,8 @@ def system_report(store, since=None, until=None, *, question=None, price=None, d
                 "filters": {k: str(v) for k, v in (("since", since), ("until", until), ("question", question)) if v is not None},
                 "decisions": len(asks), "dispatched": len(disp), "erased": erased, "catalogs": catalogs,
                 "models": models},
-        system1=s1, dispatch=dp, cost={"system1": cost1, "dispatch": cost2},
+        system1=s1, dispatch=dp, cost={"system1": cost1, "dispatch": cost2, **({"refine": _refine(loops, price)} if loops
+                                                                              else {})},
         corrections={"total": len(teach), "in_period": in_period, "by_source": sources,
                      "labelled_decisions": len(labels), "unmatched": unmatched},
         notes=notes)
@@ -310,6 +315,32 @@ def _drift(rows, window, monitor):
             if rep.get("drift"):
                 out.update(flagged=True, at=i, id=s.id, time=_iso(s.time), signals=list(rep["flags"]), why=list(rep["why"]))
                 break
+    return out
+
+
+def _refine(loops, price):
+    """The refinement loops of the period (records of kind "refine"): how they ended, their rounds, the proposals' model
+    calls (outside the rounds' traces, which System 1's cost counts) and the whole loops' cost as recorded."""
+    from .costs import _usages
+    out = {"loops": len(loops), "accepted": 0, "escalated": 0, "stopped_by_budget": 0, "over_budget": 0, "rounds": 0}
+    calls, total = [], _cost([], 0.0, None)
+    total["usd"] = 0.0
+    for s in loops:
+        d = s.data
+        out["accepted" if d.get("accepted") else "escalated"] += 1
+        out["stopped_by_budget"] += bool(d.get("stopped"))
+        out["over_budget"] += bool(d.get("over_budget"))
+        out["rounds"] += len(d.get("rounds") or ())
+        for r in d.get("rounds") or ():
+            g = r.get("generated")
+            calls += _usages({"generated": g}) if g is not None else []
+        c = d.get("cost") or {}
+        total = _add_cost(total, {"decisions": 1, "ms": float(c.get("ms", 0.0)), "calls": int(c.get("calls", 0)),
+                                  "input_tokens": int(c.get("input_tokens", 0)),
+                                  "output_tokens": int(c.get("output_tokens", 0)), "usd": c.get("usd")})
+    prop = _cost(calls, 0.0, price)
+    prop["decisions"] = len(loops)
+    out["proposals"], out["total"] = prop, total
     return out
 
 
@@ -504,6 +535,14 @@ def render(d):
     if d["dispatch"]:
         L.append("  dispatcher, System 1: " + _cost_line(c["dispatch"]["system1"]))
         L.append("  dispatcher, slow path: " + _cost_line(c["dispatch"]["slow_path"], "runs"))
+    if c.get("refine"):
+        r = c["refine"]
+        L.append(f"  refinement loops: {r['loops']} ({r['accepted']} accepted, {r['escalated']} escalated, "
+                 f"{r['stopped_by_budget']} stopped by their budget, {r['over_budget']} over it), {r['rounds']} rounds")
+        L.append("    whole loops: " + _cost_line(r["total"], "loops"))
+        p = r["proposals"]
+        L.append(f"    of which the proposals: {p['calls']} model call(s), {p['input_tokens']:,} input + "
+                 f"{p['output_tokens']:,} output tokens, " + _money(p))
     for n in d["notes"]:
         L += ["", "Note: " + n]
     return "\n".join(L) + "\n"
