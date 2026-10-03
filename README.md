@@ -290,6 +290,35 @@ Every answer is a value and a confidence, and the types also declare answer prim
   bytes (preview; [examples/21_verified_chart.py](examples/21_verified_chart.py)). The audit, `show` and the safeguard
   report render in Russian with `System(..., lang="ru")`.
 
+## System 1 and System 2
+
+A System under a guarantee is fast, cheap and knows when it is unsure: that is System 1. An LLM, a re-ask loop or a
+search is slow and costs money per input: System 2. solvi puts them in one system, and both are experimental in 0.9:
+
+- **Who answers** (`solvi.dispatch`). System 1 is asked first; when its own signals say its answer cannot be given
+  alone — below its guarantee, unlike the calibration examples, an abstention, a broken constraint — the slow path
+  answers, and when that cannot either, or the budget is spent, a person gets the input with both candidates and the
+  reasons. `Dispatcher.calibrate(examples, max_risk=...)` chooses, on each slice of what System 1 hands over, whether
+  System 1's own guess, the slow path, their agreement or a person answers, under one promise. Every decision is one
+  stored record with its cost and replays without calling a model
+  ([guide](docs/guide.md#who-answers-system-1-the-slow-path-or-a-person-solvidispatch)).
+- **What happened** (`System.report`, `solvi report decisions.db --overview`). From the store alone: who answered and
+  how often each handed over, the time, calls, tokens and dollars, the promise in force next to the error the stored
+  labels show, and drift ([guide](docs/guide.md#the-system-report-systemreport-solvi-report---overview)).
+- **A policy text compiled into the catalog** (`solvi.compile`). An LLM writes plain functions, hard checks and rules
+  from a policy; they are accepted without labelled examples only when every part cites its clauses, the code runs in
+  a sandbox, two independent drafts agree on every generated input and tests derived from the text pass. A person
+  settles what the drafts dispute (`review=`), a changed text is recompiled with the stored decisions it moves listed,
+  and a compiled policy can guard an agent's tool calls (`to_guard`). Agreement is not correctness: a misreading both
+  drafts share is accepted, so look at some decisions before relying on it
+  ([guide](docs/guide.md#a-specification-compiled-into-the-catalog-solvicompile)).
+- **A showcase.** A player walks the world map of Pokémon Red (recorded from a real playthrough: place names and exits,
+  no ROM) through the first fifteen goals twice; System 1 is two rules over remembered routes, System 2 a search over
+  the world map it writes as it goes, and after each goal what System 2 found becomes System 1's routes. The first run
+  takes 147 slow decisions of 183, the second 2 of 62, the fewest moves possible; every decision replays
+  ([examples/23_pokemon_world_map.py](examples/23_pokemon_world_map.py), the replay viewer in
+  [spaces/pokemon](spaces/pokemon)).
+
 ## Planning around dead ends and costs (code strategist)
 
 The default strategist needs the inputs of every producer of a fact. `solvi.strategy.CostStrategist()` plans around
@@ -472,6 +501,7 @@ on documents the extractor dominates.
 | [examples/20_vote_across_families.py](examples/20_vote_across_families.py) | A vote of two model families behind the System One API (stand-in servers started in-process): each alone and the vote under one `act_guard` guarantee; a sure mistake of one family escalates; the audit and the replay |
 | [examples/21_verified_chart.py](examples/21_verified_chart.py) | A verified chart (`solvi.charts`, preview): every number quoted from the text and checked; a careless model's swapped digit, invented share and unquoted value dropped with reasons; a deterministic SVG that replays to identical bytes |
 | [examples/22_coding_agent_hooks.py](examples/22_coding_agent_hooks.py) | A coding agent's session behind `solvi hook`: the hooks installed in a temporary project, a clean edit allowed, an edit that takes an employee id from the browser denied with the rule and the line, a migration with an empty downgrade and a comment that tries to talk past the rules denied, a skill picked for one prompt and none for another; the store verified and one decision audited and replayed |
+| [examples/23_pokemon_world_map.py](examples/23_pokemon_world_map.py) | System 1 and System 2 on the world map of Pokémon Red (recorded, no ROM): rules over remembered routes, a search over the player's world map when they are unsure or surprised, routes compiled after each goal; 147 → 2 slow decisions from the first run to the second; every decision stored, replayed and reported (`System.report`) |
 | [examples/07_receipts_model.py](examples/07_receipts_model.py) | Expense check on a scanned receipt: a receipts-tuned extractor cites each field, rules and a hard check decide (needs `solvi[model]`) |
 | [examples/08_contracts_by_description.py](examples/08_contracts_by_description.py) | Contract review with fields defined only in words: the general extractor reads the whole contract, cites clauses or says "absent" (needs `solvi[model]`) |
 

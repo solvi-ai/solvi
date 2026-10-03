@@ -27,13 +27,14 @@ Contents:
 15. [A model that writes: generation, agreement and the re-ask loop](#a-model-that-writes-generation-agreement-and-the-re-ask-loop)
 16. [A specification compiled into the catalog: solvi.compile (experimental)](#a-specification-compiled-into-the-catalog-solvicompile)
 17. [Who answers: System 1, the slow path or a person (solvi.dispatch, experimental)](#who-answers-system-1-the-slow-path-or-a-person-solvidispatch)
-18. [Verified charts: a specialist that checks every number (preview)](#verified-charts-a-specialist-that-checks-every-number)
-19. [Checking a catalog: solvi check](#checking-a-catalog-solvi-check)
-20. [Grounded decisions: provenance, audit and safeguards](#grounded-decisions-provenance-audit-and-safeguards)
-21. [Printing results: solvi.show](#printing-results-solvishow)
-22. [Extracting fields from documents](#extracting-fields-from-documents)
-23. [Command line](#command-line)
-24. [Guarantees and limitations](#guarantees-and-limitations)
+18. [System 1 and System 2 on a game: the Pokémon world map](#system-1-and-system-2-on-a-game-the-pokémon-world-map)
+19. [Verified charts: a specialist that checks every number (preview)](#verified-charts-a-specialist-that-checks-every-number)
+20. [Checking a catalog: solvi check](#checking-a-catalog-solvi-check)
+21. [Grounded decisions: provenance, audit and safeguards](#grounded-decisions-provenance-audit-and-safeguards)
+22. [Printing results: solvi.show](#printing-results-solvishow)
+23. [Extracting fields from documents](#extracting-fields-from-documents)
+24. [Command line](#command-line)
+25. [Guarantees and limitations](#guarantees-and-limitations)
 
 ## Concepts
 
@@ -4237,7 +4238,11 @@ numbers depend on the order). The slow path's promise, when it has a guarantee, 
 examples — the inputs System 1 hands it are the hard ones, unlike an average calibration set, so measure the slow path's
 error on what it is actually given before you trust `think="s2"`.
 
-### On a game: System 1, System 2 and a world map that practice compiles
+## System 1 and System 2 on a game: the Pokémon world map
+
+> A showcase of `solvi.dispatch` with a searching slow path and `solvi.worldmap`; the player and the replay viewer
+> are in `spaces/pokemon/`.
+
 
 `examples/23_pokemon_world_map.py` puts
 the pieces together on the world map of Pokémon Red: 190 places and 447 exits recorded from a real playthrough (place
