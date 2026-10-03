@@ -2308,13 +2308,23 @@ class DecisionDiff:
     report: Any
     total: int
 
+    @property
+    def moved(self) -> list:
+        """The changes whose answer moves (the others keep their answer and are decided another way: by another check,
+        or forced where a rule answered)."""
+        return [x for x in self.changed if _norm(x["old"]) != _norm(x["new"])]
+
     def __str__(self):
         from collections import Counter
-        c = Counter((x["question"], _norm(x["old"]), _norm(x["new"])) for x in self.changed)
-        lines = [f"{len(self.changed)} of {self.total} decisions change"]
+        moved = self.moved
+        c = Counter((x["question"], _norm(x["old"]), _norm(x["new"])) for x in moved)
+        lines = [f"{len(moved)} of {self.total} decisions change their answer"]
         lines += [f"  {q}: {o} → {n}: {k}" for (q, o, n), k in c.most_common()]
-        cl = Counter(tuple(sorted({c for cause in x["causes"] for c in cause["clauses"]})) for x in self.changed)
+        cl = Counter(tuple(sorted({c for cause in x["causes"] for c in cause["clauses"]})) for x in moved)
         lines += ["  because of clauses " + ", ".join(k) + f": {v}" for k, v in cl.most_common()]
+        same = len(self.changed) - len(moved)
+        if same:
+            lines.append(f"{same} more keep their answer and are decided another way (another check, or forced)")
         return "\n".join(lines)
 
 

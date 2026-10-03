@@ -4149,10 +4149,10 @@ implements as the reason.
 A policy compiled as a question — "may this call be made?" — goes in whole with `allow=`:
 
 ```python
-guard = Guard(fact_names={"authed": bool, "amount": float})
+guard = Guard(fact_names=FIELDS)                         # the facts the compiled policy reads, given with each call
 to_guard(c, guard, allow="yes", name="shop_policy")      # one policy: the compiled answer must be "yes"
-d = guard.check({"name": "refund_order", "arguments": {}}, facts={"authed": True, "amount": 250})
-d.outcome, d.reasons    # deny, ['shop_policy: ... — [c5] Refunds over 200 go to a human: ... [deny]']
+d = guard.check({"name": "refund_order", "arguments": {}}, facts=call_facts)        # e.g. a refund of 250
+d.outcome, d.reasons    # deny, ['shop_policy: ... — [c6] Refunds over 200 go to a human: ... [deny]']
 ```
 
 The policy asks the compiled question and refuses any other answer, naming the clauses of the parts that decided (the

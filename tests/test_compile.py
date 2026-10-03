@@ -229,7 +229,7 @@ def test_the_decision_diff_lists_the_decisions_a_change_moves_with_the_clauses_o
     dd = decision_diff(c1, c2, inputs=xs)
     assert [(d["seq"], d["old"], d["new"]) for d in dd.changed] == [(1, "free", "paid"), (2, "free", "paid")]
     assert dd.changed[0]["causes"][0]["part"] == "free_shipping" and dd.changed[0]["causes"][0]["clauses"] == ["c3"]
-    assert str(dd).startswith("2 of 5 decisions change")
+    assert str(dd).startswith("2 of 5 decisions change their answer") and len(dd.moved) == 2
 
 
 def test_versions_replay_each_stored_decision_with_the_catalog_that_made_it(tmp_path):
