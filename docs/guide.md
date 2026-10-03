@@ -3990,15 +3990,18 @@ After both drafts ran in a round, the person is asked about:
 
 At most `review_per_round` questions a round and `review_budget` in all (None: no limit); a reviewer that returns None
 skips the question. **An answer becomes a test** (source "person"), never code: both drafts must pass it from then on,
-and a test the writer derived for the same input that contradicts it is corrected. Acceptance stays as strict as
-without the person — both drafts pass every test, agree on every input of the pool and answer every one — so a wrong
-answer from the person makes the compilation fail, it cannot make a wrong draft pass. An answer saying the
+and a test the writer derived for the same input that contradicts it is corrected. The other conditions of
+acceptance stay as without the person — both drafts pass every test, agree on every input of the pool and answer
+every one — but the person's answers can replace or drop derived tests, so they are trusted like labels: a wrong
+answer becomes a wrong test, and both drafts can follow it. An answer saying the
 specification does not decide an input (`Ruling.neither` without an answer) is a gap: the compilation is not accepted
 until the text is amended.
 
-**What the person does not see.** Only what the drafts dispute. A misreading both drafts share — say, both accept a
-confirmation only when the user's message is exactly "yes", where the policy means any explicit yes — gives no
-disagreement and passes the tests, so nobody is asked and it is accepted. In our runs that happened to two tool groups
+**What the person does not see.** Only what the drafts dispute. A misreading both drafts share — say, both accept only a
+bare "yes" as the user's confirmation ("Yes, I confirm!" refused), where the policy means any explicit yes, or both
+refuse a call after any earlier call, which the policy never says — gives no
+disagreement and passes the tests, so nobody is asked and it is accepted. (The same limit as N-version programming,
+whose independent versions share misreadings, and as asking questions only where sampled programs differ.) In our runs that happened to two tool groups
 of a customer-service policy. Look at some decisions the drafts agree on before you rely on a compiled policy.
 
 `reference_reviewer(fn)` is a simulated person for experiments: `fn(input) → {question: answer}`, a hand-written
@@ -4164,7 +4167,7 @@ The policy asks the compiled question and refuses any other answer, naming the c
 false hard checks, else the question's rule); an input the compiled policy cannot answer (it abstains — a group that
 was not accepted, a fact it cannot read) is refused as well, with the reason. When the policy text changes, compile
 it again (`recompile`, or `compile_groups` with the same grouping: the unchanged groups' prompts are the same) and
-`decision_diff(old, new, inputs=calls)` lists the calls whose decision moves, with the clauses why — before the new
+`decision_diff(old, new, inputs=calls)` lists which of the calls you pass move, with the clauses why — before the new
 guard goes live.
 
 **Not done here.** Agreement is not correctness: two samples of one model can share a misreading, and the tests come

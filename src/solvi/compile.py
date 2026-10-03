@@ -44,8 +44,9 @@ prompt and reply, the writer, the tests, and each check's outcome per round.
 
 A person in the loop (`review=`) is asked, within a budget, about the inputs two drafts decide differently (one input
 of each of the largest kinds of disagreement) and about disputed tests (instead of the test writer's re-check). An
-answer becomes a test (source "person"), never code: both drafts must pass it, so acceptance stays as strict as
-without the person; an answer saying the specification does not decide the input is a gap, and blocks acceptance.
+answer becomes a test (source "person"), never code: both drafts must pass it, and the other conditions stay; the
+answers are trusted like labels (a wrong one is a wrong test). An answer saying the specification does not decide the
+input is a gap, and blocks acceptance. The person sees only what the drafts dispute, not a misreading they share.
 
     c = compile_groups(spec, questions, inputs, writer, by="tool_name")   # a large specification, group by group
     c.record["groups"]                                    # per group: its values, clauses, accepted or why not
