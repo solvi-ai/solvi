@@ -7,7 +7,7 @@ import pytest
 
 from solvi import Catalog, System
 from solvi.decide import Facts
-from solvi.memory import CorrectionMemory, words
+from solvi.memory import CorrectionMemory, attach, words
 from solvi.multi import Cascade
 from solvi.storage import JSONLStorage, UntrustedLabel
 from test_decide import TASK, TEAMS, model, texts
@@ -23,7 +23,7 @@ def setup(noise=0.3, **kw):
 
 def test_check_mode_escalates_when_similar_corrections_disagree_and_shows_the_cases():
     _, cat, part, s = setup()
-    mem = part.memory()
+    mem = attach(part)
     for i, t in enumerate(texts("billing", 4)):
         mem.add(t, "shipping", source="human", by="ann", stored_id=f"s{i}")
     r = s.ask({"email": texts("billing", 1, start=40)[0]})["route"]
@@ -46,7 +46,7 @@ def test_check_mode_escalates_when_similar_corrections_disagree_and_shows_the_ca
 
 def test_agreement_is_recorded_and_the_answer_is_kept():
     _, _, part, s = setup()
-    mem = part.memory()
+    mem = attach(part)
     for t in texts("billing", 3):
         mem.add(t, "billing", source="outcome")
     res = s.ask({"email": texts("billing", 1, start=9)[0]})
@@ -55,7 +55,7 @@ def test_agreement_is_recorded_and_the_answer_is_kept():
 
 def test_only_trusted_sources_and_never_the_systems_own_answers():
     _, _, part, s = setup()
-    mem = part.memory()
+    mem = attach(part)
     for bad in ("model", "system", "self", "shadow", None):
         with pytest.raises(UntrustedLabel):
             mem.add(texts("billing", 1)[0], "billing", source=bad)
@@ -72,7 +72,7 @@ def test_learn_from_storage_takes_trusted_corrections_and_skips_the_rest(tmp_pat
     store.save_correction("route", {"email": texts("billing", 1, start=2)[0]}, "nonsense")   # not an option: skipped
     store._append({"v": 1, "kind": "teach", "teach": "route", "init": {"email": "x"}, "answer": "billing",
                    "source": "model"})                                            # written around save_correction
-    mem = part.memory()
+    mem = attach(part)
     got = mem.learn_from(store, question="route")
     assert got["added"] == 2 and len(got["skipped"]) == 2
     assert any("UntrustedLabel" in why for _, why in got["skipped"])
@@ -84,7 +84,7 @@ def test_learn_from_storage_takes_trusted_corrections_and_skips_the_rest(tmp_pat
 
 def test_answer_mode_answers_where_the_decider_escalated_and_says_so():
     _, cat, part, s = setup(min_confidence=0.999)
-    mem = part.memory(mode="answer")
+    mem = attach(part, mode="answer")
     for t in texts("billing", 4):
         mem.add(t, "billing", source="human")
     res = s.ask({"email": texts("billing", 1, start=30)[0]})
@@ -102,7 +102,7 @@ def test_inside_a_cascade_the_memory_only_checks():
     m1, m2 = model(noise=0.3), model(noise=0.3, version="2")
     small = m1.decision("team", TASK, "email", TEAMS, option_order="given")
     large = m2.decision("team", TASK, "email", TEAMS, option_order="given")
-    mem = small.memory(mode="answer")
+    mem = attach(small, mode="answer")
     for t in texts("billing", 4):
         mem.add(t, "shipping", source="human")
     casc = Cascade([small, large])
@@ -135,17 +135,17 @@ def test_deterministic_order_independent_and_fingerprinted():
     x = texts("billing", 1, start=77)[0]
     assert a.propose(x).to_dict() == b.propose(x).to_dict() == a.propose(x).to_dict()
     fp0 = part.fingerprint()
-    part.memory(a)
+    attach(part, a)
     fp1 = part.fingerprint()
     a.add(texts("shipping", 1, start=99)[0], "shipping", source="rule")
     assert len({fp0, fp1, part.fingerprint()}) == 3
-    part.memory(False)
+    attach(part, False)
     assert part.fingerprint() == fp0
 
 
 def test_a_memory_change_is_seen_by_replay():
     _, cat, part, s = setup()
-    mem = part.memory()
+    mem = attach(part)
     mem.add(texts("billing", 1)[0], "billing", source="human")
     res = s.ask({"email": texts("billing", 1, start=3)[0]})
     assert res.trace.replay(cat)["ok"]
@@ -156,7 +156,7 @@ def test_a_memory_change_is_seen_by_replay():
 
 def test_disagreeing_neighbours_abstain():
     _, _, part, _ = setup(noise=0.0)
-    mem = part.memory()
+    mem = attach(part)
     same = texts("billing", 1)[0]
     mem.add(same, "billing", source="human", by="a")
     mem.add(same, "shipping", source="human", by="b")
@@ -166,7 +166,7 @@ def test_disagreeing_neighbours_abstain():
 
 def test_calibrate_sets_the_abstain_threshold_leave_one_out():
     _, _, part, _ = setup()
-    mem = part.memory()
+    mem = attach(part)
     for team in TEAMS:
         for t in texts(team, 12):
             mem.add(t, team, source="human")
@@ -204,7 +204,7 @@ def test_calibrate_on_cases_that_are_all_out_of_each_others_reach_says_so(tmp_pa
 
 def test_save_and_load_refuse_another_checkpoint(tmp_path):
     _, _, part, _ = setup()
-    mem = part.memory(k=5, radius=0.2)
+    mem = attach(part, k=5, radius=0.2)
     for t in texts("billing", 3):
         mem.add(t, "billing", source="human", by="ann", time=1.0)
     mem.save(tmp_path / "m.json")
@@ -219,7 +219,7 @@ def test_text_words_and_multi_label_and_facts():
     assert words("The Parcel parcel is lost") == words("lost parcel, the")
     m = model(noise=0.3)
     part = m.decision("teams", TASK, "email", TEAMS, multi=True, option_order="given")
-    mem = part.memory(text=True)
+    mem = attach(part, text=True)
     t = "I was charged twice and the app shows an error"
     mem.add(Facts(email=t), ["billing", "technical"], source="human")
     p = mem.propose(Facts(email=t))
@@ -227,13 +227,13 @@ def test_text_words_and_multi_label_and_facts():
     d = part.decide(t)
     assert d.value == ("billing", "technical") and d.extra["memory"]["action"] == "agrees"
     with pytest.raises(ValueError):
-        m.decision("where", "Where?", "email", kind="span").memory()
+        attach(m.decision("where", "Where?", "email", kind="span"))
 
 
 # --------------------------------------------------------------------------------------------------- fixes before 0.7
 def test_calibrate_does_not_change_the_live_min_strength_while_it_runs():
     _, _, part, _ = setup()
-    mem = part.memory(min_strength=2.5)
+    mem = attach(part, min_strength=2.5)
     for t in texts("billing", 20) + texts("technical", 20):
         mem.add(t, "billing" if "charged" in t else "technical")
     seen = []
@@ -249,7 +249,7 @@ def test_calibrate_does_not_change_the_live_min_strength_while_it_runs():
 
 def test_a_case_added_during_a_proposal_does_not_break_it():
     _, _, part, _ = setup()
-    mem = part.memory(radius=0.9, min_strength=0.1, min_agreement=0.5)
+    mem = attach(part, radius=0.9, min_strength=0.1, min_agreement=0.5)
     for t in texts("billing", 5):
         mem.add(t, "billing")
     orig, extra = mem._distances, iter(texts("technical", 50))
@@ -265,7 +265,7 @@ def test_a_case_added_during_a_proposal_does_not_break_it():
 
 def test_leave_one_out_leaves_out_the_cases_twins():
     _, _, part, _ = setup()
-    mem = part.memory(radius=0.05, min_strength=0.0, min_agreement=0.5)
+    mem = attach(part, radius=0.05, min_strength=0.0, min_agreement=0.5)
     far = [texts("billing", 1)[0], texts("technical", 1)[0], texts("shipping", 1)[0]]
     for t, y in zip(far, ["billing", "technical", "shipping"]):
         mem.add(t, y, by="ann")
@@ -279,7 +279,7 @@ def test_calibrate_when_one_input_was_corrected_twice_says_so_instead_of_raising
     a nearest other case. The note used to format those missing distances (TypeError), after the threshold and the
     guarantee had already been set."""
     _, _, part, _ = setup()
-    mem = part.memory()
+    mem = attach(part)
     t = texts("billing", 1)[0]
     mem.add(t, "shipping", stored_id="a")
     mem.add(t, "shipping", stored_id="b")
@@ -292,7 +292,7 @@ def test_calibrate_when_one_input_was_corrected_twice_says_so_instead_of_raising
 
 def test_a_memory_file_of_another_question_is_refused(tmp_path):
     m, _, part, _ = setup()
-    mem = part.memory()
+    mem = attach(part)
     for i, t in enumerate(texts("billing", 3)):
         mem.add(t, "shipping", stored_id=f"s{i}")
     f = mem.save(tmp_path / "m.json")
@@ -309,7 +309,7 @@ def test_a_memory_file_of_another_question_is_refused(tmp_path):
     queue = m.decision("queue", "Which queue?", "email", TEAMS, option_order="given")
     assert len(CorrectionMemory(queue).load(f, strict=False)) == 3
     four = m.decision("team4", TASK, "email", TEAMS + ["sales"], option_order="given")
-    loose = four.memory(CorrectionMemory(four).load(f, strict=False))
+    loose = attach(four, CorrectionMemory(four).load(f, strict=False))
     with pytest.raises(ValueError, match="stored for another question"):         # not a numpy broadcast error
         loose.propose(texts("billing", 1)[0])
 
@@ -321,7 +321,7 @@ def test_a_memory_given_answer_keeps_the_models_probability_as_its_confidence():
     m, _, _, _ = setup()
     part = m.decision("team", TASK, "email", TEAMS, option_order="given", min_confidence=0.9999)
     part.conformal([(t, k) for k in TEAMS for t in texts(k, 30)], coverage=0.9)
-    mem = part.memory(mode="answer", min_strength=0.5)
+    mem = attach(part, mode="answer", min_strength=0.5)
     t = texts("billing", 1, start=70)[0]
     for i in range(3):
         mem.add(t, "shipping", source="human", stored_id=f"c{i}")           # people corrected it to shipping
@@ -345,7 +345,7 @@ def test_a_memory_file_with_a_bad_setting_is_refused_and_the_memory_left_as_it_w
     """load_dict copied settings without the constructor's checks: "mode": "overwrite" or "k": "seven" loaded, and every
     later decision failed (TypeError: slice indices must be integers)."""
     _, _, part, _ = setup()
-    mem = part.memory(k=5, radius=0.2)
+    mem = attach(part, k=5, radius=0.2)
     for t in texts("billing", 3):
         mem.add(t, "billing", source="human", by="ann", time=1.0)
     data = mem.to_dict()

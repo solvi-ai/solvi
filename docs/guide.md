@@ -1352,16 +1352,15 @@ proposals by the combination's rule. `System.teach` on a question a combination 
 **The same methods as a part.** A combination has every public method of a decision part, with the same signature and
 result keys, so code written for one takes the other. `decide`, `score`, `act_guard`, `calibrate_for` (a shared
 threshold for a target error among the answered, `method="empirical"` or `"ltt"`), `conformal` and the calibration
-files act on the combination as a whole; `fit`, `adapt`, `teach`, `reset`, `memory()` (a memory for every part, which
-inside a combination only checks) go to every part and return one result per part (so does
-`solvi.lora.remove_lora(combination)`); `calls()` counts
-the models called (a part's `calls()` counts its own decisions the same way). What belongs to one part raises
+files act on the combination as a whole; `fit`, `adapt`, `teach` and `reset` go to every part and return one result
+per part (so do `solvi.memory.attach(combination)` — a memory for every part, which inside a combination only checks —
+and `solvi.lora.remove_lora(combination)`); `calls()` counts the models called (a part's `calls()` counts its own decisions the same way). What belongs to one part raises
 `NotImplementedError` naming the part to call it on: `save_lora` and `load_lora` (an adapter is trained
 on one checkpoint for one question, and its holdout recalibrates that part's own threshold), `budget`, `sections_k`,
 `long_key` and `long_input` (each part reads long texts by its own `long=`), and `in_pass` (a shared forward pass is
 for parts of one model). After changing a part, calibrate the combination again.
 
-### A memory of corrections: part.memory
+### A memory of corrections: solvi.memory
 
 > **Moving into the knowledge memory in 1.0.** This module will be folded into solvi's knowledge memory, and its API
 > may change then.
@@ -1370,7 +1369,9 @@ The cases people corrected are the best evidence of where a decider goes wrong. 
 and, at decision time, finds the nearest ones — a second signal next to the model, never a silent override:
 
 ```python
-mem = team.memory()                                  # a solvi.memory.CorrectionMemory bound to the part
+from solvi.memory import attach
+
+mem = attach(team)                                   # a solvi.memory.CorrectionMemory bound to the part
 mem.add(email, "billing", source="human", by="ann", stored_id=res.stored_id)
 mem.learn_from(store)                                # every trusted correction of the question in a TraceStorage
 mem.calibrate(max_risk=0.05)                             # the abstain threshold, leave-one-out over the stored cases
@@ -1421,7 +1422,9 @@ fingerprint is part of the part's, so a replay of a decision made with another m
 a replay with the same state recomputes the proposal and compares it. `mem.save(path)` / `CorrectionMemory(part).load(path)`
 keep it with the checkpoint's fingerprint and the question (another checkpoint or another question is refused: build it
 again with `learn_from`);
-`mem.remove(ids)` forgets cases found to be wrong; `team.memory(False)` detaches it.
+`mem.remove(ids)` forgets cases found to be wrong; `attach(team, False)` detaches it. (Until 1.0 this was
+`team.memory(...)`; the method is gone — it raises an AttributeError naming `solvi.memory.attach` — as the memory moves
+into the knowledge memory.)
 
 ### Loading a checkpoint
 

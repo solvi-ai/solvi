@@ -294,12 +294,12 @@ Every answer is a value and a confidence, and the types also declare answer prim
   sections, BM25 picks the few that bear on the question, the decider reads only those, and quotes point into the whole
   document; the trace lists the sections read. `long="full"` reads a text whole up to the length a checkpoint trained on
   long inputs declares (`max_len_long`), and retrieves within that length beyond it.
-- **Learning from corrections.** `part.memory()` escalates an answer when similar corrected cases say another one;
+- **Learning from corrections.** `solvi.memory.attach(part)` escalates an answer when similar corrected cases say another one;
   `fit` heads refit on all kept examples as corrections accumulate; `solvi.lora.adapt_lora(part, examples, holdout=0.3)` trains
   a small LoRA adapter for one question on solvi-base once it has ~100 labelled answers (`solvi[lora]`, experimental);
   `System.learning(store)` proposes updates from trusted corrections only and promotes one when it passes held-out,
   honesty and calibration gates, with rollback (experimental, off unless called)
-  ([guide](docs/guide.md#a-memory-of-corrections-partmemory)).
+  ([guide](docs/guide.md#a-memory-of-corrections-solvimemory)).
 - **Records you can check later.** `store.signature()` — 64 bytes kept next to the chain's head — later names the one
   stored record that was edited and restores its hash (preview). `solvi.charts` draws a chart in which every number is
   quoted from the text and checked (unit, scale, a pie that adds up), as a deterministic SVG that replays to the same

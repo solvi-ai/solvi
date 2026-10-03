@@ -305,7 +305,7 @@ class Combination:
 
     The decider protocol: a combination has every public method of a DecisionPart, with the same signature and result
     keys. decide / score / act_guard / calibrate_for / conformal / save_calibration / load_calibration act on the
-    combination as a whole (one threshold shared by every part); fit / adapt / teach / reset / memory go
+    combination as a whole (one threshold shared by every part); fit / adapt / teach / reset go
     to every part (a list per part, in leaves order, where the part returns one value); calls() counts the models
     called. What belongs to one part — save_lora, load_lora (an adapter is one checkpoint's, for one
     question), budget, sections_k, long_key, long_input (each part reads long texts by its own long=), in_pass (a
@@ -877,19 +877,8 @@ class Combination:
         for lf in self.leaves():
             lf.part.reset()
 
-    def memory(self, memory=None, **settings):
-        """A memory of corrected cases for every part (DecisionPart.memory with these settings) → [CorrectionMemory],
-        in leaves order; False detaches every part's → None. Inside a combination a part's memory only checks (it can
-        escalate, never answer). A memory belongs to one part, so an existing one is attached on that part
-        (part.memory(mem)), not here — that raises."""
-        if memory is False:
-            for lf in self.leaves():
-                lf.part.memory(False)
-            return None
-        if memory is not None:
-            raise ValueError(f"a CorrectionMemory belongs to one part ({memory.part.__name__!r}): attach it with "
-                             "part.memory(mem); combination.memory() gives every part its own")
-        return [lf.part.memory(None, **settings) for lf in self.leaves()]
+    memory = gone_in_1_0("memory()", "solvi.memory.attach(combination, ...) (a memory for every part) — the memory of "
+                         "corrections moves into the knowledge memory", "Combination")
 
     remove_lora = gone_in_1_0("remove_lora()", "solvi.lora.remove_lora(combination) (every part's, in leaves order)",
                               "Combination")

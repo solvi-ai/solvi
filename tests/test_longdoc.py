@@ -9,6 +9,7 @@ import pytest
 from solvi import Catalog, Span, System
 from solvi.decide import DecideModel
 from solvi.longdoc import BM25, LongDocument, approx_tokens, terms
+from solvi.memory import attach
 from test_primitives import L14G, L14gStub
 
 FILLER = ("The parties shall cooperate in good faith and keep accurate records of every order, shipment and invoice "
@@ -254,7 +255,7 @@ def test_a_long_input_runs_perturb_and_the_correction_memory():
     d = part(contract=injected)
     assert "perturb" in d.extra and d.extra["perturb"]["variants"] == 1
     part = _law(model())
-    mem = part.memory(radius=0.5, min_strength=0.1, min_agreement=0.5)
+    mem = attach(part, radius=0.5, min_strength=0.1, min_agreement=0.5)
     mem.add(TEXT, "France")
     d = part(contract=TEXT)
     assert d.extra["memory"]["action"] == "agrees" and d.extra["memory"]["neighbours"][0]["distance"] == 0

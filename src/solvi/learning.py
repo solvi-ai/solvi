@@ -526,7 +526,7 @@ class Learning:
         """Apply one question's update to `part` (the shadow part of the candidate; default: the live part) → a JSON-able
         description."""
         from .core import Unknown
-        from .memory import CorrectionMemory
+        from .memory import CorrectionMemory, attach
         part = self.parts[q] if part is None else part
         ex = self._examples(q, train)
         fit_ex = [(t, y) for t, y in ex if y is not Unknown]
@@ -538,7 +538,7 @@ class Learning:
             mem = CorrectionMemory(part, **self.ladder["memory"])
             for (t, y), lab in zip(ex, train):
                 mem.add(t, y, source=lab.source, by=lab.by, time=lab.time, stored_id=lab.id)
-            part.memory(mem)
+            attach(part, mem)
             out["memory"] = {"cases": len(mem), "fp": mem.fingerprint(), "mode": mem.mode}
         if rung == "adapter":
             out["adapter"] = self.ladder["adapter"](part, ex)
