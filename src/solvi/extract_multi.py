@@ -1,6 +1,9 @@
 """Single-pass @extract: ModernBERT reads the document once, with a pair of pointer heads (start / end) per field.
 For solvi: extractor.field(name) returns a function doc → Quote; all fields of a document come from one pass (cached by text).
 
+Moving into the knowledge memory in 1.0: this module will be folded into solvi's knowledge memory, and its API may
+change then.
+
 The extractor protocol it shares with solvi.extract_long.LongSpanExtractor: fit(items), predict(text, field),
 field(name[, description]), save(path) / load(path), fingerprint(). items here are [(text, {field: (start, end) |
 None})] (0.7's fit(docs, spans) and predict_doc(text) were removed in 0.9)."""

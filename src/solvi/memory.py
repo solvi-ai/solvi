@@ -1,6 +1,9 @@
 """A memory of corrected cases: the inputs people (or outcomes, or your rules) corrected, and at decision time the nearest
 of them — a second signal next to the decider, with an abstain threshold, recorded in the trace.
 
+Moving into the knowledge memory in 1.0: this module will be folded into solvi's knowledge memory, and its API may
+change then.
+
     mem = team.memory()                          # a CorrectionMemory bound to the decision part `team`
     mem.add(email, "billing", source="human", by="ann", stored_id=res.stored_id)
     mem.learn_from(store)                        # or every trusted correction of the question in a TraceStorage

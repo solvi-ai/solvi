@@ -375,7 +375,7 @@ from its model card (held-out fields and data sets, one seed): CORD receipt fiel
 2%). With per-field thresholds from 40 labeled contracts it reached 85.5% on CUAD; fine-tuned on 25–100 SROIE
 receipts, 86–89%. So describing a field is a start, not a finished extractor: label 25–100 documents and fine-tune.
 `solvi.extract_multi.MultiSpanExtractor` (a fixed field list, one pass per document for all fields) is the extractor
-behind the receipt numbers below; it has no save / load. See
+behind the receipt numbers below; it has no save / load, and it is moving into the knowledge memory in 1.0. See
 [docs/guide.md](docs/guide.md#extracting-fields-from-documents).
 
 ## Results

@@ -19,6 +19,11 @@ had a measured run. Importing a removed module raises ModuleNotFoundError.
 | `solvi.aliases` (`NameMatcher`, `propose`, `accept`, `apply`, `match_names`) | experimental, no checkpoint of the matcher was ever published, no measurement | name the parameters after the facts they read, or a one-line part that renames a fact |
 | example `17_model_strategist.py` | it showed the two removed pieces with stand-in models | `examples/17_cost_strategist.py`: the code strategist alone |
 | `solvi.agents.pydantic_ai`, `solvi.agents.langgraph`, `solvi.agents.openai_agents` and the `pydantic-ai`, `langgraph`, `openai-agents` extras | no measured run went through any of them; the measured agent results (an injection benchmark, the τ-bench retail stand) call the guard directly | call `guard.check` (or `guard.call`) from your framework's tool-execution step; for MCP servers, the proxy (`solvi serve --guard --upstream`), which stays |
+### Moving into the knowledge memory
+
+`solvi.memory` (`CorrectionMemory`, `part.memory`), `solvi.episode` and `solvi.extract_multi` stay in 1.0 for now and
+are marked "moving into the knowledge memory in 1.0" in their docs: they will be folded into solvi's knowledge memory,
+and their API may change then.
 
 ## 0.9.0 — 2026-10-03 — System 1 and System 2
 

@@ -1156,6 +1156,9 @@ default.
 
 ### An agent's memory as an input: episodes
 
+> **Moving into the knowledge memory in 1.0.** This module will be folded into solvi's knowledge memory, and its API
+> may change then.
+
 A decision replays because it depends on its recorded input only. An agent that takes many steps keeps state between
 them — what it tried, where it has been — and when that state lives in the harness, the decisions stop replaying, the
 model does not see what was already tried, and every agent writes its own loop detection. `solvi.episode` keeps that
@@ -1358,6 +1361,9 @@ on one checkpoint for one question, and its holdout recalibrates that part's own
 for parts of one model). After changing a part, calibrate the combination again.
 
 ### A memory of corrections: part.memory
+
+> **Moving into the knowledge memory in 1.0.** This module will be folded into solvi's knowledge memory, and its API
+> may change then.
 
 The cases people corrected are the best evidence of where a decider goes wrong. A memory of corrected cases keeps them
 and, at decision time, finds the nearest ones — a second signal next to the model, never a silent override:
@@ -4582,6 +4588,9 @@ the field is absent. extract-base's model card suggests labelling about 25–100
 GPU is recommended for training and for fast inference.
 
 ### MultiSpanExtractor: all fields in one pass
+
+> **Moving into the knowledge memory in 1.0.** This module will be folded into solvi's knowledge memory, and its API
+> may change then.
 
 `solvi.extract_multi.MultiSpanExtractor` reads a document once and has a start/end head pair per field. Use it for
 documents that fit into one window (receipts, invoices, forms).

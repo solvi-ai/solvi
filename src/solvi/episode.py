@@ -1,5 +1,8 @@
 """An agent's memory as an input of its decisions: what was tried, what did not help, what worked before.
 
+Moving into the knowledge memory in 1.0: this module will be folded into solvi's knowledge memory, and its API may
+change then.
+
 A decision in solvi depends on its recorded input and nothing else — that is what makes it replay. An agent that
 takes many steps keeps state between them (what it tried, where it has been), and when that state lives in the
 harness the decisions no longer replay, the model does not see what was already tried and offers it again, and every
