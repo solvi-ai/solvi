@@ -48,19 +48,11 @@ answer becomes a test (source "person"), never code: both drafts must pass it, a
 answers are trusted like labels (a wrong one is a wrong test). An answer saying the specification does not decide the
 input is a gap, and blocks acceptance. The person sees only what the drafts dispute, not a misreading they share.
 
-    c = compile_groups(spec, questions, inputs, writer, by="tool_name")   # a large specification, group by group
-    c.record["groups"]                                    # per group: its values, clauses, accepted or why not
-
-A large specification compiles in groups: the clauses that govern each kind of decision (the values of one input
-field) are compiled on their own, with the shared clauses, under the same acceptance; the accepted groups are assembled
-into one module that routes each input to its group, and the whole is checked again on the full pool.
-
 What it does not do. Agreement of two drafts is not correctness: two samples of one model can share a misreading, and
 the tests come from the same model. Coverage is checked by citation, not by meaning — a part may cite a clause it
 implements wrongly. The inputs pool decides what "agree" covers: a region of inputs nobody generates is not compared.
 Labels, when you have them, are the stronger check. Nothing here writes extractors from text or searches; the
-compiled parts read structured inputs. In groups, a clause the grouping leaves out of a group is not compiled for it:
-the group's agreement and tests cannot see what its specification does not say — read the grouping.
+compiled parts read structured inputs.
 """
 from __future__ import annotations
 
@@ -222,20 +214,6 @@ class Spec:
         s.clauses = {i: Clause(i, t, sec) for i, (sec, t) in zip(ids, new)}
         s.changes = ch
         s.parent = self.hash
-        return s
-
-    def subset(self, ids, name: str | None = None) -> "Spec":
-        """The clauses `ids` of this specification (their ids, sections and order kept) as a specification of its own."""
-        keep = set(ids)
-        unknown = sorted(keep - set(self.clauses))
-        if unknown:
-            raise ValueError(f"not clauses of this specification: {', '.join(unknown)}")
-        s = Spec.__new__(Spec)
-        s.name, s.changes = name or self.name, None
-        s.clauses = {i: c for i, c in self.clauses.items() if i in keep}
-        s.text = "\n\n".join(c.text for c in s.clauses.values())
-        if not s.clauses:
-            raise ValueError("the subset has no clauses")
         return s
 
     def to_dict(self):
@@ -899,7 +877,6 @@ class Compiled:
     reason: str
     record: dict = field(default_factory=dict)
     changes: dict | None = None
-    groups: dict | None = None            # compile_groups: {group name: its own Compiled}
     _ns: dict | None = field(default=None, repr=False)
 
     def clauses_of(self, part: str) -> list:
@@ -940,8 +917,6 @@ class Compiled:
         """The person's recorded answers as a reviewer (`compile_spec(..., review=c.reviewer())` reruns this
         compilation with them): a question asked before gets the same ruling; a new one gets none (None)."""
         logs = list((self.record.get("person") or {}).get("log") or [])
-        for g in (self.groups or {}).values():
-            logs += (g.record.get("person") or {}).get("log") or []
         table = {_key(e["kind"], e["input"], e.get("test")): e["ruling"] for e in logs if e.get("ruling")}
 
         def review(d):
@@ -953,14 +928,12 @@ class Compiled:
     def to_dict(self) -> dict:
         return {"spec": self.spec.to_dict(), "questions": [q.model_dump() for q in self.questions], "source": self.source,
                 "parts": self.parts, "not_normative": self.not_normative, "accepted": self.accepted,
-                "reason": self.reason, "record": self.record, "changes": self.changes,
-                "groups": {n: g.to_dict() for n, g in self.groups.items()} if self.groups is not None else None}
+                "reason": self.reason, "record": self.record, "changes": self.changes}
 
     @classmethod
     def from_dict(cls, d) -> "Compiled":
         return cls(Spec.from_dict(d["spec"]), [Question.model_validate(q) for q in d["questions"]], d["source"],
-                   d["parts"], d["not_normative"], d["accepted"], d["reason"], d.get("record") or {}, d.get("changes"),
-                   {n: cls.from_dict(g) for n, g in d["groups"].items()} if d.get("groups") is not None else None)
+                   d["parts"], d["not_normative"], d["accepted"], d["reason"], d.get("record") or {}, d.get("changes"))
 
     def save(self, path) -> Path:
         """Write `module.py` (the code, as accepted) and `compiled.json` (everything) into a folder."""
@@ -1100,7 +1073,7 @@ class Dispute:
     kind: "disagreement" — the two drafts answer `input` differently (`answers[i]` is draft i's answer, `clauses[i]`
     the clauses its deciding parts cite; `similar`: how many inputs of the pool disagree the same way); "test" — every
     draft that answers the test `test` (its clause, input, expected answer and why) fails it (`answers`: what they
-    gave). `round`: the round; `spec`: the specification's name (a group's, in compile_groups); `clause_text`: the
+    gave). `round`: the round; `spec`: the specification's name; `clause_text`: the
     texts of the clauses involved."""
     kind: str
     input: dict
@@ -1752,9 +1725,6 @@ def recompile(old: Compiled, spec: Spec, inputs: Inputs, writer=None, *, rounds:
         raise ValueError("recompile needs a revised specification: old.spec.revise(new_text)")
     if not old.accepted:
         raise Rejected(old.reason)
-    if old.record.get("grouped"):
-        raise ValueError("recompile does not patch a compilation made in groups: run compile_groups on the revised "
-                         "specification")
     questions = list(old.questions)
     gens = _gens(writer)
     log = []
@@ -1830,474 +1800,6 @@ def recompile(old: Compiled, spec: Spec, inputs: Inputs, writer=None, *, rounds:
     c = _result(spec, questions, a, b, reason, history, reviewed, test_list, bad, terr, log, gens, changes, person)
     c.record["parent"] = {"spec_hash": old.spec.hash, "source_sha": hashlib.sha256(old.source.encode()).hexdigest()}
     return c
-
-
-# ───────────────────────────────────────────────────────────── a large specification, compiled in groups
-@dataclass
-class Groups:
-    """Which clauses govern which decisions. `by`: the input field that names the decision (a tool's name, the kind of
-    a request); `groups`: {name: {"values": [values of `by` the group decides], "clauses": [clause ids]}}; `shared`:
-    clauses that govern every decision (or state no rule: a preamble, a definition), put into every group's
-    specification. A clause may be in several groups; a value of `by` in exactly one. `record`: how the grouping was
-    made (the prompt and reply when `group_clauses` wrote it)."""
-    by: str
-    groups: dict
-    shared: list = field(default_factory=list)
-    record: dict = field(default_factory=dict)
-
-    def problems(self, spec: Spec, values=None) -> list[str]:
-        """Why this grouping cannot be used with `spec` ([] — it can): unknown clauses, a clause placed nowhere, a
-        value in two groups or not a value of `by`, a group name that is not an identifier."""
-        why, seen = [], {}
-        if not isinstance(self.groups, dict) or not self.groups:
-            return ["no groups"]
-        for g, d in self.groups.items():
-            if not isinstance(g, str) or not re.fullmatch(r"[A-Za-z][A-Za-z0-9_]{0,40}", g):
-                why.append(f"group name {g!r} is not a short identifier")
-            if not isinstance(d, dict) or not isinstance(d.get("values"), list) or not isinstance(d.get("clauses"), list):
-                why.append(f"group {g}: needs a 'values' list and a 'clauses' list")
-                continue
-            if not d["values"]:
-                why.append(f"group {g} decides no value of {self.by}")
-            for v in d["values"]:
-                if v in seen:
-                    why.append(f"{self.by} = {v!r} is in groups {seen[v]} and {g}: each value goes to one group")
-                seen.setdefault(v, g)
-                if values is not None and v not in values:
-                    why.append(f"group {g}: {v!r} is not a value of {self.by}")
-            why += [f"group {g} names {c!r}, which is not a clause" for c in d["clauses"] if c not in spec.clauses]
-        if not isinstance(self.shared, list):
-            return why + ["shared must be a list of clause ids"]
-        why += [f"shared names {c!r}, which is not a clause" for c in self.shared if c not in spec.clauses]
-        placed = set(self.shared) | {c for d in self.groups.values() if isinstance(d, dict) for c in d.get("clauses") or []}
-        miss = [c for c in spec.clauses if c not in placed]
-        if miss:
-            why.append("clauses in no group and not shared: " + ", ".join(miss))
-        return why
-
-    def of(self, value) -> str | None:
-        """The group that decides this value of `by` (None: no group)."""
-        return next((g for g, d in self.groups.items() if value in d["values"]), None)
-
-    def to_dict(self):
-        return {"by": self.by, "groups": self.groups, "shared": self.shared, "record": self.record}
-
-
-GROUP_PROMPT = """# Group the clauses of a specification by the decision they govern
-
-{spec}
-
-## The decisions
-Every input names its decision in the field `{by}`, one of: {values}.
-
-Group the values of `{by}` into at most {k} groups of decisions governed by mostly the same clauses (one group per
-value, or one for values alike), and put each clause into the groups whose decisions it governs. A clause that governs
-every decision, or states no rule (a preamble, a definition every group uses), goes into "shared"; a clause that
-governs several groups but not all goes into each of them. Every value of `{by}` is in exactly one group; a group
-whose decisions only the shared clauses govern has no clauses of its own. Group names are short identifiers.
-Answer with one ```json block:
-{{"shared": ["c1", ...], "groups": {{"group_name": {{"values": [...], "clauses": ["c7", ...]}}, ...}}}}
-"""
-
-
-def _by_values(inputs, by, values):
-    if values is not None:
-        return list(values)
-    d = inputs.fields.get(by)
-    if isinstance(d, list):
-        return list(d)
-    out = list(dict.fromkeys(x.get(by) for x in inputs.samples if by in x))
-    if not out:
-        raise ValueError(f"no values of {by!r} to group by: declare the field's values, give samples, or values=")
-    return out
-
-
-def group_clauses(spec: Spec, by: str, values, writer=None, *, max_groups: int = 8) -> Groups:
-    """One LLM call (temperature 0) puts the clauses of `spec` into groups by the value of the input field `by` they
-    govern → a `Groups`. A reply that cannot be used is asked once more with why; still unusable → ValueError. The
-    grouping only decides what each sub-compilation reads: every group is accepted on its own, and the assembled whole
-    is checked again (see compile_groups) — a clause left out of a group shows as a disagreement or a failed test, or
-    not at all if no input exercises it, so read `groups.groups` before you rely on it."""
-    gen = _gens(writer)[0]
-    values = list(values)
-    prompt = GROUP_PROMPT.format(spec=spec.render(), by=by, values=", ".join(json.dumps(v, ensure_ascii=False)
-                                                                             for v in values), k=max_groups)
-    log, err = [], None
-    for attempt in range(2):
-        p = prompt if attempt == 0 else prompt + f"\n\nYour previous answer could not be used:\n- {err}\nAnswer again."
-        t0 = time.time()
-        try:
-            g = gen.generate([{"role": "user", "content": p}], parse=_json_block, temperature=0.0)
-            raw, meta, e = g.value, g.meta, None
-        except Exception as ex:  # noqa: BLE001 — an unusable reply is asked once more
-            raw, meta, e = {}, {}, f"{type(ex).__name__}: {ex}"[:300]
-        log.append({"what": "grouping" if attempt == 0 else "grouping again", "prompt": p,
-                    "reply": (meta or {}).get("text"), "error": e, "seconds": round(time.time() - t0, 1),
-                    "model": getattr(gen, "model_id", None), "usage": (meta or {}).get("usage")})
-        raw = raw if isinstance(raw, dict) else {}
-        grp = Groups(by, raw.get("groups") or {}, raw.get("shared") or [], {"calls": log})
-        why = grp.problems(spec, values) if not e else [e]
-        if len(grp.groups) > max_groups:
-            why.append(f"{len(grp.groups)} groups, at most {max_groups}")
-        missing = [v for v in values if grp.of(v) is None] if not e and isinstance(grp.groups, dict) else []
-        if missing:
-            why.append(f"values in no group: {', '.join(map(str, missing))}")
-        if not why:
-            return grp
-        err = "\n- ".join(why[:12])
-    raise ValueError(f"the grouping could not be used: {err}")
-
-
-class _Scoped(Inputs):
-    """The inputs of one group: the samples and drawn inputs whose `by` value the group decides."""
-
-    def __init__(self, base: Inputs, by, values):
-        fields = dict(base.fields)
-        if isinstance(fields.get(by), list):
-            fields[by] = [v for v in fields[by] if v in values]
-        note = (f"\n\nThis part of the specification decides only the inputs whose `{by}` is one of: "
-                + ", ".join(json.dumps(v, ensure_ascii=False) for v in values)
-                + ". Other inputs are decided elsewhere: your module is never asked about them.")
-        super().__init__(fields, describe=base.text() + note, samples=[x for x in base.samples if x.get(by) in values],
-                         generate=base.generate, n=base.n, seed=base.seed)
-        self.by, self.values = by, list(values)
-
-    def validate(self, x):
-        why = super().validate(x)
-        if isinstance(x, dict) and x.get(self.by) not in self.values:
-            why.append(f"{self.by} = {x.get(self.by)!r} is not decided by this group")
-        return why
-
-    def pool(self, numbers=()):
-        try:
-            out = super().pool(numbers)
-        except ValueError:
-            out = []
-        out = [x for x in out if x.get(self.by) in self.values]
-        if not out:
-            raise ValueError(f"no input of the pool has {self.by} in {self.values}")
-        return out
-
-
-def _bound(tree):
-    """Names a module binds at its top level (a dotted `import a.b` binds `a`, left as it is)."""
-    out = set()
-    for node in tree.body:
-        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
-            out.add(node.name)
-        elif isinstance(node, (ast.Assign, ast.AnnAssign, ast.AugAssign)):
-            for t in (node.targets if isinstance(node, ast.Assign) else [node.target]):
-                out |= {n.id for n in ast.walk(t) if isinstance(n, ast.Name)}
-        elif isinstance(node, ast.Import):
-            out |= {a.asname for a in node.names if a.asname} | {a.name for a in node.names
-                                                                if not a.asname and "." not in a.name}
-        elif isinstance(node, ast.ImportFrom):
-            out |= {a.asname or a.name for a in node.names if a.name != "*"}
-    return out
-
-
-class _Prefix(ast.NodeTransformer):
-    """Every use of a module's own top-level names gets a prefix (names, arguments, keyword arguments of calls to its
-    own functions, imports by alias); attributes, strings and method names stay."""
-
-    def __init__(self, names, pre):
-        self.names, self.pre = names, pre
-
-    def _p(self, n):
-        return self.pre + n if n in self.names else n
-
-    def visit_Name(self, node):
-        node.id = self._p(node.id)
-        return node
-
-    def visit_arg(self, node):
-        node.arg = self._p(node.arg)
-        self.generic_visit(node)
-        return node
-
-    def visit_FunctionDef(self, node):
-        node.name = self._p(node.name)
-        self.generic_visit(node)
-        return node
-
-    visit_AsyncFunctionDef = visit_FunctionDef
-
-    def visit_ClassDef(self, node):
-        node.name = self._p(node.name)
-        for i, st in enumerate(node.body):
-            if isinstance(st, (ast.FunctionDef, ast.AsyncFunctionDef)):
-                name = st.name
-                node.body[i] = self.visit(st)
-                node.body[i].name = name
-            else:
-                node.body[i] = self.visit(st)
-        for f in ("bases", "keywords", "decorator_list"):
-            setattr(node, f, [self.visit(x) for x in getattr(node, f)])
-        return node
-
-    def visit_Call(self, node):
-        if isinstance(node.func, ast.Name) and node.func.id in self.names:
-            for kw in node.keywords:
-                if kw.arg is not None:
-                    kw.arg = self._p(kw.arg)
-        self.generic_visit(node)
-        return node
-
-    def visit_Import(self, node):
-        for a in node.names:
-            if a.asname:
-                a.asname = self._p(a.asname)
-            elif "." not in a.name and a.name in self.names:
-                a.asname = self.pre + a.name
-        return node
-
-    def visit_ImportFrom(self, node):
-        for a in node.names:
-            if a.name != "*" and (a.asname or a.name) in self.names:
-                a.asname = self.pre + (a.asname or a.name)
-        return node
-
-
-def _group_module(source, parts, pre, by, given, questions):
-    """One group's module for the assembly → (statements, parts, rule of each question). Its top-level names get the
-    prefix; each part is gated — outside the group's values a check is True and a fact or the group's rule is None,
-    before anything else runs — and loses its type annotations (an out-of-scope None must not be refused); the
-    group's rules become facts the assembled rule routes to."""
-    tree = ast.parse(source)
-    tree.body = [n for n in tree.body if not (
-        (isinstance(n, ast.Assign) and any(isinstance(t, ast.Name) and t.id in META for t in n.targets))
-        or (isinstance(n, ast.Expr) and _is_meta_call(ast.unparse(n))))]
-    names = (_bound(tree) | set(parts)) - set(given or ()) - {"Fail"}
-    tree = _Prefix(names, pre).visit(tree)
-    out_parts, rules = {}, {}
-    for name, p in parts.items():
-        new = pre + name if name in names else name
-        p = dict(p)
-        if p["kind"] == "rule":
-            rules[p["question"]] = new
-            p = {"kind": "fn", "clauses": list(p.get("clauses") or []), "rule_of": p["question"]}
-        out_parts[new] = p
-    for node in tree.body:
-        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name in out_parts:
-            a = node.args
-            for x in a.posonlyargs + a.args + a.kwonlyargs:
-                x.annotation = None
-            node.returns = None
-            neutral = "True" if out_parts[node.name]["kind"] == "check" else "None"
-            if by not in [x.arg for x in a.posonlyargs + a.args + a.kwonlyargs]:
-                # the harness gives `by`; a call from the group's own code (a part used as a helper) does not, and
-                # gets the default: such a call is never gated
-                a.args.append(ast.arg(arg=by))
-                a.defaults.append(ast.Name(id=f"{pre}DIRECT", ctx=ast.Load()))
-                gate = f"if {by} is not {pre}DIRECT and {by} not in {pre}SCOPE:\n    return {neutral}"
-            else:
-                gate = f"if {by} not in {pre}SCOPE:\n    return {neutral}"
-            node.body.insert(0, ast.parse(gate).body[0])
-    ast.fix_missing_locations(tree)
-    return ast.unparse(tree), out_parts, rules
-
-
-def assemble(by: str, members: list, questions, given=None, refused=()) -> tuple[str, dict]:
-    """The groups' modules as one module → (source, parts). `members`: [(group name, values, source, parts)] of
-    accepted groups; `refused`: [(group name, values, reason)] — inputs with those values abstain with the reason. Each
-    question's rule routes by `by` to the rule of the group that decides the value; a value no group decides abstains.
-    A part that did not read `by` gets it as a last argument with a default, so the group's own calls of it as a
-    function (a rule calling a check) still work and are not gated."""
-    chunks, parts, rules = [], {}, {}
-    for name, values, source, gparts in members:
-        pre = f"{name}__"
-        chunks.append(f"{pre}SCOPE = frozenset({list(values)!r})\n{pre}DIRECT = object()")
-        text, gp, gr = _group_module(source, gparts, pre, by, given, questions)
-        chunks.append(text)
-        parts.update(gp)
-        rules[name] = gr
-    for name, values, _ in refused:
-        chunks.append(f"{name}__SCOPE = frozenset({list(values)!r})")
-    for q in questions:
-        args = [rules[n][q.name] for n, *_ in members if q.name in rules[n]]
-        lines = [f"def decide_{q.name}({', '.join([by] + args)}):"]
-        for name, *_ in members:
-            if q.name in rules[name]:
-                lines.append(f"    if {by} in {name}__SCOPE:\n        return {rules[name][q.name]}")
-        for name, _, why in refused:
-            lines.append(f"    if {by} in {name}__SCOPE:\n        raise ValueError({('the clauses of group ' + name + ' were not accepted: ' + why)[:300]!r})")
-        lines.append(f"    raise ValueError('no group of the specification decides {by} = ' + repr({by}))")
-        chunks.append("\n".join(lines))
-        parts[f"decide_{q.name}"] = {"kind": "rule", "question": q.name, "clauses": []}
-    src = "\n\n\n".join(c.rstrip("\n") for c in chunks) + "\n\n\n" + _literal("PARTS", parts)
-    return src, parts
-
-
-def compile_groups(spec: Spec, questions, inputs: Inputs, writer=None, *, by: str, groups: Groups | dict | None = None,
-                   values=None, max_groups: int = 8, partial: bool = False, **kw) -> Compiled:
-    """Compile a large specification in groups: the clauses that govern each kind of decision (the values of the input
-    field `by`, such as a tool's name) are compiled on their own, with the shared clauses, by `compile_spec` and its
-    acceptance — two independent drafts agree on the group's inputs, tests derived from the group's clauses pass —
-    then assembled into one module whose rule routes each input to its group, and the whole is checked again:
-    both assembled modules (the groups' accepted drafts, and their independent partners) agree on the full pool, give
-    every input of an accepted group an answer, decide each group's inputs as the group's own draft did, and pass every
-    group's tests. Nothing is rewritten at this step: a failure is a refusal, with the reason.
-
-    groups: a `Groups` (or {"shared": [...], "groups": {name: {"values", "clauses"}}}); None — `group_clauses` writes it
-    with the writer. values: the values of `by` (default: the field's declared values, else those of the samples).
-    partial: False — the whole is accepted only when every group is; True — the accepted groups are assembled, and an
-    input of a refused group abstains with the reason (the result says which groups). kw: compile_spec's options
-    (rounds, tests, examples, reference, mem_mb, item_s, fresh_drafts, stuck_after, review, review_budget,
-    review_per_round — a person in the loop is asked per group, each group with its own budget).
-    The result is an ordinary `Compiled` (system(), to_guard, Versions); `c.groups` holds each group's own compilation
-    and `c.record["groups"]` what each accepted."""
-    questions = list(questions)
-    vals = _by_values(inputs, by, values)
-    if groups is None:
-        groups = group_clauses(spec, by, vals, writer, max_groups=max_groups)
-    elif isinstance(groups, dict):
-        groups = Groups(by, groups.get("groups") or {}, groups.get("shared") or [], {"given": True})
-    why = groups.problems(spec)
-    if why:
-        raise ValueError("the grouping cannot be used: " + "; ".join(why[:8]))
-    plan = {g: {"values": [v for v in d["values"]], "clauses": list(d["clauses"])} for g, d in groups.groups.items()}
-    rest = [v for v in vals if groups.of(v) is None]
-    if rest:                                          # values no group names: decided by the shared clauses alone
-        plan["other" if "other" not in plan else "other_values"] = {"values": rest, "clauses": []}
-    subs, rec = {}, {}
-    examples = list(kw.pop("examples", ()))
-    for g, d in plan.items():
-        ids = list(dict.fromkeys(list(groups.shared) + d["clauses"]))
-        sub_inputs = _Scoped(inputs, by, d["values"])
-        r = {"values": d["values"], "clauses": d["clauses"], "shared": len(groups.shared)}
-        if not ids:
-            subs[g] = Compiled(spec, questions, "", {}, {}, False, "the group has no clauses", {})
-        else:
-            sub_spec = spec.subset(ids, name=f"{spec.name} — {g}")
-            try:
-                sub_inputs.pool()
-            except ValueError as e:
-                subs[g] = Compiled(sub_spec, questions, "", {}, {}, False, f"not compiled: {e}", {})
-            else:
-                subs[g] = compile_spec(sub_spec, questions, sub_inputs, writer,
-                                       examples=[(x, a) for x, a in examples if x.get(by) in d["values"]], **kw)
-        c = subs[g]
-        r.update({"accepted": c.accepted, "reason": c.reason, "rounds": len([h for h in c.record.get("rounds", [])
-                                                                             if "round" in h]),
-                  "replaced": len(c.record.get("replaced", [])), "tests": len(c.record.get("tests", [])),
-                  "parts": len(c.parts)})
-        if c.record.get("person"):
-            p = c.record["person"]
-            r["person"] = {k: p[k] for k in ("asked", "decisions", "neither", "skipped", "by_kind")}
-            r["person"]["gaps"] = len(p["gaps"])
-        rec[g] = r
-    record = {"grouped": True, "by": by, "grouping": groups.to_dict(), "groups": rec,
-              "spec_hash": spec.hash, "calls": groups.record.get("calls", [])}
-    ok = [g for g in plan if subs[g].accepted]
-    refused = [g for g in plan if not subs[g].accepted]
-    if not ok or (refused and not partial):
-        reason = "not accepted: groups not accepted — " + "; ".join(f"{g}: {subs[g].reason}" for g in refused)
-        return Compiled(spec, questions, "", {}, {}, False, reason, record, None, subs)
-    given = given_names(inputs) or set()
-    a_members = [(g, plan[g]["values"], subs[g].source, subs[g].parts) for g in ok]
-    b_members = []
-    for g in ok:
-        other = subs[g].record.get("other_source")
-        bparts, _, _, _ = read_module(other, subs[g].spec, questions)
-        b_members.append((g, plan[g]["values"], other, bparts))
-    ref = [(g, plan[g]["values"], subs[g].reason) for g in refused]
-    src_a, parts_a = assemble(by, a_members, questions, given, ref)
-    src_b, parts_b = assemble(by, b_members, questions, given, ref)
-    nn = {}
-    cited = {c for p in parts_a.values() for c in p.get("clauses") or []}
-    for g in ok:
-        for c, why_nn in subs[g].not_normative.items():
-            if c not in cited:
-                nn.setdefault(c, why_nn)
-    for g in refused:
-        for c in plan[g]["clauses"]:
-            if c not in cited:
-                nn.setdefault(c, f"not compiled: group {g} was not accepted, its inputs abstain")
-    whole = _check_whole(spec, questions, inputs, by, plan, subs, ok, refused, src_a, parts_a, src_b, parts_b, nn,
-                         given, kw.get("mem_mb", 1024), kw.get("item_s", 5))
-    record["whole"] = whole
-    record["other_source"] = src_b
-    if whole["problems"]:
-        reason = "not accepted: the assembled whole fails its check — " + "; ".join(whole["problems"][:5])
-        return Compiled(spec, questions, "", {}, {}, False, reason, record, None, subs)
-    reason = f"accepted: {len(ok)} group(s) assembled, the whole agrees on {whole['inputs']} inputs"
-    if refused:
-        reason += ("; not accepted, so their inputs abstain: " + ", ".join(refused))
-        record["refused_groups"] = {g: {"values": plan[g]["values"], "reason": subs[g].reason} for g in refused}
-    return Compiled(spec, questions, src_a, parts_a, nn, True, reason, record, None, subs)
-
-
-def _check_whole(spec, questions, inputs, by, plan, subs, ok, refused, src_a, parts_a, src_b, parts_b, nn, given, mem_mb,
-                 item_s):
-    """The checks of the assembled whole (see compile_groups) → {"inputs", "problems", per-check counts}."""
-    problems = []
-    for src, parts, side in ((src_a, parts_a, "A"), (src_b, parts_b, "B")):
-        why = sandbox.check(src)
-        why += unknown_reads(src, {n: p for n, p in parts.items()}, given)
-        miss = coverage(spec, parts, nn) if side == "A" else []
-        if miss:
-            why.append("clauses no group covers: " + ", ".join(miss))
-        problems += [f"assembled {side}: {w}" for w in why]
-    if problems:
-        return {"inputs": 0, "problems": problems}
-    nums = numbers_in(spec.text) + numbers_in(src_a) + numbers_in(src_b)
-    try:
-        pool = inputs.pool(nums)
-    except ValueError:
-        pool = []
-    tests = [(g, t) for g in ok for t in subs[g].record.get("tests", []) if not t.get("dropped")]
-    allin = pool + [t["input"] for _, t in tests]
-    rows = {}
-    for side, src, parts in (("A", src_a, parts_a), ("B", src_b, parts_b)):
-        r, err = _run_draft(_Draft(0, source=src, parts=parts), questions, allin, mem_mb, item_s)
-        if r is None:
-            return {"inputs": len(allin), "problems": [f"assembled {side} did not run: {err}"]}
-        rows[side] = r
-    ans = {s: [{q: _norm(v) for q, v in row["answers"].items()} for row in rows[s]] for s in rows}
-    out = {"inputs": len(allin), "pool": len(pool), "tests": len(tests), "disagree": 0, "unanswered": 0,
-           "not_abstaining": 0, "unfaithful": 0, "tests_failed": 0, "no_group": 0}
-    for k, x in enumerate(allin):
-        g = next((g for g in plan if x.get(by) in plan[g]["values"]), None)
-        a, b = ans["A"][k], ans["B"][k]
-        if g is None or g in refused:
-            if g is None:
-                out["no_group"] += 1
-            if any(v is not None for v in list(a.values()) + list(b.values())):
-                out["not_abstaining"] += 1
-            continue
-        if any(v is None for v in list(a.values()) + list(b.values())) or not a or not b:
-            out["unanswered"] += 1
-        elif a != b:
-            out["disagree"] += 1
-    # each group's own drafts on the same inputs: the assembly must not change a decision
-    for g in ok:
-        idx = [k for k, x in enumerate(allin) if x.get(by) in plan[g]["values"]]
-        if not idx:
-            continue
-        sub_in = [allin[k] for k in idx]
-        for side, src in (("A", subs[g].source), ("B", subs[g].record.get("other_source"))):
-            gparts, _, _, _ = read_module(src, subs[g].spec, questions)
-            r, err = _run_draft(_Draft(0, source=src, parts=gparts), questions, sub_in, mem_mb, item_s)
-            if r is None:
-                problems.append(f"group {g} ({side}) did not run on the full pool: {err}")
-                continue
-            for k, row in zip(idx, r):
-                if {q: _norm(v) for q, v in row["answers"].items()} != ans[side][k]:
-                    out["unfaithful"] += 1
-    for j, (g, t) in enumerate(tests):
-        k = len(pool) + j
-        for s in ("A", "B"):
-            if any(ans[s][k].get(q) != e for q, e in t["expect"].items()):
-                out["tests_failed"] += 1
-    for key, text in (("disagree", "the two assembled modules disagree on {} inputs"),
-                      ("unanswered", "{} inputs of accepted groups get no answer"),
-                      ("not_abstaining", "{} inputs of refused groups or of no group are answered"),
-                      ("unfaithful", "{} decisions differ from the group's own draft"),
-                      ("tests_failed", "{} group tests fail on the assembled modules")):
-        if out[key]:
-            problems.append(text.format(out[key]))
-    out["problems"] = problems
-    return out
 
 
 # ───────────────────────────────────────────────────────────── what a change does to decisions
@@ -2447,7 +1949,7 @@ def to_guard(compiled: Compiled, guard, tools=None, *, question: str | None = No
     when the check is false. allow="yes" (the answer that lets a call through): one policy (`name`, default
     `compiled_<question>`) that asks the compiled question and fails when the answer is anything else — with the
     clauses of the parts that decided (the false hard checks, else the question's rule) as the reasons — or when the
-    compiled policy cannot answer (it abstains: an input it cannot read, or a group that was not accepted).
+    compiled policy cannot answer (it abstains: an input it cannot read).
     `question`: the compiled question (default: the only one)."""
     from .system import System
     cat, qs = compiled.catalog()
@@ -2462,8 +1964,7 @@ def to_guard(compiled: Compiled, guard, tools=None, *, question: str | None = No
     if allow is not None:
         hard = [n for n, p in compiled.parts.items() if p.get("kind") == "check" and p.get("hard")
                 and q in (p.get("then") or {})]
-        rules = [n for n, p in compiled.parts.items() if (p.get("kind") == "rule" and p.get("question") == q)
-                 or p.get("rule_of") == q]
+        rules = [n for n, p in compiled.parts.items() if p.get("kind") == "rule" and p.get("question") == q]
 
         def policy(**facts):
             res = system.ask({k: facts[k] for k in given if k in facts}, [q])
@@ -2505,6 +2006,6 @@ def to_guard(compiled: Compiled, guard, tools=None, *, question: str | None = No
     return names
 
 
-__all__ = ["Clause", "Compiled", "DecisionDiff", "Dispute", "Groups", "Inputs", "Rejected", "Ruling", "Spec", "Versions",
-           "assemble", "compile_groups", "compile_spec", "coverage", "decision_diff", "group_clauses", "merge",
-           "numbers_in", "read_module", "recompile", "reference_reviewer", "split_clauses", "to_guard"]
+__all__ = ["Clause", "Compiled", "DecisionDiff", "Dispute", "Inputs", "Rejected", "Ruling", "Spec", "Versions",
+           "compile_spec", "coverage", "decision_diff", "merge", "numbers_in", "read_module", "recompile",
+           "reference_reviewer", "split_clauses", "to_guard"]

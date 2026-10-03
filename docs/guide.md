@@ -4001,121 +4001,12 @@ until the text is amended.
 bare "yes" as the user's confirmation ("Yes, I confirm!" refused), where the policy means any explicit yes, or both
 refuse a call after any earlier call, which the policy never says — gives no
 disagreement and passes the tests, so nobody is asked and it is accepted. (The same limit as N-version programming,
-whose independent versions share misreadings, and as asking questions only where sampled programs differ.) In our runs that happened to two tool groups
-of a customer-service policy. Look at some decisions the drafts agree on before you rely on a compiled policy.
+whose independent versions share misreadings, and as asking questions only where sampled programs differ.) In our runs that happened on parts of a
+customer-service policy. Look at some decisions the drafts agree on before you rely on a compiled policy.
 
 `reference_reviewer(fn)` is a simulated person for experiments: `fn(input) → {question: answer}`, a hand-written
 reference. It picks the draft equal to the reference, else gives the reference's answer; it keeps a disputed test the
-reference agrees with, else corrects it. `recompile` takes the same options, and `compile_groups` passes them to every
-group, each with its own budget (`c.record["groups"][name]["person"]` counts the questions).
-
-### A large specification in groups: compile_groups
-
-A policy of fifty clauses over a dozen tools is too much for one draft to get right everywhere at once. `compile_groups`
-compiles it group by group: the clauses that govern each kind of decision — the values of one input field `by`, such as
-the tool's name — are compiled on their own, with the clauses every decision shares, by `compile_spec` and its whole
-acceptance (each group's drafts agree on the group's inputs, its tests come from its clauses). The accepted groups are
-assembled into one module: each group's parts keep their names under a prefix (`ship__open_address`), each answers only
-for its group's values (a check outside them is true, a fact is None), and one rule per question routes an input to the
-rule of its group. Then **the whole is checked again** on the full pool: the two assembled modules (the groups'
-accepted drafts, and their independent partners) agree on every input, every input of an accepted group gets an
-answer, each group's inputs are decided as the group's own draft decided them, and every group's tests pass. Nothing is
-rewritten at this step: a failure is a refusal with the reason.
-
-```python
-import json
-
-from solvi import Answer, Question
-from solvi.compile import Groups, Inputs, Spec, compile_groups
-
-POLICY = """# Agent policy
-- No tool is called before the user is authenticated.
-
-## Refunds
-- A refund is at most 100.
-
-## Shipping
-- Nothing ships to a closed address.
-"""
-MODULES = {                          # what the writer returns for each group (a stand-in here)
-    "refund": '''
-def small(amount):
-    return amount <= 100
-
-def allow(authed, small):
-    return bool(authed) and small
-
-PARTS = {"small": {"kind": "fn", "clauses": ["c2"]},
-         "allow": {"kind": "rule", "question": "allow", "clauses": ["c1", "c2"]}}
-NOT_NORMATIVE = {}
-''',
-    "ship": '''
-def open_address(closed):
-    return not closed
-
-def allow(authed):
-    return bool(authed)
-
-PARTS = {"open_address": {"kind": "check", "hard": True, "then": {"allow": "no"}, "clauses": ["c3"]},
-         "allow": {"kind": "rule", "question": "allow", "clauses": ["c1"]}}
-NOT_NORMATIVE = {}
-'''}
-TESTS = {"refund": {"clause": "c2", "input": {"tool": "refund", "authed": True, "amount": 101, "closed": False},
-                    "expect": {"allow": "no"}, "why": "over 100"},
-         "ship": {"clause": "c3", "input": {"tool": "ship", "authed": True, "amount": 5, "closed": True},
-                  "expect": {"allow": "no"}, "why": "a closed address"}}
-
-
-class StandIn:                       # a stand-in for generator(URL, "openai/gpt-oss-120b", ...)
-    model_id = "stand-in"
-
-    def fingerprint(self):
-        return "stand-in"
-
-    def generate(self, messages, parse=None, **kw):
-        p = messages[-1]["content"]
-        group = "refund" if 'is one of: "refund"' in p else "ship"
-        fence = "`" * 3
-        text = (f"{fence}json\n{json.dumps([TESTS[group]])}\n{fence}" if p.startswith("# Write tests")
-                else f"{fence}python\n{MODULES[group]}{fence}")
-        return type("G", (), {"value": parse(text) if parse else text, "meta": {"text": text}})()
-
-
-groups = Groups("tool", {"refund": {"values": ["refund"], "clauses": ["c2"]},
-                         "ship": {"values": ["ship"], "clauses": ["c3"]}}, shared=["c1"])
-inputs = Inputs({"tool": ["refund", "ship"], "authed": [True, False], "amount": (0, 300), "closed": [True, False]}, n=200)
-c = compile_groups(Spec(POLICY), [Question("allow", "May the call be made?", Answer.yes_no())], inputs, StandIn(),
-                   by="tool", groups=groups)
-print(c.accepted, c.reason)
-for name, g in c.record["groups"].items():
-    print(name, g["values"], g["clauses"], g["accepted"], g["reason"])
-print({k: c.record["whole"][k] for k in ("inputs", "disagree", "unfaithful", "tests_failed")})
-s = c.system()
-print(s.ask({"tool": "ship", "authed": True, "amount": 500, "closed": True})["allow"].answer,
-      s.ask({"tool": "refund", "authed": True, "amount": 500, "closed": False})["allow"].answer)
-```
-
-```
-True accepted: 2 group(s) assembled, the whole agrees on 205 inputs
-refund ['refund'] ['c2'] True accepted in round 1
-ship ['ship'] ['c3'] True accepted in round 1
-{'inputs': 205, 'disagree': 0, 'unfaithful': 0, 'tests_failed': 0}
-no no
-```
-
-Without `groups=`, `group_clauses(spec, by, values, writer)` asks the writer once to place each clause in the groups
-whose decisions it governs (or in `shared`); a grouping that leaves a clause out or puts a value in two groups is asked
-again with why, then refused. `values` default to the field's declared values, else those of the samples; a value no
-group names is decided by the shared clauses alone (group `other`). `partial=False` accepts the whole only when every
-group is accepted; `partial=True` assembles the accepted groups and lets the inputs of a refused group abstain, with
-the reason (`c.record["refused_groups"]`) — a guard that decides the tools whose rules compiled and escalates the rest.
-`c.groups` holds each group's own compilation (its record, tests, rounds); `c.record["groups"]` the summary per group.
-The result is an ordinary `Compiled`: `system()`, `to_guard`, `Versions` work as above; `recompile` does not patch it
-(compile the revised text in groups again).
-
-**Not done here.** The grouping decides what each group's drafts read: a clause left out of a group is not compiled
-for it, and neither its drafts nor its tests can notice — read `c.record["grouping"]`. A rule that ties two groups
-together (a limit summed over refunds and exchanges) belongs in `shared` or in both groups.
+reference agrees with, else corrects it. `recompile` takes the same options.
 
 ### A changed specification: recompile and the decisions it moves
 
@@ -4164,9 +4055,9 @@ d.outcome, d.reasons    # deny, ['shop_policy: ... — [c6] Refunds over 200 go 
 ```
 
 The policy asks the compiled question and refuses any other answer, naming the clauses of the parts that decided (the
-false hard checks, else the question's rule); an input the compiled policy cannot answer (it abstains — a group that
-was not accepted, a fact it cannot read) is refused as well, with the reason. When the policy text changes, compile
-it again (`recompile`, or `compile_groups` with the same grouping: the unchanged groups' prompts are the same) and
+false hard checks, else the question's rule); an input the compiled policy cannot answer (it abstains — a fact it
+cannot read) is refused as well, with the reason. When the policy text changes, compile
+it again (`recompile` patches only what the change touches) and
 `decision_diff(old, new, inputs=calls)` lists which of the calls you pass move, with the clauses why — before the new
 guard goes live.
 
