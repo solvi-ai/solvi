@@ -45,7 +45,7 @@ def _iso(t):
 
 
 def _usages(records):
-    from .dispatch import _usages as one
+    from .costs import _usages as one
     out = []
     for r in records or ():
         out += one(r.get("extra") if isinstance(r, dict) else None)
@@ -53,7 +53,7 @@ def _usages(records):
 
 
 def _cost(calls, ms, price):
-    from .dispatch import price_of
+    from .costs import price_of
     return {"decisions": 0, "ms": ms, "calls": len(calls), "input_tokens": sum(int(u.get("input_tokens", 0)) for _, u in calls),
             "output_tokens": sum(int(u.get("output_tokens", 0)) for _, u in calls),
             "usd": price_of(price, calls) if price is not None else (0.0 if not calls else None)}
