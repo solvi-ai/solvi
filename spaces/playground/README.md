@@ -17,7 +17,7 @@ from a catalog of Python functions, checks and rules, with a strategist that pla
 hash-chained trace that can be replayed.
 
 This is a **static Space**: [Gradio-Lite](https://www.gradio.app/guides/gradio-lite) (`@gradio/lite` 5.45.0) loads Python
-(Pyodide) into the visitor's browser and installs `solvi==1.0.0` from PyPI there (pinned in `index.html`). There is no server: every decision, including
+(Pyodide) into the visitor's browser and installs `solvi==1.0.1` from PyPI there (pinned in `index.html`). There is no server: every decision, including
 code typed in the Playground, runs on the visitor's machine. The first visit downloads about 35-40 MB (Pyodide, Gradio, pandas,
 numpy/scipy) once; later visits come from the browser cache.
 
