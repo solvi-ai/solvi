@@ -164,3 +164,44 @@ def test_a_map_file_written_before_visits_were_journaled_still_loads(tmp_path):
     (tmp_path / "old.json").write_text(json.dumps(d))
     old = WorldMap(tmp_path / "old.json")
     assert old.states == m.states and old.edges == m.edges and old.verify() and not old._visits
+
+
+# --- a view over the knowledge store (1.0)
+def test_claims_are_leads_to_facts_and_the_map_is_a_view_over_them():
+    from solvi.core.knowledge import KnowledgeStore
+    ks = KnowledgeStore()
+    m = WorldMap(knowledge=ks, scope={"map": "town"})
+    m.told("hall", "east door", "kitchen", quote="the sign says kitchen")        # a document: source spec
+    m.arrive("hall", "north", "garden")                                         # an observation: source outcome
+    m.arrive("garden", "back", "hall")
+    m.human("garden", "gate", "street", note="Ann says so")                     # a person
+    facts = ks.find(r="leads_to", scope={"map": "town"})
+    assert {(tuple(f["body"]["s"]), f["source"]) for f in facts} == {
+        (("hall", "east door"), "spec"), (("hall", "north"), "outcome"), (("garden", "back"), "outcome"),
+        (("garden", "gate"), "person")}
+    v = WorldMap.view(ks, {"map": "town"})
+    assert v.edges[("hall", "north")]["status"] == "confirmed" and v.edges[("hall", "east door")]["status"] == "hypothesis"
+    assert v.next("garden", {"kitchen"}) == "back" and v.verify()
+    m.arrive("hall", "east door", "pantry")                                     # the sign was wrong: refuted at once
+    v = WorldMap.view(ks, {"map": "town"})
+    assert v.edges[("hall", "east door")] == {"to": "pantry", "status": "confirmed", "source": "observed", "evidence": [],
+                                              "taken": 1}
+    assert sorted(f["status"] for f in ks.find(r="leads_to", s=["hall", "east door"])) == ["active", "refuted"]
+
+
+def test_drift_drops_a_carried_map_until_arrivals_reconfirm_it(tmp_path):
+    from solvi.core.knowledge import KnowledgeStore
+    ks = KnowledgeStore()
+    m = WorldMap(tmp_path / "w.json", knowledge=ks)
+    m.arrive("a", "n", "b")
+    m.arrive("b", "n", "c")
+    assert m.drop(why="new world") == 2 and all(e["status"] == "hypothesis" for e in m.edges.values())
+    v = WorldMap.view(ks)
+    assert all(e["status"] == "hypothesis" for e in v.edges.values())        # the store's facts are hints now
+    m.arrive("a", "n", "b")                                                  # walked again, same destination
+    m.arrive("b", "n", "x")                                                  # the world changed here
+    v = WorldMap.view(ks)
+    assert v.edges[("a", "n")]["status"] == "confirmed" and v.edges[("b", "n")]["to"] == "x"
+    m.save()
+    again = WorldMap(tmp_path / "w.json")                                     # the drop is in the map's own journal
+    assert again.edges == m.edges and again.verify() and ks.verify()

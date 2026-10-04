@@ -1,8 +1,10 @@
 """A memory of corrected cases: the inputs people (or outcomes, or your rules) corrected, and at decision time the nearest
 of them — a second signal next to the decider, with an abstain threshold, recorded in the trace.
 
-Moving into the knowledge memory in 1.0: this module will be folded into solvi's knowledge memory, and its API may
-change then.
+Part of the knowledge memory (solvi.core.knowledge): with `knowledge=` (a KnowledgeStore) every case is a fact item
+{"s": case id, "r": "correction", "o": label} of the store — source "person" (a human correction), "outcome" or "spec"
+(a rule) — and the memory's cases are a view over the active ones: retracting a correction in the store (or
+`retract(case_id)` here) removes its case, a disputed or flagged one is not used, and the journal says who taught what.
 
     mem = attach(team)                           # solvi.core.knowledge.memory.attach: a CorrectionMemory bound to the part `team`
     mem.add(email, "billing", source="human", by="ann", stored_id=res.stored_id)
@@ -131,7 +133,7 @@ class CorrectionMemory:
     `solvi.core.knowledge.memory.attach(part, ...)`, which also attaches it to the part."""
 
     def __init__(self, part, k=7, radius=0.15, min_strength=1.0, min_agreement=0.8, text=False, text_weight=0.5,
-                 mode="check"):
+                 mode="check", knowledge=None):
         if part.spec.kind in ("span", "rank", "number"):
             raise ValueError(f"a memory of corrections needs a question with options; not for {part.spec.kind!r}")
         self.part = part
@@ -144,6 +146,43 @@ class CorrectionMemory:
         self._F = None                            # the features as a matrix (rebuilt when cases change)
         self._lock = threading.Lock()             # add / remove / load against a proposal's snapshot of cases + matrix
         self.weights = part.model.weights_fingerprint()
+        self.knowledge = knowledge                # a KnowledgeStore whose correction facts are the cases
+        self._items = {}                          # case id → its fact item
+        if knowledge is not None:
+            self.sync()
+
+    # --- the knowledge store
+    def _scope(self):
+        return {"memory": self.part.__name__, "weights": self.weights}
+
+    def sync(self):
+        """The cases = the active, usable correction facts of this memory's scope in its knowledge store (retracted,
+        refuted, disputed and flagged corrections drop out). → the number of cases."""
+        if self.knowledge is None:
+            return len(self.cases)
+        cases, items = [], {}
+        for rec in self.knowledge.find(kind="fact", r="correction", scope=self._scope(), status="active"):
+            if rec["stale"]:
+                continue
+            c = dict(rec["body"]["case"])
+            c["features"] = tuple(c["features"])
+            c["words"] = None if c.get("words") is None else tuple(c["words"])
+            cases.append(Case(**c))
+            items[c["id"]] = rec["id"]
+        with self._lock:
+            self.cases, self._ids, self._items, self._F = cases, {c.id for c in cases}, items, None
+        return len(cases)
+
+    def retract(self, case_id, *, by=None, why=None):
+        """Take a correction back in the knowledge store (with what was derived from it) and drop its case."""
+        if self.knowledge is None:
+            return self.remove([case_id])
+        item = self._items.get(case_id)
+        if item is None:
+            raise KeyError(f"no case {case_id!r} in this memory's knowledge store")
+        self.knowledge.retract(item, by=by, why=why)
+        self.sync()
+        return 1
 
     # --- the cases
     def __len__(self):
@@ -184,6 +223,14 @@ class CorrectionMemory:
         cid = digest("case", f, ws, lab, source, by, time, stored_id)
         case = Case(cid, f, lab, source, None if by is None else str(by), None if time is None else float(time),
                     None if stored_id is None else str(stored_id), ws)
+        if self.knowledge is not None:
+            item = self.knowledge.add("fact", {"s": cid, "r": "correction", "o": lab, "case": case.to_dict()},
+                                      self._scope(), source={"human": "person", "rule": "spec"}.get(source, source),
+                                      by=by, evidence=None if stored_id is None else [str(stored_id)])
+            if item is None:
+                raise UntrustedLabel(f"the knowledge store refused the correction: {self.knowledge.journal[-1]['why']}")
+            self.sync()
+            return case
         with self._lock:
             if cid not in self._ids:
                 self.cases = self.cases + [case]
@@ -219,8 +266,15 @@ class CorrectionMemory:
         return {"added": added, "skipped": skipped}
 
     def remove(self, ids):
-        """Forget cases by id (e.g. a correction found to be wrong) → how many were removed."""
+        """Forget cases by id (e.g. a correction found to be wrong) → how many were removed. With a knowledge store
+        the corrections are retracted there (retract)."""
         ids = set(ids)
+        if self.knowledge is not None:
+            gone = [i for i in sorted(ids) if i in self._items]
+            for i in gone:
+                self.knowledge.retract(self._items[i], why="removed from the memory of corrections")
+            self.sync()
+            return len(gone)
         with self._lock:
             n = len(self.cases)
             self.cases = [c for c in self.cases if c.id not in ids]
@@ -498,7 +552,8 @@ def attach(part, memory=None, **settings):
     """A memory of corrected cases consulted on every decision of `part` (until 1.0: `part.memory(...)`): its proposal,
     the cases it rests on and its fingerprint go into extra["memory"]; mode="check" (default) escalates when similar
     corrected cases say another answer, mode="answer" may also answer where the part escalated by its own threshold.
-    settings: k, radius, min_strength, min_agreement, text, text_weight, mode. memory: an existing CorrectionMemory of
+    settings: k, radius, min_strength, min_agreement, text, text_weight, mode, knowledge (a KnowledgeStore: the cases
+    are its correction facts). memory: an existing CorrectionMemory of
     this part to attach; False detaches. Its fingerprint is part of the part's. → the memory.
 
     A combination (Cascade / Vote / Route): a memory for every part with these settings → [CorrectionMemory], in leaves

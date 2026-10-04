@@ -1,7 +1,9 @@
 """An agent's memory as an input of its decisions: what was tried, what did not help, what worked before.
 
-Moving into the knowledge memory in 1.0: this module will be folded into solvi's knowledge memory, and its API may
-change then.
+Part of the knowledge memory (solvi.core.knowledge): a finished episode is kept in a KnowledgeStore as an "episode"
+item (`Episode.record(store, outcome)`) — a record and evidence, indexed by the decisions it stored; the store never
+answers from episodes (an episodic answerer under a per-decision guarantee was measured and left out: on two intent
+streams it never certified a threshold).
 
 A decision in solvi depends on its recorded input and nothing else — that is what makes it replay. An agent that
 takes many steps keeps state between them (what it tried, where it has been), and when that state lives in the
@@ -170,6 +172,14 @@ class Episode(EpisodeView):
 
     def digest(self):
         return hashlib.sha256(json.dumps(self.snapshot(), sort_keys=True).encode()).hexdigest()[:16]
+
+    def record(self, store, outcome, *, stored_ids=(), by="environment", source="outcome", scope=None):
+        """Keep the finished episode as an "episode" item of a KnowledgeStore: its name, its outcome (what really
+        happened — the source is "outcome" unless a person judged it), the stored decisions it made and the digest of
+        its last snapshot. A record, raw material and evidence; the store never answers from it. → the item id."""
+        return store.add("episode", {"name": self.name, "outcome": outcome, "stored_ids": [str(i) for i in stored_ids],
+                                     "steps": self.n, "digest": self.digest()},
+                         scope, source=source, by=by, evidence=[str(i) for i in stored_ids] or None)
 
 
 class Chooser:

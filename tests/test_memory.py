@@ -354,3 +354,20 @@ def test_a_memory_file_with_a_bad_setting_is_refused_and_the_memory_left_as_it_w
     with pytest.raises(ValueError, match=why):
         fresh.load_dict(data)
     assert fresh.k == 3 and fresh.mode == "check" and len(fresh) == 0 and fresh.guarantee is None
+
+
+def test_with_a_knowledge_store_the_cases_are_correction_facts_and_a_retraction_removes_one():
+    from solvi.core.knowledge import KnowledgeStore
+    ks = KnowledgeStore()
+    _, _, part, s = setup()
+    mem = attach(part, knowledge=ks)
+    cases = [mem.add(t, "shipping", source="human", by="ann", stored_id=f"s{i}") for i, t in enumerate(texts("billing", 4))]
+    mem.add(texts("billing", 1, start=20)[0], "billing", source="rule")
+    facts = ks.find(r="correction")
+    assert len(facts) == 5 and {f["source"] for f in facts} == {"person", "spec"} and len(mem) == 5
+    again = CorrectionMemory(part, knowledge=ks)                            # the store is the memory
+    assert sorted(c.id for c in again.cases) == sorted(c.id for c in mem.cases)
+    assert mem.retract(cases[0].id, by="bob", why="wrong") == 1 and len(mem) == 4
+    assert mem.remove([cases[1].id]) == 1 and len(mem) == 3 and ks.verify()
+    with pytest.raises(UntrustedLabel):
+        mem.add(texts("billing", 1)[0], "shipping", source="model")

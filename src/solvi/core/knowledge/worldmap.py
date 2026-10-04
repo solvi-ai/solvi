@@ -24,7 +24,18 @@ the map it needs as a plain fact (the known way, what is unexplored here), so de
 Where it helps: the gain is the map carried from one task to the next, in an environment that is deep and met again
 (a command tree, a file tree, a documentation site several clicks deep) — later tasks take fewer steps than the first.
 It does not make a first exploration shorter, it gives nothing where everything is one step away, and it does not tell
-which state a task needs — only how to get to one that is named."""
+which state a task needs — only how to get to one that is named.
+
+A view over the knowledge store. With `knowledge=` (a KnowledgeStore) every claim with a destination is also a fact
+item {"s": [state, action], "r": "leads_to", "o": to} in `scope`: an arrival with source "outcome" (refuting a
+contradicted claim at once), a document's claim with source "spec", a person's with source "person" (an unchecked
+destination the environment merely showed, `see`, stays in the map's own journal). `WorldMap.view(store, scope)`
+builds the map from those items alone: active observations are confirmed claims, other present items (and items under a
+pending flag) unchecked ones, refuted, disputed and retracted items are not on it. `drop(why)` is what a drift flag does
+to a carried map — every confirmed claim becomes a hypothesis again (journaled; with a store, a flag on the scope), and
+the next arrival re-confirms or refutes it. benchmarks/knowledge/toy_crafting.py (a toy world, a changed world after 5
+episodes, 10 streams): the first contradicted arrival dropped the carried map on 10 of 10 streams, and System 1 walked
+a wrong carried claim only on the move that found the change, never after the drop."""
 from __future__ import annotations
 
 import json
@@ -56,8 +67,12 @@ class WorldMap:
     hypothesis_cost: how many confirmed steps an unchecked claim with a destination counts as in `distances`.
     A state or an action is a string, a number or a tuple of those; save / load keep them as they are."""
 
-    def __init__(self, path=None, hypothesis_cost=HYPOTHESIS_COST):
+    def __init__(self, path=None, hypothesis_cost=HYPOTHESIS_COST, *, knowledge=None, scope=None):
         self.file = Path(path) if path else None
+        self.knowledge = knowledge       # a KnowledgeStore the claims are written to as "leads_to" facts
+        self.scope = dict(scope or {"map": "worldmap"})
+        self._items = {}                 # (state, action) → its fact item in the knowledge store
+        self._view = None                # the store a view was built from (WorldMap.view)
         self.hypothesis_cost = int(hypothesis_cost)
         self.edges = {}                  # (state, action) → {"to", "status", "source", "evidence", "taken"}
         self.states = {}                 # state → {"visits", "facts"}
@@ -79,6 +94,8 @@ class WorldMap:
         """Is the journal's hash chain whole (nothing edited, removed or reordered), and is the map what the journal
         says — every claim (and, for a map whose visits are journaled, every state) the one its entries give?"""
         from ..runtime import vhash
+        if self._view is not None:                    # a view: the store's journal is the stored truth
+            return self._view.verify() and WorldMap.view(self._view, self.scope, self.hypothesis_cost).edges == self.edges
         prev = ""
         for r in self.journal:
             if r.get("prev") != prev or vhash({k: v for k, v in r.items() if k != "hash"}) != r.get("hash"):
@@ -108,6 +125,8 @@ class WorldMap:
                 m.told(st, a, to, r.get("source"), r.get("quote"), r.get("step"))
             elif op == "confirm":
                 m.arrive(st, a, to, r.get("step"))
+            elif op == "drop":
+                m.drop(r.get("why"), r.get("step"))
             elif op != "refute":                      # a refutation is written by the arrive that follows it
                 raise ValueError(f"journal entry {r.get('n')}: unknown operation {op!r}")
         if [x["hash"] for x in m.journal] != [x.get("hash") for x in entries]:
@@ -152,6 +171,7 @@ class WorldMap:
         self.edges[(state, action)] = {"to": to, "status": "hypothesis", "source": source, "evidence": [[step, quote]],
                                        "taken": e["taken"] if e else 0}
         self._write("told", state=state, action=action, to=to, source=source, quote=quote, step=step)
+        self._fact(state, action, to, "person" if source == "human" else "spec", source, [step, quote])
         return self
 
     def human(self, state, action, to, note=None, step=None):
@@ -170,7 +190,54 @@ class WorldMap:
         e.update(to=to, status="confirmed", source="observed", taken=e["taken"] + 1)
         e["evidence"].append([step, None])
         self._write("confirm", state=state, action=action, to=to, step=step)
+        self._fact(state, action, to, "outcome", "environment", [step])
         return refuted
+
+    def _fact(self, state, action, to, source, by, evidence):
+        """Mirror a claim as a "leads_to" fact item (when the map has a knowledge store): a document's or a person's
+        new claim supersedes the one it replaces; an observation refutes a contradicted one by itself."""
+        if self.knowledge is None:
+            return
+        prev = self._items.get((state, action))
+        iid = self.knowledge.add("fact", {"s": [state, action], "r": "leads_to", "o": to}, self.scope, source=source,
+                                 by=by, evidence=evidence,
+                                 supersedes=prev if source != "outcome" else None)
+        if iid is not None:
+            self._items[(state, action)] = iid
+
+    def drop(self, why=None, step=None):
+        """A drift flag for a carried map: every confirmed claim becomes a hypothesis again (planning counts it at
+        hypothesis_cost) until the next arrival re-confirms or refutes it. Journaled; with a knowledge store, a flag
+        on the map's scope (its leads_to facts become hints). → the number of claims dropped."""
+        n = 0
+        for e in self.edges.values():
+            if e["status"] == "confirmed":
+                e["status"] = "hypothesis"
+                n += 1
+        self._write("drop", why=why, step=step)
+        if self.knowledge is not None:
+            self.knowledge.flag(scope=self.scope, why=f"worldmap dropped: {why}" if why else "worldmap dropped")
+        return n
+
+    @classmethod
+    def view(cls, store, scope=None, hypothesis_cost=HYPOTHESIS_COST):
+        """The map the knowledge store's "leads_to" facts in `scope` give (see the module docstring): active, usable
+        observations are confirmed claims; other present items unchecked ones; refuted, disputed, retracted items are
+        not on it. A view is read-only; its verify() is the store's."""
+        m = cls(hypothesis_cost=hypothesis_cost)
+        m.scope = dict(scope or {"map": "worldmap"})
+        m._view = store
+        for rec in store.find(kind="fact", r="leads_to", scope=m.scope):
+            if rec["status"] not in ("active", "hypothesis", "expired"):
+                continue
+            body = rec["body"]
+            st, a = _thaw(body["s"][0]), _thaw(body["s"][1])
+            confirmed = rec["status"] == "active" and not rec["stale"] and rec["source"] == "outcome"
+            src = {"outcome": "observed", "person": "human", "spec": "told"}.get(rec["source"], rec["source"])
+            m.edges[(st, a)] = {"to": _thaw(body["o"]), "status": "confirmed" if confirmed else "hypothesis",
+                                "source": src, "evidence": [], "taken": 1 if rec["source"] == "outcome" else 0}
+            m._items[(st, a)] = rec["id"]
+        return m
 
     # --- what the map answers
     def claim(self, state, action):

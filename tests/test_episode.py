@@ -151,3 +151,16 @@ def test_revisits_names_the_state_and_note_keeps_no_value_nothing_reads():
     with pytest.raises(TypeError):
         ep.revisits()
     assert "value" not in inspect.signature(Episode.note).parameters
+
+
+def test_a_finished_episode_is_a_record_in_the_knowledge_store():
+    from solvi.core.knowledge import KnowledgeStore
+    ks = KnowledgeStore()
+    ep = Episode("ticket 4411")
+    ep.note("act", "restart").progress("fixed")
+    i = ep.record(ks, "solved", stored_ids=["d1", "d2"])
+    rec = ks.item(i)
+    assert rec["kind"] == "episode" and rec["source"] == "outcome" and rec["status"] == "active"
+    assert rec["body"] == {"name": "ticket 4411", "outcome": "solved", "stored_ids": ["d1", "d2"], "steps": 1,
+                           "digest": ep.digest()}
+    assert ep.record(ks, "solved", source="model") is None                 # never the system's own judgement
