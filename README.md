@@ -1,40 +1,148 @@
 # solvi
 
-[![PyPI](https://img.shields.io/pypi/v/solvi.svg)](https://pypi.org/project/solvi/)
-[![CI](https://github.com/solvi-ai/solvi/actions/workflows/ci.yml/badge.svg)](https://github.com/solvi-ai/solvi/actions/workflows/ci.yml)
-[![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
-[![Hugging Face](https://img.shields.io/badge/%F0%9F%A4%97%20Hugging%20Face-solvi--ai-yellow)](https://huggingface.co/solvi-ai)
+Decision systems you can check. You describe what to compute with plain Python functions and checks; a model — an LLM,
+your own classifier or a small local one — proposes where judgement is needed; solvi's checks decide. Every answer
+comes with a confidence, a reason you can check (the rule's inputs, a formula over computed facts, or a quote with
+character offsets in the source) and a hash-chained trace that can be re-executed later to confirm the answer or
+pinpoint the step that was altered. When something cannot be computed or checked, solvi abstains or hands the case to
+a person instead of guessing; a failed hard check always overrides any model's confidence.
 
-Build decision systems from a catalog of Python functions and checks plus typed questions, and get answers you can verify.
+solvi 1.0 has two levels. **Ready systems** you configure: `solvi.build` (decisions from labelled examples, with a
+promise on the errors), `solvi.Agent` (acting in an environment), `solvi.Guard` (an agent's tool calls) and
+`solvi.Knowledge` (what they know, and from whom). **Building blocks** in `solvi.core`, which the ready systems are
+made of, each replaceable by a part of your own. What works but has no measured gain yet is kept apart in
+`solvi.experimental`.
 
-## Why
+## Install
 
-You describe a task with plain Python functions (computations, checks, answer rules) and questions with typed answers
-(yes/no, a choice, a score, "not stated", a span of the text, a ranking, a number range). For each request, a strategist
-plans which functions and checks to run for the asked questions. Every answer comes with:
+```bash
+pip install solvi              # core: rules, checks, learned answer heads, build / Agent / Guard (numpy, scipy, pydantic)
+pip install "solvi[model]"     # + torch, transformers: ModernBERT field extractors for documents and the decider
+pip install "solvi[onnx]"      # + onnxruntime, tokenizers: the decider (solvi.models.decider) on CPU without torch
+pip install "solvi[serve]"     # + fastapi, uvicorn: `solvi serve app.py:system` — the questions over HTTP (also --mcp)
+pip install "solvi[mcp]"       # + the official MCP SDK for solvi serve --mcp (without it, a built-in stdio server)
+pip install "solvi[duckdb]"    # + duckdb: stored decisions in a DuckDB file (solvi.core.store.DuckDBStorage); [postgres] for PostgreSQL
+pip install "solvi[lora]"      # + torch, transformers, peft: solvi.experimental.lora.adapt_lora, a LoRA adapter per question (experimental)
+```
 
-- a **confidence** (calibratable per question);
-- a **reason you can check**: the rule inputs, a formula over computed facts, or a quote with character offsets in the
-  source document;
-- a **hash-chained trace** of every step, which can be re-executed later to confirm the answer or pinpoint the step that
-  was altered.
+Requires Python 3.11+ (tested on 3.11–3.14). Coming from 0.9: see [below](#coming-from-09).
 
-When something cannot be computed, a function fails, or a rule returns an answer outside the allowed options, solvi
-abstains instead of guessing. A failed hard check always overrides any model confidence.
+## Start
 
-**Grounded decisions.** Fuzzy proposes, deterministic decides, everything is in the trace. Each fact and answer records its
-provenance — `given`, `computed`, `quoted`, `decided` (a model's choice among options, with probabilities) or `learned` —
-and model-backed steps record the model's id and fingerprint, so a replay can tell when the model changed since a decision.
-A model's quote that is not literally the text at its offsets, or a choice outside its options, is rejected and counted
-(`system.stats`); a fallback producer runs or the question abstains. `print(res.audit())` shows what each answer rests on,
-which safeguards fired, and how much of its support is deterministic. A decision without models and one with models are the
-same system ([examples/12_grounded_audit.py](examples/12_grounded_audit.py)).
+### Decisions: `solvi.build`
 
-And it is fast. The strategist plans a flow over a 10 000-part catalog in about 11 ms and runs only the parts the questions
-need (2.3% of that catalog). Hard checks run first, so a failing one skips the expensive rest; independent slow parts (API
-calls, model inference) run in parallel. On an insurance-claim desk with slow services
-([examples/09_strategy_at_scale.py](examples/09_strategy_at_scale.py)) a full decision takes 461 ms instead of 1 122 ms for a
-script that computes everything, and 152 ms when an expired policy settles the claim first.
+Give the question, labelled examples and the promise — and a slow path if you have one. `solvi.build` fits System 1,
+calibrates its guarantee and who answers what it hands over on examples it did not see, stores every decision, and
+says what it chose:
+
+```python
+import solvi
+from solvi.models import llm
+
+s = solvi.build(question, examples, catalog=cat, max_risk=0.02,     # examples: [(state, correct answer)]
+                slow=llm(URL, "openai/gpt-oss-120b"), price=(0.037, 0.17), storage="decisions.jsonl")
+res = s.ask(state)              # res.answer, res.by ("s1", "s2" or "human"), res.reasons, res.cost
+print(s.explain())              # System 1, its signal and promise, who answers each slice, what is not covered
+```
+
+On four tasks of the stand (Banking77, Abt-Buy, CUAD, RAGTruth) the defaults matched or beat the hand-written setups
+with every promise kept on eval, in a quarter to half of the code — closer to the promised level than the hand-written
+ones, and the slow path was rarely given anything ([guide](docs/guide.md#quick-start-solvibuild),
+[examples/24_one_entry_point.py](examples/24_one_entry_point.py)).
+
+### Environments: `solvi.Agent` and `solvi.Knowledge`
+
+```python
+km = solvi.Knowledge("knowledge.jsonl", vocabulary={"here": lambda s, a: s["here"], "wood": lambda s, a: s["wood"]})
+km.goal("table", done=lambda s: s["table"])     # an agenda goal: done is code
+agent = solvi.Agent(env, knowledge=km)          # env: reset(seed), actions(state), step(action) → Outcome
+agent.run(seed=7, steps=150)                    # explore; the same world again needs fewer slow decisions
+agent.replay()                                  # every decision re-checked from what it was given
+```
+
+`solvi.Knowledge` keeps what a system learned and from whom: facts with their sources (never the system's own
+answers), goals and gates, an action model learned from outcomes; a retraction takes back everything derived from the
+item. `solvi.Agent` acts on it: System 1 where the knowledge predicts the action works, a search where it does not,
+gates and predicted refusals as hard checks — protection by default, justified risk (`RiskBudget`) as an option. In
+the toy crafting world of [examples/25_environment_agent.py](examples/25_environment_agent.py) the first run takes 61
+steps, all decided by System 2, and the same world met again 12 steps, 11 of them by System 1. Growth was shown in
+environments met again, not on decision streams or a support agent with tools; justified risk lowers the cost of
+protection without promising parity ([docs/agent.md](docs/agent.md)). `solvi.build(..., knowledge=km)` and
+`solvi.Guard(..., knowledge=km)` read the same knowledge.
+
+### Tool calls: `solvi.Guard`
+
+The agent proposes `{"name": tool, "arguments": {...}}`; `solvi.Guard` checks it — the tool is in the catalog, the
+arguments validate against its types, the values that must come from the conversation are quoted there (and not only
+from a tool output that says "ignore previous instructions"), your policies (limits, roles, allow-lists) are ordinary
+hard checks, and an optional decider asks "did the user ask for this?" under `act_guard` and `perturb` — then allows
+it (solvi runs the function), denies it with the reasons, or escalates it to a person. Every decision is a stored,
+replayable trace; any framework's tool calls go through `guard.check` / `guard.call`
+([guide](docs/guide.md#guarding-an-agents-tool-calls), [examples/19_agent_guard.py](examples/19_agent_guard.py)). On
+τ-bench retail no call it let through was refused by the environment, at a cost in solved tasks (the τ-bench row of
+the [task table](#nine-public-tasks)).
+
+### Models: `solvi.models`
+
+Types declare questions; a model proposes; checks decide. The fields of a pydantic model are the questions, their types
+the kinds (one option, several, an ordered score, yes/no); a **decider** answers them about a text or a JSON / pydantic
+state with probabilities, a calibrated confidence and act / escalate, and hard checks, constraints and rules still
+decide. The decider is whichever model you have:
+
+- **An LLM** — `solvi.models.llm(base_url, model, api_key=...)`: any OpenAI-compatible chat-completions server (OpenAI,
+  OpenRouter, vLLM, llama.cpp, Ollama). Nothing to install beyond the core; its JSON replies are validated, and an invalid
+  one escalates, never a guess.
+- **A decision service** — `solvi.models.systemone(url, model)`: anything that speaks the System One API.
+- **A local checkpoint, for offline or cheap cases** — `solvi.models.decider("solvi-base")` (`solvi[onnx]`, no GPU;
+  `solvi models pull solvi-ai/solvi-base` downloads it). solvi-base is a 150M ModernBERT-base cross-encoder distilled
+  from solvi-large: about 50 ms per question on a CPU (ONNX fp16, 4 threads). Its card is honest about where it stands: 54.5% zero-shot on typed questions over JSON states
+  (the same as solvi-large), 56.3% on Fast Decisions dev — not better than earlier small models there — and 0.602 on the
+  jabr classifier benchmark, where Jev reaches 0.966. A preview: fit it on 30–60 labelled examples of your task and
+  calibrate its escalation on your own stream before relying on it.
+
+```python
+import os
+from typing import Literal
+from pydantic import BaseModel, Field
+from solvi import Catalog, Scale, System
+from solvi.models import llm
+
+class Triage(BaseModel):
+    team: Literal["billing", "technical", "shipping"] = Field(description="Which team should handle this ticket?")
+    urgency: Scale[Literal["low", "medium", "high", "critical"]] = Field(description="How urgent is it?")
+    angry: bool = Field(description="Is the customer angry?")
+    topics: list[Literal["refund", "delay", "bug"]] = Field(description="What does the ticket mention?")
+
+model = llm("https://api.openai.com/v1", "gpt-4o-mini", api_key=os.environ["OPENAI_API_KEY"])
+# offline: model = solvi.models.decider("solvi-base")   — the same questions, the same checks
+cat = Catalog()
+questions = model.questions(cat, Triage, text_fact="ticket", min_confidence=0.6)
+
+@cat.check(hard=True, then={"urgency": "critical"})         # a legal threat is critical, whatever the model says
+def no_legal_threat(ticket) -> bool:
+    return "lawyer" not in str(ticket).lower()
+questions[1].requires.append("no_legal_threat")
+
+res = System(cat, questions).ask({"ticket": {"subject": "Charged twice", "body": "Refund my double payment!",
+                                             "customer": {"tier": "pro"}}})
+print({q: (r.answer, r.status) for q, r in res.results.items()})
+print(res.audit("team"))           # the probabilities, the model's fingerprint, what escalated and why
+```
+
+A state is read as key paths (`customer.tier: pro`); an unsure or escalated answer abstains with the reason
+(`system.stats["model_escalated"]`, `["low_confidence"]`). [examples/15_typed_decisions.py](examples/15_typed_decisions.py)
+runs the whole story with a stand-in model, without network. Whatever the model, read what it was measured on before
+relying on it, and calibrate it on your own labelled stream (`part.act_guard`, under Building blocks): checks, constraints and
+escalation are what make the answers safe to act on, not the model alone. The checkpoint contract of a local decider is in
+[docs/decide_format.md](docs/decide_format.md); a local checkpoint answers one question per forward pass with the published checkpoints,
+several with `DecideModel.load(..., multi_question=True)`.
+
+Every answer is a value and a confidence, and the types also declare answer primitives: `Maybe[T]` ("not stated" —
+`solvi.Unknown` — is a real answer, unlike an abstention), `Span[float]` (an exact piece of the text, parsed), `Rank[...]`
+(the top k, in order), `Estimate[0, 7, 14]` (a number with an interval), and evidence quotes on any answer
+(`Claim(value, evidence=[...])`, `Question(require_evidence=True)`) — each checked in the text, from rules or a model
+([guide](docs/guide.md#answer-primitives-not-stated-evidence-spans-rankings-estimates),
+[examples/16_primitives.py](examples/16_primitives.py)).
 
 ## Try it
 
@@ -46,62 +154,21 @@ script that computes everything, and 152 ms when an expired policy settles the c
   minesweeper, 20 questions, Mafia detective, a bot arena, and "hack the trace".
 - [solvi realms](https://huggingface.co/spaces/solvi-ai/realms): an endless strategy game whose factions are solvi systems —
   tested for 100 000 turns: flat decision time (~0.3–0.6 ms), bounded memory and state, every sampled trace replay OK.
-- All run **entirely in your browser** (Pyodide): no server, no GPU, nothing you type leaves the page.
+- All run **entirely in your browser** (Pyodide): no server, no GPU, nothing you type leaves the page. Each Space
+  installs the solvi release it pins (0.8.0 today) and moves to 1.0 when its pin moves.
 - Models: [solvi-ai/solvi-large](https://huggingface.co/solvi-ai/solvi-large) (typed decisions, 396M, preview),
   [solvi-ai/solvi-base](https://huggingface.co/solvi-ai/solvi-base) (the same answers on a CPU / in ONNX, 150M, preview),
   [solvi-ai/extract-base](https://huggingface.co/solvi-ai/extract-base) (fields by description) and
   [solvi-ai/extract-receipts](https://huggingface.co/solvi-ai/extract-receipts). Each model card states what the model was
   measured on, how well it does, and its limits; all models are listed at [huggingface.co/solvi-ai](https://huggingface.co/solvi-ai).
 
-## Gallery
+## Building blocks (`solvi.core`)
 
-[gallery/](gallery) — fifteen decision tasks across directions (support triage, email routing, content guard, security alerts,
-AI-agent audit, release rollout, KYC/AML, clinical screening, credit with adverse-action reasons, procurement 3-way match,
-double-charge refunds, predictive maintenance), each with scenarios, a runner and a side-by-side against an answer-only model.
-Three are helpers for coding agents: a pre-edit rule check (allow / block / escalate a file write), review triage (quick
-review only when seven risk questions are a confident "no", with a stated bound on risky changes that slip through) and a
-skill picker with an honest "none".
+The ready systems are assembled from these; you can use them directly, and put a part of your own at every extension
+point (a store, a slow path, a strategist, a head, a decider, an action model, ...).
+[docs/building_blocks.md](docs/building_blocks.md) has one reference per protocol, with a conformance check for each.
 
-## Install
-
-```bash
-pip install solvi              # core: rules, checks, learned answer heads (numpy, scipy, pydantic)
-pip install "solvi[model]"     # + torch, transformers: ModernBERT field extractors for documents and the decider
-pip install "solvi[onnx]"      # + onnxruntime, tokenizers: the decider (solvi.core.deciders) on CPU without torch
-pip install "solvi[serve]"     # + fastapi, uvicorn: `solvi serve app.py:system` — the questions over HTTP (also --mcp)
-pip install "solvi[mcp]"       # + the official MCP SDK for solvi serve --mcp (without it, a built-in stdio server)
-pip install "solvi[duckdb]"    # + duckdb: stored decisions in a DuckDB file (solvi.core.store.DuckDBStorage); [postgres] for PostgreSQL
-pip install "solvi[lora]"      # + torch, transformers, peft: solvi.experimental.lora.adapt_lora, a LoRA adapter per question (experimental)
-```
-
-Two words mark what is not settled yet: **preview** — it works and is tested, and its API may still change;
-**experimental** — no published model or measurement backs it yet, and it may change or go.
-
-`solvi.solutions.guard` (guarding an agent's tool calls) needs only the core.
-
-Requires Python 3.11+ (tested on 3.11–3.14).
-
-## From labelled examples to a system with a promise (preview)
-
-Give the question, labelled examples and the promise — and a slow path if you have one; `solvi.solutions.decisions.build` fits
-System 1, calibrates its guarantee and who answers what it hands over on examples it did not see, stores every
-decision, and says what it chose:
-
-```python
-from solvi.solutions.decisions import build
-
-s = build(question, examples, catalog=cat, max_risk=0.02,     # examples: [(state, correct answer)]
-          slow=llm(URL, "openai/gpt-oss-120b"), price=(0.037, 0.17), storage="decisions.jsonl")
-res = s.ask(state)              # res.answer, res.by ("s1", "s2" or "human"), res.reasons, res.cost
-print(s.explain())              # System 1, its signal and promise, who answers each slice, what is not covered
-```
-
-On four tasks of the stand (Banking77, Abt-Buy, CUAD, RAGTruth) the defaults matched or beat the hand-written setups
-with every promise kept on eval, in a quarter to half of the code — closer to the promised level than the hand-written
-ones, and the slow path was rarely given anything ([guide](docs/guide.md#quick-start-one-entry-point-solvisolutionsdecisions-preview),
-[examples/24_one_entry_point.py](examples/24_one_entry_point.py)).
-
-## Quickstart (core only, no model)
+### Quickstart (a catalog by hand, no model)
 
 ```python
 from datetime import date
@@ -153,20 +220,7 @@ enough_notice            = True
 With `"balance": 3` the hard check fails and the answer is `reject` with `status == "forced"`, whatever the rule says.
 `solvi.show.show(res, cat)` prints answers, the planned flow, the computed state and the replay result in one go.
 
-## Command line
-
-```bash
-solvi init triage --with-model && cd triage     # a typed catalog, passing cases.json, README, CI workflow
-solvi test . && solvi check catalog.py:system   # regression cases and the catalog lint (what CI runs)
-solvi ask catalog.py:system example.json --audit            # one decision and what it rests on (--json, --report html)
-solvi models pull solvi-ai/solvi-base           # a local decider for offline use; `solvi models` lists, `check` measures
-solvi calibrate catalog.py:system route labels.csv --risk 0.1   # act_guard → route.calib.json, loaded by the catalog
-solvi hook install                              # Claude Code's edits checked against .claude/solvi-rules.toml
-```
-
-Every command is in the [guide](docs/guide.md#command-line).
-
-## How it works
+### How it works
 
 - **Catalog.** `@cat.fn` (computation), `@cat.check` (bool), `@cat.extract` (value from text, returned as a `Quote` with
   offsets) and `@cat.rule(question)` (answer rule). A part's contract is its signature: argument names are the facts it
@@ -189,106 +243,34 @@ Every command is in the [guide](docs/guide.md#command-line).
   `res.trace.replay(system)`, which recomputes every step from recorded inputs and reports mismatches, broken hash links
   and quotes outside the text — and, given the System, a stored answer that is not the one the trace gives.
 
-## Typed decisions with any model
+**Grounded decisions.** Fuzzy proposes, deterministic decides, everything is in the trace. Each fact and answer records
+its provenance — `given`, `computed`, `quoted`, `decided` (a model's choice among options, with probabilities) or
+`learned` — and model-backed steps record the model's id and fingerprint, so a replay can tell when the model changed
+since a decision. A model's quote that is not literally the text at its offsets, or a choice outside its options, is
+rejected and counted (`system.stats`); a fallback producer runs or the question abstains. `print(res.audit())` shows
+what each answer rests on, which safeguards fired, and how much of its support is deterministic. A decision without
+models and one with models are the same system ([examples/12_grounded_audit.py](examples/12_grounded_audit.py)).
 
-Types declare questions; a model proposes; checks decide. The fields of a pydantic model are the questions, their types
-the kinds (one option, several, an ordered score, yes/no); a **decider** answers them about a text or a JSON / pydantic
-state with probabilities, a calibrated confidence and act / escalate, and hard checks, constraints and rules still
-decide. The decider is whichever model you have:
+### Guarantees, several models, serving
 
-- **An LLM** — `solvi.core.deciders.llm.llm(base_url, model, api_key=...)`: any OpenAI-compatible chat-completions server (OpenAI,
-  OpenRouter, vLLM, llama.cpp, Ollama). Nothing to install beyond the core; its JSON replies are validated, and an invalid
-  one escalates, never a guess.
-- **A decision service** — `solvi.core.deciders.systemone.systemone(url, model)`: anything that speaks the System One API.
-- **A local checkpoint, for offline or cheap cases** — `DecideModel.load("solvi-ai/solvi-base")` (`solvi[onnx]`, no
-  GPU). solvi-base is a 150M ModernBERT-base cross-encoder distilled from solvi-large: about 50 ms per question on a CPU
-  (ONNX fp16, 4 threads). Its card is honest about where it stands: 54.5% zero-shot on typed questions over JSON states
-  (the same as solvi-large), 56.3% on Fast Decisions dev — not better than earlier small models there — and 0.602 on the
-  jabr classifier benchmark, where Jev reaches 0.966. A preview: fit it on 30–60 labelled examples of your task and
-  calibrate its escalation on your own stream before relying on it.
-
-```python
-import os
-from typing import Literal
-from pydantic import BaseModel, Field
-from solvi import Catalog, Scale, System
-from solvi.core.deciders.llm import llm
-
-class Triage(BaseModel):
-    team: Literal["billing", "technical", "shipping"] = Field(description="Which team should handle this ticket?")
-    urgency: Scale[Literal["low", "medium", "high", "critical"]] = Field(description="How urgent is it?")
-    angry: bool = Field(description="Is the customer angry?")
-    topics: list[Literal["refund", "delay", "bug"]] = Field(description="What does the ticket mention?")
-
-model = llm("https://api.openai.com/v1", "gpt-4o-mini", api_key=os.environ["OPENAI_API_KEY"])
-# offline: model = solvi.core.deciders.DecideModel.load("solvi-ai/solvi-base")   — the same questions, the same checks
-cat = Catalog()
-questions = model.questions(cat, Triage, text_fact="ticket", min_confidence=0.6)
-
-@cat.check(hard=True, then={"urgency": "critical"})         # a legal threat is critical, whatever the model says
-def no_legal_threat(ticket) -> bool:
-    return "lawyer" not in str(ticket).lower()
-questions[1].requires.append("no_legal_threat")
-
-res = System(cat, questions).ask({"ticket": {"subject": "Charged twice", "body": "Refund my double payment!",
-                                             "customer": {"tier": "pro"}}})
-print({q: (r.answer, r.status) for q, r in res.results.items()})
-print(res.audit("team"))           # the probabilities, the model's fingerprint, what escalated and why
-```
-
-A state is read as key paths (`customer.tier: pro`); an unsure or escalated answer abstains with the reason
-(`system.stats["model_escalated"]`, `["low_confidence"]`). [examples/15_typed_decisions.py](examples/15_typed_decisions.py)
-runs the whole story with a stand-in model, without network. Whatever the model, read what it was measured on before
-relying on it, and calibrate it on your own labelled stream (`part.act_guard`, below): checks, constraints and
-escalation are what make the answers safe to act on, not the model alone. The checkpoint contract of a local decider is in
-[docs/decide_format.md](docs/decide_format.md); a local checkpoint answers one question per forward pass with the published checkpoints,
-several with `DecideModel.load(..., multi_question=True)`.
-
-Every answer is a value and a confidence, and the types also declare answer primitives: `Maybe[T]` ("not stated" —
-`solvi.Unknown` — is a real answer, unlike an abstention), `Span[float]` (an exact piece of the text, parsed), `Rank[...]`
-(the top k, in order), `Estimate[0, 7, 14]` (a number with an interval), and evidence quotes on any answer
-(`Claim(value, evidence=[...])`, `Question(require_evidence=True)`) — each checked in the text, from rules or a model
-([guide](docs/guide.md#answer-primitives-not-stated-evidence-spans-rankings-estimates),
-[examples/16_primitives.py](examples/16_primitives.py)).
-
-## Escalation with a guarantee, several models, serving
-
-- **A guaranteed risk.** `part.act_guard(examples, max_risk=0.10)` calibrates on a few hundred labelled examples of your stream
-  so that P(answered alone and wrong) ≤ 10% for inputs like them (conformal risk control) — a share of all inputs, not
-  the error among the answers given alone (`calibrate_for(max_error=0.10, method="ltt")` bounds that); the audit shows the promise
-  behind every answer, or says there is none. `part.conformal(examples)` gives the person who takes an escalation a short
-  list of candidates. Near ties escalate (`min_margin=`), and the answer does not depend on the order the options are listed
-  in (sorted by default).
-- **Several models.** Any decider above — an LLM, a System One service (Jev, Kev, Von, Laya-serve, …), a local
-  checkpoint — combines with the others: `Cascade`, `Vote` and `Route` (`solvi.core.deciders.combine`) combine models — the next model only when one escalates, an answer
-  only when models of different families agree, or a model picked by code — under one guarantee
-  ([examples/20_vote_across_families.py](examples/20_vote_across_families.py) shows a vote with stand-in servers).
-- **Serving and operations.** `solvi serve module:system` exposes the questions over HTTP (OpenAPI from the same types),
-  MCP and the System One API; `await system.aask(...)` runs async parts concurrently with timeouts; `CostStrategist`
-  plans the cheapest verified flow from the declared `cost=` of equivalent sources. `TraceStorage` keeps decisions with a
-  hash chain across them; `solvi diff` shows which stored decisions a rule or model change would flip; `solvi test`,
-  `solvi check` and the honesty suite (`solvi honesty`) belong in CI; `res.report(format="html")` and
-  `solvi report decisions.db --html out.html` give an auditor one page per decision or per period.
-- **Guarding an agent's tool calls (preview).** The agent proposes `{"name": tool, "arguments": {...}}`; `solvi.solutions.guard.Guard` checks
-  it — the tool is in the catalog, the arguments validate against its types, the values that must come from the
-  conversation are quoted there (and not only from a tool output that says "ignore previous instructions"), your policies
-  (limits, roles, allow-lists) are ordinary hard checks, and an optional decider asks "did the user ask for this?" under
-  `act_guard` and `perturb` — then allows it (solvi runs the function), denies it with the reasons, or escalates it to a
-  person. Every decision is a stored, replayable trace. Any framework's tool calls go through `guard.check` / `guard.call`, and
-  `solvi serve --guard catalog.py:guard --upstream CMD` puts the guard in front of an MCP server
-  ([guide](docs/guide.md#guarding-an-agents-tool-calls), [examples/19_agent_guard.py](examples/19_agent_guard.py)).
-- **Agents and knowledge.** `solvi.Knowledge` keeps what a system learned and from whom (facts with their sources,
-  goals and gates, an action model learned from outcomes), and `solvi.Agent(env, knowledge=km)` acts in an environment
-  on it: System 1 where the knowledge predicts the action works, a search where it does not, gates and predicted
-  refusals as hard checks, protection by default and justified risk (`RiskBudget`) as an option, every decision
-  replayable. `build(knowledge=km)` and `Guard(knowledge=km)` read the same knowledge. Growth was shown in environments
-  met again, not on decision streams ([docs](docs/agent.md), [examples/25_environment_agent.py](examples/25_environment_agent.py)).
-- **Behind a coding agent's hooks (preview).** `solvi hook install` puts solvi in front of Claude Code's edits and prompts:
-  every Edit / Write is checked against a rules file (forbidden patterns, required functions, Python calls read from the
-  code; fuzzy questions for a model, which block only with a calibration) and denied with the rule and the lines, sent
-  to the user, or let through; a prompt gets the one project skill it needs, or nothing. Deterministic by default; every
-  decision stored and verifiable; Codex as a preview
-  ([guide](docs/guide.md#solvi-behind-a-coding-agents-hooks), [examples/22_coding_agent_hooks.py](examples/22_coding_agent_hooks.py)).
+- **A guaranteed risk.** `part.act_guard(examples, max_risk=0.10)` calibrates on a few hundred labelled examples of
+  your stream so that P(answered alone and wrong) ≤ 10% for inputs like them (conformal risk control) — a share of all
+  inputs, not the error among the answers given alone (`calibrate_for(max_error=0.10, method="ltt")` bounds that); the
+  audit shows the promise behind every answer, or says there is none. `part.conformal(examples)` gives the person who
+  takes an escalation a short list of candidates. Near ties escalate (`min_margin=`), and the answer does not depend on
+  the order the options are listed in (sorted by default).
+- **Several models.** Any decider — an LLM, a System One service (Jev, Kev, Von, Laya-serve, …), a local checkpoint —
+  combines with the others: `Cascade`, `Vote` and `Route` (`solvi.core.deciders.combine`) — the next model only when
+  one escalates, an answer only when models of different families agree, or a model picked by code — under one
+  guarantee ([examples/20_vote_across_families.py](examples/20_vote_across_families.py) shows a vote with stand-in
+  servers).
+- **Serving and operations.** `solvi serve module:system` exposes the questions over HTTP (OpenAPI from the same
+  types), MCP and the System One API; `await system.aask(...)` runs async parts concurrently with timeouts.
+  `TraceStorage` keeps decisions with a hash chain across them; `solvi diff` shows which stored decisions a rule or
+  model change would flip; `solvi test`, `solvi check` and the honesty suite (`solvi honesty`) belong in CI;
+  `res.report(format="html")` and `solvi report decisions.db --html out.html` give an auditor one page per decision or
+  per period; `store.signature()` — 64 bytes kept next to the chain's head — later names the one stored record that
+  was edited and restores its hash.
 - **Text in.** `system.ask_text("please refund order A-10457, 1.5 million RUB, paid on 12 September 2026",
   textin=TextIn(system, decider, patterns={"order_id": r"A-\d+"}))`: the decider picks which question the message asks
   (or escalates when unsure), each input field is read with a quote (found by a deterministic cue finder — chosen over
@@ -298,24 +280,17 @@ Every answer is a value and a confidence, and the types also declare answer prim
   answers texts at `POST /ask_text` and as the MCP tool `ask_text`.
 - **Long documents.** `decider.decision(..., long="retrieve")`: a contract longer than the decider reads is split into
   sections, BM25 picks the few that bear on the question, the decider reads only those, and quotes point into the whole
-  document; the trace lists the sections read. `long="full"` reads a text whole up to the length a checkpoint trained on
-  long inputs declares (`max_len_long`), and retrieves within that length beyond it.
-- **Learning from corrections.** `solvi.core.knowledge.memory.attach(part)` escalates an answer when similar corrected cases say another one;
-  `fit` heads refit on all kept examples as corrections accumulate; `solvi.experimental.lora.adapt_lora(part, examples, holdout=0.3)` trains
-  a small LoRA adapter for one question on solvi-base once it has ~100 labelled answers (`solvi[lora]`, experimental);
-  `solvi.experimental.learning.Learning(system, store)` proposes updates from trusted corrections only and promotes one when it passes held-out,
-  honesty and calibration gates, with rollback (experimental, off unless called)
-  ([guide](docs/guide.md#a-memory-of-corrections-solvicoreknowledgememory)).
-- **Records you can check later.** `store.signature()` — 64 bytes kept next to the chain's head — later names the one
-  stored record that was edited and restores its hash (preview). `solvi.experimental.charts` draws a chart in which every number is
-  quoted from the text and checked (unit, scale, a pie that adds up), as a deterministic SVG that replays to the same
-  bytes (preview; [examples/21_verified_chart.py](examples/21_verified_chart.py)). The audit, `show` and the safeguard
-  report render in Russian with `System(..., lang="ru")`.
+  document; the trace lists the sections read. `long="full"` reads a text whole up to the length a checkpoint trained
+  on long inputs declares (`max_len_long`), and retrieves within that length beyond it.
+- **Corrections.** `fit` heads refit on all kept examples as corrections accumulate;
+  `solvi.core.knowledge.memory.attach(part)` escalates an answer when similar corrected cases say another one
+  ([guide](docs/guide.md#a-memory-of-corrections-solvicoreknowledgememory)). The audit, `show` and the safeguard report
+  render in Russian with `System(..., lang="ru")`.
 
-## System 1 and System 2
+### System 1 and System 2
 
 A System under a guarantee is fast, cheap and knows when it is unsure: that is System 1. An LLM, a re-ask loop or a
-search is slow and costs money per input: System 2. solvi puts them in one system, and both are experimental in 0.9:
+search is slow and costs money per input: System 2. `solvi.build` and `solvi.Agent` put them in one system; underneath:
 
 - **Who answers** (`solvi.core.dispatch`). System 1 is asked first; when its own signals say its answer cannot be given
   alone — below its guarantee, unlike the calibration examples, an abstention, a broken constraint — the slow path
@@ -327,13 +302,6 @@ search is slow and costs money per input: System 2. solvi puts them in one syste
 - **What happened** (`System.report`, `solvi report decisions.db --overview`). From the store alone: who answered and
   how often each handed over, the time, calls, tokens and dollars, the promise in force next to the error the stored
   labels show, and drift ([guide](docs/guide.md#the-system-report-systemreport-solvi-report---overview)).
-- **A policy text compiled into the catalog** (`solvi.experimental.compile`). An LLM writes plain functions, hard checks and rules
-  from a policy; they are accepted without labelled examples only when every part cites its clauses, the code runs in
-  a sandbox, two independent drafts agree on every generated input and tests derived from the text pass. A person
-  settles what the drafts dispute (`review=`), a changed text is recompiled with the stored decisions it moves listed,
-  and a compiled policy can guard an agent's tool calls (`to_guard`). Agreement is not correctness: a misreading both
-  drafts share is accepted, so look at some decisions before relying on it
-  ([guide](docs/guide.md#a-specification-compiled-into-the-catalog-solviexperimentalcompile)).
 - **A showcase.** A player walks the world map of Pokémon Red (recorded from a real playthrough: place names and exits,
   no ROM) through the first fifteen goals twice; System 1 is two rules over remembered routes, System 2 a search over
   the world map it writes as it goes, and after each goal what System 2 found becomes System 1's routes. The first run
@@ -341,7 +309,7 @@ search is slow and costs money per input: System 2. solvi puts them in one syste
   ([examples/23_pokemon_world_map.py](examples/23_pokemon_world_map.py), the replay viewer in
   [spaces/pokemon](spaces/pokemon)).
 
-## Planning around dead ends and costs (code strategist)
+### Planning around dead ends and costs (code strategist)
 
 The default strategist needs the inputs of every producer of a fact. `solvi.core.plan.cost.CostStrategist()` plans around
 producers whose inputs are never given, and with `producers="equivalent"` picks the cheapest verified plan by declared
@@ -384,6 +352,55 @@ The receipt numbers below are a `LongSpanExtractor` too: `solvi-ai/extract-recei
 CORD and loads with `LongSpanExtractor.load("solvi-ai/extract-receipts")` (its card says so;
 [examples/07_receipts_model.py](examples/07_receipts_model.py) uses it). See
 [docs/guide.md](docs/guide.md#extracting-fields-from-documents).
+
+## Experimental (`solvi.experimental`)
+
+Pieces that work and are tested but have not yet shown a measured gain. Importing one warns (`ExperimentalWarning`),
+a decision that used one records it, and each one graduates or is removed by 1.2; `solvi.experimental.STATUS` and
+[docs/experimental.md](docs/experimental.md) say what each is missing.
+
+- **A policy text compiled into the catalog** (`solvi.experimental.compile`). An LLM writes plain functions, hard checks
+  and rules from a policy; they are accepted without labelled examples only when every part cites its clauses, the code
+  runs in a sandbox, two independent drafts agree on every generated input and tests derived from the text pass. A
+  person settles what the drafts dispute, a changed text is recompiled with the stored decisions it moves listed.
+  Agreement is not correctness: a misreading both drafts share is accepted
+  ([guide](docs/guide.md#a-specification-compiled-into-the-catalog-solviexperimentalcompile)).
+- **Behind a coding agent's hooks** (`solvi.experimental.hooks`). `solvi hook install` puts solvi in front of Claude
+  Code's edits and prompts: every Edit / Write is checked against a rules file (forbidden patterns, required functions,
+  Python calls read from the code; fuzzy questions for a model, which block only with a calibration) and denied with
+  the rule and the lines, sent to the user, or let through; a prompt gets the one project skill it needs, or nothing
+  ([guide](docs/guide.md#solvi-behind-a-coding-agents-hooks),
+  [examples/22_coding_agent_hooks.py](examples/22_coding_agent_hooks.py)).
+- **Verified charts** (`solvi.experimental.charts`): every number quoted from the text and checked (unit, scale, a pie
+  that adds up), as a deterministic SVG that replays to the same bytes
+  ([examples/21_verified_chart.py](examples/21_verified_chart.py)).
+- **Learning** (`solvi.experimental.learning`, `solvi.experimental.lora`, `solvi.experimental.oncalib`): a loop that
+  promotes an update from trusted corrections only when it passes held-out, honesty and calibration gates, with
+  rollback; a LoRA adapter per question on solvi-base (`solvi[lora]`); recalibration on the fly from outcomes, which
+  does not keep the promise.
+- **The MCP proxy** (`solvi serve --guard catalog.py:guard --upstream CMD`: the guard in front of an MCP server) and
+  **counterfactuals** (`solvi.experimental.counterfactual`: the smallest input change that flips an answer).
+
+## Coming from 0.9
+
+Every 0.9 import path still works in 1.0.x: it imports the same module and warns (`SolviDeprecationWarning`) with the
+path to use; 1.1 removes the old paths. `solvi migrate PATH` rewrites your code (imports and dotted paths in strings,
+in `.py` and `.md` files); `solvi migrate PATH --check` only reports. Stored decisions, calibration files and
+fingerprints do not change. The full table and what was removed: [CHANGELOG.md](CHANGELOG.md#breaking-changes-and-migration).
+
+## Command line
+
+```bash
+solvi init triage --with-model && cd triage     # a typed catalog, passing cases.json, README, CI workflow
+solvi test . && solvi check catalog.py:system   # regression cases and the catalog lint (what CI runs)
+solvi ask catalog.py:system example.json --audit            # one decision and what it rests on (--json, --report html)
+solvi models pull solvi-ai/solvi-base           # a local decider for offline use; `solvi models` lists, `check` measures
+solvi calibrate catalog.py:system route labels.csv --risk 0.1   # act_guard → route.calib.json, loaded by the catalog
+solvi hook install                              # (experimental) Claude Code's edits checked against .claude/solvi-rules.toml
+solvi migrate src/ --check                      # code still on the 0.9 import paths (without --check: rewrite it)
+```
+
+Every command is in the [guide](docs/guide.md#command-line).
 
 ## Results
 
@@ -498,6 +515,15 @@ on documents the extractor dominates.
 - CPU-only deployment with a quantized extractor: dynamic int8 quantization changed half of extract-base's spans (its
   model card), so none is provided; use fp32 or fp16 and measure the time per document on your hardware.
 
+## Gallery
+
+[gallery/](gallery) — fifteen decision tasks across directions (support triage, email routing, content guard, security alerts,
+AI-agent audit, release rollout, KYC/AML, clinical screening, credit with adverse-action reasons, procurement 3-way match,
+double-charge refunds, predictive maintenance), each with scenarios, a runner and a side-by-side against an answer-only model.
+Three are helpers for coding agents: a pre-edit rule check (allow / block / escalate a file write), review triage (quick
+review only when seven risk questions are a confident "no", with a stated bound on risky changes that slip through) and a
+skill picker with an honest "none".
+
 ## Examples
 
 | File | What it shows |
@@ -520,10 +546,10 @@ on documents the extractor dominates.
 | [examples/18_several_models.py](examples/18_several_models.py) | Several models, one decision: a cascade small → large, a vote of two model families, a route by code — each under one `act_guard` guarantee, with cost per question; every stage in the audit and the trace |
 | [examples/19_agent_guard.py](examples/19_agent_guard.py) | An accounts-payable agent's tool calls through a `Guard`: grounded arguments, an invented IBAN denied, a budget escalation approved by a person, an instruction hidden in an invoice, an authorizer with `act_guard` and `perturb`; every decision stored and replayed (a scripted agent, no API keys) |
 | [examples/20_vote_across_families.py](examples/20_vote_across_families.py) | A vote of two model families behind the System One API (stand-in servers started in-process): each alone and the vote under one `act_guard` guarantee; a sure mistake of one family escalates; the audit and the replay |
-| [examples/21_verified_chart.py](examples/21_verified_chart.py) | A verified chart (`solvi.experimental.charts`, preview): every number quoted from the text and checked; a careless model's swapped digit, invented share and unquoted value dropped with reasons; a deterministic SVG that replays to identical bytes |
+| [examples/21_verified_chart.py](examples/21_verified_chart.py) | A verified chart (`solvi.experimental.charts`, experimental): every number quoted from the text and checked; a careless model's swapped digit, invented share and unquoted value dropped with reasons; a deterministic SVG that replays to identical bytes |
 | [examples/22_coding_agent_hooks.py](examples/22_coding_agent_hooks.py) | A coding agent's session behind `solvi hook`: the hooks installed in a temporary project, a clean edit allowed, an edit that takes an employee id from the browser denied with the rule and the line, a migration with an empty downgrade and a comment that tries to talk past the rules denied, a skill picked for one prompt and none for another; the store verified and one decision audited and replayed |
 | [examples/23_pokemon_world_map.py](examples/23_pokemon_world_map.py) | System 1 and System 2 on the world map of Pokémon Red (recorded, no ROM): rules over remembered routes, a search over the player's world map when they are unsure or surprised, routes compiled after each goal; 147 → 2 slow decisions from the first run to the second; every decision stored, replayed and reported (`System.report`) |
-| [examples/24_one_entry_point.py](examples/24_one_entry_point.py) | one entry point (`solvi.solutions.decisions.build`): System 1 fitted from labelled examples, its guarantee and the slow path's slice calibrated on examples it did not see, every decision stored; `explain()` prints the choices (no model) |
+| [examples/24_one_entry_point.py](examples/24_one_entry_point.py) | one entry point (`solvi.build`): System 1 fitted from labelled examples, its guarantee and the slow path's slice calibrated on examples it did not see, every decision stored; `explain()` prints the choices (no model) |
 | [examples/25_environment_agent.py](examples/25_environment_agent.py) | An environment agent (`solvi.Agent`) with `solvi.Knowledge` on a toy crafting world: System 1 acts on what the action model and the skills predict, System 2 searches, the agenda's gates are hard checks; the same world met again takes 12 steps instead of 61 (11 by System 1), and protection vs `RiskBudget` at a bridge that breaks one time in three; every decision replays |
 | [examples/07_receipts_model.py](examples/07_receipts_model.py) | Expense check on a scanned receipt: a receipts-tuned extractor cites each field, rules and a hard check decide (needs `solvi[model]`) |
 | [examples/08_contracts_by_description.py](examples/08_contracts_by_description.py) | Contract review with fields defined only in words: the general extractor reads the whole contract, cites clauses or says "absent" (needs `solvi[model]`) |
@@ -532,13 +558,17 @@ Run them from a clone: `python examples/01_leave_request.py`.
 
 ## More
 
-- [docs/guide.md](docs/guide.md): full API walkthrough.
+- [docs/using.md](docs/using.md): the ready systems — `build`, `Agent`, `Guard`, `Knowledge` and `solvi.models`.
+- [docs/agent.md](docs/agent.md): agents and knowledge, with what was and was not shown.
+- [docs/building_blocks.md](docs/building_blocks.md): the extension points of `solvi.core`.
+- [docs/experimental.md](docs/experimental.md): what is experimental and what each piece is missing.
+- [docs/guide.md](docs/guide.md): the reference guide, in the same three parts.
 - [docs/best_practices.md](docs/best_practices.md): what we learned while building on solvi, as advice.
+- [docs/mission.md](docs/mission.md): what solvi is for, what it is not, and its honest limits.
 - [docs/decide_format.md](docs/decide_format.md): the decider checkpoint contract (for training your own).
-- [docs/strategist.md](docs/strategist.md): the code strategist — dead ends and costs.
-- [ROADMAP.md](ROADMAP.md), [CHANGELOG.md](CHANGELOG.md), [CONTRIBUTING.md](CONTRIBUTING.md), [SECURITY.md](SECURITY.md).
 - [docs/benchmarks.md](docs/benchmarks.md): the scripts behind the numbers, what solvi adds to an ask, the dataset loaders.
 - [docs/vs_llm.md](docs/vs_llm.md): solvi vs asking an LLM (Grok 4.7, gpt-oss-120b, Qwen3, DeepSeek), with raw answers.
+- [ROADMAP.md](ROADMAP.md), [CHANGELOG.md](CHANGELOG.md), [CONTRIBUTING.md](CONTRIBUTING.md), [SECURITY.md](SECURITY.md).
 - [benchmarks/](benchmarks/): the benchmark scripts that can be rerun, and the dataset loaders behind the extraction
   numbers (SROIE, CORD, CUAD, Kleister-NDA — their scripts are not in the repository).
 - Tests: `pytest`.
