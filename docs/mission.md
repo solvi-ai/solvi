@@ -16,9 +16,12 @@ override, guards on an agent's tool calls, and an error promise that sends a cas
 
 **Accumulated knowledge.** A system keeps verified knowledge about the environment it works in: rules, the conditions
 under which an action works, a map of the world it moves in, and its goals — an agenda whose items are marked done by
-code checks and opened by gates. Where a written specification exists, it is compiled into rules. Where none exists,
-rules are learned from experience, and each one records where it came from. Every item can be checked and can be
-retracted, and what was built on a retracted item goes with it.
+code checks and opened by gates. Every item records where it came from (a person, an outcome, a written
+specification, a verified answer — never the system's own guess), can be checked, and can be retracted exactly: what was
+built on a retracted item goes with it, and the decisions that rested on it are listed. By default this knowledge
+protects: an action it predicts will fail is not taken, and a gate is a hard check. Taking a justified risk against a
+prediction, within a budget, is an option for when protection costs too much. In an environment it meets again, a
+system with this knowledge was shown to need far fewer slow decisions than the first time.
 
 **Any model.** solvi works with any model: an LLM behind any OpenAI-compatible server, your own classifier, or plain
 code. A small local model is available, so much of a system runs without the cloud. There is no quality promise for that
@@ -39,8 +42,11 @@ model; measure it on your task first.
 
 ## Honest limits
 
-- On a stream of one kind of decision (classification, for example), solvi keeps its error promise, but it does not
-  promise that the system gets better over time by itself.
+- Growth with accumulated knowledge was shown only in environments the system meets again: a crafting game and the
+  Pokémon world map. It was not shown on streams of one kind of decision (classification, matching) or for a support
+  agent with tools. There solvi keeps its error promise and the knowledge gives accountability — sources, retraction,
+  disputes for a person — but it does not promise that the system gets better over time by itself.
+- Justified risk lowers the cost of protection; it does not promise to do as well as a system without the knowledge.
 - The error promise does not hold in the window between an abrupt shift in the inputs and the moment a drift check
   notices it. After a flag, stop answering alone until the thresholds are calibrated again
   ([the guide explains this](guide.md#thresholds-with-a-guarantee-act_guard-learn-then-test-conformal-sets)).
@@ -54,6 +60,11 @@ model; measure it on your task first.
 
 ## Where it stands
 
-The decision runtime, the error promises, the traces and replay, the guards and the checks are in the library today
-(see the [guide](guide.md)). The world map and an agent's episodes are there too. A knowledge journal with sources and
-retraction, and an agenda with done checks and gates, are the next step toward 1.0 — see the [roadmap](../ROADMAP.md).
+In 1.0 the library has two levels. Ready systems you configure: `solvi.build` for decisions from labelled examples
+with a promise, `solvi.Agent` for acting in an environment, `solvi.Guard` for an agent's tool calls, and
+`solvi.Knowledge` for what they know. Under them, the building blocks in `solvi.core` — the decision runtime, the
+error promises, the traces and replay, the checks, the knowledge store — each replaceable by your own part. Knowledge
+as protection, with sources and exact retraction, ships in 1.0; so do the agenda with done checks and gates, and
+justified risk as an option ([Using solvi: agents and knowledge](agent.md)). What works but has not yet shown a
+measured gain is kept apart in `solvi.experimental`, each piece with what it is missing and a deadline; see the
+[roadmap](../ROADMAP.md) for what comes next.
