@@ -1,0 +1,215 @@
+{
+ "what": "solvi.core.knowledge.ConservativeActionModel on \u03c4-bench retail probes (no LLM)",
+ "quick": false,
+ "train_tasks": 400,
+ "reserved_tasks": 100,
+ "test_tasks": 115,
+ "train_transitions": 41626,
+ "train_refused": 26772,
+ "replay_training_transitions": {
+  "right": 41626
+ },
+ "unexplained_training_refusals": {
+  "cancel_pending_order": 0,
+  "exchange_delivered_order_items": 0,
+  "modify_pending_order_address": 0,
+  "modify_pending_order_items": 0,
+  "modify_pending_order_payment": 0,
+  "modify_user_address": 0,
+  "return_delivered_order_items": 0,
+  "transfer_to_human_agents": 0
+ },
+ "heldout": {
+  "n": 11763,
+  "refused": 7626,
+  "answered": 11733,
+  "abstain": 30,
+  "abstain_share": 0.002550369803621525,
+  "tp": 7602,
+  "fp": 0,
+  "fn": 0,
+  "precision": 1.0,
+  "recall": 1.0,
+  "recall_strict": 0.996852871754524
+ },
+ "heldout_by_tool": {
+  "cancel_pending_order": {
+   "n": 1430,
+   "refused": 988,
+   "answered": 1428,
+   "abstain": 2,
+   "abstain_share": 0.0013986013986013986,
+   "tp": 986,
+   "fp": 0,
+   "fn": 0,
+   "precision": 1.0,
+   "recall": 1.0,
+   "recall_strict": 0.9979757085020243
+  },
+  "exchange_delivered_order_items": {
+   "n": 1876,
+   "refused": 1633,
+   "answered": 1871,
+   "abstain": 5,
+   "abstain_share": 0.0026652452025586353,
+   "tp": 1628,
+   "fp": 0,
+   "fn": 0,
+   "precision": 1.0,
+   "recall": 1.0,
+   "recall_strict": 0.9969381506429884
+  },
+  "modify_pending_order_address": {
+   "n": 1382,
+   "refused": 829,
+   "answered": 1378,
+   "abstain": 4,
+   "abstain_share": 0.002894356005788712,
+   "tp": 829,
+   "fp": 0,
+   "fn": 0,
+   "precision": 1.0,
+   "recall": 1.0,
+   "recall_strict": 1.0
+  },
+  "modify_pending_order_items": {
+   "n": 1942,
+   "refused": 1635,
+   "answered": 1933,
+   "abstain": 9,
+   "abstain_share": 0.004634397528321318,
+   "tp": 1626,
+   "fp": 0,
+   "fn": 0,
+   "precision": 1.0,
+   "recall": 1.0,
+   "recall_strict": 0.9944954128440368
+  },
+  "modify_pending_order_payment": {
+   "n": 1106,
+   "refused": 1061,
+   "answered": 1105,
+   "abstain": 1,
+   "abstain_share": 0.0009041591320072332,
+   "tp": 1060,
+   "fp": 0,
+   "fn": 0,
+   "precision": 1.0,
+   "recall": 1.0,
+   "recall_strict": 0.9990574929311969
+  },
+  "modify_user_address": {
+   "n": 1114,
+   "refused": 23,
+   "answered": 1112,
+   "abstain": 2,
+   "abstain_share": 0.0017953321364452424,
+   "tp": 23,
+   "fp": 0,
+   "fn": 0,
+   "precision": 1.0,
+   "recall": 1.0,
+   "recall_strict": 1.0
+  },
+  "return_delivered_order_items": {
+   "n": 1817,
+   "refused": 1457,
+   "answered": 1810,
+   "abstain": 7,
+   "abstain_share": 0.003852504127682994,
+   "tp": 1450,
+   "fp": 0,
+   "fn": 0,
+   "precision": 1.0,
+   "recall": 1.0,
+   "recall_strict": 0.9951956074124915
+  },
+  "transfer_to_human_agents": {
+   "n": 1096,
+   "refused": 0,
+   "answered": 1096,
+   "abstain": 0,
+   "abstain_share": 0.0,
+   "tp": 0,
+   "fp": 0,
+   "fn": 0,
+   "precision": null,
+   "recall": null,
+   "recall_strict": null
+  }
+ },
+ "status_effect": {
+  "exact": 2585,
+  "wrong": 2,
+  "unknown": 1544,
+  "exact_share": 0.9992269037495168,
+  "note": "the touched order's new status and whether a user record changed \u2014 narrower than the research run's full entity diffs (amounts, refunds, item lists)"
+ },
+ "ablations_heldout": {
+  "no pair features": {
+   "unexplained_training_refusals": 163,
+   "heldout": {
+    "n": 11763,
+    "refused": 7626,
+    "answered": 11454,
+    "abstain": 309,
+    "abstain_share": 0.02626880897730171,
+    "tp": 7330,
+    "fp": 0,
+    "fn": 0,
+    "precision": 1.0,
+    "recall": 1.0,
+    "recall_strict": 0.961185418305796
+   }
+  },
+  "no money comparisons": {
+   "unexplained_training_refusals": 228,
+   "heldout": {
+    "n": 11763,
+    "refused": 7626,
+    "answered": 10508,
+    "abstain": 1255,
+    "abstain_share": 0.10669047011816714,
+    "tp": 6486,
+    "fp": 1,
+    "fn": 0,
+    "precision": 0.9998458455372283,
+    "recall": 1.0,
+    "recall_strict": 0.8505114083398898
+   }
+  },
+  "no pair features, no money comparisons": {
+   "unexplained_training_refusals": 391,
+   "heldout": {
+    "n": 11763,
+    "refused": 7626,
+    "answered": 10246,
+    "abstain": 1517,
+    "abstain_share": 0.1289636997364618,
+    "tp": 6228,
+    "fp": 1,
+    "fn": 0,
+    "precision": 0.9998394605875742,
+    "recall": 1.0,
+    "recall_strict": 0.8166797797010228
+   }
+  }
+ },
+ "research_run_for_comparison": {
+  "precision": 1.0,
+  "recall": 1.0,
+  "refused_heldout": 7626,
+  "answered_refusals": 7602,
+  "heldout": 11763,
+  "abstain": 30,
+  "abstain_share": 0.0026,
+  "recall_strict": 0.997,
+  "effects_exact": "4,116 / 4,116 (full entity diffs)",
+  "ablations_abstain_share": {
+   "no pair features": 0.026,
+   "no money comparisons": 0.126,
+   "no pair features, no money comparisons": 0.151
+  }
+ },
+ "seconds": 82.6
+}

@@ -1,0 +1,100 @@
+{
+ "none": {
+  "achievements_first_world": 5.4,
+  "achievements_last_third": 5.4,
+  "steps_to_stone_last_third": 33.63333333333333,
+  "s1_share_last_third": 0.33066666666666666,
+  "failed_per_100_steps": 16.522222222222222,
+  "wasted_per_100_steps": 16.988888888888887,
+  "actions_past_a_gate": 0,
+  "repeat_failures": 0,
+  "repeat_failures_per_100_steps": 0.0
+ },
+ "km": {
+  "achievements_first_world": 5.4,
+  "achievements_last_third": 6.0,
+  "steps_to_stone_last_third": 15.55,
+  "s1_share_last_third": 0.5937777777777777,
+  "failed_per_100_steps": 0.011111111111111112,
+  "wasted_per_100_steps": 0.6777777777777778,
+  "actions_past_a_gate": 0,
+  "repeat_failures": 0,
+  "repeat_failures_per_100_steps": 0.0
+ },
+ "none_agenda": {
+  "achievements_first_world": 6.0,
+  "achievements_last_third": 5.766666666666667,
+  "steps_to_stone_last_third": 15.55,
+  "s1_share_last_third": 0.4846666666666667,
+  "failed_per_100_steps": 0.0,
+  "wasted_per_100_steps": 0.5888888888888889,
+  "actions_past_a_gate": 0,
+  "repeat_failures": 0,
+  "repeat_failures_per_100_steps": 0.0
+ },
+ "km_agenda": {
+  "achievements_first_world": 6.0,
+  "achievements_last_third": 5.966666666666667,
+  "steps_to_stone_last_third": 15.55,
+  "s1_share_last_third": 0.5857777777777777,
+  "failed_per_100_steps": 0.0,
+  "wasted_per_100_steps": 0.6555555555555556,
+  "actions_past_a_gate": 0,
+  "repeat_failures": 0,
+  "repeat_failures_per_100_steps": 0.0
+ },
+ "km_place": {
+  "achievements_first_world": 5.1,
+  "achievements_last_third": 5.9,
+  "steps_to_stone_last_third": 24.066666666666666,
+  "s1_share_last_third": 0.49577777777777776,
+  "failed_per_100_steps": 8.355555555555556,
+  "wasted_per_100_steps": 8.988888888888889,
+  "actions_past_a_gate": 0,
+  "repeat_failures": 0,
+  "repeat_failures_per_100_steps": 0.0
+ },
+ "proposer": {
+  "achievements_first_world": 1.0,
+  "achievements_last_third": 0.9666666666666667,
+  "steps_to_stone_last_third": 150.0,
+  "s1_share_last_third": 0.0,
+  "failed_per_100_steps": 68.3,
+  "wasted_per_100_steps": 68.3,
+  "actions_past_a_gate": 0,
+  "repeat_failures": 8743,
+  "repeat_failures_per_100_steps": 29.344444444444445
+ },
+ "proposer_fm": {
+  "achievements_first_world": 1.0,
+  "achievements_last_third": 1.0,
+  "steps_to_stone_last_third": 150.0,
+  "s1_share_last_third": 0.0,
+  "failed_per_100_steps": 53.455555555555556,
+  "wasted_per_100_steps": 53.455555555555556,
+  "actions_past_a_gate": 0,
+  "repeat_failures": 231,
+  "repeat_failures_per_100_steps": 0.5333333333333333
+ },
+ "changed_world": {
+  "achievements_A_first": 5.3,
+  "achievements_A_last": 6.0,
+  "achievements_B_first": 6.0,
+  "achievements_B_last": 6.0,
+  "map_dropped_in_B": 10,
+  "claims_dropped": 18.6,
+  "claims_refuted_in_B": 10.2,
+  "s1_moves_on_wrong_claims_before_drop_B": 10,
+  "s1_moves_on_wrong_claims_after_drop_B": 0,
+  "streams": 10,
+  "verify": true
+ },
+ "journals_verify": true,
+ "config": {
+  "streams": 10,
+  "worlds": 20,
+  "steps": 150,
+  "s2_budget": 60,
+  "seconds": 30.8
+ }
+}
