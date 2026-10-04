@@ -60,7 +60,7 @@ from pydantic import BaseModel, ConfigDict, Field, create_model
 from . import _deprecate
 # limits, request errors, JSON within the limits, the incident message, the bounded line reader: solvi._rpc since 1.0
 # (shared with the MCP proxy, which then does not import the server); re-exported here
-from ._rpc import BadRequest, Busy, Limits, NotFound, RequestError, _readline, internal_error, log, parse_json, too_deep  # noqa: F401
+from ._rpc import CONTEXT_CHARS, CONTEXT_MESSAGES, BadRequest, Busy, Limits, NotFound, RequestError, _readline, internal_error, log, parse_json, too_deep  # noqa: F401
 from ._command import fail as _fail, load_object, load_system
 from .core._inputs import _camel, _fact_type, input_model, input_schema, question_inputs   # noqa: F401 — re-exported
 from .core.runtime import trace_hash   # noqa: F401 — re-exported (defined there: agents read it too)
@@ -1070,7 +1070,6 @@ def add_parser(sub):
     s.add_argument("--escalate", default="elicit", choices=["elicit", "deny"],
                    help="with --guard: ask the user about an escalated call (MCP elicitation, when the client supports it) "
                         "or return it as an error")
-    from .experimental.mcp import CONTEXT_CHARS, CONTEXT_MESSAGES
     s.add_argument("--context-messages", type=int, default=CONTEXT_MESSAGES, metavar="N",
                    help=f"with --guard: the tool outputs the session keeps for checking (default {CONTEXT_MESSAGES}; 0: all)")
     s.add_argument("--context-chars", type=int, default=CONTEXT_CHARS, metavar="N",

@@ -54,13 +54,12 @@ import subprocess
 import sys
 
 from .. import _deprecate
+from .._rpc import CONTEXT_CHARS, CONTEXT_MESSAGES   # defined there: solvi serve's options show them
 from ..solutions.guard import Guard, ToolCall, _text, proposal
 from . import warn_on_import
 
 warn_on_import(__name__)
 
-CONTEXT_MESSAGES = 50            # the tool outputs the proxy's session keeps for checking
-CONTEXT_CHARS = 100_000          # ... and their characters in all
 log = logging.getLogger("solvi.agents")
 
 PROTOCOL = "2025-06-18"

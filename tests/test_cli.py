@@ -811,3 +811,17 @@ def test_options_a_mode_does_not_read_are_refused_not_ignored(tmp_path, capsys):
     with pytest.raises(SystemExit):
         main(["ask", "nomodule:system", "--state", "{}", "--report", "md", "--audit"])
     assert "a report is one document — drop --audit" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize("argv", [["--help"], ["migrate", "-h"], ["serve", "-h"], ["--version"]])
+def test_help_imports_nothing_experimental(argv):
+    """`solvi <command> -h` builds every subcommand's parser: none of them may import an experimental module (its
+    ExperimentalWarning would print on every help). solvi.experimental.mcp loads only when `serve --guard` runs."""
+    import subprocess
+    code = ("import sys, warnings; warnings.simplefilter('error')\n"
+            "from solvi.cli import main\n"
+            "try:\n    main(sys.argv[1:])\nexcept SystemExit as e:\n    assert not e.code, e.code\n"
+            "print('experimental loaded:', sorted(m for m in sys.modules if m.startswith('solvi.experimental.')))")
+    out = subprocess.run([sys.executable, "-c", code, *argv], capture_output=True, text=True, timeout=120)
+    assert out.returncode == 0 and "Warning" not in out.stderr, out.stderr[-2000:]
+    assert out.stdout.strip().endswith("experimental loaded: []"), out.stdout[-500:]

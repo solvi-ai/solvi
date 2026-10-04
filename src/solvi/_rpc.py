@@ -12,6 +12,11 @@ from typing import Optional
 
 log = logging.getLogger("solvi.serve")
 
+# the guard proxy's session context (solvi.experimental.mcp): here, so that `solvi serve`'s options can show the defaults
+# without importing the experimental module (and its warning) on every `solvi <command> -h`
+CONTEXT_MESSAGES = 50            # the tool outputs the proxy's session keeps for checking
+CONTEXT_CHARS = 100_000          # ... and their characters in all
+
 
 @dataclass
 class Limits:
@@ -110,4 +115,4 @@ def _readline(stdin, limit):
             return "", True
 
 
-__all__ = ["BadRequest", "Busy", "Limits", "NotFound", "RequestError", "internal_error", "parse_json", "too_deep"]
+__all__ = ["BadRequest", "Busy", "CONTEXT_CHARS", "CONTEXT_MESSAGES", "Limits", "NotFound", "RequestError", "internal_error", "parse_json", "too_deep"]
