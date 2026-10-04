@@ -59,7 +59,15 @@ class RiskDecision:
 
 @runtime_checkable
 class RiskPolicy(Protocol):
-    """decide(action, prediction, gain=0.0, *, key=None) → RiskDecision; new_episode()."""
+    """What to do with a prediction.
+
+    You implement: `decide(action, prediction, gain=0.0, *, key=None) → RiskDecision` (take / avoid / ask_s2 with its
+    reason, the risk, support, gain and budget left) and `new_episode()`.
+
+    You get for free: every decision on a refused or unknown action recorded with its rationale; a hard prediction is
+    yours to never take (Protect and RiskBudget never do).
+
+    Stability: stable."""
 
     def decide(self, action, prediction, gain=0.0, *, key=None) -> RiskDecision: ...
 

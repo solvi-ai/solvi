@@ -79,7 +79,17 @@ class Prediction:
 
 @runtime_checkable
 class ActionModel(Protocol):
-    """observe what the environment did; predict accept / refuse / unknown with risk and support; fingerprint."""
+    """What an environment accepts, refuses and changes.
+
+    You implement: `observe(state, action, args, accepted, effect=None)` (what the environment did),
+    `predict(state, action, args) → Prediction` (verdict accept / refuse / unknown, risk, support, reason, hard,
+    effects) and `fingerprint()` (changes with what it learned).
+
+    You get for free: its refusals as hard checks, "unknown" handed to System 2 or a person, the prediction compared
+    with the outcome, a risk policy deciding on its estimate; `solvi.testing.conformance.check_action_model` checks it.
+
+    Stability: stable (ConservativeActionModel's scope: vocabulary-bound, learns what the environment checks,
+    sufficient conditions not promised to transfer)."""
 
     def observe(self, state, action, args, accepted, effect=None): ...
 

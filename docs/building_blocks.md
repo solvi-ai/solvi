@@ -47,6 +47,12 @@ def test_my_store(tmp_path):
 | [`Space`](#space) | protocol | `root`, `children(node)` (+ `complete`, `bound`) | pruning by checks, lean asks, budget, exactness, replay | via `check_slow_path` | stable |
 | [`SlowPath`](#slowpath) | base class | `mode`, `think(...) → Thought`, `fingerprint()` | routing, budgets, cost, calibration per slice, dispatch record, replay, report | `check_slow_path` | stable to use, provisional to subclass |
 | [`Environment`](#environment) | protocol | `reset(seed)`, `actions(state)`, `step(action) → Outcome` | what the environment agent does (coming with `solvi.Agent`) | `check_environment` | stable to use, provisional to implement |
+| [`KnowledgeStore`](#knowledge) | concrete | — (any `TraceStorage` backend underneath) | source check, disputes to a person, exact retraction cascade, staleness flags, snapshots that replay, redecide | `check_storage` (its backend) | stable |
+| [`WriteGate`](#knowledge) | protocol | `admit(store, item, shadow) → Verdict` | runs after the source check on every proposal, verdict journaled, holds behaviour-changing items | — | stable |
+| [`ActionModel`](#knowledge) | protocol | `observe(...)`, `predict(state, action, args) → Prediction`, `fingerprint()` | refusals as hard checks, unknown → System 2, prediction vs outcome recorded | `check_action_model` | stable (scope stated) |
+| [`Vocabulary`](#knowledge) | value | `{name: predicate(state, args)}`, `hard=` | predicate fingerprints in every action item | — | stable |
+| [`Agenda`](#knowledge) | concrete | done checks and gate checks in code | open / blocked / done, journaled, no action past a gate, overrides, `dry_run` | — | stable |
+| [`RiskPolicy`](#knowledge) | protocol | `decide(action, prediction, gain, key=) → RiskDecision`, `new_episode()` | every risky decision recorded; `Protect` default, `RiskBudget` option | — | stable |
 | [`System`, `Response`, `Dispatcher`](#system-response-dispatcher) | concrete | — | — | — | stable (final) |
 
 The catalog's own extension point is the function part (`cat.fn`, `cat.extract`, `cat.check`, `cat.rule`,
@@ -312,6 +318,32 @@ them, extend them through what they take. Their references: [solvi](api/solvi.md
 
 ## Knowledge
 
-The knowledge memory's extension points (the store, the write gate, the action model, the condition vocabulary, the
-agenda, the risk policy) join this page with `solvi.core.knowledge`; `solvi.testing.conformance.check_action_model` is
-their check.
+What a system knows across decisions (`solvi.core.knowledge`; the guide's
+[Knowledge](guide.md#knowledge-what-a-system-learned-and-from-whom) section shows the pieces together).
+
+- **`KnowledgeStore`** (concrete, stable): a hash-chained journal of facts, rules, skills, actions and episodes over any
+  `TraceStorage` — yours included — or in memory. You get the source check (never the system's own answers), disputes
+  to a person, the exact retraction cascade, staleness flags, `snapshot` for decisions (with the store's fingerprint,
+  so they replay), `redecide`, `verify` and `rebuild`. A store of your own backend is checked by `check_storage`.
+- **`WriteGate`** (protocol, stable): `admit(store, item, shadow) → Verdict(admit, reason, measured)`. Your gate runs
+  after the built-in source check on every proposed item; its verdict is journaled; holding a rule, skill or action
+  keeps it a hypothesis.
+- **`ActionModel`** (protocol, stable): `observe(state, action, args, accepted, effect)`, `predict(state, action, args) →
+  Prediction(verdict, risk, support, reason, hard, effects)`, `fingerprint()`. A model of your own — read from a game's
+  data file, say — plugs in where `ConservativeActionModel` does: its refusals become hard checks, "unknown" goes to
+  System 2, its prediction is compared with what happened. `check_action_model(make, transitions, held_out=)` checks
+  the Predictions, determinism, the fingerprint, and that it never contradicts an outcome it observed.
+  `ConservativeActionModel` is stable with its scope stated: vocabulary-bound, it learns what the environment checks,
+  and sufficient conditions are not promised to transfer to another world.
+- **`Vocabulary`** (value, stable): `{name: predicate(state, args)}`, `hard=` names that are hard rules; the
+  predicates' code fingerprints are in every action item.
+- **`Agenda`** (concrete, stable): `goal(name, done=, requires=, gates=)`, `gate(name, check, blocks=)`; you write the
+  done checks and gate checks in code; you get open / blocked / done, every state change journaled, no action past a
+  gate, person overrides, and `dry_run` to validate a gate on recorded successes.
+- **`RiskPolicy`** (protocol, stable): `decide(action, prediction, gain, key=) → RiskDecision`, `new_episode()`.
+  `Protect` (the default) keeps the verdict; `RiskBudget` takes justified risks within a per-episode budget and never
+  a hard prediction. A policy of your own receives every prediction with its risk and support and must record why.
+
+Reference: [`solvi.core.knowledge`](api/knowledge.md) and its modules ([store](api/knowledge_store.md),
+[gates](api/knowledge_gates.md), [actions](api/knowledge_actions.md), [risk](api/knowledge_risk.md),
+[agenda](api/knowledge_agenda.md), [failures](api/knowledge_failures.md)).

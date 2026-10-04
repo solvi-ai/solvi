@@ -17,7 +17,8 @@ text), environment, primitives, sets, calibration and calibfile, costs, sources,
 parts: the decider, LLMs, System One, cascades and votes, learned heads, rule lists), extract (long texts), plan
 (strategists); guarantees (calibrated promises, drift, open-set, monitors); store (the decision store, audit, diff,
 reports, signatures) and response; system (System); slow (generation, agreement, refine, search) and dispatch (the fast
-and the slow path); knowledge (world map, episodes, memory). A module imports only its own area's tier or the ones
+and the slow path); knowledge (the knowledge store, write gates, action model, risk policies, agenda, failure memory,
+world map, episodes, memory of corrections). A module imports only its own area's tier or the ones
 below it. In 0.9 `solvi.core` was the catalog module; its public names are still here."""
 from .catalog import (NOT_STATED, NOT_STATED_KEY, PRIMITIVES, Answer, AnswerType, Catalog, Claim, Decision,
                       ExperimentalWarning, NotStated, Part, Question, Quote, Serial, Unknown, accept, accepts, bin_labels,
@@ -55,8 +56,13 @@ EXTENSION_POINTS = {
     # environments (the environment agent)
     "Environment": "solvi.core.environment",
     "Outcome": "solvi.core.environment",
-    # knowledge (lane km10, solvi.core.knowledge): KnowledgeStore, WriteGate, ActionModel, Vocabulary, Agenda,
-    # RiskPolicy — added here and to __all__ by that lane
+    # knowledge: the store, the write gate, the action model and its vocabulary, the agenda, the risk policy
+    "KnowledgeStore": "solvi.core.knowledge.store",
+    "WriteGate": "solvi.core.knowledge.gates",
+    "ActionModel": "solvi.core.knowledge.actions",
+    "Vocabulary": "solvi.core.knowledge.actions",
+    "Agenda": "solvi.core.knowledge.agenda",
+    "RiskPolicy": "solvi.core.knowledge.risk",
 }
 
 
@@ -90,5 +96,4 @@ __all__ = ["ExperimentalWarning", "NOT_STATED", "accept", "accepts", "Answer", "
            "Scorer", "Decider", "Adapter", "Head", "Extractor", "Strategist", "DefaultStrategist", "Monitor",
            "TraceStorage", "Response", "System", "Fail", "Proposer", "Space", "SlowPath", "AskPath", "RefinePath",
            "SearchPath", "Thought", "Dispatcher", "Environment", "Outcome",
-           # knowledge (lane km10): KnowledgeStore, WriteGate, ActionModel, Vocabulary, Agenda, RiskPolicy
-           ]
+           "KnowledgeStore", "WriteGate", "ActionModel", "Vocabulary", "Agenda", "RiskPolicy"]

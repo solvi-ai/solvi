@@ -420,9 +420,59 @@ def test_an_environment_conforms():
     cf.check_environment(Corridor, steps=3)                             # "left" at the wall: refused, state kept
 
 
-def test_the_action_model_check_is_a_slot_for_the_knowledge_lane():
-    with pytest.raises(NotImplementedError, match="knowledge"):
-        cf.check_action_model()
+def _shop_transitions(n, seed):
+    import random
+    rng = random.Random(seed)
+    out = []
+    for _ in range(n):
+        st = {"status": rng.choice(["pending", "delivered", "cancelled"]), "paid": rng.choice(["card", "gift"])}
+        action = rng.choice(["cancel", "refund"])
+        args = {"method": rng.choice(["card", "gift"])}
+        ok = st["status"] == "pending" if action == "cancel" else args["method"] == st["paid"]
+        out.append((st, action, args, ok, {"status": "cancelled"} if ok and action == "cancel" else None))
+    return out
+
+
+def _shop_vocabulary():
+    from solvi.core.knowledge import Vocabulary
+    return Vocabulary({"status": lambda s, a: s["status"], "original": lambda s, a: a["method"] == s["paid"]})
+
+
+def test_the_conservative_action_model_conforms():
+    from solvi.core.knowledge import ConservativeActionModel
+    rep = cf.check_action_model(lambda: ConservativeActionModel(_shop_vocabulary()), _shop_transitions(200, 1),
+                                held_out=_shop_transitions(200, 2))
+    assert rep["transitions"] == 200 and rep["held_out"]["refusal_precision"] == 1.0
+    assert rep["held_out"]["refusal_recall"] == 1.0
+
+
+def test_an_action_model_that_contradicts_what_it_saw_or_is_not_deterministic_fails():
+    from solvi.core.knowledge import Prediction
+
+    class Optimist:                                   # accepts everything, whatever the environment said
+        def observe(self, state, action, args, accepted, effect=None):
+            self.n = getattr(self, "n", 0) + 1
+
+        def predict(self, state, action, args):
+            return Prediction("accept", 0.0, 0, "always")
+
+        def fingerprint(self):
+            return f"optimist:{getattr(self, 'n', 0)}"
+    with pytest.raises(cf.ConformanceError, match="contradicts"):
+        cf.check_action_model(Optimist, _shop_transitions(50, 3))
+
+    class Moody(Optimist):                            # its answer depends on how often it was asked: not reproducible
+        def predict(self, state, action, args):
+            self.calls = getattr(self, "calls", 0) + 1
+            return Prediction("refuse" if self.calls > 5 else "unknown")
+    with pytest.raises(cf.ConformanceError, match="same predictions"):
+        cf.check_action_model(Moody, [t for t in _shop_transitions(50, 4) if not t[3]])
+
+    class NotAModel:
+        def predict(self, state, action, args):
+            return "accept"
+    with pytest.raises(cf.ConformanceError, match="lacks observe"):
+        cf.check_action_model(NotAModel, [])
 
 
 def test_every_protocol_is_runtime_checkable_and_names_its_promise():

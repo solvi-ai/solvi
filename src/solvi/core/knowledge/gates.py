@@ -47,7 +47,15 @@ class Verdict:
 
 @runtime_checkable
 class WriteGate(Protocol):
-    """A write gate: admit(store, item, shadow) → Verdict (admit, reason, measured)."""
+    """A write gate of the knowledge store.
+
+    You implement: `admit(store, item, shadow) → Verdict(admit, reason, measured)` — `item` is the proposal
+    (KnowledgeStore.proposal), `shadow` what the writer passed to `add(..., shadow=)`.
+
+    You get for free: it runs after the built-in source check on every proposed item; its verdict is journaled; a
+    refusal keeps a fact out, a hold keeps a rule, skill or action a hypothesis.
+
+    Stability: stable."""
 
     def admit(self, store, item, shadow) -> Verdict: ...
 

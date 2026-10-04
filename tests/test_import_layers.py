@@ -311,9 +311,12 @@ SURFACES = {
                    "Scorer", "Decider", "Adapter", "Head", "Extractor", "Strategist", "DefaultStrategist", "Monitor",
                    "TraceStorage", "Response", "System", "Fail", "Proposer", "Space", "SlowPath", "AskPath",
                    "RefinePath", "SearchPath", "Thought", "Dispatcher", "Environment", "Outcome",
-                   # knowledge (lane km10): "KnowledgeStore", "WriteGate", "ActionModel", "Vocabulary", "Agenda",
-                   # "RiskPolicy" — pinned here by that lane
-                   ],
+                   # knowledge (lane L5)
+                   "KnowledgeStore", "WriteGate", "ActionModel", "Vocabulary", "Agenda", "RiskPolicy"],
+    "solvi.core.knowledge": ["ActionModel", "Agenda", "ConservativeActionModel", "ConsistencyGate", "FailureMemory",
+                             "KINDS", "KnowledgeStore", "LearnedGate", "MISSING", "Prediction", "Protect",
+                             "RECONFIRM_DEFAULTS", "RiskBudget", "RiskDecision", "RiskPolicy", "SourceGate", "SOURCES",
+                             "Verdict", "Vocabulary", "WorldMap", "WriteGate"],
     "solvi.models": ["cached", "cached_path", "decider", "DecideModel", "kind_of", "llm", "load", "ModelError",
                      "PUBLISHED", "pull", "resolve", "systemone"],
     "solvi.solutions.decisions": ["DecisionSystem", "build"],

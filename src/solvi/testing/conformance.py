@@ -23,7 +23,8 @@ what it checked. solvi's own test suite runs every check on every built-in (test
                                                 replay
     check_monitor(make, stream, changed=None)   Monitor: reports, flagged, a change flagged, reset forgets it
     check_environment(make, seeds=(0, 1))       Environment: the same seed and actions give the same outcomes
-    check_action_model(...)                     ActionModel (solvi.core.knowledge): filled in by the knowledge lane
+    check_action_model(make, transitions, ...)  ActionModel: Predictions, determinism, the fingerprint moves with what it
+                                                learned, never contradicts an outcome it observed; held-out comparison
 """
 from __future__ import annotations
 
@@ -421,10 +422,66 @@ def check_environment(make, *, seeds=(0, 1), steps=30, policy=None):
 
 
 # ------------------------------------------------------------------------------------------------ ActionModel
-def check_action_model(*args, **kwargs):
-    """The ActionModel conformance check (solvi.core.knowledge: observe, predict → accept / refuse / unknown,
-    fingerprint): filled in by the knowledge lane, which defines the protocol."""
-    raise NotImplementedError("check_action_model comes with solvi.core.knowledge's ActionModel (knowledge lane)")
+def check_action_model(make, transitions, *, held_out=None):
+    """make: () → a fresh action model (solvi.core.knowledge.ActionModel); transitions: what an environment did —
+    [(state, action, args, accepted, effect)], observed in order; held_out: more of them, only predicted (the result
+    reports how the predictions compare). Checks: the protocol's methods; every prediction is a Prediction with a
+    verdict in accept / refuse / unknown, a risk ≥ 0 and an integer support, plain JSON in to_dict(); learning is
+    deterministic (two fresh models fed the same transitions give the same predictions and the same fingerprint);
+    what it learned changes its fingerprint; and it never contradicts an outcome it observed (on a (state, action, args)
+    the environment answered one way every time, it predicts that answer or "unknown" — never the other). → what was
+    checked, with the held-out comparison (precision and recall of refusals over answered ones, abstention)."""
+    from ..core.knowledge.actions import VERDICTS, ActionModel, Prediction
+    transitions = list(transitions)
+    m = make()
+    _ok(isinstance(m, ActionModel), f"{type(m).__name__} lacks observe / predict / fingerprint")
+    fresh_fp = m.fingerprint()
+    _ok(isinstance(fresh_fp, str) and fresh_fp, "fingerprint() → a non-empty string")
+
+    def valid(p):
+        _ok(isinstance(p, Prediction), f"predict() → a Prediction, not {type(p).__name__}")
+        _ok(p.verdict in VERDICTS, f"a verdict in {VERDICTS}, not {p.verdict!r}")
+        _ok(isinstance(p.risk, (int, float)) and math.isfinite(p.risk) and p.risk >= 0, "risk is a finite number ≥ 0")
+        _ok(isinstance(p.support, int) and not isinstance(p.support, bool), "support is an integer (-1: a spec's rate)")
+        _ok(isinstance(p.hard, bool), "hard is True or False")
+        _json(p.to_dict())
+        return p.verdict
+
+    for state, action, args, accepted, effect in transitions:
+        valid(m.predict(state, action, args))
+        m.observe(state, action, args, accepted, effect)
+    again = make()
+    for state, action, args, accepted, effect in transitions:
+        again.observe(state, action, args, accepted, effect)
+    _ok(again.fingerprint() == m.fingerprint(), "the same transitions give the same fingerprint")
+    if transitions:
+        _ok(m.fingerprint() != fresh_fp, "what the model learned changes its fingerprint")
+    seen = {}
+    for state, action, args, accepted, _ in transitions:
+        seen.setdefault(_vh([state, action, args]), (state, action, args, set()))[3].add(bool(accepted))
+    wrong = abstained = 0
+    for state, action, args, outcomes in seen.values():
+        v = valid(m.predict(state, action, args))
+        _ok(v == valid(again.predict(state, action, args)), "the same transitions give the same predictions")
+        if len(outcomes) != 1:
+            continue
+        ok = outcomes.pop()
+        abstained += v == "unknown"
+        if (v == "accept" and not ok) or (v == "refuse" and ok):
+            wrong += 1
+    _ok(wrong == 0, f"the model contradicts {wrong} outcome(s) it observed")
+    out = {"transitions": len(transitions), "distinct": len(seen), "abstained_on_own_data": abstained,
+           "deterministic": True}
+    if held_out is not None:
+        rows = [(valid(m.predict(s, a, x)), bool(acc)) for s, a, x, acc, _ in held_out]
+        ans = [(v, ok) for v, ok in rows if v != "unknown"]
+        tp = sum(1 for v, ok in ans if v == "refuse" and not ok)
+        fp = sum(1 for v, ok in ans if v == "refuse" and ok)
+        fn = sum(1 for v, ok in ans if v == "accept" and not ok)
+        out["held_out"] = {"n": len(rows), "abstained": len(rows) - len(ans),
+                           "refusal_precision": tp / (tp + fp) if tp + fp else None,
+                           "refusal_recall": tp / (tp + fn) if tp + fn else None}
+    return out
 
 
 __all__ = ["check_action_model", "check_decider", "check_environment", "check_extractor", "check_head",

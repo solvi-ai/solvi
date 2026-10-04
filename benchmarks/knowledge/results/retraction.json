@@ -1,0 +1,36 @@
+{
+ "items": 10000,
+ "journal": 16861,
+ "build": {
+  "labels": 2229,
+  "base": 4897,
+  "derived": 3594,
+  "second": 322,
+  "confirm": 584,
+  "promote": 223,
+  "resolve": 106,
+  "tick": 602,
+  "flag": 30,
+  "end_flag": 29,
+  "refused": 182
+ },
+ "counts_end": {
+  "disputed": 340,
+  "active": 5899,
+  "expired": 625,
+  "refuted": 204,
+  "retracted": 2146,
+  "hypothesis": 786
+ },
+ "retractions": 1000,
+ "equal": 1000,
+ "verify_end": true,
+ "component_median": 6057.0,
+ "component_max": 6057,
+ "t_retract_median_s": 0.18964999999999999,
+ "t_rebuild_median_s": 0.7932,
+ "t_retract_median_small_half_s": 0.0001,
+ "t_retract_median_large_half_s": 0.2365,
+ "spearman_component_time": 0.8774464232535703,
+ "seconds": 192.2
+}
