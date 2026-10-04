@@ -20,7 +20,14 @@ this reference lists what each module exports and the signatures.
 | [`solvi.core.slow.refine`](refine.md) | a check that says why (`Fail`); the loop propose → check → re-ask with the reasons → escalate |
 | [`solvi.experimental.compile`](compile.md) | a specification compiled by an LLM into catalog parts citing its clauses, accepted when two drafts agree and the spec's tests pass; a person for what the drafts dispute; versions, recompile, the decisions a change moves, an agent guard |
 | [`solvi.experimental.compile.sandbox`](sandbox.md) | code a model wrote, held to pure functions: ast allowlist, a subprocess with limits, a restricted load |
-| [`solvi.core.knowledge.memory`](memory.md) | a memory of corrected cases: nearest neighbours with an abstain threshold |
+| [`solvi.core.knowledge`](knowledge.md) | what a system knows across decisions: the knowledge store, write gates, the action model, risk policies, the agenda, the failure memory |
+| [`solvi.core.knowledge.store`](knowledge_store.md) | the knowledge store: a hash-chained journal of items with provenance, disputes, retraction, staleness flags, snapshots |
+| [`solvi.core.knowledge.gates`](knowledge_gates.md) | write gates: `WriteGate`, the source check, the consistency check |
+| [`solvi.core.knowledge.actions`](knowledge_actions.md) | the action model: accept / refuse / unknown with risk and support, learned over an explicit vocabulary |
+| [`solvi.core.knowledge.risk`](knowledge_risk.md) | protection (`Protect`), justified risk (`RiskBudget`), a bounded learned gate (`LearnedGate`) |
+| [`solvi.core.knowledge.agenda`](knowledge_agenda.md) | goals with done checks in code, gates, order; a dry run that validates gates |
+| [`solvi.core.knowledge.failures`](knowledge_failures.md) | do not repeat a plan that failed recently: a hard check with an expiry and a bound |
+| [`solvi.core.knowledge.memory`](memory.md) | a memory of corrected cases: nearest neighbours with an abstain threshold; with a store, its correction facts |
 | [`solvi.experimental.lora`](lora.md) | a LoRA adapter per question, fitted on a few hundred labelled examples |
 | [`solvi.experimental.learning`](learning.md) | learning from corrections with gates and rollback (experimental) |
 | [`solvi.experimental.oncalib`](oncalib.md) | recalibration on the fly from outcomes (experimental; the promise is not kept) |
@@ -33,7 +40,7 @@ this reference lists what each module exports and the signatures.
 | [`solvi.experimental.charts`](charts.md) | verified charts (preview): a text with numbers → an SVG in which every number is quoted from the text |
 | [`solvi.core.deciders.longdoc`](longdoc.md) | long texts: sections, BM25 retrieval, the window a decider reads |
 | [`solvi.core.knowledge.episodes`](episode.md) | an agent's memory (what was tried, what failed, what worked) as an input |
-| [`solvi.core.knowledge.worldmap`](worldmap.md) | a map of an environment an agent builds by acting: claims with provenance |
+| [`solvi.core.knowledge.worldmap`](worldmap.md) | a map of an environment an agent builds by acting: claims with provenance, a view over "leads_to" facts |
 | [`solvi.core.guarantees.drift`](drift.md) | drift: has the stream moved away from the one the thresholds were calibrated on? |
 | [`solvi.core.deciders.heads`](heads.md) | the learned answer heads: `System.fit`'s `FastHead` and `select_features`, `CandidateHead`, `Head` (`solvi.fast` up to 0.7) |
 | [`solvi.core.extract`](extract_long.md) | `@extract` by description for long documents (`LongSpanExtractor`; torch) |

@@ -71,6 +71,13 @@ nav:
       - solvi.experimental.compile: api/compile.md
       - solvi.experimental.compile.sandbox: api/sandbox.md
       - solvi.core.deciders.combine: api/multi.md
+      - solvi.core.knowledge: api/knowledge.md
+      - solvi.core.knowledge.store: api/knowledge_store.md
+      - solvi.core.knowledge.gates: api/knowledge_gates.md
+      - solvi.core.knowledge.actions: api/knowledge_actions.md
+      - solvi.core.knowledge.risk: api/knowledge_risk.md
+      - solvi.core.knowledge.agenda: api/knowledge_agenda.md
+      - solvi.core.knowledge.failures: api/knowledge_failures.md
       - solvi.core.knowledge.memory: api/memory.md
       - solvi.experimental.lora: api/lora.md
       - solvi.experimental.learning: api/learning.md

@@ -1235,9 +1235,6 @@ default.
 
 ### An agent's memory as an input: episodes
 
-> **Moving into the knowledge memory in 1.0.** This module will be folded into solvi's knowledge memory, and its API
-> may change then.
-
 A decision replays because it depends on its recorded input only. An agent that takes many steps keeps state between
 them — what it tried, where it has been — and when that state lives in the harness, the decisions stop replaying, the
 model does not see what was already tried, and every agent writes its own loop detection. `solvi.core.knowledge.episodes` keeps that
@@ -1267,7 +1264,8 @@ its JSON text, like an event's key).
 Say what progress is — a sub-goal reached — and not "something changed": a wrong action changes the page too, and then
 erases the memory of itself. Without the episode in its input a model proposes again what has already failed; the
 memory keeps it from that and keeps every step replayable, but it does not make a model-driven agent better than
-rules a person wrote for the same task — where such rules exist, use them.
+rules a person wrote for the same task — where such rules exist, use them. A finished episode can be kept in the
+knowledge store as a record (`ep.record(ks, outcome, stored_ids=...)`, see [Knowledge](#knowledge-what-a-system-learned-and-from-whom)).
 
 ### A map the agent builds: worldmap
 
@@ -1295,7 +1293,9 @@ action is a string, a number or a tuple of those (`("room", 3)`); `save()` and a
 anything else is refused when it is reported. Keep one map across the tasks: the gain is the map carried between
 tasks in a deep environment met again (a command line, a file tree, a documentation site). It does not shorten a
 first exploration, it does nothing where every state is one step away, and it does not choose which state a task
-needs.
+needs. With `knowledge=` the map's claims are also fact items of a knowledge store, `WorldMap.view(store)` is the map
+those facts give, and `m.drop(why)` turns a carried map's confirmed claims back into hypotheses when the world may
+have changed (see [Knowledge](#knowledge-what-a-system-learned-and-from-whom)).
 
 ### Candidates that change: a head over their features
 
@@ -1441,9 +1441,6 @@ for parts of one model). After changing a part, calibrate the combination again.
 
 ### A memory of corrections: solvi.core.knowledge.memory
 
-> **Moving into the knowledge memory in 1.0.** This module will be folded into solvi's knowledge memory, and its API
-> may change then.
-
 The cases people corrected are the best evidence of where a decider goes wrong. A memory of corrected cases keeps them
 and, at decision time, finds the nearest ones — a second signal next to the model, never a silent override:
 
@@ -1502,8 +1499,11 @@ a replay with the same state recomputes the proposal and compares it. `mem.save(
 keep it with the checkpoint's fingerprint and the question (another checkpoint or another question is refused: build it
 again with `learn_from`);
 `mem.remove(ids)` forgets cases found to be wrong; `attach(team, False)` detaches it. (Until 1.0 this was
-`team.memory(...)`; the method is gone — it raises an AttributeError naming `solvi.core.knowledge.memory.attach` — as the memory moves
-into the knowledge memory.)
+`team.memory(...)`; the method is gone — it raises an AttributeError naming `solvi.core.knowledge.memory.attach`.)
+With `attach(team, knowledge=ks)` the cases are the knowledge store's correction facts (source "person" for a human
+correction, "outcome", "spec" for a rule): `mem.retract(case_id, by=..., why=...)` takes one back in the store, a
+disputed or flagged correction is not used, and the journal says who taught what (see
+[Knowledge](#knowledge-what-a-system-learned-and-from-whom)).
 
 ### Loading a checkpoint
 
@@ -4409,6 +4409,231 @@ numbers depend on the order). The slow path's promise, when it has a guarantee, 
 examples — the inputs System 1 hands it are the hard ones, unlike an average calibration set, so measure the slow path's
 error on what it is actually given before you trust `think="s2"`.
 
+## Knowledge: what a system learned, and from whom
+
+`solvi.core.knowledge` is the low level of what a system knows across decisions: facts people told it, outcomes it
+observed, rules from a written spec, what an environment accepts and refuses, goals and gates, and the plans that
+failed. Every piece is plain data with a journal, so a decision can say what it was given, and a wrong item can be
+taken back with everything that rests on it. It never learns from the system's own unverified answers.
+
+### The knowledge store
+
+```python
+from solvi.core.knowledge import KnowledgeStore
+
+ks = KnowledgeStore("decisions.jsonl")          # the journal in any TraceStorage backend (or None: in memory)
+vip = ks.add("fact", {"s": "c17", "r": "tier", "o": "vip"}, source="person", by="crm")
+ks.add("fact", {"s": "c17", "r": "tier", "o": "regular"}, source="outcome")   # the world changed: the old fact is refuted
+res = system.ask({"ticket": text, "knowledge": ks.snapshot(about="c17")})      # given to a decision: in its trace
+ks.retract(vip, by="ann", why="wrong customer")                                # with everything derived from it
+changes, justification_only = ks.redecide(store, {vip}, system)                # what the retraction moves
+ks.verify(); ks.report()
+```
+
+An item is a fact (`{"s", "r", "o"}`), a rule, a skill, an action or an episode; its source is `"person"`,
+`"outcome"` (what really happened), `"spec"` (a written specification) or `"verified"` — a System 2 answer given alone
+under its guarantee, named by `of=<stored decision>` and checked in the store. Anything else is refused and the refusal
+is journaled: the system's own answers never become knowledge, by construction. `ks.item(id)` is the full record:
+kind, body, scope, source, who, evidence, `derived_from`, confidence counts (confirmations, refutations, uses, uses
+that were wrong, a guarantee level), status, version and `supersedes`, and two time ranges — when it held in the world
+(`valid=(since, until)`, as you give it) and when the store learned and invalidated it (journal positions).
+
+Contradictions resolve by rank: an observation refutes whatever it contradicts (the world changed), a higher-ranked
+source (outcome > person > spec > verified) refutes a lower one, a producer's new version (`supersedes=`) refutes the
+one it names. Anything else is a dispute: every side is `disputed`, none is given to System 1 as a fact, and one
+person question is opened per dispute event — the same two items disputed again after a resolution are asked again;
+`ks.disputes()` lists the open ones and `ks.resolve(key, value, by=...)` is the answer.
+
+A retraction is exact: the store after `retract(x)` has the fingerprint of the store rebuilt from its journal as if x
+had never been written (`ks.rebuild(skip={x})`). `benchmarks/knowledge/retraction.py` checks it on a synthetic store of
+10,000 items (facts, derivations up to depth 5, disputes, resolutions, promotions, clock expiry, drift flags):
+1,000 of 1,000 random retractions exact, and `verify()` true at the end. Nothing is deleted: the journal keeps every entry and its chain stays whole. A retraction's cost
+grows with the connected component it touches (premise edges and shared keys): there, a retraction touched a component of 6,057 of the 10,000 items at the median and took 0.19 s (rebuilding the whole store: 0.79 s); retractions in small components took about 0 s (Spearman ρ between component size and time 0.88). The store has been
+measured up to 10,000 items, not beyond.
+
+A decision is given `ks.snapshot(...)` as a fact: the active items that match (`facts`), the hints (hypotheses, expired
+or stale items, with why), the ids they rest on, the store's fingerprint and its journal position — so the trace shows
+what the memory said, and the decision replays. `ks.redecide(store, retracted, decide)` finds the stored decisions whose
+snapshot rested on retracted items, re-builds each snapshot as it would have been without them, re-runs the decision on
+the old and the new snapshot, and splits the list into "the answer changes" (for a reviewer) and "only the
+justification changes" (recorded). The journal can share the decisions' TraceStorage: records of kind "knowledge" in the
+same hash chain; `store.iter()` and the reports read decisions only.
+
+### Staleness: flags, expiry and rollback
+
+```python
+flag = ks.flag(scope={"question": "intent"}, why="open-set gate: new kinds of input")   # a drift flag
+ks.stale(item)          # True while a pending flag covers it: read the flag, not the status
+ks.rollback(update, by="supervision", why="coverage loss")   # the previous version comes back — only as a hint
+ks.end_flag(flag, by="ann", why="re-confirmed on 30 new labels")
+```
+
+A flag (a drift or open-set flag, `reconfirm(id)` for one item) makes the items it covers that were learned before it
+hints, not facts, until a newer observation or a person confirms each one, or the flag ends. Two rules close the holes a
+stream with an abrupt shift showed in the research behind this store: a rollback while a flag covers the rolled-back
+version (or its scope) restores the previous version only as a hint — a stale version is never restored as a fact —
+and staleness is read from the flags (`stale`, `usable`), never from the item's status, which a later write can set
+back. `reconfirm_after` (per kind and source, `RECONFIRM_DEFAULTS`; the store's clock moves with `tick`) expires items
+that weaker evidence keeps: a "verified" fact after 2,000 decisions; observations, person labels and spec facts have no
+clock — the next contradicting observation refutes them. A fact nobody observes again stays believed: a world where a
+first contact is costly needs a clock of its own.
+
+What a flag does not do: it does not close the window between an abrupt shift and its detection. A calibrated promise
+("≤ 5% wrong among the answers given alone") does not hold in the first decisions after an abrupt shift to unseen
+inputs, before any monitor flags it (see [the output](#the-output-probabilities-calibrated-confidence-act-or-escalate)).
+
+### Write gates
+
+`KnowledgeStore(gates=[...])` takes `WriteGate`s — `admit(store, item, shadow) → Verdict(admit, reason, measured)`.
+`SourceGate` (the source check) always runs first; `ConsistencyGate` refuses an item whose premises are missing,
+retracted or refuted, or that would refute its own premise. A fact or an episode a gate admits is present at once; a
+rule, a skill or an action (behaviour-changing kinds) is promoted with every gate's verdict in the journal, and one a
+later gate holds stays a hypothesis. The shadow gate — measure a behaviour-changing item on a shadow of the system
+before it is promoted — is experimental: `solvi.experimental.learning.ShadowGate`.
+
+### The action model: what the environment accepts
+
+```python
+from solvi.core.knowledge import ConservativeActionModel, Vocabulary
+
+vocab = Vocabulary({"status": lambda state, args: state["orders"][args["order_id"]]["status"],
+                    "own_method": lambda state, args: args["payment_id"] in state["user"]["methods"]},
+                   hard=set())                    # names whose violation is a hard rule, never traded
+model = ConservativeActionModel(vocab, store=ks)
+model.observe(state, "cancel_order", args, accepted=False)          # what the environment did
+p = model.predict(state, "cancel_order", args)
+p.verdict, p.risk, p.support, p.reason, p.hard, p.effects            # "accept" | "refuse" | "unknown", ...
+model.commit()                                                       # each action's model as an "action" item
+```
+
+Per action, the values each condition took in accepted calls are allowed; a refused call is explained by the conditions
+whose value was never accepted, and the minimal such sets are its refusal signatures. `predict` says "accept" when
+every condition holds an allowed value, "refuse" when the violated conditions contain a signature, and "unknown"
+otherwise — "unknown" goes to System 2 or a person. A condition that cannot be read on a state (an entity not looked up)
+is never allowed until an accepted call shows it, so the model says "unknown" there. The vocabulary is an explicit
+argument and its predicates' fingerprints are in every action item.
+
+Measured (`benchmarks/knowledge/taubench_action_model.py`, τ-bench retail, no LLM): probes around the gold steps of 400
+training tasks (41,626 transitions, 26,772 refused) and of the 115 test tasks (11,763 held-out transitions, 7,626
+refused). With a vocabulary of typed predicates from generic templates over the tools' JSON schema (existence, status, lengths, enums, pair features of two conditions on one argument, money comparisons), refusal precision and recall over the answered held-out transitions are
+1.000 and 1.000 (7,602 of 7,602 answered refusals, no false refusal), the model abstains on 30 (0.26%), and it replays all 41,626 training transitions. Without pair features it
+abstains on 2.6% (precision still 1.000); without money comparisons 10.7% and makes 1 false refusal (precision 0.9998); without both, 12.9% and again 1 false refusal. Read it this way:
+
+- **vocabulary-bound**: it learns only checks the vocabulary can express. That vocabulary was written by someone who
+  had read the tools' code; the result says what a conservative learner recovers given such a vocabulary, not that it
+  discovers the checks. When the vocabulary cannot explain a refusal, the model answers only condition vectors it has
+  seen exactly, and those answers can be wrong (the false refusals above);
+- **it learns what the environment checks**: a rule the environment does not enforce — confirm with the customer,
+  authenticate first, one customer per conversation — is never refused by it. Those come from a written policy:
+  agenda gates or hard checks;
+- **necessary conditions transfer, sufficient conditions are not promised to**: conditions that held at every success
+  by accident (an item carried, a place's name) make it over-conservative in a new world — "unknown", not wrong (the
+  `km_place` arm of the toy world below);
+- effects are predicted when every accepted call with the same condition values (else of the action) had the same
+  effect; on the τ-bench probes, the touched order's new status was exact on 2,585 of the 2,587 accepted calls it predicted an effect for (1,544 accepted calls got no effect prediction: their condition values had been seen with different effects).
+
+### Protection by default, justified risk as an option
+
+```python
+from solvi.core.knowledge import LearnedGate, Protect, RiskBudget
+
+policy = Protect()                                      # the default: refuse → avoid, unknown → System 2
+policy = RiskBudget(max_risk_per_episode=1.0, min_gain_ratio=1.0, min_support=3)
+d = policy.decide("descend", prediction, gain=0.3)      # RiskDecision: take / avoid / ask_s2, with the rationale
+policy.new_episode()
+
+gate = LearnedGate("depth", expiry=10, floor=lambda level: level + 1)
+gate.failed(context=level, level=depth); gate.arrived(level, depth, failed=False); gate.end_episode()
+gate.predict(level, depth)                              # a Prediction a policy decides on
+```
+
+Knowledge used only as hard gates removes the failures it targets and can cost a metric that rewards risk. Every
+prediction therefore carries a verdict and an estimate (risk, support); `Protect` keeps the verdict, `RiskBudget` takes a
+refused action when its expected gain is at least `min_gain_ratio` × its risk and the risk fits the episode's budget,
+sends a refusal resting on fewer than `min_support` cases to System 2, and never takes a hard prediction (an
+instant-harm or a policy rule) — in any mode. A gate learned from failures is bounded: it reads the last `expiry`
+episodes only, never falls below `floor`, and is reopened by evidence (recorded arrivals with a low failure rate).
+
+On a toy dungeon (`benchmarks/knowledge/risk_dungeon.py`, 20 streams × 30 games; a toy with hand-set hazards, not
+evidence about your domain): the mean deepest level was 3.47 without knowledge (482 deaths from the hazards the knowledge targets), 5.67 with `Protect` (40 such deaths) and 6.65 with `RiskBudget` (196 such deaths; 5.8 risky actions taken per game). From the first to the last third of the streams `Protect` fell from 6.74 to 5.02 as learned refusals accumulated, and with a gate that never expires and has no floor from 6.70 to 2.99 — the gate tightening itself — while `RiskBudget` went from 6.29 to 6.94. Measure `RiskBudget` on your own metric before you turn it on.
+
+### The agenda: goals, gates, order
+
+```python
+from solvi.core.knowledge import Agenda
+
+ag = Agenda(ks)                                         # goals and gates are rule items, goal states fact items
+ag.goal("authenticated", done=lambda s: s.get("user_id") is not None)
+ag.goal("exchanged", done=lambda s: s.get("status") == "exchange requested", requires=["authenticated"])
+ag.gate("auth_first", lambda s: s.get("user_id") is not None, blocks=["modify_*", "exchange_*"])
+ag.update(state)                                        # runs the done checks; every change is journaled
+ag.open(state), ag.blocked(state), ag.done()
+ok, why = ag.allows(state, "exchange_delivered_order_items")   # no action past a gate
+ag.override("auth_first", by="lead", why="verified by phone")  # a person, with a recorded reason
+report = ag.dry_run(recorded_successes)                 # [(state, action)] that worked → how often each gate blocks them
+```
+
+A goal is done only when its code check says so, never because a model claims it. A gate is a hard check over the state:
+`allows` refuses an action it blocks while its check is False, and a goal it blocks is not open. Validate a gate before
+you make it hard: a gate written from policy text ("remind the customer to confirm they listed every item") can block
+the calls a customer wanted. `dry_run` replays recorded successful actions through the gates and reports, per gate, how
+many it would have blocked; a gate that would have blocked many is not ready. In the toy world below the gates are the
+written rules, so "0 actions past a gate" holds by construction.
+
+### Failure memory: do not repeat what just failed
+
+```python
+from solvi.core.knowledge import FailureMemory
+
+fm = FailureMemory(window=20, unit="steps", max_blocked=8, min_open=1)
+fm.install(cat, plan="plan", then={"plan": "ask_person"})   # a hard check over the given fact "recent_failures"
+res = system.ask({"situation": s, **fm.given(options=plans)})
+fm.failed(plan, why="the door stayed shut")             # or fm.succeeded(plan): evidence reopens it
+fm.step()
+```
+
+A failure blocks its plan for `window` steps (or episodes), then expires; at most `max_blocked` plans are blocked at
+once, and given the plans on offer at least `min_open` stay open — a memory fed by its own failures cannot tighten
+without bound. The blocked plans are a given fact, so the check is a pure function and the decision replays.
+
+### The toy world: memory, agenda and failure memory together
+
+`benchmarks/knowledge/toy_crafting.py` runs the protocol of the research program's crafting-game runs on a toy world
+(8 places, 6 operators with the environment's own checks, 150 steps; 10 streams × 20 worlds) using only these pieces.
+It is not Crafter: Crafter installs, but the agent that played it there was a thousand lines of hand-written reflexes
+that are not part of solvi. Over the last third of each stream: 
+
+| arm | achievements (of 6) | steps to the first stone | System 1 share | failed attempts per 100 steps |
+|---|---|---|---|---|
+| nothing carried | 5.40 | 33.6 | 33% | 16.5 |
+| the action model carried across worlds | 6.00 | 15.6 | 59% | 0.01 |
+| nothing carried, agenda (gates = the written rules) | 5.77 | 15.6 | 48% | 0 |
+| carried, agenda | 5.97 | 15.6 | 59% | 0 |
+| carried, the place's name in the vocabulary | 5.90 | 24.1 | 50% | 8.4 |
+
+A proposer that does not learn (a random operator of an open goal, like a model asked again without memory) repeated
+a failure in the same situation within 10 steps 29.3 times per 100 steps; behind the failure memory's hard check, 0.53
+times. A changed world (5 episodes in world A, then 5 in world B with the map carried): the first contradicted arrival
+dropped the carried map on 10 of 10 streams (18.6 claims dropped, 10.2 refuted in B on average); System 1 walked a
+wrong carried claim once per stream — the move that found the change — and never after the drop. Every knowledge
+journal verified. The toy's numbers say the pieces work together as described; how much they gain depends on the
+environment and the agent around them.
+
+### The world map, episodes and corrections in the store
+
+`WorldMap(knowledge=ks, scope=...)` writes every claim with a destination as a `"leads_to"` fact (an arrival as an
+outcome, a document's claim as spec, a person's as person); `WorldMap.view(ks, scope)` is the map those facts give.
+`m.drop(why)` is what a drift flag does to a carried map: confirmed claims become hypotheses until the next arrival
+re-confirms or refutes them (with a store, a flag on the map's scope). `Episode.record(ks, outcome, stored_ids=...)`
+keeps a finished episode as an "episode" item — a record and evidence, never an answerer. `attach(part,
+knowledge=ks)` makes a memory of corrections whose cases are the store's correction facts: retracting one removes its
+case.
+
+What is not here, because it was measured and failed or was not measured: recalibrating System 1 continuously from
+memory (it broke the promise when the threshold was refitted), answering from episodes under a per-decision guarantee
+(no threshold could be certified), facts as a growth channel on classification and matching streams (no gain over a
+static System 1), compiling code from examples, and the knowledge memory at 10⁵–10⁶ items (not measured).
+
 ## System 1 and System 2 on a game: the Pokémon world map
 
 > A showcase of `solvi.core.dispatch` with a searching slow path and `solvi.core.knowledge.worldmap`; the player and the replay viewer
@@ -5106,6 +5331,10 @@ What it does not guarantee:
 - solvi answers closed questions — yes/no, a choice, ordered levels, several labels, "not stated", a span of the text, a
   ranking, an estimate. It does not generate free text.
 - New fields need labeled examples (extract-base's model card: about 25–100 documents per task).
+- The knowledge store keeps what it is told and observes, with its sources; it does not make a decider better on a
+  stream of classification or matching decisions, and a learned action model knows only what its vocabulary can express
+  and what the environment itself checks. Gates written from a policy can block correct actions: validate them on
+  recorded successes (`Agenda.dry_run`) before making them hard.
 
 Research note: in our experiments, an LLM could write a working catalog from a plain-language task description when every
 draft was executed against examples with known answers and errors were fed back (see [benchmarks](benchmarks.md#writing-catalogs-with-an-llm)).

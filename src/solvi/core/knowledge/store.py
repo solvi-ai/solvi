@@ -43,7 +43,7 @@ fingerprint and journal position, so every decision that is given it records the
 `redecide(storage, retracted, decide)` re-runs the decisions that rested on retracted items on their re-built snapshots
 and splits them into "answer changes" (to a reviewer) and "justification only" (recorded).
 
-Measured by benchmarks/knowledge/retraction.py: RETRACTION_DOC. Cost grows with the connected component a write
+Measured by benchmarks/knowledge/retraction.py: 1,000 of 1,000 random retractions exact on a 10,000-item synthetic store (the store after a retraction has the fingerprint of the store rebuilt without it). Cost grows with the connected component a write
 touches (premise edges and shared keys); the store has been measured to 10,000 items, not 10⁵–10⁶."""
 from __future__ import annotations
 

@@ -225,11 +225,48 @@ calibration-file format for the command (`solvi.cli._calibrate`): `solvi.calibfi
 work in 1.0.x with a warning. The `solvi models` command's code moved to `solvi.cli._models` (`solvi.models` keeps
 the library: `load`, `resolve`, `pull`, `cached`, and the providers below).
 
-### Moving into the knowledge memory
+### Knowledge: what a system learned, and from whom (`solvi.core.knowledge`)
 
-`solvi.core.knowledge.memory` (`CorrectionMemory`, `solvi.core.knowledge.memory.attach`) and `solvi.core.knowledge.episodes` stay in 1.0 for now and
-are marked "moving into the knowledge memory in 1.0" in their docs: they will be folded into solvi's knowledge memory,
-and their API may change then.
+The low level of the knowledge memory, stable unless stated (guide: "Knowledge"; scripts in `benchmarks/knowledge/`).
+
+- **`KnowledgeStore`**: a hash-chained journal of items — facts, rules, skills, actions, episodes — over any
+  TraceStorage backend (or in memory; it can share the decisions' store and chain). One record schema: source
+  (`person`, `outcome`, `spec`, or `verified` named by its stored decision — never the system's own answer), who,
+  evidence, `derived_from`, confidence counts, scope, version and `supersedes`, the time it held in the world and the
+  time the store knew it, `reconfirm_after`. Contradictions resolve by rank (an observation refutes what it
+  contradicts); anything else is a dispute, never a fact, with one person question per dispute event. `retract` takes an
+  item back with everything derived from it — exact: the store after a retraction has the fingerprint of the store
+  rebuilt without it (`benchmarks/knowledge/retraction.py`: 1,000 of 1,000 random retractions exact on 10,000 items). `snapshot` is what a decision is given (with
+  the store's fingerprint and journal position, so it replays); `redecide` re-runs the decisions that rested on
+  retracted items and splits them into answer changes and justification only. `verify`, `rebuild(upto=, skip=)`,
+  `report`.
+- **Staleness, with the two defects of the research prototype fixed**: a flag (drift, open set, `reconfirm`) makes the
+  items it covers hints until confirmed, a rollback while a flag covers the rolled-back version restores the previous
+  version only as a hint (it was restored as a fact), and `stale(id)` reads the flags, not the item status (which a
+  later write could set back). `reconfirm_after` per kind and source, on the store's clock.
+- **`WriteGate`** protocol, `SourceGate` (always first) and `ConsistencyGate`; `ShadowGate` is experimental
+  (`solvi.experimental.learning`).
+- **`ActionModel`** protocol and **`ConservativeActionModel(vocabulary=Vocabulary({...}))`**: accept / refuse /
+  unknown as a `Prediction` with risk, support, reason, a hard flag and the effects; learned from what the environment
+  accepted and refused. Stable, with its scope stated: vocabulary-bound, it learns what the environment checks, and
+  sufficient conditions are not promised to transfer. τ-bench retail probes (`benchmarks/knowledge/taubench_action_model.py`):
+  refusal precision and recall 1.000 on 11,763 held-out transitions, 0.26% abstained; with a shorter vocabulary it
+  abstains more and can make a false refusal (1 in each money-comparison ablation).
+- **`RiskPolicy`**: `Protect` (the default: the verdict is final) and `RiskBudget(max_risk_per_episode, min_gain_ratio,
+  min_support)` (justified risk within a per-episode budget, every take recorded, hard rules never traded);
+  **`LearnedGate`** (bounded: expiry, floor, reopened by evidence). `benchmarks/knowledge/risk_dungeon.py`.
+- **`Agenda`**: goals with done checks in code, gates that block actions or goals, `requires` order, person overrides —
+  goals and gates are rule items of the store and goal states fact items; `dry_run(records)` reports how often each gate
+  would have blocked recorded successful actions (validate a gate before making it hard).
+- **`FailureMemory`**: "do not repeat a plan that failed in the last N steps / episodes" as a built-in hard check
+  (`install(cat, plan=..., then=...)`), with an expiry, a cap on blocked plans and a floor of open plans.
+- **Folded**: `WorldMap(knowledge=..)` writes its claims as `"leads_to"` facts, `WorldMap.view(store)` is the map they
+  give, `drop(why)` turns a carried map's claims back into hypotheses; `Episode.record(store, outcome)` keeps a finished
+  episode as an "episode" item; `CorrectionMemory(..., knowledge=)` / `attach(part, knowledge=)` keeps its cases as
+  correction facts (person / outcome / spec), `retract(case_id)` takes one back. `solvi.core.extract.multi` is removed
+  (see Removed).
+- `benchmarks/knowledge/toy_crafting.py`: the pieces together on a toy crafting world (not Crafter: its agent is not
+  part of solvi).
 
 ### Journal, budgets, outcomes
 
