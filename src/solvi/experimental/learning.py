@@ -730,4 +730,41 @@ def _shadow_part(p, model):
     return sp
 
 
-__all__ = ["ExperimentalWarning", "Label", "Learning", "TRUSTED_SOURCES", "UpdateReport", "split_of"]
+class ShadowGate:
+    """A write gate of the knowledge store (solvi.core.knowledge.gates.WriteGate), experimental: a behaviour-changing
+    item (a rule, a skill, an action used as a check) is tried on a shadow of the system before it is promoted.
+
+        ks = KnowledgeStore(gates=[SourceGate(), ConsistencyGate(), ShadowGate(min_gain=0.0, max_changed=0.3)])
+        ks.add("rule", body, source="person", shadow=lambda store, item: {"gain": 0.02, "changed": 0.05, "honest": True})
+
+    `shadow` (given to add, or `measure` here): a function (store, item) → {"gain": the held-out gain, "changed": the
+    share of past decisions it would change, "honest": the honesty gates hold} — or that dict itself. Admitted when
+    gain ≥ min_gain, changed ≤ max_changed and honest is not False; the measurement is recorded with the verdict. A fact
+    or an episode is admitted without one: an observation is its own evidence. Experimental: no in-repo script measures
+    how many harmful updates it catches. Without a measurement a behaviour-changing item is held."""
+    name = "shadow"
+
+    def __init__(self, measure=None, *, min_gain=0.0, max_changed=None):
+        self.measure, self.min_gain, self.max_changed = measure, float(min_gain), max_changed
+
+    def admit(self, store, item, shadow=None):
+        from ..core.knowledge.gates import Verdict
+        if item.get("kind") not in ("rule", "skill", "action"):
+            return Verdict(True, "an observation is its own evidence", gate=self.name)
+        m = shadow if shadow is not None else self.measure
+        if callable(m):
+            m = m(store, item)
+        if not isinstance(m, dict):
+            return Verdict(False, "no shadow measurement for a behaviour-changing item", gate=self.name)
+        gain, changed = float(m.get("gain", 0.0)), m.get("changed")
+        why = []
+        if gain < self.min_gain:
+            why.append(f"gain {gain:g} < {self.min_gain:g}")
+        if self.max_changed is not None and changed is not None and float(changed) > float(self.max_changed):
+            why.append(f"changes {float(changed):g} > {float(self.max_changed):g} of past decisions")
+        if m.get("honest") is False:
+            why.append("the honesty gates do not hold")
+        return Verdict(not why, "; ".join(why), measured={k: m[k] for k in sorted(m)}, gate=self.name)
+
+
+__all__ = ["ExperimentalWarning", "Label", "Learning", "ShadowGate", "TRUSTED_SOURCES", "UpdateReport", "split_of"]
