@@ -1,92 +1,39 @@
 # Changelog
 
-## 1.0.0 — unreleased
+## 1.0.0 — unreleased — two levels, knowledge and agents
 
-### Python
+1.0 makes solvi two levels. The **high level** is ready systems you configure: `solvi.build` (decisions from
+labelled examples with a promise on the errors), `solvi.Agent` (new: acting in an environment), `solvi.Guard` (an
+agent's tool calls) and `solvi.Knowledge` (new: what a system knows and from whom — facts with their sources, exact
+retraction, an agenda of goals and gates, an action model learned from outcomes). The **low level**, `solvi.core`, is
+the building blocks they are made of, with every extension point exported, documented and covered by a conformance
+check. What works but has not shown a measured gain is moved to **`solvi.experimental`**, marked in every decision
+that uses it, with a deadline (1.2) to graduate or go. Field reports from building on solvi brought quotes matched on
+a normalized view, quotes from several labelled sources, `then=` that wires its hard check and can compute the answer,
+`res.checks`, a compact journal, budgets for generation and refinement, and outcomes as labels. Python 3.11 or newer.
+Every 0.9 import path keeps working through 1.0.x with a warning, and `solvi migrate` rewrites your code. What was
+tried for this release and did not meet its bar is listed at the end.
 
-- Python 3.11 or newer; tested on 3.11–3.14. Python 3.10 is no longer supported (`tomli` is no longer a dependency:
-  rules files are read with the standard `tomllib`).
-- One fingerprint everywhere: on Python 3.10, `typing.Any` was not a class, so a catalog that declares `Any` had a
-  different fingerprint there than on 3.11+. With 3.10 gone, every supported Python computes the same fingerprints. A
-  decision stored by 0.9 or earlier **on Python 3.10** from a catalog that declares `Any` replays as made by another
-  catalog (a fingerprint mismatch).
-- Unions fingerprint as one form: Python 3.14 made `Optional[X]`, `Union[X, Y]` and `X | Y` one class, so a declared
-  union now records `typing.Union` whatever its spelling and Python. Catalogs declaring `Optional[...]`, `Union[...]` or
-  `Maybe[...]` keep their 3.11–3.13 fingerprints; a catalog declaring a union with `|` (`str | NotStated`) gets a new
-  one (decisions stored from it by 0.9 replay as made by another catalog), and so does any union under 0.9 on 3.14.
+### Breaking changes and migration
 
-### Checks and quotes
+If your code imports only the 23 names `solvi` still exports (below), it runs unchanged. Every other 0.9 import path
+still works in 1.0.x: it imports the very same module and warns (`SolviDeprecationWarning`) with the path to use;
+1.1 removes the old paths. Run `solvi migrate PATH` once (below), then your tests with
+`-W error::solvi.SolviDeprecationWarning`. What breaks now, without a warning period:
 
-- **Quotes are matched on a normalized view.** Models type no-break spaces, no-break hyphens, `…`, curly quotes and
-  other dashes where the source has plain ones (or the other way round), and an honest quote was rejected for it. Now
-  quotes, evidence and spans are compared after Unicode NFKC, with dashes and hyphens as `-`, curly and angle quotes as
-  straight ones, `…` as `...`, every run of whitespace as one space and zero-width characters dropped (letter case is
-  kept). What is stored is always the source's own text at offsets into the original text; a record whose quote needed
-  the normalized view says so (`extra["quote_match"]`: the form's name and what the part wrote), and replay re-checks
-  it. A literal match is tried first and leaves the record exactly as before. `Catalog(quotes="literal")` keeps the 0.9
-  rule. Fingerprints are unchanged unless you set `quotes="literal"`.
-- **Several labelled sources.** A string of evidence is looked for in the part's first source as before, then in its
-  other text inputs (`notes`, `dialogues`, `map`, ...); the stored quote names the one it came from. `Claim(source=[...])`
-  lists the sources to search. `solvi.core.find_quote(quote, {"notes": ..., "map": ...})` does the same lookup for your
-  own checks.
+- **Python 3.11 or newer** (see Changed for the fingerprints this fixes).
+- **The removed modules** (table under Removed) raise ModuleNotFoundError.
+- **The methods moved off the classes** (table below) raise an AttributeError that names the new call.
 - **`then=` wires its hard check.** A hard check whose `then` names a question now runs in that question's flow by
   itself; `requires=` is no longer needed for it, and other questions' flows do not change. Before, forgetting
   `requires` let the question be answered as if the check had passed. A strategist of your own that leaves such a check
   out is refused when the `System` is built; `solvi check` (`then_not_in_flow`) keeps reporting it for a strategist
   swapped in afterwards. A system that relied on the check *not* running for that question now gets the forced answer
   when it fails.
-- **`then=` can compute the answer.** `then={"step": free_side}` takes a function of facts (argument names are the facts,
-  type hints are checked like any part's) instead of a constant. It runs only when the check fails; the facts it reads
-  are computed even after an early exit; its value must be one of the question's answers, else the question abstains.
-  The value is recorded in the trace (a record of kind `"then"`) and re-run by replay; the function's code is part of
-  the check's fingerprint. `solvi check` reports literals it returns that are not answers (`then_bad_answer`).
-- **`res.checks`.** Every check of a decision as data, in flow order: name, questions, status (`passed`, `failed`,
-  `skipped`, `error`), hard or soft, the reason (what `Fail(...)` said) and the answers a failed hard check's `then`
-  set — no more parsing the audit text. It is in `res.to_dict()` and in stored decisions as `"checks"` (derived from
-  the trace, like `"overall"`); records stored before keep their hashes and get the same list when loaded.
 
-### Removed
-
-What leaves solvi on the way to 1.0: parts that measured worse than the plain way, that nothing used, or that never
-had a measured run. Importing a removed module raises ModuleNotFoundError.
-
-| removed | why | use instead |
-|---|---|---|
-| `solvi.many` (`Many`, `decide_many`) | measured worse: one direct decision over the options was more accurate than its shortlist and its tournament | narrow the options in code (filter, rank), then one ordinary decision |
-| Space `documents-server` (Gradio) | never deployed: Gradio Spaces need a paid plan; the browser Space `documents-web` does the same | the `documents-web` Space |
-| `tools/smoke_decide.py` | a one-off script for checking a decider checkpoint; no CI or docs ran it | `solvi models check <checkpoint>` and the `model` tests (`pytest -m model`) |
-| `solvi.otel` and the `otel` extra | nothing in solvi used it and it had no measured use | `res.to_dict()` or a store (`solvi.core.store`), sent to your tracing backend by your own code |
-| `solvi.pytest_plugin` (the `pytest11` entry point, `pytest gallery/`, `--solvi-fuzz`) | it loaded in every pytest session wherever solvi was installed; `solvi test` runs the same cases | `solvi test <dir>` (`--fuzz N`), or one pytest test that calls `solvi.testing.run_path` (docs: Regression tests) |
-| `ModelStrategist` and `solvi.segment_model` (the model strategist) | experimental, no checkpoint was ever published, and the model planned no better than a short keyword list, and far slower | `CostStrategist(producers="equivalent")` with `cost=` declared |
-| `solvi.aliases` (`NameMatcher`, `propose`, `accept`, `apply`, `match_names`) | experimental, no checkpoint of the matcher was ever published, no measurement | name the parameters after the facts they read, or a one-line part that renames a fact |
-| example `17_model_strategist.py` | it showed the two removed pieces with stand-in models | `examples/17_cost_strategist.py`: the code strategist alone |
-| `solvi.agents.pydantic_ai`, `solvi.agents.langgraph`, `solvi.agents.openai_agents` and the `pydantic-ai`, `langgraph`, `openai-agents` extras | no measured run went through any of them; the measured agent results (an injection benchmark, the τ-bench retail stand) call the guard directly | call `guard.check` (or `guard.call`) from your framework's tool-execution step; for MCP servers, the proxy (`solvi serve --guard --upstream`), which stays |
-| `System(cost_policy="measured")`, `solvi.core.costs.MeasuredCosts`, `system.freeze_costs()` / `unfreeze_costs()` | planning on measured run times showed no measured benefit | declare `cost=` on the parts; `cost_policy="declared"` is the only value left (a 0.9 plan record with measured costs still replays) |
-| `solvi.core.deciders.heads.Head` (the legacy answer head) | `System.fit` has built a `FastHead` since 0.8 and nothing in solvi built `Head` any more | `solvi.core.deciders.heads.FastHead` |
-| `solvi.extract_multi` / `solvi.core.extract.multi` (`MultiSpanExtractor`) | nothing in solvi used it; the published receipts model behind the README's receipt numbers (`solvi-ai/extract-receipts`) is a `LongSpanExtractor` | `LongSpanExtractor` with a description per field (a `MultiSpanExtractor` checkpoint loads with solvi 0.9) |
-
-### Moved off the classes (no shim)
-
-A stable class no longer imports an experimental module, so these methods became functions of their own modules. The
-old method raises an AttributeError that names the new call; what the method did is unchanged.
-
-| was | now |
-|---|---|
-| `part.adapt_lora(examples, ...)` (and on a Cascade / Vote / Route) | `solvi.experimental.lora.adapt_lora(part, examples, ...)` (experimental) |
-| `part.remove_lora()`, `combination.remove_lora()` | `solvi.experimental.lora.remove_lora(part)` (a combination: every part's) |
-| `system.learning(store, ...)` | `solvi.experimental.learning.Learning(system, store, ...)` (experimental; same arguments) |
-| `part.memory(...)`, `combination.memory(...)` | `solvi.core.knowledge.memory.attach(part, ...)` (same settings; a combination: a memory for every part) |
-| `res.counterfactual(question, ...)` | `solvi.experimental.counterfactual.search(res, question, ...)` (experimental; same arguments; `res.counterfactual` no longer exists). The module was first removed for 1.0 (no measured use) and is kept as experimental instead |
-
-`part.save_lora`, `part.load_lora`, `part.lora` and calibration files that carry an adapter work as before: a part now
-has an adapter slot, and the LoRA adapter fills it.
-
-### New layout: two levels and `solvi.experimental` (old imports warn until 1.1)
-
-solvi's modules moved into packages that say what you can rely on: `solvi` and `solvi.solutions` are the ready-made
-systems, `solvi.core` and its areas (`solvi.core.types`, `solvi.core.runtime`, ...) are the building blocks they are
-made of, and `solvi.experimental` holds what may still change. Every 0.9 import path still works in 1.0.x: it imports
-the very same module and warns (`SolviDeprecationWarning`) with the path to use; 1.1 removes the old paths.
+The new layout: solvi's modules moved into packages that say what you can rely on — `solvi` and `solvi.solutions`
+are the ready-made systems, `solvi.core` and its areas (`solvi.core.types`, `solvi.core.runtime`, ...) are the
+building blocks they are made of, and `solvi.experimental` holds what may still change.
 
 - **`solvi migrate PATH`** rewrites your code (`.py` and `.md` files) to the new paths: imports, `from solvi import
   storage`, dotted paths in strings such as `monkeypatch.setattr("solvi.llm.urlopen", ...)` or
@@ -94,13 +41,6 @@ the very same module and warns (`SolviDeprecationWarning`) with the path to use;
 - Stored decisions, calibration files and fingerprints do not change: a fingerprint records the 0.9 module of a moved
   class or function (the table `solvi._deprecate.MOVED`), so decisions stored by 0.7–0.9 replay, and a store written by
   1.0 is read by 0.9 tools the same way. A stored `module:qualname` that names a 0.9 module loads without a warning.
-- **`solvi.experimental`** holds what works and is tested but has no measured gain or use yet: the learning loop,
-  LoRA adapters, compile (with its sandbox), the coding-agent hooks, the specialist and verified charts, the MCP proxy,
-  on-the-fly calibration and counterfactuals. Importing one warns (`ExperimentalWarning`); `solvi.experimental.STATUS`
-  says for each one since when it exists, what it is missing to graduate, the script that measures it and its deadline
-  (1.2: it graduates or is removed); a decision made by a System that uses one records it in the stored decision
-  (`meta["experimental"]`, e.g. `["lora"]`) and `solvi report --overview` counts them. Nothing stable imports them,
-  except on request: `solvi hook` and `solvi serve --upstream`.
 - **What `solvi` exports**: 23 names (`__all__`) — the entry points `build` (`solvi.solutions.decisions.build`, was
   `solvi.auto.build`), `Agent` (new, `solvi.solutions.agent`), `Guard` (`solvi.solutions.guard.Guard`, was
   `solvi.agents.Guard`) and `Knowledge` (new, `solvi.solutions.knowledge`), `Budget`, and the shared vocabulary
@@ -112,14 +52,8 @@ the very same module and warns (`SolviDeprecationWarning`) with the path to use;
   works in 1.0.x with a warning). `build(slow=...)` no longer compiles a written specification itself (that would make
   it import the experimental compiler): compile it first (`solvi.experimental.compile.compile_spec`) and pass the
   result; `writer=` and `inputs=` raise a TypeError saying so.
-- **`solvi.models`, the providers**: `decider("solvi-base")` (a published decider from the local cache, or any name
-  `solvi models` reads), `llm(url, model)` (an OpenAI-compatible server), `systemone(url, model)` and `DecideModel`.
-- The honesty gate runs as `solvi honesty SET.json --baseline B.json` (`solvi.testing.honesty`; it was
-  `python -m solvi.honesty`).
-- `solvi.core` itself keeps the names it exported in 0.9 (`Catalog`, `Quote`, `find_quote`, ...); its private helpers
-  are in `solvi.core.catalog`.
 
-Where each module went:
+#### Where each module went
 
 <!-- migration table: tools/migration_table.py -->
 | you imported (0.9) | import now (1.0) | level |
@@ -212,7 +146,23 @@ Where each module went:
 | `from solvi import TraceStorage` | `from solvi.core.store import TraceStorage` | low level: building blocks |
 <!-- end of migration table -->
 
-### Moved between modules (the names stay where they were too)
+#### Moved off the classes (no shim)
+
+A stable class no longer imports an experimental module, so these methods became functions of their own modules. The
+old method raises an AttributeError that names the new call; what the method did is unchanged.
+
+| was | now |
+|---|---|
+| `part.adapt_lora(examples, ...)` (and on a Cascade / Vote / Route) | `solvi.experimental.lora.adapt_lora(part, examples, ...)` (experimental) |
+| `part.remove_lora()`, `combination.remove_lora()` | `solvi.experimental.lora.remove_lora(part)` (a combination: every part's) |
+| `system.learning(store, ...)` | `solvi.experimental.learning.Learning(system, store, ...)` (experimental; same arguments) |
+| `part.memory(...)`, `combination.memory(...)` | `solvi.core.knowledge.memory.attach(part, ...)` (same settings; a combination: a memory for every part) |
+| `res.counterfactual(question, ...)` | `solvi.experimental.counterfactual.search(res, question, ...)` (experimental; same arguments; `res.counterfactual` no longer exists). The module was first removed for 1.0 (no measured use) and is kept as experimental instead |
+
+`part.save_lora`, `part.load_lora`, `part.lora` and calibration files that carry an adapter work as before: a part now
+has an adapter slot, and the LoRA adapter fills it.
+
+#### Moved between modules (the names stay where they were too)
 
 To break the import cycle between the deciders, the System, the store and the dispatcher, some pieces moved to modules
 of their own; the modules they left still have them (the same objects, no warning), and stored records, hashes,
@@ -225,42 +175,45 @@ calibration-file format for the command (`solvi.cli._calibrate`): `solvi.calibfi
 work in 1.0.x with a warning. The `solvi models` command's code moved to `solvi.cli._models` (`solvi.models` keeps
 the library: `load`, `resolve`, `pull`, `cached`, and the providers below).
 
-### Building blocks: the extension points of `solvi.core`
+### New
 
-Every place where you can put a part of your own is exported by `solvi.core`, with a docstring that says what you
-implement, what you get for free and the promise (stable; or stable to use, provisional to subclass). They load on
-first use, so `import solvi.core` stays light. New docs page: **Building blocks** (one section per extension point).
+#### Agents and knowledge: the high level (`solvi.Agent`, `solvi.Knowledge`)
 
-- **Protocols** (`typing.Protocol`, runtime-checkable — an object with the methods is one): `Scorer`, `Decider`,
-  `Adapter` (new: `kind`, `fingerprint()`, `using(scorer, active)`, `save`, `load`), `Head`, `Extractor`,
-  `Strategist`, `Monitor`, `Proposer`, `Space`, `Environment` (new, what `solvi.Agent` runs on: `reset(seed)`,
-  `actions(state)`, `step(action) → Outcome(state, accepted, effect, done)`).
-- **Base classes** with abstract methods: `TraceStorage` (a backend implements `_append`, `_raw`, `_find`, `head`,
-  `_rewrite`; a subclass missing one now fails when it is constructed, not on first use) and `SlowPath`.
-- **`SlowPath` is a real base class.** The built-ins are `AskPath(system)`, `RefinePath(system, propose=, into=)` and
-  `SearchPath(system, space=, into=)` (`solvi.core.dispatch`); a path of your own sets `mode` and implements
-  `think(...) → Thought` and `fingerprint()` — `run` adds the cost, the dispatcher the routing, budgets, calibration
-  per slice, records and replay. A stored `Thought` is read back by the class of its mode (`SlowPath.modes`), so a
-  path of your own round-trips through a store. **Deprecated:** `SlowPath(system, propose=..., space=...)` as a
-  constructor still builds the matching built-in (same fingerprint, same dispatcher config) with a
-  `SolviDeprecationWarning`; removed in 1.1. `solvi.build` makes an `AskPath`.
-- `DefaultStrategist` (`solvi.core.plan.strategist`): the deterministic planner as a class to subclass;
-  `System(strategist=DefaultStrategist())` plans and records exactly as `System()`.
-- `System.fit(..., head=)`: a function options → a head of your own (the Head protocol) instead of `FastHead`. The
-  multi-label head has a `fingerprint()` method (the same value as before).
-- The adapter slot of a decision part reads only the Adapter protocol (`fingerprint()` instead of the LoRA adapter's
-  `hash` and `name`; the values are the same, so fingerprints and calibration files do not change);
-  `LoraAdapter.load(path)` added.
-- `DriftMonitor` gains `flagged` and `reset()` (the Monitor protocol); the system report runs any monitor
-  (`system_report(store, monitor=lambda: MyMonitor())`).
-- `search` (and `SearchPath`) walks any object with `root` and `children(node)` (the Space protocol), not only a `Tree`.
-- **`solvi.testing.conformance`**: `check_storage`, `check_slow_path`, `check_strategist`, `check_head`,
-  `check_decider`, `check_extractor`, `check_monitor`, `check_environment` (and `check_action_model`, filled in with
-  the knowledge memory) run your implementation through the parts of solvi that rely on it — chain verifies,
-  tampering caught, replay matches, records round-trip, cost recomputes, budget respected. The test suite runs every
-  check on every built-in.
+New docs page: **Using solvi: agents and knowledge**; runnable: `examples/25_environment_agent.py`.
 
-### Knowledge: what a system learned, and from whom (`solvi.core.knowledge`)
+- **`solvi.Knowledge(path=None, *, vocabulary=None, write_gate=None, actions=None, failures=None)`**: the knowledge
+  store, the agenda (inside it: goals, gates and order in the same journal), the action model
+  (`ConservativeActionModel` over `vocabulary`, or your own with `actions=`) and an optional failure memory behind one
+  object — `tell` (a fact with its source; the system's own answers are refused), `retract` (with the decisions that
+  rested on it, split into answer changes and justification only), `goal`, `observe` (an environment step: the action
+  model, the failure memory, the agenda, skills and map facts) and `report`; `.store`, `.agenda`, `.actions`,
+  `.failures`. Map facts are scoped to a map and dropped by the first contradiction of a carried one (a flag on the
+  map's scope); rules and skills are carried.
+- **`solvi.Agent(env, *, knowledge, s2=None, budget=None, storage=None, risk=None)`** (also `key=`, `gain=`,
+  `seed=`): an environment agent on a `solvi.core.Environment`. Every step is a `Dispatcher` decision over a System 1
+  whose given facts are the offered actions, each with the action model's prediction, the risk policy's choice, its
+  hard blocks and the open goal it advances. System 1 takes an action predicted to work that advances an open goal (a
+  skill: the action after which the goal's done check turned true; or the first step of a confirmed route to where it
+  worked); hard checks — the agenda's gates, hard refusals, what the risk policy avoids, the failure memory — hold in
+  both systems; System 2 is a `SearchPath` over the offered actions in an exploration order (or a `SlowPath` of yours),
+  with a per-episode budget. `risk=None` is `Protect`; `risk=RiskBudget(...)` takes justified risks within a
+  per-episode budget, never a hard one. `run(seed, steps)`, `act(state)` / `observe(outcome)`, `report()`, `replay()`
+  (every decision re-checked from its stored facts); `.system`, `.dispatcher`, `.knowledge`. Example 25: the first run
+  in a world takes 61 steps, all by System 2; the second 12 steps, 11 by System 1; with a bridge that breaks one time in
+  three in front of the iron, protection fell once and got the iron in 2 of 30 episodes, `RiskBudget` fell 6 times and
+  got it in 24.
+- **`solvi.build(..., knowledge=km)`**: every decision (and every example at build time) is given `km.snapshot()` as
+  the fact `knowledge`, read by System 1's rules (`Knowledge.value(knowledge, s, r)`); a function `state → snapshot`
+  gives your own query. `explain()` says so.
+- **`solvi.Guard(..., knowledge=km)`**: the action model's prediction over the app's facts and the agenda's gates are
+  hard checks on every tool (`action_model_allows`, `agenda_allows`; given facts `action_prediction`, `agenda_blocks`,
+  so the decision replays); "unknown" leaves the call to the other checks; `guard.observe(decision, accepted)` tells
+  the knowledge what happened. A guard without knowledge is unchanged.
+- Honest limits, in the docs page: growth was shown in environments met again (a crafting game, the Pokémon world map),
+  not on decision streams or a support agent with tools; justified risk reduces the cost of protection, not to parity;
+  gates compiled from policy text must be validated with `dry_run` first.
+
+#### Knowledge: what a system learned, and from whom (`solvi.core.knowledge`)
 
 The low level of the knowledge memory, stable unless stated (guide: "Knowledge"; scripts in `benchmarks/knowledge/`).
 
@@ -303,43 +256,81 @@ The low level of the knowledge memory, stable unless stated (guide: "Knowledge";
 - `benchmarks/knowledge/toy_crafting.py`: the pieces together on a toy crafting world (not Crafter: its agent is not
   part of solvi).
 
-### Agents and knowledge: the high level (`solvi.Agent`, `solvi.Knowledge`)
+#### Building blocks: the extension points of `solvi.core`
 
-New docs page: **Using solvi: agents and knowledge**; runnable: `examples/25_environment_agent.py`.
+Every place where you can put a part of your own is exported by `solvi.core`, with a docstring that says what you
+implement, what you get for free and the promise (stable; or stable to use, provisional to subclass). They load on
+first use, so `import solvi.core` stays light. New docs page: **Building blocks** (one section per extension point).
 
-- **`solvi.Knowledge(path=None, *, vocabulary=None, write_gate=None, actions=None, failures=None)`**: the knowledge
-  store, the agenda (inside it: goals, gates and order in the same journal), the action model
-  (`ConservativeActionModel` over `vocabulary`, or your own with `actions=`) and an optional failure memory behind one
-  object — `tell` (a fact with its source; the system's own answers are refused), `retract` (with the decisions that
-  rested on it, split into answer changes and justification only), `goal`, `observe` (an environment step: the action
-  model, the failure memory, the agenda, skills and map facts) and `report`; `.store`, `.agenda`, `.actions`,
-  `.failures`. Map facts are scoped to a map and dropped by the first contradiction of a carried one (a flag on the
-  map's scope); rules and skills are carried.
-- **`solvi.Agent(env, *, knowledge, s2=None, budget=None, storage=None, risk=None)`** (also `key=`, `gain=`,
-  `seed=`): an environment agent on a `solvi.core.Environment`. Every step is a `Dispatcher` decision over a System 1
-  whose given facts are the offered actions, each with the action model's prediction, the risk policy's choice, its
-  hard blocks and the open goal it advances. System 1 takes an action predicted to work that advances an open goal (a
-  skill: the action after which the goal's done check turned true; or the first step of a confirmed route to where it
-  worked); hard checks — the agenda's gates, hard refusals, what the risk policy avoids, the failure memory — hold in
-  both systems; System 2 is a `SearchPath` over the offered actions in an exploration order (or a `SlowPath` of yours),
-  with a per-episode budget. `risk=None` is `Protect`; `risk=RiskBudget(...)` takes justified risks within a
-  per-episode budget, never a hard one. `run(seed, steps)`, `act(state)` / `observe(outcome)`, `report()`, `replay()`
-  (every decision re-checked from its stored facts); `.system`, `.dispatcher`, `.knowledge`. Example 25: the first run
-  in a world takes 61 steps, all by System 2; the second 12 steps, 11 by System 1; with a bridge that breaks one time in
-  three in front of the iron, protection fell once and got the iron in 2 of 30 episodes, `RiskBudget` fell 6 times and
-  got it in 24.
-- **`solvi.build(..., knowledge=km)`**: every decision (and every example at build time) is given `km.snapshot()` as
-  the fact `knowledge`, read by System 1's rules (`Knowledge.value(knowledge, s, r)`); a function `state → snapshot`
-  gives your own query. `explain()` says so.
-- **`solvi.Guard(..., knowledge=km)`**: the action model's prediction over the app's facts and the agenda's gates are
-  hard checks on every tool (`action_model_allows`, `agenda_allows`; given facts `action_prediction`, `agenda_blocks`,
-  so the decision replays); "unknown" leaves the call to the other checks; `guard.observe(decision, accepted)` tells
-  the knowledge what happened. A guard without knowledge is unchanged.
-- Honest limits, in the docs page: growth was shown in environments met again (a crafting game, the Pokémon world map),
-  not on decision streams or a support agent with tools; justified risk reduces the cost of protection, not to parity;
-  gates compiled from policy text must be validated with `dry_run` first.
+- **Protocols** (`typing.Protocol`, runtime-checkable — an object with the methods is one): `Scorer`, `Decider`,
+  `Adapter` (new: `kind`, `fingerprint()`, `using(scorer, active)`, `save`, `load`), `Head`, `Extractor`,
+  `Strategist`, `Monitor`, `Proposer`, `Space`, `Environment` (new, what `solvi.Agent` runs on: `reset(seed)`,
+  `actions(state)`, `step(action) → Outcome(state, accepted, effect, done)`).
+- **Base classes** with abstract methods: `TraceStorage` (a backend implements `_append`, `_raw`, `_find`, `head`,
+  `_rewrite`; a subclass missing one now fails when it is constructed, not on first use) and `SlowPath`.
+- **`SlowPath` is a real base class.** The built-ins are `AskPath(system)`, `RefinePath(system, propose=, into=)` and
+  `SearchPath(system, space=, into=)` (`solvi.core.dispatch`); a path of your own sets `mode` and implements
+  `think(...) → Thought` and `fingerprint()` — `run` adds the cost, the dispatcher the routing, budgets, calibration
+  per slice, records and replay. A stored `Thought` is read back by the class of its mode (`SlowPath.modes`), so a
+  path of your own round-trips through a store. **Deprecated:** `SlowPath(system, propose=..., space=...)` as a
+  constructor still builds the matching built-in (same fingerprint, same dispatcher config) with a
+  `SolviDeprecationWarning`; removed in 1.1. `solvi.build` makes an `AskPath`.
+- `DefaultStrategist` (`solvi.core.plan.strategist`): the deterministic planner as a class to subclass;
+  `System(strategist=DefaultStrategist())` plans and records exactly as `System()`.
+- `System.fit(..., head=)`: a function options → a head of your own (the Head protocol) instead of `FastHead`. The
+  multi-label head has a `fingerprint()` method (the same value as before).
+- The adapter slot of a decision part reads only the Adapter protocol (`fingerprint()` instead of the LoRA adapter's
+  `hash` and `name`; the values are the same, so fingerprints and calibration files do not change);
+  `LoraAdapter.load(path)` added.
+- `DriftMonitor` gains `flagged` and `reset()` (the Monitor protocol); the system report runs any monitor
+  (`system_report(store, monitor=lambda: MyMonitor())`).
+- `search` (and `SearchPath`) walks any object with `root` and `children(node)` (the Space protocol), not only a `Tree`.
+- **`solvi.testing.conformance`**: `check_storage`, `check_slow_path`, `check_strategist`, `check_head`,
+  `check_decider`, `check_extractor`, `check_monitor`, `check_environment` (and `check_action_model`, filled in with
+  the knowledge memory) run your implementation through the parts of solvi that rely on it — chain verifies,
+  tampering caught, replay matches, records round-trip, cost recomputes, budget respected. The test suite runs every
+  check on every built-in.
 
-### Journal, budgets, outcomes
+#### `solvi.experimental`
+
+- **`solvi.experimental`** holds what works and is tested but has no measured gain or use yet: the learning loop,
+  LoRA adapters, compile (with its sandbox), the coding-agent hooks, the specialist and verified charts, the MCP proxy,
+  on-the-fly calibration and counterfactuals. Importing one warns (`ExperimentalWarning`); `solvi.experimental.STATUS`
+  says for each one since when it exists, what it is missing to graduate, the script that measures it and its deadline
+  (1.2: it graduates or is removed); a decision made by a System that uses one records it in the stored decision
+  (`meta["experimental"]`, e.g. `["lora"]`) and `solvi report --overview` counts them. Nothing stable imports them,
+  except on request: `solvi hook` and `solvi serve --upstream`.
+
+#### Models by name
+
+- **`solvi.models`, the providers**: `decider("solvi-base")` (a published decider from the local cache, or any name
+  `solvi models` reads), `llm(url, model)` (an OpenAI-compatible server), `systemone(url, model)` and `DecideModel`.
+
+#### Checks and quotes
+
+- **Quotes are matched on a normalized view.** Models type no-break spaces, no-break hyphens, `…`, curly quotes and
+  other dashes where the source has plain ones (or the other way round), and an honest quote was rejected for it. Now
+  quotes, evidence and spans are compared after Unicode NFKC, with dashes and hyphens as `-`, curly and angle quotes as
+  straight ones, `…` as `...`, every run of whitespace as one space and zero-width characters dropped (letter case is
+  kept). What is stored is always the source's own text at offsets into the original text; a record whose quote needed
+  the normalized view says so (`extra["quote_match"]`: the form's name and what the part wrote), and replay re-checks
+  it. A literal match is tried first and leaves the record exactly as before. `Catalog(quotes="literal")` keeps the 0.9
+  rule. Fingerprints are unchanged unless you set `quotes="literal"`.
+- **Several labelled sources.** A string of evidence is looked for in the part's first source as before, then in its
+  other text inputs (`notes`, `dialogues`, `map`, ...); the stored quote names the one it came from. `Claim(source=[...])`
+  lists the sources to search. `solvi.core.find_quote(quote, {"notes": ..., "map": ...})` does the same lookup for your
+  own checks.
+- **`then=` can compute the answer.** `then={"step": free_side}` takes a function of facts (argument names are the facts,
+  type hints are checked like any part's) instead of a constant. It runs only when the check fails; the facts it reads
+  are computed even after an early exit; its value must be one of the question's answers, else the question abstains.
+  The value is recorded in the trace (a record of kind `"then"`) and re-run by replay; the function's code is part of
+  the check's fingerprint. `solvi check` reports literals it returns that are not answers (`then_bad_answer`).
+- **`res.checks`.** Every check of a decision as data, in flow order: name, questions, status (`passed`, `failed`,
+  `skipped`, `error`), hard or soft, the reason (what `Fail(...)` said) and the answers a failed hard check's `then`
+  set — no more parsing the audit text. It is in `res.to_dict()` and in stored decisions as `"checks"` (derived from
+  the trace, like `"overall"`); records stored before keep their hashes and get the same list when loaded.
+
+#### Journal, budgets, outcomes
 
 - **A compact journal for frequent decisions.** Every store takes `record="full"` (the default, as before),
   `"compact"` or `"sample:N"` (one decision in N in full). A compact record keeps the input, the answers, each check's
@@ -357,23 +348,96 @@ New docs page: **Using solvi: agents and knowledge**; runnable: `examples/25_env
   tokens, time and dollars, keeps what it spent, and refuses to send a request that its total (or one decision's
   budget) would not cover (`BudgetStop`). `refine(..., budget=, price=)` records what each round cost, stops before a
   round the budget would not cover, and stores one record per loop; the system report shows the loops, how they ended
-  and what they cost. The same `Budget` and `Cost` as the dispatcher, now in `solvi.costs`; `Budget` also takes
+  and what they cost. The same `Budget` and `Cost` as the dispatcher, now in `solvi.core.costs`; `Budget` also takes
   `tokens=`.
 - **Outcomes become labels**: `system.outcome(response_or_id, value, note=..., by=...)` records what really happened
   after a decision as a label of it (source "outcome"). Nothing learns from it by itself; recalibrate explicitly
   (`System.guarantee(..., corrections=True)`) on a schedule or after a drift flag.
-- **`solvi.oncalib` (experimental)**: recalibrating a guarantee on the fly from outcomes, every N labels or after a
+- **`solvi.experimental.oncalib`**: recalibrating a guarantee on the fly from outcomes, every N labels or after a
   drift flag. It warns on import, and its documentation says why the promise does not hold that way.
+
+### Changed
+
+- Python 3.11 or newer; tested on 3.11–3.14. Python 3.10 is no longer supported (`tomli` is no longer a dependency:
+  rules files are read with the standard `tomllib`).
+- One fingerprint everywhere: on Python 3.10, `typing.Any` was not a class, so a catalog that declares `Any` had a
+  different fingerprint there than on 3.11+. With 3.10 gone, every supported Python computes the same fingerprints. A
+  decision stored by 0.9 or earlier **on Python 3.10** from a catalog that declares `Any` replays as made by another
+  catalog (a fingerprint mismatch).
+- Unions fingerprint as one form: Python 3.14 made `Optional[X]`, `Union[X, Y]` and `X | Y` one class, so a declared
+  union now records `typing.Union` whatever its spelling and Python. Catalogs declaring `Optional[...]`, `Union[...]` or
+  `Maybe[...]` keep their 3.11–3.13 fingerprints; a catalog declaring a union with `|` (`str | NotStated`) gets a new
+  one (decisions stored from it by 0.9 replay as made by another catalog), and so does any union under 0.9 on 3.14.
+- The honesty gate runs as `solvi honesty SET.json --baseline B.json` (`solvi.testing.honesty`; it was
+  `python -m solvi.honesty`).
+- `solvi.core` itself keeps the names it exported in 0.9 (`Catalog`, `Quote`, `find_quote`, ...); its private helpers
+  are in `solvi.core.catalog`.
+- **No longer previews**: `solvi.build` (was `solvi.auto.build`), `solvi.Guard` (was `solvi.agents.Guard`), the
+  store signature (`solvi.core.store.signature`) and the system report (`System.report`, `solvi report --overview`)
+  are stable in 1.x. The coding-agent hooks and verified charts, previews before, are experimental
+  (`solvi.experimental.hooks`, `solvi.experimental.charts`).
+- **The documentation in three parts**: *Using solvi* (the ready systems: a new page per entry point, agents and
+  knowledge, best practices), *Building blocks* (one reference per extension point, the low-level chapters of the
+  guide) and *Experimental* (each piece with what it is missing and its deadline); the guide's chapters are ordered
+  the same way, and the API reference is grouped by level. The API pages of internal modules (`solvi.core._i18n`,
+  `solvi.core._inputs`, `solvi.core.deciders._remote`, `solvi.cli._scaffold`, `solvi.cli._calibrate`) are gone.
 - **Docs**: a full reference of the refine loop (what each round sees, the feedback, when it stops, what it records)
   and of `systemone` (every argument, the request and the reply, what a decision records, what fails how), both
   checked against the code by `tests/test_docs_match_code.py`.
-- `Budget`, `Cost` and `BudgetStop` are defined in `solvi.costs` (`solvi.dispatch` re-exports them; the dispatcher's
+- `Budget`, `Cost` and `BudgetStop` are defined in `solvi.core.costs` (`solvi.core.dispatch` re-exports them; the dispatcher's
   configuration fingerprint is unchanged for a budget without `tokens`). `Budget.over` passes over a cost whose dollars
   are unknown instead of failing on them.
 - A generator's request record now also holds the request's time (`ms`) and, with `price=`, its dollars
   (`usage["usd"]`). A refinement whose System has a storage now adds a record of kind `"refine"` to it (one per loop:
   `len(store)` counts it, `store.iter()` does not list it); `Refinement.to_dict()` gains `cost`, `budget`, `stopped` and
   `over_budget`, and each round its `cost`.
+
+### Removed
+
+What leaves solvi on the way to 1.0: parts that measured worse than the plain way, that nothing used, or that never
+had a measured run. Importing a removed module raises ModuleNotFoundError.
+
+| removed | why | use instead |
+|---|---|---|
+| `solvi.many` (`Many`, `decide_many`) | measured worse: one direct decision over the options was more accurate than its shortlist and its tournament | narrow the options in code (filter, rank), then one ordinary decision |
+| Space `documents-server` (Gradio) | never deployed: Gradio Spaces need a paid plan; the browser Space `documents-web` does the same | the `documents-web` Space |
+| `tools/smoke_decide.py` | a one-off script for checking a decider checkpoint; no CI or docs ran it | `solvi models check <checkpoint>` and the `model` tests (`pytest -m model`) |
+| `solvi.otel` and the `otel` extra | nothing in solvi used it and it had no measured use | `res.to_dict()` or a store (`solvi.core.store`), sent to your tracing backend by your own code |
+| `solvi.pytest_plugin` (the `pytest11` entry point, `pytest gallery/`, `--solvi-fuzz`) | it loaded in every pytest session wherever solvi was installed; `solvi test` runs the same cases | `solvi test <dir>` (`--fuzz N`), or one pytest test that calls `solvi.testing.run_path` (docs: Regression tests) |
+| `ModelStrategist` and `solvi.segment_model` (the model strategist) | experimental, no checkpoint was ever published, and the model planned no better than a short keyword list, and far slower | `CostStrategist(producers="equivalent")` with `cost=` declared |
+| `solvi.aliases` (`NameMatcher`, `propose`, `accept`, `apply`, `match_names`) | experimental, no checkpoint of the matcher was ever published, no measurement | name the parameters after the facts they read, or a one-line part that renames a fact |
+| example `17_model_strategist.py` | it showed the two removed pieces with stand-in models | `examples/17_cost_strategist.py`: the code strategist alone |
+| `solvi.agents.pydantic_ai`, `solvi.agents.langgraph`, `solvi.agents.openai_agents` and the `pydantic-ai`, `langgraph`, `openai-agents` extras | no measured run went through any of them; the measured agent results (an injection benchmark, the τ-bench retail stand) call the guard directly | call `guard.check` (or `guard.call`) from your framework's tool-execution step; for MCP servers, the proxy (`solvi serve --guard --upstream`), which stays |
+| `System(cost_policy="measured")`, `solvi.core.costs.MeasuredCosts`, `system.freeze_costs()` / `unfreeze_costs()` | planning on measured run times showed no measured benefit | declare `cost=` on the parts; `cost_policy="declared"` is the only value left (a 0.9 plan record with measured costs still replays) |
+| `solvi.core.deciders.heads.Head` (the legacy answer head) | `System.fit` has built a `FastHead` since 0.8 and nothing in solvi built `Head` any more | `solvi.core.deciders.heads.FastHead` |
+| `solvi.extract_multi` / `solvi.core.extract.multi` (`MultiSpanExtractor`) | nothing in solvi used it; the published receipts model behind the README's receipt numbers (`solvi-ai/extract-receipts`) is a `LongSpanExtractor` | `LongSpanExtractor` with a description per field (a `MultiSpanExtractor` checkpoint loads with solvi 0.9) |
+
+### Tried and left out
+
+Each of these was measured against a bar set before the run, did not meet it, and is not in the library (stable or
+experimental). The knowledge store keeps what a system knows with its sources either way; what these runs tested is
+whether it also makes the system better on its own.
+
+- **Getting better over time on a stream of one kind of decision.** On classification and product matching, a static
+  System 1 already answers most inputs alone; facts added from a person's answers to its escalations gave no
+  measurable gain, and answering from remembered cases never certified a threshold that keeps the promise. There the
+  store gives accountability (sources, retraction, disputes for a person), not growth. Growth was shown only in
+  environments met again (a crafting game, the Pokémon world map).
+- **Answering from past episodes under the per-decision promise.** Looking up similar past cases — by nearest
+  neighbours or by attention over episodes — and answering from them never passed calibration at a realistic label
+  budget, so it always handed the decision on. Episodes stay records and evidence, never an answerer.
+- **Recalibrating continuously in the stable path.** Moving a guarantee's threshold as outcomes arrive broke the
+  promise: the outcomes a system sees are not a random sample of its decisions, and a threshold refitted after every
+  label is no longer the one the promise was calibrated for. Recalibration stays explicit (on a schedule or after a
+  drift flag); the on-the-fly version is experimental (`solvi.experimental.oncalib`) with that warning.
+- **Compiling a large policy into rules.** On a support agent's written policy, the two drafts of the compiler
+  disagreed on most inputs or failed the tests derived from the text, also with a person settling disputes, so solvi
+  refused to load it. Compiling stays experimental: so far it was accepted only on short specifications.
+- **A learned memory on top of written rules.** For a support agent with tools that already had hand-written gates,
+  a memory of what the environment refused did not cut refused or unwanted calls over time and blocked some calls the
+  customer wanted; in a dungeon game, learned knowledge and a compiled specification did not add up either. Where the
+  rules are written, write them as gates; knowledge is protection, and justified risk (`RiskBudget`) lowers its cost
+  without promising parity with an agent that has no knowledge.
 
 ## 0.9.0 — 2026-10-03 — System 1 and System 2
 
