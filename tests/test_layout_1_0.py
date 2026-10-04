@@ -31,6 +31,11 @@ def test_every_moved_module_is_in_the_table_and_its_new_path_exists():
 def test_an_old_path_imports_the_same_module_with_a_warning(old):
     new = _deprecate.old_paths()[old]
     _fresh(old)
+    parent = old.rpartition(".")[0]
+    if parent in _deprecate.old_paths():          # an old parent (solvi.agents) imports first with its own warning:
+        with warnings.catch_warnings():           # loaded here, so only this module's warning is under test
+            warnings.simplefilter("ignore")
+            importlib.import_module(parent)
     with pytest.warns(solvi.SolviDeprecationWarning, match=rf"{old} moved in 1\.0: use {new}; the old path is removed in 1\.1"):
         mod = importlib.import_module(old)
     assert mod is importlib.import_module(new)
