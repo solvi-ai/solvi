@@ -3449,7 +3449,7 @@ store = JSONLStorage("game.jsonl", record="sample:100")    # one decision in 100
 | record= | What a decision's record holds |
 |---|---|
 | `"full"` (default) | the whole response (`res.to_dict()`): every step's value, inputs and hash, the flow, the timings |
-| `"compact"` | the given facts (the input, with the types that restore it); each answer with its why, guard, source, evidence and guarantee (not its probabilities); each check's result and reasons; every model-backed step whole (its value, probabilities, model id and fingerprint, tokens, the generator's reply) and the answer heads, guarantees, plan and text records; every step's hash; the catalog's and questions' fingerprints and the time. Not the computed values, the other steps' records, the planned flow, the timings or the per-part fingerprints |
+| `"compact"` | the given facts (the input, with the types that restore it); each answer with its why, guard, source, evidence and guarantee (not its probabilities); each check's result and reasons; every model-backed step whole (its value, probabilities, model id and fingerprint, tokens, the generator's reply) and the answer heads, guarantees, plan and text records and the answer a hard check's `then` function gave (since 1.0.1); every step's hash; the catalog's and questions' fingerprints and the time. Not the computed values, the other steps' records, the planned flow, the timings or the per-part fingerprints |
 | `"sample:N"` | one decision in N (counted by the store object) in full, the others compact |
 
 Bytes a decision in a `JSONLStorage` file ([benchmarks/journal_size.py](../benchmarks/journal_size.py); every store also
@@ -3469,7 +3469,7 @@ costs 1.1 KB a decision — give a long constant text once (a hash or a key as t
 and that its answers are the record's. `replay_all(system)` re-runs it: the flow is planned again for the recorded
 questions on the recorded input and run, every step's hash is chained again and compared with the recorded one — a
 step's hash covers its inputs, value, error and the link to the step before, so equal hashes mean every step gave what
-it gave then — and then the decision is replayed like a full one (heads, guarantees, plan, answers). A model is not
+it gave then — and then the decision is replayed like a full one (heads, guarantees, plan, `then` functions, answers). A model is not
 called again where a full record's replay would not call it either (`trust_models=True`, a generator, a model marked
 `deterministic=False` such as a hosted System One model): its kept output is given back to the step instead and must
 give the recorded record again; a model that full replay re-runs is re-run here too. What it cannot do, and says instead of passing:
@@ -3480,6 +3480,7 @@ give the recorded record again; a model that full replay re-runs is re-run here 
 | a model step | re-run, or its recorded output verified (`trust_models=True`, non-deterministic models) | the same: re-run, or its kept output given back and verified |
 | a step that no longer gives the recorded value (the catalog changed) | the old and the new value | kind `recompute`: the step and the new value; the old value is not kept, only its hash |
 | a model step whose kept output is missing, or does not give its record again | — | kind `not_kept`: "not verified … (no verdict on the data)"; nothing after it is checked |
+| the answer a hard check's `then` function gave | re-run on the recorded facts it read, compared with the recorded answer | the same, on the re-computed facts (kept since 1.0.1; a compact record written by 1.0.0 does not keep it: kind `not_kept`) |
 | `get(id)` | the Response | `CompactRecord`; `store.rederive(id, system)` rebuilds it (the same re-run) |
 | `quarantine(fact)` | from the recorded inputs | re-derived with the store's System; one that cannot be is not searched, and a warning names it |
 | `where_is(fact)` | decisions resting on the fact, records holding it | compact decisions holding it in their input are listed under "stored" |

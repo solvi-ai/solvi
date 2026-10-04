@@ -207,3 +207,70 @@ def test_solvi_check_reports_a_literal_the_function_returns_that_is_not_an_answe
     rep = lint(agent(bad_side))
     assert rep.codes("error") == ["then_bad_answer"] and "'UP'" in rep.errors[0].message
     assert lint(agent()).findings == []
+
+
+# --- compact records (1.0.1): the `then` record is kept whole and re-checked by replay
+def _compact(tmp_path):
+    from solvi.core.store import JSONLStorage
+    s = agent()
+    s.storage = JSONLStorage(tmp_path / "c.jsonl", record="compact")
+    s.storage.catalog = s
+    res = s.ask(LOOP)
+    return s, res.stored_id
+
+
+def test_a_compact_record_keeps_the_then_answer_and_replay_verifies_it(tmp_path):
+    s, id = _compact(tmp_path)
+    kept = [r for r in s.storage.record(id)["compact"]["trace"]["records"] if r["kind"] == "then"]
+    assert [(r["name"], r["value"], sorted(r["inputs"])) for r in kept] == [("then:step", "S", ["facing", "free"])]
+    assert s.storage.verify()["ok"] and s.storage.replay_all(s) == []
+    back = s.storage.rederive(id, s)
+    assert [r.value for r in back.trace.records if r.kind == "then"] == ["S"]
+    assert back["step"].answer == "S" and back["step"].status == "forced"
+
+
+def test_a_compact_then_record_whose_function_changed_is_caught(tmp_path):
+    s, _ = _compact(tmp_path)
+    s.catalog.parts["not_looping"].then["step"] = lambda free: free[-1]
+    s.catalog.parts["not_looping"].then_parts = None
+    bad = s.storage.replay_all(s)
+    assert bad and any(m[1] == "then:step" for m in bad[0]["mismatches"])
+    assert "not_kept" not in bad[0]["kinds"]
+
+
+def test_a_tampered_compact_then_value_is_caught(tmp_path):
+    from solvi.core.runtime import vhash
+    from solvi.core.store import rederive
+    s, id = _compact(tmp_path)
+
+    def tampered(rehash=False, restep=False):
+        d = s.storage.record(id)
+        recs = d["compact"]["trace"]["records"]
+        r = next(r for r in recs if r["kind"] == "then")
+        r["value"] = "N"
+        if rehash:                                     # the record's own hash made to fit the new value
+            from solvi.core.runtime import Record
+            from solvi.core.schema import load
+            r["hash"] = vhash(load(Record, r, s).body())
+            if restep:                                 # and the record's chain of step hashes too
+                d["records"] = [[a, b, r["hash"] if b == "then:step" else h] for a, b, h in d["records"]]
+        return d
+
+    back, why = rederive(tampered(), s)                # the value edited: the record no longer fits its hash
+    assert back is not None
+    rep = back.trace.replay(s, back.flow, trust_models=True)
+    assert not rep["ok"] and any(m[1] == "then:step" and m.kind == "integrity" for m in rep["mismatches"])
+    back, why = rederive(tampered(rehash=True), s)     # rehashed: it is not the step the decision hashed
+    assert back is None and why[0][1] == "then:step" and why[0].kind == "integrity"
+    back, why = rederive(tampered(rehash=True, restep=True), s)   # consistent in the record: the function re-run says no
+    assert back is not None
+    rep = back.trace.replay(s, back.flow, trust_models=True)
+    assert not rep["ok"] and any(m[1] == "then:step" for m in rep["mismatches"])
+    with open(tmp_path / "c.jsonl") as fh:             # and in the store the edit breaks the chain
+        lines = fh.read().replace('"value": "S"', '"value": "N"')
+    assert '"value": "N"' in lines
+    with open(tmp_path / "c.jsonl", "w") as fh:
+        fh.write(lines)
+    assert not s.storage.verify()["ok"]
+    bad = s.storage.replay_all(s)
+    assert bad and any(m[1] == "then:step" for m in bad[0]["mismatches"])

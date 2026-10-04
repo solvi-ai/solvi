@@ -323,9 +323,10 @@ def journal_demo(n=100):
           "`replay_all` re-runs it from its input and compares every step's hash, and says *not verified* where it "
           "cannot check, instead of passing"
           + (f" — here {nv} compact decisions where the `then=` function fired (over the limit): its step is recorded "
-             "after the flow and a compact record does not keep it, so replay reports them as not verified rather "
-             "than as passed. Keep such decisions full (`record=\"sample:N\"` or a full store) when you must re-check "
-             "them" if nv else "") + ".\n\n"
+             "after the flow and a compact record of solvi 1.0.0 does not keep it, so replay reports them as not "
+             "verified rather than as passed. solvi 1.0.1 keeps that step in compact records and re-runs the `then=` "
+             "function on replay, so there they replay OK; on 1.0.0 keep such decisions full (`record=\"sample:N\"` "
+             "or a full store) when you must re-check them" if nv else "") + ".\n\n"
           "```python\nstore = JSONLStorage(\"desk.jsonl\", record=\"compact\")   # or \"full\" (default), \"sample:N\"\n"
           "store.verify(); store.replay_all(system); store.rederive(id, system)\n```")
     return md, pd.DataFrame(rows)

@@ -1,5 +1,22 @@
 # Changelog
 
+## 1.0.1 — unreleased
+
+### Fixed
+
+- **A compact record now keeps the answer a hard check's `then=` function gave, and replay checks it.** In 1.0.0 a
+  compact record (`record="compact"` or the compact part of `"sample:N"`) left out the trace record of kind `then`
+  (name `then:<question>`) that a `then=` function of facts writes, so `replay_all` reported every decision such a
+  function answered as `not_kept` ("not verified") instead of checking it — 51 of 100 compact decisions in the
+  playground's compact-journal demo. Compact records now keep it whole, like a model step (its value, error and the
+  hashes of the facts it read), and `replay_all` / `store.rederive` re-run the function on the re-computed facts and
+  compare: an edited value, or a function that now gives another answer, is a mismatch at `then:<question>`. A kept
+  record that does not match its step hash in the record is reported as `integrity` (it was `not_kept`). A `then` record
+  costs about 0.4 KB in a compact record (the demo: 1.8 → 2.0 KB a decision); `benchmarks/journal_size.py` does not
+  change (its workloads have no `then=` functions). Full records do not change. Compact records written by 1.0.0
+  still load, verify and replay as before: they do not hold the `then` record, so those decisions stay `not_kept`
+  (`tests/fixtures/store_1_0_0`).
+
 ## 1.0.0 — 2026-10-04 — two levels, knowledge and agents
 
 1.0 makes solvi two levels. The **high level** is ready systems you configure: `solvi.build` (decisions from

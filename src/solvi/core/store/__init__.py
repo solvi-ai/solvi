@@ -169,9 +169,12 @@ def record_mode(record):
                      f"others compact), not {record!r}")
 
 
-KEPT_STEPS = ("head", "guard", "plan", "textin")
+KEPT_STEPS = ("head", "guard", "plan", "textin", "then")
 """The trace records a compact record keeps whole besides every model-backed step: answer heads, guarantees, the
-strategist's plan and the text an ask_text read (they are small, and a re-run of the flow does not produce them)."""
+strategist's plan, the text an ask_text read and the answer a failed hard check's `then` function gave (they are
+small, and a re-run of the flow does not produce them; replay re-checks each — a `then` function is re-run on the
+re-computed facts it read and must give the kept value). Compact records written by 1.0.0 do not keep `then` records:
+their replay reports the decision not_kept, as it did then."""
 
 
 def _kept_step(r):
@@ -186,7 +189,7 @@ def compact_content(d):
     """A response's dict (Response.to_dict()) → what a compact record keeps of it (see TraceStorage, record="compact"):
     the given facts (the input as read, with the types that restore it), each answer with its why / guard / source /
     evidence / guarantee (not its probabilities), each check's result and reasons, the model-backed steps and the
-    answer heads, guarantees, plan and text records whole (with the models' ids, fingerprints and token usage), the
+    answer heads, guarantees, plan, text and `then` records whole (with the models' ids, fingerprints and token usage), the
     steps skipped, the catalog's and questions' fingerprints, and the time. Left out: the values of the computed facts
     (they are re-computed), the other steps' records (their hashes stay in the record's `records`), the planned flow,
     the timings and the per-part fingerprints."""
@@ -464,7 +467,7 @@ def rederive(d, system, trust_models=False):
     model (a compact record keeps every model step whole), and a model step that is re-run and gives the kept output
     takes the kept record (its latency and usage); then every step's hash is chained again and compared with the
     recorded one — a hash covers the step's inputs, value, error and the link to the step before, so equal hashes mean
-    the step gave what it gave then — and the kept records after the flow (answer heads, guarantees, plan, text) are
+    the step gave what it gave then — and the kept records after the flow (answer heads, guarantees, plan, text, `then`) are
     appended. The Response is the decision as it was: replay it like a stored one. None, with the reasons, when it
     cannot be rebuilt: a step whose hash differs (kind "recompute": the catalog changed since — the old value is not
     kept, only its hash), a kept model output that does not give its record again or a model step of several producers
@@ -533,6 +536,8 @@ def rederive(d, system, trust_models=False):
     for s in steps[len(trace.records):]:
         r = have.get(s)
         if r is None:
+            if any(k.step == s[0] and k.name == s[1] for k in kept.records):   # kept, but not the step that was hashed
+                return None, [Mismatch(s[0], s[1], "the kept record differs from the recorded step hash", "integrity")]
             return None, [Mismatch(s[0], s[1], "a step recorded after the flow is not kept in the compact record",
                                    "not_kept")]
         trace.records.append(r)
