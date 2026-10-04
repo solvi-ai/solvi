@@ -27,7 +27,7 @@ from .solutions.decisions import build
 from .solutions.guard import Guard
 from .solutions.knowledge import Knowledge
 
-__version__ = "0.9.0"
+__version__ = "1.0.0"
 
 _deprecate.install_old_paths()             # the 0.9 module paths import for one release, with a warning (CHANGELOG 1.0)
 
