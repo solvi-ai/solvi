@@ -142,7 +142,9 @@ def resolve(spec):
 
 def declaration(path):
     """A checkpoint folder's solvi_decide.json → (meta, parsed capabilities)."""
-    from .core.deciders import capabilities
+    # from its module: the package attribute of the same name becomes the module once `solvi.decide.capabilities` (the
+    # 0.9 path) is imported
+    from .core.deciders.capabilities import capabilities
     f = Path(path) / "solvi_decide.json"
     if not f.is_file():
         raise ModelError(f"{path} has no solvi_decide.json: not a solvi decider checkpoint")

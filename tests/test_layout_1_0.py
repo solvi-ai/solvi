@@ -246,6 +246,7 @@ def test_decision_system_is_the_old_auto_system_and_build_does_not_compile():
 
 def test_the_model_providers(monkeypatch):
     from solvi import models
+    from solvi.cli import _models as _cli_models  # noqa: F401 — loaded before the patch below: it binds models.load at import
     from solvi.core.deciders import DecideModel
     assert models.DecideModel is DecideModel
     m = models.llm("http://127.0.0.1:9/v1", "some-model")
@@ -257,3 +258,14 @@ def test_the_model_providers(monkeypatch):
     with pytest.warns(solvi.SolviDeprecationWarning, match="solvi.models.cmd_models moved in 1.0"):
         from solvi.cli import _models
         assert models.cmd_models is _models.cmd_models
+
+
+def test_a_checkpoint_declaration_reads_after_the_0_9_capabilities_path_is_imported(tmp_path):
+    """Importing `solvi.decide.capabilities` (a 0.9 path) sets the package attribute `capabilities` to the module,
+    over the function of that name; solvi's own code reads the function from its module, so it keeps working."""
+    (tmp_path / "solvi_decide.json").write_text('{"format": "solvi_decide v2", "modes": ["single"]}')
+    code = ("import warnings\nwith warnings.catch_warnings():\n    warnings.simplefilter('ignore')\n"
+            "    import solvi.decide.capabilities  # noqa\n"
+            "from solvi import models\nmeta, caps = models.declaration(%r)\nprint(meta['format'])" % str(tmp_path))
+    out = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, timeout=120)
+    assert out.stdout.strip() == "solvi_decide v2", out.stderr[-2000:]
