@@ -68,4 +68,4 @@ def test_nothing_is_left_behind():
     for extra in ("otel", "pydantic-ai", "langgraph", "openai-agents"):
         assert f"\n{extra} = " not in pyproject, extra
     assert not (ROOT / "spaces" / "documents-server").exists() and not (ROOT / "tools" / "smoke_decide.py").exists()
-    assert "## 1.0.0 — unreleased" in (ROOT / "CHANGELOG.md").read_text()
+    assert "## 1.0.0 — " in (ROOT / "CHANGELOG.md").read_text()

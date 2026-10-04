@@ -1,6 +1,6 @@
 # Changelog
 
-## 1.0.0 — unreleased — two levels, knowledge and agents
+## 1.0.0 — 2026-10-04 — two levels, knowledge and agents
 
 1.0 makes solvi two levels. The **high level** is ready systems you configure: `solvi.build` (decisions from
 labelled examples with a promise on the errors), `solvi.Agent` (new: acting in an environment), `solvi.Guard` (an
