@@ -218,7 +218,7 @@ class DecideModel:
         from ..provenance import digest
         ads = {repr(k): a.params() for k, a in sorted(self.adaptations.items(), key=repr)}
         if self.loras:                       # a model without adapters hashes as before
-            return digest(self.weights_fingerprint(), ads, {repr(k): ad.hash for k, ad in sorted(self.loras.items(), key=repr)})
+            return digest(self.weights_fingerprint(), ads, {repr(k): ad.fingerprint() for k, ad in sorted(self.loras.items(), key=repr)})
         return digest(self.weights_fingerprint(), ads)
 
     def metadata(self):
@@ -231,7 +231,7 @@ class DecideModel:
                 "act_threshold": self.act_threshold, "meta": base,
                 "adaptations": [{"task": k[0], "options": list(k[1]), "descriptions": list(k[2]), "multi": k[3], **a.params()}
                                 for k, a in self.adaptations.items()],
-                **({"loras": [{"task": k[0], "options": [o for o, _ in k[1]], **ad.describe()} for k, ad in self.loras.items()]}
+                **({"loras": [{"task": k[0], "options": [o for o, _ in k[1]], **_described(ad)} for k, ad in self.loras.items()]}
                    if self.loras else {})}
 
     @property
@@ -356,7 +356,7 @@ class DecideModel:
 
     def _lora_name(self, sp):
         ad = self.loras.get(lora_key(sp)) if self.loras else None
-        return None if ad is None else ad.name
+        return None if ad is None else ad.fingerprint()
 
     def _using(self, name):
         """The scorer with this adapter active (None: none) while scoring — a no-op for a model without adapters. An
@@ -366,7 +366,7 @@ class DecideModel:
             import contextlib
             return contextlib.nullcontext()
         ads = list(self.loras.values())
-        ad = next((a for a in ads if a.name == name), None) if name is not None else None
+        ad = next((a for a in ads if a.fingerprint() == name), None) if name is not None else None
         return (ad if ad is not None else ads[0]).using(self.scorer, active=ad is not None)
 
     def _forget_cached(self, key):
@@ -716,7 +716,7 @@ class DecideModel:
         if self.loras:
             name = self._lora_name(sp)
             if name is not None:
-                d.extra["lora"] = {"adapter": self.loras[lora_key(sp)].hash, "experimental": True}
+                d.extra["lora"] = {"adapter": self.loras[lora_key(sp)].fingerprint(), "experimental": True}
         if act is not None:
             p = self.act_probability(sp, d, act)
             d.extra["act"] = p
@@ -1094,6 +1094,13 @@ class DecideModel:
     def questions(self, cat, schema, text_fact="doc", fields=None, min_confidence=None, **kw):
         """decisions(...) registered as the answers of questions named after the fields → [Question]."""
         return [p.question(cat, min_confidence=min_confidence) for p in self.decisions(schema, text_fact, fields, **kw).values()]
+
+
+def _described(ad):
+    """What the metadata shows of an adapter: its own describe() when it has one (the LoRA adapter), else its kind and
+    fingerprint (the Adapter protocol)."""
+    d = getattr(ad, "describe", None)
+    return d() if callable(d) else {"adapter": ad.fingerprint(), "kind": ad.kind}
 
 
 def _json_default(o):

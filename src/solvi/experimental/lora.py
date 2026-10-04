@@ -127,6 +127,12 @@ class LoraAdapter:
         save_file({k: v.to(torch.bfloat16).contiguous() for k, v in self.tensors.items()}, str(path), metadata=meta)
         return path
 
+    @classmethod
+    def load(cls, path):
+        """An adapter file written by save → the LoraAdapter (ValueError if it is not one, or its content does not
+        match its hash). Into a part: solvi.experimental.lora.load(part, path) / part.load_lora(path)."""
+        return read(path)
+
 
 def _hash(tensors, config):
     import torch

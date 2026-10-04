@@ -1,9 +1,9 @@
 """Who answers: the fast system within its guarantee, a slow path when the fast one is unsure, or a person — one recorded
 decision per input, with a budget.
 
-    from solvi.core.dispatch import Budget, Dispatcher, SlowPath
+    from solvi.core.dispatch import AskPath, Budget, Dispatcher
 
-    slow = SlowPath(system2)                       # a System that answers the same question slowly (an LLM part, ...)
+    slow = AskPath(system2)                        # a System that answers the same question slowly (an LLM part, ...)
     d = Dispatcher(system, slow, question="intent", price=(0.04, 0.17),
                    budget=Budget(usd=0.002, calls=4), total=Budget(usd=5.0), supervise=0.05)
     res = d.ask({"text": "my card was charged twice"})
@@ -30,12 +30,15 @@ and, with `on_disagree="human"` or `"s2"`, goes to a person or to the slow path'
 that forces System 1's answer is never re-thought: the check decides. A signal left out of `wake` sends its inputs to a
 person instead of the slow path.
 
-The slow path (`SlowPath`) is built from the existing parts and judged by a System's checks:
-  - a System that answers the question itself — an LLM decision part (`solvi.core.deciders.llm`), generated candidates with
-    `solvi.core.slow.generate` and `solvi.core.slow.agree` in its catalog, typed facts with quotes — with its own guarantee;
-  - `propose=` (a `Generator.proposer`): `solvi.core.slow.refine` — propose, check with the System's hard checks, re-ask with the
-    reasons of the failed checks, within the budget;
-  - `space=`: `solvi.core.slow.search` — the candidates of an enumerable space through the checks.
+The slow path (a `SlowPath`) is built from the existing parts and judged by a System's checks:
+  - `AskPath(system)`: a System that answers the question itself — an LLM decision part (`solvi.core.deciders.llm`),
+    generated candidates with `solvi.core.slow.generate` and `solvi.core.slow.agree` in its catalog, typed facts with
+    quotes — with its own guarantee;
+  - `RefinePath(system, propose=, into=)` (a `Generator.proposer`, any Proposer): `solvi.core.slow.refine` — propose,
+    check with the System's hard checks, re-ask with the reasons of the failed checks, within the budget;
+  - `SearchPath(system, space=, into=)`: `solvi.core.slow.search` — the candidates of an enumerable space through the
+    checks;
+  - a subclass of your own (`mode`, `think`, `fingerprint`; see SlowPath).
 Its answer is accepted when the System does not abstain on it (and, with refine and search, its checks accept it).
 
 Calibrating the hard slice. The inputs System 1 hands over are the hard ones, and a slow path's accuracy (or its own
@@ -75,13 +78,14 @@ asks (the budget, the drift state and the decision numbers follow the order of t
 `reset_drift()` and is taken as recorded on replay, since it depends on the stream before the decision."""
 from __future__ import annotations
 
+import abc
 import hashlib
 import json
 import math
 import threading
 import time
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, ClassVar
 
 # defined in solvi.core.costs since 1.0 (the system report, solvi.core.slow.generate and solvi.core.slow.refine use them too); re-exported here
 from .costs import Budget, BudgetStop, Cost, _usages, cost_of, price_of, recorded_calls   # noqa: F401
@@ -94,9 +98,14 @@ PATHS = ("s1", "s2", "human")
 # ------------------------------------------------------------------------------------------------ the slow path
 @dataclass
 class Thought:
-    """What the slow path did for one input: its mode ("ask", "refine", "search"), its answer (None when it has none),
-    whether that answer was accepted, why not, its record (a Response, a Refinement or a SearchRun — replayable) and
-    its cost."""
+    """What the slow path did for one input: its mode ("ask", "refine", "search", or a SlowPath subclass's own), its
+    answer (None when it has none), whether that answer was accepted, why not, its record (a Response, a Refinement, a
+    SearchRun — replayable — or a subclass's own record) and its cost.
+
+    The mode names the SlowPath class that made it (`SlowPath.modes`, filled as subclasses are defined): a stored
+    Thought is read back by that class (`restore_record`), and its responses and generator records are found by it
+    (`responses_of`, `generated_of`) — so a Dispatched decision of a path of your own round-trips through a store as
+    the built-ins' do. Stability: stable (the record format too)."""
     mode: str
     answer: Any = None
     accepted: bool = False
@@ -107,78 +116,136 @@ class Thought:
 
     @property
     def responses(self):
-        r = self.record
-        if r is None:
+        """The Responses the slow path's System gave (each a replayable trace; their model outputs are its cost)."""
+        if self.record is None:
             return []
-        if self.mode == "ask":
-            return [r]
-        if self.mode == "refine":
-            return [x.response for x in r.rounds if x.response is not None]
-        return [r.response] if r.response is not None else []
+        return list(SlowPath.path_of(self.mode).responses_of(self.record))
 
     def generated(self):
         """The generator records kept outside the traces (a refinement's proposals)."""
-        if self.mode != "refine" or self.record is None:
+        if self.record is None:
             return []
-        return [x.generated for x in self.record.rounds if x.generated is not None]
+        return list(SlowPath.path_of(self.mode).generated_of(self.record))
 
     def to_dict(self):
         from .store import plain
-        rec = None if self.record is None else self.record.to_dict()
+        rec = self.record
+        if rec is not None:
+            rec = rec.to_dict() if callable(getattr(rec, "to_dict", None)) else plain(rec)
         return {"mode": self.mode, "answer": plain(self.answer), "accepted": self.accepted, "why": self.why,
                 "record": rec, "cost": self.cost.to_dict(), "stopped": self.stopped}
 
     @classmethod
     def from_dict(cls, d, system=None):
+        """A stored Thought back; its record restored by the SlowPath class of its mode (with `system`'s types)."""
         rec = d.get("record")
         if rec is not None:
-            if d["mode"] == "ask":
-                from .response import Response
-                rec = Response.model_validate(rec, catalog=system)
-            elif d["mode"] == "refine":
-                from .slow.refine import Refinement
-                rec = Refinement.from_dict(rec, catalog=system)
-            else:
-                from .slow.search import SearchRun
-                rec = SearchRun.from_dict(rec, catalog=system)
+            rec = SlowPath.path_of(d["mode"]).restore_record(rec, system)
         return cls(d["mode"], _restored(d.get("answer")), d["accepted"], d.get("why"), rec,
                    Cost.from_dict(d.get("cost") or {}), d.get("stopped"))
 
 
-class SlowPath:
-    """System 2: a slow, checked way to answer the question (see the module docs).
+class _SlowPathType(abc.ABCMeta):
+    """SlowPath(...) itself is the 0.9 factory (kept for 1.0.x, with a warning); a subclass is constructed as usual and
+    must name its mode."""
 
-    system: the System that answers or judges — one whose question is answered by a model (an LLM decision part,
-    generated candidates with agreement), or System 1 itself as the judge of proposals. question: its question's name
-    when it differs from the dispatcher's. propose: a proposer for solvi.core.slow.refine (`Generator.proposer(...)`) — the
-    proposal is given to the System as the fact `into`, checked, and re-asked with the reasons up to `rounds` times.
-    space: a space for solvi.core.slow.search (with `into`, `search=` its other options: objective, prune, keep, budget).
-    accept: what accepts a refined or searched proposal ("checks", an answer or answers, a function of the Response),
-    as in solvi.core.slow.refine; the System must also not abstain on the question. feedback: refine's feedback function."""
+    def __call__(cls, *args, **kw):
+        if cls is SlowPath:
+            from .._deprecate import _warn_from_caller
+            _warn_from_caller("SlowPath(system, ...) as a constructor is deprecated in 1.0: SlowPath is the base class "
+                              "of the slow paths — use AskPath(system), RefinePath(system, propose=, into=) or "
+                              "SearchPath(system, space=, into=); the factory is removed in 1.1")
+            return _slow_path(*args, **kw)
+        obj = super().__call__(*args, **kw)
+        if not isinstance(getattr(type(obj), "mode", None), str):
+            raise TypeError(f"{cls.__qualname__} is a SlowPath without a mode: set the class attribute mode = \"...\" "
+                            "(a name of its own; its Thoughts are read back by it)")
+        return obj
 
-    def __init__(self, system, *, question=None, propose=None, into=None, rounds=3, space=None, search=None,
-                 accept="checks", feedback=None):
-        if propose is not None and space is not None:
-            raise ValueError("a slow path refines proposals (propose=) or searches a space (space=), not both")
-        if (propose is not None or space is not None) and not isinstance(into, str) and not isinstance(space, dict):
-            raise ValueError("into= names the given fact a proposal or a candidate is passed as")
-        if propose is not None and not callable(propose):
-            raise TypeError("propose is a function (state, rounds) → a proposal, e.g. Generator.proposer(...)")
-        if int(rounds) < 1:
-            raise ValueError("rounds must be at least 1")
-        self.system, self.question, self.propose, self.into = system, question, propose, into
-        self.rounds, self.space, self.search_kw = int(rounds), space, dict(search or {})
-        self.accept, self.feedback = accept, feedback
-        self.mode = "refine" if propose is not None else "search" if space is not None else "ask"
+
+class SlowPath(metaclass=_SlowPathType):
+    """System 2: a slow, checked way to answer the question — the base class of the slow paths (see the module docs).
+
+    The built-ins: AskPath (a System that answers the question itself), RefinePath (propose → check → re-ask with the
+    reasons, solvi.core.slow.refine) and SearchPath (the candidates of a space through the checks,
+    solvi.core.slow.search).
+
+    You implement (a subclass): `mode` — a class attribute, a name of its own (its Thoughts are read back by it);
+    `think(state, question, *, price, budget, expected_round, store)` → a Thought of that mode (the answer, accepted or
+    not and why, the record); `fingerprint()` → everything the path's answers depend on (its System's fingerprint,
+    its settings). Override when you have more: `replay(thought, trust_models=False)` (re-derive the answer and the
+    acceptance from the record; the default checks the mode and replays a record that has `replay(system,
+    trust_models=)`), `signal(thought, question)` (the number a calibrated threshold is put on: default 1 for an
+    accepted answer), `restore_record(d, system)` / `responses_of(record)` / `generated_of(record)` (classmethods:
+    how a stored record is read back, which Responses and generator records it holds — for the cost), `steps` (the
+    rounds of one run, for the expected cost of one more round).
+
+    You get for free (`run`, `Dispatcher`): routing by System 1's signals, a budget per decision and in total checked
+    before the path starts (and between the rounds of a refinement), the cost in dollars, calls and tokens from the
+    model outputs its Responses record (recomputed on replay), `Dispatcher.calibrate` choosing per slice whether its
+    answers are taken and above what signal, the dispatch record in a store, replay of every decision, the system
+    report.
+
+    Stability: stable to use; provisional to subclass in 1.0 (`think` may gain keyword arguments; take **kw).
+    `SlowPath(system, propose=..., space=...)` — the 0.9 constructor — still builds the matching built-in for 1.0.x,
+    with a SolviDeprecationWarning; removed in 1.1."""
+
+    mode: ClassVar[str]                  # a subclass's name for its Thoughts ("ask", "refine", "search", yours)
+    modes: ClassVar[dict] = {}           # mode → the SlowPath class whose Thoughts have it (Thought.from_dict reads it)
+    steps = 1                            # rounds of one run (a refinement's rounds): the expected cost of one more
+
+    def __init_subclass__(cls, **kw):
+        super().__init_subclass__(**kw)
+        m = cls.__dict__.get("mode")
+        if m is None:
+            return
+        if not isinstance(m, str) or not m:
+            raise TypeError(f"{cls.__qualname__}.mode is a name (a non-empty str), not {m!r}")
+        old = SlowPath.modes.get(m)
+        if old is not None and (old.__module__, old.__qualname__) != (cls.__module__, cls.__qualname__):
+            raise ValueError(f"the slow-path mode {m!r} is {old.__module__}.{old.__qualname__}'s: give "
+                             f"{cls.__qualname__} a mode of its own")
+        SlowPath.modes[m] = cls
+
+    @classmethod
+    def path_of(cls, mode):
+        """The SlowPath class whose Thoughts have this mode (KeyError when no class of that mode is defined: import the
+        module that defines it before reading its decisions)."""
+        p = SlowPath.modes.get(mode)
+        if p is None:
+            raise KeyError(f"no slow path of mode {mode!r} is defined (known: {', '.join(sorted(SlowPath.modes))}): "
+                           "import the module that defines it before reading its records")
+        return p
+
+    def __init__(self, system, *, question=None):
+        self.system, self.question = system, question
 
     def __repr__(self):
-        return f"SlowPath({self.mode})"
+        return f"{type(self).__name__}({self.mode})"
 
+    @abc.abstractmethod
+    def think(self, state, question, *, price=None, budget=None, expected_round=None, store=True):
+        """One input → a Thought of this path's mode (its cost is filled in by run). question: the question asked of
+        the path's System (checked by run). budget: the per-decision Budget — a path that takes several steps checks
+        it between them (raise or stop with Thought.stopped); expected_round: the expected Cost of one more step."""
+
+    @abc.abstractmethod
     def fingerprint(self):
-        from .provenance import code_fingerprint, digest
-        acc = code_fingerprint(self.accept) if callable(self.accept) else repr(self.accept)
-        return digest("SlowPath", self.mode, self.system.fingerprint(), self.question, self.into, self.rounds, acc,
-                      sorted(self.search_kw), code_fingerprint(self.propose) if self.propose is not None else None)
+        """What this path's answers depend on (recorded in the dispatcher's config with every decision)."""
+
+    def run(self, state, question, *, price=None, budget=None, expected_round=None, store=True):
+        """Think about one input → a Thought, with its cost: the model outputs its Responses and generator records
+        hold, at `price`, and the time it took (the cost a replay recomputes)."""
+        q = self._q(question)
+        t0 = time.perf_counter()
+        th = self.think(state, q, price=price, budget=budget, expected_round=expected_round, store=store)
+        if not isinstance(th, Thought):
+            raise TypeError(f"{type(self).__qualname__}.think returned {type(th).__name__}, not a Thought")
+        if th.mode != self.mode:
+            raise ValueError(f"{type(self).__qualname__}.think returned a Thought of mode {th.mode!r}, not its own "
+                             f"{self.mode!r}")
+        th.cost = cost_of(th.responses, price, (time.perf_counter() - t0) * 1000, th.generated())
+        return th
 
     def _q(self, question):
         q = self.question or question
@@ -186,28 +253,141 @@ class SlowPath:
             raise ValueError(f"the slow path's System has no question {q!r} (question= names it)")
         return q
 
-    def run(self, state, question, *, price=None, budget=None, expected_round=None, store=True):
-        """Think about one input → a Thought. budget: the per-decision Budget, checked between the rounds of a
-        refinement (with expected_round, the expected Cost of one more round)."""
-        q = self._q(question)
-        t0 = time.perf_counter()
-        if self.mode == "ask":
-            res = self.system.ask(dict(state), [q], store=store)
-            r = res[q]
-            ok = r.status != "abstain"
-            th = Thought("ask", r.answer if ok else _would(r, res, q), ok, None if ok else f"the slow path abstained: {r.why}",
-                         res)
-        elif self.mode == "refine":
-            th = self._refine(state, q, price, budget, expected_round, t0, store)
-        else:
-            th = self._search(state, q, store)
-        th.cost = cost_of(th.responses, price, (time.perf_counter() - t0) * 1000, th.generated())
-        return th
+    def replay(self, thought, trust_models=False):
+        """Re-check a recorded Thought without calling a model → {"ok", "mismatches": [(what, why)]}. The default: the
+        mode is this path's, an accepted answer has its record, and a record with `replay(system, trust_models=)`
+        replays under this path's System. Override to re-derive the answer and its acceptance from the record (the
+        built-ins do)."""
+        bad = []
+        rec = thought.record
+        if thought.mode != self.mode:
+            return {"ok": False, "mismatches": [("mode", f"recorded {thought.mode}, the slow path is {self.mode}")]}
+        if rec is None:
+            if thought.accepted:
+                bad.append(("record", "an accepted answer without its record"))
+            return {"ok": not bad, "mismatches": bad}
+        rp = getattr(rec, "replay", None)
+        if callable(rp):
+            rep = rp(self.system, trust_models=trust_models)
+            bad += [("record", "; ".join(map(str, m)) if isinstance(m, (tuple, list)) else str(m))
+                    for m in (rep or {}).get("mismatches", [])]
+        return {"ok": not bad, "mismatches": bad}
 
-    def _refine(self, state, q, price, budget, expected_round, t0, store):
+    def signal(self, thought, question):
+        """The slow path's signal for its answer, what Dispatcher.calibrate thresholds: 1 for an accepted answer, −inf
+        otherwise (AskPath: its answer's confidence)."""
+        return 1.0 if thought.accepted else -math.inf
+
+    @classmethod
+    def restore_record(cls, d, system=None):
+        """A stored record (a dict) → the record (default: the dict itself)."""
+        return d
+
+    @classmethod
+    def responses_of(cls, record):
+        """The Responses a record holds (default: its `responses`, if it has them)."""
+        r = getattr(record, "responses", None)
+        return list(r() if callable(r) else r or [])
+
+    @classmethod
+    def generated_of(cls, record):
+        """The generator records a record keeps outside its traces (default: none)."""
+        return []
+
+
+class _Checked(SlowPath):
+    """The built-in paths' shared settings and fingerprint (as 0.9's single SlowPath class computed it)."""
+
+    def __init__(self, system, *, question=None, propose=None, into=None, rounds=3, space=None, search=None,
+                 accept="checks", feedback=None):
+        if int(rounds) < 1:
+            raise ValueError("rounds must be at least 1")
+        super().__init__(system, question=question)
+        self.propose, self.into = propose, into
+        self.rounds, self.space, self.search_kw = int(rounds), space, dict(search or {})
+        self.accept, self.feedback = accept, feedback
+
+    def fingerprint(self):
+        from .provenance import code_fingerprint, digest
+        acc = code_fingerprint(self.accept) if callable(self.accept) else repr(self.accept)
+        return digest("SlowPath", self.mode, self.system.fingerprint(), self.question, self.into, self.rounds, acc,
+                      sorted(self.search_kw), code_fingerprint(self.propose) if self.propose is not None else None)
+
+
+class AskPath(_Checked):
+    """The slow path that asks a System answering the question itself — an LLM decision part, generated candidates
+    with agreement (solvi.core.slow.generate / agree), typed facts with quotes — with its own guarantee. Its answer is
+    accepted when the System does not abstain on it; its signal is the answer's confidence. Stability: stable."""
+    mode = "ask"
+
+    def __init__(self, system, *, question=None):
+        super().__init__(system, question=question)
+
+    def think(self, state, question, *, price=None, budget=None, expected_round=None, store=True):
+        res = self.system.ask(dict(state), [question], store=store)
+        r = res[question]
+        ok = r.status != "abstain"
+        return Thought("ask", r.answer if ok else _would(r, res, question), ok,
+                       None if ok else f"the slow path abstained: {r.why}", res)
+
+    def replay(self, thought, trust_models=False):
+        bad = []
+        rec = thought.record
+        if thought.mode != self.mode:
+            return {"ok": False, "mismatches": [("mode", f"recorded {thought.mode}, the slow path is {self.mode}")]}
+        if rec is None:
+            return SlowPath.replay(self, thought, trust_models)
+        rep = rec.trace.replay(self.system, trust_models=trust_models)
+        bad += [("trace", f"{m[1]}: {m[2]}") for m in rep["mismatches"]]
+        qn = self.question or next(iter(rec.results))
+        r = rec[qn]
+        ok = r.status != "abstain"
+        return _same_outcome(thought, ok, r.answer if ok else _would(r, rec, qn), bad)
+
+    def signal(self, thought, question):
+        res = thought.record
+        if res is None:
+            return -math.inf
+        r = res[self._q(question)]
+        if r.status == "abstain" and r.guard not in ("low_confidence", None):
+            return -math.inf
+        return float(r.confidence)
+
+    @classmethod
+    def restore_record(cls, d, system=None):
+        from .response import Response
+        return Response.model_validate(d, catalog=system)
+
+    @classmethod
+    def responses_of(cls, record):
+        return [record]
+
+
+class RefinePath(_Checked):
+    """The slow path that refines proposals (solvi.core.slow.refine): `propose(state, rounds)` (a Proposer, e.g.
+    `Generator.proposer(...)`) gives a proposal, the System gets it as the fact `into`, its hard checks judge it, and
+    the reasons of the failed checks are fed back, up to `rounds` times; the budget is checked between the rounds.
+    accept: what accepts a proposal ("checks", an answer or answers, a function of the Response); the System must also
+    not abstain on the question. feedback: refine's feedback function. Stability: stable."""
+    mode = "refine"
+
+    def __init__(self, system, *, propose, into, question=None, rounds=3, accept="checks", feedback=None):
+        if not callable(propose):
+            raise TypeError("propose is a function (state, rounds) → a proposal, e.g. Generator.proposer(...)")
+        if not isinstance(into, str):
+            raise ValueError("into= names the given fact a proposal or a candidate is passed as")
+        super().__init__(system, question=question, propose=propose, into=into, rounds=rounds, accept=accept,
+                         feedback=feedback)
+
+    @property
+    def steps(self):
+        return self.rounds
+
+    def think(self, state, question, *, price=None, budget=None, expected_round=None, store=True):
         from .slow.refine import refine
         inner = self.propose
         assert inner is not None
+        t0 = time.perf_counter()
 
         def propose(st, rounds):
             if budget is not None and rounds:
@@ -217,8 +397,8 @@ class SlowPath:
                 if why:
                     raise BudgetStop(f"no budget for another round ({why})")
             return inner(st, rounds)
-        run = refine(self.system, dict(state), q, propose, into=self.into, rounds=self.rounds, accept=self.accept,
-                     feedback=self.feedback, store=store)
+        run = refine(self.system, dict(state), question, propose, into=self.into, rounds=self.rounds,
+                     accept=self.accept, feedback=self.feedback, store=store)
         r = run.result
         ok = bool(run.accepted) and r is not None and r.status != "abstain"
         stopped = None
@@ -226,57 +406,104 @@ class SlowPath:
         if last is not None and last.error and "BudgetStop" in last.error:
             stopped = last.error
         why = None if ok else (run.escalation or (f"the slow path abstained: {r.why}" if r is not None else "no answer"))
-        ans = (r.answer if ok else _would(r, run.response, q)) if r is not None else None
+        ans = (r.answer if ok else _would(r, run.response, question)) if r is not None else None
         return Thought("refine", ans, ok, why, run, stopped=stopped)
 
-    def _search(self, state, q, store):
+    def replay(self, thought, trust_models=False):
+        rec = thought.record
+        if thought.mode != self.mode or rec is None:
+            return SlowPath.replay(self, thought, trust_models)
+        rep = rec.replay(self.system, accept=None if not callable(self.accept) else self.accept,
+                         trust_models=trust_models)
+        bad = [("refine", f"round {m[0]} {m[1]}: {m[2]}") for m in rep["mismatches"]]
+        r = rec.result
+        ok = bool(rec.accepted) and r is not None and r.status != "abstain"
+        ans = (r.answer if ok else _would(r, rec.response, rec.question)) if r is not None else None
+        return _same_outcome(thought, ok, ans, bad)
+
+    @classmethod
+    def restore_record(cls, d, system=None):
+        from .slow.refine import Refinement
+        return Refinement.from_dict(d, catalog=system)
+
+    @classmethod
+    def responses_of(cls, record):
+        return [x.response for x in record.rounds if x.response is not None]
+
+    @classmethod
+    def generated_of(cls, record):
+        return [x.generated for x in record.rounds if x.generated is not None]
+
+
+class SearchPath(_Checked):
+    """The slow path that searches a space (solvi.core.slow.search): the candidates of `space` (a list, a dict of
+    domains, a Tree or any Space, or a function of the facts) are given to the System as the fact `into` and run
+    through its checks; `search=` takes search's other options (objective, prune, keep, budget). accept: as in
+    RefinePath. Stability: stable."""
+    mode = "search"
+
+    def __init__(self, system, *, space, into=None, question=None, search=None, accept="checks"):
+        if space is None:
+            raise ValueError("space= is the space searched (a list, a dict of domains, a Tree, a function of the facts)")
+        if not isinstance(into, str) and not isinstance(space, dict):
+            raise ValueError("into= names the given fact a proposal or a candidate is passed as")
+        super().__init__(system, question=question, space=space, into=into, search=search, accept=accept)
+
+    def think(self, state, question, *, price=None, budget=None, expected_round=None, store=True):
         from .slow.search import search
-        run = search(self.system, dict(state), q, self.space, into=self.into, accept=self.accept, store=store,
+        run = search(self.system, dict(state), question, self.space, into=self.into, accept=self.accept, store=store,
                      **self.search_kw)
         res = run.response
-        r = res[q] if res is not None else None
+        r = res[question] if res is not None else None
         ok = run.best is not None and r is not None and r.status != "abstain"
         why = None if ok else (run.escalation or "no candidate of the space was accepted")
         return Thought("search", r.answer if ok else None, ok, why, run)
 
     def replay(self, thought, trust_models=False):
-        """Re-check a recorded Thought: its record replays under this path's System (no model is called), and its
-        answer and acceptance follow from the record → {"ok", "mismatches": [(what, why)]}."""
-        bad = []
         rec = thought.record
-        q = self.question
-        if rec is None:
-            if thought.accepted:
-                bad.append(("record", "an accepted answer without its record"))
-            return {"ok": not bad, "mismatches": bad}
-        if thought.mode != self.mode:
-            return {"ok": False, "mismatches": [("mode", f"recorded {thought.mode}, the slow path is {self.mode}")]}
-        if thought.mode == "ask":
-            rep = rec.trace.replay(self.system, trust_models=trust_models)
-            bad += [("trace", f"{m[1]}: {m[2]}") for m in rep["mismatches"]]
-            qn = q or next(iter(rec.results))
-            r = rec[qn]
-            ok = r.status != "abstain"
-            ans = r.answer if ok else _would(r, rec, qn)
-        elif thought.mode == "refine":
-            rep = rec.replay(self.system, accept=None if not callable(self.accept) else self.accept,
-                             trust_models=trust_models)
-            bad += [("refine", f"round {m[0]} {m[1]}: {m[2]}") for m in rep["mismatches"]]
-            r = rec.result
-            ok = bool(rec.accepted) and r is not None and r.status != "abstain"
-            ans = (r.answer if ok else _would(r, rec.response, rec.question)) if r is not None else None
-        else:
-            rep = rec.replay(self.system, accept=self.accept, objective=self.search_kw.get("objective"),
-                             trust_models=trust_models)
-            bad += [("search", f"{m[0]}: {m[1]}") for m in rep["mismatches"]] if rec.response is not None else []
-            r = rec.response[rec.question] if rec.response is not None else None
-            ok = rec.best is not None and r is not None and r.status != "abstain"
-            ans = r.answer if ok else None
-        if ok != thought.accepted:
-            bad.append(("accepted", f"recorded {thought.accepted}, the record gives {ok}"))
-        if _vh(ans) != _vh(thought.answer):
-            bad.append(("answer", f"recorded {thought.answer!r}, the record gives {ans!r}"))
-        return {"ok": not bad, "mismatches": bad}
+        if thought.mode != self.mode or rec is None:
+            return SlowPath.replay(self, thought, trust_models)
+        rep = rec.replay(self.system, accept=self.accept, objective=self.search_kw.get("objective"),
+                         trust_models=trust_models)
+        bad = [("search", f"{m[0]}: {m[1]}") for m in rep["mismatches"]] if rec.response is not None else []
+        r = rec.response[rec.question] if rec.response is not None else None
+        ok = rec.best is not None and r is not None and r.status != "abstain"
+        return _same_outcome(thought, ok, r.answer if ok else None, bad)
+
+    @classmethod
+    def restore_record(cls, d, system=None):
+        from .slow.search import SearchRun
+        return SearchRun.from_dict(d, catalog=system)
+
+    @classmethod
+    def responses_of(cls, record):
+        return [record.response] if record.response is not None else []
+
+
+def _same_outcome(thought, ok, ans, bad):
+    """The replay's verdict: the record's acceptance and answer are the recorded ones."""
+    if ok != thought.accepted:
+        bad.append(("accepted", f"recorded {thought.accepted}, the record gives {ok}"))
+    if _vh(ans) != _vh(thought.answer):
+        bad.append(("answer", f"recorded {thought.answer!r}, the record gives {ans!r}"))
+    return {"ok": not bad, "mismatches": bad}
+
+
+def _slow_path(system, *, question=None, propose=None, into=None, rounds=3, space=None, search=None, accept="checks",
+               feedback=None):
+    """The 0.9 SlowPath(...) constructor: the built-in path its arguments name, with every setting as 0.9 kept it (so
+    its fingerprint, and the config of the decisions it made, are 0.9's)."""
+    if propose is not None and space is not None:
+        raise ValueError("a slow path refines proposals (propose=) or searches a space (space=), not both")
+    if (propose is not None or space is not None) and not isinstance(into, str) and not isinstance(space, dict):
+        raise ValueError("into= names the given fact a proposal or a candidate is passed as")
+    if propose is not None and not callable(propose):
+        raise TypeError("propose is a function (state, rounds) → a proposal, e.g. Generator.proposer(...)")
+    cls = RefinePath if propose is not None else SearchPath if space is not None else AskPath
+    obj = object.__new__(cls)
+    _Checked.__init__(obj, system, question=question, propose=propose, into=into, rounds=rounds, space=space,
+                      search=search, accept=accept, feedback=feedback)
+    return obj
 
 
 # ------------------------------------------------------------------------------------------------ one decision
@@ -352,6 +579,7 @@ class Dispatched:
 # ------------------------------------------------------------------------------------------------ the dispatcher
 class Dispatcher:
     """System 1 first; the slow path or a person when its signals say so; within a budget. See the module docs.
+    Stability: stable (final: use it, do not subclass; extend it with a SlowPath, a Monitor, a TraceStorage).
 
     system: System 1. slow: a SlowPath (None: every input System 1 cannot answer alone goes to a person). question:
     the question dispatched (default: the System's only question). budget: a Budget per decision; total: a Budget for
@@ -671,15 +899,7 @@ class Dispatcher:
         from .catalog import Unknown
         if th is None or th.answer is None or (self.unknown == "human" and th.answer is Unknown):
             return -math.inf
-        if th.mode != "ask":
-            return 1.0 if th.accepted else -math.inf
-        res = th.record
-        if res is None:
-            return -math.inf
-        r = res[self.slow._q(self.question)]
-        if r.status == "abstain" and r.guard not in ("low_confidence", None):
-            return -math.inf
-        return float(r.confidence)
+        return float(self.slow.signal(th, self.question))
 
     def slice_of(self, res):
         """The slice of System 1's response: the first signal that wakes the slow path (None: none does)."""
@@ -949,7 +1169,7 @@ class Dispatcher:
 
 def _per_round(expected, slow):
     """The expected cost of one more round of a refinement: the mean run's cost spread over its rounds."""
-    k = max(1, slow.rounds if slow.mode == "refine" else 1)
+    k = max(1, int(getattr(slow, "steps", 1) or 1))
     return Cost(None if expected.usd is None else expected.usd / k, int(math.ceil(expected.calls / k)), expected.ms / k)
 
 
@@ -1010,5 +1230,5 @@ def _vh(v):
     return vhash(plain(v))
 
 
-__all__ = ["Budget", "BudgetStop", "Cost", "Dispatched", "Dispatcher", "PATHS", "SIGNALS", "SlowPath", "Thought",
-           "cost_of", "price_of", "recorded_calls"]
+__all__ = ["AskPath", "Budget", "BudgetStop", "Cost", "Dispatched", "Dispatcher", "PATHS", "RefinePath", "SearchPath",
+           "SIGNALS", "SlowPath", "Thought", "cost_of", "price_of", "recorded_calls"]

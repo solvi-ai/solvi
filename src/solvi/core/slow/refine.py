@@ -52,9 +52,28 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Protocol, runtime_checkable
 
 from ..catalog import Claim
+
+
+@runtime_checkable
+class Proposer(Protocol):
+    """What proposes in a refinement (`refine(propose=...)`, `RefinePath(propose=...)`).
+
+    You implement: `__call__(state, rounds)` → a proposal — a value, or a solvi.core.slow.generate.Generated (a
+    model's reply with its request recorded) — for the given facts `state`, having seen the earlier `rounds` (each with
+    its proposal and `reasons`: what the checks said was wrong). `Generator.proposer(...)` builds one from an LLM; a
+    plain function is one. Raise BudgetStop (solvi.core.costs) to stop the loop.
+
+    You get for free: each proposal given to the System as a fact and judged by its hard checks, the reasons of the
+    failed checks fed back, rounds up to a limit and a budget, an escalation to a person when nothing is accepted,
+    every round's response stored and replayable (the model's reply re-read through its schema, not re-asked), costs
+    per round.
+
+    Stability: stable."""
+
+    def __call__(self, state: dict, rounds: list) -> Any: ...
 
 
 class Fail(Claim):
@@ -500,4 +519,4 @@ def _stored_record(run):
                        "rounds": rounds})
 
 
-__all__ = ["accepted", "causes", "Fail", "Failed", "failed_checks", "refine", "Refinement", "Round"]
+__all__ = ["accepted", "causes", "Fail", "Failed", "failed_checks", "Proposer", "refine", "Refinement", "Round"]

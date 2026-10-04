@@ -86,7 +86,8 @@ def checks_of(resp):
 
 @dataclass
 class Response(Serial):
-    """The answers of one ask, with the flow, the trace, every fact's value and the safeguards.
+    """The answers of one ask, with the flow, the trace, every fact's value and the safeguards. Stability: stable
+    (final: use it, do not subclass; its record format is stable).
 
     A response keeps a strong reference to the System that answered it (for `report()`: the questions, the answer heads,
     the replay). Deliberately not a weak one: `System(cat, qs).ask(state).report()` is common

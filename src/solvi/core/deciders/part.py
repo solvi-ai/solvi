@@ -149,7 +149,7 @@ class DecisionPart:
                                  (self.option_order, self.permutations)),
                                 ("long", self.long_key()),
                                 ("memory", None if self.correction_memory is None else self.correction_memory.fingerprint()),
-                                ("lora", None if self.lora is None else self.lora.hash))
+                                ("lora", None if self.lora is None else self.lora.fingerprint()))
               if v is not None}
         if th:
             return digest("DecisionPart", self.model.weights_fingerprint(), self.spec.describe(), a.params() if a else None, th)
@@ -883,7 +883,7 @@ class DecisionPart:
         signal = {k: v for k, v in (("option_order", None if self.option_order != "average" else
                                      (self.option_order, self.permutations)),
                                     ("long", self.long_key()),
-                                    ("lora", None if self.lora is None else self.lora.hash))
+                                    ("lora", None if self.lora is None else self.lora.fingerprint()))
                   if v is not None}
         if signal:                                  # a part with the default signal keeps the fingerprint it had
             return digest("DecisionPart", self.model.weights_fingerprint(), self.spec.describe(), a.params() if a else None,

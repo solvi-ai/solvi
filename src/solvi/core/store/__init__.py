@@ -28,6 +28,7 @@ PostgresStorage (psycopg 3; the same tables, several services writing) and DuckD
 DuckDB file, for analytics)."""
 from __future__ import annotations
 
+import abc
 import contextlib
 import hashlib
 import json
@@ -554,8 +555,19 @@ def _result_cls():
     return Result
 
 
-class TraceStorage:
+class TraceStorage(abc.ABC):
     """A store of responses and their traces with a hash chain across the stored records (see the module docstring).
+
+    The base class of every store (an extension point: `from solvi.core import TraceStorage`). A backend of your own
+    implements five methods — `_append(body)` (assign seq, time, prev, hash and id atomically; → the record),
+    `_raw(snap=None)` (every chained record in stored order: (position, dict or None when unreadable)), `_find(id)`
+    (the record or None), `head()` ({"count", "hash"}) and `_rewrite(rec)` (replace the record with that seq: redact
+    uses it) — and may override `close()`, `_snapshot()`, `_backend_problems(rows, snap)`, `iter` / `query` (for an
+    index). It gets for free: the hash chain and `verify` (with an anchor and a signature), `save` / `get` /
+    `rederive` (full and compact records), corrections and verified labels with their source checks, `query`,
+    `report`, `replay_all`, `quarantine` / `where_is`, `redact`, `signature`, and every reader of a store (the audit,
+    the system report, diff). `solvi.testing.conformance.check_storage(MyStorage)` checks a backend. Stability:
+    stable; the record format is stable (stores of 0.7 to 0.9 read and verify).
 
     save(response, meta=None) → id; get(id) → Response; record(id) → the stored dict; iter() / query(...) → [Stored];
     corrections() → the teach records; head() → {"count", "hash"}; signature(); verify(anchor=None, signature=None);
@@ -585,10 +597,12 @@ class TraceStorage:
         self._saved = 0                               # decisions saved by this object ("sample:N" draws every N-th)
 
     # --- a backend implements these
+    @abc.abstractmethod
     def _append(self, body):
         """Add a record: assign seq, time, prev, hash and id atomically; → the record."""
         raise NotImplementedError
 
+    @abc.abstractmethod
     def _raw(self, snap=None):
         """Every chained record in stored order (for verify) → iterator of (position, dict or None when unreadable).
         `snap`: a _snapshot() — the records as they were then."""
@@ -599,9 +613,12 @@ class TraceStorage:
         stored head (and what else the backend needs) at one moment. None: the backend has nothing to pin."""
         return None
 
+    @abc.abstractmethod
     def _find(self, id):
+        """The stored record (a dict) with this id, or None."""
         raise NotImplementedError
 
+    @abc.abstractmethod
     def head(self):
         """{"count", "hash"}: the number of chained records and the last record's hash (GENESIS when empty). Publish it
         somewhere else (a ticket, a log, a signed message) to later catch a rewrite of the whole store: verify(anchor=...)."""
@@ -725,6 +742,7 @@ class TraceStorage:
     def close(self):
         """Release what the store holds open (a database connection; nothing for a JSON-lines file). A store is also a
         context manager: `with SQLiteStorage("decisions.db") as store: ...` closes it at the end."""
+        return None
 
     def __enter__(self):
         return self
@@ -789,6 +807,7 @@ class TraceStorage:
         return render(period(self, since, until, question, examples, system, **filters), format)
 
     # --- erasure
+    @abc.abstractmethod
     def _rewrite(self, rec):
         """Replace the stored record with this seq by `rec` (same seq, prev, hash and id)."""
         raise NotImplementedError

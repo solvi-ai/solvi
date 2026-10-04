@@ -299,23 +299,26 @@ def _system1(asks, labels, question, price, drift_window, monitor):
 
 
 def _drift(rows, window, monitor):
-    """A DriftMonitor over the decisions in order → the first flag (decision number in the period, id, time, why)."""
+    """A DriftMonitor (or the Monitor `monitor()` makes) over the decisions in order → the first flag (decision number
+    in the period, id, time, why). A monitor without a window (`window`, `min_n`) is run over every decision."""
     if monitor is None and window is None:
         return {"tested": False, "why": "not run (drift_window=None)"}
     from ..guarantees.drift import DriftMonitor
     mon = monitor() if monitor is not None else DriftMonitor(window=int(window))
-    need = mon.window + mon.min_n
-    if len(rows) < need:
+    win, min_n = getattr(mon, "window", None), getattr(mon, "min_n", None)
+    need = (win or 0) + (min_n or 0)
+    if win is not None and min_n is not None and len(rows) < need:
         return {"tested": False, "why": f"{len(rows)} decisions, fewer than the {need} a window of {mon.window} needs "
                                         f"(the reference, then at least {mon.min_n} to compare)"}
     import warnings
-    out = {"tested": True, "window": mon.window, "alpha": mon.alpha, "decisions": len(rows), "flagged": False}
+    out = {"tested": True, "window": win, "alpha": getattr(mon, "alpha", None), "decisions": len(rows), "flagged": False}
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
         for i, (s, o, lab) in enumerate(rows, start=1):
             rep = mon.observe(o, label=lab)
             if rep.get("drift"):
-                out.update(flagged=True, at=i, id=s.id, time=_iso(s.time), signals=list(rep["flags"]), why=list(rep["why"]))
+                out.update(flagged=True, at=i, id=s.id, time=_iso(s.time), signals=list(rep.get("flags") or []),
+                           why=list(rep.get("why") or []))
                 break
     return out
 
@@ -496,7 +499,8 @@ def render(d):
                      f"{x.get('change_at')}): {x['why']}")
         dr = p["drift"]
         if dr["tested"]:
-            L.append(f"  drift (DriftMonitor, window {dr['window']}, over {dr['decisions']} decisions): "
+            L.append(f"  drift ({'DriftMonitor, window ' + str(dr['window']) if dr['window'] is not None else 'monitor'}, "
+                     f"over {dr['decisions']} decisions): "
                      + (f"flagged at decision {dr['at']} of the period ({dr['id']}, {dr['time']}): {'; '.join(dr['why'])}"
                         if dr["flagged"] else "no flag"))
         else:

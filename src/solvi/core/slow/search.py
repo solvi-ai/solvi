@@ -65,7 +65,35 @@ import dataclasses
 import itertools
 import time
 from dataclasses import dataclass, field
-from typing import Any, Callable
+from typing import Any, Callable, Protocol, runtime_checkable
+
+
+@runtime_checkable
+class Space(Protocol):
+    """A space of candidates walked depth-first by `search` (and `SearchPath`).
+
+    You implement: `root` (the first node) and `children(node)` → the nodes one step further. Optional:
+    `complete(node)` → is the node a candidate (default: when it has no children) and `bound(node)` → the best
+    objective any candidate below it can reach (needs an objective). `Tree(root, children, complete, bound)` is the
+    ready one; a class of your own with these methods is one too.
+
+    You get for free: every candidate decided by the System's checks (lean, the facts that do not read the candidate
+    computed once), pruning of partial nodes by monotone hard checks (`prune=`) and by the bound, a budget of asks,
+    the best kept by an objective, a record of what was searched (asked, rejected by check, pruned) and whether the
+    result is exact, the winner asked in full and replayable.
+
+    Stability: stable."""
+
+    root: Any
+
+    def children(self, node: Any) -> Any: ...
+
+
+def _is_space(space):
+    """A Tree, or an object of your own with `root` and `children(node)` (the Space protocol) — not a list, a dict of
+    domains or a function of the facts."""
+    return isinstance(space, Tree) or (not isinstance(space, (dict, list, tuple, str)) and hasattr(space, "root")
+                                       and callable(getattr(space, "children", None)))
 
 
 @dataclass
@@ -324,10 +352,10 @@ def search(system, state, question, space, *, into=None, objective=None, maximiz
     t0 = time.perf_counter()
     from ..runtime import MISSING
     held = []
-    vals = system.facts_for(dict(state)) if hold or (callable(space) and not isinstance(space, Tree)) else None
-    if callable(space) and not isinstance(space, Tree):
+    vals = system.facts_for(dict(state)) if hold or (callable(space) and not _is_space(space)) else None
+    if callable(space) and not _is_space(space):
         space = space({k: v for k, v in vals.items() if v is not MISSING})
-    kind = "tree" if isinstance(space, Tree) else "domains" if isinstance(space, dict) else "candidates"
+    kind = "tree" if _is_space(space) else "domains" if isinstance(space, dict) else "candidates"
     if kind == "domains":
         if into is not None:
             raise ValueError("a dict of domains gives each candidate as its facts: leave into=None")
@@ -341,7 +369,7 @@ def search(system, state, question, space, *, into=None, objective=None, maximiz
     clash = [k for k in keys if k in state]
     if clash:
         raise ValueError(f"the state already gives {', '.join(clash)}: a candidate would replace it")
-    bound = space.bound if kind == "tree" else None
+    bound = getattr(space, "bound", None) if kind == "tree" else None
     if bound is not None and objective is None:
         raise ValueError("a Tree's bound needs an objective")
     if prune and kind != "tree":
@@ -391,7 +419,7 @@ def search(system, state, question, space, *, into=None, objective=None, maximiz
 
     try:
         if kind == "tree":
-            children, complete = space.children, space.complete
+            children, complete = space.children, getattr(space, "complete", None)
 
             def visit(node):
                 kids = None
@@ -458,4 +486,4 @@ def search(system, state, question, space, *, into=None, objective=None, maximiz
     return run
 
 
-__all__ = ["search", "SearchRun", "Tree"]
+__all__ = ["search", "SearchRun", "Space", "Tree"]

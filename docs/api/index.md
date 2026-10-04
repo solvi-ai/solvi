@@ -6,8 +6,11 @@ this reference lists what each module exports and the signatures.
 | Module | What it holds |
 |---|---|
 | [`solvi`](solvi.md) | the entry points `build` and `Guard`, `Budget`, and the shared vocabulary: catalog, questions and answers, `System` and `Response`, typed answers |
-| [`solvi.core`](core.md) | the low level: the catalog and its value classes; one module per area under `solvi.core` |
+| [`solvi.core`](core.md) | the low level: the catalog and its value classes, and the extension points (protocols and base classes, see [Building blocks](../building_blocks.md)); one module per area under `solvi.core` |
 | [`solvi.core.deciders`](decide.md) | the decider: typed questions about a text or a state answered by a model |
+| [`solvi.core.deciders.protocols`](protocols.md) | the extension points of the parts: `Scorer`, `Decider`, `Adapter`, `Head` |
+| [`solvi.core.guarantees.monitor`](monitor.md) | the `Monitor` protocol: a watcher of the decision stream |
+| [`solvi.core.environment`](environment.md) | the `Environment` protocol and `Outcome`: a world an agent acts in |
 | [`solvi.core.calibration`](calibration.md) | reliability, expected calibration error, coverage at a target accuracy |
 | [`solvi.core.guarantees.guarantee`](guarantee.md) | a calibrated threshold with a stated promise on a question (`System.guarantee`), a computed fact or any scalar |
 | [`solvi.core.guarantees.openset`](openset.md) | inputs from outside the calibration set: a threshold sized for the share of them, estimated as the stream goes, and a change flag |
@@ -62,6 +65,7 @@ this reference lists what each module exports and the signatures.
 | [`solvi.core.store.signature`](signature.md) | a signature of a trace or a store that names the one changed record (preview) |
 | [`solvi.core.store.diff`](diff.md) | `solvi diff` and shadow mode |
 | [`solvi.testing`](testing.md) | decision regression tests from `cases.json` |
+| [`solvi.testing.conformance`](conformance.md) | conformance checks for your implementations of the extension points of `solvi.core` (stores, slow paths, strategists, heads, deciders, extractors, monitors, environments) |
 | [`solvi.testing.honesty`](honesty.md) | the honesty suite |
 | [`solvi.check`](check.md) | `solvi check`: catalog lint |
 | [`solvi.core.calibfile`](calibfile.md) | calibration files (`save_calibration` / `load_calibration`) and `solvi calibrate` |

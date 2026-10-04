@@ -256,6 +256,7 @@ class DriftMonitor:
         self.recent: deque[Observation] = deque(maxlen=self.window)
         self.history: deque[dict] = deque(maxlen=max(0, int(keep)) or None) if keep else deque(maxlen=0)
         self.seen, self._ref = 0, None
+        self._flagged = False
 
     # --- the reference
     def set_reference(self, decisions, labels=None):
@@ -379,8 +380,26 @@ class DriftMonitor:
                     rep["why"].append(why)
             rep["drift"] = len(rep["flags"]) >= self.min_signals
             rep["seen"] = self.seen
+        self._flagged = bool(rep["drift"])
         self.history.append(rep)
         return rep
+
+    # --- the Monitor protocol (solvi.core.Monitor)
+    @property
+    def flagged(self):
+        """Did the last observed decision's report flag a change of the stream?"""
+        return getattr(self, "_flagged", False)
+
+    def reset(self):
+        """The stream starts again: the window, the sequential statistics (from the reference again), the history and
+        the flag are cleared; the reference is kept (a monitor still filling its reference starts that again)."""
+        self.recent.clear()
+        self.history.clear()
+        self._perm, self._flagged, self.seen = None, False, 0
+        if self._ref is None:
+            self.reference = []
+        else:
+            self._start_sequential()
 
     # --- the report
     def report(self):

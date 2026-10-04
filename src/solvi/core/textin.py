@@ -35,7 +35,7 @@ import typing
 from dataclasses import dataclass, field
 from decimal import Decimal, InvalidOperation
 from enum import Enum
-from typing import Any, Literal
+from typing import Any, Literal, Protocol, runtime_checkable
 
 from .catalog import Quote, Unknown
 from .provenance import ESCALATED, digest, model_info
@@ -610,6 +610,31 @@ def _string_after(text, b, fs):
 
 
 # ------------------------------------------------------------------------------------------------ extractors
+@runtime_checkable
+class Extractor(Protocol):
+    """What points at the piece of a text that holds a field: `TextIn(system, extractor=yours)` (or a list, tried in
+    order).
+
+    You implement: `find(text, field)` → [Quote] candidates, best first ([] when the text does not state it) — each a
+    literal span of `text` (Quote(text[start:end], start, end, source, confidence)); `field` is a FieldSpec (its
+    name, kind, description, cue words, options); `fingerprint()` → its identity (a version, the weights). Optional:
+    `model_id` (recorded with the fingerprint).
+
+    You get for free: a deterministic parser per type turns the quote into the value (a quote that does not parse
+    leaves the field unread), "not stated" and the clarifying question for a missing required field, the next
+    extractor tried when one finds nothing usable, the quote's offsets and the extractor's identity recorded in the
+    trace (provenance "quoted", counted among the model outputs), and replay checking that the quote is literally in
+    the text and gives the recorded value.
+
+    Stability: stable. `CueExtractor` and `DeciderExtractor` are stable to use, provisional to subclass. (The long-
+    document field extractor `solvi.core.extract.LongSpanExtractor` makes catalog parts — `field(name, description)`
+    → a function text → Quote — and is not one of these.)"""
+
+    def find(self, text: str, field: Any) -> list: ...
+
+    def fingerprint(self) -> str: ...
+
+
 class CueExtractor:
     """A deterministic extractor: candidates of the field's type in the text (numbers, dates, enum labels and synonyms,
     cue words for a yes / no, a pattern), the one nearest after a cue word of the field (its name, its description's
@@ -1257,6 +1282,6 @@ def replay_record(r, init):
     return bad
 
 
-__all__ = ["Change", "CueExtractor", "DeciderExtractor", "entry_points", "EntryField", "EntryPoint", "field_spec",
+__all__ = ["Change", "CueExtractor", "DeciderExtractor", "entry_points", "EntryField", "EntryPoint", "Extractor", "field_spec",
            "FieldRead", "FieldSpec", "NUMBER_RE", "parse_bool", "parse_date", "parse_enum", "parse_number",
            "ParseError", "rederive", "replay_record", "SEP", "SOURCE", "TextIn", "TextRead"]
