@@ -174,6 +174,35 @@ TOP_LEVEL_MOVED: dict[str, str] = {
 }
 
 
+# a module 1.0 removed from inside a 0.9 package that moved (solvi.agents → solvi.solutions.guard) → what to use instead.
+# Importing one raises ModuleNotFoundError, always: without this the old package would be imported first (with its
+# warning, an error under -W error), and only then would the submodule be missing.
+REMOVED_UNDER_OLD_PATHS: dict[str, str] = {
+    f"solvi.agents.{name}": "call guard.check (or guard.call) from your framework's tool-execution step; for MCP "
+                            "servers, the proxy (solvi serve --guard --upstream)"
+    for name in ("pydantic_ai", "langgraph", "openai_agents")
+}
+
+
+def _removed_error(fullname):
+    return ModuleNotFoundError(f"No module named {fullname!r}: removed in 1.0; {REMOVED_UNDER_OLD_PATHS[fullname]} "
+                               f"(CHANGELOG 1.0, Removed)", name=fullname)
+
+
+def _removed_import_in_progress():
+    """The removed module (REMOVED_UNDER_OLD_PATHS) whose import is importing its old parent package right now, or None:
+    the import machinery imports a parent before it looks for the child, so the parent's finder call is the first
+    place the child can be refused."""
+    frame = sys._getframe(2)
+    while frame is not None and "importlib" in frame.f_code.co_filename:
+        if frame.f_code.co_name in ("_find_and_load", "_find_and_load_unlocked"):
+            name = frame.f_locals.get("name")
+            if name in REMOVED_UNDER_OLD_PATHS:
+                return name
+        frame = frame.f_back
+    return None
+
+
 def old_paths():
     """{0.9 module path: its 1.0 path} — every module that moved (MOVED's module lines, inverted) and EXTRA_PATHS."""
     out = {old: new for new, old in MOVED.items() if ":" not in new and old not in KEPT}
@@ -220,9 +249,14 @@ class _OldPathFinder(importlib.abc.MetaPathFinder, importlib.abc.Loader):
     def find_spec(self, fullname, path=None, target=None):
         if not fullname.startswith("solvi.") or fullname in sys.modules:
             return None
+        if fullname in REMOVED_UNDER_OLD_PATHS:              # its old parent is already imported
+            raise _removed_error(fullname)
         new = old_paths().get(fullname)
         if new is None:
             return None
+        removed = _removed_import_in_progress()
+        if removed is not None and removed.startswith(fullname + "."):   # refused before the parent warns
+            raise _removed_error(removed)
         return importlib.machinery.ModuleSpec(fullname, self, loader_state=new)
 
     def create_module(self, spec):
