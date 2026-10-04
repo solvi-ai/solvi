@@ -5,7 +5,7 @@ this reference lists what each module exports and the signatures.
 
 | Module | What it holds |
 |---|---|
-| [`solvi`](solvi.md) | the entry points `build` and `Guard`, `Budget`, and the shared vocabulary: catalog, questions and answers, `System` and `Response`, typed answers |
+| [`solvi`](solvi.md) | the entry points `build`, `Agent`, `Guard` and `Knowledge`, `Budget`, and the shared vocabulary: catalog, questions and answers, `System` and `Response`, typed answers |
 | [`solvi.core`](core.md) | the low level: the catalog and its value classes, and the extension points (protocols and base classes, see [Building blocks](../building_blocks.md)); one module per area under `solvi.core` |
 | [`solvi.core.deciders`](decide.md) | the decider: typed questions about a text or a state answered by a model |
 | [`solvi.core.deciders.protocols`](protocols.md) | the extension points of the parts: `Scorer`, `Decider`, `Adapter`, `Head` |
@@ -36,6 +36,8 @@ this reference lists what each module exports and the signatures.
 | [`solvi.experimental.oncalib`](oncalib.md) | recalibration on the fly from outcomes (experimental; the promise is not kept) |
 | [`solvi.serve`](serve.md) | `solvi serve`: HTTP, MCP and the System One API |
 | [`solvi.solutions.guard`](agents.md) | guarding an agent's tool calls: `Guard`, the MCP proxy |
+| [`solvi.solutions.agent`](solutions_agent.md) | the environment agent: `Agent` — System 1 on what the knowledge predicts, System 2 a search, hard checks, replay |
+| [`solvi.solutions.knowledge`](solutions_knowledge.md) | `Knowledge`: the store, agenda, action model and failure memory behind one object |
 | [`solvi.experimental.hooks`](hooks.md) | a coding agent's hooks: edits checked against rules, a skill picked for a prompt, install / uninstall (Claude Code; Codex, preview) |
 | [`solvi.core.textin`](textin.md) | text in: a message → the question it asks and its typed input state, read with quotes |
 | [`solvi.core._inputs`](inputs.md) | what a question reads: its given facts, the model and JSON schema of its input state, entry points |

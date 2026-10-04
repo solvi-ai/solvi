@@ -299,9 +299,9 @@ def test_experimental_modules_warn_on_import_and_say_their_status():
 
 # --- (rule 5) the public surfaces are pinned: a name added to or dropped from one is a decision, made here
 SURFACES = {
-    "solvi": ["build", "Guard", "Budget", "Catalog", "Question", "Answer", "System", "Response", "Quote", "Claim",
-              "Decision", "Fail", "Unknown", "Span", "Maybe", "Rank", "Estimate", "Scale", "Bins",
-              "SolviDeprecationWarning", "ExperimentalWarning"],          # LAYOUT §1; Agent, Knowledge come in L6
+    "solvi": ["build", "Agent", "Guard", "Knowledge", "Budget", "Catalog", "Question", "Answer", "System", "Response",
+              "Quote", "Claim", "Decision", "Fail", "Unknown", "Span", "Maybe", "Rank", "Estimate", "Scale", "Bins",
+              "SolviDeprecationWarning", "ExperimentalWarning"],          # LAYOUT §1: 23 names
     "solvi.core": ["ExperimentalWarning", "NOT_STATED", "accept", "accepts", "Answer", "AnswerType", "bin_labels",
                    "Catalog", "check_evidence", "Claim", "cuts_number", "Decision", "evidence_rows", "find_quote",
                    "find_whole", "ground", "has_evidence", "locate", "NOT_STATED_KEY", "NotStated", "Part", "plain_json",
@@ -320,7 +320,9 @@ SURFACES = {
     "solvi.models": ["cached", "cached_path", "decider", "DecideModel", "kind_of", "llm", "load", "ModelError",
                      "PUBLISHED", "pull", "resolve", "systemone"],
     "solvi.solutions.decisions": ["DecisionSystem", "build"],
-    "solvi.solutions.guard": ["accepted_proposals", "accepts", "INTENTS", "model_from_json_schema", "arguments_from_user",
+    "solvi.solutions.agent": ["Agent", "CHECKS", "QUESTION", "s1_pick", "search_order", "state_key"],
+    "solvi.solutions.knowledge": ["Knowledge", "action_key", "split_action"],
+    "solvi.solutions.guard": ["action_model_allows", "agenda_allows", "accepted_proposals", "accepts", "INTENTS", "model_from_json_schema", "arguments_from_user",
                               "arguments_grounded", "arguments_model", "arguments_valid", "AUTHORIZE_TASK",
                               "conversation", "Guard", "GuardDecision", "MATCHERS", "Message", "messages",
                               "no_injected_arguments", "no_instructions_in_tool_outputs", "proposal",
@@ -341,6 +343,8 @@ def test_the_public_surfaces_are_the_pinned_ones():
                 assert getattr(mod, n) is not None, (name, n)
     import solvi
     assert solvi.build.__module__ == "solvi.solutions.decisions" and solvi.Guard.__module__ == "solvi.solutions.guard"
+    assert solvi.Agent.__module__ == "solvi.solutions.agent" and solvi.Knowledge.__module__ == "solvi.solutions.knowledge"
+    assert len(solvi.__all__) == 23
 
 
 # --- (rule 6) the 1.0 shims resolve: every 0.9 module path and every name solvi no longer exports reach the same object,

@@ -43,6 +43,7 @@ nav:
   - Home: index.md
   - Mission: mission.md
   - Guide: guide/index.md          # expanded into one page per chapter by the hook
+  - "Using solvi: agents and knowledge": agent.md
   - Best practices: best_practices.md
   - Building blocks: building_blocks.md
   - Formats and tools:
@@ -88,6 +89,8 @@ nav:
       - solvi.experimental.oncalib: api/oncalib.md
       - solvi.serve: api/serve.md
       - solvi.solutions.guard: api/agents.md
+      - solvi.solutions.agent: api/solutions_agent.md
+      - solvi.solutions.knowledge: api/solutions_knowledge.md
       - solvi.experimental.hooks: api/hooks.md
       - solvi.core.textin: api/textin.md
       - solvi.core._inputs: api/inputs.md

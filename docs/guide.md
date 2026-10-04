@@ -4419,6 +4419,10 @@ observed, rules from a written spec, what an environment accepts and refuses, go
 failed. Every piece is plain data with a journal, so a decision can say what it was given, and a wrong item can be
 taken back with everything that rests on it. It never learns from the system's own unverified answers.
 
+The high level over these pieces — `solvi.Knowledge` (one object for the store, the agenda, the action model and the
+failure memory), `solvi.Agent` (an agent acting in an environment on it), `build(knowledge=)` and `Guard(knowledge=)` —
+is on its own page: [Using solvi: agents and knowledge](agent.md).
+
 ### The knowledge store
 
 ```python

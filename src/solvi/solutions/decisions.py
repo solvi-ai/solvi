@@ -67,14 +67,16 @@ class DecisionSystem:
     gate: the OpenSetGate, or None; slow: the SlowPath, or None; choices: every choice made, with its numbers (what
     explain() prints); calibration: the reports of System.guarantee / OpenSetGate / Dispatcher.calibrate."""
 
-    def __init__(self, question, system, dispatcher, gate, slow, choices, calibration):
+    def __init__(self, question, system, dispatcher, gate, slow, choices, calibration, knowledge=None):
         self.question, self.system, self.dispatcher, self.gate, self.slow = question, system, dispatcher, gate, slow
         self.choices, self.calibration = choices, calibration
+        self.knowledge = knowledge               # state → the snapshot given as the fact "knowledge" (build(knowledge=))
 
     def ask(self, state):
         """One input → a Dispatched (answer, by "s1" / "s2" / "human", action, reasons, cost); stored when the build
-        was given storage=."""
-        return self.dispatcher.ask(state)
+        was given storage=. With build(knowledge=), the state is given the knowledge's snapshot as the fact
+        "knowledge" (unless it has one): the trace records what the memory said, and the decision replays."""
+        return self.dispatcher.ask(_with_knowledge(state, self.knowledge))
 
     def replay(self, res, trust_models=False):
         """Re-check a Dispatched without calling a model → {"ok", "mismatches"} (Dispatcher.replay)."""
@@ -126,6 +128,8 @@ class DecisionSystem:
             else:
                 lines.append("Every input System 1 does not answer alone goes to a person; after a drift flag System 1's "
                              "answers are checked by the slow path and a disagreement goes to a person.")
+        if c.get("knowledge"):
+            lines.append(f"Knowledge: {c['knowledge']}.")
         lines.append(f"Budget: {c['budget']}.")
         lines.append(f"Record: {c['storage']}.")
         lines.append("Not covered: inputs unlike the examples" + (" beyond new options like the left-out ones"
@@ -141,6 +145,30 @@ class DecisionSystem:
 
 
 # ------------------------------------------------------------------------------------------------ helpers
+def _with_knowledge(state, snap):
+    """The state with the knowledge's snapshot as the given fact "knowledge" (a state that has one keeps it)."""
+    if snap is None or not isinstance(state, dict) or "knowledge" in state:
+        return state
+    return {**state, "knowledge": snap(state)}
+
+
+def _knowledge_source(knowledge):
+    """build(knowledge=) → (state → snapshot, description): a solvi.Knowledge (its snapshot of facts and rules) or a
+    function of the state (your own query, e.g. km.snapshot(about=state["customer"]))."""
+    if knowledge is None:
+        return None, None
+    if callable(getattr(knowledge, "snapshot", None)):
+        km = knowledge
+        return (lambda state: km.snapshot()), ("every decision is given the knowledge's snapshot (its active facts and "
+                                               "rules, the hints with why, the store's fingerprint and journal "
+                                               "position) as the fact \"knowledge\"; the examples were given the "
+                                               "snapshot at build time")
+    if callable(knowledge):
+        return knowledge, (f"every decision is given {getattr(knowledge, '__name__', 'the function')}(state) as the "
+                           "fact \"knowledge\"")
+    raise TypeError("knowledge= takes a solvi.Knowledge or a function state → snapshot")
+
+
 def _judge(q, correct):
     """correct(answer, label) → bool, or equality of the normalized answers."""
     from ..core.runtime import vhash
@@ -251,7 +279,7 @@ def _slow_path(slow, q, reads, novel_on, writer, inputs):
 # ------------------------------------------------------------------------------------------------ build
 def build(question, examples, *, catalog=None, learner=None, slow=None, reads=None, max_risk=None, max_error=None,
           signal=None, correct=None, novel="auto", budget=None, total=None, price=None, storage=None, split=None,
-          seed=0, delta=0.10, min_slice=20, writer=None, inputs=None):
+          seed=0, delta=0.10, min_slice=20, writer=None, inputs=None, knowledge=None):
     """Fit System 1, calibrate its guarantee and the dispatcher, wire the store → a DecisionSystem (see the module docs).
 
     question: a Question, or the name of one a rule of `catalog` (or learner=) answers. examples: [(state, correct
@@ -265,7 +293,9 @@ def build(question, examples, *, catalog=None, learner=None, slow=None, reads=No
     tokens (needed for dollars). storage: a path or a TraceStorage — every decision and the policy, hash-chained.
     split: (fit, guarantee, dispatch) shares. seed: the shuffle and the open-set simulation. delta: learn-then-test's
     confidence. min_slice: a slice of the slow path with fewer calibration examples goes to a person. writer, inputs:
-    gone in 1.0 (they compiled a Spec here): a TypeError says to compile it first."""
+    gone in 1.0 (they compiled a Spec here): a TypeError says to compile it first. knowledge: a solvi.Knowledge (or a
+    function state → snapshot) — every decision, and every example at build time, is given its snapshot as the fact
+    "knowledge", which System 1's rules read like any fact (`Knowledge.value(knowledge, s, r)`)."""
     from ..core.dispatch import SIGNALS, THINK, Dispatcher
     from ..core.guarantees.guarantee import promise_text
     from ..core.store import open_storage
@@ -278,6 +308,15 @@ def build(question, examples, *, catalog=None, learner=None, slow=None, reads=No
     examples = [tuple(e) for e in examples]
     if not examples or not all(len(e) == 2 and isinstance(e[0], dict) for e in examples):
         raise ValueError("examples are [(state dict, correct answer), ...]")
+    given_keys = list(examples[0][0].keys())
+    snap_of, knowledge_desc = _knowledge_source(knowledge)
+    if snap_of is not None:
+        if callable(getattr(knowledge, "snapshot", None)):
+            at_build = snap_of({})
+            snap_once = (lambda state: at_build)
+        else:
+            snap_once = snap_of
+        examples = [(_with_knowledge(st, snap_once), y) for st, y in examples]
     cat = catalog if catalog is not None else Catalog()
     qname = question if isinstance(question, str) else question.name
     if learner is not None:
@@ -455,7 +494,7 @@ def build(question, examples, *, catalog=None, learner=None, slow=None, reads=No
     slow_path, slow_desc = None, None
     if has_slow:
         if reads is None:
-            reads = list(examples[0][0].keys())
+            reads = given_keys
         reads = [reads] if isinstance(reads, str) else list(reads)
         slow_path, slow_desc = _slow_path(slow, q, reads, novel_on, writer, inputs)
     if not slice_open:
@@ -473,6 +512,7 @@ def build(question, examples, *, catalog=None, learner=None, slow=None, reads=No
                "storage": (f"every decision and the policy, hash-chained, in {type(d.storage).__name__}"
                            if d.storage is not None else "not stored (storage= keeps every decision)")}
     choices["probe"] = probe_desc
+    choices["knowledge"] = knowledge_desc
     if has_slow and slice_open:
         rep = d.calibrate(d_ex, max_risk=max_risk, max_error=max_error, delta=delta, min_slice=min_slice,
                           correct=None if correct is None else (lambda ans, label, res: correct(ans, label)))
@@ -494,7 +534,7 @@ def build(question, examples, *, catalog=None, learner=None, slow=None, reads=No
         choices["dispatch_promise"] = (f"{promise_text(rep['method'], rep['level'], rep['delta'])}; on the {rep['n']} "
                                        f"calibration examples: answered alone {rep['answered']:.1%}, P(alone and wrong) "
                                        f"{rep['risk']:.2%}" + (f" ({rep['why']})" if rep.get("why") else ""))
-    return DecisionSystem(qname, system, d, gate, slow_path, choices, calib)
+    return DecisionSystem(qname, system, d, gate, slow_path, choices, calib, knowledge=snap_of)
 
 
 def _rule_answer(cat, qname):

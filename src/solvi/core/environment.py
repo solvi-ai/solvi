@@ -1,5 +1,5 @@
 """The Environment protocol: a world an agent acts in, one step at a time — what the environment agent of solvi 1.0
-(`solvi.Agent`, coming in the high level) runs on, and what an action model learns from.
+(`solvi.Agent`, the high level) runs on, and what an action model learns from.
 
     from solvi.core import Environment, Outcome
 
@@ -47,8 +47,7 @@ class Environment(Protocol):
     (no action past a gate, no action predicted to be refused), System 2 (a search) when System 1 is unsure, a
     recorded and replayable step per decision, knowledge carried across episodes.
 
-    Stability: stable to use; provisional to implement until `solvi.Agent` ships (a keyword may be added to
-    `reset`)."""
+    Stability: stable (`solvi.Agent` calls `reset(seed)`, `actions(state)` and `step(action)` only)."""
 
     def reset(self, seed: int | None = None) -> Any: ...
 

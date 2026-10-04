@@ -303,8 +303,9 @@ Reference: [`SlowPath`](api/dispatch.md#solvi.core.dispatch.SlowPath), [`Thought
 ## Environment
 
 A world acted in step by step: `reset(seed)` → the first state, `actions(state)`, `step(action)` →
-`Outcome(state, accepted, effect, done)`. It is what the environment agent of the 1.0 high level (`solvi.Agent`) runs
-on, and what an action model learns from: the effects and refusals the environment itself reports.
+`Outcome(state, accepted, effect, done)`. It is what the environment agent (`solvi.Agent`, see
+[Using solvi: agents and knowledge](agent.md)) runs on, and what an action model learns from: the effects and refusals
+the environment itself reports.
 `check_environment(make)` checks that the same seed and actions give the same outcomes and that a refused action leaves
 the state as it was.
 

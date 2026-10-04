@@ -77,7 +77,8 @@ GIVEN = ("tool_name", "tool_arguments", "conversation", "conversation_roles", "u
 BUILTIN = ("argument_errors", "call_arguments", "grounding", "proposal", "arguments_valid", "arguments_grounded",
            "arguments_from_user", "schema_error", "schema_readable",
            "no_injected_arguments", "no_instructions_in_tool_outputs", "request_authorizes", "verdict", "tools_known",
-           "known_tool", "not_made_before", "confirmation", "user_confirmed")
+           "known_tool", "not_made_before", "confirmation", "user_confirmed", "action_prediction", "agenda_blocks",
+           "action_model_allows", "agenda_allows")
 ROLES = {"user": "user", "human": "user", "assistant": "assistant", "ai": "assistant", "model": "assistant",
          "tool": "tool", "function": "tool", "function_call_output": "tool", "tool_result": "tool", "system": "system",
          "developer": "system"}
@@ -1096,6 +1097,29 @@ def grounded_confirmed_verdict(call_arguments, grounding, confirmation):
     return Claim("allow", evidence=ev, source="conversation") if ev else "allow"
 
 
+def action_model_allows(action_prediction):
+    """The knowledge's action model does not predict that the environment refuses this call.
+
+    Guard(knowledge=): a prediction of "unknown" (or no action model) lets the other checks decide."""
+    p = action_prediction or {}
+    if p.get("verdict") == "refuse":
+        from ...core.slow.refine import Fail
+        return Fail(f"{p.get('reason')}" + (" (a hard rule)" if p.get("hard") else ""))
+    return True
+
+
+def agenda_allows(agenda_blocks):
+    """No gate of the knowledge's agenda blocks this call."""
+    if agenda_blocks:
+        from ...core.slow.refine import Fail
+        return Fail(*[f"gate {b}" for b in agenda_blocks])
+    return True
+
+
+action_model_allows.show_fail_reasons = True       # the reason names the refusal the model learned
+agenda_allows.show_fail_reasons = True
+
+
 def known_tool(tool_name, tools_known) -> bool:
     """The tool is in the guard's catalog."""
     return tool_name in tools_known
@@ -1248,10 +1272,17 @@ class Guard:
     "conversation" (or "user_request") and "proposal" — see `make_authorizer()`; its act_guard threshold and perturb=k
     apply. facts: names (or {name: type}) of facts your app gives with every call (a user's role, a budget left): policies
     that read them apply to every tool without naming it (the types are for readers: a policy's own annotations are what
-    solvi validates). scan_user, tool_values: the defaults of every tool's `scan_user` and `tool_values` (see `tool`)."""
+    solvi validates). scan_user, tool_values: the defaults of every tool's `scan_user` and `tool_values` (see `tool`).
+    knowledge: a solvi.Knowledge — before a call, its action model predicts what the environment will do with it over
+    the facts your app gives (`facts=`: the state the model's vocabulary reads), and a predicted refusal denies the call
+    (`action_model_allows`); its agenda's gates that block the tool deny it too (`agenda_allows`). The prediction and
+    the blocks are given facts of the decision (`action_prediction`, `agenda_blocks`), so it replays; a prediction of
+    "unknown", or no action model, leaves the call to the other checks. `guard.observe(decision, accepted, effect)`
+    tells the knowledge what the environment did."""
 
     @_deprecate.removed_kwargs(facts="fact_names")
-    def __init__(self, storage=None, authorizer=None, fact_names=None, lang="en", scan_user=False, tool_values="deny"):
+    def __init__(self, storage=None, authorizer=None, fact_names=None, lang="en", scan_user=False, tool_values="deny",
+                 knowledge=None):
         from ...core.store import open_storage
         self.storage = open_storage(storage)
         self.tools: dict[str, Tool] = {}
@@ -1267,6 +1298,9 @@ class Guard:
         if tool_values not in ("deny", "escalate"):
             raise ValueError('tool_values must be "deny" or "escalate"')
         self.tool_values = tool_values
+        if knowledge is not None and not (hasattr(knowledge, "agenda") and hasattr(knowledge, "actions")):
+            raise TypeError("knowledge= takes a solvi.Knowledge")
+        self.knowledge = knowledge
 
     # --- the catalog
     def tool(self, func=None, *, name=None, schema=None, description=None, ground=(), ground_from=("user", "tool", "system"),
@@ -1625,6 +1659,9 @@ class Guard:
             cat.fn(f)
         for f, on_fail in policies:
             check(f, on_fail)
+        if self.knowledge is not None:
+            check(action_model_allows, "deny")
+            check(agenda_allows, "deny")
         auth = self._authorizer is not None and t.authorize is not False
         if auth:
             cat.fn(proposal)
@@ -1724,9 +1761,36 @@ class Guard:
         if clash:
             raise ValueError(f"facts {clash} collide with the call's own facts; rename them")
         state.update(facts)
+        if self.knowledge is not None and c.name in self.tools:
+            state.update(self._knowledge_facts(c, facts))
         if c.name not in self.tools:
             state = {"tool_name": c.name, "tool_arguments": c.arguments, "tools_known": sorted(self.tools)}
         return state
+
+    def _knowledge_facts(self, c, facts):
+        """The knowledge's word on a call: the action model's prediction over the app's facts (with the store's journal
+        position) and the agenda's gates that block the tool."""
+        km = self.knowledge
+        pred = None
+        if km.actions is not None:
+            args = c.arguments if isinstance(c.arguments, dict) else {}
+            p = km.actions.predict(facts, c.name, args)
+            pred = {**p.to_dict(), "knowledge": km.store.head()}
+        blocks = km.agenda.allows(facts, c.name)[1] if km.agenda.gates else []
+        return {"action_prediction": pred, "agenda_blocks": blocks}
+
+    def observe(self, decision, accepted, effect=None):
+        """What the environment did with a call this guard decided (accepted or refused, and its effect): written to
+        the knowledge (its action model learns from it). → Knowledge.observe's result."""
+        if self.knowledge is None:
+            raise ValueError("Guard(knowledge=...) has no knowledge to tell")
+        init = dict(decision.response.trace.init or {})
+        facts = {k: v for k, v in init.items() if k not in GIVEN and k not in ("calls_made", "action_prediction",
+                                                                               "agenda_blocks")}
+        from ...core.environment import Outcome
+        args = decision.arguments if isinstance(decision.arguments, dict) else {}
+        return self.knowledge.observe(facts, decision.tool, Outcome(facts, accepted=bool(accepted), effect=effect),
+                                      args=args)
 
     def check(self, call, context=None, facts=None, store=True):
         """Decide on a proposed call without making it → GuardDecision (allow / deny / escalate, with the reasons and
@@ -2083,7 +2147,7 @@ def _clip(text, n):
 from .confirm import accepted_proposals, accepts  # noqa: E402
 from .intents import INTENTS  # noqa: E402
 
-__all__ = ["accepted_proposals", "accepts", "INTENTS", "model_from_json_schema", "arguments_from_user", "arguments_grounded", "arguments_model", "arguments_valid", "AUTHORIZE_TASK",
+__all__ = ["action_model_allows", "agenda_allows", "accepted_proposals", "accepts", "INTENTS", "model_from_json_schema", "arguments_from_user", "arguments_grounded", "arguments_model", "arguments_valid", "AUTHORIZE_TASK",
            "conversation", "Guard", "GuardDecision", "MATCHERS", "Message", "messages", "no_injected_arguments",
            "no_instructions_in_tool_outputs", "proposal", "request_authorizes", "same_url", "Session", "Tool",
            "ToolCall", "url_parts", "VERDICTS"]

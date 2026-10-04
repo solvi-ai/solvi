@@ -4,7 +4,11 @@ parts whose every answer is grounded, a hash chain over stored decisions and ind
 The high level, ready to use and configure:
 
     solvi.build(question, examples, ...)   a decision system: System 1 fitted, its guarantee, a slow path, a store
+    solvi.Agent(env, knowledge=km)          an environment agent: System 1 on what the knowledge predicts, System 2 a
+                                            search, hard checks from the agenda and the action model, replay
     solvi.Guard(storage=...)                an agent's tool calls checked before they run
+    solvi.Knowledge(path, ...)              what a system learned and from whom: facts, goals and gates, an action
+                                            model — shared by build(knowledge=), Guard(knowledge=) and Agent
     solvi.models                            the models: decider("solvi-base"), llm(url, model), systemone(...)
 
 with the vocabulary they share (Catalog, Question, Answer, System, Response, Quote, Claim, Decision, Fail, Unknown, the
@@ -18,8 +22,10 @@ from .core.costs import Budget
 from .core.slow.refine import Fail
 from .core.system import Response, System
 from .core.types import Bins, Estimate, Maybe, Rank, Scale, Span
+from .solutions.agent import Agent
 from .solutions.decisions import build
 from .solutions.guard import Guard
+from .solutions.knowledge import Knowledge
 
 __version__ = "0.9.0"
 
@@ -32,7 +38,7 @@ def __getattr__(name):
     return _deprecate.old_attribute(__name__, name)
 
 
-# 21 names (LAYOUT §1; `Agent` and `Knowledge` join with the knowledge memory)
-__all__ = ["build", "Guard", "Budget", "Catalog", "Question", "Answer", "System", "Response", "Quote", "Claim", "Decision",
+# 23 names (LAYOUT §1)
+__all__ = ["build", "Agent", "Guard", "Knowledge", "Budget", "Catalog", "Question", "Answer", "System", "Response", "Quote", "Claim", "Decision",
            "Fail", "Unknown", "Span", "Maybe", "Rank", "Estimate", "Scale", "Bins", "SolviDeprecationWarning",
            "ExperimentalWarning"]

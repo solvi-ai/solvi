@@ -277,6 +277,12 @@ Every answer is a value and a confidence, and the types also declare answer prim
   person. Every decision is a stored, replayable trace. Any framework's tool calls go through `guard.check` / `guard.call`, and
   `solvi serve --guard catalog.py:guard --upstream CMD` puts the guard in front of an MCP server
   ([guide](docs/guide.md#guarding-an-agents-tool-calls), [examples/19_agent_guard.py](examples/19_agent_guard.py)).
+- **Agents and knowledge.** `solvi.Knowledge` keeps what a system learned and from whom (facts with their sources,
+  goals and gates, an action model learned from outcomes), and `solvi.Agent(env, knowledge=km)` acts in an environment
+  on it: System 1 where the knowledge predicts the action works, a search where it does not, gates and predicted
+  refusals as hard checks, protection by default and justified risk (`RiskBudget`) as an option, every decision
+  replayable. `build(knowledge=km)` and `Guard(knowledge=km)` read the same knowledge. Growth was shown in environments
+  met again, not on decision streams ([docs](docs/agent.md), [examples/25_environment_agent.py](examples/25_environment_agent.py)).
 - **Behind a coding agent's hooks (preview).** `solvi hook install` puts solvi in front of Claude Code's edits and prompts:
   every Edit / Write is checked against a rules file (forbidden patterns, required functions, Python calls read from the
   code; fuzzy questions for a model, which block only with a calibration) and denied with the rule and the lines, sent
@@ -518,6 +524,7 @@ on documents the extractor dominates.
 | [examples/22_coding_agent_hooks.py](examples/22_coding_agent_hooks.py) | A coding agent's session behind `solvi hook`: the hooks installed in a temporary project, a clean edit allowed, an edit that takes an employee id from the browser denied with the rule and the line, a migration with an empty downgrade and a comment that tries to talk past the rules denied, a skill picked for one prompt and none for another; the store verified and one decision audited and replayed |
 | [examples/23_pokemon_world_map.py](examples/23_pokemon_world_map.py) | System 1 and System 2 on the world map of Pokémon Red (recorded, no ROM): rules over remembered routes, a search over the player's world map when they are unsure or surprised, routes compiled after each goal; 147 → 2 slow decisions from the first run to the second; every decision stored, replayed and reported (`System.report`) |
 | [examples/24_one_entry_point.py](examples/24_one_entry_point.py) | one entry point (`solvi.solutions.decisions.build`): System 1 fitted from labelled examples, its guarantee and the slow path's slice calibrated on examples it did not see, every decision stored; `explain()` prints the choices (no model) |
+| [examples/25_environment_agent.py](examples/25_environment_agent.py) | An environment agent (`solvi.Agent`) with `solvi.Knowledge` on a toy crafting world: System 1 acts on what the action model and the skills predict, System 2 searches, the agenda's gates are hard checks; the same world met again takes 12 steps instead of 61 (11 by System 1), and protection vs `RiskBudget` at a bridge that breaks one time in three; every decision replays |
 | [examples/07_receipts_model.py](examples/07_receipts_model.py) | Expense check on a scanned receipt: a receipts-tuned extractor cites each field, rules and a hard check decide (needs `solvi[model]`) |
 | [examples/08_contracts_by_description.py](examples/08_contracts_by_description.py) | Contract review with fields defined only in words: the general extractor reads the whole contract, cites clauses or says "absent" (needs `solvi[model]`) |
 

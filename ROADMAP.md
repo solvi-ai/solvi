@@ -24,7 +24,7 @@ Built on the account above: what works becomes the stable low level, and the hig
 | Item | What it gives | Status |
 |---|---|---|
 | Low level: building blocks with stable extension points | Runtime, parts, questions, storage and traces, guards, deciders, slow paths and dispatch as documented base classes and protocols you can subclass or replace, with a promise of which ones stay stable; your own pieces keep tracing, replay and guarantees | planned |
-| High level: ready-made systems | A System 1 + System 2 system in one, where you choose the models and providers and state what you need (questions, examples, risk, budget); built only from the low level, so any piece can be swapped out | planned |
+| High level: ready-made systems | A System 1 + System 2 system in one, where you choose the models and providers and state what you need (questions, examples, risk, budget); built only from the low level, so any piece can be swapped out. `solvi.build` and `solvi.Guard`; `solvi.Knowledge` (store, agenda, action model, failure memory in one object; `build(knowledge=)`, `Guard(knowledge=)`) and `solvi.Agent` (an environment agent: System 1 on what the knowledge predicts, System 2 a search, hard checks from gates and refusals, protection by default and `RiskBudget` as an option, every decision replayable; example 25). Next: the agent on a real game environment with a measured run before any claim beyond the toy | in progress (on `dev`) |
 | Clear split in docs and imports | A short path for the high level; a reference for the low level | planned |
 | `solvi.experimental` | Pieces that work but are not yet measured well enough for the stable promise live in one submodule, with what they still need to graduate | planned |
 

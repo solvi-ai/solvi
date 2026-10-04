@@ -101,11 +101,11 @@ the very same module and warns (`SolviDeprecationWarning`) with the path to use;
   (1.2: it graduates or is removed); a decision made by a System that uses one records it in the stored decision
   (`meta["experimental"]`, e.g. `["lora"]`) and `solvi report --overview` counts them. Nothing stable imports them,
   except on request: `solvi hook` and `solvi serve --upstream`.
-- **What `solvi` exports**: 21 names (`__all__`) — the entry points `build` (`solvi.solutions.decisions.build`, was
-  `solvi.auto.build`) and `Guard` (`solvi.solutions.guard.Guard`, was `solvi.agents.Guard`), `Budget`, and the shared
-  vocabulary `Catalog`, `Question`, `Answer`, `System`, `Response`, `Quote`, `Claim`, `Decision`, `Fail`, `Unknown`,
-  `Span`, `Maybe`, `Rank`, `Estimate`, `Scale`, `Bins`, `SolviDeprecationWarning`, `ExperimentalWarning` (`Agent` and
-  `Knowledge` come with the knowledge memory). The other 0.9 names (`JSONLStorage` and the other stores,
+- **What `solvi` exports**: 23 names (`__all__`) — the entry points `build` (`solvi.solutions.decisions.build`, was
+  `solvi.auto.build`), `Agent` (new, `solvi.solutions.agent`), `Guard` (`solvi.solutions.guard.Guard`, was
+  `solvi.agents.Guard`) and `Knowledge` (new, `solvi.solutions.knowledge`), `Budget`, and the shared vocabulary
+  `Catalog`, `Question`, `Answer`, `System`, `Response`, `Quote`, `Claim`, `Decision`, `Fail`, `Unknown`, `Span`,
+  `Maybe`, `Rank`, `Estimate`, `Scale`, `Bins`, `SolviDeprecationWarning`, `ExperimentalWarning`. The other 0.9 names (`JSONLStorage` and the other stores,
   `TraceStorage`, `Trace`, `Record`, `Result`, `MISSING`, `Shadow`, `AnswerType`, `NotStated`, `FactTypeError`) are
   imported from their modules (table below); `from solvi import JSONLStorage` works in 1.0.x with a warning.
 - `solvi.auto.AutoSystem` is now `solvi.solutions.decisions.DecisionSystem` (what `solvi.build` returns; the old name
@@ -233,7 +233,7 @@ first use, so `import solvi.core` stays light. New docs page: **Building blocks*
 
 - **Protocols** (`typing.Protocol`, runtime-checkable — an object with the methods is one): `Scorer`, `Decider`,
   `Adapter` (new: `kind`, `fingerprint()`, `using(scorer, active)`, `save`, `load`), `Head`, `Extractor`,
-  `Strategist`, `Monitor`, `Proposer`, `Space`, `Environment` (new, for the coming environment agent: `reset(seed)`,
+  `Strategist`, `Monitor`, `Proposer`, `Space`, `Environment` (new, what `solvi.Agent` runs on: `reset(seed)`,
   `actions(state)`, `step(action) → Outcome(state, accepted, effect, done)`).
 - **Base classes** with abstract methods: `TraceStorage` (a backend implements `_append`, `_raw`, `_find`, `head`,
   `_rewrite`; a subclass missing one now fails when it is constructed, not on first use) and `SlowPath`.
@@ -302,6 +302,42 @@ The low level of the knowledge memory, stable unless stated (guide: "Knowledge";
   (see Removed).
 - `benchmarks/knowledge/toy_crafting.py`: the pieces together on a toy crafting world (not Crafter: its agent is not
   part of solvi).
+
+### Agents and knowledge: the high level (`solvi.Agent`, `solvi.Knowledge`)
+
+New docs page: **Using solvi: agents and knowledge**; runnable: `examples/25_environment_agent.py`.
+
+- **`solvi.Knowledge(path=None, *, vocabulary=None, write_gate=None, actions=None, failures=None)`**: the knowledge
+  store, the agenda (inside it: goals, gates and order in the same journal), the action model
+  (`ConservativeActionModel` over `vocabulary`, or your own with `actions=`) and an optional failure memory behind one
+  object — `tell` (a fact with its source; the system's own answers are refused), `retract` (with the decisions that
+  rested on it, split into answer changes and justification only), `goal`, `observe` (an environment step: the action
+  model, the failure memory, the agenda, skills and map facts) and `report`; `.store`, `.agenda`, `.actions`,
+  `.failures`. Map facts are scoped to a map and dropped by the first contradiction of a carried one (a flag on the
+  map's scope); rules and skills are carried.
+- **`solvi.Agent(env, *, knowledge, s2=None, budget=None, storage=None, risk=None)`** (also `key=`, `gain=`,
+  `seed=`): an environment agent on a `solvi.core.Environment`. Every step is a `Dispatcher` decision over a System 1
+  whose given facts are the offered actions, each with the action model's prediction, the risk policy's choice, its
+  hard blocks and the open goal it advances. System 1 takes an action predicted to work that advances an open goal (a
+  skill: the action after which the goal's done check turned true; or the first step of a confirmed route to where it
+  worked); hard checks — the agenda's gates, hard refusals, what the risk policy avoids, the failure memory — hold in
+  both systems; System 2 is a `SearchPath` over the offered actions in an exploration order (or a `SlowPath` of yours),
+  with a per-episode budget. `risk=None` is `Protect`; `risk=RiskBudget(...)` takes justified risks within a
+  per-episode budget, never a hard one. `run(seed, steps)`, `act(state)` / `observe(outcome)`, `report()`, `replay()`
+  (every decision re-checked from its stored facts); `.system`, `.dispatcher`, `.knowledge`. Example 25: the first run
+  in a world takes 61 steps, all by System 2; the second 12 steps, 11 by System 1; with a bridge that breaks one time in
+  three in front of the iron, protection fell once and got the iron in 2 of 30 episodes, `RiskBudget` fell 6 times and
+  got it in 24.
+- **`solvi.build(..., knowledge=km)`**: every decision (and every example at build time) is given `km.snapshot()` as
+  the fact `knowledge`, read by System 1's rules (`Knowledge.value(knowledge, s, r)`); a function `state → snapshot`
+  gives your own query. `explain()` says so.
+- **`solvi.Guard(..., knowledge=km)`**: the action model's prediction over the app's facts and the agenda's gates are
+  hard checks on every tool (`action_model_allows`, `agenda_allows`; given facts `action_prediction`, `agenda_blocks`,
+  so the decision replays); "unknown" leaves the call to the other checks; `guard.observe(decision, accepted)` tells
+  the knowledge what happened. A guard without knowledge is unchanged.
+- Honest limits, in the docs page: growth was shown in environments met again (a crafting game, the Pokémon world map),
+  not on decision streams or a support agent with tools; justified risk reduces the cost of protection, not to parity;
+  gates compiled from policy text must be validated with `dry_run` first.
 
 ### Journal, budgets, outcomes
 
