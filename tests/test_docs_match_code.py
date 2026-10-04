@@ -279,3 +279,44 @@ def test_the_guide_lists_every_replay_mismatch_kind_and_the_record_modes():
     assert str(inspect.signature(TraceStorage.rederive)) == "(self, id, system=None, trust_models=False)"
     out = _sig(System.outcome, "outcome").replace("`outcome(", "`outcome(")
     assert out.replace("`", "") in flat.replace("`", "")
+
+
+def test_the_experimental_page_gives_every_pieces_status():
+    """docs/experimental.md has a section per entry of solvi.experimental.STATUS with what it is missing and its
+    deadline, word for word, so the page and the package cannot drift apart."""
+    from solvi.experimental import STATUS
+    page = (ROOT / "docs" / "experimental.md").read_text()
+    sections = dict(re.findall(r"^## `([a-z_]+)`\n(.*?)(?=^## |\Z)", page, re.M | re.S))
+    assert sorted(sections) == sorted(STATUS)
+    for name, status in STATUS.items():
+        sec = _flat(sections[name])
+        assert f"**Missing:** {status['missing']}" in sec, name
+        assert f"**Deadline:** {status['deadline']}" in sec and f"Since {status['since']}." in sec, name
+
+
+def test_the_api_reference_is_grouped_by_level_and_has_no_private_module():
+    """The API index lists the high level, the building blocks and the experimental pieces apart; a module whose path
+    has a part starting with "_" is internal and has no page (1.0 removed the pages of _i18n, _inputs, _remote,
+    cli._scaffold and cli._calibrate)."""
+    index = (ROOT / "docs" / "api" / "index.md").read_text()
+    high, low, exp = (index.split(h)[1].split("\n## ")[0] for h in
+                      ("## High level", "## Low level", "## Experimental"))
+    for page in sorted((ROOT / "docs" / "api").glob("*.md")):
+        for mod in re.findall(r"^::: (\S+)$", page.read_text(), re.M):
+            assert not any(part.startswith("_") for part in mod.split(".")), f"{page.name}: {mod}"
+    for mod in re.findall(r"\[`(solvi[a-z_.]*)`\]", index):
+        group = exp if mod.startswith("solvi.experimental") else low if mod.startswith("solvi.core") else high
+        assert f"[`{mod}`]" in group, mod
+
+
+def test_every_guide_chapter_is_in_one_part_of_the_docs():
+    """The guide's contents name the part (Using solvi / Building blocks / Experimental) of every chapter; the docs
+    site places each chapter by it (tools/mkdocs_hooks.py), and mkdocs.yml has an entry for each part."""
+    intro = GUIDE.split("\n## ")[0]
+    chapters = re.findall(r"^## (.+)$", re.sub(r"```.*?```", "", GUIDE, flags=re.S), re.M)
+    listed = re.findall(r"^\d+\. \[(.+?)\]\(#", intro, re.M)
+    assert listed == chapters
+    parts = re.findall(r"^\*\*(.+?)\*\* —", intro, re.M)
+    assert parts == ["Using solvi", "Building blocks", "Experimental"]
+    nav = (ROOT / "mkdocs.yml").read_text()
+    assert all(f"guide-part:{p}" in nav for p in parts)

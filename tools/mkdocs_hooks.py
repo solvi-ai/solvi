@@ -4,7 +4,9 @@ The Markdown files stay written for reading on GitHub; this hook adapts them for
 
 - README, CHANGELOG, ROADMAP and the examples / gallery indexes (outside docs/) become pages of the site;
 - docs/guide.md is split at its `## ` headings into one page per chapter (guide/<chapter>.md), with the headings raised
-  one level, and guide/index.md keeps the introduction and the contents; a link to `guide.md#anchor` (from any page) or
+  one level, and guide/index.md keeps the introduction and the contents. The contents name the part of the docs each
+  chapter belongs to (a `**Part** —` line, then its numbered chapters); a nav entry `Title: guide-part:Part` becomes a
+  section with that part's chapters, and a chapter in no part fails the build. A link to `guide.md#anchor` (from any page) or
   to `#anchor` (inside the guide) goes to the chapter that has the anchor, and a visit to `guide/#anchor` is forwarded
   there by a small script, so every old anchor keeps working;
 - links to repository files that are not pages (examples/*.py, gallery folders, LICENSE, ...) point to GitHub.
@@ -33,6 +35,9 @@ _slug = slugify(case="lower")
 _FENCE = re.compile(r"^\s*(```|~~~)")
 _HEADING = re.compile(r"^(#{1,6})\s+(.*?)\s*#*\s*$")
 _LINK = re.compile(r"(\]\()([^)\s]+)((?:\s+\"[^\"]*\")?\))")
+_PART = re.compile(r"^\*\*(.+?)\*\* —")
+_ITEM = re.compile(r"^\d+\. \[[^\]]*\]\(#([^)]+)\)")
+PART_ENTRY = "guide-part:"
 
 _state: dict = {}
 log = logging.getLogger("mkdocs.hooks.solvi")
@@ -53,10 +58,11 @@ def _lines_outside_fences(lines):
 
 
 def _split_guide() -> dict:
-    """Split the guide at its level-2 headings: intro + [(slug, title, lines)], and anchor -> chapter slug."""
+    """Split the guide at its level-2 headings: intro + [(slug, title, lines)], anchor -> chapter slug, and the parts
+    (part name -> chapter slugs, from the contents in the intro)."""
     lines = (ROOT / GUIDE).read_text(encoding="utf-8").splitlines()
-    intro, chapters, anchors = [], [], {}
-    current = None
+    intro, chapters, anchors, parts = [], [], {}, {}
+    current = part = None
     for _, line, fenced in _lines_outside_fences(lines):
         m = None if fenced else _HEADING.match(line)
         if m and len(m.group(1)) == 2:
@@ -67,11 +73,34 @@ def _split_guide() -> dict:
             anchors[_slugify(m.group(2))] = current["slug"]
         if current is None:
             intro.append(line)
+            if not fenced and _PART.match(line):
+                part = _PART.match(line).group(1)
+                parts[part] = []
+            elif not fenced and part and _ITEM.match(line):
+                parts[part].append(_ITEM.match(line).group(1))
         else:
             if m and len(m.group(1)) >= 2:
                 line = line[1:]                     # raise each heading one level: the chapter title becomes the page's h1
             current["lines"].append(line)
-    return {"intro": intro, "chapters": chapters, "anchors": anchors}
+    return {"intro": intro, "chapters": chapters, "anchors": anchors, "parts": parts}
+
+
+def _expand_parts(nav, guide, used):
+    """Replace each nav entry `Title: guide-part:Part` (at any depth) by a section of that part's chapter pages."""
+    out = []
+    for item in nav:
+        if isinstance(item, dict):
+            (title, value), = item.items()
+            if isinstance(value, str) and value.startswith(PART_ENTRY):
+                name = value[len(PART_ENTRY):]
+                if name not in guide["parts"]:
+                    raise ValueError(f"mkdocs.yml: {value!r} names no part of the guide's contents")
+                used.update(guide["parts"][name])
+                item = {title: [f"guide/{slug}.md" for slug in guide["parts"][name]]}
+            elif isinstance(value, list):
+                item = {title: _expand_parts(value, guide, used)}
+        out.append(item)
+    return out
 
 
 def on_config(config, **kwargs):
@@ -80,11 +109,12 @@ def on_config(config, **kwargs):
     repo = (config.get("repo_url") or "https://github.com/solvi-ai/solvi").rstrip("/")
     _state["blob"] = f"{repo}/blob/{BRANCH}/"
     _state["tree"] = f"{repo}/tree/{BRANCH}/"
-    # the nav entry "Guide: guide/index.md" becomes a section with one page per chapter
-    nav = config.get("nav") or []
-    for i, item in enumerate(nav):
-        if isinstance(item, dict) and item.get("Guide") == "guide/index.md":
-            nav[i] = {"Guide": ["guide/index.md"] + [f"guide/{c['slug']}.md" for c in guide["chapters"]]}
+    # each nav entry "Title: guide-part:Part" becomes a section with the part's chapters; every chapter is in one part
+    used: set = set()
+    config["nav"] = _expand_parts(config.get("nav") or [], guide, used)
+    missing = [c["slug"] for c in guide["chapters"] if c["slug"] not in used]
+    if missing:
+        raise ValueError(f"docs/guide.md: chapters in no part of the nav (list them in the contents): {missing}")
     return config
 
 

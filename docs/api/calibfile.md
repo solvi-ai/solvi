@@ -4,9 +4,5 @@ Calibrations as files (`part.save_calibration` / `load_calibration`) and `solvi 
 
 ::: solvi.core.calibfile
 
-## `solvi calibrate`
-
-The command and its helpers (reading a labels file, finding the decision behind a question). They lived in
-`solvi.core.calibfile` until 1.0, where the old names still resolve.
-
-::: solvi.cli._calibrate
+The `solvi calibrate` command itself is described in the guide's
+[command line](../guide.md#calibrate-escalation-with-a-guarantee-kept-in-a-file) chapter.

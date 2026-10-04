@@ -1,8 +1,8 @@
 # Building blocks
 
-The ready-made systems (`solvi.build`, `solvi.Guard`) are assembled from the low level, `solvi.core`. Every place where
-you can put a part of your own is exported there, with what you implement, what you then get for free, and how far you
-can rely on it:
+The ready-made systems (`solvi.build`, `solvi.Agent`, `solvi.Guard`, `solvi.Knowledge` — see [Using solvi](using.md))
+are assembled from the low level, `solvi.core`. Every place where you can put a part of your own is exported there,
+with what you implement, what you then get for free, and how far you can rely on it:
 
 ```python
 from solvi.core import SlowPath, TraceStorage, Strategist, Head, Monitor, Environment   # and the rest of the table
@@ -46,7 +46,7 @@ def test_my_store(tmp_path):
 | [`Proposer`](#proposer) | protocol | `(state, rounds) → proposal` | checks judge it, reasons fed back, rounds and budget, replay | via `check_slow_path` | stable |
 | [`Space`](#space) | protocol | `root`, `children(node)` (+ `complete`, `bound`) | pruning by checks, lean asks, budget, exactness, replay | via `check_slow_path` | stable |
 | [`SlowPath`](#slowpath) | base class | `mode`, `think(...) → Thought`, `fingerprint()` | routing, budgets, cost, calibration per slice, dispatch record, replay, report | `check_slow_path` | stable to use, provisional to subclass |
-| [`Environment`](#environment) | protocol | `reset(seed)`, `actions(state)`, `step(action) → Outcome` | what the environment agent does (coming with `solvi.Agent`) | `check_environment` | stable to use, provisional to implement |
+| [`Environment`](#environment) | protocol | `reset(seed)`, `actions(state)`, `step(action) → Outcome` | everything the environment agent (`solvi.Agent`) does | `check_environment` | stable to use, provisional to implement |
 | [`KnowledgeStore`](#knowledge) | concrete | — (any `TraceStorage` backend underneath) | source check, disputes to a person, exact retraction cascade, staleness flags, snapshots that replay, redecide | `check_storage` (its backend) | stable |
 | [`WriteGate`](#knowledge) | protocol | `admit(store, item, shadow) → Verdict` | runs after the source check on every proposal, verdict journaled, holds behaviour-changing items | — | stable |
 | [`ActionModel`](#knowledge) | protocol | `observe(...)`, `predict(state, action, args) → Prediction`, `fingerprint()` | refusals as hard checks, unknown → System 2, prediction vs outcome recorded | `check_action_model` | stable (scope stated) |
@@ -59,6 +59,36 @@ The catalog's own extension point is the function part (`cat.fn`, `cat.extract`,
 `cat.constraint`): a typed function, and the planning, validation, provenance, trace, replay, hard checks and audit
 come with it — see the [guide](guide.md). The value classes it meets are exported here too: `Catalog`, `Part`,
 `Question`, `Answer`, `AnswerType`, `Quote`, `Claim`, `Decision`, `Fail`, `Unknown`.
+
+## Rebuilding one part of a ready system
+
+Each ready system takes its parts as arguments, so one part can be yours and the rest stays as it is:
+
+| ready system | the part | how |
+|---|---|---|
+| `solvi.build` | System 1 | a rule of your catalog for the question (`@cat.rule`), or `learner=`: a function `[(state, answer)] → a decision part` (your classifier wrapped as a part) |
+| `solvi.build` | System 2 | `slow=`: a [`SlowPath`](#slowpath) of your own, a `System`, a decision part, or a function `state → answer` |
+| `solvi.build` | the store | `storage=`: a path, or a [`TraceStorage`](#tracestorage) of your own |
+| `solvi.Agent` | the action model | `solvi.Knowledge(actions=...)`: an [`ActionModel`](#knowledge) of your own (read from a game's data file, say) |
+| `solvi.Agent` | System 2 | `s2=`: a [`SlowPath`](#slowpath); `budget=` limits it per episode |
+| `solvi.Agent` | risk | `risk=`: `Protect` (default), `RiskBudget(...)`, or a [`RiskPolicy`](#knowledge) of your own |
+| `solvi.Guard` | "did the user ask for this?" | `authorizer=`: any decision part, e.g. a decider's `decision(...)` with `act_guard` |
+| `solvi.Knowledge` | what may be written | `write_gate=`: a [`WriteGate`](#knowledge) that runs after the built-in source check |
+
+## The areas of `solvi.core`
+
+Where each area is explained at length (the guide's chapters of the Building blocks part) and its API page:
+
+| area | what it holds | guide | API |
+|---|---|---|---|
+| `solvi.core.plan` | the strategist: a flow per request; the cost strategist | [How the strategist plans a flow](guide.md#how-the-strategist-plans-a-flow), [Code strategist](strategist.md) | [strategist](api/strategist.md), [cost](api/strategy.md) |
+| `solvi.core.deciders` | decision parts, deciders, heads, rule lists, combinations | [Types, questions and model decisions](guide.md#types-questions-and-model-decisions), [checkpoint format](decide_format.md) | [deciders](api/decide.md), [protocols](api/protocols.md), [combine](api/multi.md), [heads](api/heads.md) |
+| `solvi.core.calibration`, `solvi.core.guarantees` | reliability, thresholds with a promise, open-set gate, drift, monitors | [Confidence, calibration and abstention](guide.md#confidence-calibration-and-abstention) | [calibration](api/calibration.md), [guarantee](api/guarantee.md), [openset](api/openset.md), [drift](api/drift.md), [monitor](api/monitor.md) |
+| `solvi.core.store`, `solvi.core.runtime` | the trace, hash-chained stores, replay, audit, reports, diff, signature | [The trace and verification](guide.md#the-trace-and-verification), [Grounded decisions](guide.md#grounded-decisions-provenance-audit-and-safeguards) | [store](api/storage.md), [audit](api/audit.md), [report](api/report.md), [sysreport](api/sysreport.md), [diff](api/diff.md), [signature](api/signature.md) |
+| `solvi.core.slow` | generation, agreement, the re-ask loop, search | [A model that writes](guide.md#a-model-that-writes-generation-agreement-and-the-re-ask-loop) | [generate](api/generate.md), [agree](api/agree.md), [refine](api/refine.md), [search](api/search.md) |
+| `solvi.core.dispatch` | System 1, a slow path or a person, with a budget | [Who answers](guide.md#who-answers-system-1-the-slow-path-or-a-person-solvicoredispatch) | [dispatch](api/dispatch.md) |
+| `solvi.core.knowledge` | the knowledge store, write gates, action model, risk, agenda, failure memory, world map, episodes, corrections | [Knowledge](guide.md#knowledge-what-a-system-learned-and-from-whom), [the Pokémon world map](guide.md#system-1-and-system-2-on-a-game-the-pokémon-world-map) | [knowledge](api/knowledge.md) |
+| `solvi.core.extract`, `solvi.core.textin` | fields from documents by description; text in | [Extracting fields from documents](guide.md#extracting-fields-from-documents), [Text in](guide.md#text-in-from-a-message-to-a-question) | [extract](api/extract_long.md), [textin](api/textin.md) |
 
 ## Scorer
 

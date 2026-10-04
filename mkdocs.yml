@@ -1,6 +1,7 @@
 # The documentation site: uv sync --group docs && uv run mkdocs serve   (build: uv run mkdocs build --strict)
 # README, CHANGELOG, ROADMAP and the examples / gallery indexes are pulled in, and the guide is split into one page per
-# chapter, by tools/mkdocs_hooks.py; the Markdown files themselves stay as they read on GitHub.
+# chapter, placed in the part (Using solvi / Building blocks / Experimental) its contents name, by tools/mkdocs_hooks.py;
+# the Markdown files themselves stay as they read on GitHub.
 site_name: solvi
 site_description: Decision systems from a catalog of Python functions and checks, with answers you can verify
 site_url: https://solvi-ai.github.io/solvi/
@@ -42,91 +43,100 @@ theme:
 nav:
   - Home: index.md
   - Mission: mission.md
-  - Guide: guide/index.md          # expanded into one page per chapter by the hook
-  - "Using solvi: agents and knowledge": agent.md
-  - Best practices: best_practices.md
-  - Building blocks: building_blocks.md
-  - Formats and tools:
-      - Decider checkpoint and input format: decide_format.md
-      - Code strategist: strategist.md
+  - Using solvi:
+      - using.md
+      - Agents and knowledge: agent.md
+      - Best practices: best_practices.md
+      - Guide: guide-part:Using solvi        # the guide's chapters of this part, one page each (tools/mkdocs_hooks.py)
       - Regression tests: testing.md
       - Honesty suite: honesty.md
+  - Building blocks:
+      - building_blocks.md
+      - Guide: guide-part:Building blocks
+      - Decider checkpoint and input format: decide_format.md
+      - Code strategist: strategist.md
+  - Experimental:
+      - experimental.md
+      - Guide: guide-part:Experimental
+  - Evidence:
       - Benchmarks: benchmarks.md
       - solvi vs asking an LLM: vs_llm.md
   - Examples:
       - Examples: examples.md
       - Gallery: gallery.md
+  - Reference guide (all chapters): guide/index.md
   - API reference:
       - api/index.md
-      - solvi: api/solvi.md
-      - solvi.core: api/core.md
-      - solvi.core.deciders: api/decide.md
-      - solvi.core.deciders.protocols: api/protocols.md
-      - solvi.core.guarantees.monitor: api/monitor.md
-      - solvi.core.environment: api/environment.md
-      - solvi.core.calibration: api/calibration.md
-      - solvi.core.guarantees.guarantee: api/guarantee.md
-      - solvi.core.guarantees.openset: api/openset.md
-      - solvi.core.deciders.systemone: api/systemone.md
-      - solvi.core.deciders.llm: api/llm.md
-      - solvi.core.deciders._remote: api/remote.md
-      - solvi.core.slow.generate: api/generate.md
-      - solvi.core.slow.agree: api/agree.md
-      - solvi.core.slow.refine: api/refine.md
-      - solvi.experimental.compile: api/compile.md
-      - solvi.experimental.compile.sandbox: api/sandbox.md
-      - solvi.core.deciders.combine: api/multi.md
-      - solvi.core.knowledge: api/knowledge.md
-      - solvi.core.knowledge.store: api/knowledge_store.md
-      - solvi.core.knowledge.gates: api/knowledge_gates.md
-      - solvi.core.knowledge.actions: api/knowledge_actions.md
-      - solvi.core.knowledge.risk: api/knowledge_risk.md
-      - solvi.core.knowledge.agenda: api/knowledge_agenda.md
-      - solvi.core.knowledge.failures: api/knowledge_failures.md
-      - solvi.core.knowledge.memory: api/memory.md
-      - solvi.experimental.lora: api/lora.md
-      - solvi.experimental.learning: api/learning.md
-      - solvi.experimental.oncalib: api/oncalib.md
-      - solvi.serve: api/serve.md
-      - solvi.solutions.guard: api/agents.md
-      - solvi.solutions.agent: api/solutions_agent.md
-      - solvi.solutions.knowledge: api/solutions_knowledge.md
-      - solvi.experimental.hooks: api/hooks.md
-      - solvi.core.textin: api/textin.md
-      - solvi.core._inputs: api/inputs.md
-      - solvi.experimental.specialist: api/specialist.md
-      - solvi.experimental.charts: api/charts.md
-      - solvi.core.deciders.longdoc: api/longdoc.md
-      - solvi.core.knowledge.episodes: api/episode.md
-      - solvi.core.knowledge.worldmap: api/worldmap.md
-      - solvi.core.guarantees.drift: api/drift.md
-      - solvi.core.deciders.heads: api/heads.md
-      - solvi.core.extract: api/extract_long.md
-      - solvi.core.plan.strategist: api/strategist.md
-      - solvi.core.plan.cost: api/strategy.md
-      - solvi.core.costs: api/costs.md
-      - solvi.core.deciders.rulelist: api/rulelist.md
-      - solvi.core.store.audit: api/audit.md
-      - solvi.show: api/show.md
-      - solvi.core.store.report: api/report.md
-      - solvi.core.store.sysreport: api/sysreport.md
-      - solvi.core.sets: api/sets.md
-      - solvi.core.slow.search: api/search.md
-      - solvi.solutions.decisions: api/auto.md
-      - solvi.core.dispatch: api/dispatch.md
-      - solvi.experimental.counterfactual: api/counterfactual.md
-      - solvi.core.deciders.perturb: api/perturb.md
-      - solvi.core.store: api/storage.md
-      - solvi.core.store.signature: api/signature.md
-      - solvi.core.store.diff: api/diff.md
-      - solvi.testing: api/testing.md
-      - solvi.testing.conformance: api/conformance.md
-      - solvi.testing.honesty: api/honesty.md
-      - solvi.check: api/check.md
-      - solvi.core.calibfile: api/calibfile.md
-      - solvi.models: api/models.md
-      - solvi.cli._scaffold: api/scaffold.md
-      - solvi.core._i18n: api/i18n.md
+      - High level:
+          - solvi: api/solvi.md
+          - solvi.solutions.decisions: api/auto.md
+          - solvi.solutions.agent: api/solutions_agent.md
+          - solvi.solutions.knowledge: api/solutions_knowledge.md
+          - solvi.solutions.guard: api/agents.md
+          - solvi.models: api/models.md
+          - solvi.serve: api/serve.md
+          - solvi.show: api/show.md
+          - solvi.check: api/check.md
+          - solvi.testing: api/testing.md
+          - solvi.testing.conformance: api/conformance.md
+          - solvi.testing.honesty: api/honesty.md
+      - Building blocks:
+          - solvi.core: api/core.md
+          - solvi.core.deciders: api/decide.md
+          - solvi.core.deciders.protocols: api/protocols.md
+          - solvi.core.deciders.llm: api/llm.md
+          - solvi.core.deciders.systemone: api/systemone.md
+          - solvi.core.deciders.combine: api/multi.md
+          - solvi.core.deciders.heads: api/heads.md
+          - solvi.core.deciders.rulelist: api/rulelist.md
+          - solvi.core.deciders.longdoc: api/longdoc.md
+          - solvi.core.deciders.perturb: api/perturb.md
+          - solvi.core.extract: api/extract_long.md
+          - solvi.core.textin: api/textin.md
+          - solvi.core.sets: api/sets.md
+          - solvi.core.plan.strategist: api/strategist.md
+          - solvi.core.plan.cost: api/strategy.md
+          - solvi.core.costs: api/costs.md
+          - solvi.core.calibration: api/calibration.md
+          - solvi.core.calibfile: api/calibfile.md
+          - solvi.core.guarantees.guarantee: api/guarantee.md
+          - solvi.core.guarantees.openset: api/openset.md
+          - solvi.core.guarantees.drift: api/drift.md
+          - solvi.core.guarantees.monitor: api/monitor.md
+          - solvi.core.store: api/storage.md
+          - solvi.core.store.audit: api/audit.md
+          - solvi.core.store.report: api/report.md
+          - solvi.core.store.sysreport: api/sysreport.md
+          - solvi.core.store.signature: api/signature.md
+          - solvi.core.store.diff: api/diff.md
+          - solvi.core.slow.generate: api/generate.md
+          - solvi.core.slow.agree: api/agree.md
+          - solvi.core.slow.refine: api/refine.md
+          - solvi.core.slow.search: api/search.md
+          - solvi.core.dispatch: api/dispatch.md
+          - solvi.core.environment: api/environment.md
+          - solvi.core.knowledge: api/knowledge.md
+          - solvi.core.knowledge.store: api/knowledge_store.md
+          - solvi.core.knowledge.gates: api/knowledge_gates.md
+          - solvi.core.knowledge.actions: api/knowledge_actions.md
+          - solvi.core.knowledge.risk: api/knowledge_risk.md
+          - solvi.core.knowledge.agenda: api/knowledge_agenda.md
+          - solvi.core.knowledge.failures: api/knowledge_failures.md
+          - solvi.core.knowledge.memory: api/memory.md
+          - solvi.core.knowledge.episodes: api/episode.md
+          - solvi.core.knowledge.worldmap: api/worldmap.md
+      - Experimental:
+          - solvi.experimental: api/experimental.md
+          - solvi.experimental.learning: api/learning.md
+          - solvi.experimental.lora: api/lora.md
+          - solvi.experimental.compile: api/compile.md
+          - solvi.experimental.compile.sandbox: api/sandbox.md
+          - solvi.experimental.hooks: api/hooks.md
+          - solvi.experimental.specialist: api/specialist.md
+          - solvi.experimental.charts: api/charts.md
+          - solvi.experimental.mcp: api/mcp.md
+          - solvi.experimental.oncalib: api/oncalib.md
+          - solvi.experimental.counterfactual: api/counterfactual.md
   - Changelog: changelog.md
   - Roadmap: roadmap.md
 

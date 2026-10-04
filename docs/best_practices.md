@@ -8,7 +8,7 @@ a source is kept as advice, in plain words.
 
 **Keep the keys of a state in one fixed order, and do not reorder them later.** A decision model reads a dict as lines
 in the dict's order, and the order changes answers. This is not one model's quirk: every model we tried — the solvi
-checkpoints, a hosted decision model and an LLM asked through `solvi.core.deciders.llm` — changed some answers when only the order of
+checkpoints, a hosted decision model and an LLM asked through `solvi.models.llm` — changed some answers when only the order of
 the keys changed, and for some of them the accuracy moved with it.
 
 So: build the state the same way every time — declare it as a pydantic model (`System(input_model=Model)`: the facts then
@@ -59,7 +59,7 @@ will not find a better one.
 **A rule across items belongs after the items' decisions, not inside each one.** "One counterpart per product" over
 product-matching pairs, enforced with `solvi.core.sets.decide_set` on the answers as given, raised F1 for every solver we
 tried, and helped a weak solver most: on Abt-Buy (1,916 pairs) 0.872 → 0.909 for an LLM asked each pair, 0.860 → 0.870
-for the same LLM through `solvi.core.deciders.llm`, 0.931 → 0.933 for a fitted head ([abtbuy/solution.py](../benchmarks/tasks/abtbuy/solution.py)
+for the same LLM through `solvi.models.llm`, 0.931 → 0.933 for a fitted head ([abtbuy/solution.py](../benchmarks/tasks/abtbuy/solution.py)
 `--repair`, [abtbuy/llm_pair.py](../benchmarks/tasks/abtbuy/llm_pair.py)). Giving each request the other candidates as facts instead (how the pair ranks
 among them) did worse. Prefer the exact method: it was at least as good as the greedy one, and fast on large
 components.
@@ -145,7 +145,7 @@ the guarantee kept answering about 90%. Recalibrate the guarantee after every re
 by constrained decoding may apply the grammar from the first token and skip the thinking. On OpenRouter one of
 gpt-oss-120b's providers answered every request that way under json_schema and json_object (no reasoning tokens) and
 served a part of all requests (about a fifth of the judge's replies below had no reasoning under json_schema); a
-yes/no hallucination judge asked through `solvi.core.deciders.llm` scored F1 0.744 on RAGTruth dev with the schema enforced and 0.791
+yes/no hallucination judge asked through `solvi.models.llm` scored F1 0.744 on RAGTruth dev with the schema enforced and 0.791
 with the contract in the prompt (the plain call to the model: 0.802), on eval 0.733 → 0.766 (plain 0.784)
 ([ragtruth/reply_format.py](../benchmarks/tasks/ragtruth/reply_format.py)); a product-matching question on Abt-Buy 0.837 → 0.860
 (plain 0.872, [abtbuy/llm_pair.py](../benchmarks/tasks/abtbuy/llm_pair.py)). solvi does this by default: with
