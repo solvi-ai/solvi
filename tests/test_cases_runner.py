@@ -6,6 +6,7 @@ from pathlib import Path
 
 import pytest
 
+import solvi
 from solvi import cli, testing
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -135,7 +136,7 @@ def test_command_line(tmp_path, capsys):
     assert cli.main(["test", str(tmp_path / "missing")]) == 2
     (tmp_path / "empty").mkdir()
     assert cli.main(["test", str(tmp_path / "empty")]) == 2       # no cases files
-    assert cli.main(["--version"]) == 0 and "solvi 0." in capsys.readouterr().out
+    assert cli.main(["--version"]) == 0 and f"solvi {solvi.__version__}\n" in capsys.readouterr().out
     assert cli.main(["nope"]) == 2 and cli.main(["--help"]) == 0
 
 
