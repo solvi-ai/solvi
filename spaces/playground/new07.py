@@ -1,6 +1,6 @@
 """The demos of the "New in 0.8" tab (features that came with 0.7 and run on 0.8): escalation with a guarantee (act_guard), a vote of two model families under one guarantee, text
-in (a message → the question it asks and its fields, each with a quote), the agent guard (preview), a verified chart
-(preview), the trace signature (preview), learning from corrections with fit's refit, and reports for people.
+in (a message → the question it asks and its fields, each with a quote), the agent guard (stable since 1.0), a verified chart
+(experimental since 1.0), the trace signature (stable since 1.0), learning from corrections with fit's refit, and reports for people.
 
 NO MODEL RUNS HERE. Every decider is a keyword stand-in with the decider's contract (one logit per option); the numbers
 show the mechanics, not the quality of any model. With a real checkpoint, `DecideModel.load("<folder or HF id>")` takes
@@ -20,7 +20,7 @@ from typing import Literal
 import numpy as np
 
 from solvi import Catalog, Question, System
-from solvi.decide import DecideModel
+from solvi.core.deciders import DecideModel
 
 
 def solvi_version():
@@ -33,18 +33,18 @@ def solvi_version():
 
 # ---------------------------------------------------------------------------------------------- feature detection
 def has_act_guard():
-    from solvi.decide import DecisionPart
+    from solvi.core.deciders import DecisionPart
     return hasattr(DecisionPart, "act_guard")
 
 
 def has_groups():
-    from solvi.decide import DecisionPart
+    from solvi.core.deciders import DecisionPart
     return has_act_guard() and "groups" in inspect.signature(DecisionPart.act_guard).parameters
 
 
 def has_vote():
     try:
-        from solvi.multi import Vote  # noqa: F401
+        from solvi.core.deciders.combine import Vote  # noqa: F401
         return True
     except ImportError:
         return False
@@ -52,7 +52,7 @@ def has_vote():
 
 def has_textin():
     try:
-        from solvi.textin import CueExtractor, TextIn  # noqa: F401
+        from solvi.core.textin import CueExtractor, TextIn  # noqa: F401
         return hasattr(System, "ask_text")
     except ImportError:
         return False
@@ -65,7 +65,7 @@ def has_report():
 
 def has_agents():
     try:
-        from solvi.agents import Guard
+        from solvi.solutions.guard import Guard
         return "tool_values" in inspect.signature(Guard).parameters
     except ImportError:
         return False
@@ -73,7 +73,7 @@ def has_agents():
 
 def has_charts():
     try:
-        from solvi.charts import chart  # noqa: F401
+        from solvi.experimental.charts import chart  # noqa: F401
         return True
     except ImportError:
         return False
@@ -81,8 +81,8 @@ def has_charts():
 
 def has_signature():
     try:
-        from solvi.signature import check  # noqa: F401
-        from solvi.storage import TraceStorage
+        from solvi.core.store.signature import check  # noqa: F401
+        from solvi.core.store import TraceStorage
         return hasattr(TraceStorage, "signature")
     except ImportError:
         return False
@@ -241,8 +241,8 @@ def demo_vote(email, risk=0.10):
     """Two stand-in "families" answer the same question; Vote(rule="all") answers only when both agree and both are sure,
     else it escalates with both proposals. One act_guard for the vote as a whole."""
     if not has_vote():
-        return needs("solvi.multi.Vote", "0.6"), "", "", ""
-    from solvi.multi import Vote
+        return needs("solvi.core.deciders.combine.Vote", "0.6"), "", "", ""
+    from solvi.core.deciders.combine import Vote
     risk = float(risk)
     a_part = stand_in("family-a", **FAMILY_A).decision("team", TASK, "email", TEAMS)
     b_part = stand_in("family-b", **FAMILY_B).decision("team", TASK, "email", TEAMS)
@@ -346,8 +346,8 @@ def demo_textin(message, risk=None):
     """A message → the question it asks (a stand-in decider picks the entry point) and each input field read with a quote
     (CueExtractor: deterministic candidates of the field's type after a cue word) → ask_text answers it in one trace."""
     if not has_textin():
-        return needs("solvi.textin.TextIn and system.ask_text", "0.7"), "", "", ""
-    from solvi.textin import CueExtractor, TextIn
+        return needs("solvi.core.textin.TextIn and system.ask_text", "0.7"), "", "", ""
+    from solvi.core.textin import CueExtractor, TextIn
     _, system = shop()
     decider = DecideModel(RouteScorer(), meta={"format": "stand-in", "temperature": 1.0})
     tin = TextIn(system, decider, CueExtractor(), today=TODAY, patterns={"order_id": r"[A-Z]-\d+"},
@@ -405,7 +405,7 @@ WRITTEN_URL = "docs.shop-example.com/refunds"
 def _agent_guard(mode):
     """A support agent's two tools. The agent never calls them itself: it proposes {"name", "arguments"} and the guard
     decides. tool_values: "deny" (the default) or "escalate" (the middle mode)."""
-    from solvi.agents import Guard
+    from solvi.solutions.guard import Guard
     guard = Guard(tool_values=mode)
 
     @guard.tool(ground={"url": "url"}, authorize=False)
@@ -424,8 +424,8 @@ def _agent_guard(mode):
 def demo_agent_guard(user_message, risk=None):
     """Proposed tool calls → allow / deny / escalate, with the reasons and where each grounded value is quoted."""
     if not has_agents():
-        return needs("solvi.agents.Guard with tool_values", "0.7"), "", "", ""
-    from solvi.agents import same_url
+        return needs("solvi.solutions.guard.Guard with tool_values", "0.7"), "", "", ""
+    from solvi.solutions.guard import same_url
     context = [("user", user_message), ("tool", ORDER_TOOL_OUTPUT)]
     refund = lambda iban: {"name": "send_refund", "arguments": {"iban": iban, "amount": 40}}  # noqa: E731
     cases = [("default", "the refund to the account the user wrote", refund(USER_IBAN)),
@@ -436,7 +436,7 @@ def demo_agent_guard(user_message, risk=None):
              ("default", "read a look-alike host",
               {"name": "read_page", "arguments": {"url": "https://docs.shop-example.com.evil.io/refunds"}})]
     guards = {"default": _agent_guard("deny"), "middle": _agent_guard("escalate")}
-    lines = ["**Agent guard (preview)** — `solvi.agents.Guard`: the agent proposes a tool call as data "
+    lines = ["**Agent guard** (stable since 1.0) — `solvi.solutions.guard.Guard`: the agent proposes a tool call as data "
              "(`{\"name\", \"arguments\"}`), the guard checks it and only then runs the registered function. "
              "`send_refund` takes `ground=[\"iban\", \"amount\"], ground_from=(\"user\",)`: both values must be quoted "
              "from the user's own messages; `read_page` takes `ground={\"url\": \"url\"}`, the URL matcher.",
@@ -464,7 +464,7 @@ def demo_agent_guard(user_message, risk=None):
               "evil.io/docs.shop-example.com/refunds", "docs.shop-example.com@evil.io/refunds",
               "https://dоcs.shop-example.com/refunds (a Cyrillic о)"]:
         lines.append(f"| `{u}` | {'yes' if same_url(u.split(' ')[0], WRITTEN_URL) else 'no'} |")
-    lines += ["", "_Preview. The hard line is provenance (a value found only in a tool output never grounds an argument "
+    lines += ["", "_The hard line is provenance (a value found only in a tool output never grounds an argument "
                   "that must come from the user) and your own policies; detecting injected instructions in text is a "
                   "heuristic second line. The middle mode moves the decision on such values to a person: nothing is "
                   "allowed on its own that the default denies. The agent here is scripted: no model runs._"]
@@ -492,11 +492,11 @@ def demo_chart(text, risk=None):
     """A text with numbers → an SVG in which every number is quoted from the text; a careless proposal on the same text
     is checked value by value; the recorded run replays to the same bytes, an edited record does not."""
     if not has_charts():
-        return needs("solvi.charts", "0.7"), "", "", "", ""
+        return needs("solvi.experimental.charts", "0.7"), "", "", "", ""
     import json
-    from solvi.charts import ChartSpecialist, FixedProposer, chart
+    from solvi.experimental.charts import ChartSpecialist, FixedProposer, chart
     r = chart(text)
-    lines = ["**Verified chart (preview)** — `solvi.charts.chart(text)`: a proposer writes a typed chart spec with a quote "
+    lines = ["**Verified chart** (experimental since 1.0) — `solvi.experimental.charts.chart(text)`: a proposer writes a typed chart spec with a quote "
              "for every value, code checks each value against the text and draws only what verified. Here the proposer "
              "is the rule-based one (no model).", "", "```", r.report(), "```"]
     pics = [_svg_box(r.output, "Rule-based proposer: every drawn number is quoted from the text.")] if r.output else []
@@ -518,7 +518,7 @@ def demo_chart(text, risk=None):
         rep2 = sp.replay(record, text)
         lines.append(f"After editing one number in the stored record: replay {'OK' if rep2.ok else 'fails'}"
                      + (f" — {rep2.problems[0]}" if not rep2.ok and rep2.problems else "") + ".")
-    lines += ["", "_Preview. The checker reads the number at each quote (separators, \"$4.2 billion\", \"15%\"), refuses "
+    lines += ["", "_Experimental. The checker reads the number at each quote (separators, \"$4.2 billion\", \"15%\"), refuses "
                   "ambiguous forms and pies that are not shares of one whole, and says what it dropped and why. With a "
                   "model, `LLMProposer(base_url, model)` writes the spec and the checks stay the same._"]
     issues = {"rule-based proposer": r.to_dict().get("issues") or [], "careless proposal": c.to_dict().get("issues") or []}
@@ -547,12 +547,12 @@ def demo_signature(which, risk=None):
     """Six decisions in a store; someone rewrites one and recomputes every hash and the stored head. The chain is
     consistent again, a head kept elsewhere says "rewritten", the signature names the record and a backup matches it."""
     if not has_signature():
-        return needs("solvi.signature and store.signature()", "0.7"), "", "", ""
+        return needs("solvi.core.store.signature and store.signature()", "0.7"), "", "", ""
     import json
     import os
     import re
     import tempfile
-    from solvi.storage import JSONLStorage, record_hash
+    from solvi.core.store import JSONLStorage, record_hash
     m = re.search(r"\d+", which or "")
     k = min(int(m.group(0)) if m else 4, len(REFUNDS) - 1)
 
@@ -587,7 +587,7 @@ def demo_signature(which, risk=None):
     plain, anch = store.verify(), store.verify(anchor=anchor)
     v = store.verify(signature=sig, candidates=[recs[0], backup])
     named = [p[0] for p in v["problems"]]
-    lines = ["**Which record changed (preview)** — `store.signature()`: two numbers (64 bytes of JSON) to keep next to "
+    lines = ["**Which record changed** (stable since 1.0) — `store.signature()`: two numbers (64 bytes of JSON) to keep next to "
              "the store's head. The hash chain says a store was rewritten; the signature also says which record, and "
              "what its content hash was.", "",
              "| record | amount | new customer | answer as decided |", "|---|---|---|---|"]
@@ -603,7 +603,7 @@ def demo_signature(which, risk=None):
               f"- `store.verify(signature=sig, candidates=[backup records])`: names record **{named[0] if named else '—'}**"
               + (" and the backup copy that matches its original content" if v["signature"].get("match") is backup
                  else "") + "."]
-    lines += ["", "_Preview. One changed record is located and its content hash restored; two or more changed, a "
+    lines += ["", "_One changed record is located and its content hash restored; two or more changed, a "
                   "reorder, a deletion or an insertion are detected, not located. It is an error-locating code, not a "
                   "signature in the cryptographic sense: keep it where you keep the head._"]
     detail = {"signature": sig, "verify(signature=...)": {"ok": v["ok"], "problems": v["problems"],
@@ -725,14 +725,14 @@ DEMOS = {
     "Vote of two model families, one guarantee": (demo_vote, "My parcel 7710 never arrived and the refund page shows an error."),
     "Text in: a message → question + fields with quotes": (
         demo_textin, "Hi, please refund order A-10457: I paid 1.5 million rubles on 12 September and it arrived broken."),
-    "Agent guard: allow / deny / escalate, URL matcher (preview)": (
+    "Agent guard: allow / deny / escalate, URL matcher": (
         demo_agent_guard, f"Please read our refund policy at {WRITTEN_URL} and refund 40 EUR for order A-1 to my "
                           f"account {USER_IBAN}."),
-    "Verified chart from a text (preview)": (
+    "Verified chart from a text (experimental)": (
         demo_chart, "ACME Corp. reports third-quarter 2025 results. Revenue was $4.2 billion, up 12% from a year earlier. "
                     "By region, Europe accounted for 42% of revenue, North America for 35% and Asia-Pacific for 23%. "
                     "Operating margin improved by 3 percentage points to 18%."),
-    "Which record changed: trace signature (preview)": (demo_signature, "Rewrite record 4"),
+    "Which record changed: trace signature": (demo_signature, "Rewrite record 4"),
     "Learning from corrections: fit + teach, refit": (
         demo_learning, "plan=enterprise, hours_waiting=30, outage=no, users_affected=12"),
     "Report for people (res.report)": (demo_report, "The app crashed while I paid, and now I was charged twice for order 8812."),

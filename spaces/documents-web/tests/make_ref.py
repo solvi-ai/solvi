@@ -9,7 +9,7 @@ import json
 import sys
 import time
 
-from solvi.extract_long import LongSpanExtractor
+from solvi.core.extract import LongSpanExtractor
 
 import solvi_docs
 

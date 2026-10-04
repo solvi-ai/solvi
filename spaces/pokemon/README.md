@@ -61,7 +61,7 @@ cd spaces/pokemon && python -m pokeworld.record           # re-record data/runs 
 ## Layout
 
 - `index.html`: Gradio-Lite 5.45 (with the same package "time machine" as the other solvi Spaces), the requirement
-  `solvi==0.9.0` and every file below mounted by URL.
+  `solvi==1.0.0` and every file below mounted by URL.
 - `app.py`: the UI — Replay (the map the player knows after each decision, who decided and why, System 2's plans with
   their values), World map, Numbers, Check and report, About.
 - `pokeworld/world.py` (the recorded world, the ROM check), `pokeworld/agent.py` (System 1, System 2, the dispatcher,
@@ -72,7 +72,7 @@ cd spaces/pokemon && python -m pokeworld.record           # re-record data/runs 
 ```bash
 cd spaces/pokemon
 PYTHONPATH=../../src python app.py       # with gradio installed; or serve the folder (python -m http.server) for the
-                                          # in-browser version, which needs solvi 0.9.0 on PyPI
+                                          # in-browser version, which installs solvi 1.0.0 from PyPI
 ```
 
 Pokémon is a trademark of Nintendo, Creatures and GAME FREAK. This project is not affiliated with them and includes no

@@ -14,7 +14,7 @@ from __future__ import annotations
 import json
 
 from solvi import Answer, Catalog, Question, System
-from solvi.runtime import MISSING, Record, Trace, vhash
+from solvi.core.runtime import MISSING, Record, Trace, vhash
 
 cat = Catalog()
 
@@ -182,7 +182,7 @@ def _part(name):
 
 
 def planned_names(init):
-    from solvi.strategist import plan
+    from solvi.core.plan.strategist import plan
     flow = plan(cat, QUESTIONS, init.keys())
     return [s.part.name for s in flow.steps]
 

@@ -22,7 +22,7 @@ import numpy as np
 from pydantic import BaseModel, Field
 
 from solvi import Catalog, Scale
-from solvi.decide import DecideModel
+from solvi.core.deciders import DecideModel
 
 LABELS = ["billing", "technical", "account", "security", "other"]
 

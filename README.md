@@ -147,15 +147,19 @@ Every answer is a value and a confidence, and the types also declare answer prim
 ## Try it
 
 - [solvi playground](https://huggingface.co/spaces/solvi-ai/playground): write a decision task in Python and run it, watch the
-  strategist's plan, tamper with a trace and see the replay catch it, learn rules from examples.
+  strategist's plan, tamper with a trace and see the replay catch it, learn rules from examples. Its "New in 1.0" tab:
+  `solvi.build` from labelled examples with `explain()`, `res.checks` and `then=` as a function of facts, quotes matched
+  on a normalized view, the compact journal, the two levels.
 - [solvi documents](https://huggingface.co/spaces/solvi-ai/documents): cited, typed answers from contracts, invoices, receipts,
   leases and more — the ModernBERT extractor (ONNX) and the decisions both run in your browser; add a field by describing it.
 - [solvi arcade](https://huggingface.co/spaces/solvi-ai/arcade): game agents that explain every move — tic-tac-toe, maze,
-  minesweeper, 20 questions, Mafia detective, a bot arena, and "hack the trace".
+  minesweeper, 20 questions, Mafia detective, a bot arena, and "hack the trace". Its "Agent and knowledge (1.0)" tab:
+  `solvi.Agent` in a small world — run 1 explores (System 2), run 2 in the same world walks what it learned (System 1),
+  the knowledge report with a retraction, and protection vs justified risk (`RiskBudget`) behind a gate that holds.
 - [solvi realms](https://huggingface.co/spaces/solvi-ai/realms): an endless strategy game whose factions are solvi systems —
   tested for 100 000 turns: flat decision time (~0.3–0.6 ms), bounded memory and state, every sampled trace replay OK.
 - All run **entirely in your browser** (Pyodide): no server, no GPU, nothing you type leaves the page. Each Space
-  installs the solvi release it pins (0.8.0 today) and moves to 1.0 when its pin moves.
+  installs the solvi release it pins (1.0.0).
 - Models: [solvi-ai/solvi-large](https://huggingface.co/solvi-ai/solvi-large) (typed decisions, 396M, preview),
   [solvi-ai/solvi-base](https://huggingface.co/solvi-ai/solvi-base) (the same answers on a CPU / in ONNX, 150M, preview),
   [solvi-ai/extract-base](https://huggingface.co/solvi-ai/extract-base) (fields by description) and

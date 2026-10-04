@@ -31,6 +31,7 @@ the browser cache). Write your own decision task in the [solvi playground](https
 | 🎭 Mafia | A detective bot cites concrete events as evidence and never accuses a player it verified innocent (0 violations in 1 000 games). Town wins 65.6% with the bot vs 29% with a random voter. Watch it, or play with it as your advisor. |
 | 🕵️ Hack | Try to forge a solvi decision trace: edit a value, fix its hash, rebuild the whole chain, change an input. Replay and a published receipt catch every level and say where and why. |
 | 🏟️ Arena | A tournament of maze bots (built-in and yours) with a leaderboard, replays with the reason for every tick, "why did my bot lose?", and a switch that enforces the hard safety check on every bot: Cornerer goes from 532 to 815 points. |
+| 🧭 Agent and knowledge (1.0) | solvi 1.0's environment agent (`solvi.Agent`) and its memory (`solvi.Knowledge`) in a small crafting world (8 places, six goals). Run 1 explores with an empty memory: 61 steps, all decided by System 2; run 2 in the same world: 12 steps, 11 by System 1; a new world keeps the learned rules and re-learns the map. The knowledge report (items, sources, what was refuted or retracted, what each action needs), a retraction of a person's fact with what was derived from it (the store's fingerprint equals the one rebuilt without it), every decision replayed. Then protection vs justified risk (`RiskBudget`) on a world whose iron lies across a bridge that breaks one time in three, behind a written gate that holds in both. |
 | 🛠️ Your bot | Edit the maze agent's scoring function and run 20 seeded games against the default bot, in your own browser. |
 
 ## Maze benchmark (100 seeded games, same scoring rule and ghosts)
@@ -45,11 +46,14 @@ numbers.
 
 ## Layout
 
-- `index.html`: loads `@gradio/lite@5.45.0` from jsDelivr, lists the requirement (`solvi==0.8.0`, bumped with each release) and mounts `app.py`
+- `index.html`: loads `@gradio/lite@5.45.0` from jsDelivr, lists the requirement (`solvi==1.0.0`, bumped with each release) and mounts `app.py`
   and `games/*.py` by URL.
 - `app.py`: the Gradio 5 UI (theme and CSS in `gr.Blocks(...)`).
 - `games/tictactoe.py`, `games/maze.py`, `games/fusion.py`: pure game logic and solvi catalogs, the same as in the
   server version of this Space. `games/_ttt_catalog.py` is a vendored copy of the tic-tac-toe example catalog.
+- `games/crafting.py` and `tabs/agent.py`: the "Agent and knowledge (1.0)" tab — the toy crafting world of
+  `examples/25_environment_agent.py` (vendored, with a step log for the page) and its UI; the agent and its memory live
+  in a `gr.State`, so each visitor has their own.
 - `games/explain.py`: renders a solvi `Response` as a "why" card.
 - `games/sandbox.py`: runs the visitor's bot code in-process, in a fresh namespace, under a `sys.settrace` guard: a call
   that runs more than 200,000 lines of the bot's code (an infinite loop), or a run longer than 30 s, is stopped. It

@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import html
 
-from solvi.runtime import MISSING
+from solvi.core.runtime import MISSING
 
 
 def _short(v, limit=90):

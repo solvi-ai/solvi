@@ -15,7 +15,8 @@ short_description: Endless strategy game with solvi AI, in your browser
 An endless turn-based strategy game (a small 4X: map, resources, cities, units) whose AI factions are
 [solvi](https://github.com/solvi-ai/solvi) decision systems. There is no win condition. The point is to watch the game
 run indefinitely and show that it stays healthy. Everything runs in the visitor's browser with
-[Gradio-Lite](https://www.gradio.app/guides/gradio-lite) (Pyodide): no server, no threads, no network after load.
+[Gradio-Lite](https://www.gradio.app/guides/gradio-lite) (Pyodide): no server, no threads, no network after load. Built on solvi
+1.0 (`solvi==1.0.0` from PyPI).
 
 ## The game
 
@@ -350,7 +351,7 @@ population equal the evaluation's at every checkpoint; 0 violations, save/load e
 
 ## Layout
 
-- `index.html`: loads `@gradio/lite@5.45.0` from jsDelivr, requires `solvi==0.8.0` (bumped with each release), and mounts `app.py` and `realms/*.py`.
+- `index.html`: loads `@gradio/lite@5.45.0` from jsDelivr, requires `solvi==1.0.0` (bumped with each release), and mounts `app.py` and `realms/*.py`.
   It keeps the arcade's PyPI "time machine" (the simple index is filtered to files uploaded before the Gradio-Lite release,
   solvi exempt), without which micropip cannot resolve gradio 5.45.
 - `app.py`: the Gradio 5 UI.

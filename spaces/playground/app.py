@@ -24,12 +24,13 @@ import pandas as pd
 
 import demos
 import new07
+import new10
 import strategy_demo as sd
 import vs_llm
 from audit_view import audit_html, fmt_answer
 from sandbox import LIMITS_NOTE, run_job, serialize
 from solvi import System
-from solvi.strategist import plan
+from solvi.core.plan.strategist import plan
 
 IN_BROWSER = sys.platform == "emscripten"
 
@@ -726,7 +727,9 @@ def solvi_version():
 ABOUT = """
 **solvi vs LLM** (its own tab): cases from the public benchmark side by side — the saved answers of LLMs asked directly and inside solvi, next to solvi deciding live in this tab; reorder the options, replay the trace, and the benchmark's main table. Strong LLMs follow these short rules nearly perfectly; the differences are cost, speed, repeatability, replay and the guarantee.
 
-**New in 0.8** (the "New in 0.8" tab; this Space pins solvi 0.8.0): the 0.8 highlights with a link to the CHANGELOG — one name for every concept, any model as the decider, a guarantee on any question, checks that say why and a re-ask loop, consistent answers across many items, erasure that keeps the chain — and live demos: escalation with a guarantee you set (`act_guard`: P(answered alone and wrong) ≤ risk, and the audit's guarantee line), a vote of two model families under one guarantee, text in (a message → the question it asks and its fields, each with a quote), the agent guard (preview), a verified chart from a text with numbers (preview, SVG), the trace signature that names the one changed record (preview), learning from corrections with `fit`'s refit, and reports for people (`res.report()`, also under the Playground's answers). The deciders there are keyword stand-ins and the agent is scripted: no model runs.
+**New in 1.0** (the "New in 1.0" tab; this Space pins solvi 1.0.0): `solvi.build` from labelled examples in five lines with `explain()`; `res.checks` as a table, with a hard check whose `then=` computes the answer from facts; quotes matched on a normalized view (a quote typed with other spaces, quotes or dashes is accepted and the source's own text kept; a made-up quote is refused); the compact journal (bytes per decision, verify and replay); and the two levels, `solvi` (ready systems) and `solvi.core` (building blocks). The environment agent and its knowledge (`solvi.Agent`, `solvi.Knowledge`) are in the [solvi arcade](https://huggingface.co/spaces/solvi-ai/arcade).
+
+**New in 0.8** (the "New in 0.8" tab): the 0.8 highlights with a link to the CHANGELOG — one name for every concept, any model as the decider, a guarantee on any question, checks that say why and a re-ask loop, consistent answers across many items, erasure that keeps the chain — and live demos: escalation with a guarantee you set (`act_guard`: P(answered alone and wrong) ≤ risk, and the audit's guarantee line), a vote of two model families under one guarantee, text in (a message → the question it asks and its fields, each with a quote), the agent guard, a verified chart from a text with numbers (experimental, SVG), the trace signature that names the one changed record, learning from corrections with `fit`'s refit, and reports for people (`res.report()`, also under the Playground's answers). The deciders there are keyword stand-ins and the agent is scripted: no model runs.
 
 **New in 0.4: grounded decisions.** Fuzzy proposes, deterministic decides, everything is in the trace: a model may quote, pick a category or learn an answer, but plain code checks its output (grounding, closed options, confidence, hard checks, constraints between answers) before anything uses it.
 `res.audit()` shows what every answer rests on and which safeguards fired, and replay reports "model changed since this decision" when a model is swapped; try the three "New in 0.4" presets and the Audit panel.
@@ -804,6 +807,68 @@ with gr.Blocks(title="solvi playground", theme=THEME, css=CSS + vs_llm.CSS) as d
         t_btn.click(tamper_playground, [code, init_json, qs, known, t_step, t_val, t_rehash], t_out)
         t_model.click(replace_model_playground, [code, init_json, qs, known], t_out)
 
+    with gr.Tab("New in 1.0"):
+        gr.Markdown("**New in solvi 1.0** (the [CHANGELOG](https://github.com/solvi-ai/solvi/blob/main/CHANGELOG.md) "
+                    "has the full list): two levels — ready systems (`solvi.build`, `solvi.Agent`, `solvi.Guard`, "
+                    "`solvi.Knowledge`) and the building blocks they are made of (`solvi.core`); `res.checks`; quotes "
+                    "matched on a normalized view; `then=` that computes the answer; a compact journal. Each demo runs "
+                    "live on the solvi this tab loaded, with no model. The agent and its knowledge (run 1 vs run 2 in "
+                    "the same world, protection vs justified risk) are in the "
+                    "[solvi arcade](https://huggingface.co/spaces/solvi-ai/arcade), tab \"Agent and knowledge (1.0)\".",
+                    elem_classes="note")
+        with gr.Tab("build + explain"):
+            with gr.Row():
+                b_n = gr.Radio([1200, 2000, 3000], value=1200, label="labelled examples", scale=2)
+                b_risk = gr.Radio([0.02, 0.05, 0.10], value=0.02, label="max_risk (the promise)", scale=2)
+                b_btn = gr.Button("Build and ask", variant="primary", scale=1)
+            b_md = gr.Markdown("Press **Build and ask**: a refund question, labelled examples, a promise and a slow "
+                               "path in — a calibrated System 1 with a dispatcher out, in five lines.")
+            b_rows = gr.Dataframe(label="The first decisions", wrap=True, interactive=False)
+            b_by = gr.Dataframe(label="Who answered 200 more", interactive=False)
+            b_btn.click(new10.build_demo, [b_n, b_risk], [b_md, b_rows, b_by])
+        with gr.Tab("res.checks + then="):
+            c_case = gr.Radio(list(new10.CHECK_CASES), value=next(iter(new10.CHECK_CASES)), label="Case")
+            with gr.Row():
+                c_amount = gr.Number(80, label="amount")
+                c_limit = gr.Number(100, label="limit")
+                c_days = gr.Number(12, precision=0, label="days since purchase")
+                c_cust = gr.Textbox("ann", label="customer")
+                c_rec = gr.Textbox("R-1042", label="receipt")
+            c_btn = gr.Button("Decide", variant="primary")
+            c_ans = gr.Dataframe(label="The answer", wrap=True, interactive=False)
+            c_tab = gr.Dataframe(label="res.checks: every check as data, in flow order", wrap=True,
+                                 interactive=False)
+            c_md = gr.Markdown()
+            c_in = [c_amount, c_limit, c_days, c_cust, c_rec]
+            c_case.change(lambda k: list(new10.CHECK_CASES[k]), c_case, c_in).then(
+                new10.checks_demo, c_in, [c_md, c_tab, c_ans])
+            c_btn.click(new10.checks_demo, c_in, [c_md, c_tab, c_ans])
+        with gr.Tab("Quotes"):
+            gr.Markdown("A model quotes the call notes as evidence. Models type no-break spaces, straight quotes, "
+                        "`...` and plain hyphens where the source has other characters; 1.0 matches quotes on a "
+                        "normalized view and keeps the **source's own text** at offsets into the original. A quote "
+                        "that is not in the notes is still refused.", elem_classes="note")
+            q_case = gr.Radio(list(new10.QUOTE_CASES), value=next(iter(new10.QUOTE_CASES)), label="The model's quote")
+            q_text = gr.Textbox(next(iter(new10.QUOTE_CASES.values())), label="The quote the model wrote (edit it)")
+            q_notes = gr.Textbox(new10.NOTES, lines=3, label="The notes (the source)")
+            q_btn = gr.Button("Check the quote", variant="primary")
+            q_tab = gr.Dataframe(label="The same quote under the two rules", wrap=True, interactive=False)
+            q_md = gr.Markdown()
+            q_case.change(lambda k: new10.QUOTE_CASES[k], q_case, q_text).then(
+                new10.quotes_demo, [q_text, q_notes], [q_md, q_tab])
+            q_btn.click(new10.quotes_demo, [q_text, q_notes], [q_md, q_tab])
+        with gr.Tab("Compact journal"):
+            with gr.Row():
+                j_n = gr.Radio([50, 100, 300], value=100, label="decisions", scale=3)
+                j_btn = gr.Button("Store them twice", variant="primary", scale=1)
+            j_tab = gr.Dataframe(label="Full vs compact records", wrap=True, interactive=False)
+            j_md = gr.Markdown()
+            j_btn.click(new10.journal_demo, j_n, [j_md, j_tab])
+        with gr.Tab("Two levels"):
+            l_btn = gr.Button("Show what each level exports", variant="primary")
+            l_md = gr.Markdown()
+            l_btn.click(new10.levels_demo, None, l_md)
+
     with gr.Tab("solvi vs LLM"):
         V_SET = vs_llm.set_choices()[0][1]
         gr.Markdown(vs_llm.intro(IN_BROWSER))
@@ -838,19 +903,19 @@ with gr.Blocks(title="solvi playground", theme=THEME, css=CSS + vs_llm.CSS) as d
 
     with gr.Tab("New in 0.8"):
         gr.Markdown("**New in solvi 0.8** (the [CHANGELOG](https://github.com/solvi-ai/solvi/blob/main/CHANGELOG.md) has "
-                    "the full list): one name for every concept (the 0.7 names still work, with a warning, until 0.9); "
-                    "any model as the decider (an LLM through `solvi.llm`, a System One service, or a local checkpoint); "
+                    "the full list): one name for every concept (the 0.7 names worked, with a warning, until 0.9); "
+                    "any model as the decider (an LLM through `solvi.core.deciders.llm`, a System One service, or a local checkpoint); "
                     "a calibrated guarantee with a stated promise on any question (`System.guarantee`); checks that say "
-                    "why (`Fail`) and a propose → check → re-ask loop (`solvi.refine`); the answers of many items made "
-                    "consistent under set rules (`solvi.sets.decide_set`); inputs from outside the calibration set "
-                    "(`solvi.openset`); erasure that keeps the hash chain verifiable (`store.redact`); and the fixes of "
+                    "why (`Fail`) and a propose → check → re-ask loop (`solvi.core.slow.refine`); the answers of many items made "
+                    "consistent under set rules (`solvi.core.sets.decide_set`); inputs from outside the calibration set "
+                    "(`solvi.core.guarantees.openset`); erasure that keeps the hash chain verifiable (`store.redact`); and the fixes of "
                     "an independent audit (a failed hard check always overrides; replay checks the stored answers).",
                     elem_classes="note")
         gr.Markdown("The demos below run live on the solvi this tab loaded. **No model runs here:** the deciders are "
                     "keyword stand-ins with a decider's contract and the agent is scripted, so the numbers show the "
-                    "mechanics, not a model's quality. The agent guard, verified charts and the trace signature are "
-                    "**previews**; the gated learning loop and LoRA adapters are **experimental** and not shown (LoRA "
-                    "needs torch). A demo that needs a newer solvi than the one this tab loaded says so.",
+                    "mechanics, not a model's quality. Since 1.0 the agent guard and the trace signature are stable, and "
+                    "verified charts, the gated learning loop and LoRA adapters are **experimental** "
+                    "(`solvi.experimental`; the last two are not shown: LoRA needs torch). A demo that needs a newer solvi than the one this tab loaded says so.",
                     elem_classes="note")
         with gr.Row():
             with gr.Column(scale=4):

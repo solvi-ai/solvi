@@ -27,6 +27,7 @@ Typed answers from documents with [solvi](https://github.com/solvi-ai/solvi), co
 - **Fields are defined by a plain-English description.** No training, no labels. Add a field and it is extracted at once.
 - **Every answer cites the exact span**: the field is highlighted in the document at its character offsets.
 - **Rules and hard checks decide**, in plain Python you can edit on the page.
+- **Built on solvi 1.0**: the page installs `solvi==1.0.0` from PyPI into its Python.
 - **The system abstains instead of guessing**: missing field, failed parse or an answer outside the options gives no answer.
 - **The trace re-verifies**: every run writes a hash-chained trace and replays it; "Tamper with a copy" shows the replay
   catching an edited fact.
@@ -46,13 +47,13 @@ A use case is one file in `usecases/` (fields as `[name, description]`, document
 1. **Tokenizer** (`tokenizer.js`): ModernBERT byte-level BPE reimplemented in JavaScript so every token has character
    offsets (Python code-point offsets for solvi quotes, UTF-16 offsets for highlighting). Identical ids and offsets to
    Hugging Face `tokenizers` on all sample documents and descriptions.
-2. **Extractor** (`extractor.worker.js`): reproduces `solvi.extract_long.LongSpanExtractor.predict`: windows
+2. **Extractor** (`extractor.worker.js`): reproduces `solvi.core.extract.LongSpanExtractor.predict`: windows
    `[CLS] description [SEP] chunk [SEP]` (1024 tokens, stride 128), softmax of start/end logits per window, best span
    `start ≤ end < start + 256` by `p_start · p_end`, best over windows, present if the score reaches the threshold from
    `solvi_extract.json`. The model file (790 MB) is cached with the Cache API. WebGPU is used when the GPU supports
    16-bit float shaders (`shader-f16`); otherwise the model runs on the CPU (multi-threaded when the page is
    cross-origin isolated, which the headers above enable).
-3. **Decisions** (`solvi_docs.py` in Pyodide, `solvi` from PyPI): each field becomes an `@cat.extract` part returning a
+3. **Decisions** (`solvi_docs.py` in Pyodide, `solvi==1.0.0` from PyPI, pinned twice in `app.js`): each field becomes an `@cat.extract` part returning a
    `Quote(value, start, end, confidence)`; the use case's rule code adds `@cat.fn`, `@cat.check` and `@cat.rule` parts;
    `System(cat, QUESTIONS).ask({"doc": text, "today": ...})` answers, and the trace is replayed.
 

@@ -17,7 +17,7 @@ import traceback
 from datetime import date, datetime, timedelta
 
 from solvi import Answer, Catalog, Question, Quote, System
-from solvi.runtime import MISSING, vhash
+from solvi.core.runtime import MISSING, vhash
 
 # ------------------------------------------------------------------------------------------------------------ helpers
 NUMBER_WORDS = {"zero": 0, "one": 1, "two": 2, "three": 3, "four": 4, "five": 5, "six": 6, "seven": 7, "eight": 8, "nine": 9,

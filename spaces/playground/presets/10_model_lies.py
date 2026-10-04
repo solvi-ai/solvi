@@ -14,7 +14,7 @@ the support is deterministic. Set both switches in init_state to "honest" and ru
 import re
 
 from solvi import Answer, Catalog, Decision, Question, Quote
-from solvi.provenance import digest
+from solvi.core.provenance import digest
 
 CATEGORIES = ["travel", "meals", "equipment"]
 KEYWORDS = {"travel": ["taxi", "train", "flight", "hotel"], "meals": ["lunch", "dinner", "restaurant"],

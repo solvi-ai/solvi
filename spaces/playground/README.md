@@ -17,7 +17,7 @@ from a catalog of Python functions, checks and rules, with a strategist that pla
 hash-chained trace that can be replayed.
 
 This is a **static Space**: [Gradio-Lite](https://www.gradio.app/guides/gradio-lite) (`@gradio/lite` 5.45.0) loads Python
-(Pyodide) into the visitor's browser and installs `solvi==0.8.0` from PyPI there (pinned in `index.html`). There is no server: every decision, including
+(Pyodide) into the visitor's browser and installs `solvi==1.0.0` from PyPI there (pinned in `index.html`). There is no server: every decision, including
 code typed in the Playground, runs on the visitor's machine. The first visit downloads about 35-40 MB (Pyodide, Gradio, pandas,
 numpy/scipy) once; later visits come from the browser cache.
 
@@ -33,6 +33,16 @@ Tabs:
   tasks (13–15: helpers for coding agents, with keyword stand-ins for the deciders). The
   System is kept while the code is unchanged, so `setup` (e.g. `fit`) runs once and the stats accumulate. The code runs in-process (`sandbox.py`: `exec` in a fresh
   module) with a 5 s time guard (`sys.settrace` on the visitor's own frames), so an infinite loop is stopped.
+- **New in 1.0**: live demos of what solvi 1.0 added, each in its own sub-tab and under a second in the browser, no
+  model: `solvi.build` from labelled examples in five lines with `explain()` (a refund question, 1,200–3,000 examples,
+  a promise `max_risk` and a stand-in slow path; who answered 200 new requests); `res.checks` as a table (name, result,
+  reason, hard, then) on a refund desk whose hard check `then=` is a function of facts (over the limit → "partial" or
+  "person"), with the trace replayed; quotes matched on a normalized view (a model's quote with no-break spaces,
+  straight quotes, `...` and a plain hyphen accepted, the notes' own text kept at its offsets; a made-up quote refused;
+  `Catalog(quotes="literal")`, 0.9's rule, side by side); the compact journal (bytes per decision of a full and a
+  compact `JSONLStorage`, `verify()` and `replay_all`, which reports a compact decision it cannot check as "not
+  verified" instead of passing it); and the two levels (what `from solvi import …` and `from solvi.core import …`
+  give, and `solvi.experimental`). The agent and its knowledge are in the arcade's "Agent and knowledge (1.0)" tab.
 - **solvi vs LLM**: cases from the public benchmark ([docs/vs_llm.md](../../docs/vs_llm.md),
   [benchmarks/vs_llm](../../benchmarks/vs_llm)), 15 refund and 15 3-way-match cases picked to be instructive (values at
   a limit, currency conversion, injected instructions, missing and conflicting facts, plain cases). For a case: its input,
@@ -45,17 +55,17 @@ Tabs:
   these rules nearly perfectly and solvi is not more accurate there; the differences are cost, speed, repeatability,
   replay and the guarantee.
 - **New in 0.8**: the 0.8 highlights (one name per concept, any model as the decider, `System.guarantee`, `Fail` and
-  `solvi.refine`, `decide_set`, `solvi.openset`, `store.redact`, the audit fixes) with a link to the CHANGELOG, then
+  `solvi.core.slow.refine`, `decide_set`, `solvi.core.guarantees.openset`, `store.redact`, the audit fixes) with a link to the CHANGELOG, then
   small live demos, with keyword stand-ins in place of models and a scripted agent (no model runs in
   the browser): escalation with a guarantee (`act_guard` on 300 labelled emails: the answered share, the error, the risk
   on new emails, `must_escalate_at_least`, and the guarantee line of the audit; a slider sets the risk), a vote of two
-  model families under one guarantee (`solvi.multi.Vote` with `act_guard`: disagreement escalates with both proposals;
-  the audit's guarantee line), text in (`solvi.textin.TextIn` with `CueExtractor`: a message → the question it asks and
-  its fields, each with a quote; `system.ask_text` answers it), the agent guard (preview: `solvi.agents.Guard` allows a
+  model families under one guarantee (`solvi.core.deciders.combine.Vote` with `act_guard`: disagreement escalates with both proposals;
+  the audit's guarantee line), text in (`solvi.core.textin.TextIn` with `CueExtractor`: a message → the question it asks and
+  its fields, each with a quote; `system.ask_text` answers it), the agent guard (`solvi.solutions.guard.Guard`, stable since 1.0, allows a
   refund to the account the user wrote, denies one to an account found only in a tool output, escalates the same call
   with `tool_values="escalate"`; the URL matcher accepts the address the user named and refuses look-alike hosts), a
-  verified chart (preview: `solvi.charts.chart(text)` → an SVG where every number is quoted from the text; a careless
-  proposal checked value by value; replay and an edited record), which record changed (preview: `store.signature()`
+  verified chart (experimental since 1.0: `solvi.experimental.charts.chart(text)` → an SVG where every number is quoted from the text; a careless
+  proposal checked value by value; replay and an edited record), which record changed (`store.signature()`, stable since 1.0,
   names the one rewritten decision of six after every hash and the head were recomputed), learning from corrections
   (`fit` on 10 tickets, then 290 `teach` corrections, with 0.7's refit on doubling and without it) and a report for
   people (`res.report()` as Markdown and as the self-contained HTML page). The Playground tab also shows the report of

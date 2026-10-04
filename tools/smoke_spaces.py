@@ -10,10 +10,18 @@ What is checked, per Space (the direct *.static.hf.space page, not the huggingfa
 
 - playground: the first preset runs on load and prints "Trace replay: OK"; the Run button runs it again; the "solvi vs
   LLM" tab, when the deployed page has it, decides its second case and then its first one live, reorders the options
-  (solvi's answers stay the same) and replays the trace ("replay ok"); the "New in 0.8" tab ("New in 0.7" on a page deployed
-  before 0.8), when the deployed page has it, runs its first demo (its output, or a note that the solvi it loaded is too old);
-- arcade: tic-tac-toe loads; "O (solvi starts)" makes solvi move and explain the move ("solvi plays …");
+  (solvi's answers stay the same) and replays the trace ("replay ok"); the "New in 1.0" tab, when the deployed page has
+  it, runs each demo: `solvi.build` + `explain()` (who answered 200 requests), `res.checks` with a `then=` function
+  (the forced answer "partial", the trace replays), quotes (a quote typed otherwise accepted on the normalized view, a
+  made-up one refused), the compact journal (bytes per decision full vs compact) and the two levels (23 names); the
+  "New in 0.8" tab ("New in 0.7" on a page deployed before 0.8), when the deployed page has it, runs its first demo
+  (its output, or a note that the solvi it loaded is too old);
+- arcade: tic-tac-toe loads; "O (solvi starts)" makes solvi move and explain the move ("solvi plays …"); the "Agent and
+  knowledge (1.0)" tab, when the deployed page has it: run 1 in a world, run 2 in the same world (more System 1, fewer
+  steps), a new world, a retraction (exact), every decision replays, and protection vs RiskBudget (the gate held);
 - realms: a world is generated ("Turn 0 · N factions alive"); "Next turn" advances it;
+- pokemon (not published; only a local copy, --url pokemon=...): the "Check and report" tab replays every stored
+  decision ("Replayed N of N");
 - documents: Python and solvi load in the page ("+ solvi <version>: ready"). The extractor model (790 MB) is not
   downloaded unless --with-model is given; then the first use case is extracted and decided and the trace replays
   ("Replay OK").
@@ -71,6 +79,7 @@ def check_playground(page, timeout_s, with_model=False):
     _wait_text(page, r"Trace replay: OK", 120)
     notes.append("Run pressed: Trace replay OK")
     notes.append(_check_vs_llm(page))
+    notes += _check_new_in_1_0(page)
     # the demo tab: "New in 0.8" (its panel opens with "New in solvi 0.8"); a page deployed before 0.8 calls it "New in 0.7"
     for name, marker in (("New in 0.8", "New in solvi 0.8"), ("New in 0.7", "Features of solvi 0.7")):
         tab = page.get_by_role("tab", name=name)
@@ -86,6 +95,57 @@ def check_playground(page, timeout_s, with_model=False):
         notes.append("no 'New in 0.8' (or 'New in 0.7') tab on the deployed page")
     page.get_by_role("tab", name="About").first.click()
     return notes, _gradio_solvi_version(page)
+
+
+def _tab(page, name):
+    """The tab `name` (exact), or None when the deployed page does not have it."""
+    tab = page.get_by_role("tab", name=name, exact=True)
+    return tab.first if tab.count() else None
+
+
+def _click_and_wait(page, button, pattern, timeout_s=120):
+    """Click the visible button named `button` (exact), wait for `pattern` → (the match, seconds)."""
+    t0 = time.monotonic()
+    page.get_by_role("button", name=button, exact=True).locator("visible=true").first.click()
+    m = _wait_text(page, pattern, timeout_s)
+    return m, time.monotonic() - t0
+
+
+def _check_new_in_1_0(page):
+    """The "New in 1.0" tab: each of its demos runs live (each its own sub-tab and button)."""
+    tab = _tab(page, "New in 1.0")
+    if tab is None:
+        return ["no 'New in 1.0' tab on the deployed page"]
+    tab.click()
+    _wait_text(page, r"New in solvi 1\.0", 60)
+    notes = []
+    _tab(page, "build + explain").click()
+    m, dt = _click_and_wait(page, "Build and ask",
+                            r"Then 200 new requests in [\d,]+ ms: System 1 alone (\d+), the slow path (\d+), a person (\d+)|"
+                            r"This demo failed[^\n]*|These demos need solvi[^\n]*")
+    if not m.group(1):
+        raise RuntimeError("New in 1.0 · build: " + m.group(0))
+    notes.append(f"New in 1.0 · build + explain ({dt:.1f} s): 200 requests → System 1 {m.group(1)}, slow path "
+                 f"{m.group(2)}, person {m.group(3)}")
+    _tab(page, "res.checks + then=").click()
+    page.get_by_label("over the limit: then computes 'partial'", exact=True).check()
+    t0 = time.monotonic()
+    _wait_text(page, r"refund = partial \(forced\)[\s\S]*the trace replays: OK", 60)
+    notes.append(f"New in 1.0 · res.checks + then= ({time.monotonic() - t0:.1f} s): within_limit failed, then computed "
+                 "'partial', the trace replays")
+    _tab(page, "Quotes").click()
+    m, dt = _click_and_wait(page, "Check the quote", r"needed the normalized view[\s\S]*?abstain")
+    page.get_by_label("made up (not in the notes)", exact=True).check()
+    _wait_text(page, r"a made-up quote is refused", 60)
+    notes.append(f"New in 1.0 · quotes ({dt:.1f} s): typed otherwise → accepted on the normalized view (literal: "
+                 "abstain); made up → refused")
+    _tab(page, "Compact journal").click()
+    m, dt = _click_and_wait(page, "Store them twice", r"Compact: ([\d,]+) bytes a decision vs ([\d,]+) full")
+    notes.append(f"New in 1.0 · compact journal ({dt:.1f} s): {m.group(1)} bytes a decision compact vs {m.group(2)} full")
+    _tab(page, "Two levels").click()
+    m, dt = _click_and_wait(page, "Show what each level exports", r"high level, (\d+) names[\s\S]*?made of, (\d+) names")
+    notes.append(f"New in 1.0 · two levels: solvi {m.group(1)} names, solvi.core {m.group(2)} names")
+    return notes
 
 
 def _check_vs_llm(page):
@@ -114,7 +174,45 @@ def check_arcade(page, timeout_s, with_model=False):
     _wait_text(page, r"solvi has not moved yet|solvi plays", timeout_s)
     page.get_by_text("O (solvi starts)", exact=True).first.click()
     m = _wait_text(page, r"solvi plays [^\n]+", 120)
-    return [f"tic-tac-toe: {m.group(0)[:80]}"], None
+    return [f"tic-tac-toe: {m.group(0)[:80]}"] + _check_agent_tab(page), None
+
+
+RUN = r"(\d+) steps, (\d) of 6 goals — System 1 (\d+), System 2 (\d+)"
+
+
+def _check_agent_tab(page):
+    """The arcade's "Agent and knowledge (1.0)" tab: run 1, run 2 in the same world (more System 1, fewer steps), a new
+    world, a retraction, replay, and protection vs justified risk."""
+    tab = page.get_by_role("tab", name=re.compile("Agent and knowledge"))
+    if not tab.count():
+        return ["no 'Agent and knowledge (1.0)' tab on the deployed page"]
+    tab.first.click()
+    notes = []
+    m1, dt1 = _click_and_wait(page, "▶ Run 1 (empty memory)", r"run 1 in world 7 \(empty memory\): " + RUN)
+    m2, dt2 = _click_and_wait(page, "▶ Run again, same world", r"run 2 in world 7 \(same memory\): " + RUN)
+    s1a, s1b, st_a, st_b = int(m1.group(3)), int(m2.group(3)), int(m1.group(1)), int(m2.group(1))
+    if not (s1b > s1a and st_b < st_a):
+        raise RuntimeError(f"run 2 did not use its memory: run 1 {m1.group(0)}; run 2 {m2.group(0)}")
+    notes.append(f"agent: run 1 ({dt1:.1f} s) {st_a} steps, System 1 {s1a} / System 2 {m1.group(4)}; run 2 ({dt2:.1f} s) "
+                 f"{st_b} steps, System 1 {s1b} / System 2 {m2.group(4)}")
+    m3, dt3 = _click_and_wait(page, "🗺️ A new world, same memory", r"world 8 \(new world, same memory\): " + RUN)
+    rp = _wait_text(page, r"Every decision replays[^\n]*?(\d+) of (\d+)", 30)
+    if rp.group(1) != rp.group(2):
+        raise RuntimeError("agent: not every decision replays: " + rp.group(0))
+    notes.append(f"agent: new world ({dt3:.1f} s) {m3.group(1)} steps, System 1 {m3.group(3)}; every decision replays "
+                 f"({rp.group(1)} of {rp.group(2)})")
+    m4, dt4 = _click_and_wait(page, "↩ Retract a person's fact", r"took back (\d+) items[\s\S]*?: (exact|NOT exact)")
+    if m4.group(2) != "exact":
+        raise RuntimeError("agent: the retraction was not exact")
+    notes.append(f"agent: retraction ({dt4:.1f} s) took back {m4.group(1)} items, exact")
+    m5, dt5 = _click_and_wait(page, "▶ Run both agents", r"(\d+) episodes per agent in [\d.]+ s — the gate held in both: (\w+)",
+                              300)
+    if m5.group(2) != "yes":
+        raise RuntimeError("agent: the gate did not hold")
+    iron = re.findall(r"iron in (\d+) of (\d+)", page.inner_text("body"))
+    notes.append(f"agent: protection vs RiskBudget ({dt5:.1f} s, {m5.group(1)} episodes each): gate held; "
+                 + ", ".join(f"iron {a}/{b}" for a, b in iron[-2:]))
+    return notes
 
 
 def check_realms(page, timeout_s, with_model=False):
@@ -148,7 +246,29 @@ def check_documents(page, timeout_s, with_model=False):
     return notes, m.group(1)
 
 
-CHECKS = {"playground": check_playground, "arcade": check_arcade, "realms": check_realms, "documents": check_documents}
+def check_pokemon(page, timeout_s, with_model=False):
+    """The Pokémon showcase (not published; a local copy only, --url pokemon=...): the replay tab replays every stored
+    decision. Its output is a textbox, so the check reads the textareas' values."""
+    _wait_text(page, r"solvi plays the world map of Pokémon Red", timeout_s)
+    page.get_by_role("tab", name="Check and report", exact=True).first.click()
+    page.get_by_role("button", name="Replay every stored decision", exact=True).first.click()
+    rx = re.compile(r"Replayed (\d+) of (\d+) stored decisions")
+    deadline = time.monotonic() + 180
+    while True:
+        vals = page.locator("textarea").evaluate_all("els => els.map(e => e.value)")
+        m = next((rx.search(v) for v in vals if rx.search(v)), None)
+        if m:
+            break
+        if time.monotonic() > deadline:
+            raise TimeoutError("no replay result after 180 s")
+        page.wait_for_timeout(1000)
+    if m.group(1) != m.group(2) or "Mismatches" in " ".join(vals):
+        raise RuntimeError("not every stored decision replays: " + m.group(0))
+    return [f"replay tab: {m.group(0)}"], None
+
+
+CHECKS = {"playground": check_playground, "arcade": check_arcade, "realms": check_realms, "documents": check_documents,
+          "pokemon": check_pokemon}
 
 
 # ---------------------------------------------------------------------------------------------- runner
@@ -220,7 +340,9 @@ def main(argv=None):
     names = [n.strip() for n in a.only.split(",") if n.strip()]
     unknown = [n for n in names if n not in CHECKS]
     if unknown:
-        ap.error(f"unknown Space(s): {', '.join(unknown)}; known: {', '.join(SPACES)}")
+        ap.error(f"unknown Space(s): {', '.join(unknown)}; known: {', '.join(CHECKS)}")
+    if "pokemon" in names and not any(u.startswith("pokemon=") for u in a.url):
+        ap.error("pokemon is not published: give a local copy with --url pokemon=http://127.0.0.1:PORT/index.html")
     try:
         urls = dict(u.split("=", 1) for u in a.url)
     except ValueError:

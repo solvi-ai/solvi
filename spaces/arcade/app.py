@@ -469,9 +469,9 @@ THEME = gr.themes.Soft(primary_hue="violet", secondary_hue="amber",
                        font=[gr.themes.GoogleFont("Montserrat"), "ui-sans-serif", "system-ui", "sans-serif"],
                        font_mono=[gr.themes.GoogleFont("IBM Plex Mono"), "ui-monospace", "Consolas", "monospace"])
 
-from tabs import akinator as tab_ak, arena as tab_ar, mafia as tab_mf, minesweeper as tab_ms, tracehack as tab_th  # noqa: E402
+from tabs import agent as tab_ag, akinator as tab_ak, arena as tab_ar, mafia as tab_mf, minesweeper as tab_ms, tracehack as tab_th  # noqa: E402
 
-CSS = CSS + tab_ms.CSS + tab_th.CSS + tab_ak.CSS + tab_mf.CSS + tab_ar.CSS
+CSS = CSS + tab_ms.CSS + tab_th.CSS + tab_ak.CSS + tab_mf.CSS + tab_ar.CSS + tab_ag.CSS
 
 with gr.Blocks(title="solvi arcade", theme=THEME, css=CSS) as demo:
     gr.Markdown(INTRO, elem_id="hero")
@@ -594,6 +594,8 @@ with gr.Blocks(title="solvi arcade", theme=THEME, css=CSS) as demo:
             tab_th.build()
         with gr.Tab("🏟️ Arena"):
             tab_ar.build()
+        with gr.Tab("🧭 Agent and knowledge (1.0)"):
+            tab_ag.build()
         with gr.Tab("🛠️ Your bot"):
             gr.Markdown(
                 "This is the maze agent's scoring function — the one piece of Pac's catalog you can rewrite. Change the "
