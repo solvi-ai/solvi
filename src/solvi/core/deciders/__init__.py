@@ -35,6 +35,9 @@ On top of the raw logits, per question (task, options, kind):
 
 Backends: "torch" (`solvi[model]`) or "onnx" (`solvi[onnx]`: onnxruntime + tokenizers, no torch), or any object with
 `logits(items)` (and optionally `logits_pass(passes)`) — tests, other models: see DecideModel."""
+import sys
+import types
+
 from .kinds import ACT_FEATURES, ACT_FEATURES_V3, DEFAULT_T, FORMAT, KINDS, KINDS_V3, LEGACY_FORMAT, MANY, MARKERS, NULL_SOURCE, ONE, OPT, OTHER_NAMES, TYPED2_FORMAT, TYPED_FORMAT, V3_MARKERS, WIRE, _KIND, _OPTION_KINDS, _kind, _spec_names, _unused_options  # noqa: F401
 from .state import SERIALIZATIONS, _KEY_OK, _is_text, _jkey, _paths, _pkey, _scalar, _single, _text, _tree, jsonable, state_text  # noqa: F401
 from .wire import Item, Logits, Pass, _respan, _typed_span, decode_pointer, pass_prompt, pointer_evidence, prompt  # noqa: F401
@@ -46,3 +49,17 @@ from .part import DecisionPart, plan_batches  # noqa: F401
 from .model import DecideModel, _json_default  # noqa: F401
 
 __all__ = ["act_features", "Adaptation", "block_masks", "BlockUnsupported", "capabilities", "DecideModel", "decision_of", "DecisionPart", "decode_pointer", "Facts", "group_name", "group_record", "GroupBy", "guard_promise", "Item", "jsonable", "KINDS", "Logits", "LongInputWarning", "lora_key", "no_separation", "one_source", "OnnxScorer", "Pass", "pass_prompt", "plan_batches", "pointer_evidence", "prompt", "state_text", "TorchScorer"]
+
+
+class _Package(type(sys.modules[__name__])):
+    """Python sets a package's attribute to a submodule when that submodule is imported by path; the submodule
+    `capabilities` shares its name with the function `capabilities`, so importing it (e.g. through the 0.9 path
+    `solvi.decide.capabilities`) would replace the function. The function stays."""
+
+    def __setattr__(self, name, value):
+        if name == "capabilities" and isinstance(value, types.ModuleType):
+            return
+        super().__setattr__(name, value)
+
+
+sys.modules[__name__].__class__ = _Package
