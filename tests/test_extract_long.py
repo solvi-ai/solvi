@@ -136,35 +136,18 @@ def test_an_answer_in_a_late_window_of_a_long_document_comes_back_at_its_charact
     assert absent.field("iban", "the IBAN")(doc).value == ""
 
 
-def test_a_labelled_span_maps_to_the_tokens_that_cover_it():
-    from solvi.core.extract.multi import MultiSpanExtractor
-    offs = [(0, 0), (0, 5), (6, 10), (11, 15), (0, 0)]             # [CLS], three tokens, [SEP]
-    assert MultiSpanExtractor._tok_span(offs, (11, 15)) == (3, 3)
-    assert MultiSpanExtractor._tok_span(offs, (0, 10)) == (1, 2) and MultiSpanExtractor._tok_span(offs, (7, 9)) == (2, 2)
-
-
 def test_a_missing_optional_dependency_names_the_extra_to_install(monkeypatch):
     """The extractors failed with a bare ModuleNotFoundError (with backend="auto" and no
     runtime: "No module named 'torch'"), while storage and serve name the extra."""
     import sys
     from solvi.core.extract import LongSpanExtractor
-    from solvi.core.extract.multi import MultiSpanExtractor
     monkeypatch.setitem(sys.modules, "torch", None)                # as if it were not installed
-    for make in (lambda: MultiSpanExtractor(["total"], "m"), lambda: LongSpanExtractor("m")):
-        with pytest.raises(ImportError, match=r"Extractor needs torch: pip install 'solvi\[model\]'"):
-            make()
+    with pytest.raises(ImportError, match=r"Extractor needs torch: pip install 'solvi\[model\]'"):
+        LongSpanExtractor("m")
 
 
-def test_one_extractor_protocol_and_no_training_target_past_the_encoded_text():
-    """MultiSpanExtractor had fit(docs, spans), predict_doc and no save / load; a labelled span past the truncated window
-    became (first token, last token), a wrong target; LongSpanExtractor's cache never shrank and keyed by hash(text)."""
-    import inspect
-
+def test_one_extractor_protocol():
+    """The extractor protocol (MultiSpanExtractor, which shared it, was removed in 1.0)."""
     from solvi.core.extract import LongSpanExtractor
-    from solvi.core.extract.multi import MultiSpanExtractor
-    offs = [(0, 0), (0, 5), (6, 10), (11, 15), (0, 0)]
-    assert MultiSpanExtractor._tok_span(offs, (40, 45)) is None and MultiSpanExtractor._tok_span(offs, (6, 10)) == (2, 2)
-    for cls in (MultiSpanExtractor, LongSpanExtractor):
-        for name in ("fit", "predict", "field", "save", "load", "fingerprint"):
-            assert callable(getattr(cls, name)), (cls, name)
-    assert list(inspect.signature(MultiSpanExtractor.predict).parameters)[1:3] == ["text", "field"]
+    for name in ("fit", "predict", "field", "save", "load", "fingerprint"):
+        assert callable(getattr(LongSpanExtractor, name)), name

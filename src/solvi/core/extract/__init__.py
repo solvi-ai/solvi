@@ -1,6 +1,5 @@
-"""@extract for real-world, general-purpose documents (the extractor protocol it shares with
-solvi.core.extract.multi.MultiSpanExtractor: fit(items), predict(text, description), field(name, description), save / load,
-fingerprint()): a field is defined by its DESCRIPTION, the document may be long
+"""@extract for real-world, general-purpose documents (the extractor protocol: fit(items), predict(text, description),
+field(name, description), save / load, fingerprint()): a field is defined by its DESCRIPTION, the document may be long
 (windows), and the field may be absent ("no answer"). ModernBERT: input "field description [SEP] document window", two pointer
 heads; "no answer" is position 0 (the special token). Prediction: the best span across all windows; an answer exists if its
 score is above the field's threshold (tuned on held-out examples). Also works for fields unseen in training, from the
@@ -225,7 +224,7 @@ class LongSpanExtractor:
         cfg = json.load(open(f"{path}/solvi_extract.json"))
         if cfg.get("kind", "long") != "long":                # files of 0.7 have no kind: they are LongSpanExtractor's
             raise ValueError(f"{path_or_id}: not a LongSpanExtractor (solvi_extract.json has kind {cfg['kind']!r}; a "
-                             "MultiSpanExtractor loads with solvi.core.extract.multi.MultiSpanExtractor.load)")
+                             "MultiSpanExtractor of solvi 0.9 — removed in 1.0 — loads with solvi 0.9)")
         ex = cls(path, max_len=cfg["max_len"], stride=cfg["stride"], max_span=cfg["max_span"], device=device)
         ex.enc.to(ex.torch.float32)
         ex.head.load_state_dict(ex.torch.load(f"{path}/span_head.pt", map_location=ex.device, weights_only=True))

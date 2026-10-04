@@ -66,7 +66,6 @@ MOVED: dict[str, str] = {
     "solvi.core.guarantees.drift": "solvi.drift",
     "solvi.core.knowledge.episodes": "solvi.episode",
     "solvi.core.extract": "solvi.extract_long",
-    "solvi.core.extract.multi": "solvi.extract_multi",
     "solvi.core.slow.generate": "solvi.generate",
     "solvi.core.guarantees.guarantee": "solvi.guarantee",
     "solvi.core.deciders.heads": "solvi.heads",

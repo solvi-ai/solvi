@@ -37,7 +37,6 @@ this reference lists what each module exports and the signatures.
 | [`solvi.core.guarantees.drift`](drift.md) | drift: has the stream moved away from the one the thresholds were calibrated on? |
 | [`solvi.core.deciders.heads`](heads.md) | the learned answer heads: `System.fit`'s `FastHead` and `select_features`, `CandidateHead`, `Head` (`solvi.fast` up to 0.7) |
 | [`solvi.core.extract`](extract_long.md) | `@extract` by description for long documents (`LongSpanExtractor`; torch) |
-| [`solvi.core.extract.multi`](extract_multi.md) | a single-pass `@extract` over several fields (torch) |
 | [`solvi.core.plan.strategist`](strategist.md) | the strategist: a flow per request (`Flow`, `PlanError`), the learned order of hard checks and producer policy |
 | [`solvi.core.plan.cost`](strategy.md) | the code strategist (`CostStrategist`): dead ends dropped, the cheapest verified plan |
 | [`solvi.core.costs`](costs.md) | measured run times (`CostBook`), the dollars of recorded model calls (`price_of`), `Budget` and `Cost` |

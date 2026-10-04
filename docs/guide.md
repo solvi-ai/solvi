@@ -4625,7 +4625,7 @@ def category(doc):
 def risk(amount, country): ...
 ```
 
-`LongSpanExtractor.field`, `MultiSpanExtractor.field` and `LongSpanExtractor.embedder` mark their functions (the attributes
+`LongSpanExtractor.field` and `LongSpanExtractor.embedder` mark their functions (the attributes
 `__solvi_model__` and `__solvi_provenance__`), so registering them is enough. For any other model,
 pass `model=`.
 
@@ -4909,52 +4909,21 @@ the text of your exceptions. A message it has no template for is shown in Englis
 
 ## Extracting fields from documents
 
-With `pip install "solvi[model]"`, solvi provides three ModernBERT extractors. All of them predict a start and an end
-position in the text, so the extracted value is always a substring of the document with exact offsets. Each gives you
+With `pip install "solvi[model]"`, solvi provides a ModernBERT extractor, `LongSpanExtractor`. It predicts a start and an end
+position in the text, so the extracted value is always a substring of the document with exact offsets. It gives you
 plain functions `doc -> Quote` to register with `cat.extract`.
 
 Labels are character spans: for each training document and field, `(start, end)` of the value in the text, or `None` if
 the field is absent. extract-base's model card suggests labelling about 25–100 documents per task and fine-tuning. A
 GPU is recommended for training and for fast inference.
 
-### MultiSpanExtractor: all fields in one pass
+### MultiSpanExtractor (removed in 1.0)
 
-> **Moving into the knowledge memory in 1.0.** This module will be folded into solvi's knowledge memory, and its API
-> may change then.
-
-`solvi.core.extract.multi.MultiSpanExtractor` reads a document once and has a start/end head pair per field. Use it for
-documents that fit into one window (receipts, invoices, forms).
-
-```python
-from solvi.core.extract.multi import MultiSpanExtractor
-
-ex = MultiSpanExtractor(["company", "date", "total"],
-                        model_name="answerdotai/ModernBERT-large", max_len=1024)
-ex.fit(train, epochs=4, lr=3e-5, bs=8)
-# train: [(text, {"company": (s, e), "date": (s, e), "total": (s, e) or None})]
-ex.save("receipts-extractor")              # MultiSpanExtractor.load("receipts-extractor") reads it back
-
-ex.fit_temperature(calib_docs, lambda field, i, span: span == calib_spans[i][field])   # optional, per-field temperature
-
-for name in ["company", "date", "total"]:
-    cat.extract(ex.field(name))            # registers the fact "company", ... read from init_state["doc"]
-
-@cat.fn
-def total_value(total):
-    return float(total.replace(",", ""))
-```
-
-- `ex.field(name)` returns a function named `name` with one argument `doc`, which returns
-  `Quote(doc[s:e], s, e, confidence=c)`.
-- `ex.predict(text)` returns `{field: (start, end, confidence)}` (`ex.predict(text, field)` one of them). Results are
-  cached per text, so all fields of one document cost a single forward pass. The two extractors share one protocol —
-  `fit(items)`, `predict(text, field)`, `field(name[, description])`, `save` / `load`, `fingerprint()` (0.7's
-  `fit(docs, spans)` and `predict_doc(text)` were removed in 0.9). A labelled span past the encoded
-  text (`max_len` tokens) is left out of training.
-- `fit_temperature(docs, gold_ok)` picks a softmax temperature per field that minimizes log loss of "confidence vs.
-  correct" on held-out documents; `gold_ok(field, doc_index, (start, end))` tells whether a prediction is correct.
-- The extractor always returns a span; this one does not model "field absent". Use `LongSpanExtractor` when fields may
-  be missing.
+0.9's `solvi.core.extract.multi.MultiSpanExtractor` (a fixed field list, one start/end head pair per field, one pass
+per document) was used by nothing in solvi and is gone in 1.0. The published receipts model, `solvi-ai/extract-receipts`, is a
+`LongSpanExtractor` (below); for a fixed list of fields over short documents, one `LongSpanExtractor` with a
+description per field reads the same fields (one pass per field instead of one per document; predictions are
+cached per text and field).
 
 ### LongSpanExtractor: long documents, fields by description, "no answer"
 

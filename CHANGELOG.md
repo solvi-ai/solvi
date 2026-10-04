@@ -63,6 +63,7 @@ had a measured run. Importing a removed module raises ModuleNotFoundError.
 | `solvi.agents.pydantic_ai`, `solvi.agents.langgraph`, `solvi.agents.openai_agents` and the `pydantic-ai`, `langgraph`, `openai-agents` extras | no measured run went through any of them; the measured agent results (an injection benchmark, the τ-bench retail stand) call the guard directly | call `guard.check` (or `guard.call`) from your framework's tool-execution step; for MCP servers, the proxy (`solvi serve --guard --upstream`), which stays |
 | `System(cost_policy="measured")`, `solvi.core.costs.MeasuredCosts`, `system.freeze_costs()` / `unfreeze_costs()` | planning on measured run times showed no measured benefit | declare `cost=` on the parts; `cost_policy="declared"` is the only value left (a 0.9 plan record with measured costs still replays) |
 | `solvi.core.deciders.heads.Head` (the legacy answer head) | `System.fit` has built a `FastHead` since 0.8 and nothing in solvi built `Head` any more | `solvi.core.deciders.heads.FastHead` |
+| `solvi.extract_multi` / `solvi.core.extract.multi` (`MultiSpanExtractor`) | nothing in solvi used it; the published receipts model behind the README's receipt numbers (`solvi-ai/extract-receipts`) is a `LongSpanExtractor` | `LongSpanExtractor` with a description per field (a `MultiSpanExtractor` checkpoint loads with solvi 0.9) |
 
 ### Moved off the classes (no shim)
 
@@ -157,7 +158,6 @@ Where each module went:
 | `solvi.drift` | `solvi.core.guarantees.drift` | low level: building blocks |
 | `solvi.episode` | `solvi.core.knowledge.episodes` | low level: building blocks |
 | `solvi.extract_long` | `solvi.core.extract` | low level: building blocks |
-| `solvi.extract_multi` | `solvi.core.extract.multi` | low level: building blocks |
 | `solvi.generate` | `solvi.core.slow.generate` | low level: building blocks |
 | `solvi.guarantee` | `solvi.core.guarantees.guarantee` | low level: building blocks |
 | `solvi.heads` | `solvi.core.deciders.heads` | low level: building blocks |
@@ -227,7 +227,7 @@ the library: `load`, `resolve`, `pull`, `cached`, and the providers below).
 
 ### Moving into the knowledge memory
 
-`solvi.core.knowledge.memory` (`CorrectionMemory`, `solvi.core.knowledge.memory.attach`), `solvi.core.knowledge.episodes` and `solvi.core.extract.multi` stay in 1.0 for now and
+`solvi.core.knowledge.memory` (`CorrectionMemory`, `solvi.core.knowledge.memory.attach`) and `solvi.core.knowledge.episodes` stay in 1.0 for now and
 are marked "moving into the knowledge memory in 1.0" in their docs: they will be folded into solvi's knowledge memory,
 and their API may change then.
 

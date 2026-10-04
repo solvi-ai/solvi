@@ -223,15 +223,6 @@ def test_files_and_command_lines(tmp_path, monkeypatch, capsys):
         hooks.rules_system()
 
 
-def test_extractors():
-    from solvi.core.extract.multi import MultiSpanExtractor
-    ex = MultiSpanExtractor.__new__(MultiSpanExtractor)
-    with pytest.raises(TypeError, match=rf"MultiSpanExtractor.fit\(docs, spans\) {GONE}fit\(\[\(text, spans\), \.\.\.\]\)"):
-        ex.fit(["a text"], [{"total": None}])  # type: ignore[call-arg]
-    with pytest.raises(AttributeError, match=rf"MultiSpanExtractor.predict_doc\(\) {GONE}predict\(text\[, field\]\)"):
-        ex.predict_doc("a text")
-
-
 def test_removed_kwargs_names_the_new_keyword():
     from solvi import _deprecate
 

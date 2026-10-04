@@ -88,7 +88,6 @@ nav:
       - solvi.core.guarantees.drift: api/drift.md
       - solvi.core.deciders.heads: api/heads.md
       - solvi.core.extract: api/extract_long.md
-      - solvi.core.extract.multi: api/extract_multi.md
       - solvi.core.plan.strategist: api/strategist.md
       - solvi.core.plan.cost: api/strategy.md
       - solvi.core.costs: api/costs.md
