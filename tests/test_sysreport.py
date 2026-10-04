@@ -10,7 +10,7 @@ from test_dispatch import _hard_slice
 from solvi import Answer, Catalog, Decision, Question, System
 from solvi.core.store import JSONLStorage, SQLiteStorage
 from solvi.cli import main
-from solvi.core.dispatch import Dispatcher, SlowPath
+from solvi.core.dispatch import AskPath, Dispatcher
 from solvi.core.guarantees.guarantee import calibrate
 from solvi.core.store import open_storage
 from solvi.core.store.sysreport import SystemReport, system_report
@@ -108,7 +108,7 @@ def test_the_dispatchers_final_answers_cost_and_calibrated_promise_equal_the_raw
     s1, s2, data = _hard_slice(guess_right=0.6, slow_right=0.95)
     path = tmp_path / "d.jsonl"
     store = JSONLStorage(path)
-    d = Dispatcher(s1, SlowPath(s2), price=(1.0, 2.0), storage=store)
+    d = Dispatcher(s1, AskPath(s2), price=(1.0, 2.0), storage=store)
     first = d.ask(data[350][0])                                     # before calibrate: no policy
     rep_cal = d.calibrate(data[:300], max_risk=0.05)
     for st, y in data[300:360]:

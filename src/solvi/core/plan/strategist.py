@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import random
 from collections import deque
+from typing import Any, Protocol, runtime_checkable
 
 from ... import _deprecate
 from ..catalog import Quote
@@ -49,6 +50,47 @@ def given_facts(catalog, questions=()):
     for q in questions:
         read.update(q.uses or ())
     return read - set(catalog.parts)
+
+
+@runtime_checkable
+class Strategist(Protocol):
+    """The planner of a System: which parts and checks run for these questions on these given facts.
+
+    You implement: `plan(catalog, questions, init_keys, heads=None)` → a `Flow` (solvi.core.runtime: the steps in an
+    order their inputs allow, the parts per question, the unresolved questions with the reasons). Pass it as
+    `System(..., strategist=yours)`. Give the flow a `strategy` dict (as `CostStrategist` does) to have the plan hashed
+    into every trace (`solvi.core.plan.cost.plan_record`).
+
+    You get for free: hard checks enforced whatever the plan says (a hard check whose `then=` names a question must be
+    in that question's flow, or System(...) refuses the strategist), types checked on every step, the plan recorded and
+    replayed, every place that plans for the System (ask, fit, serve's input schemas, `solvi check`) seeing the same
+    flow.
+
+    Stability: stable. `DefaultStrategist` and `solvi.core.plan.cost.CostStrategist` are stable to use, provisional
+    to subclass."""
+
+    def plan(self, catalog: Any, questions: Any, init_keys: Any, heads: Any = None) -> Flow: ...
+
+
+class DefaultStrategist:
+    """The deterministic planner every System uses when it is given none (`plan` in this module), as an object: the
+    targets of each question (its rule's arguments, a fitted head's facts, its `uses` hint), walked back to the given
+    facts, every check on computed facts that the flow can run, the required parts. `System(strategist=
+    DefaultStrategist())` plans exactly as `System()` does. Subclass it to change one step and keep the rest (call
+    `super().plan(...)` and edit the Flow)."""
+
+    record = False                                   # the deterministic plan is not written into the trace
+
+    def plan(self, catalog, questions, init_keys, heads=None):
+        """→ Flow (see the module docs)."""
+        return plan(catalog, questions, init_keys, heads)
+
+    def computable(self, catalog, init_keys):
+        """The facts this planner can compute from these given facts (every alternative producer's inputs needed)."""
+        return computable(catalog, init_keys)
+
+    def __repr__(self):
+        return "DefaultStrategist()"
 
 
 def plan(catalog, questions, init_keys, heads=None):
@@ -313,5 +355,5 @@ def _plain(v):
     return v.value if isinstance(v, Quote) else v
 
 
-__all__ = ["Binary", "computable", "Flow", "given_facts", "OrderModel", "plan", "PlanError", "ProducerPolicy",
-           "scalar_row", "Step"]
+__all__ = ["Binary", "computable", "DefaultStrategist", "Flow", "given_facts", "OrderModel", "plan", "PlanError",
+           "ProducerPolicy", "scalar_row", "Step", "Strategist"]

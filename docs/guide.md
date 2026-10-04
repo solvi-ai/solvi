@@ -4253,7 +4253,7 @@ guess.
 
 ```python
 from solvi import Answer, Catalog, Decision, Question, System
-from solvi.core.dispatch import Budget, Dispatcher, SlowPath
+from solvi.core.dispatch import AskPath, Budget, Dispatcher
 from solvi.core.slow.generate import Generated
 
 TEAMS = ["billing", "shipping"]
@@ -4286,7 +4286,7 @@ def slow_team(reading):
 
 
 system2 = System(slow, [Question("team", "Which team?", Answer.choice(TEAMS))])
-d = Dispatcher(system1, SlowPath(system2), price=(0.04, 0.17), total=Budget(calls=2))
+d = Dispatcher(system1, AskPath(system2), price=(0.04, 0.17), total=Budget(calls=2))
 for email in ["I was charged twice", "my parcel is late", "the delivery never came", "where is my refund?"]:
     res = d.ask({"email": email})
     print(f"{res.by:6} {res.answer!s:9} {res.action:6} {res.reasons[-1][:60]}")
@@ -4335,19 +4335,22 @@ A drift flag stays up until `d.reset_drift()`; replay takes it as recorded (it d
 
 ### The slow path
 
-`SlowPath(system2)` asks a System that answers the question. Two other forms put System 1's checks in front of a
-proposer:
+A slow path is a `SlowPath` (`solvi.core.dispatch`). `AskPath(system2)` asks a System that answers the question. Two
+other built-ins put System 1's checks in front of a proposer:
 
 ```python
-SlowPath(judge, propose=writer.proposer(messages, schema=Plan), into="plan", rounds=3)   # solvi.core.slow.refine
-SlowPath(judge, space=lambda facts: candidates(facts), into="slot", search={"objective": "score"})   # solvi.core.slow.search
+RefinePath(judge, propose=writer.proposer(messages, schema=Plan), into="plan", rounds=3)   # solvi.core.slow.refine
+SearchPath(judge, space=lambda facts: candidates(facts), into="slot", search={"objective": "score"})   # solvi.core.slow.search
 ```
 
 With `propose=`, each proposal is given to `judge` as the fact `into`, its hard checks judge it, and the reasons of
 the failed ones go back to the model for up to `rounds` rounds (`solvi.core.slow.refine`); with `space=`, the candidates of an
 enumerable space run through the checks (`solvi.core.slow.search`). The answer is accepted when the System does not abstain on
 it and, for these two, its checks accept it. `slow.run(state, question)` runs it alone (a `Thought`: mode, answer,
-accepted, why, record, cost) — the "slow path alone" arm of a comparison.
+accepted, why, record, cost) — the "slow path alone" arm of a comparison. A slow path of your own subclasses
+`SlowPath` (a `mode`, `think`, `fingerprint`): see [Building blocks](building_blocks.md#slowpath). The 0.9 form
+`SlowPath(system2, propose=..., space=...)` still builds the matching built-in in 1.0.x, with a
+`SolviDeprecationWarning`.
 
 ### Budget and cost
 
@@ -4425,7 +4428,7 @@ gives — so every decision replays.
 - System 1 is a catalog of two rules (the remembered route's exit; the only exit there is) asked for a span of the
   exits on offer, so an answer that is not on the screen is refused. It abstains when it remembers no route, when the
   remembered exit is not on offer, or when the last step surprised it.
-- System 2 is `SlowPath(system2, space=..., into="plan", search={"objective": "value"})`: the known way to the goal
+- System 2 is `SearchPath(system2, space=..., into="plan", search={"objective": "value"})`: the known way to the goal
   when the player's `WorldMap` has one, else every unexplored exit within reach, scored by expected value, behind a
   hard check that the plan's first step is on offer. An LLM can add a hint as an alternative producer of one fact
   (off by default); an invalid reply is no hint, never a guess.

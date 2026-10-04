@@ -205,12 +205,12 @@ def _constant(xs):
 
 def _slow_path(slow, q, reads, novel_on, writer, inputs):
     """slow= → (SlowPath, description)."""
-    from ..core.dispatch import SlowPath
+    from ..core.dispatch import AskPath, SlowPath
     from ..core.system import System
     if isinstance(slow, SlowPath):
         return slow, f"the given SlowPath ({slow.mode})"
     if isinstance(slow, System):
-        return SlowPath(slow, question=q.name if q.name in slow.questions else None), "the given System"
+        return AskPath(slow, question=q.name if q.name in slow.questions else None), "the given System"
     kind = type(slow).__name__
     if kind == "Spec" or writer is not None or inputs is not None:
         raise TypeError("a Spec as the slow path is compiled first (since 1.0 build does not compile it): c = "
@@ -219,11 +219,11 @@ def _slow_path(slow, q, reads, novel_on, writer, inputs):
         c = slow
         if not c.accepted:
             raise ValueError(f"the compiled specification was not accepted: {c.reason}")
-        return SlowPath(c.system()), "the rules compiled from the written specification (solvi.experimental.compile)"
+        return AskPath(c.system()), "the rules compiled from the written specification (solvi.experimental.compile)"
     cat = Catalog()
     if hasattr(slow, "question") and hasattr(slow, "decide"):          # a decision part
         sq = slow.question(cat, name=q.name, text=q.text)
-        return SlowPath(System(cat, [sq])), f"the decision part {getattr(slow, '__name__', q.name)!r}"
+        return AskPath(System(cat, [sq])), f"the decision part {getattr(slow, '__name__', q.name)!r}"
     if hasattr(slow, "decision") and hasattr(slow, "scorer"):         # a model (solvi.core.deciders.llm, a DecideModel)
         opts = list(q.answer.options or [])
         boolean = sorted(map(str, opts)) == ["no", "yes"]
@@ -231,7 +231,7 @@ def _slow_path(slow, q, reads, novel_on, writer, inputs):
                              type=bool if boolean else None, not_stated=bool(novel_on and not boolean))
         sq = part.question(cat, name=q.name, text=q.text)
         what = getattr(slow, "model_id", None) or type(slow).__name__
-        return SlowPath(System(cat, [sq])), (f"the model {what} asked the question, reading {', '.join(reads)}"
+        return AskPath(System(cat, [sq])), (f"the model {what} asked the question, reading {', '.join(reads)}"
                                              + ("; it may say \"not stated\" (→ a person)" if novel_on and not boolean else ""))
     if callable(slow):
         from ..core.catalog import Part
@@ -242,7 +242,7 @@ def _slow_path(slow, q, reads, novel_on, writer, inputs):
         answer.__name__ = f"slow_{q.name}"
         cat.replace_rule(Part(kind="rule", name="answer:" + q.name, inputs=list(reads), func=answer, question=q.name,
                               doc=(getattr(fn, "__doc__", "") or "").strip()))
-        return SlowPath(System(cat, [Question(q.name, q.text, q.answer)])), \
+        return AskPath(System(cat, [Question(q.name, q.text, q.answer)])), \
             f"the function {getattr(fn, '__name__', 'slow')} over {', '.join(reads)}"
     raise TypeError("slow= takes a SlowPath, a System, a decision part, a model (solvi.core.deciders.llm), a function state → answer, "
                     "or a compiled specification")

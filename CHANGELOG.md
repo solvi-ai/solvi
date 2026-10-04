@@ -225,6 +225,41 @@ calibration-file format for the command (`solvi.cli._calibrate`): `solvi.calibfi
 work in 1.0.x with a warning. The `solvi models` command's code moved to `solvi.cli._models` (`solvi.models` keeps
 the library: `load`, `resolve`, `pull`, `cached`, and the providers below).
 
+### Building blocks: the extension points of `solvi.core`
+
+Every place where you can put a part of your own is exported by `solvi.core`, with a docstring that says what you
+implement, what you get for free and the promise (stable; or stable to use, provisional to subclass). They load on
+first use, so `import solvi.core` stays light. New docs page: **Building blocks** (one section per extension point).
+
+- **Protocols** (`typing.Protocol`, runtime-checkable — an object with the methods is one): `Scorer`, `Decider`,
+  `Adapter` (new: `kind`, `fingerprint()`, `using(scorer, active)`, `save`, `load`), `Head`, `Extractor`,
+  `Strategist`, `Monitor`, `Proposer`, `Space`, `Environment` (new, for the coming environment agent: `reset(seed)`,
+  `actions(state)`, `step(action) → Outcome(state, accepted, effect, done)`).
+- **Base classes** with abstract methods: `TraceStorage` (a backend implements `_append`, `_raw`, `_find`, `head`,
+  `_rewrite`; a subclass missing one now fails when it is constructed, not on first use) and `SlowPath`.
+- **`SlowPath` is a real base class.** The built-ins are `AskPath(system)`, `RefinePath(system, propose=, into=)` and
+  `SearchPath(system, space=, into=)` (`solvi.core.dispatch`); a path of your own sets `mode` and implements
+  `think(...) → Thought` and `fingerprint()` — `run` adds the cost, the dispatcher the routing, budgets, calibration
+  per slice, records and replay. A stored `Thought` is read back by the class of its mode (`SlowPath.modes`), so a
+  path of your own round-trips through a store. **Deprecated:** `SlowPath(system, propose=..., space=...)` as a
+  constructor still builds the matching built-in (same fingerprint, same dispatcher config) with a
+  `SolviDeprecationWarning`; removed in 1.1. `solvi.build` makes an `AskPath`.
+- `DefaultStrategist` (`solvi.core.plan.strategist`): the deterministic planner as a class to subclass;
+  `System(strategist=DefaultStrategist())` plans and records exactly as `System()`.
+- `System.fit(..., head=)`: a function options → a head of your own (the Head protocol) instead of `FastHead`. The
+  multi-label head has a `fingerprint()` method (the same value as before).
+- The adapter slot of a decision part reads only the Adapter protocol (`fingerprint()` instead of the LoRA adapter's
+  `hash` and `name`; the values are the same, so fingerprints and calibration files do not change);
+  `LoraAdapter.load(path)` added.
+- `DriftMonitor` gains `flagged` and `reset()` (the Monitor protocol); the system report runs any monitor
+  (`system_report(store, monitor=lambda: MyMonitor())`).
+- `search` (and `SearchPath`) walks any object with `root` and `children(node)` (the Space protocol), not only a `Tree`.
+- **`solvi.testing.conformance`**: `check_storage`, `check_slow_path`, `check_strategist`, `check_head`,
+  `check_decider`, `check_extractor`, `check_monitor`, `check_environment` (and `check_action_model`, filled in with
+  the knowledge memory) run your implementation through the parts of solvi that rely on it — chain verifies,
+  tampering caught, replay matches, records round-trip, cost recomputes, budget respected. The test suite runs every
+  check on every built-in.
+
 ### Moving into the knowledge memory
 
 `solvi.core.knowledge.memory` (`CorrectionMemory`, `solvi.core.knowledge.memory.attach`), `solvi.core.knowledge.episodes` and `solvi.core.extract.multi` stay in 1.0 for now and

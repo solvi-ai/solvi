@@ -8,7 +8,7 @@ import pytest
 
 from solvi import Answer, Catalog, Question, System
 from solvi.solutions.decisions import build
-from solvi.core.dispatch import Budget, SlowPath
+from solvi.core.dispatch import AskPath, Budget, SlowPath
 
 
 def _pairs(n, seed=0):
@@ -133,7 +133,7 @@ def test_a_system_or_a_slow_path_is_taken_as_it_is():
     slow = System(cat2, [Q])
     s = build(Q, _pairs(600), catalog=_catalog(), max_risk=0.05, slow=slow)
     assert isinstance(s.slow, SlowPath) and s.slow.system is slow
-    s2 = build(Q, _pairs(600), catalog=_catalog(), max_risk=0.05, slow=SlowPath(slow))
+    s2 = build(Q, _pairs(600), catalog=_catalog(), max_risk=0.05, slow=AskPath(slow))
     assert s2.slow.system is slow
 
 

@@ -28,7 +28,7 @@ starts with what run 1 left. The page replays the two recorded runs with
 - **System 1** is a catalog of two rules: take the exit of the route it remembers to the goal, or the only exit there
   is. It abstains when it remembers no route, when the remembered exit is not on offer, or when the last step surprised
   it (Professor Oak walks you to his lab; the S.S. Anne leaves the dock).
-- **System 2** is a search (`solvi.core.slow.search` through `solvi.core.dispatch.SlowPath`) over the world map the player writes as
+- **System 2** is a search (`solvi.core.slow.search` through `solvi.core.dispatch.SearchPath`) over the world map the player writes as
   it goes (`solvi.core.knowledge.worldmap.WorldMap`): the known way to the goal when the map has one, else every unexplored exit within
   reach, scored by expected value; a hard check keeps only plans whose first step is on offer. An LLM hint is possible
   (`llm=`), and off.

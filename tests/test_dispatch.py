@@ -9,7 +9,7 @@ from test_llm import TEAMS, FakeLLM
 
 from solvi import Answer, Catalog, Decision, Fail, Question, System
 from solvi.core.store import JSONLStorage
-from solvi.core.dispatch import Budget, Cost, Dispatcher, SlowPath, cost_of
+from solvi.core.dispatch import AskPath, Budget, Cost, Dispatcher, RefinePath, SearchPath, SlowPath, cost_of
 from solvi.core.deciders.llm import llm
 
 URL = "http://127.0.0.1:9/v1"
@@ -42,7 +42,7 @@ def slow_llm(reply=None):
 
 def test_a_sure_answer_of_system_1_is_given_alone_and_the_slow_path_is_not_called():
     s2, srv = slow_llm()
-    d = Dispatcher(fast(), SlowPath(s2), price=(1.0, 2.0))
+    d = Dispatcher(fast(), AskPath(s2), price=(1.0, 2.0))
     res = d.ask({"email": "I was charged twice"})
     assert (res.answer, res.by, res.action) == ("billing", "s1", "accept")
     assert res.s2 is None and srv.bodies == [] and res.cost["s2"].calls == 0
@@ -51,7 +51,7 @@ def test_a_sure_answer_of_system_1_is_given_alone_and_the_slow_path_is_not_calle
 
 def test_an_unsure_answer_wakes_the_slow_path_and_its_cost_comes_from_the_recorded_tokens():
     s2, srv = slow_llm()
-    d = Dispatcher(fast(), SlowPath(s2), price=(1.0, 2.0))
+    d = Dispatcher(fast(), AskPath(s2), price=(1.0, 2.0))
     res = d.ask({"email": "I was charged for a parcel"})          # "charged": billing, sure
     assert res.by == "s1"
     res = d.ask({"email": "hello, my parcel is late"})
@@ -66,7 +66,7 @@ def test_an_unsure_answer_wakes_the_slow_path_and_its_cost_comes_from_the_record
 
 def test_when_the_slow_path_cannot_answer_a_person_gets_it_with_both_candidates_and_the_reason():
     s2, srv = slow_llm(reply="not json at all")
-    d = Dispatcher(fast(), SlowPath(s2))
+    d = Dispatcher(fast(), AskPath(s2))
     res = d.ask({"email": "hello"})
     assert (res.action, res.by, res.answer) == ("think", "human", None)
     assert res.candidates["s1"] == "shipping"
@@ -76,7 +76,7 @@ def test_when_the_slow_path_cannot_answer_a_person_gets_it_with_both_candidates_
 
 def test_no_budget_left_in_total_sends_the_input_to_a_person_without_calling_the_model():
     s2, srv = slow_llm()
-    d = Dispatcher(fast(), SlowPath(s2), total=Budget(calls=1))
+    d = Dispatcher(fast(), AskPath(s2), total=Budget(calls=1))
     assert d.ask({"email": "hello"}).by == "s2"
     res = d.ask({"email": "hello again"})
     assert (res.action, res.by, res.answer) == ("human", "human", None)
@@ -87,7 +87,7 @@ def test_no_budget_left_in_total_sends_the_input_to_a_person_without_calling_the
 
 def test_a_run_expected_to_cost_more_than_the_budget_per_decision_is_not_started():
     s2, srv = slow_llm()
-    d = Dispatcher(fast(), SlowPath(s2), price=(1.0, 2.0), budget=Budget(usd=0.0001))
+    d = Dispatcher(fast(), AskPath(s2), price=(1.0, 2.0), budget=Budget(usd=0.0001))
     first = d.ask({"email": "hello"})                              # no estimate yet: it runs, and goes over
     assert first.by == "s2" and first.over_budget and "usd" in first.over_budget
     res = d.ask({"email": "hello again"})
@@ -99,14 +99,14 @@ def test_a_run_expected_to_cost_more_than_the_budget_per_decision_is_not_started
 def test_a_budget_in_dollars_needs_a_price():
     s2, _ = slow_llm()
     with pytest.raises(ValueError, match="needs price"):
-        Dispatcher(fast(), SlowPath(s2), total=Budget(usd=1.0))
+        Dispatcher(fast(), AskPath(s2), total=Budget(usd=1.0))
     with pytest.raises(ValueError, match="Budget usd"):
         Budget(usd=-1)
 
 
 def test_supervision_checks_a_sampled_share_records_the_disagreement_and_keeps_system_1s_answer_by_default():
     s2, srv = slow_llm(reply='{"answer": "shipping", "probabilities": {"billing": 0.1, "shipping": 0.9}, "quote": ""}')
-    d = Dispatcher(fast(), SlowPath(s2), supervise=1.0)
+    d = Dispatcher(fast(), AskPath(s2), supervise=1.0)
     res = d.ask({"email": "I was charged twice"})
     assert (res.action, res.by, res.answer) == ("check", "s1", "billing")
     assert res.disagreement == {"s1": "billing", "s2": "shipping", "s2_accepted": True}
@@ -118,7 +118,7 @@ def test_supervision_checks_a_sampled_share_records_the_disagreement_and_keeps_s
 @pytest.mark.parametrize("policy, by, answer", [("human", "human", None), ("s2", "s2", "shipping")])
 def test_a_disagreeing_check_can_go_to_a_person_or_to_the_slow_paths_accepted_answer(policy, by, answer):
     s2, _ = slow_llm(reply='{"answer": "shipping", "probabilities": {"billing": 0.1, "shipping": 0.9}, "quote": ""}')
-    d = Dispatcher(fast(), SlowPath(s2), supervise=1.0, on_disagree=policy)
+    d = Dispatcher(fast(), AskPath(s2), supervise=1.0, on_disagree=policy)
     res = d.ask({"email": "I was charged twice"})
     assert (res.by, res.answer) == (by, answer)
     assert d.replay(res)["ok"]
@@ -126,7 +126,7 @@ def test_a_disagreeing_check_can_go_to_a_person_or_to_the_slow_paths_accepted_an
 
 def test_the_supervision_draw_is_a_reproducible_hash_and_samples_about_the_share_asked():
     s2, _ = slow_llm()
-    d = Dispatcher(fast(), SlowPath(s2), supervise=0.3, seed=7)
+    d = Dispatcher(fast(), AskPath(s2), supervise=0.3, seed=7)
     draws = [d.draw(f"h{i}", i) for i in range(2000)]
     assert draws == [d.draw(f"h{i}", i) for i in range(2000)]
     assert 0.25 < sum(x < 0.3 for x in draws) / 2000 < 0.35
@@ -134,7 +134,7 @@ def test_the_supervision_draw_is_a_reproducible_hash_and_samples_about_the_share
 
 def test_think_agree_gives_the_slow_answer_only_when_it_equals_what_system_1_would_have_said():
     s2, _ = slow_llm(reply='{"answer": "billing", "probabilities": {"billing": 0.9, "shipping": 0.1}, "quote": ""}')
-    d = Dispatcher(fast(), SlowPath(s2), think="agree")
+    d = Dispatcher(fast(), AskPath(s2), think="agree")
     res = d.ask({"email": "hello"})                                # System 1 would say shipping
     assert (res.by, res.answer) == ("human", None)
     assert any("a person decides" in r for r in res.reasons)
@@ -143,12 +143,12 @@ def test_think_agree_gives_the_slow_answer_only_when_it_equals_what_system_1_wou
 
 def test_a_signal_left_out_of_wake_sends_the_input_to_a_person():
     s2, srv = slow_llm()
-    d = Dispatcher(fast(), SlowPath(s2), wake=("openset", "abstain"))
+    d = Dispatcher(fast(), AskPath(s2), wake=("openset", "abstain"))
     res = d.ask({"email": "hello"})
     assert res.by == "human" and "guarantee does not wake the slow path" in res.reasons[-1]
     assert srv.bodies == []
     with pytest.raises(ValueError, match="unknown signal"):
-        Dispatcher(fast(), SlowPath(s2), wake=("guess",))
+        Dispatcher(fast(), AskPath(s2), wake=("guess",))
 
 
 def test_without_a_slow_path_the_dispatcher_is_system_1_under_its_guarantee_with_a_person_behind_it():
@@ -170,7 +170,7 @@ def test_a_hard_check_that_forces_the_answer_is_never_rethought_or_supervised():
     s1 = System(cat, [Question("team", "Which team?", Answer.choice(list(TEAMS)), min_confidence=0.8,
                                requires=["not_an_invoice"])])
     s2, srv = slow_llm()
-    d = Dispatcher(s1, SlowPath(s2), supervise=1.0)
+    d = Dispatcher(s1, AskPath(s2), supervise=1.0)
     res = d.ask({"email": "an invoice"})
     assert (res.by, res.answer, res.action) == ("s1", "billing", "accept") and srv.bodies == []
 
@@ -187,7 +187,7 @@ def test_a_low_agreement_wakes_the_slow_path_and_its_fact_is_computed_in_every_f
         return "billing"
     s1 = System(cat, [Question("team", "Which team?", Answer.choice(list(TEAMS)))])
     s2, _ = slow_llm()
-    d = Dispatcher(s1, SlowPath(s2), agreement={"team_agreement": 2 / 3})
+    d = Dispatcher(s1, AskPath(s2), agreement={"team_agreement": 2 / 3})
     res = d.ask({"email": "hello parcel"})
     assert res.action == "think" and "team_agreement = 0.5 < 0.667" in res.reasons[0]
     assert d.replay(res)["ok"]
@@ -210,7 +210,7 @@ def test_a_broken_constraint_between_the_questions_wakes_the_slow_path():
     s1 = System(cat, [Question("team", "Which team?", Answer.choice(list(TEAMS))),
                       Question("refund", "Refund?", Answer.yes_no())])
     s2, _ = slow_llm()
-    d = Dispatcher(s1, SlowPath(s2), question="team")
+    d = Dispatcher(s1, AskPath(s2), question="team")
     res = d.ask({"email": "parcel"})
     assert res.action == "think" and "billing_refunds" in res.reasons[0] and res.by == "s2"
     assert d.replay(res)["ok"]
@@ -227,7 +227,7 @@ class _Monitor:
 
 def test_a_drift_flag_makes_the_slow_path_check_every_later_answer_until_reset():
     s2, _ = slow_llm(reply='{"answer": "shipping", "probabilities": {"billing": 0.1, "shipping": 0.9}, "quote": ""}')
-    d = Dispatcher(fast(), SlowPath(s2), monitor=_Monitor(at=2), on_disagree="human")
+    d = Dispatcher(fast(), AskPath(s2), monitor=_Monitor(at=2), on_disagree="human")
     assert d.ask({"email": "charged"}).action == "accept"
     res = d.ask({"email": "charged again"})
     assert res.action == "check" and res.by == "human" and "DriftMonitor" in res.reasons[0]
@@ -239,7 +239,7 @@ def test_a_drift_flag_makes_the_slow_path_check_every_later_answer_until_reset()
 
 def test_replay_does_not_call_the_model_and_catches_an_edited_answer_and_a_changed_dispatcher():
     s2, srv = slow_llm()
-    d = Dispatcher(fast(), SlowPath(s2), price=(1.0, 2.0))
+    d = Dispatcher(fast(), AskPath(s2), price=(1.0, 2.0))
     res = d.ask({"email": "hello, my parcel"})
     calls = len(srv.bodies)
     assert res.answer == "shipping" and d.replay(res)["ok"] and len(srv.bodies) == calls
@@ -249,7 +249,7 @@ def test_replay_does_not_call_the_model_and_catches_an_edited_answer_and_a_chang
     res.by = "s1"
     assert not d.replay(res)["ok"]
     res.by = "s2"
-    other = Dispatcher(fast(), SlowPath(s2), price=(2.0, 2.0))
+    other = Dispatcher(fast(), AskPath(s2), price=(2.0, 2.0))
     assert ("config" in [w for w, _ in other.replay(res)["mismatches"]])
     res.cost["s2"] = Cost(0.0, 0)
     res.s2.cost = Cost(0.0, 0)
@@ -259,7 +259,7 @@ def test_replay_does_not_call_the_model_and_catches_an_edited_answer_and_a_chang
 def test_every_decision_is_stored_hash_chained_and_replays_from_the_store(tmp_path):
     s2, srv = slow_llm()
     store = JSONLStorage(tmp_path / "d.jsonl")
-    d = Dispatcher(fast(), SlowPath(s2), price=(1.0, 2.0), supervise=0.5, storage=store)
+    d = Dispatcher(fast(), AskPath(s2), price=(1.0, 2.0), supervise=0.5, storage=store)
     for e in ["charged", "hello", "parcel", "charged twice", "late"]:
         d.ask({"email": e})
     back = d.stored()
@@ -291,7 +291,7 @@ def test_refine_as_the_slow_path_reasks_with_the_failed_checks_reasons_and_stops
     def propose(state, rounds):
         seen.append([r.reasons for r in rounds])
         return "9:00" if not rounds else "10:00"
-    slow = SlowPath(judge, propose=propose, into="slot", rounds=3)
+    slow = RefinePath(judge, propose=propose, into="slot", rounds=3)
     th = slow.run({}, "ok")
     assert th.accepted and th.answer == "yes" and len(th.record.rounds) == 2
     assert seen[1] == [["Harold is busy at 9:00"]]
@@ -302,7 +302,7 @@ def test_refine_as_the_slow_path_reasks_with_the_failed_checks_reasons_and_stops
 
 def test_search_as_the_slow_path_walks_the_space_through_the_checks():
     judge = _plan_system()
-    slow = SlowPath(judge, space=["9:00", "10:00", "11:00"], into="slot")
+    slow = SearchPath(judge, space=["9:00", "10:00", "11:00"], into="slot")
     th = slow.run({}, "ok")
     assert th.mode == "search" and th.accepted and th.record.best == "10:00"
     assert slow.replay(th)["ok"]
@@ -319,7 +319,7 @@ def test_a_searching_slow_path_with_a_fact_as_its_objective_replays():
     def ok(slot, late):
         return "yes"
     judge = System(cat, [Question("ok", "Is the slot fine?", Answer.yes_no(), requires=["late"])])
-    slow = SlowPath(judge, space=["9:00", "11:00", "10:00"], into="slot", search={"objective": "late"})
+    slow = SearchPath(judge, space=["9:00", "11:00", "10:00"], into="slot", search={"objective": "late"})
     th = slow.run({}, "ok")
     assert th.record.best == "11:00" and th.record.value == 11.0
     assert slow.replay(th)["ok"]                      # the objective is the fact's name: read from the response
@@ -330,10 +330,33 @@ def test_a_searching_slow_path_with_a_fact_as_its_objective_replays():
 def test_a_slow_path_is_refused_when_it_cannot_answer_the_question_or_is_misconfigured():
     s2, _ = slow_llm()
     with pytest.raises(ValueError, match="no question"):
-        Dispatcher(fast(), SlowPath(s2, question="other"))
-    with pytest.raises(ValueError, match="not both"):
-        SlowPath(s2, propose=lambda s, r: 1, space=[1], into="x")
+        Dispatcher(fast(), AskPath(s2, question="other"))
     with pytest.raises(ValueError, match="into="):
+        RefinePath(s2, propose=lambda s, r: 1, into=None)
+    with pytest.raises(ValueError, match="into="):
+        SearchPath(s2, space=[1])
+    with pytest.raises(TypeError, match="propose is a function"):
+        RefinePath(s2, propose=1, into="x")
+    with pytest.raises(ValueError, match="rounds must be at least 1"):
+        RefinePath(s2, propose=lambda s, r: 1, into="x", rounds=0)
+
+
+def test_the_0_9_slow_path_constructor_still_builds_the_built_in_path_with_a_warning():
+    import solvi
+    s2, _ = slow_llm()
+    with pytest.warns(solvi.SolviDeprecationWarning, match="use AskPath"):
+        old = SlowPath(s2)
+    assert type(old) is AskPath and old.fingerprint() == AskPath(s2).fingerprint()
+    prop = lambda s, r: "9:00"
+    with pytest.warns(solvi.SolviDeprecationWarning):
+        r = SlowPath(s2, propose=prop, into="slot", rounds=2)
+    assert type(r) is RefinePath and r.steps == 2 and r.fingerprint() == RefinePath(s2, propose=prop, into="slot",
+                                                                                     rounds=2).fingerprint()
+    with pytest.warns(solvi.SolviDeprecationWarning):
+        assert type(SlowPath(s2, space=[1], into="x")) is SearchPath
+    with pytest.warns(solvi.SolviDeprecationWarning), pytest.raises(ValueError, match="not both"):
+        SlowPath(s2, propose=lambda s, r: 1, space=[1], into="x")
+    with pytest.warns(solvi.SolviDeprecationWarning), pytest.raises(ValueError, match="into="):
         SlowPath(s2, propose=lambda s, r: 1)
 
 
@@ -377,7 +400,7 @@ def test_an_open_set_gate_below_its_threshold_thinks_and_its_flag_makes_later_an
     s1 = fast(min_confidence=None)
     s1.guarantee("team", promise=_Gate())
     s2, _ = slow_llm()
-    d = Dispatcher(s1, SlowPath(s2))
+    d = Dispatcher(s1, AskPath(s2))
     res = d.ask({"email": "hello parcel"})                         # confidence 0.6 < 0.9
     assert res.action == "think" and res.reasons[0].startswith("System 1 is below its guarantee")
     assert dict(d.signals(res.s1))["openset"]
@@ -389,9 +412,9 @@ def test_an_open_set_gate_below_its_threshold_thinks_and_its_flag_makes_later_an
 
 def test_same_says_when_two_answers_agree_and_a_comparison_that_raises_is_not_an_agreement():
     s2, _ = slow_llm(reply='{"answer": "billing", "probabilities": {"billing": 0.9, "shipping": 0.1}, "quote": ""}')
-    loose = Dispatcher(fast(), SlowPath(s2), think="agree", same=lambda a, b: True)
+    loose = Dispatcher(fast(), AskPath(s2), think="agree", same=lambda a, b: True)
     assert loose.ask({"email": "hello"}).by == "s2"
-    broken = Dispatcher(fast(), SlowPath(s2), think="agree", same=lambda a, b: 1 / 0)
+    broken = Dispatcher(fast(), AskPath(s2), think="agree", same=lambda a, b: 1 / 0)
     assert broken.ask({"email": "hello"}).by == "human"
 
 
@@ -404,9 +427,9 @@ def test_the_slow_paths_not_stated_is_an_answer_or_with_unknown_human_a_hand_off
     part = model.decision("team", "Which team?", "email", Maybe[Literal["billing", "shipping"]])
     cat = Catalog()
     s2 = System(cat, [part.question(cat)])
-    res = Dispatcher(fast(), SlowPath(s2)).ask({"email": "hello"})
+    res = Dispatcher(fast(), AskPath(s2)).ask({"email": "hello"})
     assert res.by == "s2" and res.answer is Unknown
-    d = Dispatcher(fast(), SlowPath(s2), unknown="human")
+    d = Dispatcher(fast(), AskPath(s2), unknown="human")
     res = d.ask({"email": "hello again"})
     assert res.by == "human" and "none of the options" in res.reasons[-1]
     assert d.replay(res)["ok"]
@@ -421,7 +444,7 @@ def test_a_stored_not_stated_answer_is_unknown_again_and_its_hand_off_replays(tm
     part = model.decision("team", "Which team?", "email", Maybe[Literal["billing", "shipping"]])
     cat = Catalog()
     s2 = System(cat, [part.question(cat)])
-    d = Dispatcher(fast(), SlowPath(s2), unknown="human", supervise=1.0, storage=JSONLStorage(tmp_path / "d.jsonl"))
+    d = Dispatcher(fast(), AskPath(s2), unknown="human", supervise=1.0, storage=JSONLStorage(tmp_path / "d.jsonl"))
     d.ask({"email": "hello"})
     d.ask({"email": "charged"})                                    # a check whose slow answer is "not stated"
     back = d.stored()
@@ -472,7 +495,7 @@ def _hard_slice(guess_right=0.95, slow_right=0.5, n=400, seed=0):
 
 def test_calibrate_gives_the_hard_slice_to_system_1s_own_guess_when_it_beats_the_slow_path_and_calls_nothing():
     s1, s2, data = _hard_slice(guess_right=0.97, slow_right=0.6)
-    d = Dispatcher(s1, SlowPath(s2), price=(1.0, 1.0))
+    d = Dispatcher(s1, AskPath(s2), price=(1.0, 1.0))
     rep = d.calibrate(data[:300], max_risk=0.05)
     sl = rep["slices"]["guarantee"]
     assert sl["answer"] == "s1" and sl["accuracy"]["s1"] > sl["accuracy"]["s2"]
@@ -486,7 +509,7 @@ def test_calibrate_gives_the_hard_slice_to_system_1s_own_guess_when_it_beats_the
 
 def test_calibrate_gives_the_slice_to_the_slow_path_when_it_is_the_better_one_on_that_slice():
     s1, s2, data = _hard_slice(guess_right=0.6, slow_right=0.99)
-    d = Dispatcher(s1, SlowPath(s2))
+    d = Dispatcher(s1, AskPath(s2))
     rep = d.calibrate(data[:300], max_risk=0.05)
     assert rep["slices"]["guarantee"]["answer"] in ("s2", "agree")
     hard = next(st for st, _ in data[300:] if 0.3 < st["x"] < 0.7)
@@ -496,7 +519,7 @@ def test_calibrate_gives_the_slice_to_the_slow_path_when_it_is_the_better_one_on
 
 def test_a_slice_with_too_few_examples_goes_to_a_person_and_says_so():
     s1, s2, data = _hard_slice()
-    d = Dispatcher(s1, SlowPath(s2))
+    d = Dispatcher(s1, AskPath(s2))
     rep = d.calibrate(data[:40], max_risk=0.2, min_slice=100)
     sl = rep["slices"]["guarantee"]
     assert sl["answer"] == "human" and "too few examples on this slice" in sl["why"]
@@ -508,7 +531,7 @@ def test_a_slice_with_too_few_examples_goes_to_a_person_and_says_so():
 def test_when_system_1_alone_already_breaks_the_promise_every_slice_goes_to_a_person():
     s1, s2, data = _hard_slice(guess_right=0.97, slow_right=0.97)
     flipped = [(st, ("no" if y == "yes" else "yes") if not 0.3 < st["x"] < 0.7 else y) for st, y in data[:300]]
-    d = Dispatcher(s1, SlowPath(s2))
+    d = Dispatcher(s1, AskPath(s2))
     rep = d.calibrate(flipped, max_risk=0.05)
     assert "already break the promise" in rep["why"]
     assert all(v["answer"] == "human" for v in rep["slices"].values())
@@ -516,7 +539,7 @@ def test_when_system_1_alone_already_breaks_the_promise_every_slice_goes_to_a_pe
 
 def test_a_decision_made_before_calibrate_does_not_replay_against_the_calibrated_dispatcher():
     s1, s2, data = _hard_slice()
-    d = Dispatcher(s1, SlowPath(s2))
+    d = Dispatcher(s1, AskPath(s2))
     hard = next(st for st, _ in data[300:] if 0.3 < st["x"] < 0.7)
     before = d.ask(hard)
     d.calibrate(data[:300], max_risk=0.05)
@@ -540,7 +563,7 @@ def test_a_rule_answer_held_back_by_a_guarantee_is_still_system_1s_would_be_answ
     s1.guarantee("team", promise=calibrate([0.1] * 20 + [0.9] * 20, [False] * 20 + [True] * 20, max_risk=0.1,
                                            signal="trust"), signal="trust")
     s2, _ = slow_llm()
-    d = Dispatcher(s1, SlowPath(s2), think="agree")
+    d = Dispatcher(s1, AskPath(s2), think="agree")
     res = d.ask({"email": "hello, a parcel"})
     assert res.s1["team"].status == "abstain" and res.candidates["s1"] == "billing"
     assert res.by == "human" and d.replay(res)["ok"]

@@ -11,7 +11,7 @@ route compiled by consolidation), or the only exit there is. It stands back (abs
 when the remembered exit is not on offer here, or when the last step surprised it (it led somewhere else than it
 expected, or did not lead anywhere).
 
-System 2 (`slow`) — a search (`solvi.core.slow.search` through `solvi.core.dispatch.SlowPath`) over plans the world map gives: the
+System 2 (`slow`) — a search (`solvi.core.slow.search` through `solvi.core.dispatch.SearchPath`) over plans the world map gives: the
 known way to the objective when the map has one, otherwise every unexplored exit within reach, scored by expected
 value: P(the place behind it is of a kind the goal needs) × the goal's direction × places the goal names, discounted
 by the steps to get there. A hard check keeps only plans whose first step is on offer here. Optionally an LLM reads the
@@ -32,7 +32,7 @@ from collections import deque
 from dataclasses import dataclass, field
 
 from solvi import Answer, Catalog, Question, System
-from solvi.core.dispatch import Dispatcher, SlowPath
+from solvi.core.dispatch import Dispatcher, SearchPath
 from solvi.core.knowledge.worldmap import WorldMap
 
 from .world import place_map, place_type
@@ -177,7 +177,7 @@ def system2(llm=None):
 
 
 def slow_path(sys2):
-    return SlowPath(sys2, space=lambda facts: list(facts["view"]["plans"]), into="plan", search={"objective": "value"})
+    return SearchPath(sys2, space=lambda facts: list(facts["view"]["plans"]), into="plan", search={"objective": "value"})
 
 
 def dispatcher(storage=None, llm=None):

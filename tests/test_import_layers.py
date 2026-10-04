@@ -306,7 +306,14 @@ SURFACES = {
                    "Catalog", "check_evidence", "Claim", "cuts_number", "Decision", "evidence_rows", "find_quote",
                    "find_whole", "ground", "has_evidence", "locate", "NOT_STATED_KEY", "NotStated", "Part", "plain_json",
                    "PRIMITIVES", "Question", "question_data", "Quote", "Serial", "Unknown", "unknown_key", "unwrap",
-                   "validated"],
+                   "validated",
+                   # the extension points (LAYOUT §3, lane L4): protocols, base classes and what they meet
+                   "Scorer", "Decider", "Adapter", "Head", "Extractor", "Strategist", "DefaultStrategist", "Monitor",
+                   "TraceStorage", "Response", "System", "Fail", "Proposer", "Space", "SlowPath", "AskPath",
+                   "RefinePath", "SearchPath", "Thought", "Dispatcher", "Environment", "Outcome",
+                   # knowledge (lane km10): "KnowledgeStore", "WriteGate", "ActionModel", "Vocabulary", "Agenda",
+                   # "RiskPolicy" — pinned here by that lane
+                   ],
     "solvi.models": ["cached", "cached_path", "decider", "DecideModel", "kind_of", "llm", "load", "ModelError",
                      "PUBLISHED", "pull", "resolve", "systemone"],
     "solvi.solutions.decisions": ["DecisionSystem", "build"],

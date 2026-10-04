@@ -85,6 +85,12 @@ def experimental_of(system):
 
 
 class System:
+    """A catalog and its questions: `ask(state)` plans the flow (the strategist), runs the parts, applies the checks,
+    rules, heads, guarantees and constraints, and returns a Response with its hash-chained trace; `fit`, `teach`,
+    `guarantee`, `report`, storage. See the constructor and the guide.
+
+    The concrete system every solution is built on — an extension point by what it takes (a Strategist, a
+    TraceStorage, heads, deciders, monitors), not by subclassing. Stability: stable (final: use it, do not subclass)."""
     inputs = _deprecate.removed_attr("inputs", "input_model", "System")       # 0.7 names
     costs = _deprecate.removed_attr("costs", "cost_book", "System")
 
@@ -434,6 +440,9 @@ class System:
         usable producer; the deterministic strategist needs the inputs of every alternative)."""
         if self.strategist is None:
             return computable(self.catalog, init_keys)
+        own = getattr(self.strategist, "computable", None)
+        if callable(own):                             # DefaultStrategist: the deterministic strategist's closure
+            return own(self.catalog, init_keys)
         from .plan.cost import reachable
         return reachable(self.catalog, init_keys)
 
@@ -856,7 +865,7 @@ class System:
         return vals
 
     def fit(self, question, examples, features=None, *, select=None, min_gain=0.0, lam=None, refit=2.0,
-            refit_until=2000):
+            refit_until=2000, head=None):
         """An answer head for a question without a rule, learned from examples — [(init_state, answer)]: a closed-form
         ridge head (solvi.core.deciders.heads.FastHead, milliseconds to seconds), which every `teach` for this question updates at once.
 
@@ -865,12 +874,16 @@ class System:
         squared error (solvi.core.deciders.heads.select_features); a fact is kept while it lowers that error by more than `min_gain` ×
         the error of the answers' shares. The kept facts become the question's flow, so later requests compute only
         what the head reads. Default (None): select when `features` is not given, keep every fact listed when it is.
-        lam, refit, refit_until: as FastHead (a refit keeps the selected facts; it does not choose again).
+        lam, refit, refit_until: as FastHead (a refit keeps the selected facts; it does not choose again). head: a
+        function options → an unfitted head of your own (the Head protocol, solvi.core.Head: fit(rows, answers,
+        features), predict, contributions, teach, fingerprint) used instead of FastHead (lam, refit, refit_until then
+        do not apply); a multi-label question gets one per option, with the options ["yes", "no"].
         `head.selection` says what each kept fact did to the error. Before 0.8, fit was a logistic head chosen by
         cross-validated accuracy (+1 point), which kept nothing on imbalanced questions; fit_fast was this without the
         selection (now fit(..., select=False))."""
         from .deciders.heads import FastHead, select_features
         import time
+        factory = head
         q = self.questions[question]
         examples = _learnable(q, examples)
         t0 = time.perf_counter()
@@ -884,8 +897,10 @@ class System:
         ans = [q.answer.normalize(a) for _, a in examples]
 
         def make():
-            return FastHead(["yes", "no"] if q.answer.kind == "multi" else q.answer.options, lam=lam, refit=refit,
-                            refit_until=refit_until)
+            opts = ["yes", "no"] if q.answer.kind == "multi" else q.answer.options
+            if factory is not None:
+                return factory(list(opts))
+            return FastHead(opts, lam=lam, refit=refit, refit_until=refit_until)
 
         def train(h, ys):
             if not select:
@@ -1153,6 +1168,10 @@ class MultiHead:
 
     def teach(self, row, answer):
         return sum(h.teach(row, "yes" if o in answer else "no") for o, h in self.heads.items())
+
+    def fingerprint(self):
+        """The options and every option's head (the Head protocol; the value 0.9 computed for it by type name)."""
+        return digest("MultiHead", self.options, {o: fingerprint(h) for o, h in self.heads.items()})
 
 
 MISSING_INPUTS = "missing inputs: "

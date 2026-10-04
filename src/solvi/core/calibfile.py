@@ -159,7 +159,7 @@ def load(part, path, groups=None, strict=True):
     lo = rec.get("lora")
     if lo and callable(getattr(part, "_load_adapter", None)):
         ad = part._calibration_adapter()
-        if ad is None or ad.hash != lo.get("hash"):
+        if ad is None or ad.fingerprint() != lo.get("hash"):
             import os                               # calibrated with an adapter: load it first (from beside the file)
             f = os.path.join(os.path.dirname(os.path.abspath(str(path))), lo.get("file") or os.path.basename(lora_path(path)))
             part._load_adapter("lora", f, strict, expect=lo.get("hash"))

@@ -44,6 +44,7 @@ nav:
   - Mission: mission.md
   - Guide: guide/index.md          # expanded into one page per chapter by the hook
   - Best practices: best_practices.md
+  - Building blocks: building_blocks.md
   - Formats and tools:
       - Decider checkpoint and input format: decide_format.md
       - Code strategist: strategist.md
@@ -59,6 +60,9 @@ nav:
       - solvi: api/solvi.md
       - solvi.core: api/core.md
       - solvi.core.deciders: api/decide.md
+      - solvi.core.deciders.protocols: api/protocols.md
+      - solvi.core.guarantees.monitor: api/monitor.md
+      - solvi.core.environment: api/environment.md
       - solvi.core.calibration: api/calibration.md
       - solvi.core.guarantees.guarantee: api/guarantee.md
       - solvi.core.guarantees.openset: api/openset.md
@@ -107,6 +111,7 @@ nav:
       - solvi.core.store.signature: api/signature.md
       - solvi.core.store.diff: api/diff.md
       - solvi.testing: api/testing.md
+      - solvi.testing.conformance: api/conformance.md
       - solvi.testing.honesty: api/honesty.md
       - solvi.check: api/check.md
       - solvi.core.calibfile: api/calibfile.md
