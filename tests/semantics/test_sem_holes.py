@@ -263,19 +263,42 @@ def test_hole4_a_why_edited_in_the_store_with_every_hash_recomputed_does_not_rep
     assert [b["seq"] for b in bad] == [i] and bad[0]["kinds"] == {"answer": 1}
 
 
-@pytest.mark.xfail(strict=True, reason="open: a stored record's index fields (guards, safeguards, models, flow, the "
-                                       "confidence in answers) are not checked against its stored response — after a "
-                                       "consistent rewrite query() finds what never happened (store/__init__.py "
-                                       "_summary_problems)")
-def test_open_a_records_index_fields_agree_with_its_response(tmp_path):
+def _edit_index(rec, field):
+    """Edit one index field of a stored record the way a forger who wants query() to find something would."""
+    if field == "safeguards":
+        rec["safeguards"] = rec["safeguards"] + [["hard_check", "answer:pay", ["pay"]]]
+    elif field == "guards":
+        rec["guards"] = {**rec["guards"], "size": "low_confidence"}
+    elif field == "models":
+        rec["models"] = rec["models"] + [{"type": "Forged", "id": "gpt", "fp": "0" * 16}]
+    elif field == "flow":
+        rec["flow"] = list(reversed(rec["flow"]))
+    elif field == "confidence":
+        q = sorted(rec["answers"])[0]
+        rec["answers"][q][1] = 0.5 if rec["answers"][q][1] != 0.5 else 0.25
+
+
+@pytest.mark.parametrize("record", ["full", "compact"])
+@pytest.mark.parametrize("field", ["safeguards", "guards", "models", "flow", "confidence"])
+def test_hole6_a_records_index_fields_agree_with_its_response(tmp_path, field, record):
+    """The record's summary — guards, safeguards, models, flow and the confidence in answers, what query() and the SQL
+    index tables read — is compared with its stored response by verify() (docs/trace_spec.md §4.3): a consistent rewrite
+    of an index field alone is a problem. A compact record keeps no flow: there the edited flow is caught by replay."""
     s = system()
-    st = JSONLStorage(tmp_path / "s.jsonl", system=s)
+    st = JSONLStorage(tmp_path / "s.jsonl", system=s, record=record)
     st.save(s.ask({"amount": 5, "limit": 100}))
+    assert st.verify()["ok"]
     recs = read_lines(st.path)
-    recs[0]["safeguards"] = [["hard_check", "answer:pay", ["pay"]]]
+    _edit_index(recs[0], field)
     write_lines(st.path, recs, rechain(recs))
     st = JSONLStorage(st.path, system=s)
-    assert not st.verify()["ok"] or st.replay_all(s)
+    out = st.verify()
+    if record == "compact" and field == "flow":
+        assert out["ok"]
+        (bad,) = st.replay_all(s)
+        assert bad["kinds"] == {"integrity": 1} and bad["summary"].startswith("data damaged")
+    else:
+        assert not out["ok"] and any(field.rstrip("s") in p[2] for p in out["problems"]), out["problems"]
 
 
 # --- hole 5: what is left of a redacted record stays verified

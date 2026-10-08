@@ -104,9 +104,13 @@ Guaranteed (each is a test):
    [test_every_field_of_every_record_edited_alone_fails_verify, test_a_field_added_or_removed_fails_verify]
 2. Deleting, inserting, duplicating or swapping records makes `ok` false; so does cutting records off the end while the
    stored head still counts them. [test_deleting_inserting_reordering_or_cutting_records_fails_verify]
-3. A full or compact `ask` record whose summary disagrees with its stored response (answers and statuses, `init_hash`,
-   step hashes, the trace's own links) makes `ok` false. A record whose stored response is malformed is a problem, not
-   an exception.
+3. A full or compact `ask` record whose summary disagrees with its stored response (answers, statuses and the
+   confidence in `answers` — the result's confidence rounded to 4 digits —, `init_hash`, step hashes, the trace's own
+   links, `guards`, `safeguards`, `models` and, for a full record, `flow`) makes `ok` false: what `query()` and the SQL
+   index tables read is what the response holds. A compact record keeps no planned flow; its `flow` is compared with
+   the flow planned again when it is re-derived (`replay_all`: kind `integrity` under the same catalog and questions,
+   else `flow`). A record whose stored response is malformed is a problem, not an exception.
+   [test_hole6_a_records_index_fields_agree_with_its_response]
 4. On SQL backends, a row column or an index row (answers, safeguards, models) that differs from the record's JSON makes
    `ok` false. [test_sqlite_body_and_index_edits_fail_verify]
 5. `verify(anchor=head)` with a head taken earlier and kept elsewhere makes `ok` false when the records it covers were

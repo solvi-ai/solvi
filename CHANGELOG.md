@@ -11,6 +11,12 @@
   compared within a relative 1e-9 (`solvi.core.runtime.CONFIDENCE_TOL`): float rounding is not an edit. The why of a
   record stored by solvi 0.7.1 or earlier (dict keys sorted) is not compared. An `ask_text` decision is compared with
   the confidence and reason ask_text gave (the reading's confidence and missing fields, rebuilt from the trace).
+- **`verify()` checks a record's summary against its stored response.** Besides the answers, statuses, input hash and
+  step hashes, the record's index fields — `guards`, `safeguards`, `models`, the confidence in `answers` and (full
+  records) `flow` — must agree with the stored response; a mismatch is a verify problem. Before, a consistent rewrite of
+  an index field passed `verify()`, and `query(safeguard=..., model=...)` found what never happened. A compact record's
+  `flow` is compared with the flow planned again on `replay_all` / `store.rederive`. Stores written by solvi 0.7.1–1.0.1
+  verify as before (`tests/fixtures`).
 
 ## 1.0.1 — 2026-10-04
 

@@ -356,9 +356,52 @@ def _matches(d, question, answer, status, safeguard, model, since, until, catalo
     return True
 
 
+def _models_of(records):
+    """The models index of a record (entry: "models") from its trace records: every model that ran, the one used and the
+    rejected alternatives, sorted."""
+    models = {}
+    for r in records:
+        for rm in [r.get("model"), *((r.get("tried_models") or {}).values())]:
+            if isinstance(rm, dict):
+                m = {k: str(rm.get(k)) for k in ("type", "id", "fp")}
+                models[_cj(m)] = m
+    return [models[k] for k in sorted(models)]
+
+
+def _same_conf(stored, conf):
+    """The confidence in a record's answers (rounded to 4 digits) against its result's."""
+    from ..schema import untag_floats
+    a, b = untag_floats(stored), untag_floats(conf)
+    if not isinstance(b, (int, float)) or isinstance(b, bool) or not isinstance(a, (int, float)):
+        return _cj(stored) == _cj(conf)
+    if b != b:                                        # NaN
+        return a != a
+    return a == (round(b, 4) if abs(b) != float("inf") else b)
+
+
+def _index_problems(d, res, safeguards, records, flow=None):
+    """The record's index fields — guards, safeguards, models, the confidence in answers and (full records) the flow —
+    against its stored response: what query() and the SQL index tables read is what the response holds."""
+    out = []
+    answers = d.get("answers") or {}
+    if any(q in res and not _same_conf(a[1], res[q].get("confidence")) for q, a in answers.items()):
+        out.append("stored confidences differ from the record's answers")
+    if "guards" in d and {q: r.get("guard") for q, r in res.items() if r.get("guard")} != d.get("guards"):
+        out.append("stored guards differ from the record's guards")
+    if "safeguards" in d and [[s.get("kind"), s.get("fact"), sorted(s.get("questions") or [])]
+                              for s in safeguards or ()] != d.get("safeguards"):
+        out.append("stored safeguards differ from the record's safeguards")
+    if "models" in d and _models_of(records) != d.get("models"):
+        out.append("the models in the stored trace differ from the record's models")
+    if flow is not None and "flow" in d and [s.get("name") for s in flow.get("steps") or ()] != d.get("flow"):
+        out.append("stored flow differs from the record's flow")
+    return out
+
+
 def _summary_problems(d):
-    """A stored response agrees with its own summary: the answers, the input hash and the trace records' hashes, and the
-    trace's own chain links (no catalog needed; replay_all re-computes the steps)."""
+    """A stored response agrees with its own summary: the answers (with their confidence), the input hash, the trace
+    records' hashes, the trace's own chain links, the guards, safeguards, models and flow (no catalog needed; replay_all
+    re-computes the steps)."""
     out = []
     if d.get("record") == "compact":
         return _compact_problems(d)
@@ -382,12 +425,13 @@ def _summary_problems(d):
     want = {q: [a[2], _cj(None if a[0] == "<not stated>" else a[0])] for q, a in (d.get("answers") or {}).items()}
     if got != want:
         out.append("stored answers differ from the record's answers")
-    return out
+    return out + _index_problems(d, res, resp.get("safeguards"), recs, resp.get("flow") or {})
 
 
 def _compact_problems(d):
     """A compact record agrees with its own summary: the input hash, each kept step's place, hash and link in the
-    recorded chain of step hashes, and the answers (no catalog needed; replay_all re-runs the steps)."""
+    recorded chain of step hashes, the answers (with their confidence), guards, safeguards and models (every model step
+    is kept); not the flow, which a compact record does not keep (no catalog needed; replay_all re-runs the steps)."""
     c = d.get("compact")
     if not isinstance(c, dict):
         return ["a compact record without its compact content"]
@@ -409,7 +453,8 @@ def _compact_problems(d):
     want = {q: [a[2], _cj(None if a[0] == "<not stated>" else a[0])] for q, a in (d.get("answers") or {}).items()}
     if got != want:
         out.append("compact answers differ from the record's answers")
-    return out
+    return out + _index_problems(d, {q: {**_RESULT_DEFAULTS, **r} for q, r in res.items()}, c.get("safeguards"),
+                                 tr.get("records") or [])
 
 
 def _not_rerun(flow, recorded, trust_models):
@@ -474,6 +519,7 @@ def rederive(d, system, trust_models=False):
     that is not re-run (kind "not_kept": no verdict past it), the input not restored."""
     import dataclasses
     from ..response import Response
+    from ..provenance import catalog_fingerprint
     from ..runtime import MISSING, Mismatch, Trace, execute, vhash
     from ..schema import load
     if not (hasattr(system, "catalog") and hasattr(system, "questions") and hasattr(system, "_prepare")):
@@ -514,6 +560,15 @@ def rederive(d, system, trust_models=False):
             return None, [Mismatch(0, "init", "the recorded input cannot be checked: " + "; ".join(
                 f"{k} came back from storage as JSON gave it — {v}" for k, v in lossy.items()), "not_restored")]
         return None, [Mismatch(0, "init", "init_hash does not match the recorded input", "integrity")]
+    planned = [st.part.name for st in p.flow.steps]
+    if d.get("flow") is not None and planned != d.get("flow"):   # a compact record keeps only the names: checked here
+        fp = kept.fingerprint or {}
+        same = (fp.get("catalog") is not None and fp.get("catalog") == catalog_fingerprint(system.catalog)["fp"]
+                and fp.get("questions") == system._questions_fp())
+        return None, [Mismatch(0, "flow", f"the record's flow {d.get('flow')} is not the one planned again {planned}"
+                               + (" under the same catalog and questions: the record was edited" if same else
+                                  " — the catalog, the questions or the strategist changed since"),
+                               "integrity" if same else "flow")]
     prev = trace.init_hash
     for i, r in enumerate(trace.records):
         want = steps[i] if i < len(steps) else None
