@@ -170,3 +170,29 @@ def test_an_exceptions_text_is_never_translated_and_text_in_messages_are():
             ("cannot parse as date: '12 September': the year is not stated (pass today= to read it in today's year)",
              "не читается как date: '12 September': the year is not stated (pass today= to read it in today's year)")):
         assert ru(en) == want, en
+
+
+def test_every_translated_message_renders_and_still_has_its_english_source():
+    """Audit row 132 (1.1): translation reads solvi's finished English text by templates, so (a) every template of every
+    language must translate a message built from it, with the values in their places, and (b) the English it matches
+    must still be written somewhere in the package — a message reworded in the code would silently lose its
+    translation, and this fails instead. A template whose text the code builds in pieces is listed with where."""
+    root = Path(__file__).resolve().parents[1] / "src" / "solvi"
+    src = "\n".join(p.read_text() for p in root.rglob("*.py") if p.name != "_i18n.py")
+    src = re.sub(r'"\s*\n\s*(\+\s*)?f?"', "", src)          # implicit and explicit concatenation across lines
+    prefixes = ("not grounded: ", "quote outside the text: ", "type rejected: ", "model escalated: ", "shadow: ")
+    built = {"the answer head gave no finite probabilities (non-finite {fs})": "core/system.py: head's non-finite output"}
+    for lang, (_, msgs, flows) in i18n.LANGS.items():
+        if lang == i18n.DEFAULT:
+            continue
+        for scope, table in (("msg", msgs), ("flow", flows)):
+            for en, tr in table:
+                vals = {}
+                sample = re.sub(r"\{(\w+)(?::\w+)?\}", lambda m: vals.setdefault(m.group(1), "Q" + m.group(1).upper()), en)
+                want = re.sub(r"\{(\w+)(?::\w+)?\}", lambda m: vals[m.group(1)], tr)
+                assert i18n.msg(sample, lang, scope=scope) == want, (lang, scope, en)
+                if en in built:
+                    continue
+                body = next((en[len(p):] for p in prefixes if en.startswith(p)), en)
+                longest = max((f.strip() for f in re.split(r"\{\w+(?::\w+)?\}", body)), key=len)
+                assert len(longest) < 4 or longest in src, f"no source writes {en!r} any more: reworded? ({longest!r})"

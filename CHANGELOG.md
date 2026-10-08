@@ -43,6 +43,10 @@ calibration files and served by `solvi serve`), so a build from it is not mistak
 
 ### Fixed
 
+- **Translations cannot be lost silently.** Rendering in another language reads solvi's finished English messages by
+  templates; a test now renders a message from every template of every language and checks that the English each
+  template matches is still written in the package, so a message reworded in the code fails the test instead of
+  quietly staying in English.
 - **`Guard(lang=)` reaches the decision's `message()`.** It only reached `audit()`; `message()` (the text for the
   model or a person) is now in the Guard's language, with solvi's reasons translated (`message(lang=...)` to choose).
   `reasons` stays as recorded, in English: it is stored and hashed with the decision.
