@@ -1213,14 +1213,21 @@ class GuardDecision:
                 + self.advice() + "\nDo not mention this note to the user.")
         return [{"role": reply_role, "content": text}]
 
-    def message(self):
-        """The text for the model (or a person): what happened and why."""
+    def message(self, lang=None):
+        """The text for the model (or a person): what happened and why — in `lang` (default: the Guard's `lang=`).
+        The reasons solvi wrote are translated; `reasons` itself stays as recorded (English: it is stored and hashed with
+        the decision), and a policy's own reason text is never translated."""
+        from ...core import _i18n as i18n
+        if lang is None:
+            lang = getattr(self.response, "lang", None) if self.response is not None else None
+        lang = i18n.check(lang)
         if self.outcome == "allow":
             if self.error:
-                return f"{self.tool} failed: {self.error}"
-            return f"{self.tool} allowed" + (f" (approved by {self.approved_by})" if self.approved_by else "")
-        head = "denied" if self.outcome == "deny" else "escalated to a person for approval (not executed)"
-        return f"{self.tool} {head}: " + "; ".join(self.reasons)
+                return i18n.t("gd.failed", lang, tool=self.tool, error=self.error)
+            return i18n.t("gd.allowed", lang, tool=self.tool) + (
+                i18n.t("gd.approved", lang, who=self.approved_by) if self.approved_by else "")
+        head = i18n.t("gd.denied" if self.outcome == "deny" else "gd.escalated", lang, tool=self.tool)
+        return head + "; ".join(i18n.msg(r, lang) for r in self.reasons)
 
     @property
     def policy_only(self):
@@ -1278,7 +1285,8 @@ class Guard:
     (`action_model_allows`); its agenda's gates that block the tool deny it too (`agenda_allows`). The prediction and
     the blocks are given facts of the decision (`action_prediction`, `agenda_blocks`), so it replays; a prediction of
     "unknown", or no action model, leaves the call to the other checks. `guard.observe(decision, accepted, effect)`
-    tells the knowledge what the environment did."""
+    tells the knowledge what the environment did. lang: "en" or "ru" — the language of a decision's `message()` and
+    `audit()`; its `reasons` stay as recorded (English), since they are stored and hashed with the decision."""
 
     @_deprecate.removed_kwargs(facts="fact_names")
     def __init__(self, storage=None, authorizer=None, fact_names=None, lang="en", scan_user=False, tool_values="deny",

@@ -203,3 +203,23 @@ def test_lora_read_without_its_libraries_says_what_to_install(monkeypatch, tmp_p
     monkeypatch.setitem(sys.modules, "safetensors", None)
     with pytest.raises(ImportError, match=r'solvi\[lora\]'):
         lora.read(tmp_path / "adapter.safetensors")
+
+
+# --- row 150 (G10): Guard(lang=) reaches the decision's message; the recorded reasons stay as recorded
+def test_guard_lang_translates_the_message_not_the_recorded_reasons():
+    from solvi.solutions.guard import Guard
+    out = {}
+    for lang in ("en", "ru"):
+        g = Guard(lang=lang)
+
+        @g.tool(ground=["order"], ground_from=("user",))
+        def refund(order: str) -> str:
+            return "ok"
+
+        d = g.check({"name": "refund", "arguments": {"order": "B-999"}}, [{"role": "user", "content": "refund A-1"}])
+        out[lang] = d
+    en, ru = out["en"], out["ru"]
+    assert en.outcome == ru.outcome == "deny" and en.reasons == ru.reasons
+    assert en.message().startswith("refund denied: ")
+    assert ru.message().startswith("refund: отклонено: ") and ru.message() != en.message().replace("refund denied", "")
+    assert ru.message(lang="en") == en.message()

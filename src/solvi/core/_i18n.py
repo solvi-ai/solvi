@@ -74,6 +74,9 @@ EN = {
     "sh.tried": "  {name}: used {used}; tried {tried}", "sh.audit": "── audit (support of each answer, safeguards) ",
     "sh.replay": "── trace replay ", "sh.steps": "  steps {n}, mismatches {m}", "sh.model_steps": "  model steps: ",
     "sh.time": "── time {ms} ms", "fl.not_taken": "not taken: ",
+    # a guard's decision (solvi.solutions.guard: GuardDecision.message)
+    "gd.allowed": "{tool} allowed", "gd.approved": " (approved by {who})", "gd.failed": "{tool} failed: {error}",
+    "gd.denied": "{tool} denied: ", "gd.escalated": "{tool} escalated to a person for approval (not executed): ",
     # Response.computed_state
     "cs.quote": "   quote [{s}:{e}]", "cs.confidence": " confidence {c}", "cs.model": "   model {m}", "cs.error": "   ERROR: {err}",
     # System.safeguard_summary
@@ -131,6 +134,8 @@ RU = {
     "sh.audit": "── аудит (опора каждого ответа, защиты) ", "sh.replay": "── повтор трассы ",
     "sh.steps": "  шагов {n}, расхождений {m}", "sh.model_steps": "  шаги моделей: ", "sh.time": "── время {ms} мс",
     "fl.not_taken": "не взято: ",
+    "gd.allowed": "{tool}: разрешено", "gd.approved": " (одобрил: {who})", "gd.failed": "{tool}: ошибка: {error}",
+    "gd.denied": "{tool}: отклонено: ", "gd.escalated": "{tool}: передано человеку на одобрение (не выполнено): ",
     "cs.quote": "   цитата [{s}:{e}]", "cs.confidence": " уверенность {c}", "cs.model": "   модель {m}",
     "cs.error": "   ОШИБКА: {err}",
     "rp.head": "запросов {asks}, ответов {answers}, воздержаний {abstained}, выходов моделей {model_outputs}",

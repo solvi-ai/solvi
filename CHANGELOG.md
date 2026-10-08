@@ -43,6 +43,9 @@ calibration files and served by `solvi serve`), so a build from it is not mistak
 
 ### Fixed
 
+- **`Guard(lang=)` reaches the decision's `message()`.** It only reached `audit()`; `message()` (the text for the
+  model or a person) is now in the Guard's language, with solvi's reasons translated (`message(lang=...)` to choose).
+  `reasons` stays as recorded, in English: it is stored and hashed with the decision.
 - **`solvi.experimental.lora.read` without torch or safetensors** refuses with what to install (`pip install
   "solvi[lora]"`) instead of a bare `ModuleNotFoundError`; a test of that refusal runs without torch.
 - **`CandidateHead.n` counts the steps it was taught**, not only those it was fitted on; **`CostBook.get` takes a part's
@@ -74,8 +77,10 @@ calibration files and served by `solvi serve`), so a build from it is not mistak
   Now a bool is grounded only when the quoted words say it — "yes", "true", "y", "1", "on", "да", "✓" for `True`;
   "no", "false", "n", "0", "off", "нет", "✗" for `False` (any case, end punctuation ignored;
   `solvi.core.provenance.BOOL_WORDS`); any other text rejects the output as `not grounded` and the questions on it
-  abstain. A model that quoted, say, the word "paid" for `True` should quote the checkbox word or return a string.
-  A `datetime` or a list value is still not compared (said so in the README and the guide).
+  abstain. A model-backed part that quoted evidence for a bool (`Quote(True, …)` over "reverse the second payment")
+  should return `Claim(True, evidence=[...])` — a value with its evidence — instead; a code extractor's bool quote is
+  not rejected, and its audit line now says "derived from '…'" where it said "converted from '…'" (the value is not the
+  quoted text). A `datetime` or a list value is still not compared (said so in the README and the guide).
 - **`solvi check` reports a `uses` hint that does nothing.** `Question(uses=["nope"])` on a question with a rule (or a
   fitted answer head) was accepted, ignored at run time and `solvi check` said "no problems found"; now it is the warning
   `uses_ignored`. Without `System(input_model=...)`, a `uses` name that no part computes or reads is the note
