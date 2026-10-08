@@ -228,7 +228,7 @@ class _NetScorer:
                         o["act"] = float(lg[r, mpos, self.act_col])
                     if unk:
                         o["unknown"] = float(lg[r, mpos, self.unk_col])
-                    if ptr and len(encs[i]) > 4:          # full layout with the input's tokens: the pointer (l14g)
+                    if ptr and len(encs[i]) > 4:          # full layout with the input's tokens: the pointer
                         pos, offs = encs[i][4]
                         a, b = self.ptr_cols
                         o["pointer"] = {"start": lg[r, pos, a], "end": lg[r, pos, b],

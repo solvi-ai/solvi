@@ -469,8 +469,12 @@ def bin_labels(edges, integer=True, unit=None):
 
 
 class Answer:
+    """The answer types of a question: `Answer.yes_no()`, `Answer.choice([...])`, `Answer.maybe(...)` and the others
+    below — each an AnswerType."""
+
     @staticmethod
     def yes_no() -> AnswerType:
+        """A yes / no question: the options "yes" and "no" (a rule may return a bool: True is "yes")."""
         return AnswerType("yes_no", ["yes", "no"])
 
     @staticmethod

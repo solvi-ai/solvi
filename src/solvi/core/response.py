@@ -107,7 +107,7 @@ class Response(Serial):
     A response keeps a strong reference to the System that answered it (for `report()`: the questions, the answer heads,
     the replay). Deliberately not a weak one: `System(cat, qs).ask(state).report()` is common
     and the temporary System would be gone before the report runs. A response you keep for long keeps its System (and its
-    models) alive; keep `res.to_dict()` or the stored record instead, or drop the reference with `res._system = None`
+    models) alive; keep `res.to_dict()` or the stored record instead, or drop the reference with `res.detach()`
     (then pass `system=` to report)."""
     results: dict
     flow: object
@@ -233,6 +233,12 @@ class Response(Serial):
         from .store.audit import build
         a = build(self, question, lang=self.lang if lang is None else lang)
         return a[question] if isinstance(question, str) else a
+
+    def detach(self):
+        """Drop this response's reference to the System that answered it (so a response kept for long does not keep
+        the System and its models alive) → the response. Afterwards pass `system=` to `report()`."""
+        self._system = None
+        return self
 
     def report(self, format="md", question=None, system=None, replay="trusted"):
         """A human-readable report of this decision for an auditor or a customer: each answer, what it rests on, the quotes

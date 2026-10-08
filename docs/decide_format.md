@@ -7,17 +7,21 @@ solvi reads any checkpoint that declares them. How to use a decider in a catalog
 ## 1. Formats solvi reads
 
 `solvi_decide.json["format"]` names the format; every capability field below may be declared over the format's defaults.
+The `format` and `subformat` values are literal strings that checkpoints carry and solvi matches exactly; their
+prefixes (`l14b_`, `l14f`, `l14g`) are historical identifiers with no meaning of their own. In the text below the formats
+are called by what they are: the **text-only** format (`l14b_decider v1`), the **typed v1** format (`l14f typed v1`)
+and the **answer-primitives** format (`l14g typed v2`).
 
 | `format` | Checkpoints | Defaults |
 |---|---|---|
 | `l14b_decider v1` | the first, text-only deciders | modes `single`, `multi`; columns `single` 0, `multi` 1; text input; no act head; one question per pass |
 | `l14f typed v1` | the first typed checkpoints | modes `single`, `multi`, `score`, `noul`; columns `single` / `score` / `noul` 0, `multi` 1, `act` 2; states `paths`, `tree`, `json`; act head in column 2; noul labels `true` / `false`; one question per pass unless `multi_question` is declared |
-| `solvi_decide v2` | any other model | the `l14b_decider v1` defaults; everything else declared |
-| `solvi_decide v2` with `"subformat": "l14g typed v2"` (also `format` `l14g typed v2`) | the answer-primitives checkpoints and later (the published solvi-base, solvi-large and solvi-large-long) | the answer primitives, §9: the `l14f typed v1` defaults plus modes `rank`, `number`, `span`, "not stated" (column 3), a pointer (columns 4 / 5) |
-| `solvi_decide v3` (without that subformat) | none published; what `solvi.core.deciders.llm` and `solvi.core.deciders.systemone` declare for themselves | the answer-primitives fields are read (§9), but the defaults are the `l14b_decider v1` ones: no "not stated", no pointer, no act head unless declared — declare `modes`, `unknown`, `pointer`, `act`, or add `"subformat": "l14g typed v2"` for the row above |
+| `solvi_decide v2` | any other model | the text-only defaults; everything else declared |
+| `solvi_decide v2` with `"subformat": "l14g typed v2"` (also `format` `l14g typed v2`) | the answer-primitives checkpoints and later (the published solvi-base, solvi-large and solvi-large-long) | the answer primitives, §9: the typed v1 defaults plus modes `rank`, `number`, `span`, "not stated" (column 3), a pointer (columns 4 / 5) |
+| `solvi_decide v3` (without that subformat) | none published; what `solvi.core.deciders.llm` and `solvi.core.deciders.systemone` declare for themselves | the answer-primitives fields are read (§9), but the defaults are the text-only ones: no "not stated", no pointer, no act head unless declared — declare `modes`, `unknown`, `pointer`, `act`, or add `"subformat": "l14g typed v2"` for the row above |
 
-`l14f typed v1.N`, `l14g typed v2.N` and `solvi_decide v2.N` / `v3.N` (a minor version) load the same way; any other format is refused
-(`ValueError: unknown decider format`). A checkpoint without `format` is read as `l14b_decider v1`. An `l14b_decider v1`
+A minor version of any of these (`.N` after the format string, e.g. `solvi_decide v2.1`) loads the same way; any other
+format is refused (`ValueError: unknown decider format`). A checkpoint without `format` is read as text-only. A text-only
 checkpoint loads, scores and hashes exactly as in solvi 0.4 (same fingerprints, same trace hashes).
 
 ## 2. The checkpoint folder
@@ -69,12 +73,12 @@ solvi_decide.json      format and capabilities (below)
 | `noul_labels` | the option labels of a native yes/no question, the "yes" one first | per format |
 | `state_serialization` | the state serializations the model was trained on, preferred first; solvi uses the first of `paths`, `tree`, `json` it finds. `["text"]` (the text-only deciders): states are sent as `paths` lines, which the model reads as text. A v2 checkpoint that lists none of the three is refused | per format |
 | `multi_question` | several questions per forward pass: `false`, `true`, a number (`max_questions`), or `{"layout", "max_questions", "max_len", "window"}` — layout `block` (§5), `max_questions` per pass (default 6), `max_len` of a block sequence (1024), `window` of the local attention layers (64, ±tokens) | `false` |
-| `temperature` | a number (the single-choice temperature; `temperature_multi` then gives the multi-label one), or one per kind: `choice` (or `single`), `multi`, `score`, `noul` (missing kinds: the single-choice one) | `l14b_decider v1`: 1.45; else 1.0 |
+| `temperature` | a number (the single-choice temperature; `temperature_multi` then gives the multi-label one), or one per kind: `choice` (or `single`), `multi`, `score`, `noul` (missing kinds: the single-choice one) | text-only: 1.45; else 1.0 |
 | `thresholds` | `other` (the "other" abstain threshold, §6), `multi` (a multi-label option applies at p ≥ it), `escalate_below` (a default confidence threshold for parts that set none). The top-level `other_threshold`, `multi_threshold`, `temperature_multi` of the text-only deciders are still read | 0.5, 0.5, none |
 | `act` | the act / escalate head: `false` / absent — none; `{}` or `"act_head": true` — present with defaults. `column` (default `columns.act`), `temperature` (1.0), `calibrator` (optional, §6), `threshold` (0.5), `threshold_for_error` (`{"target error": threshold}`, used by `max_error=`) | per format |
 
 Other keys (`base`, `training`, `licenses`, ...) are free: `model.metadata()` shows them. Every capability field, the
-temperatures and thresholds are part of the checkpoint's fingerprint (a v2 or `l14f typed v1` checkpoint; `l14b_decider v1` hashes as
+temperatures and thresholds are part of the checkpoint's fingerprint (a v2 or typed v1 checkpoint; a text-only one hashes as
 before).
 
 ## 4. One question: the sequence
@@ -211,10 +215,10 @@ several text facts are joined by new lines. A scalar fact (a number, a date) is 
   (several questions in one forward pass; raise `ValueError` when they do not fit together);
 - optionally `fingerprint()` (else the model is "unversioned") and `model_id`.
 
-`meta` is the content of `solvi_decide.json`; a meta whose `format` is none of §1 (a stand-in) gets the `l14b_decider v1`
+`meta` is the content of `solvi_decide.json`; a meta whose `format` is none of §1 (a stand-in) gets the text-only
 defaults and hashes as in solvi 0.4.
 
-## 9. Answer primitives: `l14g typed v2`
+## 9. Answer primitives
 
 The contract for a decider that answers every answer primitive of solvi (see the
 [guide](guide.md#answer-primitives-not-stated-evidence-spans-rankings-estimates)): "not stated", evidence quotes, spans,
@@ -224,7 +228,7 @@ writes it and is the reference for the network side — and solvi reads it (sinc
 A checkpoint is read with this contract when its `solvi_decide.json` has `"subformat": "l14g typed v2"` (their training code writes
 `"format": "solvi_decide v2"` with it), or `"format": "l14g typed v2"` / `"solvi_decide v3"` — a bare `"solvi_decide v3"`
 gets the fields below only as far as it declares them (its defaults are the text-only ones: see the table in §1). Only such checkpoints get the
-new capability fields: `l14b_decider v1`, `l14f typed v1` and plain `solvi_decide v2` checkpoints parse, score and hash
+new capability fields: text-only, typed v1 and plain `solvi_decide v2` checkpoints parse, score and hash
 exactly as before (same `model.caps`, temperatures and fingerprints).
 
 ### 9.1 `solvi_decide.json`
@@ -253,7 +257,7 @@ exactly as before (same `model.caps`, temperatures and fingerprints).
 }
 ```
 
-| Field | Meaning | Default (`l14g typed v2`) |
+| Field | Meaning | Default (answer-primitives format) |
 |---|---|---|
 | `modes` | adds `rank` (order the options), `number` (a number over bins), `span` (a piece of the input) | all seven |
 | `markers` | `rank` `[unused5]`, `number` `[unused6]`, `span` `[unused7]` | as shown |

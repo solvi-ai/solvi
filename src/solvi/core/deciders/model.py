@@ -186,7 +186,7 @@ class DecideModel:
 
     @property
     def has_not_stated(self):
-        """Does the checkpoint give a "not stated" output (an l14g checkpoint's `unknown`)?"""
+        """Does the checkpoint give a "not stated" output (an answer-primitives checkpoint's `unknown`)?"""
         return self.caps.get("unknown") is not None
 
     has_unknown = _deprecate.removed_attr("has_unknown", "has_not_stated", "DecideModel")
@@ -312,7 +312,7 @@ class DecideModel:
 
     # --- raw logits
     def _pick(self, sp, o, text=None):
-        """One scorer output → (the question's logits [K], the act logit or None). From an l14g checkpoint the logits also
+        """One scorer output → (the question's logits [K], the act logit or None). From an answer-primitives checkpoint the logits also
         carry the "not stated" logit (`.unknown`) and the decoded pointer (`.pointer`)."""
         act = unk = ptr = why = info = None
         transient = False
@@ -550,7 +550,7 @@ class DecideModel:
 
     def _decision(self, sp, z):
         """Calibrated logits → Decision. Questions of solvi 0.5 without "not stated" decide exactly as before; span, rank and
-        number questions and those allowing "not stated" (from an l14g checkpoint's outputs) go through _decision_v3; a
+        number questions and those allowing "not stated" (from an answer-primitives checkpoint's outputs) go through _decision_v3; a
         question asking for evidence gets the pointer's quotes."""
         u, ptr = getattr(z, "unknown", None), getattr(z, "pointer", None)
         if sp.kind == "span":
@@ -574,7 +574,7 @@ class DecideModel:
 
     def _decision_v3(self, sp, z, u):
         """rank / number, and any kind with "not stated": for single, score, noul, rank, number the "not stated" logit u
-        competes with the options in one softmax (the l14g contract), for multi it is a sigmoid. choice / noul: the most
+        competes with the options in one softmax (the answer-primitives contract), for multi it is a sigmoid. choice / noul: the most
         probable of the options and "not stated"; score / rank / number: "not stated" when p(not stated) ≥ the threshold
         (0.5), else the median level / the order by probability / the median bin, from the probabilities given it is
         stated. Confidence: p(answer) — for a ranking its Plackett–Luce probability, for a number the mass of its interval
@@ -974,7 +974,7 @@ class DecideModel:
         The value is one of the options by construction; the options are the part's closed set; provenance `decided`; the
         trace records the model, whose fingerprint covers the checkpoint and this part's adaptation and thresholds.
 
-        Answer primitives (an l14g checkpoint, docs/decide_format.md §9): `Maybe[T]` or not_stated=True — "not stated" is an
+        Answer primitives (an answer-primitives checkpoint, docs/decide_format.md §9): `Maybe[T]` or not_stated=True — "not stated" is an
         answer (solvi.Unknown); `Rank[Literal[...], k]` or kind="rank", k= — the options best first; `Estimate[edges]` or
         kind="number", bins=, unit=, coverage= — a number over bins; `Span[T]` or kind="span" — a piece of the (one, given)
         text fact, coerced to T when it is a question's answer; evidence=True (or a number) — supporting quotes from the

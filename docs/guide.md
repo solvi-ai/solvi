@@ -606,7 +606,7 @@ def repair_days(doc: str) -> Estimate[0, 3, 7, 14]:
 heads (`fit`) answer the four classic kinds only (examples answered `Unknown` are left out). All of it
 round-trips through JSON (`result.not_stated`, `evidence`, `extra`) and replays. From a decider — `model.decision(name,
 task, fact, Maybe[...] / Span[T] / Rank[...] / Estimate[...], evidence=True)` — these need an answer-primitives checkpoint (its "not
-stated" output and its pointer; see [decide_format.md §9](decide_format.md#9-answer-primitives-l14g-typed-v2)).
+stated" output and its pointer; see [decide_format.md §9](decide_format.md#9-answer-primitives)).
 A decider's `Span[T]` without `Maybe` has no way to say that the text does not state the answer: when its pointer finds
 "no span" at least as probable as the best span, the decision escalates ("the text may not state it …") instead of
 answering with that span — declare `Maybe[Span[T]]` to get "not stated" as an answer.
@@ -1771,7 +1771,7 @@ Every option after `questions` is keyword-only. With a JSON-lines store every `a
 | `res.state_text()` | a printable listing (`computed_state` in 0.7): each computed fact, its value, quote offsets, extraction confidence, errors |
 | `res.values` | dict of all fact values (inputs and computed) |
 | `res.trace` | the hash-chained trace (see [The trace](#the-trace-and-verification)) |
-| `res.audit(q=None)` | what each answer rests on and which safeguards fired (see [Grounded decisions](#grounded-decisions-provenance-audit-and-safeguards)) |
+| `res.audit(question=None)` | what each answer rests on and which safeguards fired (see [Grounded decisions](#grounded-decisions-provenance-audit-and-safeguards)) |
 | `res.safeguards` | the safeguard events of this response |
 | `res.checks` | every check of the flow as data, in flow order: `CheckResult(name, questions, status, hard, reason, then)` — status `"passed"`, `"failed"`, `"skipped"` (a failed hard check closed every question that needed it; or no data: a hard check that could not be planned because inputs it needs are not given, listed after the flow's checks with `missing`, the given inputs it lacks) or `"error"` (it ran and could not be evaluated); `reason` is what `Fail(...)` said (else the docstring's first line, else "<name> is false"; for an error the error); `then` the answers a failed hard check set. Also in `to_dict()` / `to_json()` and so in a stored decision (`"checks"`, derived from the trace; ignored on load and recomputed) |
 | `res.ms` | decision time in milliseconds |

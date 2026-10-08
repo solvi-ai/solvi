@@ -43,6 +43,15 @@ calibration files and served by `solvi serve`), so a build from it is not mistak
 
 ### Fixed
 
+- **Docs: every public module has an API page.** 24 modules had none — among them `solvi.core.runtime` and
+  `solvi.core.types`, where the 1.0 migration table sends you for `Trace`, `Record`, `Result`, `MISSING` and
+  `FactTypeError`, and `solvi.core.provenance` and `solvi.core.schema`; they are now in the API index ("Module by
+  module") and the site's navigation. `Answer` and `Answer.yes_no` have docstrings; the guide's `res.audit(q=None)` is
+  `res.audit(question=None)`.
+- **`Response.detach()`** drops a response's reference to the System that answered it (the docs advised setting the
+  private `res._system = None`).
+- **Docs: the decider format page calls the formats by what they are** (text-only, typed v1, answer-primitives) instead
+  of by internal codes; the literal `format` strings that checkpoints carry are unchanged.
 - **Docs: the guard's injection detector states its measured rates, and `scan_user` is described as it behaves.** The
   guide said `Guard(scan_user=True)` escalates a user who writes "Model: XPS 13 9310. Please refund …"; it does not (in
   a user's message a field label counts only when its sentence goes on to give an order). The guide now gives what a

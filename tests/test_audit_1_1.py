@@ -125,3 +125,50 @@ def test_scan_user_does_not_escalate_a_field_label_and_the_guide_says_so():
     guide = (pathlib.Path(__file__).parents[1] / "docs" / "guide.md").read_text()
     assert "is escalated too: turn `scan_user` on" not in guide
     assert "flagged **11 of the 12" in guide and "missed 14 of the\n20 injections" in guide
+
+
+# --- rows 48 (A19) and 135 (H-13): every public module has an API page, in the index and the nav
+def test_every_public_module_has_an_api_page():
+    import pathlib
+    import re
+    root = pathlib.Path(__file__).parents[1]
+    documented = set()
+    for p in (root / "docs" / "api").glob("*.md"):
+        documented |= set(re.findall(r"^:::\s*([\w.]+)", p.read_text(), re.M))
+    mods = []
+    for p in sorted((root / "src" / "solvi").rglob("*.py")):
+        parts = list(p.relative_to(root / "src").with_suffix("").parts)
+        if parts[-1] == "__init__":
+            parts = parts[:-1]
+        if not any(x.startswith("_") for x in parts):
+            mods.append(".".join(parts))
+    assert [m for m in mods if m not in documented] == []
+    index, nav = (root / "docs" / "api" / "index.md").read_text(), (root / "mkdocs.yml").read_text()
+    for mod in ("solvi.core.runtime", "solvi.core.types", "solvi.core.provenance", "solvi.core.schema"):
+        assert f"[`{mod}`](" in index and f"- {mod}: api/" in nav, mod
+
+
+def test_answer_yes_no_has_a_docstring_and_a_response_detaches_without_a_private_name():
+    from solvi import Answer
+    from solvi.core.response import Response
+    assert Answer.yes_no.__doc__ and Answer.__doc__
+    assert "_system = None" not in Response.__doc__
+    cat = Catalog()
+
+    @cat.rule("q")
+    def q(x):
+        return x > 1
+
+    r = System(cat, [Question("q", "?", Answer.yes_no())]).ask({"x": 2})
+    assert r.detach() is r and r._system is None
+
+
+def test_public_docs_name_no_experiment_codes_in_prose():
+    """docs/decide_format.md named formats by experiment codes in prose; the literal format strings stay (in backticks
+    or quotes: checkpoints carry them)."""
+    import pathlib
+    import re
+    root = pathlib.Path(__file__).parents[1]
+    for page in (root / "docs").glob("*.md"):
+        text = re.sub(r"`[^`\n]*`|\"[^\"\n]*\"|'[^'\n]*'|```.*?```", "", page.read_text(), flags=re.S)
+        assert not re.search(r"\bl14[a-z]?\b", text, re.I), (page.name, re.search(r".{30}\bl14[a-z]?\b.{30}", text).group())
