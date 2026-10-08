@@ -43,6 +43,10 @@ calibration files and served by `solvi serve`), so a build from it is not mistak
 
 ### Fixed
 
+- **The Spaces stay in step with the repository.** `tools/sync_gallery.py --check` reports a playground preset that
+  differs from its gallery entry (a test runs it, so CI fails instead of the playground drifting); the realms Space's
+  README cites only result files it ships, and the four published runs it cites are tracked on purpose (`.gitignore`
+  says so) instead of against it.
 - **Translations cannot be lost silently.** Rendering in another language reads solvi's finished English messages by
   templates; a test now renders a message from every template of every language and checks that the English each
   template matches is still written in the package, so a message reworded in the code fails the test instead of

@@ -223,3 +223,32 @@ def test_guard_lang_translates_the_message_not_the_recorded_reasons():
     assert en.message().startswith("refund denied: ")
     assert ru.message().startswith("refund: отклонено: ") and ru.message() != en.message().replace("refund denied", "")
     assert ru.message(lang="en") == en.message()
+
+
+# --- row 126 (G14): the playground is checked against the gallery; the realms Space cites only files it has
+def test_the_playground_presets_are_in_sync_with_the_gallery():
+    import importlib.util
+    import pathlib
+    root = pathlib.Path(__file__).parents[1]
+    spec = importlib.util.spec_from_file_location("sync_gallery", root / "tools" / "sync_gallery.py")
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    assert mod.stale() == [], "run: python tools/sync_gallery.py"
+
+
+def test_the_realms_readme_cites_files_that_exist_and_none_is_tracked_against_gitignore():
+    import pathlib
+    import re
+    import shutil
+    import subprocess
+    root = pathlib.Path(__file__).parents[1]
+    realms = root / "spaces" / "realms"
+    for line in (realms / "README.md").read_text().splitlines():
+        if line.startswith("uv run"):
+            continue                                  # a command's output path
+        for ref in re.findall(r"`(results/[^`]+?)`", line):
+            ref = re.sub(r"\{(\w+),[^}]*\}", r"\1", ref.replace("<seed>", "1"))     # one instance of a pattern
+            assert (realms / ref).exists(), ref
+    if shutil.which("git") and (root / ".git").exists():
+        out = subprocess.run(["git", "ls-files", "-ci", "--exclude-standard"], cwd=root, capture_output=True, text=True)
+        assert out.returncode != 0 or out.stdout.strip() == ""

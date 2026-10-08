@@ -195,14 +195,15 @@ What the numbers say, plainly:
   dominated (share 2–15), the rest stuck at 0.1–0.5 — usually after the warmonger conquers the adaptive faction's
   core and the respawned one-city faction cannot grow in a full world. A first full evaluation attempt with an earlier
   variant (no advantage baseline, more optimism, faster forgetting) gave seed 1: 2.07 → 14.19 and seed 2: 1.63 → 0.10 (collapse at turn
-  14 500); it was stopped when seed 2 failed, and is kept in `results/attempt1/`.
+  14 500); it was stopped when seed 2 failed (its files are not in this repository).
 - **Why it stays hard**: the reward is the whole faction's score 20 turns later, so one build or one order barely
   moves it; the signal that walls and archers prevent a conquest arrives rarely and late. Faction-level credit
   assignment is the weak point, not speed or memory (decisions stay ~1 ms, the saved state < 300 KB).
 
-Raw checkpoints: `results/endless_<seed>.json` (evaluation and 100 000-turn run), `results/ablation/frozen_<seed>.json`
-(frozen ablation), `results/baseline_fitfast/` (the previous learner's runs), `results/attempt1/`. Charts:
-`results/health.{png,svg}`, `results/learning.{png,svg}` (solid: learner, dashed: frozen, dotted: previous learner).
+Raw checkpoints in this repository: `results/endless_<seed>.json` (evaluation and 100 000-turn run) and their logs
+`results/logs/sim_<seed>.log`. The frozen ablation, the previous learner's runs and the first attempt were not
+published (only their numbers above). Charts: `results/health.{png,svg}`, `results/learning.{png,svg}` (solid:
+learner, dashed: frozen, dotted: previous learner).
 
 ### Variant 2: proposer + laws + verified lookahead (pre-registered test)
 
@@ -276,8 +277,8 @@ solvi online-learning default fixed (off unless a learned policy uses it), B4's 
 and does not recur.
 
 Raw data: `results/lookahead/endless_<seed>.json`, `results/lookahead/logs/`, `results/lookahead/b5_check.py`,
-`results/lookahead/learnoff/` (the replica), `results/dev_la/` (development runs), `results/lookahead/dev/` (speed and
-resume checks). Charts: `results/lookahead/lookahead.{png,svg}`, `results/lookahead/health.{png,svg}`.
+`results/lookahead/learnoff/` (the replica); the development runs and the speed and resume checks were not published.
+Charts: `results/lookahead/lookahead.{png,svg}`, `results/lookahead/health.{png,svg}`.
 
 ### Variant 3 (policy net + laws): a small policy net proposes, laws and a check decide (pre-registered test)
 
