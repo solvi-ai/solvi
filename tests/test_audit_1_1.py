@@ -1,6 +1,5 @@
 """Reproductions of the audit rows fixed for 1.1 (each test failed before its fix)."""
 import warnings
-from datetime import date
 
 import pytest
 
@@ -172,3 +171,10 @@ def test_public_docs_name_no_experiment_codes_in_prose():
     for page in (root / "docs").glob("*.md"):
         text = re.sub(r"`[^`\n]*`|\"[^\"\n]*\"|'[^'\n]*'|```.*?```", "", page.read_text(), flags=re.S)
         assert not re.search(r"\bl14[a-z]?\b", text, re.I), (page.name, re.search(r".{30}\bl14[a-z]?\b.{30}", text).group())
+
+
+# --- row 147 (B21): one name, one meaning: the guard kind and the reason prefix have different names
+def test_type_rejected_is_one_name_with_one_value():
+    from solvi.core import primitives, provenance
+    assert getattr(primitives, "TYPE_REJECTED", provenance.TYPE_REJECTED) == provenance.TYPE_REJECTED == "type rejected"
+    assert primitives.GUARD_TYPE_REJECTED == "type_rejected"

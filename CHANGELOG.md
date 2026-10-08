@@ -43,6 +43,10 @@ calibration files and served by `solvi serve`), so a build from it is not mistak
 
 ### Fixed
 
+- **One name, one meaning for "type rejected".** `solvi.core.primitives` named its guard kind `TYPE_REJECTED`
+  ("type_rejected") while `solvi.core.provenance.TYPE_REJECTED` is the reason prefix ("type rejected"); the guard kinds
+  there are now `GUARD_TYPE_REJECTED`, `GUARD_GROUNDING`, `GUARD_OUTSIDE` (module-internal names; the values are
+  unchanged).
 - **Docs: every public module has an API page.** 24 modules had none — among them `solvi.core.runtime` and
   `solvi.core.types`, where the 1.0 migration table sends you for `Trace`, `Record`, `Result`, `MISSING` and
   `FactTypeError`, and `solvi.core.provenance` and `solvi.core.schema`; they are now in the API index ("Module by
