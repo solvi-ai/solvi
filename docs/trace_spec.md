@@ -212,17 +212,23 @@ id and hash.
    names it (or with another who / why) is a verify problem.
 5. Not done: copies made before (backups, exports) and what was learned from the record are not touched.
 
-## 9. Open points and proposed changes (the author's decision)
+## 9. Decisions (the author's)
 
-- **Bind every field of a result to the trace.** Replay compares answer and status only; confidence, why, guard and
-  source can be edited (`runtime._answers_differ`). Pinned as `xfail(strict=True)`.
-- **Check a record's summary against its response.** `guards`, `safeguards`, `models`, `flow` and the confidence in
-  `answers` are not compared with the stored response (`store._summary_problems`): after a consistent rewrite, `query`
-  finds what never happened. Pinned as `xfail(strict=True)`.
-- **Store "no data" apart from "cannot be checked".** Proposed: a status (or a stored guard) `no_data` for a question
-  whose hard check could not be planned, and the check listed in `res.checks` with status `skipped` and the missing
-  inputs. Today both are `abstain` in the store.
-- **Strict typed checks.** Proposed: a `-> bool` check passes only on a real boolean, as an untyped one does (today its
-  type reads `"yes"` and `1` as `True`).
-- **Wider value hashes.** Step and input hashes are 64 bits (16 hex digits). Enough against accidents; a port may
-  want the full 256 bits in a format 3.
+Done:
+
+- **Every field of a result is bound to the trace.** Replay compares confidence (within 1e-9), why, guard and source
+  besides the answer and its status (§5.4). [test_hole4_a_results_other_fields_are_bound_to_the_trace]
+- **A record's summary is checked against its response.** `verify()` compares `guards`, `safeguards`, `models`,
+  `flow` and the confidence in `answers` with the stored response (§4.3). [test_hole6_*]
+- **"No data" is stored apart from "cannot be checked".** Guard `no_data`, the check `skipped` in `res.checks` with
+  its missing inputs; the status stays `abstain` (§6); record schema 2.1.0. [test_sem_statuses]
+- **Strict typed checks.** A `-> bool` check passes only on a real boolean, as an untyped one does; numpy's bools count
+  (§7). [test_hole2_*]
+
+Decided, not done:
+
+- **Wider value hashes in a format 3.** Step and input hashes are 64 bits today (16 hex digits of SHA-256): enough
+  against accidents, short for a port or an adversary. A future record format 3 will hash steps and inputs with
+  **BLAKE3**, 256 bits (fast, and one function for every length of value); if BLAKE3 is not acceptable as a dependency,
+  with full-length SHA-256 (64 hex digits) instead. Formats 1 and 2 keep their 16-digit hashes and are still read and
+  verified; nothing written today changes.

@@ -1,4 +1,4 @@
-"""The five holes an audit found in the guarantees, each pinned as a property over seeded random cases
+"""The holes an audit found in the guarantees, each pinned as a property over seeded random cases
 (docs/trace_spec.md §8). A hole still open is a test marked xfail(strict=True) with reason "open: ..." — it starts
 failing the suite (XPASS) the day the hole is closed, so the mark is removed with the fix.
 
@@ -6,7 +6,9 @@ failing the suite (XPASS) the day the hole is closed, so the mark is removed wit
 2  an untyped hard check / guard policy returning a falsy non-bool (numpy False, 0, None, []) counted as passed
 3  cat.check(f, hard=True, then=...) with f passed directly registered a soft check
 4  an answer edited in the stored JSON still replayed ok
-5  a redacted record's kept answers could be edited and verify(anchor, signature) still passed"""
+5  a redacted record's kept answers could be edited and verify(anchor, signature) still passed
+6  a record's index fields (guards, safeguards, models, flow, confidence) could be rewritten consistently
+4' (with 4) a result's confidence, why, guard and source could be edited and still replayed ok"""
 import copy
 import json
 
