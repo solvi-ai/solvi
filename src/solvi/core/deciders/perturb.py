@@ -391,8 +391,8 @@ def injection_spans(text, actions=True):
     instruction split across lines), again with escaped line breaks ("\\n" in a JSON or repr output) read as line
     breaks, and each paragraph as a whole. A heuristic: it catches the common wordings, not
     every injection (a paraphrase, base64, letters spaced apart are not covered) — the guard's hard guarantee is where a
-    value comes from (`ground_from=("user",)`), not this. Measured on a small review set (docs/guide.md, "Measured"):
-    11 of 12 ordinary tool outputs flagged, 14 of 20 reworded injections missed. actions=False: without the action rules ("pay / transfer …
+    value comes from (`ground_from=("user",)`), not this. On a small review set (benchmarks/injection_review.py): 11 of 12 ordinary
+    tool outputs flagged, 14 of 20 reworded injections missed. actions=False: without the action rules ("pay / transfer …
     now") — the overrides and role tags only, for text where requests are expected (the user's own messages)."""
     if not isinstance(text, str) or not text.strip():
         return []
