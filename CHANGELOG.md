@@ -43,6 +43,11 @@ calibration files and served by `solvi serve`), so a build from it is not mistak
 
 ### Fixed
 
+- **Fewer private names imported across modules.** `solvi.core.textin` exports its number vocabulary
+  (`NUMBER_WORDS`, `NUMBER_SCALES`, `CURRENCY_AFTER`, `digits`), which `solvi.experimental.charts` imported under
+  private names, and `solvi.core.catalog.group_func` (a group of alternative producers as one function) is public for
+  the planners, the runtime and the experimental modules that used `_group_func` (the old name still resolves).
+  `solvi.experimental.specialist.Trace` says it is the specialist's own chain, not the core trace.
 - **The Spaces stay in step with the repository.** `tools/sync_gallery.py --check` reports a playground preset that
   differs from its gallery entry (a test runs it, so CI fails instead of the playground drifting); the realms Space's
   README cites only result files it ships, and the four published runs it cites are tracked on purpose (`.gitignore`

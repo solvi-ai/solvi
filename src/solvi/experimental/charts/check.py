@@ -8,9 +8,9 @@ from decimal import Decimal
 
 from ...core.catalog import find_whole
 from ..specialist import BLOCKED, CHANGED, DROPPED, WARNING, Checked, Issue
-from ...core.textin import _CUR_AFTER, NUMBER_RE, _SCALES, ParseError, _digits
+from ...core.textin import CURRENCY_AFTER as _CUR_AFTER, NUMBER_RE, NUMBER_SCALES as _SCALES, ParseError, digits as _digits
 from .spec import SCALES, ChartSpec, VerifiedChart, VerifiedPoint, VerifiedSeries
-from ...core.textin import _NUM_WORDS
+from ...core.textin import NUMBER_WORDS as _NUM_WORDS
 
 MAX_SLICES = 8
 

@@ -27,7 +27,7 @@ import time
 
 from ... import _deprecate
 from .strategist import Flow, PlanError, plan as det_plan
-from ..catalog import Catalog, _group_func
+from ..catalog import Catalog, group_func
 from ..runtime import narrowed, replay_plan             # defined there (the runtime replays plan records); re-exported
 
 UNIT = 1.0
@@ -351,7 +351,7 @@ def _widen(catalog, kept, ok):
 
 def _narrow(g, alts):
     n = dataclasses.replace(g, alternatives=alts, inputs=list(dict.fromkeys(x for a in alts for x in a.inputs)))
-    n.func = _group_func(n)
+    n.func = group_func(n)
     return n
 
 

@@ -636,7 +636,7 @@ def _then_parts(check):
     return out or None
 
 
-def _group_func(group):
+def group_func(group):
     """The group as a plain function: alternatives in declaration order, the first accepted value wins (used by code that
     calls part.func directly; the executor runs groups itself, with the producer policy and the trace)."""
     def run(**args):
@@ -936,7 +936,7 @@ class Catalog:
         g = self.parts.get(fact)
         if g is None:
             g = Part(kind=p.kind, name=fact, inputs=[], func=None, doc=f"alternative producers of {fact}", alternatives=[])
-            g.func = _group_func(g)
+            g.func = group_func(g)
             self.parts[fact] = g
         elif g.alternatives is None:
             if g.kind not in ("fn", "extract"):
@@ -948,7 +948,7 @@ class Catalog:
                          tin=g.tin, tout=g.tout, source=g.source, timeout=g.timeout, blocking=g.blocking)
             g = Part(kind=g.kind, name=fact, inputs=list(g.inputs), func=None, doc=f"alternative producers of {fact}",
                      alternatives=[first])
-            g.func = _group_func(g)
+            g.func = group_func(g)
             self.parts[fact] = g
         if any(a.name == p.name for a in g.alternatives):
             raise ValueError(f"producer {p.name} of {fact} is already in the catalog")
@@ -1062,6 +1062,8 @@ class Catalog:
 
 
 __all__ = ["ExperimentalWarning", "NOT_STATED", "accept", "accepts", "Answer", "AnswerType", "bin_labels", "Catalog", "check_evidence", "Claim",
-           "cuts_number", "Decision", "evidence_rows", "find_whole", "ground", "has_evidence", "locate",
+           "cuts_number", "Decision", "evidence_rows", "find_whole", "ground", "group_func", "has_evidence", "locate",
            "NOT_STATED_KEY", "NotStated", "Part", "plain_json", "PRIMITIVES", "Question", "question_data", "Quote",
            "Serial", "Unknown", "unknown_key", "unwrap", "validated"]
+
+_group_func = group_func          # the name before 1.1

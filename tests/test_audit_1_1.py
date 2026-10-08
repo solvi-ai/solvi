@@ -252,3 +252,17 @@ def test_the_realms_readme_cites_files_that_exist_and_none_is_tracked_against_gi
     if shutil.which("git") and (root / ".git").exists():
         out = subprocess.run(["git", "ls-files", "-ci", "--exclude-standard"], cwd=root, capture_output=True, text=True)
         assert out.returncode != 0 or out.stdout.strip() == ""
+
+
+# --- rows 92 (M2) / 118 (D-22): no module imports a private name of another subpackage where a public one exists
+def test_charts_and_the_planners_import_public_names():
+    import pathlib
+    root = pathlib.Path(__file__).parents[1] / "src" / "solvi"
+    charts = (root / "experimental" / "charts" / "check.py").read_text()
+    assert "from ...core.textin import _" not in charts and "core.textin import NUMBER_WORDS" in charts
+    for f in ("core/plan/cost.py", "core/runtime.py", "experimental/counterfactual.py", "experimental/learning.py"):
+        assert "_group_func" not in (root / f).read_text(), f
+    from solvi.core import textin
+    from solvi.core.catalog import group_func  # noqa: F401
+    assert {"NUMBER_WORDS", "NUMBER_SCALES", "CURRENCY_AFTER", "digits"} <= set(textin.__all__)
+    assert textin.digits("1,250.50") == textin._digits("1,250.50")

@@ -1282,6 +1282,10 @@ def replay_record(r, init):
     return bad
 
 
-__all__ = ["Change", "CueExtractor", "DeciderExtractor", "entry_points", "EntryField", "EntryPoint", "Extractor", "field_spec",
+# the number vocabulary, public for readers of numbers outside this module (solvi.experimental.charts checks a chart's
+# values against the text with it): number words, scale words, a currency written after the number, digit strings
+NUMBER_WORDS, NUMBER_SCALES, CURRENCY_AFTER, digits = _NUM_WORDS, _SCALES, _CUR_AFTER, _digits
+
+__all__ = ["Change", "CURRENCY_AFTER", "digits", "NUMBER_SCALES", "NUMBER_WORDS", "CueExtractor", "DeciderExtractor", "entry_points", "EntryField", "EntryPoint", "Extractor", "field_spec",
            "FieldRead", "FieldSpec", "NUMBER_RE", "parse_bool", "parse_date", "parse_enum", "parse_number",
            "ParseError", "rederive", "replay_record", "SEP", "SOURCE", "TextIn", "TextRead"]

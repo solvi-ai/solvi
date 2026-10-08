@@ -859,11 +859,11 @@ def replay_plan(r, catalog, init_keys):
 
 def narrowed(group, tried):
     """A fact's producer group narrowed to the producers that ran (replay of a plan that dropped the others)."""
-    from .catalog import _group_func
+    from .catalog import group_func
     names = [n for n, _ in tried]
     alts = [a for a in group.alternatives if a.name in names] or list(group.alternatives)
     g = dataclasses.replace(group, alternatives=alts, inputs=list(dict.fromkeys(x for a in alts for x in a.inputs)))
-    g.func = _group_func(g)
+    g.func = group_func(g)
     return g
 
 
