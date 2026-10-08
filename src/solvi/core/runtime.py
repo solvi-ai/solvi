@@ -659,11 +659,11 @@ def _recompute(part, r, args, init, catalog=None):
         v = locate(part, v, init)
         value, quote, _, _ = unwrap(v)
         why = ground(part, v, init)
+        if not why:
+            value, why = check_value(part, value)
         if not why and part.tout is not None:
             from .types import typed_out
             value, why = typed_out(part, value)
-        if not why:
-            value, why = check_value(part, value)
         why = why or validated(part, value, plain)
         if not why and r.error is None and (has_evidence(v) or (isinstance(r.extra, dict) and r.extra.get("evidence"))):
             got = evidence_rows(v) if has_evidence(v) else []
@@ -1168,14 +1168,21 @@ async def _adrive(g, timeout):
 
 
 def check_value(p, value):
-    """A check answers True or False → (value, why not). numpy's bool is taken as a bool; anything else — 0, None from a
-    forgotten return, a list, a string — rejects the step, so the fact is missing and whatever depends on it abstains: a
-    check that failed with a falsy non-bool would otherwise count as passed. A typed check (`-> bool`) is validated by its
-    type instead."""
-    if p.kind != "check" or p.tout is not None or isinstance(value, bool):
+    """A check answers True or False → (value, why not). numpy's bool is taken as a bool (`amount <= limit` over numpy
+    numbers gives one); anything else — 0, 1, None from a forgotten return, a list, a string such as "yes" or "true" —
+    rejects the step, so the fact is missing and whatever depends on it abstains: a check that failed with a falsy
+    non-bool would otherwise count as passed, and one that says "yes" is not saying True. The same for a check declared
+    `-> bool` (strict: its type alone used to read 1, "yes", "true" as True); a check declared with another
+    return type is validated by that type. Called before a typed output is validated."""
+    if p.kind != "check" or isinstance(value, bool):
+        return value, None
+    typed = p.tout is not None
+    if typed and p.returns is not bool:
         return value, None
     if type(value).__module__ == "numpy" and type(value).__name__ in ("bool", "bool_"):    # amount <= limit over numpy
         return bool(value), None                                                          # numbers; numpy is not imported
+    if typed:
+        return value, f"a check declared `-> bool` returns True or False, not {type(value).__name__} ({str(value)[:40]!r})"
     return value, f"a check returns True or False, not {type(value).__name__} ({str(value)[:40]!r}); declare it `-> bool`"
 
 
@@ -1212,11 +1219,11 @@ def _step(p, vals, init_state, policy=None, costs=None, known=None, memo=None, b
     v = locate(p, v, init_state)
     value, quote, conf, probs = unwrap(v)
     why = ground(p, v, init_state)
+    if not why:                                       # a check: True or False (numpy's bool), typed `-> bool` or not
+        value, why = check_value(p, value)
     if not why and p.tout is not None:                # typed output: validated / coerced (a closed set: outside the options)
         from .types import typed_out
         value, why = typed_out(p, value)
-    if not why:
-        value, why = check_value(p, value)
     why = why or validated(p, value, args)
     if why:                                           # rejected: the fact is missing, the claim stays visible in the error
         return StepOut(MISSING, quote, conf, why, hashes, ms, probs=probs, extra=_extra(v))

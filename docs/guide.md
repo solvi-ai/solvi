@@ -176,6 +176,12 @@ def ship_rule(big_order):
   A check can say why it is False: `return Fail("Harold is busy 13:30 - 15:30")` — see
   [A check that says why](#a-check-that-says-why-fail).
 
+  A check returns `True` or `False` (numpy's bools count: `amount <= limit` over numpy numbers gives one), typed
+  `-> bool` or not. Anything else — `1`, `"yes"`, `"true"`, `0`, `None`, a list — rejects the step: the check's status is
+  `"error"` and the questions it governs abstain (guard `hard_check`); it never passes, and `0` or `"no"` does not force
+  the `then` answer either. A check declared with another return type (`-> Literal[True, False]`) is validated by that
+  type.
+
   No rule and no model confidence can override a failed hard check. A hard check whose `then` names a question is put
   into that question's flow by the strategist (since 1.0; the step's reason says `hard check for <question> (then)`), so
   `then=` alone wires it — no `requires=` needed, and the other questions' flows stay as they were. A strategist of your

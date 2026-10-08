@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+### Breaking changes
+
+- **A check declared `-> bool` passes only on a real `True`, like an untyped one.** Its type used to read `1`, `1.0`,
+  `"1"`, `"yes"`, `"true"` as `True` and `0`, `"no"` as `False`; now any value that is not a bool rejects the step —
+  the check's status is `"error"` ("a check declared `-> bool` returns True or False, not str ('yes')") and the questions
+  it governs abstain (guard `hard_check`) instead of being answered or forced. numpy's bools still count (a
+  comparison of numpy numbers gives one). Migration: return `True` / `False` (`return answer == "yes"`), or declare the
+  return type you mean (`-> Literal[True, False]` is validated by its type). Guard policies declared `-> bool` follow
+  the same rule. A decision stored before with such a check replays as `recompute` (the step now gives another value).
+
 ### Changed
 
 - **Replay binds every field of a result to its trace, not only the answer and its status.** With the System,

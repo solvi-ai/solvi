@@ -131,12 +131,41 @@ def test_hole2_numpy_bools_are_bools():
             assert (r.answer, r.status) == want
 
 
-@pytest.mark.parametrize("v", [1, "yes", "true", "1", 1.0])
-def test_hole2_a_typed_check_passes_what_its_type_reads_as_true(v):
-    """A check declared `-> bool` is validated by its type, which reads 1, "yes", "true", "1", 1.0 as True (and 0, "no"
-    as False; None, [], "" are rejected). Pinned as it is; making typed checks strict is a proposed change."""
-    r = _cap_system(lambda a, l: v, typed=True)[1].ask(OVER)["pay"]
-    assert (r.answer, r.status) == ("yes", "ok")
+@pytest.mark.parametrize("v", [1, "yes", "true", "1", 1.0, "True", 2, [True], "ok"])
+def test_hole2_a_typed_check_passes_only_on_true_too(v):
+    """A check declared `-> bool` is as strict as an untyped one: anything but True / False (or numpy's bools) rejects
+    the step and the question abstains — its type no longer reads 1, "yes", "true" as True."""
+    s = _cap_system(lambda a, l: v, typed=True)[1]
+    res = s.ask(OVER)
+    r = res["pay"]
+    assert (r.answer, r.status, r.guard) == (None, "abstain", "hard_check")
+    (c,) = res.checks
+    assert c.status == "error" and "declared `-> bool` returns True or False" in c.reason
+    assert res.trace.replay(s, res.flow)["ok"]
+
+
+@pytest.mark.parametrize("v", [0, "no", "false", "0", 0.0, None, [], ""])
+def test_hole2_a_typed_check_does_not_read_falsy_values_as_false(v):
+    """...nor 0, "no" as False: they do not force the `then` answer either, the question abstains."""
+    r = _cap_system(lambda a, l: v, typed=True)[1].ask({"amount": 5, "limit": 100})["pay"]
+    assert (r.answer, r.status, r.guard) == (None, "abstain", "hard_check")
+
+
+def test_hole2_a_check_typed_otherwise_keeps_its_type():
+    """Only `-> bool` is made strict: a check declared with another return type is validated by that type."""
+    from typing import Literal
+    cat = Catalog()
+
+    @cat.check(hard=True, then={"pay": "no"})
+    def cap(amount, limit) -> Literal[True, False]:
+        return amount <= limit
+
+    @cat.rule("pay")
+    def pay(amount):
+        return "yes"
+
+    s = System(cat, [Question("pay", "Pay?", Answer.choice(["yes", "no"]), requires=["cap"])])
+    assert s.ask(OVER)["pay"].answer == "no" and s.ask({"amount": 5, "limit": 100})["pay"].answer == "yes"
 
 
 @pytest.mark.parametrize("seed", range(6))

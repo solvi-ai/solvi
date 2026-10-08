@@ -182,12 +182,14 @@ Not guaranteed:
 
 ## 7. Hard checks
 
-1. An untyped hard check passes only when it returns `True` (numpy's `True` counts). Any other value — `False`, `0`,
-   `None`, `[]`, `""`, a string — never lets the guarded answer through: `False` forces the `then` answer, a non-boolean
-   rejects the step and the question abstains. The same holds for an untyped guard policy: the call is not allowed.
-   [test_hole2_*]
-2. A check declared `-> bool` is validated by its type, which reads `1`, `1.0`, `"1"`, `"yes"`, `"true"` as `True` and
-   `0`, `"no"` as `False`; `None`, `[]`, `""` are rejected (the question abstains).
+1. A hard check passes only when it returns `True` (numpy's `True` counts), whether it is untyped or declared `-> bool`.
+   Any other value — `False`, `0`, `1`, `None`, `[]`, `""`, a string such as `"yes"` or `"true"` — never lets the
+   guarded answer through: `False` (numpy's `False`, `Fail(...)`) forces the `then` answer, a non-boolean rejects the
+   step (check status `error`, reason "a check [declared `-> bool`] returns True or False, not ...") and the question
+   abstains. The same holds for a guard policy: the call is not allowed. [test_hole2_*]
+2. numpy's `bool_` is taken as a bool, typed or not: it is what a comparison of numpy numbers gives, and it has only
+   the two values, so reading it is not a coercion (the untyped rule has accepted it since the audit fix). A check
+   declared with another return type (`-> Literal[True, False]`, ...) is validated by that type alone.
 3. `cat.check(f, hard=True, then=...)` with the function passed directly registers the same part as the decorator form.
    [test_hole3_*]
 4. An input key named like a check or a computed fact of the catalog is refused (`ValueError`) — in `ask`, over HTTP
