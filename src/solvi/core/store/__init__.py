@@ -925,7 +925,11 @@ class TraceStorage(abc.ABC):
                 problems.append((d.get("seq"), rid, f"sequence number {d.get('seq')} where {n} was expected (records "
                                                     "deleted, inserted or reordered)"))
             if d.get("kind", "ask") == "ask" and not d.get("redacted"):
-                problems += [(d.get("seq"), rid, p) for p in _summary_problems(d)]
+                try:
+                    problems += [(d.get("seq"), rid, p) for p in _summary_problems(d)]
+                except (AttributeError, TypeError, KeyError, IndexError, ValueError) as e:    # damaged in its shape:
+                    problems.append((d.get("seq"), rid, "stored response is malformed (an edit after it was stored): "   # a
+                                     f"{type(e).__name__}: {str(e)[:80]}"))                       # problem, not a crash
             rows.append(d)
             prev, n = d.get("hash"), n + 1
         for rid, (seq, h, by, note) in erased.items():
