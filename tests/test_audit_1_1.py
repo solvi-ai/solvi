@@ -192,3 +192,14 @@ def test_candidate_head_counts_taught_steps_and_costbook_reads_by_name():
     book = CostBook()
     book.observe("total", 4.0)
     assert book.get("total") == 4.0 and book.get("other", default=2.0) == 2.0
+
+
+# --- row 148 (C25): without torch / safetensors, reading an adapter refuses with what to install (runs without torch)
+def test_lora_read_without_its_libraries_says_what_to_install(monkeypatch, tmp_path):
+    import sys
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        from solvi.experimental import lora
+    monkeypatch.setitem(sys.modules, "safetensors", None)
+    with pytest.raises(ImportError, match=r'solvi\[lora\]'):
+        lora.read(tmp_path / "adapter.safetensors")

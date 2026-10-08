@@ -43,6 +43,8 @@ calibration files and served by `solvi serve`), so a build from it is not mistak
 
 ### Fixed
 
+- **`solvi.experimental.lora.read` without torch or safetensors** refuses with what to install (`pip install
+  "solvi[lora]"`) instead of a bare `ModuleNotFoundError`; a test of that refusal runs without torch.
 - **`CandidateHead.n` counts the steps it was taught**, not only those it was fitted on; **`CostBook.get` takes a part's
   name** as well as the part (`observe` takes the name).
 - **One name, one meaning for "type rejected".** `solvi.core.primitives` named its guard kind `TYPE_REJECTED`
