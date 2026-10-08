@@ -43,7 +43,7 @@ import os
 import sys
 import warnings
 
-from .._command import dump as _dump, fail as _fail, load_module, load_object, load_system  # noqa: F401
+from .._command import dump as _dump, fail as _fail, load_module, load_object, load_system, open_store  # noqa: F401
 
 
 STORE_KINDS = (".db / .sqlite / .sqlite3 (SQLite), .duckdb (DuckDB), a postgresql:// URL (PostgreSQL), else a "
@@ -52,10 +52,7 @@ STORE_HELP = "a TraceStorage: " + STORE_KINDS
 
 
 def _store(path, system=None):
-    from ..core.store import open_storage
-    if not path.startswith(("postgresql://", "postgres://")) and not os.path.exists(path):
-        _fail(f"no such store: {path}")
-    return open_storage(path, system)
+    return open_store(path, system, must_exist=True)
 
 
 def _filters(a):
@@ -315,8 +312,7 @@ def cmd_ask(a):
         res = system.ask(state, names)
     stored = None
     if a.store:
-        from ..core.store import open_storage
-        stored = open_storage(a.store, system).save(res)
+        stored = open_store(a.store, system).save(res)
     lang = a.lang or getattr(system, "lang", None)
     if a.json:
         out = {"answers": _answers(res), "safeguards": res.safeguards or [], "ms": res.ms}

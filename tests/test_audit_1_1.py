@@ -72,3 +72,28 @@ def test_uses_naming_nothing_is_a_note_without_a_rule():
     s = System(cat, [Question("risk", "?", Answer.choice(["low", "high"]), uses=["totl"])])
     rep = lint(s)
     assert "uses_unknown" in rep.codes() and "uses_ignored" not in rep.codes()
+
+
+# --- row 73 (F3): a store path that cannot be a store is a usage error (status 2, one line), not a traceback
+def _cli(capsys, *argv):
+    from solvi.cli import main
+    capsys.readouterr()
+    try:
+        code = main([str(a) for a in argv])
+    except SystemExit as e:
+        code = e.code
+    return code, capsys.readouterr().err
+
+
+@pytest.mark.parametrize("store", ["nodir/sub/d.db", "nodir/d.jsonl"])
+def test_ask_store_into_a_missing_directory_is_a_usage_error(tmp_path, capsys, store):
+    from solvi.cli import main
+    d = tmp_path / "app"
+    assert main(["init", str(d), "--template", "support"]) == 0
+    code, err = _cli(capsys, "ask", f"{d}/catalog.py:system", d / "example.json", "--store", tmp_path / store)
+    assert code == 2 and "does not exist" in err and "Traceback" not in err
+
+
+def test_verify_on_a_directory_is_a_usage_error(tmp_path, capsys):
+    code, err = _cli(capsys, "verify", tmp_path)
+    assert code == 2 and "is a directory, not a store" in err

@@ -61,7 +61,7 @@ from . import _deprecate
 # limits, request errors, JSON within the limits, the incident message, the bounded line reader: solvi._rpc since 1.0
 # (shared with the MCP proxy, which then does not import the server); re-exported here
 from ._rpc import CONTEXT_CHARS, CONTEXT_MESSAGES, BadRequest, Busy, Limits, NotFound, RequestError, _readline, internal_error, log, parse_json, too_deep  # noqa: F401
-from ._command import fail as _fail, load_object, load_system
+from ._command import fail as _fail, load_object, load_system, open_store
 from .core._inputs import _camel, _fact_type, input_model, input_schema, question_inputs   # noqa: F401 — re-exported
 from .core.runtime import trace_hash   # noqa: F401 — re-exported (defined there: agents read it too)
 from .core.schema import dump, dumps
@@ -950,6 +950,7 @@ def cmd_serve(a):
         _fail("serve: name a System (module:attr or file.py:attr) and / or a decider (--decider)")
     if a.store and system is None:
         _fail("serve: --store needs a System")
+    store = open_store(a.store, system) if a.store else None
     for k in ("max_body", "max_depth"):
         if getattr(a, k) < 1:
             _fail(f"serve --{k.replace('_', '-')}: must be at least 1")
@@ -962,7 +963,7 @@ def cmd_serve(a):
             _fail("serve --mcp: needs a System (its questions are the tools)")
         if a.mcp_impl == "sdk" and not sdk_available():
             _fail("serve --mcp-impl sdk: the MCP SDK (mcp>=2) is not installed: pip install 'solvi[mcp]'")
-        svc = Service(system, decider, a.store, limits=limits,      # the decider routes texts for the ask_text tool
+        svc = Service(system, decider, store, limits=limits,      # the decider routes texts for the ask_text tool
                       allow_client_no_store=a.allow_client_no_store)
         run_mcp(svc, a.mcp_impl)
         return 0
@@ -979,7 +980,7 @@ def cmd_serve(a):
     if token is None and a.host not in LOOPBACK:
         print(f"solvi serve: warning: listening on {a.host} without a token — anyone who can reach it can ask and store "
               "decisions (set SOLVI_SERVE_TOKEN)", file=sys.stderr)
-    app = create_app(system, decider, a.store, a.model_name, title=f"solvi: {a.system}" if a.system else "solvi",
+    app = create_app(system, decider, store, a.model_name, title=f"solvi: {a.system}" if a.system else "solvi",
                      limits=limits, token=token, cors=a.cors, allow_client_no_store=a.allow_client_no_store)
     uvicorn.run(app, host=a.host, port=a.port, log_level=a.log_level, server_header=False)
     return 0
@@ -1005,8 +1006,7 @@ def _serve_guard(a, _fail, load_object):
     if not isinstance(guard, Guard):
         _fail(f"--guard {a.guard}: not a solvi.Guard")
     if a.store:
-        from .core.store import open_storage
-        guard.storage = open_storage(a.store)
+        guard.storage = open_store(a.store)
     try:
         facts = json.loads(a.facts) if a.facts else None
     except ValueError as e:

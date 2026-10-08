@@ -54,6 +54,11 @@
 - **`DecideModel.logits`, `.score` and `.adaptation` take the question's spec** (`not_stated=`, `evidence=`, `k=`, ...)
   as `decide`, `fit` and `teach` do: a question with "not stated" or evidence could be decided and fitted but not scored,
   and its adaptation could not be looked up.
+- **A store path that cannot be a store is a usage error.** `solvi ask --store nodir/sub/d.db` (a directory that does
+  not exist) and `solvi verify <a directory>` ended in a `sqlite3.OperationalError` traceback with status 1 (the status
+  of "the command ran and found a problem"). Now every command that takes a store (`ask --store`, `verify`, `query`,
+  `replay`, `serve --store`, `serve --guard --store`) says in one line what is wrong — "is a directory, not a store",
+  "the directory ... does not exist", "cannot open the store ..." — and exits with status 2.
 
 ## 1.0.1 — 2026-10-04
 
