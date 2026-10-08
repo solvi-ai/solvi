@@ -3575,12 +3575,23 @@ signatures of tree-shaped objects (derivations), where its non-associativity see
 | two records swapped, one deleted or inserted in the middle | detected, not located |
 | records cut off the end / appended after signing | "signed items missing" / not covered: sign again or `extend` |
 
-| Records | syndrome: sign / locate | octonion experiment (`benchmarks/`): sign / locate |
+The code itself is fast; through a store, reading and hashing the records is what costs. The first table times the code
+alone over 40-byte items (what `benchmarks/trace_signature.py` signs: `"ms"` in its output); the second, a real store of
+stored decisions (a three-question System; `"store_ms"`), where `store.signature()` reads every record and
+`store.verify(signature=)` also re-checks each record's hash, chain link and stored response — measured on a busy
+20-core machine (load ≈ 19), the best of three runs, so expect less on an idle one.
+
+| Items | syndrome code alone: sign / locate | octonion experiment (`benchmarks/`): sign / locate |
 |---|---|---|
 | 1 000 | 1.3 / 1.4 ms | 13 / 16 ms |
 | 10 000 | 13 / 14 ms | 175 / 149 ms |
 | 50 000 | 66 / 67 ms | 0.80 / 0.76 s |
 | size | 64 bytes | 256 bytes |
+
+| Stored decisions | SQLite: `store.signature()` / `verify(signature=)` | JSON lines: `store.signature()` / `verify(signature=)` |
+|---|---|---|
+| 1 000 | 0.34 / 0.83 s | 0.32 / 0.76 s |
+| 10 000 | 2.6 / 7.5 s | 3.8 / 8.2 s |
 
 The signature restores the record's content hash, not the record: to get the record back, pass `candidates` (a backup,
 a replica). It is an error-locating code, not a MAC — anyone who can rewrite the signature can forge it, so keep it where

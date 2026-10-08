@@ -43,6 +43,10 @@ calibration files and served by `solvi serve`), so a build from it is not mistak
 
 ### Fixed
 
+- **Docs: the signature timing says what it times.** The guide's 1,000 records → 1.3 / 1.4 ms was the syndrome code
+  over 40-byte strings; through a store of real decisions `store.signature()` takes about 0.3 s and
+  `verify(signature=)` about 0.8 s per 1,000 records (measured on a busy machine). Both tables are now in the guide, and
+  `benchmarks/trace_signature.py` times the store as well (`"store_ms"`).
 - **A model's quote holding a bool is compared with the text.** `Quote(True, 0, 5)` over "hello" was accepted (a bool
   "could not be compared") and the answer on it was `ok`, although a quote that is not the text is promised a refusal.
   Now a bool is grounded only when the quoted words say it — "yes", "true", "y", "1", "on", "да", "✓" for `True`;

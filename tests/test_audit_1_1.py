@@ -97,3 +97,13 @@ def test_ask_store_into_a_missing_directory_is_a_usage_error(tmp_path, capsys, s
 def test_verify_on_a_directory_is_a_usage_error(tmp_path, capsys):
     code, err = _cli(capsys, "verify", tmp_path)
     assert code == 2 and "is a directory, not a store" in err
+
+
+# --- row 83 (E19): the signature timing says what it times, and gives the time through a real store
+def test_signature_timing_names_items_and_store():
+    import pathlib
+    root = pathlib.Path(__file__).parents[1]
+    guide = (root / "docs" / "guide.md").read_text()
+    assert "| Stored decisions | SQLite: `store.signature()` / `verify(signature=)`" in guide
+    assert "code alone over 40-byte items" in guide
+    assert "def store_times" in (root / "benchmarks" / "trace_signature.py").read_text()
