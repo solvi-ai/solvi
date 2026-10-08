@@ -54,6 +54,7 @@ nav:
       - building_blocks.md
       - Guide: guide-part:Building blocks
       - Decider checkpoint and input format: decide_format.md
+      - Stored decisions, format and replay rules: trace_spec.md
       - Code strategist: strategist.md
   - Experimental:
       - experimental.md
