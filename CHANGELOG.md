@@ -1,5 +1,17 @@
 # Changelog
 
+## Unreleased
+
+### Changed
+
+- **Replay binds every field of a result to its trace, not only the answer and its status.** With the System,
+  `res.trace.replay(system, res.flow)` and `store.replay_all(system)` now also compare each stored result's
+  confidence, why, guard and source with the ones the trace gives; a result edited in any of them (in a response's
+  JSON, or in a store whose every hash was recomputed) is a mismatch of kind `answer` ("data damaged"). Confidence is
+  compared within a relative 1e-9 (`solvi.core.runtime.CONFIDENCE_TOL`): float rounding is not an edit. The why of a
+  record stored by solvi 0.7.1 or earlier (dict keys sorted) is not compared. An `ask_text` decision is compared with
+  the confidence and reason ask_text gave (the reading's confidence and missing fields, rebuilt from the trace).
+
 ## 1.0.1 — 2026-10-04
 
 ### Fixed

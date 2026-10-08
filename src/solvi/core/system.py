@@ -517,7 +517,7 @@ class System:
         for r in trace.records:
             if r.value is not MISSING:
                 vals[r.name] = r.value
-        results = self._results(qs, flow, t, vals)[0]
+        results = self._results(qs, flow, t, vals, _read_of_trace(trace))[0]
         if self.guards:                               # the recorded guard verdicts, re-derived (solvi.core.guarantees.guarantee)
             from .guarantees.guarantee import apply_guards
             apply_guards(self, results, t, vals, flow, live=False)
@@ -1234,6 +1234,26 @@ def _read_results(read, results):
         r.confidence = min([r.confidence] + confs)
     elif r.status == "abstain" and read.missing:
         r.why = f"not stated in the text: {', '.join(read.missing)}; {r.why}"
+
+
+def _read_of_trace(trace):
+    """ask_text: what _read_results needs of the read (the question, the entry point's confidence, the fields read and
+    the required ones missing), rebuilt from the trace's "textin" records — so answers_of gives the confidence and the
+    reason ask_text gave. None for a trace without them, or whose entry point escalated (nothing was asked)."""
+    from types import SimpleNamespace
+
+    from .textin import ROUTE
+    route = next((r for r in trace.records if r.kind == "textin" and r.name == ROUTE), None)
+    if route is None or route.value is None:
+        return None
+    fields = {}
+    for r in trace.records:
+        if r.kind == "textin" and r.name != ROUTE:
+            ex = r.extra if isinstance(r.extra, dict) else {}
+            fields[ex.get("field", r.name.split(":", 1)[-1])] = SimpleNamespace(
+                status=ex.get("status"), confidence=r.confidence, required=bool(ex.get("required")))
+    missing = [f for f, x in fields.items() if x.status not in ("read", "given") and (x.required or x.status == "conflict")]
+    return SimpleNamespace(question=route.value, route={"confidence": route.confidence}, fields=fields, missing=missing)
 
 
 def _then_answer(catalog, check, q, trace, vals, flow, said):

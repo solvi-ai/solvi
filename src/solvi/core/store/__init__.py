@@ -1005,6 +1005,8 @@ class TraceStorage(abc.ABC):
                 except Exception as e:  # noqa: BLE001
                     failed(s, "load", e)
                     continue
+            if int(s.data.get("v") or 1) < 2:         # stored with sorted dict keys: a reason that shows a dict shows it
+                r.trace.legacy_order = True           # in another order than it was written (not an edit; see LEGACY_ORDER)
             try:                                      # a compact decision's steps (and models) were just re-run by
                 rep = r.trace.replay(system, r.flow, trust_models=trust_models or s.compact)   # rederive: not again
             except Exception as e:  # noqa: BLE001

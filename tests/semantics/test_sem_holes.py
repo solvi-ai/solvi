@@ -220,17 +220,47 @@ def test_hole4_an_answer_edited_in_the_store_with_every_hash_recomputed_does_not
     assert [b["seq"] for b in bad] == [i] and bad[0]["kinds"] == {"answer": 1}
 
 
-@pytest.mark.xfail(strict=True, reason="open: only an answer and its status are bound to the trace — a stored "
-                                       "result's confidence, why, guard or source can be edited and still replays ok "
-                                       "(runtime.py _answers_differ compares answer and status only)")
-@pytest.mark.parametrize("field,value", [("confidence", 0.37), ("why", "forged"), ("source", "cap")])
-def test_open_a_results_other_fields_are_bound_to_the_trace(field, value):
+@pytest.mark.parametrize("field,value", [("confidence", 0.37), ("why", "forged"), ("source", "cap"), ("guard", "hard_check"),
+                                         ("confidence", 1.0 - 1e-6)])
+def test_hole4_a_results_other_fields_are_bound_to_the_trace(field, value):
+    """Every field a result is read for — confidence, why, guard, source, not only the answer and its status — is
+    compared on replay; an edit is a mismatch of kind `answer` (docs/trace_spec.md §5)."""
     s = system()
     res = s.ask({"amount": 5, "limit": 100})
     d = json.loads(res.to_json())
+    assert d["results"]["pay"][field] != value
     d["results"]["pay"][field] = value
     forged = Response.from_json(json.dumps(d))
-    assert not forged.trace.replay(s, forged.flow)["ok"]
+    rep = forged.trace.replay(s, forged.flow)
+    assert not rep["ok"] and rep["answers"] == "differ" and rep["kinds"] == {"answer": 1}
+    assert field in rep["mismatches"][0][2] and rep["summary"].startswith("data damaged")
+
+
+def test_hole4_a_confidence_within_float_rounding_still_replays():
+    """Confidence is compared within runtime.CONFIDENCE_TOL (1e-9, relative): float rounding is not an edit."""
+    s = system()
+    res = s.ask({"amount": 5, "limit": 100})
+    d = json.loads(res.to_json())
+    d["results"]["pay"]["confidence"] *= 1 + 1e-12
+    again = Response.from_json(json.dumps(d))
+    assert again.trace.replay(s, again.flow)["ok"]
+
+
+@pytest.mark.parametrize("seed", SEEDS)
+def test_hole4_a_why_edited_in_the_store_with_every_hash_recomputed_does_not_replay(tmp_path, seed):
+    rng = rng_for(seed)
+    s = system()
+    st = JSONLStorage(tmp_path / "s.jsonl", system=s, record=rng.choice(["full", "compact"]))
+    for _ in range(3):
+        st.save(s.ask(random_input(rng)))
+    recs = read_lines(st.path)
+    i = rng.randrange(len(recs))
+    q = rng.choice(sorted(recs[i]["answers"]))
+    (recs[i].get("response") or recs[i].get("compact"))["results"][q]["why"] = "approved by the manager"
+    write_lines(st.path, recs, rechain(recs))
+    st = JSONLStorage(st.path, system=s)
+    bad = st.replay_all(s)
+    assert [b["seq"] for b in bad] == [i] and bad[0]["kinds"] == {"answer": 1}
 
 
 @pytest.mark.xfail(strict=True, reason="open: a stored record's index fields (guards, safeguards, models, flow, the "

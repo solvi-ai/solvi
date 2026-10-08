@@ -3352,8 +3352,11 @@ System: a bare catalog replays the steps but cannot check the answers, and the r
 - that recomputing the part gives the recorded value (and the same quote offsets);
 - that quotes lie within the source text (and, for model-backed parts, are literally the quoted text);
 - for model-backed steps, that the recorded model fingerprint matches the catalog's current model (see below);
-- with the System: that each stored answer and its status are the ones the trace gives — the hard checks, rules, heads
-  and constraints applied again to the recorded facts. An answer edited after the run is a mismatch of kind `answer`.
+- with the System: that each stored result is the one the trace gives — the hard checks, rules, heads and constraints
+  applied again to the recorded facts — in every field it is read for: the answer, its status, its confidence (within a
+  relative 1e-9, `solvi.core.runtime.CONFIDENCE_TOL`: float rounding, never an edit), why, guard and source. A result
+  edited after the run is a mismatch of kind `answer`. (A record stored by solvi 0.7.1 or earlier, with dict keys
+  sorted, is compared without its why: a dict in it reads in another order than it was written.)
 
 It returns `{"ok": bool, "steps": int, "mismatches": [(step, name, reason), ...], "models": [(step, name, verdict), ...],
 "answers": "same" | "differ" | "unchecked", "catalog": "same" | "changed" | "unrecorded"}` (with `"changed_parts"` when the catalog changed since the trace was

@@ -520,11 +520,45 @@ def _not_restored(bad, n0, lossy, r):
             bad[i] = Mismatch(m[0], m[1], f"{m[2]} — not checked: {_lost_text(lossy, lost)}", "not_restored")
 
 
+CONFIDENCE_TOL = 1e-9
+"""How far a stored result's confidence may be from the one its trace gives and still count as the same (relative, and
+absolute for confidences near 0): room for float rounding — a product or a calibration computed in another order, a
+model's probabilities on another BLAS — never for an edit (a stored record keeps confidence to 4 digits; an edited one
+moves it by far more)."""
+
+
+def _same_confidence(a, b):
+    try:
+        a, b = float(a), float(b)
+    except (TypeError, ValueError):
+        return a == b
+    if math.isnan(a) or math.isnan(b):
+        return math.isnan(a) and math.isnan(b)
+    return math.isclose(a, b, rel_tol=CONFIDENCE_TOL, abs_tol=CONFIDENCE_TOL)
+
+
+def _result_differs(was, now, why=True):
+    """The fields of a stored result that differ from the one its trace gives → [field] (see _answers_differ). why=False:
+    the reason is not compared (a record of format 1, stored with sorted dict keys: a dict in the reason is shown in
+    another order than it was written)."""
+    out = []
+    if vhash(was.answer) != vhash(now.answer):
+        out.append("answer")
+    for k in ("status", "why", "guard", "source") if why else ("status", "guard", "source"):
+        if getattr(was, k, None) != getattr(now, k, None):
+            out.append(k)
+    if not _same_confidence(was.confidence, now.confidence):
+        out.append("confidence")
+    return out
+
+
 def _answers_differ(trace, system, flow):
     """The answers stored with a trace against the ones the trace gives under `system` (System.answers_of) → mismatches.
     Kind "answer" when the system's questions and catalog are the recorded ones — then a stored answer that differs was
-    edited after the run; else "recompute": the questions or the catalog changed since. Compared: the answer and its
-    status. Not compared: an abstention ask_text made before any flow ran (the entry point escalated)."""
+    edited after the run; else "recompute": the questions or the catalog changed since. Compared: every field a result
+    is read for — the answer, its status, its confidence (within CONFIDENCE_TOL: float rounding), why, guard and source.
+    Not compared: an abstention ask_text made before any flow ran (the entry point escalated); the reason of a record of
+    format 1 (trace.legacy_order, set by TraceStorage.replay_all)."""
     stored = {q: r for q, r in trace.answers.items() if not (getattr(r, "source", None) == "textin" and r.status == "abstain")}
     gone = [q for q in stored if q not in system.questions]
     try:
@@ -538,9 +572,15 @@ def _answers_differ(trace, system, flow):
     out = [Mismatch(0, f"answer:{q}", "the question is not in the system (renamed or removed)", "missing_part") for q in gone]
     for q, a in now.items():
         was = stored[q]
-        if vhash(was.answer) != vhash(a.answer) or was.status != a.status:
-            out.append(Mismatch(0, f"answer:{q}", f"stored answer {was.answer!r} [{was.status}] is not the one the trace "
-                                f"gives: {a.answer!r} [{a.status}]", "answer" if same_system else "recompute"))
+        diff = _result_differs(was, a, why=not getattr(trace, "legacy_order", False))
+        if not diff:
+            continue
+        if diff[0] in ("answer", "status"):
+            why = f"stored answer {was.answer!r} [{was.status}] is not the one the trace gives: {a.answer!r} [{a.status}]"
+        else:
+            why = f"stored answer {was.answer!r} [{was.status}] is the one the trace gives, but its " + ", ".join(
+                f"{k} {str(getattr(was, k, None))[:60]!r} is not {str(getattr(a, k, None))[:60]!r}" for k in diff)
+        out.append(Mismatch(0, f"answer:{q}", why, "answer" if same_system else "recompute"))
     return out
 
 

@@ -136,9 +136,13 @@ Guaranteed:
    replays with `ok` true, `answers == "same"`; replaying twice gives the same result.
    [test_a_decision_replays_ok_fresh_reloaded_and_twice, test_every_stored_decision_replays_and_rederives_to_its_answers]
 3. A compact record re-derives to the answers and step hashes of the original decision.
-4. Replayed with the System, an answer or a status edited after the run — in a response's JSON, or in a store whose
-   every hash was recomputed — is a mismatch of kind `answer` and the summary starts with `data damaged`.
-   [test_hole4_*]
+4. Replayed with the System, any field of a result edited after the run — the answer, its status, its confidence, why,
+   guard or source; in a response's JSON, or in a store whose every hash was recomputed — is a mismatch of kind
+   `answer` and the summary starts with `data damaged`. Confidence is compared within a relative (and, near 0,
+   absolute) 1e-9 (`solvi.core.runtime.CONFIDENCE_TOL`): room for float rounding — a product or a calibration computed
+   in another order, a model's probabilities on another BLAS — and far below the 4 digits a record keeps. The why of a
+   format-1 record is not compared (its dicts were stored with sorted keys, so a dict in a reason reads in another
+   order). [test_hole4_*]
 5. Replayed against a catalog that changed, the summary says the catalog changed, never `data damaged`.
    [test_a_changed_rule_is_told_from_damaged_data]
 6. Mismatch kinds: `integrity`, `answer` (the data was changed); `recompute`, `model_changed`, `missing_part`,
@@ -147,9 +151,8 @@ Guaranteed:
 Not guaranteed:
 
 - Replayed with a bare Catalog, answers are not checked (`answers == "unchecked"`).
-- Only the answer and its status are bound to the trace. A result's confidence, why, guard, source and the record's
-  index fields (`guards`, `safeguards`, `models`, the confidence in `answers`) can be changed consistently and still
-  replay ok. Open: see §9.
+- A result's `probs`, `evidence`, `extra`, `repaired`, `provenance` and `kind` are not compared: edited consistently they
+  still replay ok (the step records they were taken from are bound by their hashes).
 - A trace rebuilt honestly from a different input is consistent; compare `init_hash` with a receipt kept elsewhere.
 - Parts that call external systems must return the same values on replay, or their steps do not recompute.
 
