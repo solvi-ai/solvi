@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 1.1.0 (unreleased)
 
 ### Breaking changes
 
@@ -37,6 +37,16 @@
   a minor version: readers of 2.0.0 may ignore the new values). Code that tested `guard is None` to find missing inputs
   for a hard check should test `guard == "no_data"`. Such a decision stored by solvi 1.0.1 or earlier (guard none,
   "cannot compute: cap") still replays ok.
+
+### Fixed
+
+- **A model's quote holding a bool is compared with the text.** `Quote(True, 0, 5)` over "hello" was accepted (a bool
+  "could not be compared") and the answer on it was `ok`, although a quote that is not the text is promised a refusal.
+  Now a bool is grounded only when the quoted words say it — "yes", "true", "y", "1", "on", "да", "✓" for `True`;
+  "no", "false", "n", "0", "off", "нет", "✗" for `False` (any case, end punctuation ignored;
+  `solvi.core.provenance.BOOL_WORDS`); any other text rejects the output as `not grounded` and the questions on it
+  abstain. A model that quoted, say, the word "paid" for `True` should quote the checkbox word or return a string.
+  A `datetime` or a list value is still not compared (said so in the README and the guide).
 
 ## 1.0.1 — 2026-10-04
 

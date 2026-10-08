@@ -187,7 +187,7 @@ def test_hallucination_falls_back_to_the_next_producer():
 def test_numbers_are_grounded_as_written_and_other_types_are_not_compared():
     assert matches("Acme  Tools\nGmbH", "Acme Tools GmbH") and not matches("Acme", "Acme Tools")
     assert matches(1250.0, "1,250.00") and matches(1250, "EUR 1 250") and not matches(1250.5, "1,250.00")
-    assert matches(True, "yes") is None
+    assert matches(True, "yes") is True and matches(True, "hello") is False   # a bool: its words (1.1)
     ex = FakeExtractor(hallucinate="9,999.00")
     for halluc, grounded in ((None, True), ("9,999.00", False)):
         ex.hallucinate = halluc
@@ -441,7 +441,7 @@ def test_a_models_quote_of_a_decimal_a_numpy_number_or_a_date_is_compared_with_t
     assert matches(datetime.date(2020, 1, 1), "hello") is False and matches(datetime.date(2020, 1, 1), "on 2020-01-01") is True
     assert matches(datetime.date(2026, 9, 12), "12 September 2026") is True
     assert matches(datetime.date(2026, 9, 13), "12 September 2026") is False
-    assert matches(datetime.date(2026, 9, 12), "12 Sep") is None and matches(True, "yes") is None   # cannot be compared
+    assert matches(datetime.date(2026, 9, 12), "12 Sep") is None   # cannot be compared
 
     class M:
         version = "1"
