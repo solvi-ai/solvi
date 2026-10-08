@@ -51,6 +51,31 @@ model; measure it on your task first.
   notices it. After a flag, stop answering alone until the thresholds are calibrated again
   ([the guide explains this](guide.md#thresholds-with-a-guarantee-act_guard-learn-then-test-conformal-sets)).
 
+## Where it is going
+
+solvi is being built toward a **verification-first runtime for autonomous systems** made of specialised models, rules,
+knowledge and computation — systems that learn from experience, model the consequences of their actions, change their
+own behaviour and evolve, but only under verification they cannot switch off. Models propose. Experience teaches.
+Search explores. solvi decides what survives.
+
+What this means in practice:
+
+- **Models point, code answers.** For anything that can be computed or looked up — arithmetic, dates, a value in a
+  table, a comparison, a rule — a model chooses the operation and points at its operands; the answer comes only from
+  executing it. When no operation fits, the answer is "cannot compute", never a guess. Where nothing can be computed (a
+  judgement), the model's choice is the answer, marked as the model's, with a quote checked against the source.
+- **A change to the system is a candidate, not an edit.** A new rule, parameter, piece of code, or knowledge from a new
+  version of a document — proposed by an LLM, a search, a person or the system's own experience — is compared with the
+  current system on cases it has not seen and on past decisions, and is promoted or rejected with its evidence
+  recorded. Every version can be replayed and rolled back. Parameters and rules can be promoted by the checks alone;
+  code, model weights and knowledge from documents also need a person; goals and the checks themselves are changed
+  only by people.
+- **Learning only from signals outside the system**: an outcome, a check, a correction, a label — never from its own
+  accepted answers.
+
+Status: this is a direction, not a promise. What is measured today is listed below under *Honest limits* and *Where it
+stands*; the rest is research, and its measurements are published whether they pass or not.
+
 ## Honesty
 
 - Only what measurably helps enters the library. A feature whose gain is not clear in general stays out, or stays

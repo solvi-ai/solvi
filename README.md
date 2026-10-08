@@ -13,6 +13,9 @@ promise on the errors), `solvi.Agent` (acting in an environment), `solvi.Guard` 
 made of, each replaceable by a part of your own. What works but has no measured gain yet is kept apart in
 `solvi.experimental`.
 
+Where solvi is going — systems that learn from experience and change themselves only through checks they cannot switch
+off — is described, with what is measured and what is research, in [the mission](docs/mission.md#where-it-is-going).
+
 ## Install
 
 ```bash
