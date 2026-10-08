@@ -7,22 +7,25 @@ from dataclasses import dataclass
 
 from .. import _deprecate
 from .catalog import Serial
-from .runtime import MISSING
+from .runtime import MISSING, NO_DATA
 
 
 @dataclass
 class CheckResult:
     """One check of a decision (`res.checks`): its name, the questions whose flow ran it, its status — "passed",
-    "failed", "skipped" (not run: a failed hard check settled every question that needed it) or "error" (it could not
-    be evaluated: a missing input, an exception, not a bool) — whether it is hard, the reason (a failed check: the
-    reasons it gave with `Fail(...)`, else its docstring's first line, else "<name> is false"; an error: the error;
-    skipped: why) and, for a failed hard check, the answers its `then` set: {question: answer}."""
+    "failed", "skipped" (not run: a failed hard check settled every question that needed it, or — no data — a hard check
+    that could not be planned because inputs it needs are not given) or "error" (it ran and could not be evaluated: an
+    exception, not a bool) — whether it is hard, the reason (a failed check: the reasons it gave with `Fail(...)`, else
+    its docstring's first line, else "<name> is false"; an error: the error; skipped: why), for a failed hard check the
+    answers its `then` set: {question: answer}, and for a hard check without data the given inputs it misses (`missing`;
+    None otherwise)."""
     name: str
     questions: list
     status: str
     hard: bool
     reason: str | None = None
     then: dict | None = None
+    missing: list | None = None
 
     @property
     def passed(self):
@@ -30,8 +33,11 @@ class CheckResult:
 
     def to_dict(self):
         """As JSON data (an answer as stored: a tuple as a list, "not stated" as "<not stated>")."""
-        return {"name": self.name, "questions": list(self.questions), "status": self.status, "hard": self.hard,
-                "reason": self.reason, "then": None if self.then is None else {q: _plain(a) for q, a in self.then.items()}}
+        d = {"name": self.name, "questions": list(self.questions), "status": self.status, "hard": self.hard,
+             "reason": self.reason, "then": None if self.then is None else {q: _plain(a) for q, a in self.then.items()}}
+        if self.missing is not None:                  # checks with data are written exactly as before
+            d["missing"] = list(self.missing)
+        return d
 
 
 def _plain(v):
@@ -81,6 +87,15 @@ def checks_of(resp):
         else:
             status, reason = "passed", None
         out.append(CheckResult(name, qs, status, hard, reason, then))
+    nodata = {}                                       # hard checks not planned for lack of data (guard "no_data"): after
+    for q, x in resp.results.items():                 # the flow's checks, in the order the questions name them
+        for name, missing in ((x.extra or {}).get(NO_DATA) or {}).items() if x.guard == NO_DATA else ():
+            c = nodata.get(name)
+            if c is None:
+                c = nodata[name] = CheckResult(name, [], "skipped", True, "no data: missing " + ", ".join(missing),
+                                               missing=list(missing))
+                out.append(c)
+            c.questions.append(q)
     return out
 
 
@@ -92,7 +107,7 @@ class Response(Serial):
     A response keeps a strong reference to the System that answered it (for `report()`: the questions, the answer heads,
     the replay). Deliberately not a weak one: `System(cat, qs).ask(state).report()` is common
     and the temporary System would be gone before the report runs. A response you keep for long keeps its System (and its
-    models) alive; keep `res.to_dict()` or the stored record instead, or drop the reference with `res._system = None`
+    models) alive; keep `res.to_dict()` or the stored record instead, or drop the reference with `res.detach()`
     (then pass `system=` to report)."""
     results: dict
     flow: object
@@ -122,7 +137,8 @@ class Response(Serial):
     def checks(self):
         """Every check of this decision's flow as data, in flow order → [CheckResult]: name, questions, status ("passed",
         "failed", "skipped", "error"), hard, reason (what `Fail(...)` said), and the answers a failed hard check's `then`
-        set. In `to_dict()` (and so in a stored decision) as "checks"; derived from the trace, never parsed from text."""
+        set; then the hard checks that could not be planned for lack of data (guard "no_data"), "skipped" with the
+        missing inputs. In `to_dict()` (and so in a stored decision) as "checks"; derived from the trace, never parsed from text."""
         return checks_of(self)
 
     @property
@@ -217,6 +233,12 @@ class Response(Serial):
         from .store.audit import build
         a = build(self, question, lang=self.lang if lang is None else lang)
         return a[question] if isinstance(question, str) else a
+
+    def detach(self):
+        """Drop this response's reference to the System that answered it (so a response kept for long does not keep
+        the System and its models alive) → the response. Afterwards pass `system=` to `report()`."""
+        self._system = None
+        return self
 
     def report(self, format="md", question=None, system=None, replay="trusted"):
         """A human-readable report of this decision for an auditor or a customer: each answer, what it rests on, the quotes

@@ -220,9 +220,9 @@ class Rerun:
                         q = _pinned(p, rec)
                         self._note(p.name, rec)
                     else:
-                        from ..core.catalog import _group_func
+                        from ..core.catalog import group_func
                         q = dataclasses.replace(p, alternatives=alts)
-                        q.func = _group_func(q)
+                        q.func = group_func(q)
                         self.held += [f"{p.name} ({a.name}: left out)" for a in p.alternatives if _fuzzy(a)]
             elif _fuzzy(p):
                 q = _pinned(p, rec)

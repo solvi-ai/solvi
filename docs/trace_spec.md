@@ -20,7 +20,9 @@ machine-readable schema of a record is `src/solvi/core/store/record.schema.json`
 
 - `v` is the record format. This version of solvi writes `v: 2` (`solvi.core.store.FORMAT`). Format 1 (solvi 0.7.1 and
   earlier) is read and verified, never written.
-- `record.schema.json` describes format 2; its `x-schema-version` is `2.0.0`. Records of kinds `ask`, `teach`,
+- `record.schema.json` describes format 2; its `x-schema-version` is `2.1.0` (2.0.0 plus the guard `no_data`, its
+  result's `extra["no_data"]` and a response check's optional `missing` — a minor version: a 2.0.0 reader may ignore
+  them, and the hash body does not change; `x-schema-changes` lists each version). Records of kinds `ask`, `teach`,
   `redaction` and `segment` are closed: a new field is a new schema version (minor when readers may ignore it, major
   when the hash body changes). Other kinds (`knowledge`, `dispatch`, `policy`, `refine`, `update`) are checked for the
   envelope only. [test_sem_record_schema]
@@ -104,9 +106,13 @@ Guaranteed (each is a test):
    [test_every_field_of_every_record_edited_alone_fails_verify, test_a_field_added_or_removed_fails_verify]
 2. Deleting, inserting, duplicating or swapping records makes `ok` false; so does cutting records off the end while the
    stored head still counts them. [test_deleting_inserting_reordering_or_cutting_records_fails_verify]
-3. A full or compact `ask` record whose summary disagrees with its stored response (answers and statuses, `init_hash`,
-   step hashes, the trace's own links) makes `ok` false. A record whose stored response is malformed is a problem, not
-   an exception.
+3. A full or compact `ask` record whose summary disagrees with its stored response (answers, statuses and the
+   confidence in `answers` — the result's confidence rounded to 4 digits —, `init_hash`, step hashes, the trace's own
+   links, `guards`, `safeguards`, `models` and, for a full record, `flow`) makes `ok` false: what `query()` and the SQL
+   index tables read is what the response holds. A compact record keeps no planned flow; its `flow` is compared with
+   the flow planned again when it is re-derived (`replay_all`: kind `integrity` under the same catalog and questions,
+   else `flow`). A record whose stored response is malformed is a problem, not an exception.
+   [test_hole6_a_records_index_fields_agree_with_its_response]
 4. On SQL backends, a row column or an index row (answers, safeguards, models) that differs from the record's JSON makes
    `ok` false. [test_sqlite_body_and_index_edits_fail_verify]
 5. `verify(anchor=head)` with a head taken earlier and kept elsewhere makes `ok` false when the records it covers were
@@ -136,9 +142,13 @@ Guaranteed:
    replays with `ok` true, `answers == "same"`; replaying twice gives the same result.
    [test_a_decision_replays_ok_fresh_reloaded_and_twice, test_every_stored_decision_replays_and_rederives_to_its_answers]
 3. A compact record re-derives to the answers and step hashes of the original decision.
-4. Replayed with the System, an answer or a status edited after the run — in a response's JSON, or in a store whose
-   every hash was recomputed — is a mismatch of kind `answer` and the summary starts with `data damaged`.
-   [test_hole4_*]
+4. Replayed with the System, any field of a result edited after the run — the answer, its status, its confidence, why,
+   guard or source; in a response's JSON, or in a store whose every hash was recomputed — is a mismatch of kind
+   `answer` and the summary starts with `data damaged`. Confidence is compared within a relative (and, near 0,
+   absolute) 1e-9 (`solvi.core.runtime.CONFIDENCE_TOL`): room for float rounding — a product or a calibration computed
+   in another order, a model's probabilities on another BLAS — and far below the 4 digits a record keeps. The why of a
+   format-1 record is not compared (its dicts were stored with sorted keys, so a dict in a reason reads in another
+   order). [test_hole4_*]
 5. Replayed against a catalog that changed, the summary says the catalog changed, never `data damaged`.
    [test_a_changed_rule_is_told_from_damaged_data]
 6. Mismatch kinds: `integrity`, `answer` (the data was changed); `recompute`, `model_changed`, `missing_part`,
@@ -147,9 +157,8 @@ Guaranteed:
 Not guaranteed:
 
 - Replayed with a bare Catalog, answers are not checked (`answers == "unchecked"`).
-- Only the answer and its status are bound to the trace. A result's confidence, why, guard, source and the record's
-  index fields (`guards`, `safeguards`, `models`, the confidence in `answers`) can be changed consistently and still
-  replay ok. Open: see §9.
+- A result's `probs`, `evidence`, `extra`, `repaired`, `provenance` and `kind` are not compared: edited consistently they
+  still replay ok (the step records they were taken from are bound by their hashes).
 - A trace rebuilt honestly from a different input is consistent; compare `init_hash` with a receipt kept elsewhere.
 - Parts that call external systems must return the same values on replay, or their steps do not recompute.
 
@@ -160,19 +169,27 @@ Not guaranteed:
   else `computed`).
 - An answer's status is one of `ok`, `forced` (a failed hard check's `then` set it), `abstain`.
 - A check's status in `res.checks` is one of `passed`, `failed`, `skipped`, `error`.
-- **No data vs. cannot be checked.** A hard check whose input is not given is not planned: the question abstains with
-  guard `None`, and the check is absent from `res.checks`. A hard check that raised or returned a value that is not a
-  boolean: the question abstains with guard `hard_check`, and the check's status is `error`. The response tells the two
-  apart; the store's answer triple (`[answer, confidence, "abstain"]`) does not. [test_sem_statuses]
+- **No data vs. cannot be checked.** A hard check that governs a question and whose inputs are not given (and cannot be
+  computed) is not planned: the question abstains with guard `no_data` (source: the check; `extra["no_data"]`:
+  `{check: [the given inputs it misses]}`, walked back through facts that cannot be computed), and the check is listed
+  in `res.checks` after the flow's checks with status `skipped`, `missing` naming those inputs. A hard check that ran
+  and raised or returned a value that is not a boolean: the question abstains with guard `hard_check`, and the check's
+  status is `error`. Both keep the status `abstain` (an answer's status is unchanged, so every reader of `abstain`
+  keeps working); the store tells them apart in the record's `guards` (and the SQL index's guard column). A question
+  that cannot be computed for any other reason (a rule's input, a soft check) abstains with guard `None`, "cannot
+  compute: ...". `no_data` is not a safeguard event (`safeguards` and `system.stats` do not count it): nothing was
+  rejected, an input was missing. [test_sem_statuses]
 
 ## 7. Hard checks
 
-1. An untyped hard check passes only when it returns `True` (numpy's `True` counts). Any other value — `False`, `0`,
-   `None`, `[]`, `""`, a string — never lets the guarded answer through: `False` forces the `then` answer, a non-boolean
-   rejects the step and the question abstains. The same holds for an untyped guard policy: the call is not allowed.
-   [test_hole2_*]
-2. A check declared `-> bool` is validated by its type, which reads `1`, `1.0`, `"1"`, `"yes"`, `"true"` as `True` and
-   `0`, `"no"` as `False`; `None`, `[]`, `""` are rejected (the question abstains).
+1. A hard check passes only when it returns `True` (numpy's `True` counts), whether it is untyped or declared `-> bool`.
+   Any other value — `False`, `0`, `1`, `None`, `[]`, `""`, a string such as `"yes"` or `"true"` — never lets the
+   guarded answer through: `False` (numpy's `False`, `Fail(...)`) forces the `then` answer, a non-boolean rejects the
+   step (check status `error`, reason "a check [declared `-> bool`] returns True or False, not ...") and the question
+   abstains. The same holds for a guard policy: the call is not allowed. [test_hole2_*]
+2. numpy's `bool_` is taken as a bool, typed or not: it is what a comparison of numpy numbers gives, and it has only
+   the two values, so reading it is not a coercion (the untyped rule has accepted it since the audit fix). A check
+   declared with another return type (`-> Literal[True, False]`, ...) is validated by that type alone.
 3. `cat.check(f, hard=True, then=...)` with the function passed directly registers the same part as the decorator form.
    [test_hole3_*]
 4. An input key named like a check or a computed fact of the catalog is refused (`ValueError`) — in `ask`, over HTTP
@@ -195,17 +212,23 @@ id and hash.
    names it (or with another who / why) is a verify problem.
 5. Not done: copies made before (backups, exports) and what was learned from the record are not touched.
 
-## 9. Open points and proposed changes (the author's decision)
+## 9. Decisions (the author's)
 
-- **Bind every field of a result to the trace.** Replay compares answer and status only; confidence, why, guard and
-  source can be edited (`runtime._answers_differ`). Pinned as `xfail(strict=True)`.
-- **Check a record's summary against its response.** `guards`, `safeguards`, `models`, `flow` and the confidence in
-  `answers` are not compared with the stored response (`store._summary_problems`): after a consistent rewrite, `query`
-  finds what never happened. Pinned as `xfail(strict=True)`.
-- **Store "no data" apart from "cannot be checked".** Proposed: a status (or a stored guard) `no_data` for a question
-  whose hard check could not be planned, and the check listed in `res.checks` with status `skipped` and the missing
-  inputs. Today both are `abstain` in the store.
-- **Strict typed checks.** Proposed: a `-> bool` check passes only on a real boolean, as an untyped one does (today its
-  type reads `"yes"` and `1` as `True`).
-- **Wider value hashes.** Step and input hashes are 64 bits (16 hex digits). Enough against accidents; a port may
-  want the full 256 bits in a format 3.
+Done:
+
+- **Every field of a result is bound to the trace.** Replay compares confidence (within 1e-9), why, guard and source
+  besides the answer and its status (§5.4). [test_hole4_a_results_other_fields_are_bound_to_the_trace]
+- **A record's summary is checked against its response.** `verify()` compares `guards`, `safeguards`, `models`,
+  `flow` and the confidence in `answers` with the stored response (§4.3). [test_hole6_*]
+- **"No data" is stored apart from "cannot be checked".** Guard `no_data`, the check `skipped` in `res.checks` with
+  its missing inputs; the status stays `abstain` (§6); record schema 2.1.0. [test_sem_statuses]
+- **Strict typed checks.** A `-> bool` check passes only on a real boolean, as an untyped one does; numpy's bools count
+  (§7). [test_hole2_*]
+
+Decided, not done:
+
+- **Wider value hashes in a format 3.** Step and input hashes are 64 bits today (16 hex digits of SHA-256): enough
+  against accidents, short for a port or an adversary. A future record format 3 will hash steps and inputs with
+  **BLAKE3**, 256 bits (fast, and one function for every length of value); if BLAKE3 is not acceptable as a dependency,
+  with full-length SHA-256 (64 hex digits) instead. Formats 1 and 2 keep their 16-digit hashes and are still read and
+  verified; nothing written today changes.

@@ -542,8 +542,13 @@ def save(part, path):
 
 
 def read(path):
-    """An adapter file → LoraAdapter (ValueError if it is not one, or its content does not match its hash)."""
-    from safetensors import safe_open
+    """An adapter file → LoraAdapter (ValueError if it is not one, or its content does not match its hash; ImportError
+    with what to install when safetensors or torch is missing)."""
+    try:
+        import torch  # noqa: F401 — safe_open(framework="pt") reads into torch tensors
+        from safetensors import safe_open
+    except ImportError:
+        raise ImportError('reading a LoRA adapter needs torch and safetensors: pip install "solvi[lora]"') from None
     with safe_open(str(path), framework="pt") as f:
         meta = f.metadata() or {}
         tensors = {k: f.get_tensor(k).float() for k in f.keys()}

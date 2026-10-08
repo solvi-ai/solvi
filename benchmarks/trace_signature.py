@@ -11,7 +11,10 @@ with that anchor (TraceStorage.verify(anchor=head)) says the store was rewritten
   32 float64 = 256 bytes; restores 28 bytes of the hash;
 - (not a code) all record hashes kept elsewhere: 32 bytes per record, locates any number of changes.
 
-Also: two and three changes (a code must refuse to locate, never name a wrong record), and time per store size."""
+Also: two and three changes (a code must refuse to locate, never name a wrong record), and time per store size — of the
+code alone over 40-byte items ("ms"), and through a real store of stored decisions ("store_ms": store.signature() and
+store.verify(signature=), which read and hash every record and check each stored response; a SQLite and a JSON-lines
+store of a small three-question System's decisions)."""
 from __future__ import annotations
 
 import argparse
@@ -78,12 +81,65 @@ def main():
             assert check(edited, sig)["index"] == n // 3
             row[f"{alg}_locate"] = round((time.perf_counter() - t) * 1e3, 1)
         out["ms"][n] = row
+    out["store_ms"] = store_times((1000, 10000))
     out["bytes"] = {"syndrome": 64, "octonion": 32 * 8, "hash chain head": "count + 32",
                     "all record hashes": "32 per record"}
     print(json.dumps(out, indent=2))
     if a.json:
         with open(a.json, "w") as fh:
             json.dump(out, fh, indent=2)
+
+
+def store_times(sizes, reps=3):
+    """store.signature() and store.verify(signature=) on stores of real decisions → {backend: {n: {sign, verify}}} in ms
+    (the best of `reps`: the machine's other load is not the code's time)."""
+    import tempfile
+
+    from solvi import Answer, Catalog, Question, System
+    from solvi.core.store import open_storage
+    cat = Catalog()
+
+    @cat.fn
+    def total(amount: float, tax: float) -> float:
+        return amount * (1 + tax)
+
+    @cat.check
+    def large(total: float) -> bool:
+        return total > 1000
+
+    @cat.rule("approve")
+    def approve(total, large):
+        return "review" if large else "approve"
+
+    @cat.rule("tier")
+    def tier(total):
+        return "high" if total > 500 else "low"
+
+    @cat.rule("flag")
+    def flag(large):
+        return large
+
+    qs = [Question("approve", "?", Answer.choice(["approve", "review"])), Question("tier", "?", Answer.choice(["low", "high"])),
+          Question("flag", "?", Answer.yes_no())]
+    out = {}
+    with tempfile.TemporaryDirectory() as d:
+        for ext in ("db", "jsonl"):
+            out[ext] = {}
+            for n in sizes:
+                store = open_storage(os.path.join(d, f"s{n}.{ext}"))
+                s = System(cat, qs, storage=store)
+                for i in range(n):
+                    s.ask({"amount": 10.0 * i, "tax": 0.2})
+                best = {"sign": float("inf"), "verify": float("inf")}
+                for _ in range(reps):
+                    t = time.perf_counter()
+                    sig = store.signature()
+                    best["sign"] = min(best["sign"], (time.perf_counter() - t) * 1e3)
+                    t = time.perf_counter()
+                    assert store.verify(signature=sig)["ok"]
+                    best["verify"] = min(best["verify"], (time.perf_counter() - t) * 1e3)
+                out[ext][n] = {k: round(v, 1) for k, v in best.items()}
+    return out
 
 
 if __name__ == "__main__":

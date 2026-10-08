@@ -1,5 +1,112 @@
 # Changelog
 
+## 1.1.0 (unreleased)
+
+The development tree calls itself `1.1.0.dev0` (`solvi --version`, `solvi.__version__`, the version written into
+calibration files and served by `solvi serve`), so a build from it is not mistaken for the published 1.0.1.
+
+### Breaking changes
+
+- **A check declared `-> bool` passes only on a real `True`, like an untyped one.** Its type used to read `1`, `1.0`,
+  `"1"`, `"yes"`, `"true"` as `True` and `0`, `"no"` as `False`; now any value that is not a bool rejects the step —
+  the check's status is `"error"` ("a check declared `-> bool` returns True or False, not str ('yes')") and the questions
+  it governs abstain (guard `hard_check`) instead of being answered or forced. numpy's bools still count (a
+  comparison of numpy numbers gives one). Migration: return `True` / `False` (`return answer == "yes"`), or declare the
+  return type you mean (`-> Literal[True, False]` is validated by its type). Guard policies declared `-> bool` follow
+  the same rule. A decision stored before with such a check replays as `recompute` (the step now gives another value).
+
+### Changed
+
+- **Replay binds every field of a result to its trace, not only the answer and its status.** With the System,
+  `res.trace.replay(system, res.flow)` and `store.replay_all(system)` now also compare each stored result's
+  confidence, why, guard and source with the ones the trace gives; a result edited in any of them (in a response's
+  JSON, or in a store whose every hash was recomputed) is a mismatch of kind `answer` ("data damaged"). Confidence is
+  compared within a relative 1e-9 (`solvi.core.runtime.CONFIDENCE_TOL`): float rounding is not an edit. The why of a
+  record stored by solvi 0.7.1 or earlier (dict keys sorted) is not compared. An `ask_text` decision is compared with
+  the confidence and reason ask_text gave (the reading's confidence and missing fields, rebuilt from the trace).
+- **`verify()` checks a record's summary against its stored response.** Besides the answers, statuses, input hash and
+  step hashes, the record's index fields — `guards`, `safeguards`, `models`, the confidence in `answers` and (full
+  records) `flow` — must agree with the stored response; a mismatch is a verify problem. Before, a consistent rewrite of
+  an index field passed `verify()`, and `query(safeguard=..., model=...)` found what never happened. A compact record's
+  `flow` is compared with the flow planned again on `replay_all` / `store.rederive`. Stores written by solvi 0.7.1–1.0.1
+  verify as before (`tests/fixtures`).
+- **"No data" is stored apart from "cannot be checked": guard `no_data`.** A question whose governing hard check could
+  not be planned because inputs it needs are not given now abstains with `guard="no_data"` (it was `None`), `source`
+  the check, `why` "no data for hard check cap: missing limit" (it was "cannot compute: cap") and
+  `extra["no_data"] == {"cap": ["limit"]}`; the check is listed in `res.checks` as `"skipped"` with the new field
+  `CheckResult.missing` (`["limit"]`; written to `to_dict()` only when set). The status stays `abstain`, so code that
+  reads statuses is unchanged; the store keeps the difference in the record's `guards` (and the SQL guard column),
+  where a hard check that ran and could not be evaluated stays `hard_check`. Record schema 2.1.0 (format 2 unchanged;
+  a minor version: readers of 2.0.0 may ignore the new values). Code that tested `guard is None` to find missing inputs
+  for a hard check should test `guard == "no_data"`. Such a decision stored by solvi 1.0.1 or earlier (guard none,
+  "cannot compute: cap") still replays ok.
+
+### Fixed
+
+- **Fewer private names imported across modules.** `solvi.core.textin` exports its number vocabulary
+  (`NUMBER_WORDS`, `NUMBER_SCALES`, `CURRENCY_AFTER`, `digits`), which `solvi.experimental.charts` imported under
+  private names, and `solvi.core.catalog.group_func` (a group of alternative producers as one function) is public for
+  the planners, the runtime and the experimental modules that used `_group_func` (the old name still resolves).
+  `solvi.experimental.specialist.Trace` says it is the specialist's own chain, not the core trace.
+- **The Spaces stay in step with the repository.** `tools/sync_gallery.py --check` reports a playground preset that
+  differs from its gallery entry (a test runs it, so CI fails instead of the playground drifting); the realms Space's
+  README cites only result files it ships, and the four published runs it cites are tracked on purpose (`.gitignore`
+  says so) instead of against it.
+- **Translations cannot be lost silently.** Rendering in another language reads solvi's finished English messages by
+  templates; a test now renders a message from every template of every language and checks that the English each
+  template matches is still written in the package, so a message reworded in the code fails the test instead of
+  quietly staying in English.
+- **`Guard(lang=)` reaches the decision's `message()`.** It only reached `audit()`; `message()` (the text for the
+  model or a person) is now in the Guard's language, with solvi's reasons translated (`message(lang=...)` to choose).
+  `reasons` stays as recorded, in English: it is stored and hashed with the decision.
+- **`solvi.experimental.lora.read` without torch or safetensors** refuses with what to install (`pip install
+  "solvi[lora]"`) instead of a bare `ModuleNotFoundError`; a test of that refusal runs without torch.
+- **`CandidateHead.n` counts the steps it was taught**, not only those it was fitted on; **`CostBook.get` takes a part's
+  name** as well as the part (`observe` takes the name).
+- **One name, one meaning for "type rejected".** `solvi.core.primitives` named its guard kind `TYPE_REJECTED`
+  ("type_rejected") while `solvi.core.provenance.TYPE_REJECTED` is the reason prefix ("type rejected"); the guard kinds
+  there are now `GUARD_TYPE_REJECTED`, `GUARD_GROUNDING`, `GUARD_OUTSIDE` (module-internal names; the values are
+  unchanged).
+- **Docs: every public module has an API page.** 24 modules had none — among them `solvi.core.runtime` and
+  `solvi.core.types`, where the 1.0 migration table sends you for `Trace`, `Record`, `Result`, `MISSING` and
+  `FactTypeError`, and `solvi.core.provenance` and `solvi.core.schema`; they are now in the API index ("Module by
+  module") and the site's navigation. `Answer` and `Answer.yes_no` have docstrings; the guide's `res.audit(q=None)` is
+  `res.audit(question=None)`.
+- **`Response.detach()`** drops a response's reference to the System that answered it (the docs advised setting the
+  private `res._system = None`).
+- **Docs: the decider format page calls the formats by what they are** (text-only, typed v1, answer-primitives) instead
+  of by internal codes; the literal `format` strings that checkpoints carry are unchanged.
+- **Docs: the guard's injection detector states its measured rates, and `scan_user` is described as it behaves.** The
+  guide said `Guard(scan_user=True)` escalates a user who writes "Model: XPS 13 9310. Please refund …"; it does not (in
+  a user's message a field label counts only when its sentence goes on to give an order). The guide now gives what a
+  small review set measured: 11 of 12 ordinary tool outputs flagged, 14 of 20 reworded injections missed. The detector
+  itself is unchanged in this release.
+- **Docs: the signature timing says what it times.** The guide's 1,000 records → 1.3 / 1.4 ms was the syndrome code
+  over 40-byte strings; through a store of real decisions `store.signature()` takes about 0.3 s and
+  `verify(signature=)` about 0.8 s per 1,000 records (measured on a busy machine). Both tables are now in the guide, and
+  `benchmarks/trace_signature.py` times the store as well (`"store_ms"`).
+- **A model's quote holding a bool is compared with the text.** `Quote(True, 0, 5)` over "hello" was accepted (a bool
+  "could not be compared") and the answer on it was `ok`, although a quote that is not the text is promised a refusal.
+  Now a bool is grounded only when the quoted words say it — "yes", "true", "y", "1", "on", "да", "✓" for `True`;
+  "no", "false", "n", "0", "off", "нет", "✗" for `False` (any case, end punctuation ignored;
+  `solvi.core.provenance.BOOL_WORDS`); any other text rejects the output as `not grounded` and the questions on it
+  abstain. A model-backed part that quoted evidence for a bool (`Quote(True, …)` over "reverse the second payment")
+  should return `Claim(True, evidence=[...])` — a value with its evidence — instead; a code extractor's bool quote is
+  not rejected, and its audit line now says "derived from '…'" where it said "converted from '…'" (the value is not the
+  quoted text). A `datetime` or a list value is still not compared (said so in the README and the guide).
+- **`solvi check` reports a `uses` hint that does nothing.** `Question(uses=["nope"])` on a question with a rule (or a
+  fitted answer head) was accepted, ignored at run time and `solvi check` said "no problems found"; now it is the warning
+  `uses_ignored`. Without `System(input_model=...)`, a `uses` name that no part computes or reads is the note
+  `uses_unknown` (it can only be a given input).
+- **`DecideModel.logits`, `.score` and `.adaptation` take the question's spec** (`not_stated=`, `evidence=`, `k=`, ...)
+  as `decide`, `fit` and `teach` do: a question with "not stated" or evidence could be decided and fitted but not scored,
+  and its adaptation could not be looked up.
+- **A store path that cannot be a store is a usage error.** `solvi ask --store nodir/sub/d.db` (a directory that does
+  not exist) and `solvi verify <a directory>` ended in a `sqlite3.OperationalError` traceback with status 1 (the status
+  of "the command ran and found a problem"). Now every command that takes a store (`ask --store`, `verify`, `query`,
+  `replay`, `serve --store`, `serve --guard --store`) says in one line what is wrong — "is a directory, not a store",
+  "the directory ... does not exist", "cannot open the store ..." — and exits with status 2.
+
 ## 1.0.1 — 2026-10-04
 
 ### Fixed

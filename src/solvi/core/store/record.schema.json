@@ -4,7 +4,8 @@
   "title": "solvi stored record, format 2",
   "description": "One line of a JSONLStorage file (one row body of an SQL store) as solvi writes it with record format 2 (\"v\": 2). The specification is docs/trace_spec.md; tests/semantics/test_record_schema.py validates real records against this file. Records of kinds ask, teach, redaction and segment are described field by field and closed: a new field is a new schema version. Other kinds (knowledge, dispatch, policy, refine, update) are checked for the common envelope only.",
   "x-solvi-format": 2,
-  "x-schema-version": "2.0.0",
+  "x-schema-version": "2.1.0",
+  "x-schema-changes": {"2.1.0": "guard \"no_data\" (a question whose governing hard check could not be planned: inputs not given) in guards and results, its result's extra {\"no_data\": {check: [missing input]}} and a response check's optional \"missing\"; a minor version: a reader of 2.0.0 may ignore them, the hash body does not change"},
   "type": "object",
   "required": ["v", "kind", "seq", "time", "prev", "hash", "id"],
   "properties": {
@@ -44,7 +45,8 @@
                     "items": {"type": "array", "minItems": 3, "maxItems": 3,
                               "prefixItems": [{"type": "integer", "minimum": 0}, {"type": "string"}, {"$ref": "#/$defs/vhash"}]}},
     "flow_names": {"type": "array", "items": {"type": "string"}},
-    "guards_index": {"type": "object", "additionalProperties": {"type": "string"}},
+    "guards_index": {"description": "{question: the guard that settled it} for the questions one settled. Guards solvi writes: hard_check (a governing hard check failed, or ran and could not be evaluated), no_data (2.1.0: a governing hard check could not be planned — inputs it needs are not given), outside_options, rule_abstained, low_confidence, missing_facts, escalated, grounding, timeout, type_rejected, evidence_missing, instruction, memory; open to guards of other modules.",
+                     "type": "object", "additionalProperties": {"type": "string"}},
     "safeguards_index": {"type": "array",
                          "items": {"type": "array", "minItems": 3, "maxItems": 3,
                                    "prefixItems": [{"type": "string"}, {"type": "string"},
@@ -85,6 +87,8 @@
                  "provenance": {"$ref": "#/$defs/provenance"},
                  "source": {"type": ["string", "null"]},
                  "guard": {"type": ["string", "null"]},
+                 "extra": {"description": "A primitive's details; for guard no_data (2.1.0): {\"no_data\": {check: [missing input]}}.",
+                           "type": ["object", "null"]},
                  "kind": {"type": ["string", "null"]},
                  "not_stated": {"type": "boolean"},
                  "evidence": {"type": "array"}

@@ -81,6 +81,8 @@ nav:
           - solvi.testing: api/testing.md
           - solvi.testing.conformance: api/conformance.md
           - solvi.testing.honesty: api/honesty.md
+          - solvi.solutions: api/solutions.md
+          - solvi.cli: api/cli.md
       - Building blocks:
           - solvi.core: api/core.md
           - solvi.core.deciders: api/decide.md
@@ -126,6 +128,28 @@ nav:
           - solvi.core.knowledge.memory: api/memory.md
           - solvi.core.knowledge.episodes: api/episode.md
           - solvi.core.knowledge.worldmap: api/worldmap.md
+          - solvi.core.catalog: api/core_catalog.md
+          - solvi.core.system: api/core_system.md
+          - solvi.core.response: api/core_response.md
+          - solvi.core.runtime: api/core_runtime.md
+          - solvi.core.types: api/core_types.md
+          - solvi.core.provenance: api/core_provenance.md
+          - solvi.core.primitives: api/core_primitives.md
+          - solvi.core.schema: api/core_schema.md
+          - solvi.core.chain: api/core_chain.md
+          - solvi.core.sources: api/core_sources.md
+          - solvi.core.plan: api/core_plan.md
+          - solvi.core.guarantees: api/core_guarantees.md
+          - solvi.core.slow: api/core_slow.md
+          - solvi.core.deciders.model: api/deciders_model.md
+          - solvi.core.deciders.part: api/deciders_part.md
+          - solvi.core.deciders.adapt: api/deciders_adapt.md
+          - solvi.core.deciders.backends: api/deciders_backends.md
+          - solvi.core.deciders.capabilities: api/deciders_capabilities.md
+          - solvi.core.deciders.gate: api/deciders_gate.md
+          - solvi.core.deciders.kinds: api/deciders_kinds.md
+          - solvi.core.deciders.state: api/deciders_state.md
+          - solvi.core.deciders.wire: api/deciders_wire.md
       - Experimental:
           - solvi.experimental: api/experimental.md
           - solvi.experimental.learning: api/learning.md

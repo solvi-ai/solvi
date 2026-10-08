@@ -24,3 +24,16 @@ def test_readme_quickstart_prints_what_the_readme_says():
     with contextlib.redirect_stdout(out):
         exec(compile(code, name, "exec"), {})
     assert out.getvalue().strip() == printed.strip()
+
+
+def test_an_unreleased_tree_has_a_dev_version_of_the_next_release():
+    """Audit row 97 (1.1): while CHANGELOG's top heading is unreleased, the version is a .dev of that release, so a
+    build of the tree is never taken for the published one."""
+    log = (pathlib.Path(__file__).parents[1] / "CHANGELOG.md").read_text()
+    top = re.search(r"^## (.+)$", log, re.M).group(1)
+    if "unreleased" in top.lower():
+        nxt = re.match(r"(\d+\.\d+\.\d+)", top)
+        assert nxt, f"the unreleased heading names its version: {top!r}"
+        assert re.fullmatch(re.escape(nxt.group(1)) + r"\.dev\d+", solvi.__version__), solvi.__version__
+    else:
+        assert top.startswith(solvi.__version__ + " ")

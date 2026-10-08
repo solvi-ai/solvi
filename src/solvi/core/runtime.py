@@ -317,6 +317,13 @@ class Record(Serial):
         return b
 
 
+NO_DATA = "no_data"
+"""The guard of a question that abstains because a hard check governing it could not be planned: inputs it needs are not
+given (and cannot be computed). Its result's `extra["no_data"]` is {check: [missing input]}, and the check is listed in
+`res.checks` as "skipped". Told apart from a hard check that ran and could not be evaluated (guard "hard_check", check
+"error")."""
+
+
 @dataclass
 class Result(Serial):
     answer: Any
@@ -326,11 +333,11 @@ class Result(Serial):
     probs: dict = field(default_factory=dict)
     provenance: str | None = None  # of the answer: computed (rule, hard check), learned (head, learned rule), decided (model rule)
     source: str | None = None      # what produced it: the rule, the hard check, or the head type
-    guard: str | None = None       # the safeguard that settled it: hard_check, outside_options, rule_abstained, low_confidence, missing_facts
+    guard: str | None = None       # the safeguard that settled it: hard_check, no_data, outside_options, rule_abstained, low_confidence, missing_facts
     repaired: tuple | None = None  # (previous answer, [constraints]) when joint decoding changed it
     kind: str | None = None        # the answer type's kind: yes_no, choice, ordinal, multi, span, rank, estimate
     evidence: list = field(default_factory=list)   # supporting quotes: [Quote(text, start, end, source)], checked in the text
-    extra: dict | None = None      # a primitive's details: an estimate's interval and coverage, a ranking's scores
+    extra: dict | None = None      # a primitive's details: an estimate's interval and coverage, a ranking's scores; no_data: {check: [missing input]}
 
     @property
     def not_stated(self):
@@ -520,11 +527,55 @@ def _not_restored(bad, n0, lossy, r):
             bad[i] = Mismatch(m[0], m[1], f"{m[2]} — not checked: {_lost_text(lossy, lost)}", "not_restored")
 
 
+CONFIDENCE_TOL = 1e-9
+"""How far a stored result's confidence may be from the one its trace gives and still count as the same (relative, and
+absolute for confidences near 0): room for float rounding — a product or a calibration computed in another order, a
+model's probabilities on another BLAS — never for an edit (a stored record keeps confidence to 4 digits; an edited one
+moves it by far more)."""
+
+
+def _same_confidence(a, b):
+    try:
+        a, b = float(a), float(b)
+    except (TypeError, ValueError):
+        return a == b
+    if math.isnan(a) or math.isnan(b):
+        return math.isnan(a) and math.isnan(b)
+    return math.isclose(a, b, rel_tol=CONFIDENCE_TOL, abs_tol=CONFIDENCE_TOL)
+
+
+def _result_differs(was, now, why=True):
+    """The fields of a stored result that differ from the one its trace gives → [field] (see _answers_differ). why=False:
+    the reason is not compared (a record of format 1, stored with sorted dict keys: a dict in the reason is shown in
+    another order than it was written)."""
+    out = []
+    if vhash(was.answer) != vhash(now.answer):
+        out.append("answer")
+    for k in ("status", "why", "guard", "source") if why else ("status", "guard", "source"):
+        if getattr(was, k, None) != getattr(now, k, None):
+            out.append(k)
+    if not _same_confidence(was.confidence, now.confidence):
+        out.append("confidence")
+    return out
+
+
+def _before_no_data(was, now, diff):
+    """A result stored before the guard no_data (solvi ≤ 1.0.1): the same abstention, written as "cannot compute: <the
+    unplanned facts>" with no guard and no source — what that version gave, not an edit."""
+    if now.guard != NO_DATA or was.guard is not None or was.source is not None or set(diff) - {"why", "guard", "source"}:
+        return False
+    why = was.why or ""
+    named = why[len("cannot compute: "):].split(", ") if why.startswith("cannot compute: ") else []
+    return set((now.extra or {}).get(NO_DATA) or {}) <= set(named)
+
+
 def _answers_differ(trace, system, flow):
     """The answers stored with a trace against the ones the trace gives under `system` (System.answers_of) → mismatches.
     Kind "answer" when the system's questions and catalog are the recorded ones — then a stored answer that differs was
-    edited after the run; else "recompute": the questions or the catalog changed since. Compared: the answer and its
-    status. Not compared: an abstention ask_text made before any flow ran (the entry point escalated)."""
+    edited after the run; else "recompute": the questions or the catalog changed since. Compared: every field a result
+    is read for — the answer, its status, its confidence (within CONFIDENCE_TOL: float rounding), why, guard and source.
+    Not compared: an abstention ask_text made before any flow ran (the entry point escalated); the reason of a record of
+    format 1 (trace.legacy_order, set by TraceStorage.replay_all)."""
     stored = {q: r for q, r in trace.answers.items() if not (getattr(r, "source", None) == "textin" and r.status == "abstain")}
     gone = [q for q in stored if q not in system.questions]
     try:
@@ -538,9 +589,15 @@ def _answers_differ(trace, system, flow):
     out = [Mismatch(0, f"answer:{q}", "the question is not in the system (renamed or removed)", "missing_part") for q in gone]
     for q, a in now.items():
         was = stored[q]
-        if vhash(was.answer) != vhash(a.answer) or was.status != a.status:
-            out.append(Mismatch(0, f"answer:{q}", f"stored answer {was.answer!r} [{was.status}] is not the one the trace "
-                                f"gives: {a.answer!r} [{a.status}]", "answer" if same_system else "recompute"))
+        diff = _result_differs(was, a, why=not getattr(trace, "legacy_order", False))
+        if not diff or _before_no_data(was, a, diff):
+            continue
+        if diff[0] in ("answer", "status"):
+            why = f"stored answer {was.answer!r} [{was.status}] is not the one the trace gives: {a.answer!r} [{a.status}]"
+        else:
+            why = f"stored answer {was.answer!r} [{was.status}] is the one the trace gives, but its " + ", ".join(
+                f"{k} {str(getattr(was, k, None))[:60]!r} is not {str(getattr(a, k, None))[:60]!r}" for k in diff)
+        out.append(Mismatch(0, f"answer:{q}", why, "answer" if same_system else "recompute"))
     return out
 
 
@@ -602,11 +659,11 @@ def _recompute(part, r, args, init, catalog=None):
         v = locate(part, v, init)
         value, quote, _, _ = unwrap(v)
         why = ground(part, v, init)
+        if not why:
+            value, why = check_value(part, value)
         if not why and part.tout is not None:
             from .types import typed_out
             value, why = typed_out(part, value)
-        if not why:
-            value, why = check_value(part, value)
         why = why or validated(part, value, plain)
         if not why and r.error is None and (has_evidence(v) or (isinstance(r.extra, dict) and r.extra.get("evidence"))):
             got = evidence_rows(v) if has_evidence(v) else []
@@ -802,11 +859,11 @@ def replay_plan(r, catalog, init_keys):
 
 def narrowed(group, tried):
     """A fact's producer group narrowed to the producers that ran (replay of a plan that dropped the others)."""
-    from .catalog import _group_func
+    from .catalog import group_func
     names = [n for n, _ in tried]
     alts = [a for a in group.alternatives if a.name in names] or list(group.alternatives)
     g = dataclasses.replace(group, alternatives=alts, inputs=list(dict.fromkeys(x for a in alts for x in a.inputs)))
-    g.func = _group_func(g)
+    g.func = group_func(g)
     return g
 
 
@@ -1111,14 +1168,21 @@ async def _adrive(g, timeout):
 
 
 def check_value(p, value):
-    """A check answers True or False → (value, why not). numpy's bool is taken as a bool; anything else — 0, None from a
-    forgotten return, a list, a string — rejects the step, so the fact is missing and whatever depends on it abstains: a
-    check that failed with a falsy non-bool would otherwise count as passed. A typed check (`-> bool`) is validated by its
-    type instead."""
-    if p.kind != "check" or p.tout is not None or isinstance(value, bool):
+    """A check answers True or False → (value, why not). numpy's bool is taken as a bool (`amount <= limit` over numpy
+    numbers gives one); anything else — 0, 1, None from a forgotten return, a list, a string such as "yes" or "true" —
+    rejects the step, so the fact is missing and whatever depends on it abstains: a check that failed with a falsy
+    non-bool would otherwise count as passed, and one that says "yes" is not saying True. The same for a check declared
+    `-> bool` (strict: its type alone used to read 1, "yes", "true" as True); a check declared with another
+    return type is validated by that type. Called before a typed output is validated."""
+    if p.kind != "check" or isinstance(value, bool):
+        return value, None
+    typed = p.tout is not None
+    if typed and p.returns is not bool:
         return value, None
     if type(value).__module__ == "numpy" and type(value).__name__ in ("bool", "bool_"):    # amount <= limit over numpy
         return bool(value), None                                                          # numbers; numpy is not imported
+    if typed:
+        return value, f"a check declared `-> bool` returns True or False, not {type(value).__name__} ({str(value)[:40]!r})"
     return value, f"a check returns True or False, not {type(value).__name__} ({str(value)[:40]!r}); declare it `-> bool`"
 
 
@@ -1155,11 +1219,11 @@ def _step(p, vals, init_state, policy=None, costs=None, known=None, memo=None, b
     v = locate(p, v, init_state)
     value, quote, conf, probs = unwrap(v)
     why = ground(p, v, init_state)
+    if not why:                                       # a check: True or False (numpy's bool), typed `-> bool` or not
+        value, why = check_value(p, value)
     if not why and p.tout is not None:                # typed output: validated / coerced (a closed set: outside the options)
         from .types import typed_out
         value, why = typed_out(p, value)
-    if not why:
-        value, why = check_value(p, value)
     why = why or validated(p, value, args)
     if why:                                           # rejected: the fact is missing, the claim stays visible in the error
         return StepOut(MISSING, quote, conf, why, hashes, ms, probs=probs, extra=_extra(v))

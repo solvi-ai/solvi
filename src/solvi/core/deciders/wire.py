@@ -52,7 +52,7 @@ def pass_prompt(items, markers=None):
 
 
 class Logits(np.ndarray):
-    """A question's logits [K] with an l14g checkpoint's extra outputs: `unknown` (the "not stated" logit) and `pointer`
+    """A question's logits [K] with an answer-primitives checkpoint's extra outputs: `unknown` (the "not stated" logit) and `pointer`
     (decoded: {"null": p(null span), "spans": [(p, start, end, text)]}, most probable first) — and from a scorer that
     can fail on one question (solvi.core.deciders.llm): `escalate` (why the output is not usable: the decision escalates with it),
     `transient` (not cached: ask again next time) and `info` (recorded in the decision's extra)."""
@@ -149,7 +149,7 @@ def _typed_span(spans, vtype):
 
 def pointer_evidence(ptr, threshold=0.15, max_spans=3):
     """Evidence quotes from a decoded pointer: greedily up to max_spans non-overlapping spans with p ≥ threshold; none
-    when the null span is at least as probable as the best span (the l14g contract's `evidence`)."""
+    when the null span is at least as probable as the best span (the answer-primitives contract's `evidence`)."""
     spans = ptr["spans"]
     if not spans or ptr["null"] >= spans[0][0]:
         return []

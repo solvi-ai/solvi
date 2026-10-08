@@ -31,7 +31,7 @@ NOT_GROUNDED = "not grounded"
 OUTSIDE_OPTIONS = "outside the options"
 VALIDATE = "rejected by validate"
 TYPE_REJECTED = "type rejected"               # a typed fact failed its type (solvi.core.types); the guard kind of the same
-#                                               event is "type_rejected" (solvi.core.primitives.TYPE_REJECTED)
+#                                               event is "type_rejected" (solvi.core.primitives.GUARD_TYPE_REJECTED)
 ESCALATED = "model escalated"                 # a decider's own act / escalate signal said "hand it to a person" (solvi.core.deciders)
 TIMED_OUT = "timed out"                       # a part did not finish within its timeout (System.aask)
 INSTRUCTION = "answer depends on an instruction-like sentence"   # perturb=k: the answer changed without such a sentence
@@ -393,6 +393,9 @@ def catalog_fingerprint(catalog):
 _WS = re.compile(r"\s+")
 _NUM = re.compile(r"-?\d[\d,  ']*(?:\.\d+)?|-?\.\d+")
 _DATEISH = re.compile(r"\d|today|tomorrow|yesterday|сегодня|завтра|вчера", re.I)
+# a bool is "the text" when the quoted words say it (solvi 1.1): a checkbox-like answer, not any span the model points at
+BOOL_WORDS = {True: frozenset({"true", "yes", "y", "1", "on", "да", "✓", "✔", "☑"}),
+              False: frozenset({"false", "no", "n", "0", "off", "нет", "✗", "✘", "☐"})}
 
 
 def _norm(s):
@@ -422,11 +425,17 @@ def matches(value, snippet):
     """Is `value` literally the quoted text? Strings: equal up to whitespace. Numbers (int, float, Decimal, Fraction, numpy
     scalars): a number in the snippet equals it (thousands separators allowed; a Decimal or a Fraction exactly, a float
     up to rounding). A date: the snippet reads as that date (solvi.core.textin.parse_date) or holds it in ISO form; a snippet
-    with no date in it is not the date, one whose date needs a year or "today" to be read is not compared (None). Other
-    types (datetimes, lists, booleans) cannot be compared → None (not checked)."""
+    with no date in it is not the date, one whose date needs a year or "today" to be read is not compared (None). A bool
+    (also numpy's): the snippet is one of its words (BOOL_WORDS: "yes" / "true" / "1" / "да" ... for True, "no" / "false" /
+    "0" / "нет" ... for False, any case) — any other text is not that bool. Other types (datetimes, lists) cannot be
+    compared → None (not checked)."""
     import datetime
     if isinstance(value, str):
         return _norm(value) == _norm(snippet)
+    b = value.item() if (hasattr(value, "item") and getattr(value, "ndim", None) == 0
+                         and type(value).__name__ in ("bool", "bool_")) else value
+    if isinstance(b, bool):
+        return _norm(snippet).strip(" .,;:!?()[]\"'").casefold() in BOOL_WORDS[b]
     n = _number(value)
     if n is not None:
         for m in _NUM.finditer(snippet):

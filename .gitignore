@@ -13,6 +13,10 @@ data/
 *.safetensors
 spaces/realms/results/logs/
 spaces/realms/results/endless_*.json
+# ... except the four published runs the realms README cites as its raw checkpoints (tracked on purpose)
+!spaces/realms/results/logs/
+!spaces/realms/results/logs/sim_[1-4].log
+!spaces/realms/results/endless_[1-4].json
 spaces/realms/results/dev/
 spaces/realms/results/attempt1/
 spaces/realms/results/ablation/

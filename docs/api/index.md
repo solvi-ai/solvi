@@ -23,6 +23,8 @@ internal and have no page.
 | [`solvi.testing`](testing.md) | decision regression tests from `cases.json` |
 | [`solvi.testing.conformance`](conformance.md) | conformance checks for your implementations of the extension points of `solvi.core` (stores, slow paths, strategists, heads, deciders, extractors, monitors, environments) |
 | [`solvi.testing.honesty`](honesty.md) | the honesty suite |
+| [`solvi.solutions`](solutions.md) | the ready-made systems, one module each (above) |
+| [`solvi.cli`](cli.md) | the `solvi` command line |
 
 ## Low level: building blocks
 
@@ -75,6 +77,35 @@ internal and have no page.
 | [`solvi.core.knowledge.memory`](memory.md) | a memory of corrected cases: nearest neighbours with an abstain threshold; with a store, its correction facts |
 | [`solvi.core.knowledge.episodes`](episode.md) | an agent's memory (what was tried, what failed, what worked) as an input |
 | [`solvi.core.knowledge.worldmap`](worldmap.md) | a map of an environment an agent builds by acting: claims with provenance, a view over "leads_to" facts |
+
+### Module by module
+
+The modules `solvi.core` is made of. Their public names are re-exported by `solvi.core` (or the package named), so you rarely import from them directly; the 1.0 migration table points to some of them (`solvi.core.runtime` for `Trace`, `Record`, `Result`, `MISSING`; `solvi.core.types` for `FactTypeError`).
+
+| Module | What it holds |
+|---|---|
+| [`solvi.core.catalog`](core_catalog.md) | the catalog: `Catalog`, `Question`, `Answer` and the decorators that register parts (re-exported by `solvi.core` and `solvi`) |
+| [`solvi.core.system`](core_system.md) | `System`: catalog + questions → `ask` → answers with flow, trace and safeguards; `fit` / `teach`; storage |
+| [`solvi.core.response`](core_response.md) | `Response`: the answers of one ask with the flow, the trace, the values and the safeguards |
+| [`solvi.core.runtime`](core_runtime.md) | flow execution and replay: `Trace`, `Record`, `Result`, `Replay`, `MISSING`, the hash chain of the steps |
+| [`solvi.core.types`](core_types.md) | typed facts: the types a catalog function's hints give the facts it reads and sets, `Scale`, `FactTypeError` |
+| [`solvi.core.provenance`](core_provenance.md) | provenance of facts and answers, model identity and fingerprints, grounding of quotes (`matches`) |
+| [`solvi.core.primitives`](core_primitives.md) | answer primitives: "not stated" (`Unknown`), evidence, spans, rankings and estimates |
+| [`solvi.core.schema`](core_schema.md) | pydantic models of solvi's public data: answer types, questions, results, trace records, flows, responses |
+| [`solvi.core.chain`](core_chain.md) | the hash chain of a trace: records added after the flow's steps |
+| [`solvi.core.sources`](core_sources.md) | where a label may come from: the trusted sources and the check every channel runs |
+| [`solvi.core.plan`](core_plan.md) | planning a question's flow: the strategist protocol and the built-in strategists |
+| [`solvi.core.guarantees`](core_guarantees.md) | promises on answers: calibrated thresholds, drift, open-set inputs |
+| [`solvi.core.slow`](core_slow.md) | the deliberate path (System 2): generate, agree, refine, search |
+| [`solvi.core.deciders.model`](deciders_model.md) | `DecideModel`: a decider checkpoint (or any scorer) — load, score, decide, adapt, make decision parts |
+| [`solvi.core.deciders.part`](deciders_part.md) | `DecisionPart`: a decider bound to one question, with its gates, guarantees and files |
+| [`solvi.core.deciders.adapt`](deciders_adapt.md) | adapting one question: label-bias correction, few-shot shift and scale, temperature |
+| [`solvi.core.deciders.backends`](deciders_backends.md) | the encoders: ONNX and torch scorers, tokenizing, file fingerprints |
+| [`solvi.core.deciders.capabilities`](deciders_capabilities.md) | a checkpoint's declared capabilities (`solvi_decide.json`) with their defaults |
+| [`solvi.core.deciders.gate`](deciders_gate.md) | what decides alone: the act features, thresholds, promises (`act_guard`) |
+| [`solvi.core.deciders.kinds`](deciders_kinds.md) | question kinds, wire markers and the options each kind takes |
+| [`solvi.core.deciders.state`](deciders_state.md) | the input a decider reads: a text, or a state serialized by `state_text` |
+| [`solvi.core.deciders.wire`](deciders_wire.md) | what the scorer sees: items, passes, prompts, logits, the pointer's spans |
 
 ## Experimental
 

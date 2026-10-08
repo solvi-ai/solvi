@@ -38,7 +38,8 @@ from . import VERIFIED, _cj, _when, akey, view
 
 KIND = {"computed": "rule", "decided": "model", "learned": "learned head", "proposed": "model proposal",
         "quoted": "quote", "given": "given"}
-GUARD = {"low_confidence": "below the guarantee or threshold", "hard_check": "a hard check", "missing_facts":
+GUARD = {"low_confidence": "below the guarantee or threshold", "hard_check": "a hard check", "no_data":
+         "no data for a hard check", "missing_facts":
          "facts missing", "rule_abstained": "the rule abstained", "outside_options": "outside the options"}
 
 

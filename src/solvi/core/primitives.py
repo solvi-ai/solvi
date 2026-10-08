@@ -32,11 +32,14 @@ import math
 from enum import Enum
 
 from .catalog import Quote, Unknown
+from .provenance import TYPE_REJECTED as PROVENANCE_TYPE_REJECTED
 
-# guard kinds a primitive's abstention carries (Result.guard; the safeguard kinds of solvi.core.store.audit). Not the reason texts
-# of solvi.core.provenance: provenance.TYPE_REJECTED is the prefix of a rejection reason ("type rejected: ..."), this one the
-# guard kind ("type_rejected").
-GROUNDING, TYPE_REJECTED, OUTSIDE, NO_EVIDENCE = "grounding", "type_rejected", "outside_options", "evidence_missing"
+# guard kinds a primitive's abstention carries (Result.guard; the safeguard kinds of solvi.core.store.audit), named GUARD_*
+# so they are not taken for the reason texts of solvi.core.provenance (provenance.TYPE_REJECTED is the prefix of a
+# rejection reason, "type rejected: ..."; GUARD_TYPE_REJECTED the guard kind, "type_rejected").
+GUARD_GROUNDING, GUARD_TYPE_REJECTED, GUARD_OUTSIDE, NO_EVIDENCE = ("grounding", "type_rejected", "outside_options",
+                                                                    "evidence_missing")
+GROUNDING, OUTSIDE = GUARD_GROUNDING, GUARD_OUTSIDE        # the names before 1.1 (module-internal; kept for readers)
 
 
 class Rejected(Exception):
@@ -226,7 +229,7 @@ def resolve(at, rec, init, quotes="normalized"):
                 value = span_value(at.type, t)        # the type's own reading, else textin's date / number parsers
             except ValueError as err:
                 why = _msg(err) if hasattr(err, "errors") else str(err)
-                raise Rejected(TYPE_REJECTED, f"type rejected: span {_short(t)!r} is not {type_name(at.type)} ({why})") \
+                raise Rejected(GUARD_TYPE_REJECTED, f"{PROVENANCE_TYPE_REJECTED}: span {_short(t)!r} is not {type_name(at.type)} ({why})") \
                     from None
         span = Quote(t, s, e, src, conf)
         return {"answer": value, "confidence": conf, "probs": probs or {}, "evidence": [span] + ev, "extra": None}

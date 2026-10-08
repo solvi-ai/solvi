@@ -253,7 +253,8 @@ With `"balance": 3` the hard check fails and the answer is `reject` with `status
 **Grounded decisions.** Fuzzy proposes, deterministic decides, everything is in the trace. Each fact and answer records
 its provenance — `given`, `computed`, `quoted`, `decided` (a model's choice among options, with probabilities) or
 `learned` — and model-backed steps record the model's id and fingerprint, so a replay can tell when the model changed
-since a decision. A model's quote that is not literally the text at its offsets, or a choice outside its options, is
+since a decision. A model's quote that is not literally the text at its offsets (a bool must be quoted as its word, "yes" /
+"no"; a datetime or a list value is not compared), or a choice outside its options, is
 rejected and counted (`system.stats`); a fallback producer runs or the question abstains. `print(res.audit())` shows
 what each answer rests on, which safeguards fired, and how much of its support is deterministic. A decision without
 models and one with models are the same system ([examples/12_grounded_audit.py](examples/12_grounded_audit.py)).

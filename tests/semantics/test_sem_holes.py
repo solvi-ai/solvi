@@ -1,4 +1,4 @@
-"""The five holes an audit found in the guarantees, each pinned as a property over seeded random cases
+"""The holes an audit found in the guarantees, each pinned as a property over seeded random cases
 (docs/trace_spec.md §8). A hole still open is a test marked xfail(strict=True) with reason "open: ..." — it starts
 failing the suite (XPASS) the day the hole is closed, so the mark is removed with the fix.
 
@@ -6,7 +6,9 @@ failing the suite (XPASS) the day the hole is closed, so the mark is removed wit
 2  an untyped hard check / guard policy returning a falsy non-bool (numpy False, 0, None, []) counted as passed
 3  cat.check(f, hard=True, then=...) with f passed directly registered a soft check
 4  an answer edited in the stored JSON still replayed ok
-5  a redacted record's kept answers could be edited and verify(anchor, signature) still passed"""
+5  a redacted record's kept answers could be edited and verify(anchor, signature) still passed
+6  a record's index fields (guards, safeguards, models, flow, confidence) could be rewritten consistently
+4' (with 4) a result's confidence, why, guard and source could be edited and still replayed ok"""
 import copy
 import json
 
@@ -131,12 +133,41 @@ def test_hole2_numpy_bools_are_bools():
             assert (r.answer, r.status) == want
 
 
-@pytest.mark.parametrize("v", [1, "yes", "true", "1", 1.0])
-def test_hole2_a_typed_check_passes_what_its_type_reads_as_true(v):
-    """A check declared `-> bool` is validated by its type, which reads 1, "yes", "true", "1", 1.0 as True (and 0, "no"
-    as False; None, [], "" are rejected). Pinned as it is; making typed checks strict is a proposed change."""
-    r = _cap_system(lambda a, l: v, typed=True)[1].ask(OVER)["pay"]
-    assert (r.answer, r.status) == ("yes", "ok")
+@pytest.mark.parametrize("v", [1, "yes", "true", "1", 1.0, "True", 2, [True], "ok"])
+def test_hole2_a_typed_check_passes_only_on_true_too(v):
+    """A check declared `-> bool` is as strict as an untyped one: anything but True / False (or numpy's bools) rejects
+    the step and the question abstains — its type no longer reads 1, "yes", "true" as True."""
+    s = _cap_system(lambda a, l: v, typed=True)[1]
+    res = s.ask(OVER)
+    r = res["pay"]
+    assert (r.answer, r.status, r.guard) == (None, "abstain", "hard_check")
+    (c,) = res.checks
+    assert c.status == "error" and "declared `-> bool` returns True or False" in c.reason
+    assert res.trace.replay(s, res.flow)["ok"]
+
+
+@pytest.mark.parametrize("v", [0, "no", "false", "0", 0.0, None, [], ""])
+def test_hole2_a_typed_check_does_not_read_falsy_values_as_false(v):
+    """...nor 0, "no" as False: they do not force the `then` answer either, the question abstains."""
+    r = _cap_system(lambda a, l: v, typed=True)[1].ask({"amount": 5, "limit": 100})["pay"]
+    assert (r.answer, r.status, r.guard) == (None, "abstain", "hard_check")
+
+
+def test_hole2_a_check_typed_otherwise_keeps_its_type():
+    """Only `-> bool` is made strict: a check declared with another return type is validated by that type."""
+    from typing import Literal
+    cat = Catalog()
+
+    @cat.check(hard=True, then={"pay": "no"})
+    def cap(amount, limit) -> Literal[True, False]:
+        return amount <= limit
+
+    @cat.rule("pay")
+    def pay(amount):
+        return "yes"
+
+    s = System(cat, [Question("pay", "Pay?", Answer.choice(["yes", "no"]), requires=["cap"])])
+    assert s.ask(OVER)["pay"].answer == "no" and s.ask({"amount": 5, "limit": 100})["pay"].answer == "yes"
 
 
 @pytest.mark.parametrize("seed", range(6))
@@ -220,32 +251,85 @@ def test_hole4_an_answer_edited_in_the_store_with_every_hash_recomputed_does_not
     assert [b["seq"] for b in bad] == [i] and bad[0]["kinds"] == {"answer": 1}
 
 
-@pytest.mark.xfail(strict=True, reason="open: only an answer and its status are bound to the trace — a stored "
-                                       "result's confidence, why, guard or source can be edited and still replays ok "
-                                       "(runtime.py _answers_differ compares answer and status only)")
-@pytest.mark.parametrize("field,value", [("confidence", 0.37), ("why", "forged"), ("source", "cap")])
-def test_open_a_results_other_fields_are_bound_to_the_trace(field, value):
+@pytest.mark.parametrize("field,value", [("confidence", 0.37), ("why", "forged"), ("source", "cap"), ("guard", "hard_check"),
+                                         ("confidence", 1.0 - 1e-6)])
+def test_hole4_a_results_other_fields_are_bound_to_the_trace(field, value):
+    """Every field a result is read for — confidence, why, guard, source, not only the answer and its status — is
+    compared on replay; an edit is a mismatch of kind `answer` (docs/trace_spec.md §5)."""
     s = system()
     res = s.ask({"amount": 5, "limit": 100})
     d = json.loads(res.to_json())
+    assert d["results"]["pay"][field] != value
     d["results"]["pay"][field] = value
     forged = Response.from_json(json.dumps(d))
-    assert not forged.trace.replay(s, forged.flow)["ok"]
+    rep = forged.trace.replay(s, forged.flow)
+    assert not rep["ok"] and rep["answers"] == "differ" and rep["kinds"] == {"answer": 1}
+    assert field in rep["mismatches"][0][2] and rep["summary"].startswith("data damaged")
 
 
-@pytest.mark.xfail(strict=True, reason="open: a stored record's index fields (guards, safeguards, models, flow, the "
-                                       "confidence in answers) are not checked against its stored response — after a "
-                                       "consistent rewrite query() finds what never happened (store/__init__.py "
-                                       "_summary_problems)")
-def test_open_a_records_index_fields_agree_with_its_response(tmp_path):
+def test_hole4_a_confidence_within_float_rounding_still_replays():
+    """Confidence is compared within runtime.CONFIDENCE_TOL (1e-9, relative): float rounding is not an edit."""
     s = system()
-    st = JSONLStorage(tmp_path / "s.jsonl", system=s)
-    st.save(s.ask({"amount": 5, "limit": 100}))
+    res = s.ask({"amount": 5, "limit": 100})
+    d = json.loads(res.to_json())
+    d["results"]["pay"]["confidence"] *= 1 + 1e-12
+    again = Response.from_json(json.dumps(d))
+    assert again.trace.replay(s, again.flow)["ok"]
+
+
+@pytest.mark.parametrize("seed", SEEDS)
+def test_hole4_a_why_edited_in_the_store_with_every_hash_recomputed_does_not_replay(tmp_path, seed):
+    rng = rng_for(seed)
+    s = system()
+    st = JSONLStorage(tmp_path / "s.jsonl", system=s, record=rng.choice(["full", "compact"]))
+    for _ in range(3):
+        st.save(s.ask(random_input(rng)))
     recs = read_lines(st.path)
-    recs[0]["safeguards"] = [["hard_check", "answer:pay", ["pay"]]]
+    i = rng.randrange(len(recs))
+    q = rng.choice(sorted(recs[i]["answers"]))
+    (recs[i].get("response") or recs[i].get("compact"))["results"][q]["why"] = "approved by the manager"
     write_lines(st.path, recs, rechain(recs))
     st = JSONLStorage(st.path, system=s)
-    assert not st.verify()["ok"] or st.replay_all(s)
+    bad = st.replay_all(s)
+    assert [b["seq"] for b in bad] == [i] and bad[0]["kinds"] == {"answer": 1}
+
+
+def _edit_index(rec, field):
+    """Edit one index field of a stored record the way a forger who wants query() to find something would."""
+    if field == "safeguards":
+        rec["safeguards"] = rec["safeguards"] + [["hard_check", "answer:pay", ["pay"]]]
+    elif field == "guards":
+        rec["guards"] = {**rec["guards"], "size": "low_confidence"}
+    elif field == "models":
+        rec["models"] = rec["models"] + [{"type": "Forged", "id": "gpt", "fp": "0" * 16}]
+    elif field == "flow":
+        rec["flow"] = list(reversed(rec["flow"]))
+    elif field == "confidence":
+        q = sorted(rec["answers"])[0]
+        rec["answers"][q][1] = 0.5 if rec["answers"][q][1] != 0.5 else 0.25
+
+
+@pytest.mark.parametrize("record", ["full", "compact"])
+@pytest.mark.parametrize("field", ["safeguards", "guards", "models", "flow", "confidence"])
+def test_hole6_a_records_index_fields_agree_with_its_response(tmp_path, field, record):
+    """The record's summary — guards, safeguards, models, flow and the confidence in answers, what query() and the SQL
+    index tables read — is compared with its stored response by verify() (docs/trace_spec.md §4.3): a consistent rewrite
+    of an index field alone is a problem. A compact record keeps no flow: there the edited flow is caught by replay."""
+    s = system()
+    st = JSONLStorage(tmp_path / "s.jsonl", system=s, record=record)
+    st.save(s.ask({"amount": 5, "limit": 100}))
+    assert st.verify()["ok"]
+    recs = read_lines(st.path)
+    _edit_index(recs[0], field)
+    write_lines(st.path, recs, rechain(recs))
+    st = JSONLStorage(st.path, system=s)
+    out = st.verify()
+    if record == "compact" and field == "flow":
+        assert out["ok"]
+        (bad,) = st.replay_all(s)
+        assert bad["kinds"] == {"integrity": 1} and bad["summary"].startswith("data damaged")
+    else:
+        assert not out["ok"] and any(field.rstrip("s") in p[2] for p in out["problems"]), out["problems"]
 
 
 # --- hole 5: what is left of a redacted record stays verified

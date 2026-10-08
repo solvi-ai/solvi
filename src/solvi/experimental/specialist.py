@@ -92,7 +92,11 @@ def sha256(data):
 
 class Trace:
     """A hash chain of steps: entry i stores its step, its data, the previous entry's hash and its own hash =
-    sha256(prev + canonical(step, data)). Editing any entry breaks every hash after it."""
+    sha256(prev + canonical(step, data)). Editing any entry breaks every hash after it.
+
+    Not solvi.core.runtime.Trace: a specialist's run is its own chain, kept by the specialist (`to_dict` / `replay`);
+    a TraceStorage, `solvi report` and the audit do not read it. Whether specialists move onto the core trace is part
+    of their "graduate or go" decision for 1.2 (solvi.experimental.STATUS)."""
 
     GENESIS = "0" * 64
 

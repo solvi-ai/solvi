@@ -145,8 +145,8 @@ def act_features(sp, d, act_logit):
     x = {"confidence": float(d.conf), "margin": margin, "entropy": ent, "act_logit": float(act_logit),
          "n_options": float(len(sp.real))}
     x.update({f"kind={k}": float(sp.kind == k) for k in KINDS})
-    # the l14g features: always present (0 when the question does not allow "not stated"), so an l14g act calibrator can
-    # score every kind — a plain yes / no or choice question on an l14g checkpoint as well
+    # the answer-primitives features: always present (0 when the question does not allow "not stated"), so such an act calibrator can
+    # score every kind — a plain yes / no or choice question on such a checkpoint as well
     x["p_unknown"] = float((d.probs or {}).get(Unknown, 0.0))
     x.update({f"kind={k}": float(sp.kind == k) for k in KINDS_V3[len(KINDS):]})
     return x

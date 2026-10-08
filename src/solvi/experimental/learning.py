@@ -302,7 +302,7 @@ class Learning:
         its own thresholds; the catalog and the System are shallow copies whose parts point at the copies."""
         import dataclasses
 
-        from ..core.catalog import _group_func
+        from ..core.catalog import group_func
         from ..core.deciders import DecisionPart
         models = {}
         for p in self.parts.values():
@@ -326,7 +326,7 @@ class Learning:
                 if all(a is b for a, b in zip(alts, p.alternatives)):
                     return p
                 g = dataclasses.replace(p, alternatives=alts)
-                g.func = _group_func(g)
+                g.func = group_func(g)
                 return g
             f, m = sub(p.func), sub(p.model)
             return p if f is p.func and m is p.model else dataclasses.replace(p, func=f, model=m)
