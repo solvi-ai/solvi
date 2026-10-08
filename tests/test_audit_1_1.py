@@ -46,3 +46,29 @@ def test_bool_matching_words():
     assert matches(True, "no") is False and matches(False, "hello") is False
     np = pytest.importorskip("numpy")
     assert matches(np.bool_(True), "yes") and matches(np.bool_(False), "yes") is False
+
+
+# --- row 127 (E10): Question(uses=[...]) that does nothing is reported by solvi check
+def test_uses_on_a_question_with_a_rule_is_reported():
+    from solvi.check import lint
+    cat = Catalog()
+
+    @cat.rule("approve")
+    def approve(amount):
+        return "approve"
+
+    s = System(cat, [Question("approve", "?", Answer.choice(["approve", "reject"]), uses=["nope"])])
+    assert "uses_ignored" in lint(s).codes()
+
+
+def test_uses_naming_nothing_is_a_note_without_a_rule():
+    from solvi.check import lint
+    cat = Catalog()
+
+    @cat.fn
+    def total(amount):
+        return amount
+
+    s = System(cat, [Question("risk", "?", Answer.choice(["low", "high"]), uses=["totl"])])
+    rep = lint(s)
+    assert "uses_unknown" in rep.codes() and "uses_ignored" not in rep.codes()

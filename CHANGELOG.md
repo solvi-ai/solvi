@@ -47,6 +47,10 @@
   `solvi.core.provenance.BOOL_WORDS`); any other text rejects the output as `not grounded` and the questions on it
   abstain. A model that quoted, say, the word "paid" for `True` should quote the checkbox word or return a string.
   A `datetime` or a list value is still not compared (said so in the README and the guide).
+- **`solvi check` reports a `uses` hint that does nothing.** `Question(uses=["nope"])` on a question with a rule (or a
+  fitted answer head) was accepted, ignored at run time and `solvi check` said "no problems found"; now it is the warning
+  `uses_ignored`. Without `System(input_model=...)`, a `uses` name that no part computes or reads is the note
+  `uses_unknown` (it can only be a given input).
 
 ## 1.0.1 — 2026-10-04
 

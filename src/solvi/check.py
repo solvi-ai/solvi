@@ -280,6 +280,11 @@ def _questions(cat, questions, heads, given, rep, planner):
         if missing:
             rep.add("error", "unanswerable", name, "no input can answer it: nothing can compute " + ", ".join(missing))
         rule = cat.rules.get(name)
+        if q.uses and (rule is not None or name in heads):
+            rep.add("warning", "uses_ignored", name,
+                    f"`uses` ({', '.join(map(str, q.uses))}) is ignored: the question has "
+                    f"{'a rule' if rule is not None else 'an answer head'}, whose inputs make its flow — `uses` narrows "
+                    "the flow only of a question without either")
         if rule is not None:
             asked = [x for x in rule.inputs if x in questions and x not in cat.parts]
             if asked:
@@ -401,7 +406,8 @@ def _rules(cat, questions, rep):
 
 def _names(cat, system, questions, rep):
     """With System(input_model=Model), names only a typo (or an extra key) explains: an argument, or a `uses` hint, that
-    nothing computes and the model does not declare. Without a model every such name is a given fact: nothing to tell."""
+    nothing computes and the model does not declare. Without a model an argument is a given fact; a `uses` hint that no
+    part computes or reads is a note (it can only name an input: a typo, or a raw feature for a head)."""
     m = getattr(system, "input_model", None)
     fields = getattr(m, "model_fields", None)
     readers = {}
@@ -410,6 +416,13 @@ def _names(cat, system, questions, rep):
             for x in a.inputs:
                 readers.setdefault(x, []).append(getattr(a.func, "__name__", a.name) if a.func is not None else a.name)
     if fields is None:
+        rules = set(cat.rules) | set(getattr(system, "heads", None) or ())
+        for qn, q in questions.items():
+            for x in (q.uses or ()) if qn not in rules else ():
+                if x not in cat.parts and x not in readers and x not in questions:
+                    rep.add("note", "uses_unknown", qn,
+                            f"`uses` names {x!r}, which no part computes or reads: unless the input gives it (a typo?) "
+                            "the hint selects nothing")
         return
     forbid = (getattr(m, "model_config", None) or {}).get("extra") == "forbid"
     how = ": the model forbids extra keys, so it can never be given" if forbid else \
