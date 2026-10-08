@@ -107,3 +107,21 @@ def test_signature_timing_names_items_and_store():
     assert "| Stored decisions | SQLite: `store.signature()` / `verify(signature=)`" in guide
     assert "syndrome code alone: sign / locate" in guide
     assert "def store_times" in (root / "benchmarks" / "trace_signature.py").read_text()
+
+
+# --- row 76 (G8, docs part): the guide says what scan_user does with a field label, and states the measured rates
+def test_scan_user_does_not_escalate_a_field_label_and_the_guide_says_so():
+    import pathlib
+    from solvi.solutions.guard import Guard
+    g = Guard(scan_user=True)
+
+    @g.tool(ground=["order"], ground_from=("user",))
+    def refund(order: str) -> str:
+        return "ok"
+
+    msg = "Model: XPS 13 9310. Please refund order A-10457."
+    assert g.check({"name": "refund", "arguments": {"order": "A-10457"}}, [{"role": "user", "content": msg}]).outcome \
+        == "allow"
+    guide = (pathlib.Path(__file__).parents[1] / "docs" / "guide.md").read_text()
+    assert "is escalated too: turn `scan_user` on" not in guide
+    assert "flagged **11 of the 12" in guide and "missed 14 of the\n20 injections" in guide

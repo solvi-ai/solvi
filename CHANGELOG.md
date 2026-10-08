@@ -43,6 +43,11 @@ calibration files and served by `solvi serve`), so a build from it is not mistak
 
 ### Fixed
 
+- **Docs: the guard's injection detector states its measured rates, and `scan_user` is described as it behaves.** The
+  guide said `Guard(scan_user=True)` escalates a user who writes "Model: XPS 13 9310. Please refund …"; it does not (in
+  a user's message a field label counts only when its sentence goes on to give an order). The guide now gives what a
+  small review set measured: 11 of 12 ordinary tool outputs flagged, 14 of 20 reworded injections missed. The detector
+  itself is unchanged in this release.
 - **Docs: the signature timing says what it times.** The guide's 1,000 records → 1.3 / 1.4 ms was the syndrome code
   over 40-byte strings; through a store of real decisions `store.signature()` takes about 0.3 s and
   `verify(signature=)` about 0.8 s per 1,000 records (measured on a busy machine). Both tables are now in the guide, and
