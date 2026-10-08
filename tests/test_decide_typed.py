@@ -753,3 +753,20 @@ def test_the_published_checkpoint_answers_typed_questions_as_the_readme_shows_if
         mq._cache.clear()
         together = mq._raw_pass(specs, text)[0][0]
         assert np.max(np.abs(alone - together)) < 1e-3
+
+
+def test_logits_score_and_adaptation_take_the_question_spec():
+    """Audit row 106 (1.1): logits / score / adaptation take the spec decide / fit / teach take (not_stated=, ...), so a
+    question with "not stated" can be scored and its adaptation found."""
+    m = v2()
+    ex = [("charged twice, refund", "billing"), ("app crash error", "technical"), ("parcel tracking", "shipping")] * 2
+    m.fit(ex, "Which team?", TEAMS, not_stated=True)
+    assert m.adaptation("Which team?", TEAMS, not_stated=True) is m.adaptation("Which team?", TEAMS)
+    assert m.adaptation("Which team?", TEAMS, evidence=1) is None     # a question with evidence: another key
+    assert m.adaptation("Which team?", TEAMS, evidence=1, create=True) is not m.adaptation("Which team?", TEAMS)
+    z = m.logits("refund please", "Which team?", TEAMS, not_stated=True)
+    assert set(z) == set(TEAMS)
+    p = m.score("refund please", "Which team?", TEAMS, not_stated=True)
+    assert max(p, key=p.get) == "billing"
+    with pytest.raises(TypeError, match="renamed in 0.8"):
+        m.adaptation("Which team?", TEAMS, unknown=True)

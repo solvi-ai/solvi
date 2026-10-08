@@ -51,6 +51,9 @@
   fitted answer head) was accepted, ignored at run time and `solvi check` said "no problems found"; now it is the warning
   `uses_ignored`. Without `System(input_model=...)`, a `uses` name that no part computes or reads is the note
   `uses_unknown` (it can only be a given input).
+- **`DecideModel.logits`, `.score` and `.adaptation` take the question's spec** (`not_stated=`, `evidence=`, `k=`, ...)
+  as `decide`, `fit` and `teach` do: a question with "not stated" or evidence could be decided and fitted but not scored,
+  and its adaptation could not be looked up.
 
 ## 1.0.1 — 2026-10-04
 

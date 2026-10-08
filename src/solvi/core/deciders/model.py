@@ -526,9 +526,11 @@ class DecideModel:
                     self._cache.popitem(last=False)
             return res
 
-    def logits(self, text, task, options, descriptions=None, multi=False, other=None, kind=None):
-        """Raw logits of the scored options ("other" excluded): {option: logit}, or a list of them for a list of inputs."""
-        sp = _Spec(task, options, descriptions, multi, other, kind)
+    @_spec_names
+    def logits(self, text, task, options, descriptions=None, multi=False, other=None, kind=None, **spec):
+        """Raw logits of the scored options ("other" excluded): {option: logit}, or a list of them for a list of inputs.
+        `spec`: as decide (not_stated=, evidence=, k=, ...: the question is scored as decide scores it)."""
+        sp = _Spec(task, options, descriptions, multi, other, kind, **spec)
         one = _single(text)
         zs = self._raw([(sp, self.text(t)) for t in ([text] if one else list(text))])
         res = [{o: float(v) for o, v in zip(sp.real, z)} for z in zs]
@@ -753,11 +755,14 @@ class DecideModel:
                                 "long=\"retrieve\" reads a long input by its relevant sections.")
         return out[0] if one else out
 
-    def score(self, text, task, options, descriptions=None, multi=False, other=None, kind=None):
+    @_spec_names
+    def score(self, text, task, options, descriptions=None, multi=False, other=None, kind=None, **spec):
         """→ {option: probability} (a list of them for a list of inputs): softmax over the options for a single choice, a
         score or yes/no, a sigmoid per option with multi=True; the adaptation of this question applied, "other" by its
-        threshold."""
-        d = self.decide(text, task, options, descriptions, multi, other, kind)
+        threshold. `spec`: as decide (not_stated=, evidence=, ...)."""
+        if "unknown" in spec:                         # back to the public name decide takes
+            spec["not_stated"] = spec.pop("unknown")
+        d = self.decide(text, task, options, descriptions, multi, other, kind, **spec)
         return d.probs if isinstance(d, Decision) else [x.probs for x in d]
 
     def decide_pass(self, text, parts, names=None):
@@ -783,8 +788,12 @@ class DecideModel:
         return out
 
     # --- adaptation
-    def adaptation(self, task, options, descriptions=None, multi=False, other=None, create=False, kind=None):
-        sp = _Spec(task, options, descriptions, multi, other, kind)
+    @_spec_names
+    def adaptation(self, task, options, descriptions=None, multi=False, other=None, create=False, kind=None, **spec):
+        """The Adaptation of one question (None when it has none; `create=True` makes an empty one). `spec` as for
+        adapt / fit / teach (not_stated=, evidence=, ...): a question asking for evidence has its own key, so its
+        adaptation is found only with the same spec."""
+        sp = _Spec(task, options, descriptions, multi, other, kind, **spec)
         if create and sp.key not in self.adaptations:
             self.adaptations[sp.key] = Adaptation()
         return self.adaptations.get(sp.key)
