@@ -20,7 +20,9 @@ machine-readable schema of a record is `src/solvi/core/store/record.schema.json`
 
 - `v` is the record format. This version of solvi writes `v: 2` (`solvi.core.store.FORMAT`). Format 1 (solvi 0.7.1 and
   earlier) is read and verified, never written.
-- `record.schema.json` describes format 2; its `x-schema-version` is `2.0.0`. Records of kinds `ask`, `teach`,
+- `record.schema.json` describes format 2; its `x-schema-version` is `2.1.0` (2.0.0 plus the guard `no_data`, its
+  result's `extra["no_data"]` and a response check's optional `missing` — a minor version: a 2.0.0 reader may ignore
+  them, and the hash body does not change; `x-schema-changes` lists each version). Records of kinds `ask`, `teach`,
   `redaction` and `segment` are closed: a new field is a new schema version (minor when readers may ignore it, major
   when the hash body changes). Other kinds (`knowledge`, `dispatch`, `policy`, `refine`, `update`) are checked for the
   envelope only. [test_sem_record_schema]
@@ -167,10 +169,16 @@ Not guaranteed:
   else `computed`).
 - An answer's status is one of `ok`, `forced` (a failed hard check's `then` set it), `abstain`.
 - A check's status in `res.checks` is one of `passed`, `failed`, `skipped`, `error`.
-- **No data vs. cannot be checked.** A hard check whose input is not given is not planned: the question abstains with
-  guard `None`, and the check is absent from `res.checks`. A hard check that raised or returned a value that is not a
-  boolean: the question abstains with guard `hard_check`, and the check's status is `error`. The response tells the two
-  apart; the store's answer triple (`[answer, confidence, "abstain"]`) does not. [test_sem_statuses]
+- **No data vs. cannot be checked.** A hard check that governs a question and whose inputs are not given (and cannot be
+  computed) is not planned: the question abstains with guard `no_data` (source: the check; `extra["no_data"]`:
+  `{check: [the given inputs it misses]}`, walked back through facts that cannot be computed), and the check is listed
+  in `res.checks` after the flow's checks with status `skipped`, `missing` naming those inputs. A hard check that ran
+  and raised or returned a value that is not a boolean: the question abstains with guard `hard_check`, and the check's
+  status is `error`. Both keep the status `abstain` (an answer's status is unchanged, so every reader of `abstain`
+  keeps working); the store tells them apart in the record's `guards` (and the SQL index's guard column). A question
+  that cannot be computed for any other reason (a rule's input, a soft check) abstains with guard `None`, "cannot
+  compute: ...". `no_data` is not a safeguard event (`safeguards` and `system.stats` do not count it): nothing was
+  rejected, an input was missing. [test_sem_statuses]
 
 ## 7. Hard checks
 

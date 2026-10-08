@@ -1767,7 +1767,7 @@ Every option after `questions` is keyword-only. With a JSON-lines store every `a
 | `res.trace` | the hash-chained trace (see [The trace](#the-trace-and-verification)) |
 | `res.audit(q=None)` | what each answer rests on and which safeguards fired (see [Grounded decisions](#grounded-decisions-provenance-audit-and-safeguards)) |
 | `res.safeguards` | the safeguard events of this response |
-| `res.checks` | every check of the flow as data, in flow order: `CheckResult(name, questions, status, hard, reason, then)` — status `"passed"`, `"failed"`, `"skipped"` (a failed hard check closed every question that needed it) or `"error"` (it could not be evaluated); `reason` is what `Fail(...)` said (else the docstring's first line, else "<name> is false"; for an error the error); `then` the answers a failed hard check set. Also in `to_dict()` / `to_json()` and so in a stored decision (`"checks"`, derived from the trace; ignored on load and recomputed) |
+| `res.checks` | every check of the flow as data, in flow order: `CheckResult(name, questions, status, hard, reason, then)` — status `"passed"`, `"failed"`, `"skipped"` (a failed hard check closed every question that needed it; or no data: a hard check that could not be planned because inputs it needs are not given, listed after the flow's checks with `missing`, the given inputs it lacks) or `"error"` (it ran and could not be evaluated); `reason` is what `Fail(...)` said (else the docstring's first line, else "<name> is false"; for an error the error); `then` the answers a failed hard check set. Also in `to_dict()` / `to_json()` and so in a stored decision (`"checks"`, derived from the trace; ignored on load and recomputed) |
 | `res.ms` | decision time in milliseconds |
 | `res.confidence` | overall confidence: the probability that every answered question is right (product of the answers' confidences, errors taken as independent — conservative when constraints tie answers together); abstained questions are left out |
 | `res.complete`, `res.weakest` | did every question get an answer; `(question, confidence)` of the least confident answer |
@@ -1785,14 +1785,17 @@ Every option after `questions` is keyword-only. With a JSON-lines store every `a
 | `.status` | `"ok"`, `"forced"` (a hard check decided) or `"abstain"` |
 | `.probs` | class probabilities for answers from a learned head or a model decision (empty for plain rules) |
 | `.provenance`, `.source` | where the answer came from: `computed` (a rule, a hard check), `learned` (a head, a learned rule), `decided` (a model-backed rule); and which rule / check / head |
-| `.guard`, `.repaired` | the safeguard that settled it (`hard_check`, `outside_options`, `low_confidence`, `grounding`, `type_rejected`, `evidence_missing`, ...), and `(previous answer, constraints)` if joint decoding changed it |
+| `.guard`, `.repaired` | the safeguard that settled it (`hard_check`, `no_data`, `outside_options`, `low_confidence`, `grounding`, `type_rejected`, `evidence_missing`, ...), and `(previous answer, constraints)` if joint decoding changed it |
 | `.kind` | the answer type's kind (`yes_no`, `choice`, `ordinal`, `multi`, `span`, `rank`, `estimate`) |
 | `.evidence`, `.span` | the supporting quotes `[Quote(text, start, end, source)]`; a span answer's Quote |
 | `.not_stated`, `.interval`, `.scores`, `.extra` | the answer is `solvi.Unknown`; an estimate's interval; a ranking's scores; the details as data |
 
 A question abstains when:
 
-- a fact it needs cannot be computed from `init_state` (nothing in the catalog produces it);
+- a fact it needs cannot be computed from `init_state` (nothing in the catalog produces it); when that fact is a hard
+  check that governs the question, the guard is `no_data` — "no data for hard check cap: missing limit", the check is in
+  `res.checks` as `"skipped"` with `missing=["limit"]` and `res["q"].extra["no_data"] == {"cap": ["limit"]}` — told
+  apart from a hard check that ran and could not be evaluated (guard `hard_check`, check `"error"`);
 - a part it depends on raised an exception (the error is kept in the trace);
 - its rule returned a value outside the options, or returned `None` to abstain;
 - a hard check failed and has no `then` entry for it;

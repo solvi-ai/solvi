@@ -17,6 +17,16 @@
   an index field passed `verify()`, and `query(safeguard=..., model=...)` found what never happened. A compact record's
   `flow` is compared with the flow planned again on `replay_all` / `store.rederive`. Stores written by solvi 0.7.1–1.0.1
   verify as before (`tests/fixtures`).
+- **"No data" is stored apart from "cannot be checked": guard `no_data`.** A question whose governing hard check could
+  not be planned because inputs it needs are not given now abstains with `guard="no_data"` (it was `None`), `source`
+  the check, `why` "no data for hard check cap: missing limit" (it was "cannot compute: cap") and
+  `extra["no_data"] == {"cap": ["limit"]}`; the check is listed in `res.checks` as `"skipped"` with the new field
+  `CheckResult.missing` (`["limit"]`; written to `to_dict()` only when set). The status stays `abstain`, so code that
+  reads statuses is unchanged; the store keeps the difference in the record's `guards` (and the SQL guard column),
+  where a hard check that ran and could not be evaluated stays `hard_check`. Record schema 2.1.0 (format 2 unchanged;
+  a minor version: readers of 2.0.0 may ignore the new values). Code that tested `guard is None` to find missing inputs
+  for a hard check should test `guard == "no_data"`. Such a decision stored by solvi 1.0.1 or earlier (guard none,
+  "cannot compute: cap") still replays ok.
 
 ## 1.0.1 — 2026-10-04
 

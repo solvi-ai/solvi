@@ -317,6 +317,13 @@ class Record(Serial):
         return b
 
 
+NO_DATA = "no_data"
+"""The guard of a question that abstains because a hard check governing it could not be planned: inputs it needs are not
+given (and cannot be computed). Its result's `extra["no_data"]` is {check: [missing input]}, and the check is listed in
+`res.checks` as "skipped". Told apart from a hard check that ran and could not be evaluated (guard "hard_check", check
+"error")."""
+
+
 @dataclass
 class Result(Serial):
     answer: Any
@@ -326,11 +333,11 @@ class Result(Serial):
     probs: dict = field(default_factory=dict)
     provenance: str | None = None  # of the answer: computed (rule, hard check), learned (head, learned rule), decided (model rule)
     source: str | None = None      # what produced it: the rule, the hard check, or the head type
-    guard: str | None = None       # the safeguard that settled it: hard_check, outside_options, rule_abstained, low_confidence, missing_facts
+    guard: str | None = None       # the safeguard that settled it: hard_check, no_data, outside_options, rule_abstained, low_confidence, missing_facts
     repaired: tuple | None = None  # (previous answer, [constraints]) when joint decoding changed it
     kind: str | None = None        # the answer type's kind: yes_no, choice, ordinal, multi, span, rank, estimate
     evidence: list = field(default_factory=list)   # supporting quotes: [Quote(text, start, end, source)], checked in the text
-    extra: dict | None = None      # a primitive's details: an estimate's interval and coverage, a ranking's scores
+    extra: dict | None = None      # a primitive's details: an estimate's interval and coverage, a ranking's scores; no_data: {check: [missing input]}
 
     @property
     def not_stated(self):
@@ -552,6 +559,16 @@ def _result_differs(was, now, why=True):
     return out
 
 
+def _before_no_data(was, now, diff):
+    """A result stored before the guard no_data (solvi ≤ 1.0.1): the same abstention, written as "cannot compute: <the
+    unplanned facts>" with no guard and no source — what that version gave, not an edit."""
+    if now.guard != NO_DATA or was.guard is not None or was.source is not None or set(diff) - {"why", "guard", "source"}:
+        return False
+    why = was.why or ""
+    named = why[len("cannot compute: "):].split(", ") if why.startswith("cannot compute: ") else []
+    return set((now.extra or {}).get(NO_DATA) or {}) <= set(named)
+
+
 def _answers_differ(trace, system, flow):
     """The answers stored with a trace against the ones the trace gives under `system` (System.answers_of) → mismatches.
     Kind "answer" when the system's questions and catalog are the recorded ones — then a stored answer that differs was
@@ -573,7 +590,7 @@ def _answers_differ(trace, system, flow):
     for q, a in now.items():
         was = stored[q]
         diff = _result_differs(was, a, why=not getattr(trace, "legacy_order", False))
-        if not diff:
+        if not diff or _before_no_data(was, a, diff):
             continue
         if diff[0] in ("answer", "status"):
             why = f"stored answer {was.answer!r} [{was.status}] is not the one the trace gives: {a.answer!r} [{a.status}]"

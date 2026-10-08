@@ -10,7 +10,7 @@ from typing import TYPE_CHECKING
 from .. import _deprecate
 from .catalog import Catalog, gone_in_1_0
 from .provenance import model_info
-from .runtime import MISSING, Record, Result, execute, now_ms, path_confidence, srepr, vhash
+from .runtime import MISSING, NO_DATA, Record, Result, execute, now_ms, path_confidence, srepr, vhash
 from .plan.strategist import computable, plan
 from .catalog import Part, Question, Unknown, plain_json, question_data
 from .plan.strategist import OrderModel, ProducerPolicy
@@ -647,7 +647,14 @@ class System:
                               + _caused_by(by, r), "abstain", source=f, guard="hard_check")
         missing =[f for f in facts if f in by and by[f].value is MISSING]
         if flow.unresolved.get(q.name):
-            return Result(None, 0.0, "cannot compute: " + ", ".join(flow.unresolved[q.name]), "abstain")
+            lost = flow.unresolved[q.name]
+            nodata = self._no_data(q, lost, trace.init)
+            if nodata:                                # a hard check that governs the question could not be planned: its
+                said = "; ".join(f"no data for hard check {c}: missing {', '.join(m)}" for c, m in nodata.items())   # inputs
+                rest = [f for f in lost if f not in nodata]                                                  # are not given
+                return Result(None, 0.0, said + ("; cannot compute: " + ", ".join(rest) if rest else ""), "abstain",
+                              source=next(iter(nodata)), guard=NO_DATA, extra={NO_DATA: nodata})
+            return Result(None, 0.0, "cannot compute: " + ", ".join(lost), "abstain")
         rule = self.catalog.rules.get(q.name)
         soft_failed = []
         for f in facts:
@@ -721,6 +728,31 @@ class System:
                               value=a, confidence=base, provenance="learned", model=model_info(head), probs=dict(p)),
                 len(flow.steps))
         return Result(a, conf, why, probs=p, provenance="learned", source=type(head).__name__)
+
+    def _no_data(self, q, lost, init):
+        """The hard checks among a question's unresolved facts that govern it, each with the given inputs it misses (walked
+        back through the facts that cannot be computed) → {check: [input]}, in the order of `lost` (sorted)."""
+        reach = None
+        out = {}
+        for f in lost:
+            part = self.catalog.parts.get(f)
+            if part is None or part.kind != "check" or not part.hard or not governs(part, q):
+                continue
+            if reach is None:
+                reach = self._computable(init.keys())
+            missing, seen, todo = [], set(), list(part.inputs)
+            while todo:
+                x = todo.pop(0)
+                if x in seen or x in init:
+                    continue
+                seen.add(x)
+                p = self.catalog.parts.get(x)
+                if p is None:
+                    missing.append(x)
+                elif x not in reach:
+                    todo.extend(p.inputs)
+            out[f] = sorted(missing) or [f]
+        return out
 
     # --- the learned strategist
     def _observe(self, trace, init_state, vals, policy):
