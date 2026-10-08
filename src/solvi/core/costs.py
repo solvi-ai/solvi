@@ -17,6 +17,7 @@ class CostBook:
         self.n = {}
 
     def observe(self, name, ms):
+        """One run of the part named `name` took `ms`."""
         if name in self.ms:
             self.ms[name] += self.alpha * (ms - self.ms[name])
         else:
@@ -24,10 +25,14 @@ class CostBook:
         self.n[name] = self.n.get(name, 0) + 1
 
     def get(self, part, default=1.0):
-        if part.name in self.ms:
-            return self.ms[part.name]
-        if part.cost is not None:
-            return float(part.cost)
+        """The moving average for a part (a catalog part, or its name — what `observe` takes); else the part's declared
+        `cost`, else `default`."""
+        name = part if isinstance(part, str) else part.name
+        if name in self.ms:
+            return self.ms[name]
+        cost = None if isinstance(part, str) else part.cost
+        if cost is not None:
+            return float(cost)
         return default
 
     def __repr__(self):

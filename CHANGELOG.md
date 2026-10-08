@@ -43,6 +43,8 @@ calibration files and served by `solvi serve`), so a build from it is not mistak
 
 ### Fixed
 
+- **`CandidateHead.n` counts the steps it was taught**, not only those it was fitted on; **`CostBook.get` takes a part's
+  name** as well as the part (`observe` takes the name).
 - **One name, one meaning for "type rejected".** `solvi.core.primitives` named its guard kind `TYPE_REJECTED`
   ("type_rejected") while `solvi.core.provenance.TYPE_REJECTED` is the reason prefix ("type rejected"); the guard kinds
   there are now `GUARD_TYPE_REJECTED`, `GUARD_GROUNDING`, `GUARD_OUTSIDE` (module-internal names; the values are

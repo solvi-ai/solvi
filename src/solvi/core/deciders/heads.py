@@ -353,7 +353,7 @@ class CandidateHead:
         self.features = list(features)
         self.relative = bool(relative)
         self.head = FastHead(["yes", "no"], pairs=pairs, refit=refit)
-        self.n = 0
+        self.n = 0                                     # the steps learned from: fit's, then one per teach
 
     def rows(self, candidates):
         """The rows the head reads: each candidate's features and, for numbers, the gaps to the step's min and max."""
@@ -407,7 +407,9 @@ class CandidateHead:
     def teach(self, candidates, chosen):
         """One correction: this candidate (index, or a set of them) was the one to take. → ms."""
         good = {chosen} if isinstance(chosen, int) else set(chosen)
-        return sum(self.head.teach(r, "yes" if i in good else "no") for i, r in enumerate(self.rows(candidates)))
+        ms = sum(self.head.teach(r, "yes" if i in good else "no") for i, r in enumerate(self.rows(candidates)))
+        self.n += 1                                    # n: the steps the head has learned from (fit and taught)
+        return ms
 
     def fingerprint(self):
         from ..provenance import digest

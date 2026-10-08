@@ -178,3 +178,17 @@ def test_type_rejected_is_one_name_with_one_value():
     from solvi.core import primitives, provenance
     assert getattr(primitives, "TYPE_REJECTED", provenance.TYPE_REJECTED) == provenance.TYPE_REJECTED == "type rejected"
     assert primitives.GUARD_TYPE_REJECTED == "type_rejected"
+
+
+# --- row 146 (B18): CandidateHead.n counts taught steps; CostBook.get takes the name observe takes
+def test_candidate_head_counts_taught_steps_and_costbook_reads_by_name():
+    from solvi.core.costs import CostBook
+    from solvi.core.deciders.heads import CandidateHead
+    steps = [([{"d": 1.0}, {"d": 5.0}], 0), ([{"d": 2.0}, {"d": 9.0}], 0), ([{"d": 7.0}, {"d": 0.5}], 1)]
+    h = CandidateHead(["d"]).fit(steps)
+    assert h.n == 3
+    h.teach([{"d": 1.5}, {"d": 4.0}], 0)
+    assert h.n == 4
+    book = CostBook()
+    book.observe("total", 4.0)
+    assert book.get("total") == 4.0 and book.get("other", default=2.0) == 2.0
