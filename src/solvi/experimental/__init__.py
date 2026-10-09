@@ -45,6 +45,11 @@ STATUS: dict[str, dict] = {
             "server", "script": None},
     "oncalib": {"since": "1.0", "what": "recalibrating a guarantee on the fly from outcomes", "missing": "a "
                 "recalibration that keeps the guarantee's promise (it does not: see its module docs)", "script": None},
+    "changes": {"since": "1.1", "what": "one change pipeline for four sources (a document version, verified "
+                "experience, a person's correction, a search proposal): pluggable stages, a journal of kind \"change\", "
+                "promote into the knowledge store / compiled versions / learning, versions and rollback", "missing": "a "
+                "measured use: a pre-registered run where the pipeline admits fewer harmful changes than the store's "
+                "gates alone, without blocking the useful ones, with a script in benchmarks/", "script": None},
     "counterfactual": {"since": "0.7", "what": "the smallest change of a decision's inputs that changes its answer "
                        "(adverse-action reasons)", "missing": "one measured use, e.g. adverse-action reasons on the "
                        "credit gallery task", "script": None},

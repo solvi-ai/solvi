@@ -103,6 +103,17 @@ Recalibrating a guarantee on the fly from outcomes, every N labels or after a dr
 - Guide: [Outcomes as labels](guide.md#outcomes-as-labels-systemoutcome); API: [solvi.experimental.oncalib](api/oncalib.md).
   The stable path recalibrates explicitly, on a schedule or after a drift flag.
 
+## `changes`
+
+One change pipeline for four sources (a document version, verified experience, a person's correction, a search
+proposal): pluggable stages, a journal of kind "change", promote into the knowledge store / compiled versions /
+learning, versions and rollback (`solvi.experimental.changes.Pipeline(stages, storage, store=...)`). Since 1.1.
+
+- **Missing:** a measured use: a pre-registered run where the pipeline admits fewer harmful changes than the store's
+  gates alone, without blocking the useful ones, with a script in benchmarks/.
+- **Script:** none yet. **Deadline:** 1.2.
+- Design and API: the module docstring of `solvi.experimental.changes`.
+
 ## `counterfactual`
 
 The smallest change of a decision's inputs that changes its answer (adverse-action reasons;
