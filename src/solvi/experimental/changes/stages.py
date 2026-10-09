@@ -1,0 +1,515 @@
+"""The stages of the change pipeline: the Stage protocol, its Verdict, and the built-in stages.
+
+    class MyStage:                                 # the Stage protocol (like a WriteGate of the knowledge store)
+        name = "mine"
+        def run(self, change, ctx) -> Verdict: ...  # Verdict.admit / .refuse / .hold, with what it measured
+
+Built in, in the order the pipeline usually runs them (what each one wraps, ports, or adds):
+
+  KnownFailures      a candidate identical to one rejected before is refused (reads the change journal)          new
+  Static             the source and the artifact are well-formed; the store's SourceGate; rule code passes the
+                     compiler's sandbox check; evidence exists; a parse callback                                 wraps
+  Consistency        the store's ConsistencyGate on the proposed item; conflicts on its key; narrows / widens   wraps
+  Confirmation       a callback: the compilation's acceptance, or the rule replayed on its own evidence          wraps
+  CleanCases         Agenda.dry_run over recorded successes: how many the change would block                    wraps
+  Impact             decision_diff / store.diff.diff / a callback: the share of past decisions it changes       wraps
+  FreshEnvironments  paired selection on fresh worlds, then confirmation on other fresh worlds with a bootstrap
+                     lower bound > 0, a deterministic replay, rules that never crash, progress not lower         ports
+  Approval           a table (artifact kind, source) → "gate" | "gate+person" | "person"; holds until a ruling  new
+  Canaries           a honesty run against a baseline; a suspiciously perfect score is a flag (hold)            wraps
+
+`ctx` is the pipeline's Context: the KnowledgeStore (ctx.store, may be None), the journal, the verdicts so far
+(ctx.verdicts: stage name → Verdict), the approval level, and the person's ruling once given."""
+from __future__ import annotations
+
+import fnmatch
+from dataclasses import dataclass, field
+from typing import Any, Callable, Protocol, runtime_checkable
+
+DECISIONS = ("admit", "refuse", "hold")
+SOURCES = ("document", "outcome", "person", "search")          # the four sources of change
+LEVELS = ("gate", "gate+person", "person")
+
+
+@dataclass
+class Verdict:
+    """A stage's answer about one change: "admit", "refuse" or "hold" (wait for a person), why, and what it measured."""
+    decision: str
+    reason: str = ""
+    measured: dict | None = None
+    stage: str = ""
+
+    def __post_init__(self):
+        if self.decision not in DECISIONS:
+            raise ValueError(f"a verdict is one of {DECISIONS}, not {self.decision!r}")
+
+    @property
+    def ok(self):
+        return self.decision == "admit"
+
+    @classmethod
+    def admit(cls, reason="", measured=None, stage=""):
+        return cls("admit", reason, measured, stage)
+
+    @classmethod
+    def refuse(cls, reason="", measured=None, stage=""):
+        return cls("refuse", reason, measured, stage)
+
+    @classmethod
+    def hold(cls, reason="", measured=None, stage=""):
+        return cls("hold", reason, measured, stage)
+
+    @classmethod
+    def of(cls, x, stage=""):
+        """A callback's answer as a Verdict: a Verdict, a knowledge-store gate Verdict (admit: bool), a bool, a dict
+        {"ok": bool, "reason"?, ...measurements}, or None (admitted, nothing measured)."""
+        if isinstance(x, Verdict):
+            x.stage = x.stage or stage
+            return x
+        if x is None:
+            return cls.admit(stage=stage)
+        if isinstance(x, bool):
+            return cls("admit" if x else "refuse", "" if x else "the check said no", stage=stage)
+        if isinstance(x, dict):
+            m = {k: v for k, v in x.items() if k not in ("ok", "reason")}
+            return cls("admit" if x.get("ok", True) else "refuse", str(x.get("reason", "")), m or None, stage)
+        if isinstance(getattr(x, "admit", None), bool):                  # gates.Verdict
+            return cls("admit" if x.admit else "refuse", x.reason, x.measured, stage or getattr(x, "gate", ""))
+        raise TypeError(f"a stage callback returns a Verdict, a bool, a dict or None, not {type(x).__name__}")
+
+    def to_dict(self):
+        return {"stage": self.stage, "decision": self.decision, "reason": self.reason, "measured": self.measured}
+
+
+@runtime_checkable
+class Stage(Protocol):
+    """A stage of the change pipeline.
+
+    You implement: `name` and `run(change, ctx) → Verdict` (admit / refuse / hold, with measurements).
+
+    You get for free: it runs in the pipeline's order; its verdict is a journal record (kind "change"); a refusal
+    rejects the change (recorded with the stage, so the same candidate is refused next time); a hold keeps it until
+    `Pipeline.rule(...)`.
+
+    Stability: experimental."""
+    name: str
+
+    def run(self, change, ctx) -> Verdict: ...
+
+
+def _call(fn, change, ctx):
+    return fn(change, ctx)
+
+
+# ───────────────────────────────────────────────────────────── 9. failure memory (new)
+class KnownFailures:
+    """A candidate whose fingerprint (Change.fingerprint: source, artifact, content, code) was rejected before is refused
+    with the earlier stage and reason — a search does not walk in circles. Reads the change journal; nothing expires
+    (unlike solvi.core.knowledge.FailureMemory, which unblocks a plan after a window)."""
+    name = "failure_memory"
+
+    def run(self, change, ctx):
+        fp = change.fingerprint()
+        for d in ctx.journal.records("rejected"):
+            if d.get("fingerprint") == fp:
+                return Verdict.refuse(f"rejected before by stage {d.get('stage')!r}: {d.get('reason')}",
+                                      {"earlier": d.get("change")})
+        return Verdict.admit()
+
+
+# ───────────────────────────────────────────────────────────── 1. static (wraps)
+class Static:
+    """Well-formedness before anything is run.
+
+    Checks: the source is one of the four; a "search" proposal carries evidence (it enters the store as an
+    observation, so it must point at what was observed); an item's kind and body are accepted by
+    KnowledgeStore.proposal and its source by the store's SourceGate; `change.code` (rule code) passes the compiler's
+    sandbox check (solvi.experimental.compile.sandbox.check: pure functions, standard-library imports); each evidence id
+    exists (`evidence_exists(eid) → bool`, e.g. a TraceStorage's record or an experience log); `parse(change, ctx)` →
+    a list of problems (e.g. a lawlang parse)."""
+    name = "static"
+
+    def __init__(self, *, parse: Callable | None = None, evidence_exists: Callable | None = None, sandbox: bool = True):
+        self.parse, self.evidence_exists, self.sandbox = parse, evidence_exists, sandbox
+
+    def run(self, change, ctx):
+        problems = []
+        if change.source not in SOURCES:
+            problems.append(f"source {change.source!r} is not one of {SOURCES}")
+        elif change.source == "search" and not change.evidence:
+            problems.append("a search proposal carries evidence (stored ids of what it was confirmed on): a proposal "
+                            "without it is the system's own unverified answer")
+        if change.artifact == "item":
+            if ctx.store is None:
+                problems.append("an item change needs a KnowledgeStore (Pipeline(store=...))")
+            elif not problems:
+                try:
+                    prop = ctx.store.proposal(**change.item_kwargs())
+                except (ValueError, TypeError) as e:
+                    problems.append(f"not a knowledge item: {e}")
+                else:
+                    from ...core.knowledge.gates import SourceGate
+                    v = SourceGate().admit(ctx.store, prop)
+                    if not v.admit:
+                        problems.append(f"source gate: {v.reason}")
+        if change.code is not None and self.sandbox:
+            from ..compile import sandbox
+            problems += [f"sandbox: {p}" for p in sandbox.check(change.code)]
+        if self.evidence_exists is not None:
+            missing = [e for e in change.evidence if not self.evidence_exists(e)]
+            if missing:
+                problems.append(f"evidence not found: {missing[:5]}")
+        if self.parse is not None:
+            problems += list(self.parse(change, ctx) or ())
+        return Verdict.refuse("; ".join(problems), {"problems": problems}) if problems else Verdict.admit()
+
+
+# ───────────────────────────────────────────────────────────── 2. consistency (wraps)
+class Consistency:
+    """The knowledge store's ConsistencyGate on the proposed item (premises exist and are present; not self-defeating),
+    plus what it measures: the active items on the same key holding another value (`conflicts`: the store resolves
+    them by source rank or asks a person — not a refusal here) and, with `classify(change, ctx) → "narrows" | "widens"`,
+    the direction of the behaviour change (Approval upgrades "gate" to "gate+person" for a widening change). An
+    artifact other than an item is admitted with only the classification."""
+    name = "consistency"
+
+    def __init__(self, *, classify: Callable | None = None):
+        self.classify = classify
+
+    def run(self, change, ctx):
+        m = {}
+        if self.classify is not None:
+            m["direction"] = self.classify(change, ctx)
+        if change.artifact != "item" or ctx.store is None:
+            return Verdict.admit("not a knowledge item", m or None)
+        from ...core.knowledge.gates import ConsistencyGate
+        ks = ctx.store
+        prop = ks.proposal(**change.item_kwargs())
+        v = ConsistencyGate().admit(ks, prop)
+        if prop["key"] is not None:
+            others = [i for i in ks.by_key.get(prop["key"], ()) if i != prop["id"] and ks.status(i) == "active"]
+            m["conflicts"] = sorted(i for i in others if ks.items[i].value != (prop["body"] or {}).get("o"))
+        return Verdict("admit" if v.admit else "refuse", v.reason, m or None)
+
+
+# ───────────────────────────────────────────────────────────── 3. independent confirmation (wraps)
+class Confirmation:
+    """Independent confirmation by a callback `check(change, ctx)` → a Verdict, bool or dict. Two ready-made ones:
+
+    Confirmation.compiled()           a "compiled" artifact is confirmed when the compilation was accepted (two drafts
+                                      agree on the pool, separate tests pass, the person's rulings hold —
+                                      solvi.experimental.compile);
+    Confirmation.on_evidence(replay)  every evidence id must be confirmed by `replay(eid, change) → bool` (an outcome rule
+                                      must fire on what it was learned from, e.g. rewound k steps before the failure)."""
+    name = "confirmation"
+
+    def __init__(self, check: Callable):
+        self.check = check
+
+    def run(self, change, ctx):
+        return Verdict.of(_call(self.check, change, ctx))
+
+    @classmethod
+    def compiled(cls):
+        def check(change, ctx):
+            c = change.payload
+            ok = bool(getattr(c, "accepted", False))
+            return Verdict("admit" if ok else "refuse", "" if ok else f"compilation not accepted: {getattr(c, 'reason', '')}",
+                           {"fingerprint": getattr(c, "fingerprint", None)})
+        return cls(check)
+
+    @classmethod
+    def on_evidence(cls, replay: Callable, *, min_share: float = 1.0):
+        def check(change, ctx):
+            if not change.evidence:
+                return Verdict.refuse("no evidence to confirm the change on")
+            hits = [bool(replay(e, change)) for e in change.evidence]
+            share = sum(hits) / len(hits)
+            ok = share >= min_share
+            return Verdict("admit" if ok else "refuse", "" if ok else f"confirmed on {sum(hits)} of {len(hits)} evidence",
+                           {"confirmed": sum(hits), "evidence": len(hits), "share": share})
+        return cls(check)
+
+
+# ───────────────────────────────────────────────────────────── 4. clean cases (wraps Agenda.dry_run)
+def hazard_body(name, when, actions, **extra):
+    """A hazard rule as a knowledge item body: {"s": "hazard:<name>", "r": "forbid", "o": {"when", "actions"}, "kind":
+    "hazard"} — in state `when` (every key equal), the actions matching `actions` (glob patterns) are forbidden."""
+    return {"s": f"hazard:{name}", "r": "forbid", "o": {"when": dict(when), "actions": list(actions)}, "kind": "hazard",
+            **extra}
+
+
+def hazard_gate(body):
+    """A hazard body → (check, blocks) for Agenda.gate: check(state) is True (allowed) unless every `when` key matches."""
+    o = body["o"]
+    when = dict(o["when"])
+
+    def check(state):
+        return not all(isinstance(state, dict) and state.get(k) == v for k, v in when.items())
+    return check, list(o["actions"])
+
+
+def gate_of(change):
+    """The (check, blocks) a change installs as an agenda gate: `change.check` when given (with blocks from its body),
+    else the declarative hazard form of its body (hazard_gate)."""
+    body = (change.payload or {}).get("body") or {}
+    if change.check is not None:
+        return change.check, list((body.get("o") or {}).get("actions") or ["*"])
+    return hazard_gate(body)
+
+
+def allowed(state, action, gates):
+    """Does any (check, blocks) gate forbid `action` in `state`? (a policy's helper) → bool."""
+    for check, blocks in gates:
+        if any(fnmatch.fnmatchcase(str(action), b) for b in blocks) and not check(state):
+            return False
+    return True
+
+
+class CleanCases:
+    """How many recorded successes the change would block: the change installed as a gate of an empty
+    solvi.core.knowledge.Agenda and `dry_run(records)` over (state, action) pairs that worked (windows without a failure,
+    accepted calls). Refused when the share of records it blocks exceeds `max_share` (default 0: a hazard rule may not
+    block anything that worked). records: a list or `records(change, ctx)`; gate: change → (check, blocks) (default
+    gate_of)."""
+    name = "clean_cases"
+
+    def __init__(self, records, *, gate: Callable = gate_of, max_share: float = 0.0):
+        self.records, self.gate, self.max_share = records, gate, float(max_share)
+
+    def run(self, change, ctx):
+        from ...core.knowledge.agenda import Agenda
+        recs = self.records(change, ctx) if callable(self.records) else self.records
+        recs = list(recs)
+        check, blocks = self.gate(change)
+        ag = Agenda(None).gate("candidate", check, blocks=blocks)
+        rep = ag.dry_run(recs)
+        share = rep["blocked_any"] / rep["records"] if rep["records"] else 0.0
+        m = {"records": rep["records"], "would_block": rep["blocked_any"], "share": share,
+             "examples": rep["gates"]["candidate"]["examples"]}
+        if share > self.max_share:
+            return Verdict.refuse(f"would block {rep['blocked_any']} of {rep['records']} recorded successes "
+                                  f"({share:.1%} > {self.max_share:.1%})", m)
+        return Verdict.admit("", m)
+
+
+# ───────────────────────────────────────────────────────────── 5. impact (wraps decision_diff / diff / redecide)
+class Impact:
+    """The share of past decisions the change would change. measure(change, ctx) → {"changed", "total"} (or a
+    DiffReport / DecisionDiff); refused when changed / total > max_share (None: only recorded). Ready-made:
+
+    Impact.of_system(storage, system_of)   solvi.core.store.diff.diff(storage, system_of(change, ctx)) — the stored
+                                           decisions re-run with the candidate system;
+    Impact.of_compiled(storage, old_of)    solvi.experimental.compile.decision_diff(old_of(ctx), change.payload,
+                                           store=storage) — with the clauses that cause each change."""
+    name = "impact"
+
+    def __init__(self, measure: Callable, *, max_share: float | None = None):
+        self.measure, self.max_share = measure, max_share
+
+    def run(self, change, ctx):
+        r = self.measure(change, ctx)
+        if hasattr(r, "moved") and hasattr(r, "total"):                 # DecisionDiff
+            m = {"changed": len(r.moved), "total": r.total, "ids": [x["id"] for x in r.moved][:20]}
+        elif hasattr(r, "changed") and hasattr(r, "total"):             # DiffReport
+            m = {"changed": len(r.changed), "total": r.total, "ids": [x["id"] for x in r.changed][:20]}
+        else:
+            m = dict(r)
+        share = m["changed"] / m["total"] if m.get("total") else 0.0
+        m["share"] = share
+        if self.max_share is not None and share > self.max_share:
+            return Verdict.refuse(f"changes {m['changed']} of {m['total']} past decisions ({share:.1%} > "
+                                  f"{self.max_share:.1%})", m)
+        return Verdict.admit("", m)
+
+    @classmethod
+    def of_system(cls, storage, system_of: Callable, *, max_share=None, **filters):
+        def measure(change, ctx):
+            from ...core.store.diff import diff
+            return diff(storage, system_of(change, ctx), **filters)
+        return cls(measure, max_share=max_share)
+
+    @classmethod
+    def of_compiled(cls, storage, old_of: Callable, *, max_share=None, **filters):
+        def measure(change, ctx):
+            from ..compile import decision_diff
+            return decision_diff(old_of(ctx), change.payload, store=storage, **filters)
+        return cls(measure, max_share=max_share)
+
+
+# ───────────────────────────────────────────────────────────── 6. fresh environments (ported)
+class FreshEnvironments:
+    """The candidate against the current agent on fresh worlds of an Environment, paired by seed (ported from a gated
+    evolution harness).
+
+    env: a function → a new Environment; agent: a function (change or None, ctx) → a policy (state, actions) → action
+    (None: the current agent); select / confirm: seeds, or functions (change, ctx) → seeds — two disjoint sets of worlds
+    never used before (draw them fresh per candidate; never the held-out evaluation seeds, see EvaluatorLock); score:
+    row → number, higher is better (default: 1 when the episode did not fail); progress: row → number (default the
+    episode's info["progress"]).
+
+    The bar, in order: (1) selection — the mean paired gain on `select` is > 0; (2) the candidate's rules never crash
+    (a policy that raises); (3) replay — the candidate replays its first `replay` selection worlds with the same
+    actions; (4) confirmation — on `confirm`, the bootstrap lower bound of the paired gain is > `min_lower`; (5)
+    progress not lower — the upper bound of the paired progress change on `confirm` is ≥ −`progress_tolerance`
+    (a rule that makes the agent overcautious is refused). Everything measured is recorded."""
+    name = "fresh_environments"
+
+    def __init__(self, env: Callable, agent: Callable, *, select, confirm, score: Callable | None = None,
+                 progress: Callable | None = None, max_steps: int = 200, boot: int = 2000, seed: int = 0,
+                 min_lower: float = 0.0, progress_tolerance: float = 0.0, replay: int = 2):
+        self.env, self.agent, self.select, self.confirm = env, agent, select, confirm
+        self.score = score or (lambda r: 0.0 if r["failed"] else 1.0)
+        self.progress = progress or (lambda r: r["progress"])
+        self.max_steps, self.boot, self.seed = max_steps, boot, seed
+        self.min_lower, self.progress_tolerance, self.replay = min_lower, progress_tolerance, replay
+
+    def _seeds(self, s, change, ctx):
+        return list(s(change, ctx) if callable(s) else s)
+
+    def _play(self, policy, seeds):
+        from .paired import run_episode
+        return [run_episode(self.env(), policy, s, max_steps=self.max_steps) for s in seeds]
+
+    def run(self, change, ctx):
+        from .paired import paired_bootstrap
+        sel, conf = self._seeds(self.select, change, ctx), self._seeds(self.confirm, change, ctx)
+        if not sel or not conf:
+            return Verdict.refuse("no selection or confirmation worlds")
+        if set(sel) & set(conf):
+            return Verdict.refuse(f"selection and confirmation worlds overlap: {sorted(set(sel) & set(conf))[:5]}")
+        base, cand = self.agent(None, ctx), self.agent(change, ctx)
+        rb, rc = self._play(base, sel), self._play(cand, sel)
+        m, lo, hi = paired_bootstrap([self.score(r) for r in rb], [self.score(r) for r in rc], boot=self.boot,
+                                     seed=self.seed)
+        meas = {"select": {"worlds": len(sel), "gain": [m, lo, hi], "failed": [sum(r["failed"] for r in rb),
+                                                                              sum(r["failed"] for r in rc)]}}
+        errs = sum(r["errors"] for r in rc)
+        if errs:
+            return Verdict.refuse(f"the candidate's rules crashed in {errs} selection world(s): "
+                                  f"{next(r['error'] for r in rc if r['errors'])}", meas)
+        if m <= 0:
+            return Verdict.refuse(f"no gain on the selection worlds (mean {m:+.3f})", meas)
+        again = self._play(self.agent(change, ctx), sel[:self.replay])
+        same = all(a["actions"] == b["actions"] for a, b in zip(again, rc))
+        meas["deterministic"] = same
+        if not same:
+            return Verdict.refuse("not deterministic: a selection world replayed with other actions", meas)
+        cb, cc = self._play(base, conf), self._play(cand, conf)
+        errs = sum(r["errors"] for r in cc)
+        cm, clo, chi = paired_bootstrap([self.score(r) for r in cb], [self.score(r) for r in cc], boot=self.boot,
+                                        seed=self.seed + 1)
+        pm, plo, phi = paired_bootstrap([self.progress(r) for r in cb], [self.progress(r) for r in cc], boot=self.boot,
+                                        seed=self.seed + 2)
+        meas["confirm"] = {"worlds": len(conf), "gain": [cm, clo, chi], "progress": [pm, plo, phi],
+                           "failed": [sum(r["failed"] for r in cb), sum(r["failed"] for r in cc)]}
+        if errs:
+            return Verdict.refuse(f"the candidate's rules crashed in {errs} confirmation world(s)", meas)
+        if clo <= self.min_lower:
+            return Verdict.refuse(f"not confirmed: the gain's lower bound {clo:+.3f} ≤ {self.min_lower:+.3f}", meas)
+        if phi < -self.progress_tolerance:
+            return Verdict.refuse(f"progress lower: the change's upper bound {phi:+.3f} < {-self.progress_tolerance:+.3f}",
+                                  meas)
+        return Verdict.admit("", meas)
+
+
+# ───────────────────────────────────────────────────────────── 7. approval (new: a table)
+DEFAULT_APPROVAL = {
+    ("rule", "outcome"): "gate", ("skill", "outcome"): "gate", ("action", "outcome"): "gate",
+    ("fact", "outcome"): "gate", ("fact", "person"): "gate", ("rule", "person"): "gate",
+    ("rule", "search"): "gate+person", ("skill", "search"): "gate+person",
+    ("rule", "document"): "gate+person", ("compiled", "document"): "gate+person",
+    ("update", "person"): "gate", ("update", "outcome"): "gate",
+    ("evaluator", "person"): "person", ("goal", "person"): "person",
+}
+
+
+class Approval:
+    """Who approves: table {(artifact kind, source): "gate" | "gate+person" | "person"} (the artifact kind is the
+    item's kind for an item — "rule", "fact", ... — else "compiled" / "update"; a key may also be the kind alone);
+    `default` for a pair not in the table. "gate": admitted. "gate+person" and "person": held until a person's ruling
+    (Pipeline.rule), then admitted or refused. A change the consistency stage classified as widening behaviour is
+    raised from "gate" to `widen`. Under "person", the gate stages' refusals are advisory (recorded; the person
+    decides), except the static stage's."""
+    name = "approval"
+
+    def __init__(self, table: dict | None = None, *, default: str = "gate+person", widen: str = "gate+person"):
+        self.table = dict(DEFAULT_APPROVAL if table is None else table)
+        for v in [*self.table.values(), default, widen]:
+            if v not in LEVELS:
+                raise ValueError(f"an approval level is one of {LEVELS}, not {v!r}")
+        self.default, self.widen = default, widen
+
+    def level(self, change, verdicts=None):
+        k = change.kind
+        lv = self.table.get((k, change.source), self.table.get(k, self.default))
+        c = (verdicts or {}).get("consistency")
+        if lv == "gate" and c is not None and (c.measured or {}).get("direction") == "widens":
+            lv = self.widen
+        return lv
+
+    def run(self, change, ctx):
+        lv = self.level(change, ctx.verdicts)
+        if lv == "gate":
+            return Verdict.admit("", {"level": lv})
+        if ctx.ruling is None:
+            return Verdict.hold(f"approval level {lv!r}: waiting for a person's ruling", {"level": lv})
+        ok, by, note = ctx.ruling
+        return Verdict("admit" if ok else "refuse", f"{'approved' if ok else 'rejected'} by {by}" + (f": {note}" if note else ""),
+                       {"level": lv, "by": by})
+
+
+# ───────────────────────────────────────────────────────────── 8. canaries (wraps solvi.testing.honesty)
+def _perfect(m):
+    return bool(m.get("n")) and m.get("confident_errors") == 0 and m.get("escalated") == 0
+
+
+class Canaries:
+    """A honesty run of the candidate: run(change, ctx) → metrics (solvi.testing.honesty.metrics's dict, or your own
+    numbers in the same direction). Refused when a gated number is worse than `baseline` by more than `tolerance`
+    (solvi.testing.honesty.compare); held — a flag, not a success — when `perfect(metrics)` says the score is
+    suspiciously perfect (default: every case answered and none wrong, on a set built so that a perfect score proves
+    access to the answers: a removed test, a reference the candidate should not see). Ready-made:
+    Canaries.honesty(system_of, cases) asks the candidate system the cases (honesty.load_set(path)["cases"])."""
+    name = "canaries"
+
+    def __init__(self, run: Callable, *, baseline: dict | None = None, tolerance: float = 0.02,
+                 perfect: Callable | None = _perfect):
+        self._run, self.baseline, self.tolerance, self.perfect = run, baseline, tolerance, perfect
+
+    def run(self, change, ctx):
+        from ...testing.honesty import compare
+        m = dict(self._run(change, ctx))
+        worse = compare(m, self.baseline, self.tolerance) if self.baseline else []
+        meas = {"metrics": m, "worse": worse}
+        if worse:
+            return Verdict.refuse("honesty got worse: " + "; ".join(worse), meas)
+        if self.perfect is not None and self.perfect(m):
+            return Verdict.hold("a suspiciously perfect score on the canaries: a flag for a person, not a success", meas)
+        return Verdict.admit("", meas)
+
+    @classmethod
+    def honesty(cls, system_of: Callable, cases, *, risk: float = 0.10, **kw):
+        def run(change, ctx):
+            from ...testing import honesty
+            return honesty.metrics(honesty.run(system_of(change, ctx), cases, store=False), risk=risk)
+        return cls(run, **kw)
+
+
+@dataclass
+class Context:
+    """What a stage sees besides the change: the pipeline, its KnowledgeStore (or None), its journal, the change's
+    journal id, the verdicts so far (stage name → Verdict), the approval level, and the ruling (ok, by, note) once
+    a person gave one."""
+    pipeline: Any
+    store: Any
+    journal: Any
+    change_id: str
+    verdicts: dict = field(default_factory=dict)
+    level: str | None = None
+    ruling: tuple | None = None
+
+
+__all__ = ["Approval", "allowed", "Canaries", "CleanCases", "Confirmation", "Consistency", "Context", "DECISIONS",
+           "DEFAULT_APPROVAL", "FreshEnvironments", "gate_of", "hazard_body", "hazard_gate", "Impact", "KnownFailures",
+           "LEVELS", "SOURCES", "Stage", "Static", "Verdict"]
