@@ -1,8 +1,8 @@
-"""The stages of the change pipeline: the Stage protocol, its Verdict, and the built-in stages.
+"""The stages of the change pipeline: the Stage protocol, its StageVerdict, and the built-in stages.
 
     class MyStage:                                 # the Stage protocol (like a WriteGate of the knowledge store)
         name = "mine"
-        def run(self, change, ctx) -> Verdict: ...  # Verdict.admit / .refuse / .hold, with what it measured
+        def run(self, change, ctx) -> StageVerdict: ...  # StageVerdict.admit / .refuse / .hold, with what it measured
 
 Built in, in the order the pipeline usually runs them (what each one wraps, ports, or adds):
 
@@ -19,7 +19,7 @@ Built in, in the order the pipeline usually runs them (what each one wraps, port
   Canaries           a honesty run against a baseline; a suspiciously perfect score is a flag (hold)            wraps
 
 `ctx` is the pipeline's Context: the KnowledgeStore (ctx.store, may be None), the journal, the verdicts so far
-(ctx.verdicts: stage name → Verdict), the approval level, and the person's ruling once given."""
+(ctx.verdicts: stage name → StageVerdict), the approval level, and the person's ruling once given."""
 from __future__ import annotations
 
 import fnmatch
@@ -32,7 +32,7 @@ LEVELS = ("gate", "gate+person", "person")
 
 
 @dataclass
-class Verdict:
+class StageVerdict:
     """A stage's answer about one change: "admit", "refuse" or "hold" (wait for a person), why, and what it measured."""
     decision: str
     reason: str = ""
@@ -61,9 +61,9 @@ class Verdict:
 
     @classmethod
     def of(cls, x, stage=""):
-        """A callback's answer as a Verdict: a Verdict, a knowledge-store gate Verdict (admit: bool), a bool, a dict
+        """A callback's answer as a StageVerdict: a StageVerdict, a knowledge-store gate Verdict (admit: bool), a bool, a dict
         {"ok": bool, "reason"?, ...measurements}, or None (admitted, nothing measured)."""
-        if isinstance(x, Verdict):
+        if isinstance(x, StageVerdict):
             x.stage = x.stage or stage
             return x
         if x is None:
@@ -75,7 +75,7 @@ class Verdict:
             return cls("admit" if x.get("ok", True) else "refuse", str(x.get("reason", "")), m or None, stage)
         if isinstance(getattr(x, "admit", None), bool):                  # gates.Verdict
             return cls("admit" if x.admit else "refuse", x.reason, x.measured, stage or getattr(x, "gate", ""))
-        raise TypeError(f"a stage callback returns a Verdict, a bool, a dict or None, not {type(x).__name__}")
+        raise TypeError(f"a stage callback returns a StageVerdict, a bool, a dict or None, not {type(x).__name__}")
 
     def to_dict(self):
         return {"stage": self.stage, "decision": self.decision, "reason": self.reason, "measured": self.measured}
@@ -85,7 +85,7 @@ class Verdict:
 class Stage(Protocol):
     """A stage of the change pipeline.
 
-    You implement: `name` and `run(change, ctx) → Verdict` (admit / refuse / hold, with measurements).
+    You implement: `name` and `run(change, ctx) → StageVerdict` (admit / refuse / hold, with measurements).
 
     You get for free: it runs in the pipeline's order; its verdict is a journal record (kind "change"); a refusal
     rejects the change (recorded with the stage, so the same candidate is refused next time); a hold keeps it until
@@ -94,7 +94,7 @@ class Stage(Protocol):
     Stability: experimental."""
     name: str
 
-    def run(self, change, ctx) -> Verdict: ...
+    def run(self, change, ctx) -> StageVerdict: ...
 
 
 def _call(fn, change, ctx):
@@ -112,9 +112,9 @@ class KnownFailures:
         fp = change.fingerprint()
         for d in ctx.journal.records("rejected"):
             if d.get("fingerprint") == fp:
-                return Verdict.refuse(f"rejected before by stage {d.get('stage')!r}: {d.get('reason')}",
+                return StageVerdict.refuse(f"rejected before by stage {d.get('stage')!r}: {d.get('reason')}",
                                       {"earlier": d.get("change")})
-        return Verdict.admit()
+        return StageVerdict.admit()
 
 
 # ───────────────────────────────────────────────────────────── 1. static (wraps)
@@ -161,7 +161,7 @@ class Static:
                 problems.append(f"evidence not found: {missing[:5]}")
         if self.parse is not None:
             problems += list(self.parse(change, ctx) or ())
-        return Verdict.refuse("; ".join(problems), {"problems": problems}) if problems else Verdict.admit()
+        return StageVerdict.refuse("; ".join(problems), {"problems": problems}) if problems else StageVerdict.admit()
 
 
 # ───────────────────────────────────────────────────────────── 2. consistency (wraps)
@@ -181,7 +181,7 @@ class Consistency:
         if self.classify is not None:
             m["direction"] = self.classify(change, ctx)
         if change.artifact != "item" or ctx.store is None:
-            return Verdict.admit("not a knowledge item", m or None)
+            return StageVerdict.admit("not a knowledge item", m or None)
         from ...core.knowledge.gates import ConsistencyGate
         ks = ctx.store
         prop = ks.proposal(**change.item_kwargs())
@@ -189,12 +189,12 @@ class Consistency:
         if prop["key"] is not None:
             others = [i for i in ks.by_key.get(prop["key"], ()) if i != prop["id"] and ks.status(i) == "active"]
             m["conflicts"] = sorted(i for i in others if ks.items[i].value != (prop["body"] or {}).get("o"))
-        return Verdict("admit" if v.admit else "refuse", v.reason, m or None)
+        return StageVerdict("admit" if v.admit else "refuse", v.reason, m or None)
 
 
 # ───────────────────────────────────────────────────────────── 3. independent confirmation (wraps)
 class Confirmation:
-    """Independent confirmation by a callback `check(change, ctx)` → a Verdict, bool or dict. Two ready-made ones:
+    """Independent confirmation by a callback `check(change, ctx)` → a StageVerdict, bool or dict. Two ready-made ones:
 
     Confirmation.compiled()           a "compiled" artifact is confirmed when the compilation was accepted (two drafts
                                       agree on the pool, separate tests pass, the person's rulings hold —
@@ -207,14 +207,14 @@ class Confirmation:
         self.check = check
 
     def run(self, change, ctx):
-        return Verdict.of(_call(self.check, change, ctx))
+        return StageVerdict.of(_call(self.check, change, ctx))
 
     @classmethod
     def compiled(cls):
         def check(change, ctx):
             c = change.payload
             ok = bool(getattr(c, "accepted", False))
-            return Verdict("admit" if ok else "refuse", "" if ok else f"compilation not accepted: {getattr(c, 'reason', '')}",
+            return StageVerdict("admit" if ok else "refuse", "" if ok else f"compilation not accepted: {getattr(c, 'reason', '')}",
                            {"fingerprint": getattr(c, "fingerprint", None)})
         return cls(check)
 
@@ -222,11 +222,11 @@ class Confirmation:
     def on_evidence(cls, replay: Callable, *, min_share: float = 1.0):
         def check(change, ctx):
             if not change.evidence:
-                return Verdict.refuse("no evidence to confirm the change on")
+                return StageVerdict.refuse("no evidence to confirm the change on")
             hits = [bool(replay(e, change)) for e in change.evidence]
             share = sum(hits) / len(hits)
             ok = share >= min_share
-            return Verdict("admit" if ok else "refuse", "" if ok else f"confirmed on {sum(hits)} of {len(hits)} evidence",
+            return StageVerdict("admit" if ok else "refuse", "" if ok else f"confirmed on {sum(hits)} of {len(hits)} evidence",
                            {"confirmed": sum(hits), "evidence": len(hits), "share": share})
         return cls(check)
 
@@ -288,9 +288,9 @@ class CleanCases:
         m = {"records": rep["records"], "would_block": rep["blocked_any"], "share": share,
              "examples": rep["gates"]["candidate"]["examples"]}
         if share > self.max_share:
-            return Verdict.refuse(f"would block {rep['blocked_any']} of {rep['records']} recorded successes "
+            return StageVerdict.refuse(f"would block {rep['blocked_any']} of {rep['records']} recorded successes "
                                   f"({share:.1%} > {self.max_share:.1%})", m)
-        return Verdict.admit("", m)
+        return StageVerdict.admit("", m)
 
 
 # ───────────────────────────────────────────────────────────── 5. impact (wraps decision_diff / diff / redecide)
@@ -318,9 +318,9 @@ class Impact:
         share = m["changed"] / m["total"] if m.get("total") else 0.0
         m["share"] = share
         if self.max_share is not None and share > self.max_share:
-            return Verdict.refuse(f"changes {m['changed']} of {m['total']} past decisions ({share:.1%} > "
+            return StageVerdict.refuse(f"changes {m['changed']} of {m['total']} past decisions ({share:.1%} > "
                                   f"{self.max_share:.1%})", m)
-        return Verdict.admit("", m)
+        return StageVerdict.admit("", m)
 
     @classmethod
     def of_system(cls, storage, system_of: Callable, *, max_share=None, **filters):
@@ -375,9 +375,9 @@ class FreshEnvironments:
         from ._paired import paired_bootstrap
         sel, conf = self._seeds(self.select, change, ctx), self._seeds(self.confirm, change, ctx)
         if not sel or not conf:
-            return Verdict.refuse("no selection or confirmation worlds")
+            return StageVerdict.refuse("no selection or confirmation worlds")
         if set(sel) & set(conf):
-            return Verdict.refuse(f"selection and confirmation worlds overlap: {sorted(set(sel) & set(conf))[:5]}")
+            return StageVerdict.refuse(f"selection and confirmation worlds overlap: {sorted(set(sel) & set(conf))[:5]}")
         base, cand = self.agent(None, ctx), self.agent(change, ctx)
         rb, rc = self._play(base, sel), self._play(cand, sel)
         m, lo, hi = paired_bootstrap([self.score(r) for r in rb], [self.score(r) for r in rc], boot=self.boot,
@@ -386,15 +386,15 @@ class FreshEnvironments:
                                                                               sum(r["failed"] for r in rc)]}}
         errs = sum(r["errors"] for r in rc)
         if errs:
-            return Verdict.refuse(f"the candidate's rules crashed in {errs} selection world(s): "
+            return StageVerdict.refuse(f"the candidate's rules crashed in {errs} selection world(s): "
                                   f"{next(r['error'] for r in rc if r['errors'])}", meas)
         if m <= 0:
-            return Verdict.refuse(f"no gain on the selection worlds (mean {m:+.3f})", meas)
+            return StageVerdict.refuse(f"no gain on the selection worlds (mean {m:+.3f})", meas)
         again = self._play(self.agent(change, ctx), sel[:self.replay])
         same = all(a["actions"] == b["actions"] for a, b in zip(again, rc))
         meas["deterministic"] = same
         if not same:
-            return Verdict.refuse("not deterministic: a selection world replayed with other actions", meas)
+            return StageVerdict.refuse("not deterministic: a selection world replayed with other actions", meas)
         cb, cc = self._play(base, conf), self._play(cand, conf)
         errs = sum(r["errors"] for r in cc)
         cm, clo, chi = paired_bootstrap([self.score(r) for r in cb], [self.score(r) for r in cc], boot=self.boot,
@@ -404,13 +404,13 @@ class FreshEnvironments:
         meas["confirm"] = {"worlds": len(conf), "gain": [cm, clo, chi], "progress": [pm, plo, phi],
                            "failed": [sum(r["failed"] for r in cb), sum(r["failed"] for r in cc)]}
         if errs:
-            return Verdict.refuse(f"the candidate's rules crashed in {errs} confirmation world(s)", meas)
+            return StageVerdict.refuse(f"the candidate's rules crashed in {errs} confirmation world(s)", meas)
         if clo <= self.min_lower:
-            return Verdict.refuse(f"not confirmed: the gain's lower bound {clo:+.3f} ≤ {self.min_lower:+.3f}", meas)
+            return StageVerdict.refuse(f"not confirmed: the gain's lower bound {clo:+.3f} ≤ {self.min_lower:+.3f}", meas)
         if phi < -self.progress_tolerance:
-            return Verdict.refuse(f"progress lower: the change's upper bound {phi:+.3f} < {-self.progress_tolerance:+.3f}",
+            return StageVerdict.refuse(f"progress lower: the change's upper bound {phi:+.3f} < {-self.progress_tolerance:+.3f}",
                                   meas)
-        return Verdict.admit("", meas)
+        return StageVerdict.admit("", meas)
 
 
 # ───────────────────────────────────────────────────────────── 7. approval (new: a table)
@@ -451,11 +451,11 @@ class Approval:
     def run(self, change, ctx):
         lv = self.level(change, ctx.verdicts)
         if lv == "gate":
-            return Verdict.admit("", {"level": lv})
+            return StageVerdict.admit("", {"level": lv})
         if ctx.ruling is None:
-            return Verdict.hold(f"approval level {lv!r}: waiting for a person's ruling", {"level": lv})
+            return StageVerdict.hold(f"approval level {lv!r}: waiting for a person's ruling", {"level": lv})
         ok, by, note = ctx.ruling
-        return Verdict("admit" if ok else "refuse", f"{'approved' if ok else 'rejected'} by {by}" + (f": {note}" if note else ""),
+        return StageVerdict("admit" if ok else "refuse", f"{'approved' if ok else 'rejected'} by {by}" + (f": {note}" if note else ""),
                        {"level": lv, "by": by})
 
 
@@ -483,10 +483,10 @@ class Canaries:
         worse = compare(m, self.baseline, self.tolerance) if self.baseline else []
         meas = {"metrics": m, "worse": worse}
         if worse:
-            return Verdict.refuse("honesty got worse: " + "; ".join(worse), meas)
+            return StageVerdict.refuse("honesty got worse: " + "; ".join(worse), meas)
         if self.perfect is not None and self.perfect(m):
-            return Verdict.hold("a suspiciously perfect score on the canaries: a flag for a person, not a success", meas)
-        return Verdict.admit("", meas)
+            return StageVerdict.hold("a suspiciously perfect score on the canaries: a flag for a person, not a success", meas)
+        return StageVerdict.admit("", meas)
 
     @classmethod
     def honesty(cls, system_of: Callable, cases, *, risk: float = 0.10, **kw):
@@ -499,7 +499,7 @@ class Canaries:
 @dataclass
 class Context:
     """What a stage sees besides the change: the pipeline, its KnowledgeStore (or None), its journal, the change's
-    journal id, the verdicts so far (stage name → Verdict), the approval level, and the ruling (ok, by, note) once
+    journal id, the verdicts so far (stage name → StageVerdict), the approval level, and the ruling (ok, by, note) once
     a person gave one."""
     pipeline: Any
     store: Any
@@ -512,4 +512,4 @@ class Context:
 
 __all__ = ["Approval", "allowed", "Canaries", "CleanCases", "Confirmation", "Consistency", "Context", "DECISIONS",
            "DEFAULT_APPROVAL", "FreshEnvironments", "gate_of", "hazard_body", "hazard_gate", "Impact", "KnownFailures",
-           "LEVELS", "SOURCES", "Stage", "Static", "Verdict"]
+           "LEVELS", "SOURCES", "Stage", "Static", "StageVerdict"]

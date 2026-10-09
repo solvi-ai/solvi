@@ -15,7 +15,7 @@ with warnings.catch_warnings():
     warnings.simplefilter("ignore")
     from solvi.experimental.changes import (Approval, Canaries, Change, CleanCases, Consistency, EvalLocked,
                                             EvaluatorLock, FreshEnvironments, Impact, KnownFailures, LearningTarget,
-                                            Pipeline, Static, Verdict, VersionsTarget, allowed, gate_of, hazard_body,
+                                            Pipeline, Static, StageVerdict, VersionsTarget, allowed, gate_of, hazard_body,
                                             hazard_gate, paired_bootstrap)
 
 
@@ -209,10 +209,10 @@ def test_the_journal_is_hash_chained_and_a_tampered_record_is_caught(tmp_path):
 
 # ───────────────────────────────────────────── the other stages and pieces
 def test_verdicts_impact_canaries_and_confirmation(tmp_path):
-    assert Verdict.of(True).ok and Verdict.of({"ok": False, "reason": "x", "n": 3}).measured == {"n": 3}
-    assert Verdict.of(None).ok
+    assert StageVerdict.of(True).ok and StageVerdict.of({"ok": False, "reason": "x", "n": 3}).measured == {"n": 3}
+    assert StageVerdict.of(None).ok
     with pytest.raises(ValueError):
-        Verdict("maybe")
+        StageVerdict("maybe")
     ch = lava_rule()
     assert Impact(lambda c, x: {"changed": 4, "total": 10}, max_share=0.3).run(ch, None).decision == "refuse"
     assert Impact(lambda c, x: {"changed": 1, "total": 10}, max_share=0.3).run(ch, None).measured["share"] == 0.1

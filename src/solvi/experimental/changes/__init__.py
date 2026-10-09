@@ -28,7 +28,7 @@ evidence, the proposer's expected effect (recorded; `observe` later records what
 type (fact / rule / meaning) when known, the parent version, rule code to sandbox-check (`code`), and the rule's
 executable form (`check`, not journaled; its code fingerprint is).
 
-The stages (_stages.py; each `run(change, ctx) → Verdict` admit / refuse / hold with measurements): KnownFailures (a
+The stages (_stages.py; each `run(change, ctx) → StageVerdict` admit / refuse / hold with measurements): KnownFailures (a
 candidate rejected before is refused — new), Static (wraps SourceGate, KnowledgeStore.proposal and the compiler's sandbox
 check), Consistency (wraps ConsistencyGate; records key conflicts and narrows / widens), Confirmation (wraps a
 compilation's acceptance or a replay on the evidence), CleanCases (wraps Agenda.dry_run), Impact (wraps decision_diff /
@@ -64,7 +64,7 @@ from .. import warn_on_import
 from ._journal import ChangeJournal, EvalLocked, EvaluatorLock
 from ._paired import paired_bootstrap, run_episode
 from ._stages import (DEFAULT_APPROVAL, LEVELS, Approval, Canaries, CleanCases, Confirmation, Consistency, Context,
-                     FreshEnvironments, Impact, KnownFailures, SOURCES, Stage, Static, Verdict, allowed, gate_of,
+                     FreshEnvironments, Impact, KnownFailures, SOURCES, Stage, Static, StageVerdict, allowed, gate_of,
                      hazard_body, hazard_gate)
 from ._targets import KnowledgeTarget, LearningTarget, Refused, VersionsTarget
 
@@ -201,7 +201,7 @@ class Pipeline:
         self.stages = list(stages)
         for s in self.stages:
             if not callable(getattr(s, "run", None)) or not getattr(s, "name", None):
-                raise TypeError(f"a stage has a name and run(change, ctx) → Verdict; {s!r} has not")
+                raise TypeError(f"a stage has a name and run(change, ctx) → StageVerdict; {s!r} has not")
         if approval is not None and not any(isinstance(s, Approval) for s in self.stages):
             self.stages.append(approval if isinstance(approval, Approval) else Approval(approval))
         self.journal = ChangeJournal(storage)
@@ -239,7 +239,7 @@ class Pipeline:
         ctx = Context(self, self.store, self.journal, cid, dict(verdicts), level, ruling)
         if ruling is not None:                        # the stage that held the change is decided by the ruling
             st = self.stages[start]
-            v = Verdict("admit" if ruling[0] else "refuse", f"{'approved' if ruling[0] else 'rejected'} by {ruling[1]}"
+            v = StageVerdict("admit" if ruling[0] else "refuse", f"{'approved' if ruling[0] else 'rejected'} by {ruling[1]}"
                         + (f": {ruling[2]}" if ruling[2] else ""), {"level": level, "by": ruling[1]}, st.name)
             self.journal.write("verdict", change=cid, **v.to_dict(), advisory=False)
             ctx.verdicts[st.name] = v
@@ -249,9 +249,9 @@ class Pipeline:
         for i in range(start, len(self.stages)):
             st = self.stages[i]
             try:
-                v = Verdict.of(st.run(change, ctx), st.name)
+                v = StageVerdict.of(st.run(change, ctx), st.name)
             except Exception as e:  # noqa: BLE001 — a stage that raises refuses (recorded), the pipeline goes on
-                v = Verdict.refuse(f"the stage raised {type(e).__name__}: {e}")
+                v = StageVerdict.refuse(f"the stage raised {type(e).__name__}: {e}")
             v.stage = st.name
             advisory = (v.decision == "refuse" and level == "person" and st.name not in ("static", "approval"))
             self.journal.write("verdict", change=cid, **v.to_dict(), advisory=advisory)
@@ -367,4 +367,4 @@ __all__ = ["allowed", "Approval", "ARTIFACTS", "Canaries", "Change", "CHANGE_TYP
            "Confirmation", "Consistency", "Context", "DEFAULT_APPROVAL", "EvalLocked", "EvaluatorLock",
            "FreshEnvironments", "gate_of", "hazard_body", "hazard_gate", "Impact", "KnowledgeTarget", "KnownFailures",
            "LearningTarget", "LEVELS", "paired_bootstrap", "Pipeline", "Refused", "Result", "run_episode", "SOURCES",
-           "Stage", "Static", "STORE_SOURCE", "Verdict", "VersionsTarget"]
+           "Stage", "Static", "STORE_SOURCE", "StageVerdict", "VersionsTarget"]
