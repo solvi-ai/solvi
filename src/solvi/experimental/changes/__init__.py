@@ -177,6 +177,15 @@ class Result:
                                    + (f": {v.reason}" if v.reason else "") for v in self.verdicts])
 
 
+SEARCH_UNCONFIRMED = "search proposal: confirmation on its evidence did not run"
+
+
+def _confirmed_on_evidence(verdicts):
+    """Did the confirmation stage run Confirmation.on_evidence and admit? (a search proposal is promotable only then)"""
+    v = verdicts.get("confirmation")
+    return v is not None and v.ok and bool((v.measured or {}).get("on_evidence"))
+
+
 def _ruling(r):
     """A person's ruling → (ok, note): True / False, "approve" / "reject", or a compile Ruling ("keep" / "drop")."""
     if isinstance(r, bool):
@@ -262,6 +271,8 @@ class Pipeline:
                 return Result(cid, "held", stage=st.name, reason=v.reason, verdicts=list(ctx.verdicts.values()))
             if v.decision == "refuse" and not advisory:
                 return self._reject(change, cid, st.name, v.reason, ctx)
+        if change.source == "search" and not _confirmed_on_evidence(ctx.verdicts):
+            return self._reject(change, cid, "confirmation", SEARCH_UNCONFIRMED, ctx)
         target = self.targets.get(change.artifact)
         if target is None:
             return self._reject(change, cid, "promote", f"no target for artifact {change.artifact!r}", ctx)

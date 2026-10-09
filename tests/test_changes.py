@@ -13,9 +13,9 @@ from solvi.core.store import JSONLStorage
 
 with warnings.catch_warnings():
     warnings.simplefilter("ignore")
-    from solvi.experimental.changes import (Approval, Canaries, Change, CleanCases, Consistency, EvalLocked,
-                                            EvaluatorLock, FreshEnvironments, Impact, KnownFailures, LearningTarget,
-                                            Pipeline, Static, StageVerdict, VersionsTarget, allowed, gate_of,
+    from solvi.experimental.changes import (Approval, Canaries, Change, CleanCases, Confirmation, Consistency,
+                                            EvalLocked, EvaluatorLock, FreshEnvironments, Impact, KnownFailures,
+                                            LearningTarget, Pipeline, Static, StageVerdict, VersionsTarget, allowed, gate_of,
                                             gates_of, hazard_body, paired_bootstrap)
 
 
@@ -170,6 +170,16 @@ def test_a_search_proposal_needs_evidence_and_an_unknown_source_is_refused(tmp_p
     body = hazard_body("lava", {"next": "lava"}, ["step"])
     res = pipe.propose(Change("search", payload={"kind": "rule", "body": body}, proposer="evolve"))
     assert res.status == "rejected" and res.stage == "static" and "evidence" in res.reason
+    unconfirmed = pipe.propose(Change("search", payload={"kind": "rule", "body": body}, proposer="evolve",
+                                      evidence=["ep-1"]))
+    assert unconfirmed.status == "rejected" and unconfirmed.stage == "confirmation"
+    assert unconfirmed.reason == "search proposal: confirmation on its evidence did not run"
+    other = Pipeline([Static(), Confirmation(lambda c, x: True)], str(tmp_path / "c2.jsonl"), store=ks,
+                     approval={"rule": "gate"})               # a confirmation that is not on the evidence: not enough
+    assert other.propose(Change("search", payload={"kind": "rule", "body": body}, proposer="evolve",
+                                evidence=["ep-1"])).stage == "confirmation"
+    pipe = Pipeline([Static(), Confirmation.on_evidence(lambda e, c: True)], str(tmp_path / "c3.jsonl"), store=ks,
+                    approval={"rule": "gate"})
     ok = pipe.propose(Change("search", payload={"kind": "rule", "body": body}, proposer="evolve", evidence=["ep-1"]))
     assert ok.promoted and ks.item(ok.ref)["source"] == "outcome" and ks.item(ok.ref)["by"] == "search:evolve"
     res = pipe.propose(Change("model", payload={"kind": "rule", "body": body}))
@@ -226,7 +236,6 @@ def test_verdicts_impact_canaries_and_confirmation(tmp_path):
     perfect = Canaries(lambda c, x: {"confident_error_rate": 0.0, "coverage_at_risk": 1.0, "n": 5, "confident_errors": 0,
                                      "escalated": 0}, baseline=base)
     assert perfect.run(ch, None).decision == "hold"
-    from solvi.experimental.changes import Confirmation
     on_ev = Confirmation.on_evidence(lambda e, c: e != "ep-12")
     v = on_ev.run(ch, None)
     assert v.decision == "refuse" and v.measured["confirmed"] == 2
@@ -262,7 +271,6 @@ def test_targets_for_compiled_versions_and_learning_updates(tmp_path):
 
     vt, loop = VersionsTarget(FakeVersions()), FakeLoop()
     acc = type("C", (), {"accepted": True, "fingerprint": "f1", "reason": ""})()
-    from solvi.experimental.changes import Confirmation
     pipe = Pipeline([Confirmation.compiled()], str(tmp_path / "c.jsonl"), targets=[vt, LearningTarget(loop)],
                     approval={"compiled": "gate", "update": "gate"})
     r1 = pipe.propose(Change("document", artifact="compiled", payload=acc, reason="v2 of the policy"))

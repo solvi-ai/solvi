@@ -226,8 +226,9 @@ class Confirmation:
             hits = [bool(replay(e, change)) for e in change.evidence]
             share = sum(hits) / len(hits)
             ok = share >= min_share
-            return StageVerdict("admit" if ok else "refuse", "" if ok else f"confirmed on {sum(hits)} of {len(hits)} evidence",
-                           {"confirmed": sum(hits), "evidence": len(hits), "share": share})
+            return StageVerdict("admit" if ok else "refuse",
+                                "" if ok else f"confirmed on {sum(hits)} of {len(hits)} evidence",
+                                {"confirmed": sum(hits), "evidence": len(hits), "share": share, "on_evidence": True})
         return cls(check)
 
 
