@@ -5,7 +5,9 @@
     VersionsTarget(versions)    "compiled"  solvi.experimental.compile.Versions.add → the version number; rollback:
                                             the version in force goes back (Versions keeps every version)
     LearningTarget(loop)        "update"    solvi.experimental.learning.Learning.run (its own gates) → the version;
-                                            rollback: Learning.rollback to the version before
+                                            rollback: Learning.rollback to the version before. Decision: the
+                                            loop's own gates are the stages for this artifact; the pipeline does
+                                            not re-implement them
 
 A target implements `artifact`, `promote(change, measured) → a JSON-able reference` (raise Refused when the artifact's
 own gates say no) and `rollback(ref, by=None, why=None)`."""

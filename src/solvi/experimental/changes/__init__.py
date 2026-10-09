@@ -18,12 +18,15 @@ rollback, versions, a changelog) from one source (labels) to four, with the stag
 store's write gates. Nothing here stores knowledge: an admitted change goes into what already holds it (_targets.py) —
 a KnowledgeStore item ("item": fact, rule, skill, action, with its sub-kind in body["kind"], e.g. "hazard", and the change
 type in body["change"]), a compiled catalog version ("compiled": solvi.experimental.compile.Versions), or a learning update
-("update": Learning.run).
+("update": LearningTarget calls Learning.run() — decision: the loop's own gates (consistency, heldout, honesty,
+act_guard, size) are the stages for that artifact, and the pipeline does not re-implement them).
 
 The candidate. `Change(source, artifact="item", payload=...)`: source is "document", "outcome", "person" or "search";
 it maps onto the knowledge store's SOURCES as document → "spec", outcome → "outcome", person → "person", and search →
-"outcome" only with evidence (the stored ids it was confirmed on; Static refuses a search proposal without it), so the
-store's SourceGate keeps refusing the system's own unverified answers. Also: the proposer and the reason, the
+"outcome" with by = "search:<proposer>", and only with evidence (Static refuses a search proposal without it) that
+the confirmation stage confirmed: a search proposal is promotable only when Confirmation.on_evidence ran and admitted
+it (else rejected: "search proposal: confirmation on its evidence did not run"), so the store's SourceGate keeps
+refusing the system's own unverified answers. Also: the proposer and the reason, the
 evidence, the proposer's expected effect (recorded; `observe` later records what happened next to it), the change
 type (fact / rule / meaning) when known, the parent version, rule code to sandbox-check (`code`), and the rule's
 executable form (`check`, not journaled; its code fingerprint is).
@@ -36,6 +39,16 @@ solvi.core.store.diff.diff), FreshEnvironments (ported: paired selection, determ
 bootstrap lower bound > 0, rules never crash, progress not lower), Approval (new: a table (kind, source) → "gate" |
 "gate+person" | "person"), Canaries (wraps solvi.testing.honesty; a suspiciously perfect score holds).
 
+Decision on approval "person": the automated stages still run and are journaled, but their refusals are advisory
+(recorded with "advisory": true; the person decides) — except the static stage's, which stays final (a malformed
+change cannot be promoted by anyone).
+
+Hazard rules: the stored artifact is a `rule` item with body["kind"] == "hazard" (hazard_body); no second item is
+written through Agenda.gate. gates_of(store, scope=None, parse=...) is a read-only view of the active hazard items as
+(check, blocks) gate checks, by the same code path the dry run uses (gate_of), so an agent installs them live. The
+condition language is supplied by the caller through parse= (lawlang + a macro catalog is the decided form);
+equality of state keys (hazard_gate) is the placeholder.
+
 The journal (_journal.py): records of kind "change" in a TraceStorage — "propose" (the change, its fingerprint, parent),
 one "verdict" per stage, then "promoted" (version, target reference), "rejected" (the stage and reason), "held",
 "ruling", "rollback" and "observed". The storage's hash chain covers them (a tampered record fails verify()); with
@@ -47,13 +60,17 @@ the evaluator's code pinned, an access log, lock_out() for proposer processes, l
 What is checked: tests/test_changes.py — the chain verifies and a tampered record is caught; a hazard rule from
 "outcome" passes static → consistency → clean cases → fresh environments (a toy corridor) → approval and is an active
 rule item, listed in versions and undone by rollback; a rejected candidate is recorded with its stage and refused when
-proposed again; approval "person" holds until a ruling. What is not done: no measured use — nothing shows the pipeline
-admits fewer bad changes than the store's gates alone; no rewind over an Environment (Confirmation.on_evidence takes the
-replay as a callback); no narrows / widens classifier (a callback; Z3 over lawlang is planned); regression scenarios
-(`solvi test` cases.json) are not a stage yet; an item's scope flag on a world change, validity periods in Versions
-and the change-type classifier in the compiler are not here; the untrusted-code process sandbox of the research
-harness is not ported (Static uses the compiler's sandbox check only); a held change lives in this process until it
-is ruled on (the record survives, the object does not)."""
+proposed again; approval "person" holds until a ruling; a search proposal needs confirmation on its evidence;
+gates_of reads the active hazard items without writing. What is not done:
+- no measured use: nothing shows yet that the pipeline admits fewer harmful changes than the store's gates alone;
+- no rewind over an Environment (Confirmation.on_evidence takes the replay as a callback);
+- no narrows / widens classifier (Consistency takes it as a callback; Z3 over lawlang is planned);
+- no regression-scenario stage (`solvi test` cases.json);
+- no scope flag on a world change for rules from experience;
+- no validity periods in compile Versions (nor the change-type classifier in the compiler);
+- the research harness's untrusted-code process sandbox is not ported (Static uses the compiler's sandbox check);
+- a held change lives only in this process's memory until it is ruled on (its journal records survive, the Change
+  object does not)."""
 from __future__ import annotations
 
 from dataclasses import dataclass, field

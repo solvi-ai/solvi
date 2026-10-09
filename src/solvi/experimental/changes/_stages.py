@@ -449,8 +449,8 @@ class Approval:
     item's kind for an item — "rule", "fact", ... — else "compiled" / "update"; a key may also be the kind alone);
     `default` for a pair not in the table. "gate": admitted. "gate+person" and "person": held until a person's ruling
     (Pipeline.rule), then admitted or refused. A change the consistency stage classified as widening behaviour is
-    raised from "gate" to `widen`. Under "person", the gate stages' refusals are advisory (recorded; the person
-    decides), except the static stage's."""
+    raised from "gate" to `widen`. Decision: under "person", the automated stages still run, and their refusals are
+    advisory (recorded; the person decides), except the static stage's."""
     name = "approval"
 
     def __init__(self, table: dict | None = None, *, default: str = "gate+person", widen: str = "gate+person"):
