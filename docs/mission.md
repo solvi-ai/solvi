@@ -60,10 +60,15 @@ Search explores. solvi decides what survives.
 
 What this means in practice:
 
-- **Models point, code answers.** For anything that can be computed or looked up — arithmetic, dates, a value in a
-  table, a comparison, a rule — a model chooses the operation and points at its operands; the answer comes only from
-  executing it. When no operation fits, the answer is "cannot compute", never a guess. Where nothing can be computed (a
-  judgement), the model's choice is the answer, marked as the model's, with a quote checked against the source.
+- **Models read, compiled rules decide.** The model's job is to read a case into typed facts — each fact a quote
+  checked against the source, or "not stated"; the rules of the policy or regulation are code, compiled from the
+  document and checked before use; the decision comes only from running that code on the facts. A missing fact gives
+  "cannot compute" and an escalation, never a guess. Where nothing can be computed (a judgement), the model's choice
+  is the answer, marked as the model's, with a quote checked against the source. This is the split known from
+  rules-as-code work such as SARA: when the rules exist as verified code, what is left to the model is extracting the
+  facts. The variant where the model also writes the computation — choosing the operations and pointing at their
+  operands for code to execute — was measured on decisions under a versioned regulation: every answer replayed, but
+  it was no more accurate than the model's direct answer, so it is not the direction.
 - **A change to the system is a candidate, not an edit.** A new rule, parameter, piece of code, or knowledge from a new
   version of a document — proposed by an LLM, a search, a person or the system's own experience — is compared with the
   current system on cases it has not seen and on past decisions, and is promoted or rejected with its evidence
