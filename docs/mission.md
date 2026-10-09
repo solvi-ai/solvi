@@ -54,9 +54,11 @@ model; measure it on your task first.
 ## Where it is going
 
 solvi is being built toward a **verification-first runtime for autonomous systems** made of specialised models, rules,
-knowledge and computation — systems that learn from experience, model the consequences of their actions, change their
-own behaviour and evolve, but only under verification they cannot switch off. Models propose. Experience teaches.
-Search explores. solvi decides what survives.
+knowledge and computation — systems that accumulate verified knowledge from outcomes, corrections and documents, change
+their own rules and evolve, but only under verification they cannot switch off. Models propose. Experience teaches.
+Search explores. solvi decides what survives. Two things were tried and did not help, so they are not the direction:
+learning behaviour by storing what rescued the agent, and a learned latent world model. What grew was knowledge — the
+rules of an environment and a map, carried across episodes — and that is what the runtime is built to accumulate.
 
 What this means in practice:
 
