@@ -368,11 +368,11 @@ class FreshEnvironments:
         return list(s(change, ctx) if callable(s) else s)
 
     def _play(self, policy, seeds):
-        from .paired import run_episode
+        from ._paired import run_episode
         return [run_episode(self.env(), policy, s, max_steps=self.max_steps) for s in seeds]
 
     def run(self, change, ctx):
-        from .paired import paired_bootstrap
+        from ._paired import paired_bootstrap
         sel, conf = self._seeds(self.select, change, ctx), self._seeds(self.confirm, change, ctx)
         if not sel or not conf:
             return Verdict.refuse("no selection or confirmation worlds")

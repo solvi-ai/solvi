@@ -124,4 +124,5 @@ The modules `solvi.core` is made of. Their public names are re-exported by `solv
 | [`solvi.experimental.charts`](charts.md) | verified charts: a text with numbers → an SVG in which every number is quoted from the text |
 | [`solvi.experimental.mcp`](mcp.md) | an MCP stdio proxy that puts the agent guard in front of an MCP server's `tools/call` |
 | [`solvi.experimental.oncalib`](oncalib.md) | recalibration on the fly from outcomes (the promise is not kept) |
+| [`solvi.experimental.changes`](changes.md) | one change pipeline for a document version, verified experience, a person's correction or a search proposal: pluggable stages, a journal, promote, versions, rollback |
 | [`solvi.experimental.counterfactual`](counterfactual.md) | counterfactuals: the smallest change of the given inputs that changes an answer |

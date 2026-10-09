@@ -15,7 +15,7 @@ into what already holds that kind of knowledge, and can be rolled back.
 
 What it is: a generalisation of solvi.experimental.learning.Learning (a candidate, gates with recorded numbers, promote /
 rollback, versions, a changelog) from one source (labels) to four, with the stages as objects like the knowledge
-store's write gates. Nothing here stores knowledge: an admitted change goes into what already holds it (targets.py) —
+store's write gates. Nothing here stores knowledge: an admitted change goes into what already holds it (_targets.py) —
 a KnowledgeStore item ("item": fact, rule, skill, action, with its sub-kind in body["kind"], e.g. "hazard", and the change
 type in body["change"]), a compiled catalog version ("compiled": solvi.experimental.compile.Versions), or a learning update
 ("update": Learning.run).
@@ -28,7 +28,7 @@ evidence, the proposer's expected effect (recorded; `observe` later records what
 type (fact / rule / meaning) when known, the parent version, rule code to sandbox-check (`code`), and the rule's
 executable form (`check`, not journaled; its code fingerprint is).
 
-The stages (stages.py; each `run(change, ctx) → Verdict` admit / refuse / hold with measurements): KnownFailures (a
+The stages (_stages.py; each `run(change, ctx) → Verdict` admit / refuse / hold with measurements): KnownFailures (a
 candidate rejected before is refused — new), Static (wraps SourceGate, KnowledgeStore.proposal and the compiler's sandbox
 check), Consistency (wraps ConsistencyGate; records key conflicts and narrows / widens), Confirmation (wraps a
 compilation's acceptance or a replay on the evidence), CleanCases (wraps Agenda.dry_run), Impact (wraps decision_diff /
@@ -36,7 +36,7 @@ solvi.core.store.diff.diff), FreshEnvironments (ported: paired selection, determ
 bootstrap lower bound > 0, rules never crash, progress not lower), Approval (new: a table (kind, source) → "gate" |
 "gate+person" | "person"), Canaries (wraps solvi.testing.honesty; a suspiciously perfect score holds).
 
-The journal (journal.py): records of kind "change" in a TraceStorage — "propose" (the change, its fingerprint, parent),
+The journal (_journal.py): records of kind "change" in a TraceStorage — "propose" (the change, its fingerprint, parent),
 one "verdict" per stage, then "promoted" (version, target reference), "rejected" (the stage and reason), "held",
 "ruling", "rollback" and "observed". The storage's hash chain covers them (a tampered record fails verify()); with
 the decisions' store they share one chain. Versions: version 0 is the state before the first change; each promotion is
@@ -61,12 +61,12 @@ from typing import Any, Callable
 
 from ...core.runtime import vhash
 from .. import warn_on_import
-from .journal import ChangeJournal, EvalLocked, EvaluatorLock
-from .paired import paired_bootstrap, run_episode
-from .stages import (DEFAULT_APPROVAL, LEVELS, Approval, Canaries, CleanCases, Confirmation, Consistency, Context,
+from ._journal import ChangeJournal, EvalLocked, EvaluatorLock
+from ._paired import paired_bootstrap, run_episode
+from ._stages import (DEFAULT_APPROVAL, LEVELS, Approval, Canaries, CleanCases, Confirmation, Consistency, Context,
                      FreshEnvironments, Impact, KnownFailures, SOURCES, Stage, Static, Verdict, allowed, gate_of,
                      hazard_body, hazard_gate)
-from .targets import KnowledgeTarget, LearningTarget, Refused, VersionsTarget
+from ._targets import KnowledgeTarget, LearningTarget, Refused, VersionsTarget
 
 warn_on_import(__name__)
 
