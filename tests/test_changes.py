@@ -15,8 +15,8 @@ with warnings.catch_warnings():
     warnings.simplefilter("ignore")
     from solvi.experimental.changes import (Approval, Canaries, Change, CleanCases, Consistency, EvalLocked,
                                             EvaluatorLock, FreshEnvironments, Impact, KnownFailures, LearningTarget,
-                                            Pipeline, Static, StageVerdict, VersionsTarget, allowed, gate_of, hazard_body,
-                                            hazard_gate, paired_bootstrap)
+                                            Pipeline, Static, StageVerdict, VersionsTarget, allowed, gate_of,
+                                            gates_of, hazard_body, paired_bootstrap)
 
 
 # ───────────────────────────────────────────── a toy world: walk right to the goal; one cell may be lava
@@ -48,8 +48,7 @@ class Corridor:
 
 def agent(change, ctx):
     """Prefers "step"; obeys every active hazard rule of the store (and the candidate's): a forbidden step → jump."""
-    gates = [hazard_gate(r["body"]) for r in ctx.store.find(kind="rule", status="active")
-             if (r["body"] or {}).get("kind") == "hazard"]
+    gates = gates_of(ctx.store)
     if change is not None:
         gates.append(gate_of(change))
 
@@ -109,7 +108,11 @@ def test_a_hazard_rule_from_outcomes_is_promoted_listed_and_rolled_back(tmp_path
     assert pipe.lineage(res.change_id) == [{"change": res.change_id, "version": 1, "parent": 0}]
     assert pipe.observe(res.change_id, {"failed_share": 0.0})["expected"] == {"failed_share": "lower"}
 
+    gates = gates_of(ks)
+    assert len(gates) == 1 and not allowed({"next": "lava"}, "step", gates) and allowed({"next": "floor"}, "step", gates)
+    assert len(ks.find(kind="rule")) == 1                     # the view wrote nothing
     assert pipe.rollback(0, by="ann", why="test") == [1]
+    assert gates_of(ks) == []
     assert ks.status(iid) == "retracted" and pipe.current == 0 and not pipe.versions()[0]["in_force"]
     assert pipe.journal.verify()["ok"] and ks.verify()
     acts = [d["action"] for d in pipe.history()]

@@ -234,13 +234,19 @@ class Confirmation:
 # ───────────────────────────────────────────────────────────── 4. clean cases (wraps Agenda.dry_run)
 def hazard_body(name, when, actions, **extra):
     """A hazard rule as a knowledge item body: {"s": "hazard:<name>", "r": "forbid", "o": {"when", "actions"}, "kind":
-    "hazard"} — in state `when` (every key equal), the actions matching `actions` (glob patterns) are forbidden."""
+    "hazard"} — in state `when`, the actions matching `actions` (glob patterns) are forbidden. This `rule` item is the
+    stored artifact; no second item is written through Agenda.gate (gates_of gives a read-only view instead).
+
+    The condition language is the caller's: pass `parse=` (body → (check, blocks)) to gate_of / gates_of / CleanCases,
+    e.g. a lawlang condition over a macro catalog. The built-in hazard_gate reads `when` as equality of state keys
+    only — a placeholder, not the decided rule form."""
     return {"s": f"hazard:{name}", "r": "forbid", "o": {"when": dict(when), "actions": list(actions)}, "kind": "hazard",
             **extra}
 
 
 def hazard_gate(body):
-    """A hazard body → (check, blocks) for Agenda.gate: check(state) is True (allowed) unless every `when` key matches."""
+    """A hazard body → (check, blocks) for Agenda.gate: check(state) is True (allowed) unless every `when` key matches
+    (equality only: the placeholder condition language; see hazard_body)."""
     o = body["o"]
     when = dict(o["when"])
 
@@ -249,13 +255,25 @@ def hazard_gate(body):
     return check, list(o["actions"])
 
 
-def gate_of(change):
+def gate_of(change, parse: Callable = hazard_gate):
     """The (check, blocks) a change installs as an agenda gate: `change.check` when given (with blocks from its body),
-    else the declarative hazard form of its body (hazard_gate)."""
+    else `parse(body)` (default hazard_gate)."""
     body = (change.payload or {}).get("body") or {}
     if change.check is not None:
         return change.check, list((body.get("o") or {}).get("actions") or ["*"])
-    return hazard_gate(body)
+    return parse(body)
+
+
+def gates_of(store, scope=None, *, parse: Callable = hazard_gate):
+    """A read-only view: the (check, blocks) of every active, usable hazard rule item in a KnowledgeStore (under `scope`
+    when given), by the same `parse` the dry run uses → [(check, blocks)]. An agent installs them live
+    (Agenda.gate(name, check, blocks=blocks) on an Agenda without a store, or `allowed(state, action, gates)`); nothing
+    is written, so no item is duplicated."""
+    out = []
+    for r in store.find(kind="rule", scope=scope, status="active"):
+        if (r["body"] or {}).get("kind") == "hazard" and store.usable(r["id"]):
+            out.append(parse(r["body"]))
+    return out
 
 
 def allowed(state, action, gates):
@@ -271,11 +289,12 @@ class CleanCases:
     solvi.core.knowledge.Agenda and `dry_run(records)` over (state, action) pairs that worked (windows without a failure,
     accepted calls). Refused when the share of records it blocks exceeds `max_share` (default 0: a hazard rule may not
     block anything that worked). records: a list or `records(change, ctx)`; gate: change → (check, blocks) (default
-    gate_of)."""
+    gate_of with `parse`); parse: the condition language, body → (check, blocks) (default hazard_gate)."""
     name = "clean_cases"
 
-    def __init__(self, records, *, gate: Callable = gate_of, max_share: float = 0.0):
-        self.records, self.gate, self.max_share = records, gate, float(max_share)
+    def __init__(self, records, *, gate: Callable | None = None, parse: Callable = hazard_gate, max_share: float = 0.0):
+        self.records, self.max_share = records, float(max_share)
+        self.gate = gate if gate is not None else (lambda change: gate_of(change, parse))
 
     def run(self, change, ctx):
         from ...core.knowledge.agenda import Agenda
@@ -511,5 +530,6 @@ class Context:
 
 
 __all__ = ["Approval", "allowed", "Canaries", "CleanCases", "Confirmation", "Consistency", "Context", "DECISIONS",
-           "DEFAULT_APPROVAL", "FreshEnvironments", "gate_of", "hazard_body", "hazard_gate", "Impact", "KnownFailures",
+           "DEFAULT_APPROVAL", "FreshEnvironments", "gate_of", "gates_of", "hazard_body", "hazard_gate", "Impact",
+           "KnownFailures",
            "LEVELS", "SOURCES", "Stage", "Static", "StageVerdict"]

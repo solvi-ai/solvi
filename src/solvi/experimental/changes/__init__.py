@@ -65,7 +65,7 @@ from ._journal import ChangeJournal, EvalLocked, EvaluatorLock
 from ._paired import paired_bootstrap, run_episode
 from ._stages import (DEFAULT_APPROVAL, LEVELS, Approval, Canaries, CleanCases, Confirmation, Consistency, Context,
                      FreshEnvironments, Impact, KnownFailures, SOURCES, Stage, Static, StageVerdict, allowed, gate_of,
-                     hazard_body, hazard_gate)
+                     gates_of, hazard_body, hazard_gate)
 from ._targets import KnowledgeTarget, LearningTarget, Refused, VersionsTarget
 
 warn_on_import(__name__)
@@ -365,6 +365,7 @@ class Pipeline:
 
 __all__ = ["allowed", "Approval", "ARTIFACTS", "Canaries", "Change", "CHANGE_TYPES", "ChangeJournal", "CleanCases",
            "Confirmation", "Consistency", "Context", "DEFAULT_APPROVAL", "EvalLocked", "EvaluatorLock",
-           "FreshEnvironments", "gate_of", "hazard_body", "hazard_gate", "Impact", "KnowledgeTarget", "KnownFailures",
+           "FreshEnvironments", "gate_of", "gates_of", "hazard_body", "hazard_gate", "Impact", "KnowledgeTarget",
+           "KnownFailures",
            "LearningTarget", "LEVELS", "paired_bootstrap", "Pipeline", "Refused", "Result", "run_episode", "SOURCES",
            "Stage", "Static", "STORE_SOURCE", "StageVerdict", "VersionsTarget"]
