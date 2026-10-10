@@ -50,6 +50,16 @@ probes planned from each mismatch learned every denial class in one session: ref
 no allowed call wrongly skipped, against 48 → 29 with random probes at the same budget. benchmarks/laws_toy.py
 reproduces both findings in miniature (tests/test_laws_toy.py, `pytest -m slow`).
 
+Compiled laws. An atom may carry its code — `Atom(name, fn, feature=, code="s['front'] == 'tree'", defs=...)`, a
+Python expression over `s` and `a` that equals `fn`, with the module-level source it needs. `law.to_code(grammar)` is a
+pure function for one law; `lawset.to_module()` one module that imports nothing from solvi (the laws in the set's own
+order, most specific first; `predict(s, a, base=None, apply=None)` with your base predictor as the fallback). A law
+whose atoms have no code is refused, naming them; so is an action or effect that is not a literal. Compiled code is
+accepted only after the differential check: `check_compiled(module, buffer, lawset)` runs the module against
+`lawset.predict` (and the applied law's id) on every row of the buffer, and the bar is 0 differences. A grammar may grow
+(`grammar.add(atom)`, e.g. a relational atom a proposer invents); a buffer evaluates the new atom on its older rows the
+first time a condition names it.
+
 What is not done:
 - no grammar that cannot be enumerated (where the mismatch should matter most) has been measured;
 - retirement is by precision only; a weak law no observation contradicts stays;
@@ -58,11 +68,13 @@ What is not done:
 from __future__ import annotations
 
 from .. import warn_on_import
+from ._compile import CompiledCheck, check_compiled, load_module
 from ._core import (Atom, Buffer, CallableProposer, Candidate, Enumerate, Grammar, Law, LawSet, Proposer,
                     RandomProposer, Step, Transition)
 from ._probes import Probe, discriminate, split
 
 warn_on_import(__name__)
 
-__all__ = ["Atom", "Buffer", "CallableProposer", "Candidate", "Enumerate", "Grammar", "Law", "LawSet", "Probe", "Proposer",
-           "RandomProposer", "Step", "Transition", "discriminate", "split"]
+__all__ = ["Atom", "Buffer", "CallableProposer", "Candidate", "CompiledCheck", "Enumerate", "Grammar", "Law", "LawSet",
+           "Probe", "Proposer", "RandomProposer", "Step", "Transition", "check_compiled", "discriminate", "load_module",
+           "split"]

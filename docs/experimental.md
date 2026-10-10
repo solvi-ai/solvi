@@ -24,7 +24,7 @@ keeps working for one release. **Removal**: a piece that has not graduated by it
 is removed and the negative result published.
 
 Each section below gives the piece's `STATUS` entry: what it is, since when it exists, what it is missing to graduate,
-the script that measures it (`changes`, `laws`, `skills`) and where the guide describes it.
+the script that measures it (`changes`, `laws`, `skills`, `relations`) and where the guide describes it.
 
 ## `lora`
 
@@ -109,6 +109,27 @@ System 2 of `solvi.Agent`; `SkillSet.to_knowledge` writes the skills into the kn
   slow tests/test_skills_toy.py`). **Deadline:** 1.2.
 - Guide: [Learning in a world described by code](best_practices.md#learning-in-a-world-described-by-code-plan-on-the-code);
   API: [solvi.experimental.skills](api/skills.md).
+
+## `relations`
+
+Relations over a state and rules found over them (`solvi.experimental.relations`): a state becomes named relations over
+its nodes, stored as packed bits (a path tree: PARENT, SAME_DIR, IS_DIR, NAME=x; a grid seen from the player: EAST,
+SOUTH, AT, FACE and the cells' materials and creatures); a relation-algebra enumerator builds programs bottom-up
+(composition, converse, union, intersection, difference, a bounded complement, transitive closure, path counts) and
+keeps one per behaviour — two programs are the same only when their full relations agree on every example; programs are
+scored by the support and precision of a readout (does the subject relate to anything), noise-tolerant, and a
+`Library` keeps accepted ones as terminals of later searches. `RelAlgProposer` hands the best programs to a law set as
+atoms, and its unchanged held-out test judges them. A found rule runs as code: `compile_program` writes plain set code
+(or index arrays for large graphs; dense answers refused) and `check_program` compares it with the interpreter pair for
+pair; with `Atom(..., code=)`, `LawSet.to_module()` writes a law set as one module and `check_compiled` runs it against
+`LawSet.predict` on every row (the bar: 0 differences). Since 1.1.
+
+- **Missing:** on a pre-registered battery of 28 random rules over three relations the enumerator found 22 within seven nodes, every find exact on larger graphs of other families, and compiled rules matched hand-written set code pair for pair on a forest of 100,000 nodes within twice its time; still missing: a stand where relational atoms beat the flat grammar on real data (an MCP filesystem server with an ancestor rule, a game simulator with written mechanics), how deep the search reaches with the twenty-odd relations of a grid window, and a way to drop proposed atoms no law uses.
+- **Script:** `benchmarks/relations_battery.py` (the battery; the rule file is passed with `--rules`) and
+  `benchmarks/relations_compile.py` (compiled rules on a forest of 100,000 nodes, on worlds of 1,000 nodes and on
+  100,000 law rows; `pytest -m slow tests/test_relations_gate.py`). **Deadline:** 1.2.
+- Guide: [Relational rules](best_practices.md#relational-rules-enumerate-let-the-test-judge-then-compile);
+  API: [solvi.experimental.relations](api/relations.md).
 
 ## Graduated and removed
 

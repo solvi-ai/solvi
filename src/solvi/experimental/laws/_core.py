@@ -15,11 +15,18 @@ from typing import Any, Callable, Iterable, Protocol
 class Atom:
     """A named boolean feature of a state: `fn(state)` or `fn(state, action)` → bool. `feature` groups atoms that
     describe the same thing (thresholds of one counter, the material of one cell): a condition holds at most one atom
-    per feature. Default: the atom's own name."""
-    __slots__ = ("name", "fn", "feature", "_with_action")
+    per feature. Default: the atom's own name.
 
-    def __init__(self, name: str, fn: Callable[..., Any], feature: str | None = None):
+    code: optional, a Python expression over `s` (the state) and `a` (the action) that equals `fn` — what a compiled
+    law set (`LawSet.to_module`) runs in its place; defs: the module-level source the expression needs (a string or a
+    tuple of strings; identical ones are written once). An atom without code cannot be compiled."""
+    __slots__ = ("name", "fn", "feature", "code", "defs", "_with_action")
+
+    def __init__(self, name: str, fn: Callable[..., Any], feature: str | None = None, *, code: str | None = None,
+                 defs: str | Iterable[str] = ()):
         self.name, self.fn, self.feature = str(name), fn, str(feature) if feature is not None else str(name)
+        self.code = str(code) if code is not None else None
+        self.defs = (defs,) if isinstance(defs, str) else tuple(defs)
         self._with_action = _required_args(fn) >= 2
 
     def __call__(self, state, action):
@@ -42,14 +49,24 @@ class Grammar:
     atom names, at most `k`, at most one per feature; the empty condition () holds everywhere."""
 
     def __init__(self, atoms: Iterable[Atom], k: int = 3):
-        self.atoms = list(atoms)
+        self.atoms: list[Atom] = []
         self.k = int(k)
-        self.by_name = {}
-        for a in self.atoms:
-            if a.name in self.by_name:
-                raise ValueError(f"two atoms are named {a.name!r}")
-            self.by_name[a.name] = a
-        self.feature = {a.name: a.feature for a in self.atoms}
+        self.by_name: dict[str, Atom] = {}
+        self.feature: dict[str, str] = {}
+        self.position: dict[str, int] = {}
+        for a in atoms:
+            self.add(a)
+
+    def add(self, atom: Atom) -> Atom:
+        """Append an atom (a proposer may invent one, e.g. a relational atom). A buffer built before evaluates it on
+        its older rows when a condition first names it. ValueError if the name is taken."""
+        if atom.name in self.by_name:
+            raise ValueError(f"two atoms are named {atom.name!r}")
+        self.position[atom.name] = len(self.atoms)
+        self.atoms.append(atom)
+        self.by_name[atom.name] = atom
+        self.feature[atom.name] = atom.feature
+        return atom
 
     def true(self, state, action) -> tuple[str, ...]:
         """The names of the atoms true for `action` in `state`, sorted."""
@@ -134,6 +151,8 @@ class Buffer:
         self._order: list[Any] = []                              # groups in order of first appearance
         self._seen: set = set()
         self._cache: dict = {}                                   # (action, what, key) → (bitset, rows done)
+        self._width: dict[Any, list[int]] = {}                  # action → per row, the grammar's size when added
+        self._late: set = set()                                  # (action, atom) indexed on the rows before it
         self.n = 0
 
     def add(self, t: Transition):
@@ -141,6 +160,7 @@ class Buffer:
         rows = self._rows.setdefault(a, [])
         bit = 1 << len(rows)
         rows.append(t)
+        self._width.setdefault(a, []).append(len(self.grammar.atoms))
         atoms = self._atoms.setdefault(a, {})
         for name in self.grammar.true(t.state, t.action):
             atoms[name] = atoms.get(name, 0) | bit
@@ -187,8 +207,30 @@ class Buffer:
         m = (1 << len(self._rows.get(a, ()))) - 1
         atoms = self._atoms.get(a, {})
         for name in condition:
+            self._index_late(a, name)
             m &= atoms.get(name, 0)
         return m
+
+    def _index_late(self, a, name):
+        """An atom the grammar gained after some rows of `a` were added: evaluate it on those rows, once."""
+        i = self.grammar.position.get(name)
+        if i is None or (a, name) in self._late:
+            return
+        widths = self._width.get(a, ())
+        if not widths or widths[0] > i:
+            return                                               # every row saw the atom when it was added
+        self._late.add((a, name))
+        atom = self.grammar.by_name[name]
+        rows = self._rows[a]
+        m = 0
+        for j, w in enumerate(widths):
+            if w > i:
+                break
+            if atom(rows[j].state, rows[j].action):
+                m |= 1 << j
+        if m:
+            atoms = self._atoms.setdefault(a, {})
+            atoms[name] = atoms.get(name, 0) | m
 
     def where(self, action, what, key, test: Callable[[Transition], bool]) -> int:
         """The rows of `action` where test(row) holds, cached under (what, key) and extended as rows arrive."""
@@ -251,6 +293,13 @@ class Law:
 
     def text(self) -> str:
         return f"{self.action}{' & ' + ' & '.join(self.condition) if self.condition else ''} -> {self.effect!r}"
+
+    def to_code(self, grammar: "Grammar", name: str | None = None) -> str:
+        """The source of a pure function `def law_<n>(s, a)` → (True, effect) where this law applies, else (False,
+        None), from the atoms' code. ValueError naming the atoms without code, or for an action / effect that is not a
+        literal."""
+        from ._compile import law_to_code
+        return law_to_code(self, grammar, name)
 
 
 @dataclass
@@ -359,6 +408,7 @@ class LawSet:
         self.laws: list[Law] = []          # active, priority order
         self.retired: list[Law] = []
         self.capped = 0                    # tests refused because the cap was reached
+        self.transition: Transition | None = None   # the transition `step` is proposing for (a proposer may read it)
         self._seq = 0
         self._base_key = ("base", id(base))
 
@@ -561,7 +611,11 @@ class LawSet:
         miss = predicted != t.observed
         st = Step(t, predicted, law, miss, retired=retired)
         if miss:
-            cands = self.mismatch(t.state, t.action, t.observed)
+            self.transition = t
+            try:
+                cands = self.mismatch(t.state, t.action, t.observed)
+            finally:
+                self.transition = None
             st.candidates = len(cands)
             st.accepted = self.test(cands, buffer, exclude=t.group) if cands else []
         if remember:
@@ -571,6 +625,15 @@ class LawSet:
     def learn(self, stream: Iterable[Transition], buffer: Buffer, *, remember: bool = False) -> list[Step]:
         """The loop over a stream, in order (not a schedule: every transition is predicted before it is learned from)."""
         return [self.step(t, buffer, remember=remember) for t in stream]
+
+    # ----------------------------------------------------------------------------------- compiled
+    def to_module(self) -> str:
+        """The active laws as one Python module that imports nothing from solvi: one function per law, `LAWS` in this
+        set's dispatch order (most specific first), `applied(s, a)` and `predict(s, a, base=None, apply=None)` with
+        the base predictor as the fallback. Check it with `check_compiled(module, buffer, lawset)`. ValueError naming
+        every atom without code."""
+        from ._compile import lawset_to_module
+        return lawset_to_module(self)
 
     # ----------------------------------------------------------------------------------- knowledge
     def to_knowledge(self, store, scope: dict | None = None) -> dict[str, str]:

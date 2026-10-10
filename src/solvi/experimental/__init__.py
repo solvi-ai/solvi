@@ -67,6 +67,18 @@ STATUS: dict[str, dict] = {
                "the toy (a game simulator with written mechanics, a service with a specification), a 5% promise "
                "(fifty clean uses per certified unit), a condition rule that specialises after a failure, and a "
                "planner with a heuristic", "script": "benchmarks/skills_toy.py"},
+    "relations": {"since": "1.1", "what": "relations over a state and rules over them: packed-bit relations, the "
+                  "relation algebra (composition, converse, closure, counts), a bottom-up enumerator with "
+                  "observational equivalence on the full relations, a library of accepted programs, compilation into "
+                  "set code or index arrays with a differential check, encoders (a grid window seen from the player, "
+                  "a path tree) and a proposer of relational atoms for the laws' held-out test", "missing": "on a "
+                  "pre-registered battery of 28 random rules over three relations the enumerator found 22 within "
+                  "seven nodes, every find exact on larger graphs of other families, and compiled rules matched "
+                  "hand-written set code pair for pair on a forest of 100,000 nodes within twice its time; still "
+                  "missing: a stand where relational atoms beat the flat grammar on real data (an MCP filesystem "
+                  "server with an ancestor rule, a game simulator with written mechanics), how deep the search "
+                  "reaches with the twenty-odd relations of a grid window, and a way to drop proposed atoms no law "
+                  "uses", "script": "benchmarks/relations_battery.py"},
 }
 for _s in STATUS.values():
     _s["deadline"] = DEADLINE

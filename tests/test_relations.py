@@ -86,7 +86,7 @@ def test_closure_is_transitive_on_a_chain_and_a_cycle():
 # ───────────────────────────────────────────── programs
 def test_show_size_and_evaluate():
     ast = ("MINUS", ("COMP", ("T", E2), E0), ("I",))
-    assert show(ast) == "((E2ᵀ ∘ E0) ∖ I)" and size(ast) == 5
+    assert show(ast) == "((E2ᵀ ∘ E0) ∖ I)" and size(ast) == 6
     assert show(("PLUS", E0)) == "(E0)⁺" and show(("C2", E0, E1)) == "(E0 #2∘ E1)"
     r = worlds()[0]
     want = compose(converse(r.matrix("E2")), r.matrix("E0")) & ~np.eye(r.n, dtype=bool)
@@ -144,6 +144,27 @@ def test_observational_equivalence_is_sound_under_composition_and_a_readout_key_
     assert ("R", "F") in kept and ("R", "G") in kept
 
 
+def test_a_complement_stays_inside_each_examples_real_pairs():
+    small, big = Relations(["A"], 2), Relations(["A"], 5)
+    small.add("A", 0, 1)
+    for p in enumerate_programs([small, big], 2, ops=("NOT",)):
+        assert not p.value[0, 2:, :].any() and not p.value[0, :, 2:].any(), show(p.ast)   # padding stays empty
+    assert np.array_equal(evaluate(("NOT", ("R", "A")), small), [[True, False], [True, True]])
+
+
+def test_search_on_a_subset_rechecks_on_all_examples_and_memory_is_capped():
+    ex = worlds(seed=9, count=12, p=0.25)
+    target = [evaluate(("COMP", E0, ("T", E1)), r) for r in ex]
+    f = synthesize(ex[:4], target[:4], 5, check=(ex, target))
+    assert f.ast is not None and all(np.array_equal(evaluate(f.ast, r), t) for r, t in zip(ex, target))
+    # a target that only the subset satisfies: the subset's match fails the re-check and is not returned
+    fake = [evaluate(E0, r) if i < 4 else evaluate(E1, r) for i, r in enumerate(ex)]
+    assert synthesize(ex[:4], fake[:4], 3, check=(ex, fake)).ast is None
+    en = enumerate_programs(ex, 6, max_bytes=200_000)
+    list(en)
+    assert en.stopped == "cap" and en.behaviours * en.bytes_per_behaviour <= 200_000 + en.bytes_per_behaviour
+
+
 def test_score_counts_support_and_precision_of_the_readout():
     r = Relations(["A"], 3)
     r.update("A", [(0, 1)])
@@ -168,7 +189,7 @@ def test_top_programs_do_not_stop_at_the_first_match_and_tolerate_noise():
     y = [bool(r.matrix("TREE")[1, 1]) for r in ex]
     noisy = [v if i % 10 else not v for i, v in enumerate(y)]            # 10% of the labels flipped
     top = top_programs(ex, noisy, size=3, k=5)
-    assert len(top) == 5
+    assert 2 <= len(top) <= 5                                           # as many readout patterns as exist
     assert show(top[0].ast) == "(FACE ∘ TREE)"
     assert top[0].score.precision >= 0.85 and top[0].score.support >= 20
     pats = [tuple(t.readout) for t in top]
@@ -207,9 +228,14 @@ SPARSE_ASTS = [E0, ("T", E1), ("COMP", E0, E1), ("C2", E0, ("T", E0)), ("C3", ("
 def test_compiled_programs_agree_with_the_interpreter_pair_for_pair():
     rng = np.random.default_rng(11)
     ws = [rand_rel(rng, n, p=p) for n in (12, 64) for p in (1.5 / n, 4.0 / n)] + [rand_rel(rng, 1000, p=1.5 / 1000)]
-    for ast in SPARSE_ASTS:
-        chk = check_program(ast, ws)
-        assert chk.ok and chk.differences == 0 and chk.worlds == len(ws), show(ast)
+    for backend in ("sets", "arrays"):
+        for ast in SPARSE_ASTS:
+            chk = check_program(ast, ws, backend=backend)
+            assert chk.ok and chk.differences == 0 and chk.worlds == len(ws), (backend, show(ast))
+    small = ws[:2]
+    for ast in (("NOT", E0), ("OR", ("U",), E1), ("AND", ("NOT", E0), ("NOT", E1))):     # dense, bounded by n
+        for backend in ("sets", "arrays"):
+            assert check_program(ast, small, dense=True, backend=backend).ok, (backend, show(ast))
 
 
 def test_compiled_code_is_plain_python_over_sets():
@@ -287,7 +313,8 @@ def tree_paths(rng):
     for _ in range(12):
         depth = rng.randint(1, 4)
         parts = [rng.choice(DIRS) for _ in range(depth)]
-        out.append("/" + "/".join(parts) + "/" + rng.choice(("f", "g", "h")) + rng.choice((".txt", ".md")))
+        name = rng.choice(("f", "g", "secret")) + rng.choice((".txt", ".md", ""))    # a file may be named "secret"
+        out.append("/" + "/".join(parts) + "/" + name)
     return out
 
 
