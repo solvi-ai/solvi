@@ -162,6 +162,21 @@ def ship_rule(big_order):
     return not big_order                    # bool is normalized to "yes"/"no" for yes/no questions
 ```
 
+### Citing the clause a rule implements
+
+A hand-written part can say which text it implements: `cite=` a verbatim quote (or a list) and `clause=` the clause's
+id (or a list as long). They are kept as `Part.cites` and checked against the text by `solvi.check.citations(system,
+text, spec=None, require=False)` — or `solvi check module:system --text POLICY.md`: a quote not in the text is the
+error `cite_not_found` (matched as quotes are, across Unicode forms, dashes and curly quotes), with a `Spec` a clause
+that does not exist or does not hold the quote is an error, `require=True` warns on an uncited part; a correction can
+be cited as `clause="person:k07"`. The causes of `solvi diff` carry the citations: clause → rule → decision.
+
+```python
+@cat.fn(clause="c16", cite='new rule `guarantor`: other_debtors is "guarantor" → −1')
+def guarantor_points(other_debtors):
+    return -1 if other_debtors == "guarantor" else 0
+```
+
 ### Soft and hard checks
 
 - A **soft check** is a boolean fact. Rules can use it, answer heads can learn from it, and failed soft checks are listed
@@ -3666,7 +3681,9 @@ is not named, and a decision that changes because of a threshold is attributed t
 Of the steps on such a path the causes are those where a difference starts (its own code, declarations or model
 changed, it is new or no longer runs, or nothing it reads differs); with several changes at once each is listed, and
 which of them alone would have changed the answer takes a `diff` against a system with only that change. The header
-lists the parts whose code changed since the decisions were stored and the parts that ran now and not then.
+lists the parts whose code changed since the decisions were stored and the parts that ran now and not then. The causes
+carry the cited clauses: a cause whose part cites what it implements (`clause=` / `cite=`, see [the
+catalog](#citing-the-clause-a-rule-implements)) has `"cites": [{"clause", "quote"}]`.
 
 Each stored decision's recorded input is asked again for the same questions (`store=False`: the new system's own storage
 is not written) and compared with the stored response: answer, status, the guard that settled it, the safeguard events

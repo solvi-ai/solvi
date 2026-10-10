@@ -599,6 +599,8 @@ class Part:
     timeout: float | None = None         # System.aask: seconds a call may take (else System(timeout=)); then the step fails
     blocking: bool = False               # System.aask: a sync part that blocks (I/O, a model) runs in a worker thread
     quotes: str = "normalized"           # quote matching: "normalized" (1.0 default) or "literal" (0.9); Catalog(quotes=)
+    cites: list | None = None            # what it implements: [(clause id or None, verbatim quote or None)] — the
+    #                                      decorators' clause= / cite=; checked by solvi.check.citations, shown by diff
     then_parts: dict | None = field(default=None, repr=False, compare=False)   # check only: question → Part of a `then`
     #                                                                            function (its typed inputs; see check)
     tin: dict | None = field(default=None, repr=False, compare=False)   # compiled validators of the typed arguments
@@ -608,6 +610,27 @@ class Part:
         """Must a Quote from this part be literally at its offsets? Yes for model-backed parts (unless exact=False)."""
         from .provenance import FUZZY
         return self.exact if self.exact is not None else (self.model is not None or self.provenance in FUZZY)
+
+
+def cites_of(cite=None, clause=None):
+    """The decorators' `cite=` (a verbatim quote of the text the part implements, or a list of them) and `clause=` (the
+    clause id, or a list of ids — as long as the list of quotes when both are lists) → Part.cites: [(clause, quote)],
+    or None when neither is given. One clause with several quotes: each quote cites it; quotes without a clause: None."""
+    if cite is None and clause is None:
+        return None
+    quotes = [cite] if isinstance(cite, str) or cite is None else list(cite)
+    ids = [clause] if isinstance(clause, str) or clause is None else list(clause)
+    if any(q is not None and not isinstance(q, str) for q in quotes) or any(c is not None and not isinstance(c, str)
+                                                                              for c in ids):
+        raise ValueError("cite= is a quote or a list of quotes, clause= a clause id or a list of ids (strings)")
+    if isinstance(clause, str) or clause is None:       # one clause (or none) for every quote
+        ids = ids * len(quotes)
+    elif cite is None:                                  # clauses without quotes
+        quotes = quotes * len(ids)
+    if len(ids) != len(quotes):
+        raise ValueError(f"cite= and clause= as lists must have the same length ({len(quotes)} quotes, {len(ids)} "
+                         "clauses)")
+    return list(zip(ids, quotes))
 
 
 def _then_parts(check):
@@ -948,7 +971,7 @@ class Catalog:
             first = Part(kind=g.kind, name=g.func.__name__ + "__declared", inputs=g.inputs, func=g.func, doc=g.doc,
                          cost=g.cost, provides=fact, validate=g.validate, min_confidence=g.min_confidence, model=g.model,
                          provenance=g.provenance, options=g.options, exact=g.exact, types=g.types, returns=g.returns,
-                         tin=g.tin, tout=g.tout, source=g.source, timeout=g.timeout, blocking=g.blocking)
+                         tin=g.tin, tout=g.tout, source=g.source, timeout=g.timeout, blocking=g.blocking, cites=g.cites)
             g = Part(kind=g.kind, name=fact, inputs=list(g.inputs), func=None, doc=f"alternative producers of {fact}",
                      alternatives=[first])
             g.func = group_func(g)
@@ -969,7 +992,7 @@ class Catalog:
         return self._add(kind, f, **kw)
 
     def extract(self, f=None, *, provides=None, cost=None, validate=None, min_confidence=None, model=None, provenance=None,
-                exact=None, source=None, timeout=None, blocking=None):
+                exact=None, source=None, timeout=None, blocking=None, cite=None, clause=None):
         """Extract a value from text (returns a Quote). With `provides="fact"` the function is one of several alternative
         producers of that fact: its output is used only if it passes `validate` / `min_confidence`, otherwise the next
         alternative runs. `cost` (ms) is a prior for scheduling until run times are measured.
@@ -979,21 +1002,26 @@ class Catalog:
         argument, else its only str-typed argument; if that is ambiguous, registration raises and asks for source=. A
         returned Quote that names another source (Quote(..., source="notes")) keeps it.
         The function may be `async def` (awaited by System.aask). `timeout` (seconds) and `blocking` (a sync function that
-        waits on I/O or a model: aask runs it in a worker thread) apply under aask; see System.aask."""
+        waits on I/O or a model: aask runs it in a worker thread) apply under aask; see System.aask.
+        `cite` / `clause` (on every decorator): the text the part implements — a verbatim quote (or a list) and the id of
+        its clause (or a list as long), e.g. `@cat.fn(clause="c16", cite="other_debtors is \"guarantor\" → −1")`;
+        recorded as Part.cites, checked against the text by solvi.check.citations (`solvi check --text`), listed in the
+        causes of solvi.core.store.diff.diff."""
         return self._deco("extract", f, provides=provides, cost=cost, validate=validate, min_confidence=min_confidence,
                           model=model, provenance=provenance, exact=exact, source=source, timeout=timeout,
-                          blocking=blocking)
+                          blocking=blocking, cites=cites_of(cite, clause))
 
     def fn(self, f=None, *, provides=None, cost=None, validate=None, model=None, provenance=None, options=None,
-           min_confidence=None, timeout=None, blocking=None):
+           min_confidence=None, timeout=None, blocking=None, cite=None, clause=None):
         """A computation. `provides`, `validate`, `cost`, `timeout`, `blocking`: as for extract. A model-backed fn (`model=`)
         with `options` is a model decision: it returns a Decision (or a plain value) that must be one of the options, else
-        it is rejected."""
+        it is rejected. `cite`, `clause`: as for extract."""
         return self._deco("fn", f, provides=provides, cost=cost, validate=validate, model=model, provenance=provenance,
                           options=None if options is None else list(options), min_confidence=min_confidence,
-                          timeout=timeout, blocking=blocking)
+                          timeout=timeout, blocking=blocking, cites=cites_of(cite, clause))
 
-    def check(self, f=None, *, hard=False, then=None, cost=None, model=None, provenance=None, timeout=None, blocking=None):
+    def check(self, f=None, *, hard=False, then=None, cost=None, model=None, provenance=None, timeout=None, blocking=None,
+              cite=None, clause=None):
         """A check: a function of facts that answers True or False (or `solvi.core.slow.refine.Fail("why")` for False with its
         reasons). hard=True: when it is False it decides the questions it governs — the model cannot override it.
         then: {question: answer} — the answer a question gets when this hard check is False (a question listed here is
@@ -1002,12 +1030,12 @@ class Catalog:
         function of facts instead of a constant — `then={"step": free_side}` with `def free_side(position, walls) ->
         str` — whose argument names are the facts it reads (typed like any part's); it runs only when the check is
         False, its value must be one of the question's answers (else the question abstains), and it is recorded in the
-        trace (record kind "then") and re-checked by replay."""
+        trace (record kind "then") and re-checked by replay. `cite`, `clause`: as for extract."""
         if then is not None and not isinstance(then, dict):
             raise TypeError(f"then= is {{question: answer or function of facts}}, not {type(then).__name__}: e.g. "
                             "then={\"step\": free_side}")
         return self._deco("check", f, hard=hard, then=then or {}, cost=cost, model=model, provenance=provenance,
-                          timeout=timeout, blocking=blocking)
+                          timeout=timeout, blocking=blocking, cites=cites_of(cite, clause))
 
     def features(self, fact):
         """Cheap features of the input for choosing among a fact's alternative producers (the learned producer policy):
@@ -1024,12 +1052,13 @@ class Catalog:
             return f
         return deco
 
-    def rule(self, question, *, model=None, provenance=None, timeout=None, blocking=None):
+    def rule(self, question, *, model=None, provenance=None, timeout=None, blocking=None, cite=None, clause=None):
         """The answer rule of a question. With `model=` the rule is a model's decision: it may return a Decision with
-        probabilities; an answer outside the question's options abstains, as for any rule. `timeout`, `blocking`: as for
-        extract."""
+        probabilities; an answer outside the question's options abstains, as for any rule. `timeout`, `blocking`, `cite`,
+        `clause`: as for extract."""
+        cites = cites_of(cite, clause)
         return lambda f: self._add("rule", f, question=question, model=model, provenance=provenance, timeout=timeout,
-                                   blocking=blocking)
+                                   blocking=blocking, cites=cites)
 
     def replace_rule(self, part):
         """Install a ready rule Part (System.learn_rule: a learned rule list) as its question's rule, in place of the one
@@ -1064,7 +1093,7 @@ class Catalog:
         raise KeyError(f"{name} is not a producer of {fact}")
 
 
-__all__ = ["ExperimentalWarning", "NOT_STATED", "accept", "accepts", "Answer", "AnswerType", "bin_labels", "Catalog", "check_evidence", "Claim",
+__all__ = ["ExperimentalWarning", "NOT_STATED", "accept", "accepts", "Answer", "AnswerType", "bin_labels", "Catalog", "check_evidence", "cites_of", "Claim",
            "cuts_number", "Decision", "evidence_rows", "find_whole", "ground", "group_func", "has_evidence", "locate",
            "NOT_STATED_KEY", "NotStated", "Part", "plain_json", "PRIMITIVES", "Question", "question_data", "Quote",
            "Serial", "Unknown", "unknown_key", "unwrap", "validated"]

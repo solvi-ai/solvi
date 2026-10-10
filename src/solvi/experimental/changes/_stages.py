@@ -129,17 +129,20 @@ class Static:
     a list of problems (e.g. a lawlang parse).
 
     A candidate that carries a catalog (catalog_of: a Catalog or a System as the payload, or as its "catalog" /
-    "system" key; a compiled catalog — solvi.experimental.compile.Compiled — when `sensitive` is given) is refused
-    when solvi.check.lint flags a part that reads a sensitive field (`reads_sensitive`, `reads_sensitive_via`): the
-    catalog's own Catalog(sensitive=...) and `sensitive` here. `catalog_of(payload)` → a Catalog / System or None
-    replaces how the catalog is found."""
+    "system" key; a compiled catalog — solvi.experimental.compile.Compiled — when `sensitive` or `text` is given) is
+    refused when solvi.check.lint flags a part that reads a sensitive field (`reads_sensitive`, `reads_sensitive_via`):
+    the catalog's own Catalog(sensitive=...) and `sensitive` here; and, with `text` (the policy its parts cite), when
+    solvi.check.citations finds an error — a quote not in the text, and with `spec` (a Spec) a clause that does not
+    exist or does not hold the quote. `catalog_of(payload)` → a Catalog / System or None replaces how the catalog is
+    found."""
     name = "static"
 
     def __init__(self, *, parse: Callable | None = None, evidence_exists: Callable | None = None, sandbox: bool = True,
-                 sensitive=None, catalog_of: Callable | None = None):
+                 sensitive=None, catalog_of: Callable | None = None, text: str | None = None, spec=None):
         self.parse, self.evidence_exists, self.sandbox = parse, evidence_exists, sandbox
         self.sensitive = None if sensitive is None else ([sensitive] if isinstance(sensitive, str) else list(sensitive))
         self.catalog_of = catalog_of
+        self.text, self.spec = text, spec
 
     def run(self, change, ctx):
         problems = []
@@ -180,15 +183,17 @@ class Static:
         if self.catalog_of is not None:
             found = self.catalog_of(payload)
         else:
-            found = catalog_of(payload, compiled=bool(self.sensitive))
+            found = catalog_of(payload, compiled=bool(self.sensitive) or self.text is not None)
         if found is None:
             return None
         return found.catalog if hasattr(found, "questions") and not hasattr(found, "rules") else found
 
     def _lint(self, cat):
-        from ...check import Report, _sensitive
+        from ...check import Report, _sensitive, citations
         rep = Report()
         _sensitive(cat, rep, self.sensitive)
+        if self.text is not None:
+            rep.findings += citations(cat, self.text, spec=self.spec).findings
         return [f"{f.code}: {f.where}: {f.message}" for f in rep.errors]
 
 

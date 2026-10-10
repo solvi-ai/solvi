@@ -26,6 +26,18 @@ calibration files and served by `solvi serve`), so a build from it is not mistak
   `solvi.experimental.changes` refuses a candidate catalog with such a part (`Static(sensitive=...)`, plus the
   catalog's own declaration).
 
+- **Citations on hand-written parts.** `@cat.fn`, `@cat.check`, `@cat.rule` and `@cat.extract` take `cite=` (a verbatim
+  quote of the text the part implements, or a list) and `clause=` (its clause id, or a list as long), kept as
+  `Part.cites` — pairs (clause, quote). `solvi.check.citations(obj, text, *, spec=None, require=False)` checks them:
+  a quote not in the text (found in the catalog's quote mode) is the error `cite_not_found`; with a
+  `solvi.experimental.compile.Spec`, a clause it does not have is `clause_unknown` and a quote outside the named
+  clause `cite_outside_clause`; `require=True` makes an uncited part the warning `no_cite`; a correction cited as
+  `clause="person:k07"` is checked against the text only. `solvi check module:system --text POLICY.md` runs it after
+  the lint. The causes of `solvi.core.store.diff.diff` carry `"cites"` ([{"clause", "quote"}]) when their part has
+  citations; `solvi.experimental.compile.decision_diff` also takes plain Systems (hand-written catalogs), whose
+  causes get their `clauses` from the citations; the changes pipeline's `Static(text=..., spec=...)` refuses a
+  candidate whose citations fail.
+
 ### Changed
 
 - **Replay binds every field of a result to its trace, not only the answer and its status.** With the System,

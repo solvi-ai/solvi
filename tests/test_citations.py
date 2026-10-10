@@ -167,10 +167,10 @@ def test_solvi_check_text(tmp_path, capsys):
 
         system = System(cat, [Question("decision", "Approve?", Answer.choice(["approve", "refuse"]))])
     '''))
-    for cite, code in (("points ≥ 2 → refuse", 0), ("points ≥ 3 → refuse", 1)):
-        f.write_text(f.read_text().replace("CITE", repr(cite)) if "CITE" in f.read_text() else
-                     f.read_text().replace(repr("points ≥ 2 → refuse"), repr(cite)))
+    for i, (cite, code) in enumerate((("points ≥ 2 → refuse", 0), ("points ≥ 3 → refuse", 1))):
+        g = tmp_path / f"credit{i}.py"                  # a module of its own: the loader caches a module by its file
+        g.write_text(f.read_text().replace("CITE", repr(cite)))
         capsys.readouterr()
-        assert main(["check", f"{f}:system", "--text", str(tmp_path / "POLICY.md")]) == code
+        assert main(["check", f"{g}:system", "--text", str(tmp_path / "POLICY.md")]) == code
         out = capsys.readouterr().out
         assert ("cite_not_found" in out) == (code == 1)

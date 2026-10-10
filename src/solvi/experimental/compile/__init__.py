@@ -1842,11 +1842,19 @@ def _status(a):
     return a.get("status") if isinstance(a, dict) else None
 
 
-def decision_diff(old: Compiled, new: Compiled, *, store=None, inputs=None, **filters) -> DecisionDiff:
+def _decides(x):
+    """A Compiled or a System → its System (a Compiled's, built for this diff)."""
+    return x.system() if isinstance(x, Compiled) else x
+
+
+def decision_diff(old, new, *, store=None, inputs=None, **filters) -> DecisionDiff:
     """Which decisions `new` would change: the stored ones (`store`, decided by `old`'s catalog — filters as for
-    solvi.core.store.diff.diff) or `inputs` (each decided by `old` first, in a temporary store). Each change's causes are the steps
-    solvi.core.store.diff names, with the clauses their parts implement (in the new compilation, else the old one)."""
-    from ...core.store.diff import diff
+    solvi.core.store.diff.diff) or `inputs` (each decided by `old` first, in a temporary store). old / new: a Compiled,
+    or a plain System (a hand-written catalog). Each change's causes are the steps solvi.core.store.diff names, with the
+    clauses their parts implement — a Compiled's PARTS (in the new compilation, else the old one), for a plain catalog
+    the clause ids its parts cite (`clause=` on the decorators) — and "cites", the parts' citations [{"clause",
+    "quote"}] when they have them."""
+    from ...core.store.diff import diff, part_cites
     from ...core.store import JSONLStorage
     tmp = None
     if store is None:
@@ -1854,11 +1862,18 @@ def decision_diff(old: Compiled, new: Compiled, *, store=None, inputs=None, **fi
             raise ValueError("decision_diff needs a store of decisions or inputs")
         tmp = tempfile.mkdtemp(prefix="solvi_ddiff_")
         store = JSONLStorage(str(Path(tmp) / "decisions.jsonl"))
-        s_old = old.system(storage=store)
-        for x in inputs:
-            s_old.ask(dict(x))
+        if isinstance(old, Compiled):
+            s_old = old.system(storage=store)
+            for x in inputs:
+                s_old.ask(dict(x))
+        else:
+            store.catalog = old
+            for x in inputs:
+                store.save(old.ask(dict(x), store=False))
     try:
-        rep = diff(store, new.system(), **filters)
+        s_new = _decides(new)
+        rep = diff(store, s_new, **filters)
+        s_old = _decides(old) if not isinstance(old, Compiled) else None
         out = []
         for ch in rep.changed:
             for q, d in ch["questions"].items():
@@ -1866,10 +1881,21 @@ def decision_diff(old: Compiled, new: Compiled, *, store=None, inputs=None, **fi
                     continue
                 causes = []
                 for c in d.get("causes") or []:
-                    part = new.part_of(c["name"]) or old.part_of(c["name"])
-                    src = new if new.part_of(c["name"]) else old
-                    causes.append({"step": c["name"], "part": part, "clauses": src.clauses_of(part) if part else [],
-                                   "why": c.get("why")})
+                    cites = c.get("cites")
+                    if cites is None and s_old is not None:
+                        cites = part_cites(s_old.catalog, c["name"])
+                    if isinstance(new, Compiled) or isinstance(old, Compiled):
+                        part = (new.part_of(c["name"]) if isinstance(new, Compiled) else None) or \
+                            (old.part_of(c["name"]) if isinstance(old, Compiled) else None)
+                        src = new if isinstance(new, Compiled) and new.part_of(c["name"]) else old
+                        clauses = src.clauses_of(part) if part and isinstance(src, Compiled) else []
+                    else:
+                        part = c["name"]
+                        clauses = list(dict.fromkeys(x["clause"] for x in cites or () if x["clause"] is not None))
+                    cause = {"step": c["name"], "part": part, "clauses": clauses, "why": c.get("why")}
+                    if cites:
+                        cause["cites"] = cites
+                    causes.append(cause)
                 out.append({"id": ch["id"], "seq": ch.get("seq"), "question": q, "old": _plain_answer(d["old"]),
                             "new": _plain_answer(d["new"]), "status": [_status(d["old"]), _status(d["new"])],
                             "causes": causes})
