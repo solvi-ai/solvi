@@ -1,0 +1,163 @@
+# every release scanned, in scan order: page key, URL, outcome (the text id and paragraph index, or skipped)
+bea_1	https://www.bea.gov/news/2026/us-international-trade-goods-and-services-august-2026	t01 (paragraph 124)
+bea_2	https://www.bea.gov/news/2026/gdp-third-estimate-industries-corporate-profits-state-gdp-and-state-personal-income-2nd	t02 (paragraph 63)
+bea_3	https://www.bea.gov/news/2026/personal-income-and-outlays-august-2026	skipped: no qualifying paragraph
+bea_4	https://www.bea.gov/news/2026/us-international-transactions-and-investment-position-2nd-quarter-2026	skipped: no qualifying paragraph
+bea_5	https://www.bea.gov/news/2026/direct-investment-country-and-industry-2025	t03 (paragraph 61)
+bea_6	https://www.bea.gov/news/2026/activities-us-affiliates-foreign-multinational-enterprises-2024	skipped: no qualifying paragraph
+bea_7	https://www.bea.gov/news/2026/new-foreign-direct-investment-united-states-2025	t04 (paragraph 68)
+bea_8	https://www.bea.gov/news/2026/outdoor-recreation-economic-statistics-us-and-states-2024	t05 (paragraph 60)
+bea_9	https://www.bea.gov/news/2026/real-personal-consumption-expenditures-state-and-real-personal-income-state-2024	skipped: no qualifying paragraph
+bea_10	https://www.bea.gov/news/2026/gross-domestic-product-county-and-personal-income-county-2024	skipped: no qualifying paragraph
+bea_11	https://www.bea.gov/news/2025/gross-domestic-product-puerto-rico-2023	skipped: no qualifying paragraph
+bea_12	https://www.bea.gov/news/2025/activities-us-multinational-enterprises-2023	t06 (paragraph 61)
+eia_1	https://www.eia.gov/todayinenergy/detail.php?id=68284	skipped: no qualifying paragraph
+eia_2	https://www.eia.gov/todayinenergy/detail.php?id=68264	t14 (paragraph 37)
+eia_3	https://www.eia.gov/todayinenergy/detail.php?id=68245	t15 (paragraph 49)
+eia_4	https://www.eia.gov/todayinenergy/detail.php?id=68225	skipped: no qualifying paragraph
+eia_5	https://www.eia.gov/todayinenergy/detail.php?id=68244	t16 (paragraph 39)
+eia_6	https://www.eia.gov/todayinenergy/detail.php?id=68224	skipped: no qualifying paragraph
+eia_7	https://www.eia.gov/todayinenergy/detail.php?id=68204	t17 (paragraph 37)
+eia_8	https://www.eia.gov/todayinenergy/detail.php?id=68184	skipped: no qualifying paragraph
+eia_9	https://www.eia.gov/todayinenergy/detail.php?id=68164	skipped: no qualifying paragraph
+eia_10	https://www.eia.gov/todayinenergy/detail.php?id=68144	t18 (paragraph 36)
+eia_11	https://www.eia.gov/todayinenergy/detail.php?id=68125	t19 (paragraph 38)
+eia_12	https://www.eia.gov/todayinenergy/detail.php?id=68124	t20 (paragraph 40)
+eia_13	https://www.eia.gov/todayinenergy/detail.php?id=68104	t21 (paragraph 43)
+eia_14	https://www.eia.gov/todayinenergy/detail.php?id=68084	skipped: no qualifying paragraph
+eia_15	https://www.eia.gov/todayinenergy/detail.php?id=68064	t22 (paragraph 35)
+fda_1	https://www.fda.gov/news-events/press-announcements/fda-seeks-public-input-support-ibogaine-research	skipped: no qualifying paragraph
+fda_2	https://www.fda.gov/news-events/press-announcements/fda-approves-first-heart-valve-designed-grow-children	skipped: no qualifying paragraph
+fda_3	https://www.fda.gov/news-events/press-announcements/fda-launches-nationwide-effort-expand-scientific-expertise-and-consumer-voices-advisory-committees	skipped: no qualifying paragraph
+fda_4	https://www.fda.gov/news-events/press-announcements/fda-investigation-leads-charges-against-two-indian-nationals-involved-transnational-counterfeit-drug	skipped: no qualifying paragraph
+fda_5	https://www.fda.gov/news-events/press-announcements/fda-approves-first-treatment-mct8-deficiency	skipped: no qualifying paragraph
+fda_6	https://www.fda.gov/news-events/press-announcements/fda-intends-evaluate-changes-pmta-regulatory-framework	skipped: no qualifying paragraph
+fda_7	https://www.fda.gov/news-events/press-announcements/federal-court-enters-consent-decree-against-gold-star-distribution-inc-following-persistent	skipped: no qualifying paragraph
+fda_8	https://www.fda.gov/news-events/press-announcements/fda-updates-regulations-advance-innovative-alternatives-animal-testing	skipped: no qualifying paragraph
+fda_9	https://www.fda.gov/news-events/press-announcements/fda-approves-first-gene-therapy-pediatric-patients-sanfilippo-syndrome-type	skipped: no qualifying paragraph
+fda_10	https://www.fda.gov/news-events/press-announcements/fda-launches-expedited-ind-pilot-begins-accepting-applications	skipped: no qualifying paragraph
+nass_1	https://www.nass.usda.gov/Newsroom/2026/10-01-2026.php	skipped: no qualifying paragraph
+nass_2	https://www.nass.usda.gov/Newsroom/2026/09-30-2026.php	t42 (paragraph 197)
+nass_3	https://www.nass.usda.gov/Newsroom/2026/09-24-2026.php	skipped: no qualifying paragraph
+nass_4	https://www.nass.usda.gov/Newsroom/2026/08-12-2026B.php	skipped: no qualifying paragraph
+nass_5	https://www.nass.usda.gov/Newsroom/2026/08-12-2026.php	skipped: no qualifying paragraph
+noaa_1	https://www.noaa.gov/news/weekend-noreaster-likely-to-bring-damaging-winds-coastal-flooding	skipped: no qualifying paragraph
+noaa_2	https://www.noaa.gov/news/new-turbulence-detection-tool-aims-to-make-commercial-flights-smoother-ext	skipped: no qualifying paragraph
+noaa_3	https://www.noaa.gov/news/happy-250th-usa-heres-your-july-4th-weekend-forecast	skipped: no qualifying paragraph
+noaa_4	https://www.noaa.gov/news/worlds-4th-mass-coral-bleaching-event-likely-ended-in-2025-ext	skipped: no qualifying paragraph
+noaa_5	https://www.noaa.gov/news/access-to-noaas-world-renowned-mauna-loa-observatory-restored	skipped: no qualifying paragraph
+noaa_6	https://www.noaa.gov/news/noaa-research-offers-roadmap-to-improve-west-nile-virus-forecasting-prevention-ext	skipped: no qualifying paragraph
+noaa_7	https://www.noaa.gov/news/noaa-ship-thomas-jefferson-returns-to-great-lakes-for-mapping-mission-ext	skipped: no qualifying paragraph
+nass_6	https://www.nass.usda.gov/Newsroom/2026/07-24-2026.php	skipped: no qualifying paragraph
+nass_7	https://www.nass.usda.gov/Newsroom/2026/06-30-2026.php	skipped: no qualifying paragraph
+nass_8	https://www.nass.usda.gov/Newsroom/2026/06-25-2026.php	skipped: no qualifying paragraph
+nass_9	https://www.nass.usda.gov/Newsroom/2026/05-29-2026.php	skipped: no qualifying paragraph
+nass_10	https://www.nass.usda.gov/Newsroom/2026/05-13-2026.php	skipped: no qualifying paragraph
+nass_11	https://www.nass.usda.gov/Newsroom/2026/03-31-2026.php	skipped: no qualifying paragraph
+nass_12	https://www.nass.usda.gov/Newsroom/2026/03-26-2026.php	skipped: no qualifying paragraph
+nass_13	https://www.nass.usda.gov/Newsroom/2026/03-12-2026.php	skipped: no qualifying paragraph
+nass_14	https://www.nass.usda.gov/Newsroom/2026/02-26-2026.php	skipped: no qualifying paragraph
+nass_15	https://www.nass.usda.gov/Newsroom/2026/01-30-2026.php	skipped: no qualifying paragraph
+ncei_1	https://www.ncei.noaa.gov/news/global-climate-202609	t43 (paragraph 51)
+ncei_2	https://www.ncei.noaa.gov/news/national-climate-202609	skipped: no qualifying paragraph
+ncei_3	https://www.ncei.noaa.gov/news/global-climate-202608	t44 (paragraph 52)
+ncei_4	https://www.ncei.noaa.gov/news/national-climate-202608	t45 (paragraph 53)
+ncei_5	https://www.ncei.noaa.gov/news/national-climate-202607	skipped: no qualifying paragraph
+ncei_6	https://www.ncei.noaa.gov/news/global-climate-202607	skipped: no qualifying paragraph
+ncei_7	https://www.ncei.noaa.gov/news/national-climate-202606	skipped: no qualifying paragraph
+ncei_8	https://www.ncei.noaa.gov/news/global-climate-202606	skipped: no qualifying paragraph
+usgs_1	https://www.usgs.gov/news/national-news-release/usgs-updates-us-critical-mineral-deposits	skipped: no qualifying paragraph
+usgs_2	https://www.usgs.gov/news/national-news-release/usgs-cooperative-national-geologic-map-now-covers-50-states-us	skipped: no qualifying paragraph
+usgs_3	https://www.usgs.gov/news/state-news-release/usgs-and-nebraska-release-first-ever-statewide-map-surface-geology	skipped: no qualifying paragraph
+usgs_4	https://www.usgs.gov/news/national-news-release/usgs-releases-assessment-undiscovered-oil-and-gas-resources-buda	skipped: no qualifying paragraph
+usgs_5	https://www.usgs.gov/news/state-news-release/new-usgs-funded-science-will-support-landslide-public-safety-and-disaster	skipped: no qualifying paragraph
+nasa_1	https://www.nasa.gov/news-release/nasa-sets-coverage-for-spacex-35th-station-resupply-launch-arrival/	skipped: no qualifying paragraph
+nasa_2	https://www.nasa.gov/news-release/nasa-energy-department-advance-new-era-of-nuclear-powered-exploration/	skipped: no qualifying paragraph
+nasa_3	https://www.nasa.gov/news-release/nasa-opens-applications-for-next-class-of-flight-directors/	skipped: no qualifying paragraph
+nasa_4	https://www.nasa.gov/news-release/nasa-seeks-us-industry-plans-for-commercial-space-stations/	skipped: no qualifying paragraph
+nasa_5	https://www.nasa.gov/news-release/nasa-briefing-to-highlight-contributions-to-martian-moons-mission/	skipped: no qualifying paragraph
+nasa_6	https://www.nasa.gov/news-release/nasa-announces-bold-science-initiatives-for-americas-golden-age-summit/	skipped: no qualifying paragraph
+nasa_7	https://www.nasa.gov/news-release/nasas-spacex-crew-12-splashes-down-sets-briefing-to-discuss-mission/	skipped: no qualifying paragraph
+nasa_8	https://www.nasa.gov/news-release/nasa-to-cover-northrop-grumman-crs-24-spacecraft-departure/	skipped: no qualifying paragraph
+nasa_9	https://www.nasa.gov/news-release/nasa-glenn-invites-phase-1-proposals-for-aerospace-power-systems-laboratory/	skipped: no qualifying paragraph
+nasa_10	https://www.nasa.gov/news-release/nasa-to-stream-spacex-crew-12-return-splashdown-live/	skipped: no qualifying paragraph
+nasa_11	https://www.nasa.gov/news-release/nasa-astronaut-christina-koch-to-join-nfl-fans-in-philadelphia/	skipped: no qualifying paragraph
+ers_1	https://www.ers.usda.gov/amber-waves/2026/february/fewer-farms-more-milk-the-changing-structure-and-costs-of-us-dairy-farming	t32 (paragraph 62)
+ers_2	https://www.ers.usda.gov/amber-waves/2025/august/us-obesity-rate-changes-differ-for-rural-and-urban-areas-as-well-as-across-regions	t33 (paragraph 64)
+ers_3	https://www.ers.usda.gov/amber-waves/2025/june/school-food-authorities-work-with-state-and-federal-agencies-to-implement-the-national-school-lunch-program	t34 (paragraph 83)
+ers_4	https://www.ers.usda.gov/amber-waves/2025/may/southeast-asia-growing-potential-for-us-agriculture	t35 (paragraph 61)
+ers_5	https://www.ers.usda.gov/amber-waves/2025/june/food-price-inflation-slowed-in-2023-and-2024	t36 (paragraph 56)
+ers_6	https://www.ers.usda.gov/amber-waves/2024/december/ers-data-series-tracks-major-uses-of-u-s-land-with-a-focus-on-agriculture	t37 (paragraph 57)
+ers_7	https://www.ers.usda.gov/amber-waves/2024/october/ers-s-updated-snap-policy-database-facilitates-research-on-program-participation-and-outcomes	skipped: no qualifying paragraph
+ers_8	https://www.ers.usda.gov/amber-waves/2024/october/u-s-consumers-increased-spending-on-food-away-from-home-in-2023-driving-overall-food-spending-growth	t38 (paragraph 57)
+ers_9	https://www.ers.usda.gov/amber-waves/2025/july/most-irrigation-organizations-use-uniform-prices-for-water-deliveries	t39 (paragraph 58)
+ers_10	https://www.ers.usda.gov/amber-waves/2025/may/as-rural-populations-grow-older-communities-increasingly-rely-on-smaller-labor-force	t40 (paragraph 57)
+ers_11	https://www.ers.usda.gov/amber-waves/2024/december/pricing-of-ethanol-blends-at-the-pump-differs-in-the-short-term-compared-with-the-long-term	t41 (paragraph 58)
+ers_12	https://www.ers.usda.gov/amber-waves/2024/december/larger-beef-cow-calf-farms-have-lower-costs-per-cow-than-smaller-operations	skipped: no qualifying paragraph
+bea_13	https://www.bea.gov/news/2026/personal-income-and-outlays-july-2026	skipped: no qualifying paragraph
+bea_14	https://www.bea.gov/news/2026/personal-income-and-outlays-june-2026	skipped: no qualifying paragraph
+bea_15	https://www.bea.gov/news/2026/personal-income-and-outlays-may-2026	skipped: no qualifying paragraph
+bea_16	https://www.bea.gov/news/2026/personal-income-and-outlays-april-2026	skipped: no qualifying paragraph
+bea_17	https://www.bea.gov/news/2026/personal-income-and-outlays-january-2026	t07 (paragraph 75)
+bea_18	https://www.bea.gov/news/2026/personal-income-and-outlays-december-2025	skipped: no qualifying paragraph
+bea_19	https://www.bea.gov/news/2026/gdp-advance-estimate-4th-quarter-and-year-2025	t08 (paragraph 65)
+bea_20	https://www.bea.gov/news/2026/gross-domestic-product-state-and-personal-income-state-3rd-quarter-2025	skipped: no qualifying paragraph
+bea_21	https://www.bea.gov/news/2026/us-international-investment-position-3rd-quarter-2025	t09 (paragraph 60)
+bea_22	https://www.bea.gov/news/2026/us-international-transactions-3rd-quarter-2025	skipped: no qualifying paragraph
+eiap_1	https://www.eia.gov/pressroom/releases/press593.php	t29 (paragraph 23)
+eiap_2	https://www.eia.gov/pressroom/releases/press592.php	t30 (paragraph 21)
+eiap_3	https://www.eia.gov/pressroom/releases/press591.php	skipped: no qualifying paragraph
+eiap_4	https://www.eia.gov/pressroom/releases/press590.php	t31 (paragraph 21)
+eiap_5	https://www.eia.gov/pressroom/releases/press589.php	skipped: the cap of three EIA press releases was reached
+eiap_6	https://www.eia.gov/pressroom/releases/press588.php	skipped: the cap of three EIA press releases was reached
+eiap_7	https://www.eia.gov/pressroom/releases/press587.php	skipped: the cap of three EIA press releases was reached
+eiap_8	https://www.eia.gov/pressroom/releases/press586.php	skipped: the cap of three EIA press releases was reached
+eiap_9	https://www.eia.gov/pressroom/releases/press585.php	skipped: the cap of three EIA press releases was reached
+eiap_10	https://www.eia.gov/pressroom/releases/press584.php	skipped: the cap of three EIA press releases was reached
+eiap_11	https://www.eia.gov/pressroom/releases/press583.php	skipped: the cap of three EIA press releases was reached
+eiap_12	https://www.eia.gov/pressroom/releases/press582.php	skipped: the cap of three EIA press releases was reached
+fish_1	https://www.fisheries.noaa.gov/feature-story/celebrate-national-seafood-month	skipped: no qualifying paragraph
+fish_2	https://www.fisheries.noaa.gov/feature-story/highly-migratory-species-management-managing-shared-resources-home-and-around-world	skipped: no qualifying paragraph
+fish_3	https://www.fisheries.noaa.gov/feature-story/how-will-el-nino-affect-your-local-fisheries	skipped: no qualifying paragraph
+fish_4	https://www.fisheries.noaa.gov/feature-story/seal-approval-injured-gray-seal-finds-permanent-home-connecticut	skipped: no qualifying paragraph
+fish_5	https://www.fisheries.noaa.gov/feature-story/united-states-wins-key-measures-benefiting-us-fisheries-pacific-bluefin-tuna-and	skipped: no qualifying paragraph
+fish_6	https://www.fisheries.noaa.gov/feature-story/noaa-fisheries-awards-14-projects-2026-sea-scallop-research-set-aside-program	skipped: no qualifying paragraph
+fish_7	https://www.fisheries.noaa.gov/feature-story/kelvin-waves-explained	skipped: no qualifying paragraph
+fish_8	https://www.fisheries.noaa.gov/feature-story/noaa-funds-six-new-projects-restore-habitat-collaboration-recreational-anglers	skipped: no qualifying paragraph
+fish_9	https://www.fisheries.noaa.gov/feature-story/coral-restoration-champion-recognized-2026-dr-nancy-foster-habitat-conservation-award	skipped: no qualifying paragraph
+doe_1	https://www.energy.gov/articles/energy-department-supports-fercs-call-pjm-protect-ratepayers-and-build-more-reliable-power	skipped: no qualifying paragraph
+doe_2	https://www.energy.gov/articles/fact-sheet-delivering-president-trumps-promise-unleash-prosperity-and-security-united	skipped: no qualifying paragraph
+doe_3	https://www.energy.gov/articles/fact-sheet-energy-department-ushering-golden-age-american-science	skipped: no qualifying paragraph
+doe_4	https://www.energy.gov/articles/fact-sheet-golden-era-american-nuclear-energy-has-arrived	skipped: no qualifying paragraph
+doe_5	https://www.energy.gov/articles/us-department-energy-awards-96-million-67-early-career-scientists	t50 (paragraph 63)
+doe_6	https://www.energy.gov/articles/energy-department-announces-new-genesis-mission-awards-advance-super-intelligence-science	skipped: no qualifying paragraph
+doe_7	https://www.energy.gov/articles/energy-department-launches-genesis-mission-graduate-fellowship-advance-american-scientific	skipped: no qualifying paragraph
+doe_8	https://www.energy.gov/articles/fact-sheet-energy-department-celebrating-president-trumps-great-american-energy-comeback	skipped: no qualifying paragraph
+ncei_9	https://www.ncei.noaa.gov/news/national-climate-202605	skipped: no qualifying paragraph
+ncei_10	https://www.ncei.noaa.gov/news/global-climate-202605	t46 (paragraph 48)
+ncei_11	https://www.ncei.noaa.gov/news/national-climate-202604	t47 (paragraph 43)
+ncei_12	https://www.ncei.noaa.gov/news/global-climate-202604	t48 (paragraph 47)
+ncei_13	https://www.ncei.noaa.gov/news/national-climate-202603	skipped: no qualifying paragraph
+ncei_14	https://www.ncei.noaa.gov/news/global-climate-202603	t49 (paragraph 47)
+ncei_15	https://www.ncei.noaa.gov/news/national-climate-202602	skipped: no qualifying paragraph
+ncei_16	https://www.ncei.noaa.gov/news/national-climate-202601	skipped: no qualifying paragraph
+bea_23	https://www.bea.gov/news/2025/marine-economy-satellite-account-2023	skipped: no qualifying paragraph
+bea_24	https://www.bea.gov/news/2025/arts-and-cultural-production-satellite-account-us-and-states-2023	t10 (paragraph 60)
+bea_25	https://www.bea.gov/news/2024/gross-domestic-product-county-and-metropolitan-area-2023	skipped: no qualifying paragraph
+bea_26	https://www.bea.gov/news/2024/gross-domestic-product-commonwealth-northern-mariana-islands-2021-and-2022	t11 (paragraph 61)
+bea_27	https://www.bea.gov/news/2024/outdoor-recreation-satellite-account-us-and-states-2023	t12 (paragraph 61)
+bea_28	https://www.bea.gov/news/2024/personal-income-county-and-metropolitan-area-2023	t13 (paragraph 61)
+bea_29	https://www.bea.gov/news/2024/personal-consumption-expenditures-state-2023	skipped: no qualifying paragraph
+bea_30	https://www.bea.gov/news/2024/gross-domestic-product-us-virgin-islands-2022	skipped: no qualifying paragraph
+bea_31	https://www.bea.gov/news/2024/gross-domestic-product-guam-2022	skipped: no qualifying paragraph
+bea_32	https://www.bea.gov/news/2023/gross-domestic-product-american-samoa-2022	skipped: no qualifying paragraph
+eia_16	https://www.eia.gov/todayinenergy/detail.php?id=68044	t23 (paragraph 37)
+eia_17	https://www.eia.gov/todayinenergy/detail.php?id=68024	skipped: no qualifying paragraph
+eia_18	https://www.eia.gov/todayinenergy/detail.php?id=68004	t24 (paragraph 36)
+eia_19	https://www.eia.gov/todayinenergy/detail.php?id=67984	t25 (paragraph 37)
+eia_20	https://www.eia.gov/todayinenergy/detail.php?id=67964	t26 (paragraph 38)
+eia_21	https://www.eia.gov/todayinenergy/detail.php?id=67944	skipped: near-duplicate of t19
+eia_22	https://www.eia.gov/todayinenergy/detail.php?id=67924	t27 (paragraph 37)
+eia_23	https://www.eia.gov/todayinenergy/detail.php?id=67904	t28 (paragraph 35)
+eia_24	https://www.eia.gov/todayinenergy/detail.php?id=67884	skipped: no qualifying paragraph
+eia_25	https://www.eia.gov/todayinenergy/detail.php?id=67864	skipped: no qualifying paragraph
