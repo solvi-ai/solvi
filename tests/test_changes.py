@@ -340,3 +340,54 @@ def test_update_candidates_differ_by_state_records_carry_the_level_and_callbacks
     assert held.status == "held" and widen.history("held")[-1]["level"] == "gate+person"
     done = widen.rule(held.change_id, True, by="ann")
     assert done.promoted and t.state == "s1" and widen.history("promoted")[-1]["level"] == "gate+person"
+
+
+# ───────────────────────────────────────────── a candidate catalog through Static: sensitive fields
+class StateTarget:
+    """A target for "update" changes whose payload names a state (and carries its catalog)."""
+    artifact = "update"
+
+    def __init__(self):
+        self.state = None
+
+    def promote(self, change, measured):
+        self.state = change.payload["fingerprint"]
+        return {"state": self.state}
+
+    def rollback(self, ref, by=None, why=None):
+        self.state = None
+
+
+def _credit_catalog(young=False, sensitive=()):
+    from solvi import Catalog
+    cat = Catalog(sensitive=sensitive)
+
+    @cat.fn
+    def amount_points(amount):
+        return 2 if amount > 8000 else 0
+
+    if young:
+        @cat.fn
+        def young_points(age):
+            return 1 if age <= 25 else 0
+
+    @cat.rule("decision")
+    def decision(amount_points):
+        return "refuse" if amount_points >= 2 else "approve"
+    return cat
+
+
+def test_static_refuses_a_candidate_catalog_that_reads_a_sensitive_field(tmp_path):
+    t = StateTarget()
+    pipe = Pipeline([Static(sensitive={"age"})], str(tmp_path / "c.jsonl"), targets=[t],
+                    approval={("update", "person"): "gate"})
+    bad = pipe.propose(Change("person", artifact="update", payload={"fingerprint": "young", "catalog": _credit_catalog(True)}))
+    assert bad.status == "rejected" and bad.stage == "static"
+    assert "reads_sensitive" in bad.reason and "young_points" in bad.reason and "'age'" in bad.reason
+    ok = pipe.propose(Change("person", artifact="update", payload={"fingerprint": "plain", "catalog": _credit_catalog()}))
+    assert ok.promoted and t.state == "plain"
+    # the catalog's own declaration is enough: Static() lints with it
+    own = Pipeline([Static()], str(tmp_path / "c2.jsonl"), targets=[t], approval={("update", "person"): "gate"})
+    res = own.propose(Change("person", artifact="update",
+                             payload={"fingerprint": "young2", "catalog": _credit_catalog(True, sensitive={"age"})}))
+    assert res.status == "rejected" and res.stage == "static" and "reads_sensitive" in res.reason
