@@ -258,7 +258,11 @@ non-speech clips and caught 299 of 300 injected corruptions, yet among the numbe
 (English) matched the reference text: 21 of the 22 misses were clock times ("10:00") and ratios ("3:2") that our rule
 normaliser tokenised one way in the reference and another in the hypothesis; one per language was a real mishearing. A
 threshold rule that demands 99% on a dev set with such misses picks a corner (English: 13% coverage at p ≥ 0.99). Fix the
-tokeniser first; agreement of two readers is the check that works.
+tokeniser first; agreement of two readers is the check that works. With one tokeniser on both sides and a larger second
+model, on sentences no run had seen, 97.2% (Russian, 81% coverage) and 97.6% (English, 70%) of the accepted numbers matched
+the text; the rest split evenly between forms the rules still read differently (spoken fractions, spoken clock times,
+"one point one") and numbers both readers misheard the same way — the second reader cannot catch those. Expect two
+small readers plus rules to top out near 97–98% on read numbers, and budget a person for the rest.
 
 ## Tools (the agent guard)
 
