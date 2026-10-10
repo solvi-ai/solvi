@@ -197,7 +197,7 @@ def test_two_laws_that_only_unsafe_probes_tell_apart_stay_undetermined():
     ls = LawSet(g, base=lambda s, a: "off")
     a, b = Candidate("do", ("x0",), "on"), Candidate("do", ("x1",), "on")
     world = world_of(("x0",))
-    probes = [(s, "do") for s in ALL[:64]]
+    probes = [(s, "do") for s in ALL]
     safe = lambda s, act: s[0] == s[1]                   # noqa: E731 — x0 and x1 agree wherever we may ask
     adm = ls.admit_by_probes([a, b], world, probes=probes, safe=safe, budget=20)
     assert adm.status == "undetermined" and adm.law is None and ls.laws == []
