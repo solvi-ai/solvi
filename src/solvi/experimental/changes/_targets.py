@@ -2,20 +2,38 @@
 
     KnowledgeTarget(store)      "item"      KnowledgeStore.add (its own gates run again) → the item id;
                                             rollback: KnowledgeStore.rollback (the previous version comes back)
-    VersionsTarget(versions)    "compiled"  solvi.experimental.compile.Versions.add → the version number; rollback:
+    VersionsTarget(versions)    "compiled"  solvi.core.versions.Versions.add → the version number; rollback:
                                             the version in force goes back (Versions keeps every version)
-    LearningTarget(loop)        "update"    solvi.experimental.learning.Learning.run (its own gates) → the version;
-                                            rollback: Learning.rollback to the version before. Decision: the
-                                            loop's own gates are the stages for this artifact; the pipeline does
-                                            not re-implement them
+    LearningTarget(system, ...) "update"    the update ladder and its gates (_updates.py: consistency, held-out,
+                                            honesty, act_guard, size) on the stored labels → the update's version;
+                                            each gate's numbers are a stage verdict of the change ("update:<gate>");
+                                            rollback: the state of the version before comes back
 
 A target implements `artifact`, `promote(change, measured) → a JSON-able reference` (raise Refused when the artifact's
-own gates say no) and `rollback(ref, by=None, why=None)`."""
+own gates say no) and `rollback(ref, by=None, why=None)`. A target whose own gates measure something returns
+Promoted(ref, verdicts) and raises Refused(reason, verdicts=..., stage=...): the pipeline journals those verdicts as
+the change's stages."""
 from __future__ import annotations
+
+from dataclasses import dataclass, field
+from typing import Any
 
 
 class Refused(RuntimeError):
-    """The target's own gates refused the change at promotion (the reason is recorded as stage "promote")."""
+    """The target's own gates refused the change at promotion: the reason is recorded with `stage` (default "promote"),
+    and `verdicts` (StageVerdicts of the target's gates, when it has them) are journaled before it."""
+
+    def __init__(self, reason, *, verdicts=(), stage=None):
+        super().__init__(reason)
+        self.verdicts, self.stage = list(verdicts), stage
+
+
+@dataclass
+class Promoted:
+    """A target's promotion with the verdicts of its own gates: `ref` is journaled as the change's reference, each
+    verdict as a stage of the change."""
+    ref: Any
+    verdicts: list = field(default_factory=list)
 
 
 class KnowledgeTarget:
@@ -45,7 +63,8 @@ class VersionsTarget:
 
     def __init__(self, versions):
         self.versions = versions
-        self.in_force = (versions.numbers() or [None])[-1]
+        cur = getattr(versions, "current", None)              # solvi.core.versions.Versions keeps the version in force
+        self.in_force = cur if cur is not None else (versions.numbers() or [None])[-1]
 
     def promote(self, change, measured):
         before = self.in_force
@@ -55,6 +74,8 @@ class VersionsTarget:
 
     def rollback(self, ref, by=None, why=None):
         self.in_force = ref["before"]
+        if ref["before"] is not None and callable(getattr(self.versions, "rollback", None)):
+            self.versions.rollback(ref["before"], by=by, why=why)
 
     def system(self, **kw):
         """The System of the version in force."""
@@ -62,20 +83,80 @@ class VersionsTarget:
 
 
 class LearningTarget:
+    """Labelled updates as candidate changes: LearningTarget(system, storage=None, *, parts=None, ladder=None,
+    gates=None, changelog=None, holdout=0.3, calibration=0.2, gate_teach=True) — the arguments of the ladder and gates
+    (_updates.Updates; their defaults in _updates.LADDER / GATES). While a target is attached, System.teach only stores
+    a correction (gate_teach=False keeps the instant update; detach() ends it) and a Change(artifact="update") learns
+    from the stored labels: promoted with the version of the update, or refused at the first gate that failed."""
     artifact = "update"
 
-    def __init__(self, loop):
-        self.loop = loop
+    def __init__(self, system, storage=None, *, parts=None, ladder=None, gates=None, changelog=None, holdout=0.3,
+                 calibration=0.2, gate_teach=True):
+        from ._updates import Updates
+        self.updates = Updates(system, storage, parts, ladder, gates, changelog, holdout, calibration, gate_teach)
+
+    @property
+    def parts(self):
+        """{question: the decision part an update changes}."""
+        return self.updates.parts
 
     def promote(self, change, measured):
-        before = self.loop._baseline()
-        rep = self.loop.run()
+        from ._stages import StageVerdict
+        before = self.updates._baseline()
+        rep = self.updates.run()
+        if rep.action == "none":
+            raise Refused(str(rep).splitlines()[0] + (f" ({len(rep.rejected_labels)} label(s) refused)"
+                                                     if rep.rejected_labels else ""))
+        verdicts = [StageVerdict("admit", "; ".join(f"{q}: {x['rung']} on {x['train']} training label(s)"
+                                                    for q, x in rep.questions.items()),
+                                 {"questions": rep.questions}, "update:ladder")]
+        for g, r in rep.gates.items():
+            why = r.get("why", "")
+            if g == "promotion" and r.get("restored"):
+                why += f" — the live parts were put back as they were (version {rep.current})"
+            verdicts.append(StageVerdict("admit" if r.get("ok") else "refuse", why,
+                                         {k: v for k, v in r.items() if k != "why"}, f"update:{g}"))
         if not rep.promoted:
-            raise Refused(str(rep))
-        return {"version": rep.version, "before": before}
+            first = next(v for v in verdicts if not v.ok)
+            raise Refused(first.reason, verdicts=verdicts, stage=first.stage)
+        return Promoted({"version": rep.version, "before": before, "questions": rep.questions, "fp_before": rep.fp_before,
+                         "fp_after": rep.fp_after, "record": rep.record_id}, verdicts)
 
     def rollback(self, ref, by=None, why=None):
-        self.loop.rollback(ref["before"])
+        self.updates.rollback(ref["before"])
+
+    def restore(self, version):
+        """Restore any recorded version of the update (also one recorded by another process on the same store) → it."""
+        return self.updates.rollback(version)
+
+    def detach(self):
+        """Stop gating System.teach (the update records stay)."""
+        self.updates.detach()
+
+    def labels(self):
+        """The trusted labels → {"labels": [Label], "rejected": [(id, why)]}."""
+        return self.updates.labels()
+
+    def history(self):
+        """Every update record (kind "update"), in order."""
+        return self.updates.history()
+
+    def versions(self):
+        """The promoted update versions → [{"version", "fp", "time", "action", "id"}]."""
+        return self.updates.versions()
+
+    @property
+    def current(self):
+        """The update version in force (None when the live state is no recorded version)."""
+        return self.updates.current
+
+    def fingerprint(self):
+        """The fingerprint of the updated parts' state."""
+        return self.updates.fingerprint()
+
+    def version_of(self, part_fp):
+        """The update versions in which a part had this fingerprint (as a decision's trace records it)."""
+        return self.updates.version_of(part_fp)
 
 
-__all__ = ["KnowledgeTarget", "LearningTarget", "Refused", "VersionsTarget"]
+__all__ = ["KnowledgeTarget", "LearningTarget", "Promoted", "Refused", "VersionsTarget"]

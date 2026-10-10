@@ -83,7 +83,6 @@ from __future__ import annotations
 import ast
 import inspect
 import itertools
-import re
 import textwrap
 from dataclasses import asdict, dataclass, field, replace
 
@@ -721,53 +720,11 @@ def _short_path(p):
 
 
 # --- citations
-_CL_HEADING = re.compile(r"^(#{1,6})\s+(.*\S)\s*$")
-_CL_ITEM = re.compile(r"^\s*(?:[-*+]|\d+[.)])\s+(.*)$")
-_CL_SEP = re.compile(r"^:?-{2,}:?$")
-
-
-def split_clauses(text: str) -> list[tuple[str, str]]:
-    """A text → [(section, clause text)]: each paragraph, list item and table row is a clause (a table row is written
-    as `header: cell; ...`); headings name the section and are not clauses themselves."""
-    out, buf, path, header = [], [], [], None
-
-    def flush():
-        if buf:
-            out.append((" / ".join(t for _, t in path), " ".join(buf).strip()))
-            buf.clear()
-    for line in text.splitlines():
-        s = line.strip()
-        h = _CL_HEADING.match(s)
-        if h:
-            flush()
-            header = None
-            level = len(h.group(1))
-            path[:] = [p for p in path if p[0] < level] + [(level, h.group(2))]
-            continue
-        if s.startswith("|"):
-            flush()
-            cells = [c.strip() for c in s.strip("|").split("|")]
-            if all(_CL_SEP.match(c) for c in cells if c):
-                continue
-            if header is None:
-                header = cells
-                continue
-            out.append((" / ".join(t for _, t in path), "; ".join(f"{a}: {b}" for a, b in zip(header, cells) if b)))
-            continue
-        header = None
-        if not s:
-            flush()
-        elif _CL_ITEM.match(line):
-            flush()
-            buf.append(_CL_ITEM.match(line).group(1).strip())
-        else:
-            buf.append(s)
-    flush()
-    return [(sec, t) for sec, t in out if t]
+from .core.versions import split_clauses  # noqa: E402 — moved to the stable versions module in 1.1 (still here)
 
 
 def spec_clauses(text):
-    """A specification's text → {"c1": clause text, ...}: the clauses solvi.experimental.compile.Spec(text) numbers."""
+    """A specification's text → {"c1": clause text, ...}: the clauses solvi.core.versions.Spec(text) numbers."""
     return {f"c{i}": t for i, (_, t) in enumerate(split_clauses(text), 1)}
 
 
@@ -809,7 +766,7 @@ def citations(obj, text, *, spec=None, require=False):
     """The citations of a catalog's parts (`cite=` / `clause=` on the decorators: Part.cites) against the text they
     quote → Report. Every quote must be in `text`, found as solvi.core.catalog.find_quote finds it with the part's
     quote mode ("normalized" by default: Unicode form, dashes, spaces, curly quotes; the source's own substring is what
-    counts) — else the error `cite_not_found`. With `spec` (a solvi.experimental.compile.Spec, or {clause id: text} —
+    counts) — else the error `cite_not_found`. With `spec` (a solvi.core.versions.Spec, or {clause id: text} —
     spec_clauses(text) numbers a text's clauses as Spec does) a clause id must be one
     of its clauses (`clause_unknown`) and the quote must lie in that clause's text (`cite_outside_clause`; a table row,
     which the Spec writes as `header: cell; ...`, is also compared by its cells). A clause id with a ":" — a person's
@@ -907,7 +864,7 @@ def add_parser(sub):
     c.add_argument("--text", metavar="FILE", help="the text the parts cite (a policy): after the lint, every part's "
                                                  "cite= must be found in it (solvi.check.citations)")
     c.add_argument("--spec", metavar="FILE", help="the specification the parts cite, split into clauses c1, c2, ... "
-                                                 "(solvi.experimental.compile.Spec): each clause= must exist and hold its "
+                                                 "(solvi.core.versions.Spec): each clause= must exist and hold its "
                                                  "quote; also the text, unless --text is given")
     c.add_argument("--require-cites", action="store_true", help="with --text / --spec: a part without cite= is the "
                                                                  "warning no_cite")

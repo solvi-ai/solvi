@@ -134,7 +134,7 @@ def system_report(store, since=None, until=None, *, question=None, price=None, d
 
     def within(t):
         return (t0 is None or t >= t0) and (t1 is None or t < t1)
-    asks, disp, policies, teach, erased, loops = [], [], {}, [], 0, []
+    asks, disp, policies, teach, erased, loops, specialists = [], [], {}, [], 0, [], {}
     for s in store.iter(None, redacted=True):
         d = s.data
         if s.kind == "teach":
@@ -151,6 +151,8 @@ def system_report(store, since=None, until=None, *, question=None, price=None, d
             disp.append(s)
         elif s.kind == "refine" and (question is None or d.get("question") == question):
             loops.append(s)
+        elif s.kind == "specialist":                  # a specialist's run (solvi.core.specialist): counted by name
+            specialists[d.get("specialist")] = specialists.get(d.get("specialist"), 0) + 1
     # the labels: a correction names its decision (of=), else the latest decision before it on the same input
     by_init, ids = {}, {}
     for s in asks:
@@ -204,7 +206,8 @@ def system_report(store, since=None, until=None, *, question=None, price=None, d
         period={"since": _iso(min(times)) if times else None, "until": _iso(max(times)) if times else None,
                 "filters": {k: str(v) for k, v in (("since", since), ("until", until), ("question", question)) if v is not None},
                 "decisions": len(asks), "dispatched": len(disp), "erased": erased, "catalogs": catalogs,
-                "models": models, **({"experimental": experimental} if experimental else {})},
+                "models": models, **({"experimental": experimental} if experimental else {}),
+                **({"specialists": specialists} if specialists else {})},
         system1=s1, dispatch=dp, cost={"system1": cost1, "dispatch": cost2, **({"refine": _refine(loops, price)} if loops
                                                                               else {})},
         corrections={"total": len(teach), "in_period": in_period, "by_source": sources,
@@ -462,6 +465,8 @@ def render(d):
             f"{fp} — {e['decisions']} decision(s), {e['first']} to {e['last']}" for fp, e in P["catalogs"].items()) + ".")
     if P["models"]:
         L.append("Models that ran: " + "; ".join(f"{k} ({n} decisions)" for k, n in P["models"].items()) + ".")
+    if P.get("specialists"):
+        L.append("Specialist runs: " + "; ".join(f"{k} {n}" for k, n in sorted(P["specialists"].items())) + ".")
     if P.get("experimental"):
         L.append("Made with experimental pieces (solvi.experimental: the API may change): " + "; ".join(
             f"{k} ({n} decisions)" for k, n in sorted(P["experimental"].items())) + ".")

@@ -8,8 +8,8 @@
     lock.verify(); lock.lock_out(); lock.seeds("final evaluation")   # logged; refused in a locked-out process
 
 A journal record follows the envelope of docs/trace_spec.md (v, kind, seq, time, prev, hash, id); a new kind is checked
-for the envelope only, as "update" (solvi.experimental.learning) and "knowledge" are. The writer is Learning._record's
-pattern: the body made plain JSON, appended to the storage's chain.
+for the envelope only, as "update" (the update target's records) and "knowledge" are. The writer is the update
+records' pattern: the body made plain JSON, appended to the storage's chain.
 
 EvaluatorLock is a generic port of a research harness's lock (held-out seeds pinned by SHA-256, the evaluator's code
 pinned by hash, a hash-chained access log, `lock_out()` for candidate processes, `leak_scan`). It guards against

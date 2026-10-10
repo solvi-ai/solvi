@@ -113,6 +113,9 @@ nav:
           - solvi.core.store.sysreport: api/sysreport.md
           - solvi.core.store.signature: api/signature.md
           - solvi.core.store.diff: api/diff.md
+          - solvi.core.versions: api/versions.md
+          - solvi.core.specialist: api/specialist.md
+          - solvi.core.explain: api/explain.md
           - solvi.core.slow.generate: api/generate.md
           - solvi.core.slow.agree: api/agree.md
           - solvi.core.slow.refine: api/refine.md
@@ -153,17 +156,12 @@ nav:
           - solvi.core.deciders.wire: api/deciders_wire.md
       - Experimental:
           - solvi.experimental: api/experimental.md
-          - solvi.experimental.learning: api/learning.md
           - solvi.experimental.lora: api/lora.md
           - solvi.experimental.compile: api/compile.md
           - solvi.experimental.compile.sandbox: api/sandbox.md
           - solvi.experimental.hooks: api/hooks.md
-          - solvi.experimental.specialist: api/specialist.md
           - solvi.experimental.charts: api/charts.md
-          - solvi.experimental.mcp: api/mcp.md
-          - solvi.experimental.oncalib: api/oncalib.md
           - solvi.experimental.changes: api/changes.md
-          - solvi.experimental.counterfactual: api/counterfactual.md
   - Changelog: changelog.md
   - Roadmap: roadmap.md
 

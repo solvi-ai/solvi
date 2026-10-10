@@ -145,7 +145,7 @@ class FakeUpstream:
 
 
 def make_proxy(g, tools, reply=None, **kw):
-    from solvi.experimental import mcp
+    from solvi import _mcp_proxy as mcp                         # the proxy's module (solvi.serve re-exports it)
     up = FakeUpstream(tools, reply or (lambda name, args: f"{name} ok"))
     orig = mcp.Upstream
     mcp.Upstream = FakeUpstream                                 # Proxy accepts an Upstream instance as it is

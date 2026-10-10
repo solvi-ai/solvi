@@ -25,7 +25,7 @@ what it checked. solvi's own test suite runs every check on every built-in (test
     check_environment(make, seeds=(0, 1))       Environment: the same seed and actions give the same outcomes
     check_action_model(make, transitions, ...)  ActionModel: Predictions, determinism, the fingerprint moves with what it
                                                 learned, never contradicts an outcome it observed; held-out comparison
-    check_specialist(specialist, sources, ...)  Specialist (solvi.experimental.specialist): two runs give identical
+    check_specialist(specialist, sources, ...)  Specialist (solvi.core.specialist): two runs give identical
                                                 bytes, a run replays from its record, the record round-trips through
                                                 JSON, an invalid proposal is blocked with no output
 """
@@ -492,11 +492,14 @@ INVALID_PROPOSAL = "{ not a proposal"
 
 
 def check_specialist(specialist, sources, *, proposer=None):
-    """specialist: a solvi.experimental.specialist.Specialist; sources: texts it runs on; proposer: the proposer to
-    run with (default: the specialist's own). For each source: two runs give identical output bytes; the record
+    """specialist: a solvi.core.specialist.Specialist; sources: texts it runs on; proposer: the proposer to run with
+    (default: the specialist's own). For each source: two runs give identical output bytes; the record
     (`run.to_dict()`) round-trips through JSON and replays (`specialist.replay(record, source)`: the same checks, the
-    same bytes); an invalid proposal is blocked — a BLOCKED issue and no output. → what was checked."""
-    blocked_ = "blocked"                # solvi.experimental.specialist.BLOCKED (a stable module does not import it)
+    same bytes); an invalid proposal is blocked — a BLOCKED issue and no output. Then the core store path: with a
+    temporary TraceStorage every run is a record of kind "specialist", the store verifies, every stored run replays
+    from the store (`replay_runs`), and an edited record is caught by verify(). → what was checked."""
+    from ..core.specialist import BLOCKED as blocked_, KIND, replay_runs
+    from ..core.store import JSONLStorage
     sources = list(sources)
     _ok(sources, "check_specialist needs at least one source")
     replayed = blocked = 0
@@ -515,7 +518,30 @@ def check_specialist(specialist, sources, *, proposer=None):
             "an invalid proposal is blocked: a BLOCKED issue and no output")
         _ok(bool(specialist.replay(bad.to_dict(), src)), "a blocked run replays from its record")
         blocked += 1
-    return {"sources": len(sources), "runs": 2 * len(sources), "replayed": replayed, "blocked": blocked}
+    with tempfile.TemporaryDirectory(prefix="solvi_specialist_") as d:
+        path = Path(d) / "runs.jsonl"
+        kept, specialist.storage = getattr(specialist, "storage", None), JSONLStorage(str(path))
+        try:
+            for src in sources:
+                specialist.run(src, proposer=proposer)
+                specialist.run(src, proposal=INVALID_PROPOSAL)
+            store = specialist.storage
+            stored = len(list(store.iter(KIND)))
+            _ok(stored == 2 * len(sources), f"every run is one record of kind {KIND!r} in the storage ({stored} stored)")
+            _ok(store.verify()["ok"], "the storage verifies with the specialist's records")
+            bad = replay_runs(store, specialist, sources)
+            _ok(not bad, f"every stored run replays from the store: {bad[:2]}")
+            store.close()
+        finally:
+            specialist.storage = kept
+        lines = path.read_text().splitlines()
+        rec = json.loads(lines[0])
+        rec["output_sha256"] = "0" * 64 if rec.get("output_sha256") != "0" * 64 else "1" * 64
+        path.write_text("\n".join([json.dumps(rec)] + lines[1:]) + "\n")
+        edit_caught = not JSONLStorage(str(path)).verify()["ok"]
+        _ok(edit_caught, "an edited specialist record fails the storage's verify()")
+    return {"sources": len(sources), "runs": 2 * len(sources), "replayed": replayed, "blocked": blocked,
+            "stored": stored, "store_replayed": stored - len(bad), "edit_caught": edit_caught}
 
 
 __all__ = ["check_action_model", "check_decider", "check_environment", "check_extractor", "check_head", "check_specialist",

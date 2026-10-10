@@ -7,7 +7,7 @@ import pytest
 
 from solvi import Answer, Catalog, Decision, Question, System
 from solvi.core.store import JSONLStorage
-from solvi.experimental.counterfactual import search as counterfactual
+from solvi.core.explain import search as counterfactual
 
 
 # ---------------------------------------------------------------- a refund window

@@ -15,7 +15,7 @@ with warnings.catch_warnings():
     warnings.simplefilter("ignore")
     from solvi.experimental.changes import (Approval, Canaries, Change, CleanCases, Confirmation, Consistency,
                                             EvalLocked, EvaluatorLock, FreshEnvironments, Impact, KnownFailures,
-                                            LearningTarget, Pipeline, Static, StageVerdict, VersionsTarget, allowed, gate_of,
+                                            Pipeline, Static, StageVerdict, VersionsTarget, allowed, gate_of,
                                             gates_of, hazard_body, paired_bootstrap)
 
 
@@ -244,7 +244,7 @@ def test_verdicts_impact_canaries_and_confirmation(tmp_path):
     assert paired_bootstrap([0, 0, 0, 0], [1, 1, 1, 1], boot=100)[1] == 1.0
 
 
-def test_targets_for_compiled_versions_and_learning_updates(tmp_path):
+def test_targets_for_compiled_versions_and_updates(tmp_path):
     class FakeVersions:
         def __init__(self):
             self.v = []
@@ -256,26 +256,24 @@ def test_targets_for_compiled_versions_and_learning_updates(tmp_path):
             self.v.append(compiled)
             return len(self.v)
 
-    class FakeLoop:
+    class UpdateTarget:                           # any object with artifact, promote and rollback is a target
+        artifact = "update"
         version = 0
 
-        def _baseline(self):
-            return self.version
-
-        def run(self):
+        def promote(self, change, measured):
             self.version += 1
-            return type("R", (), {"promoted": True, "version": self.version})()
+            return {"version": self.version, "before": self.version - 1}
 
-        def rollback(self, v):
-            self.version = v
+        def rollback(self, ref, by=None, why=None):
+            self.version = ref["before"]
 
-    vt, loop = VersionsTarget(FakeVersions()), FakeLoop()
+    vt, loop = VersionsTarget(FakeVersions()), UpdateTarget()
     acc = type("C", (), {"accepted": True, "fingerprint": "f1", "reason": ""})()
-    pipe = Pipeline([Confirmation.compiled()], str(tmp_path / "c.jsonl"), targets=[vt, LearningTarget(loop)],
+    pipe = Pipeline([Confirmation.compiled()], str(tmp_path / "c.jsonl"), targets=[vt, loop],
                     approval={"compiled": "gate", "update": "gate"})
     r1 = pipe.propose(Change("document", artifact="compiled", payload=acc, reason="v2 of the policy"))
     assert r1.promoted and vt.in_force == 1
-    r2 = Pipeline([], pipe.journal.storage, targets=[vt, LearningTarget(loop)], approval={"update": "gate"}).propose(
+    r2 = Pipeline([], pipe.journal.storage, targets=[vt, loop], approval={"update": "gate"}).propose(
         Change("person", artifact="update"))
     assert r2.promoted and loop.version == 1
     pipe.rollback(0)

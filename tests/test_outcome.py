@@ -1,9 +1,7 @@
 """System.outcome: what really happened after a decision, stored as an "outcome" label of it (the same source check as
 every label) that nothing learns from by itself; an explicit recalibration reads it (System.guarantee(...,
-corrections=True)). Recalibration on the fly lives in the experimental solvi.experimental.oncalib, which warns on import."""
-import importlib
+corrections=True)). Recalibration on the fly was removed in 1.1 (it broke the promise)."""
 import random
-import sys
 
 import pytest
 
@@ -75,20 +73,3 @@ def test_explicit_recalibration_reads_the_outcomes(tmp_path):
     assert rep["labels"]["corrections"] == {"outcome": 40} and rep["n"] == 140
 
 
-def test_oncalib_is_experimental_and_recalibrates_every_n_outcomes_and_after_a_drift_flag(tmp_path):
-    from solvi.core import ExperimentalWarning
-    sys.modules.pop("solvi.experimental.oncalib", None)
-    with pytest.warns(ExperimentalWarning, match="does not keep a guarantee's promise"):
-        oncalib = importlib.import_module("solvi.experimental.oncalib")
-    assert "RISK" in oncalib.__doc__
-    s, store, rng = _guarded(tmp_path)
-    live = oncalib.OnTheFly(s, "label", every=20, window=30, min_labels=10, max_risk=0.10)
-    for st, y in _draw(rng, 45):
-        live.outcome(s.ask(st), y)
-    assert len(live.history) == 2 and len(live.history[-1]["labels"]) == 30 and live.new == 5
-    assert live.drifted() is None                                           # no labels since the flag yet
-    for st, y in _draw(rng, 12):
-        live.outcome(s.ask(st), y)
-    assert live.recalibrate()["n"] == 12
-    with pytest.raises(ValueError, match="no examples="):
-        oncalib.OnTheFly(s, "label", examples=[])

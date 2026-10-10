@@ -77,7 +77,7 @@ when:
 
 ## Corruption tests for specialists
 
-A specialist (`solvi.experimental.specialist`: a model proposes a typed spec, code checks it against the source, code
+A specialist (`solvi.core.specialist`: a model proposes a typed spec, code checks it against the source, code
 renders) is only as good as its check. `solvi.testing.corrupt.corrupt` measures the check: it corrupts recorded
 proposals as if the proposer had misread its source, runs the specialist again on the same source with each corrupted
 proposal, and counts how many corruptions the check catches.

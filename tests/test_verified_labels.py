@@ -112,15 +112,18 @@ def test_guarantee_reads_the_stored_verified_labels_only_when_its_sources_name_t
         s.guarantee("label", base, max_risk=0.05, sources=("verified",))
 
 
-def test_the_memory_and_the_learning_loop_refuse_verified_labels_with_the_measured_reason(tmp_path):
-    from solvi.experimental.learning import Learning
+def test_the_memory_and_the_update_ladder_refuse_verified_labels_with_the_measured_reason(tmp_path):
+    import warnings
     from solvi.core.knowledge.memory import CorrectionMemory
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        from solvi.experimental.changes._updates import Updates
     with pytest.raises(UntrustedLabel, match="broke its system's promise|memory of corrections fed verified"):
         CorrectionMemory.add(object.__new__(CorrectionMemory), "x", "yes", source="verified")
     s, store, _ = _guarded(tmp_path)
     res, r = _alone(s, 0.97)
     s.teach("label", {"x": 0.97}, r.answer, label_source="verified", of=res.stored_id)
-    loop = object.__new__(Learning)
+    loop = object.__new__(Updates)
     loop.storage, loop.parts, loop.holdout, loop.calibration = store, {"label": None}, 0.3, 0.2
     got = loop.labels()
-    assert got["labels"] == [] and "learning loop's ladder" in got["rejected"][0][1]
+    assert got["labels"] == [] and "ladder" in got["rejected"][0][1]

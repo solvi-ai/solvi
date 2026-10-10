@@ -515,6 +515,15 @@ def test_check_specialist_on_the_charts_specialist_and_on_a_random_render():
         from solvi.experimental.charts import ChartSpecialist, RuleProposer
     got = cf.check_specialist(ChartSpecialist(), [PRESS, QUARTERS, WASTE], proposer=RuleProposer())
     assert got["sources"] == 3 and got["replayed"] == 3 and got["blocked"] == 3
+    assert got["stored"] == 6 and got["store_replayed"] == 6 and got["edit_caught"] is True    # the core store path
+
+    class Forgetful(ChartSpecialist):              # stores a run whose record says nothing about its proposal
+        def _record(self, run):
+            d = super()._record(run)
+            d["proposal"] = None
+            return d
+    with pytest.raises(cf.ConformanceError, match="replays from the store"):
+        cf.check_specialist(Forgetful(), [PRESS], proposer=RuleProposer())
 
     class Noisy(ChartSpecialist):
         def render(self, checked):

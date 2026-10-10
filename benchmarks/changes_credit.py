@@ -47,7 +47,7 @@ from solvi.core.catalog import find_quote  # noqa: E402
 from solvi.core.store import JSONLStorage  # noqa: E402
 from solvi.experimental.changes import (Approval, Change, Consistency, Impact, KnownFailures, Pipeline,  # noqa: E402
                                         Static)
-from solvi.experimental.compile import Spec, decision_diff  # noqa: E402
+from solvi.core.versions import Spec, decision_diff  # noqa: E402
 
 PREPARED = DATA / "credit" / "prepared"
 POLICY = (TASKS / "credit" / "POLICY_v1_v2.md").read_text(encoding="utf-8")

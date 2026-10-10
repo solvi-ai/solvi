@@ -65,6 +65,7 @@ from ._command import fail as _fail, load_object, load_system, open_store
 from .core._inputs import _camel, _fact_type, input_model, input_schema, question_inputs   # noqa: F401 — re-exported
 from .core.runtime import trace_hash   # noqa: F401 — re-exported (defined there: agents read it too)
 from .core.schema import dump, dumps
+from ._mcp_proxy import Proxy, Upstream, UpstreamError, run_proxy   # the MCP proxy with a guard (stable since 1.1)
 
 REF = "#/components/schemas/{model}"          # where the OpenAPI document keeps the models (see create_app)
 
@@ -994,14 +995,13 @@ def _limits(a):
 
 
 def _serve_guard(a, _fail, load_object):
-    """`solvi serve --guard catalog.py:guard --upstream CMD`: the MCP proxy with a Guard (solvi.experimental.mcp)."""
+    """`solvi serve --guard catalog.py:guard --upstream CMD`: the MCP proxy with a Guard (run_proxy)."""
     if not (a.guard and a.upstream):
         _fail("serve --guard / --upstream: both are needed — the guard (module:attr or file.py:attr) and the MCP server's "
               "command line")
     if a.system or a.decider:
         _fail("serve --guard: a proxy serves the upstream server's tools; drop the System / --decider")
-    from .agents import Guard
-    from .experimental.mcp import run_proxy
+    from .solutions.guard import Guard
     guard = load_object(a.guard)
     if not isinstance(guard, Guard):
         _fail(f"--guard {a.guard}: not a solvi.Guard")
@@ -1064,7 +1064,7 @@ def add_parser(sub):
     s.add_argument("--mcp-impl", default="auto", choices=["auto", "sdk", "builtin"],
                    help="the official MCP SDK (auto: when installed) or the built-in JSON-RPC subset")
     s.add_argument("--guard", help="module:attr or file.py:attr — a solvi.Guard: an MCP proxy that checks every "
-                                   "tools/call of --upstream (solvi.experimental.mcp)")
+                                   "tools/call of --upstream (solvi.serve.run_proxy)")
     s.add_argument("--upstream", help="the command line of the MCP server (stdio) behind the guard")
     s.add_argument("--facts", help="a JSON object of facts the guard's policies read (with --guard)")
     s.add_argument("--escalate", default="elicit", choices=["elicit", "deny"],
@@ -1079,7 +1079,7 @@ def add_parser(sub):
 
 
 __all__ = ["AccessGuard", "add_parser", "AskRequest", "AskTextRequest", "BadRequest", "Busy", "ChoiceAnswer",
-           "cmd_serve", "create_app", "input_model", "input_schema", "internal_error", "Limits", "mcp_tools",
+           "CONTEXT_CHARS", "CONTEXT_MESSAGES", "Proxy", "run_proxy", "Upstream", "UpstreamError", "cmd_serve", "create_app", "input_model", "input_schema", "internal_error", "Limits", "mcp_tools",
            "NotFound", "NoulAnswer", "parse_json", "question_inputs", "redact", "RequestError", "run_builtin",
            "ScoreAnswer", "sdk_available", "SERVE_DEFAULTS", "Service", "SystemOneQuestion", "SystemOneRequest",
            "SystemOneResponse", "too_deep", "tool_name", "trace_hash"]

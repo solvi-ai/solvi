@@ -1,5 +1,5 @@
 """Corruption tests for specialists: corrupt a specialist's recorded proposals and count how many corruptions its check
-catches (solvi.experimental.specialist: a model proposes, code checks against the source, code renders).
+catches (solvi.core.specialist: a model proposes, code checks against the source, code renders).
 
     from solvi.testing.corrupt import change_digit, corrupt, drop, swap
 
@@ -38,7 +38,7 @@ What "caught" means:
     fewer.)
 
 The rate is that of the corruptions these mutators make, on these records: a check that holds relations between values
-catches omissions, one that only quotes each value does not (see solvi.experimental.STATUS["specialist"] for the
+catches omissions, one that only quotes each value does not (see the changelog, 1.1, "the specialist contract graduates", for the
 specialists measured this way)."""
 from __future__ import annotations
 
@@ -261,7 +261,7 @@ class CorruptionReport:
 def corrupt(specialist, records, corruptions, *, n=300, seed=0, accepted=None):
     """Corrupt recorded proposals and run the specialist on each corruption → CorruptionReport (see the module docs).
 
-    specialist: a solvi.experimental.specialist.Specialist; records: (id, source, proposal) — the proposal as recorded
+    specialist: a solvi.core.specialist.Specialist; records: (id, source, proposal) — the proposal as recorded
     (`Run.proposal`, or a stored record's "proposal"); corruptions: {kind: mutator} (a mutator: see the module docs); n: mutations to apply; seed: the
     draws' seed; accepted: run → {JSON pointer: value} of what the check verified (default: default_accepted)."""
     recs = sorted(((str(i), s, _plain(p)) for i, s, p in records), key=lambda r: r[0])

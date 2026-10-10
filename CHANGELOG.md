@@ -21,7 +21,11 @@ calibration files and served by `solvi serve`), so a build from it is not mistak
   person's correction and a search proposal become candidates that pass the same pluggable stages (KnownFailures,
   Static, Consistency, Confirmation, CleanCases, Impact, FreshEnvironments, Approval, Canaries), are journaled in a
   hash-chained store (records of kind "change"), promoted into what holds that knowledge (a knowledge store item,
-  compiled versions, a learning update) and rolled back by version. `benchmarks/changes_credit.py` runs the credit
+  compiled versions, a labelled update) and rolled back by version. A labelled update is `Change(artifact="update")`
+  promoted by `LearningTarget(system, ...)`: the update ladder (fit, a memory of corrected cases, the adapter hook) and
+  the gates of the removed learning loop (consistency, held-out, honesty, act_guard, size), each gate's numbers a stage
+  verdict of the change (`"update:<gate>"`); a target's own gates reach the journal through `Promoted(ref, verdicts)`
+  and `Refused(reason, verdicts=, stage=)`. `benchmarks/changes_credit.py` runs the credit
   policy (two versions, 20 corrections, a rule that must be refused; the policy and corrections in
   `benchmarks/tasks/credit/`, the applications through `fetch.sh` / `prepare.py`) and exits 1 when a count differs.
   Measured on two stands: on a credit policy the pipeline carried a document version (144 of 144 changed decisions traced to their clause), admitted 12 of 12 exact exceptions, held every widening one for a person and refused 8 of 8 exceptions that touched other decisions, 0 extraneous changes, 14 versions replayed; on a bank-request stream with a person's labels every one of 22 candidates passed every stage (`nogate` = `gate`), so the stages added nothing there — the module is journal, impact analysis, approval levels and rollback; still missing: the narrows / widens classifier over rule conditions, a regression-scenario stage, and a script for the bank-request stream (the credit numbers: benchmarks/changes_credit.py).
@@ -38,20 +42,20 @@ calibration files and served by `solvi serve`), so a build from it is not mistak
   quote of the text the part implements, or a list) and `clause=` (its clause id, or a list as long), kept as
   `Part.cites` — pairs (clause, quote). `solvi.check.citations(obj, text, *, spec=None, require=False)` checks them:
   a quote not in the text (found in the catalog's quote mode) is the error `cite_not_found`; with a
-  `solvi.experimental.compile.Spec`, a clause it does not have is `clause_unknown` and a quote outside the named
+  `solvi.core.versions.Spec`, a clause it does not have is `clause_unknown` and a quote outside the named
   clause `cite_outside_clause`; `require=True` makes an uncited part the warning `no_cite`; a correction cited as
   `clause="person:k07"` is checked against the text only. `solvi check module:system --text POLICY.md` runs it after
   the lint; `--spec FILE` splits a specification into clauses `c1`, `c2`, ... as `Spec(text)` does (also the text,
   unless `--text` is given; `solvi.check.spec_clauses`, and `split_clauses` now lives in `solvi.check` — still
-  importable from `solvi.experimental.compile`), `--require-cites` adds the `no_cite` warnings. The causes of `solvi.core.store.diff.diff` carry `"cites"` ([{"clause", "quote"}]) when their part has
-  citations; `solvi.experimental.compile.decision_diff` also takes plain Systems (hand-written catalogs), whose
+  importable from `solvi.experimental.compile`; both now from `solvi.core.versions`), `--require-cites` adds the `no_cite` warnings. The causes of `solvi.core.store.diff.diff` carry `"cites"` ([{"clause", "quote"}]) when their part has
+  citations; `solvi.core.versions.decision_diff` also takes plain Systems (hand-written catalogs), whose
   causes get their `clauses` from the citations; the changes pipeline's `Static(text=..., spec=...)` refuses a
   candidate whose citations fail.
 
 - **Exact exceptions: `only=` in the diff.** `solvi.core.store.diff.diff(storage, system, ..., only=ids)` reports
   `DiffReport.extraneous` (the ids of the changed decisions outside `only`) and `DiffReport.exact` (`only` given,
   nothing outside it changed, and every decision re-ran: one listed in `errors` may have changed, so it makes `exact`
-  False — on both reports); `solvi.experimental.compile.decision_diff(old, new, ..., only=)` gives the same two
+  False — on both reports); `solvi.core.versions.decision_diff(old, new, ..., only=)` gives the same two
   fields on `DecisionDiff`, over the decisions whose answer moves — with `inputs=` the ids are the inputs' `id` key,
   else their positions, and each change carries `"input"`. The changes pipeline's `Impact` stage refuses a change
   whose `expected["only"]` is set and whose diff changes other decisions ("changes N decision(s) other than the
@@ -72,8 +76,64 @@ calibration files and served by `solvi serve`), so a build from it is not mistak
   relation). Deterministic for a seed; skipped draws counted. `solvi.testing.conformance.check_specialist(specialist,
   sources, *, proposer=None)`: identical bytes, replay, JSON records, blocked invalid proposals.
 
+- **`solvi.core.versions`: versions of a document and their impact (stable, out of the experimental compiler).**
+  `Spec` and `Clause` (a text as numbered clauses, `revise` keeping the ids of unchanged ones), `CatalogVersion` (a
+  catalog that implements a document: the module of pure functions, its parts with the clauses each implements, the
+  questions — what the compiler's `Compiled` held, named for what it is; `Compiled` is now a subclass), `Versions`
+  (numbered folders with each version's parent, the version in force — `current`, `rollback(n, by=, why=)`,
+  `history()` — `system(n)`, `find`, `replay_all`) and `decision_diff` / `DecisionDiff` (`only=`, `extraneous`, `exact`,
+  `cites`; old and new a version or a plain System). The module of a version is checked and loaded as before (the
+  in-process check and load moved with it; the subprocess runner stays in `solvi.experimental.compile.sandbox`).
+  `split_clauses` lives here now (still importable from `solvi.check`). The change pipeline and
+  `benchmarks/changes_credit.py` import it; a version promoted by `VersionsTarget` is rolled back in the folder too.
+
+- **The specialist contract graduates: `solvi.core.specialist` (graduated from experimental: `Specialist`, `Run`,
+  `Replay`, `Checked`, `Issue`, the severities, `canonical`, `sha256`, and the two-reader alignment `Reading`, `Agreed`,
+  `Alignment`, `align`, `interval_overlap`, `box_iou` — the trace on the core store).** `Specialist(proposer=None,
+  storage=None)`: with a TraceStorage (or a path) every `run` is one record of kind `"specialist"` in the store's hash
+  chain — the chain the decisions use, so `verify()` catches an edited run — holding the source's hash and length, the
+  proposer, the proposal, the check's issues / kept / verified / meta, the renderer, the output's hash and size, the head
+  of the run's own chain and the specialist's `fingerprints()` when it reports them (`store_source=True` also keeps the
+  source text, so a stored run replays by its id alone); `Run.stored_id` names it and
+  `Run.to_dict()` keeps its shape. `specialist.replay(record_or_id, source=None, storage=None)` re-checks and re-renders
+  from a stored record (identical issues and bytes, or what differs); `replay_runs(storage, specialist, sources)` replays
+  every stored run of a specialist. `solvi report --overview` counts the runs per specialist.
+  `solvi.testing.conformance.check_specialist` adds the store path (`stored`, `store_replayed`, `edit_caught`).
+  Measured under the contract in 2026-10 (stands outside the repository, no script here): receipt OCR caught 84% of
+  corruptions and speech to text 99.7%, both resting on two readers aligned by `align`; neither specialist ships, and
+  charts (`ChartSpecialist(..., storage=)`) stays experimental until its accuracy is measured on real texts.
+
+- **Graduated: the MCP proxy with a guard — `solvi.serve.run_proxy`, `Proxy`, `Upstream`, `UpstreamError`** (`solvi
+  serve --guard catalog.py:guard --upstream CMD` now imports nothing experimental). Measured against the real
+  filesystem server: 25/25 violating or injected calls never reached it, 30/30 allowed calls identical to the direct
+  server, 5/5 malformed messages answered with an error and no crash, 55/55 calls stored and replayed, 15 ms
+  overhead; the script `benchmarks/mcp_proxy_filesystem.py` lands with that measurement.
+
+- **Graduated: counterfactual explanations — `solvi.core.explain`** (`search`, `Counterfactual`, `Counterfactuals`,
+  `Change`, `Rerun`; until now `solvi.experimental.counterfactual`). Measured on the credit policy: 3,613 of 3,613
+  explanations valid on re-decision, thresholds minimal against brute force in 53 of 53, an explanation in one or two
+  fields for 507 of 522 refused or review applications, 0.065 s per search; the script
+  `benchmarks/counterfactual_credit.py` lands with that measurement. New, as the measurement asked: the cost of a
+  change is a parameter — `search(..., text_cost=1.0)` for an enumerated value (a text field over its domain, a
+  boolean, an Enum) and `costs={field: weight}` multiplying a field's change costs (defaults as before), since a
+  category change at the fixed cost 1 ranked first where a person would move a number.
+
 ### Changed
 
+- **`solvi.experimental.counterfactual` re-exports `solvi.core.explain` for one release**, as the same objects, with an
+  `ExperimentalWarning`; it is removed in 1.2 and `STATUS["counterfactual"]` is gone. The 0.9 path
+  `solvi.counterfactual` resolves to the stable module; fingerprints keep naming it `solvi.counterfactual`.
+- **`solvi.experimental.mcp` re-exports the proxy from `solvi.serve` for one release**, as the same objects, with an
+  `ExperimentalWarning`; it is removed in 1.2 and `STATUS["mcp"]` is gone. The guide's proxy section moved to the serving
+  chapter.
+- **`solvi.experimental.specialist` re-exports `solvi.core.specialist` for one release**, as the same objects, with an
+  `ExperimentalWarning` naming the new path; it is removed in 1.2, and `STATUS["specialist"]` is gone. The 0.9 path
+  `solvi.specialist` now resolves to `solvi.core.specialist`; fingerprints keep naming it `solvi.specialist`.
+- **`solvi.experimental.compile` re-exports what moved to `solvi.core.versions`** (`Spec`, `Clause`, `Versions`,
+  `DecisionDiff`, `decision_diff`, `Rejected`, `split_clauses`, `build_catalog`, and `CatalogVersion`) for one
+  release, as the same objects; import them from `solvi.core.versions` (the compiler's copies go in 1.2).
+  `Versions.get()` / `system()` without a number give the version in force (the latest unless rolled back) and return
+  a `CatalogVersion` (a `Compiled` loads as one). Fingerprints still name the moved classes by their 0.9 module.
 - **Replay binds every field of a result to its trace, not only the answer and its status.** With the System,
   `res.trace.replay(system, res.flow)` and `store.replay_all(system)` now also compare each stored result's
   confidence, why, guard and source with the ones the trace gives; a result edited in any of them (in a response's
@@ -97,6 +157,16 @@ calibration files and served by `solvi serve`), so a build from it is not mistak
   a minor version: readers of 2.0.0 may ignore the new values). Code that tested `guard is None` to find missing inputs
   for a hard check should test `guard == "no_data"`. Such a decision stored by solvi 1.0.1 or earlier (guard none,
   "cannot compute: cap") still replays ok.
+
+### Removed
+
+What leaves solvi in 1.1: experimental pieces that measured negative. Importing a removed module raises
+ModuleNotFoundError.
+
+| removed | why | use instead |
+|---|---|---|
+| `solvi.experimental.oncalib` (`OnTheFly`) | recalibrating a guarantee on the fly from outcomes broke the promise (measured 2026-09, "Tried and left out") | `System.guarantee(..., corrections=True)` on a schedule or after a drift flag |
+| `solvi.experimental.learning` (`Learning`, `ShadowGate`, `UpdateReport`, `split_of`) and its 0.9 path `solvi.learning` | on streams of one kind of decision the loop gave no measurable gain (2026-10, "Tried and left out"); its verified-labels channel has been in the core since 0.9 | `solvi.experimental.changes` (`Change(artifact="update")`, `LearningTarget`); for a shadow measurement in a knowledge store, a write gate of your own reading `add(..., shadow=)` |
 
 ### Fixed
 
@@ -262,7 +332,7 @@ building blocks they are made of, and `solvi.experimental` holds what may still 
 | `solvi.command` | `solvi._command` | internal |
 | `solvi.compile` | `solvi.experimental.compile` | experimental: may change; removed in 1.2 unless it graduates |
 | `solvi.costs` | `solvi.core.costs` | low level: building blocks |
-| `solvi.counterfactual` | `solvi.experimental.counterfactual` | experimental: may change; removed in 1.2 unless it graduates |
+| `solvi.counterfactual` | `solvi.core.explain` | low level: building blocks |
 | `solvi.decide` | `solvi.core.deciders` | low level: building blocks |
 | `solvi.decide.adapt` | `solvi.core.deciders.adapt` | low level: building blocks |
 | `solvi.decide.backends` | `solvi.core.deciders.backends` | low level: building blocks |
@@ -285,7 +355,6 @@ building blocks they are made of, and `solvi.experimental` holds what may still 
 | `solvi.hooks` | `solvi.experimental.hooks` | experimental: may change; removed in 1.2 unless it graduates |
 | `solvi.i18n` | `solvi.core._i18n` | internal |
 | `solvi.inputs` | `solvi.core._inputs` | internal |
-| `solvi.learning` | `solvi.experimental.learning` | experimental: may change; removed in 1.2 unless it graduates |
 | `solvi.llm` | `solvi.core.deciders.llm` | low level: building blocks |
 | `solvi.loader` | `solvi._loader` | internal |
 | `solvi.longdoc` | `solvi.core.deciders.longdoc` | low level: building blocks |
@@ -307,7 +376,7 @@ building blocks they are made of, and `solvi.experimental` holds what may still 
 | `solvi.search` | `solvi.core.slow.search` | low level: building blocks |
 | `solvi.sets` | `solvi.core.sets` | low level: building blocks |
 | `solvi.signature` | `solvi.core.store.signature` | low level: building blocks |
-| `solvi.specialist` | `solvi.experimental.specialist` | experimental: may change; removed in 1.2 unless it graduates |
+| `solvi.specialist` | `solvi.core.specialist` | low level: building blocks |
 | `solvi.storage` | `solvi.core.store` | low level: building blocks |
 | `solvi.strategist` | `solvi.core.plan.strategist` | low level: building blocks |
 | `solvi.strategy` | `solvi.core.plan.cost` | low level: building blocks |

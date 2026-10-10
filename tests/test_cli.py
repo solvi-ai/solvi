@@ -816,7 +816,7 @@ def test_options_a_mode_does_not_read_are_refused_not_ignored(tmp_path, capsys):
 @pytest.mark.parametrize("argv", [["--help"], ["migrate", "-h"], ["serve", "-h"], ["--version"]])
 def test_help_imports_nothing_experimental(argv):
     """`solvi <command> -h` builds every subcommand's parser: none of them may import an experimental module (its
-    ExperimentalWarning would print on every help). solvi.experimental.mcp loads only when `serve --guard` runs."""
+    ExperimentalWarning would print on every help). the MCP proxy (stable since 1.1) is solvi.serve's own."""
     import subprocess
     code = ("import sys, warnings; warnings.simplefilter('error')\n"
             "from solvi.cli import main\n"

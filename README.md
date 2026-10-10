@@ -382,12 +382,14 @@ a decision that used one records it, and each one graduates or is removed by 1.2
 - **Verified charts** (`solvi.experimental.charts`): every number quoted from the text and checked (unit, scale, a pie
   that adds up), as a deterministic SVG that replays to the same bytes
   ([examples/21_verified_chart.py](examples/21_verified_chart.py)).
-- **Learning** (`solvi.experimental.learning`, `solvi.experimental.lora`, `solvi.experimental.oncalib`): a loop that
-  promotes an update from trusted corrections only when it passes held-out, honesty and calibration gates, with
-  rollback; a LoRA adapter per question on solvi-base (`solvi[lora]`); recalibration on the fly from outcomes, which
-  does not keep the promise.
-- **The MCP proxy** (`solvi serve --guard catalog.py:guard --upstream CMD`: the guard in front of an MCP server) and
-  **counterfactuals** (`solvi.experimental.counterfactual`: the smallest input change that flips an answer).
+- **Changes** (`solvi.experimental.changes`): one pipeline for a document version, a person's correction, verified
+  experience and a labelled update — pluggable stages, a hash-chained journal, impact analysis, approval levels and
+  rollback by version; an update from trusted corrections is promoted only when it passes held-out, honesty and
+  calibration gates. **LoRA** (`solvi.experimental.lora`): an adapter per question on solvi-base (`solvi[lora]`).
+
+Graduated in 1.1 (stable now): the MCP proxy with a guard (`solvi serve --guard catalog.py:guard --upstream CMD`,
+`solvi.serve.run_proxy`), counterfactual explanations (`solvi.core.explain`: the smallest input change that flips an
+answer), the specialist contract (`solvi.core.specialist`) and document versions (`solvi.core.versions`).
 
 ## Coming from 0.9
 

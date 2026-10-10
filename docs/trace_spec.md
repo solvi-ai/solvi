@@ -24,7 +24,7 @@ machine-readable schema of a record is `src/solvi/core/store/record.schema.json`
   result's `extra["no_data"]` and a response check's optional `missing` — a minor version: a 2.0.0 reader may ignore
   them, and the hash body does not change; `x-schema-changes` lists each version). Records of kinds `ask`, `teach`,
   `redaction` and `segment` are closed: a new field is a new schema version (minor when readers may ignore it, major
-  when the hash body changes). Other kinds (`knowledge`, `dispatch`, `policy`, `refine`, `update`) are checked for the
+  when the hash body changes). Other kinds (`knowledge`, `dispatch`, `policy`, `refine`, `update`, `change`, `specialist`) are checked for the
   envelope only. [test_sem_record_schema]
 - Formats only go up along a chain: a record of format 1 after a record of format 2 is a verify problem. [test_sem_chain]
 

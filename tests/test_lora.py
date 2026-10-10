@@ -13,7 +13,7 @@ pytest.importorskip("peft")
 
 from solvi import Catalog, System  # noqa: E402
 from solvi.core.deciders import DecideModel  # noqa: E402
-from solvi.experimental.learning import ExperimentalWarning  # noqa: E402
+from solvi.core import ExperimentalWarning  # noqa: E402
 from solvi.experimental.lora import LoraWarning, adapt_lora, remove_lora  # noqa: E402
 
 TEAMS = ["billing", "technical"]

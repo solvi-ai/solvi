@@ -99,11 +99,12 @@ MOVED: dict[str, str] = {
     "solvi.experimental.charts.spec": "solvi.charts.spec",
     "solvi.experimental.compile": "solvi.compile",
     "solvi.experimental.hooks": "solvi.hooks",
-    "solvi.experimental.learning": "solvi.learning",
     "solvi.experimental.lora": "solvi.lora",
     "solvi.experimental.compile.sandbox": "solvi.sandbox",
     "solvi.experimental.specialist": "solvi.specialist",
+    "solvi.core.specialist": "solvi.specialist",                     # graduated in 1.1 (the old path re-exports it)
     "solvi.experimental.counterfactual": "solvi.counterfactual",     # removed for 1.0, restored as experimental
+    "solvi.core.explain": "solvi.counterfactual",                    # graduated in 1.1 (the old path re-exports it)
     # 1.0 layout, the high level (solvi.solutions.*, the cli and testing packages)
     "solvi.solutions.decisions": "solvi.auto",
     "solvi.solutions.guard": "solvi.agents.guard",
@@ -123,6 +124,31 @@ MOVED: dict[str, str] = {
     "solvi.cli._models:_report": "solvi.models",
     "solvi.cli._models:add_parser": "solvi.models",
     "solvi.cli._models:cmd_models": "solvi.models",
+    # 1.1: the document versions left solvi.experimental.compile for the stable solvi.core.versions (names, not the module:
+    # solvi.versions was never a 0.9 path)
+    "solvi.core.versions:Spec": "solvi.compile",
+    "solvi.core.versions:Clause": "solvi.compile",
+    "solvi.core.versions:Versions": "solvi.compile",
+    "solvi.core.versions:DecisionDiff": "solvi.compile",
+    "solvi.core.versions:decision_diff": "solvi.compile",
+    "solvi.core.versions:Rejected": "solvi.compile",
+    "solvi.core.versions:split_clauses": "solvi.compile",
+    "solvi.core.versions:build_catalog": "solvi.compile",
+    "solvi.core.versions:_norm": "solvi.compile",
+    "solvi.core.versions._sandbox:Refused": "solvi.sandbox",
+    "solvi.core.versions._sandbox:check": "solvi.sandbox",
+    "solvi.core.versions._sandbox:load": "solvi.sandbox",
+    "solvi.core.versions._sandbox:safe_builtins": "solvi.sandbox",
+    "solvi.core.versions._sandbox:source_name": "solvi.sandbox",
+    "solvi.core.versions._sandbox:_guarded_import": "solvi.sandbox",
+    "solvi.core.versions._sandbox:_dunder": "solvi.sandbox",
+    # 1.1: the MCP proxy graduated into solvi.serve (its private module); the old path re-exports it until 1.2
+    "solvi._mcp_proxy:Proxy": "solvi.agents.mcp",
+    "solvi._mcp_proxy:Upstream": "solvi.agents.mcp",
+    "solvi._mcp_proxy:UpstreamError": "solvi.agents.mcp",
+    "solvi._mcp_proxy:run_proxy": "solvi.agents.mcp",
+    "solvi._mcp_proxy:forwarded": "solvi.agents.mcp",
+    "solvi._mcp_proxy:_meta": "solvi.agents.mcp",
     # the import-cycle lane's moves (names that left a 0.9 module), at their 1.0 paths
     "solvi.core.response:Response": "solvi.system",
     "solvi.core.chain:append": "solvi.system",

@@ -45,13 +45,17 @@ own. [Building blocks](building_blocks.md) has one reference per extension point
 22. [Knowledge: what a system learned, and from whom](#knowledge-what-a-system-learned-and-from-whom)
 23. [System 1 and System 2 on a game: the Pokémon world map](#system-1-and-system-2-on-a-game-the-pokémon-world-map)
 24. [Extracting fields from documents](#extracting-fields-from-documents)
+25. [Versions of a document and their impact: solvi.core.versions](#versions-of-a-document-and-their-impact-solvicoreversions)
+26. [Specialists: a model proposes, code checks, the store keeps the run](#specialists-a-model-proposes-code-checks-the-store-keeps-the-run)
+27. [Explaining a decision: the smallest change that flips it](#explaining-a-decision-the-smallest-change-that-flips-it)
 
 **Experimental** — `solvi.experimental`: works and is tested, no measured gain yet; its API may change, and each piece
 graduates or is removed by 1.2 ([Experimental](experimental.md) lists what each one is missing).
 
-25. [solvi behind a coding agent's hooks](#solvi-behind-a-coding-agents-hooks)
-26. [A specification compiled into the catalog: solvi.experimental.compile](#a-specification-compiled-into-the-catalog-solviexperimentalcompile)
-27. [Verified charts: a specialist that checks every number](#verified-charts-a-specialist-that-checks-every-number)
+28. [solvi behind a coding agent's hooks](#solvi-behind-a-coding-agents-hooks)
+29. [A specification compiled into the catalog: solvi.experimental.compile](#a-specification-compiled-into-the-catalog-solviexperimentalcompile)
+30. [Verified charts: a specialist that checks every number](#verified-charts-a-specialist-that-checks-every-number)
+31. [The change pipeline: solvi.experimental.changes](#the-change-pipeline-solviexperimentalchanges)
 
 ## Quick start: solvi.build
 
@@ -170,7 +174,7 @@ text, spec=None, require=False)` — or `solvi check module:system --text POLICY
 error `cite_not_found` (matched as quotes are, across Unicode forms, dashes and curly quotes), with a `Spec` a clause
 that does not exist or does not hold the quote is an error, `require=True` warns on an uncited part; a correction can
 be cited as `clause="person:k07"`. `--spec POLICY.md` splits the text into clauses `c1`, `c2`, ... as
-`solvi.experimental.compile.Spec` does (and is the text, unless `--text` names another file); `--require-cites` warns on
+`solvi.core.versions.Spec` does (and is the text, unless `--text` names another file); `--require-cites` warns on
 an uncited part. The causes of `solvi diff` carry the citations: clause → rule → decision.
 
 ```python
@@ -1603,7 +1607,7 @@ unless `strict=False`); `save_calibration` writes it next to the calibration fil
 were before the first adapter. It is refused for a decider that is not a torch encoder (an ONNX one: load it with
 `backend="torch"`; an LLM or a rule has no weights to adapt), for checkpoints larger than solvi-base (use the GPU script)
 and for rank / number / span questions. **Experimental:** the API, the recipe and the file format may change; the first
-use warns (`solvi.experimental.learning.ExperimentalWarning`).
+use warns (`solvi.ExperimentalWarning`).
 
 ### "Other" as an abstain threshold
 
@@ -1891,9 +1895,10 @@ fit on all of them; with refits it catches up. The cost:
 - the kept examples: their fact rows, about 1 KB each for 14 plain facts (vector facts such as embeddings cost their
   length), up to `refit_until` examples (2000). Past that no refit is due, the rows are dropped and the head goes on with
   rank-one steps only;
-- a refit is a change like any update: `teach` makes it at once and it is not gated. The learning loop
-  (`solvi.experimental.learning.Learning`) manages decision parts, not fitted heads: while it is attached with `gate_teach=True`, `teach`
-  only stores the correction and the head (and its refit schedule) does not move. The head depends only on its first
+- a refit is a change like any update: `teach` makes it at once and it is not gated. An update target of the change
+  pipeline (`LearningTarget`, [below](#a-labelled-update-is-a-candidate-change)) manages decision parts, not fitted
+  heads: while it is attached with `gate_teach=True`, `teach` only stores the correction and the head (and its refit
+  schedule) does not move. The head depends only on its first
   fit and the sequence of corrections, so replaying them gives the same head (the same fingerprint); keep a
   `copy.deepcopy(head)` to go back.
 
@@ -1965,17 +1970,8 @@ schedule or after a drift flag (`System.guarantee(..., corrections=True)` — th
 source), refit (`fit` on `storage.corrections()`), or keep them as knowledge. Recalibrating on every outcome as it
 arrives is not in the stable path: measured, it broke the promises — the outcomes an agent sees are not a random sample
 of its decisions (a decision that abstained has none), and a threshold moved after every label is no longer the one the
-promise was calibrated for. The experimental `solvi.experimental.oncalib` does it, with that risk in its documentation:
-
-```python
-from solvi.experimental.oncalib import OnTheFly                          # ExperimentalWarning on import
-live = OnTheFly(system, "move", max_risk=0.05, every=50, window=500, min_labels=30)
-live.outcome(res, "west")          # stored as above; every 50 new labels: System.guarantee on the last 500
-live.drifted()                     # a drift flag: from now on only later labels count, recalibrated at once
-live.history                       # each recalibration: when, why, the label ids, the report
-```
-
-Use it to explore, never to make a promise you report.
+promise was calibrated for. The experimental module that did it was removed in 1.1 for that reason: recalibrate on a
+schedule (say, every 500 new outcomes) or when a drift monitor flags the stream.
 
 ### System 2's answers as labels: `label_source="verified"`
 
@@ -2027,66 +2023,11 @@ requests with new intents — System 2 = an LLM's recorded answers; the details 
 | a guarantee's calibration: `System.guarantee(..., corrections=store, sources=...)` | yes, when `sources` names it | fed every verified answer, System 1 answered more within its promise on two tasks of three |
 | a head (`fit` / `teach`) | no — `teach(label_source="verified")` only stores the label | gained on one task of three |
 | a memory of corrections | no — `UntrustedLabel` | broke System 1's promise on the contract task |
-| the learning loop (`solvi.experimental.learning.Learning`) | no — listed in `labels()["rejected"]` | its ladder is a head and a memory |
+| a labelled update (`LearningTarget` of `solvi.experimental.changes`) | no — listed in `labels()["rejected"]` | its ladder is a head and a memory |
 
 Feed the calibration **every** answer System 2 vouched for, not only the cases where it disagreed with System 1: a
 threshold calibrated on disagreements alone sees only System 1's mistakes, and the verified disagreements were too few
 to move anything. The report's `labels` lists the stored ids it read; calibrating again without them undoes it.
-
-### Learning from corrections with gates and rollback (experimental)
-
-`Learning(system, ...)` (from `solvi.experimental.learning`; until 1.0 `system.learning(...)`, which now raises an AttributeError
-naming it) turns the stored corrections into updates of the model decisions — only through gates, recorded,
-and reversible. It is off until you call it, and experimental (it warns `ExperimentalWarning`; its API and defaults may
-change):
-
-```python
-from solvi.experimental.learning import Learning
-
-loop = Learning(system, store, gates={"honesty": "tests/honesty/core_v1.json"})
-# ... the system runs; people correct escalations with system.teach(...) — now stored only, not learned at once
-rep = loop.run()                  # labels → a proposed update → gates → promoted or undone; recorded either way
-print(rep)                        # the rung per question and each gate's numbers
-loop.versions()                   # [{"version", "fp", "time", "action"}]
-loop.rollback(2)                  # any promoted version, in this process or another one on the same store
-```
-
-**Labels** come only from outside the model: the store's corrections from `"human"`, `"outcome"` and `"rule"` sources
-A correction from any other source is refused and listed (`loop.labels()["rejected"]`); the stored decisions — the
-system's own answers — are never read as labels, so self-training is impossible by construction. Each label goes, by a
-hash of its id, to `"train"`, `"calibration"` or `"holdout"` (50 / 20 / 30% by default): a held-out label is never trained
-on, in this update or any later one. While the loop is attached, `System.teach` only stores the correction
-(`gate_teach=False` keeps the instant update; `loop.detach()` ends it).
-
-**The ladder**, per question, by the number of training labels: under `fit_below` (50) — the decider's shift / scale
-(`fit`); under `memory_below` (1000) — `fit` plus a memory of the corrected cases (`part.memory`, mode `"check"` unless
-`ladder={"memory": {"mode": "answer"}}`); beyond — the `adapter` hook when you give one (`(part, [(text, answer)])` →
-a JSON-able description; an object with `state(part)` / `restore(part, state)` is rolled back too), else the memory.
-
-**The gates** — the update is promoted only if every one passes; otherwise it is dropped and recorded as rejected. The
-candidate is built and gated on a shadow of the system (copies of the decision parts, their thresholds and memory, and of
-the model's adaptations; the checkpoint is shared), so asks that run meanwhile see the state in force, never an un-gated
-candidate; the live parts change only when the update is promoted. An `adapter` hook runs on the shadow part and reaches
-the live one through its `state` / `restore`.
-
-| Gate | Passes when |
-|---|---|
-| `consistency` | at most `max_conflict` (20%) of the new training labels are contradicted by a memory of the labels already learned — a batch of wrong corrections hurts more than right ones help |
-| `heldout` | on the held-out labels, asked through the whole system, (right − wrong answered alone) / n improves by at least `min_gain` (0.01), with at least `min_holdout` (5) labels |
-| `honesty` | the honesty numbers (confident errors, coverage at `risk`, quote support) on the held-out labels — and on your own honesty set (`gates={"honesty": path or cases}`) — get no worse than `tolerance` (0.02) |
-| `act_guard` | a part calibrated with `act_guard` / `calibrate_for` is calibrated again, with the same risk, on at least `min_calibration` (30) calibration labels: an old threshold says nothing about a changed signal; conformal answer sets are recalibrated on them too, or dropped (and recorded) with fewer |
-| `size` | shadow run: the stored decisions whose input is held out for a learned question — the labels' split, per question (up to `shadow_limit`, 500) are asked with the current and the candidate state and compared (`solvi.core.store.diff.compare`); at most `max_change` (30%) may change |
-
-`max_change` is deliberately low: the first update of a badly biased decider can move far more than 30% of the decisions
-and is then rejected until you raise the limit for it (`gates={"max_change": 0.8}`) — a decision a person should take.
-
-**The record.** Every run that proposes an update writes a record of kind `"update"` to the changelog (by default the
-same store, hash-chained with the decisions; `changelog=` for another): the version it came from, the fingerprints before
-and after, the rung and label counts per question, the training label ids, every gate's numbers and — for a promoted
-state — the state itself (the adaptation with its examples, the thresholds and guarantee, the memory's cases). The first
-run records the state it started from as a baseline version. Each decision's trace names the part's fingerprint, and
-`loop.version_of(fp)` the version it belongs to. Limits: only questions answered by a single decision part (not a
-combination), and per-group `act_guard` thresholds are not recalibrated (such an update is rejected).
 
 ## Guarding an agent's tool calls
 
@@ -2571,37 +2512,11 @@ print(g.definition("refund", policies=True)["description"])
 The reasons are written for refusals and every line goes into each request, so it stays off unless you turn it on; the
 checks themselves are the same either way.
 
-### An MCP proxy
-
-```
-solvi serve --guard catalog.py:guard --upstream "npx -y @modelcontextprotocol/server-filesystem /work" --store calls.db
-```
-
-The proxy is an MCP server (stdio) in front of another one: `tools/list` returns the upstream tools the guard declares
-(`guard.declare("read_text_file")`: each takes the upstream `inputSchema`; the rest are hidden), and every `tools/call`
-passes the guard before it is forwarded. A denied call is an error result with the reasons; an escalated one asks the
-user through the client when it supports MCP elicitation (an approve yes / no form; `--escalate deny` turns that off),
-else it is an error result. Each result's `_meta.solvi` has the outcome, the stored id and the trace hash; `--facts
-'{"role": "viewer"}'` gives the policies their facts. The proxy does not see the user's messages: grounded arguments are
-looked up in the tool outputs of the session. An allowed call is forwarded with the arguments as the guard validated
-them (coerced to the schema's types — `"no"` for a boolean is sent as `false`, so what the checks read is what the
-server gets; arguments the client did not send are not added). The session keeps the last `--context-messages` (50) tool
-outputs, at most `--context-chars` (100 000) characters in all (0: no limit): each decision's trace records the context
-it was checked against, so the cap bounds what every stored decision holds; an output longer than the cap keeps its
-beginning and its instruction-like sentences, and an output that has left the window no longer grounds values or taints
-calls. A tool whose `inputSchema` cannot be read (a property pydantic refuses, such as `_x`) is still listed, with a
-permissive schema and a warning in the log, and every call of it escalates; a recursive `$ref` is followed once (inside
-itself it is any object); a tool whose arguments collide with the guard's facts is hidden. For an MCP client:
-
-```json
-{"mcpServers": {"files": {"command": "solvi", "args": ["serve", "--guard", "/path/to/catalog.py:guard",
-                                                       "--upstream", "npx -y @modelcontextprotocol/server-filesystem /work"]}}}
-```
-
 **Which frameworks.** solvi ships no framework adapter (the PydanticAI, LangGraph and OpenAI Agents SDK adapters were
 removed in 1.0: none had a measured run). The measured runs put the agent's tool calls through `guard.check` / `guard.call` directly, from the framework's
 own tool-execution step, and so can you: pass the framework's history to `guard.check` as messages, map an escalation to
-its human-in-the-loop mechanism, and keep `calls_made` per conversation for `once=True`. MCP has the proxy (above).
+its human-in-the-loop mechanism, and keep `calls_made` per conversation for `once=True`. MCP has the proxy
+([An MCP proxy](#an-mcp-proxy), in the serving chapter).
 Message shapes the guard does not recognise are read fail-closed (unknown blocks are tool outputs), but formats that
 merge the user's text with tool text (smolagents' "Observation:" user turns, AutoGen's and LlamaIndex's flattened chat
 memories) cannot be read back into roles: a user-grounded call may be denied there, and history compression (above)
@@ -2739,6 +2654,39 @@ only this endpoint. Without FastAPI, `solvi.serve.Service(system, decider)` answ
 - **JSON.** Responses are strict JSON: a non-finite float (an escalation threshold no calibration could meet is `inf`) is
   written as `{"$float": "inf"}` (`"-inf"`, `"nan"`), as in stored records and calibration files; `Response.from_json`
   reads it back as the float.
+
+### An MCP proxy
+
+```
+solvi serve --guard catalog.py:guard --upstream "npx -y @modelcontextprotocol/server-filesystem /work" --store calls.db
+```
+
+The proxy (stable since 1.1: `solvi.serve.run_proxy`, `Proxy`, `Upstream`; until then experimental) is an MCP server
+(stdio) in front of another one: `tools/list` returns the upstream tools the guard declares
+(`guard.declare("read_text_file")`: each takes the upstream `inputSchema`; the rest are hidden), and every `tools/call`
+passes the guard before it is forwarded. A denied call is an error result with the reasons; an escalated one asks the
+user through the client when it supports MCP elicitation (an approve yes / no form; `--escalate deny` turns that off),
+else it is an error result. Each result's `_meta.solvi` has the outcome, the stored id and the trace hash; `--facts
+'{"role": "viewer"}'` gives the policies their facts. The proxy does not see the user's messages: grounded arguments are
+looked up in the tool outputs of the session. An allowed call is forwarded with the arguments as the guard validated
+them (coerced to the schema's types — `"no"` for a boolean is sent as `false`, so what the checks read is what the
+server gets; arguments the client did not send are not added). The session keeps the last `--context-messages` (50) tool
+outputs, at most `--context-chars` (100 000) characters in all (0: no limit): each decision's trace records the context
+it was checked against, so the cap bounds what every stored decision holds; an output longer than the cap keeps its
+beginning and its instruction-like sentences, and an output that has left the window no longer grounds values or taints
+calls. A tool whose `inputSchema` cannot be read (a property pydantic refuses, such as `_x`) is still listed, with a
+permissive schema and a warning in the log, and every call of it escalates; a recursive `$ref` is followed once (inside
+itself it is any object); a tool whose arguments collide with the guard's facts is hidden. For an MCP client:
+
+```json
+{"mcpServers": {"files": {"command": "solvi", "args": ["serve", "--guard", "/path/to/catalog.py:guard",
+                                                       "--upstream", "npx -y @modelcontextprotocol/server-filesystem /work"]}}}
+```
+
+Measured against the real filesystem server (`@modelcontextprotocol/server-filesystem`, the script
+`benchmarks/mcp_proxy_filesystem.py`): 25 of 25 calls that broke a policy or carried an injection never reached the
+server, 30 of 30 allowed calls gave the same result as the server called directly, 5 of 5 malformed messages were
+answered with an error and no crash, 55 of 55 calls were stored and replayed, at about 15 ms of overhead a call.
 
 ## Text in: from a message to a question
 
@@ -3688,7 +3636,8 @@ carry the cited clauses: a cause whose part cites what it implements (`clause=` 
 catalog](#citing-the-clause-a-rule-implements)) has `"cites": [{"clause", "quote"}]`. An exception meant for one decision is checked
 with `diff(store, new_system, only={decision_id})`: `rep.extraneous` lists the ids of the other decisions it changes
 (answer, status or guard — a decision now forced by the exception counts) and `rep.exact` is True when there are none;
-`solvi.experimental.compile.decision_diff(..., only=)` does the same over the decisions whose answer moves.
+`solvi.core.versions.decision_diff(..., only=)` does the same over the decisions whose answer moves ([versions of a
+document](#versions-of-a-document-and-their-impact-solvicoreversions)).
 
 Each stored decision's recorded input is asked again for the same questions (`store=False`: the new system's own storage
 is not written) and compared with the stored response: answer, status, the guard that settled it, the safeguard events
@@ -3838,53 +3787,6 @@ approve = 'yes'  [ok]  confidence 0.60  ← computed by approve
               · grounding rejected: total — total_model: not grounded: '488.60' is not the text at [100:105] ('48.60')
               · fallback producer: total — total_regex used after total_model rejected
 ```
-
-### Counterfactual explanations (experimental): solvi.experimental.counterfactual
-
-"What would have changed the answer?" — the smallest change of the given inputs, for adverse-action reasons in lending and
-clear answers in support. Experimental: importing it warns, its API may change, and it has no measured use yet
-(`solvi.experimental.STATUS["counterfactual"]`).
-
-```python
-from solvi.experimental.counterfactual import search
-res = system.ask({"amount": 1200.0, "debt": 1000, "income": 5000, "history": "on time", "age": 30})
-cf = search(res, "approve")
-print(cf)
-# approve = decline [ok]
-#   approve if amount ≤ 1000 (now 1200)
-#   held at their recorded proposals (no model called): risk
-#   not searched: history (str: no domain (pass domains={'history': [...]}))
-cf.best.changes[0]            # Change(fact="amount", now=1200.0, to=1000.0, op="≤", cost=0.17)
-cf.to_dict()
-```
-
-Only the deterministic flow is re-run, on the recorded plan: every model-backed part — an extractor, a model decision, a
-learned answer head — is **held at the proposal it recorded in this trace**, and no model is called. The explanation is
-"what the code would decide if the models said what they said"; the result lists the parts held. A model part that did not
-run in the recorded decision (a hard check failed first) has no proposal: inputs that need it make the question abstain and
-do not count as a change (listed as "without a recorded proposal"). Learned rule lists (`learn_rule`) are code and re-run.
-
-What is searched (`over=`: default, the given facts the question's flow reads):
-
-- numbers and dates — outward from the current value in both directions with doubling steps, then bisection between the
-  last unchanged and the first changed value: the nearest threshold crossing, exact for inputs the answer is monotone in
-  (a non-monotone input can hide a nearer crossing between two probes). A direction where no probe changes the answer
-  is tried again on an even grid up to the farthest probe, which finds the band of a two-sided rule (`abs(value + 20) >
-  5` at 40 → `no if value ≤ -15`); a narrower band can still be missed, so when nothing is found the result says "no
-  change ... was found", not that none exists. Integers and dates give exact bounds
-  (`debt ≤ 1999`, `purchase_date ≥ 2026-08-20`); floats are shown at the shortest decimal that holds, `≤` or `<` as the
-  rule has it. A non-negative input stays non-negative; a domain `(lo, hi)` that does not contain the current value is
-  refused for that input (`cf.not_searched` says why);
-- booleans, Enums and `Literal` fields of `System(input_model=...)` — every other value;
-- anything else only with `domains={"history": ["on time", "late"]}`; a tuple bounds a number: `domains={"amount": (0, 5000)}`.
-
-`max_changes=2` (the default) tries two inputs together when no single input changes the answer ("approve if amount ≤ 1000
-(now 1200) and debt ≤ 1999 (now 2500)" — each bound holds with the other change made); `max_changes=1` does not.
-`target="approve"` looks only for that answer. Results are ranked by the number of changes, then their size (the relative
-change of a number; for a date the days moved over 30, or over the width of its domain; 1 for an enumerated value).
-A given input read only by a part that did not run (a soft check skipped after a hard check failed) is listed in
-`cf.not_searched`. `max_evals=5000` caps the re-runs (`cf.exhausted`). A response loaded from
-a store with its System works the same; one loaded without it needs `system=` (`search(res, "approve", system=system)`).
 
 ### Reports for people: res.report, store.report, solvi report
 
@@ -4604,8 +4506,9 @@ inputs, before any monitor flags it (see [the output](#the-output-probabilities-
 `SourceGate` (the source check) always runs first; `ConsistencyGate` refuses an item whose premises are missing,
 retracted or refuted, or that would refute its own premise. A fact or an episode a gate admits is present at once; a
 rule, a skill or an action (behaviour-changing kinds) is promoted with every gate's verdict in the journal, and one a
-later gate holds stays a hypothesis. The shadow gate — measure a behaviour-changing item on a shadow of the system
-before it is promoted — is experimental: `solvi.experimental.learning.ShadowGate`.
+later gate holds stays a hypothesis. A shadow measurement of a behaviour-changing item — its gain on held-out cases,
+the share of past decisions it would change — reaches every gate as `add(..., shadow=...)`; a gate that admits on it
+is yours to write (the experimental change pipeline measures candidates in its stages and passes the numbers that way).
 
 ### The action model: what the environment accepts
 
@@ -4922,6 +4825,227 @@ description)` returns one `(start, end, score, no_answer_score)`, and `field(nam
 - A GPU is recommended for training and for long documents.
 - On a CPU, use the fp32 ONNX export; no int8 export is provided. If you quantize one yourself, compare its spans with
   the fp32 export's on your own fields before using it.
+
+## Versions of a document and their impact: solvi.core.versions
+
+A policy, a regulation or a contract changes; the catalog that implements it changes with it. `solvi.core.versions`
+keeps the text as numbered clauses, each catalog as a version whose parts cite the clauses they implement, and says
+which decisions a new version moves — and the clauses why — before it goes live. (Until 1.1 this lived in the
+experimental compiler, `solvi.experimental.compile`, which re-exports every name for one release; the compiler itself,
+an LLM writing the parts, stays experimental.)
+
+```python
+from solvi import Answer, Question
+from solvi.core.versions import CatalogVersion, Spec, Versions, decision_diff
+
+POLICY = """# Shipping
+- An order of 50 or more ships free.
+- Orders to the world zone heavier than 30 kg are refused.
+"""
+MODULE = '''
+def free_shipping(total):
+    return total >= 50
+
+def small_enough(zone, weight):
+    return not (zone == "world" and weight > 30) or Fail(f"{weight} kg to the world zone")
+
+def ship(free_shipping):
+    return "free" if free_shipping else "paid"
+'''
+PARTS = {"free_shipping": {"kind": "fn", "clauses": ["c1"]},
+         "small_enough": {"kind": "check", "hard": True, "then": {"ship": "refused"}, "clauses": ["c2"]},
+         "ship": {"kind": "rule", "question": "ship", "clauses": ["c1"]}}
+QS = [Question("ship", "Ship free, paid or refused?", Answer.choice(["free", "paid", "refused"]))]
+
+spec = Spec(POLICY)                                     # c1, c2: paragraphs, list items and table rows
+spec2 = spec.revise(POLICY.replace("50 or more", "80 or more"))   # spec2.changes: {"changed": ["c1"], ...}
+v1 = CatalogVersion(spec, QS, MODULE, PARTS)
+v2 = CatalogVersion(spec2, QS, MODULE.replace(">= 50", ">= 80"), PARTS)
+orders = [{"id": f"o{t}", "zone": "home", "total": t, "weight": 1} for t in (10, 60, 90)]
+dd = decision_diff(v1, v2, inputs=orders, only={"o60"})
+print(dd)                       # 1 of 3 decisions change their answer ... because of clauses c1: 1
+dd.exact, dd.extraneous         # True, []: the change moves only what it was meant to
+
+versions = Versions("policy_versions")   # v1/, v2/ ... each module.py + compiled.json + version.json
+versions.add(v1, "first"); versions.add(v2, "free from 80")     # v2's parent: v1, the version in force
+versions.replay_all(store)               # every stored decision against the version that made it ([] — all replay)
+versions.rollback(1)                     # v1 in force again; every version is kept
+```
+
+**A specification** (`Spec(text)`, or `Spec(clauses={id: text})`) splits Markdown-like text into clauses `c1`, `c2`,
+...: paragraphs, list items and table rows (a row as `header: cell; ...`), headings naming the section. `spec.revise(new)`
+aligns a changed text with the old one: an unchanged clause keeps its id, a replaced one keeps the id of the one it
+replaces (`changed`), new ones get new ids (`added`), the rest are `removed`. `spec.hash` covers the clauses.
+
+**A catalog version** (`CatalogVersion(spec, questions, source, parts)`) is a module of plain functions — a part's name is
+the fact it sets, its argument names what it reads — and `parts`, each part's kind (`fn`, `check`, `rule`), for a hard
+check its `then`, for a rule its question, and the clauses it implements. `version.system(**kw)` is an ordinary System;
+the module is checked before it is loaded (standard-library imports only, no files, reflection or dunders) and a check
+may return `Fail("why")`. `save(folder)` / `CatalogVersion.load(folder)` write and read `module.py` and `compiled.json`
+(an edited `module.py` is refused); a version with `accepted=False` is refused unless `allow_unaccepted=True`.
+
+**The decisions a version moves.** `decision_diff(old, new, *, store=None, inputs=None, only=None)` re-runs the stored
+decisions (`store=`, decided by the old version) or `inputs` (each decided by the old version first) through
+[solvi diff](#catalog-fingerprint-solvi-diff-and-shadow-mode) and maps each cause step to the clauses its part
+implements; old and new may also be plain Systems, whose parts cite their clauses with `clause=` / `cite=` ([citing the
+clause](#citing-the-clause-a-rule-implements)), and the causes then carry `"cites"`. `only=` names the decisions the
+change may move — stored ids, or with `inputs=` an input's `"id"` (else its position): `extraneous` lists the others it
+moves, and `exact` is True when there are none and every decision re-ran. On a credit policy
+(`benchmarks/changes_credit.py`) a second version moved 144 decisions and each was traced to its clause, and every
+exception for one application was checked with `only=` before it was admitted.
+
+**Versions** (`Versions(folder)`) numbers the versions it is given; each records its parent (the version in force when
+it was added), its catalog fingerprint and the spec's hash. `current` is the version in force (`get()` and `system()`
+give it), `rollback(n, by=, why=)` puts an earlier one back in force (recorded in `history()`), `find(fp)` the version of
+a fingerprint, and `replay_all(store)` replays each stored decision with the version whose catalog made it, so old
+decisions keep verifying after the rules changed; a decision made by a catalog that is no version here is reported.
+The change pipeline (`solvi.experimental.changes`, `VersionsTarget`) promotes into a `Versions` and rolls it back.
+
+## Specialists: a model proposes, code checks, the store keeps the run
+
+A specialist does one job on a source — a chart from a press release, the fields of a receipt, the words of a
+recording — under one contract (`solvi.core.specialist`, stable since 1.1; until then `solvi.experimental.specialist`,
+which re-exports it for one release):
+
+1. **propose** — a proposer (a small model, an LLM, a rule-based extractor) writes a typed intermediate spec (a pydantic
+   model), never the result itself;
+2. **check** — deterministic code verifies the spec against the source and the specialist's rules; what does not verify
+   is dropped or changed, each with a reason (an `Issue`: severity `dropped` / `changed` / `warning` / `blocked`, a
+   stable code, a message, the path in the spec) — marked, never invented or repaired by a guess;
+3. **render** — deterministic code builds the result from the verified spec only (same verified spec → same bytes);
+4. **trace** — the source's hash, the proposal, the check and the output's hash go into the run's own hash chain
+   (`run.trace`) and, with a storage, into one record of kind `"specialist"` in the store's chain.
+
+```python
+from pydantic import BaseModel
+from solvi.core.specialist import Checked, Issue, Specialist, replay_runs
+
+class Item(BaseModel):
+    label: str
+    value: int
+    quote: str
+
+class Items(BaseModel):
+    items: list[Item]
+
+class Numbers(Specialist):
+    name, version, spec_type = "numbers", "1", Items
+
+    def check(self, spec, source):                 # → Checked(verified spec or None, issues, kept lines, meta)
+        kept = [x for x in spec.items if x.quote in source and str(x.value) in x.quote]
+        issues = [Issue("dropped", "quote_outside", f"{x.label}: not in the source") for x in spec.items if x not in kept]
+        return Checked(Items(items=kept) if kept else None, issues, [f"{x.label} = {x.value}" for x in kept])
+
+    def render(self, checked):                     # from the verified spec only
+        return "\n".join(f"{x.label}: {x.value}" for x in checked.verified.items)
+
+sp = Numbers(my_proposer, storage="runs.jsonl")    # a TraceStorage or a path; the decisions' store works too
+run = sp.run(text, "sales by region")
+run.output, run.issues, print(run.report())        # the result (None when nothing verified), the issues, kept / dropped
+sp.replay(run.stored_id, text).ok                  # from the stored record: the same issues, the same bytes
+replay_runs(sp.storage, Numbers(), [text])         # every stored run of this specialist → [] when all replay
+```
+
+A proposer is any callable `(source, question) → spec | dict | JSON` (its `id`, when it has one, names it); it is never
+trusted and never replayed — its output is recorded and checked. A failing proposer or an invalid proposal blocks the
+run (a `blocked` issue, no output), recorded too.
+
+**The record.** With `storage=`, every `run` appends one record of kind `"specialist"`: `specialist`, `version`,
+`question`, `source_sha256` and `source_chars` (the source itself is not stored — pass it to `replay` — unless
+`store_source=True`, which keeps the text in the record so `replay(stored_id)` is self-contained, at the cost of the
+text's size in every record and the text in the store), `proposer`,
+`proposal` (for a blocked run the raw proposal and `proposal_error`), the check's `issues`, `kept`, `verified` and
+`meta`, `renderer`, `output_sha256`, `output_bytes`, `trace_head` (the head of the run's own chain) and `fingerprints`
+when the specialist reports them (`fingerprints()` → e.g. the model's and the renderer's). It is in the same hash chain
+as the decisions, so `store.verify()` catches an edited run, and `solvi report --overview` counts the runs per
+specialist. `run.stored_id` names the record; `run.to_dict()` keeps its shape and replays without a store.
+
+**Replay.** `specialist.replay(record_or_id, source=None, storage=None)` re-checks the recorded proposal against the
+source and re-renders it: identical issues and identical bytes, or a list of what differs (another source, an edited
+record, a check that gives other issues now, another specialist or version). `replay_runs(storage, specialist,
+sources)` does it for every stored run of that specialist (sources: the texts, or `{sha256: text}`).
+
+**Testing a specialist.** `solvi.testing.conformance.check_specialist(specialist, sources)` checks the contract —
+identical bytes, replay from the record and from the store, JSON records, blocked invalid proposals, an edited stored
+record caught; [corruption tests](testing.md#corruption-tests-for-specialists) (`solvi.testing.corrupt`) measure how
+many misreadings its check catches. The first specialist is [verified charts](#verified-charts-a-specialist-that-checks-every-number)
+(experimental).
+
+### Two readers: agreement on aligned spans
+
+A second, independent reader of the same source is the strongest check a specialist has. `align(a, b, overlap=...,
+min_overlap=0.5, same=None, min_a=0.0, min_b=0.0)` in `solvi.core.specialist` matches two readers' `Reading`s
+one-to-one by the overlap of their spans — greedy by descending overlap, ties by input order, so it is deterministic —
+and returns what both read (`agreed`, each with both spans and confidences), what they read differently on one span
+(`conflicts`) and what only one of them read (`only_a`, `only_b`). Time, boxes and character offsets are one function:
+
+```python
+from solvi.core.specialist import Reading, align, box_iou, interval_overlap
+
+words = align([Reading("1990", (0.96, 1.66), 0.86)], [Reading("1990", (0.95, 1.70), 1.0)],
+              overlap=interval_overlap)                     # two speech models' words by time
+boxes = align([Reading("TOTAL", (149, 461, 185, 479))], [Reading("TOTAL", (150, 464, 184, 477))],
+              overlap=box_iou, same=lambda x, y: x.strip() == y.strip())    # two OCR engines' words by box
+```
+
+Nothing in it decides acceptance: the check accepts from `agreed` and turns `conflicts` into a conflict or a review;
+the thresholds are the task's. On two stands this was the mechanism behind the measured gains: speech (two models'
+words aligned in time) gave 0 false words on 400 non-speech clips and caught 299 of 300 corruptions, receipts (two OCR
+engines' words aligned by box) went from 88% to 96.4% exact among accepted fields.
+
+## Explaining a decision: the smallest change that flips it
+
+"What would have changed the answer?" — the smallest change of the given inputs, for adverse-action reasons in lending and
+clear answers in support: `solvi.core.explain` (stable since 1.1; until then `solvi.experimental.counterfactual`, which
+re-exports it for one release). Measured on the credit policy (`benchmarks/counterfactual_credit.py`): 3,613 of 3,613
+explanations were valid when the decision was made again with the change, the thresholds found were minimal against a
+brute-force search in 53 of 53 cases, 507 of 522 refused or review applications got an explanation in one or two
+fields, at 0.065 s per search.
+
+```python
+from solvi.core.explain import search
+res = system.ask({"amount": 1200.0, "debt": 1000, "income": 5000, "history": "on time", "age": 30})
+cf = search(res, "approve")
+print(cf)
+# approve = decline [ok]
+#   approve if amount ≤ 1000 (now 1200)
+#   held at their recorded proposals (no model called): risk
+#   not searched: history (str: no domain (pass domains={'history': [...]}))
+cf.best.changes[0]            # Change(fact="amount", now=1200.0, to=1000.0, op="≤", cost=0.17)
+cf.to_dict()
+```
+
+Only the deterministic flow is re-run, on the recorded plan: every model-backed part — an extractor, a model decision, a
+learned answer head — is **held at the proposal it recorded in this trace**, and no model is called. The explanation is
+"what the code would decide if the models said what they said"; the result lists the parts held. A model part that did not
+run in the recorded decision (a hard check failed first) has no proposal: inputs that need it make the question abstain and
+do not count as a change (listed as "without a recorded proposal"). Learned rule lists (`learn_rule`) are code and re-run.
+
+What is searched (`over=`: default, the given facts the question's flow reads):
+
+- numbers and dates — outward from the current value in both directions with doubling steps, then bisection between the
+  last unchanged and the first changed value: the nearest threshold crossing, exact for inputs the answer is monotone in
+  (a non-monotone input can hide a nearer crossing between two probes). A direction where no probe changes the answer
+  is tried again on an even grid up to the farthest probe, which finds the band of a two-sided rule (`abs(value + 20) >
+  5` at 40 → `no if value ≤ -15`); a narrower band can still be missed, so when nothing is found the result says "no
+  change ... was found", not that none exists. Integers and dates give exact bounds
+  (`debt ≤ 1999`, `purchase_date ≥ 2026-08-20`); floats are shown at the shortest decimal that holds, `≤` or `<` as the
+  rule has it. A non-negative input stays non-negative; a domain `(lo, hi)` that does not contain the current value is
+  refused for that input (`cf.not_searched` says why);
+- booleans, Enums and `Literal` fields of `System(input_model=...)` — every other value;
+- anything else only with `domains={"history": ["on time", "late"]}`; a tuple bounds a number: `domains={"amount": (0, 5000)}`.
+
+`max_changes=2` (the default) tries two inputs together when no single input changes the answer ("approve if amount ≤ 1000
+(now 1200) and debt ≤ 1999 (now 2500)" — each bound holds with the other change made); `max_changes=1` does not.
+`target="approve"` looks only for that answer. Results are ranked by the number of changes, then their size (the relative
+change of a number; for a date the days moved over 30, or over the width of its domain; `text_cost`, 1 by default, for
+an enumerated value — a text field searched over its domain, a boolean, an Enum), each times the field's weight in
+`costs={"amount": 2.0}` (1 by default). With the default a change of category often ranks first where a person would
+rather move a number (the credit measurement found such a case): raise
+`text_cost=` or weigh the fields so the ranking follows what is cheap to change for the person you explain to.
+A given input read only by a part that did not run (a soft check skipped after a hard check failed) is listed in
+`cf.not_searched`. `max_evals=5000` caps the re-runs (`cf.exhausted`). A response loaded from
+a store with its System works the same; one loaded without it needs `system=` (`search(res, "approve", system=system)`).
 
 ## solvi behind a coding agent's hooks
 
@@ -5301,17 +5425,21 @@ print(decision_diff(c, c2, store=store))    # which stored decisions change, and
 The writer sees the new text with its changed and added clauses marked and the removed ones listed, and the current
 module; it returns a patch. Each added or replaced part must cite a changed or added clause, each removed part the
 clause that removes it, and no part may still cite a removed clause — otherwise the patch goes back with the reasons.
-Then the same acceptance runs on the merged module, with tests written for the new text. `decision_diff` re-runs
+Then the same acceptance runs on the merged module, with tests written for the new text. `decision_diff` (stable:
+[solvi.core.versions](#versions-of-a-document-and-their-impact-solvicoreversions), re-exported here for one release) re-runs
 stored decisions (or `inputs=`, decided by the old version first) through `solvi.core.store.diff` and maps each cause step to the
 clauses its part cites — as fine as the parts are: a rule that cites every clause names every clause.
 
 ### Versions and replay
 
+A compilation is a `CatalogVersion` (`Compiled` is one), so the stable versions folder takes it — see
+[versions of a document](#versions-of-a-document-and-their-impact-solvicoreversions):
+
 ```python
-from solvi.experimental.compile import Versions
+from solvi.core.versions import Versions
 versions = Versions("policy_versions")      # v1/, v2/ ... each module.py + compiled.json + version.json
 n = versions.add(c2, "after the change")    # accepted compilations only
-system = versions.system()                  # the latest; versions.system(1) the first
+system = versions.system()                  # the version in force; versions.system(1) the first
 versions.replay_all(store)                  # every stored decision against the version that made it ([] — all replay)
 ```
 
@@ -5360,7 +5488,7 @@ pass them.
 
 Chart makers and LLMs get numbers wrong: a swapped digit, a share that was never in the text, a percentage drawn as a
 count, a pie of answers that add up to 108%. `solvi.experimental.charts` turns a text into an SVG chart in four steps — the contract
-of every specialist (`solvi.experimental.specialist.Specialist`):
+of every [specialist](#specialists-a-model-proposes-code-checks-the-store-keeps-the-run) (`solvi.core.specialist.Specialist`):
 
 1. **propose** — a proposer writes a typed `ChartSpec` (pydantic): the chart type (`bar`, `line`, `pie`), a title, a unit
    and a scale, series of labelled values, and for every value the passage of the text it was read from;
@@ -5443,24 +5571,66 @@ dual-axis charts yet. Tables, slides and speech are the next specialists.
 
 See [examples/21_verified_chart.py](../examples/21_verified_chart.py).
 
-### Two readers: agreement on aligned spans
+## The change pipeline: solvi.experimental.changes
 
-A second, independent reader of the same source is the strongest check a specialist has. `align(a, b, overlap=...,
-min_overlap=0.5, same=None, min_a=0.0, min_b=0.0)` in `solvi.experimental.specialist` matches two readers' `Reading`s
-one-to-one by the overlap of their spans — greedy by descending overlap, ties by input order, so it is deterministic —
-and returns what both read (`agreed`, each with both spans and confidences), what they read differently on one span
-(`conflicts`) and what only one of them read (`only_a`, `only_b`). Time, boxes and character offsets are one function:
+> **Experimental** (since 1.1; what it is missing: [Experimental](experimental.md)). Measured as infrastructure — a
+> journal, impact analysis, approval levels and rollback — not as gates that admit fewer harmful changes.
+
+A document version, a person's correction, verified experience and a search proposal are each a `Change`; a
+`Pipeline` runs every candidate through the same pluggable stages (`Static`, `Consistency`, `Impact`, `Approval`, ...),
+journals each verdict in a hash-chained store (records of kind `"change"`), promotes an admitted change into what holds
+that kind of knowledge (a target: a knowledge store item, a catalog version, a labelled update) and rolls back by
+version. The module docstring of `solvi.experimental.changes` describes every stage; `benchmarks/changes_credit.py`
+runs a credit policy through it (two versions, twenty corrections).
 
 ```python
-from solvi.experimental.specialist import Reading, align, box_iou, interval_overlap
+from solvi.experimental.changes import Change, Impact, Pipeline, Static
 
-words = align([Reading("1990", (0.96, 1.66), 0.86)], [Reading("1990", (0.95, 1.70), 1.0)],
-              overlap=interval_overlap)                     # two speech models' words by time
-boxes = align([Reading("TOTAL", (149, 461, 185, 479))], [Reading("TOTAL", (150, 464, 184, 477))],
-              overlap=box_iou, same=lambda x, y: x.strip() == y.strip())    # two OCR engines' words by box
+pipe = Pipeline([Static(), Impact(measure)], "changes.jsonl", targets=[target], approval={("update", "person"): "gate"})
+res = pipe.propose(Change("person", artifact="update", proposer="ann", reason="the corrections of the week"))
+res.status, res.stage, res.verdicts          # "promoted" | "rejected" | "held", the stage that decided, every verdict
+pipe.versions(); pipe.rollback(0)            # each promotion is a version; a rollback goes through its target
 ```
 
-Nothing in it decides acceptance: the check accepts from `agreed` and turns `conflicts` into a conflict or a review;
-the thresholds are the task's. On two stands this was the mechanism behind the measured gains: speech (two models'
-words aligned in time) gave 0 false words on 400 non-speech clips and caught 299 of 300 corruptions, receipts (two OCR
-engines' words aligned by box) went from 88% to 96.4% exact among accepted fields.
+### A labelled update is a candidate change
+
+The corrections people make (`System.teach`), known outcomes (`System.outcome`) and your rules' rejections can update
+the model decisions — only as a change: `LearningTarget(system, ...)` is the target of `Change(artifact="update")`.
+While it is attached, `System.teach` only stores a correction (`gate_teach=False` keeps the instant update;
+`target.detach()` ends it); a proposed update reads the stored labels, builds a candidate on a shadow of the system,
+and promotes it only when every gate passes:
+
+```python
+from solvi.experimental.changes import Change, LearningTarget, Pipeline
+
+target = LearningTarget(system, gates={"honesty": "tests/honesty/core_v1.json"})
+pipe = Pipeline([], system.storage, targets=[target], approval={"update": "gate"})   # one chain with the decisions
+res = pipe.propose(Change("person", artifact="update", proposer="ann"))
+[(v.stage, v.decision, v.reason) for v in res.verdicts]   # "update:ladder", "update:consistency", ... with numbers
+pipe.rollback(0)                                           # the state before the update comes back
+```
+
+**Labels** come only from outside the model: corrections from `"human"`, `"outcome"` and `"rule"` sources; any other
+source is refused and listed (`target.labels()["rejected"]`), and the stored decisions are never read as labels. Each
+label goes, by a hash of its content, to `"train"`, `"calibration"` or `"holdout"` (50 / 20 / 30%): a held-out label
+is never trained on.
+
+**The ladder**, per question, by the number of training labels: under `fit_below` (50) the decider's shift / scale
+(`fit`); under `memory_below` (1000) also a memory of the corrected cases; beyond, the `adapter` hook when you give one
+(`(part, [(text, answer)])`; with `state(part)` / `restore(part, state)` it is rolled back too). Only closed-list
+questions answered by a single decision part.
+
+**The gates** are the change's stages, `"update:<gate>"`, each with its numbers; the first that fails refuses it:
+
+| Gate | Passes when |
+|---|---|
+| `consistency` | at most `max_conflict` (20%) of the new training labels are contradicted by a memory of the labels already learned |
+| `heldout` | on the held-out labels, (right − wrong answered alone) / n improves by at least `min_gain` (0.01), with at least `min_holdout` (5) labels |
+| `honesty` | the honesty numbers on the held-out labels (and your honesty set, `gates={"honesty": ...}`) get no worse than `tolerance` (0.02) |
+| `act_guard` | a part calibrated with `act_guard` / `calibrate_for` is calibrated again on at least `min_calibration` (30) calibration labels; conformal answer sets are recalibrated, or dropped with fewer |
+| `size` | of the stored decisions whose input is held out (up to `shadow_limit`, 500), at most `max_change` (30%) change |
+
+Every update is recorded (kind `"update"`, in the labels' store) with its gates, the fingerprints before and after and
+the state to roll back to; `target.restore(version)` brings back any recorded version, also in another process.
+Measured: on streams of one kind of decision the loop these gates came from gave no measurable gain, which is why it
+is no longer a module of its own (the changelog, 1.1 "Removed").

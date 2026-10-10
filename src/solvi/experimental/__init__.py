@@ -11,8 +11,8 @@ What marks them:
   `warnings.filterwarnings("ignore", category=solvi.ExperimentalWarning)`);
 - a decision made by a System that uses one records it: `meta["experimental"]` in the stored decision (the names, e.g.
   `["lora"]`), and the system report counts them;
-- nothing stable imports them, and the top-level `solvi` package does not re-export them. Two command-line entries load
-  one on request: `solvi hook` (hooks) and `solvi serve --upstream` (mcp).
+- nothing stable imports them, and the top-level `solvi` package does not re-export them. One command-line entry loads
+  one on request: `solvi hook` (hooks).
 
 Graduating needs a pre-registered bar, a script in `benchmarks/` that measures it, the bar met and reviewed, no import
 of anything experimental, a conformance check and a docs move; the old path is then kept for one release. A piece that
@@ -25,33 +25,19 @@ from __future__ import annotations
 DEADLINE = "1.2"
 
 STATUS: dict[str, dict] = {
-    "learning": {"since": "0.7", "what": "the learning loop: trusted labels → a ladder of updates → gates → promote or "
-                 "roll back", "missing": "a simulation on real data that decides the default gates; the gate's holdout "
-                 "must come from the audit, and a rollback during a drift flag must hold", "script": None},
     "lora": {"since": "0.7", "what": "a LoRA adapter on the decider for one question (adapt_lora)", "missing": "a "
-             "decision on real use, a benchmark script in the repo, and wiring as the learning loop's adapter step; "
-             "measured gains over fit come with overconfidence", "script": None},
+             "decision on real use, a benchmark script in the repo, and wiring as the adapter rung of an update "
+             "(solvi.experimental.changes); measured gains over fit come with overconfidence", "script": None},
     "compile": {"since": "0.9", "what": "a written specification compiled by an LLM into catalog parts, accepted when "
                 "two drafts agree and the specification's tests pass (with its sandbox)", "missing": "acceptance on "
                 "larger specifications and a benchmark script in benchmarks/", "script": None},
     "hooks": {"since": "0.7.1", "what": "`solvi hook`: a coding agent's pre-edit rule checks and skill picker",
               "missing": "false deny and ask rates on real coding-agent sessions, with a script", "script": None},
-    "specialist": {"since": "0.7", "what": "the propose → check → render specialist pattern", "missing": "a specialist "
-                   "that ships, with a script in benchmarks/: two model types were measured under the contract in "
-                   "2026-10, with solvi.testing.corrupt as the corruption test — receipt OCR (84% of corruptions "
-                   "caught) and speech to text (99.7% caught) — and neither ships (36% of receipt fields accepted; "
-                   "90% / 86% of accepted spoken numbers exact); both rest on two readers aligned by `align` (time, boxes); "
-                   "charts has no accuracy number yet", "script": None},
     "charts": {"since": "0.7", "what": "verified charts: every number quoted from the text, a deterministic SVG",
                "missing": "accuracy on real texts with the rule-based and the LLM proposer", "script": None},
-    "mcp": {"since": "0.9", "what": "an MCP stdio proxy that puts the agent guard in front of `tools/call` "
-            "(`solvi serve --guard --upstream`)", "missing": "a measured run through the proxy against a real MCP "
-            "server", "script": None},
-    "oncalib": {"since": "1.0", "what": "recalibrating a guarantee on the fly from outcomes", "missing": "a "
-                "recalibration that keeps the guarantee's promise (it does not: see its module docs)", "script": None},
     "changes": {"since": "1.1", "what": "one change pipeline for four sources (a document version, verified "
                 "experience, a person's correction, a search proposal): pluggable stages, a journal of kind \"change\", "
-                "promote into the knowledge store / compiled versions / learning, versions and rollback", "missing": "on a "
+                "promote into the knowledge store / compiled versions / a labelled update, versions and rollback", "missing": "on a "
                 "credit policy the pipeline carried a document version (144 of 144 changed decisions traced to their "
                 "clause), admitted 12 of 12 exact exceptions, held every widening one for a person and refused 8 of 8 "
                 "exceptions that touched other decisions, 0 extraneous changes, 14 versions replayed; on a bank-request "
@@ -60,9 +46,6 @@ STATUS: dict[str, dict] = {
                 "rollback; still missing: the narrows / widens classifier over rule conditions, a regression-scenario "
                 "stage, and a script for the bank-request stream (the credit numbers: benchmarks/changes_credit.py)",
                 "script": "benchmarks/changes_credit.py"},
-    "counterfactual": {"since": "0.7", "what": "the smallest change of a decision's inputs that changes its answer "
-                       "(adverse-action reasons)", "missing": "one measured use, e.g. adverse-action reasons on the "
-                       "credit gallery task", "script": None},
 }
 for _s in STATUS.values():
     _s["deadline"] = DEADLINE
