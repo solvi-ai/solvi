@@ -102,8 +102,17 @@ calibration files and served by `solvi serve`), so a build from it is not mistak
   corruptions and speech to text 99.7%, both resting on two readers aligned by `align`; neither specialist ships, and
   charts (`ChartSpecialist(..., storage=)`) stays experimental until its accuracy is measured on real texts.
 
+- **Graduated: the MCP proxy with a guard — `solvi.serve.run_proxy`, `Proxy`, `Upstream`, `UpstreamError`** (`solvi
+  serve --guard catalog.py:guard --upstream CMD` now imports nothing experimental). Measured against the real
+  filesystem server: 25/25 violating or injected calls never reached it, 30/30 allowed calls identical to the direct
+  server, 5/5 malformed messages answered with an error and no crash, 55/55 calls stored and replayed, 15 ms
+  overhead; the script `benchmarks/mcp_proxy_filesystem.py` lands with that measurement.
+
 ### Changed
 
+- **`solvi.experimental.mcp` re-exports the proxy from `solvi.serve` for one release**, as the same objects, with an
+  `ExperimentalWarning`; it is removed in 1.2 and `STATUS["mcp"]` is gone. The guide's proxy section moved to the serving
+  chapter.
 - **`solvi.experimental.specialist` re-exports `solvi.core.specialist` for one release**, as the same objects, with an
   `ExperimentalWarning` naming the new path; it is removed in 1.2, and `STATUS["specialist"]` is gone. The 0.9 path
   `solvi.specialist` now resolves to `solvi.core.specialist`; fingerprints keep naming it `solvi.specialist`.

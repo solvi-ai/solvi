@@ -17,7 +17,7 @@ internal and have no page.
 | [`solvi.solutions.knowledge`](solutions_knowledge.md) | `Knowledge`: the store, agenda, action model and failure memory behind one object |
 | [`solvi.solutions.guard`](agents.md) | guarding an agent's tool calls: `Guard`, the "user asked" and "user confirmed" policies |
 | [`solvi.models`](models.md) | the models by name — `decider("solvi-base")`, `llm(url, model)`, `systemone(url, model)` — and the published and cached deciders (`solvi models`: list, pull, check) |
-| [`solvi.serve`](serve.md) | `solvi serve`: HTTP, MCP and the System One API |
+| [`solvi.serve`](serve.md) | `solvi serve`: HTTP, MCP and the System One API; the MCP proxy with a guard (`run_proxy`) |
 | [`solvi.show`](show.md) | printing a response |
 | [`solvi.check`](check.md) | `solvi check`: catalog lint |
 | [`solvi.testing`](testing.md) | decision regression tests from `cases.json` |
@@ -123,6 +123,5 @@ The modules `solvi.core` is made of. Their public names are re-exported by `solv
 | [`solvi.experimental.compile.sandbox`](sandbox.md) | code a model wrote, held to pure functions: ast allowlist, a subprocess with limits, a restricted load |
 | [`solvi.experimental.hooks`](hooks.md) | a coding agent's hooks: edits checked against rules, a skill picked for a prompt, install / uninstall (Claude Code; Codex, preview) |
 | [`solvi.experimental.charts`](charts.md) | verified charts: a text with numbers → an SVG in which every number is quoted from the text |
-| [`solvi.experimental.mcp`](mcp.md) | an MCP stdio proxy that puts the agent guard in front of an MCP server's `tools/call` |
 | [`solvi.experimental.changes`](changes.md) | one change pipeline for a document version, verified experience, a person's correction or a search proposal: pluggable stages, a journal, promote, versions, rollback; a labelled update (`LearningTarget`) is a candidate change |
 | [`solvi.experimental.counterfactual`](counterfactual.md) | counterfactuals: the smallest change of the given inputs that changes an answer |

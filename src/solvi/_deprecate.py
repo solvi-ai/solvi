@@ -141,6 +141,13 @@ MOVED: dict[str, str] = {
     "solvi.core.versions._sandbox:source_name": "solvi.sandbox",
     "solvi.core.versions._sandbox:_guarded_import": "solvi.sandbox",
     "solvi.core.versions._sandbox:_dunder": "solvi.sandbox",
+    # 1.1: the MCP proxy graduated into solvi.serve (its private module); the old path re-exports it until 1.2
+    "solvi._mcp_proxy:Proxy": "solvi.agents.mcp",
+    "solvi._mcp_proxy:Upstream": "solvi.agents.mcp",
+    "solvi._mcp_proxy:UpstreamError": "solvi.agents.mcp",
+    "solvi._mcp_proxy:run_proxy": "solvi.agents.mcp",
+    "solvi._mcp_proxy:forwarded": "solvi.agents.mcp",
+    "solvi._mcp_proxy:_meta": "solvi.agents.mcp",
     # the import-cycle lane's moves (names that left a 0.9 module), at their 1.0 paths
     "solvi.core.response:Response": "solvi.system",
     "solvi.core.chain:append": "solvi.system",

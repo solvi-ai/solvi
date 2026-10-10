@@ -15,8 +15,8 @@ How you can tell you are using one:
   `warnings.filterwarnings("ignore", category=solvi.ExperimentalWarning)`);
 - a decision made by a System that uses one records it in the stored decision (`meta["experimental"]`, e.g.
   `["lora"]`), and `solvi report --overview` counts those decisions;
-- nothing stable imports them, and `solvi` does not re-export them. Two commands load one when you ask for it:
-  `solvi hook` (hooks) and `solvi serve --guard --upstream` (mcp).
+- nothing stable imports them, and `solvi` does not re-export them. One command loads one when you ask for it:
+  `solvi hook` (hooks).
 
 **Graduating** needs a bar fixed before the measurement, a script in `benchmarks/` that measures it, the bar met and
 independently reviewed, no import of anything experimental, a conformance check, and a docs move; the old path then
@@ -65,15 +65,6 @@ Verified charts: every number quoted from the text, a deterministic SVG. Since 0
 - Guide: [Verified charts](guide.md#verified-charts-a-specialist-that-checks-every-number);
   API: [solvi.experimental.charts](api/charts.md); runnable: `examples/21_verified_chart.py`.
 
-## `mcp`
-
-An MCP stdio proxy that puts the agent guard in front of `tools/call` (`solvi serve --guard --upstream`). Since 0.9.
-
-- **Missing:** a measured run through the proxy against a real MCP server.
-- **Script:** none yet. **Deadline:** 1.2.
-- Guide: [An MCP proxy](guide.md#an-mcp-proxy); API: [solvi.solutions.guard](api/agents.md) (the proxy is rendered
-  there).
-
 ## `changes`
 
 One change pipeline for four sources (a document version, verified experience, a person's correction, a search
@@ -101,6 +92,8 @@ The smallest change of a decision's inputs that changes its answer (adverse-acti
 
 ## Graduated and removed
 
+- **Graduated in 1.1:** `mcp` — the MCP proxy with a guard is `solvi.serve`'s (`run_proxy`, `Proxy`, `Upstream`;
+  [guide](guide.md#an-mcp-proxy)); `solvi.experimental.mcp` re-exports it, with this warning, until 1.2.
 - **Graduated in 1.1:** `specialist` — the specialist contract is the stable `solvi.core.specialist`, its runs stored
   as records of kind "specialist" in a TraceStorage ([guide](guide.md#specialists-a-model-proposes-code-checks-the-store-keeps-the-run));
   `solvi.experimental.specialist` re-exports it, with this warning, until 1.2.

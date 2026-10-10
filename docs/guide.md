@@ -2511,37 +2511,11 @@ print(g.definition("refund", policies=True)["description"])
 The reasons are written for refusals and every line goes into each request, so it stays off unless you turn it on; the
 checks themselves are the same either way.
 
-### An MCP proxy
-
-```
-solvi serve --guard catalog.py:guard --upstream "npx -y @modelcontextprotocol/server-filesystem /work" --store calls.db
-```
-
-The proxy is an MCP server (stdio) in front of another one: `tools/list` returns the upstream tools the guard declares
-(`guard.declare("read_text_file")`: each takes the upstream `inputSchema`; the rest are hidden), and every `tools/call`
-passes the guard before it is forwarded. A denied call is an error result with the reasons; an escalated one asks the
-user through the client when it supports MCP elicitation (an approve yes / no form; `--escalate deny` turns that off),
-else it is an error result. Each result's `_meta.solvi` has the outcome, the stored id and the trace hash; `--facts
-'{"role": "viewer"}'` gives the policies their facts. The proxy does not see the user's messages: grounded arguments are
-looked up in the tool outputs of the session. An allowed call is forwarded with the arguments as the guard validated
-them (coerced to the schema's types — `"no"` for a boolean is sent as `false`, so what the checks read is what the
-server gets; arguments the client did not send are not added). The session keeps the last `--context-messages` (50) tool
-outputs, at most `--context-chars` (100 000) characters in all (0: no limit): each decision's trace records the context
-it was checked against, so the cap bounds what every stored decision holds; an output longer than the cap keeps its
-beginning and its instruction-like sentences, and an output that has left the window no longer grounds values or taints
-calls. A tool whose `inputSchema` cannot be read (a property pydantic refuses, such as `_x`) is still listed, with a
-permissive schema and a warning in the log, and every call of it escalates; a recursive `$ref` is followed once (inside
-itself it is any object); a tool whose arguments collide with the guard's facts is hidden. For an MCP client:
-
-```json
-{"mcpServers": {"files": {"command": "solvi", "args": ["serve", "--guard", "/path/to/catalog.py:guard",
-                                                       "--upstream", "npx -y @modelcontextprotocol/server-filesystem /work"]}}}
-```
-
 **Which frameworks.** solvi ships no framework adapter (the PydanticAI, LangGraph and OpenAI Agents SDK adapters were
 removed in 1.0: none had a measured run). The measured runs put the agent's tool calls through `guard.check` / `guard.call` directly, from the framework's
 own tool-execution step, and so can you: pass the framework's history to `guard.check` as messages, map an escalation to
-its human-in-the-loop mechanism, and keep `calls_made` per conversation for `once=True`. MCP has the proxy (above).
+its human-in-the-loop mechanism, and keep `calls_made` per conversation for `once=True`. MCP has the proxy
+([An MCP proxy](#an-mcp-proxy), in the serving chapter).
 Message shapes the guard does not recognise are read fail-closed (unknown blocks are tool outputs), but formats that
 merge the user's text with tool text (smolagents' "Observation:" user turns, AutoGen's and LlamaIndex's flattened chat
 memories) cannot be read back into roles: a user-grounded call may be denied there, and history compression (above)
@@ -2679,6 +2653,39 @@ only this endpoint. Without FastAPI, `solvi.serve.Service(system, decider)` answ
 - **JSON.** Responses are strict JSON: a non-finite float (an escalation threshold no calibration could meet is `inf`) is
   written as `{"$float": "inf"}` (`"-inf"`, `"nan"`), as in stored records and calibration files; `Response.from_json`
   reads it back as the float.
+
+### An MCP proxy
+
+```
+solvi serve --guard catalog.py:guard --upstream "npx -y @modelcontextprotocol/server-filesystem /work" --store calls.db
+```
+
+The proxy (stable since 1.1: `solvi.serve.run_proxy`, `Proxy`, `Upstream`; until then experimental) is an MCP server
+(stdio) in front of another one: `tools/list` returns the upstream tools the guard declares
+(`guard.declare("read_text_file")`: each takes the upstream `inputSchema`; the rest are hidden), and every `tools/call`
+passes the guard before it is forwarded. A denied call is an error result with the reasons; an escalated one asks the
+user through the client when it supports MCP elicitation (an approve yes / no form; `--escalate deny` turns that off),
+else it is an error result. Each result's `_meta.solvi` has the outcome, the stored id and the trace hash; `--facts
+'{"role": "viewer"}'` gives the policies their facts. The proxy does not see the user's messages: grounded arguments are
+looked up in the tool outputs of the session. An allowed call is forwarded with the arguments as the guard validated
+them (coerced to the schema's types — `"no"` for a boolean is sent as `false`, so what the checks read is what the
+server gets; arguments the client did not send are not added). The session keeps the last `--context-messages` (50) tool
+outputs, at most `--context-chars` (100 000) characters in all (0: no limit): each decision's trace records the context
+it was checked against, so the cap bounds what every stored decision holds; an output longer than the cap keeps its
+beginning and its instruction-like sentences, and an output that has left the window no longer grounds values or taints
+calls. A tool whose `inputSchema` cannot be read (a property pydantic refuses, such as `_x`) is still listed, with a
+permissive schema and a warning in the log, and every call of it escalates; a recursive `$ref` is followed once (inside
+itself it is any object); a tool whose arguments collide with the guard's facts is hidden. For an MCP client:
+
+```json
+{"mcpServers": {"files": {"command": "solvi", "args": ["serve", "--guard", "/path/to/catalog.py:guard",
+                                                       "--upstream", "npx -y @modelcontextprotocol/server-filesystem /work"]}}}
+```
+
+Measured against the real filesystem server (`@modelcontextprotocol/server-filesystem`, the script
+`benchmarks/mcp_proxy_filesystem.py`): 25 of 25 calls that broke a policy or carried an injection never reached the
+server, 30 of 30 allowed calls gave the same result as the server called directly, 5 of 5 malformed messages were
+answered with an error and no crash, 55 of 55 calls were stored and replayed, at about 15 ms of overhead a call.
 
 ## Text in: from a message to a question
 

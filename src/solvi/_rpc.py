@@ -1,5 +1,5 @@
 """What a request may be and how a refused one is answered, shared by solvi serve (HTTP and MCP over stdio) and the MCP
-proxy (solvi.experimental.mcp): Limits, the request errors, JSON parsed within the limits, the incident message for a failure
+proxy (solvi.serve.run_proxy): Limits, the request errors, JSON parsed within the limits, the incident message for a failure
 of the server itself, and a line reader bounded by the limits. Moved out of solvi.serve in 1.0 (which re-exports every
 name; the logger is still "solvi.serve"), so that the proxy does not import the server."""
 from __future__ import annotations
@@ -12,8 +12,8 @@ from typing import Optional
 
 log = logging.getLogger("solvi.serve")
 
-# the guard proxy's session context (solvi.experimental.mcp): here, so that `solvi serve`'s options can show the defaults
-# without importing the experimental module (and its warning) on every `solvi <command> -h`
+# the guard proxy's session context (solvi._mcp_proxy): here, so that `solvi serve`'s options can show the defaults
+# without importing the proxy on every `solvi <command> -h`
 CONTEXT_MESSAGES = 50            # the tool outputs the proxy's session keeps for checking
 CONTEXT_CHARS = 100_000          # ... and their characters in all
 

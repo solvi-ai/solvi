@@ -11,8 +11,8 @@ What marks them:
   `warnings.filterwarnings("ignore", category=solvi.ExperimentalWarning)`);
 - a decision made by a System that uses one records it: `meta["experimental"]` in the stored decision (the names, e.g.
   `["lora"]`), and the system report counts them;
-- nothing stable imports them, and the top-level `solvi` package does not re-export them. Two command-line entries load
-  one on request: `solvi hook` (hooks) and `solvi serve --upstream` (mcp).
+- nothing stable imports them, and the top-level `solvi` package does not re-export them. One command-line entry loads
+  one on request: `solvi hook` (hooks).
 
 Graduating needs a pre-registered bar, a script in `benchmarks/` that measures it, the bar met and reviewed, no import
 of anything experimental, a conformance check and a docs move; the old path is then kept for one release. A piece that
@@ -35,9 +35,6 @@ STATUS: dict[str, dict] = {
               "missing": "false deny and ask rates on real coding-agent sessions, with a script", "script": None},
     "charts": {"since": "0.7", "what": "verified charts: every number quoted from the text, a deterministic SVG",
                "missing": "accuracy on real texts with the rule-based and the LLM proposer", "script": None},
-    "mcp": {"since": "0.9", "what": "an MCP stdio proxy that puts the agent guard in front of `tools/call` "
-            "(`solvi serve --guard --upstream`)", "missing": "a measured run through the proxy against a real MCP "
-            "server", "script": None},
     "changes": {"since": "1.1", "what": "one change pipeline for four sources (a document version, verified "
                 "experience, a person's correction, a search proposal): pluggable stages, a journal of kind \"change\", "
                 "promote into the knowledge store / compiled versions / a labelled update, versions and rollback", "missing": "on a "
