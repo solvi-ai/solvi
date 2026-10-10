@@ -146,6 +146,18 @@ escalation label), or calibrate on a representative audit alone, and give new op
 minimum support. A confirmation on a held-out 30% of the labels decided nothing here: a candidate answers 3–4 of the
 held-out requests alone, which neither certifies nor refutes a 5% promise.
 
+**Labels on a stream do not raise what a fixed System 1 answers alone — budget them for new answerers, not thresholds.**
+On the bank-request stream of 2,000 (20 topics unseen from request 1,000) we fed one fixed classifier seven kinds of person
+labels — every escalated request, a 5% or 10% random audit, both with inverse-sampling weights, and an active policy that
+records each label's draw probability and moves the threshold only under an anytime-valid certificate — recalibrating the
+guarantee, the open-set gate and a refitted head every 200 requests. The promise (≤ 5% wrong among the answers given alone)
+held in every arm, and the share answered alone moved from 44.2% to at best 45.6%; the weights changed none of the 2,000
+decisions; a shared threshold for the new topics never certified (at 5% error and 80% availability a group needs about 180
+clean labels, the stream gave at most 174 with errors in them); the certificate never reached its bound at 10% or 30%
+labels (log-wealth 0.35 of the 2.30 needed). What labels do buy: more answers on known topics after a shift (+11 points) at
+the price of fewer before it (−5). If you want coverage on new kinds of input, plan for hundreds of labels per new option
+and a new answerer, and keep the person on the rest.
+
 **Fix a head's ridge strength when its answers go through a guarantee.** `fit` chooses λ by leave-one-out accuracy; a
 refit on more labels can choose a much smaller one, and the head's ranking of its own answers gets worse even when the
 added labels are right: on product matching, a head refitted on 808 instead of 300 pairs picked λ 0.1 and the error
