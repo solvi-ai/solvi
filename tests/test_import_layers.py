@@ -172,7 +172,7 @@ LOW_TIERS = {
     "guarantees": "core.guarantees",
     "records": "core.store core.response",
     "system": "core.system",
-    "deliberate": "core.slow core.dispatch",
+    "deliberate": "core.slow core.dispatch core.versions",          # versions: a module reads Fail (core.slow)
     "knowledge": "core.knowledge",
 }
 HIGH = "__init__ __main__ _command solutions check cli models serve show testing"

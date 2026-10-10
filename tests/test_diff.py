@@ -376,7 +376,7 @@ def test_decision_diff_only_by_the_inputs_id_or_position():
     import warnings
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
-        from solvi.experimental.compile import decision_diff
+        from solvi.core.versions import decision_diff
     apps = [{"id": "a1", "text": "pay", "amount": 500, "customer": "ann"},
             {"id": "a2", "text": "please pay", "amount": 50, "customer": "ann"},
             {"id": "a3", "text": "pay", "amount": 20, "customer": "ann"}]
@@ -405,7 +405,7 @@ def test_a_diff_with_decisions_that_could_not_be_re_run_is_not_exact(tmp_path):
     import warnings
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
-        from solvi.experimental.compile import decision_diff
+        from solvi.core.versions import decision_diff
     store, res = stored(tmp_path)
     ids = [r.stored_id for r in res]
     rep = diff(store, _failing_on_blocked(build(threshold=600)), only={ids[2]})

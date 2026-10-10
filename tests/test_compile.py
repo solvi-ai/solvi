@@ -1,15 +1,14 @@
 """solvi.experimental.compile: a specification split into clauses, catalog parts written by a model (a stand-in here) and accepted
 only when two drafts agree on generated inputs, pass the tests derived from the specification and keep the module
-contract; a revised specification recompiled part by part; the decisions a change moves, with the clauses why; versions
-that replay old decisions with the catalog that made them; compiled hard checks as guard policies."""
+contract; a revised specification recompiled part by part; compiled hard checks as guard policies. Spec, revise,
+Versions and decision_diff moved to the stable solvi.core.versions in 1.1: their tests are in tests/test_versions.py."""
 import json
 
 import pytest
 
 from solvi import Answer, Question
-from solvi.core.store import JSONLStorage
-from solvi.experimental.compile import (Inputs, Rejected, Spec, Versions, compile_spec, coverage, decision_diff, read_module,
-                           recompile, split_clauses, to_guard)
+from solvi.experimental.compile import (Compiled, Inputs, Rejected, Spec, compile_spec, coverage, read_module, recompile,
+                                        to_guard)
 
 POLICY = """# Shipping
 
@@ -81,25 +80,6 @@ class Writer:
         g = G()
         g.value, g.meta = (parse(reply) if parse else reply), {"text": reply}
         return g
-
-
-def test_paragraphs_list_items_and_table_rows_are_clauses_and_headings_name_their_section():
-    cl = split_clauses(POLICY)
-    assert cl == [("Shipping", "zone: domestic; fee: 5"), ("Shipping", "zone: world; fee: 20"),
-                  ("Shipping", "An order of 50 or more ships free."),
-                  ("Shipping", "Orders to the world zone heavier than 30 kg are refused.")]
-    s = Spec(POLICY)
-    assert list(s.clauses) == ["c1", "c2", "c3", "c4"] and "[c3] An order of 50" in s.render()
-    assert s.hash == Spec(POLICY).hash != Spec(POLICY.replace("50", "60")).hash
-
-
-def test_a_revised_specification_keeps_the_ids_of_unchanged_clauses_and_names_the_changes():
-    s = Spec(POLICY)
-    r = s.revise(POLICY.replace("50 or more", "60 or more").replace("are refused.", "are refused.\n- Gift cards ship free."))
-    assert r.changes == {"unchanged": ["c1", "c2", "c4"], "changed": ["c3"], "added": ["c5"], "removed": []}
-    assert r.clauses["c5"].text == "Gift cards ship free."
-    gone = s.revise(POLICY.replace("- Orders to the world zone heavier than 30 kg are refused.\n", ""))
-    assert gone.changes["removed"] == ["c4"] and "c4" not in gone.clauses
 
 
 def test_the_pool_holds_the_samples_the_drawn_inputs_and_boundary_values_around_the_numbers():
@@ -221,33 +201,6 @@ PARTS["zone_fee"] = {"kind": "fn", "clauses": ["c1"]}
     c2 = recompile(c1, c1.spec.revise(V2), INPUTS, Writer([[sneaky], [sneaky]], tests=[]), rounds=1, tests=0)
     assert not c2.accepted
     assert "zone_fee is added or replaced but cites no [changed] or [added] clause: add the one" in json.dumps(c2.record["rounds"])
-
-
-def test_the_decision_diff_lists_the_decisions_a_change_moves_with_the_clauses_of_their_causes():
-    c1 = compile_spec(Spec(POLICY), QS, INPUTS, Writer([[GOOD], [GOOD]]))
-    c2 = recompile(c1, c1.spec.revise(V2), INPUTS, Writer([[PATCH], [PATCH]], tests=[]), tests=0)
-    xs = [{"zone": "domestic", "total": t, "weight": 1} for t in (10, 50, 79, 80, 120)]
-    dd = decision_diff(c1, c2, inputs=xs)
-    assert [(d["seq"], d["old"], d["new"]) for d in dd.changed] == [(1, "free", "paid"), (2, "free", "paid")]
-    assert dd.changed[0]["causes"][0]["part"] == "free_shipping" and dd.changed[0]["causes"][0]["clauses"] == ["c3"]
-    assert str(dd).startswith("2 of 5 decisions change their answer") and len(dd.moved) == 2
-
-
-def test_versions_replay_each_stored_decision_with_the_catalog_that_made_it(tmp_path):
-    c1 = compile_spec(Spec(POLICY), QS, INPUTS, Writer([[GOOD], [GOOD]]))
-    c2 = recompile(c1, c1.spec.revise(V2), INPUTS, Writer([[PATCH], [PATCH]], tests=[]), tests=0)
-    v = Versions(tmp_path / "versions")
-    assert (v.add(c1, "v1"), v.add(c2, "v2")) == (1, 2) and len(v) == 2
-    assert v.find(c1.fingerprint) == 1 and v.get(2).source == c2.source
-    store = JSONLStorage(str(tmp_path / "d.jsonl"))
-    s1 = v.system(1, storage=store)
-    for t in (60, 70):
-        s1.ask({"zone": "domestic", "total": t, "weight": 1})
-    v.system(2, storage=store).ask({"zone": "domestic", "total": 90, "weight": 1})
-    assert v.replay_all(store) == []
-    assert len(store.replay_all(v.system(2))) == 2              # the v1 decisions do not recompute under v2
-    with pytest.raises(Rejected):
-        v.add(compile_spec(Spec(POLICY), QS, INPUTS, Writer([["x = 1"], ["x = 1"]]), rounds=1))
 
 
 def test_compiled_hard_checks_become_guard_policies_with_the_reasons_of_the_check():
@@ -590,3 +543,13 @@ NOT_NORMATIVE = {"c2": "the schema requires it"}
     assert d.outcome == "deny" and "[c1] A refund is at most 100." in " ".join(d.reasons)
     d = guard.call({"name": "refund", "arguments": {}}, context="refund")       # the compiled policy cannot answer
     assert d.outcome == "deny" and "cannot decide" in " ".join(d.reasons)
+
+
+def test_a_compilation_is_a_catalog_version_and_the_stable_versions_take_it(tmp_path):
+    from solvi.core.versions import CatalogVersion, Versions
+    c = compile_spec(Spec(POLICY), QS, INPUTS, Writer([[GOOD], [GOOD]]))
+    assert isinstance(c, Compiled) and isinstance(c, CatalogVersion)
+    assert c.system().experimental == ["compile"]                  # a compiled system still says it is experimental
+    v = Versions(tmp_path / "v")
+    assert v.add(c, "v1") == 1 and v.get(1).source == c.source and v.get(1).fingerprint == c.fingerprint
+    assert isinstance(Compiled.load(c.save(tmp_path / "c")), Compiled)

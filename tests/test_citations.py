@@ -14,7 +14,7 @@ from solvi.core.store.diff import diff
 with warnings.catch_warnings():
     warnings.simplefilter("ignore")
     from solvi.experimental.changes import Change, Pipeline, Static
-    from solvi.experimental.compile import Spec, decision_diff
+    from solvi.core.versions import Spec, decision_diff
 
 C1 = "An application is scored in points; the points decide."
 C7 = 'credit_amount_dm > 8000 → +2'
