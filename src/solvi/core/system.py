@@ -57,7 +57,7 @@ def _contracted(system, c, q, r, flow, trace):
     """An answer under its question's contract (solvi.core.contract): kept, or an abstention naming the violations."""
     from .contract import refusal
     init = trace.init
-    v = c.violations(r.answer, c.echo_inputs(init, _given_read(system, q, flow, init)))
+    v = c.violations(r.answer, c.echo_inputs(init, _given_read(system, q, flow, init)), echo_type=q.answer)
     if not v:
         return r
     return Result(None, 0.0, refusal(v, r.answer) + f" ({r.why})", "abstain", dict(r.probs or {}), r.provenance,

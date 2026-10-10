@@ -4418,7 +4418,7 @@ def asks_a_count(state) -> bool:
     """The text lists items to count."""
     return "items:" in state["text"]
 
-cat.contract("first_word", returns=str, echo=True, applicable=one_line)     # a question of a System
+cat.contract("first_word", returns=str, applicable=one_line)     # a question of a System (echo: free text, checked)
 slow = AskPath(system2, contract=Contract(applicable=asks_a_count))          # a slow path (else its catalog's contract)
 ```
 
@@ -4427,8 +4427,11 @@ slow = AskPath(system2, contract=Contract(applicable=asks_a_count))          # a
   against it).
 - `echo` — the answer must not be a given fact it was read from (a "summary" that is the text, a "label" that is the
   field it was handed): `True` — every given fact the question's rule reads, directly or through computed facts (for a
-  slow path: every given fact of the input); a list of names; `False` — off. Compared after normalisation: case and
-  spacing, and a number equals its digits.
+  slow path: every given fact of the input); a list of names; `False` — off. The default (`None`) follows the answer's
+  kind: free text — a span, a `str` answer, `returns=str` — is checked; a declared choice, yes / no, enumeration or
+  number is not, since such an answer may rightly equal an input field (a team that is the `team` field of the
+  ticket). An explicit `echo=` always overrides. Compared after normalisation: case and spacing, and a number equals
+  its digits.
 - `applicable(state) → bool` — a precondition over the given facts, checked *before* the answerer is called: an
   answerer is called because its question applies, not because the input has the right form. One that raises counts as
   not met.

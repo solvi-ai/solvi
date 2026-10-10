@@ -51,8 +51,10 @@ def test_echo_by_default_follows_the_answer_kind():
                                           echo_type=Answer.choice(["billing", "shipping"]))[0].code == "echo"
     assert Contract(echo=True).violations(3, inputs)[0].code == "echo"
     assert Contract(echo=False).violations("hello world", inputs) == []
-    assert Contract(echo=["text"]).violations("billing", inputs, echo_type=Answer.choice(["billing"])) == []
-    assert Contract(echo=["field"]).violations("billing", inputs, echo_type=Answer.choice(["billing"]))[0].code == "echo"
+    only_text, only_field = Contract(echo=["text"]), Contract(echo=["field"])              # the names pick the inputs
+    assert only_text.violations("billing", only_text.echo_inputs(inputs), echo_type=Answer.choice(["billing"])) == []
+    assert only_field.violations("billing", only_field.echo_inputs(inputs),
+                                 echo_type=Answer.choice(["billing"]))[0].code == "echo"
     assert Contract().fingerprint() != Contract(echo=True).fingerprint()
 
 

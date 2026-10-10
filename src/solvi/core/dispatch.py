@@ -262,7 +262,7 @@ class SlowPath(metaclass=_SlowPathType):
             raise ValueError(f"{type(self).__qualname__}.think returned a Thought of mode {th.mode!r}, not its own "
                              f"{self.mode!r}")
         if c is not None and th.accepted:             # a hard refusal: whatever the path's confidence
-            v = c.violations(th.answer, c.echo_inputs(state), _answer_type(self, q))
+            v = c.violations(th.answer, c.echo_inputs(state), _answer_type(self, q), echo_type=_echo_type(self, q))
             if v:
                 from .contract import refusal
                 th.accepted, th.why = False, refusal(v, th.answer)
@@ -519,6 +519,11 @@ def _answer_type(slow, question):
     return None if a is None or a.primitive and a.kind != "estimate" else a
 
 
+def _echo_type(slow, question):
+    """The question's answer type, for the echo default of a contract (free text is checked, a choice is not)."""
+    return getattr(slow.system.questions.get(slow.question or question), "answer", None)
+
+
 def _replay_thought(slow, th, state, question, trust_models=False):
     """A recorded Thought replayed with its contract: a "not applicable" must still not apply (and nothing ran); a
     path that ran must still apply; the record's own replay with the acceptance the path gave before the contract;
@@ -546,7 +551,8 @@ def _replay_thought(slow, th, state, question, trust_models=False):
     rep = slow.replay(inner, trust_models=trust_models)
     bad += list(rep.get("mismatches") or [])
     if inner.accepted and (c is not None or refused):
-        now = [x.to_dict() for x in c.violations(inner.answer, c.echo_inputs(state), _answer_type(slow, question))] \
+        now = [x.to_dict() for x in c.violations(inner.answer, c.echo_inputs(state), _answer_type(slow, question),
+                                                 echo_type=_echo_type(slow, question))] \
             if c is not None else []
         want = list((rec or {}).get("violations") or [])
         if now != want:

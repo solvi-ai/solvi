@@ -101,7 +101,7 @@ gates that block the tool. `guard.observe(decision, accepted)` tells the knowled
 
 ```python
 guard.firewall()                  # every slot value of a call is in the request (or a fact the app gives)
-cat.contract("intent", echo=True, applicable=lambda s: bool(s["text"].strip()))
+cat.contract("summary", applicable=lambda s: bool(s["text"].strip()))   # a summary that is the text: refused
 ```
 
 `guard.firewall()` checks every call of every tool deterministically: the arguments validate against the tool's

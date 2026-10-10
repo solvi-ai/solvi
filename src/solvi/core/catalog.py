@@ -1072,11 +1072,12 @@ class Catalog:
         self.rules[part.question] = part
         return part
 
-    def contract(self, question, *, returns=None, echo=True, applicable=None):
+    def contract(self, question, *, returns=None, echo=None, applicable=None):
         """Declare the contract of a question's answer (solvi.core.contract): returns — the type the answer must have
         (a Python type, a tuple of types or an answer type; None: the question's own, which a System already holds its
         answers to); echo — the answer must not equal a given fact it was read from (True: every given fact its rule
-        reads, directly or through computed facts; a list of names; False: off); applicable — a function of the given
+        reads, directly or through computed facts; a list of names; False: off; None, the default: by the answer's
+        kind — checked for free text such as a span, not for a declared choice, yes / no or number); applicable — a function of the given
         facts → bool checked before the question is computed. A broken contract is a hard refusal: the question
         abstains (guard "contract", or "not_applicable" without computing it), whatever the confidence. A System
         raises when the catalog has a contract for a question it does not ask. → the Contract."""

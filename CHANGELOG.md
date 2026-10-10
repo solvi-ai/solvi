@@ -29,7 +29,8 @@ calibration files and served by `solvi serve`), so a build from it is not mistak
   (schema) and 0.217 (schema + grounded), with 0.833 of the wanted calls made (amounts said in words go to a person).
 - **The answer contract (`solvi.core.contract`).** A certificate certifies execution, not reading: `Contract(returns=,
   echo=, applicable=)` states what reading the question right looks like — the answer's type matches what the
-  question asks, the answer is not the given fact it was read from, and a precondition is checked before the answerer
+  question asks, the answer is not the given fact it was read from (by default checked for free text, not for a
+  declared choice, yes / no, enumeration or number; `echo=` overrides), and a precondition is checked before the answerer
   is called. `Catalog.contract(question, ...)`: an answer that breaks it abstains whatever its confidence (guard
   `"contract"`, the violations in `Result.extra["contract"]`); a question whose precondition fails is not computed
   (guard `"not_applicable"`); new lifetime stats `contract_refused` and `not_applicable`; contracts are in the

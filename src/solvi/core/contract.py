@@ -10,15 +10,17 @@ contract states what reading the question right looks like, in three declarative
               question's declared answer type
   echo        the answer is not the input it was read from (a "summary" that is the text, a "label" that is the
               field it was given): True — every given fact the question's rule reads, directly or through computed
-              facts; a list of fact names; False — off. Compared after normalisation (case, spacing; a number and
-              its digits are one value)
+              facts; a list of fact names; False — off; None (the default) — by the answer's kind: checked for free
+              text (a str answer, a span, `returns=str`), not for a declared choice, yes / no, enumeration or number,
+              which may rightly equal an input field. An explicit value always overrides. Compared after
+              normalisation (case, spacing; a number and its digits are one value)
   applicable  a precondition `applicable(state) -> bool` over the given facts, checked BEFORE the answerer is called:
               an answerer is called because its question applies, not because the input has the right form. One that
               raises counts as not met.
 
 Where it applies (each violation is a hard refusal with a named reason, whatever the confidence):
 
-    cat.contract("first_word", returns=str, echo=True, applicable=one_line)     # in a System: the guard "contract"
+    cat.contract("first_word", returns=str, applicable=one_line)     # in a System: the guard "contract"
     AskPath(system2, contract=Contract(applicable=asks_a_count))               # a slow path: not called, not accepted
     class MySpecialist(Specialist):
         def applicable(self, source, question): ...                           # a specialist: blocked, not proposed
@@ -121,19 +123,20 @@ def _type_ok(answer, t):
 @dataclasses.dataclass(frozen=True)
 class Contract:
     """The contract of an answer (see the module docs). returns: a Python type, a tuple of types or an answer type
-    (None: the question's own); echo: True, a list of fact names, or False; applicable: a function of the given facts
+    (None: the question's own); echo: True, a list of fact names, False, or None (by the answer's kind: free text
+    only); applicable: a function of the given facts
     → bool (None: always applies)."""
     returns: Any = None
-    echo: Any = True
+    echo: Any = None
     applicable: Callable | None = None
 
     def __post_init__(self):
         if self.applicable is not None and not callable(self.applicable):
             raise TypeError("applicable is a function (state) -> bool")
-        if not isinstance(self.echo, bool):
+        if self.echo is not None and not isinstance(self.echo, bool):
             names = (self.echo,) if isinstance(self.echo, str) else tuple(self.echo)
             if not all(isinstance(x, str) for x in names):
-                raise TypeError("echo is True, False or a list of fact names")
+                raise TypeError("echo is True, False, None or a list of fact names")
             object.__setattr__(self, "echo", names)
         r = self.returns
         if r is not None and not _is_answer_type(r) and not isinstance(r, type) and not (
@@ -158,16 +161,34 @@ class Contract:
 
     def echo_inputs(self, given, read=None):
         """The given facts an answer must not equal: all those the answerer read (`read`; None — every given fact) when
-        echo is True, the named ones when echo names facts, none when False."""
+        echo is True or None, the named ones when echo names facts, none when False."""
         if self.echo is False:
             return {}
         names = self.echo if isinstance(self.echo, tuple) else (read if read is not None else list(given))
         return {k: given[k] for k in names if k in given}
 
-    def violations(self, answer, inputs=None, answer_type=None) -> list:
+    def echoes(self, answer, answer_type=None) -> bool:
+        """Is the echo clause checked for this answer? An explicit echo= decides; else (None) by the answer's kind:
+        free text — a span or a str answer type (`returns`, else the question's answer type, else the answer's own
+        value) — is checked; a declared choice, yes / no, ordinal, multi, rank, estimate, an enumeration, a number or
+        a bool is not."""
+        import enum
+        if self.echo is not None:
+            return self.echo is not False
+        t = self.returns if self.returns is not None else answer_type
+        if t is not None:
+            if _is_answer_type(t):
+                return t.kind == "span" and t.type in (None, str)
+            types = t if isinstance(t, tuple) else (t,)
+            return all(isinstance(x, type) and issubclass(x, str) and not issubclass(x, enum.Enum) for x in types)
+        return isinstance(answer, str) and not isinstance(answer, enum.Enum)
+
+    def violations(self, answer, inputs=None, answer_type=None, *, echo_type=None) -> list:
         """The clauses an answer breaks → [Violation] ([] when it keeps the contract; an answer of None — an
         abstention — is not checked). inputs: {fact: value} the answer must not equal (see echo_inputs);
-        answer_type: the question's, used when `returns` is None."""
+        answer_type: the question's, used for the type clause when `returns` is None and for the echo default;
+        echo_type: the question's answer type for the echo default only (a System, whose answers already hold their
+        type)."""
         if answer is None:
             return []
         out = []
@@ -177,7 +198,7 @@ class Contract:
             if not ok:
                 out.append(Violation("wrong_type", f"the answer {_short(answer)} ({type(answer).__name__}) is not "
                                                    f"{expected}"))
-        if self.echo is not False:
+        if self.echoes(answer, echo_type if echo_type is not None else answer_type):
             a = canon(answer)
             if a is not None:
                 same = sorted(k for k, v in (inputs or {}).items() if canon(v) == a)
@@ -204,7 +225,8 @@ class Contract:
                 co = getattr(f, "__code__", None)
                 code = co.co_code.hex() + repr(co.co_consts) if co is not None else type(f).__qualname__
             code = f"{getattr(f, '__qualname__', type(f).__qualname__)}\n{code}"
-        blob = repr((rt, list(self.echo) if isinstance(self.echo, tuple) else self.echo, code))
+        echo = list(self.echo) if isinstance(self.echo, tuple) else "auto" if self.echo is None else self.echo
+        blob = repr((rt, echo, code))
         return hashlib.sha256(blob.encode()).hexdigest()[:16]
 
 
