@@ -387,3 +387,30 @@ def test_decision_diff_only_by_the_inputs_id_or_position():
     bare = [{k: v for k, v in a.items() if k != "id"} for a in apps]
     by_position = decision_diff(build(), build(threshold=600, version="2"), inputs=bare, only={0})
     assert by_position.extraneous == [1] and not by_position.exact
+
+
+def _failing_on_blocked(system):
+    """The system, whose ask raises for the blocked customer: that decision cannot be re-run."""
+    real = system.ask
+
+    def ask(state, *a, **k):
+        if state.get("customer") == "blocked":
+            raise RuntimeError("the service is down")
+        return real(state, *a, **k)
+    system.ask = ask
+    return system
+
+
+def test_a_diff_with_decisions_that_could_not_be_re_run_is_not_exact(tmp_path):
+    import warnings
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        from solvi.experimental.compile import decision_diff
+    store, res = stored(tmp_path)
+    ids = [r.stored_id for r in res]
+    rep = diff(store, _failing_on_blocked(build(threshold=600)), only={ids[2]})
+    assert [e["id"] for e in rep.errors] == [ids[3]] and rep.extraneous == [] and rep.exact is False
+    apps = [{"id": "a1", "text": "pay", "amount": 500, "customer": "ann"},
+            {"id": "a2", "text": "pay", "amount": 10, "customer": "blocked"}]
+    dd = decision_diff(build(), _failing_on_blocked(build(threshold=600)), inputs=apps, only={"a1"})
+    assert dd.report.errors and dd.extraneous == [] and dd.exact is False
