@@ -65,6 +65,7 @@ quoted any more: their scripts were not ported here).
 |---|---|
 | `perturb_injection.py` | `perturb=k` against instructions appended to Bitext support messages: how often they are followed, what it costs |
 | `injection_review.py` | the guard's injection detector on a 1.0 review set: ordinary tool outputs flagged (11 of 12), reworded injections missed (14 of 20) |
+| `guard_firewall.py` | the guard's call firewall (`Guard.firewall`) on a synthetic irrelevance set (60 relevant, 120 irrelevant, 60 near-miss requests, each with a proposed call): false calls made with no guard, the schema check, schema + grounded (1.000 / 0.750 / 0.217), and the wanted calls still made (1.000 / 1.000 / 0.833); deterministic, under a second |
 | `fast_head.py`, `strategist_scale.py` | `fit` (the answer head and its selection) and the strategist at scale |
 | `ask_speed.py` | milliseconds per `ask` on small and large inputs (the README quickstart, the gallery, random catalogs of 50 and 1 000 parts, a 3.7k-float stream input): the README's Speed table |
 | `ask_overhead.py` | what solvi adds to one `ask` (every gallery entry and a decider project, no real model) |

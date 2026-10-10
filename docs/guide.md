@@ -2316,6 +2316,42 @@ nobody answers is a refusal. Under attack, calls with the attacker's value reach
 quote the injected instruction: what still gets through is what the reviewer approves — e-mails to real meeting
 participants, whose addresses came from the calendar, carrying an attacker's link, for one.
 
+**A call firewall: every slot from the request.** `ground=` names the arguments that must be quoted. For an agent
+that may call a tool on a request that does not ask for it — the model fills the slots with values it made up —
+`guard.firewall()` checks every slot of every call (or `guard.firewall(["book_train", "weather"])` for some tools; it
+also covers tools declared later):
+
+```python
+guard.firewall()                           # sources=("user",), facts=True, on_ungrounded="escalate"
+d = guard.check({"name": "weather", "arguments": {"city": "Berlin"}},
+                [{"role": "user", "content": "Tell me a joke about penguins."}])
+d.outcome          # "escalate" — d.reasons: ["not in the request: city='Berlin' (a person decides)"]
+d.slots            # {"city": {"value": "Berlin", "status": "missing", "why": "not in the request or the given facts"}}
+```
+
+Two deterministic checks. *Schema*: the arguments validate against the tool's declared schema — types, required
+arguments, enumerations — which every guard checks (`arguments_valid`, deny); under the firewall a tool whose schema
+could not be read is denied instead of escalated. *Grounded* (`slots_grounded`): every value the call sends — each
+argument, each nested field and list item — is written in the request (the messages of the roles in `sources=`,
+default the user's) or is one of the facts your app passes with the call (`facts=`; `facts=False` for the text
+only). Strings are found as whole words after normalisation (case, typographic dashes and quotes, Unicode spaces;
+`match="token" | "whole" | "substring"` for stricter or looser), numbers as digits of exactly their value. Exempt by
+their declaration: enumerations (a `Literal`, an `Enum`, a JSON-schema `enum` / `const`), booleans, null, empty
+strings, and the slots you name in `exempt=` (`"legs[].city"` for list items). Arguments the call does not send keep
+their defaults and are not slots. A call with a slot found nowhere escalates (`on_ungrounded="deny"` refuses it), and
+`d.slots` says per slot where it was found or why it was exempt; the report is the fact `slot_grounding` of the trace.
+Behind the MCP proxy the user's messages are not seen: declare `sources=("tool",)` there.
+
+What it catches and what it does not: `benchmarks/guard_firewall.py` runs a small synthetic set (60 requests that ask
+for a call, 120 that ask for none, 60 near misses that name a value but ask for something else; each with a proposed
+call). False calls made: 1.000 with no guard, 0.750 with the schema check alone, 0.217 with schema and grounding — the
+ones left are calls whose values are all in the request (a number copied from "what is 12 times 7?", a city the user
+named while asking about a cat). Of the requests that do ask for the call, 0.833 are made and the rest go to a person:
+an amount said in words ("fifty dollars") is not a digit. Whether a request asks for a call at all is a judgement;
+a model judge would catch more, but its verdict is not reproducible on replay, so the firewall has none — add
+`require_request` (next paragraph: word patterns of the user's own request) or the authorizer (a model, with its
+promise) when you need that judgement.
+
 **Actions without a user-given value.** Some actions carry nothing the user must give. "Book the best-rated hotel"
 takes the hotel from a search result. "Add it to my calendar" takes a title and a time the agent chose. "Read the
 article Bob posted" takes the URL from a message. Declaring those arguments as the user's denies every honest call.
@@ -2523,7 +2559,8 @@ memories) cannot be read back into roles: a user-grounded call may be denied the
 must be avoided.
 
 **Limits.** Grounding is literal: a paraphrased value ("two hundred fifty") is denied, and a value that appears in the
-conversation for another reason passes grounding (a policy or the authorizer has to catch it). The instruction-like rules
+conversation for another reason passes grounding (a policy or the authorizer has to catch it) — the firewall too: it
+stops calls with invented values, not calls on a request that names their values for another purpose. The instruction-like rules
 catch common wordings, not every injection. The authorizer is a model: its promise holds for calls like the ones it was
 calibrated on. The guard checks the calls an agent proposes; what a tool does once allowed is the tool's business.
 [examples/19_agent_guard.py](../examples/19_agent_guard.py) runs every case above with a scripted agent.
@@ -4366,6 +4403,45 @@ accepted, why, record, cost) — the "slow path alone" arm of a comparison. A sl
 `SlowPath(system2, propose=..., space=...)` still builds the matching built-in in 1.0.x, with a
 `SolviDeprecationWarning`.
 
+### The answer contract: type, echo, applicability
+
+A check that an answerer *runs* correctly — a program that passes its examples, a part that replays — does not say it
+was the right answerer for this input: a program that counts words, run on a question that asks for a name, returns a
+number, correctly. A certificate certifies execution, not reading. A contract (`solvi.core.contract`) states what
+reading the question right looks like, and its clauses are hard: they override any confidence, each with a named
+reason.
+
+```python
+from solvi.core.contract import Contract
+
+def asks_a_count(state) -> bool:
+    """The text lists items to count."""
+    return "items:" in state["text"]
+
+cat.contract("first_word", returns=str, echo=True, applicable=one_line)     # a question of a System
+slow = AskPath(system2, contract=Contract(applicable=asks_a_count))          # a slow path (else its catalog's contract)
+```
+
+- `returns` — the answer's type: a Python type or a tuple of them (an int is a float, a bool is not a number) or an
+  answer type; `None` — the question's own (a System already holds its answers to it; a slow path's answer is checked
+  against it).
+- `echo` — the answer must not be a given fact it was read from (a "summary" that is the text, a "label" that is the
+  field it was handed): `True` — every given fact the question's rule reads, directly or through computed facts (for a
+  slow path: every given fact of the input); a list of names; `False` — off. Compared after normalisation: case and
+  spacing, and a number equals its digits.
+- `applicable(state) → bool` — a precondition over the given facts, checked *before* the answerer is called: an
+  answerer is called because its question applies, not because the input has the right form. One that raises counts as
+  not met.
+
+In a System, an answer that breaks the contract abstains — `result.guard == "contract"`, `result.extra["contract"]`
+the violations, the reason in `result.why` — and a question whose precondition fails is not planned at all (`guard ==
+"not_applicable"`); the lifetime stats count both (`contract_refused`, `not_applicable`). Hard checks that force an
+answer (`then=`) are your answers and are not checked. In the dispatcher, a slow path whose contract does not apply is
+not called: a person gets the input and the decision records `s2.contract == {"applicable": False, "why": ...}`; an
+answer of the slow path that breaks the contract is not accepted (`s2.contract["violations"]`), and the person sees it
+as a candidate. Replay re-derives both, and the contract is part of the System's and the dispatcher's fingerprints.
+Specialists have the same clauses (`Specialist.applicable`, see [Specialists](#specialists-a-model-proposes-code-checks-the-store-keeps-the-run)).
+
 ### Budget and cost
 
 `budget=Budget(usd=, calls=, ms=, tokens=)` is per decision, `total=Budget(...)` for the dispatcher's life (`Budget`
@@ -4968,9 +5044,18 @@ source and re-renders it: identical issues and identical bytes, or a list of wha
 record, a check that gives other issues now, another specialist or version). `replay_runs(storage, specialist,
 sources)` does it for every stored run of that specialist (sources: the texts, or `{sha256: text}`).
 
-**Testing a specialist.** `solvi.testing.conformance.check_specialist(specialist, sources)` checks the contract —
-identical bytes, replay from the record and from the store, JSON records, blocked invalid proposals, an edited stored
-record caught; [corruption tests](testing.md#corruption-tests-for-specialists) (`solvi.testing.corrupt`) measure how
+**Called by applicability, never an echo.** A check that verifies the spec against the source says the specialist did
+its job right; it does not say this was its job. Override `applicable(source, question) → bool` to state the
+precondition (a chart specialist: the text has numbers to chart): when it is False — or raises — the run is blocked
+with the issue `not_applicable` and the proposer is not called, recorded and replayed like any blocked run. And an
+output that is not a text, or is the source itself (nothing was read from it), is withheld with the issue
+`wrong_type` or `echo`. Questions in a System and the dispatcher's slow path get the same contract from
+`solvi.core.contract` — see [the answer contract](#the-answer-contract-type-echo-applicability).
+
+**Testing a specialist.** `solvi.testing.conformance.check_specialist(specialist, sources, inapplicable=())` checks the
+contract — identical bytes, replay from the record and from the store, JSON records, blocked invalid proposals, an
+edited stored record caught, outputs that are texts and not their source, and on each `inapplicable` source a run
+blocked as `not_applicable` without a call to the proposer; [corruption tests](testing.md#corruption-tests-for-specialists) (`solvi.testing.corrupt`) measure how
 many misreadings its check catches. The first specialist is [verified charts](#verified-charts-a-specialist-that-checks-every-number)
 (experimental).
 

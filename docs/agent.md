@@ -97,6 +97,23 @@ query (`lambda s: km.snapshot(about=s["customer"])`).
 gives (`facts=`) — a predicted refusal denies the call, "unknown" leaves it to the other checks — and the agenda's
 gates that block the tool. `guard.observe(decision, accepted)` tells the knowledge what the environment did.
 
+## Tool calls: a firewall and contracts
+
+```python
+guard.firewall()                  # every slot value of a call is in the request (or a fact the app gives)
+cat.contract("intent", echo=True, applicable=lambda s: bool(s["text"].strip()))
+```
+
+`guard.firewall()` checks every call of every tool deterministically: the arguments validate against the tool's
+schema, and every value the call sends is written in the user's request or given by your app as a fact (numbers as
+digits; enumerations and booleans exempt). A call with an invented value escalates, with the slot named
+(`decision.slots`). It does not judge whether the request asks for the call: a model judge would, but its verdict
+does not replay. An answer's contract (`Catalog.contract`, a slow path's `contract=`, `Specialist.applicable`)
+refuses an answer of the wrong type or one that only repeats its input, and calls an answerer only when its
+precondition holds: a check that an answerer ran right does not say it was the right one for this input. See the
+guide: [a call firewall](guide.md#guarding-an-agents-tool-calls) and
+[the answer contract](guide.md#the-answer-contract-type-echo-applicability).
+
 ## What it does and does not promise
 
 - **Growth was shown in environments met again**: a crafting game and the Pokémon world map
@@ -116,6 +133,8 @@ gates that block the tool. `guard.observe(decision, accepted)` tells the knowled
   customer to confirm every item") can block the calls a customer wanted. `km.agenda.dry_run(recorded_successes)`
   reports, per gate, how many recorded successful actions it would have blocked.
 - **Justified risk reduces the cost of protection; it does not promise parity** with an agent without knowledge.
+- **The firewall stops calls with invented values, not calls whose values the request names for another reason**
+  (`benchmarks/guard_firewall.py`: on its synthetic set 0.217 of the false calls still pass, all of that kind).
 - The store has been measured to 10,000 items (`benchmarks/knowledge/retraction.py`), not beyond.
 
 Reference: [`solvi.solutions.agent`](api/solutions_agent.md), [`solvi.solutions.knowledge`](api/solutions_knowledge.md),
