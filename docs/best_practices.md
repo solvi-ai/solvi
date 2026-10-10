@@ -133,6 +133,19 @@ bank requests with new intents the LLM was right on 75% and its guarantee vouche
 was learned; its unverified answers, fed to all four channels at once, raised the share answered alone after the shift
 from 53% to 71% and the error among those from 16% to 20% (promise 5%), with more of the LLM's own mistakes copied.
 
+**A person's labels on what you escalated are the hard cases — weight them, or they tighten the threshold.** On a
+bank-request stream of 2,000 (20 of 77 topics unseen from request 1,000) a person labelled every escalated request and 5% of the
+answers given alone; every 200 requests the guarantee was recalibrated on the human set plus those labels, the open-set gate
+re-estimated with the labelled outside requests and the classifier refitted with a new topic as an option once it had 10 labels.
+The promise held (0.47% / 2.64% wrong among the answers given alone before / after the shift), but the share answered alone
+moved from 44.2% to 45.1%: before the shift it fell from 68.8% to 63.6% (the escalated requests are the ones the fast system
+gets wrong more often, so the threshold rose from 0.75 to 0.83), after it the known topics gained 11 points (31.9% → 42.9%)
+while the new topics, present in the head with 10–20 labels each, never passed the threshold calibrated on the old ones (7
+answers, all wrong). Weight such labels by the probability they were sampled with (an audit label at 5% counts 20× an
+escalation label), or calibrate on a representative audit alone, and give new options a threshold of their own with a
+minimum support. A confirmation on a held-out 30% of the labels decided nothing here: a candidate answers 3–4 of the
+held-out requests alone, which neither certifies nor refutes a 5% promise.
+
 **Fix a head's ridge strength when its answers go through a guarantee.** `fit` chooses λ by leave-one-out accuracy; a
 refit on more labels can choose a much smaller one, and the head's ranking of its own answers gets worse even when the
 added labels are right: on product matching, a head refitted on 808 instead of 300 pairs picked λ 0.1 and the error
@@ -222,9 +235,30 @@ command trees of real tools, an agent with a `WorldMap` kept across the tasks re
 fewer steps. Where everything is one step away (a site with a full sidebar) a map adds nothing, and it does not shorten
 the first exploration.
 
+**Charge a risk budget on every take, and expect no gain from it over a written agent's reflexes.** In a crafting game, `RiskBudget` placed where the written reflexes refuse the planner's action bought no achievements at any budget (−0.16 per episode at a budget of 1.0, −0.28 at 2.0, against the bar of +10%), and random takes at the same per-class rates did as well as the budgeted ones. With a key that charges a trade once per episode (the pattern of the agent example) the budget stopped bounding exposure: 29 takes for 0.56 charged, −23% steps lived. Pass no key, so every take is charged; and measure a risk policy against random takes before claiming it is justified.
+
 **A script is a strong baseline — measure against it.** On simulated support tickets a model with memory solved as many
 as a short script did; on incidents a runbook resolved far more than the model. What solvi adds to a model-driven agent
 is that every step is checked, recorded and replayable, not that the model beats the rules.
+
+## Specialists (a model proposes, code checks)
+
+**Expect a second reader to buy exactness and cost half the coverage; let the arithmetic vouch where it can.** On receipts
+(SROIE and CORD v2 test sets, 1,923 gold fields) an open OCR model alone read 88% of the fields right; accepting a field only
+when a second OCR engine read the same digits in the same place and the receipt's sums held raised that to 96.4% with no
+accepted total failing its arithmetic, but 64% of the fields went to "needs review" or "conflict": the second engine confirmed
+39–60% of the first one's fields, and a sum can only vouch for a field that takes part in one (most item lines carry no unit
+price). Reading the second engine on the first one's word boxes (41% coverage on calibration) and dropping it for money fields
+with a passing sum (41%) moved coverage by a few points, not to the 70% we wanted. Budget for the review queue before promising
+coverage, and put the budget where the fields have no equation neighbours (names, dates).
+
+**Normalise numbers the same way on both sides before judging a transcript, and look at what the two readers agreed on.**
+Two speech models of different families (faster-whisper small, a Kaldi model) aligned in time gave 0 false words on 400
+non-speech clips and caught 299 of 300 injected corruptions, yet among the numbers they agreed on only 90% (Russian) and 86%
+(English) matched the reference text: 21 of the 22 misses were clock times ("10:00") and ratios ("3:2") that our rule
+normaliser tokenised one way in the reference and another in the hypothesis; one per language was a real mishearing. A
+threshold rule that demands 99% on a dev set with such misses picks a corner (English: 13% coverage at p ≥ 0.99). Fix the
+tokeniser first; agreement of two readers is the check that works.
 
 ## Tools (the agent guard)
 
