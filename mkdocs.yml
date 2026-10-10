@@ -162,6 +162,7 @@ nav:
           - solvi.experimental.hooks: api/hooks.md
           - solvi.experimental.charts: api/charts.md
           - solvi.experimental.changes: api/changes.md
+          - solvi.experimental.laws: api/laws.md
   - Changelog: changelog.md
   - Roadmap: roadmap.md
 

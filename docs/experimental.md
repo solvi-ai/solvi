@@ -24,7 +24,7 @@ keeps working for one release. **Removal**: a piece that has not graduated by it
 is removed and the negative result published.
 
 Each section below gives the piece's `STATUS` entry: what it is, since when it exists, what it is missing to graduate,
-the script that measures it (one so far: `changes`) and where the guide describes it.
+the script that measures it (`changes`, `laws`) and where the guide describes it.
 
 ## `lora`
 
@@ -79,6 +79,20 @@ and rollback (`solvi.experimental.changes.Pipeline(stages, storage, store=...)`)
   docstring of `solvi.experimental.changes`; the library pieces it uses are stable:
   sensitive fields and citations in [solvi check](guide.md#checking-a-catalog-solvi-check), `only=` in
   [solvi diff](guide.md#catalog-fingerprint-solvi-diff-and-shadow-mode).
+
+## `laws`
+
+Laws of an environment from prediction mismatches, judged by the environment, never by a model
+(`solvi.experimental.laws`): a grammar of boolean atoms you write, candidates "for this action, under this condition,
+the effect is this" from each wrong prediction, acceptance only by a held-out test on other worlds, sessions or paths,
+most specific first, retirement when the held-out precision falls, a probe planner for live systems (`split`,
+`discriminate`: read-only before write) and export into the knowledge store (`LawSet.to_knowledge`). Since 1.1.
+
+- **Missing:** on a game simulator with written mechanics the laws closed 94% of the gap between a learned map and the written mechanics, but random candidates under the same test came within 1.1 points, so the mismatch is a compact proposal heuristic and the test does the work; on a real MCP filesystem server with a path policy, probes planned from mismatches took refusals from 6 to 0 in one session (random probes: 48 to 29); still missing: a grammar too large to enumerate, retirement of weak laws nothing contradicts, wiring into a System's decisions, and a script for the two stands (the toys: benchmarks/laws_toy.py).
+- **Script:** `benchmarks/laws_toy.py` (two deterministic toys that reproduce both findings in miniature; `pytest -m
+  slow tests/test_laws_toy.py`). **Deadline:** 1.2.
+- Guide: [Laws from an environment](best_practices.md#laws-from-an-environment-the-test-is-the-judge); API:
+  [solvi.experimental.laws](api/laws.md).
 
 ## Graduated and removed
 

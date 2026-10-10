@@ -46,6 +46,16 @@ STATUS: dict[str, dict] = {
                 "rollback; still missing: the narrows / widens classifier over rule conditions, a regression-scenario "
                 "stage, and a script for the bank-request stream (the credit numbers: benchmarks/changes_credit.py)",
                 "script": "benchmarks/changes_credit.py"},
+    "laws": {"since": "1.1", "what": "laws of an environment from prediction mismatches: a grammar of atoms you "
+             "write, candidates from each mismatch, acceptance only by a held-out test on other groups (worlds, "
+             "sessions, paths), most specific first, retirement on falling precision, a probe planner for live "
+             "systems, export into the knowledge store", "missing": "on a game simulator with written mechanics the "
+             "laws closed 94% of the gap between a learned map and the written mechanics, but random candidates under "
+             "the same test came within 1.1 points, so the mismatch is a compact proposal heuristic and the test does "
+             "the work; on a real MCP filesystem server with a path policy, probes planned from mismatches took "
+             "refusals from 6 to 0 in one session (random probes: 48 to 29); still missing: a grammar too large to "
+             "enumerate, retirement of weak laws nothing contradicts, wiring into a System's decisions, and a "
+             "script for the two stands (the toys: benchmarks/laws_toy.py)", "script": "benchmarks/laws_toy.py"},
 }
 for _s in STATUS.values():
     _s["deadline"] = DEADLINE
