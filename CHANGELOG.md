@@ -87,8 +87,26 @@ calibration files and served by `solvi serve`), so a build from it is not mistak
   `split_clauses` lives here now (still importable from `solvi.check`). The change pipeline and
   `benchmarks/changes_credit.py` import it; a version promoted by `VersionsTarget` is rolled back in the folder too.
 
+- **The specialist contract graduates: `solvi.core.specialist` (graduated from experimental: `Specialist`, `Run`,
+  `Replay`, `Checked`, `Issue`, the severities, `canonical`, `sha256`, and the two-reader alignment `Reading`, `Agreed`,
+  `Alignment`, `align`, `interval_overlap`, `box_iou` — the trace on the core store).** `Specialist(proposer=None,
+  storage=None)`: with a TraceStorage (or a path) every `run` is one record of kind `"specialist"` in the store's hash
+  chain — the chain the decisions use, so `verify()` catches an edited run — holding the source's hash and length, the
+  proposer, the proposal, the check's issues / kept / verified / meta, the renderer, the output's hash and size, the head
+  of the run's own chain and the specialist's `fingerprints()` when it reports them; `Run.stored_id` names it and
+  `Run.to_dict()` keeps its shape. `specialist.replay(record_or_id, source=None, storage=None)` re-checks and re-renders
+  from a stored record (identical issues and bytes, or what differs); `replay_runs(storage, specialist, sources)` replays
+  every stored run of a specialist. `solvi report --overview` counts the runs per specialist.
+  `solvi.testing.conformance.check_specialist` adds the store path (`stored`, `store_replayed`, `edit_caught`).
+  Measured under the contract in 2026-10 (stands outside the repository, no script here): receipt OCR caught 84% of
+  corruptions and speech to text 99.7%, both resting on two readers aligned by `align`; neither specialist ships, and
+  charts (`ChartSpecialist(..., storage=)`) stays experimental until its accuracy is measured on real texts.
+
 ### Changed
 
+- **`solvi.experimental.specialist` re-exports `solvi.core.specialist` for one release**, as the same objects, with an
+  `ExperimentalWarning` naming the new path; it is removed in 1.2, and `STATUS["specialist"]` is gone. The 0.9 path
+  `solvi.specialist` now resolves to `solvi.core.specialist`; fingerprints keep naming it `solvi.specialist`.
 - **`solvi.experimental.compile` re-exports what moved to `solvi.core.versions`** (`Spec`, `Clause`, `Versions`,
   `DecisionDiff`, `decision_diff`, `Rejected`, `split_clauses`, `build_catalog`, and `CatalogVersion`) for one
   release, as the same objects; import them from `solvi.core.versions` (the compiler's copies go in 1.2).
@@ -336,7 +354,7 @@ building blocks they are made of, and `solvi.experimental` holds what may still 
 | `solvi.search` | `solvi.core.slow.search` | low level: building blocks |
 | `solvi.sets` | `solvi.core.sets` | low level: building blocks |
 | `solvi.signature` | `solvi.core.store.signature` | low level: building blocks |
-| `solvi.specialist` | `solvi.experimental.specialist` | experimental: may change; removed in 1.2 unless it graduates |
+| `solvi.specialist` | `solvi.core.specialist` | low level: building blocks |
 | `solvi.storage` | `solvi.core.store` | low level: building blocks |
 | `solvi.strategist` | `solvi.core.plan.strategist` | low level: building blocks |
 | `solvi.strategy` | `solvi.core.plan.cost` | low level: building blocks |

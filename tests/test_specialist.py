@@ -200,10 +200,14 @@ def test_a_storage_given_as_a_path(tmp_path):
 
 # ------------------------------------------------------------------------------------------------ the move
 def test_the_old_path_re_exports_the_same_objects_with_the_experimental_warning():
+    import importlib
+
+    import solvi.experimental
     sys.modules.pop("solvi.experimental.specialist", None)
+    vars(solvi.experimental).pop("specialist", None)
     from solvi.core import ExperimentalWarning, specialist
     with pytest.warns(ExperimentalWarning, match="graduated in 1.1.*solvi.core.specialist"):
-        from solvi.experimental import specialist as old
+        old = importlib.import_module("solvi.experimental.specialist")
     for name in specialist.__all__:
         assert getattr(old, name) is getattr(specialist, name), name
     from solvi.experimental import STATUS

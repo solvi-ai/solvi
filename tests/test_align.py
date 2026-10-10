@@ -3,7 +3,6 @@ overlap of their spans — time intervals (speech), boxes (receipts), character 
 import json
 import random
 import re
-import warnings
 from pathlib import Path
 
 import pytest

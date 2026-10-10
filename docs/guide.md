@@ -46,14 +46,15 @@ own. [Building blocks](building_blocks.md) has one reference per extension point
 23. [System 1 and System 2 on a game: the Pokémon world map](#system-1-and-system-2-on-a-game-the-pokémon-world-map)
 24. [Extracting fields from documents](#extracting-fields-from-documents)
 25. [Versions of a document and their impact: solvi.core.versions](#versions-of-a-document-and-their-impact-solvicoreversions)
+26. [Specialists: a model proposes, code checks, the store keeps the run](#specialists-a-model-proposes-code-checks-the-store-keeps-the-run)
 
 **Experimental** — `solvi.experimental`: works and is tested, no measured gain yet; its API may change, and each piece
 graduates or is removed by 1.2 ([Experimental](experimental.md) lists what each one is missing).
 
-26. [solvi behind a coding agent's hooks](#solvi-behind-a-coding-agents-hooks)
-27. [A specification compiled into the catalog: solvi.experimental.compile](#a-specification-compiled-into-the-catalog-solviexperimentalcompile)
-28. [Verified charts: a specialist that checks every number](#verified-charts-a-specialist-that-checks-every-number)
-29. [The change pipeline: solvi.experimental.changes](#the-change-pipeline-solviexperimentalchanges)
+27. [solvi behind a coding agent's hooks](#solvi-behind-a-coding-agents-hooks)
+28. [A specification compiled into the catalog: solvi.experimental.compile](#a-specification-compiled-into-the-catalog-solviexperimentalcompile)
+29. [Verified charts: a specialist that checks every number](#verified-charts-a-specialist-that-checks-every-number)
+30. [The change pipeline: solvi.experimental.changes](#the-change-pipeline-solviexperimentalchanges)
 
 ## Quick start: solvi.build
 
@@ -4939,6 +4940,96 @@ a fingerprint, and `replay_all(store)` replays each stored decision with the ver
 decisions keep verifying after the rules changed; a decision made by a catalog that is no version here is reported.
 The change pipeline (`solvi.experimental.changes`, `VersionsTarget`) promotes into a `Versions` and rolls it back.
 
+## Specialists: a model proposes, code checks, the store keeps the run
+
+A specialist does one job on a source — a chart from a press release, the fields of a receipt, the words of a
+recording — under one contract (`solvi.core.specialist`, stable since 1.1; until then `solvi.experimental.specialist`,
+which re-exports it for one release):
+
+1. **propose** — a proposer (a small model, an LLM, a rule-based extractor) writes a typed intermediate spec (a pydantic
+   model), never the result itself;
+2. **check** — deterministic code verifies the spec against the source and the specialist's rules; what does not verify
+   is dropped or changed, each with a reason (an `Issue`: severity `dropped` / `changed` / `warning` / `blocked`, a
+   stable code, a message, the path in the spec) — marked, never invented or repaired by a guess;
+3. **render** — deterministic code builds the result from the verified spec only (same verified spec → same bytes);
+4. **trace** — the source's hash, the proposal, the check and the output's hash go into the run's own hash chain
+   (`run.trace`) and, with a storage, into one record of kind `"specialist"` in the store's chain.
+
+```python
+from pydantic import BaseModel
+from solvi.core.specialist import Checked, Issue, Specialist, replay_runs
+
+class Item(BaseModel):
+    label: str
+    value: int
+    quote: str
+
+class Items(BaseModel):
+    items: list[Item]
+
+class Numbers(Specialist):
+    name, version, spec_type = "numbers", "1", Items
+
+    def check(self, spec, source):                 # → Checked(verified spec or None, issues, kept lines, meta)
+        kept = [x for x in spec.items if x.quote in source and str(x.value) in x.quote]
+        issues = [Issue("dropped", "quote_outside", f"{x.label}: not in the source") for x in spec.items if x not in kept]
+        return Checked(Items(items=kept) if kept else None, issues, [f"{x.label} = {x.value}" for x in kept])
+
+    def render(self, checked):                     # from the verified spec only
+        return "\n".join(f"{x.label}: {x.value}" for x in checked.verified.items)
+
+sp = Numbers(my_proposer, storage="runs.jsonl")    # a TraceStorage or a path; the decisions' store works too
+run = sp.run(text, "sales by region")
+run.output, run.issues, print(run.report())        # the result (None when nothing verified), the issues, kept / dropped
+sp.replay(run.stored_id, text).ok                  # from the stored record: the same issues, the same bytes
+replay_runs(sp.storage, Numbers(), [text])         # every stored run of this specialist → [] when all replay
+```
+
+A proposer is any callable `(source, question) → spec | dict | JSON` (its `id`, when it has one, names it); it is never
+trusted and never replayed — its output is recorded and checked. A failing proposer or an invalid proposal blocks the
+run (a `blocked` issue, no output), recorded too.
+
+**The record.** With `storage=`, every `run` appends one record of kind `"specialist"`: `specialist`, `version`,
+`question`, `source_sha256` and `source_chars` (the source itself is not stored — pass it to `replay`), `proposer`,
+`proposal` (for a blocked run the raw proposal and `proposal_error`), the check's `issues`, `kept`, `verified` and
+`meta`, `renderer`, `output_sha256`, `output_bytes`, `trace_head` (the head of the run's own chain) and `fingerprints`
+when the specialist reports them (`fingerprints()` → e.g. the model's and the renderer's). It is in the same hash chain
+as the decisions, so `store.verify()` catches an edited run, and `solvi report --overview` counts the runs per
+specialist. `run.stored_id` names the record; `run.to_dict()` keeps its shape and replays without a store.
+
+**Replay.** `specialist.replay(record_or_id, source=None, storage=None)` re-checks the recorded proposal against the
+source and re-renders it: identical issues and identical bytes, or a list of what differs (another source, an edited
+record, a check that gives other issues now, another specialist or version). `replay_runs(storage, specialist,
+sources)` does it for every stored run of that specialist (sources: the texts, or `{sha256: text}`).
+
+**Testing a specialist.** `solvi.testing.conformance.check_specialist(specialist, sources)` checks the contract —
+identical bytes, replay from the record and from the store, JSON records, blocked invalid proposals, an edited stored
+record caught; [corruption tests](testing.md#corruption-tests-for-specialists) (`solvi.testing.corrupt`) measure how
+many misreadings its check catches. The first specialist is [verified charts](#verified-charts-a-specialist-that-checks-every-number)
+(experimental).
+
+### Two readers: agreement on aligned spans
+
+A second, independent reader of the same source is the strongest check a specialist has. `align(a, b, overlap=...,
+min_overlap=0.5, same=None, min_a=0.0, min_b=0.0)` in `solvi.core.specialist` matches two readers' `Reading`s
+one-to-one by the overlap of their spans — greedy by descending overlap, ties by input order, so it is deterministic —
+and returns what both read (`agreed`, each with both spans and confidences), what they read differently on one span
+(`conflicts`) and what only one of them read (`only_a`, `only_b`). Time, boxes and character offsets are one function:
+
+```python
+from solvi.core.specialist import Reading, align, box_iou, interval_overlap
+
+words = align([Reading("1990", (0.96, 1.66), 0.86)], [Reading("1990", (0.95, 1.70), 1.0)],
+              overlap=interval_overlap)                     # two speech models' words by time
+boxes = align([Reading("TOTAL", (149, 461, 185, 479))], [Reading("TOTAL", (150, 464, 184, 477))],
+              overlap=box_iou, same=lambda x, y: x.strip() == y.strip())    # two OCR engines' words by box
+```
+
+Nothing in it decides acceptance: the check accepts from `agreed` and turns `conflicts` into a conflict or a review;
+the thresholds are the task's. On two stands this was the mechanism behind the measured gains: speech (two models'
+words aligned in time) gave 0 false words on 400 non-speech clips and caught 299 of 300 corruptions, receipts (two OCR
+engines' words aligned by box) went from 88% to 96.4% exact among accepted fields.
+
 ## solvi behind a coding agent's hooks
 
 > **Experimental** (`solvi.experimental.hooks`, since 0.7.1; what it is missing: [Experimental](experimental.md)).
@@ -5380,7 +5471,7 @@ pass them.
 
 Chart makers and LLMs get numbers wrong: a swapped digit, a share that was never in the text, a percentage drawn as a
 count, a pie of answers that add up to 108%. `solvi.experimental.charts` turns a text into an SVG chart in four steps — the contract
-of every specialist (`solvi.experimental.specialist.Specialist`):
+of every [specialist](#specialists-a-model-proposes-code-checks-the-store-keeps-the-run) (`solvi.core.specialist.Specialist`):
 
 1. **propose** — a proposer writes a typed `ChartSpec` (pydantic): the chart type (`bar`, `line`, `pie`), a title, a unit
    and a scale, series of labelled values, and for every value the passage of the text it was read from;
@@ -5462,28 +5553,6 @@ layout is conservative rather than exact. Charts are bar, line and pie, one unit
 dual-axis charts yet. Tables, slides and speech are the next specialists.
 
 See [examples/21_verified_chart.py](../examples/21_verified_chart.py).
-
-### Two readers: agreement on aligned spans
-
-A second, independent reader of the same source is the strongest check a specialist has. `align(a, b, overlap=...,
-min_overlap=0.5, same=None, min_a=0.0, min_b=0.0)` in `solvi.experimental.specialist` matches two readers' `Reading`s
-one-to-one by the overlap of their spans — greedy by descending overlap, ties by input order, so it is deterministic —
-and returns what both read (`agreed`, each with both spans and confidences), what they read differently on one span
-(`conflicts`) and what only one of them read (`only_a`, `only_b`). Time, boxes and character offsets are one function:
-
-```python
-from solvi.experimental.specialist import Reading, align, box_iou, interval_overlap
-
-words = align([Reading("1990", (0.96, 1.66), 0.86)], [Reading("1990", (0.95, 1.70), 1.0)],
-              overlap=interval_overlap)                     # two speech models' words by time
-boxes = align([Reading("TOTAL", (149, 461, 185, 479))], [Reading("TOTAL", (150, 464, 184, 477))],
-              overlap=box_iou, same=lambda x, y: x.strip() == y.strip())    # two OCR engines' words by box
-```
-
-Nothing in it decides acceptance: the check accepts from `agreed` and turns `conflicts` into a conflict or a review;
-the thresholds are the task's. On two stands this was the mechanism behind the measured gains: speech (two models'
-words aligned in time) gave 0 false words on 400 non-speech clips and caught 299 of 300 corruptions, receipts (two OCR
-engines' words aligned by box) went from 88% to 96.4% exact among accepted fields.
 
 ## The change pipeline: solvi.experimental.changes
 

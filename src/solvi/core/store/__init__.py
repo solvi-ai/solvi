@@ -12,6 +12,7 @@ Every stored decision is one record (a dict of plain JSON):
                   corrects; for "verified", the System 2 decision the label is);
   kind "update"   a labelled update (solvi.experimental.changes, LearningTarget): what changed, the gates' results, the state
                   to roll back to;
+  kind "specialist" a specialist's run (solvi.core.specialist): the source's hash, the proposal, the check, the output's hash;
   every record    seq (0, 1, 2, ...), time (seconds since the epoch), meta (optional, yours; a decision made with
                   solvi.experimental pieces has meta["experimental"]: their names), prev and hash.
 

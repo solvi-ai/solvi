@@ -114,6 +114,7 @@ nav:
           - solvi.core.store.signature: api/signature.md
           - solvi.core.store.diff: api/diff.md
           - solvi.core.versions: api/versions.md
+          - solvi.core.specialist: api/specialist.md
           - solvi.core.slow.generate: api/generate.md
           - solvi.core.slow.agree: api/agree.md
           - solvi.core.slow.refine: api/refine.md
@@ -158,7 +159,6 @@ nav:
           - solvi.experimental.compile: api/compile.md
           - solvi.experimental.compile.sandbox: api/sandbox.md
           - solvi.experimental.hooks: api/hooks.md
-          - solvi.experimental.specialist: api/specialist.md
           - solvi.experimental.charts: api/charts.md
           - solvi.experimental.mcp: api/mcp.md
           - solvi.experimental.changes: api/changes.md

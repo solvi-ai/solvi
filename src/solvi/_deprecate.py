@@ -102,6 +102,7 @@ MOVED: dict[str, str] = {
     "solvi.experimental.lora": "solvi.lora",
     "solvi.experimental.compile.sandbox": "solvi.sandbox",
     "solvi.experimental.specialist": "solvi.specialist",
+    "solvi.core.specialist": "solvi.specialist",                     # graduated in 1.1 (the old path re-exports it)
     "solvi.experimental.counterfactual": "solvi.counterfactual",     # removed for 1.0, restored as experimental
     # 1.0 layout, the high level (solvi.solutions.*, the cli and testing packages)
     "solvi.solutions.decisions": "solvi.auto",

@@ -56,15 +56,6 @@ hook schema). Since 0.7.1.
 - Guide: [solvi behind a coding agent's hooks](guide.md#solvi-behind-a-coding-agents-hooks);
   API: [solvi.experimental.hooks](api/hooks.md); runnable: `examples/22_coding_agent_hooks.py`.
 
-## `specialist`
-
-The propose → check → render specialist pattern. Since 0.7.
-
-- **Missing:** a specialist that ships, with a script in benchmarks/: two model types were measured under the contract in 2026-10, with solvi.testing.corrupt as the corruption test — receipt OCR (84% of corruptions caught) and speech to text (99.7% caught) — and neither ships (36% of receipt fields accepted; 90% / 86% of accepted spoken numbers exact); both rest on two readers aligned by `align` (time, boxes); charts has no accuracy number yet.
-- **Script:** none yet. **Deadline:** 1.2.
-- API: [solvi.experimental.specialist](api/specialist.md); the corruption test:
-  [solvi.testing.corrupt](testing.md#corruption-tests-for-specialists).
-
 ## `charts`
 
 Verified charts: every number quoted from the text, a deterministic SVG. Since 0.7.
@@ -108,8 +99,11 @@ The smallest change of a decision's inputs that changes its answer (adverse-acti
 - Guide: [Counterfactual explanations](guide.md#counterfactual-explanations-experimental-solviexperimentalcounterfactual);
   API: [solvi.experimental.counterfactual](api/counterfactual.md).
 
-## Removed
+## Graduated and removed
 
+- **Graduated in 1.1:** `specialist` — the specialist contract is the stable `solvi.core.specialist`, its runs stored
+  as records of kind "specialist" in a TraceStorage ([guide](guide.md#specialists-a-model-proposes-code-checks-the-store-keeps-the-run));
+  `solvi.experimental.specialist` re-exports it, with this warning, until 1.2.
 - **1.1:** `oncalib` (recalibrating a guarantee on the fly from outcomes: it broke the promise — recalibrate explicitly,
   `System.guarantee(..., corrections=True)`, on a schedule or after a drift flag) and `learning` (the learning loop: no
   measurable gain on streams of one kind of decision; a labelled update is now a candidate change of

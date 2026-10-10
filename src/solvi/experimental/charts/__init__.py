@@ -6,7 +6,7 @@
     open("chart.svg", "w").write(run.output)               # None when nothing verified
     print(run.report())                                     # kept / dropped / changed, and why
 
-The first specialist of `solvi.experimental.specialist`: a proposer writes a ChartSpec (a chart type, series of labelled values,
+The first specialist of `solvi.core.specialist`: a proposer writes a ChartSpec (a chart type, series of labelled values,
 each value with its quote in the text, a unit, a scale, a title); the checker verifies every value — the quote is in
 the text, it holds that number (thousands separators, decimals, "4.2 billion", "15%", "1 500 000 руб" are read; an
 ambiguous "1.000" or "3 100" is not), with the chart's unit (percent is not percentage points, dollars are not euros,
@@ -16,7 +16,7 @@ the report says what was dropped and why, and the chart marks the gap. The rende
 SVG from the verified values only, and the trace replays: the same checks, the same bytes."""
 from __future__ import annotations
 
-from ..specialist import Checked, Specialist
+from ...core.specialist import Checked, Specialist
 from .check import ChartChecker, canon_unit
 from .propose import FixedProposer, LLMProposer, RuleProposer, spec_json_schema
 from .render import PALETTE, Drawing, contrast, render_svg
@@ -34,8 +34,8 @@ class ChartSpecialist(Specialist):
     version = "1"
     spec_type = ChartSpec
 
-    def __init__(self, proposer=None, *, decimal=None):
-        super().__init__(proposer or RuleProposer())
+    def __init__(self, proposer=None, *, decimal=None, storage=None):
+        super().__init__(proposer or RuleProposer(), storage=storage)
         self.checker = ChartChecker(decimal=decimal)
 
     def check(self, spec, source) -> Checked:
