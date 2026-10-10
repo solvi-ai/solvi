@@ -36,6 +36,21 @@ picks the safe probe whose predicted outcomes split the hypotheses most — read
 `discriminate(laws_a, laws_b, safe, probes)` the cheapest safe probe where two law sets differ; `lawset.hypothesis(c)`
 is the set with one candidate added, so a mismatch's candidates become hypotheses to tell apart.
 
+Ranking candidates where each check is expensive (a live probe, a planner call). `RankedProposer(inner, scorer,
+buffer)` reorders another proposer's candidates and never adds, drops or changes one: the order is what a probe budget
+spends (the hypotheses `split` / `discriminate` receive first). Features come from the buffer's bitsets
+(`atom_features`: per atom, its precision, recall, Jaccard and anti-match against the effect on the logged rows, its
+rate, the base rate, and the best of the pairs among the top atoms — a fixed length; `candidate_features` sums them per
+condition). `BagOfAtomsRanker(seed).fit(grammar, sample)` is a numpy logistic regression from an atom's features to
+"this atom is in the true condition", trained on synthetic tasks drawn from the grammar (`synthetic_task`: a random
+condition labels sampled states); a condition's score is the sum of its atoms' log-odds, so no position matters.
+`FeatureRanker(stat)` is the control: the raw statistic, no training. On synthetic tasks of one grammar (7 categorical
+and 3 counter features, 30 atoms, k = 3; 60 fresh tasks with 2% label noise, trained on 150) the checks to the true
+condition were 69.7 in the blind order (by length, then name), 2.1 with the trained ranker, and 24.6 / 30.4 / 42.8
+with the raw Jaccard / recall / precision (the best raw threshold picked after the fact: 12.8; tests/test_laws_rank.py).
+In distribution only:
+never measured on a live system or a grammar the ranker was not trained on.
+
 Knowledge. `to_knowledge(store, scope)` writes each law as a KnowledgeStore item of kind "rule" with body {"kind":
 "law", "action", "if", "then"} (the sub-kind in the body, as the change pipeline's hazard rules), source "outcome",
 evidence = support / hits / precision / net / the birth group / the ids of the held-out transitions it was accepted on;
@@ -50,6 +65,16 @@ probes planned from each mismatch learned every denial class in one session: ref
 no allowed call wrongly skipped, against 48 → 29 with random probes at the same budget. benchmarks/laws_toy.py
 reproduces both findings in miniature (tests/test_laws_toy.py, `pytest -m slow`).
 
+Compiled laws. An atom may carry its code — `Atom(name, fn, feature=, code="s['front'] == 'tree'", defs=...)`, a
+Python expression over `s` and `a` that equals `fn`, with the module-level source it needs. `law.to_code(grammar)` is a
+pure function for one law; `lawset.to_module()` one module that imports nothing from solvi (the laws in the set's own
+order, most specific first; `predict(s, a, base=None, apply=None)` with your base predictor as the fallback). A law
+whose atoms have no code is refused, naming them; so is an action or effect that is not a literal. Compiled code is
+accepted only after the differential check: `check_compiled(module, buffer, lawset)` runs the module against
+`lawset.predict` (and the applied law's id) on every row of the buffer, and the bar is 0 differences. A grammar may grow
+(`grammar.add(atom)`, e.g. a relational atom a proposer invents); a buffer evaluates the new atom on its older rows the
+first time a condition names it.
+
 What is not done:
 - no grammar that cannot be enumerated (where the mismatch should matter most) has been measured;
 - retirement is by precision only; a weak law no observation contradicts stays;
@@ -58,11 +83,16 @@ What is not done:
 from __future__ import annotations
 
 from .. import warn_on_import
+from ._compile import CompiledCheck, check_compiled, load_module
 from ._core import (Atom, Buffer, CallableProposer, Candidate, Enumerate, Grammar, Law, LawSet, Proposer,
                     RandomProposer, Step, Transition)
 from ._probes import Probe, discriminate, split
+from ._rank import (FEATURES, BagOfAtomsRanker, FeatureRanker, RankedProposer, SyntheticTask, atom_features,
+                    candidate_features, checks_to, synthetic_task)
 
 warn_on_import(__name__)
 
-__all__ = ["Atom", "Buffer", "CallableProposer", "Candidate", "Enumerate", "Grammar", "Law", "LawSet", "Probe", "Proposer",
-           "RandomProposer", "Step", "Transition", "discriminate", "split"]
+__all__ = ["Atom", "BagOfAtomsRanker", "Buffer", "CallableProposer", "Candidate", "CompiledCheck", "Enumerate",
+           "FEATURES", "FeatureRanker", "Grammar", "Law", "LawSet", "Probe", "Proposer", "RandomProposer",
+           "RankedProposer", "Step", "SyntheticTask", "Transition", "atom_features", "candidate_features",
+           "check_compiled", "checks_to", "discriminate", "load_module", "split", "synthetic_task"]
