@@ -355,3 +355,35 @@ def test_diff_names_the_step_that_changed_the_answer_not_an_added_step_that_chan
     only_rule = diff(store, scorecard(2, refuse_at=5))             # the new rule alone: one decision changes, by it
     (c,) = only_rule.changed
     assert c["seq"] == 2 and [x["name"] for x in c["questions"]["decision"]["causes"]] == ["guarantor_points", "points"]
+
+
+# --- exact exceptions: only=
+def test_diff_only_lists_the_changes_outside_the_allowed_decisions(tmp_path):
+    store, res = stored(tmp_path)
+    ids = [r.stored_id for r in res]
+    exact = diff(store, build(threshold=600), only={ids[2]})              # only the 500 order moves
+    assert [c["id"] for c in exact.changed] == [ids[2]]
+    assert exact.extraneous == [] and exact.exact is True
+    broad = diff(store, build(threshold=600, version="2"), only=[ids[2]])  # "please" now flags the first one too
+    assert sorted(c["id"] for c in broad.changed) == sorted([ids[0], ids[2]])
+    assert broad.extraneous == [ids[0]] and broad.exact is False
+    assert broad.to_dict()["extraneous"] == [ids[0]] and broad.to_dict()["exact"] is False
+    plain = diff(store, build(threshold=600))
+    assert plain.extraneous == [] and plain.exact is False               # no `only`: nothing is allowed, nothing exact
+
+
+def test_decision_diff_only_by_the_inputs_id_or_position():
+    import warnings
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        from solvi.experimental.compile import decision_diff
+    apps = [{"id": "a1", "text": "pay", "amount": 500, "customer": "ann"},
+            {"id": "a2", "text": "please pay", "amount": 50, "customer": "ann"},
+            {"id": "a3", "text": "pay", "amount": 20, "customer": "ann"}]
+    dd = decision_diff(build(), build(threshold=600, version="2"), inputs=apps, only={"a1"})
+    assert sorted(x["input"] for x in dd.moved) == ["a1", "a2"]
+    assert dd.extraneous == ["a2"] and dd.exact is False
+    assert decision_diff(build(), build(threshold=600), inputs=apps, only={"a1"}).exact is True
+    bare = [{k: v for k, v in a.items() if k != "id"} for a in apps]
+    by_position = decision_diff(build(), build(threshold=600, version="2"), inputs=bare, only={0})
+    assert by_position.extraneous == [1] and not by_position.exact

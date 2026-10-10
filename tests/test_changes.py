@@ -391,3 +391,40 @@ def test_static_refuses_a_candidate_catalog_that_reads_a_sensitive_field(tmp_pat
     res = own.propose(Change("person", artifact="update",
                              payload={"fingerprint": "young2", "catalog": _credit_catalog(True, sensitive={"age"})}))
     assert res.status == "rejected" and res.stage == "static" and "reads_sensitive" in res.reason
+
+
+# ───────────────────────────────────────────── exact exceptions: Impact refuses a change that moves other decisions
+def _exception_system(cond=None):
+    from solvi import Answer, Catalog, Question, System
+    cat = Catalog()
+    if cond is not None:
+        @cat.check(hard=True, then={"decision": "approve"})
+        def exception_k07(purpose, points) -> bool:
+            return not all({"purpose": purpose, "points": points}[k] == v for k, v in cond.items())
+
+    @cat.rule("decision")
+    def decision(points):
+        return "refuse" if points >= 4 else "approve"
+    return System(cat, [Question("decision", "Approve?", Answer.choice(["approve", "refuse"]))])
+
+
+def test_impact_refuses_an_exception_that_moves_other_decisions_and_admits_the_exact_one(tmp_path):
+    store = JSONLStorage(str(tmp_path / "d.jsonl"))
+    v0 = _exception_system()
+    v0.storage, store.catalog = store, v0
+    apps = {"a1": ("car", 5), "a2": ("tv", 5), "a3": ("car", 6), "a4": ("car", 1)}
+    sid = {k: v0.ask({"purpose": p, "points": n}).stored_id for k, (p, n) in apps.items()}
+    t = StateTarget()
+    pipe = Pipeline([Impact.of_system(store, lambda ch, ctx: ch.payload["system"])], str(tmp_path / "c.jsonl"),
+                    targets=[t], approval={("update", "person"): "gate"})
+    broad = pipe.propose(Change("person", artifact="update", expected={"only": [sid["a1"]]},
+                                payload={"fingerprint": "broad", "system": _exception_system({"purpose": "car"})}))
+    assert broad.status == "rejected" and broad.stage == "impact"
+    assert broad.reason == f"changes 1 decision(s) other than the allowed ones: {[sid['a3']]}"
+    assert broad.verdicts[-1].measured["extraneous"] == [sid["a3"]]
+    exact = pipe.propose(Change("person", artifact="update", expected={"only": [sid["a1"]]},
+                                payload={"fingerprint": "exact",
+                                         "system": _exception_system({"purpose": "car", "points": 5})}))
+    assert exact.promoted and t.state == "exact"
+    m = exact.verdicts[-1].measured
+    assert m["extraneous"] == [] and m["changed"] == 1 and m["ids"] == [sid["a1"]]
