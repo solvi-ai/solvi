@@ -307,3 +307,36 @@ def test_the_evaluator_lock(tmp_path, monkeypatch):
     with pytest.raises(EvalLocked, match="changed"):
         EvaluatorLock(seeds, pinned="0" * 64).verify()
     assert lock.access_count() == 1
+
+
+def test_update_candidates_differ_by_state_records_carry_the_level_and_callbacks_measure(tmp_path):
+    class Target:
+        artifact = "update"
+
+        def __init__(self):
+            self.state = None
+
+        def promote(self, change, measured):
+            self.state = change.payload["fingerprint"]
+            return {"state": self.state}
+
+        def rollback(self, ref, by=None, why=None):
+            self.state = None
+
+    a, b = Change("person", artifact="update", payload={"fingerprint": "s1"}), Change("person", artifact="update",
+                                                                                          payload={"fingerprint": "s2"})
+    assert a.fingerprint() != b.fingerprint() and Change("person", artifact="update").to_dict()["content"] is None
+    t = Target()
+    only_one = Impact(lambda c, x: {"changed": 2, "total": 10, "ok": False, "reason": "changes another decision"})
+    pipe = Pipeline([KnownFailures(), Consistency(classify=lambda c, x: {"direction": "narrows", "conflicts": 0}),
+                     only_one], str(tmp_path / "c.jsonl"), targets=[t], approval={("update", "person"): "gate"})
+    res = pipe.propose(a)
+    assert res.status == "rejected" and res.stage == "impact" and res.reason == "changes another decision"
+    assert res.verdicts[1].measured == {"direction": "narrows", "conflicts": 0}
+    assert pipe.history("rejected")[-1]["level"] == "gate" and pipe.propose(b).stage == "impact"
+    widen = Pipeline([Consistency(classify=lambda c, x: {"direction": "widens"})], str(tmp_path / "c2.jsonl"),
+                     targets=[t], approval={("update", "person"): "gate"})
+    held = widen.propose(a)
+    assert held.status == "held" and widen.history("held")[-1]["level"] == "gate+person"
+    done = widen.rule(held.change_id, True, by="ann")
+    assert done.promoted and t.state == "s1" and widen.history("promoted")[-1]["level"] == "gate+person"

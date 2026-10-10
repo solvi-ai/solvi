@@ -169,8 +169,9 @@ class Consistency:
     """The knowledge store's ConsistencyGate on the proposed item (premises exist and are present; not self-defeating),
     plus what it measures: the active items on the same key holding another value (`conflicts`: the store resolves
     them by source rank or asks a person — not a refusal here) and, with `classify(change, ctx) → "narrows" | "widens"`,
-    the direction of the behaviour change (Approval upgrades "gate" to "gate+person" for a widening change). An
-    artifact other than an item is admitted with only the classification."""
+    the direction of the behaviour change (Approval upgrades "gate" to "gate+person" for a widening change); classify
+    may also return a dict {"direction": ..., other measurements} — all of it is recorded. An artifact other than an
+    item is admitted with only the classification."""
     name = "consistency"
 
     def __init__(self, *, classify: Callable | None = None):
@@ -179,7 +180,11 @@ class Consistency:
     def run(self, change, ctx):
         m = {}
         if self.classify is not None:
-            m["direction"] = self.classify(change, ctx)
+            d = self.classify(change, ctx)
+            if isinstance(d, dict):                   # {"direction", ...what it measured, e.g. conflicts}
+                m.update(d)
+            else:
+                m["direction"] = d
         if change.artifact != "item" or ctx.store is None:
             return StageVerdict.admit("not a knowledge item", m or None)
         from ...core.knowledge.gates import ConsistencyGate
@@ -316,7 +321,9 @@ class CleanCases:
 # ───────────────────────────────────────────────────────────── 5. impact (wraps decision_diff / diff / redecide)
 class Impact:
     """The share of past decisions the change would change. measure(change, ctx) → {"changed", "total"} (or a
-    DiffReport / DecisionDiff); refused when changed / total > max_share (None: only recorded). Ready-made:
+    DiffReport / DecisionDiff); refused when changed / total > max_share (None: only recorded), or when the measure's
+    dict says "ok": False (the caller's own rule, e.g. "only the corrected decision may change"; its "reason" is the
+    refusal's). Ready-made:
 
     Impact.of_system(storage, system_of)   solvi.core.store.diff.diff(storage, system_of(change, ctx)) — the stored
                                            decisions re-run with the candidate system;
@@ -335,8 +342,11 @@ class Impact:
             m = {"changed": len(r.changed), "total": r.total, "ids": [x["id"] for x in r.changed][:20]}
         else:
             m = dict(r)
+        own = (m.pop("ok", True), str(m.pop("reason", "")))
         share = m["changed"] / m["total"] if m.get("total") else 0.0
         m["share"] = share
+        if not own[0]:
+            return StageVerdict.refuse(own[1] or "the impact measure refused the change", m)
         if self.max_share is not None and share > self.max_share:
             return StageVerdict.refuse(f"changes {m['changed']} of {m['total']} past decisions ({share:.1%} > "
                                   f"{self.max_share:.1%})", m)

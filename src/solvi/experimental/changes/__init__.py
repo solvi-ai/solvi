@@ -51,7 +51,7 @@ equality of state keys (hazard_gate) is the placeholder.
 
 The journal (_journal.py): records of kind "change" in a TraceStorage — "propose" (the change, its fingerprint, parent),
 one "verdict" per stage, then "promoted" (version, target reference), "rejected" (the stage and reason), "held",
-"ruling", "rollback" and "observed". The storage's hash chain covers them (a tampered record fails verify()); with
+"ruling", "rollback" and "observed"; promoted / rejected / held carry the approval level ("level"). The storage's hash chain covers them (a tampered record fails verify()); with
 the decisions' store they share one chain. Versions: version 0 is the state before the first change; each promotion is
 the next number with the version in force as its parent; rollback(v) undoes every version after v through its target
 (KnowledgeStore.rollback for items) and is itself a record. EvaluatorLock (ported): held-out seeds pinned by SHA-256,
@@ -96,7 +96,8 @@ CHANGE_TYPES = ("fact", "rule", "meaning")
 class Change:
     """A candidate change (see the module docstring). payload: for "item", {"kind", "body", and optionally "scope",
     "derived_from", "supersedes", "valid", "reconfirm_after"}; for "compiled", a solvi.experimental.compile.Compiled;
-    for "update", None (the learning loop reads its own labels)."""
+    for "update", None (the learning loop reads its own labels) or the updated state, whose `fingerprint` (an attribute or
+    a dict key) identifies the candidate (two updates to different states are different candidates)."""
     source: str
     artifact: str = "item"
     payload: Any = None
@@ -151,10 +152,8 @@ class Change:
         """What identifies the candidate (the failure memory compares it): source, artifact, content, code."""
         if self.artifact == "item":
             c = {k: v for k, v in self.item_kwargs().items() if k not in ("by", "evidence")}
-        elif self.artifact == "compiled":
-            c = getattr(self.payload, "fingerprint", None)
-        else:
-            c = None
+        else:                                         # "compiled", or an "update" whose payload names its state
+            c = self.payload.get("fingerprint") if isinstance(self.payload, dict) else getattr(self.payload, "fingerprint", None)
         chk = None
         if self.check is not None:
             from ...core.provenance import code_fingerprint
@@ -284,7 +283,7 @@ class Pipeline:
             ctx.verdicts[st.name] = v
             if v.decision == "hold":
                 self._held[cid] = (change, i, {k: x for k, x in ctx.verdicts.items() if k != st.name}, parent)
-                self.journal.write("held", change=cid, stage=st.name, reason=v.reason)
+                self.journal.write("held", change=cid, stage=st.name, reason=v.reason, level=self._level(change, ctx))
                 return Result(cid, "held", stage=st.name, reason=v.reason, verdicts=list(ctx.verdicts.values()))
             if v.decision == "refuse" and not advisory:
                 return self._reject(change, cid, st.name, v.reason, ctx)
@@ -299,12 +298,19 @@ class Pipeline:
             return self._reject(change, cid, "promote", str(e), ctx)
         version = self._next_version()
         self.journal.write("promoted", change=cid, version=version, parent=parent, artifact=change.artifact, ref=ref,
-                           expected=change.expected)
+                           expected=change.expected, level=self._level(change, ctx))
         return Result(cid, "promoted", version=version, verdicts=list(ctx.verdicts.values()), ref=ref)
 
     def _reject(self, change, cid, stage, reason, ctx):
-        self.journal.write("rejected", change=cid, fingerprint=change.fingerprint(), stage=stage, reason=reason)
+        self.journal.write("rejected", change=cid, fingerprint=change.fingerprint(), stage=stage, reason=reason,
+                           level=self._level(change, ctx))
         return Result(cid, "rejected", stage=stage, reason=reason, verdicts=list(ctx.verdicts.values()))
+
+    def _level(self, change, ctx):
+        """The approval level of a change as its final record states it: the approval table's, raised for a change the
+        consistency stage classified as widening (the same rule Approval applies), whether or not Approval ran."""
+        appr = next((s for s in self.stages if isinstance(s, Approval)), None)
+        return appr.level(change, ctx.verdicts) if appr is not None else "gate"
 
     @staticmethod
     def _summary(verdicts):
