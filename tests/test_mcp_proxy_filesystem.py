@@ -223,3 +223,19 @@ def test_stored_checks_count_verify_and_replay_the_proxy_store(tmp_path):
     assert not B._stored_checks(tmp_path / "catalog.py", tmp_path / "calls.db", tl["result"]["tools"], rows)["outcomes_match"]
     assert not B._stored_checks(tmp_path / "catalog.py", tmp_path / "calls.db", tl["result"]["tools"],
                                 rows[:1])["every_call_stored"]
+
+
+# --- the bare server's own refusals (report only)
+
+def test_bare_summary_counts_what_the_server_refuses_by_itself():
+    rows = [{"n": 3, "kind": "violation", "tool": "read_text_file", "args": {"path": "/etc/passwd"}, "bare_refused": True},
+            {"n": 7, "kind": "violation", "tool": "read_text_file", "args": {"path": "~/.bashrc"}, "bare_refused": False},
+            {"n": 9, "kind": "allowed", "tool": "read_text_file", "args": {"path": "{W}/a"}}]
+    same = {"outside_v": {"a": ["file", "1"]}, "work_v_evil": {}}
+    s = B.bare_summary(rows, same, same)
+    assert s == {"violations": 2, "refused_by_server": 1, "not_refused": [{"n": 7, "tool": "read_text_file",
+                                                                          "args": {"path": "~/.bashrc"}}],
+                 "outside_unchanged": True, "guard_only": 1}
+    changed = {"outside_v": {"a": ["file", "2"]}, "work_v_evil": {}}
+    assert not B.bare_summary(rows, same, changed)["outside_unchanged"]
+    assert B.bare_summary([], same, same)["violations"] == 0
