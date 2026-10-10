@@ -3895,8 +3895,11 @@ by a hard check, and 600 and 400 decisions under the two catalog fingerprints.
 parts, answer heads and learned rules), `grounding_rejected`, `type_rejected`, `outside_options`, `rule_abstained`,
 `low_confidence`, `validator_rejected`,
 `forced_by_hard_check`, `constraint_repairs`, `fallbacks`, `model_escalated`, `evidence_missing`, `timeouts`,
-`instruction_flips` and `memory_disagreements`.
-`system.safeguard_summary()` prints them (`evidence missing` once it has fired).
+`instruction_flips`, `memory_disagreements`, `contract_refused` (answers that broke their question's contract:
+a wrong type or an echo of the input, see `Catalog.contract`) and `not_applicable` (questions whose contract's
+precondition did not hold, so they were not computed).
+`system.safeguard_summary()` prints them (`evidence missing`, `contract_refused` and `not_applicable` once they have
+fired).
 [examples/12_grounded_audit.py](../examples/12_grounded_audit.py) runs one catalog with and without models,
 with a hallucinating extractor and a classifier answering outside its options.
 

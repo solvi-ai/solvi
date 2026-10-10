@@ -491,9 +491,12 @@ def check_action_model(make, transitions, *, held_out=None):
 INVALID_PROPOSAL = "{ not a proposal"
 
 
-def check_specialist(specialist, sources, *, proposer=None):
+def check_specialist(specialist, sources, *, proposer=None, inapplicable=()):
     """specialist: a solvi.core.specialist.Specialist; sources: texts it runs on; proposer: the proposer to run with
-    (default: the specialist's own). For each source: two runs give identical output bytes; the record
+    (default: the specialist's own); inapplicable: sources its contract says it does not apply to (`applicable`).
+    The contract (solvi.core.contract): an output is a text or None and never the source itself; on each inapplicable
+    source the run is blocked with the issue "not_applicable" and the proposer is not called, and the run replays.
+    For each source: two runs give identical output bytes; the record
     (`run.to_dict()`) round-trips through JSON and replays (`specialist.replay(record, source)`: the same checks, the
     same bytes); an invalid proposal is blocked — a BLOCKED issue and no output. Then the core store path: with a
     temporary TraceStorage every run is a record of kind "specialist", the store verifies, every stored run replays
@@ -502,9 +505,25 @@ def check_specialist(specialist, sources, *, proposer=None):
     from ..core.store import JSONLStorage
     sources = list(sources)
     _ok(sources, "check_specialist needs at least one source")
+    inapplicable = list(inapplicable)
     replayed = blocked = 0
+    calls = []
+    base = proposer or getattr(specialist, "proposer", None)
+
+    def tripwire(source, question):
+        calls.append(source)
+        return base(source, question) if base is not None else INVALID_PROPOSAL
+    for src in inapplicable:
+        run = specialist.run(src, proposer=tripwire)
+        _ok(run.output is None and [i.code for i in run.issues if i.severity == blocked_] == ["not_applicable"],
+            f"a source the specialist does not apply to is blocked as not applicable ({specialist.name}: "
+            f"{[str(i) for i in run.issues][:2] or 'it ran'})")
+        _ok(not calls, "the proposer is not called on a source the specialist does not apply to")
+        _ok(bool(specialist.replay(run.to_dict(), src)), "a run blocked as not applicable replays from its record")
     for src in sources:
         a = specialist.run(src, proposer=proposer)
+        _ok(a.output is None or (isinstance(a.output, str) and a.output != src),
+            "an output is a text and not the source itself")
         b = specialist.run(src, proposer=proposer)
         _ok(a.output == b.output, f"two runs of one source give identical bytes ({specialist.name}: the outputs differ)")
         rec = a.to_dict()
@@ -541,7 +560,8 @@ def check_specialist(specialist, sources, *, proposer=None):
         edit_caught = not JSONLStorage(str(path)).verify()["ok"]
         _ok(edit_caught, "an edited specialist record fails the storage's verify()")
     return {"sources": len(sources), "runs": 2 * len(sources), "replayed": replayed, "blocked": blocked,
-            "stored": stored, "store_replayed": stored - len(bad), "edit_caught": edit_caught}
+            "stored": stored, "store_replayed": stored - len(bad), "edit_caught": edit_caught,
+            "not_applicable": len(inapplicable)}
 
 
 __all__ = ["check_action_model", "check_decider", "check_environment", "check_extractor", "check_head", "check_specialist",

@@ -892,6 +892,7 @@ class Catalog:
         self.types: dict = {}                      # fact → type (its producer's return type; see solvi.core.types)
         self.readers: dict = {}                    # fact → {typed part that reads it: the type it reads}
         self.decisions = 0                         # decision parts registered (solvi.core.deciders): 0 — no batching work at all
+        self.contracts: dict = {}                  # question → solvi.core.contract.Contract (Catalog.contract)
 
     def _add(self, kind, f, **kw):
         sig = inspect.signature(f)
@@ -1070,6 +1071,19 @@ class Catalog:
             forget_rule(self, part.question)
         self.rules[part.question] = part
         return part
+
+    def contract(self, question, *, returns=None, echo=True, applicable=None):
+        """Declare the contract of a question's answer (solvi.core.contract): returns — the type the answer must have
+        (a Python type, a tuple of types or an answer type; None: the question's own, which a System already holds its
+        answers to); echo — the answer must not equal a given fact it was read from (True: every given fact its rule
+        reads, directly or through computed facts; a list of names; False: off); applicable — a function of the given
+        facts → bool checked before the question is computed. A broken contract is a hard refusal: the question
+        abstains (guard "contract", or "not_applicable" without computing it), whatever the confidence. A System
+        raises when the catalog has a contract for a question it does not ask. → the Contract."""
+        from .contract import Contract
+        c = Contract(returns, echo, applicable)
+        self.contracts[str(question)] = c
+        return c
 
     def constraint(self, f):
         """A rule between answers: argument names are question names, it returns True when the answers fit together

@@ -79,6 +79,7 @@ asks (the budget, the drift state and the decision numbers follow the order of t
 from __future__ import annotations
 
 import abc
+import dataclasses
 import hashlib
 import json
 import math
@@ -113,6 +114,8 @@ class Thought:
     record: Any = None
     cost: Cost = field(default_factory=Cost)
     stopped: str | None = None           # the budget stopped it between steps
+    contract: dict | None = None         # what the slow path's contract did (solvi.core.contract): {"applicable": False,
+    #                                      "why"} — not called; {"applicable": True, "violations": [...]} — not accepted
 
     @property
     def responses(self):
@@ -132,8 +135,11 @@ class Thought:
         rec = self.record
         if rec is not None:
             rec = rec.to_dict() if callable(getattr(rec, "to_dict", None)) else plain(rec)
-        return {"mode": self.mode, "answer": plain(self.answer), "accepted": self.accepted, "why": self.why,
-                "record": rec, "cost": self.cost.to_dict(), "stopped": self.stopped}
+        d = {"mode": self.mode, "answer": plain(self.answer), "accepted": self.accepted, "why": self.why,
+             "record": rec, "cost": self.cost.to_dict(), "stopped": self.stopped}
+        if self.contract is not None:                 # a record without a contract is written as before
+            d["contract"] = plain(self.contract)
+        return d
 
     @classmethod
     def from_dict(cls, d, system=None):
@@ -142,7 +148,7 @@ class Thought:
         if rec is not None:
             rec = SlowPath.path_of(d["mode"]).restore_record(rec, system)
         return cls(d["mode"], _restored(d.get("answer")), d["accepted"], d.get("why"), rec,
-                   Cost.from_dict(d.get("cost") or {}), d.get("stopped"))
+                   Cost.from_dict(d.get("cost") or {}), d.get("stopped"), d.get("contract"))
 
 
 class _SlowPathType(abc.ABCMeta):
@@ -217,8 +223,11 @@ class SlowPath(metaclass=_SlowPathType):
                            "import the module that defines it before reading its records")
         return p
 
-    def __init__(self, system, *, question=None):
-        self.system, self.question = system, question
+    def __init__(self, system, *, question=None, contract=None):
+        from .contract import Contract
+        if contract is not None and not isinstance(contract, Contract):
+            raise TypeError("contract= takes a solvi.core.contract.Contract")
+        self.system, self.question, self.contract = system, question, contract
 
     def __repr__(self):
         return f"{type(self).__name__}({self.mode})"
@@ -238,14 +247,35 @@ class SlowPath(metaclass=_SlowPathType):
         hold, at `price`, and the time it took (the cost a replay recomputes)."""
         q = self._q(question)
         t0 = time.perf_counter()
+        c = self.contract_for(q)
+        if c is not None:                             # checked before the path is called: called by applicability
+            ok, why = c.applies(state)
+            if not ok:
+                th = Thought(self.mode, None, False, f"not applicable: {why}", None,
+                             contract={"applicable": False, "why": why})
+                th.cost = cost_of([], price, (time.perf_counter() - t0) * 1000, [])
+                return th
         th = self.think(state, q, price=price, budget=budget, expected_round=expected_round, store=store)
         if not isinstance(th, Thought):
             raise TypeError(f"{type(self).__qualname__}.think returned {type(th).__name__}, not a Thought")
         if th.mode != self.mode:
             raise ValueError(f"{type(self).__qualname__}.think returned a Thought of mode {th.mode!r}, not its own "
                              f"{self.mode!r}")
+        if c is not None and th.accepted:             # a hard refusal: whatever the path's confidence
+            v = c.violations(th.answer, c.echo_inputs(state), _answer_type(self, q))
+            if v:
+                from .contract import refusal
+                th.accepted, th.why = False, refusal(v, th.answer)
+                th.contract = {"applicable": True, "violations": [x.to_dict() for x in v]}
         th.cost = cost_of(th.responses, price, (time.perf_counter() - t0) * 1000, th.generated())
         return th
+
+    def contract_for(self, question):
+        """The contract the slow path's answers are held to: its own (`contract=`), else the contract its System's
+        catalog declares for the question (`Catalog.contract`), else None."""
+        if getattr(self, "contract", None) is not None:
+            return self.contract
+        return (getattr(self.system.catalog, "contracts", None) or {}).get(self.question or question)
 
     def _q(self, question):
         q = self.question or question
@@ -299,10 +329,10 @@ class _Checked(SlowPath):
     """The built-in paths' shared settings and fingerprint (as 0.9's single SlowPath class computed it)."""
 
     def __init__(self, system, *, question=None, propose=None, into=None, rounds=3, space=None, search=None,
-                 accept="checks", feedback=None):
+                 accept="checks", feedback=None, contract=None):
         if int(rounds) < 1:
             raise ValueError("rounds must be at least 1")
-        super().__init__(system, question=question)
+        super().__init__(system, question=question, contract=contract)
         self.propose, self.into = propose, into
         self.rounds, self.space, self.search_kw = int(rounds), space, dict(search or {})
         self.accept, self.feedback = accept, feedback
@@ -320,8 +350,8 @@ class AskPath(_Checked):
     accepted when the System does not abstain on it; its signal is the answer's confidence. Stability: stable."""
     mode = "ask"
 
-    def __init__(self, system, *, question=None):
-        super().__init__(system, question=question)
+    def __init__(self, system, *, question=None, contract=None):
+        super().__init__(system, question=question, contract=contract)
 
     def think(self, state, question, *, price=None, budget=None, expected_round=None, store=True):
         res = self.system.ask(dict(state), [question], store=store)
@@ -371,13 +401,13 @@ class RefinePath(_Checked):
     not abstain on the question. feedback: refine's feedback function. Stability: stable."""
     mode = "refine"
 
-    def __init__(self, system, *, propose, into, question=None, rounds=3, accept="checks", feedback=None):
+    def __init__(self, system, *, propose, into, question=None, rounds=3, accept="checks", feedback=None, contract=None):
         if not callable(propose):
             raise TypeError("propose is a function (state, rounds) → a proposal, e.g. Generator.proposer(...)")
         if not isinstance(into, str):
             raise ValueError("into= names the given fact a proposal or a candidate is passed as")
         super().__init__(system, question=question, propose=propose, into=into, rounds=rounds, accept=accept,
-                         feedback=feedback)
+                         feedback=feedback, contract=contract)
 
     @property
     def steps(self):
@@ -442,12 +472,13 @@ class SearchPath(_Checked):
     RefinePath. Stability: stable."""
     mode = "search"
 
-    def __init__(self, system, *, space, into=None, question=None, search=None, accept="checks"):
+    def __init__(self, system, *, space, into=None, question=None, search=None, accept="checks", contract=None):
         if space is None:
             raise ValueError("space= is the space searched (a list, a dict of domains, a Tree, a function of the facts)")
         if not isinstance(into, str) and not isinstance(space, dict):
             raise ValueError("into= names the given fact a proposal or a candidate is passed as")
-        super().__init__(system, question=question, space=space, into=into, search=search, accept=accept)
+        super().__init__(system, question=question, space=space, into=into, search=search, accept=accept,
+                         contract=contract)
 
     def think(self, state, question, *, price=None, budget=None, expected_round=None, store=True):
         from .slow.search import search
@@ -478,6 +509,49 @@ class SearchPath(_Checked):
     @classmethod
     def responses_of(cls, record):
         return [record.response] if record.response is not None else []
+
+
+def _answer_type(slow, question):
+    """The question's answer type, for the contract's type clause (None for a primitive answer: a span or an estimate
+    the System has already resolved)."""
+    q = slow.system.questions.get(slow.question or question)
+    a = getattr(q, "answer", None)
+    return None if a is None or a.primitive and a.kind != "estimate" else a
+
+
+def _replay_thought(slow, th, state, question, trust_models=False):
+    """A recorded Thought replayed with its contract: a "not applicable" must still not apply (and nothing ran); a
+    path that ran must still apply; the record's own replay with the acceptance the path gave before the contract;
+    the violations the contract gives now must be the recorded ones."""
+    c = slow.contract_for(question)
+    rec, bad = th.contract, []
+    if rec is not None and rec.get("applicable") is False:
+        if c is None:
+            bad.append(("contract", "recorded as not applicable, and the slow path has no contract"))
+        else:
+            ok, why = c.applies(state)
+            if ok:
+                bad.append(("contract", "recorded as not applicable; the contract applies to the input now"))
+            elif why != rec.get("why"):
+                bad.append(("contract", f"recorded {rec.get('why')!r}, the contract says {why!r} now"))
+        if th.record is not None or th.accepted:
+            bad.append(("contract", "a slow path that did not apply has no record and no accepted answer"))
+        return {"ok": not bad, "mismatches": bad}
+    if c is not None:
+        ok, why = c.applies(state)
+        if not ok:
+            bad.append(("contract", f"the slow path ran, and its contract does not apply to the input now ({why})"))
+    refused = rec is not None and "violations" in rec
+    inner = dataclasses.replace(th, accepted=True, why=None, contract=None) if refused else th
+    rep = slow.replay(inner, trust_models=trust_models)
+    bad += list(rep.get("mismatches") or [])
+    if inner.accepted and (c is not None or refused):
+        now = [x.to_dict() for x in c.violations(inner.answer, c.echo_inputs(state), _answer_type(slow, question))] \
+            if c is not None else []
+        want = list((rec or {}).get("violations") or [])
+        if now != want:
+            bad.append(("contract", f"recorded violations {want}, the contract gives {now}"))
+    return {"ok": not bad, "mismatches": bad}
 
 
 def _same_outcome(thought, ok, ans, bad):
@@ -682,7 +756,9 @@ class Dispatcher:
                       None if self.budget is None else self.budget.to_dict(),
                       None if self.total is None else self.total.to_dict(), pr,
                       self.slow.fingerprint() if self.slow is not None else None,
-                      None if self.policy is None else self.policy["fingerprint"])
+                      None if self.policy is None else self.policy["fingerprint"],
+                      *([("contract", self.slow.contract.fingerprint())]       # a decision made under another contract
+                        if self.slow is not None and getattr(self.slow, "contract", None) is not None else []))
 
     # --- the decision
     def draw(self, init_hash, n):
@@ -1131,7 +1207,7 @@ class Dispatcher:
             if self.slow is None:
                 bad.append(("s2", "a slow-path record, and the dispatcher has no slow path"))
             else:
-                rep2 = self.slow.replay(d.s2, trust_models=trust_models)
+                rep2 = _replay_thought(self.slow, d.s2, d.s1.trace.init, self.question, trust_models)
                 bad += [("s2 " + w, why) for w, why in rep2["mismatches"]]
                 c = cost_of(d.s2.responses, self.price, d.s2.cost.ms, d.s2.generated())
                 if _cost_key(c) != _cost_key(d.s2.cost):

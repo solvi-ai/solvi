@@ -706,10 +706,10 @@ def _taints(conversation, conversation_roles):
 
 
 # ------------------------------------------------------------------------------------------------ the call firewall
-FIREWALL_MATCHERS = ("nocase", "token", "whole", "substring")
+_FIREWALL_MATCHERS = ("nocase", "token", "whole", "substring")
 
 
-def enum_paths(schema):
+def _enum_paths(schema):
     """The slots a JSON schema of a tool's arguments declares as enumerations (enum / const, also inside anyOf / oneOf
     with null, $ref followed) → {"a", "a.b", "a[]", ...}: a list's items are "a[]", an object's properties "a.b"."""
     defs = dict(schema.get("$defs") or schema.get("definitions") or {})
@@ -1606,8 +1606,8 @@ class Guard:
         Returns the declaration (a dict)."""
         if on_ungrounded not in ("deny", "escalate"):
             raise ValueError('on_ungrounded must be "deny" or "escalate"')
-        if match not in FIREWALL_MATCHERS:
-            raise ValueError(f"match is one of {', '.join(FIREWALL_MATCHERS)}, not {match!r}")
+        if match not in _FIREWALL_MATCHERS:
+            raise ValueError(f"match is one of {', '.join(_FIREWALL_MATCHERS)}, not {match!r}")
         roles = tuple(ROLES.get(r, r) for r in ((sources,) if isinstance(sources, str) else sources))
         bad = [r for r in roles if r not in ROLES.values()]
         if bad or not roles:
@@ -1844,7 +1844,7 @@ class Guard:
         check(arguments_valid, "deny")
         if fw is not None and fw["grounded"]:
             spec = {k: fw[k] for k in ("sources", "exempt", "match")}
-            spec["enums"] = sorted(enum_paths(t.model.model_json_schema()))
+            spec["enums"] = sorted(_enum_paths(t.model.model_json_schema()))
             cat.fn(_slot_grounding(json.dumps(spec, sort_keys=True), fw["facts"]))
             check(slots_grounded, fw["on_ungrounded"])
         if t.ground:
@@ -2378,7 +2378,7 @@ def _clip(text, n):
 from .confirm import accepted_proposals, accepts  # noqa: E402
 from .intents import INTENTS  # noqa: E402
 
-__all__ = ["action_model_allows", "enum_paths", "FIREWALL_MATCHERS", "slots_grounded", "agenda_allows", "accepted_proposals", "accepts", "INTENTS", "model_from_json_schema", "arguments_from_user", "arguments_grounded", "arguments_model", "arguments_valid", "AUTHORIZE_TASK",
+__all__ = ["action_model_allows", "slots_grounded", "agenda_allows", "accepted_proposals", "accepts", "INTENTS", "model_from_json_schema", "arguments_from_user", "arguments_grounded", "arguments_model", "arguments_valid", "AUTHORIZE_TASK",
            "conversation", "Guard", "GuardDecision", "MATCHERS", "Message", "messages", "no_injected_arguments",
            "no_instructions_in_tool_outputs", "proposal", "request_authorizes", "same_url", "Session", "Tool",
            "ToolCall", "url_parts", "VERDICTS"]

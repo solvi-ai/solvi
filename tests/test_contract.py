@@ -117,8 +117,10 @@ def test_contract_declarations_are_checked_and_change_the_fingerprint():
     @cat.rule("q")
     def q(text) -> str:
         return text
-    with pytest.raises(ValueError):
-        cat.contract("nope")
+    cat.contract("nope")                                                      # a question no System of it asks
+    with pytest.raises(ValueError, match="nope"):
+        System(cat, [Question("q", "?", Answer.span("text"))])
+    del cat.contracts["nope"]
     with pytest.raises(TypeError):
         cat.contract("q", applicable="yes")
     a = System(cat, [Question("q", "?", Answer.span("text"))]).fingerprint()
@@ -191,7 +193,7 @@ class Echoing(SlowPath):
         self.answer = answer
 
     def think(self, state, question, **kw):
-        return Thought(self.mode, self.answer(state), True)
+        return Thought(self.mode, self.answer(state), True, record={"read": state["text"]})
 
     def fingerprint(self):
         return "echo-test"

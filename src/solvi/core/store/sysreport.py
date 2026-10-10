@@ -40,7 +40,8 @@ KIND = {"computed": "rule", "decided": "model", "learned": "learned head", "prop
         "quoted": "quote", "given": "given"}
 GUARD = {"low_confidence": "below the guarantee or threshold", "hard_check": "a hard check", "no_data":
          "no data for a hard check", "missing_facts":
-         "facts missing", "rule_abstained": "the rule abstained", "outside_options": "outside the options"}
+         "facts missing", "rule_abstained": "the rule abstained", "outside_options": "outside the options",
+         "contract": "the answer broke its contract", "not_applicable": "the question did not apply"}
 
 
 def _iso(t):

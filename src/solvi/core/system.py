@@ -35,6 +35,35 @@ class _Prepared:
     textin: object = None               # a solvi.core.textin.TextRead (ask_text): its records go into the trace
 
 
+def _given_read(system, q, flow, init):
+    """The given facts a question's answer is read from: what its rule (or answer head) reads, directly or through the
+    computed facts of its flow."""
+    cat = system.catalog
+    read = set()
+    for f in flow.per_question.get(q.name, []) if flow is not None else []:
+        p = cat.parts.get(f)
+        if p is not None:
+            read.update(p.inputs)
+    rule = cat.rules.get(q.name)
+    if rule is not None:
+        read.update(rule.inputs)
+    head = system.heads.get(q.name)
+    if head is not None:
+        read.update(getattr(head, "features", ()) or ())
+    return sorted(x for x in read if x in init)
+
+
+def _contracted(system, c, q, r, flow, trace):
+    """An answer under its question's contract (solvi.core.contract): kept, or an abstention naming the violations."""
+    from .contract import refusal
+    init = trace.init
+    v = c.violations(r.answer, c.echo_inputs(init, _given_read(system, q, flow, init)))
+    if not v:
+        return r
+    return Result(None, 0.0, refusal(v, r.answer) + f" ({r.why})", "abstain", dict(r.probs or {}), r.provenance,
+                  r.source, "contract", None, r.kind, [], {"contract": [x.to_dict() for x in v]})
+
+
 def _speculate_note(speculate, p):
     """aask(speculate=True) under a learned order: the hard checks run one at a time in that order, so nothing starts
     early — say so rather than ignore the option."""
@@ -154,6 +183,11 @@ class System:
                                  f"{'is not a question' if len(lost) == 1 else 'are not questions'} of this system "
                                  f"({', '.join(self.questions)}): a constraint's arguments are question names, and it "
                                  "applies only when all of them are asked")
+        lost = sorted(set(getattr(catalog, "contracts", {})) - set(self.questions))
+        if lost:                                      # a contract for a question nobody asks would never apply
+            raise ValueError(f"the catalog has a contract for {', '.join(map(repr, lost))}, which "
+                             f"{'is not a question' if len(lost) == 1 else 'are not questions'} of this system "
+                             f"({', '.join(self.questions)})")
         self.heads: dict[str, FastHead] = {}
         from .store import open_storage
         self.storage = open_storage(storage)
@@ -410,7 +444,9 @@ class System:
         if clash:                                     # the planner would take the given value for the part's own: a check
             raise ValueError(_clash(self.catalog, clash, "the input has"))   # named in the input would never run
         qs = [self.questions[n] for n in self._names(names)]
-        flow = self._plan(qs, init_state.keys())
+        cs = getattr(self.catalog, "contracts", None)  # a question whose contract does not apply is not computed
+        flow = self._plan([q for q in qs if not cs or q.name not in cs or cs[q.name].applies(init_state)[0]],
+                          init_state.keys())
         if not (order is None or order in ("default", "learned") or hasattr(order, "p_fail")):
             raise ValueError(f'order must be "default", "learned" or an object with p_fail(check, row), not {order!r}')
         mode = self.order if order is None else order
@@ -486,9 +522,20 @@ class System:
         hard = [(n, p) for n, p in self.catalog.parts.items() if p.kind == "check" and p.hard]   # in catalog order
         pcache = {}                                   # the questions share one walk of path_confidence
         results = {}
+        cs = getattr(self.catalog, "contracts", None) or {}
         for q in qs:
+            c = cs.get(q.name)
+            if c is not None:
+                ok, why = c.applies(trace.init)
+                if not ok:                            # not computed (ask planned without it): not applicable
+                    results[q.name] = Result(None, 0.0, f"not applicable: {why}", "abstain", guard="not_applicable",
+                                             kind=q.answer.kind, extra={"contract": [{"code": "not_applicable",
+                                                                                     "message": why}]})
+                    continue
             r = self._answer(q, flow, trace, vals, by, hard, pcache)
             r.kind = q.answer.kind
+            if c is not None and r.status == "ok":
+                r = _contracted(self, c, q, r, flow, trace)
             if q.name in self.calib and r.status == "ok":
                 r.confidence = _platt(r.confidence, *self.calib[q.name])
             results[q.name] = r
@@ -558,11 +605,13 @@ class System:
             return (q.text, ans, tuple(q.requires), tuple(q.uses or ()) if q.uses is not None else None,
                     q.min_confidence, q.require_evidence)
         key = (tuple((n, content(q)) for n, q in self.questions.items()), tuple(sorted(self.calib.items())),
-               tuple(sorted((n, g.fingerprint()) for n, g in self.guards.items())))     # solvi.core.guarantees.guarantee
+               tuple(sorted((n, g.fingerprint()) for n, g in self.guards.items())),     # solvi.core.guarantees.guarantee
+               tuple(sorted((n, c.fingerprint()) for n, c in (getattr(self.catalog, "contracts", None) or {}).items())))
         cached = getattr(self, "_qfp", None)
         if cached is None or cached[0] != key:
             cached = self._qfp = (key, digest(sorted((q.name, data(q)) for q in self.questions.values()), list(key[1]),
-                                              *([list(key[2])] if key[2] else [])))
+                                              *([list(key[2])] if key[2] else []),
+                                              *([["contracts", list(key[3])]] if key[3] else [])))
         return cached[1]
 
     def _fingerprint(self, flow):
