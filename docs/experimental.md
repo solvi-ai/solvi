@@ -110,10 +110,11 @@ One change pipeline for four sources (a document version, verified experience, a
 proposal): pluggable stages, a journal of kind "change", promote into the knowledge store / compiled versions /
 learning, versions and rollback (`solvi.experimental.changes.Pipeline(stages, storage, store=...)`). Since 1.1.
 
-- **Missing:** a measured use: a pre-registered run where the pipeline admits fewer harmful changes than the store's
-  gates alone, without blocking the useful ones, with a script in benchmarks/.
+- **Missing:** on a credit policy the pipeline carried a document version (144 of 144 changed decisions traced to their clause), admitted 12 of 12 exact exceptions, held every widening one for a person and refused 8 of 8 exceptions that touched other decisions, 0 extraneous changes, 14 versions replayed; on a bank-request stream with a person's labels every one of 22 candidates passed every stage (`nogate` = `gate`), so the stages added nothing there — the module is journal, impact analysis, approval levels and rollback; still missing: the narrows / widens classifier over rule conditions, a regression-scenario stage, and a script in `benchmarks/`.
 - **Script:** none yet. **Deadline:** 1.2.
-- Design and API: the module docstring of `solvi.experimental.changes`.
+- Design and API: the module docstring of `solvi.experimental.changes`; the library pieces it uses are stable:
+  sensitive fields and citations in [solvi check](guide.md#checking-a-catalog-solvi-check), `only=` in
+  [solvi diff](guide.md#catalog-fingerprint-solvi-diff-and-shadow-mode).
 
 ## `counterfactual`
 

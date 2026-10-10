@@ -50,9 +50,14 @@ STATUS: dict[str, dict] = {
                 "recalibration that keeps the guarantee's promise (it does not: see its module docs)", "script": None},
     "changes": {"since": "1.1", "what": "one change pipeline for four sources (a document version, verified "
                 "experience, a person's correction, a search proposal): pluggable stages, a journal of kind \"change\", "
-                "promote into the knowledge store / compiled versions / learning, versions and rollback", "missing": "a "
-                "measured use: a pre-registered run where the pipeline admits fewer harmful changes than the store's "
-                "gates alone, without blocking the useful ones, with a script in benchmarks/", "script": None},
+                "promote into the knowledge store / compiled versions / learning, versions and rollback", "missing": "on a "
+                "credit policy the pipeline carried a document version (144 of 144 changed decisions traced to their "
+                "clause), admitted 12 of 12 exact exceptions, held every widening one for a person and refused 8 of 8 "
+                "exceptions that touched other decisions, 0 extraneous changes, 14 versions replayed; on a bank-request "
+                "stream with a person's labels every one of 22 candidates passed every stage (`nogate` = `gate`), so "
+                "the stages added nothing there — the module is journal, impact analysis, approval levels and "
+                "rollback; still missing: the narrows / widens classifier over rule conditions, a regression-scenario "
+                "stage, and a script in `benchmarks/`", "script": None},
     "counterfactual": {"since": "0.7", "what": "the smallest change of a decision's inputs that changes its answer "
                        "(adverse-action reasons)", "missing": "one measured use, e.g. adverse-action reasons on the "
                        "credit gallery task", "script": None},

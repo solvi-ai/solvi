@@ -61,8 +61,18 @@ What is checked: tests/test_changes.py — the chain verifies and a tampered rec
 "outcome" passes static → consistency → clean cases → fresh environments (a toy corridor) → approval and is an active
 rule item, listed in versions and undone by rollback; a rejected candidate is recorded with its stage and refused when
 proposed again; approval "person" holds until a ruling; a search proposal needs confirmation on its evidence;
-gates_of reads the active hazard items without writing. What is not done:
-- no measured use: nothing shows yet that the pipeline admits fewer harmful changes than the store's gates alone;
+gates_of reads the active hazard items without writing; Static refuses a candidate catalog with a part that reads a
+sensitive field (Static(sensitive=), Catalog(sensitive=)) or a citation not in the text (Static(text=, spec=)); Impact
+refuses an exception whose diff moves decisions outside expected["only"] and admits the exact one.
+
+Measured (2026-10, two stands; the stands are outside this repository, so no script in benchmarks/ yet): on a credit
+policy the pipeline carried a document version (144 of 144 changed decisions traced to their clause), admitted 12 of 12
+exact exceptions, held every widening one for a person and refused 8 of 8 exceptions that touched other decisions, 0
+extraneous changes, 14 versions replayed; on a bank-request stream with a person's labels every one of 22 candidates
+passed every stage (`nogate` = `gate`), so the stages added nothing there. The module is journal, impact analysis,
+approval levels and rollback — infrastructure, not a claim that its gates admit fewer harmful changes.
+
+What is not done:
 - no rewind over an Environment (Confirmation.on_evidence takes the replay as a callback);
 - no narrows / widens classifier (Consistency takes it as a callback; Z3 over lawlang is planned);
 - no regression-scenario stage (`solvi test` cases.json);
