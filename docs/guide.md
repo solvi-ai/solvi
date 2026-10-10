@@ -45,14 +45,15 @@ own. [Building blocks](building_blocks.md) has one reference per extension point
 22. [Knowledge: what a system learned, and from whom](#knowledge-what-a-system-learned-and-from-whom)
 23. [System 1 and System 2 on a game: the Pokémon world map](#system-1-and-system-2-on-a-game-the-pokémon-world-map)
 24. [Extracting fields from documents](#extracting-fields-from-documents)
+25. [Versions of a document and their impact: solvi.core.versions](#versions-of-a-document-and-their-impact-solvicoreversions)
 
 **Experimental** — `solvi.experimental`: works and is tested, no measured gain yet; its API may change, and each piece
 graduates or is removed by 1.2 ([Experimental](experimental.md) lists what each one is missing).
 
-25. [solvi behind a coding agent's hooks](#solvi-behind-a-coding-agents-hooks)
-26. [A specification compiled into the catalog: solvi.experimental.compile](#a-specification-compiled-into-the-catalog-solviexperimentalcompile)
-27. [Verified charts: a specialist that checks every number](#verified-charts-a-specialist-that-checks-every-number)
-28. [The change pipeline: solvi.experimental.changes](#the-change-pipeline-solviexperimentalchanges)
+26. [solvi behind a coding agent's hooks](#solvi-behind-a-coding-agents-hooks)
+27. [A specification compiled into the catalog: solvi.experimental.compile](#a-specification-compiled-into-the-catalog-solviexperimentalcompile)
+28. [Verified charts: a specialist that checks every number](#verified-charts-a-specialist-that-checks-every-number)
+29. [The change pipeline: solvi.experimental.changes](#the-change-pipeline-solviexperimentalchanges)
 
 ## Quick start: solvi.build
 
@@ -171,7 +172,7 @@ text, spec=None, require=False)` — or `solvi check module:system --text POLICY
 error `cite_not_found` (matched as quotes are, across Unicode forms, dashes and curly quotes), with a `Spec` a clause
 that does not exist or does not hold the quote is an error, `require=True` warns on an uncited part; a correction can
 be cited as `clause="person:k07"`. `--spec POLICY.md` splits the text into clauses `c1`, `c2`, ... as
-`solvi.experimental.compile.Spec` does (and is the text, unless `--text` names another file); `--require-cites` warns on
+`solvi.core.versions.Spec` does (and is the text, unless `--text` names another file); `--require-cites` warns on
 an uncited part. The causes of `solvi diff` carry the citations: clause → rule → decision.
 
 ```python
@@ -3626,7 +3627,8 @@ carry the cited clauses: a cause whose part cites what it implements (`clause=` 
 catalog](#citing-the-clause-a-rule-implements)) has `"cites": [{"clause", "quote"}]`. An exception meant for one decision is checked
 with `diff(store, new_system, only={decision_id})`: `rep.extraneous` lists the ids of the other decisions it changes
 (answer, status or guard — a decision now forced by the exception counts) and `rep.exact` is True when there are none;
-`solvi.experimental.compile.decision_diff(..., only=)` does the same over the decisions whose answer moves.
+`solvi.core.versions.decision_diff(..., only=)` does the same over the decisions whose answer moves ([versions of a
+document](#versions-of-a-document-and-their-impact-solvicoreversions)).
 
 Each stored decision's recorded input is asked again for the same questions (`store=False`: the new system's own storage
 is not written) and compared with the stored response: answer, status, the guard that settled it, the safeguard events
@@ -4862,6 +4864,81 @@ description)` returns one `(start, end, score, no_answer_score)`, and `field(nam
 - On a CPU, use the fp32 ONNX export; no int8 export is provided. If you quantize one yourself, compare its spans with
   the fp32 export's on your own fields before using it.
 
+## Versions of a document and their impact: solvi.core.versions
+
+A policy, a regulation or a contract changes; the catalog that implements it changes with it. `solvi.core.versions`
+keeps the text as numbered clauses, each catalog as a version whose parts cite the clauses they implement, and says
+which decisions a new version moves — and the clauses why — before it goes live. (Until 1.1 this lived in the
+experimental compiler, `solvi.experimental.compile`, which re-exports every name for one release; the compiler itself,
+an LLM writing the parts, stays experimental.)
+
+```python
+from solvi import Answer, Question
+from solvi.core.versions import CatalogVersion, Spec, Versions, decision_diff
+
+POLICY = """# Shipping
+- An order of 50 or more ships free.
+- Orders to the world zone heavier than 30 kg are refused.
+"""
+MODULE = '''
+def free_shipping(total):
+    return total >= 50
+
+def small_enough(zone, weight):
+    return not (zone == "world" and weight > 30) or Fail(f"{weight} kg to the world zone")
+
+def ship(free_shipping):
+    return "free" if free_shipping else "paid"
+'''
+PARTS = {"free_shipping": {"kind": "fn", "clauses": ["c1"]},
+         "small_enough": {"kind": "check", "hard": True, "then": {"ship": "refused"}, "clauses": ["c2"]},
+         "ship": {"kind": "rule", "question": "ship", "clauses": ["c1"]}}
+QS = [Question("ship", "Ship free, paid or refused?", Answer.choice(["free", "paid", "refused"]))]
+
+spec = Spec(POLICY)                                     # c1, c2: paragraphs, list items and table rows
+spec2 = spec.revise(POLICY.replace("50 or more", "80 or more"))   # spec2.changes: {"changed": ["c1"], ...}
+v1 = CatalogVersion(spec, QS, MODULE, PARTS)
+v2 = CatalogVersion(spec2, QS, MODULE.replace(">= 50", ">= 80"), PARTS)
+orders = [{"id": f"o{t}", "zone": "home", "total": t, "weight": 1} for t in (10, 60, 90)]
+dd = decision_diff(v1, v2, inputs=orders, only={"o60"})
+print(dd)                       # 1 of 3 decisions change their answer ... because of clauses c1: 1
+dd.exact, dd.extraneous         # True, []: the change moves only what it was meant to
+
+versions = Versions("policy_versions")   # v1/, v2/ ... each module.py + compiled.json + version.json
+versions.add(v1, "first"); versions.add(v2, "free from 80")     # v2's parent: v1, the version in force
+versions.replay_all(store)               # every stored decision against the version that made it ([] — all replay)
+versions.rollback(1)                     # v1 in force again; every version is kept
+```
+
+**A specification** (`Spec(text)`, or `Spec(clauses={id: text})`) splits Markdown-like text into clauses `c1`, `c2`,
+...: paragraphs, list items and table rows (a row as `header: cell; ...`), headings naming the section. `spec.revise(new)`
+aligns a changed text with the old one: an unchanged clause keeps its id, a replaced one keeps the id of the one it
+replaces (`changed`), new ones get new ids (`added`), the rest are `removed`. `spec.hash` covers the clauses.
+
+**A catalog version** (`CatalogVersion(spec, questions, source, parts)`) is a module of plain functions — a part's name is
+the fact it sets, its argument names what it reads — and `parts`, each part's kind (`fn`, `check`, `rule`), for a hard
+check its `then`, for a rule its question, and the clauses it implements. `version.system(**kw)` is an ordinary System;
+the module is checked before it is loaded (standard-library imports only, no files, reflection or dunders) and a check
+may return `Fail("why")`. `save(folder)` / `CatalogVersion.load(folder)` write and read `module.py` and `compiled.json`
+(an edited `module.py` is refused); a version with `accepted=False` is refused unless `allow_unaccepted=True`.
+
+**The decisions a version moves.** `decision_diff(old, new, *, store=None, inputs=None, only=None)` re-runs the stored
+decisions (`store=`, decided by the old version) or `inputs` (each decided by the old version first) through
+[solvi diff](#catalog-fingerprint-solvi-diff-and-shadow-mode) and maps each cause step to the clauses its part
+implements; old and new may also be plain Systems, whose parts cite their clauses with `clause=` / `cite=` ([citing the
+clause](#citing-the-clause-a-rule-implements)), and the causes then carry `"cites"`. `only=` names the decisions the
+change may move — stored ids, or with `inputs=` an input's `"id"` (else its position): `extraneous` lists the others it
+moves, and `exact` is True when there are none and every decision re-ran. On a credit policy
+(`benchmarks/changes_credit.py`) a second version moved 144 decisions and each was traced to its clause, and every
+exception for one application was checked with `only=` before it was admitted.
+
+**Versions** (`Versions(folder)`) numbers the versions it is given; each records its parent (the version in force when
+it was added), its catalog fingerprint and the spec's hash. `current` is the version in force (`get()` and `system()`
+give it), `rollback(n, by=, why=)` puts an earlier one back in force (recorded in `history()`), `find(fp)` the version of
+a fingerprint, and `replay_all(store)` replays each stored decision with the version whose catalog made it, so old
+decisions keep verifying after the rules changed; a decision made by a catalog that is no version here is reported.
+The change pipeline (`solvi.experimental.changes`, `VersionsTarget`) promotes into a `Versions` and rolls it back.
+
 ## solvi behind a coding agent's hooks
 
 > **Experimental** (`solvi.experimental.hooks`, since 0.7.1; what it is missing: [Experimental](experimental.md)).
@@ -5240,17 +5317,21 @@ print(decision_diff(c, c2, store=store))    # which stored decisions change, and
 The writer sees the new text with its changed and added clauses marked and the removed ones listed, and the current
 module; it returns a patch. Each added or replaced part must cite a changed or added clause, each removed part the
 clause that removes it, and no part may still cite a removed clause — otherwise the patch goes back with the reasons.
-Then the same acceptance runs on the merged module, with tests written for the new text. `decision_diff` re-runs
+Then the same acceptance runs on the merged module, with tests written for the new text. `decision_diff` (stable:
+[solvi.core.versions](#versions-of-a-document-and-their-impact-solvicoreversions), re-exported here for one release) re-runs
 stored decisions (or `inputs=`, decided by the old version first) through `solvi.core.store.diff` and maps each cause step to the
 clauses its part cites — as fine as the parts are: a rule that cites every clause names every clause.
 
 ### Versions and replay
 
+A compilation is a `CatalogVersion` (`Compiled` is one), so the stable versions folder takes it — see
+[versions of a document](#versions-of-a-document-and-their-impact-solvicoreversions):
+
 ```python
-from solvi.experimental.compile import Versions
+from solvi.core.versions import Versions
 versions = Versions("policy_versions")      # v1/, v2/ ... each module.py + compiled.json + version.json
 n = versions.add(c2, "after the change")    # accepted compilations only
-system = versions.system()                  # the latest; versions.system(1) the first
+system = versions.system()                  # the version in force; versions.system(1) the first
 versions.replay_all(store)                  # every stored decision against the version that made it ([] — all replay)
 ```
 

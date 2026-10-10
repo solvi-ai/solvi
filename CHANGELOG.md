@@ -42,20 +42,20 @@ calibration files and served by `solvi serve`), so a build from it is not mistak
   quote of the text the part implements, or a list) and `clause=` (its clause id, or a list as long), kept as
   `Part.cites` — pairs (clause, quote). `solvi.check.citations(obj, text, *, spec=None, require=False)` checks them:
   a quote not in the text (found in the catalog's quote mode) is the error `cite_not_found`; with a
-  `solvi.experimental.compile.Spec`, a clause it does not have is `clause_unknown` and a quote outside the named
+  `solvi.core.versions.Spec`, a clause it does not have is `clause_unknown` and a quote outside the named
   clause `cite_outside_clause`; `require=True` makes an uncited part the warning `no_cite`; a correction cited as
   `clause="person:k07"` is checked against the text only. `solvi check module:system --text POLICY.md` runs it after
   the lint; `--spec FILE` splits a specification into clauses `c1`, `c2`, ... as `Spec(text)` does (also the text,
   unless `--text` is given; `solvi.check.spec_clauses`, and `split_clauses` now lives in `solvi.check` — still
-  importable from `solvi.experimental.compile`), `--require-cites` adds the `no_cite` warnings. The causes of `solvi.core.store.diff.diff` carry `"cites"` ([{"clause", "quote"}]) when their part has
-  citations; `solvi.experimental.compile.decision_diff` also takes plain Systems (hand-written catalogs), whose
+  importable from `solvi.experimental.compile`; both now from `solvi.core.versions`), `--require-cites` adds the `no_cite` warnings. The causes of `solvi.core.store.diff.diff` carry `"cites"` ([{"clause", "quote"}]) when their part has
+  citations; `solvi.core.versions.decision_diff` also takes plain Systems (hand-written catalogs), whose
   causes get their `clauses` from the citations; the changes pipeline's `Static(text=..., spec=...)` refuses a
   candidate whose citations fail.
 
 - **Exact exceptions: `only=` in the diff.** `solvi.core.store.diff.diff(storage, system, ..., only=ids)` reports
   `DiffReport.extraneous` (the ids of the changed decisions outside `only`) and `DiffReport.exact` (`only` given,
   nothing outside it changed, and every decision re-ran: one listed in `errors` may have changed, so it makes `exact`
-  False — on both reports); `solvi.experimental.compile.decision_diff(old, new, ..., only=)` gives the same two
+  False — on both reports); `solvi.core.versions.decision_diff(old, new, ..., only=)` gives the same two
   fields on `DecisionDiff`, over the decisions whose answer moves — with `inputs=` the ids are the inputs' `id` key,
   else their positions, and each change carries `"input"`. The changes pipeline's `Impact` stage refuses a change
   whose `expected["only"]` is set and whose diff changes other decisions ("changes N decision(s) other than the
@@ -76,8 +76,24 @@ calibration files and served by `solvi serve`), so a build from it is not mistak
   relation). Deterministic for a seed; skipped draws counted. `solvi.testing.conformance.check_specialist(specialist,
   sources, *, proposer=None)`: identical bytes, replay, JSON records, blocked invalid proposals.
 
+- **`solvi.core.versions`: versions of a document and their impact (stable, out of the experimental compiler).**
+  `Spec` and `Clause` (a text as numbered clauses, `revise` keeping the ids of unchanged ones), `CatalogVersion` (a
+  catalog that implements a document: the module of pure functions, its parts with the clauses each implements, the
+  questions — what the compiler's `Compiled` held, named for what it is; `Compiled` is now a subclass), `Versions`
+  (numbered folders with each version's parent, the version in force — `current`, `rollback(n, by=, why=)`,
+  `history()` — `system(n)`, `find`, `replay_all`) and `decision_diff` / `DecisionDiff` (`only=`, `extraneous`, `exact`,
+  `cites`; old and new a version or a plain System). The module of a version is checked and loaded as before (the
+  in-process check and load moved with it; the subprocess runner stays in `solvi.experimental.compile.sandbox`).
+  `split_clauses` lives here now (still importable from `solvi.check`). The change pipeline and
+  `benchmarks/changes_credit.py` import it; a version promoted by `VersionsTarget` is rolled back in the folder too.
+
 ### Changed
 
+- **`solvi.experimental.compile` re-exports what moved to `solvi.core.versions`** (`Spec`, `Clause`, `Versions`,
+  `DecisionDiff`, `decision_diff`, `Rejected`, `split_clauses`, `build_catalog`, and `CatalogVersion`) for one
+  release, as the same objects; import them from `solvi.core.versions` (the compiler's copies go in 1.2).
+  `Versions.get()` / `system()` without a number give the version in force (the latest unless rolled back) and return
+  a `CatalogVersion` (a `Compiled` loads as one). Fingerprints still name the moved classes by their 0.9 module.
 - **Replay binds every field of a result to its trace, not only the answer and its status.** With the System,
   `res.trace.replay(system, res.flow)` and `store.replay_all(system)` now also compare each stored result's
   confidence, why, guard and source with the ones the trace gives; a result edited in any of them (in a response's

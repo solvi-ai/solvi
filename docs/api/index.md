@@ -62,6 +62,7 @@ internal and have no page.
 | [`solvi.core.store.sysreport`](sysreport.md) | the system report: who answered, the cost, the promise against the stored labels, drift — from the store alone |
 | [`solvi.core.store.signature`](signature.md) | a signature of a trace or a store that names the one changed record |
 | [`solvi.core.store.diff`](diff.md) | `solvi diff` and shadow mode |
+| [`solvi.core.versions`](versions.md) | versions of a document: clauses (`Spec`), catalog versions citing them, versions with parents and rollback, the decisions a new version moves (`decision_diff`) |
 | [`solvi.core.slow.generate`](generate.md) | generation by an LLM: a text or validated JSON, quotes checked in a text, recorded as a model's output |
 | [`solvi.core.slow.agree`](agree.md) | agreement of generated candidates under a key: the chosen one, its share as a fact, the tally |
 | [`solvi.core.slow.refine`](refine.md) | a check that says why (`Fail`); the loop propose → check → re-ask with the reasons → escalate |
@@ -117,7 +118,7 @@ The modules `solvi.core` is made of. Their public names are re-exported by `solv
 |---|---|
 | [`solvi.experimental`](experimental.md) | `STATUS`: what each experimental piece is, what it is missing, its deadline |
 | [`solvi.experimental.lora`](lora.md) | a LoRA adapter per question, fitted on a few hundred labelled examples |
-| [`solvi.experimental.compile`](compile.md) | a specification compiled by an LLM into catalog parts citing its clauses, accepted when two drafts agree and the spec's tests pass; a person for what the drafts dispute; versions, recompile, the decisions a change moves, an agent guard |
+| [`solvi.experimental.compile`](compile.md) | a specification compiled by an LLM into catalog parts citing its clauses, accepted when two drafts agree and the spec's tests pass; a person for what the drafts dispute; recompile, an agent guard (versions and the decisions a change moves: `solvi.core.versions`) |
 | [`solvi.experimental.compile.sandbox`](sandbox.md) | code a model wrote, held to pure functions: ast allowlist, a subprocess with limits, a restricted load |
 | [`solvi.experimental.hooks`](hooks.md) | a coding agent's hooks: edits checked against rules, a skill picked for a prompt, install / uninstall (Claude Code; Codex, preview) |
 | [`solvi.experimental.specialist`](specialist.md) | the specialist contract: propose a typed spec, check it against the source, render, replay |

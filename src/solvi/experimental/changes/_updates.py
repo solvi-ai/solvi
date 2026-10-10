@@ -61,7 +61,7 @@ import inspect
 import json
 from dataclasses import asdict, dataclass, field
 
-from ...core.store import FORMAT, TRUSTED_SOURCES, UntrustedLabel, check_source, plain
+from ...core.store import FORMAT, UntrustedLabel, check_source, plain
 from ...core.store import open_storage
 from .. import mark
 

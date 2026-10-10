@@ -17,7 +17,7 @@ What it is: a generalisation of the learning loop of 0.7–1.0 (a candidate, gat
 rollback, versions, a changelog) from one source (labels) to four, with the stages as objects like the knowledge
 store's write gates; the loop itself was removed in 1.1 and its ladder and gates are the "update" target's. Nothing here stores knowledge: an admitted change goes into what already holds it (_targets.py) —
 a KnowledgeStore item ("item": fact, rule, skill, action, with its sub-kind in body["kind"], e.g. "hazard", and the change
-type in body["change"]), a compiled catalog version ("compiled": solvi.experimental.compile.Versions), or a labelled update ("update":
+type in body["change"]), a compiled catalog version ("compiled": solvi.core.versions.Versions), or a labelled update ("update":
 LearningTarget(system, ...) runs the update ladder — fit, a memory of the corrected cases, the adapter hook — and its
 gates (consistency, heldout, honesty, act_guard, size) on the stored labels; each gate's numbers are a stage verdict of
 the change, "update:<gate>", and the first that fails refuses it).
@@ -107,7 +107,7 @@ CHANGE_TYPES = ("fact", "rule", "meaning")
 @dataclass
 class Change:
     """A candidate change (see the module docstring). payload: for "item", {"kind", "body", and optionally "scope",
-    "derived_from", "supersedes", "valid", "reconfirm_after"}; for "compiled", a solvi.experimental.compile.Compiled;
+    "derived_from", "supersedes", "valid", "reconfirm_after"}; for "compiled", a solvi.core.versions.CatalogVersion (a Compiled too);
     for "update", None (LearningTarget reads the stored labels itself) or the updated state, whose `fingerprint` (an attribute or
     a dict key) identifies the candidate (two updates to different states are different candidates)."""
     source: str

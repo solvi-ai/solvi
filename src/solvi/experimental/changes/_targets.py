@@ -2,7 +2,7 @@
 
     KnowledgeTarget(store)      "item"      KnowledgeStore.add (its own gates run again) → the item id;
                                             rollback: KnowledgeStore.rollback (the previous version comes back)
-    VersionsTarget(versions)    "compiled"  solvi.experimental.compile.Versions.add → the version number; rollback:
+    VersionsTarget(versions)    "compiled"  solvi.core.versions.Versions.add → the version number; rollback:
                                             the version in force goes back (Versions keeps every version)
     LearningTarget(system, ...) "update"    the update ladder and its gates (_updates.py: consistency, held-out,
                                             honesty, act_guard, size) on the stored labels → the update's version;
@@ -63,7 +63,8 @@ class VersionsTarget:
 
     def __init__(self, versions):
         self.versions = versions
-        self.in_force = (versions.numbers() or [None])[-1]
+        cur = getattr(versions, "current", None)              # solvi.core.versions.Versions keeps the version in force
+        self.in_force = cur if cur is not None else (versions.numbers() or [None])[-1]
 
     def promote(self, change, measured):
         before = self.in_force
@@ -73,6 +74,8 @@ class VersionsTarget:
 
     def rollback(self, ref, by=None, why=None):
         self.in_force = ref["before"]
+        if ref["before"] is not None and callable(getattr(self.versions, "rollback", None)):
+            self.versions.rollback(ref["before"], by=by, why=why)
 
     def system(self, **kw):
         """The System of the version in force."""

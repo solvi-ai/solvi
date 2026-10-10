@@ -113,6 +113,7 @@ nav:
           - solvi.core.store.sysreport: api/sysreport.md
           - solvi.core.store.signature: api/signature.md
           - solvi.core.store.diff: api/diff.md
+          - solvi.core.versions: api/versions.md
           - solvi.core.slow.generate: api/generate.md
           - solvi.core.slow.agree: api/agree.md
           - solvi.core.slow.refine: api/refine.md

@@ -129,7 +129,7 @@ class Static:
     a list of problems (e.g. a lawlang parse).
 
     A candidate that carries a catalog (catalog_of: a Catalog or a System as the payload, or as its "catalog" /
-    "system" key; a compiled catalog — solvi.experimental.compile.Compiled — when `sensitive` or `text` is given) is
+    "system" key; a catalog version — solvi.core.versions.CatalogVersion, a Compiled too — when `sensitive` or `text` is given) is
     refused when solvi.check.lint flags a part that reads a sensitive field (`reads_sensitive`, `reads_sensitive_via`):
     the catalog's own Catalog(sensitive=...) and `sensitive` here; and, with `text` (the policy its parts cite), when
     solvi.check.citations finds an error — a quote not in the text, and with `spec` (a Spec) a clause that does not
@@ -199,13 +199,13 @@ class Static:
 
 def catalog_of(payload, *, compiled=True):
     """The catalog a change carries → a Catalog, a System or None: the payload itself (a Catalog or a System), a dict
-    payload's "system" / "catalog", or — with compiled=True — a compiled catalog's (Compiled.catalog(), loaded through
-    the compiler's sandbox)."""
+    payload's "system" / "catalog", or — with compiled=True — a catalog version's (CatalogVersion.catalog(), checked and
+    loaded as pure functions)."""
     if isinstance(payload, dict):
         payload = payload.get("system", payload.get("catalog"))
     if payload is None:
         return None
-    if callable(getattr(payload, "catalog", None)) and hasattr(payload, "source"):      # a Compiled
+    if callable(getattr(payload, "catalog", None)) and hasattr(payload, "source"):      # a CatalogVersion
         return payload.catalog(allow_unaccepted=True)[0] if compiled else None
     if hasattr(payload, "catalog") and hasattr(payload, "questions"):                  # a System
         return payload
@@ -381,7 +381,7 @@ class Impact:
 
     Impact.of_system(storage, system_of)   solvi.core.store.diff.diff(storage, system_of(change, ctx)) — the stored
                                            decisions re-run with the candidate system;
-    Impact.of_compiled(storage, old_of)    solvi.experimental.compile.decision_diff(old_of(ctx), change.payload,
+    Impact.of_compiled(storage, old_of)    solvi.core.versions.decision_diff(old_of(ctx), change.payload,
                                            store=storage) — with the clauses that cause each change."""
     name = "impact"
 
@@ -432,7 +432,7 @@ class Impact:
     @classmethod
     def of_compiled(cls, storage, old_of: Callable, *, max_share=None, **filters):
         def measure(change, ctx):
-            from ..compile import decision_diff
+            from ...core.versions import decision_diff
             return decision_diff(old_of(ctx), change.payload, store=storage, only=_only(change), **filters)
         return cls(measure, max_share=max_share)
 

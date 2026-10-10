@@ -62,16 +62,16 @@ import hashlib
 import json
 import random
 import re
-import shutil
-import tempfile
 import time
 from dataclasses import dataclass, field
-from pathlib import Path
-from typing import Any, Callable
+from typing import Callable
 
 from . import sandbox
-from ...core.catalog import Catalog, Question
+from ...core.catalog import Catalog, Question  # noqa: F401 — Catalog: kept importable from here
 from ...core.slow.refine import Fail
+# moved to the stable solvi.core.versions in 1.1 and re-exported here for one release (removed from this module in 1.2)
+from ...core.versions import (CatalogVersion, Clause, DecisionDiff, Rejected, Spec, Versions, _norm,  # noqa: F401
+                              build_catalog, decision_diff, split_clauses)
 from .. import mark, warn_on_import
 
 warn_on_import(__name__)
@@ -80,114 +80,6 @@ DEFAULT_MODEL = "openai/gpt-oss-120b"
 SANDBOX_EXTRA = {"Fail": Fail}                        # trusted names a compiled module may use without an import
 KINDS = ("fn", "check", "rule")
 META = ("PARTS", "NOT_NORMATIVE", "REMOVE")
-
-
-class Rejected(RuntimeError):
-    """A compilation that was not accepted was asked for its catalog. `.reason` says why it was not accepted."""
-
-    def __init__(self, reason):
-        self.reason = reason
-        super().__init__(f"the compilation was not accepted: {reason}")
-
-
-# ───────────────────────────────────────────────────────────── the specification as clauses
-@dataclass
-class Clause:
-    id: str
-    text: str
-    section: str = ""
-
-
-from ...check import split_clauses  # noqa: E402,F401 — the splitter is stable (solvi check --spec uses it)
-
-
-class Spec:
-    """A specification as numbered clauses (`c1`, `c2`, ...). `Spec(text)` splits a text (Markdown-like: paragraphs, list
-    items and table rows are clauses, headings are sections); `Spec(clauses={id: text})` takes them as given.
-    `spec.revise(new_text)` aligns a changed text with this one: unchanged clauses keep their ids, and `changes` says
-    which clauses changed, were added or removed."""
-
-    def __init__(self, text: str | None = None, *, clauses=None, name: str = "specification"):
-        self.name = name
-        self.changes: dict | None = None
-        if clauses is not None:
-            items = clauses.items() if isinstance(clauses, dict) else [(f"c{i}", t) for i, t in enumerate(clauses, 1)]
-            self.clauses = {str(k): Clause(str(k), str(v)) for k, v in items}
-            self.text = "\n\n".join(c.text for c in self.clauses.values()) if text is None else text
-        elif text is not None:
-            self.text = text
-            self.clauses = {f"c{i}": Clause(f"c{i}", t, sec) for i, (sec, t) in enumerate(split_clauses(text), 1)}
-        else:
-            raise ValueError("Spec needs a text or clauses")
-        if not self.clauses:
-            raise ValueError("the specification has no clauses")
-
-    @property
-    def hash(self) -> str:
-        """sha256 of the clauses (ids, sections, texts)."""
-        blob = json.dumps([[c.id, c.section, c.text] for c in self.clauses.values()], ensure_ascii=False)
-        return hashlib.sha256(blob.encode()).hexdigest()
-
-    def render(self, marks: dict | None = None) -> str:
-        """The clauses as the writer reads them: `[c3] (section) text`, with `marks` ({id: "changed"}) in front."""
-        out, sec = [], None
-        for c in self.clauses.values():
-            if c.section != sec:
-                sec = c.section
-                if sec:
-                    out.append(f"\n### {sec}")
-            m = f"[{marks[c.id]}] " if marks and c.id in marks else ""
-            out.append(f"[{c.id}] {m}{c.text}")
-        return "\n".join(out).strip()
-
-    def revise(self, text: str | None = None, *, clauses=None) -> "Spec":
-        """A new version of this specification, aligned with it: a clause whose text (and section) did not change keeps its
-        id; a replaced clause keeps the id of the one it replaces (`changed`); new clauses get new ids (`added`); the
-        others are `removed`. `new.changes` = {"unchanged", "changed", "added", "removed"} (lists of ids)."""
-        if clauses is not None:
-            items = list(clauses.values()) if isinstance(clauses, dict) else list(clauses)
-            new = [("", str(t)) for t in items]
-        else:
-            new = split_clauses(text)
-        old = list(self.clauses.values())
-        sm = difflib.SequenceMatcher(a=[(c.section, c.text) for c in old], b=new, autojunk=False)
-        n = max(int(i[1:]) for i in self.clauses if re.fullmatch(r"c\d+", i)) if any(
-            re.fullmatch(r"c\d+", i) for i in self.clauses) else 0
-        ids = [None] * len(new)
-        ch = {"unchanged": [], "changed": [], "added": [], "removed": []}
-        for tag, i1, i2, j1, j2 in sm.get_opcodes():
-            if tag == "equal":
-                for k in range(i2 - i1):
-                    ids[j1 + k] = old[i1 + k].id
-                    ch["unchanged"].append(old[i1 + k].id)
-                continue
-            pairs = min(i2 - i1, j2 - j1) if tag == "replace" else 0
-            for k in range(pairs):
-                ids[j1 + k] = old[i1 + k].id
-                ch["changed"].append(old[i1 + k].id)
-            for k in range(j1 + pairs, j2):
-                n += 1
-                ids[k] = f"c{n}"
-                ch["added"].append(ids[k])
-            ch["removed"] += [old[k].id for k in range(i1 + pairs, i2)]
-        s = Spec.__new__(Spec)
-        s.name, s.text = self.name, text if text is not None else "\n\n".join(t for _, t in new)
-        s.clauses = {i: Clause(i, t, sec) for i, (sec, t) in zip(ids, new)}
-        s.changes = ch
-        s.parent = self.hash
-        return s
-
-    def to_dict(self):
-        return {"name": self.name, "hash": self.hash, "clauses": [[c.id, c.section, c.text] for c in self.clauses.values()],
-                "changes": self.changes}
-
-    @classmethod
-    def from_dict(cls, d):
-        s = cls.__new__(cls)
-        s.name, s.changes = d.get("name", "specification"), d.get("changes")
-        s.clauses = {i: Clause(i, t, sec) for i, sec, t in d["clauses"]}
-        s.text = "\n\n".join(c.text for c in s.clauses.values())
-        return s
 
 
 # ───────────────────────────────────────────────────────────── the inputs a decision reads
@@ -517,25 +409,6 @@ def with_parts(source: str, parts: dict) -> str:
     return "\n\n".join(t.rstrip("\n") for t in keep) + "\n\n\n" + _literal("PARTS", parts)
 
 
-def build_catalog(ns: dict, parts: dict, questions) -> tuple[Catalog, list]:
-    """The catalog of a loaded module (in PARTS order) and the questions, each requiring the hard checks that name it."""
-    cat = Catalog()
-    for name, p in parts.items():
-        f = ns[name]
-        if p["kind"] == "fn":
-            cat.fn(f)
-        elif p["kind"] == "check":
-            cat.check(f, hard=bool(p.get("hard")), then=dict(p.get("then") or {}) or None)
-        else:
-            cat.rule(p["question"])(f)
-    qs = []
-    for q in questions:
-        need = [n for n, p in parts.items() if p["kind"] == "check" and p.get("hard") and q.name in (p.get("then") or {})]
-        qs.append(Question(q.name, q.text, q.answer, requires=list(dict.fromkeys(list(q.requires) + need)),
-                           uses=q.uses, min_confidence=q.min_confidence, require_evidence=q.require_evidence))
-    return cat, qs
-
-
 def _answer_json(a):
     if a is None:
         return None
@@ -824,55 +697,15 @@ def merge(old_source: str, old_parts: dict, old_nn: dict, patch_source: str, pat
 
 
 # ───────────────────────────────────────────────────────────── the result
-@dataclass
-class Compiled:
-    """A compilation: the module, its parts with the clauses each implements, whether it was accepted and why, and the
-    record (spec, prompts and replies, writer, tests, checks per round). `catalog()` / `system()` load the module (through
-    `solvi.experimental.compile.sandbox.load`) and refuse an unaccepted compilation unless `allow_unaccepted=True`."""
-    spec: Spec
-    questions: list
-    source: str
-    parts: dict
-    not_normative: dict
-    accepted: bool
-    reason: str
-    record: dict = field(default_factory=dict)
-    changes: dict | None = None
-    _ns: dict | None = field(default=None, repr=False)
-
-    def clauses_of(self, part: str) -> list:
-        """The clauses a part implements (a rule may be named `answer:<question>`)."""
-        if part.startswith("answer:"):
-            q = part.split(":", 1)[1]
-            part = next((n for n, p in self.parts.items() if p.get("kind") == "rule" and p.get("question") == q), part)
-        return list((self.parts.get(part) or {}).get("clauses") or [])
-
-    def part_of(self, step: str) -> str | None:
-        """The PARTS name of a trace step (`answer:<question>` → its rule's function)."""
-        if step.startswith("answer:"):
-            q = step.split(":", 1)[1]
-            return next((n for n, p in self.parts.items() if p.get("kind") == "rule" and p.get("question") == q), None)
-        return step if step in self.parts else None
-
-    def catalog(self, allow_unaccepted: bool = False) -> tuple[Catalog, list]:
-        """→ (Catalog, questions): the module loaded in this process (sandbox.load), each hard check required by the
-        questions it names. Raises Rejected for a compilation that was not accepted."""
-        if not self.accepted and not allow_unaccepted:
-            raise Rejected(self.reason)
-        if self._ns is None:
-            self._ns = sandbox.load(self.source, SANDBOX_EXTRA)
-        return build_catalog(self._ns, self.parts, self.questions)
+class Compiled(CatalogVersion):
+    """A compilation: a catalog version (solvi.core.versions.CatalogVersion: the module, its parts with the clauses each
+    implements, whether it was accepted and why) whose `record` keeps the spec, prompts and replies, writer, tests and
+    checks per round. `catalog()` / `system()` load the module (checked first) and refuse an unaccepted compilation
+    unless `allow_unaccepted=True`; the System says it decides with an experimental piece (meta["experimental"])."""
 
     def system(self, allow_unaccepted: bool = False, **kw):
-        """An ordinary System over the compiled catalog (kw: System's own — storage, ...)."""
-        from ...core.system import System
-        cat, qs = self.catalog(allow_unaccepted)
-        return mark(System(cat, qs, **kw), "compile")
-
-    @property
-    def fingerprint(self) -> str:
-        """The catalog's fingerprint (what a stored decision records as the catalog that decided)."""
-        return self.system(allow_unaccepted=True).fingerprint()["catalog"]
+        """An ordinary System over the compiled catalog (kw: System's own — storage, ...), marked "compile"."""
+        return mark(super().system(allow_unaccepted, **kw), "compile")
 
     def reviewer(self) -> Callable:
         """The person's recorded answers as a reviewer (`compile_spec(..., review=c.reviewer())` reruns this
@@ -886,31 +719,6 @@ class Compiled:
         review.reviewer_name = "replay"
         return review
 
-    def to_dict(self) -> dict:
-        return {"spec": self.spec.to_dict(), "questions": [q.model_dump() for q in self.questions], "source": self.source,
-                "parts": self.parts, "not_normative": self.not_normative, "accepted": self.accepted,
-                "reason": self.reason, "record": self.record, "changes": self.changes}
-
-    @classmethod
-    def from_dict(cls, d) -> "Compiled":
-        return cls(Spec.from_dict(d["spec"]), [Question.model_validate(q) for q in d["questions"]], d["source"],
-                   d["parts"], d["not_normative"], d["accepted"], d["reason"], d.get("record") or {}, d.get("changes"))
-
-    def save(self, path) -> Path:
-        """Write `module.py` (the code, as accepted) and `compiled.json` (everything) into a folder."""
-        p = Path(path)
-        p.mkdir(parents=True, exist_ok=True)
-        (p / "module.py").write_text(self.source)
-        (p / "compiled.json").write_text(json.dumps(self.to_dict(), indent=1, ensure_ascii=False, default=str))
-        return p
-
-    @classmethod
-    def load(cls, path) -> "Compiled":
-        d = json.loads((Path(path) / "compiled.json").read_text())
-        c = cls.from_dict(d)
-        if (Path(path) / "module.py").read_text() != c.source:
-            raise ValueError(f"{path}/module.py differs from the source recorded in compiled.json")
-        return c
 
 
 # ───────────────────────────────────────────────────────────── the loop
@@ -938,12 +746,6 @@ def _ask(gen, prompt, temperature, seed, log, what):
                 "model": getattr(gen, "model_id", None), "temperature": temperature, "seed": seed,
                 "usage": (meta or {}).get("usage"), "request": (meta or {}).get("request")})
     return text, err
-
-
-def _norm(a):
-    if isinstance(a, bool):
-        return "yes" if a else "no"
-    return None if a is None else str(a)
 
 
 def _valid_tests(raw, spec, questions, inputs):
@@ -1763,186 +1565,6 @@ def recompile(old: Compiled, spec: Spec, inputs: Inputs, writer=None, *, rounds:
     return c
 
 
-# ───────────────────────────────────────────────────────────── what a change does to decisions
-@dataclass
-class DecisionDiff:
-    """The decisions a new compilation changes: `changed` = [{"id", "question", "old", "new", "causes": [{"step",
-    "part", "clauses", "why"}]}] (with `inputs=`, also "input": the input's id); `report` is solvi.core.store.diff's own
-    report. With `only=`: `extraneous`, the ids of the decisions whose answer moves (`moved`) that are not in it, and
-    `exact`, True when there are none and every decision re-ran (`report.errors` empty)."""
-    changed: list
-    report: Any
-    total: int
-    extraneous: list = field(default_factory=list)
-    exact: bool = False
-
-    @property
-    def moved(self) -> list:
-        """The changes whose answer moves (the others keep their answer and are decided another way: by another check,
-        or forced where a rule answered)."""
-        return [x for x in self.changed if _norm(x["old"]) != _norm(x["new"])]
-
-    def __str__(self):
-        from collections import Counter
-        moved = self.moved
-        c = Counter((x["question"], _norm(x["old"]), _norm(x["new"])) for x in moved)
-        lines = [f"{len(moved)} of {self.total} decisions change their answer"]
-        lines += [f"  {q}: {o} → {n}: {k}" for (q, o, n), k in c.most_common()]
-        cl = Counter(tuple(sorted({c for cause in x["causes"] for c in cause["clauses"]})) for x in moved)
-        lines += ["  because of clauses " + ", ".join(k) + f": {v}" for k, v in cl.most_common()]
-        same = len(self.changed) - len(moved)
-        if same:
-            lines.append(f"{same} more keep their answer and are decided another way (another check, or forced)")
-        return "\n".join(lines)
-
-
-def _plain_answer(a):
-    return a.get("answer") if isinstance(a, dict) else a
-
-
-def _status(a):
-    return a.get("status") if isinstance(a, dict) else None
-
-
-def _decides(x):
-    """A Compiled or a System → its System (a Compiled's, built for this diff)."""
-    return x.system() if isinstance(x, Compiled) else x
-
-
-def decision_diff(old, new, *, store=None, inputs=None, only=None, **filters) -> DecisionDiff:
-    """Which decisions `new` would change: the stored ones (`store`, decided by `old`'s catalog — filters as for
-    solvi.core.store.diff.diff) or `inputs` (each decided by `old` first, in a temporary store). old / new: a Compiled,
-    or a plain System (a hand-written catalog). Each change's causes are the steps solvi.core.store.diff names, with the
-    clauses their parts implement — a Compiled's PARTS (in the new compilation, else the old one), for a plain catalog
-    the clause ids its parts cite (`clause=` on the decorators) — and "cites", the parts' citations [{"clause",
-    "quote"}] when they have them.
-
-    only: the decisions the change is allowed to move — stored decision ids, or with `inputs=` the inputs' ids: an
-    input's "id" key when it has one, else its position in `inputs` (0, 1, ...); each change then carries "input".
-    `extraneous` lists the moved decisions outside it (by those ids), `exact` is True when there are none and every
-    decision re-ran (a decision that could not be re-run makes it False)."""
-    from ...core.store.diff import diff, part_cites
-    from ...core.store import JSONLStorage
-    tmp = None
-    input_ids: dict = {}
-    if store is None:
-        if inputs is None:
-            raise ValueError("decision_diff needs a store of decisions or inputs")
-        tmp = tempfile.mkdtemp(prefix="solvi_ddiff_")
-        store = JSONLStorage(str(Path(tmp) / "decisions.jsonl"))
-        if isinstance(old, Compiled):
-            s_old = old.system(storage=store)
-            for i, x in enumerate(inputs):
-                input_ids[s_old.ask(dict(x)).stored_id] = x["id"] if isinstance(x, dict) and "id" in x else i
-        else:
-            store.catalog = old
-            for i, x in enumerate(inputs):
-                input_ids[store.save(old.ask(dict(x), store=False))] = x["id"] if isinstance(x, dict) and "id" in x else i
-    try:
-        s_new = _decides(new)
-        rep = diff(store, s_new, **filters)
-        s_old = _decides(old) if not isinstance(old, Compiled) else None
-        out = []
-        for ch in rep.changed:
-            for q, d in ch["questions"].items():
-                if not d.get("changed"):
-                    continue
-                causes = []
-                for c in d.get("causes") or []:
-                    cites = c.get("cites")
-                    if cites is None and s_old is not None:
-                        cites = part_cites(s_old.catalog, c["name"])
-                    if isinstance(new, Compiled) or isinstance(old, Compiled):
-                        part = (new.part_of(c["name"]) if isinstance(new, Compiled) else None) or \
-                            (old.part_of(c["name"]) if isinstance(old, Compiled) else None)
-                        src = new if isinstance(new, Compiled) and new.part_of(c["name"]) else old
-                        clauses = src.clauses_of(part) if part and isinstance(src, Compiled) else []
-                    else:
-                        part = c["name"]
-                        clauses = list(dict.fromkeys(x["clause"] for x in cites or () if x["clause"] is not None))
-                    cause = {"step": c["name"], "part": part, "clauses": clauses, "why": c.get("why")}
-                    if cites:
-                        cause["cites"] = cites
-                    causes.append(cause)
-                row = {"id": ch["id"], "seq": ch.get("seq"), "question": q, "old": _plain_answer(d["old"]),
-                       "new": _plain_answer(d["new"]), "status": [_status(d["old"]), _status(d["new"])],
-                       "causes": causes}
-                if input_ids:
-                    row["input"] = input_ids.get(ch["id"])
-                out.append(row)
-        total = len(list(store.iter()))
-        dd = DecisionDiff(out, rep, total)
-        if only is not None:
-            allowed = set(only)
-            dd.extraneous = [i for i in dict.fromkeys(x.get("input", x["id"]) for x in dd.moved) if i not in allowed]
-            dd.exact = not dd.extraneous and not rep.errors
-        return dd
-    finally:
-        if tmp is not None:
-            store.close()
-            shutil.rmtree(tmp, ignore_errors=True)
-
-
-# ───────────────────────────────────────────────────────────── versions
-class Versions:
-    """Compiled catalogs as numbered versions in a folder (`v1/`, `v2/`, ... each `module.py` + `compiled.json`).
-    `system(n)` builds a version's System; `replay_all(store)` replays every stored decision with the version whose
-    catalog fingerprint it recorded — an old decision is checked against the rules it was made with."""
-
-    def __init__(self, path):
-        self.path = Path(path)
-        self.path.mkdir(parents=True, exist_ok=True)
-        self._fps: dict = {}
-
-    def __len__(self):
-        return len(self.numbers())
-
-    def numbers(self) -> list[int]:
-        return sorted(int(p.name[1:]) for p in self.path.glob("v*") if p.name[1:].isdigit() and (p / "compiled.json").exists())
-
-    def add(self, compiled: Compiled, label: str | None = None) -> int:
-        """Store an accepted compilation as the next version → its number."""
-        if not compiled.accepted:
-            raise Rejected(compiled.reason)
-        n = (self.numbers() or [0])[-1] + 1
-        p = compiled.save(self.path / f"v{n}")
-        (p / "version.json").write_text(json.dumps({"version": n, "label": label, "fingerprint": compiled.fingerprint,
-                                                    "spec_hash": compiled.spec.hash, "time": time.time()}, indent=1))
-        return n
-
-    def get(self, n: int | None = None) -> Compiled:
-        """Version n (the latest when None)."""
-        n = n if n is not None else self.numbers()[-1]
-        return Compiled.load(self.path / f"v{n}")
-
-    def info(self, n: int) -> dict:
-        return json.loads((self.path / f"v{n}" / "version.json").read_text())
-
-    def system(self, n: int | None = None, **kw):
-        return self.get(n).system(**kw)
-
-    def find(self, fingerprint: str) -> int | None:
-        """The version whose catalog has this fingerprint."""
-        for n in self.numbers():
-            if self.info(n)["fingerprint"] == fingerprint:
-                return n
-        return None
-
-    def replay_all(self, store, **filters) -> list:
-        """Replay every stored decision against the version that made it (by the recorded catalog fingerprint) → the
-        ones that do not replay (as TraceStorage.replay_all), plus decisions whose catalog is no version here."""
-        bad, known = [], set()
-        for n in self.numbers():
-            fp = self.info(n)["fingerprint"]
-            known.add(fp)
-            bad += [{**b, "version": n} for b in store.replay_all(self.system(n), catalog_fp=fp, **filters)]
-        for s in (store.query(**filters) if filters else store.iter()):
-            if s.data.get("catalog") not in known:
-                bad.append({"id": s.id, "seq": s.seq, "time": s.time, "version": None, "mismatches": [],
-                            "summary": "decided by a catalog that is no version here"})
-        return bad
-
-
 # ───────────────────────────────────────────────────────────── into an agent guard
 def to_guard(compiled: Compiled, guard, tools=None, *, question: str | None = None, on_fail: str = "deny",
              allow=None, name: str | None = None) -> list:
@@ -2011,6 +1633,6 @@ def to_guard(compiled: Compiled, guard, tools=None, *, question: str | None = No
     return names
 
 
-__all__ = ["Clause", "Compiled", "DecisionDiff", "Dispute", "Inputs", "Rejected", "Ruling", "Spec", "Versions",
+__all__ = ["CatalogVersion", "Clause", "Compiled", "DecisionDiff", "Dispute", "Inputs", "Rejected", "Ruling", "Spec", "Versions",
            "compile_spec", "coverage", "decision_diff", "merge", "numbers_in", "read_module", "recompile",
-           "reference_reviewer", "split_clauses", "to_guard"]
+           "reference_reviewer", "split_clauses", "to_guard", "build_catalog"]
