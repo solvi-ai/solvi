@@ -1,0 +1,386 @@
+{
+ "written": "2026-10-10 09:37:23",
+ "seed": 20261003,
+ "how": "applications ranked by sha256(seed:correction:id); v2 decisions forced by the hard rule skipped; 10 narrowing (v2 approve/review → stricter) and 10 widening (v2 refuse/review → more permissive), a review one going to the side drawn by sha256(seed:direction:id); the 8 lowest sha256(seed:scope:id) are overreach; corrected decision drawn by sha256(seed:to:id) where two are possible. Exact condition: equalities on declared fields in a fixed order until only this application matches among the 1,000; overreach: the first of a fixed list of broad conditions that also changes another application's decision. No condition matches a boundary test input (boundaries.json). Widening (§0.8): the corrected decision is more permissive on any matched input (refuse < review < approve).",
+ "counts": {
+  "kind": {
+   "narrowing": 10,
+   "widening": 10
+  },
+  "scope": {
+   "overreach": 8,
+   "exact": 12
+  },
+  "kind×scope": {
+   "narrowing/overreach": 5,
+   "widening/exact": 7,
+   "widening/overreach": 3,
+   "narrowing/exact": 5
+  },
+  "expected": {
+   "refused by impact": 8,
+   "held for the person, then promoted after the ruling": 7,
+   "admitted (promoted)": 5
+  }
+ },
+ "corrections": [
+  {
+   "cid": "k01",
+   "application": "app0365",
+   "set": "history",
+   "kind": "narrowing",
+   "scope": "overreach",
+   "v2_decision": "approve",
+   "corrected": "review",
+   "condition": {
+    "purpose": "business",
+    "checking_account": "no checking account"
+   },
+   "note": "person: application app0365 should be 'review', not 'approve' — exception: purpose = 'business' and checking_account = 'no checking account'",
+   "matches_among_1000": 37,
+   "other_matched_whose_decision_changes": 34,
+   "classifier": "widens",
+   "expected_verdict": "refused by impact"
+  },
+  {
+   "cid": "k02",
+   "application": "app0945",
+   "set": "new",
+   "kind": "widening",
+   "scope": "exact",
+   "v2_decision": "refuse",
+   "corrected": "approve",
+   "condition": {
+    "credit_amount_dm": 8358
+   },
+   "note": "person: application app0945 should be 'approve', not 'refuse' — exception: credit_amount_dm = 8358",
+   "matches_among_1000": 1,
+   "other_matched_whose_decision_changes": 0,
+   "classifier": "widens",
+   "expected_verdict": "held for the person, then promoted after the ruling"
+  },
+  {
+   "cid": "k03",
+   "application": "app0472",
+   "set": "history",
+   "kind": "widening",
+   "scope": "overreach",
+   "v2_decision": "refuse",
+   "corrected": "review",
+   "condition": {
+    "purpose": "car (new)",
+    "checking_account": "below 0 DM"
+   },
+   "note": "person: application app0472 should be 'review', not 'refuse' — exception: purpose = 'car (new)' and checking_account = 'below 0 DM'",
+   "matches_among_1000": 78,
+   "other_matched_whose_decision_changes": 66,
+   "classifier": "widens",
+   "expected_verdict": "refused by impact"
+  },
+  {
+   "cid": "k04",
+   "application": "app0743",
+   "set": "history",
+   "kind": "widening",
+   "scope": "exact",
+   "v2_decision": "refuse",
+   "corrected": "approve",
+   "condition": {
+    "credit_amount_dm": 2483
+   },
+   "note": "person: application app0743 should be 'approve', not 'refuse' — exception: credit_amount_dm = 2483",
+   "matches_among_1000": 1,
+   "other_matched_whose_decision_changes": 0,
+   "classifier": "widens",
+   "expected_verdict": "held for the person, then promoted after the ruling"
+  },
+  {
+   "cid": "k05",
+   "application": "app0342",
+   "set": "history",
+   "kind": "widening",
+   "scope": "exact",
+   "v2_decision": "review",
+   "corrected": "approve",
+   "condition": {
+    "credit_amount_dm": 3213
+   },
+   "note": "person: application app0342 should be 'approve', not 'review' — exception: credit_amount_dm = 3213",
+   "matches_among_1000": 1,
+   "other_matched_whose_decision_changes": 0,
+   "classifier": "widens",
+   "expected_verdict": "held for the person, then promoted after the ruling"
+  },
+  {
+   "cid": "k06",
+   "application": "app0182",
+   "set": "history",
+   "kind": "widening",
+   "scope": "overreach",
+   "v2_decision": "refuse",
+   "corrected": "approve",
+   "condition": {
+    "purpose": "car (new)",
+    "checking_account": "below 0 DM"
+   },
+   "note": "person: application app0182 should be 'approve', not 'refuse' — exception: purpose = 'car (new)' and checking_account = 'below 0 DM'",
+   "matches_among_1000": 78,
+   "other_matched_whose_decision_changes": 77,
+   "classifier": "widens",
+   "expected_verdict": "refused by impact"
+  },
+  {
+   "cid": "k07",
+   "application": "app0108",
+   "set": "new",
+   "kind": "widening",
+   "scope": "exact",
+   "v2_decision": "refuse",
+   "corrected": "approve",
+   "condition": {
+    "credit_amount_dm": 7721
+   },
+   "note": "person: application app0108 should be 'approve', not 'refuse' — exception: credit_amount_dm = 7721",
+   "matches_among_1000": 1,
+   "other_matched_whose_decision_changes": 0,
+   "classifier": "widens",
+   "expected_verdict": "held for the person, then promoted after the ruling"
+  },
+  {
+   "cid": "k08",
+   "application": "app0591",
+   "set": "history",
+   "kind": "narrowing",
+   "scope": "exact",
+   "v2_decision": "approve",
+   "corrected": "refuse",
+   "condition": {
+    "credit_amount_dm": 1965
+   },
+   "note": "person: application app0591 should be 'refuse', not 'approve' — exception: credit_amount_dm = 1965",
+   "matches_among_1000": 1,
+   "other_matched_whose_decision_changes": 0,
+   "classifier": "narrows",
+   "expected_verdict": "admitted (promoted)"
+  },
+  {
+   "cid": "k09",
+   "application": "app0212",
+   "set": "history",
+   "kind": "widening",
+   "scope": "exact",
+   "v2_decision": "refuse",
+   "corrected": "approve",
+   "condition": {
+    "credit_amount_dm": 5293
+   },
+   "note": "person: application app0212 should be 'approve', not 'refuse' — exception: credit_amount_dm = 5293",
+   "matches_among_1000": 1,
+   "other_matched_whose_decision_changes": 0,
+   "classifier": "widens",
+   "expected_verdict": "held for the person, then promoted after the ruling"
+  },
+  {
+   "cid": "k10",
+   "application": "app0320",
+   "set": "history",
+   "kind": "widening",
+   "scope": "exact",
+   "v2_decision": "refuse",
+   "corrected": "approve",
+   "condition": {
+    "credit_amount_dm": 4249
+   },
+   "note": "person: application app0320 should be 'approve', not 'refuse' — exception: credit_amount_dm = 4249",
+   "matches_among_1000": 1,
+   "other_matched_whose_decision_changes": 0,
+   "classifier": "widens",
+   "expected_verdict": "held for the person, then promoted after the ruling"
+  },
+  {
+   "cid": "k11",
+   "application": "app0290",
+   "set": "history",
+   "kind": "narrowing",
+   "scope": "overreach",
+   "v2_decision": "approve",
+   "corrected": "refuse",
+   "condition": {
+    "purpose": "business",
+    "checking_account": "no checking account"
+   },
+   "note": "person: application app0290 should be 'refuse', not 'approve' — exception: purpose = 'business' and checking_account = 'no checking account'",
+   "matches_among_1000": 37,
+   "other_matched_whose_decision_changes": 32,
+   "classifier": "narrows",
+   "expected_verdict": "refused by impact"
+  },
+  {
+   "cid": "k12",
+   "application": "app0729",
+   "set": "new",
+   "kind": "narrowing",
+   "scope": "exact",
+   "v2_decision": "approve",
+   "corrected": "review",
+   "condition": {
+    "credit_amount_dm": 1275,
+    "duration_months": 24
+   },
+   "note": "person: application app0729 should be 'review', not 'approve' — exception: credit_amount_dm = 1275 and duration_months = 24",
+   "matches_among_1000": 1,
+   "other_matched_whose_decision_changes": 0,
+   "classifier": "narrows",
+   "expected_verdict": "admitted (promoted)"
+  },
+  {
+   "cid": "k13",
+   "application": "app0791",
+   "set": "new",
+   "kind": "narrowing",
+   "scope": "overreach",
+   "v2_decision": "approve",
+   "corrected": "review",
+   "condition": {
+    "purpose": "car (used)",
+    "checking_account": "no checking account"
+   },
+   "note": "person: application app0791 should be 'review', not 'approve' — exception: purpose = 'car (used)' and checking_account = 'no checking account'",
+   "matches_among_1000": 54,
+   "other_matched_whose_decision_changes": 50,
+   "classifier": "widens",
+   "expected_verdict": "refused by impact"
+  },
+  {
+   "cid": "k14",
+   "application": "app0997",
+   "set": "new",
+   "kind": "narrowing",
+   "scope": "overreach",
+   "v2_decision": "approve",
+   "corrected": "refuse",
+   "condition": {
+    "checking_account": "no checking account",
+    "savings": "below 100 DM"
+   },
+   "note": "person: application app0997 should be 'refuse', not 'approve' — exception: checking_account = 'no checking account' and savings = 'below 100 DM'",
+   "matches_among_1000": 191,
+   "other_matched_whose_decision_changes": 180,
+   "classifier": "narrows",
+   "expected_verdict": "refused by impact"
+  },
+  {
+   "cid": "k15",
+   "application": "app0431",
+   "set": "history",
+   "kind": "widening",
+   "scope": "overreach",
+   "v2_decision": "refuse",
+   "corrected": "review",
+   "condition": {
+    "purpose": "others",
+    "checking_account": "0 to 200 DM"
+   },
+   "note": "person: application app0431 should be 'review', not 'refuse' — exception: purpose = 'others' and checking_account = '0 to 200 DM'",
+   "matches_among_1000": 7,
+   "other_matched_whose_decision_changes": 6,
+   "classifier": "widens",
+   "expected_verdict": "refused by impact"
+  },
+  {
+   "cid": "k16",
+   "application": "app0510",
+   "set": "new",
+   "kind": "widening",
+   "scope": "exact",
+   "v2_decision": "refuse",
+   "corrected": "review",
+   "condition": {
+    "credit_amount_dm": 759
+   },
+   "note": "person: application app0510 should be 'review', not 'refuse' — exception: credit_amount_dm = 759",
+   "matches_among_1000": 1,
+   "other_matched_whose_decision_changes": 0,
+   "classifier": "widens",
+   "expected_verdict": "held for the person, then promoted after the ruling"
+  },
+  {
+   "cid": "k17",
+   "application": "app0697",
+   "set": "new",
+   "kind": "narrowing",
+   "scope": "exact",
+   "v2_decision": "approve",
+   "corrected": "refuse",
+   "condition": {
+    "credit_amount_dm": 926
+   },
+   "note": "person: application app0697 should be 'refuse', not 'approve' — exception: credit_amount_dm = 926",
+   "matches_among_1000": 1,
+   "other_matched_whose_decision_changes": 0,
+   "classifier": "narrows",
+   "expected_verdict": "admitted (promoted)"
+  },
+  {
+   "cid": "k18",
+   "application": "app0135",
+   "set": "history",
+   "kind": "narrowing",
+   "scope": "exact",
+   "v2_decision": "approve",
+   "corrected": "review",
+   "condition": {
+    "credit_amount_dm": 1240,
+    "duration_months": 12
+   },
+   "note": "person: application app0135 should be 'review', not 'approve' — exception: credit_amount_dm = 1240 and duration_months = 12",
+   "matches_among_1000": 1,
+   "other_matched_whose_decision_changes": 0,
+   "classifier": "narrows",
+   "expected_verdict": "admitted (promoted)"
+  },
+  {
+   "cid": "k19",
+   "application": "app0619",
+   "set": "history",
+   "kind": "narrowing",
+   "scope": "overreach",
+   "v2_decision": "approve",
+   "corrected": "review",
+   "condition": {
+    "purpose": "car (new)",
+    "checking_account": "no checking account"
+   },
+   "note": "person: application app0619 should be 'review', not 'approve' — exception: purpose = 'car (new)' and checking_account = 'no checking account'",
+   "matches_among_1000": 80,
+   "other_matched_whose_decision_changes": 77,
+   "classifier": "widens",
+   "expected_verdict": "refused by impact"
+  },
+  {
+   "cid": "k20",
+   "application": "app0702",
+   "set": "new",
+   "kind": "narrowing",
+   "scope": "exact",
+   "v2_decision": "approve",
+   "corrected": "review",
+   "condition": {
+    "credit_amount_dm": 1377
+   },
+   "note": "person: application app0702 should be 'review', not 'approve' — exception: credit_amount_dm = 1377",
+   "matches_among_1000": 1,
+   "other_matched_whose_decision_changes": 0,
+   "classifier": "narrows",
+   "expected_verdict": "admitted (promoted)"
+  }
+ ],
+ "young": {
+  "cid": "young",
+  "rule": "young_points (POLICY.md c20: age ≤ 25 → +1)",
+  "reads": [
+   "age"
+  ],
+  "expected_verdict": "refused by static: sensitive field"
+ }
+}
