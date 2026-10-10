@@ -340,6 +340,31 @@ achievements and System 1 84% of the decisions after about twenty worlds (part o
 longer). Script:
 [skills_toy.py](../benchmarks/skills_toy.py) (`pytest -m slow tests/test_skills_toy.py`).
 
+## Rules over relations: enumerate with a library, rank only where a check is expensive
+
+**Find a rule over relations as follows** (`solvi.experimental.relations.library.find_rules`):
+1. Enumerate small programs bottom-up with observational equivalence, from the base relations plus the library.
+2. Accept only what passes the held-out test (exact, or support / precision / recall / net on other worlds).
+3. Put accepted rules into the library as new terminals, so composites become small programs.
+4. Use a gradient-trained learner only when the enumeration budget runs out or the labels are noisy, and only as a
+   proposer whose program is then checked like any other candidate (`proposer=`).
+5. Rank candidates with a learned or feature ranker only when a check is expensive (`RankedProposer`).
+
+On two toys ([relations_library_toy.py](../benchmarks/relations_library_toy.py), five seeds each) the library found every
+level — a path tree's "denied if an ancestor directory is named secret and the depth is at least 3" (three levels) within
+1,679 enumerated programs, kinship on forests to depth 6 (second cousin once removed) within 6,125 — where the same
+search without the library found neither top rule in 100,000, with 0 false accepts on larger fresh worlds. A library
+also has a cost: every entry is a terminal, so a rule it does not help gets dearer (sibling took 4,176 programs after
+grandparent and great-grandparent were admitted, 487 without the library). The intermediate concepts were given as
+targets: the search found which one was within reach and the programs, not the concepts. **The caveat on step 4:**
+that one-step rules are learned by gradient is verified only on hand-picked rules over one relation; on random rules
+plain enumeration already finds every one-step rule in seconds, and rules of two steps or more did not hold when learned
+by gradient — no gradient learner ships with solvi. **On step 5:** a check on the logged rows is a few bit operations, so ranking pays only where each
+check is a live probe or a planner call. On synthetic tasks drawn from one grammar (30 atoms, k = 3) the trained
+bag-of-atoms ranker needed 2.1 checks to the true condition against 69.7 in the blind order (by length, then name),
+and the raw-feature control 24.6 (the best raw threshold picked after the fact: 12.8) — in distribution only; measure
+the control on your own grammar before trusting the trained one (`tests/test_laws_rank.py`).
+
 ## Storage and audit
 
 **One store, any number of writers — but check which backend.** SQLite and PostgreSQL take several processes;

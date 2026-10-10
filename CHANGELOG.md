@@ -63,6 +63,32 @@ calibration files and served by `solvi serve`), so a build from it is not mistak
   1.5% of System 1's decisions in failed runs under a 20% promise pooled over the skills; replayed cases never
   transferred, plans compiled without verification reached no goal. At 5% nothing certified within the toy's 20
   episodes.
+- **`solvi.experimental.relations.library`: rules over relations, composites by enumeration with a library
+  (experimental).** `find_rules(examples, targets, base=, size=, budget=, library=(), test=HeldOut(other_worlds,
+  targets))` enumerates small programs over the base relations of example worlds (each a mapping name → an (n, n)
+  boolean matrix; unary predicates as diagonals) bottom-up with observational equivalence (a hash of the packed relation
+  over all examples), hands a program that matches a target on the examples to the held-out test (`HeldOut`: exact, or
+  support / precision / recall / net for noisy labels; a target with no true pair there never passes), admits what
+  passes as a `Library(program, name, examples, test_record)` entry and enumerates again with it as a terminal; a
+  program that only fits the examples is counted as rejected, never admitted. `budget` caps the enumerated programs over
+  all rounds; `grow=False` is the flat control; `tolerance=` admits near-matches on noisy examples to the test;
+  `proposer=` is a fallback slot for a learned proposer (none ships), its programs checked the same way. Programs are
+  nested tuples (base relations, the identity, library entries; converse, closure, "at least k successors",
+  composition, ∩, ∪, ∖; no complement); `run(program, world, library=)` runs one on any world. The enumerator inside is
+  a minimal one, to be replaced by the full relation enumerator. `benchmarks/relations_library_toy.py` (five seeds,
+  `pytest -m slow`): a path tree's "denied if an ancestor directory is named secret and the depth is at least 3"
+  (three levels) found with 1,679 enumerated programs in all, kinship on forests to depth 6 with 6,125, where flat
+  search found neither top rule in 100,000; 0 false accepts on larger fresh worlds. The flat budget was 60,000 in the
+  first run (the kinship ladder then cost the library 1.02 × a tenth of it) and was raised after it.
+- **`solvi.experimental.laws`: ranking candidates where each check is expensive.** `RankedProposer(inner, scorer,
+  buffer)` reorders another proposer's candidates (never adds, drops or changes one), so a probe budget spends the likely
+  hypotheses first; `atom_features` / `candidate_features` read precision, recall, Jaccard and anti-match of each atom
+  and of the best pairs among the top atoms against the effect off the buffer's bitsets (a fixed length);
+  `BagOfAtomsRanker(seed).fit(grammar, sample)` — a numpy logistic regression over per-atom features, a condition
+  scored by the sum of its atoms' log-odds, trained on `synthetic_task`s drawn from the grammar, seeded and
+  deterministic; `FeatureRanker(stat)` — the raw statistic, no training, the control to measure first. On synthetic
+  tasks of one grammar (`tests/test_laws_rank.py`): 2.1 checks to the true condition against 69.7 in the blind order,
+  the raw Jaccard 24.6 (the best raw threshold picked after the fact: 12.8); in distribution only.
 - **Sensitive fields: declared on the catalog, refused by `solvi check`.** `Catalog(sensitive={"age", "sex"})`,
   `lint(obj, sensitive=...)` and `solvi check module:system --sensitive age,sex` (the names add up) name given facts no
   part may read. A part that reads one (a fn, extract, check, rule, `then` function, alternative producer or
