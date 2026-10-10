@@ -222,6 +222,8 @@ command trees of real tools, an agent with a `WorldMap` kept across the tasks re
 fewer steps. Where everything is one step away (a site with a full sidebar) a map adds nothing, and it does not shorten
 the first exploration.
 
+**Charge a risk budget on every take, and expect no gain from it over a written agent's reflexes.** In a crafting game, `RiskBudget` placed where the written reflexes refuse the planner's action bought no achievements at any budget (−0.16 per episode at a budget of 1.0, −0.28 at 2.0, against the bar of +10%), and random takes at the same per-class rates did as well as the budgeted ones. With a key that charges a trade once per episode (the pattern of the agent example) the budget stopped bounding exposure: 29 takes for 0.56 charged, −23% steps lived. Pass no key, so every take is charged; and measure a risk policy against random takes before claiming it is justified.
+
 **A script is a strong baseline — measure against it.** On simulated support tickets a model with memory solved as many
 as a short script did; on incidents a runbook resolved far more than the model. What solvi adds to a model-driven agent
 is that every step is checked, recorded and replayable, not that the model beats the rules.
