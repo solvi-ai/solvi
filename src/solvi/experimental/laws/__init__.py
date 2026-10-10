@@ -83,8 +83,9 @@ stream runs — or δ / space when you declare `space=` (Bonferroni). A law righ
 `sized_need(N, δ, null)` ≈ (2·ln N + ln 1/δ) / ε, ε = 1 − null (at δ = 0.1, null 0.9: 29 rows at N = 1, 150 at N = 821, 228 at N = 52,000 or 125 with space=52,000); errors ask
 for more. On a buffer with no law (2,000 rows; an effect at 70% independent of 40 sparse atoms; the 821 conditions of at
 most two atoms) the fixed thresholds (support ≥ 5, precision ≥ 0.9) accepted a law in 100 of 100 buffers, the sized
-rule in 0 of 100, and a real two-atom law on 250 rows was still accepted (tests/test_laws_w2.py). `sized=False` keeps
-the fixed thresholds — the measured stands above ran so, and a small buffer needs it. Each Law records `tested`, `need`,
+rule in 0 of 100, and a real two-atom law on 250 rows was still accepted (tests/test_laws_w2.py). A small buffer
+therefore accepts nothing — the rule working, not failing: declare `space=` or pass `sized=False` knowingly (the fixed
+thresholds; the measured stands above ran so, and their false accepts are the known price). Each Law records `tested`, `need`,
 `level` and `admitted` ("test", "probes", "hand").
 
 Admission by probes. Where the world (or an exact model of it) answers questions, `lawset.admit_by_probes(candidates,

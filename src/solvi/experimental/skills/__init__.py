@@ -56,13 +56,13 @@ the state is the predicted one); the option must pass the agent's hard checks.
 Measured: benchmarks/skills_toy.py, a deterministic gridworld (a key, a door, a gem behind it, an exit; fresh layouts
 from a seed, now and then a boulder): see the toy's own docstring and tests/test_skills_toy.py (`pytest -m slow`).
 
-Abstention and cost. `SkillSet(grammar, certificate, disagree="abstain")` (or `match(..., disagree="abstain")`):
-where the usable skills of a goal whose conditions no other usable one strictly contains have different action
-sequences, `match` returns None and counts it in `abstained` (System 2 decides there); the default stays the most
-specific skill. Each episode records `searched` (simulated steps of the planner's searches), `verify_calls` and
+The search cost. Each episode records `searched` (simulated steps of the planner's searches), `verify_calls` and
 `cost` = {candidates, tests, probes, simulated} — report it next to System 1's share.
 
 What is not done:
+- skills are admitted by the certificate on their outcomes, not by discriminating probes (laws have
+  `LawSet.admit_by_probes`); a skill set does not abstain — two certified skills of one goal are both verified plans,
+  and abstaining would need conflicting predicted end states, which skills do not carry;
 - the certificate needs its clean outcomes per certified unit: a skill used once per episode needs about fifty episodes
   at 5% before it acts alone; pool by goal or over the set (then the promise is the pool's) or loosen the promise;
 - the condition rule only widens by shared atoms; it does not search for the smallest sufficient condition and

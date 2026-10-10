@@ -96,7 +96,7 @@ STATUS: dict[str, dict] = {
     "skills": {"since": "1.1", "what": "learning in a world described by code: System 2 plans on an exact model (a "
                "copy of the environment), only plans the code verified are compiled into System 1 skills with "
                "conditions over a grammar of atoms, each used alone only while its outcomes keep an anytime-valid "
-               "certificate; abstention where certified skills disagree; a search-cost record per episode; the "
+               "certificate; a search-cost record per episode; the "
                "planner as System 2 of solvi.Agent; export into the knowledge store", "missing": "on "
                "a deterministic gridworld (20 fresh layouts, five seeds) System 1's share reached 0.81 in the last "
                "five episodes with every goal reached, as when System 2 plans every goal, and 1.5% of System 1's "
@@ -105,8 +105,8 @@ STATUS: dict[str, dict] = {
                "the toy (a game simulator with written mechanics, a service with a specification), a 5% promise "
                "(fifty clean uses per certified unit), a condition rule that specialises after a failure, and a "
                "planner with a heuristic"
-               "; abstention where certified skills of one goal disagree and the search-cost record are tested on "
-               "synthetic sets only, and the sized and probe admission of laws is not applied to skills",
+               "; the search-cost record is tested on a synthetic corridor only, and skills are not admitted by "
+               "discriminating probes (laws are: LawSet.admit_by_probes)",
                "script": "benchmarks/skills_toy.py"},
 }
 for _s in STATUS.values():

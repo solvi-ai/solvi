@@ -87,7 +87,9 @@ Laws of an environment from prediction mismatches, judged by the environment, ne
 the effect is this" from each wrong prediction, acceptance only by a held-out test on other worlds, sessions or paths,
 most specific first, retirement when the held-out precision falls, a probe planner for live systems (`split`,
 `discriminate`: read-only before write) and export into the knowledge store (`LawSet.to_knowledge`). The acceptance is
-sized by how many candidates were tested on the buffer (`sized=True`, the default; `sized=False` the fixed thresholds),
+sized by how many candidates were tested on the buffer (`sized=True`, the default: a law needs about 150 rows at 800
+candidates and about 230 at 52,000, and a small buffer accepts nothing — declare `space=` or pass `sized=False`
+knowingly),
 `LawSet.admit_by_probes` admits a law by asking the world where the candidates disagree and only when one class
 survives, `predict(..., disagree="abstain")` abstains where laws that are not exceptions of one another disagree, and
 `LawSet.cost` records the search cost. Since 1.1.
@@ -135,11 +137,10 @@ it, verified plans are compiled into System 1 skills ("when these atoms hold, fo
 conditions keep the atoms every verified start shared), and a skill acts alone only while its outcomes keep an
 anytime-valid certificate — before that System 2 re-verifies it at every use, and an alarm on its alone outcomes
 retires it. `SkillLearner` runs the loop with a record per decision and per episode; `as_s2(learner)` makes the planner
-System 2 of `solvi.Agent`; `SkillSet.to_knowledge` writes the skills into the knowledge store;
-`SkillSet(disagree="abstain")` leaves to System 2 the states where certified skills of one goal disagree, and each
-episode records its search cost. Since 1.1.
+System 2 of `solvi.Agent`; `SkillSet.to_knowledge` writes the skills into the knowledge store, and each episode
+records its search cost. Since 1.1.
 
-- **Missing:** on a deterministic gridworld (20 fresh layouts, five seeds) System 1's share reached 0.81 in the last five episodes with every goal reached, as when System 2 plans every goal, and 1.5% of System 1's decisions were in failed runs under a 20% promise pooled over the skills, while replayed cases never transferred and plans compiled without verification reached no goal; still missing: a stand beyond the toy (a game simulator with written mechanics, a service with a specification), a 5% promise (fifty clean uses per certified unit), a condition rule that specialises after a failure, and a planner with a heuristic; abstention where certified skills of one goal disagree and the search-cost record are tested on synthetic sets only, and the sized and probe admission of laws is not applied to skills.
+- **Missing:** on a deterministic gridworld (20 fresh layouts, five seeds) System 1's share reached 0.81 in the last five episodes with every goal reached, as when System 2 plans every goal, and 1.5% of System 1's decisions were in failed runs under a 20% promise pooled over the skills, while replayed cases never transferred and plans compiled without verification reached no goal; still missing: a stand beyond the toy (a game simulator with written mechanics, a service with a specification), a 5% promise (fifty clean uses per certified unit), a condition rule that specialises after a failure, and a planner with a heuristic; the search-cost record is tested on a synthetic corridor only, and skills are not admitted by discriminating probes (laws are: LawSet.admit_by_probes).
 - **Script:** `benchmarks/skills_toy.py` (the gridworld with four arms: skills, plan always, cases, scrambled; `pytest -m
   slow tests/test_skills_toy.py`). **Deadline:** 1.2.
 - Guide: [Learning in a world described by code](best_practices.md#learning-in-a-world-described-by-code-plan-on-the-code);

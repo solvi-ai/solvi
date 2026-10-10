@@ -69,15 +69,13 @@ class SkillSet:
     have failed; then the plan becomes a skill of its own. Nothing else widens a condition. Widening restarts the
     skill's own certificate (its evidence was gathered on a narrower condition).
 
-    disagree: "first" (default: `match` gives the most specific usable skill) or "abstain": where the usable skills
-    of the goal whose conditions no other usable one strictly contains have different action sequences, `match`
-    returns None (System 2 decides) and counts it in `abstained` — two certified skills, neither an exception of the
-    other, and nothing in the evidence says which one applies here."""
+    No abstention between skills: two certified skills of one goal are both verified plans, and a different action
+    sequence is not a disagreement about the world (laws abstain where they predict different outcomes:
+    `LawSet.predict(..., disagree="abstain")`). A skill set could abstain only on conflicting predicted end states
+    for the same goal, which skills do not carry; `match` stays most specific first."""
 
     def __init__(self, grammar=None, certificate: Certificate | None | bool = True, *, generalize: bool = True,
-                 key=None, disagree: str = "first"):
-        if disagree not in ("first", "abstain"):
-            raise ValueError(f"disagree is 'first' or 'abstain', not {disagree!r}")
+                 key=None):
         if certificate is True:
             certificate = Certificate()
         if certificate is False:
@@ -86,8 +84,6 @@ class SkillSet:
             raise TypeError("certificate= takes a Certificate (or None: no certificate, a control)")
         self.grammar, self.certificate, self.generalize = grammar, certificate, bool(generalize)
         self.key = key or state_key
-        self.disagree = disagree
-        self.abstained = 0
         self.skills: list[Skill] = []
         self.pools: dict[str, EProcess] = {}
         self._items: dict[str, str] = {}             # skill id → its current knowledge item id
@@ -125,22 +121,12 @@ class SkillSet:
             return skill.status == "active"
         return skill.status == "active" and self.pool(skill).certified
 
-    def match(self, state, goal, *, atoms=None, disagree: str | None = None) -> Skill | None:
-        """The most specific skill of `goal` whose condition holds in `state` and whose certificate holds, or None.
-        disagree="abstain" (or the set's own): None where the maximal usable skills disagree on the sequence."""
-        mode = disagree or self.disagree
-        if mode not in ("first", "abstain"):
-            raise ValueError(f"disagree is 'first' or 'abstain', not {mode!r}")
-        usable = [s for s in self.candidates(state, goal, atoms=atoms) if self.usable(s)]
-        if not usable:
-            return None
-        if mode == "abstain" and len(usable) > 1:
-            sets = [set(s.condition) for s in usable]
-            top = [s for s, c in zip(usable, sets) if not any(o > c for o in sets)]
-            if len({s.actions for s in top}) > 1:
-                self.abstained += 1
-                return None
-        return usable[0]
+    def match(self, state, goal, *, atoms=None) -> Skill | None:
+        """The most specific skill of `goal` whose condition holds in `state` and whose certificate holds, or None."""
+        for s in self.candidates(state, goal, atoms=atoms):
+            if self.usable(s):
+                return s
+        return None
 
     def retired(self) -> list[Skill]:
         return [s for s in self.skills if s.status == "retired"]
@@ -214,7 +200,6 @@ class SkillSet:
     def report(self) -> dict:
         usable = [s for s in self.skills if self.usable(s)]
         return {"count": len(self.skills), "usable": len(usable), "retired": len(self.retired()),
-                "abstained": self.abstained,
                 "verified": sum(1 for s in self.skills if s.source == "verified"),
                 "certificate": self.certificate.to_dict() if self.certificate is not None else None,
                 "pools": {k: p.to_dict() for k, p in self.pools.items()},

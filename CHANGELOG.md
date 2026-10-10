@@ -44,14 +44,15 @@ calibration files and served by `solvi serve`), so a build from it is not mistak
   advance, Bonferroni; `delta=0.1`, `null_precision=` min_precision or 0.95 at 1); `sized_level` / `sized_need` give the
   level and the clean support it asks for. On a synthetic buffer with no law the fixed thresholds accepted a law in 100
   of 100 buffers, the sized rule in 0 of 100; a real law on 250 rows was still accepted. `sized=False` keeps the fixed
-  thresholds (the measured toys and benchmarks pass it, and a buffer of tens of rows needs it). Each `Law` records
+  thresholds (the measured toys and benchmarks pass it). A law now needs about 150 held-out rows at 800 candidates and
+  about 230 at 52,000; a small buffer accepts nothing — declare `space=` or pass `sized=False` knowingly. Each `Law` records
   `tested`, `need`, `level` and `admitted`. `LawSet.admit_by_probes(candidates, ask, probes=, safe=, budget=, buffer=)`
   asks the world where the surviving candidates disagree (`split`), accepts the shortest one only when one equivalence
   class survives and returns an `Admission` ("accepted" / "undetermined" with the classes); on a synthetic world at 8
   checks a random held-out sample accepted a wrong law in 0.593 of 300 trials, the probes in none (0.987 right).
   `predict(..., disagree="abstain")` / `LawSet(disagree=)` returns `Undetermined` where the most specific matching laws
-  (none an exception of another) disagree, counted in `abstained`; `SkillSet(disagree=)` / `match(disagree=)` returns
-  None where certified skills of one goal disagree. Most specific first stays the default. `LawSet.cost`,
+  (none an exception of another) disagree, counted in `abstained`; most specific first stays the default. Skills do not
+  abstain (two certified skills of one goal are both verified plans). `LawSet.cost`,
   `Step.tested` and the skill episodes' `cost` (`searched`, `verify_calls`) record the search cost.
   Measured on two stands: on a game simulator with written mechanics the laws closed 94% of the gap between a learned
   map and the written mechanics, with random candidates under the same test within 1.1 points; on a real MCP

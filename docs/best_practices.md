@@ -325,9 +325,11 @@ that a stand tried tens of thousands of candidates on the same buffer, and some 
 synthetic buffer with no law at all (2,000 rows, an effect at 70% independent of 40 sparse atoms, 821 conditions) the
 fixed bar accepted a law in 100 of 100 buffers. `LawSet(sized=True)` — the default — tests each candidate at the level
 δ / (N·(N + 1)), N the candidates scored on that buffer so far, so the chance of any false acceptance stays below δ:
-0 of 100 on the same buffers, while a real law on 250 rows was still accepted. Its price is data: a clean law needs
-about (2·ln N + ln 1/δ) / ε rows (150 at N = 821, 228 at N = 52,000; 125 if you declare `space=52_000`). With a small
-buffer keep `sized=False` and treat the fixed bar's false accepts as known; the measured stands above ran so.
+0 of 100 on the same buffers, while a real law on 250 rows was still accepted. **Its price is data: a law needs about
+150 rows at 800 candidates and about 230 at 52,000** ((2·ln N + ln 1/δ) / ε rows for a law right on every row; 125 at
+52,000 if you declare `space=52_000`). **A small buffer accepts nothing — that is the rule working, not failing.**
+Collect more held-out rows, test fewer candidates, declare `space=`, or pass `sized=False` knowingly and treat the
+fixed bar's false accepts as the known price; the stands measured above ran with `sized=False`.
 
 **Where the world answers questions, admit by discriminating probes, not by a random sample.** A neighbouring research
 line measured that a hypothesis "certified" on 8 random held-out examples is wrong more often the larger the space
@@ -340,8 +342,9 @@ undetermined). Ask only where the rest of your law set and base are right, or a 
 
 **Abstain when consistent laws disagree.** Two laws that both passed their test, neither an exception of the other,
 predicting different things for one state are a reason to abstain, not a tie to break by length or age:
-`predict(state, action, disagree="abstain")` returns `Undetermined` there and counts it (`lawset.abstained`);
-`SkillSet(disagree="abstain")` does the same for certified skills. **Report the search cost next to accuracy**:
+`predict(state, action, disagree="abstain")` returns `Undetermined` there and counts it (`lawset.abstained`). Skills
+do not abstain: two certified skills of one goal are both verified plans, and a different sequence is not a
+disagreement about the world. **Report the search cost next to accuracy**:
 `lawset.cost` and each skill episode's `cost` (candidates, tests, probes, simulated steps). Measured on synthetic worlds
 only: [tests/test_laws_w2.py](../tests/test_laws_w2.py).
 
