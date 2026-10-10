@@ -301,6 +301,23 @@ planted note got another customer's order cancelled without a guard, and not wit
 **Do not use a small decision model as the only authorizer.** Asked "did the user ask for this call with these
 values?", solvi-base said yes to calls it should have refused. Grounding and policies in code did the work.
 
+## Laws from an environment: the test is the judge
+
+**Let the environment judge a law, on transitions it was not born from; keep the held-out buffer by group.** With
+`solvi.experimental.laws` a wrong prediction proposes candidate laws ("for this action, under this condition, the effect
+is this"), and a candidate is accepted only when it removes errors on held-out transitions of other worlds, sessions or
+paths than the one that proposed it (`Buffer` keys rows by `group`; `test(..., exclude=group)`). On a game simulator
+with written mechanics the laws closed 94% of the gap between a learned map and the written mechanics — and random
+candidates from the same grammar under the same test came within 1.1 points: where the grammar can be enumerated, the
+test does the work and the mismatch only keeps the set of laws compact (61 laws against 103). Retire a law when its
+held-out precision falls (`retire_below`), and cap the set. Where each test is a call into a live system, plan the
+probes: on a real MCP filesystem server with a path policy, probes chosen to tell the mismatch's candidates apart
+(read-only calls first) learned every denial class in one session — refusals 6 → 0 in the next one, no allowed call
+skipped — where random probes at the same budget went 48 → 29. **An LLM may propose, never judge:** under the same
+test an LLM proposer ended 0.95 points below enumeration, and in the same study a model judged the truth of its own
+claims about the path policy wrongly 18 times out of 40. Both findings in miniature, with their bars:
+[laws_toy.py](../benchmarks/laws_toy.py) (`pytest -m slow tests/test_laws_toy.py`).
+
 ## Storage and audit
 
 **One store, any number of writers — but check which backend.** SQLite and PostgreSQL take several processes;

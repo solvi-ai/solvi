@@ -29,6 +29,20 @@ calibration files and served by `solvi serve`), so a build from it is not mistak
   policy (two versions, 20 corrections, a rule that must be refused; the policy and corrections in
   `benchmarks/tasks/credit/`, the applications through `fetch.sh` / `prepare.py`) and exits 1 when a count differs.
   Measured on two stands: on a credit policy the pipeline carried a document version (144 of 144 changed decisions traced to their clause), admitted 12 of 12 exact exceptions, held every widening one for a person and refused 8 of 8 exceptions that touched other decisions, 0 extraneous changes, 14 versions replayed; on a bank-request stream with a person's labels every one of 22 candidates passed every stage (`nogate` = `gate`), so the stages added nothing there — the module is journal, impact analysis, approval levels and rollback; still missing: the narrows / widens classifier over rule conditions, a regression-scenario stage, and a script for the bank-request stream (the credit numbers: benchmarks/changes_credit.py).
+- **`solvi.experimental.laws`: laws of an environment from prediction mismatches (experimental).** A `Grammar` of
+  boolean atoms you write (`Atom(name, fn, feature=)`, conjunctions of at most k, one atom per feature); a `LawSet`
+  predicts with the most specific matching law (else your base predictor), turns a mismatch into candidates
+  (`Enumerate` by default, `RandomProposer` as the control, `CallableProposer` for any function, an LLM among them) and
+  accepts one only by a held-out test on a `Buffer` keyed by group — never the proposing world, session or path —
+  with support, precision and a net error reduction; laws retire when their held-out precision falls, the set has a
+  cap, `step` / `learn` run the loop over a stream. `to_knowledge(store, scope)` writes each law as a "rule" item
+  (body kind "law") with source "outcome" and the transitions it was accepted on as evidence, and retires the retired
+  ones; the journal verifies and replays. `split` / `discriminate` plan probes for a live system (read-only first).
+  Measured on two stands: on a game simulator with written mechanics the laws closed 94% of the gap between a learned
+  map and the written mechanics, with random candidates under the same test within 1.1 points; on a real MCP
+  filesystem server with a path policy, refusals 6 → 0 in one session (random probes: 48 → 29).
+  `benchmarks/laws_toy.py` reproduces both in miniature (a gridworld and a path policy, five seeds each;
+  `pytest -m slow`). A `slow` pytest marker: such tests run only with `-m slow`.
 - **Sensitive fields: declared on the catalog, refused by `solvi check`.** `Catalog(sensitive={"age", "sex"})`,
   `lint(obj, sensitive=...)` and `solvi check module:system --sensitive age,sex` (the names add up) name given facts no
   part may read. A part that reads one (a fn, extract, check, rule, `then` function, alternative producer or
