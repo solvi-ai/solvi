@@ -853,13 +853,16 @@ def plain_json(v):
 class Catalog:
     """Everything the system can do; the strategist decides which parts each question needs."""
 
-    def __init__(self, *, quotes="normalized"):
+    def __init__(self, *, quotes="normalized", sensitive=()):
         """quotes: how quotes and evidence are matched against their source text — "normalized" (default since 1.0: a
         quote that differs from its text only in Unicode form, no-break spaces or hyphens, dashes, "…", whitespace
         runs or curly quotes is found, and the source's own substring is kept, see solvi.core.locate) or "literal"
-        (0.9: the text as written, up to whitespace runs). It applies to the parts registered after it is set."""
+        (0.9: the text as written, up to whitespace runs). It applies to the parts registered after it is set.
+        sensitive: names of given facts no part may read (age, sex, ...) — `solvi check` (solvi.check.lint) reports a part
+        that reads one, directly or through a fact computed from one, as an error; nothing changes at ask time."""
         from .provenance import quote_mode
         self.quotes = quote_mode(quotes)
+        self.sensitive: frozenset[str] = frozenset([sensitive] if isinstance(sensitive, str) else sensitive or ())
         self.parts: dict[str, Part] = {}
         self.rules: dict[str, Part] = {}
         self.constraints: dict[str, Part] = {}     # rules between answers of different questions

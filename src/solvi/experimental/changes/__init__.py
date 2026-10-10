@@ -80,7 +80,7 @@ from ...core.runtime import vhash
 from .. import warn_on_import
 from ._journal import ChangeJournal, EvalLocked, EvaluatorLock
 from ._paired import paired_bootstrap, run_episode
-from ._stages import (DEFAULT_APPROVAL, LEVELS, Approval, Canaries, CleanCases, Confirmation, Consistency, Context,
+from ._stages import (DEFAULT_APPROVAL, LEVELS, Approval, Canaries, CleanCases, catalog_of, Confirmation, Consistency, Context,
                      FreshEnvironments, Impact, KnownFailures, SOURCES, Stage, Static, StageVerdict, allowed, gate_of,
                      gates_of, hazard_body, hazard_gate)
 from ._targets import KnowledgeTarget, LearningTarget, Refused, VersionsTarget
@@ -397,7 +397,7 @@ class Pipeline:
         return sorted(self._held)
 
 
-__all__ = ["allowed", "Approval", "ARTIFACTS", "Canaries", "Change", "CHANGE_TYPES", "ChangeJournal", "CleanCases",
+__all__ = ["allowed", "Approval", "ARTIFACTS", "Canaries", "catalog_of", "Change", "CHANGE_TYPES", "ChangeJournal", "CleanCases",
            "Confirmation", "Consistency", "Context", "DEFAULT_APPROVAL", "EvalLocked", "EvaluatorLock",
            "FreshEnvironments", "gate_of", "gates_of", "hazard_body", "hazard_gate", "Impact", "KnowledgeTarget",
            "KnownFailures",

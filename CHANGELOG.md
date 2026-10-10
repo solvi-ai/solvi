@@ -15,6 +15,17 @@ calibration files and served by `solvi serve`), so a build from it is not mistak
   return type you mean (`-> Literal[True, False]` is validated by its type). Guard policies declared `-> bool` follow
   the same rule. A decision stored before with such a check replays as `recompute` (the step now gives another value).
 
+### New
+
+- **Sensitive fields: declared on the catalog, refused by `solvi check`.** `Catalog(sensitive={"age", "sex"})`,
+  `lint(obj, sensitive=...)` and `solvi check module:system --sensitive age,sex` (the names add up) name given facts no
+  part may read. A part that reads one (a fn, extract, check, rule, `then` function, alternative producer or
+  constraint) is the error `reads_sensitive`; a fact computed from one is tainted, and a part reading it is the error
+  `reads_sensitive_via` with the chain in the message; a declared field nothing reads is the note `sensitive_unread`.
+  `Report.ok` is False and `solvi check` exits 1 on such an error; nothing changes at ask time. The Static stage of
+  `solvi.experimental.changes` refuses a candidate catalog with such a part (`Static(sensitive=...)`, plus the
+  catalog's own declaration).
+
 ### Changed
 
 - **Replay binds every field of a result to its trace, not only the answer and its status.** With the System,

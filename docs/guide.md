@@ -2895,6 +2895,22 @@ constant table (`{...}.get(kind, 1)`) or a default on a computed value is not fl
 `System(input_model=...)`), or mark the line `# solvi: ok`. **Notes** never fail: a question without a rule abstains until
 an answer head is fitted.
 
+**Sensitive fields.** `Catalog(sensitive={"age", "sex"})` names given facts no part may read; `lint(system,
+sensitive=...)` and `solvi check ... --sensitive age,sex` add names to the catalog's own. A part that reads one — a fn,
+extract, check or rule, a `then` function, an alternative producer, a constraint — is the error `reads_sensitive`
+(`fn 'young_points' reads 'age': a sensitive field`); a fact computed from one is tainted too, and a part that reads it
+is the error `reads_sensitive_via`, with the chain (`reads 'risk_band', computed from 'age'`); a declared field nothing
+reads is the note `sensitive_unread`. Nothing changes at ask time: lint, and the Static stage of
+`solvi.experimental.changes`, are where such a part is refused. A credit policy's proposed rule `young` is refused so:
+
+```python
+cat = Catalog(sensitive={"age", "sex"})
+
+@cat.fn
+def young_points(age):                        # solvi check: error reads_sensitive — young_points reads 'age'
+    return 1 if age <= 25 else 0
+```
+
 ## Printing results: solvi.show
 
 ```python

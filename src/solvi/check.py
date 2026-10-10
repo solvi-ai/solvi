@@ -5,6 +5,7 @@
     print(rep); rep.ok                 # errors fail; warnings fail with strict=True (solvi check --strict)
 
     solvi check myapp.decisions:system [--strict] [--json]     # exit 0: no errors; 1: errors; 2: usage errors
+    solvi check myapp.decisions:system --sensitive age,sex      # parts that read these (or what is computed from them)
 
 Errors (a decision is, or can be, wrong or impossible):
   then_not_in_flow      a hard check sets `then=` for a question whose flow does not run it. Since 1.0 the deterministic
@@ -30,6 +31,11 @@ Errors (a decision is, or can be, wrong or impossible):
                         question it governs abstains — return a bool and declare it `-> bool`
   rule_returns_non_option   a rule with `return <literal>` (also in `a if c else b`) that is not one of its question's
                         options (`return "aprove"`): on that path the question abstains
+  reads_sensitive       a part (fn, extract, check, rule, a `then` function, an alternative producer, a constraint) reads a
+                        sensitive field: one declared with Catalog(sensitive=...) or given to lint(sensitive=...) /
+                        `solvi check --sensitive age,sex`
+  reads_sensitive_via   a part reads a fact computed from a sensitive field (the message gives the chain: "reads
+                        'risk_band', computed from 'age'"); a fact a part computes from a tainted fact is tainted too
 Warnings:
   unused_part           a part no question's flow uses (a question without a rule, fit or `uses` uses everything computable:
                         those are the candidate features of the head it will be fitted with)
@@ -56,6 +62,7 @@ Notes (never fail):
   mutual_producers      facts derived from each other (net from gross and gross from net), each with a producer
                         outside the loop: the system's strategist plans around it
   no_rule               a question without a rule answers only after fit (it abstains until then)
+  sensitive_unread      a sensitive field no part reads (declared, nothing reads it: fine)
 
 The flows are planned with every given fact present (`solvi.core.plan.strategist.given_facts`), as `solvi serve` does, by the
 system's own strategist (System(strategist=)) — the deterministic one when none is set."""
@@ -124,9 +131,11 @@ class Report:
         return "\n".join(lines)
 
 
-def lint(obj, strict=False, max_combos=100_000):
+def lint(obj, strict=False, max_combos=100_000, sensitive=None):
     """A System (or a Catalog) → Report. `max_combos`: the largest number of answer combinations tried per group of
-    constraints that share questions."""
+    constraints that share questions. `sensitive`: names of given facts no part may read (age, sex, ...), added to the
+    catalog's own Catalog(sensitive=...); a part that reads one, or a fact computed from one, is an error
+    (`reads_sensitive`, `reads_sensitive_via`). Nothing changes at ask time: lint is where it is refused."""
     from .core.plan.strategist import given_facts
     if hasattr(obj, "tools") and hasattr(obj, "system") and not hasattr(obj, "questions"):   # a solvi.Guard
         rep = Report(strict=strict)
@@ -134,7 +143,7 @@ def lint(obj, strict=False, max_combos=100_000):
             if t.model is None:
                 rep.add("note", "no_schema", f"{name}", "the tool has no argument schema yet (adopted from an MCP server)")
                 continue
-            for f in lint(obj.system(name), strict, max_combos).findings:
+            for f in lint(obj.system(name), strict, max_combos, sensitive).findings:
                 rep.findings.append(replace(f, where=f"{name}: {f.where}"))
         return rep
     system = obj if hasattr(obj, "catalog") and hasattr(obj, "questions") else None
@@ -171,7 +180,63 @@ def lint(obj, strict=False, max_combos=100_000):
         rep.add("note", "constraints_not_checked", ", ".join(cat.constraints),
                 "constraints are checked against a System's questions: lint the System")
     _silent_defaults(cat, given, rep)
+    _sensitive(cat, rep, sensitive)
     return rep
+
+
+# --- sensitive fields
+def _readers(cat):
+    """Every function of a catalog that reads facts → [(where, label, inputs, the fact it sets or None)]: parts (each
+    alternative producer of a fact on its own), the `then` functions of checks, rules and constraints."""
+    out = []
+    for name, p in cat.parts.items():
+        for a in p.alternatives or [p]:
+            out.append((f"{name} ({a.name})" if p.alternatives else name, f"{a.kind} {a.name!r}", list(a.inputs), name))
+        for q, tp in (p.then_parts or {}).items():
+            out.append((tp.name, f"the `then` function of {name!r} for {q!r}", list(tp.inputs), None))
+    for q, r in cat.rules.items():
+        fname = getattr(r.func, "__name__", None) or r.name
+        out.append((fname, f"rule {fname!r}", list(r.inputs), None))
+    for name, c in cat.constraints.items():
+        out.append((name, f"constraint {name!r}", list(c.inputs), None))
+    return out
+
+
+def sensitive_names(cat, sensitive=None):
+    """The sensitive fields of a catalog: its own Catalog(sensitive=...) and `sensitive` (a name or names) → set."""
+    extra = [sensitive] if isinstance(sensitive, str) else list(sensitive or ())
+    return set(getattr(cat, "sensitive", None) or ()) | set(extra)
+
+
+def _sensitive(cat, rep, sensitive=None):
+    """reads_sensitive / reads_sensitive_via / sensitive_unread. A fact set by a part that reads a tainted name is
+    tainted, with the chain back to the sensitive field it comes from."""
+    names = sensitive_names(cat, sensitive)
+    if not names:
+        return
+    readers = _readers(cat)
+    chain = {x: [x] for x in names}                   # tainted name → [it, what it is computed from, ..., the field]
+    changed = True
+    while changed:
+        changed = False
+        for _, _, inputs, fact in readers:
+            if fact is None or fact in chain:
+                continue
+            hit = next((x for x in inputs if x in chain), None)
+            if hit is not None:
+                chain[fact] = [fact] + chain[hit]
+                changed = True
+    read = set()
+    for where, label, inputs, _ in readers:
+        for x in dict.fromkeys(inputs):
+            if x in names:
+                read.add(x)
+                rep.add("error", "reads_sensitive", where, f"{label} reads {x!r}: a sensitive field")
+            elif x in chain:
+                rep.add("error", "reads_sensitive_via", where, f"{label} reads {x!r}, computed from "
+                        + ", computed from ".join(repr(y) for y in chain[x][1:]))
+    for x in sorted(names - read):
+        rep.add("note", "sensitive_unread", x, "declared sensitive; no part reads it")
 
 
 # --- cycles
@@ -650,7 +715,8 @@ def cmd_check(a):
     obj = _target(a.target)
     if not (hasattr(obj, "parts") and hasattr(obj, "rules")) and not hasattr(obj, "catalog"):
         _fail(f"check {a.target}: not a solvi System, Catalog or Guard")
-    rep = lint(obj, strict=a.strict, max_combos=a.max_combos)
+    sensitive = [x.strip() for x in (a.sensitive or "").split(",") if x.strip()] or None
+    rep = lint(obj, strict=a.strict, max_combos=a.max_combos, sensitive=sensitive)
     if a.json:
         from .core.schema import dumps
         print(dumps(rep.to_dict(), ensure_ascii=False, indent=2))
@@ -682,7 +748,9 @@ def add_parser(sub):
     c.add_argument("--max-combos", type=int, default=100_000,
                    help="the most answer combinations tried per group of constraints (default 100000)")
     c.add_argument("--json", action="store_true", help="print JSON")
+    c.add_argument("--sensitive", metavar="NAMES", help="comma-separated given facts no part may read (age,sex): a part "
+                                                       "that reads one, or a fact computed from one, is an error")
     return c
 
 
-__all__ = ["add_parser", "cmd_check", "Finding", "lint", "Report", "silent_defaults"]
+__all__ = ["add_parser", "cmd_check", "Finding", "lint", "Report", "sensitive_names", "silent_defaults"]

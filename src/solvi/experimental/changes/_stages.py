@@ -126,11 +126,20 @@ class Static:
     KnowledgeStore.proposal and its source by the store's SourceGate; `change.code` (rule code) passes the compiler's
     sandbox check (solvi.experimental.compile.sandbox.check: pure functions, standard-library imports); each evidence id
     exists (`evidence_exists(eid) → bool`, e.g. a TraceStorage's record or an experience log); `parse(change, ctx)` →
-    a list of problems (e.g. a lawlang parse)."""
+    a list of problems (e.g. a lawlang parse).
+
+    A candidate that carries a catalog (catalog_of: a Catalog or a System as the payload, or as its "catalog" /
+    "system" key; a compiled catalog — solvi.experimental.compile.Compiled — when `sensitive` is given) is refused
+    when solvi.check.lint flags a part that reads a sensitive field (`reads_sensitive`, `reads_sensitive_via`): the
+    catalog's own Catalog(sensitive=...) and `sensitive` here. `catalog_of(payload)` → a Catalog / System or None
+    replaces how the catalog is found."""
     name = "static"
 
-    def __init__(self, *, parse: Callable | None = None, evidence_exists: Callable | None = None, sandbox: bool = True):
+    def __init__(self, *, parse: Callable | None = None, evidence_exists: Callable | None = None, sandbox: bool = True,
+                 sensitive=None, catalog_of: Callable | None = None):
         self.parse, self.evidence_exists, self.sandbox = parse, evidence_exists, sandbox
+        self.sensitive = None if sensitive is None else ([sensitive] if isinstance(sensitive, str) else list(sensitive))
+        self.catalog_of = catalog_of
 
     def run(self, change, ctx):
         problems = []
@@ -161,7 +170,43 @@ class Static:
                 problems.append(f"evidence not found: {missing[:5]}")
         if self.parse is not None:
             problems += list(self.parse(change, ctx) or ())
+        cat = self._catalog(change.payload)
+        if cat is not None:
+            problems += self._lint(cat)
         return StageVerdict.refuse("; ".join(problems), {"problems": problems}) if problems else StageVerdict.admit()
+
+    def _catalog(self, payload):
+        """The candidate's catalog (a Catalog) or None."""
+        if self.catalog_of is not None:
+            found = self.catalog_of(payload)
+        else:
+            found = catalog_of(payload, compiled=bool(self.sensitive))
+        if found is None:
+            return None
+        return found.catalog if hasattr(found, "questions") and not hasattr(found, "rules") else found
+
+    def _lint(self, cat):
+        from ...check import Report, _sensitive
+        rep = Report()
+        _sensitive(cat, rep, self.sensitive)
+        return [f"{f.code}: {f.where}: {f.message}" for f in rep.errors]
+
+
+def catalog_of(payload, *, compiled=True):
+    """The catalog a change carries → a Catalog, a System or None: the payload itself (a Catalog or a System), a dict
+    payload's "system" / "catalog", or — with compiled=True — a compiled catalog's (Compiled.catalog(), loaded through
+    the compiler's sandbox)."""
+    if isinstance(payload, dict):
+        payload = payload.get("system", payload.get("catalog"))
+    if payload is None:
+        return None
+    if callable(getattr(payload, "catalog", None)) and hasattr(payload, "source"):      # a Compiled
+        return payload.catalog(allow_unaccepted=True)[0] if compiled else None
+    if hasattr(payload, "catalog") and hasattr(payload, "questions"):                  # a System
+        return payload
+    if hasattr(payload, "parts") and hasattr(payload, "rules"):                        # a Catalog
+        return payload
+    return None
 
 
 # ───────────────────────────────────────────────────────────── 2. consistency (wraps)
@@ -540,7 +585,7 @@ class Context:
     ruling: tuple | None = None
 
 
-__all__ = ["Approval", "allowed", "Canaries", "CleanCases", "Confirmation", "Consistency", "Context", "DECISIONS",
+__all__ = ["Approval", "allowed", "Canaries", "catalog_of", "CleanCases", "Confirmation", "Consistency", "Context", "DECISIONS",
            "DEFAULT_APPROVAL", "FreshEnvironments", "gate_of", "gates_of", "hazard_body", "hazard_gate", "Impact",
            "KnownFailures",
            "LEVELS", "SOURCES", "Stage", "Static", "StageVerdict"]
