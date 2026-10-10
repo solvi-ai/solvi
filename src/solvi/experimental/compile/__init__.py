@@ -98,49 +98,7 @@ class Clause:
     section: str = ""
 
 
-_HEADING = re.compile(r"^(#{1,6})\s+(.*\S)\s*$")
-_ITEM = re.compile(r"^\s*(?:[-*+]|\d+[.)])\s+(.*)$")
-_SEP = re.compile(r"^:?-{2,}:?$")
-
-
-def split_clauses(text: str) -> list[tuple[str, str]]:
-    """A text → [(section, clause text)]: each paragraph, list item and table row is a clause (a table row is written
-    as `header: cell; ...`); headings name the section and are not clauses themselves."""
-    out, buf, path, header = [], [], [], None
-
-    def flush():
-        if buf:
-            out.append((" / ".join(t for _, t in path), " ".join(buf).strip()))
-            buf.clear()
-    for line in text.splitlines():
-        s = line.strip()
-        h = _HEADING.match(s)
-        if h:
-            flush()
-            header = None
-            level = len(h.group(1))
-            path[:] = [p for p in path if p[0] < level] + [(level, h.group(2))]
-            continue
-        if s.startswith("|"):
-            flush()
-            cells = [c.strip() for c in s.strip("|").split("|")]
-            if all(_SEP.match(c) for c in cells if c):
-                continue
-            if header is None:
-                header = cells
-                continue
-            out.append((" / ".join(t for _, t in path), "; ".join(f"{a}: {b}" for a, b in zip(header, cells) if b)))
-            continue
-        header = None
-        if not s:
-            flush()
-        elif _ITEM.match(line):
-            flush()
-            buf.append(_ITEM.match(line).group(1).strip())
-        else:
-            buf.append(s)
-    flush()
-    return [(sec, t) for sec, t in out if t]
+from ...check import split_clauses  # noqa: E402,F401 — the splitter is stable (solvi check --spec uses it)
 
 
 class Spec:
@@ -1809,10 +1767,14 @@ def recompile(old: Compiled, spec: Spec, inputs: Inputs, writer=None, *, rounds:
 @dataclass
 class DecisionDiff:
     """The decisions a new compilation changes: `changed` = [{"id", "question", "old", "new", "causes": [{"step",
-    "part", "clauses", "why"}]}]; `report` is solvi.core.store.diff's own report."""
+    "part", "clauses", "why"}]}] (with `inputs=`, also "input": the input's id); `report` is solvi.core.store.diff's own
+    report. With `only=`: `extraneous`, the ids of the decisions whose answer moves (`moved`) that are not in it, and
+    `exact`, True when there are none and every decision re-ran (`report.errors` empty)."""
     changed: list
     report: Any
     total: int
+    extraneous: list = field(default_factory=list)
+    exact: bool = False
 
     @property
     def moved(self) -> list:
@@ -1842,23 +1804,44 @@ def _status(a):
     return a.get("status") if isinstance(a, dict) else None
 
 
-def decision_diff(old: Compiled, new: Compiled, *, store=None, inputs=None, **filters) -> DecisionDiff:
+def _decides(x):
+    """A Compiled or a System → its System (a Compiled's, built for this diff)."""
+    return x.system() if isinstance(x, Compiled) else x
+
+
+def decision_diff(old, new, *, store=None, inputs=None, only=None, **filters) -> DecisionDiff:
     """Which decisions `new` would change: the stored ones (`store`, decided by `old`'s catalog — filters as for
-    solvi.core.store.diff.diff) or `inputs` (each decided by `old` first, in a temporary store). Each change's causes are the steps
-    solvi.core.store.diff names, with the clauses their parts implement (in the new compilation, else the old one)."""
-    from ...core.store.diff import diff
+    solvi.core.store.diff.diff) or `inputs` (each decided by `old` first, in a temporary store). old / new: a Compiled,
+    or a plain System (a hand-written catalog). Each change's causes are the steps solvi.core.store.diff names, with the
+    clauses their parts implement — a Compiled's PARTS (in the new compilation, else the old one), for a plain catalog
+    the clause ids its parts cite (`clause=` on the decorators) — and "cites", the parts' citations [{"clause",
+    "quote"}] when they have them.
+
+    only: the decisions the change is allowed to move — stored decision ids, or with `inputs=` the inputs' ids: an
+    input's "id" key when it has one, else its position in `inputs` (0, 1, ...); each change then carries "input".
+    `extraneous` lists the moved decisions outside it (by those ids), `exact` is True when there are none and every
+    decision re-ran (a decision that could not be re-run makes it False)."""
+    from ...core.store.diff import diff, part_cites
     from ...core.store import JSONLStorage
     tmp = None
+    input_ids: dict = {}
     if store is None:
         if inputs is None:
             raise ValueError("decision_diff needs a store of decisions or inputs")
         tmp = tempfile.mkdtemp(prefix="solvi_ddiff_")
         store = JSONLStorage(str(Path(tmp) / "decisions.jsonl"))
-        s_old = old.system(storage=store)
-        for x in inputs:
-            s_old.ask(dict(x))
+        if isinstance(old, Compiled):
+            s_old = old.system(storage=store)
+            for i, x in enumerate(inputs):
+                input_ids[s_old.ask(dict(x)).stored_id] = x["id"] if isinstance(x, dict) and "id" in x else i
+        else:
+            store.catalog = old
+            for i, x in enumerate(inputs):
+                input_ids[store.save(old.ask(dict(x), store=False))] = x["id"] if isinstance(x, dict) and "id" in x else i
     try:
-        rep = diff(store, new.system(), **filters)
+        s_new = _decides(new)
+        rep = diff(store, s_new, **filters)
+        s_old = _decides(old) if not isinstance(old, Compiled) else None
         out = []
         for ch in rep.changed:
             for q, d in ch["questions"].items():
@@ -1866,15 +1849,34 @@ def decision_diff(old: Compiled, new: Compiled, *, store=None, inputs=None, **fi
                     continue
                 causes = []
                 for c in d.get("causes") or []:
-                    part = new.part_of(c["name"]) or old.part_of(c["name"])
-                    src = new if new.part_of(c["name"]) else old
-                    causes.append({"step": c["name"], "part": part, "clauses": src.clauses_of(part) if part else [],
-                                   "why": c.get("why")})
-                out.append({"id": ch["id"], "seq": ch.get("seq"), "question": q, "old": _plain_answer(d["old"]),
-                            "new": _plain_answer(d["new"]), "status": [_status(d["old"]), _status(d["new"])],
-                            "causes": causes})
+                    cites = c.get("cites")
+                    if cites is None and s_old is not None:
+                        cites = part_cites(s_old.catalog, c["name"])
+                    if isinstance(new, Compiled) or isinstance(old, Compiled):
+                        part = (new.part_of(c["name"]) if isinstance(new, Compiled) else None) or \
+                            (old.part_of(c["name"]) if isinstance(old, Compiled) else None)
+                        src = new if isinstance(new, Compiled) and new.part_of(c["name"]) else old
+                        clauses = src.clauses_of(part) if part and isinstance(src, Compiled) else []
+                    else:
+                        part = c["name"]
+                        clauses = list(dict.fromkeys(x["clause"] for x in cites or () if x["clause"] is not None))
+                    cause = {"step": c["name"], "part": part, "clauses": clauses, "why": c.get("why")}
+                    if cites:
+                        cause["cites"] = cites
+                    causes.append(cause)
+                row = {"id": ch["id"], "seq": ch.get("seq"), "question": q, "old": _plain_answer(d["old"]),
+                       "new": _plain_answer(d["new"]), "status": [_status(d["old"]), _status(d["new"])],
+                       "causes": causes}
+                if input_ids:
+                    row["input"] = input_ids.get(ch["id"])
+                out.append(row)
         total = len(list(store.iter()))
-        return DecisionDiff(out, rep, total)
+        dd = DecisionDiff(out, rep, total)
+        if only is not None:
+            allowed = set(only)
+            dd.extraneous = [i for i in dict.fromkeys(x.get("input", x["id"]) for x in dd.moved) if i not in allowed]
+            dd.exact = not dd.extraneous and not rep.errors
+        return dd
     finally:
         if tmp is not None:
             store.close()

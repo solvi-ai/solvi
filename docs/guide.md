@@ -162,6 +162,23 @@ def ship_rule(big_order):
     return not big_order                    # bool is normalized to "yes"/"no" for yes/no questions
 ```
 
+### Citing the clause a rule implements
+
+A hand-written part can say which text it implements: `cite=` a verbatim quote (or a list) and `clause=` the clause's
+id (or a list as long). They are kept as `Part.cites` and checked against the text by `solvi.check.citations(system,
+text, spec=None, require=False)` — or `solvi check module:system --text POLICY.md`: a quote not in the text is the
+error `cite_not_found` (matched as quotes are, across Unicode forms, dashes and curly quotes), with a `Spec` a clause
+that does not exist or does not hold the quote is an error, `require=True` warns on an uncited part; a correction can
+be cited as `clause="person:k07"`. `--spec POLICY.md` splits the text into clauses `c1`, `c2`, ... as
+`solvi.experimental.compile.Spec` does (and is the text, unless `--text` names another file); `--require-cites` warns on
+an uncited part. The causes of `solvi diff` carry the citations: clause → rule → decision.
+
+```python
+@cat.fn(clause="c16", cite='new rule `guarantor`: other_debtors is "guarantor" → −1')
+def guarantor_points(other_debtors):
+    return -1 if other_debtors == "guarantor" else 0
+```
+
 ### Soft and hard checks
 
 - A **soft check** is a boolean fact. Rules can use it, answer heads can learn from it, and failed soft checks are listed
@@ -2895,6 +2912,22 @@ constant table (`{...}.get(kind, 1)`) or a default on a computed value is not fl
 `System(input_model=...)`), or mark the line `# solvi: ok`. **Notes** never fail: a question without a rule abstains until
 an answer head is fitted.
 
+**Sensitive fields.** `Catalog(sensitive={"age", "sex"})` names given facts no part may read; `lint(system,
+sensitive=...)` and `solvi check ... --sensitive age,sex` add names to the catalog's own. A part that reads one — a fn,
+extract, check or rule, a `then` function, an alternative producer, a constraint — is the error `reads_sensitive`
+(`fn 'young_points' reads 'age': a sensitive field`); a fact computed from one is tainted too, and a part that reads it
+is the error `reads_sensitive_via`, with the chain (`reads 'risk_band', computed from 'age'`); a declared field nothing
+reads is the note `sensitive_unread`. Nothing changes at ask time: lint, and the Static stage of
+`solvi.experimental.changes`, are where such a part is refused. A credit policy's proposed rule `young` is refused so:
+
+```python
+cat = Catalog(sensitive={"age", "sex"})
+
+@cat.fn
+def young_points(age):                        # solvi check: error reads_sensitive — young_points reads 'age'
+    return 1 if age <= 25 else 0
+```
+
 ## Printing results: solvi.show
 
 ```python
@@ -3650,7 +3683,12 @@ is not named, and a decision that changes because of a threshold is attributed t
 Of the steps on such a path the causes are those where a difference starts (its own code, declarations or model
 changed, it is new or no longer runs, or nothing it reads differs); with several changes at once each is listed, and
 which of them alone would have changed the answer takes a `diff` against a system with only that change. The header
-lists the parts whose code changed since the decisions were stored and the parts that ran now and not then.
+lists the parts whose code changed since the decisions were stored and the parts that ran now and not then. The causes
+carry the cited clauses: a cause whose part cites what it implements (`clause=` / `cite=`, see [the
+catalog](#citing-the-clause-a-rule-implements)) has `"cites": [{"clause", "quote"}]`. An exception meant for one decision is checked
+with `diff(store, new_system, only={decision_id})`: `rep.extraneous` lists the ids of the other decisions it changes
+(answer, status or guard — a decision now forced by the exception counts) and `rep.exact` is True when there are none;
+`solvi.experimental.compile.decision_diff(..., only=)` does the same over the decisions whose answer moves.
 
 Each stored decision's recorded input is asked again for the same questions (`store=False`: the new system's own storage
 is not written) and compared with the stored response: answer, status, the guard that settled it, the safeguard events
@@ -5404,3 +5442,25 @@ layout is conservative rather than exact. Charts are bar, line and pie, one unit
 dual-axis charts yet. Tables, slides and speech are the next specialists.
 
 See [examples/21_verified_chart.py](../examples/21_verified_chart.py).
+
+### Two readers: agreement on aligned spans
+
+A second, independent reader of the same source is the strongest check a specialist has. `align(a, b, overlap=...,
+min_overlap=0.5, same=None, min_a=0.0, min_b=0.0)` in `solvi.experimental.specialist` matches two readers' `Reading`s
+one-to-one by the overlap of their spans — greedy by descending overlap, ties by input order, so it is deterministic —
+and returns what both read (`agreed`, each with both spans and confidences), what they read differently on one span
+(`conflicts`) and what only one of them read (`only_a`, `only_b`). Time, boxes and character offsets are one function:
+
+```python
+from solvi.experimental.specialist import Reading, align, box_iou, interval_overlap
+
+words = align([Reading("1990", (0.96, 1.66), 0.86)], [Reading("1990", (0.95, 1.70), 1.0)],
+              overlap=interval_overlap)                     # two speech models' words by time
+boxes = align([Reading("TOTAL", (149, 461, 185, 479))], [Reading("TOTAL", (150, 464, 184, 477))],
+              overlap=box_iou, same=lambda x, y: x.strip() == y.strip())    # two OCR engines' words by box
+```
+
+Nothing in it decides acceptance: the check accepts from `agreed` and turns `conflicts` into a conflict or a review;
+the thresholds are the task's. On two stands this was the mechanism behind the measured gains: speech (two models'
+words aligned in time) gave 0 false words on 400 non-speech clips and caught 299 of 300 corruptions, receipts (two OCR
+engines' words aligned by box) went from 88% to 96.4% exact among accepted fields.

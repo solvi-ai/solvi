@@ -217,6 +217,9 @@ class DiffReport:
     changed: list = field(default_factory=list)   # [{"id", "seq", "time", "questions": {question: change}}]
     errors: list = field(default_factory=list)    # [{"id", "seq", "error"}] decisions that could not be re-run
     catalog: dict = field(default_factory=dict)   # {"new": fp, "stored": {fp: count}, "changed_parts", "added_parts"}
+    only: list | None = None                      # diff(only=): the decisions the change is allowed to change
+    extraneous: list = field(default_factory=list)   # ids of the changed decisions not in `only` (in `changed` order)
+    exact: bool = False                           # `only` given, nothing outside it changed, every decision re-ran
 
     @property
     def ok(self):
@@ -239,7 +242,7 @@ class DiffReport:
 
     def to_dict(self):
         return {"total": self.total, "changed": self.changed, "errors": self.errors, "catalog": self.catalog,
-                "by_question": self.by_question()}
+                "by_question": self.by_question(), "only": self.only, "extraneous": self.extraneous, "exact": self.exact}
 
     def __str__(self):
         n = len(self.changed)
@@ -250,6 +253,10 @@ class DiffReport:
         ap = self.catalog.get("added_parts")
         if ap:
             lines.append("  parts that ran now and not then: " + ", ".join(ap))
+        if self.only is not None:
+            lines.append("  exact: only the allowed decisions change" if self.exact else
+                         f"  {len(self.extraneous)} decision(s) changed outside the allowed ones: "
+                         + ", ".join(map(str, self.extraneous[:10])) + (" …" if len(self.extraneous) > 10 else ""))
         for q, s in sorted(self.by_question().items()):
             lines.append(f"  {q}: {s['changed']} changed (" + ", ".join(f"{k} {v}" for k, v in s["fields"].items()) + ")")
             for t, k in sorted(s["transitions"].items(), key=lambda kv: -kv[1]):
@@ -310,12 +317,17 @@ def _compact_change(s, system, confidence):
     return out
 
 
-def diff(storage, system, confidence=0.01, limit=None, **filters):
+def diff(storage, system, confidence=0.01, limit=None, only=None, **filters):
     """Re-run stored decisions with `system` (e.g. a new catalog or model) and report what changes → DiffReport.
     Each stored decision is loaded (typed values restored with `system`), its recorded input is asked again for the same
     questions (store=False: nothing is written to the system's own storage), and the two responses are compared (see
     compare). A stored decision whose input did not come back as it was (see solvi.core.schema: an untyped enum or object, an
     untyped date stored by solvi ≤ 0.7.1) is listed under `errors` — "could not be re-run" — not as a changed one. filters: TraceStorage.query filters (question=, since=, ...) to pick the decisions; limit: at most this many.
+    only: the ids of the stored decisions the change is meant to change (an exception for one corrected decision) —
+    `extraneous` lists the ids of the changed decisions outside it, `exact` is True when there are none and every
+    decision re-ran (a decision that could not be re-run, listed in `errors`, may have changed: then `exact` is False).
+    A cause whose part (in `system`) cites what it implements (`clause=` / `cite=` on its decorator) carries "cites":
+    [{"clause", "quote"}] — the chain clause → part → decision.
     The system's learned parts may learn from these asks as from any other (System(learn=...))."""
     from ..provenance import catalog_fingerprint
     rep = DiffReport()
@@ -356,10 +368,40 @@ def diff(storage, system, confidence=0.01, limit=None, **filters):
         added_parts |= {r.name for r in new.trace.records if r.name not in was and r.kind not in ("head", "plan", "textin", "guard", "then")}
         ch = compare(old, new, confidence)
         if ch:
+            _add_cites(ch, system.catalog, new)
             rep.changed.append({"id": s.id, "seq": s.seq, "time": s.time, "questions": ch})
     rep.catalog["changed_parts"] = sorted(changed_parts)
     rep.catalog["added_parts"] = sorted(added_parts)
+    if only is not None:
+        allowed = set(only)
+        rep.only = list(only)
+        rep.extraneous = [i for i in dict.fromkeys(c["id"] for c in rep.changed) if i not in allowed]
+        rep.exact = not rep.extraneous and not rep.errors
     return rep
+
+
+def part_cites(cat, name, producer=None):
+    """The citations of the part behind a step (Part.cites: the decorators' clause= / cite=) → [{"clause", "quote"}] or
+    None. name: a step's name (a fact, or "answer:<question>" for a rule); producer: the alternative producer that gave
+    a grouped fact its value (else the citations of all its producers)."""
+    p = cat.rules.get(name[len("answer:"):]) if name.startswith("answer:") else cat.parts.get(name)
+    if p is None:
+        return None
+    alts = p.alternatives or []
+    chosen = [a for a in alts if a.name == producer] or alts or [p]
+    cites = [c for a in chosen for c in (a.cites or ())]
+    return [{"clause": c, "quote": q} for c, q in cites] or None
+
+
+def _add_cites(changes, cat, new):
+    """Each cause (and first step) of compare's changes gains "cites" when its part has citations."""
+    recs = _records(new)
+    for d in changes.values():
+        for c in list(d.get("causes") or []) + ([d["first_step"]] if d.get("first_step") else []):
+            r = recs.get(c.get("name") or "")
+            cites = part_cites(cat, c.get("name") or "", getattr(r, "producer", None))
+            if cites:
+                c["cites"] = cites
 
 
 # --- shadow mode
@@ -430,4 +472,4 @@ class Shadow:
         return "\n".join(lines)
 
 
-__all__ = ["causes", "compare", "diff", "DiffReport", "Shadow"]
+__all__ = ["causes", "compare", "diff", "DiffReport", "part_cites", "Shadow"]

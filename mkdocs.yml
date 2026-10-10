@@ -79,6 +79,7 @@ nav:
           - solvi.show: api/show.md
           - solvi.check: api/check.md
           - solvi.testing: api/testing.md
+          - solvi.testing.corrupt: api/testing.md
           - solvi.testing.conformance: api/conformance.md
           - solvi.testing.honesty: api/honesty.md
           - solvi.solutions: api/solutions.md
@@ -161,6 +162,7 @@ nav:
           - solvi.experimental.charts: api/charts.md
           - solvi.experimental.mcp: api/mcp.md
           - solvi.experimental.oncalib: api/oncalib.md
+          - solvi.experimental.changes: api/changes.md
           - solvi.experimental.counterfactual: api/counterfactual.md
   - Changelog: changelog.md
   - Roadmap: roadmap.md

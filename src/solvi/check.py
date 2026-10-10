@@ -5,6 +5,12 @@
     print(rep); rep.ok                 # errors fail; warnings fail with strict=True (solvi check --strict)
 
     solvi check myapp.decisions:system [--strict] [--json]     # exit 0: no errors; 1: errors; 2: usage errors
+    solvi check myapp.decisions:system --sensitive age,sex      # parts that read these (or what is computed from them)
+    solvi check myapp.decisions:system --text POLICY.md         # then every part's cite= is looked for in the text
+    solvi check myapp.decisions:system --spec POLICY.md [--require-cites]   # and its clause= against Spec(text)'s clauses
+
+    from solvi.check import citations
+    citations(system, policy_text, spec=None, require=False)   # → Report: the citations of the parts (see citations)
 
 Errors (a decision is, or can be, wrong or impossible):
   then_not_in_flow      a hard check sets `then=` for a question whose flow does not run it. Since 1.0 the deterministic
@@ -30,6 +36,11 @@ Errors (a decision is, or can be, wrong or impossible):
                         question it governs abstains — return a bool and declare it `-> bool`
   rule_returns_non_option   a rule with `return <literal>` (also in `a if c else b`) that is not one of its question's
                         options (`return "aprove"`): on that path the question abstains
+  reads_sensitive       a part (fn, extract, check, rule, a `then` function, an alternative producer, a constraint) reads a
+                        sensitive field: one declared with Catalog(sensitive=...) or given to lint(sensitive=...) /
+                        `solvi check --sensitive age,sex`
+  reads_sensitive_via   a part reads a fact computed from a sensitive field (the message gives the chain: "reads
+                        'risk_band', computed from 'age'"); a fact a part computes from a tainted fact is tainted too
 Warnings:
   unused_part           a part no question's flow uses (a question without a rule, fit or `uses` uses everything computable:
                         those are the candidate features of the head it will be fitted with)
@@ -56,6 +67,14 @@ Notes (never fail):
   mutual_producers      facts derived from each other (net from gross and gross from net), each with a producer
                         outside the loop: the system's strategist plans around it
   no_rule               a question without a rule answers only after fit (it abstains until then)
+  sensitive_unread      a sensitive field no part reads (declared, nothing reads it: fine)
+
+Citations (solvi.check.citations; `solvi check --text`):
+  cite_not_found        a part's quote (cite=) is not in the text — in the catalog's quote mode: "normalized" finds it
+                        across Unicode forms, dashes, spaces and curly quotes (error)
+  clause_unknown        with spec=: the part names a clause the specification does not have (error)
+  cite_outside_clause   with spec=: the quote is in the text but not in the clause the part names (error)
+  no_cite               with require=True: a part without a citation (warning)
 
 The flows are planned with every given fact present (`solvi.core.plan.strategist.given_facts`), as `solvi serve` does, by the
 system's own strategist (System(strategist=)) — the deterministic one when none is set."""
@@ -64,6 +83,7 @@ from __future__ import annotations
 import ast
 import inspect
 import itertools
+import re
 import textwrap
 from dataclasses import asdict, dataclass, field, replace
 
@@ -124,9 +144,11 @@ class Report:
         return "\n".join(lines)
 
 
-def lint(obj, strict=False, max_combos=100_000):
+def lint(obj, strict=False, max_combos=100_000, sensitive=None):
     """A System (or a Catalog) → Report. `max_combos`: the largest number of answer combinations tried per group of
-    constraints that share questions."""
+    constraints that share questions. `sensitive`: names of given facts no part may read (age, sex, ...), added to the
+    catalog's own Catalog(sensitive=...); a part that reads one, or a fact computed from one, is an error
+    (`reads_sensitive`, `reads_sensitive_via`). Nothing changes at ask time: lint is where it is refused."""
     from .core.plan.strategist import given_facts
     if hasattr(obj, "tools") and hasattr(obj, "system") and not hasattr(obj, "questions"):   # a solvi.Guard
         rep = Report(strict=strict)
@@ -134,7 +156,7 @@ def lint(obj, strict=False, max_combos=100_000):
             if t.model is None:
                 rep.add("note", "no_schema", f"{name}", "the tool has no argument schema yet (adopted from an MCP server)")
                 continue
-            for f in lint(obj.system(name), strict, max_combos).findings:
+            for f in lint(obj.system(name), strict, max_combos, sensitive).findings:
                 rep.findings.append(replace(f, where=f"{name}: {f.where}"))
         return rep
     system = obj if hasattr(obj, "catalog") and hasattr(obj, "questions") else None
@@ -171,7 +193,63 @@ def lint(obj, strict=False, max_combos=100_000):
         rep.add("note", "constraints_not_checked", ", ".join(cat.constraints),
                 "constraints are checked against a System's questions: lint the System")
     _silent_defaults(cat, given, rep)
+    _sensitive(cat, rep, sensitive)
     return rep
+
+
+# --- sensitive fields
+def _readers(cat):
+    """Every function of a catalog that reads facts → [(where, label, inputs, the fact it sets or None)]: parts (each
+    alternative producer of a fact on its own), the `then` functions of checks, rules and constraints."""
+    out = []
+    for name, p in cat.parts.items():
+        for a in p.alternatives or [p]:
+            out.append((f"{name} ({a.name})" if p.alternatives else name, f"{a.kind} {a.name!r}", list(a.inputs), name))
+        for q, tp in (p.then_parts or {}).items():
+            out.append((tp.name, f"the `then` function of {name!r} for {q!r}", list(tp.inputs), None))
+    for q, r in cat.rules.items():
+        fname = getattr(r.func, "__name__", None) or r.name
+        out.append((fname, f"rule {fname!r}", list(r.inputs), None))
+    for name, c in cat.constraints.items():
+        out.append((name, f"constraint {name!r}", list(c.inputs), None))
+    return out
+
+
+def sensitive_names(cat, sensitive=None):
+    """The sensitive fields of a catalog: its own Catalog(sensitive=...) and `sensitive` (a name or names) → set."""
+    extra = [sensitive] if isinstance(sensitive, str) else list(sensitive or ())
+    return set(getattr(cat, "sensitive", None) or ()) | set(extra)
+
+
+def _sensitive(cat, rep, sensitive=None):
+    """reads_sensitive / reads_sensitive_via / sensitive_unread. A fact set by a part that reads a tainted name is
+    tainted, with the chain back to the sensitive field it comes from."""
+    names = sensitive_names(cat, sensitive)
+    if not names:
+        return
+    readers = _readers(cat)
+    chain = {x: [x] for x in names}                   # tainted name → [it, what it is computed from, ..., the field]
+    changed = True
+    while changed:
+        changed = False
+        for _, _, inputs, fact in readers:
+            if fact is None or fact in chain:
+                continue
+            hit = next((x for x in inputs if x in chain), None)
+            if hit is not None:
+                chain[fact] = [fact] + chain[hit]
+                changed = True
+    read = set()
+    for where, label, inputs, _ in readers:
+        for x in dict.fromkeys(inputs):
+            if x in names:
+                read.add(x)
+                rep.add("error", "reads_sensitive", where, f"{label} reads {x!r}: a sensitive field")
+            elif x in chain:
+                rep.add("error", "reads_sensitive_via", where, f"{label} reads {x!r}, computed from "
+                        + ", computed from ".join(repr(y) for y in chain[x][1:]))
+    for x in sorted(names - read):
+        rep.add("note", "sensitive_unread", x, "declared sensitive; no part reads it")
 
 
 # --- cycles
@@ -642,6 +720,128 @@ def _short_path(p):
     return p if r.startswith("..") else r
 
 
+# --- citations
+_CL_HEADING = re.compile(r"^(#{1,6})\s+(.*\S)\s*$")
+_CL_ITEM = re.compile(r"^\s*(?:[-*+]|\d+[.)])\s+(.*)$")
+_CL_SEP = re.compile(r"^:?-{2,}:?$")
+
+
+def split_clauses(text: str) -> list[tuple[str, str]]:
+    """A text → [(section, clause text)]: each paragraph, list item and table row is a clause (a table row is written
+    as `header: cell; ...`); headings name the section and are not clauses themselves."""
+    out, buf, path, header = [], [], [], None
+
+    def flush():
+        if buf:
+            out.append((" / ".join(t for _, t in path), " ".join(buf).strip()))
+            buf.clear()
+    for line in text.splitlines():
+        s = line.strip()
+        h = _CL_HEADING.match(s)
+        if h:
+            flush()
+            header = None
+            level = len(h.group(1))
+            path[:] = [p for p in path if p[0] < level] + [(level, h.group(2))]
+            continue
+        if s.startswith("|"):
+            flush()
+            cells = [c.strip() for c in s.strip("|").split("|")]
+            if all(_CL_SEP.match(c) for c in cells if c):
+                continue
+            if header is None:
+                header = cells
+                continue
+            out.append((" / ".join(t for _, t in path), "; ".join(f"{a}: {b}" for a, b in zip(header, cells) if b)))
+            continue
+        header = None
+        if not s:
+            flush()
+        elif _CL_ITEM.match(line):
+            flush()
+            buf.append(_CL_ITEM.match(line).group(1).strip())
+        else:
+            buf.append(s)
+    flush()
+    return [(sec, t) for sec, t in out if t]
+
+
+def spec_clauses(text):
+    """A specification's text → {"c1": clause text, ...}: the clauses solvi.experimental.compile.Spec(text) numbers."""
+    return {f"c{i}": t for i, (_, t) in enumerate(split_clauses(text), 1)}
+
+
+def _cited_parts(cat):
+    """Every part a catalog runs, with where it is reported → [(where, label, part)]: parts (each alternative producer on
+    its own) and rules."""
+    out = []
+    for name, p in cat.parts.items():
+        for a in p.alternatives or [p]:
+            out.append((f"{name} ({a.name})" if p.alternatives else name, f"{a.kind} {a.name!r}", a))
+    for q, r in cat.rules.items():
+        fname = getattr(r.func, "__name__", None) or r.name
+        out.append((fname, f"rule {fname!r}", r))
+    return out
+
+
+def _cells(text):
+    """A clause as compared with a quote: as it is, and — for a table row the specification wrote as `header: cell;
+    ...` — its cells alone, with "|" and ";" as spaces."""
+    import re
+    loose = [text]
+    cells = [re.sub(r"^[^:;|]{1,40}:\s+", "", c.strip()) for c in text.split(";")]
+    loose.append(" ".join(c for c in cells if c))
+    return loose
+
+
+def _in_clause(quote, clause_text, mode):
+    from .core.catalog import find_quote
+    import re
+
+    def flat(t):
+        return " ".join(re.sub(r"[|;]", " ", t).split())
+    if find_quote(quote, clause_text, quotes=mode, whole=False) is not None:
+        return True
+    return any(find_quote(flat(quote), flat(t), quotes=mode, whole=False) is not None for t in _cells(clause_text))
+
+
+def citations(obj, text, *, spec=None, require=False):
+    """The citations of a catalog's parts (`cite=` / `clause=` on the decorators: Part.cites) against the text they
+    quote → Report. Every quote must be in `text`, found as solvi.core.catalog.find_quote finds it with the part's
+    quote mode ("normalized" by default: Unicode form, dashes, spaces, curly quotes; the source's own substring is what
+    counts) — else the error `cite_not_found`. With `spec` (a solvi.experimental.compile.Spec, or {clause id: text} —
+    spec_clauses(text) numbers a text's clauses as Spec does) a clause id must be one
+    of its clauses (`clause_unknown`) and the quote must lie in that clause's text (`cite_outside_clause`; a table row,
+    which the Spec writes as `header: cell; ...`, is also compared by its cells). A clause id with a ":" — a person's
+    correction, `clause="person:k07"` — is no clause of the specification: its quote is looked for in `text` only.
+    require=True: a part without a citation is the warning `no_cite` (a policy catalog that wants every rule to cite
+    its clause). obj: a System or a Catalog."""
+    from .core.catalog import find_quote
+    cat = obj.catalog if hasattr(obj, "catalog") and hasattr(obj, "questions") else obj
+    rep = Report()
+    for where, label, p in _cited_parts(cat):
+        cites = p.cites or []
+        if not cites:
+            if require:
+                rep.add("warning", "no_cite", where, f"{label} cites no clause (cite= / clause=)")
+            continue
+        mode = getattr(p, "quotes", "normalized")
+        for clause, quote in cites:
+            if quote is not None and find_quote(quote, text, quotes=mode) is None:
+                rep.add("error", "cite_not_found", where, f"{label} cites {quote!r}: not found in the text")
+                continue
+            if spec is None or clause is None or ":" in clause:
+                continue
+            clauses = spec.clauses if hasattr(spec, "clauses") else spec
+            if clause not in clauses:
+                rep.add("error", "clause_unknown", where, f"{label} names clause {clause!r}, which the specification "
+                                                          "does not have")
+            elif quote is not None and not _in_clause(quote, getattr(clauses[clause], "text", clauses[clause]), mode):
+                rep.add("error", "cite_outside_clause", where, f"{label} cites {quote!r} as clause {clause!r}, but "
+                                                               f"{clause} does not say it")
+    return rep
+
+
 # --- the command
 def cmd_check(a):
     """`solvi check` (see solvi.cli) → 0: no errors (with --strict: no warnings either); 1: problems. The target is
@@ -650,7 +850,29 @@ def cmd_check(a):
     obj = _target(a.target)
     if not (hasattr(obj, "parts") and hasattr(obj, "rules")) and not hasattr(obj, "catalog"):
         _fail(f"check {a.target}: not a solvi System, Catalog or Guard")
-    rep = lint(obj, strict=a.strict, max_combos=a.max_combos)
+    sensitive = [x.strip() for x in (a.sensitive or "").split(",") if x.strip()] or None
+    rep = lint(obj, strict=a.strict, max_combos=a.max_combos, sensitive=sensitive)
+    if a.require_cites and not (a.text or a.spec):
+        _fail("check --require-cites: give the text the parts cite (--text FILE or --spec FILE)")
+    if a.text or a.spec:
+        from pathlib import Path
+
+        def read(path, flag):
+            try:
+                return Path(path).read_text(encoding="utf-8")
+            except OSError as e:
+                _fail(f"check {flag} {path}: {e}")
+        spec_text = read(a.spec, "--spec") if a.spec else None
+        spec = spec_clauses(spec_text) if spec_text is not None else None
+        policy = read(a.text, "--text") if a.text else spec_text
+        tools, tool_system = getattr(obj, "tools", None), getattr(obj, "system", None)
+        if tools is not None and callable(tool_system) and not hasattr(obj, "questions"):     # a solvi.Guard
+            for name, t in tools.items():
+                if t.model is not None:
+                    rep.findings += [replace(f, where=f"{name}: {f.where}") for f in
+                                     citations(tool_system(name), policy, spec=spec, require=a.require_cites).findings]
+        else:
+            rep.findings += citations(obj, policy, spec=spec, require=a.require_cites).findings
     if a.json:
         from .core.schema import dumps
         print(dumps(rep.to_dict(), ensure_ascii=False, indent=2))
@@ -682,7 +904,16 @@ def add_parser(sub):
     c.add_argument("--max-combos", type=int, default=100_000,
                    help="the most answer combinations tried per group of constraints (default 100000)")
     c.add_argument("--json", action="store_true", help="print JSON")
+    c.add_argument("--text", metavar="FILE", help="the text the parts cite (a policy): after the lint, every part's "
+                                                 "cite= must be found in it (solvi.check.citations)")
+    c.add_argument("--spec", metavar="FILE", help="the specification the parts cite, split into clauses c1, c2, ... "
+                                                 "(solvi.experimental.compile.Spec): each clause= must exist and hold its "
+                                                 "quote; also the text, unless --text is given")
+    c.add_argument("--require-cites", action="store_true", help="with --text / --spec: a part without cite= is the "
+                                                                 "warning no_cite")
+    c.add_argument("--sensitive", metavar="NAMES", help="comma-separated given facts no part may read (age,sex): a part "
+                                                       "that reads one, or a fact computed from one, is an error")
     return c
 
 
-__all__ = ["add_parser", "cmd_check", "Finding", "lint", "Report", "silent_defaults"]
+__all__ = ["add_parser", "citations", "spec_clauses", "split_clauses", "cmd_check", "Finding", "lint", "Report", "sensitive_names", "silent_defaults"]

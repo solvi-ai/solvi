@@ -15,6 +15,63 @@ calibration files and served by `solvi serve`), so a build from it is not mistak
   return type you mean (`-> Literal[True, False]` is validated by its type). Guard policies declared `-> bool` follow
   the same rule. A decision stored before with such a check replays as `recompute` (the step now gives another value).
 
+### New
+
+- **`solvi.experimental.changes`: one change pipeline (experimental).** A document version, verified experience, a
+  person's correction and a search proposal become candidates that pass the same pluggable stages (KnownFailures,
+  Static, Consistency, Confirmation, CleanCases, Impact, FreshEnvironments, Approval, Canaries), are journaled in a
+  hash-chained store (records of kind "change"), promoted into what holds that knowledge (a knowledge store item,
+  compiled versions, a learning update) and rolled back by version. `benchmarks/changes_credit.py` runs the credit
+  policy (two versions, 20 corrections, a rule that must be refused; the policy and corrections in
+  `benchmarks/tasks/credit/`, the applications through `fetch.sh` / `prepare.py`) and exits 1 when a count differs.
+  Measured on two stands: on a credit policy the pipeline carried a document version (144 of 144 changed decisions traced to their clause), admitted 12 of 12 exact exceptions, held every widening one for a person and refused 8 of 8 exceptions that touched other decisions, 0 extraneous changes, 14 versions replayed; on a bank-request stream with a person's labels every one of 22 candidates passed every stage (`nogate` = `gate`), so the stages added nothing there — the module is journal, impact analysis, approval levels and rollback; still missing: the narrows / widens classifier over rule conditions, a regression-scenario stage, and a script for the bank-request stream (the credit numbers: benchmarks/changes_credit.py).
+- **Sensitive fields: declared on the catalog, refused by `solvi check`.** `Catalog(sensitive={"age", "sex"})`,
+  `lint(obj, sensitive=...)` and `solvi check module:system --sensitive age,sex` (the names add up) name given facts no
+  part may read. A part that reads one (a fn, extract, check, rule, `then` function, alternative producer or
+  constraint) is the error `reads_sensitive`; a fact computed from one is tainted, and a part reading it is the error
+  `reads_sensitive_via` with the chain in the message; a declared field nothing reads is the note `sensitive_unread`.
+  `Report.ok` is False and `solvi check` exits 1 on such an error; nothing changes at ask time. The Static stage of
+  `solvi.experimental.changes` refuses a candidate catalog with such a part (`Static(sensitive=...)`, plus the
+  catalog's own declaration).
+
+- **Citations on hand-written parts.** `@cat.fn`, `@cat.check`, `@cat.rule` and `@cat.extract` take `cite=` (a verbatim
+  quote of the text the part implements, or a list) and `clause=` (its clause id, or a list as long), kept as
+  `Part.cites` — pairs (clause, quote). `solvi.check.citations(obj, text, *, spec=None, require=False)` checks them:
+  a quote not in the text (found in the catalog's quote mode) is the error `cite_not_found`; with a
+  `solvi.experimental.compile.Spec`, a clause it does not have is `clause_unknown` and a quote outside the named
+  clause `cite_outside_clause`; `require=True` makes an uncited part the warning `no_cite`; a correction cited as
+  `clause="person:k07"` is checked against the text only. `solvi check module:system --text POLICY.md` runs it after
+  the lint; `--spec FILE` splits a specification into clauses `c1`, `c2`, ... as `Spec(text)` does (also the text,
+  unless `--text` is given; `solvi.check.spec_clauses`, and `split_clauses` now lives in `solvi.check` — still
+  importable from `solvi.experimental.compile`), `--require-cites` adds the `no_cite` warnings. The causes of `solvi.core.store.diff.diff` carry `"cites"` ([{"clause", "quote"}]) when their part has
+  citations; `solvi.experimental.compile.decision_diff` also takes plain Systems (hand-written catalogs), whose
+  causes get their `clauses` from the citations; the changes pipeline's `Static(text=..., spec=...)` refuses a
+  candidate whose citations fail.
+
+- **Exact exceptions: `only=` in the diff.** `solvi.core.store.diff.diff(storage, system, ..., only=ids)` reports
+  `DiffReport.extraneous` (the ids of the changed decisions outside `only`) and `DiffReport.exact` (`only` given,
+  nothing outside it changed, and every decision re-ran: one listed in `errors` may have changed, so it makes `exact`
+  False — on both reports); `solvi.experimental.compile.decision_diff(old, new, ..., only=)` gives the same two
+  fields on `DecisionDiff`, over the decisions whose answer moves — with `inputs=` the ids are the inputs' `id` key,
+  else their positions, and each change carries `"input"`. The changes pipeline's `Impact` stage refuses a change
+  whose `expected["only"]` is set and whose diff changes other decisions ("changes N decision(s) other than the
+  allowed ones: [...]", the first ten ids) and records `extraneous` in its measurement.
+
+- **Two readers: `align` in `solvi.experimental.specialist`.** `align(a, b, overlap=interval_overlap,
+  min_overlap=0.5, same=None, min_a=0.0, min_b=0.0) → Alignment(agreed, only_a, only_b, conflicts)` matches two
+  readers' `Reading(value, span, confidence=None, raw=None)` one-to-one, greedily by descending overlap (ties by input
+  order: deterministic); `interval_overlap` (over the shorter span: seconds, characters) and `box_iou` are the
+  built-in overlaps; `same=` compares values (a normaliser), `min_a` / `min_b` drop low-confidence readings first. An
+  `Agreed` carries both readings for the provenance record. Nothing in it decides acceptance.
+- **Corruption tests for specialists: `solvi.testing.corrupt`.** `corrupt(specialist, records, corruptions, *, n=300,
+  seed=0, accepted=None) → CorruptionReport` corrupts recorded proposals (`(id, source, proposal)`), runs the
+  specialist on each with `proposal=`, and reports `n`, `caught`, `rate`, `per_kind` and `rows`. Built-in mutators over
+  the proposal's JSON tree, for any pydantic spec: `change_digit(paths=)`, `drop(paths=)`, `swap(paths=)` (regexes over
+  JSON pointers). A digit change or a swap is caught when the run has no output or the mutated value is not accepted at
+  its place; a drop when the check reports an issue the unmutated run did not (an omission is visible only through a
+  relation). Deterministic for a seed; skipped draws counted. `solvi.testing.conformance.check_specialist(specialist,
+  sources, *, proposer=None)`: identical bytes, replay, JSON records, blocked invalid proposals.
+
 ### Changed
 
 - **Replay binds every field of a result to its trace, not only the answer and its status.** With the System,

@@ -36,8 +36,12 @@ STATUS: dict[str, dict] = {
                 "larger specifications and a benchmark script in benchmarks/", "script": None},
     "hooks": {"since": "0.7.1", "what": "`solvi hook`: a coding agent's pre-edit rule checks and skill picker",
               "missing": "false deny and ask rates on real coding-agent sessions, with a script", "script": None},
-    "specialist": {"since": "0.7", "what": "the propose → check → render specialist pattern", "missing": "a measured "
-                   "specialist (charts has no accuracy number yet)", "script": None},
+    "specialist": {"since": "0.7", "what": "the propose → check → render specialist pattern", "missing": "a specialist "
+                   "that ships, with a script in benchmarks/: two model types were measured under the contract in "
+                   "2026-10, with solvi.testing.corrupt as the corruption test — receipt OCR (84% of corruptions "
+                   "caught) and speech to text (99.7% caught) — and neither ships (36% of receipt fields accepted; "
+                   "90% / 86% of accepted spoken numbers exact); both rest on two readers aligned by `align` (time, boxes); "
+                   "charts has no accuracy number yet", "script": None},
     "charts": {"since": "0.7", "what": "verified charts: every number quoted from the text, a deterministic SVG",
                "missing": "accuracy on real texts with the rule-based and the LLM proposer", "script": None},
     "mcp": {"since": "0.9", "what": "an MCP stdio proxy that puts the agent guard in front of `tools/call` "
@@ -45,6 +49,17 @@ STATUS: dict[str, dict] = {
             "server", "script": None},
     "oncalib": {"since": "1.0", "what": "recalibrating a guarantee on the fly from outcomes", "missing": "a "
                 "recalibration that keeps the guarantee's promise (it does not: see its module docs)", "script": None},
+    "changes": {"since": "1.1", "what": "one change pipeline for four sources (a document version, verified "
+                "experience, a person's correction, a search proposal): pluggable stages, a journal of kind \"change\", "
+                "promote into the knowledge store / compiled versions / learning, versions and rollback", "missing": "on a "
+                "credit policy the pipeline carried a document version (144 of 144 changed decisions traced to their "
+                "clause), admitted 12 of 12 exact exceptions, held every widening one for a person and refused 8 of 8 "
+                "exceptions that touched other decisions, 0 extraneous changes, 14 versions replayed; on a bank-request "
+                "stream with a person's labels every one of 22 candidates passed every stage (`nogate` = `gate`), so "
+                "the stages added nothing there — the module is journal, impact analysis, approval levels and "
+                "rollback; still missing: the narrows / widens classifier over rule conditions, a regression-scenario "
+                "stage, and a script for the bank-request stream (the credit numbers: benchmarks/changes_credit.py)",
+                "script": "benchmarks/changes_credit.py"},
     "counterfactual": {"since": "0.7", "what": "the smallest change of a decision's inputs that changes its answer "
                        "(adverse-action reasons)", "missing": "one measured use, e.g. adverse-action reasons on the "
                        "credit gallery task", "script": None},

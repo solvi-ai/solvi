@@ -21,6 +21,7 @@ internal and have no page.
 | [`solvi.show`](show.md) | printing a response |
 | [`solvi.check`](check.md) | `solvi check`: catalog lint |
 | [`solvi.testing`](testing.md) | decision regression tests from `cases.json` |
+| [`solvi.testing.corrupt`](testing.md) | corruption tests for specialists: how many corrupted proposals a specialist's check catches |
 | [`solvi.testing.conformance`](conformance.md) | conformance checks for your implementations of the extension points of `solvi.core` (stores, slow paths, strategists, heads, deciders, extractors, monitors, environments) |
 | [`solvi.testing.honesty`](honesty.md) | the honesty suite |
 | [`solvi.solutions`](solutions.md) | the ready-made systems, one module each (above) |
@@ -124,4 +125,5 @@ The modules `solvi.core` is made of. Their public names are re-exported by `solv
 | [`solvi.experimental.charts`](charts.md) | verified charts: a text with numbers → an SVG in which every number is quoted from the text |
 | [`solvi.experimental.mcp`](mcp.md) | an MCP stdio proxy that puts the agent guard in front of an MCP server's `tools/call` |
 | [`solvi.experimental.oncalib`](oncalib.md) | recalibration on the fly from outcomes (the promise is not kept) |
+| [`solvi.experimental.changes`](changes.md) | one change pipeline for a document version, verified experience, a person's correction or a search proposal: pluggable stages, a journal, promote, versions, rollback |
 | [`solvi.experimental.counterfactual`](counterfactual.md) | counterfactuals: the smallest change of the given inputs that changes an answer |

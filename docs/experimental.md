@@ -24,7 +24,7 @@ keeps working for one release. **Removal**: a piece that has not graduated by it
 is removed and the negative result published.
 
 Each section below gives the piece's `STATUS` entry: what it is, since when it exists, what it is missing to graduate,
-the script that measures it (none yet for any of them) and where the guide describes it.
+the script that measures it (one so far: `changes`) and where the guide describes it.
 
 ## `learning`
 
@@ -72,9 +72,10 @@ hook schema). Since 0.7.1.
 
 The propose → check → render specialist pattern. Since 0.7.
 
-- **Missing:** a measured specialist (charts has no accuracy number yet).
+- **Missing:** a specialist that ships, with a script in benchmarks/: two model types were measured under the contract in 2026-10, with solvi.testing.corrupt as the corruption test — receipt OCR (84% of corruptions caught) and speech to text (99.7% caught) — and neither ships (36% of receipt fields accepted; 90% / 86% of accepted spoken numbers exact); both rest on two readers aligned by `align` (time, boxes); charts has no accuracy number yet.
 - **Script:** none yet. **Deadline:** 1.2.
-- API: [solvi.experimental.specialist](api/specialist.md).
+- API: [solvi.experimental.specialist](api/specialist.md); the corruption test:
+  [solvi.testing.corrupt](testing.md#corruption-tests-for-specialists).
 
 ## `charts`
 
@@ -102,6 +103,19 @@ Recalibrating a guarantee on the fly from outcomes, every N labels or after a dr
 - **Script:** none yet. **Deadline:** 1.2.
 - Guide: [Outcomes as labels](guide.md#outcomes-as-labels-systemoutcome); API: [solvi.experimental.oncalib](api/oncalib.md).
   The stable path recalibrates explicitly, on a schedule or after a drift flag.
+
+## `changes`
+
+One change pipeline for four sources (a document version, verified experience, a person's correction, a search
+proposal): pluggable stages, a journal of kind "change", promote into the knowledge store / compiled versions /
+learning, versions and rollback (`solvi.experimental.changes.Pipeline(stages, storage, store=...)`). Since 1.1.
+
+- **Missing:** on a credit policy the pipeline carried a document version (144 of 144 changed decisions traced to their clause), admitted 12 of 12 exact exceptions, held every widening one for a person and refused 8 of 8 exceptions that touched other decisions, 0 extraneous changes, 14 versions replayed; on a bank-request stream with a person's labels every one of 22 candidates passed every stage (`nogate` = `gate`), so the stages added nothing there — the module is journal, impact analysis, approval levels and rollback; still missing: the narrows / widens classifier over rule conditions, a regression-scenario stage, and a script for the bank-request stream (the credit numbers: benchmarks/changes_credit.py).
+- **Script:** `benchmarks/changes_credit.py` (the credit policy; needs the German Credit applications:
+  `benchmarks/tasks/fetch.sh credit` and `prepare.py`). **Deadline:** 1.2.
+- Design and API: the module docstring of `solvi.experimental.changes`; the library pieces it uses are stable:
+  sensitive fields and citations in [solvi check](guide.md#checking-a-catalog-solvi-check), `only=` in
+  [solvi diff](guide.md#catalog-fingerprint-solvi-diff-and-shadow-mode).
 
 ## `counterfactual`
 
