@@ -61,8 +61,27 @@ def test_the_ast_runs_on_any_world_and_prints():
     assert np.array_equal(L.run(("PLUS", ("R", "E")), w), L.run(("PLUS", ("PLUS", ("R", "E"))), w))
     assert L.show(prog) == "((Eᵀ ∘ E) ∖ I)"
     assert L.size(prog) == 6
-    dom = L.run(("CNT", 1, ("R", "E")), w)                  # a unary predicate as a diagonal: "has a child"
+    dom = L.run(("CNT1", ("R", "E")), w)                    # a unary predicate as a diagonal: "has a child"
     assert np.array_equal(np.diag(dom), w["E"].any(1)) and not (dom & ~np.eye(len(dom), dtype=bool)).any()
+
+
+def test_find_rules_runs_on_the_package_enumerator_and_takes_its_library():
+    """One enumerator and one program format in the package: find_rules searches with the relation-algebra
+    enumerator (the minimal stand-in is gone), and `library=` takes the package's Library of accepted programs as well
+    as relations.library.Library entries."""
+    import importlib
+
+    import solvi.experimental.relations as R
+    with pytest.raises(ImportError):
+        importlib.import_module("solvi.experimental.relations._enum_min")
+    assert L.show is R.show and L.size is R.size
+    lib = R.Library()
+    lib.add(("MINUS", ("COMP", ("T", ("R", "E")), ("R", "E")), ("I",)), "sibling")
+    test = L.HeldOut(HELD, {"uncle": uncle})
+    r = L.find_rules(TRAIN, {"uncle": uncle}, base=["E"], size=3, budget=2_000, library=lib, test=test)
+    assert L.show(r.found["uncle"].program) == "(sibling ∘ E)" and r.found["uncle"].test_record["passed"]
+    w = HELD[0]
+    assert np.array_equal(L.run(r.found["uncle"].program, w, library=r.library), uncle(w))
 
 
 def test_the_library_entry_has_the_agreed_fields_and_runs_as_a_terminal():

@@ -238,6 +238,25 @@ def test_compiled_programs_agree_with_the_interpreter_pair_for_pair():
             assert check_program(ast, small, dense=True, backend=backend).ok, (backend, show(ast))
 
 
+def test_at_least_one_successor_is_an_opt_in_operator_that_compiles():
+    """CNT1 (the nodes with a successor, as a diagonal) is known to the algebra, the enumerator and both compile
+    backends, but not in the default OPS: the default search space stays as it was."""
+    assert "CNT1" not in OPS and "CNT2" in OPS
+    ex = worlds(seed=3)
+    for r in ex:
+        dom = evaluate(("CNT1", E0), r)
+        assert np.array_equal(np.diag(dom), r.matrix("E0").any(1)) and not (dom & ~np.eye(r.n, dtype=bool)).any()
+    assert show(("CNT1", E0)) == "#≥1(E0)" and size(("CNT1", E0)) == 2
+    progs = list(enumerate_programs(ex, 2, ops=("CNT1",)))
+    assert ("CNT1", E0) in {p.ast for p in progs}
+    assert "CNT1" not in {p.ast[0] for p in enumerate_programs(ex, 2)}
+    rng = np.random.default_rng(12)
+    ws = [rand_rel(rng, n, p=1.5 / n) for n in (12, 64, 1000)]
+    for backend in ("sets", "arrays"):
+        for ast in (("CNT1", E0), ("COMP", ("CNT1", ("T", E1)), E2)):
+            assert check_program(ast, ws, backend=backend).differences == 0, (backend, show(ast))
+
+
 def test_compiled_code_is_plain_python_over_sets():
     src = compile_ast(("PLUS", E0), name="anc")
     assert src.startswith("def anc(R, n):") and "import" not in src

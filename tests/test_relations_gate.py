@@ -4,7 +4,7 @@
    same rule), with the source's own example seeds and graph families (32 random graphs of 6–12 nodes; held-out graphs
    of 32 and 64 nodes of three families). Bar: at least 22 of 28 found within 7 nodes, every find exact on the
    held-out graphs of the other families, peak memory of the process at most 3 GB. The rule file is read at test
-   time from SOLVI_RULE_BATTERY (or the research checkout next to this repository); absent → skipped.
+   time from SOLVI_RULE_BATTERY only (it is not part of this repository); unset or absent → skipped.
 2. benchmarks/relations_compile.py: found rules executed as plain set code — closure, grandparent and sibling on a
    forest of 100,000 nodes pair for pair equal to hand-written set code and at most 2× its time; compiled programs
    against the interpreter on random worlds of 1,000 nodes (0 differing pairs); a compiled law module against
@@ -32,14 +32,9 @@ def _load(name):
 
 
 def _rules_file():
+    """The battery file from SOLVI_RULE_BATTERY; there is no default path."""
     env = os.environ.get("SOLVI_RULE_BATTERY")
-    if env:
-        return Path(env) if Path(env).exists() else None
-    for up in ROOT.parents:
-        p = up / "kelly_nn" / "albert_lab" / "iter12_rules.json"
-        if p.exists():
-            return p
-    return None
+    return Path(env) if env and Path(env).is_file() else None
 
 
 @pytest.mark.slow
