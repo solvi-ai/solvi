@@ -17,6 +17,29 @@ calibration files and served by `solvi serve`), so a build from it is not mistak
 
 ### New
 
+- **A call firewall in the guard (`Guard.firewall`).** Two deterministic checks of every call of the tools it names
+  (or of every tool, also those declared later): the arguments validate against the tool's declared schema (as every
+  guard checks; under the firewall a tool whose schema cannot be read is denied instead of escalated), and every slot
+  value the call sends — each argument, nested field and list item — is written in the request (the messages of
+  `sources=`, default the user's) or is a fact the app gives (`facts=`); strings as whole words after normalisation,
+  numbers as digits; enumerations, booleans, null, empty strings and `exempt=` slots exempt by declaration. A call
+  with a slot found nowhere fails `slots_grounded` and escalates (`on_ungrounded="deny"`: is denied); the report per
+  slot is `GuardDecision.slots` and the trace fact `slot_grounding`. No model judge: its verdict does not replay.
+  `benchmarks/guard_firewall.py`: on a synthetic irrelevance set false calls made fall from 1.000 (no guard) to 0.750
+  (schema) and 0.217 (schema + grounded), with 0.833 of the wanted calls made (amounts said in words go to a person).
+- **The answer contract (`solvi.core.contract`).** A certificate certifies execution, not reading: `Contract(returns=,
+  echo=, applicable=)` states what reading the question right looks like — the answer's type matches what the
+  question asks, the answer is not the given fact it was read from (by default checked for free text, not for a
+  declared choice, yes / no, enumeration or number; `echo=` overrides), and a precondition is checked before the answerer
+  is called. `Catalog.contract(question, ...)`: an answer that breaks it abstains whatever its confidence (guard
+  `"contract"`, the violations in `Result.extra["contract"]`); a question whose precondition fails is not computed
+  (guard `"not_applicable"`); new lifetime stats `contract_refused` and `not_applicable`; contracts are in the
+  questions' fingerprint. The dispatcher: `AskPath` / `RefinePath` / `SearchPath(contract=)` (or the slow path's
+  catalog contract) — a slow path that does not apply is not called and a person gets the input, an answer that
+  breaks the contract is not accepted (`Thought.contract`, written only when a contract acted, so earlier records are
+  unchanged); both replay. `Specialist.applicable(source, question)`: a run it does not apply to is blocked
+  (`not_applicable`) without calling the proposer; an output that is not a text or is the source itself is withheld
+  (`wrong_type`, `echo`). `check_specialist(..., inapplicable=)` checks the contract.
 - **`solvi.experimental.compile`: a certificate on fresh examples sized by the hypothesis space (experimental).**
   `fresh_examples_needed(n_hypotheses, eps=0.05, delta=0.1)` gives N = max(20, ⌈(ln |H| + ln 1/δ) / ε⌉) — the
   number of fresh labelled examples a candidate chosen among |H| must all pass (323 for a million candidates, 47 for

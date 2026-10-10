@@ -47,6 +47,12 @@ model; measure it on your task first.
   agent with tools. There solvi keeps its error promise and the knowledge gives accountability — sources, retraction,
   disputes for a person — but it does not promise that the system gets better over time by itself.
 - Justified risk lowers the cost of protection; it does not promise to do as well as a system without the knowledge.
+- The checks of a tool call and of an answer are literal. The guard's firewall refuses calls with values that are not
+  in the request, not calls on a request that names those values for another purpose (on its synthetic set,
+  `benchmarks/guard_firewall.py`, 0.217 of the false calls still pass); whether a request asks for a call at all is a
+  judgement solvi leaves to a model under a promise or to a person. An answer's contract (its type, no echo of the
+  input, a precondition checked before the answerer runs) refuses misreadings it can state; a wrong answer of the
+  right type to an applicable question passes it.
 - The error promise does not hold in the window between an abrupt shift in the inputs and the moment a drift check
   notices it. After a flag, stop answering alone until the thresholds are calibrated again
   ([the guide explains this](guide.md#thresholds-with-a-guarantee-act_guard-learn-then-test-conformal-sets)).

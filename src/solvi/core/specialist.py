@@ -243,6 +243,32 @@ class Specialist:
         reported."""
         return None
 
+    # --- the contract (solvi.core.contract): called by applicability, never an echo
+    def applicable(self, source, question) -> bool:
+        """Does this specialist apply to the source and the question? Checked before the proposer is called: a False
+        (or an exception) blocks the run with the issue "not_applicable", the proposer is not called. Override it to
+        state the precondition — a specialist is called because its task applies, not because the input has its
+        form. Default: always."""
+        return True
+
+    def _applies(self, source, question):
+        try:
+            ok = self.applicable(source, question)
+        except Exception as e:  # noqa: BLE001 — a precondition that cannot be evaluated is not met
+            return False, f"{type(e).__name__}: {e}"
+        return ok is True, None
+
+    def _output_contract(self, out, source):
+        """The output's contract: a text (or None), and not the source itself → an Issue, or None."""
+        if out is None:
+            return None
+        if not isinstance(out, str):
+            return Issue(BLOCKED, "wrong_type", f"the renderer returned {type(out).__name__}, not a text")
+        from .contract import canon
+        if canon(out) is not None and canon(out) == canon(source):
+            return Issue(BLOCKED, "echo", "the output is the source itself: nothing was read from it")
+        return None
+
     # --- to implement
     def check(self, spec, source) -> Checked:            # pragma: no cover - abstract
         raise NotImplementedError
@@ -295,6 +321,13 @@ class Specialist:
         trace.add("input", {"specialist": self.name, "version": self.version, "source_sha256": sha256(source.encode()),
                             "source_chars": len(source), "question": question})
         raw, spec, pid = proposal, None, "given"
+        ok, err = self._applies(source, question)
+        if not ok:                                    # checked before the proposer: it is not called
+            if proposal is None and proposer is not None:
+                pid = getattr(proposer, "id", None) or getattr(proposer, "__name__", None) or type(proposer).__name__
+            why = f"{self.name} does not apply to this source" + (f" (its precondition failed: {err})" if err else "")
+            trace.add("propose", {"proposer": pid, "error": f"not applicable: {why}", "not_applicable": True})
+            return self._blocked(source, question, None, trace, "not_applicable", why)
         if proposal is None:
             if proposer is None:
                 raise ValueError(f"{self.name}: no proposer and no proposal")
@@ -320,9 +353,13 @@ class Specialist:
 
     def _finish(self, source, question, spec, trace):
         checked = self.check(spec, source)
+        out = self.render(checked) if checked.verified is not None else None
+        bad = self._output_contract(out, source)
+        if bad is not None:                           # the output breaks the contract: withheld, with the reason
+            checked = Checked(checked.verified, list(checked.issues) + [bad], checked.kept, checked.meta)
+            out = None
         trace.add("check", {"issues": checked.issues, "verified": checked.verified, "kept": checked.kept,
                             "meta": checked.meta})
-        out = self.render(checked) if checked.verified is not None else None
         trace.add("render", {"renderer": f"{self.name} {self.version}",
                              "output_sha256": sha256(out.encode()) if out is not None else None,
                              "output_bytes": len(out.encode()) if out is not None else 0})
@@ -377,6 +414,8 @@ class Specialist:
         rsha = (trace.step("render") or {}).get("output_sha256")
         if prop is None:                              # no proposer output recorded: the proposer is called, and it says so
             return self._repropose(source, record.get("question"), rsha, record.get("output_sha256"), problems, proposer)
+        if prop.get("not_applicable") and self._applies(source, record.get("question"))[0]:
+            problems.append("recorded as not applicable; the specialist applies to this source now")
         if "spec" not in prop:
             if "error" in prop:
                 self._still_invalid(prop.get("raw"), problems)
@@ -460,6 +499,8 @@ class Specialist:
         if d.get("version") != self.version:
             problems.append(f"recorded by version {d.get('version')!r}, replayed by {self.version!r}")
         if d.get("proposal_error") is not None:
+            if str(d["proposal_error"]).startswith("not applicable") and self._applies(source, d.get("question"))[0]:
+                problems.append("recorded as not applicable; the specialist applies to this source now")
             if "proposal_error" in d and d.get("proposal") is not None:
                 self._still_invalid(d["proposal"], problems)
             return Replay(not problems, problems)

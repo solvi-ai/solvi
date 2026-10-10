@@ -27,7 +27,8 @@ EN = {
     "sg.rule_abstained": "rule abstained", "sg.low_confidence": "low confidence", "sg.validator": "rejected by validate",
     "sg.hard_check": "hard check decided", "sg.constraint_repair": "constraint repair", "sg.fallback": "fallback producer",
     "sg.escalated": "model escalated", "sg.evidence_missing": "evidence missing", "sg.timeout": "timed out", "sg.instruction": "answer depends on an instruction-like sentence",
-    "sg.memory": "memory of corrections disagrees",
+    "sg.memory": "memory of corrections disagrees", "sg.contract": "contract refused",
+    "sg.not_applicable": "not applicable",
     # statuses and provenance kinds
     "status.ok": "ok", "status.abstain": "abstain", "status.forced": "forced",
     "prov.given": "given", "prov.computed": "computed", "prov.quoted": "quoted", "prov.decided": "decided",
@@ -89,6 +90,7 @@ RU = {
     "sg.low_confidence": "низкая уверенность", "sg.validator": "отклонено validate",
     "sg.hard_check": "решила жёсткая проверка", "sg.constraint_repair": "исправлено ограничением",
     "sg.fallback": "запасной источник", "sg.escalated": "модель передала человеку",
+    "sg.contract": "нарушен контракт", "sg.not_applicable": "неприменим",
     "sg.evidence_missing": "нет подтверждающей цитаты", "sg.timeout": "время истекло", "sg.instruction": "ответ зависит от фразы-инструкции во входе",
     "sg.memory": "память исправлений не согласна",
     "status.ok": "ок", "status.abstain": "воздержание", "status.forced": "решено проверкой",

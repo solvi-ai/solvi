@@ -96,6 +96,7 @@ The modules `solvi.core` is made of. Their public names are re-exported by `solv
 | [`solvi.core.provenance`](core_provenance.md) | provenance of facts and answers, model identity and fingerprints, grounding of quotes (`matches`) |
 | [`solvi.core.primitives`](core_primitives.md) | answer primitives: "not stated" (`Unknown`), evidence, spans, rankings and estimates |
 | [`solvi.core.schema`](core_schema.md) | pydantic models of solvi's public data: answer types, questions, results, trace records, flows, responses |
+| [`solvi.core.contract`](core_contract.md) | the contract of an answer: its type, no echo of the input, applicability checked before the answerer is called |
 | [`solvi.core.chain`](core_chain.md) | the hash chain of a trace: records added after the flow's steps |
 | [`solvi.core.sources`](core_sources.md) | where a label may come from: the trusted sources and the check every channel runs |
 | [`solvi.core.plan`](core_plan.md) | planning a question's flow: the strategist protocol and the built-in strategists |

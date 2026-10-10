@@ -141,6 +141,7 @@ nav:
           - solvi.core.primitives: api/core_primitives.md
           - solvi.core.schema: api/core_schema.md
           - solvi.core.chain: api/core_chain.md
+          - solvi.core.contract: api/core_contract.md
           - solvi.core.sources: api/core_sources.md
           - solvi.core.plan: api/core_plan.md
           - solvi.core.guarantees: api/core_guarantees.md

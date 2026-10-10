@@ -280,7 +280,24 @@ the text; the rest split evenly between forms the rules still read differently (
 "one point one") and numbers both readers misheard the same way — the second reader cannot catch those. Expect two
 small readers plus rules to top out near 97–98% on read numbers, and budget a person for the rest.
 
+**A certificate certifies execution, not reading: contract the type and the applicability.** A program that passes its
+examples, a check that verifies a spec against its source, a replay that matches — each says the answerer ran right,
+not that it was the right answerer for this input. Declare what reading the question right looks like
+(`Catalog.contract`, a slow path's `contract=`, `Specialist.applicable`): the answer's type matches what the question
+asks, the answer is not the input it was read from, and the answerer is called only when its precondition holds — not
+because the input has the right form. These clauses are hard: they refuse whatever the confidence, with the reason
+named.
+
 ## Tools (the agent guard)
+
+**A call must be grounded in the request.** When the model may call a tool on a request that does not ask for one,
+turn on `guard.firewall()`: every slot value of a call must be written in the user's request or be a fact your app
+gives, numbers as digits, enumerations and booleans exempt by their declaration. On the synthetic irrelevance set of
+[benchmarks/guard_firewall.py](../benchmarks/guard_firewall.py) the share of false calls made fell from 1.000 with no
+guard to 0.750 with the schema check alone and 0.217 with the firewall, while 0.833 of the wanted calls were still made
+(the rest — amounts said in words — went to a person). What gets through has all its values in the request; whether
+the request asks for the call at all is a judgement the firewall leaves to `require_request`, the authorizer or a
+person.
 
 **Ground the arguments that matter in the user's words** (`ground=`, `ground_from=("user",)`), and in a long session
 limit how far back a mention counts (`ground_last=1`): a file the user asked to read earlier otherwise grounds
