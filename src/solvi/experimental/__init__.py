@@ -38,7 +38,7 @@ STATUS: dict[str, dict] = {
               "missing": "false deny and ask rates on real coding-agent sessions, with a script", "script": None},
     "specialist": {"since": "0.7", "what": "the propose → check → render specialist pattern", "missing": "a specialist "
                    "that ships, with a script in benchmarks/: two model types were measured under the contract in "
-                   "2026-10, with solvi.testing.mutations as the corruption test — receipt OCR (84% of corruptions "
+                   "2026-10, with solvi.testing.corrupt as the corruption test — receipt OCR (84% of corruptions "
                    "caught) and speech to text (99.7% caught) — and neither ships (36% of receipt fields accepted; "
                    "90% / 86% of accepted spoken numbers exact); both rest on two readers aligned by `align` (time, boxes); "
                    "charts has no accuracy number yet", "script": None},

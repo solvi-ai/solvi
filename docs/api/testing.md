@@ -4,8 +4,8 @@ Decision regression tests from `cases.json`.
 
 ::: solvi.testing
 
-## `solvi.testing.mutations`
+## `solvi.testing.corrupt`
 
-Mutation tests for specialists: how many corrupted proposals a specialist's check catches.
+Corruption tests for specialists: how many corrupted proposals a specialist's check catches.
 
-::: solvi.testing.mutations
+::: solvi.testing.corrupt

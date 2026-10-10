@@ -299,10 +299,6 @@ def mutations(state, n=50, seed=0):
     return out
 
 
-_fuzz_states = mutations       # fuzz's own name for it: importing the submodule solvi.testing.mutations (mutation tests
-#                                for specialists) rebinds the package's `mutations` to that module, which stays callable
-
-
 def fuzz(system, state, n=50, seed=0):
     """Ask with n mutated states (see mutations) → one line per problem: "crash — mutation: exception" for an exception
     that escaped System.ask, "invalid — mutation: ..." for an answer given with a confidence that is not a number in
@@ -310,7 +306,7 @@ def fuzz(system, state, n=50, seed=0):
     import math
     import warnings
     out = []
-    for what, st in _fuzz_states(state, n, seed):
+    for what, st in mutations(state, n, seed):
         try:
             with warnings.catch_warnings():
                 warnings.simplefilter("ignore")

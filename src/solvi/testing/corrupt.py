@@ -1,10 +1,10 @@
-"""Mutation tests for specialists: corrupt a specialist's recorded proposals and count how many corruptions its check
+"""Corruption tests for specialists: corrupt a specialist's recorded proposals and count how many corruptions its check
 catches (solvi.experimental.specialist: a model proposes, code checks against the source, code renders).
 
-    from solvi.testing.mutations import change_digit, drop, mutate, swap
+    from solvi.testing.corrupt import change_digit, corrupt, drop, swap
 
     records = [(rid, source, run.proposal) for rid, source, run in stored_runs]     # the proposals as recorded
-    rep = mutate(specialist, records, {"digit": change_digit(paths=r"^/series/\\d+/points/\\d+/value$"),
+    rep = corrupt(specialist, records, {"digit": change_digit(paths=r"^/series/\\d+/points/\\d+/value$"),
                                        "drop": drop(paths=r"^/series/\\d+/points/\\d+$")}, n=300, seed=0)
     rep.n, rep.caught, rep.rate        # applied mutations, caught ones, caught / n
     rep.per_kind                       # {kind: {"n", "caught", "skipped"}}
@@ -46,8 +46,6 @@ import copy
 import json
 import random
 import re
-import sys
-import types
 from collections import Counter
 from dataclasses import dataclass, field
 from decimal import Decimal, InvalidOperation
@@ -233,8 +231,8 @@ def _new_issue(run, base, path, value):
 
 
 @dataclass
-class MutationReport:
-    """What a mutation test found: n applied mutations, how many were caught, the rate, per kind {"n", "caught",
+class CorruptionReport:
+    """What a corruption test found: n applied mutations, how many were caught, the rate, per kind {"n", "caught",
     "skipped"}, and one row per mutation {"id", "kind", "path", "value", "caught", "criterion"}."""
     n: int = 0
     caught: int = 0
@@ -254,32 +252,32 @@ class MutationReport:
                 "per_kind": self.per_kind, "rows": self.rows}
 
     def __str__(self):
-        lines = [f"mutations: {self.caught} of {self.n} caught ({self.rate:.1%}), {self.skipped} draw(s) skipped"]
+        lines = [f"corruptions: {self.caught} of {self.n} caught ({self.rate:.1%}), {self.skipped} draw(s) skipped"]
         for k, s in self.per_kind.items():
             lines.append(f"  {k}: {s['caught']} of {s['n']} caught" + (f", {s['skipped']} skipped" if s["skipped"] else ""))
         return "\n".join(lines)
 
 
-def mutate(specialist, records, mutators, *, n=300, seed=0, accepted=None):
-    """Corrupt recorded proposals and run the specialist on each corruption → MutationReport (see the module docs).
+def corrupt(specialist, records, corruptions, *, n=300, seed=0, accepted=None):
+    """Corrupt recorded proposals and run the specialist on each corruption → CorruptionReport (see the module docs).
 
     specialist: a solvi.experimental.specialist.Specialist; records: (id, source, proposal) — the proposal as recorded
-    (`Run.proposal`, or a stored record's "proposal"); mutators: {kind: mutator}; n: mutations to apply; seed: the
+    (`Run.proposal`, or a stored record's "proposal"); corruptions: {kind: mutator} (a mutator: see the module docs); n: mutations to apply; seed: the
     draws' seed; accepted: run → {JSON pointer: value} of what the check verified (default: default_accepted)."""
     recs = sorted(((str(i), s, _plain(p)) for i, s, p in records), key=lambda r: r[0])
-    if not recs or not mutators:
-        raise ValueError("mutate needs records and mutators")
+    if not recs or not corruptions:
+        raise ValueError("corrupt needs records and corruptions")
     accepted = accepted or default_accepted
-    kinds = list(mutators)
+    kinds = list(corruptions)
     rng = random.Random(seed)
-    rep = MutationReport(per_kind={k: {"n": 0, "caught": 0, "skipped": 0} for k in kinds})
+    rep = CorruptionReport(per_kind={k: {"n": 0, "caught": 0, "skipped": 0} for k in kinds})
     base = {}
     draws = 0
     while rep.n < n and draws < 20 * n:
         draws += 1
         rid, source, proposal = rng.choice(recs)
         kind = rng.choice(kinds)
-        m = mutators[kind]
+        m = corruptions[kind]
         got = m(copy.deepcopy(proposal), rng)
         if got is None:
             rep.per_kind[kind]["skipped"] += 1
@@ -304,17 +302,4 @@ def mutate(specialist, records, mutators, *, n=300, seed=0, accepted=None):
     return rep
 
 
-class _Module(types.ModuleType):
-    """This module, callable as the fuzzing function it shares its name with: importing solvi.testing.mutations rebinds
-    the package's `mutations` (solvi.testing.mutations(state, n, seed): mutated input states) to this module, so
-    calling it still gives the mutated states."""
-
-    def __call__(self, state, n=50, seed=0):
-        from . import _fuzz_states
-        return _fuzz_states(state, n, seed)
-
-
-sys.modules[__name__].__class__ = _Module
-
-
-__all__ = ["change_digit", "default_accepted", "drop", "leaves", "mutate", "MutationReport", "nodes", "swap"]
+__all__ = ["change_digit", "default_accepted", "drop", "leaves", "corrupt", "CorruptionReport", "nodes", "swap"]
