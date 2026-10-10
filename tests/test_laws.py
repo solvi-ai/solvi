@@ -58,6 +58,7 @@ def buffer_of(*groups, repeat=1, env=door):
 def lawset(**kw):
     kw.setdefault("base", lambda s, a: "same")
     kw.setdefault("min_support", 2)
+    kw.setdefault("sized", False)                         # the fixed thresholds: these buffers are tiny
     return LawSet(door_grammar(), **kw)
 
 
@@ -269,7 +270,7 @@ def test_a_random_proposer_draws_from_the_whole_grammar():
     g = door_grammar()
     assert all(g.check(c.condition) == c.condition for c in cands)
     assert any(set(c.condition) - {"unlocked", "no_key", "light"} for c in cands)    # not only true atoms
-    again = LawSet(door_grammar(), proposer=RandomProposer(seed=3, n=50))
+    again = LawSet(door_grammar(), proposer=RandomProposer(seed=3, n=50), sized=False)
     assert [c.condition for c in again.mismatch({"locked": False, "key": False, "light": True}, "push", "opens")] \
         == [c.condition for c in cands]
 
@@ -281,7 +282,7 @@ def test_the_enumerating_proposer_is_the_default():
 def test_effect_variants_and_apply():
     """The effect may be a change applied to the state (a counter + 1) rather than the observation itself."""
     g = Grammar([Atom("full", lambda s: s["n"] >= 3, feature="n"), Atom("room", lambda s: s["n"] < 3, feature="n")])
-    ls = LawSet(g, base=lambda s, a: s["n"], apply=lambda eff, s: s["n"] + eff,
+    ls = LawSet(g, base=lambda s, a: s["n"], sized=False, apply=lambda eff, s: s["n"] + eff,
                 effects=lambda s, observed: [observed - s["n"]], min_support=2)
     buf = Buffer(g)
     for i, n in enumerate([0, 1, 2, 3, 4, 0, 1, 2, 3, 4]):

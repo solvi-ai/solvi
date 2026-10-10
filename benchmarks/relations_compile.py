@@ -241,7 +241,7 @@ def _learned_grid(seed):
     held = Buffer(g)
     for w in range(6):
         held.extend(grid_rows(rng, 300, f"h{w}"))
-    ls = LawSet(g, base=lambda s, a: "nothing")
+    ls = LawSet(g, base=lambda s, a: "nothing", sized=False)       # measured under the fixed thresholds
     for w in range(6):
         ls.learn(grid_rows(rng, 300, f"s{w}"), held)
     return ls, rng
@@ -291,7 +291,7 @@ def path_policy(rows=20_000, seed=0):
     held = Buffer(g)
     for i in range(6):
         held.extend(Transition({"path": p}, "read", policy(p), group=f"h{i}") for p in (tree_path(rng) for _ in range(12)))
-    ls = LawSet(g, base=lambda s, a: "ok", min_support=3)
+    ls = LawSet(g, base=lambda s, a: "ok", min_support=3, sized=False)   # measured under the fixed thresholds
     ls.proposer = RelAlgProposer(g, k=20, encoder=PathTree("path", names=("secret",)), rows=held, size=5)
     for i in range(6):
         for p in (tree_path(rng) for _ in range(12)):

@@ -5,8 +5,10 @@ from __future__ import annotations
 import hashlib
 import inspect
 import json
+import math
 import random
 from dataclasses import dataclass, field
+from functools import lru_cache
 from itertools import combinations
 from typing import Any, Callable, Iterable, Protocol
 
@@ -141,7 +143,8 @@ class Transition:
 class Buffer:
     """Held-out transitions, grouped. Per action: one bitset per atom over its rows and one per group, so a law's
     support and precision on the rows of every group but one are a few AND operations. The proposing transition's group
-    is left out of every test (`exclude=`)."""
+    is left out of every test (`exclude=`). tested: how many candidates have been scored on this buffer, by every
+    law set that tested on it — the N the sized acceptance divides its error by."""
 
     def __init__(self, grammar: Grammar):
         self.grammar = grammar
@@ -154,6 +157,7 @@ class Buffer:
         self._width: dict[Any, list[int]] = {}                  # action → per row, the grammar's size when added
         self._late: set = set()                                  # (action, atom) indexed on the rows before it
         self.n = 0
+        self.tested = 0                                          # candidates scored on this buffer, in all
 
     def add(self, t: Transition):
         a = _key(t.action)
@@ -264,7 +268,11 @@ class Law:
     """An accepted law (see the package docstring). support / hits / precision / net: on the held-out buffer at
     acceptance (rows of every group but `born`), counted; sources: the ids of the rows it was accepted on; n / hits_after:
     observations from other groups since, while it was the law applied; held: (hits, n) on the buffer rows where it is
-    the applied law, from the last test; status: "active" | "retired"; why: the retirement's reason."""
+    the applied law, from the last test; status: "active" | "retired"; why: the retirement's reason. tested: the
+    candidates scored on the buffer when it was accepted (with the sized acceptance, the N of its bound; admitted by
+    probes: the candidates it was told apart from); need: the clean support the sized rule asked for at that N; level:
+    the per-candidate error level δ_N it passed (None: fixed thresholds, `sized=False`, or a law added by hand);
+    admitted: "test" (the held-out buffer), "probes" (`admit_by_probes`) or "hand" (`add`)."""
     id: str
     action: Any
     condition: tuple
@@ -282,6 +290,10 @@ class Law:
     hits_after: int = 0
     held: tuple = (0, 0)
     why: str | None = None
+    tested: int = 0
+    need: int = 0
+    level: float | None = None
+    admitted: str = "test"
 
     def holds(self, true: Iterable[str]) -> bool:
         t = set(true)
@@ -305,12 +317,14 @@ class Law:
 @dataclass
 class Step:
     """One transition of the loop: what was predicted (and by which law), whether it was a mismatch, how many
-    candidates were proposed, which laws were accepted and which retired."""
+    candidates were proposed and how many of them were scored on the buffer (tested), which laws were accepted and
+    which retired."""
     transition: Transition
     predicted: Any
     law: Law | None
     mismatch: bool
     candidates: int = 0
+    tested: int = 0
     accepted: list = field(default_factory=list)
     retired: list = field(default_factory=list)
 
@@ -377,6 +391,69 @@ class CallableProposer:
         return out
 
 
+# ───────────────────────────────────────────── the sized acceptance
+def sized_level(tested: int, delta: float, space: int | None = None) -> float:
+    """The error level one candidate is tested at when `tested` candidates have been scored on the buffer: δ / space
+    when you declared the number of candidates you will test (`space`, Bonferroni; valid while tested ≤ space), else
+    δ / (N·(N + 1)) with N = tested — the n-th candidate gets at most δ / (n·(n + 1)) and these sum to less than δ over
+    any number of candidates, so the bound holds however long the stream runs."""
+    n = max(1, int(tested))
+    if space is not None and n <= int(space):
+        return float(delta) / int(space)
+    return float(delta) / (n * (n + 1))
+
+
+def sized_need(tested: int, delta: float, null: float, space: int | None = None) -> int:
+    """The smallest support with which a law that is right on every row passes the sized rule at this N: the least s
+    with null**s ≤ level, i.e. ⌈ln(1/level) / ln(1/null)⌉ ≈ (ln N + ln 1/δ) / ε for null = 1 − ε (twice ln N
+    without a declared space)."""
+    lvl = sized_level(tested, delta, space)
+    return max(1, math.ceil(math.log(1.0 / lvl) / math.log(1.0 / float(null)) - 1e-9))
+
+
+@lru_cache(maxsize=65536)
+def _log_tail(s: int, h: int, p: float) -> float:
+    """log P[Binomial(s, p) ≥ h]."""
+    if h <= 0:
+        return 0.0
+    if h > s:
+        return -math.inf
+    lp, lq = math.log(p), math.log1p(-p)
+    lg = math.lgamma(s + 1)
+    terms = [lg - math.lgamma(j + 1) - math.lgamma(s - j + 1) + j * lp + (s - j) * lq for j in range(h, s + 1)]
+    m = max(terms)
+    return m + math.log(sum(math.exp(x - m) for x in terms))
+
+
+@dataclass(frozen=True, eq=False)
+class Undetermined:
+    """The answer of `predict(..., disagree="abstain")` where laws that are not exceptions of one another disagree:
+    the laws (the most specific matching ones, none of whose conditions contains another's) and what each predicts.
+    Never equal to an observation."""
+    laws: tuple
+    predictions: tuple
+
+    def __repr__(self):
+        return f"Undetermined({[law.id for law in self.laws]}, predictions={list(self.predictions)!r})"
+
+
+@dataclass
+class Admission:
+    """What `admit_by_probes` decided. status: "accepted" (one equivalence class of candidates survived and it is
+    not the set without a law) or "undetermined"; law: the accepted law (the shortest candidate of the surviving
+    class) or None; classes: the surviving candidates grouped by what they predict on every probe offered (shortest
+    first in each, classes by their shortest); asked: the probes asked, as Transitions (group "probe"); refuted: the
+    candidates the logged rows and the probes refuted; null: the set without any new law still survives; why: the
+    reason."""
+    status: str
+    law: Law | None
+    classes: list
+    asked: list
+    refuted: int
+    null: bool
+    why: str
+
+
 # ───────────────────────────────────────────── the law set
 def _identity(effect, state):
     return effect
@@ -392,12 +469,38 @@ class LawSet:
     base: the predictor when no law applies, `base(state, action)` (default: None). apply: `apply(effect, state)` → the
     predicted observation (default: the effect is the observation). effects: `effects(state, observed)` → the effect
     variants an observation supports (default: [observed]). proposer: default Enumerate(). The acceptance: support ≥
-    min_support, precision ≥ min_precision and a net error reduction > 0 on the held-out rows; retirement: running
-    held-out precision < retire_below over at least retire_min cases; at most `cap` active laws."""
+    min_support, precision ≥ min_precision and a net error reduction > 0 on the held-out rows, and — sized=True, the
+    default — the sized rule below; retirement: running held-out precision < retire_below over at least retire_min
+    cases; at most `cap` active laws.
+
+    The sized acceptance (sized=True). Fixed thresholds do not see how many candidates were tried on one buffer: on a
+    buffer with no law at all (2,000 rows, an effect at 70% independent of 40 sparse atoms) the 821 conditions of at
+    most two atoms passed support ≥ 5 and precision ≥ 0.9 in 100 of 100 buffers. The sized rule tests each candidate
+    against the null "its precision is at most null_precision" (min_precision; 0.95 when min_precision is 1) at the
+    level δ_N = sized_level(N, delta, space), N the candidates scored on this buffer so far (`buffer.tested`): it
+    passes when P[Binomial(support, null) ≥ hits] ≤ δ_N. A law right on every row needs support ≥ sized_need(N, ...)
+    ≈ (ln N + ln 1/δ) / ε (ε = 1 − null; with the anytime level, 2·ln N); every row it gets wrong asks for more. Then a
+    candidate whose true precision is at most the null passes with probability ≤ δ_N, and over every candidate tested
+    on the buffer the chance of any such acceptance is ≤ delta — on the same buffers: 0 of 100. The bound assumes the
+    held-out rows are independent draws and the candidates were not chosen by looking at them. sized=False: the
+    fixed thresholds (the measured stands ran so). Each accepted Law records `tested` (N), `need` and `level`.
+
+    disagree: "first" (default: the most specific matching law, ties to the earlier) or "abstain" (`predict` returns
+    `Undetermined` where laws none of which is an exception of another disagree; see `predict`).
+
+    cost: the search-cost record — candidates (proposed for mismatches), tests (candidates scored on a buffer),
+    accepted, probes (asked by `admit_by_probes`), simulated (0 here; a model-based learner adds its steps) — report it
+    next to accuracy."""
 
     def __init__(self, grammar: Grammar, *, base: Callable | None = None, apply: Callable | None = None,
                  effects: Callable | None = None, proposer: Proposer | None = None, min_support: int = 5,
-                 min_precision: float = 0.9, retire_below: float = 0.8, retire_min: int = 5, cap: int = 300):
+                 min_precision: float = 0.9, retire_below: float = 0.8, retire_min: int = 5, cap: int = 300,
+                 sized: bool = True, delta: float = 0.1, space: int | None = None,
+                 null_precision: float | None = None, disagree: str = "first"):
+        if disagree not in ("first", "abstain"):
+            raise ValueError(f"disagree is 'first' or 'abstain', not {disagree!r}")
+        if not 0.0 < float(delta) < 1.0:
+            raise ValueError("delta is a probability strictly between 0 and 1")
         self.grammar = grammar
         self.base = base
         self.apply = apply or _identity
@@ -405,11 +508,22 @@ class LawSet:
         self.proposer = proposer if proposer is not None else Enumerate()
         self.min_support, self.min_precision = int(min_support), float(min_precision)
         self.retire_below, self.retire_min, self.cap = float(retire_below), int(retire_min), int(cap)
+        self.sized, self.delta = bool(sized), float(delta)
+        self.space = int(space) if space is not None else None
+        if null_precision is None:
+            null_precision = self.min_precision if self.min_precision < 1.0 else 0.95
+        if not 0.0 < float(null_precision) < 1.0:
+            raise ValueError("null_precision is strictly between 0 and 1")
+        self.null_precision = float(null_precision)
+        self.disagree = disagree
+        self.abstained = 0                 # predictions that abstained (disagree="abstain")
+        self.cost = {"candidates": 0, "tests": 0, "accepted": 0, "probes": 0, "simulated": 0}
         self.laws: list[Law] = []          # active, priority order
         self.retired: list[Law] = []
         self.capped = 0                    # tests refused because the cap was reached
         self.transition: Transition | None = None   # the transition `step` is proposing for (a proposer may read it)
         self._seq = 0
+        self._last_tested = 0
         self._base_key = ("base", id(base))
 
     # ----------------------------------------------------------------------------------- prediction
@@ -431,8 +545,43 @@ class LawSet:
                 return law
         return None
 
-    def predict(self, state, action, base: Callable | None = None):
-        """The first matching law's effect applied to the state, or the base predictor's answer."""
+    def matching(self, state, action) -> list[Law]:
+        """Every active law of `action` whose condition holds in `state`, in the set's order (most specific first)."""
+        true = set(self.grammar.true(state, action))
+        k = _key(action)
+        return [law for law in self.laws if _key(law.action) == k and law.holds(true)]
+
+    def conflict(self, state, action) -> Undetermined | None:
+        """Where the matching laws that are not exceptions of one another disagree → Undetermined, else None. Of the
+        matching laws only the maximal ones count — those whose condition no other matching law's condition strictly
+        contains (a law with a larger condition is an exception that was tested where the wider one applied); when
+        these predict different observations here, nothing in the evidence says which one speaks."""
+        ms = self.matching(state, action)
+        if len(ms) < 2:
+            return None
+        sets = [set(law.condition) for law in ms]
+        top = [law for law, c in zip(ms, sets) if not any(o > c for o in sets)]
+        preds = [self.apply(law.effect, state) for law in top]
+        if len({_key(p) for p in preds}) < 2:
+            return None
+        return Undetermined(tuple(top), tuple(preds))
+
+    def predict(self, state, action, base: Callable | None = None, *, disagree: str | None = None):
+        """The first matching law's effect applied to the state, or the base predictor's answer. disagree="abstain"
+        (or the set's own `disagree`): where the maximal matching laws disagree (`conflict`), an `Undetermined` instead
+        — the abstention is counted in `abstained`. The default "first" keeps most specific first, ties to the
+        earlier law.
+
+        A version space in miniature: two laws that both passed their test and neither of which is an exception of
+        the other cover this state and say different things — the order between them is a tie-break, not evidence."""
+        mode = disagree or self.disagree
+        if mode not in ("first", "abstain"):
+            raise ValueError(f"disagree is 'first' or 'abstain', not {mode!r}")
+        if mode == "abstain":
+            u = self.conflict(state, action)
+            if u is not None:
+                self.abstained += 1
+                return u
         law = self.applied(state, action)
         if law is not None:
             return self.apply(law.effect, state)
@@ -457,11 +606,12 @@ class LawSet:
     def mismatch(self, state, action, observed) -> list[Candidate]:
         """No mismatch (the prediction is the observation) → []; else the proposer's candidates, without the laws
         already active."""
-        if self.predict(state, action) == observed:
+        if self.predict(state, action, disagree="first") == observed:
             return []
         active = {(_key(law.action), law.condition, _key(law.effect)) for law in self.laws}
-        return [c for c in self.proposer.propose(self, state, action, observed)
-                if (_key(c.action), tuple(c.condition), _key(c.effect)) not in active]
+        proposed = list(self.proposer.propose(self, state, action, observed))
+        self.cost["candidates"] += len(proposed)
+        return [c for c in proposed if (_key(c.action), tuple(c.condition), _key(c.effect)) not in active]
 
     # ----------------------------------------------------------------------------------- the held-out test
     def _effect_mask(self, buffer, action, effect):
@@ -501,16 +651,36 @@ class LawSet:
         take = m & ~cov[min(len(cond), self.grammar.k + 1)]
         return m.bit_count(), (m & E).bit_count(), (take & E).bit_count() - (take & ok).bit_count()
 
+    def passes(self, support: int, hits: int, tested: int) -> bool:
+        """The acceptance on counts alone (net aside): support ≥ min_support, hits ≥ min_precision · support, and with
+        sized=True P[Binomial(support, null_precision) ≥ hits] ≤ sized_level(tested, delta, space)."""
+        if support < self.min_support or hits < self.min_precision * support:
+            return False
+        if not self.sized:
+            return True
+        if support < sized_need(tested, self.delta, self.null_precision, self.space):
+            return False
+        return _log_tail(int(support), int(hits), self.null_precision) <= math.log(
+            sized_level(tested, self.delta, self.space)) + 1e-12
+
     def test(self, candidates: Iterable[Candidate], buffer: Buffer, exclude=None, accept: int = 1) -> list[Law]:
         """Accept up to `accept` candidates (default one: the best) that pass on the held-out rows of every group but
-        `exclude` (the proposing transition's): support ≥ min_support, precision ≥ min_precision, net > 0. Best: the
-        largest net, then fewer atoms, then the higher precision, then the earlier candidate. → the accepted laws."""
+        `exclude` (the proposing transition's): `passes(support, hits, N)` — support ≥ min_support, precision ≥
+        min_precision and, sized, the binomial bound at N = the candidates scored on this buffer so far, this call's
+        included — and net > 0. Best: the largest net, then fewer atoms, then the higher precision, then the earlier
+        candidate. → the accepted laws."""
         candidates = list(candidates)
         if not candidates:
             return []
         if len(self.laws) >= self.cap:
             self.capped += 1
             return []
+        active0 = {(_key(law.action), law.condition, _key(law.effect)) for law in self.laws}
+        scored = sum(1 for c in candidates if (_key(c.action), tuple(c.condition), _key(c.effect)) not in active0)
+        buffer.tested += scored
+        self.cost["tests"] += scored
+        self._last_tested = scored
+        n_tested = buffer.tested
         out = []
         for _ in range(accept):
             views = {}
@@ -524,7 +694,7 @@ class LawSet:
                 if a not in views:
                     views[a] = self._view(buffer, c.action, exclude)
                 sup, hits, net = self.score(c, buffer, exclude, _view=views[a])
-                if sup < self.min_support or hits < self.min_precision * sup or net <= 0:
+                if net <= 0 or not self.passes(sup, hits, n_tested):
                     continue
                 key = (net, -len(cond), hits / sup, -i)
                 if best is None or key > best[0]:
@@ -535,13 +705,208 @@ class LawSet:
             m = buffer.match(c.action, tuple(c.condition)) & views[_key(c.action)][0]
             law = self._accept(c, born=exclude, support=sup, hits=hits, net=net,
                                sources=tuple(buffer.ids(c.action, m)))
+            law.tested = n_tested
+            self.cost["accepted"] += 1
+            if self.sized:
+                law.level = sized_level(n_tested, self.delta, self.space)
+                law.need = sized_need(n_tested, self.delta, self.null_precision, self.space)
             out.append(law)
             self.check(buffer, c.action)
         return out
 
     def add(self, candidate: Candidate, *, born=None) -> Law:
         """Put a law in without the test (a person's law, a written rule, a test fixture) → the law."""
-        return self._accept(candidate, born=born)
+        law = self._accept(candidate, born=born)
+        law.admitted = "hand"
+        return law
+
+    # ----------------------------------------------------------------------------------- admission by probes
+    def admit_by_probes(self, candidates: Iterable[Candidate], ask: Callable[[Any, Any], Any], *,
+                        probes: Iterable[tuple[Any, Any]], safe: Callable[[Any, Any], bool] | None = None,
+                        budget: int = 8, buffer: Buffer | None = None, exclude=None,
+                        read_only: Callable[..., bool] | None = None, cost: Callable[[Any, Any], Any] | None = None,
+                        order: str = "split", unique: bool = True, seed: int = 0) -> Admission:
+        """Admit one of `candidates` by asking the world where they disagree (CEGIS-style), not by a random held-out
+        sample. ask(state, action) → the observation (the environment, or an exact model of it); probes: the (state,
+        action) pairs you may ask about (a finite pool; also what the equivalence classes are computed on); safe:
+        which of them may be asked (default: all); budget: at most this many asks.
+
+        A candidate is the set with it added (`hypothesis`): where it is the applied law it predicts its effect,
+        elsewhere what the set predicts now. It is refuted by a row (a logged one from `buffer` — every group but
+        `exclude`, its own actions only — or an asked probe) where it is the applied law and its effect is wrong, or
+        where its condition does not hold, the set is wrong and its effect is what was observed (it is too narrow).
+        The set without a new law ("null") is a hypothesis too, refuted where the set is wrong. Loop: group the
+        surviving hypotheses by their predictions on every probe of the pool; while more than one group is left and
+        the budget lasts, ask the safe probe that splits the groups most (`split`: read-only first, the larger split,
+        the lower cost), drop the refuted. Accept the shortest candidate (fewest atoms, then the order given) only when
+        one group of candidates is left and the null is not in it or alive (identifiability); otherwise
+        "undetermined" with the surviving groups — never a guess. order="random", unique=False: the control — `budget`
+        random safe probes, the shortest survivor accepted (a held-out sample of that size).
+
+        Measured on a synthetic world (10 binary features, 20 atoms, k = 3; the hidden law a random conjunction of two
+        atoms; the 176 candidates Enumerate proposes from one state where it fires; a pool of 200 random states; 300
+        trials; a wrong law = one that differs from the hidden law on any of the 1,024 states): at 8 checks a random
+        held-out sample with the shortest survivor accepted took a wrong law in 0.593 of the trials (0.407 right); the
+        active admission asked 7.45 probes on average and accepted 0.987 right, 0.000 wrong, 0.013 undetermined. The
+        uniqueness rule alone on 8 random probes: 0.000 wrong but 0.893 undetermined; 20 random probes with the
+        shortest survivor: 0.037 wrong (tests/test_laws_w2.py reruns the 8-check comparison on 150 trials). The
+        accepted law records admitted="probes", tested = the number of candidates, support = the rows where it
+        applied, born = "probe"."""
+        if order not in ("split", "random"):
+            raise ValueError(f"order is 'split' or 'random', not {order!r}")
+        from ._probes import split
+        cands: list[Candidate] = []
+        seen = set()
+        for c in candidates:
+            k = (_key(c.action), tuple(c.condition), _key(c.effect))
+            if k not in seen:
+                seen.add(k)
+                cands.append(c)
+        pool = list(probes)
+        rng = random.Random(seed)
+
+        def info(x, a):
+            ms = self.matching(x, a)
+            return set(self.grammar.true(x, a)), self.predict(x, a, disagree="first"), \
+                max((len(law.condition) for law in ms), default=-1)
+
+        cache: dict[int, tuple] = {}
+
+        def pinfo(i):
+            if i not in cache:
+                cache[i] = info(*pool[i])
+            return cache[i]
+
+        def pred(c, x, a, inf):
+            T, cur, shadow = inf
+            if _key(c.action) != _key(a):
+                return cur, False, False
+            hold = set(c.condition) <= T
+            applied = hold and len(c.condition) > shadow
+            return (self.apply(c.effect, x) if applied else cur), applied, hold
+
+        def refutes(c, x, a, obs, inf):
+            if c is None:
+                return inf[1] != obs
+            p, applied, hold = pred(c, x, a, inf)
+            if _key(c.action) != _key(a):
+                return False
+            if applied:
+                return p != obs
+            return (not hold) and inf[1] != obs and self.apply(c.effect, x) == obs
+
+        acts = {_key(c.action): c.action for c in cands}
+        alive = list(range(len(cands)))
+        null = True
+        refuted = 0
+        if buffer is not None:
+            for a in acts.values():
+                for row in buffer.rows(a, exclude):
+                    inf = info(row.state, row.action)
+                    keep = [j for j in alive if not refutes(cands[j], row.state, row.action, row.observed, inf)]
+                    refuted += len(alive) - len(keep)
+                    alive = keep
+                    if null and refutes(None, row.state, row.action, row.observed, inf):
+                        null = False
+        vec: dict[int, tuple] = {}
+
+        def vector(j):
+            if j not in vec:
+                if j < 0:
+                    vec[j] = tuple(_key(pinfo(i)[1]) for i in range(len(pool)))
+                else:
+                    vec[j] = tuple(_key(pred(cands[j], pool[i][0], pool[i][1], pinfo(i))[0]) for i in range(len(pool)))
+            return vec[j]
+
+        def groups():
+            out: dict = {}
+            for j in alive + ([-1] if null else []):
+                out.setdefault(vector(j), []).append(j)
+            return list(out.values())
+
+        asked: list[Transition] = []
+        done: set[int] = set()
+        ok_safe = (lambda i: True) if safe is None else (lambda i: bool(safe(*pool[i])))
+        why = ""
+        while True:
+            gs = groups()
+            if order == "split" and len(gs) <= 1:
+                why = "one class left"
+                break
+            if len(asked) >= int(budget):
+                why = f"the budget of {int(budget)} probes is spent"
+                break
+            if not alive:
+                why = "every candidate refuted"
+                break
+            if order == "random":
+                left = [i for i in range(len(pool)) if i not in done and ok_safe(i)]
+                if not left:
+                    why = "no safe probe left"
+                    break
+                i = rng.choice(left)
+            else:
+                reps = [(lambda st, ac, j=g[0]: vector(j)[st]) for g in gs]
+                ro = None if read_only is None else (lambda st, ac: read_only(*pool[st]) if _arity2(read_only)
+                                                     else read_only(pool[st][1]))
+                cs = None if cost is None else (lambda st, ac: cost(*pool[st]))
+                pr = split(reps, lambda st, ac: ok_safe(st), [(i, pool[i][1]) for i in range(len(pool))
+                                                             if i not in done], read_only=ro, cost=cs)
+                if pr is None:
+                    why = "no safe probe tells the classes apart (they differ only where it is unsafe to ask)"
+                    break
+                i = pr.state
+            done.add(i)
+            x, a = pool[i]
+            obs = ask(x, a)
+            asked.append(Transition(x, a, obs, group="probe", id=f"probe-{len(asked) + 1}-{i}"))
+            inf = pinfo(i)
+            keep = [j for j in alive if not refutes(cands[j], x, a, obs, inf)]
+            refuted += len(alive) - len(keep)
+            alive = keep
+            if null and refutes(None, x, a, obs, inf):
+                null = False
+        self.cost["probes"] += len(asked)
+        by_vec: dict = {}
+        for j in alive:
+            by_vec.setdefault(vector(j), []).append(j)
+        order_key = (lambda j: (len(cands[j].condition), j))
+        cls = sorted((sorted(g, key=order_key) for g in by_vec.values()), key=lambda g: order_key(g[0]))
+        classes = [[cands[j] for j in g] for g in cls]
+        null_with = null and bool(cls) and vector(-1) in by_vec
+
+        def undetermined(reason):
+            return Admission("undetermined", None, classes, asked, refuted, null, reason)
+
+        if not alive:
+            return undetermined("no candidate survived" + (f" ({why})" if why else ""))
+        if unique:
+            if len(cls) > 1:
+                return undetermined(f"{len(cls)} classes of candidates survive: {why}")
+            if null_with:
+                return undetermined(f"the surviving candidates predict what the set without them does on every probe: "
+                                    f"{why}")
+            if null:
+                return undetermined(f"the set without a new law survives too: {why}")
+            j = cls[0][0]
+        else:
+            j = min(alive, key=order_key)
+        if len(self.laws) >= self.cap:
+            self.capped += 1
+            return undetermined("the cap of active laws is reached")
+        c = cands[j]
+        rows = list(asked)
+        if buffer is not None:
+            rows = [r for a in acts.values() for r in buffer.rows(a, exclude)] + rows
+        sup = [r for r in rows if pred(c, r.state, r.action, info(r.state, r.action))[1]]
+        hits = sum(1 for r in sup if self.apply(c.effect, r.state) == r.observed)
+        net = sum(1 for r in sup if self.apply(c.effect, r.state) == r.observed
+                  and self.predict(r.state, r.action, disagree="first") != r.observed)
+        law = self._accept(c, born="probe", support=len(sup), hits=hits, net=net,
+                           sources=tuple(r.id for r in sup))
+        law.admitted, law.tested = "probes", len(cands)
+        self.cost["accepted"] += 1
+        return Admission("accepted", law, classes, asked, refuted, null, why or "one class left")
 
     def _accept(self, c, *, born, support=0, hits=0, net=0, sources=()):
         self._seq += 1
@@ -606,7 +971,7 @@ class LawSet:
         """One transition of the loop: predict, count it against the applied law (retire), on a mismatch propose and
         test on the buffer without this transition's group; `remember`: then add it to the buffer."""
         law = self.applied(t.state, t.action)
-        predicted = self.predict(t.state, t.action)
+        predicted = self.predict(t.state, t.action, disagree="first")
         retired = self.observe(t)
         miss = predicted != t.observed
         st = Step(t, predicted, law, miss, retired=retired)
@@ -617,7 +982,9 @@ class LawSet:
             finally:
                 self.transition = None
             st.candidates = len(cands)
+            self._last_tested = 0
             st.accepted = self.test(cands, buffer, exclude=t.group) if cands else []
+            st.tested = self._last_tested
         if remember:
             buffer.add(t)
         return st
@@ -661,6 +1028,10 @@ class LawSet:
         return out
 
 
+def _arity2(fn):
+    return _required_args(fn) >= 2
+
+
 def _plain(x):
     try:
         json.dumps(x)
@@ -669,5 +1040,5 @@ def _plain(x):
         return repr(x)
 
 
-__all__ = ["Atom", "Buffer", "CallableProposer", "Candidate", "Enumerate", "Grammar", "Law", "LawSet", "Proposer",
-           "RandomProposer", "Step", "Transition"]
+__all__ = ["Admission", "Atom", "Buffer", "CallableProposer", "Candidate", "Enumerate", "Grammar", "Law", "LawSet",
+           "Proposer", "RandomProposer", "Step", "Transition", "Undetermined", "sized_level", "sized_need"]

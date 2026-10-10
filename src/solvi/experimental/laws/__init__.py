@@ -84,15 +84,16 @@ from __future__ import annotations
 
 from .. import warn_on_import
 from ._compile import CompiledCheck, check_compiled, load_module
-from ._core import (Atom, Buffer, CallableProposer, Candidate, Enumerate, Grammar, Law, LawSet, Proposer,
-                    RandomProposer, Step, Transition)
+from ._core import (Admission, Atom, Buffer, CallableProposer, Candidate, Enumerate, Grammar, Law, LawSet, Proposer,
+                    RandomProposer, Step, Transition, Undetermined, sized_level, sized_need)
 from ._probes import Probe, discriminate, split
 from ._rank import (FEATURES, BagOfAtomsRanker, FeatureRanker, RankedProposer, SyntheticTask, atom_features,
                     candidate_features, checks_to, synthetic_task)
 
 warn_on_import(__name__)
 
-__all__ = ["Atom", "BagOfAtomsRanker", "Buffer", "CallableProposer", "Candidate", "CompiledCheck", "Enumerate",
+__all__ = ["Admission", "Atom", "BagOfAtomsRanker", "Buffer", "CallableProposer", "Candidate", "CompiledCheck", "Enumerate",
            "FEATURES", "FeatureRanker", "Grammar", "Law", "LawSet", "Probe", "Proposer", "RandomProposer",
            "RankedProposer", "Step", "SyntheticTask", "Transition", "atom_features", "candidate_features",
-           "check_compiled", "checks_to", "discriminate", "load_module", "split", "synthetic_task"]
+           "check_compiled", "checks_to", "discriminate", "load_module", "sized_level", "sized_need", "split",
+           "synthetic_task", "Undetermined"]
