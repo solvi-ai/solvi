@@ -40,6 +40,20 @@ The library. `Library`: accepted programs (`Entry(program, name, examples, test)
 and its test record), each a terminal ("L", name) of later searches, so a composite rule is a small program over
 earlier ones; `expand` inlines them.
 
+Composites with a library of held-out-tested rules (`solvi.experimental.relations.library`):
+
+    from solvi.experimental.relations.library import HeldOut, find_rules
+    r = find_rules(worlds, targets, base=["PARENT", "IS_DIR", "NAME=secret"], size=6, budget=50_000, library=(),
+                   test=HeldOut(other_worlds, targets))
+    r.found["denied"].program            # e.g. (under_secret ∩ depth3), over earlier finds in r.library
+
+`find_rules` enumerates small programs bottom-up (observational equivalence on the examples), admits only what passes
+the held-out test on other worlds, and enumerates again with the admitted rules as new terminals, so a rule three
+levels deep is a small program over earlier finds; the targets are given (an unordered set), the search finds which is
+within reach and the programs. A learned proposer has a slot (`proposer=`) as a fallback when the budget runs out; none
+ships. A world there is a mapping name → (n, n) boolean matrix; `relations.library.Library` is one admitted entry
+(program, name, examples, test_record), and `library=` also takes this package's `Library`.
+
 Compiled rules. `compile_ast(ast)` writes plain Python over sets of pairs (an index per relation; composition a join;
 closure joins of the new pairs to a fixed point; counts per pair) that imports nothing; `compile_program` executes it.
 `backend="arrays"` writes the same over index arrays for large graphs: a relation is a sorted int64 array of keys
@@ -58,8 +72,9 @@ score each behaviour against "the effect predicts this row", and hand the top k 
 to the law set's unchanged held-out test (other groups only) — the test does the work.
 
 Measured: benchmarks/relations_battery.py (the enumerator on a pre-registered battery of random rules over three
-relations) and benchmarks/relations_compile.py (compiled rules on a forest of 100,000 nodes and on 100,000 law rows);
-the numbers are in their docstrings and tests/test_relations_gate.py (`pytest -m slow`).
+relations), benchmarks/relations_compile.py (compiled rules on a forest of 100,000 nodes and on 100,000 law rows) and
+benchmarks/relations_library_toy.py (the library on a path tree and on kinship, with and without it); the numbers are
+in their docstrings, tests/test_relations_gate.py and tests/test_relations_library_toy.py (`pytest -m slow`).
 
 Pitfalls built in. Equivalence holds on the examples only: the program kept for a class is its smallest member and
 may not generalise, so every find needs a held-out check on other sizes and families (the proposer's candidates go
@@ -78,6 +93,8 @@ What is not done:
 - the proposer enumerates on one group's rows; with few rows many programs share a readout, and only the held-out
   test separates them;
 - relational atoms stay in the grammar once proposed (every row evaluates them); nothing prunes unused ones yet;
+- the library's intermediate concepts are given as targets; find_rules finds the order and the programs, not the
+  concepts; library entries are never retired, and every entry makes the rules it does not help dearer;
 - the compiled atom of a state's graph allows complements (its domain, the window or the path's chain, is bounded);
   `compile_ast` refuses them by default."""
 from __future__ import annotations
@@ -91,12 +108,14 @@ from ._compile import (BACKENDS, RUNTIME, RUNTIME_ARRAYS, DenseAnswer, ProgramCh
                        compile_program, from_keys, to_keys)
 from ._enumerate import (Entry, Enumerator, Found, Library, Program, Score, Scored, enumerate_programs, lower_bound,
                          rank, score, synthesize, top_programs)
+from .library import HeldOut, RuleProposer, Rules, TargetRecord, find_rules
 
 warn_on_import(__name__)
 
-__all__ = ["BACKENDS", "BINARY", "CREATURES", "DenseAnswer", "Egocentric", "Entry", "Enumerator", "Found", "Library", "MATERIALS",
-           "OPS", "PATHS", "PROPOSER_OPS", "PathTree", "Program", "ProgramCheck", "RUNTIME", "RUNTIME_ARRAYS", "RelAlgProposer",
-           "Relations", "Score", "Scored", "UNARY", "check_program", "closure", "compile_ast", "compile_program",
-           "complement", "compose", "converse", "count_at_least", "encode", "encode_paths", "enumerate_programs",
-           "evaluate", "from_keys", "intersect", "lower_bound", "minus", "rank", "readout", "relational_atom", "score",
-           "show", "size", "synthesize", "to_keys", "top_programs", "union", "xor"]
+__all__ = ["BACKENDS", "BINARY", "CREATURES", "DenseAnswer", "Egocentric", "Entry", "Enumerator", "Found", "HeldOut",
+           "Library", "MATERIALS", "OPS", "PATHS", "PROPOSER_OPS", "PathTree", "Program", "ProgramCheck", "RUNTIME",
+           "RUNTIME_ARRAYS", "RelAlgProposer", "Relations", "RuleProposer", "Rules", "Score", "Scored", "TargetRecord",
+           "UNARY", "check_program", "closure", "compile_ast", "compile_program", "complement", "compose", "converse",
+           "count_at_least", "encode", "encode_paths", "enumerate_programs", "evaluate", "find_rules", "from_keys",
+           "intersect", "lower_bound", "minus", "rank", "readout", "relational_atom", "score", "show", "size",
+           "synthesize", "to_keys", "top_programs", "union", "xor"]
