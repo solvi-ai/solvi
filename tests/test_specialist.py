@@ -240,3 +240,20 @@ def test_the_charts_specialist_stores_its_runs(tmp_path):
     r = sp.run(text, "revenue by region")
     assert r.ok and store.record(r.stored_id)["specialist"] == "charts" and sp.replay(r.stored_id, text).ok
     assert replay_runs(store, ChartSpecialist(), [text]) == []
+
+
+def test_store_source_keeps_the_text_so_a_stored_run_replays_by_id_alone(tmp_path):
+    store = JSONLStorage(str(tmp_path / "s.jsonl"))
+    plain = Numbers(rules, storage=store).run(TEXT)
+    assert "source" not in store.record(plain.stored_id)                 # the default keeps the hash only
+    assert not Numbers(storage=store).replay(plain.stored_id).ok
+    sp = Numbers(rules, storage=store, store_source=True)
+    r = sp.run(TEXT)
+    d = store.record(r.stored_id)
+    assert d["source"] == TEXT and d["source_sha256"] == sha256(TEXT.encode())
+    assert sp.replay(r.stored_id).ok and Numbers().replay(r.stored_id, storage=store).ok   # no source passed
+    assert Numbers().replay(r.stored_id, OTHER, storage=store).problems == [
+        "the source is not the one the run read (its sha256 differs)"]   # a source passed still wins
+    bad = replay_runs(store, Numbers(), [])                              # no texts given: the stored source serves
+    assert [x["id"] for x in bad] == [plain.stored_id]                  # only the run without its source is listed
+    assert store.verify()["ok"]

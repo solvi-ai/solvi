@@ -53,3 +53,22 @@ def test_the_docs_moved_with_it():
     assert "solvi.experimental.mcp: api/mcp.md" not in nav
     from solvi.core.provenance import fp_module
     assert fp_module("solvi._mcp_proxy", "Proxy") == "solvi.agents.mcp"
+
+
+def test_serve_imports_nothing_from_a_0_9_old_path():
+    import ast
+
+    from solvi import _deprecate
+    old = set(_deprecate.old_paths())
+    found = []
+    for name in ("serve.py", "_mcp_proxy.py"):
+        for n in ast.walk(ast.parse((ROOT / "src" / "solvi" / name).read_text())):
+            if isinstance(n, ast.ImportFrom):
+                mod = ("solvi." + (n.module or "")) if n.level == 1 else (n.module or "")
+                targets = [mod] + [f"{mod}.{a.name}" for a in n.names]
+            elif isinstance(n, ast.Import):
+                targets = [a.name for a in n.names]
+            else:
+                continue
+            found += [t for t in targets if t in old]
+    assert found == [], found
