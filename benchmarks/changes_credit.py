@@ -1,5 +1,6 @@
 """The change pipeline (solvi.experimental.changes) on a credit policy: two document versions, 20 corrections by a
-person, one rule that must be refused — every one a candidate through the same stages and one hash-chained journal.
+person, one rule that must be refused, one threshold change that washes out the hand-overs — every one a candidate through the
+same stages and one hash-chained journal.
 
     benchmarks/tasks/fetch.sh credit && python benchmarks/tasks/prepare.py      # the German Credit applications, once
     python benchmarks/changes_credit.py                                          # about a minute or two; no LLM
@@ -14,14 +15,22 @@ simulated: every held change is approved.
 The stages: KnownFailures, Static (sensitive fields of about.json; every citation found in the policy or the
 correction it quotes, inside its clause), Consistency (a correction that makes any matched decision more permissive
 widens: held for a person), Impact (v2: the stored history re-decided — decision_diff with the clauses of each change;
-a correction: every decided application re-decided, `expected["only"]` = the corrected one), Approval (documents:
-gate + person; corrections: gate, a person for a widening one).
+a correction: every decided application re-decided, `expected["only"]` = the corrected one), RefusalRegression (not
+switchable: the target here answers, so every change is checked; the held should-abstain set is the applications the
+policy in force hands to a person — decision "review" — under version 2, without the 20 corrected ones; declared once
+version 2 is in force, because a document version redefines what goes to a person), Approval (documents: gate +
+person; corrections: gate, a person for a widening one).
+
+The threshold change: the system's own tuning "points = 3 → approve" (the review band closed: fewer hand-overs). It
+answers every application of the should-abstain set and the refusal-regression stage refuses it; impact alone would
+not (no `only`, no share limit).
 
 Printed: decisions equal to the reference (reference.py) under v1 and v2; the history decisions v2 changes and how
 many trace to a clause; each correction's verdict against the one corrections.json expects; extraneous changes of the
 admitted corrections; the `young` rule's refusal; replay of every version; the journal's verify. The exit status is 1
 when any count differs from the expected one (144 of 144 traced; 8 refused, 7 held → promoted, 5 admitted; 0
-extraneous; young refused by static; 14 versions replay; the journal verifies). Without the applications it prints how
+extraneous; young refused by static; the threshold change refused by refusal_regression, answering all 137 of 137
+hand-overs; one refusal-regression record per proposal; 14 versions replay; the journal verifies). Without the applications it prints how
 to fetch them and exits 0."""
 from __future__ import annotations
 
@@ -46,7 +55,7 @@ from solvi import Answer, Catalog, Question, System  # noqa: E402
 from solvi.core.catalog import find_quote  # noqa: E402
 from solvi.core.store import JSONLStorage  # noqa: E402
 from solvi.experimental.changes import (Approval, Change, Consistency, Impact, KnownFailures, Pipeline,  # noqa: E402
-                                        Static)
+                                        RefusalRegression, Static, is_refusal)
 from solvi.core.versions import Spec, decision_diff  # noqa: E402
 
 PREPARED = DATA / "credit" / "prepared"
@@ -61,7 +70,7 @@ ORDER = {"refuse": 0, "review": 1, "approve": 2}             # more permissive �
 PERSON = "person (simulated: every held change is approved)"
 EXPECTED = {"v2_changed": 144, "v2_traced": 144, "refused by impact": 8,
             "held for the person, then promoted after the ruling": 7, "admitted (promoted)": 5, "extraneous": 0,
-            "versions": 14}
+            "versions": 14, "should_abstain": 137}
 
 
 def clause(quote):
@@ -174,6 +183,13 @@ def decision_v2(points):
     return "refuse" if points >= 4 else "review" if points == 3 else "approve"
 
 
+def decision_v2_no_review(points):
+    return "refuse" if points >= 4 else "approve"
+
+
+decision_v2_no_review.__name__ = "decision"
+
+
 def exception_rule(cor):
     """A person's exception as a hard check: False (the condition holds) forces the corrected decision. Written as
     source so that its arguments are the fields it reads (and its code is fingerprinted like any part's)."""
@@ -189,7 +205,7 @@ def exception_rule(cor):
     return ns[name]
 
 
-def build(version, exceptions=(), young=False, sensitive=()):
+def build(version, exceptions=(), young=False, sensitive=(), review=True):
     """The System of one hand-written catalog: version 1 or 2, the admitted exceptions (and the candidate's), the
     `young` proposal."""
     cat = Catalog(sensitive=sensitive)
@@ -209,7 +225,7 @@ def build(version, exceptions=(), young=False, sensitive=()):
            (["rule `property` is removed;"] if version == 2 else []))
     cat.fn(clause=[clause(q) for q in pts], cite=pts)(points)
     dq = "points ≥ 5 → **refuse**" if version == 1 else "the thresholds move: points ≥ 4 → refuse; points = 3 → review;"
-    cat.rule("decision", **cite(dq))(decision_v1 if version == 1 else decision_v2)
+    cat.rule("decision", **cite(dq))(decision_v1 if version == 1 else decision_v2 if review else decision_v2_no_review)
     return System(cat, QUESTIONS)
 
 
@@ -233,6 +249,17 @@ class Versions:
 
     def rollback(self, ref, by=None, why=None):
         self.in_force = ref["before"]
+
+    def answerer(self, change, ctx):
+        """The target answers (so every change to it passes the refusal-regression stage): the version in force, or
+        the candidate's system."""
+        s = change.payload["system"] if change is not None else self.systems.get(self.in_force)
+        return None if s is None else (lambda x: s.ask(x, store=False))
+
+
+def handed_over(response):
+    """The policy hands an application to a person with "review" (or abstains)."""
+    return is_refusal(response, "decision") or response["decision"].answer == "review"
 
 
 def main():
@@ -282,9 +309,10 @@ def main():
             return dd
 
         pipe = Pipeline([KnownFailures(), Static(sensitive=sensitive, text=texts, spec=SPEC),
-                         Consistency(classify=classify), Impact(impact),
+                         Consistency(classify=classify), Impact(impact), RefusalRegression(refused=handed_over),
                          Approval({("update", "document"): "gate+person", ("update", "person"): "gate"})],
-                        str(tmp / "changes.jsonl"), targets=[target])
+                        str(tmp / "changes.jsonl"), targets=[target], refusals=lambda change, ctx: state["refusals"])
+        state["refusals"] = []
 
         def propose(system, label, source, reason, expected=None, correction=None):
             payload = {"fingerprint": system.fingerprint()["catalog"], "system": system, "label": label,
@@ -329,6 +357,11 @@ def main():
             x = app_input(a)
             v2.ask(x, store=False)
             state["inputs"][a["id"]] = x
+        corrected = {c["application"] for c in CORRECTIONS["corrections"]}
+        state["refusals"] = [x for i, x in state["inputs"].items() if i not in corrected and handed_over(v2.ask(x, store=False))]
+        print(f"should-abstain set (handed to a person under v2, the corrected applications left out): "
+              f"{len(state['refusals'])} applications")
+        expect("should-abstain applications", len(state["refusals"]), EXPECTED["should_abstain"])
 
         # the person's corrections, one by one
         print("corrections (expected → got):")
@@ -364,6 +397,25 @@ def main():
         print(f"young: {res.status} by {res.stage}: {res.reason[:120]}")
         if not refused:
             problems.append(f"young: {res.status} by {res.stage}")
+
+        # a threshold change that washes the hand-overs out: refused by the refusal-regression stage
+        closed = build(2, admitted, sensitive=sensitive, review=False)
+        payload = {"fingerprint": closed.fingerprint()["catalog"], "system": closed, "label": "no review band",
+                   "correction": None}
+        res = pipe.propose(Change("outcome", artifact="update", payload=payload, proposer="self-tuning",
+                                  reason="points = 3 → approve: fewer hand-overs", change_type="rule"))
+        rr = next((v for v in res.verdicts if v.stage == "refusal_regression"), None)
+        print(f"threshold change (review band closed): {res.status} by {res.stage}: {res.reason[:160]}")
+        expect("threshold change refused by", res.stage if res.status == "rejected" else res.status, "refusal_regression")
+        if rr is not None:
+            m = rr.measured
+            print(f"  refused before {m['refused_before']} → after {m['refused_after']} of {m['n']} (lost {m['lost']})")
+            expect("hand-overs it answers", f"{m['lost']} of {m['refused_before']}",
+                   f"{EXPECTED['should_abstain']} of {EXPECTED['should_abstain']}")
+        n_rr = len([d for d in pipe.history("verdict") if d["stage"] == "refusal_regression"])
+        n_prop = len(pipe.history("propose"))
+        print(f"refusal-regression records: {n_rr} for {n_prop} proposals (the static stage refused young before it)")
+        expect("refusal-regression records for the proposals that reached it", n_rr, n_prop - 1 - EXPECTED["refused by impact"])
 
         # the decisions against the reference, and every version replayed
         allapps = apps["history"] + apps["new"]

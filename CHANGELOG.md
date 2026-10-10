@@ -152,6 +152,18 @@ calibration files and served by `solvi serve`), so a build from it is not mistak
   boolean, an Enum) and `costs={field: weight}` multiplying a field's change costs (defaults as before), since a
   category change at the fixed cost 1 ranked first where a person would move a number.
 
+- **`solvi.experimental.changes.RefusalRegression`: refusal regression as a stage that cannot be switched off.** For
+  every change whose target can answer (a target's `answerer(change or None, ctx)` — now on `VersionsTarget` and
+  `LearningTarget`, whose candidate is built on a shadow by the ladder without gates or records — or
+  `Pipeline(answer_of=...)`) the pipeline runs it, inserted before Approval when it is not among the stages: the share
+  refused on a held should-abstain set (`Pipeline(refusals=...)`, `CleanCases(refusals=)`, `Confirmation(refusals=)`,
+  the stage's own) before and after the change; refused when the change answers more inputs that were refused before
+  than `max(count_tolerance, tolerance · n)` (default 0 and 0), with the set's sources and the counts in the reason;
+  journaled for every such change; its refusal is final under the "person" approval level. `is_refusal(answer,
+  question=None)` reads None, an abstaining Response or result, an escalated Decision and words such as "abstain",
+  "escalate", "hand over". `benchmarks/changes_credit.py` adds a threshold change that closes the review band: refused,
+  answering 137 of 137 hand-overs; the other counts unchanged.
+
 ### Changed
 
 - **`solvi.experimental.counterfactual` re-exports `solvi.core.explain` for one release**, as the same objects, with an

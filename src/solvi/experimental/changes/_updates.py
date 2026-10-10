@@ -441,9 +441,8 @@ class Updates:
         return {}
 
     # --- one cycle
-    def run(self):
-        """Collect the labels, propose an update by the ladder, run the gates, promote or undo it, record it. →
-        UpdateReport. The system's answers do not change unless the update is promoted."""
+    def _plan(self):
+        """→ (labels got, {question: {split: [Label]}}, plan {question: rung and counts}, trained label ids)."""
         got = self.labels()
         labels = got["labels"]
         by = {q: {"train": [], "calibration": [], "holdout": []} for q in self.parts}
@@ -458,6 +457,25 @@ class Updates:
             if s["train"] and new:
                 plan[q] = {"rung": self._rung(len(s["train"])), "train": len(s["train"]), "new": len(new),
                            "calibration": len(s["calibration"]), "holdout": len(s["holdout"])}
+        return got, by, plan, trained
+
+    def candidate(self):
+        """The System the next update would give, built on a shadow (the ladder and the recalibration, no gates;
+        nothing promoted or recorded) — the live System when there is nothing new to learn."""
+        _, by, plan, _ = self._plan()
+        if not plan:
+            return self.system
+        system, cand = self._shadow()
+        for q, x in plan.items():
+            self._apply(q, x["rung"], by[q]["train"], cand[q])
+        self._recalibrate(plan, by, cand)
+        return system
+
+    def run(self):
+        """Collect the labels, propose an update by the ladder, run the gates, promote or undo it, record it. →
+        UpdateReport. The system's answers do not change unless the update is promoted."""
+        got, by, plan, trained = self._plan()
+        cur = self.current
         if not plan:
             return UpdateReport("none", current=cur, rejected_labels=got["rejected"], fp_before=self.fingerprint())
         cur = self._baseline()

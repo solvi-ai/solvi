@@ -38,7 +38,17 @@ check), Consistency (wraps ConsistencyGate; records key conflicts and narrows / 
 compilation's acceptance or a replay on the evidence), CleanCases (wraps Agenda.dry_run), Impact (wraps decision_diff /
 solvi.core.store.diff.diff), FreshEnvironments (ported: paired selection, deterministic replay, confirmation with a
 bootstrap lower bound > 0, rules never crash, progress not lower), Approval (new: a table (kind, source) → "gate" |
-"gate+person" | "person"), Canaries (wraps solvi.testing.honesty; a suspiciously perfect score holds).
+"gate+person" | "person"), Canaries (wraps solvi.testing.honesty; a suspiciously perfect score holds), RefusalRegression
+(new, not switchable: the share refused on a held should-abstain set before and after the change; a change that answers
+what was refused before is refused — refusal is the first casualty of self-change, measured 1.00 → 0.73 over a chain
+of model merges that kept the skills).
+
+Refusal regression cannot be switched off. For every change whose target can answer (Pipeline(answer_of=...), or a
+target with `answerer(change or None, ctx)`: VersionsTarget, LearningTarget, a target of yours — an answerer, a
+threshold, a head, a gate) the pipeline runs RefusalRegression — inserted before Approval when it is not among the
+stages, a configured one of yours in its place — and journals its measurement; its refusal is final under every
+approval level. The held set is Pipeline(refusals=), the `refusals` other stages keep (CleanCases / Confirmation
+(refusals=)) and the stage's own; without any, the stage still runs and records that nothing was measured.
 
 Decision on approval "person": the automated stages still run and are journaled, but their refusals are advisory
 (recorded with "advisory": true; the person decides) — except the static stage's, which stays final (a malformed
@@ -78,6 +88,8 @@ What is not done:
 - no rewind over an Environment (Confirmation.on_evidence takes the replay as a callback);
 - no narrows / widens classifier (Consistency takes it as a callback; Z3 over lawlang is planned);
 - no regression-scenario stage (`solvi test` cases.json);
+- the should-abstain set is declared by the caller: none is derived (stored abstentions are not one — a correction
+  may rightly make the system answer them), and an empty set is recorded as "nothing measured", not refused;
 - no scope flag on a world change for rules from experience;
 - no validity periods in compile Versions (nor the change-type classifier in the compiler);
 - the research harness's untrusted-code process sandbox is not ported (Static uses the compiler's sandbox check);
@@ -92,9 +104,9 @@ from ...core.runtime import vhash
 from .. import warn_on_import
 from ._journal import ChangeJournal, EvalLocked, EvaluatorLock
 from ._paired import paired_bootstrap, run_episode
-from ._stages import (DEFAULT_APPROVAL, LEVELS, Approval, Canaries, CleanCases, catalog_of, Confirmation, Consistency, Context,
-                     FreshEnvironments, Impact, KnownFailures, SOURCES, Stage, Static, StageVerdict, allowed, gate_of,
-                     gates_of, hazard_body, hazard_gate)
+from ._stages import (DEFAULT_APPROVAL, LEVELS, REFUSAL_WORDS, Approval, Canaries, CleanCases, catalog_of, Confirmation,
+                     Consistency, Context, FreshEnvironments, Impact, KnownFailures, RefusalRegression, SOURCES, Stage,
+                     Static, StageVerdict, allowed, gate_of, gates_of, hazard_body, hazard_gate, is_refusal)
 from ._targets import KnowledgeTarget, LearningTarget, Promoted, Refused, VersionsTarget
 
 warn_on_import(__name__)
@@ -205,6 +217,7 @@ class Result:
                                    + (f": {v.reason}" if v.reason else "") for v in self.verdicts])
 
 
+FINAL = ("static", "approval", RefusalRegression.name)   # stages whose refusal is never advisory
 SEARCH_UNCONFIRMED = "search proposal: confirmation on its evidence did not run"
 
 
@@ -230,11 +243,17 @@ class Pipeline:
     """The change pipeline (see the module docstring). stages: Stage objects run in order; storage: the journal's
     TraceStorage (a path or a store); store: the KnowledgeStore items go into; approval: an Approval, or its table
     (appended as the last stage when no Approval is among the stages); targets: extra targets (VersionsTarget,
-    LearningTarget) — a KnowledgeTarget on `store` is added by itself."""
+    LearningTarget) — a KnowledgeTarget on `store` is added by itself; refusals: the held should-abstain inputs (a list,
+    or `refusals(change, ctx)` → inputs) RefusalRegression checks every answering change on; answer_of: `answer_of(change
+    or None, ctx)` → a callable input → answer (None: the answerer in force), which makes every change answering (else
+    a change answers when its target has `answerer(change or None, ctx)`).
+
+    RefusalRegression is not switchable: for every change whose target can answer it runs (inserted before Approval
+    when it is not among the stages; yours is used in its place) and is journaled; there is no argument to remove it."""
 
     experimental = True
 
-    def __init__(self, stages, storage, *, store=None, approval=None, targets=()):
+    def __init__(self, stages, storage, *, store=None, approval=None, targets=(), refusals=(), answer_of=None):
         self.stages = list(stages)
         for s in self.stages:
             if not callable(getattr(s, "run", None)) or not getattr(s, "name", None):
@@ -248,7 +267,34 @@ class Pipeline:
             self.targets["item"] = KnowledgeTarget(store)
         for t in targets:
             self.targets[t.artifact] = t
+        self.refusals, self.answer_of = refusals, answer_of
+        self._refusal = RefusalRegression()           # run for every answering change (see the class docstring)
         self._held = {}                               # change id → (change, stage index, verdicts)
+
+    # ------------------------------------------------------------------------------------------------ answering
+    def answers(self, change) -> bool:
+        """Can this change's target answer (so RefusalRegression must run on it)? With answer_of= every change can; else
+        when its target has answerer(change or None, ctx)."""
+        if self.answer_of is not None:
+            return True
+        return callable(getattr(self.targets.get(change.artifact), "answerer", None))
+
+    def answerer(self, which, ctx, change):
+        """The answerer (input → answer) of `which` — the candidate `change`, or None for the one in force — through
+        answer_of= or the change's target; None when there is none."""
+        if self.answer_of is not None:
+            return self.answer_of(which, ctx)
+        fn = getattr(self.targets.get(change.artifact), "answerer", None)
+        return fn(which, ctx) if callable(fn) else None
+
+    def stages_for(self, change):
+        """The stages a change runs through, in order: the pipeline's, with RefusalRegression inserted before Approval
+        (else last) for an answering change when none is among them."""
+        st = list(self.stages)
+        if self.answers(change) and not any(isinstance(s, RefusalRegression) for s in st):
+            i = next((k for k, s in enumerate(st) if isinstance(s, Approval)), len(st))
+            st.insert(i, self._refusal)
+        return st
 
     # ------------------------------------------------------------------------------------------------ proposing
     def propose(self, change: Change) -> Result:
@@ -274,8 +320,9 @@ class Pipeline:
         appr = next((s for s in self.stages if isinstance(s, Approval)), None)
         level = appr.level(change, verdicts) if appr is not None else "gate"
         ctx = Context(self, self.store, self.journal, cid, dict(verdicts), level, ruling)
+        stages = self.stages_for(change)
         if ruling is not None:                        # the stage that held the change is decided by the ruling
-            st = self.stages[start]
+            st = stages[start]
             v = StageVerdict("admit" if ruling[0] else "refuse", f"{'approved' if ruling[0] else 'rejected'} by {ruling[1]}"
                         + (f": {ruling[2]}" if ruling[2] else ""), {"level": level, "by": ruling[1]}, st.name)
             self.journal.write("verdict", change=cid, **v.to_dict(), advisory=False)
@@ -283,14 +330,14 @@ class Pipeline:
             if not v.ok:
                 return self._reject(change, cid, st.name, v.reason, ctx)
             start += 1
-        for i in range(start, len(self.stages)):
-            st = self.stages[i]
+        for i in range(start, len(stages)):
+            st = stages[i]
             try:
                 v = StageVerdict.of(st.run(change, ctx), st.name)
             except Exception as e:  # noqa: BLE001 — a stage that raises refuses (recorded), the pipeline goes on
                 v = StageVerdict.refuse(f"the stage raised {type(e).__name__}: {e}")
             v.stage = st.name
-            advisory = (v.decision == "refuse" and level == "person" and st.name not in ("static", "approval"))
+            advisory = (v.decision == "refuse" and level == "person" and st.name not in FINAL)
             self.journal.write("verdict", change=cid, **v.to_dict(), advisory=advisory)
             ctx.verdicts[st.name] = v
             if v.decision == "hold":
@@ -421,7 +468,7 @@ class Pipeline:
 
 __all__ = ["allowed", "Approval", "ARTIFACTS", "Canaries", "catalog_of", "Change", "CHANGE_TYPES", "ChangeJournal", "CleanCases",
            "Confirmation", "Consistency", "Context", "DEFAULT_APPROVAL", "EvalLocked", "EvaluatorLock",
-           "FreshEnvironments", "gate_of", "gates_of", "hazard_body", "hazard_gate", "Impact", "KnowledgeTarget",
-           "KnownFailures",
+           "FreshEnvironments", "gate_of", "gates_of", "hazard_body", "hazard_gate", "Impact", "is_refusal", "KnowledgeTarget",
+           "KnownFailures", "REFUSAL_WORDS", "RefusalRegression",
            "LearningTarget", "LEVELS", "paired_bootstrap", "Pipeline", "Promoted", "Refused", "Result", "run_episode", "SOURCES",
            "Stage", "Static", "STORE_SOURCE", "StageVerdict", "VersionsTarget"]

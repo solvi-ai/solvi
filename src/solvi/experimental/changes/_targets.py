@@ -10,7 +10,11 @@
                                             rollback: the state of the version before comes back
 
 A target implements `artifact`, `promote(change, measured) → a JSON-able reference` (raise Refused when the artifact's
-own gates say no) and `rollback(ref, by=None, why=None)`. A target whose own gates measure something returns
+own gates say no) and `rollback(ref, by=None, why=None)`. A target that can answer also implements
+`answerer(change or None, ctx)` → a callable input → answer (None: it cannot give one): the answerer in force for None,
+the candidate's for a change — then the pipeline runs RefusalRegression on every change to it (not switchable).
+VersionsTarget and LearningTarget answer (System.ask without storing); KnowledgeTarget does not (an item answers
+nothing by itself: give the pipeline answer_of= for the agent that reads the store). A target whose own gates measure something returns
 Promoted(ref, verdicts) and raises Refused(reason, verdicts=..., stage=...): the pipeline journals those verdicts as
 the change's stages."""
 from __future__ import annotations
@@ -81,6 +85,20 @@ class VersionsTarget:
         """The System of the version in force."""
         return self.versions.system(self.in_force, **kw)
 
+    def answerer(self, change, ctx=None):
+        """input → Response: the version in force (None before any), or the candidate's catalog version (its
+        system(allow_unaccepted=True)); None when it cannot be loaded."""
+        try:
+            if change is None:
+                if self.in_force is None or not callable(getattr(self.versions, "system", None)):
+                    return None
+                s = self.versions.system(self.in_force)
+            else:
+                s = change.payload.system(allow_unaccepted=True)
+        except Exception:  # noqa: BLE001 — no answerer: the refusal stage refuses ("cannot measure") or records it
+            return None
+        return lambda x: s.ask(x, store=False)
+
 
 class LearningTarget:
     """Labelled updates as candidate changes: LearningTarget(system, storage=None, *, parts=None, ladder=None,
@@ -124,6 +142,12 @@ class LearningTarget:
 
     def rollback(self, ref, by=None, why=None):
         self.updates.rollback(ref["before"])
+
+    def answerer(self, change, ctx=None):
+        """input → Response: the live system for None; for a change, the candidate the ladder would build from the
+        stored labels on a shadow (nothing promoted or recorded) — the system as it is when there is nothing new."""
+        s = self.updates.system if change is None else self.updates.candidate()
+        return lambda x: s.ask(x, store=False)
 
     def restore(self, version):
         """Restore any recorded version of the update (also one recorded by another process on the same store) → it."""
