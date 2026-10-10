@@ -243,7 +243,7 @@ class Specialist:
         spec). With a storage the run is stored (Run.stored_id)."""
         run = self._run(source, question, proposer=proposer, proposal=proposal)
         if self.storage is not None:
-            run.stored_id = self.storage._append(json.loads(json.dumps(self._record(run), default=str)))["id"]
+            run.stored_id = str(self.storage._append(json.loads(json.dumps(self._record(run), default=str)))["id"])
         return run
 
     def _record(self, run):
@@ -400,7 +400,7 @@ def replay_runs(storage, specialist, sources) -> list:
         d = s.data
         if d.get("specialist") != specialist.name:
             continue
-        src = texts.get(d.get("source_sha256"))
+        src = texts.get(str(d.get("source_sha256")))
         if src is None:
             bad.append({"id": s.id, "seq": s.seq, "problems": [f"no source given with sha256 {d.get('source_sha256')}"]})
             continue

@@ -492,7 +492,7 @@ class Updates:
                                     "gates": gates, "state": None})
                 if same:                            # the live parts are as they were: a refusal, not a crash
                     return UpdateReport("rejected", None, cur, plan, gates, fp_before, fp_after, got["rejected"],
-                                        rec["id"])
+                                        str(rec["id"]))
                 raise RuntimeError(f"{e} — and the live parts could not be put back (now #{self.fingerprint()}, before "
                                    f"#{fp_before}): restore them yourself; recorded as not promoted (#{rec['id']})") from e
             version = self._next_version()
