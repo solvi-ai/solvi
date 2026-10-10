@@ -318,6 +318,31 @@ test an LLM proposer ended 0.95 points below enumeration, and in the same study 
 claims about the path policy wrongly 18 times out of 40. Both findings in miniature, with their bars:
 [laws_toy.py](../benchmarks/laws_toy.py) (`pytest -m slow tests/test_laws_toy.py`).
 
+## Relational rules: enumerate, let the test judge, then compile
+
+**When a rule is about structure — an ancestor, a neighbour, a path — give the grammar relations, not more flat
+atoms.** `solvi.experimental.relations` encodes a state as relations over its nodes (a path tree: PARENT, SAME_DIR,
+IS_DIR, NAME=x; a grid seen from the player: EAST, SOUTH, AT, FACE and the cells' materials) and enumerates small
+relation-algebra programs bottom-up, one per behaviour. Two programs are one only when their full relations agree on
+every example — never when only the readout agrees, or what composes from them is lost. On a pre-registered battery of
+28 random rules over three relations it found 22 within seven nodes, each exact on larger graphs of other families,
+and a rule that needs four variables (a common 4-clique) was never accepted. `RelAlgProposer` hands the best programs
+to a law set as atoms and the law set's held-out test judges them: on a path policy that denies reads under any
+directory named "secret" (files may be named so too), the found relational law was right on all 20,000 fresh calls,
+which the flat grammar's "the parent is named secret" cannot be. **Equivalence holds on the examples only**: the
+smallest program of a class may not generalise, so keep the held-out check on other groups, sizes or families. Expect
+programs of four or five nodes with twenty-odd relations; with many or large examples search a subset and re-check on
+all (`synthesize(..., check=)`), and with noisy labels rank by agreement (`top_programs`), not by an exact match.
+
+**Compile a found rule, and accept the code only after the differential check.** Give atoms their code
+(`Atom(..., code=)`): `LawSet.to_module()` writes the laws as one module that imports nothing from solvi, and
+`check_compiled(module, buffer, lawset)` runs it against `LawSet.predict` on every row — accept it at 0 differences. A
+relational rule on a large graph compiles to index arrays (`compile_program(ast, backend="arrays")`); refuse dense
+answers (a complement over all pairs) unless the domain is bounded. On a forest of 100,000 nodes closure, grandparent
+and sibling came out pair for pair equal to hand-written set code within twice its time, and a learned law set agreed
+with its interpreter on 100,000 rows. Scripts: [relations_battery.py](../benchmarks/relations_battery.py) and
+[relations_compile.py](../benchmarks/relations_compile.py) (`pytest -m slow tests/test_relations_gate.py`).
+
 ## Learning in a world described by code: plan on the code
 
 **Where the world is code, plan on the code and compile only what the code verified.** A simulator, a file system or a
@@ -339,6 +364,39 @@ has seen. On a game simulator with written mechanics, learned rules carried acro
 achievements and System 1 84% of the decisions after about twenty worlds (part of it is survival: the agent lived
 longer). Script:
 [skills_toy.py](../benchmarks/skills_toy.py) (`pytest -m slow tests/test_skills_toy.py`).
+
+## Rules over relations: enumerate with a library, rank only where a check is expensive
+
+**Find a rule over relations as follows** (`solvi.experimental.relations.library.find_rules`):
+1. Enumerate small programs bottom-up with observational equivalence, from the base relations plus the library.
+2. Accept only what passes the held-out test (exact, or support / precision / recall / net on other worlds).
+3. Put accepted rules into the library as new terminals, so composites become small programs.
+4. Use a gradient-trained learner only when the enumeration budget runs out or the labels are noisy, and only as a
+   proposer whose program is then checked like any other candidate (`proposer=`).
+5. Rank candidates with a learned or feature ranker only when a check is expensive (`RankedProposer`).
+
+On two toys ([relations_library_toy.py](../benchmarks/relations_library_toy.py), five seeds each) the library found every
+level — a path tree's "denied if an ancestor directory is named secret and the depth is at least 3" (three levels) within
+2,556 enumerated programs, kinship on forests to depth 6 (second cousin once removed) within 10,817 — where the same
+search without the library found neither top rule in 100,000, with 0 false accepts on larger fresh worlds. The kinship
+ladder misses the toy's bar of a tenth of that budget (1.08×): the universal relation U, a terminal of the package's
+enumerator, enlarges every level: with `include_universal=False` (U left out of the terminals of both arms) the
+ladder costs 7,889 and meets the bar, the path tree 2,174 (with an earlier minimal enumerator, 6,125). Leave U out when
+no rule you look for needs "every pair". A library also has a cost: every entry is a terminal, so a rule it does not help gets dearer
+(sibling took 6,545 programs in its own round after grandparent and great-grandparent were admitted, 951 without the
+library). The intermediate concepts were given as
+targets: the search found which one was within reach and the programs, not the concepts. **Hold out other families,
+not only other draws:** a rule the programs cannot express ("x and y share a 4-clique") was never admitted on graphs of
+density 0.3 or 0.5, exact or by precision; on dense graphs (0.7) almost every edge is in a 4-clique, and precision /
+recall acceptance with held-out graphs of the same density admitted the edge relation itself — held-out graphs of
+density 0.4, or exact acceptance, rejected it (`tests/test_relations_library.py`). **The caveat on step 4:**
+that one-step rules are learned by gradient is verified only on hand-picked rules over one relation; on random rules
+plain enumeration already finds every one-step rule in seconds, and rules of two steps or more did not hold when learned
+by gradient — no gradient learner ships with solvi. **On step 5:** a check on the logged rows is a few bit operations, so ranking pays only where each
+check is a live probe or a planner call. On synthetic tasks drawn from one grammar (30 atoms, k = 3) the trained
+bag-of-atoms ranker needed 2.1 checks to the true condition against 69.7 in the blind order (by length, then name),
+and the raw-feature control 24.6 (the best raw threshold picked after the fact: 12.8) — in distribution only; measure
+the control on your own grammar before trusting the trained one (`tests/test_laws_rank.py`).
 
 ## Storage and audit
 
