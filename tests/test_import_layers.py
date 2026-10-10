@@ -24,7 +24,8 @@ from pathlib import Path
 SRC = Path(__file__).resolve().parents[1] / "src"
 BASE = {"solvi.core"} | {f"solvi.core.{m}" for m in ("catalog", "types", "provenance", "primitives", "runtime", "schema",
                                                      "textin")}
-TOP = ("solvi.cli", "solvi.serve", "solvi.experimental.hooks", "solvi.experimental.mcp", "solvi.__main__", "solvi.solutions.guard")
+TOP = ("solvi.cli", "solvi.serve", "solvi._mcp_proxy", "solvi.experimental.hooks", "solvi.experimental.mcp", "solvi.__main__",
+       "solvi.solutions.guard")   # solvi.experimental.mcp: the old path of the proxy, re-exporting it until 1.2
 
 
 def _modules():
@@ -175,11 +176,11 @@ LOW_TIERS = {
     "deliberate": "core.slow core.dispatch core.versions",          # versions: a module reads Fail (core.slow)
     "knowledge": "core.knowledge",
 }
-HIGH = "__init__ __main__ _command solutions check cli models serve show testing"
+HIGH = "__init__ __main__ _command _mcp_proxy solutions check cli models serve show testing"
 EXPERIMENTAL = "experimental"                                           # solvi.experimental.*
 # stable → experimental imports that are meant: the command-line entry for an experimental feature (LAYOUT §6:
 # `solvi serve --upstream`). solvi.build takes a compiled specification and no longer compiles one (LAYOUT risk 3).
-ALLOWED_EXPERIMENTAL = {("solvi.serve", "solvi.experimental.mcp")}
+ALLOWED_EXPERIMENTAL: set = set()             # 1.1: the MCP proxy graduated into solvi.serve
 # stable modules that load an experimental module by its name, on request: `solvi hook`, and a calibration file that
 # carries a LoRA adapter (the adapter's own loader)
 ALLOWED_BY_NAME = {("solvi.cli", "solvi.experimental.hooks"), ("solvi.core.deciders.adapt", "solvi.experimental.lora")}
@@ -276,7 +277,7 @@ def test_stable_modules_name_an_experimental_module_only_where_allowed():
 
 # experimental modules that graduated: their old path re-exports the stable module for one release, with the experimental
 # warning, and has no STATUS entry
-GRADUATED = {"specialist"}
+GRADUATED = {"specialist", "mcp"}
 
 
 def test_experimental_modules_warn_on_import_and_say_their_status():

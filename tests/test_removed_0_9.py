@@ -198,7 +198,7 @@ def test_storage_tooling_and_agents(tmp_path):
         CorrectionMemory.calibrate(None, risk=0.1)
     import solvi.serve as serve
     assert not hasattr(serve, "Guard") and serve.AccessGuard
-    from solvi.experimental.mcp import run_proxy
+    from solvi.serve import run_proxy
     for old, new in (("context_messages", "max_messages"), ("context_chars", "max_chars")):
         with pytest.raises(TypeError, match=rf"run_proxy\({old}=\) {GONE}{new}="):
             run_proxy(None, **{old: 5})
