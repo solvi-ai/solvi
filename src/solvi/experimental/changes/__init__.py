@@ -65,7 +65,8 @@ gates_of reads the active hazard items without writing; Static refuses a candida
 sensitive field (Static(sensitive=), Catalog(sensitive=)) or a citation not in the text (Static(text=, spec=)); Impact
 refuses an exception whose diff moves decisions outside expected["only"] and admits the exact one.
 
-Measured (2026-10, two stands; the stands are outside this repository, so no script in benchmarks/ yet): on a credit
+Measured (2026-10, two stands; the credit one is benchmarks/changes_credit.py, the bank-request stream has no script in
+the repository): on a credit
 policy the pipeline carried a document version (144 of 144 changed decisions traced to their clause), admitted 12 of 12
 exact exceptions, held every widening one for a person and refused 8 of 8 exceptions that touched other decisions, 0
 extraneous changes, 14 versions replayed; on a bank-request stream with a person's labels every one of 22 candidates
