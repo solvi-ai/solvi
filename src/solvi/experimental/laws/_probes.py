@@ -2,6 +2,7 @@
 the hypotheses apart, safely and cheaply (see the package docstring)."""
 from __future__ import annotations
 
+import inspect
 from dataclasses import dataclass
 from typing import Any, Callable, Iterable, Sequence
 
@@ -20,8 +21,17 @@ def _ro(read_only):
     """read_only(action) or read_only(state, action) → a function of (state, action)."""
     if read_only is None:
         return None
-    from ._core import _required_args
     return read_only if _required_args(read_only) >= 2 else (lambda state, action: read_only(action))
+
+
+def _required_args(fn):
+    """The required positional arguments of `fn` (1 when it cannot be read); _core keeps its own copy so the two
+    modules do not import each other."""
+    try:
+        ps = inspect.signature(fn).parameters.values()
+    except (TypeError, ValueError):
+        return 1
+    return sum(1 for p in ps if p.kind in (p.POSITIONAL_ONLY, p.POSITIONAL_OR_KEYWORD) and p.default is p.empty)
 
 
 def _predictor(h):

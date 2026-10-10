@@ -364,7 +364,7 @@ def run_policy(proposer_factory):
     g = flat_grammar()
     held = Buffer(g)
     held.extend(path_rows(1, [f"h{i}" for i in range(6)]))
-    ls = LawSet(g, base=lambda s, a: "ok", min_support=3)
+    ls = LawSet(g, base=lambda s, a: "ok", min_support=3, sized=False)   # 72 held-out rows: the fixed thresholds
     ls.proposer = proposer_factory(g, held)
     for t in path_rows(2, [f"s{i}" for i in range(6)]):
         ls.step(t, held, remember=True)

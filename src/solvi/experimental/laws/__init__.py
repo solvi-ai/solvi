@@ -75,8 +75,43 @@ accepted only after the differential check: `check_compiled(module, buffer, laws
 (`grammar.add(atom)`, e.g. a relational atom a proposer invents); a buffer evaluates the new atom on its older rows the
 first time a condition names it.
 
+Sized acceptance. Fixed thresholds do not see how many candidates were tried on one buffer (a stand of ours tried about
+52,000 at support ≥ 5). By default (`sized=True`) a candidate passes only when its hits would be unlikely if its true
+precision were the null (min_precision; 0.95 when that is 1): P[Binomial(support, null) ≥ hits] ≤ δ_N, N = the
+candidates scored on this buffer so far (`buffer.tested`), δ_N = δ / (N·(N + 1)) — summing to below δ however long the
+stream runs — or δ / space when you declare `space=` (Bonferroni). A law right on every row then needs support ≥
+`sized_need(N, δ, null)` ≈ (2·ln N + ln 1/δ) / ε, ε = 1 − null (at δ = 0.1, null 0.9: 29 rows at N = 1, 150 at N = 821, 228 at N = 52,000 or 125 with space=52,000); errors ask
+for more. On a buffer with no law (2,000 rows; an effect at 70% independent of 40 sparse atoms; the 821 conditions of at
+most two atoms) the fixed thresholds (support ≥ 5, precision ≥ 0.9) accepted a law in 100 of 100 buffers, the sized
+rule in 0 of 100, and a real two-atom law on 250 rows was still accepted (tests/test_laws_w2.py). A small buffer
+therefore accepts nothing — the rule working, not failing: declare `space=` or pass `sized=False` knowingly (the fixed
+thresholds; the measured stands above ran so, and their false accepts are the known price). Each Law records `tested`, `need`,
+`level` and `admitted` ("test", "probes", "hand").
+
+Admission by probes. Where the world (or an exact model of it) answers questions, `lawset.admit_by_probes(candidates,
+ask, probes=, safe=, budget=)` asks where the surviving candidates disagree, CEGIS-style: candidates refuted by logged
+rows (`buffer=`) go first; the survivors are grouped into classes by their predictions on the probe pool (the set without
+a new law is a hypothesis too); `split` picks the safe probe that splits the classes most; the refuted are dropped; the
+shortest candidate is accepted only when one class survives (identifiability) — else an `Admission` "undetermined"
+with the classes, never a guess. On a synthetic world (a hidden two-atom law, 176 candidates, 300 trials) at 8 checks a
+random held-out sample with the shortest survivor accepted a wrong law in 0.593 of the trials; the active admission in
+none (0.987 right, 0.013 undetermined, 7.45 asks). The probes are of the world you may ask: a law set whose other laws
+or base are wrong where it probes may refute a right candidate (a candidate is refuted only where it is the applied law
+and wrong, or where it does not hold, the set is wrong and its effect is what happened).
+
+Abstention. `predict(state, action, disagree="abstain")` (or `LawSet(..., disagree="abstain")`) returns `Undetermined`
+where the most specific matching laws — those no other matching law's condition strictly contains — predict different
+outcomes: both passed their test, neither is an exception of the other, and the order between them would only be a
+tie-break. It is counted in `abstained`; the default stays most specific first, the learning loop always predicts so,
+and a compiled module dispatches most specific first. The search cost: `lawset.cost` (candidates proposed, tests,
+accepted, probes, simulated) and `Step.tested` — report it next to accuracy.
+
 What is not done:
 - no grammar that cannot be enumerated (where the mismatch should matter most) has been measured;
+- the sized rule, admission by probes and abstention are measured on synthetic worlds only: not yet on the game
+  simulator or the file server stands, and a stand that tests tens of thousands of candidates needs a buffer of a few
+  hundred rows per accepted law (a buffer of tens of rows needs `sized=False`, and then the fixed thresholds' false
+  accepts are its price);
 - retirement is by precision only; a weak law no observation contradicts stays;
 - the store item's id is its content: a law retired and accepted again is the same item, asserted again;
 - no wiring into a System's decisions or an Agenda gate (a law set predicts; using the prediction is yours)."""
@@ -84,15 +119,16 @@ from __future__ import annotations
 
 from .. import warn_on_import
 from ._compile import CompiledCheck, check_compiled, load_module
-from ._core import (Atom, Buffer, CallableProposer, Candidate, Enumerate, Grammar, Law, LawSet, Proposer,
-                    RandomProposer, Step, Transition)
+from ._core import (Admission, Atom, Buffer, CallableProposer, Candidate, Enumerate, Grammar, Law, LawSet, Proposer,
+                    RandomProposer, Step, Transition, Undetermined, sized_level, sized_need)
 from ._probes import Probe, discriminate, split
 from ._rank import (FEATURES, BagOfAtomsRanker, FeatureRanker, RankedProposer, SyntheticTask, atom_features,
                     candidate_features, checks_to, synthetic_task)
 
 warn_on_import(__name__)
 
-__all__ = ["Atom", "BagOfAtomsRanker", "Buffer", "CallableProposer", "Candidate", "CompiledCheck", "Enumerate",
+__all__ = ["Admission", "Atom", "BagOfAtomsRanker", "Buffer", "CallableProposer", "Candidate", "CompiledCheck", "Enumerate",
            "FEATURES", "FeatureRanker", "Grammar", "Law", "LawSet", "Probe", "Proposer", "RandomProposer",
            "RankedProposer", "Step", "SyntheticTask", "Transition", "atom_features", "candidate_features",
-           "check_compiled", "checks_to", "discriminate", "load_module", "split", "synthetic_task"]
+           "check_compiled", "checks_to", "discriminate", "load_module", "sized_level", "sized_need", "split",
+           "synthetic_task", "Undetermined"]

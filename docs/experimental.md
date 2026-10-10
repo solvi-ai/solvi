@@ -39,7 +39,7 @@ A LoRA adapter on the decider for one question (`solvi.experimental.lora.adapt_l
 ## `compile`
 
 A written specification compiled by an LLM into catalog parts, accepted when two drafts agree and the specification's
-tests pass (with its sandbox, `solvi.experimental.compile.sandbox`). Since 0.9.
+tests pass (with its sandbox, `solvi.experimental.compile.sandbox`). Since 0.9. Since 1.1 an optional certificate on fresh examples sized by the hypothesis space (`certificate=`, `fresh_examples_needed`, `skew_guard`).
 
 - **Missing:** acceptance on larger specifications and a benchmark script in benchmarks/.
 - **Script:** none yet. **Deadline:** 1.2.
@@ -73,6 +73,20 @@ labelled update (`LearningTarget`: the update ladder and its gates, which were t
 and rollback (`solvi.experimental.changes.Pipeline(stages, storage, store=...)`). Since 1.1.
 
 - **Missing:** on a credit policy the pipeline carried a document version (144 of 144 changed decisions traced to their clause), admitted 12 of 12 exact exceptions, held every widening one for a person and refused 8 of 8 exceptions that touched other decisions, 0 extraneous changes, 14 versions replayed; on a bank-request stream with a person's labels every one of 22 candidates passed every stage (`nogate` = `gate`), so the stages added nothing there — the module is journal, impact analysis, approval levels and rollback; still missing: the narrows / widens classifier over rule conditions, a regression-scenario stage, and a script for the bank-request stream (the credit numbers: benchmarks/changes_credit.py).
+- **Refusal regression cannot be switched off.** Refusal is the first casualty of self-change (a chain of model merges
+  has been reported to keep its skills and lose much of its refusal; not reproduced here), so for every change whose target can answer (a target with
+  `answerer(change or None, ctx)` — `VersionsTarget`, `LearningTarget`, yours — or `Pipeline(answer_of=...)`) the
+  pipeline runs `RefusalRegression`: the share refused on a held should-abstain set (`Pipeline(refusals=...)`, the
+  `refusals=` kept by CleanCases / Confirmation, the stage's own) before and after; a change that answers an input
+  refused before is refused, with the set and the counts in the reason (tolerance 0.0 and a count tolerance of 0 by
+  default; raise `count_tolerance` for an answerer that flips a borderline input between runs). It is inserted before
+  Approval when it is not among the stages, journaled for every such change, final under every approval level, and
+  there is no argument that removes it. On the credit policy a threshold change that closes the review band ("points =
+  3 → approve") is refused by it: it answers 137 of 137 applications the policy hands to a person; the 12 admitted
+  corrections and both document versions pass. Without a declared set the change is held for a person ("no should-abstain set declared for a target that can
+  answer"): every pipeline whose target can answer declares `refusals=` (directly, through CleanCases / Confirmation,
+  or on the stage). The set follows the policy version — the credit stand declares it once version 2 is in force. An
+  item change is checked only with `answer_of=`.
 - **Script:** `benchmarks/changes_credit.py` (the credit policy; needs the German Credit applications:
   `benchmarks/tasks/fetch.sh credit` and `prepare.py`). **Deadline:** 1.2.
 - Guide: [The change pipeline](guide.md#the-change-pipeline-solviexperimentalchanges); design and API: the module
@@ -86,12 +100,19 @@ Laws of an environment from prediction mismatches, judged by the environment, ne
 (`solvi.experimental.laws`): a grammar of boolean atoms you write, candidates "for this action, under this condition,
 the effect is this" from each wrong prediction, acceptance only by a held-out test on other worlds, sessions or paths,
 most specific first, retirement when the held-out precision falls, a probe planner for live systems (`split`,
-`discriminate`: read-only before write) and export into the knowledge store (`LawSet.to_knowledge`). Since 1.1.
+`discriminate`: read-only before write) and export into the knowledge store (`LawSet.to_knowledge`). The acceptance is
+sized by how many candidates were tested on the buffer (`sized=True`, the default: a law needs about 150 rows at 800
+candidates and about 230 at 52,000, and a small buffer accepts nothing — declare `space=` or pass `sized=False`
+knowingly),
+`LawSet.admit_by_probes` admits a law by asking the world where the candidates disagree and only when one class
+survives, `predict(..., disagree="abstain")` abstains where laws that are not exceptions of one another disagree, and
+`LawSet.cost` records the search cost. Since 1.1.
 
-- **Missing:** on a game simulator with written mechanics the laws closed 94% of the gap between a learned map and the written mechanics, but random candidates under the same test came within 1.1 points, so the mismatch is a compact proposal heuristic and the test does the work; on a real MCP filesystem server with a path policy, probes planned from mismatches took refusals from 6 to 0 in one session (random probes: 48 to 29); still missing: a grammar too large to enumerate, retirement of weak laws nothing contradicts, wiring into a System's decisions, and a script for the two stands (the toys: benchmarks/laws_toy.py); a ranker of candidates for expensive checks (RankedProposer, a bag-of-atoms model trained on tasks drawn from the grammar) cut the checks to the true condition from 69.7 in the blind order to 2.1 on synthetic tasks of one grammar, in distribution only and never on a live system.
+- **Missing:** on a game simulator with written mechanics the laws closed 94% of the gap between a learned map and the written mechanics, but random candidates under the same test came within 1.1 points, so the mismatch is a compact proposal heuristic and the test does the work; on a real MCP filesystem server with a path policy, probes planned from mismatches took refusals from 6 to 0 in one session (random probes: 48 to 29); still missing: a grammar too large to enumerate, retirement of weak laws nothing contradicts, wiring into a System's decisions, and a script for the two stands (the toys: benchmarks/laws_toy.py); a ranker of candidates for expensive checks (RankedProposer, a bag-of-atoms model trained on tasks drawn from the grammar) cut the checks to the true condition from 69.7 in the blind order to 2.1 on synthetic tasks of one grammar, in distribution only and never on a live system; the acceptance sized by the candidates tested on a buffer (on a synthetic buffer with no law the fixed thresholds accepted a law in 100 of 100 buffers, the sized rule in 0 of 100), admission by discriminating probes (on a synthetic world at 8 checks a random held-out sample accepted a wrong law in 0.593 of the trials, the probes in none) and abstention where laws that are not exceptions of one another disagree are measured on synthetic worlds only, not yet on the game simulator or the file server.
 - **Script:** `benchmarks/laws_toy.py` (two deterministic toys that reproduce both findings in miniature; `pytest -m
   slow tests/test_laws_toy.py`). **Deadline:** 1.2.
-- Guide: [Laws from an environment](best_practices.md#laws-from-an-environment-the-test-is-the-judge), [ranking
+- Guide: [Laws from an environment](best_practices.md#laws-from-an-environment-the-test-is-the-judge), [sized
+  acceptance, probes, abstention](best_practices.md#size-the-acceptance-by-the-search-admit-by-probes-abstain-when-laws-disagree), [ranking
   candidates](best_practices.md#rules-over-relations-enumerate-with-a-library-rank-only-where-a-check-is-expensive); API:
   [solvi.experimental.laws](api/laws.md).
 
@@ -130,9 +151,10 @@ it, verified plans are compiled into System 1 skills ("when these atoms hold, fo
 conditions keep the atoms every verified start shared), and a skill acts alone only while its outcomes keep an
 anytime-valid certificate — before that System 2 re-verifies it at every use, and an alarm on its alone outcomes
 retires it. `SkillLearner` runs the loop with a record per decision and per episode; `as_s2(learner)` makes the planner
-System 2 of `solvi.Agent`; `SkillSet.to_knowledge` writes the skills into the knowledge store. Since 1.1.
+System 2 of `solvi.Agent`; `SkillSet.to_knowledge` writes the skills into the knowledge store, and each episode
+records its search cost. Since 1.1.
 
-- **Missing:** on a deterministic gridworld (20 fresh layouts, five seeds) System 1's share reached 0.81 in the last five episodes with every goal reached, as when System 2 plans every goal, and 1.5% of System 1's decisions were in failed runs under a 20% promise pooled over the skills, while replayed cases never transferred and plans compiled without verification reached no goal; still missing: a stand beyond the toy (a game simulator with written mechanics, a service with a specification), a 5% promise (fifty clean uses per certified unit), a condition rule that specialises after a failure, and a planner with a heuristic.
+- **Missing:** on a deterministic gridworld (20 fresh layouts, five seeds) System 1's share reached 0.81 in the last five episodes with every goal reached, as when System 2 plans every goal, and 1.5% of System 1's decisions were in failed runs under a 20% promise pooled over the skills, while replayed cases never transferred and plans compiled without verification reached no goal; still missing: a stand beyond the toy (a game simulator with written mechanics, a service with a specification), a 5% promise (fifty clean uses per certified unit), a condition rule that specialises after a failure, and a planner with a heuristic; the search-cost record is tested on a synthetic corridor only, and skills are not admitted by discriminating probes (laws are: LawSet.admit_by_probes).
 - **Script:** `benchmarks/skills_toy.py` (the gridworld with four arms: skills, plan always, cases, scrambled; `pytest -m
   slow tests/test_skills_toy.py`). **Deadline:** 1.2.
 - Guide: [Learning in a world described by code](best_practices.md#learning-in-a-world-described-by-code-plan-on-the-code);

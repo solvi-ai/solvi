@@ -14,6 +14,16 @@ One contract for every specialist (charts first; slides, tables, speech later):
      `Specialist.replay` re-checks the recorded proposal and re-renders it: identical issues and identical bytes, or
      it says what differs.
 
+The determinism contract of replay: replay re-executes code and re-renders from recorded model outputs; it does not
+re-call a model. A model proposer need not be deterministic (a remote LLM at temperature 0 returns other outputs across
+identical runs), so the record keeps what the proposer returned — the parsed spec, and, when the proposer returned
+text (a model's reply), that text as it came — and replay parses that output again (it must give the
+recorded spec), checks and renders it, and compares the bytes. Only a record that holds no output at all (a record
+written without one) makes replay call the proposer — `Replay.from_record` is then False and `Replay.note` says so, and
+the bytes are equal only if the proposer happens to repeat itself. Two runs of the same source give the same bytes
+only with a deterministic proposer; `solvi.testing.conformance.check_specialist(..., deterministic=False)` checks the
+replay alone.
+
     from solvi.experimental.charts import ChartSpecialist, RuleProposer
     sp = ChartSpecialist(RuleProposer(), storage="runs.jsonl")
     run = sp.run(text, "revenue by region")
@@ -25,15 +35,16 @@ One contract for every specialist (charts first; slides, tables, speech later):
 
 The stored record ("specialist" kind): specialist, version, question, source_sha256 and source_chars (the source itself
 is not stored unless `store_source=True`: pass it to replay), proposer, proposal (the spec; for a blocked run the raw proposal and
-proposal_error), issues, kept, verified, meta, renderer, output_sha256, output_bytes, trace_head (the head of the run's
-own chain) and — when the specialist reports them (`fingerprints()`) — fingerprints. `Run.to_dict()` keeps its shape;
+proposal_error), proposal_raw (the proposer's output when it was text — a model's reply, as it came), issues, kept,
+verified, meta, renderer, output_sha256, output_bytes, trace_head (the head of the run's own chain) and — when the
+specialist reports them (`fingerprints()`) — fingerprints. `Run.to_dict()` keeps its shape;
 `Run.stored_id` names the record. The in-memory Trace stays the run's own summary: the record holds the same data,
 flattened, under the store's hash.
 
 A subclass defines `spec_type` (the pydantic model of the proposal), `check(spec, source) -> Checked` and
 `render(checked) -> str | None`; the proposer is any callable `(source, question) -> spec | dict` (an `id` attribute,
-when it has one, names it in the trace). A proposer is not replayed — its output is recorded; the check and the render
-are, from that record."""
+when it has one, names it in the trace). A proposer is not replayed — its output is recorded; the parse, the check and
+the render are, from that record."""
 from __future__ import annotations
 
 import dataclasses
@@ -185,6 +196,9 @@ class Run:
              "proposal": _plain(self.proposal), "issues": [dataclasses.asdict(i) for i in self.checked.issues],
              "output_sha256": sha256(self.output.encode()) if self.output is not None else None,
              "trace": self.trace.entries}
+        raw = (self.trace.step("propose") or {})
+        if "spec" in raw and "raw" in raw:
+            d["proposal_raw"] = raw["raw"]
         if with_source:
             d["source"] = self.source
         return d
@@ -192,9 +206,14 @@ class Run:
 
 @dataclass
 class Replay:
-    """The result of replaying a specialist's recorded run: `ok` (true in a boolean context) and the problems found."""
+    """The result of replaying a specialist's recorded run: `ok` (true in a boolean context) and the problems found;
+    `from_record` — False when the record held no proposer output and the proposer was called (`note` says so);
+    `output_sha256` — the hash of the re-rendered output (None when nothing was rendered or nothing re-ran)."""
     ok: bool
     problems: list
+    from_record: bool = True
+    note: str = ""
+    output_sha256: str | None = None
 
     def __bool__(self):
         return self.ok
@@ -287,6 +306,8 @@ class Specialist:
                 "meta": chk.get("meta") or {}, "renderer": ren.get("renderer"),
                 "output_sha256": ren.get("output_sha256"), "output_bytes": ren.get("output_bytes"),
                 "trace_head": t.head}
+        if "spec" in prop and "raw" in prop:
+            body["proposal_raw"] = prop["raw"]
         if self.store_source:
             body["source"] = run.source
         fps = self.fingerprints()
@@ -324,7 +345,10 @@ class Specialist:
             trace.add("propose", {"proposer": pid, "raw": _plain(raw), "error": str(e)[:2000]})
             return self._blocked(source, question, raw, trace, "invalid_proposal",
                                  f"the proposal is not a valid {self.spec_type.__name__}: {str(e).splitlines()[0]}")
-        trace.add("propose", {"proposer": pid, "spec": spec})
+        entry = {"proposer": pid, "spec": spec}
+        if isinstance(raw, (str, bytes)):              # the proposer's text (a model's reply): replay parses it again
+            entry["raw"] = raw.decode() if isinstance(raw, bytes) else raw
+        trace.add("propose", entry)
         return self._finish(source, question, spec, trace)
 
     def _finish(self, source, question, spec, trace):
@@ -347,12 +371,15 @@ class Specialist:
         trace.add("render", {"renderer": f"{self.name} {self.version}", "output_sha256": None, "output_bytes": 0})
         return Run(self.name, self.version, source, question, raw, checked, None, trace)
 
-    def replay(self, record, source=None, storage=None):
-        """Re-check the recorded proposal against the source and re-render it: the same source, the same issues,
-        identical output bytes. record: a Run, its to_dict() (the run's own chain is verified, and the record's copies
+    def replay(self, record, source=None, storage=None, *, proposer=None):
+        """Re-parse the recorded proposer output, re-check it against the source and re-render it: the same source, the
+        same spec, the same issues, identical output bytes — without calling the proposer (see the determinism contract
+        in the module docs). record: a Run, its to_dict() (the run's own chain is verified, and the record's copies
         against it), a stored record of kind "specialist" (its hash is checked) or a stored id (read from `storage`,
         default the specialist's own); source: the text (or in the record). A run that was blocked before any spec (a
-        failed proposer, an invalid proposal) has nothing to re-check: its record is verified."""
+        failed proposer, an invalid proposal) has nothing to re-check: its record is verified, and a recorded invalid
+        output must still be invalid. Only a record with no proposer output at all calls `proposer` (default the
+        specialist's own): Replay.from_record is then False and Replay.note says so."""
         if isinstance(record, str):
             storage = storage if storage is not None else self.storage
             if storage is None:
@@ -362,7 +389,7 @@ class Specialist:
                 storage = open_storage(storage)
             record = storage.record(record)
         if isinstance(record, dict) and record.get("kind") == KIND:
-            return self._replay_stored(record, source)
+            return self._replay_stored(record, source, proposer)
         if isinstance(record, Run):
             source = record.source if source is None else source
             record = record.to_dict()
@@ -383,16 +410,67 @@ class Specialist:
             problems.append("the record's issues are not the ones in the trace")           # what the trace holds
         if record.get("output_sha256") != (trace.step("render") or {}).get("output_sha256"):
             problems.append("the record's output hash is not the one in the trace")
-        prop = trace.step("propose") or {}
+        prop = trace.step("propose")
+        rsha = (trace.step("render") or {}).get("output_sha256")
+        if prop is None:                              # no proposer output recorded: the proposer is called, and it says so
+            return self._repropose(source, record.get("question"), rsha, record.get("output_sha256"), problems, proposer)
         if prop.get("not_applicable") and self._applies(source, record.get("question"))[0]:
             problems.append("recorded as not applicable; the specialist applies to this source now")
         if "spec" not in prop:
-            return Replay(not problems, problems + (["the run had no valid proposal"] if "error" not in prop else []))
+            if "error" in prop:
+                self._still_invalid(prop.get("raw"), problems)
+                return Replay(not problems, problems)
+            return Replay(False, problems + ["the run had no valid proposal"])
         if canonical(prop["spec"]) != canonical(record.get("proposal")):
             problems.append("the record's proposal is not the one in the trace")
-        again = self._finish(source, record.get("question"), self.parse(prop["spec"]), Trace())
-        return self._compare(again, chk, (trace.step("render") or {}).get("output_sha256"), record.get("output_sha256"),
-                             problems)
+        if "raw" in prop and canonical(prop["raw"]) != canonical(record.get("proposal_raw", prop["raw"])):
+            problems.append("the record's model output is not the one in the trace")
+        spec = self._reparse(prop["spec"], prop.get("raw"), "raw" in prop, problems)
+        if spec is None:
+            return Replay(False, problems)
+        again = self._finish(source, record.get("question"), spec, Trace())
+        return self._compare(again, chk, rsha, record.get("output_sha256"), problems)
+
+    def _reparse(self, spec, raw, has_raw, problems):
+        """The spec to re-check: the recorded raw output parsed again (it must give the recorded spec), else the recorded
+        spec. None (with a problem) when the recorded output does not parse now."""
+        if not has_raw:
+            try:
+                return self.parse(spec)
+            except (ValidationError, ValueError, TypeError) as e:
+                problems.append(f"the recorded proposal is not a valid {self.spec_type.__name__}: {e}"[:300])
+                return None
+        try:
+            again = self.parse(raw)
+        except (ValidationError, ValueError, TypeError, AttributeError) as e:
+            problems.append(f"the recorded model output does not parse now: {e}"[:300])
+            return None
+        if canonical(again) != canonical(spec):
+            problems.append("re-parsing the recorded model output gives another spec now")
+        return again
+
+    def _still_invalid(self, raw, problems):
+        """A run blocked on an invalid proposal: its recorded output must not parse now either."""
+        if raw is None:
+            return
+        try:
+            self.parse(raw)
+        except Exception:  # noqa: BLE001 — still invalid, as recorded
+            return
+        problems.append("the recorded model output parses now (it was an invalid proposal when recorded)")
+
+    def _repropose(self, source, question, sha_a, sha_b, problems, proposer):
+        """A record with no proposer output: call the proposer (the replay is then not from the record)."""
+        proposer = proposer or self.proposer
+        if proposer is None:
+            return Replay(False, problems + ["the record holds no proposer output and no proposer was given to call"],
+                          from_record=False, note="no proposer output recorded; no proposer to call")
+        again = self._run(source, question, proposer=proposer)
+        sha = sha256(again.output.encode()) if again.output is not None else None
+        if sha != sha_a or sha != sha_b:
+            problems.append("the record holds no proposer output; the proposer was called and its output differs")
+        return Replay(not problems, problems, from_record=False, output_sha256=sha,
+                      note="the record holds no proposer output: replay called the proposer (not a replay from the record)")
 
     def _compare(self, again, chk, sha_a, sha_b, problems):
         if canonical(again.checked.issues) != canonical(chk.get("issues")):
@@ -402,9 +480,9 @@ class Specialist:
         sha = sha256(again.output.encode()) if again.output is not None else None
         if sha != sha_a or sha != sha_b:
             problems.append("the re-rendered output differs from the recorded one")
-        return Replay(not problems, problems)
+        return Replay(not problems, problems, output_sha256=sha)
 
-    def _replay_stored(self, d, source):
+    def _replay_stored(self, d, source, proposer=None):
         """Replay a stored record of kind "specialist" (see replay)."""
         from .store import record_hash
         problems = []
@@ -423,13 +501,15 @@ class Specialist:
         if d.get("proposal_error") is not None:
             if str(d["proposal_error"]).startswith("not applicable") and self._applies(source, d.get("question"))[0]:
                 problems.append("recorded as not applicable; the specialist applies to this source now")
+            if "proposal_error" in d and d.get("proposal") is not None:
+                self._still_invalid(d["proposal"], problems)
             return Replay(not problems, problems)
-        if d.get("proposal") is None:
-            return Replay(False, problems + ["the stored record has no proposal to re-check"])
-        try:
-            spec = self.parse(d["proposal"])
-        except (ValidationError, ValueError, TypeError) as e:
-            return Replay(False, problems + [f"the stored proposal is not a valid {self.spec_type.__name__}: {e}"[:300]])
+        if d.get("proposal") is None:                 # no proposer output recorded: the proposer is called, and it says so
+            return self._repropose(source, d.get("question"), d.get("output_sha256"), d.get("output_sha256"), problems,
+                                   proposer)
+        spec = self._reparse(d["proposal"], d.get("proposal_raw"), "proposal_raw" in d, problems)
+        if spec is None:
+            return Replay(False, problems)
         again = self._finish(source, d.get("question"), spec, Trace())
         return self._compare(again, d, d.get("output_sha256"), d.get("output_sha256"), problems)
 

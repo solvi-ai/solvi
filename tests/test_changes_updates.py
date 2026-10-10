@@ -31,10 +31,14 @@ def build(tmp_path, name="d.db"):
     return part, System(cat, [q], storage=store), store
 
 
+OUTSIDE = [{"email": e} for e in texts("other", 4, start=900)]     # no team fits: the should-abstain set
+
+
 def pipe_of(tmp_path, target, journal=None):
-    """A pipeline with no stages of its own: the update's gates are the target's."""
+    """A pipeline with no stages of its own: the update's gates are the target's (and the refusal-regression stage,
+    which an answering target always gets, on the should-abstain set)."""
     return Pipeline([], journal if journal is not None else str(tmp_path / "changes.jsonl"), targets=[target],
-                    approval={"update": "gate"})
+                    approval={"update": "gate"}, refusals=OUTSIDE)
 
 
 def propose(pipe, source="person"):

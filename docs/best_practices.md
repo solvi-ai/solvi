@@ -335,6 +335,36 @@ test an LLM proposer ended 0.95 points below enumeration, and in the same study 
 claims about the path policy wrongly 18 times out of 40. Both findings in miniature, with their bars:
 [laws_toy.py](../benchmarks/laws_toy.py) (`pytest -m slow tests/test_laws_toy.py`).
 
+## Size the acceptance by the search; admit by probes; abstain when laws disagree
+
+**Size the acceptance by how many candidates you tested.** A fixed bar ("support ≥ 5, precision ≥ 0.9") does not know
+that a stand tried tens of thousands of candidates on the same buffer, and some random condition always passes it: on a
+synthetic buffer with no law at all (2,000 rows, an effect at 70% independent of 40 sparse atoms, 821 conditions) the
+fixed bar accepted a law in 100 of 100 buffers. `LawSet(sized=True)` — the default — tests each candidate at the level
+δ / (N·(N + 1)), N the candidates scored on that buffer so far, so the chance of any false acceptance stays below δ:
+0 of 100 on the same buffers, while a real law on 250 rows was still accepted. **Its price is data: a law needs about
+150 rows at 800 candidates and about 230 at 52,000** ((2·ln N + ln 1/δ) / ε rows for a law right on every row; 125 at
+52,000 if you declare `space=52_000`). **A small buffer accepts nothing — that is the rule working, not failing.**
+Collect more held-out rows, test fewer candidates, declare `space=`, or pass `sized=False` knowingly and treat the
+fixed bar's false accepts as the known price; the stands measured above ran with `sized=False`.
+
+**Where the world answers questions, admit by discriminating probes, not by a random sample.** A neighbouring research
+line measured that a hypothesis "certified" on 8 random held-out examples is wrong more often the larger the space
+(0, 0.105, 0.193 at 17, 1,462, 124,287 hypotheses), and that 6 queries chosen to tell the survivors apart bring the
+largest case to 0.030. `LawSet.admit_by_probes(candidates, ask, probes=, safe=, budget=)` does that for laws: it asks
+the safe probe that splits the surviving classes most and accepts the shortest candidate only when one class is left;
+otherwise it returns "undetermined" with the classes. On a synthetic world at 8 checks: a random held-out sample with
+the shortest survivor accepted a wrong law in 0.593 of 300 trials, the probes in none (0.987 right, 0.013
+undetermined). Ask only where the rest of your law set and base are right, or a right candidate is refuted with them.
+
+**Abstain when consistent laws disagree.** Two laws that both passed their test, neither an exception of the other,
+predicting different things for one state are a reason to abstain, not a tie to break by length or age:
+`predict(state, action, disagree="abstain")` returns `Undetermined` there and counts it (`lawset.abstained`). Skills
+do not abstain: two certified skills of one goal are both verified plans, and a different sequence is not a
+disagreement about the world. **Report the search cost next to accuracy**:
+`lawset.cost` and each skill episode's `cost` (candidates, tests, probes, simulated steps). Measured on synthetic worlds
+only: [tests/test_laws_w2.py](../tests/test_laws_w2.py).
+
 ## Relational rules: enumerate, let the test judge, then compile
 
 **When a rule is about structure — an ancestor, a neighbour, a path — give the grammar relations, not more flat
@@ -381,6 +411,20 @@ has seen. On a game simulator with written mechanics, learned rules carried acro
 achievements and System 1 84% of the decisions after about twenty worlds (part of it is survival: the agent lived
 longer). Script:
 [skills_toy.py](../benchmarks/skills_toy.py) (`pytest -m slow tests/test_skills_toy.py`).
+
+## Self-change: guard refusal first
+
+**Refusal is the first casualty of self-change; the regression check cannot be switched off.** A chain of model merges
+has been reported to keep every skill and lose much of its refusal (a number from outside this repository, not
+reproduced here): each change looks fine on what it was meant to improve, and the inputs the system must refuse or
+hand over are answered a little more each time. In `solvi.experimental.changes` every
+change whose target can answer passes `RefusalRegression` — the share refused on a held should-abstain set before and
+after — and there is no flag to remove it. Declare the set (`Pipeline(refusals=...)`): outside or unknown inputs, the
+cases your policy hands to a person; without one the change is held for a person — a vacuous pass would be a switch in disguise. Keep the
+default tolerance (0: one input answered that was refused before refuses the change) unless your answerer is
+nondeterministic. The set follows the policy version: a document version may rightly redefine what goes to a person, so
+declare the set of the version in force, as `benchmarks/changes_credit.py` does: there a self-tuning threshold change that closed the review band
+answered 137 of 137 hand-overs and was refused, while 12 exact corrections passed.
 
 ## Rules over relations: enumerate with a library, rank only where a check is expensive
 

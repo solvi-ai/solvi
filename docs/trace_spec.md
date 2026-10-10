@@ -162,6 +162,20 @@ Not guaranteed:
 - A trace rebuilt honestly from a different input is consistent; compare `init_hash` with a receipt kept elsewhere.
 - Parts that call external systems must return the same values on replay, or their steps do not recompute.
 
+### Specialist runs (kind `specialist`): the determinism contract
+
+Replay re-executes code and re-renders from recorded model outputs; it does not re-call a model. A model need not
+repeat itself (a remote LLM at temperature 0 returns other outputs across identical runs), so a run's record keeps the
+proposer's output — `proposal` (the parsed spec) and `proposal_raw` (the proposer's output when it was text — a model's
+reply as it came; for a blocked run `proposal` is the raw output and `proposal_error` why it failed).
+`Specialist.replay` parses the recorded output again (it must give the recorded spec: "re-parsing the recorded model
+output gives another spec now" otherwise), checks it against the source and renders it; the output's sha256 must be the
+recorded one. A recorded invalid output must still be invalid. Only a record with no proposer output at all calls the
+proposer — `Replay.from_record` is then False and `Replay.note` says so; such a replay is byte-identical only if the
+proposer repeats itself. [tests/test_specialist_replay_record.py: a nondeterministic proposer's stored runs replay byte
+for byte without a call; `check_specialist` fails a specialist whose replay calls the proposer] On the charts stand's
+50 texts with an LLM proposer every stored run replays byte for byte from its record (50 of 50).
+
 ## 6. Provenance kinds and statuses
 
 - Every step value has a provenance kind: `given`, `computed`, `quoted`, `decided`, `learned`, `proposed`

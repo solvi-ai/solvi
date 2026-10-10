@@ -134,7 +134,7 @@ def gridworld_one(seed=0, train_worlds=5, steps=100, buffer_worlds=10, test_worl
     test = [t for w in range(test_worlds) for t in episode(1000 * seed + 200 + w, steps)]
     arms = {"base": {"accuracy": accuracy(naive_map, test)}}
     for name, proposer in (("laws", Enumerate()), ("random", RandomProposer(seed=seed))):
-        ls = LawSet(g, base=naive_map, proposer=proposer, min_support=3)
+        ls = LawSet(g, base=naive_map, proposer=proposer, min_support=3, sized=False)   # measured so
         steps_ = ls.learn(train, held)
         arms[name] = {"accuracy": accuracy(ls.predict, test), "laws": len(ls.laws), "retired": len(ls.retired),
                       "mismatches": sum(s.mismatch for s in steps_),
@@ -249,7 +249,8 @@ def policy_one(seed=0, max_probes=3):
     arms = {}
     for arm in ("mismatch", "random"):
         rng = random.Random(f"probes-{seed}")
-        ls = LawSet(g, base=ok_base, min_support=1, min_precision=1.0, retire_below=1.0, retire_min=1)
+        ls = LawSet(g, base=ok_base, min_support=1, min_precision=1.0, retire_below=1.0, retire_min=1,
+                    sized=False)                      # one answer of a deterministic server: measured so
         buf = Buffer(g)
         rec = {"probes": 0}
         for si, (paths, calls) in enumerate(zip(sessions, loads), 1):

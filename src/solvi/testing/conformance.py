@@ -491,52 +491,80 @@ def check_action_model(make, transitions, *, held_out=None):
 INVALID_PROPOSAL = "{ not a proposal"
 
 
-def check_specialist(specialist, sources, *, proposer=None, inapplicable=()):
+def check_specialist(specialist, sources, *, proposer=None, deterministic=True, inapplicable=()):
     """specialist: a solvi.core.specialist.Specialist; sources: texts it runs on; proposer: the proposer to run with
-    (default: the specialist's own); inapplicable: sources its contract says it does not apply to (`applicable`).
-    The contract (solvi.core.contract): an output is a text or None and never the source itself; on each inapplicable
-    source the run is blocked with the issue "not_applicable" and the proposer is not called, and the run replays.
-    For each source: two runs give identical output bytes; the record
-    (`run.to_dict()`) round-trips through JSON and replays (`specialist.replay(record, source)`: the same checks, the
-    same bytes); an invalid proposal is blocked — a BLOCKED issue and no output. Then the core store path: with a
-    temporary TraceStorage every run is a record of kind "specialist", the store verifies, every stored run replays
-    from the store (`replay_runs`), and an edited record is caught by verify(). → what was checked."""
-    from ..core.specialist import BLOCKED as blocked_, KIND, replay_runs
+    (default: the specialist's own); deterministic: the proposer repeats itself (False for a model proposer — a remote
+    LLM at temperature 0 does not); inapplicable: sources its contract says it does not apply to (`applicable`). For
+    each source: with deterministic=True two runs give identical output bytes; an output is a text or None and never
+    the source itself; the record (`run.to_dict()`) round-trips through JSON and replays from the record
+    (`specialist.replay(record, source)`: the same checks, the same bytes — and the proposer is never called: a replay
+    that calls it, or that is not `from_record`, fails); an invalid proposal is blocked — a BLOCKED issue and no output.
+    Then the contract (solvi.core.contract): on each inapplicable source the run is blocked with the issue
+    "not_applicable", the proposer is not called, and the run replays. Then the core store path: with a temporary
+    TraceStorage every run is a record of kind "specialist", the store verifies, every stored run replays from the store
+    (`replay_runs`) without calling the proposer, and an edited record is caught by verify(). → what was checked."""
+    from ..core.specialist import BLOCKED as blocked_, KIND, replay_runs, sha256
     from ..core.store import JSONLStorage
     sources = list(sources)
     _ok(sources, "check_specialist needs at least one source")
     inapplicable = list(inapplicable)
     replayed = blocked = 0
     calls = []
-    base = proposer or getattr(specialist, "proposer", None)
 
-    def tripwire(source, question):
+    def tripwire(source, question=None):
         calls.append(source)
-        return base(source, question) if base is not None else INVALID_PROPOSAL
-    for src in inapplicable:
-        run = specialist.run(src, proposer=tripwire)
-        _ok(run.output is None and [i.code for i in run.issues if i.severity == blocked_] == ["not_applicable"],
-            f"a source the specialist does not apply to is blocked as not applicable ({specialist.name}: "
-            f"{[str(i) for i in run.issues][:2] or 'it ran'})")
-        _ok(not calls, "the proposer is not called on a source the specialist does not apply to")
-        _ok(bool(specialist.replay(run.to_dict(), src)), "a run blocked as not applicable replays from its record")
+        raise RuntimeError("the proposer was called by a replay")
+
+    def from_record(fn, what):
+        """Run a replay with the specialist's proposer replaced by a tripwire → its result."""
+        kept, specialist.proposer = specialist.proposer, tripwire
+        n = len(calls)
+        try:
+            r = fn()
+        except Exception as e:  # noqa: BLE001 — a replay that raises fails the check, with the reason
+            r = e
+        finally:
+            specialist.proposer = kept
+        _ok(len(calls) == n and not isinstance(r, Exception),
+            f"{what} replays from its record without calling the proposer"
+            + (f" ({type(r).__name__}: {r})" if isinstance(r, Exception) else ""))
+        return r
+
     for src in sources:
         a = specialist.run(src, proposer=proposer)
+        if deterministic:
+            b = specialist.run(src, proposer=proposer)
+            _ok(a.output == b.output, f"two runs of one source give identical bytes ({specialist.name}: the outputs "
+                                      "differ; a model proposer that does not repeat itself: deterministic=False)")
         _ok(a.output is None or (isinstance(a.output, str) and a.output != src),
             "an output is a text and not the source itself")
-        b = specialist.run(src, proposer=proposer)
-        _ok(a.output == b.output, f"two runs of one source give identical bytes ({specialist.name}: the outputs differ)")
         rec = a.to_dict()
         back = json.loads(json.dumps(rec, ensure_ascii=False))
         _ok(back == rec, "run.to_dict() round-trips through JSON")
-        r = specialist.replay(back, src)
+        r = from_record(lambda: specialist.replay(back, src), "a run")
         _ok(bool(r), f"a run replays from its record: {r.problems[:3]}")
+        _ok(getattr(r, "from_record", True), "a run replays from its record (not by calling the proposer)")
+        sha = sha256(a.output.encode()) if a.output is not None else None
+        _ok(getattr(r, "output_sha256", sha) == sha, "a run replays from its record to the same bytes")
         replayed += 1
         bad = specialist.run(src, proposal=INVALID_PROPOSAL)
         _ok(bad.output is None and any(i.severity == blocked_ for i in bad.issues),
             "an invalid proposal is blocked: a BLOCKED issue and no output")
         _ok(bool(specialist.replay(bad.to_dict(), src)), "a blocked run replays from its record")
         blocked += 1
+    proposed = []                                     # the contract: an inapplicable source never reaches the proposer
+    base = proposer or getattr(specialist, "proposer", None)
+
+    def counting(source, question):
+        proposed.append(source)
+        return base(source, question) if base is not None else INVALID_PROPOSAL
+    for src in inapplicable:
+        run = specialist.run(src, proposer=counting)
+        _ok(run.output is None and [i.code for i in run.issues if i.severity == blocked_] == ["not_applicable"],
+            f"a source the specialist does not apply to is blocked as not applicable ({specialist.name}: "
+            f"{[str(i) for i in run.issues][:2] or 'it ran'})")
+        _ok(not proposed, "the proposer is not called on a source the specialist does not apply to")
+        _ok(bool(specialist.replay(run.to_dict(), src)), "a run blocked as not applicable replays from its record")
     with tempfile.TemporaryDirectory(prefix="solvi_specialist_") as d:
         path = Path(d) / "runs.jsonl"
         kept, specialist.storage = getattr(specialist, "storage", None), JSONLStorage(str(path))
@@ -548,7 +576,7 @@ def check_specialist(specialist, sources, *, proposer=None, inapplicable=()):
             stored = len(list(store.iter(KIND)))
             _ok(stored == 2 * len(sources), f"every run is one record of kind {KIND!r} in the storage ({stored} stored)")
             _ok(store.verify()["ok"], "the storage verifies with the specialist's records")
-            bad = replay_runs(store, specialist, sources)
+            bad = from_record(lambda: replay_runs(store, specialist, sources), "every stored run")
             _ok(not bad, f"every stored run replays from the store: {bad[:2]}")
             store.close()
         finally:
@@ -559,9 +587,9 @@ def check_specialist(specialist, sources, *, proposer=None, inapplicable=()):
         path.write_text("\n".join([json.dumps(rec)] + lines[1:]) + "\n")
         edit_caught = not JSONLStorage(str(path)).verify()["ok"]
         _ok(edit_caught, "an edited specialist record fails the storage's verify()")
-    return {"sources": len(sources), "runs": 2 * len(sources), "replayed": replayed, "blocked": blocked,
-            "stored": stored, "store_replayed": stored - len(bad), "edit_caught": edit_caught,
-            "not_applicable": len(inapplicable)}
+    return {"sources": len(sources), "runs": (2 if deterministic else 1) * len(sources), "replayed": replayed,
+            "replayed_from_record": replayed, "blocked": blocked, "stored": stored, "store_replayed": stored - len(bad),
+            "edit_caught": edit_caught, "not_applicable": len(inapplicable)}
 
 
 __all__ = ["check_action_model", "check_decider", "check_environment", "check_extractor", "check_head", "check_specialist",

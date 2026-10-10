@@ -10,7 +10,13 @@ from ._model import ExactModel, Plan, _plain, plan, verify
 from ._skills import SkillSet
 
 _EPISODE = ("steps", "s1", "s2", "fallback", "planner_calls", "plans_found", "plans_rejected", "compiled", "supervised",
-            "supervised_failed", "alone_runs", "alone_failures", "s1_failed", "mismatch", "guard_violations")
+            "supervised_failed", "alone_runs", "alone_failures", "s1_failed", "mismatch", "guard_violations", "searched",
+            "verify_calls")
+
+
+def _cost(rec):
+    return {"candidates": rec.get("searched", 0), "tests": rec.get("verify_calls", 0), "probes": 0,
+            "simulated": rec.get("simulated", 0)}
 
 
 def _goals(goals):
@@ -52,7 +58,10 @@ class SkillLearner:
     System 1 / System 2 / fallback, s1_share, goals (reached, in order), goals_reached, all_goals, planner_calls,
     plans_found / plans_rejected, simulated (steps on the exact model), compiled, supervised (failed), alone_runs,
     alone_failures, s1_failed (System 1 decisions in failed runs), mismatch (a verified plan the real world did not
-    follow), guard_violations, skills / usable / retired at the end."""
+    follow), guard_violations, skills / usable / retired at the end; searched (simulated steps the planner's searches
+    took), verify_calls, and cost — the search-cost record next to the outcome: {"candidates": searched (the states
+    the planner expanded), "tests": verify_calls (re-simulations of a plan or skill), "probes": 0 (the real
+    environment is never asked to tell hypotheses apart here), "simulated": every step on the exact model}."""
 
     def __init__(self, env, grammar, goals, *, planner=plan, horizon: int = 12, budget: int = 20_000,
                  promise: float = 0.05, delta: float = 0.1, certificate=None, actions=None, cost=None, key=None,
@@ -105,6 +114,7 @@ class SkillLearner:
         ep["simulated"] = self.model.steps - self._sim0
         rep = self.skills.report()
         ep["skills"], ep["usable"], ep["retired"] = rep["count"], rep["usable"], rep["retired"]
+        ep["cost"] = _cost(ep)
         self.episodes.append(ep)
 
     def run(self, seed=None, steps: int = 200) -> dict:
@@ -153,11 +163,13 @@ class SkillLearner:
         self._count("planner_calls")
         p = self._guarded(self.planner, self.model, state, fn, actions=self.actions, horizon=self.horizon,
                           budget=self.budget, cost=self.cost)
+        self._count("searched", int(self.model.last.get("searched", 0) or 0))
         if p is not None:
             self._count("plans_found")
         return p
 
     def _verify(self, state, p, fn):
+        self._count("verify_calls")
         return self._guarded(verify, self.model, state, p, fn)
 
     # --- one step
@@ -344,6 +356,8 @@ class SkillLearner:
         tot = dict(self.totals)
         tot["episodes"] = len(eps)
         tot["s1_share"] = tot["s1"] / tot["steps"] if tot["steps"] else None
+        tot["simulated"] = self.model.steps
+        tot["cost"] = _cost(tot)
         return {"episodes": eps, "totals": tot, "skills": self.skills.report()}
 
     def __repr__(self):

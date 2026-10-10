@@ -105,6 +105,8 @@ quote no longer states the number), and a dropped bar of a chart without a total
 bars.
 
 `solvi.testing.conformance.check_specialist(specialist, sources, inapplicable=())` checks the contract itself: two
-runs give identical bytes, a run replays from its record, the record round-trips through JSON, an invalid proposal is
-blocked with no output, an output is a text and never the source itself, and on each source in `inapplicable` the run
-is blocked as `not_applicable` without a call to the proposer (`Specialist.applicable`).
+runs give identical bytes (skipped with `deterministic=False`, for a model proposer that does not repeat itself), a run
+replays from its record — to the same bytes and without calling the proposer (a replay that calls it fails the
+check) —, the record round-trips through JSON, an invalid proposal is blocked with no output, an output is a text and
+never the source itself, and on each source in `inapplicable` the run is blocked as `not_applicable` without a call
+to the proposer (`Specialist.applicable`).
