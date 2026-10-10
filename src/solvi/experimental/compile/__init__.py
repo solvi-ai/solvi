@@ -42,6 +42,14 @@ prompt and reply, the writer, the tests, and each check's outcome per round.
     c = compile_spec(spec, questions, inputs, writer, review=ask_a_person)   # a person resolves what drafts dispute
     c.record["person"]                                    # every question asked, every answer, the tests they became
 
+    c = compile_spec(spec, questions, inputs, writer, certificate=Certificate(fresh, n_hypotheses=10 ** 6))
+    c.record["certificate"]                               # needed (fresh_examples_needed), checked, skew, failures
+
+A certificate on fresh examples (`certificate=`) is an extra gate after the others: labelled examples the writer never
+saw, as many as `fresh_examples_needed(|H|, eps, delta)` says for the number of candidates the answer was chosen from
+(or a count you choose), with answers varied enough that a constant cannot pass (`skew_guard`), answered correctly by
+both drafts in two separate runs.
+
 A person in the loop (`review=`) is asked, within a budget, about the inputs two drafts decide differently (one input
 of each of the largest kinds of disagreement) and about disputed tests (instead of the test writer's re-check). An
 answer becomes a test (source "person"), never code: both drafts must pass it, and the other conditions stay; the
@@ -1372,6 +1380,130 @@ def _loop(spec, questions, inputs, gens, *, rounds, tests, examples, reference, 
     return None, None, f"not accepted after {rounds} round(s): {last}", history, reviewed
 
 
+# ───────────────────────────────────────────────────────────── a certificate on fresh examples
+def fresh_examples_needed(n_hypotheses: int, eps: float = 0.05, delta: float = 0.1, at_least: int = 20) -> int:
+    """How many fresh labelled examples a candidate chosen among `n_hypotheses` must all pass so that, with
+    probability at least 1 - `delta`, its error rate is below `eps`: N = max(at_least, ⌈(ln |H| + ln 1/δ) / ε⌉)
+    (the bound for a consistent learner over a finite hypothesis space). The more candidates a search tried, the
+    more examples the winner must pass: one of a million candidates can match a few examples by chance."""
+    import math
+    if not (isinstance(n_hypotheses, int) and n_hypotheses >= 1):
+        raise ValueError(f"n_hypotheses must be an integer ≥ 1, got {n_hypotheses!r}")
+    if not 0 < eps <= 1:
+        raise ValueError(f"eps must be in (0, 1], got {eps!r}")
+    if not 0 < delta < 1:
+        raise ValueError(f"delta must be in (0, 1), got {delta!r}")
+    return max(int(at_least), math.ceil((math.log(n_hypotheses) + math.log(1 / delta)) / eps))
+
+
+def skew_guard(expected, min_distinct: int = 10, min_off_mode: int = 10) -> str | None:
+    """None when a set of expected answers can tell a real function from a constant, else why not. It can when the
+    answers take at least `min_distinct` distinct values, or when at least `min_off_mode` of them differ from the
+    most common answer (a yes/no question: ten of the rarer answer). A set whose answers are nearly all the same
+    certifies a constant that returns that answer."""
+    keys = [json.dumps(_norm(a) if not isinstance(a, dict) else {k: _norm(v) for k, v in a.items()},
+                       sort_keys=True, default=str) for a in expected]
+    if not keys:
+        return "no expected answers"
+    counts = {}
+    for k in keys:
+        counts[k] = counts.get(k, 0) + 1
+    off = len(keys) - max(counts.values())
+    if len(counts) >= min_distinct or off >= min_off_mode:
+        return None
+    return (f"the fresh answers are skewed: {len(counts)} distinct value(s) and {off} of {len(keys)} differ from the "
+            f"most common one (need {min_distinct} distinct or {min_off_mode} off it) — a constant would pass most of "
+            "them")
+
+
+@dataclass
+class Certificate:
+    """Fresh labelled examples `[(input, {question: answer})]` the accepted drafts must all answer correctly — never
+    shown to a writer, never part of the pool, the tests or `examples` (an example that repeats one of those does not
+    count). How many are needed: `n` when given, else `fresh_examples_needed(n_hypotheses, eps, delta, at_least)` —
+    give `n_hypotheses` when the candidates come from a search of known size; for a writer whose candidates cannot
+    be counted, choose `n`. The expected answers must pass `skew_guard`. Each draft is run `runs` times in separate
+    sandboxed processes and the runs must give the same answers (a candidate whose answer changes between processes
+    certifies nothing)."""
+    examples: list
+    n_hypotheses: int | None = None
+    n: int | None = None
+    eps: float = 0.05
+    delta: float = 0.1
+    at_least: int = 20
+    min_distinct: int = 10
+    min_off_mode: int = 10
+    runs: int = 2
+
+    def __post_init__(self):
+        self.examples = [(dict(x), dict(w)) for x, w in self.examples]
+        if (self.n is None) == (self.n_hypotheses is None):
+            raise ValueError("Certificate needs exactly one of n_hypotheses= (a search's size) or n= (a chosen count)")
+        self.needed                                        # validates eps / delta / n_hypotheses
+
+    @property
+    def needed(self) -> int:
+        if self.n is not None:
+            if int(self.n) < 1:
+                raise ValueError(f"n must be ≥ 1, got {self.n!r}")
+            return int(self.n)
+        return fresh_examples_needed(self.n_hypotheses, self.eps, self.delta, self.at_least)
+
+
+def _certify(drafts, cert: Certificate, questions, seen, mem_mb, item_s) -> tuple[str | None, dict]:
+    """Run the accepted drafts on the certificate's fresh examples → (None when they pass, else why not; the record)."""
+    def key(x):
+        return json.dumps(x, sort_keys=True, default=str)
+    fresh = [(x, w) for x, w in cert.examples if key(x) not in seen]
+    rec = {"needed": cert.needed, "given": len(cert.examples), "not_fresh": len(cert.examples) - len(fresh),
+           "checked": len(fresh), "n_hypotheses": cert.n_hypotheses, "n": cert.n, "eps": cert.eps, "delta": cert.delta,
+           "runs": cert.runs, "runs_agree": None, "skew": None, "failures": [], "passed": False}
+    expected = [{q: _norm(a) for q, a in w.items()} for _, w in fresh]
+    rec["distinct"] = len({key(e) for e in expected})
+    if len(fresh) < cert.needed:
+        return (f"not accepted: the certificate needs {cert.needed} fresh examples, {len(fresh)} given"
+                + (f" ({rec['not_fresh']} repeat a test or a labelled example)" if rec["not_fresh"] else "")), rec
+    rec["skew"] = skew_guard(expected, cert.min_distinct, cert.min_off_mode)
+    if rec["skew"]:
+        return f"not accepted: the certificate's skew guard: {rec['skew']}", rec
+    inputs = [x for x, _ in fresh]
+    agree = True
+    for d in drafts:
+        runs = []
+        for _ in range(max(1, cert.runs)):
+            rows, err = _run_draft(d, questions, inputs, mem_mb, item_s)
+            if rows is None:
+                rec["failures"].append({"draft": d.index, "error": err})
+                return f"not accepted: draft {d.index} did not run on the certificate: {err}", rec
+            runs.append([{q: _norm(r) for q, r in row["answers"].items()} for row in rows])
+        agree = agree and all(r == runs[0] for r in runs[1:])
+        for (x, _), want, got in zip(fresh, expected, runs[0]):
+            if any(got.get(q) != a for q, a in want.items()):
+                rec["failures"].append({"draft": d.index, "input": x, "expected": want, "got": got})
+    rec["runs_agree"] = agree
+    if not agree:
+        return "not accepted: a draft gave different answers in two runs on the certificate (not deterministic)", rec
+    if rec["failures"]:
+        n_bad = len({key(f["input"]) for f in rec["failures"]})
+        rec["failures"] = rec["failures"][:10]
+        return f"not accepted: the certificate on fresh examples failed on {n_bad} of {len(fresh)}", rec
+    rec["passed"] = True
+    return None, rec
+
+
+def _gate(a, b, reason, history, certificate, questions, examples, test_list, mem_mb, item_s):
+    """The certificate as a gate after the loop accepted (a, b) → (a, b, reason, the certificate's record or None)."""
+    if certificate is None or a is None:
+        return a, b, reason, None
+    seen = {json.dumps(dict(x), sort_keys=True, default=str) for x, _ in examples}
+    seen |= {json.dumps(t["input"], sort_keys=True, default=str) for t in test_list if isinstance(t.get("input"), dict)}
+    why, rec = _certify([a, b], certificate, questions, seen, mem_mb, item_s)
+    if why is None:
+        return a, b, reason, rec
+    history.append({"last_drafts": [{"source": d.source, "parts": d.parts, "problems": d.problems} for d in (a, b)]})
+    return None, None, why, rec
+
+
 def _gens(writer):
     ws = list(writer) if isinstance(writer, (list, tuple)) else [writer]
     ws = [_writer_of(w) for w in ws]
@@ -1399,7 +1531,8 @@ def _pitfalls(d):
 def compile_spec(spec: Spec, questions, inputs: Inputs, writer=None, *, rounds: int = 4, tests: int = 40,
                  examples=(), reference: Callable | None = None, mem_mb: int = 1024, item_s: int = 5,
                  fresh_drafts: int = 2, stuck_after: int = 2, review: Callable | None = None,
-                 review_budget: int | None = 20, review_per_round: int | None = 5) -> Compiled:
+                 review_budget: int | None = 20, review_per_round: int | None = 5,
+                 certificate: Certificate | None = None) -> Compiled:
     """Compile `spec` into catalog parts answering `questions` over `inputs` (see the module docs). `writer`: a
     solvi.core.slow.generate Generator (or two, for two models), or a base URL (model openai/gpt-oss-120b). `examples`: labelled
     [(input, {question: answer})] that both drafts must match; `reference(input) → {question: answer}`, compared on the
@@ -1407,7 +1540,9 @@ def compile_spec(spec: Spec, questions, inputs: Inputs, writer=None, *, rounds: 
     or no module in the reply) for `stuck_after` rounds in a row is replaced by a fresh draft, written from the task
     again with a seed of its own (0: never). `review(dispute) → Ruling`: a person in the loop — asked about the drafts'
     disagreements and the disputed tests (at most `review_per_round` questions a round, `review_budget` in all; None:
-    no limit); each answer becomes a test both drafts must pass (see `Dispute`, `Ruling`). Never raises for a bad
+    no limit); each answer becomes a test both drafts must pass (see `Dispute`, `Ruling`). `certificate`: a
+    `Certificate` of fresh labelled examples both accepted drafts must answer correctly — an extra gate after the
+    others, its count (`fresh_examples_needed`) and outcome in `record["certificate"]`. Never raises for a bad
     draft: the result says whether it was accepted."""
     questions = list(questions)
     gens = _gens(writer)
@@ -1445,7 +1580,11 @@ def compile_spec(spec: Spec, questions, inputs: Inputs, writer=None, *, rounds: 
                                             write=write, log=log, mem_mb=mem_mb, item_s=item_s, extra_check=None,
                                             need_tests=bool(tests), fresh_drafts=fresh_drafts, stuck_after=stuck_after,
                                             person=person)
-    return _result(spec, questions, a, b, reason, history, reviewed, test_list, bad, terr, log, gens, None, person)
+    a, b, reason, crec = _gate(a, b, reason, history, certificate, questions, list(examples), test_list, mem_mb, item_s)
+    c = _result(spec, questions, a, b, reason, history, reviewed, test_list, bad, terr, log, gens, None, person)
+    if crec is not None:
+        c.record["certificate"] = crec
+    return c
 
 
 def _result(spec, questions, a, b, reason, history, reviewed, test_list, bad, terr, log, gens, changes, person=None):
@@ -1478,11 +1617,12 @@ def _effective(patch, pparts, old_parts):
 def recompile(old: Compiled, spec: Spec, inputs: Inputs, writer=None, *, rounds: int = 4, tests: int = 40,
               examples=(), reference: Callable | None = None, mem_mb: int = 1024, item_s: int = 5,
               fresh_drafts: int = 2, stuck_after: int = 2, review: Callable | None = None,
-              review_budget: int | None = 20, review_per_round: int | None = 5) -> Compiled:
+              review_budget: int | None = 20, review_per_round: int | None = 5,
+              certificate: Certificate | None = None) -> Compiled:
     """Recompile an accepted compilation for a revised specification (`old.spec.revise(...)`): the writer returns only
     the parts it adds, replaces or removes — each citing a changed or added clause — and the rest stays byte-identical.
     Accepted by the same checks as compile_spec (two independent patches agree, tests written for the new
-    specification; `review=` a person in the loop, as for compile_spec). The result's `changes`: the clauses' changes
+    specification; `review=` a person in the loop and `certificate=` fresh examples, as for compile_spec). The result's `changes`: the clauses' changes
     and the parts added / replaced / removed / kept."""
     if spec.changes is None:
         raise ValueError("recompile needs a revised specification: old.spec.revise(new_text)")
@@ -1553,6 +1693,7 @@ def recompile(old: Compiled, spec: Spec, inputs: Inputs, writer=None, *, rounds:
                                             write=write, log=log, mem_mb=mem_mb, item_s=item_s, extra_check=None,
                                             need_tests=bool(tests), fresh_drafts=fresh_drafts, stuck_after=stuck_after,
                                             person=person)
+    a, b, reason, crec = _gate(a, b, reason, history, certificate, questions, list(examples), test_list, mem_mb, item_s)
     changes = {"clauses": ch}
     if a is not None:
         pparts, _, rm, _ = read_module(a.patch, spec, questions, patch=True)
@@ -1562,6 +1703,8 @@ def recompile(old: Compiled, spec: Spec, inputs: Inputs, writer=None, *, rounds:
                             "kept": [n for n in old.parts if n not in pparts and n not in rm]}
     c = _result(spec, questions, a, b, reason, history, reviewed, test_list, bad, terr, log, gens, changes, person)
     c.record["parent"] = {"spec_hash": old.spec.hash, "source_sha": hashlib.sha256(old.source.encode()).hexdigest()}
+    if crec is not None:
+        c.record["certificate"] = crec
     return c
 
 
@@ -1633,6 +1776,6 @@ def to_guard(compiled: Compiled, guard, tools=None, *, question: str | None = No
     return names
 
 
-__all__ = ["CatalogVersion", "Clause", "Compiled", "DecisionDiff", "Dispute", "Inputs", "Rejected", "Ruling", "Spec", "Versions",
-           "compile_spec", "coverage", "decision_diff", "merge", "numbers_in", "read_module", "recompile",
-           "reference_reviewer", "split_clauses", "to_guard", "build_catalog"]
+__all__ = ["CatalogVersion", "Certificate", "Clause", "Compiled", "DecisionDiff", "Dispute", "Inputs", "Rejected", "Ruling", "Spec", "Versions",
+           "compile_spec", "coverage", "decision_diff", "fresh_examples_needed", "merge", "numbers_in", "read_module", "recompile",
+           "reference_reviewer", "skew_guard", "split_clauses", "to_guard", "build_catalog"]

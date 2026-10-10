@@ -39,7 +39,7 @@ A LoRA adapter on the decider for one question (`solvi.experimental.lora.adapt_l
 ## `compile`
 
 A written specification compiled by an LLM into catalog parts, accepted when two drafts agree and the specification's
-tests pass (with its sandbox, `solvi.experimental.compile.sandbox`). Since 0.9.
+tests pass (with its sandbox, `solvi.experimental.compile.sandbox`). Since 0.9. Since 1.1 an optional certificate on fresh examples sized by the hypothesis space (`certificate=`, `fresh_examples_needed`, `skew_guard`).
 
 - **Missing:** acceptance on larger specifications and a benchmark script in benchmarks/.
 - **Script:** none yet. **Deadline:** 1.2.

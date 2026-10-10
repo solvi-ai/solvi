@@ -85,12 +85,10 @@ def test_a_draft_wrong_on_one_fresh_example_is_not_accepted_and_the_failure_is_r
     plain = compile_spec(Spec(POLICY), QS, INPUTS, w, rounds=1)
     c = compile_spec(Spec(POLICY), QS, INPUTS, Writer([[OFF_BY_ONE], [OFF_BY_ONE]], tests=[TEST_OK[1]]), rounds=1,
                      certificate=Certificate(fresh, n_hypotheses=10 ** 6))
-    if plain.accepted:                              # the drawn pool did not catch it: the certificate must
-        assert not c.accepted and "certificate" in c.reason
-        f = c.record["certificate"]["failures"]
-        assert f and f[0]["input"]["total"] == 50 and f[0]["expected"] == {"ship": "free"}
-    else:
-        assert not c.accepted
+    assert plain.accepted                           # the drawn pool did not catch it: the certificate must
+    assert not c.accepted and "certificate on fresh examples failed" in c.reason
+    f = c.record["certificate"]["failures"]
+    assert f and all(x["input"]["total"] == 50 for x in f) and f[0]["expected"] == {"ship": "free"}
 
 
 def test_a_skewed_fresh_set_is_not_a_certificate_even_when_every_answer_matches():

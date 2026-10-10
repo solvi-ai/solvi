@@ -5413,6 +5413,45 @@ customer-service policy. Look at some decisions the drafts agree on before you r
 reference. It picks the draft equal to the reference, else gives the reference's answer; it keeps a disputed test the
 reference agrees with, else corrects it. `recompile` takes the same options.
 
+### A certificate on fresh examples: certificate=
+
+The checks above need no labels. When you have labelled examples the writer never saw, `certificate=` adds one more
+gate after them: both accepted drafts must answer every fresh example correctly, and the size of that set is not a
+guess — it grows with the number of candidates the answer was chosen from.
+
+```python
+from solvi.experimental.compile import Certificate, compile_spec, fresh_examples_needed, skew_guard
+
+fresh_examples_needed(10 ** 6)               # 323: N = max(20, ⌈(ln |H| + ln 1/δ) / ε⌉), ε = 0.05, δ = 0.1
+fresh_examples_needed(1)                     # 47
+skew_guard(["no"] * 50 + ["yes"] * 3)        # why a constant "no" would pass: too few answers off the most common
+
+cert = Certificate(fresh, n_hypotheses=10 ** 6)   # fresh: [(input, {question: answer})]; or n=60 for a chosen count
+c = compile_spec(spec, questions, inputs, writer, certificate=cert)
+c.record["certificate"]       # needed, given, checked, not_fresh, distinct, skew, runs_agree, failures, passed
+```
+
+**The count.** A candidate picked among |H| that passes N fresh examples has, with probability at least 1 − δ, an
+error rate below ε when N ≥ (ln |H| + ln 1/δ) / ε — the bound for a consistent learner over a finite space. A search
+that tried a million candidates needs 323 fresh examples, not five: among a million candidates some match a handful
+of examples by chance. Give `n_hypotheses` when the candidates come from a search of known size; for an LLM writer the
+space cannot be counted, so choose `n` and say so.
+
+**The skew guard.** The fresh answers must take at least ten distinct values, or at least ten of them must differ
+from the most common answer (a yes/no question: ten of the rarer one). A set that is nearly all "no" certifies the
+constant "no".
+
+**What else it checks.** A fresh example whose input repeats a test or a labelled example does not count
+(`not_fresh`); fewer fresh examples than needed is not an acceptance. Each draft runs on the set twice, in separate
+sandboxed processes, and both runs must give the same answers: a part whose answer depends on the process — say, the
+iteration order of a set of strings — certifies nothing. The certificate is never shown to a writer, and a failure is
+not sent back for a rewrite: rewriting until a held-out set passes would make it a training set. `recompile` takes
+the same `certificate=`.
+
+**What it does not do.** The bound counts candidates, not how they were found: a writer that saw similar examples
+elsewhere, or fresh examples drawn from a narrower range than the real inputs, make the number promise less. The
+fresh examples must come from the inputs the system will meet.
+
 ### A changed specification: recompile and the decisions it moves
 
 ```python

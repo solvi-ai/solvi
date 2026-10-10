@@ -17,6 +17,15 @@ calibration files and served by `solvi serve`), so a build from it is not mistak
 
 ### New
 
+- **`solvi.experimental.compile`: a certificate on fresh examples sized by the hypothesis space (experimental).**
+  `fresh_examples_needed(n_hypotheses, eps=0.05, delta=0.1)` gives N = max(20, ⌈(ln |H| + ln 1/δ) / ε⌉) — the
+  number of fresh labelled examples a candidate chosen among |H| must all pass (323 for a million candidates, 47 for
+  one); `skew_guard(answers)` refuses a set a constant could pass (fewer than ten distinct answers and fewer than ten
+  off the most common one); `Certificate(examples, n_hypotheses=… | n=…)` passed as `compile_spec(...,
+  certificate=)` / `recompile(..., certificate=)` is an extra gate after the others: both accepted drafts must answer
+  every fresh example correctly, twice in separate sandboxed processes with the same answers, examples that repeat a
+  test or a labelled example do not count, and the count, the guard and every failure go into
+  `record["certificate"]`. Never shown to a writer and never sent back for a rewrite.
 - **`solvi.experimental.changes`: one change pipeline (experimental).** A document version, verified experience, a
   person's correction and a search proposal become candidates that pass the same pluggable stages (KnownFailures,
   Static, Consistency, Confirmation, CleanCases, Impact, FreshEnvironments, Approval, Canaries), are journaled in a
