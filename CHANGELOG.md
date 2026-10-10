@@ -17,6 +17,15 @@ calibration files and served by `solvi serve`), so a build from it is not mistak
 
 ### New
 
+- **`solvi.experimental.compile`: a certificate on fresh examples sized by the hypothesis space (experimental).**
+  `fresh_examples_needed(n_hypotheses, eps=0.05, delta=0.1)` gives N = max(20, ⌈(ln |H| + ln 1/δ) / ε⌉) — the
+  number of fresh labelled examples a candidate chosen among |H| must all pass (323 for a million candidates, 47 for
+  one); `skew_guard(answers)` refuses a set a constant could pass (fewer than ten distinct answers and fewer than ten
+  off the most common one); `Certificate(examples, n_hypotheses=… | n=…)` passed as `compile_spec(...,
+  certificate=)` / `recompile(..., certificate=)` is an extra gate after the others: both accepted drafts must answer
+  every fresh example correctly, twice in separate sandboxed processes with the same answers, examples that repeat a
+  test or a labelled example do not count, and the count, the guard and every failure go into
+  `record["certificate"]`. Never shown to a writer and never sent back for a rewrite.
 - **`solvi.experimental.changes`: one change pipeline (experimental).** A document version, verified experience, a
   person's correction and a search proposal become candidates that pass the same pluggable stages (KnownFailures,
   Static, Consistency, Confirmation, CleanCases, Impact, FreshEnvironments, Approval, Canaries), are journaled in a
@@ -226,7 +235,39 @@ calibration files and served by `solvi serve`), so a build from it is not mistak
   boolean, an Enum) and `costs={field: weight}` multiplying a field's change costs (defaults as before), since a
   category change at the fixed cost 1 ranked first where a person would move a number.
 
+- **`solvi.experimental.changes.RefusalRegression`: refusal regression as a stage that cannot be switched off.** For
+  every change whose target can answer (a target's `answerer(change or None, ctx)` — now on `VersionsTarget` and
+  `LearningTarget`, whose candidate is built on a shadow by the ladder without gates or records — or
+  `Pipeline(answer_of=...)`) the pipeline runs it, inserted before Approval when it is not among the stages: the share
+  refused on a held should-abstain set (`Pipeline(refusals=...)`, `CleanCases(refusals=)`, `Confirmation(refusals=)`,
+  the stage's own) before and after the change; refused when the change answers more inputs that were refused before
+  than `max(count_tolerance, tolerance · n)` (default 0 and 0), with the set's sources and the counts in the reason;
+  journaled for every such change; its refusal is final under the "person" approval level. Without a declared set
+  the change is held for a person ("no should-abstain set declared for a target that can answer"): every pipeline
+  whose target can answer declares one; the set follows the policy version; an item change is checked only with
+  `answer_of=`. `is_refusal(answer,
+  question=None)` reads None, an abstaining Response or result, an escalated Decision and words such as "abstain",
+  "escalate", "hand over". `benchmarks/changes_credit.py` adds a threshold change that closes the review band: refused,
+  answering 137 of 137 hand-overs; the other counts unchanged.
+- **Specialist replay: the determinism contract — replay re-executes code and re-renders from recorded model outputs;
+  it does not re-call a model.** A run's record (stored, and `Run.to_dict()`) keeps `proposal_raw`, the proposer's
+  output when it was text (a model's reply, as it came); `Specialist.replay` parses it again (it must give the
+  recorded spec), re-checks and re-renders, and a recorded invalid output must still be invalid. Only a record with no
+  proposer output calls the proposer (`replay(..., proposer=)`, default the specialist's own): `Replay.from_record` is
+  then False and `Replay.note` says so; `Replay.output_sha256` is the re-rendered output's hash.
+  `solvi.testing.conformance.check_specialist` gains the check "replays from its record without calling the proposer"
+  (a tripwire proposer during every replay, and the same bytes) and `deterministic=False` to skip the two-run check for
+  a model proposer. On the charts stand's 50 texts with the LLM proposer (gpt-oss-120b, answers from the proxy's cache,
+  no new calls) every stored run replays byte for byte from its record, 50 of 50. The 0/50 of PREREG X3 was the
+  benchmark's: its "second run" used the rule proposer for every arm; `benchmarks/charts_real_texts.py` now checks
+  replay from the record (and a second run only for the rule arm) and has `--replay RUNS_JSONL`.
+
 ### Changed
+
+- **`solvi.experimental.charts.LLMProposer` returns the model's reply text as it came** (a dict before), and
+  `ChartSpecialist.parse` reads a text leniently (the JSON object in it, a fence tolerated): the record keeps the text
+  and replay parses it again. A reply that is not JSON is now an invalid proposal (`invalid_proposal`, its text
+  recorded) instead of a failed proposer (`proposer_failed`).
 
 - **`solvi.experimental.counterfactual` re-exports `solvi.core.explain` for one release**, as the same objects, with an
   `ExperimentalWarning`; it is removed in 1.2 and `STATUS["counterfactual"]` is gone. The 0.9 path

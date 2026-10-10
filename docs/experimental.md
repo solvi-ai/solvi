@@ -39,7 +39,7 @@ A LoRA adapter on the decider for one question (`solvi.experimental.lora.adapt_l
 ## `compile`
 
 A written specification compiled by an LLM into catalog parts, accepted when two drafts agree and the specification's
-tests pass (with its sandbox, `solvi.experimental.compile.sandbox`). Since 0.9.
+tests pass (with its sandbox, `solvi.experimental.compile.sandbox`). Since 0.9. Since 1.1 an optional certificate on fresh examples sized by the hypothesis space (`certificate=`, `fresh_examples_needed`, `skew_guard`).
 
 - **Missing:** acceptance on larger specifications and a benchmark script in benchmarks/.
 - **Script:** none yet. **Deadline:** 1.2.
@@ -73,6 +73,20 @@ labelled update (`LearningTarget`: the update ladder and its gates, which were t
 and rollback (`solvi.experimental.changes.Pipeline(stages, storage, store=...)`). Since 1.1.
 
 - **Missing:** on a credit policy the pipeline carried a document version (144 of 144 changed decisions traced to their clause), admitted 12 of 12 exact exceptions, held every widening one for a person and refused 8 of 8 exceptions that touched other decisions, 0 extraneous changes, 14 versions replayed; on a bank-request stream with a person's labels every one of 22 candidates passed every stage (`nogate` = `gate`), so the stages added nothing there — the module is journal, impact analysis, approval levels and rollback; still missing: the narrows / widens classifier over rule conditions, a regression-scenario stage, and a script for the bank-request stream (the credit numbers: benchmarks/changes_credit.py).
+- **Refusal regression cannot be switched off.** Refusal is the first casualty of self-change (a chain of model merges
+  has been reported to keep its skills and lose much of its refusal; not reproduced here), so for every change whose target can answer (a target with
+  `answerer(change or None, ctx)` — `VersionsTarget`, `LearningTarget`, yours — or `Pipeline(answer_of=...)`) the
+  pipeline runs `RefusalRegression`: the share refused on a held should-abstain set (`Pipeline(refusals=...)`, the
+  `refusals=` kept by CleanCases / Confirmation, the stage's own) before and after; a change that answers an input
+  refused before is refused, with the set and the counts in the reason (tolerance 0.0 and a count tolerance of 0 by
+  default; raise `count_tolerance` for an answerer that flips a borderline input between runs). It is inserted before
+  Approval when it is not among the stages, journaled for every such change, final under every approval level, and
+  there is no argument that removes it. On the credit policy a threshold change that closes the review band ("points =
+  3 → approve") is refused by it: it answers 137 of 137 applications the policy hands to a person; the 12 admitted
+  corrections and both document versions pass. Without a declared set the change is held for a person ("no should-abstain set declared for a target that can
+  answer"): every pipeline whose target can answer declares `refusals=` (directly, through CleanCases / Confirmation,
+  or on the stage). The set follows the policy version — the credit stand declares it once version 2 is in force. An
+  item change is checked only with `answer_of=`.
 - **Script:** `benchmarks/changes_credit.py` (the credit policy; needs the German Credit applications:
   `benchmarks/tasks/fetch.sh credit` and `prepare.py`). **Deadline:** 1.2.
 - Guide: [The change pipeline](guide.md#the-change-pipeline-solviexperimentalchanges); design and API: the module

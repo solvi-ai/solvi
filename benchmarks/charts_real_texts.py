@@ -17,8 +17,15 @@ the shared proxy), then:
         proposed value was dropped);
   X3-4  solvi.testing.corrupt on the runs' recorded proposals — change_digit and swap of point values, drop of a point —
         and, reported beside it, on the proposals reduced to their verified points;
-  X3-5  each run's record replays (identical issues and bytes), a second run gives identical bytes, and
+  X3-5  each run's record replays from itself (re-parsed, re-checked, re-rendered without calling the proposer:
+        identical issues and bytes), with the rule proposer a second run gives identical bytes (a model proposer is
+        not re-called: a remote LLM at temperature 0 does not repeat itself), and
         solvi.testing.conformance.check_specialist passes on the texts.
+
+    python benchmarks/charts_real_texts.py --replay out/x3_llm/runs.jsonl    # X3-5's replay alone, from stored runs
+
+Until 1.1 the second run of X3-5 used the rule proposer for every arm, so the LLM arm's "same bytes" compared a rule
+chart with the model's (0/50); the replay of its records was 50/50.
 
 Results are saved per text as they come (out/runs.jsonl; a rerun with the same --out resumes), then out/report.json and
 out/report.md. Every read of texts.jsonl is logged (benchmarks/datasets/charts_texts/reads.log)."""
@@ -432,16 +439,27 @@ def corruption(runs, texts, n=300, seed=0):
 
 
 # ------------------------------------------------------------------------------------------ X3-5: replay
-def replay_checks(records, texts):
-    """{id: record} → per text: the record replays after a JSON round trip, and a fresh run gives the same bytes."""
-    sp = ChartSpecialist()
+def _not_called(source, question=None):
+    raise RuntimeError("replay called the proposer")
+
+
+def replay_checks(records, texts, *, rerun=None):
+    """{id: record} → per text: the record replays from itself after a JSON round trip — re-parsed, re-checked and
+    re-rendered with a proposer that may not be called — to the recorded bytes ("same_bytes"); with `rerun` (a
+    deterministic proposer: the rules) a fresh run gives the same bytes too ("rerun_same"). A model proposer is not
+    re-run: its records are the outputs."""
+    sp = ChartSpecialist(_not_called)
     out = {}
     for rid in sorted(records):
         rec = json.loads(json.dumps(records[rid], ensure_ascii=False))
         r = sp.replay(rec, texts[rid])
-        again = sp.run(texts[rid])
-        sha = hashlib.sha256(again.output.encode()).hexdigest() if again.output is not None else None
-        out[rid] = {"replay_ok": bool(r), "problems": r.problems, "same_bytes": sha == rec.get("output_sha256")}
+        row = {"replay_ok": bool(r), "problems": r.problems, "from_record": r.from_record,
+               "same_bytes": bool(r) and r.from_record and r.output_sha256 == rec.get("output_sha256")}
+        if rerun is not None:
+            again = ChartSpecialist(rerun).run(texts[rid])
+            sha = hashlib.sha256(again.output.encode()).hexdigest() if again.output is not None else None
+            row["rerun_same"] = sha == rec.get("output_sha256")
+        out[rid] = row
     return out
 
 
@@ -490,7 +508,7 @@ def run_all(texts, labels, out, *, proposer=None, n_corrupt=300, seed=0, arm="ru
     report = summarise(recs, texts, labels)
     report["x3_4"] = {arm_: {k: {kk: vv for kk, vv in v.items() if kk != "rows"} for k, v in kinds.items()}
                       for arm_, kinds in corruption(good, texts, n=n_corrupt, seed=seed).items()}
-    rp = replay_checks(good, texts)
+    rp = replay_checks(good, texts, rerun=RuleProposer() if arm == "rules" else None)
     try:
         cs = check_specialist(ChartSpecialist(), list(texts.values()))
         cs_res = {"passed": True, **cs}
@@ -498,7 +516,9 @@ def run_all(texts, labels, out, *, proposer=None, n_corrupt=300, seed=0, arm="ru
         cs_res = {"passed": False, "error": str(e)}
     report["x3_5"] = {"replayed_ok": sum(r["replay_ok"] for r in rp.values()),
                       "same_bytes": sum(r["same_bytes"] for r in rp.values()), "texts": len(texts),
-                      "failures": {k: r for k, r in rp.items() if not (r["replay_ok"] and r["same_bytes"])},
+                      "rerun_same": (sum(r["rerun_same"] for r in rp.values()) if arm == "rules" else None),
+                      "failures": {k: r for k, r in rp.items() if not (r["replay_ok"] and r["same_bytes"]
+                                                                      and r.get("rerun_same", True))},
                       "check_specialist": cs_res}
     report["config"] = {"arm": arm, "proposer": getattr(sp.proposer, "id", str(sp.proposer)), "n_corrupt": n_corrupt,
                         "seed": seed, "texts": len(texts)}
@@ -550,10 +570,12 @@ def bars(rep):
                  "met": (x4["change_digit"]["n"] > 0 and x4["change_digit"]["caught"] == x4["change_digit"]["n"]
                          and x4["swap"]["n"] > 0 and x4["swap"]["caught"] >= 0.95 * x4["swap"]["n"])},
         "X3-5": {"bar": "replay 50/50 identical bytes; check_specialist passes",
-                 "measured": f"replayed {x5['replayed_ok']}/{x5['texts']}, same bytes {x5['same_bytes']}/{x5['texts']}, "
-                             f"check_specialist {'passed' if x5['check_specialist']['passed'] else 'FAILED'}",
+                 "measured": f"replayed {x5['replayed_ok']}/{x5['texts']}, same bytes {x5['same_bytes']}/{x5['texts']}"
+                             + (f", a second rule run the same {x5['rerun_same']}/{x5['texts']}"
+                                if x5.get("rerun_same") is not None else "")
+                             + f", check_specialist {'passed' if x5['check_specialist']['passed'] else 'FAILED'}",
                  "met": x5["replayed_ok"] == x5["texts"] and x5["same_bytes"] == x5["texts"]
-                 and x5["check_specialist"]["passed"]},
+                 and x5.get("rerun_same") in (None, x5["texts"]) and x5["check_specialist"]["passed"]},
     }
 
 
@@ -601,7 +623,19 @@ def main(argv=None):
     ap.add_argument("--n-corrupt", type=int, default=300)
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--llm", default=None, help="report arm: an LLM proposer (model id) through the shared proxy")
+    ap.add_argument("--replay", default=None, help="X3-5's replay alone, from a runs.jsonl a run wrote (no proposer)")
     a = ap.parse_args(argv)
+    if a.replay:
+        texts = {r["id"]: r["text"] for r in load_texts(a.texts, mode="replay")}
+        recs = [json.loads(x) for x in Path(a.replay).read_text().splitlines() if x.strip()]
+        good = {r["id"]: r["record"] for r in recs if "record" in r}
+        rp = replay_checks(good, texts)
+        rep = {"runs": len(recs), "records": len(good), "replayed_ok": sum(r["replay_ok"] for r in rp.values()),
+               "from_record": sum(r["from_record"] for r in rp.values()),
+               "same_bytes": sum(r["same_bytes"] for r in rp.values()),
+               "failures": {k: r for k, r in rp.items() if not r["same_bytes"]}}
+        print(json.dumps(rep, indent=1, ensure_ascii=False))
+        return rep
     if a.dry == a.run:
         ap.error("say --dry (the gallery texts) or --run (the measured set), one of them")
     proposer, arm = None, "rules"

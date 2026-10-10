@@ -522,7 +522,7 @@ def test_check_specialist_on_the_charts_specialist_and_on_a_random_render():
             d = super()._record(run)
             d["proposal"] = None
             return d
-    with pytest.raises(cf.ConformanceError, match="replays from the store"):
+    with pytest.raises(cf.ConformanceError, match="every stored run replays from"):
         cf.check_specialist(Forgetful(), [PRESS], proposer=RuleProposer())
 
     class Noisy(ChartSpecialist):

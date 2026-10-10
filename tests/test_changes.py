@@ -270,7 +270,7 @@ def test_targets_for_compiled_versions_and_updates(tmp_path):
     vt, loop = VersionsTarget(FakeVersions()), UpdateTarget()
     acc = type("C", (), {"accepted": True, "fingerprint": "f1", "reason": ""})()
     pipe = Pipeline([Confirmation.compiled()], str(tmp_path / "c.jsonl"), targets=[vt, loop],
-                    approval={"compiled": "gate", "update": "gate"})
+                    approval={"compiled": "gate", "update": "gate"}, refusals=[{"text": "outside"}])
     r1 = pipe.propose(Change("document", artifact="compiled", payload=acc, reason="v2 of the policy"))
     assert r1.promoted and vt.in_force == 1
     r2 = Pipeline([], pipe.journal.storage, targets=[vt, loop], approval={"update": "gate"}).propose(

@@ -4950,11 +4950,21 @@ A proposer is any callable `(source, question) → spec | dict | JSON` (its `id`
 trusted and never replayed — its output is recorded and checked. A failing proposer or an invalid proposal blocks the
 run (a `blocked` issue, no output), recorded too.
 
+**Replay re-executes code and re-renders from recorded model outputs; it does not re-call a model.** A model proposer
+need not repeat itself — a remote LLM at temperature 0 returns other outputs across identical runs — so the record
+keeps the proposer's output (the parsed spec, and `proposal_raw`: the proposer's output when it was text — a model's
+reply as it came; the charts `LLMProposer` returns its text), and `replay` parses that output again
+(it must give the recorded spec), checks and renders it, and compares the bytes: a run with a nondeterministic proposer
+replays byte for byte. Only a record that holds no output at all makes `replay` call the proposer, and then
+`Replay.from_record` is False and `Replay.note` says so. Two runs of one source give the same bytes only with a
+deterministic proposer (`check_specialist(..., deterministic=False)` for a model one).
+
 **The record.** With `storage=`, every `run` appends one record of kind `"specialist"`: `specialist`, `version`,
 `question`, `source_sha256` and `source_chars` (the source itself is not stored — pass it to `replay` — unless
 `store_source=True`, which keeps the text in the record so `replay(stored_id)` is self-contained, at the cost of the
 text's size in every record and the text in the store), `proposer`,
-`proposal` (for a blocked run the raw proposal and `proposal_error`), the check's `issues`, `kept`, `verified` and
+`proposal` (for a blocked run the raw proposal and `proposal_error`), `proposal_raw` (the proposer's output when it was
+text — a model's reply), the check's `issues`, `kept`, `verified` and
 `meta`, `renderer`, `output_sha256`, `output_bytes`, `trace_head` (the head of the run's own chain) and `fingerprints`
 when the specialist reports them (`fingerprints()` → e.g. the model's and the renderer's). It is in the same hash chain
 as the decisions, so `store.verify()` catches an edited run, and `solvi report --overview` counts the runs per
@@ -5413,6 +5423,45 @@ customer-service policy. Look at some decisions the drafts agree on before you r
 reference. It picks the draft equal to the reference, else gives the reference's answer; it keeps a disputed test the
 reference agrees with, else corrects it. `recompile` takes the same options.
 
+### A certificate on fresh examples: certificate=
+
+The checks above need no labels. When you have labelled examples the writer never saw, `certificate=` adds one more
+gate after them: both accepted drafts must answer every fresh example correctly, and the size of that set is not a
+guess — it grows with the number of candidates the answer was chosen from.
+
+```python
+from solvi.experimental.compile import Certificate, compile_spec, fresh_examples_needed, skew_guard
+
+fresh_examples_needed(10 ** 6)               # 323: N = max(20, ⌈(ln |H| + ln 1/δ) / ε⌉), ε = 0.05, δ = 0.1
+fresh_examples_needed(1)                     # 47
+skew_guard(["no"] * 50 + ["yes"] * 3)        # why a constant "no" would pass: too few answers off the most common
+
+cert = Certificate(fresh, n_hypotheses=10 ** 6)   # fresh: [(input, {question: answer})]; or n=60 for a chosen count
+c = compile_spec(spec, questions, inputs, writer, certificate=cert)
+c.record["certificate"]       # needed, given, checked, not_fresh, distinct, skew, runs_agree, failures, passed
+```
+
+**The count.** A candidate picked among |H| that passes N fresh examples has, with probability at least 1 − δ, an
+error rate below ε when N ≥ (ln |H| + ln 1/δ) / ε — the bound for a consistent learner over a finite space. A search
+that tried a million candidates needs 323 fresh examples, not five: among a million candidates some match a handful
+of examples by chance. Give `n_hypotheses` when the candidates come from a search of known size; for an LLM writer the
+space cannot be counted, so choose `n` and say so.
+
+**The skew guard.** The fresh answers must take at least ten distinct values, or at least ten of them must differ
+from the most common answer (a yes/no question: ten of the rarer one). A set that is nearly all "no" certifies the
+constant "no".
+
+**What else it checks.** A fresh example whose input repeats a test or a labelled example does not count
+(`not_fresh`); fewer fresh examples than needed is not an acceptance. Each draft runs on the set twice, in separate
+sandboxed processes, and both runs must give the same answers: a part whose answer depends on the process — say, the
+iteration order of a set of strings — certifies nothing. The certificate is never shown to a writer, and a failure is
+not sent back for a rewrite: rewriting until a held-out set passes would make it a training set. `recompile` takes
+the same `certificate=`.
+
+**What it does not do.** The bound counts candidates, not how they were found: a writer that saw similar examples
+elsewhere, or fresh examples drawn from a narrower range than the real inputs, make the number promise less. The
+fresh examples must come from the inputs the system will meet.
+
 ### A changed specification: recompile and the decisions it moves
 
 ```python
@@ -5604,11 +5653,19 @@ and promotes it only when every gate passes:
 from solvi.experimental.changes import Change, LearningTarget, Pipeline
 
 target = LearningTarget(system, gates={"honesty": "tests/honesty/core_v1.json"})
-pipe = Pipeline([], system.storage, targets=[target], approval={"update": "gate"})   # one chain with the decisions
+pipe = Pipeline([], system.storage, targets=[target], approval={"update": "gate"},   # one chain with the decisions
+                refusals=outside)        # inputs the system must refuse or hand over: the should-abstain set
 res = pipe.propose(Change("person", artifact="update", proposer="ann"))
-[(v.stage, v.decision, v.reason) for v in res.verdicts]   # "update:ladder", "update:consistency", ... with numbers
+[(v.stage, v.decision, v.reason) for v in res.verdicts]   # "refusal_regression", "update:ladder", ... with numbers
 pipe.rollback(0)                                           # the state before the update comes back
 ```
+
+**Refusal regression cannot be switched off.** A target that can answer (`LearningTarget`, `VersionsTarget`, a target
+with `answerer(change or None, ctx)`, or any change with `Pipeline(answer_of=...)`) gets the `RefusalRegression` stage
+on every change: the share refused on the should-abstain set before and after; a change that answers an input refused
+before is refused. Without a declared set (`refusals=` on the pipeline, on CleanCases / Confirmation, or on the stage)
+the change is held for a person: "no should-abstain set declared for a target that can answer". The set follows the
+policy version — a document version may rightly change what goes to a person.
 
 **Labels** come only from outside the model: corrections from `"human"`, `"outcome"` and `"rule"` sources; any other
 source is refused and listed (`target.labels()["rejected"]`), and the stored decisions are never read as labels. Each
