@@ -115,6 +115,7 @@ nav:
           - solvi.core.store.diff: api/diff.md
           - solvi.core.versions: api/versions.md
           - solvi.core.specialist: api/specialist.md
+          - solvi.core.explain: api/explain.md
           - solvi.core.slow.generate: api/generate.md
           - solvi.core.slow.agree: api/agree.md
           - solvi.core.slow.refine: api/refine.md
@@ -161,7 +162,6 @@ nav:
           - solvi.experimental.hooks: api/hooks.md
           - solvi.experimental.charts: api/charts.md
           - solvi.experimental.changes: api/changes.md
-          - solvi.experimental.counterfactual: api/counterfactual.md
   - Changelog: changelog.md
   - Roadmap: roadmap.md
 

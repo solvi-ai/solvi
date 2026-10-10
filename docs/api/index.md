@@ -62,6 +62,7 @@ internal and have no page.
 | [`solvi.core.store.sysreport`](sysreport.md) | the system report: who answered, the cost, the promise against the stored labels, drift — from the store alone |
 | [`solvi.core.store.signature`](signature.md) | a signature of a trace or a store that names the one changed record |
 | [`solvi.core.store.diff`](diff.md) | `solvi diff` and shadow mode |
+| [`solvi.core.explain`](explain.md) | explaining a decision: the smallest change of the given inputs that changes an answer (counterfactuals), the cost of a change a parameter |
 | [`solvi.core.specialist`](specialist.md) | the specialist contract: propose a typed spec, check it against the source, render, replay; runs stored as records of kind "specialist"; two readers aligned (`align`) |
 | [`solvi.core.versions`](versions.md) | versions of a document: clauses (`Spec`), catalog versions citing them, versions with parents and rollback, the decisions a new version moves (`decision_diff`) |
 | [`solvi.core.slow.generate`](generate.md) | generation by an LLM: a text or validated JSON, quotes checked in a text, recorded as a model's output |
@@ -124,4 +125,3 @@ The modules `solvi.core` is made of. Their public names are re-exported by `solv
 | [`solvi.experimental.hooks`](hooks.md) | a coding agent's hooks: edits checked against rules, a skill picked for a prompt, install / uninstall (Claude Code; Codex, preview) |
 | [`solvi.experimental.charts`](charts.md) | verified charts: a text with numbers → an SVG in which every number is quoted from the text |
 | [`solvi.experimental.changes`](changes.md) | one change pipeline for a document version, verified experience, a person's correction or a search proposal: pluggable stages, a journal, promote, versions, rollback; a labelled update (`LearningTarget`) is a candidate change |
-| [`solvi.experimental.counterfactual`](counterfactual.md) | counterfactuals: the smallest change of the given inputs that changes an answer |

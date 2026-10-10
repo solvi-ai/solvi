@@ -108,8 +108,20 @@ calibration files and served by `solvi serve`), so a build from it is not mistak
   server, 5/5 malformed messages answered with an error and no crash, 55/55 calls stored and replayed, 15 ms
   overhead; the script `benchmarks/mcp_proxy_filesystem.py` lands with that measurement.
 
+- **Graduated: counterfactual explanations — `solvi.core.explain`** (`search`, `Counterfactual`, `Counterfactuals`,
+  `Change`, `Rerun`; until now `solvi.experimental.counterfactual`). Measured on the credit policy: 3,613 of 3,613
+  explanations valid on re-decision, thresholds minimal against brute force in 53 of 53, an explanation in one or two
+  fields for 507 of 522 refused or review applications, 0.065 s per search; the script
+  `benchmarks/counterfactual_credit.py` lands with that measurement. New, as the measurement asked: the cost of a
+  change is a parameter — `search(..., text_cost=1.0)` for an enumerated value (a text field over its domain, a
+  boolean, an Enum) and `costs={field: weight}` multiplying a field's change costs (defaults as before), since a
+  category change at the fixed cost 1 ranked first where a person would move a number.
+
 ### Changed
 
+- **`solvi.experimental.counterfactual` re-exports `solvi.core.explain` for one release**, as the same objects, with an
+  `ExperimentalWarning`; it is removed in 1.2 and `STATUS["counterfactual"]` is gone. The 0.9 path
+  `solvi.counterfactual` resolves to the stable module; fingerprints keep naming it `solvi.counterfactual`.
 - **`solvi.experimental.mcp` re-exports the proxy from `solvi.serve` for one release**, as the same objects, with an
   `ExperimentalWarning`; it is removed in 1.2 and `STATUS["mcp"]` is gone. The guide's proxy section moved to the serving
   chapter.
@@ -319,7 +331,7 @@ building blocks they are made of, and `solvi.experimental` holds what may still 
 | `solvi.command` | `solvi._command` | internal |
 | `solvi.compile` | `solvi.experimental.compile` | experimental: may change; removed in 1.2 unless it graduates |
 | `solvi.costs` | `solvi.core.costs` | low level: building blocks |
-| `solvi.counterfactual` | `solvi.experimental.counterfactual` | experimental: may change; removed in 1.2 unless it graduates |
+| `solvi.counterfactual` | `solvi.core.explain` | low level: building blocks |
 | `solvi.decide` | `solvi.core.deciders` | low level: building blocks |
 | `solvi.decide.adapt` | `solvi.core.deciders.adapt` | low level: building blocks |
 | `solvi.decide.backends` | `solvi.core.deciders.backends` | low level: building blocks |

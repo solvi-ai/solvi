@@ -46,9 +46,6 @@ STATUS: dict[str, dict] = {
                 "rollback; still missing: the narrows / widens classifier over rule conditions, a regression-scenario "
                 "stage, and a script for the bank-request stream (the credit numbers: benchmarks/changes_credit.py)",
                 "script": "benchmarks/changes_credit.py"},
-    "counterfactual": {"since": "0.7", "what": "the smallest change of a decision's inputs that changes its answer "
-                       "(adverse-action reasons)", "missing": "one measured use, e.g. adverse-action reasons on the "
-                       "credit gallery task", "script": None},
 }
 for _s in STATUS.values():
     _s["deadline"] = DEADLINE

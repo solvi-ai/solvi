@@ -80,18 +80,11 @@ and rollback (`solvi.experimental.changes.Pipeline(stages, storage, store=...)`)
   sensitive fields and citations in [solvi check](guide.md#checking-a-catalog-solvi-check), `only=` in
   [solvi diff](guide.md#catalog-fingerprint-solvi-diff-and-shadow-mode).
 
-## `counterfactual`
-
-The smallest change of a decision's inputs that changes its answer (adverse-action reasons;
-`solvi.experimental.counterfactual.search(res, question)`, was `res.counterfactual(...)`). Since 0.7.
-
-- **Missing:** one measured use, e.g. adverse-action reasons on the credit gallery task.
-- **Script:** none yet. **Deadline:** 1.2.
-- Guide: [Counterfactual explanations](guide.md#counterfactual-explanations-experimental-solviexperimentalcounterfactual);
-  API: [solvi.experimental.counterfactual](api/counterfactual.md).
-
 ## Graduated and removed
 
+- **Graduated in 1.1:** `counterfactual` — counterfactual explanations are the stable `solvi.core.explain`
+  ([guide](guide.md#explaining-a-decision-the-smallest-change-that-flips-it)), with the cost of a text change a
+  parameter (`text_cost=`, `costs=`); `solvi.experimental.counterfactual` re-exports it, with this warning, until 1.2.
 - **Graduated in 1.1:** `mcp` — the MCP proxy with a guard is `solvi.serve`'s (`run_proxy`, `Proxy`, `Upstream`;
   [guide](guide.md#an-mcp-proxy)); `solvi.experimental.mcp` re-exports it, with this warning, until 1.2.
 - **Graduated in 1.1:** `specialist` — the specialist contract is the stable `solvi.core.specialist`, its runs stored

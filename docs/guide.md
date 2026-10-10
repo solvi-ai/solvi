@@ -47,14 +47,15 @@ own. [Building blocks](building_blocks.md) has one reference per extension point
 24. [Extracting fields from documents](#extracting-fields-from-documents)
 25. [Versions of a document and their impact: solvi.core.versions](#versions-of-a-document-and-their-impact-solvicoreversions)
 26. [Specialists: a model proposes, code checks, the store keeps the run](#specialists-a-model-proposes-code-checks-the-store-keeps-the-run)
+27. [Explaining a decision: the smallest change that flips it](#explaining-a-decision-the-smallest-change-that-flips-it)
 
 **Experimental** — `solvi.experimental`: works and is tested, no measured gain yet; its API may change, and each piece
 graduates or is removed by 1.2 ([Experimental](experimental.md) lists what each one is missing).
 
-27. [solvi behind a coding agent's hooks](#solvi-behind-a-coding-agents-hooks)
-28. [A specification compiled into the catalog: solvi.experimental.compile](#a-specification-compiled-into-the-catalog-solviexperimentalcompile)
-29. [Verified charts: a specialist that checks every number](#verified-charts-a-specialist-that-checks-every-number)
-30. [The change pipeline: solvi.experimental.changes](#the-change-pipeline-solviexperimentalchanges)
+28. [solvi behind a coding agent's hooks](#solvi-behind-a-coding-agents-hooks)
+29. [A specification compiled into the catalog: solvi.experimental.compile](#a-specification-compiled-into-the-catalog-solviexperimentalcompile)
+30. [Verified charts: a specialist that checks every number](#verified-charts-a-specialist-that-checks-every-number)
+31. [The change pipeline: solvi.experimental.changes](#the-change-pipeline-solviexperimentalchanges)
 
 ## Quick start: solvi.build
 
@@ -3787,53 +3788,6 @@ approve = 'yes'  [ok]  confidence 0.60  ← computed by approve
               · fallback producer: total — total_regex used after total_model rejected
 ```
 
-### Counterfactual explanations (experimental): solvi.experimental.counterfactual
-
-"What would have changed the answer?" — the smallest change of the given inputs, for adverse-action reasons in lending and
-clear answers in support. Experimental: importing it warns, its API may change, and it has no measured use yet
-(`solvi.experimental.STATUS["counterfactual"]`).
-
-```python
-from solvi.experimental.counterfactual import search
-res = system.ask({"amount": 1200.0, "debt": 1000, "income": 5000, "history": "on time", "age": 30})
-cf = search(res, "approve")
-print(cf)
-# approve = decline [ok]
-#   approve if amount ≤ 1000 (now 1200)
-#   held at their recorded proposals (no model called): risk
-#   not searched: history (str: no domain (pass domains={'history': [...]}))
-cf.best.changes[0]            # Change(fact="amount", now=1200.0, to=1000.0, op="≤", cost=0.17)
-cf.to_dict()
-```
-
-Only the deterministic flow is re-run, on the recorded plan: every model-backed part — an extractor, a model decision, a
-learned answer head — is **held at the proposal it recorded in this trace**, and no model is called. The explanation is
-"what the code would decide if the models said what they said"; the result lists the parts held. A model part that did not
-run in the recorded decision (a hard check failed first) has no proposal: inputs that need it make the question abstain and
-do not count as a change (listed as "without a recorded proposal"). Learned rule lists (`learn_rule`) are code and re-run.
-
-What is searched (`over=`: default, the given facts the question's flow reads):
-
-- numbers and dates — outward from the current value in both directions with doubling steps, then bisection between the
-  last unchanged and the first changed value: the nearest threshold crossing, exact for inputs the answer is monotone in
-  (a non-monotone input can hide a nearer crossing between two probes). A direction where no probe changes the answer
-  is tried again on an even grid up to the farthest probe, which finds the band of a two-sided rule (`abs(value + 20) >
-  5` at 40 → `no if value ≤ -15`); a narrower band can still be missed, so when nothing is found the result says "no
-  change ... was found", not that none exists. Integers and dates give exact bounds
-  (`debt ≤ 1999`, `purchase_date ≥ 2026-08-20`); floats are shown at the shortest decimal that holds, `≤` or `<` as the
-  rule has it. A non-negative input stays non-negative; a domain `(lo, hi)` that does not contain the current value is
-  refused for that input (`cf.not_searched` says why);
-- booleans, Enums and `Literal` fields of `System(input_model=...)` — every other value;
-- anything else only with `domains={"history": ["on time", "late"]}`; a tuple bounds a number: `domains={"amount": (0, 5000)}`.
-
-`max_changes=2` (the default) tries two inputs together when no single input changes the answer ("approve if amount ≤ 1000
-(now 1200) and debt ≤ 1999 (now 2500)" — each bound holds with the other change made); `max_changes=1` does not.
-`target="approve"` looks only for that answer. Results are ranked by the number of changes, then their size (the relative
-change of a number; for a date the days moved over 30, or over the width of its domain; 1 for an enumerated value).
-A given input read only by a part that did not run (a soft check skipped after a hard check failed) is listed in
-`cf.not_searched`. `max_evals=5000` caps the re-runs (`cf.exhausted`). A response loaded from
-a store with its System works the same; one loaded without it needs `system=` (`search(res, "approve", system=system)`).
-
 ### Reports for people: res.report, store.report, solvi report
 
 The audit is for developers; a report is for an auditor or a customer — one page per decision or per period, as Markdown,
@@ -5036,6 +4990,60 @@ Nothing in it decides acceptance: the check accepts from `agreed` and turns `con
 the thresholds are the task's. On two stands this was the mechanism behind the measured gains: speech (two models'
 words aligned in time) gave 0 false words on 400 non-speech clips and caught 299 of 300 corruptions, receipts (two OCR
 engines' words aligned by box) went from 88% to 96.4% exact among accepted fields.
+
+## Explaining a decision: the smallest change that flips it
+
+"What would have changed the answer?" — the smallest change of the given inputs, for adverse-action reasons in lending and
+clear answers in support: `solvi.core.explain` (stable since 1.1; until then `solvi.experimental.counterfactual`, which
+re-exports it for one release). Measured on the credit policy (`benchmarks/counterfactual_credit.py`): 3,613 of 3,613
+explanations were valid when the decision was made again with the change, the thresholds found were minimal against a
+brute-force search in 53 of 53 cases, 507 of 522 refused or review applications got an explanation in one or two
+fields, at 0.065 s per search.
+
+```python
+from solvi.core.explain import search
+res = system.ask({"amount": 1200.0, "debt": 1000, "income": 5000, "history": "on time", "age": 30})
+cf = search(res, "approve")
+print(cf)
+# approve = decline [ok]
+#   approve if amount ≤ 1000 (now 1200)
+#   held at their recorded proposals (no model called): risk
+#   not searched: history (str: no domain (pass domains={'history': [...]}))
+cf.best.changes[0]            # Change(fact="amount", now=1200.0, to=1000.0, op="≤", cost=0.17)
+cf.to_dict()
+```
+
+Only the deterministic flow is re-run, on the recorded plan: every model-backed part — an extractor, a model decision, a
+learned answer head — is **held at the proposal it recorded in this trace**, and no model is called. The explanation is
+"what the code would decide if the models said what they said"; the result lists the parts held. A model part that did not
+run in the recorded decision (a hard check failed first) has no proposal: inputs that need it make the question abstain and
+do not count as a change (listed as "without a recorded proposal"). Learned rule lists (`learn_rule`) are code and re-run.
+
+What is searched (`over=`: default, the given facts the question's flow reads):
+
+- numbers and dates — outward from the current value in both directions with doubling steps, then bisection between the
+  last unchanged and the first changed value: the nearest threshold crossing, exact for inputs the answer is monotone in
+  (a non-monotone input can hide a nearer crossing between two probes). A direction where no probe changes the answer
+  is tried again on an even grid up to the farthest probe, which finds the band of a two-sided rule (`abs(value + 20) >
+  5` at 40 → `no if value ≤ -15`); a narrower band can still be missed, so when nothing is found the result says "no
+  change ... was found", not that none exists. Integers and dates give exact bounds
+  (`debt ≤ 1999`, `purchase_date ≥ 2026-08-20`); floats are shown at the shortest decimal that holds, `≤` or `<` as the
+  rule has it. A non-negative input stays non-negative; a domain `(lo, hi)` that does not contain the current value is
+  refused for that input (`cf.not_searched` says why);
+- booleans, Enums and `Literal` fields of `System(input_model=...)` — every other value;
+- anything else only with `domains={"history": ["on time", "late"]}`; a tuple bounds a number: `domains={"amount": (0, 5000)}`.
+
+`max_changes=2` (the default) tries two inputs together when no single input changes the answer ("approve if amount ≤ 1000
+(now 1200) and debt ≤ 1999 (now 2500)" — each bound holds with the other change made); `max_changes=1` does not.
+`target="approve"` looks only for that answer. Results are ranked by the number of changes, then their size (the relative
+change of a number; for a date the days moved over 30, or over the width of its domain; `text_cost`, 1 by default, for
+an enumerated value — a text field searched over its domain, a boolean, an Enum), each times the field's weight in
+`costs={"amount": 2.0}` (1 by default). With the default a change of category often ranks first where a person would
+rather move a number (the credit measurement found such a case): raise
+`text_cost=` or weigh the fields so the ranking follows what is cheap to change for the person you explain to.
+A given input read only by a part that did not run (a soft check skipped after a hard check failed) is listed in
+`cf.not_searched`. `max_evals=5000` caps the re-runs (`cf.exhausted`). A response loaded from
+a store with its System works the same; one loaded without it needs `system=` (`search(res, "approve", system=system)`).
 
 ## solvi behind a coding agent's hooks
 

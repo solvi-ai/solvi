@@ -82,7 +82,7 @@ def test_the_docs_moved_with_it():
     root = Path(__file__).resolve().parents[1]
     guide = (root / "docs" / "guide.md").read_text()
     intro = guide.split("\n## ")[0]
-    building = intro.split("**Building blocks**")[1].split("**Experimental**")[0]
+    building = intro.split("**Building blocks** —")[1].split("**Experimental** —")[0]
     assert "Explaining a decision: the smallest change that flips it" in building
     assert "Counterfactual explanations (experimental)" not in guide
     assert "## `counterfactual`" not in (root / "docs" / "experimental.md").read_text()

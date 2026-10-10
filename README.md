@@ -386,8 +386,10 @@ a decision that used one records it, and each one graduates or is removed by 1.2
   experience and a labelled update — pluggable stages, a hash-chained journal, impact analysis, approval levels and
   rollback by version; an update from trusted corrections is promoted only when it passes held-out, honesty and
   calibration gates. **LoRA** (`solvi.experimental.lora`): an adapter per question on solvi-base (`solvi[lora]`).
-- **The MCP proxy** (`solvi serve --guard catalog.py:guard --upstream CMD`: the guard in front of an MCP server) and
-  **counterfactuals** (`solvi.experimental.counterfactual`: the smallest input change that flips an answer).
+
+Graduated in 1.1 (stable now): the MCP proxy with a guard (`solvi serve --guard catalog.py:guard --upstream CMD`,
+`solvi.serve.run_proxy`), counterfactual explanations (`solvi.core.explain`: the smallest input change that flips an
+answer), the specialist contract (`solvi.core.specialist`) and document versions (`solvi.core.versions`).
 
 ## Coming from 0.9
 
