@@ -86,12 +86,17 @@ Laws of an environment from prediction mismatches, judged by the environment, ne
 (`solvi.experimental.laws`): a grammar of boolean atoms you write, candidates "for this action, under this condition,
 the effect is this" from each wrong prediction, acceptance only by a held-out test on other worlds, sessions or paths,
 most specific first, retirement when the held-out precision falls, a probe planner for live systems (`split`,
-`discriminate`: read-only before write) and export into the knowledge store (`LawSet.to_knowledge`). Since 1.1.
+`discriminate`: read-only before write) and export into the knowledge store (`LawSet.to_knowledge`). The acceptance is
+sized by how many candidates were tested on the buffer (`sized=True`, the default; `sized=False` the fixed thresholds),
+`LawSet.admit_by_probes` admits a law by asking the world where the candidates disagree and only when one class
+survives, `predict(..., disagree="abstain")` abstains where laws that are not exceptions of one another disagree, and
+`LawSet.cost` records the search cost. Since 1.1.
 
-- **Missing:** on a game simulator with written mechanics the laws closed 94% of the gap between a learned map and the written mechanics, but random candidates under the same test came within 1.1 points, so the mismatch is a compact proposal heuristic and the test does the work; on a real MCP filesystem server with a path policy, probes planned from mismatches took refusals from 6 to 0 in one session (random probes: 48 to 29); still missing: a grammar too large to enumerate, retirement of weak laws nothing contradicts, wiring into a System's decisions, and a script for the two stands (the toys: benchmarks/laws_toy.py); a ranker of candidates for expensive checks (RankedProposer, a bag-of-atoms model trained on tasks drawn from the grammar) cut the checks to the true condition from 69.7 in the blind order to 2.1 on synthetic tasks of one grammar, in distribution only and never on a live system.
+- **Missing:** on a game simulator with written mechanics the laws closed 94% of the gap between a learned map and the written mechanics, but random candidates under the same test came within 1.1 points, so the mismatch is a compact proposal heuristic and the test does the work; on a real MCP filesystem server with a path policy, probes planned from mismatches took refusals from 6 to 0 in one session (random probes: 48 to 29); still missing: a grammar too large to enumerate, retirement of weak laws nothing contradicts, wiring into a System's decisions, and a script for the two stands (the toys: benchmarks/laws_toy.py); a ranker of candidates for expensive checks (RankedProposer, a bag-of-atoms model trained on tasks drawn from the grammar) cut the checks to the true condition from 69.7 in the blind order to 2.1 on synthetic tasks of one grammar, in distribution only and never on a live system; the acceptance sized by the candidates tested on a buffer (on a synthetic buffer with no law the fixed thresholds accepted a law in 100 of 100 buffers, the sized rule in 0 of 100), admission by discriminating probes (on a synthetic world at 8 checks a random held-out sample accepted a wrong law in 0.593 of the trials, the probes in none) and abstention where laws that are not exceptions of one another disagree are measured on synthetic worlds only, not yet on the game simulator or the file server.
 - **Script:** `benchmarks/laws_toy.py` (two deterministic toys that reproduce both findings in miniature; `pytest -m
   slow tests/test_laws_toy.py`). **Deadline:** 1.2.
-- Guide: [Laws from an environment](best_practices.md#laws-from-an-environment-the-test-is-the-judge), [ranking
+- Guide: [Laws from an environment](best_practices.md#laws-from-an-environment-the-test-is-the-judge), [sized
+  acceptance, probes, abstention](best_practices.md#size-the-acceptance-by-the-search-admit-by-probes-abstain-when-laws-disagree), [ranking
   candidates](best_practices.md#rules-over-relations-enumerate-with-a-library-rank-only-where-a-check-is-expensive); API:
   [solvi.experimental.laws](api/laws.md).
 
@@ -130,9 +135,11 @@ it, verified plans are compiled into System 1 skills ("when these atoms hold, fo
 conditions keep the atoms every verified start shared), and a skill acts alone only while its outcomes keep an
 anytime-valid certificate — before that System 2 re-verifies it at every use, and an alarm on its alone outcomes
 retires it. `SkillLearner` runs the loop with a record per decision and per episode; `as_s2(learner)` makes the planner
-System 2 of `solvi.Agent`; `SkillSet.to_knowledge` writes the skills into the knowledge store. Since 1.1.
+System 2 of `solvi.Agent`; `SkillSet.to_knowledge` writes the skills into the knowledge store;
+`SkillSet(disagree="abstain")` leaves to System 2 the states where certified skills of one goal disagree, and each
+episode records its search cost. Since 1.1.
 
-- **Missing:** on a deterministic gridworld (20 fresh layouts, five seeds) System 1's share reached 0.81 in the last five episodes with every goal reached, as when System 2 plans every goal, and 1.5% of System 1's decisions were in failed runs under a 20% promise pooled over the skills, while replayed cases never transferred and plans compiled without verification reached no goal; still missing: a stand beyond the toy (a game simulator with written mechanics, a service with a specification), a 5% promise (fifty clean uses per certified unit), a condition rule that specialises after a failure, and a planner with a heuristic.
+- **Missing:** on a deterministic gridworld (20 fresh layouts, five seeds) System 1's share reached 0.81 in the last five episodes with every goal reached, as when System 2 plans every goal, and 1.5% of System 1's decisions were in failed runs under a 20% promise pooled over the skills, while replayed cases never transferred and plans compiled without verification reached no goal; still missing: a stand beyond the toy (a game simulator with written mechanics, a service with a specification), a 5% promise (fifty clean uses per certified unit), a condition rule that specialises after a failure, and a planner with a heuristic; abstention where certified skills of one goal disagree and the search-cost record are tested on synthetic sets only, and the sized and probe admission of laws is not applied to skills.
 - **Script:** `benchmarks/skills_toy.py` (the gridworld with four arms: skills, plan always, cases, scrambled; `pytest -m
   slow tests/test_skills_toy.py`). **Deadline:** 1.2.
 - Guide: [Learning in a world described by code](best_practices.md#learning-in-a-world-described-by-code-plan-on-the-code);

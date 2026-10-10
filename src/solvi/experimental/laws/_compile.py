@@ -119,7 +119,7 @@ def check_compiled(module: Any, buffer, lawset, *, limit: int = 20) -> CompiledC
     diffs, examples = 0, []
     for t in rows:
         law = lawset.applied(t.state, t.action)
-        want = (law.id if law is not None else None, lawset.predict(t.state, t.action))
+        want = (law.id if law is not None else None, lawset.predict(t.state, t.action, disagree="first"))
         got = (mod.applied(t.state, t.action), mod.predict(t.state, t.action, base=lawset.base, apply=apply))
         if got != want:
             diffs += 1

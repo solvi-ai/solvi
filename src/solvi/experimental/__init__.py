@@ -49,7 +49,9 @@ STATUS: dict[str, dict] = {
     "laws": {"since": "1.1", "what": "laws of an environment from prediction mismatches: a grammar of atoms you "
              "write, candidates from each mismatch, acceptance only by a held-out test on other groups (worlds, "
              "sessions, paths), most specific first, retirement on falling precision, a probe planner for live "
-             "systems, export into the knowledge store", "missing": "on a game simulator with written mechanics the "
+             "systems, export into the knowledge store; acceptance sized by the candidates tested, admission by "
+             "discriminating probes, abstention where laws disagree, a search-cost record",
+             "missing": "on a game simulator with written mechanics the "
              "laws closed 94% of the gap between a learned map and the written mechanics, but random candidates under "
              "the same test came within 1.1 points, so the mismatch is a compact proposal heuristic and the test does "
              "the work; on a real MCP filesystem server with a path policy, probes planned from mismatches took "
@@ -58,7 +60,13 @@ STATUS: dict[str, dict] = {
              "script for the two stands (the toys: benchmarks/laws_toy.py); a ranker of candidates for expensive checks "
              "(RankedProposer, a bag-of-atoms model trained on tasks drawn from the grammar) cut the checks to the true "
              "condition from 69.7 in the blind order to 2.1 on synthetic tasks of one grammar, in distribution only "
-             "and never on a live system", "script": "benchmarks/laws_toy.py"},
+             "and never on a live system"
+             "; the acceptance sized by the candidates tested on a buffer (on a synthetic buffer with no law the "
+             "fixed thresholds accepted a law in 100 of 100 buffers, the sized rule in 0 of 100), admission by "
+             "discriminating probes (on a synthetic world at 8 checks a random held-out sample accepted a wrong "
+             "law in 0.593 of the trials, the probes in none) and abstention where laws that are not exceptions of"
+             " one another disagree are measured on synthetic worlds only, not yet on the game simulator or the "
+             "file server", "script": "benchmarks/laws_toy.py"},
     "relations": {"since": "1.1", "what": "relations over a state and rules over them: packed-bit relations, the "
                   "relation algebra (composition, converse, closure, counts), a bottom-up enumerator with "
                   "observational equivalence on the full relations, a library of accepted programs, compilation into "
@@ -88,14 +96,18 @@ STATUS: dict[str, dict] = {
     "skills": {"since": "1.1", "what": "learning in a world described by code: System 2 plans on an exact model (a "
                "copy of the environment), only plans the code verified are compiled into System 1 skills with "
                "conditions over a grammar of atoms, each used alone only while its outcomes keep an anytime-valid "
-               "certificate; the planner as System 2 of solvi.Agent; export into the knowledge store", "missing": "on "
+               "certificate; abstention where certified skills disagree; a search-cost record per episode; the "
+               "planner as System 2 of solvi.Agent; export into the knowledge store", "missing": "on "
                "a deterministic gridworld (20 fresh layouts, five seeds) System 1's share reached 0.81 in the last "
                "five episodes with every goal reached, as when System 2 plans every goal, and 1.5% of System 1's "
                "decisions were in failed runs under a 20% promise pooled over the skills, while replayed cases never "
                "transferred and plans compiled without verification reached no goal; still missing: a stand beyond "
                "the toy (a game simulator with written mechanics, a service with a specification), a 5% promise "
                "(fifty clean uses per certified unit), a condition rule that specialises after a failure, and a "
-               "planner with a heuristic", "script": "benchmarks/skills_toy.py"},
+               "planner with a heuristic"
+               "; abstention where certified skills of one goal disagree and the search-cost record are tested on "
+               "synthetic sets only, and the sized and probe admission of laws is not applied to skills",
+               "script": "benchmarks/skills_toy.py"},
 }
 for _s in STATUS.values():
     _s["deadline"] = DEADLINE

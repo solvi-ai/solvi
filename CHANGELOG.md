@@ -38,6 +38,21 @@ calibration files and served by `solvi serve`), so a build from it is not mistak
   cap, `step` / `learn` run the loop over a stream. `to_knowledge(store, scope)` writes each law as a "rule" item
   (body kind "law") with source "outcome" and the transitions it was accepted on as evidence, and retires the retired
   ones; the journal verifies and replays. `split` / `discriminate` plan probes for a live system (read-only first).
+- **Laws and skills: the acceptance sized by the search, admission by probes, abstention, the search cost
+  (experimental).** `LawSet(sized=True)` — now the default — accepts a candidate only when P[Binomial(support, null) ≥
+  hits] ≤ δ / (N·(N + 1)), N the candidates scored on that buffer so far (`Buffer.tested`; `space=` declares N in
+  advance, Bonferroni; `delta=0.1`, `null_precision=` min_precision or 0.95 at 1); `sized_level` / `sized_need` give the
+  level and the clean support it asks for. On a synthetic buffer with no law the fixed thresholds accepted a law in 100
+  of 100 buffers, the sized rule in 0 of 100; a real law on 250 rows was still accepted. `sized=False` keeps the fixed
+  thresholds (the measured toys and benchmarks pass it, and a buffer of tens of rows needs it). Each `Law` records
+  `tested`, `need`, `level` and `admitted`. `LawSet.admit_by_probes(candidates, ask, probes=, safe=, budget=, buffer=)`
+  asks the world where the surviving candidates disagree (`split`), accepts the shortest one only when one equivalence
+  class survives and returns an `Admission` ("accepted" / "undetermined" with the classes); on a synthetic world at 8
+  checks a random held-out sample accepted a wrong law in 0.593 of 300 trials, the probes in none (0.987 right).
+  `predict(..., disagree="abstain")` / `LawSet(disagree=)` returns `Undetermined` where the most specific matching laws
+  (none an exception of another) disagree, counted in `abstained`; `SkillSet(disagree=)` / `match(disagree=)` returns
+  None where certified skills of one goal disagree. Most specific first stays the default. `LawSet.cost`,
+  `Step.tested` and the skill episodes' `cost` (`searched`, `verify_calls`) record the search cost.
   Measured on two stands: on a game simulator with written mechanics the laws closed 94% of the gap between a learned
   map and the written mechanics, with random candidates under the same test within 1.1 points; on a real MCP
   filesystem server with a path policy, refusals 6 → 0 in one session (random probes: 48 → 29).
