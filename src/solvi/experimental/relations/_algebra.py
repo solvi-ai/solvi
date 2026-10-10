@@ -6,10 +6,10 @@ from typing import Iterable, Sequence
 
 import numpy as np
 
-UNARY = ("T", "NOT", "PLUS", "CNT2", "CNT3")
+UNARY = ("T", "NOT", "PLUS", "CNT1", "CNT2", "CNT3")
 BINARY = ("OR", "AND", "MINUS", "XOR", "COMP", "C2", "C3")
 COMMUTATIVE = frozenset({"OR", "AND", "XOR"})
-OPS = UNARY + BINARY
+OPS = tuple(o for o in UNARY if o != "CNT1") + BINARY       # the default search; CNT1 (has a successor) is opt-in
 SYM = {"OR": "∪", "AND": "∩", "MINUS": "∖", "XOR": "⊕", "COMP": "∘", "C2": "#2∘", "C3": "#3∘"}
 
 
@@ -171,7 +171,7 @@ def show(ast) -> str:
         return "¬" + show(ast[1])
     if op == "PLUS":
         return f"({show(ast[1])})⁺"
-    if op in ("CNT2", "CNT3"):
+    if op in ("CNT1", "CNT2", "CNT3"):
         return f"#≥{op[-1]}({show(ast[1])})"
     return f"({show(ast[1])} {SYM[op]} {show(ast[2])})"
 
@@ -230,7 +230,7 @@ def apply_unary(op, v, M):
         return ~v & M
     if op == "PLUS":
         return closure(v, mask=M)
-    if op in ("CNT2", "CNT3"):
+    if op in ("CNT1", "CNT2", "CNT3"):
         return count_at_least(v, int(op[-1]), mask=M)
     raise ValueError(f"unknown unary operator {op!r}")
 

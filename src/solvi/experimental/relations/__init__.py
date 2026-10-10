@@ -23,8 +23,9 @@ acted on). The algebra on boolean matrices: `compose(a, b, k=1)` (at least k pat
 `count_at_least(a, k)` (a unary: the nodes with at least k successors).
 
 Programs are tuples: terminals ("R", name), ("I",), ("U",) (every real pair), ("L", name) (a library entry); unary
-("T", x) converse, ("NOT", x), ("PLUS", x) closure, ("CNT2", x) / ("CNT3", x); binary ("OR" | "AND" | "MINUS" | "XOR"
-| "COMP" | "C2" | "C3", a, b), C2 / C3 = at least 2 / 3 paths. `show`, `size` (nodes), `evaluate(ast, relations)`,
+("T", x) converse, ("NOT", x), ("PLUS", x) closure, ("CNT1", x) / ("CNT2", x) / ("CNT3", x) (CNT1 is opt-in: not in
+the default OPS); binary ("OR" | "AND" | "MINUS" | "XOR" | "COMP" | "C2" | "C3", a, b), C2 / C3 = at least 2 / 3
+paths. `show`, `size` (nodes), `evaluate(ast, relations)`,
 `readout(value)` — a relation as a state bit: does node 0 relate to anything.
 
 The enumerator. `enumerate_programs(examples, size, library=(), ops=...)` builds programs bottom-up by size and keeps

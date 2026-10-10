@@ -183,13 +183,14 @@ class DenseAnswer(ValueError):
 
 _SETS = {"OR": "{a} | {b}", "AND": "{a} & {b}", "MINUS": "{a} - {b}", "XOR": "{a} ^ {b}", "COMP": "_rel_comp({a}, {b})",
          "C2": "_rel_count({a}, {b}, 2)", "C3": "_rel_count({a}, {b}, 3)", "T": "_rel_conv({a})",
-         "PLUS": "_rel_plus({a})", "CNT2": "_rel_cnt({a}, 2)", "CNT3": "_rel_cnt({a}, 3)", "I": "_rel_id(n)",
+         "PLUS": "_rel_plus({a})", "CNT1": "_rel_cnt({a}, 1)", "CNT2": "_rel_cnt({a}, 2)", "CNT3": "_rel_cnt({a}, 3)", "I": "_rel_id(n)",
          "U": "_rel_all(n)", "NOT": "_rel_all(n) - {a}", "EMPTY": "set()", "OFFDIAG": "_rel_offdiag({a})",
          "DIAG": "_rel_diag({a})", "R": "R[{a}]"}
 _ARRAYS = {"OR": "_np.union1d({a}, {b})", "AND": "_np.intersect1d({a}, {b}, assume_unique=True)",
            "MINUS": "_np.setdiff1d({a}, {b}, assume_unique=True)", "XOR": "_np.setxor1d({a}, {b}, assume_unique=True)",
            "COMP": "_ra_comp({a}, {b}, n)", "C2": "_ra_count({a}, {b}, n, 2)", "C3": "_ra_count({a}, {b}, n, 3)",
-           "T": "_ra_conv({a}, n)", "PLUS": "_ra_plus({a}, n)", "CNT2": "_ra_cnt({a}, n, 2)", "CNT3": "_ra_cnt({a}, n, 3)",
+           "T": "_ra_conv({a}, n)", "PLUS": "_ra_plus({a}, n)", "CNT1": "_ra_cnt({a}, n, 1)",
+           "CNT2": "_ra_cnt({a}, n, 2)", "CNT3": "_ra_cnt({a}, n, 3)",
            "I": "_ra_id(n)", "U": "_ra_all(n)", "NOT": "_np.setdiff1d(_ra_all(n), {a}, assume_unique=True)",
            "EMPTY": "_E", "OFFDIAG": "_ra_offdiag({a}, n)", "DIAG": "_ra_diag({a}, n)", "R": "R[{a}]"}
 BACKENDS = {"sets": (_SETS, RUNTIME), "arrays": (_ARRAYS, RUNTIME_ARRAYS)}

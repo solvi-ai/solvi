@@ -106,7 +106,8 @@ class Enumerator:
     the new behaviours in order; `evals`, `behaviours`, `stopped` ("exhausted" | "cap" | "found" | "seconds") after.
 
     base: the examples (a sequence of Relations with the same relation names). ops: the operators to use (default
-    all: T, NOT, PLUS, CNT2, CNT3, OR, AND, MINUS, XOR, COMP, C2, C3). max_behaviours / max_evals / seconds: caps;
+    all but CNT1: T, NOT, PLUS, CNT2, CNT3, OR, AND, MINUS, XOR, COMP, C2, C3; CNT1 — at least one successor — is
+    opt-in). max_behaviours / max_evals / seconds: caps;
     max_bytes (default 1.5 GB): the store of behaviours (B·n² bits each, packed, plus a 16-byte key) is capped to fit —
     with many or large examples search on a subset and re-check on all (synthesize(check=...)).
 
@@ -126,9 +127,9 @@ class Enumerator:
             fit = max(1, int(max_bytes) // self.bytes_per_behaviour)
             max_behaviours = fit if max_behaviours is None else min(max_behaviours, fit)
         self.size, self.library = int(size), _library(library)
-        bad = [o for o in ops if o not in OPS]
+        bad = [o for o in ops if o not in UNARY + BINARY]
         if bad:
-            raise ValueError(f"unknown operators {bad} (have {list(OPS)})")
+            raise ValueError(f"unknown operators {bad} (have {list(UNARY + BINARY)})")
         self.unary = [o for o in UNARY if o in ops]
         self.binary = [o for o in BINARY if o in ops]
         self.max_behaviours, self.max_evals, self.seconds = max_behaviours, max_evals, seconds

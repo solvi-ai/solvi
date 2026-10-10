@@ -8,7 +8,9 @@ from rules that passed the held-out test. Bars on the means of the five seeds: e
 library's cumulative programs at every level's admission ≤ 1/10 of the no-library budget, which flat search spends
 without finding the top rule; 0 false accepts on fresh larger worlds. The no-library budget was 60,000 programs in the
 first run (the top kinship rule then cost the library 6,124 cumulative programs, 1.02 × the bar) and was raised to
-100,000 after it; the per-level own-round costs next to flat's are reported by the script, not barred."""
+100,000 after it; the per-level own-round costs next to flat's are reported by the script, not barred. With the
+package's relation enumerator in place of the minimal one the kinship ladder misses the 1/10 bar (10,817 cumulative at
+the top rule; see the script's docstring) — the bar was left as it was."""
 import importlib.util
 import time
 import warnings

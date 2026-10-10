@@ -24,8 +24,10 @@ The construction rule:
 What it does not do: invent the intermediate concepts. The targets are given (as an unordered set: find_rules sorts
 them by name, so the caller's order is not a curriculum); what it finds by itself is which target is within reach of the
 current library, and the programs. No gradient learner ships with solvi (its core has no torch): the `proposer=` slot is
-documented and tested with a stand-in. The enumerator inside is a minimal one (`_enum_min`) until the full relation
-enumerator of this package replaces it; the AST and the `Library` fields stay."""
+documented and tested with a stand-in. The search is the package's relation-algebra enumerator (`Enumerator`, with
+the operators `ops1` / `ops2` / `counts` name; the identity I and the universal relation U are always terminals) and the
+programs are the package's tuples (`show`, `size`, `evaluate`); `library=` takes `Library` entries of this module or
+the package's `Library` of accepted programs."""
 from __future__ import annotations
 
 from dataclasses import dataclass, field
@@ -33,10 +35,14 @@ from typing import Any, Callable, Iterable, Mapping, Protocol, Sequence
 
 import numpy as np
 
-from . import _enum_min as _E
+from . import _algebra as _A
+from ._enumerate import Enumerator, _digest
+from ._enumerate import Library as _Programs
 
-OPS1, OPS2 = _E.OPS1, _E.OPS2
-show, size = _E.show, _E.size
+OPS1 = ("T", "PLUS", "CNT")         # "CNT": at least k successors, one operator CNT<k> per k in `counts` (1 to 3)
+OPS2 = ("COMP", "AND", "OR", "MINUS")
+show, size = _A.show, _A.size
+_POP = np.array([bin(i).count("1") for i in range(256)], dtype=np.int64)
 
 
 @dataclass(frozen=True, eq=False)
@@ -59,10 +65,86 @@ def _lib_map(library) -> dict[str, tuple]:
     return out
 
 
+def _programs(library) -> _Programs:
+    """The entries as the package's Library (what the enumerator and the evaluator take), in an order where every
+    entry comes after the entries it uses."""
+    todo, out = list(library or ()), _Programs()
+    while todo:
+        rest = [e for e in todo if not all(r in out for r in _names(e.program, "L"))]
+        if len(rest) == len(todo):
+            raise ValueError(f"library entries {[e.name for e in rest]} use entries that are not in the library")
+        for e in todo:
+            if e not in rest:
+                out.add(e.program, e.name)
+        todo = rest
+    return out
+
+
+def _world_n(ex, names) -> int:
+    missing = [x for x in names if x not in ex]
+    if missing:
+        raise ValueError(f"an example has no relation {missing}")
+    ns = {np.asarray(ex[x]).shape for x in names}
+    shape = next(iter(ns))
+    if len(ns) != 1 or len(shape) != 2 or shape[0] != shape[1]:
+        raise ValueError(f"an example's relations must be square and of one size, got {ns}")
+    return shape[0]
+
+
+def _batch(examples, names) -> "_A._Batch":
+    """Example worlds (name → (n, n) bool) as the package's padded batch over `names`."""
+    if not examples:
+        raise ValueError("no examples")
+    names = list(names)
+    rels = []
+    for ex in examples:
+        _world_n(ex, names)
+        rels.append(_A.Relations.from_dense(names, np.stack([np.asarray(ex[x], bool) for x in names])))
+    return _A._Batch(rels, names)
+
+
+def _pad(batch, arrays) -> np.ndarray:
+    """Per-example (n, n) matrices → one padded (B, n, n) tensor; ValueError on a wrong shape."""
+    arrays = list(arrays)
+    for b, (a, n) in enumerate(zip(arrays, batch.sizes)):
+        if np.shape(a) != (n, n):
+            raise ValueError(f"example {b}: a target of shape {np.shape(a)}, the world has {n} nodes")
+    return batch.pad(arrays)
+
+
+def _pack(value) -> np.ndarray:
+    return np.packbits(np.asarray(value, bool).reshape(-1))
+
+
+def _mismatches(a, b) -> int:
+    return int(_POP[np.bitwise_xor(a, b)].sum())
+
+
+def _any_relation(world) -> list[str]:
+    return [next(k for k, v in world.items() if np.ndim(v) == 2 and np.shape(v)[0] == np.shape(v)[1])]
+
+
+def _ops(ops1, ops2, counts) -> list[str]:
+    out = []
+    for o in ops1:
+        if o == "CNT":
+            bad = [k for k in counts if int(k) not in (1, 2, 3)]
+            if bad:
+                raise ValueError(f"counts {bad}: at least 1, 2 or 3 successors")
+            out += [f"CNT{int(k)}" for k in counts]
+        else:
+            out.append(o)
+    out += list(ops2)
+    bad = [o for o in out if o not in _A.UNARY + _A.BINARY]
+    if bad:
+        raise ValueError(f"unknown operators {bad} (have {list(_A.UNARY + _A.BINARY)} and CNT)")
+    return out
+
+
 def _names(ast, kind) -> set[str]:
     if ast[0] == kind:
         return {ast[1]}
-    if ast[0] in ("R", "L", "I"):
+    if ast[0] in ("R", "L", "I", "U"):
         return set()
     return set().union(*(_names(x, kind) for x in ast[1:] if isinstance(x, tuple)))
 
@@ -76,10 +158,8 @@ def expand(program, library=()) -> tuple:
             raise RecursionError("a library entry refers to itself")
         if ast[0] == "L":
             return go(lib[ast[1]], depth + 1)
-        if ast[0] in ("R", "I"):
+        if ast[0] in ("R", "I", "U"):
             return ast
-        if ast[0] == "CNT":
-            return ("CNT", ast[1], go(ast[2], depth + 1))
         return (ast[0],) + tuple(go(x, depth + 1) for x in ast[1:])
     return go(program)
 
@@ -94,9 +174,9 @@ def run(program, world: Mapping[str, np.ndarray], library: Sequence[Library] = (
     for name in _names(program, "L"):
         if name not in lib:
             raise KeyError(f"no library entry {name!r}")
-    batch = _E.Batch([world], _base_of(program, lib) or [next(iter(world))])
+    batch = _batch([world], _base_of(program, lib) or _any_relation(world))
     n = batch.sizes[0]
-    return _E.evaluate(program, batch, lib, {})[0, :n, :n].copy()
+    return _A._eval(program, batch, _programs(library))[0, :n, :n].copy()
 
 
 def _target_arrays(target, examples, name) -> list[np.ndarray]:
@@ -129,7 +209,7 @@ class HeldOut:
     def _batch(self, names):
         k = tuple(names)
         if k not in self._batches:
-            self._batches[k] = _E.Batch(self.examples, names)
+            self._batches[k] = _batch(self.examples, names)
         return self._batches[k]
 
     def __call__(self, name: str, program, library: Sequence[Library] = ()) -> dict:
@@ -138,8 +218,8 @@ class HeldOut:
         if name not in self._truth:
             self._truth[name] = _target_arrays(self.targets[name], self.examples, name)
         lib = _lib_map(library)
-        batch = self._batch(_base_of(program, lib) or [next(iter(self.examples[0]))])
-        pred = _E.evaluate(program, batch, lib, {})
+        batch = self._batch(_base_of(program, lib) or _any_relation(self.examples[0]))
+        pred = _A._eval(program, batch, _programs(library))
         support = hits = positives = errors = 0
         for b, (y, n) in enumerate(zip(self._truth[name], batch.sizes)):
             if y.shape != (n, n):
@@ -229,20 +309,21 @@ def find_rules(examples: Sequence[Mapping[str, np.ndarray]], targets: Mapping[st
     unknown = [x for x in base if x not in names_ok]
     if unknown:
         raise ValueError(f"base relations {unknown} are not in every example")
-    batch = _E.Batch(examples, base)
+    ops = _ops(ops1, ops2, counts)
+    batch = _batch(examples, base)
     sub = examples[:search_on] if search_on and 0 < search_on < len(examples) else examples
-    sbatch = _E.Batch(sub, base) if sub is not examples else batch
+    sbatch = _batch(sub, base) if sub is not examples else batch
     order_t = sorted(targets)
     truth, struth = {}, {}
     for name in order_t:
         arrs = _target_arrays(targets[name], examples, name)
-        truth[name] = _E.pack(batch.pad(arrs))
-        struth[name] = _E.pack(sbatch.pad(arrs[:len(sub)]))
+        truth[name] = _pack(_pad(batch, arrs))
+        struth[name] = _pack(_pad(sbatch, arrs[:len(sub)]))
     tkey = {}
     for name in order_t:
-        tkey.setdefault(_E.key(struth[name]), []).append(name)
-    tpos = {name: int(_E._POP[truth[name]].sum()) for name in order_t}
-    spos = {name: int(_E._POP[struth[name]].sum()) for name in order_t}
+        tkey.setdefault(_digest(struth[name]), []).append(name)
+    tpos = {name: int(_POP[truth[name]].sum()) for name in order_t}
+    spos = {name: int(_POP[struth[name]].sum()) for name in order_t}
 
     lib = list(library)
     _lib_map(lib)
@@ -260,8 +341,8 @@ def find_rules(examples: Sequence[Mapping[str, np.ndarray]], targets: Mapping[st
     def full_match(name, prog):
         if sbatch is batch:
             return True
-        val = _E.pack(_E.evaluate(prog, batch, _lib_map(lib), {}))
-        if _E.mismatches(val, truth[name]) <= tolerance * tpos[name]:
+        val = _pack(_A._eval(prog, batch, _programs(lib)))
+        if _mismatches(val, truth[name]) <= tolerance * tpos[name]:
             return True
         records[name].recheck_failed += 1
         return False
@@ -276,27 +357,27 @@ def find_rules(examples: Sequence[Mapping[str, np.ndarray]], targets: Mapping[st
         found[name] = e
         order.append(name)
         r = records[name]
-        r.programs, r.round_programs, r.round, r.size, r.by = cost, own, rounds, _E.size(prog), by
+        r.programs, r.round_programs, r.round, r.size, r.by = cost, own, rounds, _A.size(prog), by
         open_.discard(name)
         return True
 
     while open_:
         if spent < budget:
             rounds += 1
-            terminals = [(e.name, e.program) for e in (lib if grow else library)]
-            en = _E.Enumerator(sbatch, base, terminals, ops1, ops2, counts)
+            en = Enumerator(sbatch, size, _programs(lib if grow else library), ops=ops, max_evals=budget - spent)
             admitted = False
-            for ast, packed, k in en.run(size, budget - spent):
+            for p in en:
+                packed = _pack(p.value)
                 if tolerance > 0:
-                    hit = [n for n in sorted(open_) if _E.mismatches(packed, struth[n]) <= tolerance * spos[n]]
+                    hit = [n for n in sorted(open_) if _mismatches(packed, struth[n]) <= tolerance * spos[n]]
                 else:
-                    hit = [n for n in tkey.get(k, ()) if n in open_]
+                    hit = [n for n in tkey.get(_digest(packed), ()) if n in open_]
                 for name in hit:
-                    if full_match(name, ast):
-                            admitted |= check(name, ast, "enumerate", spent + en.programs, en.programs)
+                    if full_match(name, p.ast):
+                        admitted |= check(name, p.ast, "enumerate", spent + en.evals, en.evals)
                 if admitted and grow:
                     break
-            spent += en.programs
+            spent += en.evals
             if admitted and grow:
                 continue
         if proposer is None:
@@ -305,8 +386,8 @@ def find_rules(examples: Sequence[Mapping[str, np.ndarray]], targets: Mapping[st
         for name in sorted(open_):
             for prog in proposer.propose(name, examples, _target_arrays(targets[name], examples, name), list(lib)):
                 spent += 1
-                val = _E.pack(_E.evaluate(prog, batch, _lib_map(lib), {}))
-                if _E.mismatches(val, truth[name]) <= tolerance * tpos[name] and check(
+                val = _pack(_A._eval(prog, batch, _programs(lib)))
+                if _mismatches(val, truth[name]) <= tolerance * tpos[name] and check(
                         name, prog, getattr(proposer, "name", "proposer"), spent, 1):
                     more = True
                     break

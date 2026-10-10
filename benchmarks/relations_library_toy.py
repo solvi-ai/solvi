@@ -26,6 +26,13 @@ search needs). The per-level own-round costs
 next to flat's own costs are reported, not barred: a shallow composite that flat reaches cheaply (great-grandparent,
 size 5 without the library) is not ten times cheaper with it.
 
+Measured with the package's relation enumerator (it replaced a minimal one after the first runs; the bar was not
+changed): paths — every level, 2,556 cumulative at the top rule (1,679 with the minimal one); kinship — every level,
+10,813–10,819 cumulative at the top rule (6,122–6,125 with the minimal one), so the kinship ladder MISSES the bar
+(second cousin 10,257 and second cousin once removed 10,817 > 10,000); flat finds neither top rule; 0 false accepts;
+25 s. The difference is mostly the universal relation U, a terminal of the package's enumerator that the minimal one
+did not have (without it, measured once outside the package: 2,174 and 7,889).
+
     python benchmarks/relations_library_toy.py          # the table, under a minute
 """
 from __future__ import annotations

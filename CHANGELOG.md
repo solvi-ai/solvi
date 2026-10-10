@@ -100,14 +100,15 @@ calibration files and served by `solvi serve`), so a build from it is not mistak
   `proposer=` is a fallback slot for a learned proposer (none ships), its programs checked the same way; `search_on=k`
   enumerates on the first k examples and re-checks a match on all of them before the test (`recheck_failed`). An
   inexpressible-rule control ("x and y share a 4-clique") is never admitted at densities 0.3 / 0.5; at 0.7 precision
-  acceptance with same-density held-out graphs admits the edge relation, other-density held-out graphs reject it. Programs are
-  nested tuples (base relations, the identity, library entries; converse, closure, "at least k successors",
-  composition, ∩, ∪, ∖; no complement); `run(program, world, library=)` runs one on any world. The enumerator inside is
-  a minimal one, to be replaced by the full relation enumerator. `benchmarks/relations_library_toy.py` (five seeds,
+  acceptance with same-density held-out graphs admits the edge relation, other-density held-out graphs reject it. The search is
+  the package's relation enumerator (by default converse, closure, "at least one successor" — the new opt-in operator
+  `CNT1` —, composition, ∩, ∪, ∖ over the base relations, I, U and the library entries) and programs are the package's
+  tuples; `run(program, world, library=)` runs one on any world. `benchmarks/relations_library_toy.py` (five seeds,
   `pytest -m slow`): a path tree's "denied if an ancestor directory is named secret and the depth is at least 3"
-  (three levels) found with 1,679 enumerated programs in all, kinship on forests to depth 6 with 6,125, where flat
-  search found neither top rule in 100,000; 0 false accepts on larger fresh worlds. The flat budget was 60,000 in the
-  first run (the kinship ladder then cost the library 1.02 × a tenth of it) and was raised after it.
+  (three levels) found with 2,556 enumerated programs in all, kinship on forests to depth 6 with 10,817, where flat
+  search found neither top rule in 100,000; 0 false accepts on larger fresh worlds. The kinship ladder misses the bar
+  of a tenth of the flat budget (1.08×; with an earlier minimal enumerator without U it cost 6,125). The flat budget
+  was 60,000 in the first run (the kinship ladder then cost the library 1.02 × a tenth of it) and was raised after it.
 - **`solvi.experimental.laws`: ranking candidates where each check is expensive.** `RankedProposer(inner, scorer,
   buffer)` reorders another proposer's candidates (never adds, drops or changes one), so a probe budget spends the likely
   hypotheses first; `atom_features` / `candidate_features` read precision, recall, Jaccard and anti-match of each atom

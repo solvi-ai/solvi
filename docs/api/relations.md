@@ -10,8 +10,8 @@ accepted programs, compilation into plain set code or index arrays with a differ
 `solvi.experimental.relations.library.find_rules(examples, targets, base=..., size=..., budget=..., library=(),
 test=HeldOut(other_worlds, targets))` enumerates small programs over relations, admits only what passes the held-out
 test, and builds the next rules on the admitted ones (`Library` entries as new terminals); `run(program, world,
-library=)` runs a found rule on any world. The enumerator inside is a minimal one until the full relation enumerator
-replaces it; the program format and the `Library` fields stay.
+library=)` runs a found rule on any world. The search is this package's enumerator and the programs are its tuples;
+`library=` takes `relations.library.Library` entries or the package's `Library`.
 
 ::: solvi.experimental.relations
 
