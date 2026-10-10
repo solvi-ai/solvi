@@ -63,6 +63,31 @@ calibration files and served by `solvi serve`), so a build from it is not mistak
   1.5% of System 1's decisions in failed runs under a 20% promise pooled over the skills; replayed cases never
   transferred, plans compiled without verification reached no goal. At 5% nothing certified within the toy's 20
   episodes.
+- **`solvi.experimental.relations`: relations over a state and rules over them (experimental).** A state becomes named
+  relations over its nodes as packed-bit matrices (`Relations`); the relation algebra (`compose` with path counts,
+  `converse`, `union`, `intersect`, `minus`, a bounded `complement`, transitive `closure`, `count_at_least`); programs
+  as tuples (`show`, `size`, `evaluate`, `readout`: does node 0 relate to anything). `enumerate_programs` builds programs
+  bottom-up by size and keeps one per behaviour — the key is a 16-byte hash of the packed full relations over every
+  example, never a readout — deterministically, with caps on behaviours, evaluations, seconds and memory;
+  `synthesize` finds the first program equal to a target (optionally searching a subset and re-checking on all);
+  `score` / `top_programs` rank every behaviour by the precision of its readout (noise-tolerant); a `Library` keeps
+  accepted programs (with the examples they were accepted on and their test record) as terminals of later searches.
+  `compile_program` turns a program into plain set code that imports nothing, or into index arrays for large graphs
+  (`backend="arrays"`), refusing dense answers (`DenseAnswer`), and `check_program` compares it with the interpreter
+  pair for pair. Encoders: `encode` / `Egocentric` (a grid seen from the player: a 3×3 or 5×5 window, EAST, SOUTH, AT,
+  FACE, materials and creatures as diagonals; the inventory stays flat) and `encode_paths` / `PathTree` (PARENT,
+  SAME_DIR, IS_DIR, NAME=x). `RelAlgProposer` hands relational atoms ("rel:<program>", with their compiled code) to a
+  law set's unchanged held-out test. `benchmarks/relations_battery.py` (`pytest -m slow`): on a pre-registered battery
+  of 28 random rules over three relations, 22 found within seven nodes, every find exact on larger graphs of other
+  families, peak memory 0.4 GB; a rule that needs four variables (a common 4-clique) is never accepted.
+- **Compiled laws (`solvi.experimental.laws`).** `Atom(name, fn, feature=, code=, defs=)`: an atom may carry a Python
+  expression that equals it; `law.to_code(grammar)` is a pure function for one law and `lawset.to_module()` one module
+  that imports nothing from solvi (the laws most specific first, your base predictor as the fallback); atoms without
+  code are refused by name. `check_compiled(module, buffer, lawset)` runs the module against `LawSet.predict` on every
+  row — the bar is 0 differences. `Grammar.add` lets a proposer invent atoms (a buffer evaluates a late atom on its
+  older rows on first use). `benchmarks/relations_compile.py` (`pytest -m slow`): a learned law set compiled and checked
+  on 100,000 rows with 0 differences; closure, grandparent and sibling on a forest of 100,000 nodes pair for pair equal
+  to hand-written set code within twice its time.
 - **Sensitive fields: declared on the catalog, refused by `solvi check`.** `Catalog(sensitive={"age", "sex"})`,
   `lint(obj, sensitive=...)` and `solvi check module:system --sensitive age,sex` (the names add up) name given facts no
   part may read. A part that reads one (a fn, extract, check, rule, `then` function, alternative producer or

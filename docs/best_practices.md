@@ -318,6 +318,31 @@ test an LLM proposer ended 0.95 points below enumeration, and in the same study 
 claims about the path policy wrongly 18 times out of 40. Both findings in miniature, with their bars:
 [laws_toy.py](../benchmarks/laws_toy.py) (`pytest -m slow tests/test_laws_toy.py`).
 
+## Relational rules: enumerate, let the test judge, then compile
+
+**When a rule is about structure — an ancestor, a neighbour, a path — give the grammar relations, not more flat
+atoms.** `solvi.experimental.relations` encodes a state as relations over its nodes (a path tree: PARENT, SAME_DIR,
+IS_DIR, NAME=x; a grid seen from the player: EAST, SOUTH, AT, FACE and the cells' materials) and enumerates small
+relation-algebra programs bottom-up, one per behaviour. Two programs are one only when their full relations agree on
+every example — never when only the readout agrees, or what composes from them is lost. On a pre-registered battery of
+28 random rules over three relations it found 22 within seven nodes, each exact on larger graphs of other families,
+and a rule that needs four variables (a common 4-clique) was never accepted. `RelAlgProposer` hands the best programs
+to a law set as atoms and the law set's held-out test judges them: on a path policy that denies reads under any
+directory named "secret" (files may be named so too), the found relational law was right on all 20,000 fresh calls,
+which the flat grammar's "the parent is named secret" cannot be. **Equivalence holds on the examples only**: the
+smallest program of a class may not generalise, so keep the held-out check on other groups, sizes or families. Expect
+programs of four or five nodes with twenty-odd relations; with many or large examples search a subset and re-check on
+all (`synthesize(..., check=)`), and with noisy labels rank by agreement (`top_programs`), not by an exact match.
+
+**Compile a found rule, and accept the code only after the differential check.** Give atoms their code
+(`Atom(..., code=)`): `LawSet.to_module()` writes the laws as one module that imports nothing from solvi, and
+`check_compiled(module, buffer, lawset)` runs it against `LawSet.predict` on every row — accept it at 0 differences. A
+relational rule on a large graph compiles to index arrays (`compile_program(ast, backend="arrays")`); refuse dense
+answers (a complement over all pairs) unless the domain is bounded. On a forest of 100,000 nodes closure, grandparent
+and sibling came out pair for pair equal to hand-written set code within twice its time, and a learned law set agreed
+with its interpreter on 100,000 rows. Scripts: [relations_battery.py](../benchmarks/relations_battery.py) and
+[relations_compile.py](../benchmarks/relations_compile.py) (`pytest -m slow tests/test_relations_gate.py`).
+
 ## Learning in a world described by code: plan on the code
 
 **Where the world is code, plan on the code and compile only what the code verified.** A simulator, a file system or a
