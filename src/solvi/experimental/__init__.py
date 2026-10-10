@@ -73,7 +73,9 @@ STATUS: dict[str, dict] = {
                   "set code or index arrays with a differential check, encoders (a grid window seen from the player, "
                   "a path tree) and a proposer of relational atoms for the laws' held-out test; composites by "
                   "enumeration with a library (find_rules admits only what passes a held-out test and builds the next "
-                  "rules on the admitted ones) and a fallback slot for a learned proposer", "missing": "on a "
+                  "rules on the admitted ones) and a fallback slot for a learned proposer; composition tables of relations "
+                  "learned by exact counting (residual fill, derivation over every bracketing, refusal of what the "
+                  "table cannot derive)", "missing": "on a "
                   "pre-registered battery of 28 random rules over three relations the enumerator found 22 within "
                   "seven nodes, every find exact on larger graphs of other families, and compiled rules matched "
                   "hand-written set code pair for pair on a forest of 100,000 nodes within twice its time; on two "
@@ -91,7 +93,16 @@ STATUS: dict[str, dict] = {
                   "server with an ancestor rule, a game simulator with written mechanics), how deep the search "
                   "reaches with the twenty-odd relations of a grid window, the library's intermediate concepts found "
                   "rather than given as targets, a learned proposer for the fallback slot (none ships), and a way to "
-                  "drop proposed atoms no law uses and library entries that make other rules dearer",
+                  "drop proposed atoms no law uses and library entries that make other rules dearer"
+                  "; composition tables: on a public benchmark of kinship chains, a table learned from chains of length"
+                  " 2 and 3 (111 cells, fit in under 0.1 s) answered 0.922 of 1,816 held-out chains of length 2–3 from "
+                  "the training stories with precision 0.998 among the answered (the rest refused: 130 underivable, 11 "
+                  "disagreeing bracketings), against 0.102 for the most frequent relation; the sized acceptance with a "
+                  "base-rate null admitted the same 111 cells (the smallest support was 11); still missing for them: "
+                  "longer chains (4 to 10 relations, the benchmark's test split) are not measured yet; one relation per"
+                  " cell, so a cell that depends on what the chain does not carry (a gender) is refused rather than "
+                  "split; a learned identity relation for loops is opt-in and added wrong answers on the held-out "
+                  "chains",
                   "script": "benchmarks/relations_battery.py"},
     "skills": {"since": "1.1", "what": "learning in a world described by code: System 2 plans on an exact model (a "
                "copy of the environment), only plans the code verified are compiled into System 1 skills with "

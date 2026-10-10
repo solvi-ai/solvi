@@ -459,6 +459,16 @@ bag-of-atoms ranker needed 2.1 checks to the true condition against 69.7 in the 
 and the raw-feature control 24.6 (the best raw threshold picked after the fact: 12.8) — in distribution only; measure
 the control on your own grammar before trusting the trained one (`tests/test_laws_rank.py`).
 
+## Composition tables: learn exact tables by counting, derive by composition, refuse what the table cannot derive
+
+Where a relation between two things follows from a chain of relations between them (kinship chains: a father's sister
+is an aunt), learn the table of two-step compositions by counting labelled chains (`relations.CompositionTable`: a
+cell is admitted when its majority relation has a share ≥ 0.9 and at least two votes), fill empty cells from chains of
+three by residuals, and derive a longer chain by composing over every bracketing — answer only when every bracketing
+that composes agrees, and refuse otherwise ("underivable", "disagree"); the cells used are the answer's reason. The
+promise is precision among the answered, not coverage: on a public benchmark of kinship chains, a table learned from chains of length 2 and 3 (111 cells, fit in under 0.1 s) answered 0.922 of 1,816 held-out chains of length 2–3 from the training stories with precision 0.998 among the answered (the rest refused: 130 underivable, 11 disagreeing bracketings), against 0.102 for the most frequent relation; the sized acceptance with a base-rate null admitted the same 111 cells (the smallest support was 11). Leave the identity relation off (`identity=`) where a cell depends on what the chain does not
+carry (a gender): learned loops added wrong answers there. Longer chains are not measured yet.
+
 ## Storage and audit
 
 **One store, any number of writers — but check which backend.** SQLite and PostgreSQL take several processes;

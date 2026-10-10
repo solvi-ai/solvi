@@ -88,6 +88,13 @@ the bytes, and `max_bytes` caps the store — with many or large examples search
 by the exact target hash; deduplication stays exact. A rule that needs four variables at once (x and y in a common
 4-clique) is out of reach, and the battery script's control checks it is never accepted.
 
+Composition tables (`CompositionTable`): which relation a chain of two relations composes to (father ∘ sister → aunt),
+learned by exact counting from labelled chains of length 2 (majority share ≥ m, support ≥ s), empty cells filled by
+residuals from chains of length 3, a longer chain derived by CYK over every bracketing — answered only when the
+bracketings agree, refused with the reason ("underivable", "disagree") otherwise; `explain` gives the cells used,
+`to_knowledge` writes them as rule items, `admit=sized_admit(base_rates(examples))` gates cells by the laws' sized
+acceptance with a base-rate null.
+
 What is not done:
 - the enumeration grows as (terminals × operators)^size: with the twenty-odd relations of a grid window, programs of
   four or five nodes are the practical depth, and the behaviour cap bounds memory;
@@ -97,6 +104,8 @@ What is not done:
 - relational atoms stay in the grammar once proposed (every row evaluates them); nothing prunes unused ones yet;
 - the library's intermediate concepts are given as targets; find_rules finds the order and the programs, not the
   concepts; library entries are never retired, and every entry makes the rules it does not help dearer;
+- composition tables: one relation per cell; a cell that depends on something the chain does not carry (a gender)
+  stays below the majority and its chains are refused, not split by that attribute;
 - the compiled atom of a state's graph allows complements (its domain, the window or the path's chain, is bounded);
   `compile_ast` refuses them by default."""
 from __future__ import annotations
@@ -110,14 +119,16 @@ from ._compile import (BACKENDS, RUNTIME, RUNTIME_ARRAYS, DenseAnswer, ProgramCh
                        compile_program, from_keys, to_keys)
 from ._enumerate import (Entry, Enumerator, Found, Library, Program, Score, Scored, enumerate_programs, lower_bound,
                          rank, score, synthesize, top_programs)
+from ._table import Cell, CompositionTable, Derivation, base_rates, sized_admit
 from .library import HeldOut, RuleProposer, Rules, TargetRecord, find_rules
 
 warn_on_import(__name__)
 
-__all__ = ["BACKENDS", "BINARY", "CREATURES", "DenseAnswer", "Egocentric", "Entry", "Enumerator", "Found", "HeldOut",
-           "Library", "MATERIALS", "OPS", "PATHS", "PROPOSER_OPS", "PathTree", "Program", "ProgramCheck", "RUNTIME",
-           "RUNTIME_ARRAYS", "RelAlgProposer", "Relations", "RuleProposer", "Rules", "Score", "Scored", "TargetRecord",
-           "UNARY", "check_program", "closure", "compile_ast", "compile_program", "complement", "compose", "converse",
-           "count_at_least", "encode", "encode_paths", "enumerate_programs", "evaluate", "find_rules", "from_keys",
-           "intersect", "lower_bound", "minus", "rank", "readout", "relational_atom", "score", "show", "size",
-           "synthesize", "to_keys", "top_programs", "union", "xor"]
+__all__ = ["BACKENDS", "BINARY", "CREATURES", "Cell", "CompositionTable", "DenseAnswer", "Derivation", "Egocentric",
+           "Entry", "Enumerator", "Found", "HeldOut", "Library", "MATERIALS", "OPS", "PATHS", "PROPOSER_OPS",
+           "PathTree", "Program", "ProgramCheck", "RUNTIME", "RUNTIME_ARRAYS", "RelAlgProposer", "Relations",
+           "RuleProposer", "Rules", "Score", "Scored", "TargetRecord", "UNARY", "base_rates", "check_program",
+           "closure", "compile_ast", "compile_program", "complement", "compose", "converse", "count_at_least", "encode",
+           "encode_paths", "enumerate_programs", "evaluate", "find_rules", "from_keys", "intersect", "lower_bound",
+           "minus", "rank", "readout", "relational_atom", "score", "show", "size", "sized_admit", "synthesize",
+           "to_keys", "top_programs", "union", "xor"]

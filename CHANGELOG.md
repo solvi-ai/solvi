@@ -17,6 +17,19 @@ calibration files and served by `solvi serve`), so a build from it is not mistak
 
 ### New
 
+- **Composition tables of relations (`solvi.experimental.relations.CompositionTable`, experimental).** Which relation
+  a chain of two relations composes to (kinship chains: father ∘ sister → aunt), learned by exact counting from
+  labelled chains of length 2 — a cell is admitted when its majority relation has a share ≥ `majority` (0.9) and at
+  least `support` (2) votes — with empty cells filled by residuals from chains of length 3 (recomputed each round
+  until the table stops changing; a chain counts once per round). `derive(chain)` composes a chain of any length by
+  CYK over every bracketing and answers only when the bracketings that compose agree (`agree="all"`; `"majority"`
+  opt-in), else returns a refusal with its reason (`"underivable"`, `"disagree"`); `Derivation.cells` / `explain` are
+  the cells used, `derive_paths` pools several chains of one query, `to_knowledge(store, scope)` writes the cells as
+  "rule" items with their hits and support. Opt-in: a learned identity relation for loops (`identity=`), and an
+  admission hook (`admit=`) with `sized_admit(base_rates(examples), delta)` — the laws' sized acceptance with a
+  base-rate null. Deterministic and order-free. Measured on a public benchmark of kinship chains, on 1,816 held-out
+  chains of length 2–3 from the training stories: 0.922 answered, precision 0.998 among the answered, against 0.102
+  for the most frequent relation; longer chains not measured yet (`tests/test_relations_table.py`).
 - **A call firewall in the guard (`Guard.firewall`).** Two deterministic checks of every call of the tools it names
   (or of every tool, also those declared later): the arguments validate against the tool's declared schema (as every
   guard checks; under the firewall a tool whose schema cannot be read is denied instead of escalated), and every slot
