@@ -101,8 +101,9 @@ Laws of an environment from prediction mismatches, judged by the environment, ne
 the effect is this" from each wrong prediction, acceptance only by a held-out test on other worlds, sessions or paths,
 most specific first, retirement when the held-out precision falls, a probe planner for live systems (`split`,
 `discriminate`: read-only before write) and export into the knowledge store (`LawSet.to_knowledge`). The acceptance is
-sized by how many candidates were tested on the buffer (`sized=True`, the default: a law needs about 150 rows at 800
-candidates and about 230 at 52,000, and a small buffer accepts nothing — declare `space=` or pass `sized=False`
+sized by how many candidates were tested on the buffer (`sized=True`, the default; the null is the effect's base rate, `null="base"`:
+a deterministic law at a base rate of 3% needs about 9 rows at 52,000 candidates, at 70% about 68, against a fixed
+null of 0.9 about 228; a buffer too small for its null accepts nothing — declare `space=` or pass `sized=False`
 knowingly),
 `LawSet.admit_by_probes` admits a law by asking the world where the candidates disagree and only when one class
 survives, `predict(..., disagree="abstain")` abstains where laws that are not exceptions of one another disagree, and
