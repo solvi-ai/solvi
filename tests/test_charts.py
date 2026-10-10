@@ -1,4 +1,4 @@
-"""solvi.experimental.charts / solvi.experimental.specialist: every number of a chart is checked against the source; traps are caught; the SVG is
+"""solvi.experimental.charts on the specialist contract (solvi.core.specialist): every number of a chart is checked against the source; traps are caught; the SVG is
 deterministic, accessible and replays."""
 import io
 import json
@@ -10,7 +10,7 @@ import pytest
 from solvi.experimental.charts import (PALETTE, ChartSpecialist, FixedProposer, LLMProposer, chart, contrast,
                           render_svg)
 from solvi.experimental.charts.render import BG, INK, MIN_FONT, MUTED
-from solvi.experimental.specialist import BLOCKED, CHANGED, DROPPED, WARNING, Trace
+from solvi.core.specialist import BLOCKED, CHANGED, DROPPED, WARNING, Trace
 
 PRESS = """ACME Corp. reports third-quarter 2025 results
 

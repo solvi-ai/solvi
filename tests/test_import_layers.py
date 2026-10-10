@@ -170,7 +170,7 @@ LOW_TIERS = {
     "kernel": "_deprecate _loader _migrate _rpc core",                  # solvi.core.* unless listed below
     "parts": "core.deciders core.extract core.plan core._inputs",
     "guarantees": "core.guarantees",
-    "records": "core.store core.response",
+    "records": "core.store core.response core.specialist",
     "system": "core.system",
     "deliberate": "core.slow core.dispatch core.versions",          # versions: a module reads Fail (core.slow)
     "knowledge": "core.knowledge",
@@ -274,6 +274,11 @@ def test_stable_modules_name_an_experimental_module_only_where_allowed():
     assert found == ALLOWED_BY_NAME, sorted(found)
 
 
+# experimental modules that graduated: their old path re-exports the stable module for one release, with the experimental
+# warning, and has no STATUS entry
+GRADUATED = {"specialist"}
+
+
 def test_experimental_modules_warn_on_import_and_say_their_status():
     import subprocess
     import sys
@@ -281,7 +286,8 @@ def test_experimental_modules_warn_on_import_and_say_their_status():
     from solvi import experimental
     mods = sorted(m for m in _modules() if m.startswith("solvi.experimental.") and m.count(".") == 2)
     names = {m.split(".")[2] for m in mods}
-    assert names == set(experimental.STATUS), names ^ set(experimental.STATUS)
+    assert names == set(experimental.STATUS) | GRADUATED, names ^ (set(experimental.STATUS) | GRADUATED)
+    assert not GRADUATED & set(experimental.STATUS)
     for st in experimental.STATUS.values():
         assert {"since", "what", "missing", "script", "deadline"} <= set(st) and st["deadline"] == "1.2"
     code = ("import importlib, sys, warnings\nfrom solvi.core.catalog import ExperimentalWarning\n"

@@ -1,4 +1,4 @@
-"""Alignment of two hypotheses (solvi.experimental.specialist.align): two readers' readings matched one-to-one by the
+"""Alignment of two hypotheses (solvi.core.specialist.align): two readers' readings matched one-to-one by the
 overlap of their spans — time intervals (speech), boxes (receipts), character offsets (two extractors of one text)."""
 import json
 import random
@@ -8,9 +8,7 @@ from pathlib import Path
 
 import pytest
 
-with warnings.catch_warnings():
-    warnings.simplefilter("ignore")
-    from solvi.experimental.specialist import Agreed, Alignment, Reading, align, box_iou, interval_overlap
+from solvi.core.specialist import Agreed, Alignment, Reading, align, box_iou, interval_overlap
 
 FIX = Path(__file__).parent / "fixtures" / "align"
 
