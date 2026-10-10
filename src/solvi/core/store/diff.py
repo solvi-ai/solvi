@@ -219,7 +219,7 @@ class DiffReport:
     catalog: dict = field(default_factory=dict)   # {"new": fp, "stored": {fp: count}, "changed_parts", "added_parts"}
     only: list | None = None                      # diff(only=): the decisions the change is allowed to change
     extraneous: list = field(default_factory=list)   # ids of the changed decisions not in `only` (in `changed` order)
-    exact: bool = False                           # `only` given and nothing outside it changed
+    exact: bool = False                           # `only` given, nothing outside it changed, every decision re-ran
 
     @property
     def ok(self):
@@ -324,8 +324,8 @@ def diff(storage, system, confidence=0.01, limit=None, only=None, **filters):
     compare). A stored decision whose input did not come back as it was (see solvi.core.schema: an untyped enum or object, an
     untyped date stored by solvi ≤ 0.7.1) is listed under `errors` — "could not be re-run" — not as a changed one. filters: TraceStorage.query filters (question=, since=, ...) to pick the decisions; limit: at most this many.
     only: the ids of the stored decisions the change is meant to change (an exception for one corrected decision) —
-    `extraneous` lists the ids of the changed decisions outside it, `exact` is True when there are none (decisions that
-    could not be re-run are in `errors`, not judged).
+    `extraneous` lists the ids of the changed decisions outside it, `exact` is True when there are none and every
+    decision re-ran (a decision that could not be re-run, listed in `errors`, may have changed: then `exact` is False).
     A cause whose part (in `system`) cites what it implements (`clause=` / `cite=` on its decorator) carries "cites":
     [{"clause", "quote"}] — the chain clause → part → decision.
     The system's learned parts may learn from these asks as from any other (System(learn=...))."""
@@ -376,7 +376,7 @@ def diff(storage, system, confidence=0.01, limit=None, only=None, **filters):
         allowed = set(only)
         rep.only = list(only)
         rep.extraneous = [i for i in dict.fromkeys(c["id"] for c in rep.changed) if i not in allowed]
-        rep.exact = not rep.extraneous
+        rep.exact = not rep.extraneous and not rep.errors
     return rep
 
 

@@ -1811,7 +1811,7 @@ class DecisionDiff:
     """The decisions a new compilation changes: `changed` = [{"id", "question", "old", "new", "causes": [{"step",
     "part", "clauses", "why"}]}] (with `inputs=`, also "input": the input's id); `report` is solvi.core.store.diff's own
     report. With `only=`: `extraneous`, the ids of the decisions whose answer moves (`moved`) that are not in it, and
-    `exact`, True when there are none."""
+    `exact`, True when there are none and every decision re-ran (`report.errors` empty)."""
     changed: list
     report: Any
     total: int
@@ -1861,7 +1861,8 @@ def decision_diff(old, new, *, store=None, inputs=None, only=None, **filters) ->
 
     only: the decisions the change is allowed to move — stored decision ids, or with `inputs=` the inputs' ids: an
     input's "id" key when it has one, else its position in `inputs` (0, 1, ...); each change then carries "input".
-    `extraneous` lists the moved decisions outside it (by those ids), `exact` is True when there are none."""
+    `extraneous` lists the moved decisions outside it (by those ids), `exact` is True when there are none and every
+    decision re-ran (a decision that could not be re-run makes it False)."""
     from ...core.store.diff import diff, part_cites
     from ...core.store import JSONLStorage
     tmp = None
@@ -1916,7 +1917,7 @@ def decision_diff(old, new, *, store=None, inputs=None, only=None, **filters) ->
         if only is not None:
             allowed = set(only)
             dd.extraneous = [i for i in dict.fromkeys(x.get("input", x["id"]) for x in dd.moved) if i not in allowed]
-            dd.exact = not dd.extraneous
+            dd.exact = not dd.extraneous and not rep.errors
         return dd
     finally:
         if tmp is not None:

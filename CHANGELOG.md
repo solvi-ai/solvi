@@ -44,8 +44,9 @@ calibration files and served by `solvi serve`), so a build from it is not mistak
   candidate whose citations fail.
 
 - **Exact exceptions: `only=` in the diff.** `solvi.core.store.diff.diff(storage, system, ..., only=ids)` reports
-  `DiffReport.extraneous` (the ids of the changed decisions outside `only`) and `DiffReport.exact` (`only` given and
-  nothing outside it changed); `solvi.experimental.compile.decision_diff(old, new, ..., only=)` gives the same two
+  `DiffReport.extraneous` (the ids of the changed decisions outside `only`) and `DiffReport.exact` (`only` given,
+  nothing outside it changed, and every decision re-ran: one listed in `errors` may have changed, so it makes `exact`
+  False — on both reports); `solvi.experimental.compile.decision_diff(old, new, ..., only=)` gives the same two
   fields on `DecisionDiff`, over the decisions whose answer moves — with `inputs=` the ids are the inputs' `id` key,
   else their positions, and each change carries `"input"`. The changes pipeline's `Impact` stage refuses a change
   whose `expected["only"]` is set and whose diff changes other decisions ("changes N decision(s) other than the
