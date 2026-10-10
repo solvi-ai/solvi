@@ -1,0 +1,7885 @@
+{
+ "labeller": "the X3 builder (an AI agent, Claude) by hand reading, before any proposer ran on these texts",
+ "procedure": "see README.md 'Labels'",
+ "units": {
+  "%": {
+   "%": "1"
+  },
+  "pp": {
+   "pp": "1"
+  },
+  "USD": {
+   "USD": "1"
+  },
+  "USD billion": {
+   "USD": "1000000000"
+  },
+  "USD trillion": {
+   "USD": "1000000000000"
+  },
+  "USD per barrel": {
+   "USD": "1"
+  },
+  "USD per gallon": {
+   "USD": "1"
+  },
+  "USD per person": {
+   "USD": "1"
+  },
+  "billion kWh": {
+   "kilowatthour": "1000000000",
+   "kwh": "1000000000",
+   "bkwh": "1"
+  },
+  "Bcf/d": {
+   "bcf/d": "1",
+   "bcf": "1",
+   "cubic feet per day": "1000000000",
+   "cubic foot per day": "1000000000",
+   "cubic feet": "1000000000",
+   "cubic foot": "1000000000"
+  },
+  "b/d": {
+   "b/d": "1",
+   "barrel": "1",
+   "barrels per day": "1",
+   "barrel per day": "1"
+  },
+  "million b/d": {
+   "b/d": "1000000",
+   "barrel": "1000000",
+   "barrels per day": "1000000",
+   "barrel per day": "1000000"
+  },
+  "million barrels": {
+   "barrel": "1000000"
+  },
+  "holes": {
+   "hole": "1",
+   "": "1"
+  },
+  "million feet": {
+   "feet": "1000000",
+   "foot": "1000000"
+  },
+  "counties": {
+   "county": "1",
+   "countie": "1",
+   "": "1"
+  },
+  "states": {
+   "state": "1",
+   "": "1"
+  },
+  "storms": {
+   "storm": "1",
+   "tropical storm": "1",
+   "": "1"
+  },
+  "inches": {
+   "inch": "1",
+   "inche": "1",
+   "in": "1"
+  },
+  "square miles": {
+   "square mile": "1",
+   "sq mi": "1"
+  },
+  "million square miles": {
+   "square mile": "1000000",
+   "sq mi": "1000000"
+  },
+  "billion pounds": {
+   "pound": "1000000000"
+  },
+  "pounds per cow": {
+   "pound": "1"
+  },
+  "cows": {
+   "cow": "1",
+   "": "1"
+  },
+  "herds": {
+   "herd": "1",
+   "": "1"
+  },
+  "billion bushels": {
+   "bushel": "1000000000"
+  },
+  "million people": {
+   "people": "1000000",
+   "person": "1000000",
+   "": "1000000"
+  },
+  "million workers": {
+   "worker": "1000000",
+   "": "1000000"
+  },
+  "billion acres": {
+   "acre": "1000000000"
+  },
+  "awards": {
+   "award": "1",
+   "": "1"
+  },
+  "count": {
+   "": "1"
+  },
+  "platforms": {
+   "platform": "1",
+   "": "1"
+  },
+  "year": {},
+  "date": {},
+  "reference": {},
+  "rank": {},
+  "threshold": {},
+  "name": {},
+  "ratio": {},
+  "age": {},
+  "°F": {
+   "°f": "1",
+   "f": "1"
+  }
+ },
+ "texts": {
+  "t01": {
+   "text_sha256": "b44e4981dd6f5a068bb93ef0be8bc26a13f72d157c4f392d8b12a800d5e075c0",
+   "numbers": [
+    {
+     "as_written": "$7.7",
+     "occurrence": 0,
+     "value": "7.7",
+     "unit": "USD billion",
+     "role": "value",
+     "of": "U.S. goods and services trade surplus with Netherlands, August 2026",
+     "label_keywords": "Netherlands",
+     "label_excludes": "",
+     "start": 77,
+     "end": 81
+    },
+    {
+     "as_written": "$5.6",
+     "occurrence": 0,
+     "value": "5.6",
+     "unit": "USD billion",
+     "role": "value",
+     "of": "U.S. goods and services trade surplus with South and Central America, August 2026",
+     "label_keywords": "Central America",
+     "label_excludes": "",
+     "start": 111,
+     "end": 115
+    },
+    {
+     "as_written": "$3.6",
+     "occurrence": 0,
+     "value": "3.6",
+     "unit": "USD billion",
+     "role": "value",
+     "of": "U.S. goods and services trade surplus with United Kingdom, August 2026",
+     "label_keywords": "United Kingdom|U.K.",
+     "label_excludes": "",
+     "start": 134,
+     "end": 138
+    },
+    {
+     "as_written": "$2.3",
+     "occurrence": 0,
+     "value": "2.3",
+     "unit": "USD billion",
+     "role": "value",
+     "of": "U.S. goods and services trade surplus with Hong Kong, August 2026",
+     "label_keywords": "Hong Kong",
+     "label_excludes": "",
+     "start": 152,
+     "end": 156
+    },
+    {
+     "as_written": "$1.3",
+     "occurrence": 0,
+     "value": "1.3",
+     "unit": "USD billion",
+     "role": "value",
+     "of": "U.S. goods and services trade surplus with Brazil, August 2026",
+     "label_keywords": "Brazil",
+     "label_excludes": "",
+     "start": 167,
+     "end": 171
+    },
+    {
+     "as_written": "$1.2",
+     "occurrence": 0,
+     "value": "1.2",
+     "unit": "USD billion",
+     "role": "value",
+     "of": "U.S. goods and services trade surplus with Belgium, August 2026",
+     "label_keywords": "Belgium",
+     "label_excludes": "",
+     "start": 183,
+     "end": 187
+    },
+    {
+     "as_written": "$0.6",
+     "occurrence": 0,
+     "value": "0.6",
+     "unit": "USD billion",
+     "role": "value",
+     "of": "U.S. goods and services trade surplus with Australia, August 2026",
+     "label_keywords": "Australia",
+     "label_excludes": "",
+     "start": 201,
+     "end": 205
+    },
+    {
+     "as_written": "$0.4",
+     "occurrence": 0,
+     "value": "0.4",
+     "unit": "USD billion",
+     "role": "value",
+     "of": "U.S. goods and services trade surplus with Saudi Arabia, August 2026",
+     "label_keywords": "Saudi",
+     "label_excludes": "",
+     "start": 226,
+     "end": 230
+    },
+    {
+     "as_written": "$27.7",
+     "occurrence": 0,
+     "value": "-27.7",
+     "unit": "USD billion",
+     "role": "value",
+     "of": "U.S. goods and services trade deficit with Mexico, August 2026 (a negative balance)",
+     "label_keywords": "Mexico",
+     "label_excludes": "",
+     "start": 294,
+     "end": 299
+    },
+    {
+     "as_written": "$24.0",
+     "occurrence": 0,
+     "value": "-24.0",
+     "unit": "USD billion",
+     "role": "value",
+     "of": "U.S. goods and services trade deficit with Vietnam, August 2026 (a negative balance)",
+     "label_keywords": "Vietnam",
+     "label_excludes": "",
+     "start": 311,
+     "end": 316
+    },
+    {
+     "as_written": "$18.3",
+     "occurrence": 0,
+     "value": "-18.3",
+     "unit": "USD billion",
+     "role": "value",
+     "of": "U.S. goods and services trade deficit with Taiwan, August 2026 (a negative balance)",
+     "label_keywords": "Taiwan",
+     "label_excludes": "",
+     "start": 327,
+     "end": 332
+    },
+    {
+     "as_written": "$16.4",
+     "occurrence": 0,
+     "value": "-16.4",
+     "unit": "USD billion",
+     "role": "value",
+     "of": "U.S. goods and services trade deficit with China, August 2026 (a negative balance)",
+     "label_keywords": "China",
+     "label_excludes": "",
+     "start": 342,
+     "end": 347
+    },
+    {
+     "as_written": "$11.0",
+     "occurrence": 0,
+     "value": "-11.0",
+     "unit": "USD billion",
+     "role": "value",
+     "of": "U.S. goods and services trade deficit with European Union, August 2026 (a negative balance)",
+     "label_keywords": "European Union|EU",
+     "label_excludes": "",
+     "start": 366,
+     "end": 371
+    },
+    {
+     "as_written": "$9.4",
+     "occurrence": 0,
+     "value": "-9.4",
+     "unit": "USD billion",
+     "role": "value",
+     "of": "U.S. goods and services trade deficit with South Korea, August 2026 (a negative balance)",
+     "label_keywords": "Korea",
+     "label_excludes": "",
+     "start": 387,
+     "end": 391
+    },
+    {
+     "as_written": "$7.1",
+     "occurrence": 0,
+     "value": "-7.1",
+     "unit": "USD billion",
+     "role": "value",
+     "of": "U.S. goods and services trade deficit with Canada, August 2026 (a negative balance)",
+     "label_keywords": "Canada",
+     "label_excludes": "",
+     "start": 402,
+     "end": 406
+    },
+    {
+     "as_written": "$6.2",
+     "occurrence": 0,
+     "value": "-6.2",
+     "unit": "USD billion",
+     "role": "value",
+     "of": "U.S. goods and services trade deficit with India, August 2026 (a negative balance)",
+     "label_keywords": "India",
+     "label_excludes": "",
+     "start": 416,
+     "end": 420
+    },
+    {
+     "as_written": "$6.2",
+     "occurrence": 1,
+     "value": "-6.2",
+     "unit": "USD billion",
+     "role": "value",
+     "of": "U.S. goods and services trade deficit with Germany, August 2026 (a negative balance)",
+     "label_keywords": "Germany",
+     "label_excludes": "",
+     "start": 432,
+     "end": 436
+    },
+    {
+     "as_written": "$6.0",
+     "occurrence": 0,
+     "value": "-6.0",
+     "unit": "USD billion",
+     "role": "value",
+     "of": "U.S. goods and services trade deficit with Malaysia, August 2026 (a negative balance)",
+     "label_keywords": "Malaysia",
+     "label_excludes": "",
+     "start": 449,
+     "end": 453
+    },
+    {
+     "as_written": "$4.3",
+     "occurrence": 0,
+     "value": "-4.3",
+     "unit": "USD billion",
+     "role": "value",
+     "of": "U.S. goods and services trade deficit with Italy, August 2026 (a negative balance)",
+     "label_keywords": "Italy",
+     "label_excludes": "",
+     "start": 463,
+     "end": 467
+    },
+    {
+     "as_written": "$3.7",
+     "occurrence": 0,
+     "value": "-3.7",
+     "unit": "USD billion",
+     "role": "value",
+     "of": "U.S. goods and services trade deficit with Japan, August 2026 (a negative balance)",
+     "label_keywords": "Japan",
+     "label_excludes": "",
+     "start": 477,
+     "end": 481
+    },
+    {
+     "as_written": "$2.5",
+     "occurrence": 0,
+     "value": "-2.5",
+     "unit": "USD billion",
+     "role": "value",
+     "of": "U.S. goods and services trade deficit with Ireland, August 2026 (a negative balance)",
+     "label_keywords": "Ireland",
+     "label_excludes": "",
+     "start": 493,
+     "end": 497
+    },
+    {
+     "as_written": "$1.4",
+     "occurrence": 0,
+     "value": "-1.4",
+     "unit": "USD billion",
+     "role": "value",
+     "of": "U.S. goods and services trade deficit with France, August 2026 (a negative balance)",
+     "label_keywords": "France",
+     "label_excludes": "",
+     "start": 508,
+     "end": 512
+    },
+    {
+     "as_written": "$0.8",
+     "occurrence": 0,
+     "value": "-0.8",
+     "unit": "USD billion",
+     "role": "value",
+     "of": "U.S. goods and services trade deficit with Israel, August 2026 (a negative balance)",
+     "label_keywords": "Israel",
+     "label_excludes": "",
+     "start": 523,
+     "end": 527
+    },
+    {
+     "as_written": "$0.4",
+     "occurrence": 1,
+     "value": "-0.4",
+     "unit": "USD billion",
+     "role": "value",
+     "of": "U.S. goods and services trade deficit with Switzerland, August 2026 (a negative balance)",
+     "label_keywords": "Switzerland",
+     "label_excludes": "",
+     "start": 543,
+     "end": 547
+    },
+    {
+     "as_written": "$0.3",
+     "occurrence": 0,
+     "value": "-0.3",
+     "unit": "USD billion",
+     "role": "value",
+     "of": "U.S. goods and services trade deficit with Singapore, August 2026 (a negative balance)",
+     "label_keywords": "Singapore",
+     "label_excludes": "",
+     "start": 565,
+     "end": 569
+    }
+   ],
+   "chart": {
+    "kind": "bar",
+    "unit": "USD",
+    "scale": "billion",
+    "series": [
+     {
+      "name": "trade balance, August 2026",
+      "points": [
+       [
+        "Netherlands",
+        "7.7"
+       ],
+       [
+        "South and Central America",
+        "5.6"
+       ],
+       [
+        "United Kingdom",
+        "3.6"
+       ],
+       [
+        "Hong Kong",
+        "2.3"
+       ],
+       [
+        "Brazil",
+        "1.3"
+       ],
+       [
+        "Belgium",
+        "1.2"
+       ],
+       [
+        "Australia",
+        "0.6"
+       ],
+       [
+        "Saudi Arabia",
+        "0.4"
+       ],
+       [
+        "Mexico",
+        "-27.7"
+       ],
+       [
+        "Vietnam",
+        "-24.0"
+       ],
+       [
+        "Taiwan",
+        "-18.3"
+       ],
+       [
+        "China",
+        "-16.4"
+       ],
+       [
+        "European Union",
+        "-11.0"
+       ],
+       [
+        "South Korea",
+        "-9.4"
+       ],
+       [
+        "Canada",
+        "-7.1"
+       ],
+       [
+        "India",
+        "-6.2"
+       ],
+       [
+        "Germany",
+        "-6.2"
+       ],
+       [
+        "Malaysia",
+        "-6.0"
+       ],
+       [
+        "Italy",
+        "-4.3"
+       ],
+       [
+        "Japan",
+        "-3.7"
+       ],
+       [
+        "Ireland",
+        "-2.5"
+       ],
+       [
+        "France",
+        "-1.4"
+       ],
+       [
+        "Israel",
+        "-0.8"
+       ],
+       [
+        "Switzerland",
+        "-0.4"
+       ],
+       [
+        "Singapore",
+        "-0.3"
+       ]
+      ]
+     }
+    ],
+    "note": "a diverging bar: surpluses positive, deficits negative"
+   }
+  },
+  "t02": {
+   "text_sha256": "ce67c73a1b010228699160f2672faa4d61ff98690ea654434f2216cbe41d197e",
+   "numbers": [
+    {
+     "as_written": "2.5 percent",
+     "occurrence": 0,
+     "value": "2.5",
+     "unit": "%",
+     "role": "value",
+     "of": "real value added growth, private services-producing industries, 2Q26 (annual rate)",
+     "label_keywords": "services",
+     "label_excludes": "",
+     "start": 98,
+     "end": 109
+    },
+    {
+     "as_written": "2.3 percent",
+     "occurrence": 0,
+     "value": "2.3",
+     "unit": "%",
+     "role": "value",
+     "of": "real value added growth, private goods-producing industries, 2Q26",
+     "label_keywords": "goods",
+     "label_excludes": "",
+     "start": 153,
+     "end": 164
+    },
+    {
+     "as_written": "0.1 percent",
+     "occurrence": 0,
+     "value": "0.1",
+     "unit": "%",
+     "role": "value",
+     "of": "real value added growth, government, 2Q26 — an upper bound ('less than 0.1')",
+     "label_keywords": "government",
+     "label_excludes": "",
+     "start": 219,
+     "end": 230
+    }
+   ],
+   "chart": {
+    "kind": "bar",
+    "unit": "%",
+    "scale": "",
+    "series": [
+     {
+      "name": "real value added, percent change",
+      "points": [
+       [
+        "private services-producing",
+        "2.5"
+       ],
+       [
+        "private goods-producing",
+        "2.3"
+       ],
+       [
+        "government",
+        "<0.1"
+       ]
+      ]
+     }
+    ],
+    "note": "government is 'less than 0.1 percent', a bound, not a value"
+   }
+  },
+  "t03": {
+   "text_sha256": "d425b98691102c1aa818a05d1fad8ccb762047d779128071a58d93aa1694aaba",
+   "numbers": [
+    {
+     "as_written": "$266.0 billion",
+     "occurrence": 0,
+     "value": "266.0",
+     "unit": "USD billion",
+     "role": "value",
+     "of": "increase in the FDI-in-the-U.S. position, 2025, all countries",
+     "label_keywords": "all|total|foreign direct investment|position",
+     "label_excludes": "Europe|German|Canad",
+     "start": 70,
+     "end": 84
+    },
+    {
+     "as_written": "$5.86 trillion",
+     "occurrence": 0,
+     "value": "5.86",
+     "unit": "USD trillion",
+     "role": "value",
+     "of": "the FDI-in-the-U.S. position at the end of 2025 (a level, not an increase)",
+     "label_keywords": "position|level|total",
+     "label_excludes": "",
+     "start": 88,
+     "end": 102
+    },
+    {
+     "as_written": "2025",
+     "occurrence": 0,
+     "value": null,
+     "unit": "year",
+     "role": "year",
+     "of": "year",
+     "label_keywords": "",
+     "label_excludes": "",
+     "start": 117,
+     "end": 121
+    },
+    {
+     "as_written": "$182.4 billion",
+     "occurrence": 0,
+     "value": "182.4",
+     "unit": "USD billion",
+     "role": "value",
+     "of": "increase in the position from Europe, 2025",
+     "label_keywords": "Europe",
+     "label_excludes": "",
+     "start": 149,
+     "end": 163
+    },
+    {
+     "as_written": "$49.0 billion",
+     "occurrence": 0,
+     "value": "49.0",
+     "unit": "USD billion",
+     "role": "value",
+     "of": "increase in the position from German multinationals",
+     "label_keywords": "German",
+     "label_excludes": "",
+     "start": 274,
+     "end": 287
+    },
+    {
+     "as_written": "$39.2 billion",
+     "occurrence": 0,
+     "value": "39.2",
+     "unit": "USD billion",
+     "role": "value",
+     "of": "increase in the position from Canadian multinationals",
+     "label_keywords": "Canad",
+     "label_excludes": "",
+     "start": 383,
+     "end": 396
+    }
+   ],
+   "chart": {
+    "kind": "bar",
+    "unit": "USD",
+    "scale": "billion",
+    "series": [
+     {
+      "name": "increase in FDI position, 2025",
+      "points": [
+       [
+        "all countries",
+        "266.0"
+       ],
+       [
+        "Europe",
+        "182.4"
+       ],
+       [
+        "Germany",
+        "49.0"
+       ],
+       [
+        "Canada",
+        "39.2"
+       ]
+      ]
+     }
+    ],
+    "note": "Germany is part of Europe: bars, not a pie"
+   }
+  },
+  "t04": {
+   "text_sha256": "657e496ccaeb6e451d761eb1685468f20de5c149ce52286b6ea23544b106673e",
+   "numbers": [
+    {
+     "as_written": "$13.8 billion",
+     "occurrence": 0,
+     "value": "13.8",
+     "unit": "USD billion",
+     "role": "value",
+     "of": "greenfield investment expenditures, 2025, total",
+     "label_keywords": "total|greenfield",
+     "label_excludes": "transport|computer|chemical|Asia|Australia|Korea|Japan|Louisiana|Arizona|Texas",
+     "start": 139,
+     "end": 152
+    },
+    {
+     "as_written": "2025",
+     "occurrence": 0,
+     "value": null,
+     "unit": "year",
+     "role": "year",
+     "of": "year",
+     "label_keywords": "",
+     "label_excludes": "",
+     "start": 156,
+     "end": 160
+    },
+    {
+     "as_written": "$3.6 billion",
+     "occurrence": 0,
+     "value": "3.6",
+     "unit": "USD billion",
+     "role": "value",
+     "of": "greenfield expenditures, transportation and warehousing",
+     "label_keywords": "transport",
+     "label_excludes": "",
+     "start": 247,
+     "end": 259
+    },
+    {
+     "as_written": "$2.0 billion",
+     "occurrence": 0,
+     "value": "2.0",
+     "unit": "USD billion",
+     "role": "value",
+     "of": "greenfield expenditures, computers and electronic products manufacturing",
+     "label_keywords": "computer",
+     "label_excludes": "",
+     "start": 312,
+     "end": 324
+    },
+    {
+     "as_written": "$1.8 billion",
+     "occurrence": 0,
+     "value": "1.8",
+     "unit": "USD billion",
+     "role": "value",
+     "of": "greenfield expenditures, chemicals manufacturing",
+     "label_keywords": "chemical",
+     "label_excludes": "",
+     "start": 356,
+     "end": 368
+    },
+    {
+     "as_written": "$8.3 billion",
+     "occurrence": 0,
+     "value": "8.3",
+     "unit": "USD billion",
+     "role": "value",
+     "of": "greenfield expenditures by investors from Asia and Pacific",
+     "label_keywords": "Asia",
+     "label_excludes": "",
+     "start": 479,
+     "end": 491
+    },
+    {
+     "as_written": "$3.0 billion",
+     "occurrence": 0,
+     "value": "3.0",
+     "unit": "USD billion",
+     "role": "value",
+     "of": "greenfield expenditures by investors from Australia",
+     "label_keywords": "Australia",
+     "label_excludes": "",
+     "start": 512,
+     "end": 524
+    },
+    {
+     "as_written": "$2.2 billion",
+     "occurrence": 0,
+     "value": "2.2",
+     "unit": "USD billion",
+     "role": "value",
+     "of": "greenfield expenditures by investors from South Korea",
+     "label_keywords": "Korea",
+     "label_excludes": "",
+     "start": 540,
+     "end": 552
+    },
+    {
+     "as_written": "$1.7 billion",
+     "occurrence": 0,
+     "value": "1.7",
+     "unit": "USD billion",
+     "role": "value",
+     "of": "greenfield expenditures by investors from Japan",
+     "label_keywords": "Japan",
+     "label_excludes": "",
+     "start": 566,
+     "end": 578
+    },
+    {
+     "as_written": "$3.0 billion",
+     "occurrence": 1,
+     "value": "3.0",
+     "unit": "USD billion",
+     "role": "value",
+     "of": "greenfield investment received by Louisiana",
+     "label_keywords": "Louisiana",
+     "label_excludes": "",
+     "start": 602,
+     "end": 614
+    },
+    {
+     "as_written": "$2.7 billion",
+     "occurrence": 0,
+     "value": "2.7",
+     "unit": "USD billion",
+     "role": "value",
+     "of": "greenfield investment received by Arizona",
+     "label_keywords": "Arizona",
+     "label_excludes": "",
+     "start": 626,
+     "end": 638
+    },
+    {
+     "as_written": "$1.9 billion",
+     "occurrence": 0,
+     "value": "1.9",
+     "unit": "USD billion",
+     "role": "value",
+     "of": "greenfield investment received by Texas",
+     "label_keywords": "Texas",
+     "label_excludes": "",
+     "start": 652,
+     "end": 664
+    }
+   ],
+   "chart": {
+    "kind": "bar",
+    "unit": "USD",
+    "scale": "billion",
+    "series": [
+     {
+      "name": "greenfield expenditures by industry, 2025",
+      "points": [
+       [
+        "transportation and warehousing",
+        "3.6"
+       ],
+       [
+        "computers and electronic products",
+        "2.0"
+       ],
+       [
+        "chemicals",
+        "1.8"
+       ]
+      ]
+     }
+    ],
+    "note": "three breakdowns (industry, region/country, state); a reader draws one — the first, by industry"
+   }
+  },
+  "t05": {
+   "text_sha256": "c4e712ff28ce2df8407544007ae4e74141792ecbf5fa26b8266e8c5602fa0a55",
+   "numbers": [
+    {
+     "as_written": "50",
+     "occurrence": 0,
+     "value": null,
+     "unit": "count",
+     "role": "count",
+     "of": "number of states covered (not a value)",
+     "label_keywords": "",
+     "label_excludes": "",
+     "start": 129,
+     "end": 131
+    },
+    {
+     "as_written": "2.4 percent",
+     "occurrence": 0,
+     "value": "2.4",
+     "unit": "%",
+     "role": "value",
+     "of": "outdoor recreation value added as a share of U.S. GDP, 2024",
+     "label_keywords": "U.S.|nation|national|GDP",
+     "label_excludes": "Hawaii|District",
+     "start": 257,
+     "end": 268
+    },
+    {
+     "as_written": "$696.7 billion",
+     "occurrence": 0,
+     "value": "696.7",
+     "unit": "USD billion",
+     "role": "value",
+     "of": "outdoor recreation value added, U.S., 2024",
+     "label_keywords": "value added|outdoor|U.S.",
+     "label_excludes": "",
+     "start": 270,
+     "end": 284
+    },
+    {
+     "as_written": "2024",
+     "occurrence": 0,
+     "value": null,
+     "unit": "year",
+     "role": "year",
+     "of": "year",
+     "label_keywords": "",
+     "label_excludes": "",
+     "start": 351,
+     "end": 355
+    },
+    {
+     "as_written": "2",
+     "occurrence": 0,
+     "value": null,
+     "unit": "reference",
+     "role": "reference",
+     "of": "national table 2",
+     "label_keywords": "",
+     "label_excludes": "",
+     "start": 372,
+     "end": 373
+    },
+    {
+     "as_written": "6.1 percent",
+     "occurrence": 0,
+     "value": "6.1",
+     "unit": "%",
+     "role": "value",
+     "of": "outdoor recreation share of state GDP, Hawaii (highest)",
+     "label_keywords": "Hawaii",
+     "label_excludes": "",
+     "start": 491,
+     "end": 502
+    },
+    {
+     "as_written": "1.0 percent",
+     "occurrence": 0,
+     "value": "1.0",
+     "unit": "%",
+     "role": "value",
+     "of": "outdoor recreation share of GDP, District of Columbia (lowest)",
+     "label_keywords": "District|D.C.",
+     "label_excludes": "",
+     "start": 516,
+     "end": 527
+    },
+    {
+     "as_written": "1",
+     "occurrence": 0,
+     "value": null,
+     "unit": "reference",
+     "role": "reference",
+     "of": "state table 1",
+     "label_keywords": "",
+     "label_excludes": "",
+     "start": 569,
+     "end": 570
+    }
+   ],
+   "chart": {
+    "kind": "bar",
+    "unit": "%",
+    "scale": "",
+    "series": [
+     {
+      "name": "outdoor recreation share of GDP, 2024",
+      "points": [
+       [
+        "United States",
+        "2.4"
+       ],
+       [
+        "Hawaii",
+        "6.1"
+       ],
+       [
+        "District of Columbia",
+        "1.0"
+       ]
+      ]
+     }
+    ],
+    "note": ""
+   }
+  },
+  "t06": {
+   "text_sha256": "030e06e9174bcbe95d6a17b179ced2c94f99ca396c1d43fd86ebee988a2fb8c3",
+   "numbers": [
+    {
+     "as_written": "0.8 percent",
+     "occurrence": 0,
+     "value": "-0.8",
+     "unit": "%",
+     "role": "value",
+     "of": "change in U.S. employment by U.S. parents, 2023 (a decrease)",
+     "label_keywords": "parent|United States",
+     "label_excludes": "affiliate",
+     "start": 58,
+     "end": 69
+    },
+    {
+     "as_written": "29.9 million",
+     "occurrence": 0,
+     "value": "29.9",
+     "unit": "million workers",
+     "role": "value",
+     "of": "employment in the U.S. by U.S. parents, 2023",
+     "label_keywords": "parent|United States",
+     "label_excludes": "affiliate",
+     "start": 73,
+     "end": 85
+    },
+    {
+     "as_written": "2023",
+     "occurrence": 0,
+     "value": null,
+     "unit": "year",
+     "role": "year",
+     "of": "year",
+     "label_keywords": "",
+     "label_excludes": "",
+     "start": 97,
+     "end": 101
+    },
+    {
+     "as_written": "68.1 percent",
+     "occurrence": 0,
+     "value": "68.1",
+     "unit": "%",
+     "role": "value",
+     "of": "U.S. parents' share of worldwide MNE employment, 2023",
+     "label_keywords": "parent",
+     "label_excludes": "2022",
+     "start": 130,
+     "end": 142
+    },
+    {
+     "as_written": "68.3 percent",
+     "occurrence": 0,
+     "value": "68.3",
+     "unit": "%",
+     "role": "value",
+     "of": "U.S. parents' share of worldwide MNE employment, 2022",
+     "label_keywords": "parent ; 2022",
+     "label_excludes": "",
+     "start": 219,
+     "end": 231
+    },
+    {
+     "as_written": "2022",
+     "occurrence": 0,
+     "value": null,
+     "unit": "year",
+     "role": "year",
+     "of": "year",
+     "label_keywords": "",
+     "label_excludes": "",
+     "start": 235,
+     "end": 239
+    },
+    {
+     "as_written": "0.2 percent",
+     "occurrence": 0,
+     "value": "0.2",
+     "unit": "%",
+     "role": "value",
+     "of": "change in employment abroad by foreign affiliates, 2023",
+     "label_keywords": "affiliate|abroad",
+     "label_excludes": "",
+     "start": 304,
+     "end": 315
+    },
+    {
+     "as_written": "14.0 million",
+     "occurrence": 0,
+     "value": "14.0",
+     "unit": "million workers",
+     "role": "value",
+     "of": "employment abroad by foreign affiliates, 2023",
+     "label_keywords": "affiliate|abroad",
+     "label_excludes": "",
+     "start": 319,
+     "end": 331
+    },
+    {
+     "as_written": "31.9 percent",
+     "occurrence": 0,
+     "value": "31.9",
+     "unit": "%",
+     "role": "value",
+     "of": "foreign affiliates' share of worldwide MNE employment, 2023",
+     "label_keywords": "affiliate|abroad",
+     "label_excludes": "",
+     "start": 358,
+     "end": 370
+    }
+   ],
+   "chart": {
+    "kind": "pie",
+    "unit": "%",
+    "scale": "",
+    "series": [
+     {
+      "name": "employment by U.S. MNEs worldwide, 2023",
+      "points": [
+       [
+        "U.S. parents",
+        "68.1"
+       ],
+       [
+        "foreign affiliates",
+        "31.9"
+       ]
+      ]
+     }
+    ],
+    "note": ""
+   }
+  },
+  "t07": {
+   "text_sha256": "258530cd23fabf32961349028163ebcd6fdef4ef95482d8fe868a8b3bebb1a59",
+   "numbers": [
+    {
+     "as_written": "$18.0 billion",
+     "occurrence": 0,
+     "value": "18.0",
+     "unit": "USD billion",
+     "role": "value",
+     "of": "change in personal current transfer receipts, January 2026 (total)",
+     "label_keywords": "transfer|total|receipts",
+     "label_excludes": "social security|other",
+     "start": 45,
+     "end": 58
+    },
+    {
+     "as_written": "$49.2 billion",
+     "occurrence": 0,
+     "value": "49.2",
+     "unit": "USD billion",
+     "role": "value",
+     "of": "increase in social security benefits",
+     "label_keywords": "social security",
+     "label_excludes": "",
+     "start": 93,
+     "end": 106
+    },
+    {
+     "as_written": "$16.7 billion",
+     "occurrence": 0,
+     "value": "-16.7",
+     "unit": "USD billion",
+     "role": "value",
+     "of": "decrease in other government social benefits",
+     "label_keywords": "other",
+     "label_excludes": "",
+     "start": 175,
+     "end": 188
+    }
+   ],
+   "chart": {
+    "kind": "bar",
+    "unit": "USD",
+    "scale": "billion",
+    "series": [
+     {
+      "name": "change in transfer receipts, January 2026",
+      "points": [
+       [
+        "social security benefits",
+        "49.2"
+       ],
+       [
+        "other government social benefits",
+        "-16.7"
+       ],
+       [
+        "total transfer receipts",
+        "18.0"
+       ]
+      ]
+     }
+    ],
+    "note": ""
+   }
+  },
+  "t08": {
+   "text_sha256": "99b1a1867fafcc14984194e2c80e5701f81563e83ee5f5d7c5a32653d61768a2",
+   "numbers": [
+    {
+     "as_written": "3.7 percent",
+     "occurrence": 0,
+     "value": "3.7",
+     "unit": "%",
+     "role": "value",
+     "of": "gross domestic purchases price index, 4Q25",
+     "label_keywords": "domestic purchases ; fourth|Q4|4Q",
+     "label_excludes": "",
+     "start": 55,
+     "end": 66
+    },
+    {
+     "as_written": "3.4 percent",
+     "occurrence": 0,
+     "value": "3.4",
+     "unit": "%",
+     "role": "value",
+     "of": "gross domestic purchases price index, 3Q25",
+     "label_keywords": "third|Q3|3Q",
+     "label_excludes": "",
+     "start": 119,
+     "end": 130
+    },
+    {
+     "as_written": "2.9 percent",
+     "occurrence": 0,
+     "value": "2.9",
+     "unit": "%",
+     "role": "value",
+     "of": "PCE price index, 4Q25",
+     "label_keywords": "PCE ; fourth|Q4|4Q",
+     "label_excludes": "excluding|core",
+     "start": 219,
+     "end": 230
+    },
+    {
+     "as_written": "2.8 percent",
+     "occurrence": 0,
+     "value": "2.8",
+     "unit": "%",
+     "role": "value",
+     "of": "PCE price index, 3Q25",
+     "label_keywords": "PCE ; third|Q3|3Q",
+     "label_excludes": "excluding|core",
+     "start": 261,
+     "end": 272
+    },
+    {
+     "as_written": "2.7 percent",
+     "occurrence": 0,
+     "value": "2.7",
+     "unit": "%",
+     "role": "value",
+     "of": "PCE price index excluding food and energy, 4Q25",
+     "label_keywords": "excluding|core ; fourth|Q4|4Q",
+     "label_excludes": "",
+     "start": 338,
+     "end": 349
+    },
+    {
+     "as_written": "2.9 percent",
+     "occurrence": 1,
+     "value": "2.9",
+     "unit": "%",
+     "role": "value",
+     "of": "PCE price index excluding food and energy, 3Q25",
+     "label_keywords": "excluding|core ; third|Q3|3Q",
+     "label_excludes": "",
+     "start": 380,
+     "end": 391
+    }
+   ],
+   "chart": {
+    "kind": "bar",
+    "unit": "%",
+    "scale": "",
+    "series": [
+     {
+      "name": "4Q25",
+      "points": [
+       [
+        "gross domestic purchases",
+        "3.7"
+       ],
+       [
+        "PCE",
+        "2.9"
+       ],
+       [
+        "PCE excl. food and energy",
+        "2.7"
+       ]
+      ]
+     },
+     {
+      "name": "3Q25",
+      "points": [
+       [
+        "gross domestic purchases",
+        "3.4"
+       ],
+       [
+        "PCE",
+        "2.8"
+       ],
+       [
+        "PCE excl. food and energy",
+        "2.9"
+       ]
+      ]
+     }
+    ],
+    "note": "grouped bars, two quarters"
+   }
+  },
+  "t09": {
+   "text_sha256": "6d05774ea7ca0784520a4057edec1a6955b46ae417fc69bc78dff34a2aaa52d3",
+   "numbers": [
+    {
+     "as_written": "$27.61 trillion",
+     "occurrence": 0,
+     "value": "-27.61",
+     "unit": "USD trillion",
+     "role": "value",
+     "of": "U.S. net international investment position, end of 3Q25",
+     "label_keywords": "net",
+     "label_excludes": "second",
+     "start": 134,
+     "end": 149
+    },
+    {
+     "as_written": "2025",
+     "occurrence": 0,
+     "value": null,
+     "unit": "year",
+     "role": "year",
+     "of": "year",
+     "label_keywords": "",
+     "label_excludes": "",
+     "start": 185,
+     "end": 189
+    },
+    {
+     "as_written": "$41.27 trillion",
+     "occurrence": 0,
+     "value": "41.27",
+     "unit": "USD trillion",
+     "role": "value",
+     "of": "U.S. assets, end of 3Q25",
+     "label_keywords": "asset",
+     "label_excludes": "",
+     "start": 286,
+     "end": 301
+    },
+    {
+     "as_written": "$68.89 trillion",
+     "occurrence": 0,
+     "value": "68.89",
+     "unit": "USD trillion",
+     "role": "value",
+     "of": "U.S. liabilities, end of 3Q25",
+     "label_keywords": "liabilit",
+     "label_excludes": "",
+     "start": 324,
+     "end": 339
+    },
+    {
+     "as_written": "$26.16 trillion",
+     "occurrence": 0,
+     "value": "-26.16",
+     "unit": "USD trillion",
+     "role": "value",
+     "of": "U.S. net international investment position, end of 2Q25 (revised)",
+     "label_keywords": "net ; second",
+     "label_excludes": "",
+     "start": 408,
+     "end": 423
+    },
+    {
+     "as_written": "1",
+     "occurrence": 0,
+     "value": null,
+     "unit": "reference",
+     "role": "reference",
+     "of": "table 1",
+     "label_keywords": "",
+     "label_excludes": "",
+     "start": 527,
+     "end": 528
+    }
+   ],
+   "chart": {
+    "kind": "bar",
+    "unit": "USD",
+    "scale": "trillion",
+    "series": [
+     {
+      "name": "end of 3Q25",
+      "points": [
+       [
+        "assets",
+        "41.27"
+       ],
+       [
+        "liabilities",
+        "68.89"
+       ],
+       [
+        "net position",
+        "-27.61"
+       ]
+      ]
+     }
+    ],
+    "note": ""
+   }
+  },
+  "t10": {
+   "text_sha256": "7ba27aeadfbe61eb0f0dbfb7000c65a71794448979cc270ddd8afa722844263d",
+   "numbers": [
+    {
+     "as_written": "6.6 percent",
+     "occurrence": 0,
+     "value": "6.6",
+     "unit": "%",
+     "role": "value",
+     "of": "real arts and cultural economic activity growth, 2023",
+     "label_keywords": "art|cultur ; 2023",
+     "label_excludes": "",
+     "start": 188,
+     "end": 199
+    },
+    {
+     "as_written": "2023",
+     "occurrence": 0,
+     "value": null,
+     "unit": "year",
+     "role": "year",
+     "of": "year",
+     "label_keywords": "",
+     "label_excludes": "",
+     "start": 203,
+     "end": 207
+    },
+    {
+     "as_written": "3.8 percent",
+     "occurrence": 0,
+     "value": "3.8",
+     "unit": "%",
+     "role": "value",
+     "of": "real arts and cultural economic activity growth, 2022",
+     "label_keywords": "art|cultur ; 2022",
+     "label_excludes": "",
+     "start": 225,
+     "end": 236
+    },
+    {
+     "as_written": "2022",
+     "occurrence": 0,
+     "value": null,
+     "unit": "year",
+     "role": "year",
+     "of": "year",
+     "label_keywords": "",
+     "label_excludes": "",
+     "start": 240,
+     "end": 244
+    },
+    {
+     "as_written": "1",
+     "occurrence": 0,
+     "value": null,
+     "unit": "reference",
+     "role": "reference",
+     "of": "chart 1 / table 1",
+     "label_keywords": "",
+     "label_excludes": "",
+     "start": 252,
+     "end": 253
+    },
+    {
+     "as_written": "1",
+     "occurrence": 1,
+     "value": null,
+     "unit": "reference",
+     "role": "reference",
+     "of": "table 1",
+     "label_keywords": "",
+     "label_excludes": "",
+     "start": 264,
+     "end": 265
+    },
+    {
+     "as_written": "2.9 percent",
+     "occurrence": 0,
+     "value": "2.9",
+     "unit": "%",
+     "role": "value",
+     "of": "real GDP growth, 2023",
+     "label_keywords": "GDP|economy ; 2023",
+     "label_excludes": "",
+     "start": 364,
+     "end": 375
+    },
+    {
+     "as_written": "2023",
+     "occurrence": 1,
+     "value": null,
+     "unit": "year",
+     "role": "year",
+     "of": "year",
+     "label_keywords": "",
+     "label_excludes": "",
+     "start": 379,
+     "end": 383
+    },
+    {
+     "as_written": "2.5 percent",
+     "occurrence": 0,
+     "value": "2.5",
+     "unit": "%",
+     "role": "value",
+     "of": "real GDP growth, 2022",
+     "label_keywords": "GDP|economy ; 2022",
+     "label_excludes": "",
+     "start": 401,
+     "end": 412
+    },
+    {
+     "as_written": "2022",
+     "occurrence": 1,
+     "value": null,
+     "unit": "year",
+     "role": "year",
+     "of": "year",
+     "label_keywords": "",
+     "label_excludes": "",
+     "start": 416,
+     "end": 420
+    },
+    {
+     "as_written": "1",
+     "occurrence": 2,
+     "value": null,
+     "unit": "reference",
+     "role": "reference",
+     "of": "chart 1",
+     "label_keywords": "",
+     "label_excludes": "",
+     "start": 428,
+     "end": 429
+    },
+    {
+     "as_written": "4.2 percent",
+     "occurrence": 0,
+     "value": "4.2",
+     "unit": "%",
+     "role": "value",
+     "of": "arts and cultural share of GDP, 2023",
+     "label_keywords": "share|GDP|art",
+     "label_excludes": "",
+     "start": 482,
+     "end": 493
+    },
+    {
+     "as_written": "$1.17 trillion",
+     "occurrence": 0,
+     "value": "1.17",
+     "unit": "USD trillion",
+     "role": "value",
+     "of": "arts and cultural value added, 2023",
+     "label_keywords": "art|cultur|value",
+     "label_excludes": "",
+     "start": 505,
+     "end": 519
+    },
+    {
+     "as_written": "2023",
+     "occurrence": 2,
+     "value": null,
+     "unit": "year",
+     "role": "year",
+     "of": "year",
+     "label_keywords": "",
+     "label_excludes": "",
+     "start": 524,
+     "end": 528
+    },
+    {
+     "as_written": "2",
+     "occurrence": 0,
+     "value": null,
+     "unit": "reference",
+     "role": "reference",
+     "of": "tables 2 and 3",
+     "label_keywords": "",
+     "label_excludes": "",
+     "start": 537,
+     "end": 538
+    },
+    {
+     "as_written": "3",
+     "occurrence": 0,
+     "value": null,
+     "unit": "reference",
+     "role": "reference",
+     "of": "tables 2 and 3",
+     "label_keywords": "",
+     "label_excludes": "",
+     "start": 543,
+     "end": 544
+    }
+   ],
+   "chart": {
+    "kind": "bar",
+    "unit": "%",
+    "scale": "",
+    "series": [
+     {
+      "name": "2022",
+      "points": [
+       [
+        "arts and culture",
+        "3.8"
+       ],
+       [
+        "real GDP",
+        "2.5"
+       ]
+      ]
+     },
+     {
+      "name": "2023",
+      "points": [
+       [
+        "arts and culture",
+        "6.6"
+       ],
+       [
+        "real GDP",
+        "2.9"
+       ]
+      ]
+     }
+    ],
+    "note": "grouped bars, real growth"
+   }
+  },
+  "t11": {
+   "text_sha256": "bec648595ae2b55283f0135005031e8ce44f44c94e5af6c3cffe687fa29ea60d",
+   "numbers": [
+    {
+     "as_written": "16.7 percent",
+     "occurrence": 0,
+     "value": "16.7",
+     "unit": "%",
+     "role": "value",
+     "of": "CNMI real GDP growth, 2022",
+     "label_keywords": "2022",
+     "label_excludes": "",
+     "start": 91,
+     "end": 103
+    },
+    {
+     "as_written": "2022",
+     "occurrence": 0,
+     "value": null,
+     "unit": "year",
+     "role": "year",
+     "of": "year",
+     "label_keywords": "",
+     "label_excludes": "",
+     "start": 107,
+     "end": 111
+    },
+    {
+     "as_written": "5.1 percent",
+     "occurrence": 0,
+     "value": "5.1",
+     "unit": "%",
+     "role": "value",
+     "of": "CNMI real GDP growth, 2021",
+     "label_keywords": "2021",
+     "label_excludes": "",
+     "start": 116,
+     "end": 127
+    },
+    {
+     "as_written": "2021",
+     "occurrence": 0,
+     "value": null,
+     "unit": "year",
+     "role": "year",
+     "of": "year",
+     "label_keywords": "",
+     "label_excludes": "",
+     "start": 131,
+     "end": 135
+    },
+    {
+     "as_written": "29.1 percent",
+     "occurrence": 0,
+     "value": "-29.1",
+     "unit": "%",
+     "role": "value",
+     "of": "CNMI real GDP change, 2020 (a decrease)",
+     "label_keywords": "2020",
+     "label_excludes": "",
+     "start": 153,
+     "end": 165
+    },
+    {
+     "as_written": "2020",
+     "occurrence": 0,
+     "value": null,
+     "unit": "year",
+     "role": "year",
+     "of": "year",
+     "label_keywords": "",
+     "label_excludes": "",
+     "start": 169,
+     "end": 173
+    },
+    {
+     "as_written": "1.3",
+     "occurrence": 0,
+     "value": null,
+     "unit": "reference",
+     "role": "reference",
+     "of": "table 1.3",
+     "label_keywords": "",
+     "label_excludes": "",
+     "start": 261,
+     "end": 264
+    }
+   ],
+   "chart": {
+    "kind": "bar",
+    "unit": "%",
+    "scale": "",
+    "series": [
+     {
+      "name": "CNMI real GDP, percent change",
+      "points": [
+       [
+        "2020",
+        "-29.1"
+       ],
+       [
+        "2021",
+        "5.1"
+       ],
+       [
+        "2022",
+        "16.7"
+       ]
+      ]
+     }
+    ],
+    "note": ""
+   }
+  },
+  "t12": {
+   "text_sha256": "cca71a3411e7788a234648735ece0fd425b0945aa46649d35ed30a31e2246604",
+   "numbers": [
+    {
+     "as_written": "50",
+     "occurrence": 0,
+     "value": null,
+     "unit": "count",
+     "role": "count",
+     "of": "number of states covered",
+     "label_keywords": "",
+     "label_excludes": "",
+     "start": 124,
+     "end": 126
+    },
+    {
+     "as_written": "2.3 percent",
+     "occurrence": 0,
+     "value": "2.3",
+     "unit": "%",
+     "role": "value",
+     "of": "outdoor recreation share of U.S. GDP, 2023",
+     "label_keywords": "U.S.|nation|GDP",
+     "label_excludes": "Hawaii|Delaware|District",
+     "start": 257,
+     "end": 268
+    },
+    {
+     "as_written": "$639.5 billion",
+     "occurrence": 0,
+     "value": "639.5",
+     "unit": "USD billion",
+     "role": "value",
+     "of": "outdoor recreation value added, U.S., 2023",
+     "label_keywords": "value added|outdoor|U.S.",
+     "label_excludes": "",
+     "start": 270,
+     "end": 284
+    },
+    {
+     "as_written": "2023",
+     "occurrence": 0,
+     "value": null,
+     "unit": "year",
+     "role": "year",
+     "of": "year",
+     "label_keywords": "",
+     "label_excludes": "",
+     "start": 351,
+     "end": 355
+    },
+    {
+     "as_written": "2",
+     "occurrence": 0,
+     "value": null,
+     "unit": "reference",
+     "role": "reference",
+     "of": "national table 2",
+     "label_keywords": "",
+     "label_excludes": "",
+     "start": 372,
+     "end": 373
+    },
+    {
+     "as_written": "6.3 percent",
+     "occurrence": 0,
+     "value": "6.3",
+     "unit": "%",
+     "role": "value",
+     "of": "outdoor recreation share of state GDP, Hawaii",
+     "label_keywords": "Hawaii",
+     "label_excludes": "",
+     "start": 467,
+     "end": 478
+    },
+    {
+     "as_written": "1.6 percent",
+     "occurrence": 0,
+     "value": "1.6",
+     "unit": "%",
+     "role": "value",
+     "of": "outdoor recreation share of state GDP, Delaware, Connecticut and New York",
+     "label_keywords": "Delaware|Connecticut|New York",
+     "label_excludes": "",
+     "start": 492,
+     "end": 503
+    },
+    {
+     "as_written": "0.8 percent",
+     "occurrence": 0,
+     "value": "0.8",
+     "unit": "%",
+     "role": "value",
+     "of": "outdoor recreation share of GDP, District of Columbia",
+     "label_keywords": "District|D.C.",
+     "label_excludes": "",
+     "start": 558,
+     "end": 569
+    },
+    {
+     "as_written": "1",
+     "occurrence": 0,
+     "value": null,
+     "unit": "reference",
+     "role": "reference",
+     "of": "state table 1",
+     "label_keywords": "",
+     "label_excludes": "",
+     "start": 611,
+     "end": 612
+    }
+   ],
+   "chart": {
+    "kind": "bar",
+    "unit": "%",
+    "scale": "",
+    "series": [
+     {
+      "name": "outdoor recreation share of GDP, 2023",
+      "points": [
+       [
+        "United States",
+        "2.3"
+       ],
+       [
+        "Hawaii",
+        "6.3"
+       ],
+       [
+        "Delaware, Connecticut, New York",
+        "1.6"
+       ],
+       [
+        "District of Columbia",
+        "0.8"
+       ]
+      ]
+     }
+    ],
+    "note": ""
+   }
+  },
+  "t13": {
+   "text_sha256": "c5992da29668dddb3593b2325ba8f8d035a64bbab518f8a8725e7e65cd50dba3",
+   "numbers": [
+    {
+     "as_written": "2,814",
+     "occurrence": 0,
+     "value": "2814",
+     "unit": "counties",
+     "role": "value",
+     "of": "counties where personal income increased, 2023",
+     "label_keywords": "increas",
+     "label_excludes": "",
+     "start": 50,
+     "end": 55
+    },
+    {
+     "as_written": "295",
+     "occurrence": 0,
+     "value": "295",
+     "unit": "counties",
+     "role": "value",
+     "of": "counties where personal income decreased",
+     "label_keywords": "decreas",
+     "label_excludes": "",
+     "start": 79,
+     "end": 82
+    },
+    {
+     "as_written": "five",
+     "occurrence": 0,
+     "value": "5",
+     "unit": "counties",
+     "role": "value",
+     "of": "counties where personal income was unchanged",
+     "label_keywords": "unchanged",
+     "label_excludes": "",
+     "start": 105,
+     "end": 109
+    },
+    {
+     "as_written": "2023",
+     "occurrence": 0,
+     "value": null,
+     "unit": "year",
+     "role": "year",
+     "of": "year",
+     "label_keywords": "",
+     "label_excludes": "",
+     "start": 122,
+     "end": 126
+    },
+    {
+     "as_written": "6.0 percent",
+     "occurrence": 0,
+     "value": "6.0",
+     "unit": "%",
+     "role": "value",
+     "of": "personal income growth, metropolitan portion",
+     "label_keywords": "metropolitan",
+     "label_excludes": "nonmetro",
+     "start": 234,
+     "end": 245
+    },
+    {
+     "as_written": "4.7 percent",
+     "occurrence": 0,
+     "value": "4.7",
+     "unit": "%",
+     "role": "value",
+     "of": "personal income growth, nonmetropolitan portion",
+     "label_keywords": "nonmetro",
+     "label_excludes": "",
+     "start": 299,
+     "end": 310
+    },
+    {
+     "as_written": "17.3 percent",
+     "occurrence": 0,
+     "value": "17.3",
+     "unit": "%",
+     "role": "value",
+     "of": "highest metropolitan county change (Oldham County, TX)",
+     "label_keywords": "Oldham",
+     "label_excludes": "",
+     "start": 429,
+     "end": 441
+    },
+    {
+     "as_written": "8.6 percent",
+     "occurrence": 0,
+     "value": "-8.6",
+     "unit": "%",
+     "role": "value",
+     "of": "lowest metropolitan county change (Oliver County, ND)",
+     "label_keywords": "Oliver",
+     "label_excludes": "",
+     "start": 468,
+     "end": 479
+    },
+    {
+     "as_written": "38.7 percent",
+     "occurrence": 0,
+     "value": "38.7",
+     "unit": "%",
+     "role": "value",
+     "of": "highest nonmetropolitan county change (Sherman County, TX)",
+     "label_keywords": "Sherman",
+     "label_excludes": "",
+     "start": 546,
+     "end": 558
+    },
+    {
+     "as_written": "29.1 percent",
+     "occurrence": 0,
+     "value": "-29.1",
+     "unit": "%",
+     "role": "value",
+     "of": "lowest nonmetropolitan county change (Sheridan County, ND)",
+     "label_keywords": "Sheridan",
+     "label_excludes": "",
+     "start": 586,
+     "end": 598
+    }
+   ],
+   "chart": {
+    "kind": "bar",
+    "unit": "",
+    "scale": "",
+    "series": [
+     {
+      "name": "counties by change in personal income, 2023",
+      "points": [
+       [
+        "increased",
+        "2814"
+       ],
+       [
+        "decreased",
+        "295"
+       ],
+       [
+        "unchanged",
+        "5"
+       ]
+      ]
+     }
+    ],
+    "note": "a pie of 3,114 counties would also do; no total is stated"
+   }
+  },
+  "t14": {
+   "text_sha256": "1605d8d860a5c9a255608ab931034d6f6d3bde1e009927e089cec9dddae3f14d",
+   "numbers": [
+    {
+     "as_written": "3%",
+     "occurrence": 0,
+     "value": "3",
+     "unit": "%",
+     "role": "value",
+     "of": "share of U.S. homes heating mainly with heating oil",
+     "label_keywords": "home ; heating oil",
+     "label_excludes": "propane",
+     "start": 60,
+     "end": 62
+    },
+    {
+     "as_written": "21%",
+     "occurrence": 0,
+     "value": "21",
+     "unit": "%",
+     "role": "value",
+     "of": "forecast change in winter spending, heating oil homes",
+     "label_keywords": "heating oil|oil",
+     "label_excludes": "price",
+     "start": 178,
+     "end": 181
+    },
+    {
+     "as_written": "34%",
+     "occurrence": 0,
+     "value": "34",
+     "unit": "%",
+     "role": "value",
+     "of": "forecast change in heating oil price this winter",
+     "label_keywords": "price",
+     "label_excludes": "",
+     "start": 342,
+     "end": 345
+    },
+    {
+     "as_written": "40%",
+     "occurrence": 0,
+     "value": "40",
+     "unit": "%",
+     "role": "value",
+     "of": "share of homes heating with electricity",
+     "label_keywords": "electric ; home",
+     "label_excludes": "",
+     "start": 501,
+     "end": 504
+    },
+    {
+     "as_written": "4%",
+     "occurrence": 0,
+     "value": "4",
+     "unit": "%",
+     "role": "value",
+     "of": "forecast change in electricity bills, electric-heated homes",
+     "label_keywords": "electric",
+     "label_excludes": "",
+     "start": 557,
+     "end": 559
+    },
+    {
+     "as_written": "9%",
+     "occurrence": 0,
+     "value": "-9",
+     "unit": "%",
+     "role": "value",
+     "of": "forecast change in expenditures, natural gas homes (a decrease)",
+     "label_keywords": "natural gas|gas",
+     "label_excludes": "",
+     "start": 660,
+     "end": 662
+    },
+    {
+     "as_written": "3%",
+     "occurrence": 1,
+     "value": "-3",
+     "unit": "%",
+     "role": "value",
+     "of": "forecast change in expenditures, propane homes (a decrease)",
+     "label_keywords": "propane",
+     "label_excludes": "",
+     "start": 704,
+     "end": 706
+    }
+   ],
+   "chart": {
+    "kind": "bar",
+    "unit": "%",
+    "scale": "",
+    "series": [
+     {
+      "name": "forecast change in winter heating spending",
+      "points": [
+       [
+        "heating oil",
+        "21"
+       ],
+       [
+        "electricity",
+        "4"
+       ],
+       [
+        "natural gas",
+        "-9"
+       ],
+       [
+        "propane",
+        "-3"
+       ]
+      ]
+     }
+    ],
+    "note": ""
+   }
+  },
+  "t15": {
+   "text_sha256": "42eeaf6d0d5b4f8cef0c11943c4a990eefd2a7441029bbbadb7d36f70351740e",
+   "numbers": [
+    {
+     "as_written": "15",
+     "occurrence": 0,
+     "value": null,
+     "unit": "date",
+     "role": "date",
+     "of": "September 15",
+     "label_keywords": "",
+     "label_excludes": "",
+     "start": 58,
+     "end": 60
+    },
+    {
+     "as_written": "$109",
+     "occurrence": 0,
+     "value": "109",
+     "unit": "USD per barrel",
+     "role": "value",
+     "of": "Brent futures price peak, September 15",
+     "label_keywords": "futures",
+     "label_excludes": "",
+     "start": 64,
+     "end": 68
+    },
+    {
+     "as_written": "$132",
+     "occurrence": 0,
+     "value": "132",
+     "unit": "USD per barrel",
+     "role": "value",
+     "of": "Brent spot price high, around September 15",
+     "label_keywords": "spot",
+     "label_excludes": "",
+     "start": 108,
+     "end": 112
+    },
+    {
+     "as_written": "$104",
+     "occurrence": 0,
+     "value": "104",
+     "unit": "USD per barrel",
+     "role": "value",
+     "of": "crude oil average, last two weeks of the quarter",
+     "label_keywords": "averag|final|two weeks",
+     "label_excludes": "",
+     "start": 372,
+     "end": 376
+    }
+   ],
+   "chart": {
+    "kind": "bar",
+    "unit": "USD",
+    "scale": "",
+    "series": [
+     {
+      "name": "Brent crude oil, $ per barrel, 3Q26",
+      "points": [
+       [
+        "futures peak (Sep 15)",
+        "109"
+       ],
+       [
+        "spot high",
+        "132"
+       ],
+       [
+        "average, final two weeks",
+        "104"
+       ]
+      ]
+     }
+    ],
+    "note": ""
+   }
+  },
+  "t16": {
+   "text_sha256": "d279a6be43f8ef270c403be1045879eb26059eb9cee7e2f73415a43923586694",
+   "numbers": [
+    {
+     "as_written": "2025",
+     "occurrence": 0,
+     "value": null,
+     "unit": "year",
+     "role": "year",
+     "of": "year",
+     "label_keywords": "",
+     "label_excludes": "",
+     "start": 85,
+     "end": 89
+    },
+    {
+     "as_written": "10%",
+     "occurrence": 0,
+     "value": "10",
+     "unit": "%",
+     "role": "value",
+     "of": "China's tariff on U.S. propane imposed February 2025",
+     "label_keywords": "February|Feb",
+     "label_excludes": "",
+     "start": 107,
+     "end": 110
+    },
+    {
+     "as_written": "125%",
+     "occurrence": 0,
+     "value": "125",
+     "unit": "%",
+     "role": "value",
+     "of": "China's tariff on U.S. propane, April 2025",
+     "label_keywords": "April|Apr",
+     "label_excludes": "",
+     "start": 253,
+     "end": 257
+    },
+    {
+     "as_written": "2025",
+     "occurrence": 1,
+     "value": null,
+     "unit": "year",
+     "role": "year",
+     "of": "year",
+     "label_keywords": "",
+     "label_excludes": "",
+     "start": 281,
+     "end": 285
+    },
+    {
+     "as_written": "10%",
+     "occurrence": 1,
+     "value": "10",
+     "unit": "%",
+     "role": "value",
+     "of": "China's tariff on U.S. propane since May 2025",
+     "label_keywords": "May|since",
+     "label_excludes": "",
+     "start": 318,
+     "end": 321
+    },
+    {
+     "as_written": "2025",
+     "occurrence": 2,
+     "value": null,
+     "unit": "year",
+     "role": "year",
+     "of": "year",
+     "label_keywords": "",
+     "label_excludes": "",
+     "start": 332,
+     "end": 336
+    },
+    {
+     "as_written": "28%",
+     "occurrence": 0,
+     "value": "-28",
+     "unit": "%",
+     "role": "value",
+     "of": "change in U.S. propane exports to China, 2025 vs 2024",
+     "label_keywords": "export ; 2025",
+     "label_excludes": "half|2026",
+     "start": 381,
+     "end": 384
+    },
+    {
+     "as_written": "2025",
+     "occurrence": 3,
+     "value": null,
+     "unit": "year",
+     "role": "year",
+     "of": "year",
+     "label_keywords": "",
+     "label_excludes": "",
+     "start": 388,
+     "end": 392
+    },
+    {
+     "as_written": "2024",
+     "occurrence": 0,
+     "value": null,
+     "unit": "year",
+     "role": "year",
+     "of": "year",
+     "label_keywords": "",
+     "label_excludes": "",
+     "start": 408,
+     "end": 412
+    },
+    {
+     "as_written": "2026",
+     "occurrence": 0,
+     "value": null,
+     "unit": "year",
+     "role": "year",
+     "of": "year",
+     "label_keywords": "",
+     "label_excludes": "",
+     "start": 435,
+     "end": 439
+    },
+    {
+     "as_written": "19%",
+     "occurrence": 0,
+     "value": "-19",
+     "unit": "%",
+     "role": "value",
+     "of": "change in U.S. propane exports to China, 1H26 vs 1H25",
+     "label_keywords": "export|fell ; first half|2026|1H",
+     "label_excludes": "",
+     "start": 479,
+     "end": 482
+    },
+    {
+     "as_written": "2025",
+     "occurrence": 4,
+     "value": null,
+     "unit": "year",
+     "role": "year",
+     "of": "year",
+     "label_keywords": "",
+     "label_excludes": "",
+     "start": 513,
+     "end": 517
+    }
+   ],
+   "chart": {
+    "kind": "line",
+    "unit": "%",
+    "scale": "",
+    "series": [
+     {
+      "name": "China's tariff on U.S. propane",
+      "points": [
+       [
+        "Feb 2025",
+        "10"
+       ],
+       [
+        "Apr 2025",
+        "125"
+       ],
+       [
+        "since May 2025",
+        "10"
+       ]
+      ]
+     }
+    ],
+    "note": ""
+   }
+  },
+  "t17": {
+   "text_sha256": "a0d056b6ccae7637937835cfcec9cb8c792943ca13a79d06f6db36d048a7c1e1",
+   "numbers": [
+    {
+     "as_written": "19.4 billion kilowatthours",
+     "occurrence": 0,
+     "value": "19.4",
+     "unit": "billion kWh",
+     "role": "value",
+     "of": "increase in solar generation, summer 2026 vs 2025",
+     "label_keywords": "solar",
+     "label_excludes": "",
+     "start": 200,
+     "end": 226
+    },
+    {
+     "as_written": "2025",
+     "occurrence": 0,
+     "value": null,
+     "unit": "year",
+     "role": "year",
+     "of": "year",
+     "label_keywords": "",
+     "label_excludes": "",
+     "start": 267,
+     "end": 271
+    },
+    {
+     "as_written": "9.3 BkWh",
+     "occurrence": 0,
+     "value": "9.3",
+     "unit": "billion kWh",
+     "role": "value",
+     "of": "increase in wind generation",
+     "label_keywords": "wind",
+     "label_excludes": "",
+     "start": 306,
+     "end": 314
+    },
+    {
+     "as_written": "7.5 BkWh",
+     "occurrence": 0,
+     "value": "7.5",
+     "unit": "billion kWh",
+     "role": "value",
+     "of": "increase in natural gas-fired generation",
+     "label_keywords": "gas",
+     "label_excludes": "",
+     "start": 412,
+     "end": 420
+    }
+   ],
+   "chart": {
+    "kind": "bar",
+    "unit": "kilowatthour",
+    "scale": "billion",
+    "series": [
+     {
+      "name": "increase in summer generation, 2026 vs 2025",
+      "points": [
+       [
+        "solar",
+        "19.4"
+       ],
+       [
+        "wind",
+        "9.3"
+       ],
+       [
+        "natural gas",
+        "7.5"
+       ]
+      ]
+     }
+    ],
+    "note": ""
+   }
+  },
+  "t18": {
+   "text_sha256": "73131e8bb13fe148c2c8c4678bb99e1f941540b47484c6e732d227139ad3ba1d",
+   "numbers": [
+    {
+     "as_written": "3",
+     "occurrence": 0,
+     "value": null,
+     "unit": "name",
+     "role": "name",
+     "of": "CCL Stage 3",
+     "label_keywords": "",
+     "label_excludes": "",
+     "start": 10,
+     "end": 11
+    },
+    {
+     "as_written": "2024",
+     "occurrence": 0,
+     "value": null,
+     "unit": "year",
+     "role": "year",
+     "of": "December 2024",
+     "label_keywords": "",
+     "label_excludes": "",
+     "start": 53,
+     "end": 57
+    },
+    {
+     "as_written": "3.1 billion cubic feet per day",
+     "occurrence": 0,
+     "value": "3.1",
+     "unit": "Bcf/d",
+     "role": "value",
+     "of": "Corpus Christi LNG nominal capacity",
+     "label_keywords": "Corpus|CCL|facility|nominal",
+     "label_excludes": "Sabine|peak",
+     "start": 218,
+     "end": 248
+    },
+    {
+     "as_written": "3.9 Bcf/d",
+     "occurrence": 0,
+     "value": "3.9",
+     "unit": "Bcf/d",
+     "role": "value",
+     "of": "Corpus Christi LNG peak capacity",
+     "label_keywords": "Corpus|CCL|facility|peak ; peak",
+     "label_excludes": "Sabine",
+     "start": 261,
+     "end": 270
+    },
+    {
+     "as_written": "3.6 Bcf/d",
+     "occurrence": 0,
+     "value": "3.6",
+     "unit": "Bcf/d",
+     "role": "value",
+     "of": "Sabine Pass nominal capacity",
+     "label_keywords": "Sabine",
+     "label_excludes": "peak",
+     "start": 453,
+     "end": 462
+    },
+    {
+     "as_written": "4.6 Bcf/d",
+     "occurrence": 0,
+     "value": "4.6",
+     "unit": "Bcf/d",
+     "role": "value",
+     "of": "Sabine Pass peak capacity",
+     "label_keywords": "Sabine|peak ; peak",
+     "label_excludes": "",
+     "start": 464,
+     "end": 473
+    }
+   ],
+   "chart": {
+    "kind": "bar",
+    "unit": "Bcf/d",
+    "scale": "",
+    "series": [
+     {
+      "name": "nominal",
+      "points": [
+       [
+        "Corpus Christi",
+        "3.1"
+       ],
+       [
+        "Sabine Pass",
+        "3.6"
+       ]
+      ]
+     },
+     {
+      "name": "peak",
+      "points": [
+       [
+        "Corpus Christi",
+        "3.9"
+       ],
+       [
+        "Sabine Pass",
+        "4.6"
+       ]
+      ]
+     }
+    ],
+    "note": ""
+   }
+  },
+  "t19": {
+   "text_sha256": "358c96b8dd71d5db7b5f0e7612d9864b5ce301660fbe74748292d2087a77a24f",
+   "numbers": [
+    {
+     "as_written": "$65",
+     "occurrence": 0,
+     "value": "65",
+     "unit": "USD per barrel",
+     "role": "value",
+     "of": "WTI average price, 2025",
+     "label_keywords": "2025",
+     "label_excludes": "",
+     "start": 71,
+     "end": 74
+    },
+    {
+     "as_written": "2025",
+     "occurrence": 0,
+     "value": null,
+     "unit": "year",
+     "role": "year",
+     "of": "year",
+     "label_keywords": "",
+     "label_excludes": "",
+     "start": 93,
+     "end": 97
+    },
+    {
+     "as_written": "$84",
+     "occurrence": 0,
+     "value": "84",
+     "unit": "USD per barrel",
+     "role": "value",
+     "of": "WTI average price, 2026 through August",
+     "label_keywords": "2026|August",
+     "label_excludes": "",
+     "start": 115,
+     "end": 118
+    },
+    {
+     "as_written": "2026",
+     "occurrence": 0,
+     "value": null,
+     "unit": "year",
+     "role": "year",
+     "of": "year",
+     "label_keywords": "",
+     "label_excludes": "",
+     "start": 136,
+     "end": 140
+    },
+    {
+     "as_written": "$69",
+     "occurrence": 0,
+     "value": "69",
+     "unit": "USD per barrel",
+     "role": "value",
+     "of": "breakeven price, Midland Basin",
+     "label_keywords": "Midland",
+     "label_excludes": "",
+     "start": 364,
+     "end": 367
+    },
+    {
+     "as_written": "$63",
+     "occurrence": 0,
+     "value": "63",
+     "unit": "USD per barrel",
+     "role": "value",
+     "of": "breakeven price, Delaware Basin",
+     "label_keywords": "Delaware",
+     "label_excludes": "",
+     "start": 405,
+     "end": 408
+    }
+   ],
+   "chart": {
+    "kind": "bar",
+    "unit": "USD",
+    "scale": "",
+    "series": [
+     {
+      "name": "$ per barrel",
+      "points": [
+       [
+        "WTI 2025",
+        "65"
+       ],
+       [
+        "WTI 2026 (through Aug)",
+        "84"
+       ],
+       [
+        "breakeven Midland",
+        "69"
+       ],
+       [
+        "breakeven Delaware",
+        "63"
+       ]
+      ]
+     }
+    ],
+    "note": ""
+   }
+  },
+  "t20": {
+   "text_sha256": "e40360a2e8dec68f14ad27e5c69a6127b68a4e6f8ac8024ce86b4952936d1aa8",
+   "numbers": [
+    {
+     "as_written": "2026",
+     "occurrence": 0,
+     "value": null,
+     "unit": "year",
+     "role": "year",
+     "of": "year",
+     "label_keywords": "",
+     "label_excludes": "",
+     "start": 147,
+     "end": 151
+    },
+    {
+     "as_written": "5%",
+     "occurrence": 0,
+     "value": "-5",
+     "unit": "%",
+     "role": "value",
+     "of": "change in New England natural gas consumption, Apr–Jul 2026 vs 2025",
+     "label_keywords": "consum",
+     "label_excludes": "",
+     "start": 156,
+     "end": 158
+    },
+    {
+     "as_written": "2025",
+     "occurrence": 0,
+     "value": null,
+     "unit": "year",
+     "role": "year",
+     "of": "year",
+     "label_keywords": "",
+     "label_excludes": "",
+     "start": 196,
+     "end": 200
+    },
+    {
+     "as_written": "1.1 billion kilowatthours",
+     "occurrence": 0,
+     "value": "-1.1",
+     "unit": "billion kWh",
+     "role": "value",
+     "of": "change in New England gas-fired generation (a decrease)",
+     "label_keywords": "gas",
+     "label_excludes": "",
+     "start": 409,
+     "end": 434
+    },
+    {
+     "as_written": "6%",
+     "occurrence": 0,
+     "value": "-6",
+     "unit": "%",
+     "role": "value",
+     "of": "percent change in gas-fired generation",
+     "label_keywords": "gas",
+     "label_excludes": "consum",
+     "start": 443,
+     "end": 445
+    },
+    {
+     "as_written": "2025",
+     "occurrence": 1,
+     "value": null,
+     "unit": "year",
+     "role": "year",
+     "of": "year",
+     "label_keywords": "",
+     "label_excludes": "",
+     "start": 480,
+     "end": 484
+    },
+    {
+     "as_written": "0.7 BkWh",
+     "occurrence": 0,
+     "value": "0.7",
+     "unit": "billion kWh",
+     "role": "value",
+     "of": "increase in wind generation",
+     "label_keywords": "wind",
+     "label_excludes": "",
+     "start": 591,
+     "end": 599
+    },
+    {
+     "as_written": "59%",
+     "occurrence": 0,
+     "value": "59",
+     "unit": "%",
+     "role": "value",
+     "of": "percent increase in wind generation",
+     "label_keywords": "wind",
+     "label_excludes": "",
+     "start": 601,
+     "end": 604
+    },
+    {
+     "as_written": "0.2 BkWh",
+     "occurrence": 0,
+     "value": "0.2",
+     "unit": "billion kWh",
+     "role": "value",
+     "of": "increase in utility-scale solar generation",
+     "label_keywords": "solar",
+     "label_excludes": "",
+     "start": 654,
+     "end": 662
+    },
+    {
+     "as_written": "29%",
+     "occurrence": 0,
+     "value": "29",
+     "unit": "%",
+     "role": "value",
+     "of": "percent increase in solar generation",
+     "label_keywords": "solar",
+     "label_excludes": "",
+     "start": 664,
+     "end": 667
+    }
+   ],
+   "chart": {
+    "kind": "bar",
+    "unit": "kilowatthour",
+    "scale": "billion",
+    "series": [
+     {
+      "name": "change in New England generation, Apr–Jul 2026 vs 2025",
+      "points": [
+       [
+        "natural gas",
+        "-1.1"
+       ],
+       [
+        "wind",
+        "0.7"
+       ],
+       [
+        "solar",
+        "0.2"
+       ]
+      ]
+     }
+    ],
+    "note": ""
+   }
+  },
+  "t21": {
+   "text_sha256": "f83c82cdb849fe88c10c8f45a84c971aa4640d185b4d83ffb05e3e0f757f44cb",
+   "numbers": [
+    {
+     "as_written": "$4.07",
+     "occurrence": 0,
+     "value": "4.07",
+     "unit": "USD per gallon",
+     "role": "value",
+     "of": "U.S. regular gasoline retail price",
+     "label_keywords": "U.S.|national|average|retail",
+     "label_excludes": "West|Rocky|Midwest|East|Gulf",
+     "start": 195,
+     "end": 200
+    },
+    {
+     "as_written": "$5.21",
+     "occurrence": 0,
+     "value": "5.21",
+     "unit": "USD per gallon",
+     "role": "value",
+     "of": "West Coast average",
+     "label_keywords": "West",
+     "label_excludes": "",
+     "start": 286,
+     "end": 291
+    },
+    {
+     "as_written": "$4.27",
+     "occurrence": 0,
+     "value": "4.27",
+     "unit": "USD per gallon",
+     "role": "value",
+     "of": "Rocky Mountains average",
+     "label_keywords": "Rocky",
+     "label_excludes": "",
+     "start": 328,
+     "end": 333
+    },
+    {
+     "as_written": "$3.85",
+     "occurrence": 0,
+     "value": "3.85",
+     "unit": "USD per gallon",
+     "role": "value",
+     "of": "Midwest average",
+     "label_keywords": "Midwest",
+     "label_excludes": "",
+     "start": 414,
+     "end": 419
+    },
+    {
+     "as_written": "$3.94",
+     "occurrence": 0,
+     "value": "3.94",
+     "unit": "USD per gallon",
+     "role": "value",
+     "of": "East Coast average",
+     "label_keywords": "East",
+     "label_excludes": "",
+     "start": 446,
+     "end": 451
+    },
+    {
+     "as_written": "$3.62",
+     "occurrence": 0,
+     "value": "3.62",
+     "unit": "USD per gallon",
+     "role": "value",
+     "of": "Gulf Coast average",
+     "label_keywords": "Gulf",
+     "label_excludes": "",
+     "start": 482,
+     "end": 487
+    }
+   ],
+   "chart": {
+    "kind": "bar",
+    "unit": "USD",
+    "scale": "",
+    "series": [
+     {
+      "name": "regular gasoline, $ per gallon",
+      "points": [
+       [
+        "U.S.",
+        "4.07"
+       ],
+       [
+        "West Coast",
+        "5.21"
+       ],
+       [
+        "Rocky Mountains",
+        "4.27"
+       ],
+       [
+        "Midwest",
+        "3.85"
+       ],
+       [
+        "East Coast",
+        "3.94"
+       ],
+       [
+        "Gulf Coast",
+        "3.62"
+       ]
+      ]
+     }
+    ],
+    "note": ""
+   }
+  },
+  "t22": {
+   "text_sha256": "f5d55575a8e2d1519400e659861b9698f7b4eea2c983a11153abfc2c123c2d53",
+   "numbers": [
+    {
+     "as_written": "17.4 billion cubic feet per day",
+     "occurrence": 0,
+     "value": "17.4",
+     "unit": "Bcf/d",
+     "role": "value",
+     "of": "U.S. LNG exports, 1H26",
+     "label_keywords": "first six|first half|1H26",
+     "label_excludes": "",
+     "start": 50,
+     "end": 81
+    },
+    {
+     "as_written": "23%",
+     "occurrence": 0,
+     "value": "23",
+     "unit": "%",
+     "role": "value",
+     "of": "change vs 1H25",
+     "label_keywords": "more|change|increase",
+     "label_excludes": "",
+     "start": 127,
+     "end": 130
+    },
+    {
+     "as_written": "2025",
+     "occurrence": 0,
+     "value": null,
+     "unit": "year",
+     "role": "year",
+     "of": "year",
+     "label_keywords": "",
+     "label_excludes": "",
+     "start": 160,
+     "end": 164
+    },
+    {
+     "as_written": "17.3 Bcf/d",
+     "occurrence": 0,
+     "value": "17.3",
+     "unit": "Bcf/d",
+     "role": "value",
+     "of": "U.S. LNG exports forecast, 2H26",
+     "label_keywords": "second half|2H26|2H",
+     "label_excludes": "",
+     "start": 287,
+     "end": 297
+    },
+    {
+     "as_written": "2026",
+     "occurrence": 0,
+     "value": null,
+     "unit": "year",
+     "role": "year",
+     "of": "year",
+     "label_keywords": "",
+     "label_excludes": "",
+     "start": 320,
+     "end": 324
+    },
+    {
+     "as_written": "2H26",
+     "occurrence": 0,
+     "value": null,
+     "unit": "date",
+     "role": "date",
+     "of": "period",
+     "label_keywords": "",
+     "label_excludes": "",
+     "start": 326,
+     "end": 330
+    },
+    {
+     "as_written": "18.7 Bcf/d",
+     "occurrence": 0,
+     "value": "18.7",
+     "unit": "Bcf/d",
+     "role": "value",
+     "of": "U.S. LNG exports forecast, 1H27",
+     "label_keywords": "1H27|2027",
+     "label_excludes": "",
+     "start": 349,
+     "end": 359
+    },
+    {
+     "as_written": "1H27",
+     "occurrence": 0,
+     "value": null,
+     "unit": "date",
+     "role": "date",
+     "of": "period",
+     "label_keywords": "",
+     "label_excludes": "",
+     "start": 363,
+     "end": 367
+    }
+   ],
+   "chart": {
+    "kind": "line",
+    "unit": "Bcf/d",
+    "scale": "",
+    "series": [
+     {
+      "name": "U.S. LNG exports",
+      "points": [
+       [
+        "1H26",
+        "17.4"
+       ],
+       [
+        "2H26",
+        "17.3"
+       ],
+       [
+        "1H27",
+        "18.7"
+       ]
+      ]
+     }
+    ],
+    "note": ""
+   }
+  },
+  "t23": {
+   "text_sha256": "cfcbbcf464cf758770896b8a738c365f186faa9b76e5dd951d7bb663ba4c0aa4",
+   "numbers": [
+    {
+     "as_written": "2025",
+     "occurrence": 0,
+     "value": null,
+     "unit": "year",
+     "role": "year",
+     "of": "year",
+     "label_keywords": "",
+     "label_excludes": "",
+     "start": 3,
+     "end": 7
+    },
+    {
+     "as_written": "1,824",
+     "occurrence": 0,
+     "value": "1824",
+     "unit": "holes",
+     "role": "value",
+     "of": "exploration drilling holes, 2025",
+     "label_keywords": "explor ; 2025",
+     "label_excludes": "",
+     "start": 97,
+     "end": 102
+    },
+    {
+     "as_written": "1.0 million feet",
+     "occurrence": 0,
+     "value": "1.0",
+     "unit": "million feet",
+     "role": "value",
+     "of": "exploration footage, 2025",
+     "label_keywords": "explor ; 2025",
+     "label_excludes": "",
+     "start": 139,
+     "end": 155
+    },
+    {
+     "as_written": "1,324",
+     "occurrence": 0,
+     "value": "1324",
+     "unit": "holes",
+     "role": "value",
+     "of": "exploration drilling holes, 2024",
+     "label_keywords": "explor|2024 ; 2024",
+     "label_excludes": "",
+     "start": 169,
+     "end": 174
+    },
+    {
+     "as_written": "0.6 million feet",
+     "occurrence": 0,
+     "value": "0.6",
+     "unit": "million feet",
+     "role": "value",
+     "of": "exploration footage, 2024",
+     "label_keywords": "2024",
+     "label_excludes": "",
+     "start": 205,
+     "end": 221
+    },
+    {
+     "as_written": "2024",
+     "occurrence": 0,
+     "value": null,
+     "unit": "year",
+     "role": "year",
+     "of": "year",
+     "label_keywords": "",
+     "label_excludes": "",
+     "start": 233,
+     "end": 237
+    },
+    {
+     "as_written": "3,708",
+     "occurrence": 0,
+     "value": "3708",
+     "unit": "holes",
+     "role": "value",
+     "of": "development drilling holes, 2025",
+     "label_keywords": "develop ; 2025",
+     "label_excludes": "",
+     "start": 332,
+     "end": 337
+    },
+    {
+     "as_written": "1.30 million feet",
+     "occurrence": 0,
+     "value": "1.30",
+     "unit": "million feet",
+     "role": "value",
+     "of": "development footage, 2025",
+     "label_keywords": "develop ; 2025",
+     "label_excludes": "",
+     "start": 366,
+     "end": 383
+    },
+    {
+     "as_written": "2025",
+     "occurrence": 1,
+     "value": null,
+     "unit": "year",
+     "role": "year",
+     "of": "year",
+     "label_keywords": "",
+     "label_excludes": "",
+     "start": 387,
+     "end": 391
+    },
+    {
+     "as_written": "2,462",
+     "occurrence": 0,
+     "value": "2462",
+     "unit": "holes",
+     "role": "value",
+     "of": "development drilling holes, 2024",
+     "label_keywords": "2024",
+     "label_excludes": "",
+     "start": 401,
+     "end": 406
+    },
+    {
+     "as_written": "1.26 million feet",
+     "occurrence": 0,
+     "value": "1.26",
+     "unit": "million feet",
+     "role": "value",
+     "of": "development footage, 2024",
+     "label_keywords": "2024",
+     "label_excludes": "",
+     "start": 417,
+     "end": 434
+    },
+    {
+     "as_written": "2024",
+     "occurrence": 1,
+     "value": null,
+     "unit": "year",
+     "role": "year",
+     "of": "year",
+     "label_keywords": "",
+     "label_excludes": "",
+     "start": 438,
+     "end": 442
+    }
+   ],
+   "chart": {
+    "kind": "bar",
+    "unit": "holes",
+    "scale": "",
+    "series": [
+     {
+      "name": "2024",
+      "points": [
+       [
+        "exploration",
+        "1324"
+       ],
+       [
+        "development",
+        "2462"
+       ]
+      ]
+     },
+     {
+      "name": "2025",
+      "points": [
+       [
+        "exploration",
+        "1824"
+       ],
+       [
+        "development",
+        "3708"
+       ]
+      ]
+     }
+    ],
+    "note": ""
+   }
+  },
+  "t24": {
+   "text_sha256": "31cacd1ff6bfdeefe77be3aa388f4213ac98afa14518a26feaff4e2e2074a04a",
+   "numbers": [
+    {
+     "as_written": "2024",
+     "occurrence": 0,
+     "value": null,
+     "unit": "year",
+     "role": "year",
+     "of": "January 2024",
+     "label_keywords": "",
+     "label_excludes": "",
+     "start": 62,
+     "end": 66
+    },
+    {
+     "as_written": "561,000",
+     "occurrence": 0,
+     "value": "561000",
+     "unit": "b/d",
+     "role": "value",
+     "of": "Nigeria seaborne product shipments, 2Q26",
+     "label_keywords": "2Q26|second quarter|shipment",
+     "label_excludes": "export|2023",
+     "start": 127,
+     "end": 134
+    },
+    {
+     "as_written": "2026",
+     "occurrence": 0,
+     "value": null,
+     "unit": "year",
+     "role": "year",
+     "of": "year",
+     "label_keywords": "",
+     "label_excludes": "",
+     "start": 182,
+     "end": 186
+    },
+    {
+     "as_written": "2Q26",
+     "occurrence": 0,
+     "value": null,
+     "unit": "date",
+     "role": "date",
+     "of": "period",
+     "label_keywords": "",
+     "label_excludes": "",
+     "start": 188,
+     "end": 192
+    },
+    {
+     "as_written": "79,000",
+     "occurrence": 0,
+     "value": "79000",
+     "unit": "b/d",
+     "role": "value",
+     "of": "Nigeria seaborne product shipments, 2023 annual average",
+     "label_keywords": "2023|annual",
+     "label_excludes": "export",
+     "start": 230,
+     "end": 236
+    },
+    {
+     "as_written": "2023",
+     "occurrence": 0,
+     "value": null,
+     "unit": "year",
+     "role": "year",
+     "of": "year",
+     "label_keywords": "",
+     "label_excludes": "",
+     "start": 244,
+     "end": 248
+    },
+    {
+     "as_written": "350,000",
+     "occurrence": 0,
+     "value": "350000",
+     "unit": "b/d",
+     "role": "value",
+     "of": "Nigeria product exports, 2Q26",
+     "label_keywords": "export ; 2Q26|second quarter",
+     "label_excludes": "",
+     "start": 302,
+     "end": 309
+    },
+    {
+     "as_written": "2Q26",
+     "occurrence": 1,
+     "value": null,
+     "unit": "date",
+     "role": "date",
+     "of": "period",
+     "label_keywords": "",
+     "label_excludes": "",
+     "start": 331,
+     "end": 335
+    },
+    {
+     "as_written": "46,000",
+     "occurrence": 0,
+     "value": "46000",
+     "unit": "b/d",
+     "role": "value",
+     "of": "Nigeria product exports, 2023 annual average",
+     "label_keywords": "export ; 2023|annual",
+     "label_excludes": "",
+     "start": 372,
+     "end": 378
+    },
+    {
+     "as_written": "2023",
+     "occurrence": 1,
+     "value": null,
+     "unit": "year",
+     "role": "year",
+     "of": "year",
+     "label_keywords": "",
+     "label_excludes": "",
+     "start": 386,
+     "end": 390
+    }
+   ],
+   "chart": {
+    "kind": "bar",
+    "unit": "b/d",
+    "scale": "",
+    "series": [
+     {
+      "name": "2023 average",
+      "points": [
+       [
+        "shipments",
+        "79000"
+       ],
+       [
+        "exports",
+        "46000"
+       ]
+      ]
+     },
+     {
+      "name": "2Q26",
+      "points": [
+       [
+        "shipments",
+        "561000"
+       ],
+       [
+        "exports",
+        "350000"
+       ]
+      ]
+     }
+    ],
+    "note": ""
+   }
+  },
+  "t25": {
+   "text_sha256": "2732aa1a614c0b1feb7ff4e06d2f2f891b011550da0165e4325b28b63df36a9b",
+   "numbers": [
+    {
+     "as_written": "2015",
+     "occurrence": 0,
+     "value": null,
+     "unit": "year",
+     "role": "year",
+     "of": "year",
+     "label_keywords": "",
+     "label_excludes": "",
+     "start": 3,
+     "end": 7
+    },
+    {
+     "as_written": "5,000",
+     "occurrence": 0,
+     "value": null,
+     "unit": "threshold",
+     "role": "threshold",
+     "of": "short-reach: less than 5,000 feet",
+     "label_keywords": "",
+     "label_excludes": "",
+     "start": 47,
+     "end": 52
+    },
+    {
+     "as_written": "43%",
+     "occurrence": 0,
+     "value": "43",
+     "unit": "%",
+     "role": "value",
+     "of": "short-reach wells share of completions, 2015",
+     "label_keywords": "short ; 2015",
+     "label_excludes": "",
+     "start": 84,
+     "end": 87
+    },
+    {
+     "as_written": "2015",
+     "occurrence": 1,
+     "value": null,
+     "unit": "year",
+     "role": "year",
+     "of": "year",
+     "label_keywords": "",
+     "label_excludes": "",
+     "start": 114,
+     "end": 118
+    },
+    {
+     "as_written": "2025",
+     "occurrence": 0,
+     "value": null,
+     "unit": "year",
+     "role": "year",
+     "of": "year",
+     "label_keywords": "",
+     "label_excludes": "",
+     "start": 123,
+     "end": 127
+    },
+    {
+     "as_written": "4%",
+     "occurrence": 0,
+     "value": "4",
+     "unit": "%",
+     "role": "value",
+     "of": "short-reach share of horizontal wells, 2025",
+     "label_keywords": "short|2025 ; 2025",
+     "label_excludes": "",
+     "start": 153,
+     "end": 155
+    },
+    {
+     "as_written": "5,000",
+     "occurrence": 1,
+     "value": null,
+     "unit": "threshold",
+     "role": "threshold",
+     "of": "mid-length lower bound",
+     "label_keywords": "",
+     "label_excludes": "",
+     "start": 306,
+     "end": 311
+    },
+    {
+     "as_written": "15,000",
+     "occurrence": 0,
+     "value": null,
+     "unit": "threshold",
+     "role": "threshold",
+     "of": "mid-length upper bound",
+     "label_keywords": "",
+     "label_excludes": "",
+     "start": 321,
+     "end": 327
+    },
+    {
+     "as_written": "57%",
+     "occurrence": 0,
+     "value": "57",
+     "unit": "%",
+     "role": "value",
+     "of": "mid-length share of completions, 2015",
+     "label_keywords": "mid ; 2015",
+     "label_excludes": "",
+     "start": 344,
+     "end": 347
+    },
+    {
+     "as_written": "2015",
+     "occurrence": 2,
+     "value": null,
+     "unit": "year",
+     "role": "year",
+     "of": "year",
+     "label_keywords": "",
+     "label_excludes": "",
+     "start": 366,
+     "end": 370
+    },
+    {
+     "as_written": "90%",
+     "occurrence": 0,
+     "value": "90",
+     "unit": "%",
+     "role": "value",
+     "of": "mid-length share, 2021 peak",
+     "label_keywords": "2021|peak",
+     "label_excludes": "",
+     "start": 384,
+     "end": 387
+    },
+    {
+     "as_written": "2021",
+     "occurrence": 0,
+     "value": null,
+     "unit": "year",
+     "role": "year",
+     "of": "year",
+     "label_keywords": "",
+     "label_excludes": "",
+     "start": 391,
+     "end": 395
+    },
+    {
+     "as_written": "81%",
+     "occurrence": 0,
+     "value": "81",
+     "unit": "%",
+     "role": "value",
+     "of": "mid-length share, 2025",
+     "label_keywords": "2025",
+     "label_excludes": "",
+     "start": 416,
+     "end": 419
+    },
+    {
+     "as_written": "2025",
+     "occurrence": 1,
+     "value": null,
+     "unit": "year",
+     "role": "year",
+     "of": "year",
+     "label_keywords": "",
+     "label_excludes": "",
+     "start": 423,
+     "end": 427
+    }
+   ],
+   "chart": {
+    "kind": "line",
+    "unit": "%",
+    "scale": "",
+    "series": [
+     {
+      "name": "short-reach (<5,000 ft)",
+      "points": [
+       [
+        "2015",
+        "43"
+       ],
+       [
+        "2025",
+        "4"
+       ]
+      ]
+     },
+     {
+      "name": "mid-length",
+      "points": [
+       [
+        "2015",
+        "57"
+       ],
+       [
+        "2021",
+        "90"
+       ],
+       [
+        "2025",
+        "81"
+       ]
+      ]
+     }
+    ],
+    "note": ""
+   }
+  },
+  "t26": {
+   "text_sha256": "055d9ac5d623e2419bdc58d20b2436df9bc52b4e56ea9828e6138529c128afb2",
+   "numbers": [
+    {
+     "as_written": "1.2 million b/d",
+     "occurrence": 0,
+     "value": "1.2",
+     "unit": "million b/d",
+     "role": "value",
+     "of": "Gulf Coast to East Coast shipments, April (record)",
+     "label_keywords": "Gulf|East Coast|shipments|total",
+     "label_excludes": "gasoline|distillate|crude",
+     "start": 80,
+     "end": 95
+    },
+    {
+     "as_written": "11%",
+     "occurrence": 0,
+     "value": "11",
+     "unit": "%",
+     "role": "value",
+     "of": "above the pre-waiver record",
+     "label_keywords": "record|higher",
+     "label_excludes": "",
+     "start": 106,
+     "end": 109
+    },
+    {
+     "as_written": "620,000 b/d",
+     "occurrence": 0,
+     "value": "620000",
+     "unit": "b/d",
+     "role": "value",
+     "of": "gasoline blending component shipments, April",
+     "label_keywords": "gasoline",
+     "label_excludes": "",
+     "start": 462,
+     "end": 473
+    },
+    {
+     "as_written": "220,000 b/d",
+     "occurrence": 0,
+     "value": "220000",
+     "unit": "b/d",
+     "role": "value",
+     "of": "distillate shipments, April",
+     "label_keywords": "distillate",
+     "label_excludes": "",
+     "start": 478,
+     "end": 489
+    },
+    {
+     "as_written": "12%",
+     "occurrence": 0,
+     "value": "-12",
+     "unit": "%",
+     "role": "value",
+     "of": "change in total waterborne movements, May",
+     "label_keywords": "waterborne|total|May",
+     "label_excludes": "",
+     "start": 551,
+     "end": 554
+    },
+    {
+     "as_written": "180,000 b/d",
+     "occurrence": 0,
+     "value": "180000",
+     "unit": "b/d",
+     "role": "value",
+     "of": "crude oil Gulf to East Coast shipments, May (record)",
+     "label_keywords": "crude",
+     "label_excludes": "",
+     "start": 647,
+     "end": 658
+    }
+   ],
+   "chart": {
+    "kind": "bar",
+    "unit": "b/d",
+    "scale": "",
+    "series": [
+     {
+      "name": "record Gulf Coast to East Coast shipments",
+      "points": [
+       [
+        "total, April",
+        "1200000"
+       ],
+       [
+        "gasoline blending components, April",
+        "620000"
+       ],
+       [
+        "distillate, April",
+        "220000"
+       ],
+       [
+        "crude oil, May",
+        "180000"
+       ]
+      ]
+     }
+    ],
+    "note": ""
+   }
+  },
+  "t27": {
+   "text_sha256": "3ec145b26bcd908d8f46aa3bf5e1497e82359d167e803b9e39e2a49171f34e9d",
+   "numbers": [
+    {
+     "as_written": "2025",
+     "occurrence": 0,
+     "value": null,
+     "unit": "year",
+     "role": "year",
+     "of": "year",
+     "label_keywords": "",
+     "label_excludes": "",
+     "start": 100,
+     "end": 104
+    },
+    {
+     "as_written": "8%",
+     "occurrence": 0,
+     "value": "8",
+     "unit": "%",
+     "role": "value",
+     "of": "natural gas share of the value of energy traded",
+     "label_keywords": "share|total",
+     "label_excludes": "",
+     "start": 183,
+     "end": 185
+    },
+    {
+     "as_written": "8.6 billion cubic feet per day",
+     "occurrence": 0,
+     "value": "8.6",
+     "unit": "Bcf/d",
+     "role": "value",
+     "of": "U.S. natural gas imports from Canada, 2025",
+     "label_keywords": "import",
+     "label_excludes": "",
+     "start": 260,
+     "end": 290
+    },
+    {
+     "as_written": "2025",
+     "occurrence": 1,
+     "value": null,
+     "unit": "year",
+     "role": "year",
+     "of": "year",
+     "label_keywords": "",
+     "label_excludes": "",
+     "start": 302,
+     "end": 306
+    },
+    {
+     "as_written": "1%",
+     "occurrence": 0,
+     "value": "1",
+     "unit": "%",
+     "role": "value",
+     "of": "change in import volume, 2025 vs 2024",
+     "label_keywords": "import ; volume|higher",
+     "label_excludes": "",
+     "start": 311,
+     "end": 313
+    },
+    {
+     "as_written": "2024",
+     "occurrence": 0,
+     "value": null,
+     "unit": "year",
+     "role": "year",
+     "of": "year",
+     "label_keywords": "",
+     "label_excludes": "",
+     "start": 329,
+     "end": 333
+    },
+    {
+     "as_written": "52%",
+     "occurrence": 0,
+     "value": "52",
+     "unit": "%",
+     "role": "value",
+     "of": "change in import value, 2025 vs 2024",
+     "label_keywords": "import ; value",
+     "label_excludes": "",
+     "start": 366,
+     "end": 369
+    },
+    {
+     "as_written": "2025",
+     "occurrence": 2,
+     "value": null,
+     "unit": "year",
+     "role": "year",
+     "of": "year",
+     "label_keywords": "",
+     "label_excludes": "",
+     "start": 380,
+     "end": 384
+    },
+    {
+     "as_written": "2024",
+     "occurrence": 1,
+     "value": null,
+     "unit": "year",
+     "role": "year",
+     "of": "year",
+     "label_keywords": "",
+     "label_excludes": "",
+     "start": 393,
+     "end": 397
+    },
+    {
+     "as_written": "4%",
+     "occurrence": 0,
+     "value": "4",
+     "unit": "%",
+     "role": "value",
+     "of": "change in export volume to Canada, 2025",
+     "label_keywords": "export ; volume|increased",
+     "label_excludes": "",
+     "start": 461,
+     "end": 463
+    },
+    {
+     "as_written": "2025",
+     "occurrence": 3,
+     "value": null,
+     "unit": "year",
+     "role": "year",
+     "of": "year",
+     "label_keywords": "",
+     "label_excludes": "",
+     "start": 467,
+     "end": 471
+    },
+    {
+     "as_written": "2.8 Bcf/d",
+     "occurrence": 0,
+     "value": "2.8",
+     "unit": "Bcf/d",
+     "role": "value",
+     "of": "U.S. natural gas exports to Canada, 2025",
+     "label_keywords": "export",
+     "label_excludes": "",
+     "start": 489,
+     "end": 498
+    },
+    {
+     "as_written": "77%",
+     "occurrence": 0,
+     "value": "77",
+     "unit": "%",
+     "role": "value",
+     "of": "change in export value, 2025",
+     "label_keywords": "value",
+     "label_excludes": "import",
+     "start": 529,
+     "end": 532
+    },
+    {
+     "as_written": "$2.6 billion",
+     "occurrence": 0,
+     "value": "2.6",
+     "unit": "USD billion",
+     "role": "value",
+     "of": "value of exports to Canada, 2025",
+     "label_keywords": "export|value|total",
+     "label_excludes": "",
+     "start": 543,
+     "end": 555
+    },
+    {
+     "as_written": "2025",
+     "occurrence": 4,
+     "value": null,
+     "unit": "year",
+     "role": "year",
+     "of": "year",
+     "label_keywords": "",
+     "label_excludes": "",
+     "start": 559,
+     "end": 563
+    }
+   ],
+   "chart": {
+    "kind": "bar",
+    "unit": "%",
+    "scale": "",
+    "series": [
+     {
+      "name": "volume",
+      "points": [
+       [
+        "imports from Canada",
+        "1"
+       ],
+       [
+        "exports to Canada",
+        "4"
+       ]
+      ]
+     },
+     {
+      "name": "value",
+      "points": [
+       [
+        "imports from Canada",
+        "52"
+       ],
+       [
+        "exports to Canada",
+        "77"
+       ]
+      ]
+     }
+    ],
+    "note": "percent change 2025 vs 2024"
+   }
+  },
+  "t28": {
+   "text_sha256": "f70b0040b9403c46172dbfa24bd68f42b2eeaeaca8caa56774fdf8a8ad28eaf6",
+   "numbers": [
+    {
+     "as_written": "11%",
+     "occurrence": 0,
+     "value": "-11",
+     "unit": "%",
+     "role": "value",
+     "of": "change in U.S.–Canada energy trade value, 2025",
+     "label_keywords": "fell|change|trade",
+     "label_excludes": "",
+     "start": 71,
+     "end": 74
+    },
+    {
+     "as_written": "2025",
+     "occurrence": 0,
+     "value": null,
+     "unit": "year",
+     "role": "year",
+     "of": "year",
+     "label_keywords": "",
+     "label_excludes": "",
+     "start": 78,
+     "end": 82
+    },
+    {
+     "as_written": "$137 billion",
+     "occurrence": 0,
+     "value": "137",
+     "unit": "USD billion",
+     "role": "value",
+     "of": "U.S.–Canada energy trade value, 2025 (total)",
+     "label_keywords": "total|trade|value",
+     "label_excludes": "import|export",
+     "start": 99,
+     "end": 111
+    },
+    {
+     "as_written": "$111 billion",
+     "occurrence": 0,
+     "value": "111",
+     "unit": "USD billion",
+     "role": "value",
+     "of": "U.S. energy imports from Canada, 2025",
+     "label_keywords": "import",
+     "label_excludes": "",
+     "start": 368,
+     "end": 380
+    },
+    {
+     "as_written": "2025",
+     "occurrence": 1,
+     "value": null,
+     "unit": "year",
+     "role": "year",
+     "of": "year",
+     "label_keywords": "",
+     "label_excludes": "",
+     "start": 384,
+     "end": 388
+    },
+    {
+     "as_written": "$26 billion",
+     "occurrence": 0,
+     "value": "26",
+     "unit": "USD billion",
+     "role": "value",
+     "of": "U.S. energy exports to Canada",
+     "label_keywords": "export",
+     "label_excludes": "",
+     "start": 451,
+     "end": 462
+    },
+    {
+     "as_written": "69%",
+     "occurrence": 0,
+     "value": "69",
+     "unit": "%",
+     "role": "value",
+     "of": "crude oil share of the trade value, 2025",
+     "label_keywords": "crude",
+     "label_excludes": "",
+     "start": 558,
+     "end": 561
+    },
+    {
+     "as_written": "2025",
+     "occurrence": 2,
+     "value": null,
+     "unit": "year",
+     "role": "year",
+     "of": "year",
+     "label_keywords": "",
+     "label_excludes": "",
+     "start": 591,
+     "end": 595
+    }
+   ],
+   "chart": {
+    "kind": "pie",
+    "unit": "USD",
+    "scale": "billion",
+    "series": [
+     {
+      "name": "U.S.–Canada energy trade, 2025",
+      "points": [
+       [
+        "U.S. imports from Canada",
+        "111"
+       ],
+       [
+        "U.S. exports to Canada",
+        "26"
+       ]
+      ]
+     }
+    ],
+    "note": "parts of a stated total of $137 billion"
+   }
+  },
+  "t29": {
+   "text_sha256": "2bdabc1bb2475349e903008390d2b0d3bddd799baf7398809ca5602172fa45ce",
+   "numbers": [
+    {
+     "as_written": "$114",
+     "occurrence": 0,
+     "value": "114",
+     "unit": "USD per barrel",
+     "role": "value",
+     "of": "Brent spot average, September 2026",
+     "label_keywords": "September",
+     "label_excludes": "",
+     "start": 59,
+     "end": 63
+    },
+    {
+     "as_written": "$23",
+     "occurrence": 0,
+     "value": "23",
+     "unit": "USD per barrel",
+     "role": "value",
+     "of": "September increase over August",
+     "label_keywords": "higher|August",
+     "label_excludes": "",
+     "start": 93,
+     "end": 96
+    },
+    {
+     "as_written": "$105",
+     "occurrence": 0,
+     "value": "105",
+     "unit": "USD per barrel",
+     "role": "value",
+     "of": "Brent forecast, 4Q26",
+     "label_keywords": "4Q26",
+     "label_excludes": "",
+     "start": 155,
+     "end": 159
+    },
+    {
+     "as_written": "4Q26",
+     "occurrence": 0,
+     "value": null,
+     "unit": "date",
+     "role": "date",
+     "of": "period",
+     "label_keywords": "",
+     "label_excludes": "",
+     "start": 165,
+     "end": 169
+    },
+    {
+     "as_written": "$14",
+     "occurrence": 0,
+     "value": "14",
+     "unit": "USD per barrel",
+     "role": "value",
+     "of": "4Q26 forecast change vs last month's forecast",
+     "label_keywords": "forecast|higher",
+     "label_excludes": "4Q26",
+     "start": 171,
+     "end": 174
+    },
+    {
+     "as_written": "1.9 million barrels per day",
+     "occurrence": 0,
+     "value": "-1.9",
+     "unit": "million b/d",
+     "role": "value",
+     "of": "global inventory change, 3Q26",
+     "label_keywords": "3Q26|inventor",
+     "label_excludes": "",
+     "start": 367,
+     "end": 394
+    },
+    {
+     "as_written": "3Q26",
+     "occurrence": 0,
+     "value": null,
+     "unit": "date",
+     "role": "date",
+     "of": "period",
+     "label_keywords": "",
+     "label_excludes": "",
+     "start": 404,
+     "end": 408
+    },
+    {
+     "as_written": "0.7 million b/d",
+     "occurrence": 0,
+     "value": "-0.7",
+     "unit": "million b/d",
+     "role": "value",
+     "of": "global inventory change, 4Q26",
+     "label_keywords": "4Q26|decline",
+     "label_excludes": "",
+     "start": 429,
+     "end": 444
+    },
+    {
+     "as_written": "4Q26",
+     "occurrence": 1,
+     "value": null,
+     "unit": "date",
+     "role": "date",
+     "of": "period",
+     "label_keywords": "",
+     "label_excludes": "",
+     "start": 456,
+     "end": 460
+    },
+    {
+     "as_written": "$84",
+     "occurrence": 0,
+     "value": "84",
+     "unit": "USD per barrel",
+     "role": "value",
+     "of": "Brent forecast, 2027",
+     "label_keywords": "2027",
+     "label_excludes": "",
+     "start": 537,
+     "end": 540
+    },
+    {
+     "as_written": "2027",
+     "occurrence": 0,
+     "value": null,
+     "unit": "year",
+     "role": "year",
+     "of": "year",
+     "label_keywords": "",
+     "label_excludes": "",
+     "start": 546,
+     "end": 550
+    }
+   ],
+   "chart": {
+    "kind": "line",
+    "unit": "USD",
+    "scale": "",
+    "series": [
+     {
+      "name": "Brent, $ per barrel",
+      "points": [
+       [
+        "Sep 2026",
+        "114"
+       ],
+       [
+        "4Q26",
+        "105"
+       ],
+       [
+        "2027",
+        "84"
+       ]
+      ]
+     }
+    ],
+    "note": ""
+   }
+  },
+  "t30": {
+   "text_sha256": "b68549655e81afa6fa7765594b5ccdc75ee062b15d84edaa70d4ef17f6de653a",
+   "numbers": [
+    {
+     "as_written": "$91",
+     "occurrence": 0,
+     "value": "91",
+     "unit": "USD per barrel",
+     "role": "value",
+     "of": "Brent spot average, August 2026",
+     "label_keywords": "August",
+     "label_excludes": "",
+     "start": 99,
+     "end": 102
+    },
+    {
+     "as_written": "$7",
+     "occurrence": 0,
+     "value": "7",
+     "unit": "USD per barrel",
+     "role": "value",
+     "of": "August increase over July",
+     "label_keywords": "higher|July",
+     "label_excludes": "",
+     "start": 119,
+     "end": 121
+    },
+    {
+     "as_written": "400 million barrels",
+     "occurrence": 0,
+     "value": "-400",
+     "unit": "million barrels",
+     "role": "value",
+     "of": "global inventory change so far in 2026",
+     "label_keywords": "inventor",
+     "label_excludes": "",
+     "start": 256,
+     "end": 275
+    },
+    {
+     "as_written": "2026",
+     "occurrence": 0,
+     "value": null,
+     "unit": "year",
+     "role": "year",
+     "of": "year",
+     "label_keywords": "",
+     "label_excludes": "",
+     "start": 358,
+     "end": 362
+    },
+    {
+     "as_written": "$90",
+     "occurrence": 0,
+     "value": "90",
+     "unit": "USD per barrel",
+     "role": "value",
+     "of": "Brent forecast, 2H26",
+     "label_keywords": "2H26",
+     "label_excludes": "",
+     "start": 402,
+     "end": 405
+    },
+    {
+     "as_written": "2H26",
+     "occurrence": 0,
+     "value": null,
+     "unit": "date",
+     "role": "date",
+     "of": "period",
+     "label_keywords": "",
+     "label_excludes": "",
+     "start": 411,
+     "end": 415
+    },
+    {
+     "as_written": "$74",
+     "occurrence": 0,
+     "value": "74",
+     "unit": "USD per barrel",
+     "role": "value",
+     "of": "Brent forecast, 2027",
+     "label_keywords": "2027",
+     "label_excludes": "",
+     "start": 450,
+     "end": 453
+    },
+    {
+     "as_written": "2027",
+     "occurrence": 0,
+     "value": null,
+     "unit": "year",
+     "role": "year",
+     "of": "year",
+     "label_keywords": "",
+     "label_excludes": "",
+     "start": 459,
+     "end": 463
+    }
+   ],
+   "chart": {
+    "kind": "line",
+    "unit": "USD",
+    "scale": "",
+    "series": [
+     {
+      "name": "Brent, $ per barrel",
+      "points": [
+       [
+        "Aug 2026",
+        "91"
+       ],
+       [
+        "2H26",
+        "90"
+       ],
+       [
+        "2027",
+        "74"
+       ]
+      ]
+     }
+    ],
+    "note": ""
+   }
+  },
+  "t31": {
+   "text_sha256": "d94b8108725a0791bc977f50fd91b623bb1a8d60173c07a324dece7c9bd5ad8a",
+   "numbers": [
+    {
+     "as_written": "$85",
+     "occurrence": 0,
+     "value": "85",
+     "unit": "USD per barrel",
+     "role": "value",
+     "of": "Brent spot average, June 2026",
+     "label_keywords": "June",
+     "label_excludes": "",
+     "start": 155,
+     "end": 158
+    },
+    {
+     "as_written": "$22",
+     "occurrence": 0,
+     "value": "-22",
+     "unit": "USD per barrel",
+     "role": "value",
+     "of": "change from May",
+     "label_keywords": "May",
+     "label_excludes": "",
+     "start": 188,
+     "end": 191
+    },
+    {
+     "as_written": "$32",
+     "occurrence": 0,
+     "value": "-32",
+     "unit": "USD per barrel",
+     "role": "value",
+     "of": "change from the April 2026 peak",
+     "label_keywords": "April|peak",
+     "label_excludes": "",
+     "start": 207,
+     "end": 210
+    },
+    {
+     "as_written": "2026",
+     "occurrence": 0,
+     "value": null,
+     "unit": "year",
+     "role": "year",
+     "of": "year",
+     "label_keywords": "",
+     "label_excludes": "",
+     "start": 228,
+     "end": 232
+    },
+    {
+     "as_written": "$74",
+     "occurrence": 0,
+     "value": "74",
+     "unit": "USD per barrel",
+     "role": "value",
+     "of": "Brent forecast, 3Q26",
+     "label_keywords": "third quarter|3Q",
+     "label_excludes": "",
+     "start": 287,
+     "end": 290
+    },
+    {
+     "as_written": "2026",
+     "occurrence": 1,
+     "value": null,
+     "unit": "year",
+     "role": "year",
+     "of": "year",
+     "label_keywords": "",
+     "label_excludes": "",
+     "start": 317,
+     "end": 321
+    },
+    {
+     "as_written": "$27",
+     "occurrence": 0,
+     "value": "-27",
+     "unit": "USD per barrel",
+     "role": "value",
+     "of": "change vs last month's forecast",
+     "label_keywords": "forecast",
+     "label_excludes": "",
+     "start": 323,
+     "end": 326
+    },
+    {
+     "as_written": "$65",
+     "occurrence": 0,
+     "value": "65",
+     "unit": "USD per barrel",
+     "role": "value",
+     "of": "Brent forecast, 2027",
+     "label_keywords": "2027",
+     "label_excludes": "",
+     "start": 495,
+     "end": 498
+    },
+    {
+     "as_written": "2027",
+     "occurrence": 0,
+     "value": null,
+     "unit": "year",
+     "role": "year",
+     "of": "year",
+     "label_keywords": "",
+     "label_excludes": "",
+     "start": 504,
+     "end": 508
+    }
+   ],
+   "chart": {
+    "kind": "line",
+    "unit": "USD",
+    "scale": "",
+    "series": [
+     {
+      "name": "Brent, $ per barrel",
+      "points": [
+       [
+        "Jun 2026",
+        "85"
+       ],
+       [
+        "3Q26",
+        "74"
+       ],
+       [
+        "2027",
+        "65"
+       ]
+      ]
+     }
+    ],
+    "note": ""
+   }
+  },
+  "t32": {
+   "text_sha256": "63f4ebd60c049d778d3ffc3ec47a99a43eba132ca1ab7bf1c06cee25dbb51301",
+   "numbers": [
+    {
+     "as_written": "32 percent",
+     "occurrence": 0,
+     "value": "32",
+     "unit": "%",
+     "role": "value",
+     "of": "change in U.S. milk production, 2004–2024",
+     "label_keywords": "milk production|production",
+     "label_excludes": "",
+     "start": 34,
+     "end": 44
+    },
+    {
+     "as_written": "170.8 billion pounds",
+     "occurrence": 0,
+     "value": "170.8",
+     "unit": "billion pounds",
+     "role": "value",
+     "of": "U.S. milk production, 2004",
+     "label_keywords": "2004",
+     "label_excludes": "",
+     "start": 50,
+     "end": 70
+    },
+    {
+     "as_written": "2004",
+     "occurrence": 0,
+     "value": null,
+     "unit": "year",
+     "role": "year",
+     "of": "year",
+     "label_keywords": "",
+     "label_excludes": "",
+     "start": 74,
+     "end": 78
+    },
+    {
+     "as_written": "225.9 billion pounds",
+     "occurrence": 0,
+     "value": "225.9",
+     "unit": "billion pounds",
+     "role": "value",
+     "of": "U.S. milk production, 2024",
+     "label_keywords": "2024",
+     "label_excludes": "",
+     "start": 82,
+     "end": 102
+    },
+    {
+     "as_written": "2024",
+     "occurrence": 0,
+     "value": null,
+     "unit": "year",
+     "role": "year",
+     "of": "year",
+     "label_keywords": "",
+     "label_excludes": "",
+     "start": 106,
+     "end": 110
+    },
+    {
+     "as_written": "28 percent",
+     "occurrence": 0,
+     "value": "28",
+     "unit": "%",
+     "role": "value",
+     "of": "change in milk per cow, 2004–2024",
+     "label_keywords": "output|per cow|productiv",
+     "label_excludes": "",
+     "start": 290,
+     "end": 300
+    },
+    {
+     "as_written": "18,960 pounds",
+     "occurrence": 0,
+     "value": "18960",
+     "unit": "pounds per cow",
+     "role": "value",
+     "of": "milk per cow, 2004",
+     "label_keywords": "2004",
+     "label_excludes": "",
+     "start": 306,
+     "end": 319
+    },
+    {
+     "as_written": "2004",
+     "occurrence": 1,
+     "value": null,
+     "unit": "year",
+     "role": "year",
+     "of": "year",
+     "label_keywords": "",
+     "label_excludes": "",
+     "start": 331,
+     "end": 335
+    },
+    {
+     "as_written": "24,178 pounds",
+     "occurrence": 0,
+     "value": "24178",
+     "unit": "pounds per cow",
+     "role": "value",
+     "of": "milk per cow, 2024",
+     "label_keywords": "2024",
+     "label_excludes": "",
+     "start": 339,
+     "end": 352
+    },
+    {
+     "as_written": "2024",
+     "occurrence": 1,
+     "value": null,
+     "unit": "year",
+     "role": "year",
+     "of": "year",
+     "label_keywords": "",
+     "label_excludes": "",
+     "start": 356,
+     "end": 360
+    },
+    {
+     "as_written": "2002",
+     "occurrence": 0,
+     "value": null,
+     "unit": "year",
+     "role": "year",
+     "of": "year",
+     "label_keywords": "",
+     "label_excludes": "",
+     "start": 498,
+     "end": 502
+    },
+    {
+     "as_written": "2022",
+     "occurrence": 0,
+     "value": null,
+     "unit": "year",
+     "role": "year",
+     "of": "year",
+     "label_keywords": "",
+     "label_excludes": "",
+     "start": 506,
+     "end": 510
+    },
+    {
+     "as_written": "1,000",
+     "occurrence": 0,
+     "value": null,
+     "unit": "threshold",
+     "role": "threshold",
+     "of": "farms with fewer than 1,000 cows",
+     "label_keywords": "",
+     "label_excludes": "",
+     "start": 554,
+     "end": 559
+    },
+    {
+     "as_written": "1,000",
+     "occurrence": 1,
+     "value": null,
+     "unit": "threshold",
+     "role": "threshold",
+     "of": "farms with 1,000 or more cows",
+     "label_keywords": "",
+     "label_excludes": "",
+     "start": 615,
+     "end": 620
+    },
+    {
+     "as_written": "60 percent",
+     "occurrence": 0,
+     "value": "60",
+     "unit": "%",
+     "role": "value",
+     "of": "change in the number of farms with 1,000 or more cows, 2002–2022",
+     "label_keywords": "1,000|large|farms",
+     "label_excludes": "",
+     "start": 647,
+     "end": 657
+    },
+    {
+     "as_written": "112 cows",
+     "occurrence": 0,
+     "value": "112",
+     "unit": "cows",
+     "role": "value",
+     "of": "average dairy farm size, 2000",
+     "label_keywords": "2000",
+     "label_excludes": "",
+     "start": 790,
+     "end": 798
+    },
+    {
+     "as_written": "2000",
+     "occurrence": 0,
+     "value": null,
+     "unit": "year",
+     "role": "year",
+     "of": "year",
+     "label_keywords": "",
+     "label_excludes": "",
+     "start": 802,
+     "end": 806
+    },
+    {
+     "as_written": "283 cows",
+     "occurrence": 0,
+     "value": "283",
+     "unit": "cows",
+     "role": "value",
+     "of": "average dairy farm size, 2021",
+     "label_keywords": "2021",
+     "label_excludes": "",
+     "start": 810,
+     "end": 818
+    },
+    {
+     "as_written": "2021",
+     "occurrence": 0,
+     "value": null,
+     "unit": "year",
+     "role": "year",
+     "of": "year",
+     "label_keywords": "",
+     "label_excludes": "",
+     "start": 822,
+     "end": 826
+    },
+    {
+     "as_written": "63 percent",
+     "occurrence": 0,
+     "value": "-63",
+     "unit": "%",
+     "role": "value",
+     "of": "change in licensed dairy herds, 2004–2024",
+     "label_keywords": "herd",
+     "label_excludes": "",
+     "start": 915,
+     "end": 925
+    },
+    {
+     "as_written": "66,825",
+     "occurrence": 0,
+     "value": "66825",
+     "unit": "herds",
+     "role": "value",
+     "of": "licensed U.S. dairy herds, 2004",
+     "label_keywords": "2004",
+     "label_excludes": "",
+     "start": 931,
+     "end": 937
+    },
+    {
+     "as_written": "2004",
+     "occurrence": 2,
+     "value": null,
+     "unit": "year",
+     "role": "year",
+     "of": "year",
+     "label_keywords": "",
+     "label_excludes": "",
+     "start": 941,
+     "end": 945
+    },
+    {
+     "as_written": "24,811",
+     "occurrence": 0,
+     "value": "24811",
+     "unit": "herds",
+     "role": "value",
+     "of": "licensed U.S. dairy herds, 2024",
+     "label_keywords": "2024",
+     "label_excludes": "",
+     "start": 949,
+     "end": 955
+    },
+    {
+     "as_written": "2024",
+     "occurrence": 2,
+     "value": null,
+     "unit": "year",
+     "role": "year",
+     "of": "year",
+     "label_keywords": "",
+     "label_excludes": "",
+     "start": 959,
+     "end": 963
+    }
+   ],
+   "chart": {
+    "kind": "bar",
+    "unit": "%",
+    "scale": "",
+    "series": [
+     {
+      "name": "change over two decades",
+      "points": [
+       [
+        "milk production (2004–24)",
+        "32"
+       ],
+       [
+        "milk per cow (2004–24)",
+        "28"
+       ],
+       [
+        "farms with 1,000+ cows (2002–22)",
+        "60"
+       ],
+       [
+        "licensed dairy herds (2004–24)",
+        "-63"
+       ]
+      ]
+     }
+    ],
+    "note": "four percent changes over slightly different periods; the levels come in pairs"
+   }
+  },
+  "t33": {
+   "text_sha256": "eb97cd915e7214cd77b022017556e0969ec4ca56bd6418a488f3d41bf479203e",
+   "numbers": [
+    {
+     "as_written": "30",
+     "occurrence": 0,
+     "value": null,
+     "unit": "threshold",
+     "role": "threshold",
+     "of": "BMI threshold of obesity",
+     "label_keywords": "",
+     "label_excludes": "",
+     "start": 172,
+     "end": 174
+    },
+    {
+     "as_written": "19",
+     "occurrence": 0,
+     "value": null,
+     "unit": "name",
+     "role": "name",
+     "of": "COVID-19",
+     "label_keywords": "",
+     "label_excludes": "",
+     "start": 203,
+     "end": 205
+    },
+    {
+     "as_written": "2016",
+     "occurrence": 0,
+     "value": null,
+     "unit": "year",
+     "role": "year",
+     "of": "year",
+     "label_keywords": "",
+     "label_excludes": "",
+     "start": 357,
+     "end": 361
+    },
+    {
+     "as_written": "five percentage points",
+     "occurrence": 0,
+     "value": "5",
+     "unit": "pp",
+     "role": "value",
+     "of": "rural minus urban obesity rate, 2016 (more than)",
+     "label_keywords": "rural|more likely",
+     "label_excludes": "",
+     "start": 409,
+     "end": 431
+    },
+    {
+     "as_written": "2020",
+     "occurrence": 0,
+     "value": null,
+     "unit": "year",
+     "role": "year",
+     "of": "March 2020",
+     "label_keywords": "",
+     "label_excludes": "",
+     "start": 535,
+     "end": 539
+    },
+    {
+     "as_written": "2021",
+     "occurrence": 0,
+     "value": null,
+     "unit": "year",
+     "role": "year",
+     "of": "March 2021",
+     "label_keywords": "",
+     "label_excludes": "",
+     "start": 549,
+     "end": 553
+    },
+    {
+     "as_written": "0.4 percentage point",
+     "occurrence": 0,
+     "value": "0.4",
+     "unit": "pp",
+     "role": "value",
+     "of": "change in rural adult obesity rate, first pandemic year",
+     "label_keywords": "rural",
+     "label_excludes": "",
+     "start": 603,
+     "end": 623
+    },
+    {
+     "as_written": "3.5 times",
+     "occurrence": 0,
+     "value": null,
+     "unit": "ratio",
+     "role": "ratio",
+     "of": "urban rise relative to rural (3.5 times faster)",
+     "label_keywords": "",
+     "label_excludes": "",
+     "start": 665,
+     "end": 674
+    },
+    {
+     "as_written": "1.4 percentage points",
+     "occurrence": 0,
+     "value": "1.4",
+     "unit": "pp",
+     "role": "value",
+     "of": "change in urban adult obesity rate, first pandemic year",
+     "label_keywords": "urban",
+     "label_excludes": "",
+     "start": 686,
+     "end": 707
+    },
+    {
+     "as_written": "2022",
+     "occurrence": 0,
+     "value": null,
+     "unit": "year",
+     "role": "year",
+     "of": "March 2022",
+     "label_keywords": "",
+     "label_excludes": "",
+     "start": 735,
+     "end": 739
+    },
+    {
+     "as_written": "2023",
+     "occurrence": 0,
+     "value": null,
+     "unit": "year",
+     "role": "year",
+     "of": "March 2023",
+     "label_keywords": "",
+     "label_excludes": "",
+     "start": 746,
+     "end": 750
+    },
+    {
+     "as_written": "2023",
+     "occurrence": 1,
+     "value": null,
+     "unit": "year",
+     "role": "year",
+     "of": "March 2023",
+     "label_keywords": "",
+     "label_excludes": "",
+     "start": 760,
+     "end": 764
+    },
+    {
+     "as_written": "2024",
+     "occurrence": 0,
+     "value": null,
+     "unit": "year",
+     "role": "year",
+     "of": "March 2024",
+     "label_keywords": "",
+     "label_excludes": "",
+     "start": 771,
+     "end": 775
+    },
+    {
+     "as_written": "42.4 percent",
+     "occurrence": 0,
+     "value": "42.4",
+     "unit": "%",
+     "role": "value",
+     "of": "urban adult obesity rate, Mar 2022–Mar 2023",
+     "label_keywords": "urban ; 2022|from",
+     "label_excludes": "",
+     "start": 820,
+     "end": 832
+    },
+    {
+     "as_written": "42.1 percent",
+     "occurrence": 0,
+     "value": "42.1",
+     "unit": "%",
+     "role": "value",
+     "of": "urban adult obesity rate, Mar 2023–Mar 2024",
+     "label_keywords": "urban ; 2024|to",
+     "label_excludes": "",
+     "start": 836,
+     "end": 848
+    },
+    {
+     "as_written": "47.8 percent",
+     "occurrence": 0,
+     "value": "47.8",
+     "unit": "%",
+     "role": "value",
+     "of": "rural adult obesity rate, Mar 2022–Mar 2023",
+     "label_keywords": "rural ; 2022|from",
+     "label_excludes": "",
+     "start": 887,
+     "end": 899
+    },
+    {
+     "as_written": "48.3 percent",
+     "occurrence": 0,
+     "value": "48.3",
+     "unit": "%",
+     "role": "value",
+     "of": "rural adult obesity rate, Mar 2023–Mar 2024",
+     "label_keywords": "rural ; 2024|to",
+     "label_excludes": "",
+     "start": 903,
+     "end": 915
+    },
+    {
+     "as_written": "80 percent",
+     "occurrence": 0,
+     "value": "80",
+     "unit": "%",
+     "role": "value",
+     "of": "share of U.S. adults living in urban areas (more than)",
+     "label_keywords": "urban|live",
+     "label_excludes": "",
+     "start": 927,
+     "end": 937
+    },
+    {
+     "as_written": "2020",
+     "occurrence": 1,
+     "value": null,
+     "unit": "year",
+     "role": "year",
+     "of": "2020 Census",
+     "label_keywords": "",
+     "label_excludes": "",
+     "start": 1006,
+     "end": 1010
+    }
+   ],
+   "chart": {
+    "kind": "bar",
+    "unit": "%",
+    "scale": "",
+    "series": [
+     {
+      "name": "Mar 2022–Mar 2023",
+      "points": [
+       [
+        "urban",
+        "42.4"
+       ],
+       [
+        "rural",
+        "47.8"
+       ]
+      ]
+     },
+     {
+      "name": "Mar 2023–Mar 2024",
+      "points": [
+       [
+        "urban",
+        "42.1"
+       ],
+       [
+        "rural",
+        "48.3"
+       ]
+      ]
+     }
+    ],
+    "note": ""
+   }
+  },
+  "t34": {
+   "text_sha256": "9220b47e31c1027b571b39ecfb83c64592d60be485063eace5b7eb8a0fd63adf",
+   "numbers": [
+    {
+     "as_written": "2016",
+     "occurrence": 0,
+     "value": null,
+     "unit": "year",
+     "role": "year",
+     "of": "2016–2017",
+     "label_keywords": "",
+     "label_excludes": "",
+     "start": 25,
+     "end": 29
+    },
+    {
+     "as_written": "2017",
+     "occurrence": 0,
+     "value": null,
+     "unit": "year",
+     "role": "year",
+     "of": "2016–2017",
+     "label_keywords": "",
+     "label_excludes": "",
+     "start": 30,
+     "end": 34
+    },
+    {
+     "as_written": "2021",
+     "occurrence": 0,
+     "value": null,
+     "unit": "year",
+     "role": "year",
+     "of": "2021–2022",
+     "label_keywords": "",
+     "label_excludes": "",
+     "start": 36,
+     "end": 40
+    },
+    {
+     "as_written": "2022",
+     "occurrence": 0,
+     "value": null,
+     "unit": "year",
+     "role": "year",
+     "of": "2021–2022",
+     "label_keywords": "",
+     "label_excludes": "",
+     "start": 41,
+     "end": 45
+    },
+    {
+     "as_written": "2022",
+     "occurrence": 1,
+     "value": null,
+     "unit": "year",
+     "role": "year",
+     "of": "2022–2023",
+     "label_keywords": "",
+     "label_excludes": "",
+     "start": 51,
+     "end": 55
+    },
+    {
+     "as_written": "2023",
+     "occurrence": 0,
+     "value": null,
+     "unit": "year",
+     "role": "year",
+     "of": "2022–2023",
+     "label_keywords": "",
+     "label_excludes": "",
+     "start": 56,
+     "end": 60
+    },
+    {
+     "as_written": "2016",
+     "occurrence": 1,
+     "value": null,
+     "unit": "year",
+     "role": "year",
+     "of": "2016–17",
+     "label_keywords": "",
+     "label_excludes": "",
+     "start": 138,
+     "end": 142
+    },
+    {
+     "as_written": "17",
+     "occurrence": 0,
+     "value": null,
+     "unit": "year",
+     "role": "year",
+     "of": "2016–17",
+     "label_keywords": "",
+     "label_excludes": "",
+     "start": 143,
+     "end": 145
+    },
+    {
+     "as_written": "19",
+     "occurrence": 0,
+     "value": null,
+     "unit": "name",
+     "role": "name",
+     "of": "COVID-19",
+     "label_keywords": "",
+     "label_excludes": "",
+     "start": 203,
+     "end": 205
+    },
+    {
+     "as_written": "71 percent",
+     "occurrence": 0,
+     "value": "71",
+     "unit": "%",
+     "role": "value",
+     "of": "SFAs covering costs or with a surplus, 2016–17",
+     "label_keywords": "2016 ; cover|surplus|break",
+     "label_excludes": "",
+     "start": 217,
+     "end": 227
+    },
+    {
+     "as_written": "82 percent",
+     "occurrence": 0,
+     "value": "82",
+     "unit": "%",
+     "role": "value",
+     "of": "SFAs covering costs or with a surplus, 2021–22",
+     "label_keywords": "2021 ; cover|surplus|break",
+     "label_excludes": "",
+     "start": 347,
+     "end": 357
+    },
+    {
+     "as_written": "2021",
+     "occurrence": 1,
+     "value": null,
+     "unit": "year",
+     "role": "year",
+     "of": "2021–22",
+     "label_keywords": "",
+     "label_excludes": "",
+     "start": 365,
+     "end": 369
+    },
+    {
+     "as_written": "22",
+     "occurrence": 0,
+     "value": null,
+     "unit": "year",
+     "role": "year",
+     "of": "2021–22",
+     "label_keywords": "",
+     "label_excludes": "",
+     "start": 370,
+     "end": 372
+    },
+    {
+     "as_written": "2022",
+     "occurrence": 2,
+     "value": null,
+     "unit": "year",
+     "role": "year",
+     "of": "2022–2023",
+     "label_keywords": "",
+     "label_excludes": "",
+     "start": 873,
+     "end": 877
+    },
+    {
+     "as_written": "2023",
+     "occurrence": 1,
+     "value": null,
+     "unit": "year",
+     "role": "year",
+     "of": "2022–2023",
+     "label_keywords": "",
+     "label_excludes": "",
+     "start": 878,
+     "end": 882
+    },
+    {
+     "as_written": "72 percent",
+     "occurrence": 0,
+     "value": "72",
+     "unit": "%",
+     "role": "value",
+     "of": "SFAs breaking even or with a surplus, end of 2022–23",
+     "label_keywords": "2022|2023 ; cover|surplus|break",
+     "label_excludes": "",
+     "start": 896,
+     "end": 906
+    },
+    {
+     "as_written": "28 percent",
+     "occurrence": 0,
+     "value": "28",
+     "unit": "%",
+     "role": "value",
+     "of": "SFAs with revenues insufficient to cover costs, end of 2022–23",
+     "label_keywords": "2022|2023 ; insufficient|not cover|deficit|loss",
+     "label_excludes": "",
+     "start": 995,
+     "end": 1005
+    },
+    {
+     "as_written": "2022",
+     "occurrence": 3,
+     "value": null,
+     "unit": "year",
+     "role": "year",
+     "of": "2022–2023",
+     "label_keywords": "",
+     "label_excludes": "",
+     "start": 1083,
+     "end": 1087
+    },
+    {
+     "as_written": "2023",
+     "occurrence": 2,
+     "value": null,
+     "unit": "year",
+     "role": "year",
+     "of": "2022–2023",
+     "label_keywords": "",
+     "label_excludes": "",
+     "start": 1088,
+     "end": 1092
+    },
+    {
+     "as_written": "29 percent",
+     "occurrence": 0,
+     "value": "29",
+     "unit": "%",
+     "role": "value",
+     "of": "SFAs with insufficient revenues, 2016–17",
+     "label_keywords": "2016 ; insufficient|not cover|deficit|loss",
+     "label_excludes": "",
+     "start": 1121,
+     "end": 1131
+    },
+    {
+     "as_written": "2016",
+     "occurrence": 2,
+     "value": null,
+     "unit": "year",
+     "role": "year",
+     "of": "2016–17",
+     "label_keywords": "",
+     "label_excludes": "",
+     "start": 1139,
+     "end": 1143
+    },
+    {
+     "as_written": "17",
+     "occurrence": 1,
+     "value": null,
+     "unit": "year",
+     "role": "year",
+     "of": "2016–17",
+     "label_keywords": "",
+     "label_excludes": "",
+     "start": 1144,
+     "end": 1146
+    },
+    {
+     "as_written": "18 percent",
+     "occurrence": 0,
+     "value": "18",
+     "unit": "%",
+     "role": "value",
+     "of": "SFAs with insufficient revenues, 2021–22",
+     "label_keywords": "2021 ; insufficient|not cover|deficit|loss",
+     "label_excludes": "",
+     "start": 1163,
+     "end": 1173
+    },
+    {
+     "as_written": "2021",
+     "occurrence": 2,
+     "value": null,
+     "unit": "year",
+     "role": "year",
+     "of": "2021–22",
+     "label_keywords": "",
+     "label_excludes": "",
+     "start": 1181,
+     "end": 1185
+    },
+    {
+     "as_written": "22",
+     "occurrence": 1,
+     "value": null,
+     "unit": "year",
+     "role": "year",
+     "of": "2021–22",
+     "label_keywords": "",
+     "label_excludes": "",
+     "start": 1186,
+     "end": 1188
+    }
+   ],
+   "chart": {
+    "kind": "line",
+    "unit": "%",
+    "scale": "",
+    "series": [
+     {
+      "name": "share breaking even or with a surplus",
+      "points": [
+       [
+        "2016–17",
+        "71"
+       ],
+       [
+        "2021–22",
+        "82"
+       ],
+       [
+        "2022–23",
+        "72"
+       ]
+      ]
+     }
+    ],
+    "note": "the complement series (29, 18, 28) is the same information"
+   }
+  },
+  "t35": {
+   "text_sha256": "89413aa5e16f1166cd3e68e415a8776ba8c1904137db2407546cc0cb049951c8",
+   "numbers": [
+    {
+     "as_written": "8 percent",
+     "occurrence": 0,
+     "value": "8",
+     "unit": "%",
+     "role": "value",
+     "of": "projected Southeast Asia population growth, 2023–2033",
+     "label_keywords": "Southeast Asia|region ; population",
+     "label_excludes": "Vietnam|Indonesia|Philippines|Malaysia",
+     "start": 208,
+     "end": 217
+    },
+    {
+     "as_written": "2023",
+     "occurrence": 0,
+     "value": null,
+     "unit": "year",
+     "role": "year",
+     "of": "year",
+     "label_keywords": "",
+     "label_excludes": "",
+     "start": 223,
+     "end": 227
+    },
+    {
+     "as_written": "2033",
+     "occurrence": 0,
+     "value": null,
+     "unit": "year",
+     "role": "year",
+     "of": "year",
+     "label_keywords": "",
+     "label_excludes": "",
+     "start": 231,
+     "end": 235
+    },
+    {
+     "as_written": "26 percent",
+     "occurrence": 0,
+     "value": "26",
+     "unit": "%",
+     "role": "value",
+     "of": "projected Southeast Asia per capita GDP growth (almost)",
+     "label_keywords": "GDP|income",
+     "label_excludes": "Vietnam|Indonesia|Philippines|Malaysia",
+     "start": 336,
+     "end": 346
+    },
+    {
+     "as_written": "8.2 million people",
+     "occurrence": 0,
+     "value": "8.2",
+     "unit": "million people",
+     "role": "value",
+     "of": "projected population growth, Vietnam",
+     "label_keywords": "Vietnam",
+     "label_excludes": "",
+     "start": 533,
+     "end": 551
+    },
+    {
+     "as_written": "8.0 percent",
+     "occurrence": 0,
+     "value": "8.0",
+     "unit": "%",
+     "role": "value",
+     "of": "projected population growth, Vietnam",
+     "label_keywords": "Vietnam",
+     "label_excludes": "",
+     "start": 553,
+     "end": 564
+    },
+    {
+     "as_written": "18.5 million people",
+     "occurrence": 0,
+     "value": "18.5",
+     "unit": "million people",
+     "role": "value",
+     "of": "projected population growth, Indonesia",
+     "label_keywords": "Indonesia",
+     "label_excludes": "",
+     "start": 580,
+     "end": 599
+    },
+    {
+     "as_written": "6.8 percent",
+     "occurrence": 0,
+     "value": "6.8",
+     "unit": "%",
+     "role": "value",
+     "of": "projected population growth, Indonesia",
+     "label_keywords": "Indonesia ; population|people",
+     "label_excludes": "GDP",
+     "start": 601,
+     "end": 612
+    },
+    {
+     "as_written": "$1,484",
+     "occurrence": 0,
+     "value": "1484",
+     "unit": "USD per person",
+     "role": "value",
+     "of": "projected GDP per person growth, Philippines",
+     "label_keywords": "Philippines",
+     "label_excludes": "",
+     "start": 676,
+     "end": 682
+    },
+    {
+     "as_written": "39.8 percent",
+     "occurrence": 0,
+     "value": "39.8",
+     "unit": "%",
+     "role": "value",
+     "of": "projected per capita GDP growth, Philippines",
+     "label_keywords": "Philippines",
+     "label_excludes": "",
+     "start": 695,
+     "end": 707
+    },
+    {
+     "as_written": "$2,151",
+     "occurrence": 0,
+     "value": "2151",
+     "unit": "USD per person",
+     "role": "value",
+     "of": "projected GDP per person growth, Indonesia",
+     "label_keywords": "Indonesia",
+     "label_excludes": "",
+     "start": 731,
+     "end": 737
+    },
+    {
+     "as_written": "50.2 percent",
+     "occurrence": 0,
+     "value": "50.2",
+     "unit": "%",
+     "role": "value",
+     "of": "projected per capita GDP growth, Indonesia",
+     "label_keywords": "Indonesia ; GDP|per person|income",
+     "label_excludes": "",
+     "start": 739,
+     "end": 751
+    },
+    {
+     "as_written": "3.1 million people",
+     "occurrence": 0,
+     "value": "3.1",
+     "unit": "million people",
+     "role": "value",
+     "of": "projected population growth, Malaysia",
+     "label_keywords": "Malaysia",
+     "label_excludes": "",
+     "start": 870,
+     "end": 888
+    },
+    {
+     "as_written": "9.3 percent",
+     "occurrence": 0,
+     "value": "9.3",
+     "unit": "%",
+     "role": "value",
+     "of": "projected population growth, Malaysia",
+     "label_keywords": "Malaysia ; population|people",
+     "label_excludes": "GDP",
+     "start": 890,
+     "end": 901
+    },
+    {
+     "as_written": "$4,434",
+     "occurrence": 0,
+     "value": "4434",
+     "unit": "USD per person",
+     "role": "value",
+     "of": "projected per capita GDP growth, Malaysia",
+     "label_keywords": "Malaysia",
+     "label_excludes": "",
+     "start": 932,
+     "end": 938
+    },
+    {
+     "as_written": "37.3 percent",
+     "occurrence": 0,
+     "value": "37.3",
+     "unit": "%",
+     "role": "value",
+     "of": "projected per capita GDP growth, Malaysia",
+     "label_keywords": "Malaysia ; GDP|per capita|income",
+     "label_excludes": "",
+     "start": 940,
+     "end": 952
+    }
+   ],
+   "chart": {
+    "kind": "bar",
+    "unit": "%",
+    "scale": "",
+    "series": [
+     {
+      "name": "projected per capita GDP growth, 2023–2033",
+      "points": [
+       [
+        "Philippines",
+        "39.8"
+       ],
+       [
+        "Indonesia",
+        "50.2"
+       ],
+       [
+        "Malaysia",
+        "37.3"
+       ]
+      ]
+     }
+    ],
+    "note": "population growth (Vietnam 8.0, Indonesia 6.8, Malaysia 9.3) would be a second chart"
+   }
+  },
+  "t36": {
+   "text_sha256": "d1aab19efaf3b2f57846fde80417f688fe5d57b6001220bb5a6f09ad5fdcd270",
+   "numbers": [
+    {
+     "as_written": "2021",
+     "occurrence": 0,
+     "value": null,
+     "unit": "year",
+     "role": "year",
+     "of": "mid-2021",
+     "label_keywords": "",
+     "label_excludes": "",
+     "start": 231,
+     "end": 235
+    },
+    {
+     "as_written": "2022",
+     "occurrence": 0,
+     "value": null,
+     "unit": "year",
+     "role": "year",
+     "of": "through 2022",
+     "label_keywords": "",
+     "label_excludes": "",
+     "start": 244,
+     "end": 248
+    },
+    {
+     "as_written": "19",
+     "occurrence": 0,
+     "value": null,
+     "unit": "name",
+     "role": "name",
+     "of": "COVID-19",
+     "label_keywords": "",
+     "label_excludes": "",
+     "start": 282,
+     "end": 284
+    },
+    {
+     "as_written": "2020",
+     "occurrence": 0,
+     "value": null,
+     "unit": "year",
+     "role": "year",
+     "of": "2020 to 2022",
+     "label_keywords": "",
+     "label_excludes": "",
+     "start": 344,
+     "end": 348
+    },
+    {
+     "as_written": "2022",
+     "occurrence": 1,
+     "value": null,
+     "unit": "year",
+     "role": "year",
+     "of": "2020 to 2022",
+     "label_keywords": "",
+     "label_excludes": "",
+     "start": 352,
+     "end": 356
+    },
+    {
+     "as_written": "2022",
+     "occurrence": 2,
+     "value": null,
+     "unit": "year",
+     "role": "year",
+     "of": "In 2022, HPAI",
+     "label_keywords": "",
+     "label_excludes": "",
+     "start": 509,
+     "end": 513
+    },
+    {
+     "as_written": "24.0 percent",
+     "occurrence": 0,
+     "value": "24.0",
+     "unit": "%",
+     "role": "value",
+     "of": "change in food-at-home prices, Jan 2020 to Jan 2023",
+     "label_keywords": "2020|food-at-home|at home",
+     "label_excludes": "2023 and|2024",
+     "start": 972,
+     "end": 984
+    },
+    {
+     "as_written": "2020",
+     "occurrence": 1,
+     "value": null,
+     "unit": "year",
+     "role": "year",
+     "of": "January 2020",
+     "label_keywords": "",
+     "label_excludes": "",
+     "start": 1001,
+     "end": 1005
+    },
+    {
+     "as_written": "2023",
+     "occurrence": 0,
+     "value": null,
+     "unit": "year",
+     "role": "year",
+     "of": "January 2023",
+     "label_keywords": "",
+     "label_excludes": "",
+     "start": 1018,
+     "end": 1022
+    },
+    {
+     "as_written": "2022",
+     "occurrence": 3,
+     "value": null,
+     "unit": "year",
+     "role": "year",
+     "of": "peaked in 2022",
+     "label_keywords": "",
+     "label_excludes": "",
+     "start": 1073,
+     "end": 1077
+    },
+    {
+     "as_written": "9.9-percent",
+     "occurrence": 0,
+     "value": "9.9",
+     "unit": "%",
+     "role": "value",
+     "of": "all-food price increase, 2022",
+     "label_keywords": "2022",
+     "label_excludes": "",
+     "start": 1103,
+     "end": 1114
+    },
+    {
+     "as_written": "5.8 percent",
+     "occurrence": 0,
+     "value": "5.8",
+     "unit": "%",
+     "role": "value",
+     "of": "food price increase, 2023",
+     "label_keywords": "2023",
+     "label_excludes": "2020",
+     "start": 1212,
+     "end": 1223
+    },
+    {
+     "as_written": "2023",
+     "occurrence": 1,
+     "value": null,
+     "unit": "year",
+     "role": "year",
+     "of": "year",
+     "label_keywords": "",
+     "label_excludes": "",
+     "start": 1227,
+     "end": 1231
+    },
+    {
+     "as_written": "2.3 percent",
+     "occurrence": 0,
+     "value": "2.3",
+     "unit": "%",
+     "role": "value",
+     "of": "food price increase, 2024",
+     "label_keywords": "2024",
+     "label_excludes": "",
+     "start": 1236,
+     "end": 1247
+    },
+    {
+     "as_written": "2024",
+     "occurrence": 0,
+     "value": null,
+     "unit": "year",
+     "role": "year",
+     "of": "year",
+     "label_keywords": "",
+     "label_excludes": "",
+     "start": 1251,
+     "end": 1255
+    }
+   ],
+   "chart": {
+    "kind": "line",
+    "unit": "%",
+    "scale": "",
+    "series": [
+     {
+      "name": "food price increase from the previous year",
+      "points": [
+       [
+        "2022",
+        "9.9"
+       ],
+       [
+        "2023",
+        "5.8"
+       ],
+       [
+        "2024",
+        "2.3"
+       ]
+      ]
+     }
+    ],
+    "note": ""
+   }
+  },
+  "t37": {
+   "text_sha256": "afe118ec87b3e69c5947e016fb4e0ab194619d67b8c224981c88553a4893926c",
+   "numbers": [
+    {
+     "as_written": "2.26 billion acres",
+     "occurrence": 0,
+     "value": "2.26",
+     "unit": "billion acres",
+     "role": "value",
+     "of": "total U.S. land area",
+     "label_keywords": "total|land area",
+     "label_excludes": "",
+     "start": 43,
+     "end": 61
+    },
+    {
+     "as_written": "2017",
+     "occurrence": 0,
+     "value": null,
+     "unit": "year",
+     "role": "year",
+     "of": "year",
+     "label_keywords": "",
+     "label_excludes": "",
+     "start": 131,
+     "end": 135
+    },
+    {
+     "as_written": "29 percent",
+     "occurrence": 0,
+     "value": "29",
+     "unit": "%",
+     "role": "value",
+     "of": "share of U.S. land in grassland pasture and range, 2017",
+     "label_keywords": "grassland|pasture|range",
+     "label_excludes": "",
+     "start": 143,
+     "end": 153
+    },
+    {
+     "as_written": "28 percent",
+     "occurrence": 0,
+     "value": "28",
+     "unit": "%",
+     "role": "value",
+     "of": "share in forest-use land",
+     "label_keywords": "forest",
+     "label_excludes": "",
+     "start": 209,
+     "end": 219
+    },
+    {
+     "as_written": "17 percent",
+     "occurrence": 0,
+     "value": "17",
+     "unit": "%",
+     "role": "value",
+     "of": "share in cropland",
+     "label_keywords": "cropland|crop",
+     "label_excludes": "",
+     "start": 245,
+     "end": 255
+    },
+    {
+     "as_written": "3 percent",
+     "occurrence": 0,
+     "value": "3",
+     "unit": "%",
+     "role": "value",
+     "of": "share in urban areas",
+     "label_keywords": "urban",
+     "label_excludes": "",
+     "start": 314,
+     "end": 323
+    },
+    {
+     "as_written": "14 percent",
+     "occurrence": 0,
+     "value": "14",
+     "unit": "%",
+     "role": "value",
+     "of": "share in special uses",
+     "label_keywords": "special",
+     "label_excludes": "",
+     "start": 488,
+     "end": 498
+    },
+    {
+     "as_written": "9 percent",
+     "occurrence": 0,
+     "value": "9",
+     "unit": "%",
+     "role": "value",
+     "of": "share in miscellaneous other uses",
+     "label_keywords": "miscellaneous|other|remaining",
+     "label_excludes": "",
+     "start": 552,
+     "end": 561
+    },
+    {
+     "as_written": "2017",
+     "occurrence": 1,
+     "value": null,
+     "unit": "year",
+     "role": "year",
+     "of": "year",
+     "label_keywords": "",
+     "label_excludes": "",
+     "start": 857,
+     "end": 861
+    }
+   ],
+   "chart": {
+    "kind": "pie",
+    "unit": "%",
+    "scale": "",
+    "series": [
+     {
+      "name": "U.S. land use, 2017",
+      "points": [
+       [
+        "grassland pasture and range",
+        "29"
+       ],
+       [
+        "forest",
+        "28"
+       ],
+       [
+        "cropland",
+        "17"
+       ],
+       [
+        "special uses",
+        "14"
+       ],
+       [
+        "miscellaneous other",
+        "9"
+       ],
+       [
+        "urban",
+        "3"
+       ]
+      ]
+     }
+    ],
+    "note": ""
+   }
+  },
+  "t38": {
+   "text_sha256": "efa51ebde6318f9a8075ba232dc9be92b27b8c55dad55b1343611ea4f6ffb594",
+   "numbers": [
+    {
+     "as_written": "2023",
+     "occurrence": 0,
+     "value": null,
+     "unit": "year",
+     "role": "year",
+     "of": "year",
+     "label_keywords": "",
+     "label_excludes": "",
+     "start": 3,
+     "end": 7
+    },
+    {
+     "as_written": "$2.57 trillion",
+     "occurrence": 0,
+     "value": "2.57",
+     "unit": "USD trillion",
+     "role": "value",
+     "of": "total U.S. food spending, 2023",
+     "label_keywords": "total|food spending|spending",
+     "label_excludes": "",
+     "start": 96,
+     "end": 110
+    },
+    {
+     "as_written": "$7,672",
+     "occurrence": 0,
+     "value": "7672",
+     "unit": "USD per person",
+     "role": "value",
+     "of": "food spending per person, 2023",
+     "label_keywords": "per person|per capita|total",
+     "label_excludes": "away|at-home|at home",
+     "start": 131,
+     "end": 137
+    },
+    {
+     "as_written": "7.5-percent",
+     "occurrence": 0,
+     "value": "7.5",
+     "unit": "%",
+     "role": "value",
+     "of": "change in food spending per person, 2023",
+     "label_keywords": "increase|per person|total",
+     "label_excludes": "away|at-home|at home",
+     "start": 164,
+     "end": 175
+    },
+    {
+     "as_written": "12.0-percent",
+     "occurrence": 0,
+     "value": "12.0",
+     "unit": "%",
+     "role": "value",
+     "of": "change in food-away-from-home spending, 2023",
+     "label_keywords": "away",
+     "label_excludes": "",
+     "start": 278,
+     "end": 290
+    },
+    {
+     "as_written": "$4,485",
+     "occurrence": 0,
+     "value": "4485",
+     "unit": "USD per person",
+     "role": "value",
+     "of": "FAFH spending per capita, 2023",
+     "label_keywords": "away ; 2023",
+     "label_excludes": "",
+     "start": 350,
+     "end": 356
+    },
+    {
+     "as_written": "2023",
+     "occurrence": 1,
+     "value": null,
+     "unit": "year",
+     "role": "year",
+     "of": "year",
+     "label_keywords": "",
+     "label_excludes": "",
+     "start": 371,
+     "end": 375
+    },
+    {
+     "as_written": "$4,004",
+     "occurrence": 0,
+     "value": "4004",
+     "unit": "USD per person",
+     "role": "value",
+     "of": "FAFH spending per capita, 2022",
+     "label_keywords": "away ; 2022",
+     "label_excludes": "",
+     "start": 381,
+     "end": 387
+    },
+    {
+     "as_written": "2022",
+     "occurrence": 0,
+     "value": null,
+     "unit": "year",
+     "role": "year",
+     "of": "year",
+     "label_keywords": "",
+     "label_excludes": "",
+     "start": 391,
+     "end": 395
+    },
+    {
+     "as_written": "1.8 percent",
+     "occurrence": 0,
+     "value": "1.8",
+     "unit": "%",
+     "role": "value",
+     "of": "change in food-at-home spending, 2023",
+     "label_keywords": "at-home|at home",
+     "label_excludes": "",
+     "start": 442,
+     "end": 453
+    },
+    {
+     "as_written": "$3,187",
+     "occurrence": 0,
+     "value": "3187",
+     "unit": "USD per person",
+     "role": "value",
+     "of": "FAH spending per capita, 2023",
+     "label_keywords": "at-home|at home ; 2023",
+     "label_excludes": "",
+     "start": 457,
+     "end": 463
+    },
+    {
+     "as_written": "$3,130",
+     "occurrence": 0,
+     "value": "3130",
+     "unit": "USD per person",
+     "role": "value",
+     "of": "FAH spending per capita, 2022",
+     "label_keywords": "at-home|at home ; 2022",
+     "label_excludes": "",
+     "start": 480,
+     "end": 486
+    }
+   ],
+   "chart": {
+    "kind": "bar",
+    "unit": "USD",
+    "scale": "",
+    "series": [
+     {
+      "name": "2022",
+      "points": [
+       [
+        "food away from home",
+        "4004"
+       ],
+       [
+        "food at home",
+        "3130"
+       ]
+      ]
+     },
+     {
+      "name": "2023",
+      "points": [
+       [
+        "food away from home",
+        "4485"
+       ],
+       [
+        "food at home",
+        "3187"
+       ]
+      ]
+     }
+    ],
+    "note": "per capita spending, grouped bars"
+   }
+  },
+  "t39": {
+   "text_sha256": "7fb79403c94cc61e7536f43104a62270313d5d888883ba2be2e7feb7899e058c",
+   "numbers": [
+    {
+     "as_written": "21 percent",
+     "occurrence": 0,
+     "value": "21",
+     "unit": "%",
+     "role": "value",
+     "of": "organizations with volumetric pricing only",
+     "label_keywords": "volumetric",
+     "label_excludes": "mix|per acre",
+     "start": 23,
+     "end": 33
+    },
+    {
+     "as_written": "44 percent",
+     "occurrence": 0,
+     "value": "44",
+     "unit": "%",
+     "role": "value",
+     "of": "organizations with per acre assessments/taxes only",
+     "label_keywords": "per acre",
+     "label_excludes": "mix",
+     "start": 133,
+     "end": 143
+    },
+    {
+     "as_written": "24 percent",
+     "occurrence": 0,
+     "value": "24",
+     "unit": "%",
+     "role": "value",
+     "of": "organizations with a mix of both",
+     "label_keywords": "mix",
+     "label_excludes": "",
+     "start": 232,
+     "end": 242
+    },
+    {
+     "as_written": "12 percent",
+     "occurrence": 0,
+     "value": "12",
+     "unit": "%",
+     "role": "value",
+     "of": "organizations reporting neither",
+     "label_keywords": "remaining|neither|do not",
+     "label_excludes": "",
+     "start": 353,
+     "end": 363
+    }
+   ],
+   "chart": {
+    "kind": "pie",
+    "unit": "%",
+    "scale": "",
+    "series": [
+     {
+      "name": "irrigation organizations by water pricing",
+      "points": [
+       [
+        "volumetric only",
+        "21"
+       ],
+       [
+        "per acre only",
+        "44"
+       ],
+       [
+        "mix",
+        "24"
+       ],
+       [
+        "neither",
+        "12"
+       ]
+      ]
+     }
+    ],
+    "note": "the shares add up to 101 (rounding)"
+   }
+  },
+  "t40": {
+   "text_sha256": "abff2b333aef4bf67dbb6f046e1cbbdaaa42f9ee3b23be3bdeff41b3f877ff87",
+   "numbers": [
+    {
+     "as_written": "2023",
+     "occurrence": 0,
+     "value": null,
+     "unit": "year",
+     "role": "year",
+     "of": "year",
+     "label_keywords": "",
+     "label_excludes": "",
+     "start": 3,
+     "end": 7
+    },
+    {
+     "as_written": "55",
+     "occurrence": 0,
+     "value": null,
+     "unit": "age",
+     "role": "age",
+     "of": "under age 55",
+     "label_keywords": "",
+     "label_excludes": "",
+     "start": 153,
+     "end": 155
+    },
+    {
+     "as_written": "25",
+     "occurrence": 0,
+     "value": null,
+     "unit": "age",
+     "role": "age",
+     "of": "ages 25 to 54",
+     "label_keywords": "",
+     "label_excludes": "",
+     "start": 232,
+     "end": 234
+    },
+    {
+     "as_written": "54",
+     "occurrence": 0,
+     "value": null,
+     "unit": "age",
+     "role": "age",
+     "of": "ages 25 to 54",
+     "label_keywords": "",
+     "label_excludes": "",
+     "start": 238,
+     "end": 240
+    },
+    {
+     "as_written": "15",
+     "occurrence": 0,
+     "value": null,
+     "unit": "age",
+     "role": "age",
+     "of": "ages 15 to 64",
+     "label_keywords": "",
+     "label_excludes": "",
+     "start": 387,
+     "end": 389
+    },
+    {
+     "as_written": "64",
+     "occurrence": 0,
+     "value": null,
+     "unit": "age",
+     "role": "age",
+     "of": "ages 15 to 64",
+     "label_keywords": "",
+     "label_excludes": "",
+     "start": 394,
+     "end": 396
+    },
+    {
+     "as_written": "28 million",
+     "occurrence": 0,
+     "value": "28",
+     "unit": "million people",
+     "role": "value",
+     "of": "rural people aged 15–64, 2023",
+     "label_keywords": "15|working ; 2023",
+     "label_excludes": "",
+     "start": 467,
+     "end": 477
+    },
+    {
+     "as_written": "2023",
+     "occurrence": 1,
+     "value": null,
+     "unit": "year",
+     "role": "year",
+     "of": "year",
+     "label_keywords": "",
+     "label_excludes": "",
+     "start": 481,
+     "end": 485
+    },
+    {
+     "as_written": "30 million",
+     "occurrence": 0,
+     "value": "30",
+     "unit": "million people",
+     "role": "value",
+     "of": "rural people aged 15–64, 2010 (more than)",
+     "label_keywords": "15|working ; 2010",
+     "label_excludes": "",
+     "start": 501,
+     "end": 511
+    },
+    {
+     "as_written": "2010",
+     "occurrence": 0,
+     "value": null,
+     "unit": "year",
+     "role": "year",
+     "of": "year",
+     "label_keywords": "",
+     "label_excludes": "",
+     "start": 515,
+     "end": 519
+    },
+    {
+     "as_written": "65",
+     "occurrence": 0,
+     "value": null,
+     "unit": "age",
+     "role": "age",
+     "of": "aged 65 and over",
+     "label_keywords": "",
+     "label_excludes": "",
+     "start": 574,
+     "end": 576
+    },
+    {
+     "as_written": "7.4 million",
+     "occurrence": 0,
+     "value": "7.4",
+     "unit": "million people",
+     "role": "value",
+     "of": "rural residents aged 65+, 2010",
+     "label_keywords": "65|older ; 2010",
+     "label_excludes": "",
+     "start": 596,
+     "end": 607
+    },
+    {
+     "as_written": "2010",
+     "occurrence": 1,
+     "value": null,
+     "unit": "year",
+     "role": "year",
+     "of": "year",
+     "label_keywords": "",
+     "label_excludes": "",
+     "start": 611,
+     "end": 615
+    },
+    {
+     "as_written": "9.7 million",
+     "occurrence": 0,
+     "value": "9.7",
+     "unit": "million people",
+     "role": "value",
+     "of": "rural residents aged 65+, 2023",
+     "label_keywords": "65|older ; 2023",
+     "label_excludes": "",
+     "start": 619,
+     "end": 630
+    },
+    {
+     "as_written": "2023",
+     "occurrence": 2,
+     "value": null,
+     "unit": "year",
+     "role": "year",
+     "of": "year",
+     "label_keywords": "",
+     "label_excludes": "",
+     "start": 634,
+     "end": 638
+    }
+   ],
+   "chart": {
+    "kind": "bar",
+    "unit": "people",
+    "scale": "million",
+    "series": [
+     {
+      "name": "2010",
+      "points": [
+       [
+        "aged 15–64",
+        "30"
+       ],
+       [
+        "aged 65+",
+        "7.4"
+       ]
+      ]
+     },
+     {
+      "name": "2023",
+      "points": [
+       [
+        "aged 15–64",
+        "28"
+       ],
+       [
+        "aged 65+",
+        "9.7"
+       ]
+      ]
+     }
+    ],
+    "note": "2010's 15–64 figure is 'more than 30 million'"
+   }
+  },
+  "t41": {
+   "text_sha256": "4f591aafaec1256aa8e2350d3ad5f1e0731163cfae26740c6ec7a4339241a43e",
+   "numbers": [
+    {
+     "as_written": "2007",
+     "occurrence": 0,
+     "value": null,
+     "unit": "year",
+     "role": "year",
+     "of": "the 2007 law",
+     "label_keywords": "",
+     "label_excludes": "",
+     "start": 10,
+     "end": 14
+    },
+    {
+     "as_written": "2006",
+     "occurrence": 0,
+     "value": null,
+     "unit": "year",
+     "role": "year",
+     "of": "year",
+     "label_keywords": "",
+     "label_excludes": "",
+     "start": 223,
+     "end": 227
+    },
+    {
+     "as_written": "3.8 percent",
+     "occurrence": 0,
+     "value": "3.8",
+     "unit": "%",
+     "role": "value",
+     "of": "ethanol share of transportation fuel, 2006",
+     "label_keywords": "2006",
+     "label_excludes": "",
+     "start": 285,
+     "end": 296
+    },
+    {
+     "as_written": "2008",
+     "occurrence": 0,
+     "value": null,
+     "unit": "year",
+     "role": "year",
+     "of": "year",
+     "label_keywords": "",
+     "label_excludes": "",
+     "start": 341,
+     "end": 345
+    },
+    {
+     "as_written": "6.9 percent",
+     "occurrence": 0,
+     "value": "6.9",
+     "unit": "%",
+     "role": "value",
+     "of": "ethanol share, 2008 (nearly)",
+     "label_keywords": "2008",
+     "label_excludes": "",
+     "start": 376,
+     "end": 387
+    },
+    {
+     "as_written": "2019",
+     "occurrence": 0,
+     "value": null,
+     "unit": "year",
+     "role": "year",
+     "of": "year",
+     "label_keywords": "",
+     "label_excludes": "",
+     "start": 405,
+     "end": 409
+    },
+    {
+     "as_written": "10 percent",
+     "occurrence": 0,
+     "value": "10",
+     "unit": "%",
+     "role": "value",
+     "of": "ethanol share, 2019 (around)",
+     "label_keywords": "2019",
+     "label_excludes": "",
+     "start": 482,
+     "end": 492
+    }
+   ],
+   "chart": {
+    "kind": "line",
+    "unit": "%",
+    "scale": "",
+    "series": [
+     {
+      "name": "ethanol share of transportation fuel",
+      "points": [
+       [
+        "2006",
+        "3.8"
+       ],
+       [
+        "2008",
+        "6.9"
+       ],
+       [
+        "2019",
+        "10"
+       ]
+      ]
+     }
+    ],
+    "note": ""
+   }
+  },
+  "t42": {
+   "text_sha256": "9e29b3230e8abe2b3055db04523a418cc82dcad09f0e58de38785e2a2928afa5",
+   "numbers": [
+    {
+     "as_written": "30",
+     "occurrence": 0,
+     "value": null,
+     "unit": "date",
+     "role": "date",
+     "of": "September 30",
+     "label_keywords": "",
+     "label_excludes": "",
+     "start": 29,
+     "end": 31
+    },
+    {
+     "as_written": "2026",
+     "occurrence": 0,
+     "value": null,
+     "unit": "year",
+     "role": "year",
+     "of": "year",
+     "label_keywords": "",
+     "label_excludes": "",
+     "start": 33,
+     "end": 37
+    },
+    {
+     "as_written": "1",
+     "occurrence": 0,
+     "value": null,
+     "unit": "date",
+     "role": "date",
+     "of": "Sept. 1",
+     "label_keywords": "",
+     "label_excludes": "",
+     "start": 82,
+     "end": 83
+    },
+    {
+     "as_written": "2026",
+     "occurrence": 1,
+     "value": null,
+     "unit": "year",
+     "role": "year",
+     "of": "year",
+     "label_keywords": "",
+     "label_excludes": "",
+     "start": 85,
+     "end": 89
+    },
+    {
+     "as_written": "2.10 billion bushels",
+     "occurrence": 0,
+     "value": "2.10",
+     "unit": "billion bushels",
+     "role": "value",
+     "of": "old crop corn stocks, Sept 1 2026",
+     "label_keywords": "corn",
+     "label_excludes": "",
+     "start": 99,
+     "end": 119
+    },
+    {
+     "as_written": "35%",
+     "occurrence": 0,
+     "value": "35",
+     "unit": "%",
+     "role": "value",
+     "of": "change in corn stocks from a year earlier",
+     "label_keywords": "corn",
+     "label_excludes": "",
+     "start": 124,
+     "end": 127
+    },
+    {
+     "as_written": "1",
+     "occurrence": 1,
+     "value": null,
+     "unit": "date",
+     "role": "date",
+     "of": "Sept. 1",
+     "label_keywords": "",
+     "label_excludes": "",
+     "start": 139,
+     "end": 140
+    },
+    {
+     "as_written": "2025",
+     "occurrence": 0,
+     "value": null,
+     "unit": "year",
+     "role": "year",
+     "of": "year",
+     "label_keywords": "",
+     "label_excludes": "",
+     "start": 142,
+     "end": 146
+    },
+    {
+     "as_written": "3%",
+     "occurrence": 0,
+     "value": "-3",
+     "unit": "%",
+     "role": "value",
+     "of": "change in soybean stocks from a year earlier",
+     "label_keywords": "soybean",
+     "label_excludes": "",
+     "start": 334,
+     "end": 336
+    },
+    {
+     "as_written": "1",
+     "occurrence": 2,
+     "value": null,
+     "unit": "date",
+     "role": "date",
+     "of": "Sept. 1",
+     "label_keywords": "",
+     "label_excludes": "",
+     "start": 348,
+     "end": 349
+    },
+    {
+     "as_written": "2025",
+     "occurrence": 1,
+     "value": null,
+     "unit": "year",
+     "role": "year",
+     "of": "year",
+     "label_keywords": "",
+     "label_excludes": "",
+     "start": 351,
+     "end": 355
+    },
+    {
+     "as_written": "13%",
+     "occurrence": 0,
+     "value": "-13",
+     "unit": "%",
+     "role": "value",
+     "of": "change in all wheat stocks from a year earlier",
+     "label_keywords": "wheat",
+     "label_excludes": "",
+     "start": 388,
+     "end": 391
+    }
+   ],
+   "chart": {
+    "kind": "bar",
+    "unit": "%",
+    "scale": "",
+    "series": [
+     {
+      "name": "Sept 1 stocks, change from a year earlier",
+      "points": [
+       [
+        "corn",
+        "35"
+       ],
+       [
+        "soybeans",
+        "-3"
+       ],
+       [
+        "wheat",
+        "-13"
+       ]
+      ]
+     }
+    ],
+    "note": ""
+   }
+  },
+  "t43": {
+   "text_sha256": "944c533968175a2e8c51bbc905d385ca78354862c7a9df8df1248115638c032f",
+   "numbers": [
+    {
+     "as_written": "eight",
+     "occurrence": 0,
+     "value": "8",
+     "unit": "storms",
+     "role": "value",
+     "of": "Eastern North Pacific tropical storms, September 2026",
+     "label_keywords": "tropical storm|storms",
+     "label_excludes": "hurricane",
+     "start": 114,
+     "end": 119
+    },
+    {
+     "as_written": "1994",
+     "occurrence": 0,
+     "value": null,
+     "unit": "year",
+     "role": "year",
+     "of": "year",
+     "label_keywords": "",
+     "label_excludes": "",
+     "start": 143,
+     "end": 147
+    },
+    {
+     "as_written": "1997",
+     "occurrence": 0,
+     "value": null,
+     "unit": "year",
+     "role": "year",
+     "of": "year",
+     "label_keywords": "",
+     "label_excludes": "",
+     "start": 149,
+     "end": 153
+    },
+    {
+     "as_written": "2015",
+     "occurrence": 0,
+     "value": null,
+     "unit": "year",
+     "role": "year",
+     "of": "year",
+     "label_keywords": "",
+     "label_excludes": "",
+     "start": 158,
+     "end": 162
+    },
+    {
+     "as_written": "Seven",
+     "occurrence": 0,
+     "value": "7",
+     "unit": "storms",
+     "role": "value",
+     "of": "of those, hurricanes",
+     "label_keywords": "hurricane",
+     "label_excludes": "major",
+     "start": 190,
+     "end": 195
+    },
+    {
+     "as_written": "five",
+     "occurrence": 0,
+     "value": "5",
+     "unit": "storms",
+     "role": "value",
+     "of": "of those, major hurricanes",
+     "label_keywords": "major",
+     "label_excludes": "",
+     "start": 234,
+     "end": 238
+    },
+    {
+     "as_written": "5",
+     "occurrence": 0,
+     "value": null,
+     "unit": "rank",
+     "role": "rank",
+     "of": "Category 5",
+     "label_keywords": "",
+     "label_excludes": "",
+     "start": 384,
+     "end": 385
+    },
+    {
+     "as_written": "2015",
+     "occurrence": 1,
+     "value": null,
+     "unit": "year",
+     "role": "year",
+     "of": "2015's Hurricane Patricia",
+     "label_keywords": "",
+     "label_excludes": "",
+     "start": 491,
+     "end": 495
+    },
+    {
+     "as_written": "2",
+     "occurrence": 0,
+     "value": null,
+     "unit": "rank",
+     "role": "rank",
+     "of": "Category 2",
+     "label_keywords": "",
+     "label_excludes": "",
+     "start": 575,
+     "end": 576
+    }
+   ],
+   "chart": {
+    "kind": "bar",
+    "unit": "",
+    "scale": "",
+    "series": [
+     {
+      "name": "Eastern North Pacific, September 2026",
+      "points": [
+       [
+        "tropical storms",
+        "8"
+       ],
+       [
+        "hurricanes",
+        "7"
+       ],
+       [
+        "major hurricanes",
+        "5"
+       ]
+      ]
+     }
+    ],
+    "note": ""
+   }
+  },
+  "t44": {
+   "text_sha256": "55d8fd0d38d259820f15e6f4f925e0e77ae3eabbbb3ec8b476aa700ca1fd307b",
+   "numbers": [
+    {
+     "as_written": "19",
+     "occurrence": 0,
+     "value": "19",
+     "unit": "storms",
+     "role": "value",
+     "of": "global tropical storms, August 2026",
+     "label_keywords": "tropical storm|storms|global",
+     "label_excludes": "Atlantic|Pacific|hurricane|major",
+     "start": 72,
+     "end": 74
+    },
+    {
+     "as_written": "five",
+     "occurrence": 0,
+     "value": "5",
+     "unit": "storms",
+     "role": "value",
+     "of": "of those, hurricanes or typhoons",
+     "label_keywords": "hurricane|typhoon",
+     "label_excludes": "major",
+     "start": 102,
+     "end": 106
+    },
+    {
+     "as_written": "four",
+     "occurrence": 0,
+     "value": "4",
+     "unit": "storms",
+     "role": "value",
+     "of": "of those, major (Category 3+)",
+     "label_keywords": "major",
+     "label_excludes": "",
+     "start": 152,
+     "end": 156
+    },
+    {
+     "as_written": "3",
+     "occurrence": 0,
+     "value": null,
+     "unit": "rank",
+     "role": "rank",
+     "of": "Category 3",
+     "label_keywords": "",
+     "label_excludes": "",
+     "start": 190,
+     "end": 191
+    },
+    {
+     "as_written": "two",
+     "occurrence": 0,
+     "value": "2",
+     "unit": "storms",
+     "role": "value",
+     "of": "Atlantic tropical storms",
+     "label_keywords": "Atlantic",
+     "label_excludes": "",
+     "start": 312,
+     "end": 315
+    },
+    {
+     "as_written": "eight",
+     "occurrence": 0,
+     "value": "8",
+     "unit": "storms",
+     "role": "value",
+     "of": "Eastern North Pacific named storms",
+     "label_keywords": "Pacific|named",
+     "label_excludes": "",
+     "start": 479,
+     "end": 484
+    },
+    {
+     "as_written": "1",
+     "occurrence": 0,
+     "value": null,
+     "unit": "rank",
+     "role": "rank",
+     "of": "Category 1",
+     "label_keywords": "",
+     "label_excludes": "",
+     "start": 613,
+     "end": 614
+    }
+   ],
+   "chart": {
+    "kind": "bar",
+    "unit": "",
+    "scale": "",
+    "series": [
+     {
+      "name": "global tropical cyclones, August 2026",
+      "points": [
+       [
+        "tropical storms",
+        "19"
+       ],
+       [
+        "hurricanes/typhoons",
+        "5"
+       ],
+       [
+        "major",
+        "4"
+       ]
+      ]
+     }
+    ],
+    "note": ""
+   }
+  },
+  "t45": {
+   "text_sha256": "4a685df3c4fa4f089c90dc7fd7d1d7f5f35cba676a7b1b8ad758fdcde07ee1e5",
+   "numbers": [
+    {
+     "as_written": "16.01 inches",
+     "occurrence": 0,
+     "value": "16.01",
+     "unit": "inches",
+     "role": "value",
+     "of": "Hawaii precipitation, August 2026",
+     "label_keywords": "August",
+     "label_excludes": "June|January|year",
+     "start": 17,
+     "end": 29
+    },
+    {
+     "as_written": "10.84 inches",
+     "occurrence": 0,
+     "value": "10.84",
+     "unit": "inches",
+     "role": "value",
+     "of": "August departure above the 1991–2020 average",
+     "label_keywords": "above|departure ; August",
+     "label_excludes": "June|January",
+     "start": 58,
+     "end": 70
+    },
+    {
+     "as_written": "1991",
+     "occurrence": 0,
+     "value": null,
+     "unit": "year",
+     "role": "year",
+     "of": "1991–2020",
+     "label_keywords": "",
+     "label_excludes": "",
+     "start": 81,
+     "end": 85
+    },
+    {
+     "as_written": "2020",
+     "occurrence": 0,
+     "value": null,
+     "unit": "year",
+     "role": "year",
+     "of": "1991–2020",
+     "label_keywords": "",
+     "label_excludes": "",
+     "start": 86,
+     "end": 90
+    },
+    {
+     "as_written": "1991",
+     "occurrence": 1,
+     "value": null,
+     "unit": "year",
+     "role": "year",
+     "of": "1991–present",
+     "label_keywords": "",
+     "label_excludes": "",
+     "start": 147,
+     "end": 151
+    },
+    {
+     "as_written": "43.54 inches",
+     "occurrence": 0,
+     "value": "43.54",
+     "unit": "inches",
+     "role": "value",
+     "of": "peak rainfall at Laupāhoehoe",
+     "label_keywords": "Laup|peak|Lala",
+     "label_excludes": "",
+     "start": 237,
+     "end": 249
+    },
+    {
+     "as_written": "28.24 inches",
+     "occurrence": 0,
+     "value": "28.24",
+     "unit": "inches",
+     "role": "value",
+     "of": "Hawaii precipitation, June–August",
+     "label_keywords": "June|summer",
+     "label_excludes": "",
+     "start": 319,
+     "end": 331
+    },
+    {
+     "as_written": "14.83 inches",
+     "occurrence": 0,
+     "value": "14.83",
+     "unit": "inches",
+     "role": "value",
+     "of": "summer departure above average",
+     "label_keywords": "above|departure ; June|summer",
+     "label_excludes": "",
+     "start": 357,
+     "end": 369
+    },
+    {
+     "as_written": "75.83 inches",
+     "occurrence": 0,
+     "value": "75.83",
+     "unit": "inches",
+     "role": "value",
+     "of": "Hawaii precipitation, year to date (January–August)",
+     "label_keywords": "year|January",
+     "label_excludes": "",
+     "start": 469,
+     "end": 481
+    },
+    {
+     "as_written": "36.28 inches",
+     "occurrence": 0,
+     "value": "36.28",
+     "unit": "inches",
+     "role": "value",
+     "of": "year-to-date departure above average",
+     "label_keywords": "above|departure ; year|January",
+     "label_excludes": "",
+     "start": 483,
+     "end": 495
+    }
+   ],
+   "chart": {
+    "kind": "bar",
+    "unit": "inches",
+    "scale": "",
+    "series": [
+     {
+      "name": "Hawaii precipitation, 2026",
+      "points": [
+       [
+        "August",
+        "16.01"
+       ],
+       [
+        "June–August",
+        "28.24"
+       ],
+       [
+        "January–August",
+        "75.83"
+       ]
+      ]
+     }
+    ],
+    "note": "departures above average would be a second series"
+   }
+  },
+  "t46": {
+   "text_sha256": "3b2b1d86daf721442ada1188db4a6f32c8245945ad214036872654f89824ac24",
+   "numbers": [
+    {
+     "as_written": "48",
+     "occurrence": 0,
+     "value": null,
+     "unit": "count",
+     "role": "count",
+     "of": "48-year record",
+     "label_keywords": "",
+     "label_excludes": "",
+     "start": 61,
+     "end": 63
+    },
+    {
+     "as_written": "8.29 million square miles",
+     "occurrence": 0,
+     "value": "8.29",
+     "unit": "million square miles",
+     "role": "value",
+     "of": "global sea ice extent, May 2026",
+     "label_keywords": "extent|global|cover",
+     "label_excludes": "",
+     "start": 86,
+     "end": 111
+    },
+    {
+     "as_written": "670,000 square miles",
+     "occurrence": 0,
+     "value": "-670000",
+     "unit": "square miles",
+     "role": "value",
+     "of": "global extent departure below the 1991–2020 average",
+     "label_keywords": "global|below",
+     "label_excludes": "Arctic|Antarctic",
+     "start": 122,
+     "end": 142
+    },
+    {
+     "as_written": "1991",
+     "occurrence": 0,
+     "value": null,
+     "unit": "year",
+     "role": "year",
+     "of": "1991–2020",
+     "label_keywords": "",
+     "label_excludes": "",
+     "start": 153,
+     "end": 157
+    },
+    {
+     "as_written": "2020",
+     "occurrence": 0,
+     "value": null,
+     "unit": "year",
+     "role": "year",
+     "of": "1991–2020",
+     "label_keywords": "",
+     "label_excludes": "",
+     "start": 158,
+     "end": 162
+    },
+    {
+     "as_written": "310,000 square miles",
+     "occurrence": 0,
+     "value": "-310000",
+     "unit": "square miles",
+     "role": "value",
+     "of": "Arctic extent departure below average",
+     "label_keywords": "Arctic",
+     "label_excludes": "Antarctic",
+     "start": 315,
+     "end": 335
+    },
+    {
+     "as_written": "370,000 square miles",
+     "occurrence": 0,
+     "value": "-370000",
+     "unit": "square miles",
+     "role": "value",
+     "of": "Antarctic extent departure below average",
+     "label_keywords": "Antarctic",
+     "label_excludes": "",
+     "start": 391,
+     "end": 411
+    }
+   ],
+   "chart": {
+    "kind": "bar",
+    "unit": "square mile",
+    "scale": "",
+    "series": [
+     {
+      "name": "May 2026 sea ice extent vs 1991–2020 average",
+      "points": [
+       [
+        "global",
+        "-670000"
+       ],
+       [
+        "Arctic",
+        "-310000"
+       ],
+       [
+        "Antarctic",
+        "-370000"
+       ]
+      ]
+     }
+    ],
+    "note": ""
+   }
+  },
+  "t47": {
+   "text_sha256": "bd0705f29bd61b7d3ce53e29ff44ee7ab420bcbd9cf9b746b2f584d1148d761b",
+   "numbers": [
+    {
+     "as_written": "Eight",
+     "occurrence": 0,
+     "value": "8",
+     "unit": "states",
+     "role": "value",
+     "of": "states with a statewide April temperature record",
+     "label_keywords": "record",
+     "label_excludes": "",
+     "start": 96,
+     "end": 101
+    },
+    {
+     "as_written": "1896",
+     "occurrence": 0,
+     "value": null,
+     "unit": "year",
+     "role": "year",
+     "of": "year",
+     "label_keywords": "",
+     "label_excludes": "",
+     "start": 325,
+     "end": 329
+    },
+    {
+     "as_written": "1",
+     "occurrence": 0,
+     "value": null,
+     "unit": "threshold",
+     "role": "threshold",
+     "of": "more than 1°F",
+     "label_keywords": "",
+     "label_excludes": "",
+     "start": 343,
+     "end": 344
+    },
+    {
+     "as_written": "20th",
+     "occurrence": 0,
+     "value": null,
+     "unit": "name",
+     "role": "name",
+     "of": "20th-century",
+     "label_keywords": "",
+     "label_excludes": "",
+     "start": 366,
+     "end": 370
+    },
+    {
+     "as_written": "8",
+     "occurrence": 0,
+     "value": null,
+     "unit": "threshold",
+     "role": "threshold",
+     "of": "more than 8°F",
+     "label_keywords": "",
+     "label_excludes": "",
+     "start": 407,
+     "end": 408
+    },
+    {
+     "as_written": "16",
+     "occurrence": 0,
+     "value": "16",
+     "unit": "states",
+     "role": "value",
+     "of": "additional states among their 10 warmest Aprils",
+     "label_keywords": "additional|10 warmest|ranked",
+     "label_excludes": "",
+     "start": 426,
+     "end": 428
+    },
+    {
+     "as_written": "10",
+     "occurrence": 0,
+     "value": null,
+     "unit": "rank",
+     "role": "rank",
+     "of": "10 warmest",
+     "label_keywords": "",
+     "label_excludes": "",
+     "start": 455,
+     "end": 457
+    },
+    {
+     "as_written": "24",
+     "occurrence": 0,
+     "value": "24",
+     "unit": "states",
+     "role": "value",
+     "of": "states total among the 10 warmest (incl. the 8 records)",
+     "label_keywords": "total",
+     "label_excludes": "",
+     "start": 484,
+     "end": 486
+    },
+    {
+     "as_written": "20th",
+     "occurrence": 1,
+     "value": null,
+     "unit": "name",
+     "role": "name",
+     "of": "20th-century",
+     "label_keywords": "",
+     "label_excludes": "",
+     "start": 593,
+     "end": 597
+    }
+   ],
+   "chart": {
+    "kind": "bar",
+    "unit": "",
+    "scale": "",
+    "series": [
+     {
+      "name": "states, April 2026",
+      "points": [
+       [
+        "record warm",
+        "8"
+       ],
+       [
+        "other top-10 warm",
+        "16"
+       ]
+      ]
+     }
+    ],
+    "note": "with the stated total of 24"
+   }
+  },
+  "t48": {
+   "text_sha256": "a8c5b02a1906e035089df581e327d55d180864e94803caf0efa8aff8f4accffd",
+   "numbers": [
+    {
+     "as_written": "48",
+     "occurrence": 0,
+     "value": null,
+     "unit": "count",
+     "role": "count",
+     "of": "48-year record",
+     "label_keywords": "",
+     "label_excludes": "",
+     "start": 62,
+     "end": 64
+    },
+    {
+     "as_written": "7.63 million square miles",
+     "occurrence": 0,
+     "value": "7.63",
+     "unit": "million square miles",
+     "role": "value",
+     "of": "global sea ice extent, April 2026",
+     "label_keywords": "extent|global|cover",
+     "label_excludes": "",
+     "start": 87,
+     "end": 112
+    },
+    {
+     "as_written": "590,000 square miles",
+     "occurrence": 0,
+     "value": "-590000",
+     "unit": "square miles",
+     "role": "value",
+     "of": "global departure below the 1991–2020 average",
+     "label_keywords": "global|below",
+     "label_excludes": "Arctic|Antarctic",
+     "start": 123,
+     "end": 143
+    },
+    {
+     "as_written": "1991",
+     "occurrence": 0,
+     "value": null,
+     "unit": "year",
+     "role": "year",
+     "of": "1991–2020",
+     "label_keywords": "",
+     "label_excludes": "",
+     "start": 154,
+     "end": 158
+    },
+    {
+     "as_written": "2020",
+     "occurrence": 0,
+     "value": null,
+     "unit": "year",
+     "role": "year",
+     "of": "1991–2020",
+     "label_keywords": "",
+     "label_excludes": "",
+     "start": 159,
+     "end": 163
+    },
+    {
+     "as_written": "290,000 square miles",
+     "occurrence": 0,
+     "value": "-290000",
+     "unit": "square miles",
+     "role": "value",
+     "of": "Arctic departure below average",
+     "label_keywords": "Arctic",
+     "label_excludes": "Antarctic",
+     "start": 288,
+     "end": 308
+    },
+    {
+     "as_written": "300,000 square miles",
+     "occurrence": 0,
+     "value": "-300000",
+     "unit": "square miles",
+     "role": "value",
+     "of": "Antarctic departure below average",
+     "label_keywords": "Antarctic",
+     "label_excludes": "",
+     "start": 364,
+     "end": 384
+    },
+    {
+     "as_written": "11th",
+     "occurrence": 0,
+     "value": null,
+     "unit": "rank",
+     "role": "rank",
+     "of": "11th-smallest",
+     "label_keywords": "",
+     "label_excludes": "",
+     "start": 407,
+     "end": 411
+    }
+   ],
+   "chart": {
+    "kind": "bar",
+    "unit": "square mile",
+    "scale": "",
+    "series": [
+     {
+      "name": "April 2026 sea ice extent vs 1991–2020 average",
+      "points": [
+       [
+        "global",
+        "-590000"
+       ],
+       [
+        "Arctic",
+        "-290000"
+       ],
+       [
+        "Antarctic",
+        "-300000"
+       ]
+      ]
+     }
+    ],
+    "note": ""
+   }
+  },
+  "t49": {
+   "text_sha256": "77d020ea72a2754d177dab529d2446ad28a6e3c6bf6f4ae247e335be1103f28a",
+   "numbers": [
+    {
+     "as_written": "48",
+     "occurrence": 0,
+     "value": null,
+     "unit": "count",
+     "role": "count",
+     "of": "48-year record",
+     "label_keywords": "",
+     "label_excludes": "",
+     "start": 62,
+     "end": 64
+    },
+    {
+     "as_written": "6.83 million square miles",
+     "occurrence": 0,
+     "value": "6.83",
+     "unit": "million square miles",
+     "role": "value",
+     "of": "global sea ice extent, March 2026",
+     "label_keywords": "extent|global|cover",
+     "label_excludes": "",
+     "start": 87,
+     "end": 112
+    },
+    {
+     "as_written": "540,000 square miles",
+     "occurrence": 0,
+     "value": "-540000",
+     "unit": "square miles",
+     "role": "value",
+     "of": "global departure below the 1991–2020 average",
+     "label_keywords": "global|below",
+     "label_excludes": "Arctic|Antarctic",
+     "start": 123,
+     "end": 143
+    },
+    {
+     "as_written": "1991",
+     "occurrence": 0,
+     "value": null,
+     "unit": "year",
+     "role": "year",
+     "of": "1991–2020",
+     "label_keywords": "",
+     "label_excludes": "",
+     "start": 154,
+     "end": 158
+    },
+    {
+     "as_written": "2020",
+     "occurrence": 0,
+     "value": null,
+     "unit": "year",
+     "role": "year",
+     "of": "1991–2020",
+     "label_keywords": "",
+     "label_excludes": "",
+     "start": 159,
+     "end": 163
+    },
+    {
+     "as_written": "350,000 square miles",
+     "occurrence": 0,
+     "value": "-350000",
+     "unit": "square miles",
+     "role": "value",
+     "of": "Arctic departure below average",
+     "label_keywords": "Arctic",
+     "label_excludes": "Antarctic",
+     "start": 288,
+     "end": 308
+    },
+    {
+     "as_written": "200,000 square miles",
+     "occurrence": 0,
+     "value": "-200000",
+     "unit": "square miles",
+     "role": "value",
+     "of": "Antarctic departure below average",
+     "label_keywords": "Antarctic",
+     "label_excludes": "",
+     "start": 364,
+     "end": 384
+    },
+    {
+     "as_written": "1992",
+     "occurrence": 0,
+     "value": null,
+     "unit": "year",
+     "role": "year",
+     "of": "year",
+     "label_keywords": "",
+     "label_excludes": "",
+     "start": 414,
+     "end": 418
+    },
+    {
+     "as_written": "13th",
+     "occurrence": 0,
+     "value": null,
+     "unit": "rank",
+     "role": "rank",
+     "of": "13th-smallest",
+     "label_keywords": "",
+     "label_excludes": "",
+     "start": 426,
+     "end": 430
+    }
+   ],
+   "chart": {
+    "kind": "bar",
+    "unit": "square mile",
+    "scale": "",
+    "series": [
+     {
+      "name": "March 2026 sea ice extent vs 1991–2020 average",
+      "points": [
+       [
+        "global",
+        "-540000"
+       ],
+       [
+        "Arctic",
+        "-350000"
+       ],
+       [
+        "Antarctic",
+        "-200000"
+       ]
+      ]
+     }
+    ],
+    "note": ""
+   }
+  },
+  "t50": {
+   "text_sha256": "f174c7b84e28f0e2e5d0f3ace92ffef87ac3301af0ad6f5feb9b4beebc41fce0",
+   "numbers": [
+    {
+     "as_written": "2026",
+     "occurrence": 0,
+     "value": null,
+     "unit": "year",
+     "role": "year",
+     "of": "year",
+     "label_keywords": "",
+     "label_excludes": "",
+     "start": 4,
+     "end": 8
+    },
+    {
+     "as_written": "39",
+     "occurrence": 0,
+     "value": "39",
+     "unit": "count",
+     "role": "value",
+     "of": "universities represented by 2026 selectees",
+     "label_keywords": "universit",
+     "label_excludes": "",
+     "start": 66,
+     "end": 68
+    },
+    {
+     "as_written": "11",
+     "occurrence": 0,
+     "value": "11",
+     "unit": "count",
+     "role": "value",
+     "of": "DOE national laboratories and user facilities represented",
+     "label_keywords": "Laborator|lab",
+     "label_excludes": "",
+     "start": 83,
+     "end": 85
+    },
+    {
+     "as_written": "26",
+     "occurrence": 0,
+     "value": "26",
+     "unit": "states",
+     "role": "value",
+     "of": "states represented",
+     "label_keywords": "state",
+     "label_excludes": "",
+     "start": 155,
+     "end": 157
+    },
+    {
+     "as_written": "2010",
+     "occurrence": 0,
+     "value": null,
+     "unit": "year",
+     "role": "year",
+     "of": "year",
+     "label_keywords": "",
+     "label_excludes": "",
+     "start": 453,
+     "end": 457
+    },
+    {
+     "as_written": "1,238",
+     "occurrence": 0,
+     "value": "1238",
+     "unit": "awards",
+     "role": "value",
+     "of": "ECRP awards since 2010 (total)",
+     "label_keywords": "total|award|program",
+     "label_excludes": "universit|laborator",
+     "start": 480,
+     "end": 485
+    },
+    {
+     "as_written": "797",
+     "occurrence": 0,
+     "value": "797",
+     "unit": "awards",
+     "role": "value",
+     "of": "awards to university researchers",
+     "label_keywords": "universit",
+     "label_excludes": "",
+     "start": 504,
+     "end": 507
+    },
+    {
+     "as_written": "441",
+     "occurrence": 0,
+     "value": "441",
+     "unit": "awards",
+     "role": "value",
+     "of": "awards to DOE National Laboratory researchers",
+     "label_keywords": "laborator|lab",
+     "label_excludes": "",
+     "start": 538,
+     "end": 541
+    }
+   ],
+   "chart": {
+    "kind": "pie",
+    "unit": "",
+    "scale": "",
+    "series": [
+     {
+      "name": "ECRP awards since 2010",
+      "points": [
+       [
+        "university researchers",
+        "797"
+       ],
+       [
+        "DOE national laboratory researchers",
+        "441"
+       ]
+      ]
+     }
+    ],
+    "note": "parts of the stated total 1,238"
+   }
+  }
+ }
+}
