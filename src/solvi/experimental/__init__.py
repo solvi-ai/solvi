@@ -56,6 +56,17 @@ STATUS: dict[str, dict] = {
              "refusals from 6 to 0 in one session (random probes: 48 to 29); still missing: a grammar too large to "
              "enumerate, retirement of weak laws nothing contradicts, wiring into a System's decisions, and a "
              "script for the two stands (the toys: benchmarks/laws_toy.py)", "script": "benchmarks/laws_toy.py"},
+    "skills": {"since": "1.1", "what": "learning in a world described by code: System 2 plans on an exact model (a "
+               "copy of the environment), only plans the code verified are compiled into System 1 skills with "
+               "conditions over a grammar of atoms, each used alone only while its outcomes keep an anytime-valid "
+               "certificate; the planner as System 2 of solvi.Agent; export into the knowledge store", "missing": "on "
+               "a deterministic gridworld (20 fresh layouts, five seeds) System 1's share reached 0.81 in the last "
+               "five episodes with every goal reached, as when System 2 plans every goal, and 1.5% of System 1's "
+               "decisions were in failed runs under a 20% promise pooled over the skills, while replayed cases never "
+               "transferred and plans compiled without verification reached no goal; still missing: a stand beyond "
+               "the toy (a game simulator with written mechanics, a service with a specification), a 5% promise "
+               "(fifty clean uses per certified unit), a condition rule that specialises after a failure, and a "
+               "planner with a heuristic", "script": "benchmarks/skills_toy.py"},
 }
 for _s in STATUS.values():
     _s["deadline"] = DEADLINE

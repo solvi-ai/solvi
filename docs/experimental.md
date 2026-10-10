@@ -24,7 +24,7 @@ keeps working for one release. **Removal**: a piece that has not graduated by it
 is removed and the negative result published.
 
 Each section below gives the piece's `STATUS` entry: what it is, since when it exists, what it is missing to graduate,
-the script that measures it (`changes`, `laws`) and where the guide describes it.
+the script that measures it (`changes`, `laws`, `skills`) and where the guide describes it.
 
 ## `lora`
 
@@ -93,6 +93,22 @@ most specific first, retirement when the held-out precision falls, a probe plann
   slow tests/test_laws_toy.py`). **Deadline:** 1.2.
 - Guide: [Laws from an environment](best_practices.md#laws-from-an-environment-the-test-is-the-judge); API:
   [solvi.experimental.laws](api/laws.md).
+
+## `skills`
+
+Learning in a world described by code (`solvi.experimental.skills`): System 2 plans on an exact model of the world (a
+copy of the environment; the real one is never stepped by the planner), a plan counts only after the code re-simulated
+it, verified plans are compiled into System 1 skills ("when these atoms hold, for this goal, do this sequence"; the
+conditions keep the atoms every verified start shared), and a skill acts alone only while its outcomes keep an
+anytime-valid certificate — before that System 2 re-verifies it at every use, and an alarm on its alone outcomes
+retires it. `SkillLearner` runs the loop with a record per decision and per episode; `as_s2(learner)` makes the planner
+System 2 of `solvi.Agent`; `SkillSet.to_knowledge` writes the skills into the knowledge store. Since 1.1.
+
+- **Missing:** on a deterministic gridworld (20 fresh layouts, five seeds) System 1's share reached 0.81 in the last five episodes with every goal reached, as when System 2 plans every goal, and 1.5% of System 1's decisions were in failed runs under a 20% promise pooled over the skills, while replayed cases never transferred and plans compiled without verification reached no goal; still missing: a stand beyond the toy (a game simulator with written mechanics, a service with a specification), a 5% promise (fifty clean uses per certified unit), a condition rule that specialises after a failure, and a planner with a heuristic.
+- **Script:** `benchmarks/skills_toy.py` (the gridworld with four arms: skills, plan always, cases, scrambled; `pytest -m
+  slow tests/test_skills_toy.py`). **Deadline:** 1.2.
+- Guide: [Learning in a world described by code](best_practices.md#learning-in-a-world-described-by-code-plan-on-the-code);
+  API: [solvi.experimental.skills](api/skills.md).
 
 ## Graduated and removed
 
