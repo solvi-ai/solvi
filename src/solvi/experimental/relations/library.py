@@ -181,13 +181,15 @@ class TargetRecord:
     """Per target: programs = the enumerated programs spent (cumulative, all rounds) when it was admitted, or None;
     round_programs = those of its own round only (from the round's start to its admission: the search it needed with
     the library of that moment); round = the round it was admitted in; size = its program's size; rejected = programs
-    that fit the examples but failed the held-out test; by = "enumerate" or the proposer's name."""
+    that fit the examples but failed the held-out test; recheck_failed = matches on the search subset that failed on all
+    the examples (`search_on`); by = "enumerate" or the proposer's name."""
     name: str
     programs: int | None = None
     round_programs: int | None = None
     round: int | None = None
     size: int | None = None
     rejected: int = 0
+    recheck_failed: int = 0
     by: str | None = None
 
 
@@ -207,7 +209,7 @@ def find_rules(examples: Sequence[Mapping[str, np.ndarray]], targets: Mapping[st
                size: int = 6, budget: int = 50_000, library: Sequence[Library] = (),
                test: Callable[..., dict], proposer: RuleProposer | None = None, grow: bool = True,
                tolerance: float = 0.0, ops1: Sequence[str] = OPS1, ops2: Sequence[str] = OPS2,
-               counts: Sequence[int] = (1,)) -> Rules:
+               counts: Sequence[int] = (1,), search_on: int | None = None) -> Rules:
     """Find a program for each target, building composites on earlier finds.
 
     Rounds: enumerate programs of size ≤ `size` from `base` (relation names in every example), the identity and the
@@ -216,7 +218,10 @@ def find_rules(examples: Sequence[Mapping[str, np.ndarray]], targets: Mapping[st
     function returning a record with "passed"; the first that passes is admitted (a `Library` entry) and, with `grow`,
     the next round starts with it as a terminal. A round that admits nothing ends the search; then `proposer` (if any)
     proposes for the open targets, its programs checked the same way. `budget` caps the enumerated programs over all
-    rounds. `grow=False`: one flat pass, finds are recorded but never used as terminals (the control). Deterministic;
+    rounds. `search_on=k`: enumerate on the first k examples only (cheaper keys), and re-check a match on all the
+    examples before the test (observational equivalence on a subset merges programs that differ elsewhere: a failed
+    re-check is counted, `recheck_failed`, and the search goes on). `grow=False`: one flat pass, finds are recorded but
+    never used as terminals (the control). Deterministic;
     targets are taken in name order, so the caller's order is no curriculum."""
     examples = list(examples)
     base = list(base)
@@ -225,15 +230,19 @@ def find_rules(examples: Sequence[Mapping[str, np.ndarray]], targets: Mapping[st
     if unknown:
         raise ValueError(f"base relations {unknown} are not in every example")
     batch = _E.Batch(examples, base)
+    sub = examples[:search_on] if search_on and 0 < search_on < len(examples) else examples
+    sbatch = _E.Batch(sub, base) if sub is not examples else batch
     order_t = sorted(targets)
-    truth = {}
+    truth, struth = {}, {}
     for name in order_t:
         arrs = _target_arrays(targets[name], examples, name)
         truth[name] = _E.pack(batch.pad(arrs))
+        struth[name] = _E.pack(sbatch.pad(arrs[:len(sub)]))
     tkey = {}
     for name in order_t:
-        tkey.setdefault(_E.key(truth[name]), []).append(name)
+        tkey.setdefault(_E.key(struth[name]), []).append(name)
     tpos = {name: int(_E._POP[truth[name]].sum()) for name in order_t}
+    spos = {name: int(_E._POP[struth[name]].sum()) for name in order_t}
 
     lib = list(library)
     _lib_map(lib)
@@ -247,6 +256,15 @@ def find_rules(examples: Sequence[Mapping[str, np.ndarray]], targets: Mapping[st
     spent = 0
     rounds = 0
     ex_t = tuple(examples)
+
+    def full_match(name, prog):
+        if sbatch is batch:
+            return True
+        val = _E.pack(_E.evaluate(prog, batch, _lib_map(lib), {}))
+        if _E.mismatches(val, truth[name]) <= tolerance * tpos[name]:
+            return True
+        records[name].recheck_failed += 1
+        return False
 
     def check(name, prog, by, cost, own):
         rec = dict(test(name, prog, list(lib)), by=by)
@@ -266,15 +284,16 @@ def find_rules(examples: Sequence[Mapping[str, np.ndarray]], targets: Mapping[st
         if spent < budget:
             rounds += 1
             terminals = [(e.name, e.program) for e in (lib if grow else library)]
-            en = _E.Enumerator(batch, base, terminals, ops1, ops2, counts)
+            en = _E.Enumerator(sbatch, base, terminals, ops1, ops2, counts)
             admitted = False
             for ast, packed, k in en.run(size, budget - spent):
                 if tolerance > 0:
-                    hit = [n for n in sorted(open_) if _E.mismatches(packed, truth[n]) <= tolerance * tpos[n]]
+                    hit = [n for n in sorted(open_) if _E.mismatches(packed, struth[n]) <= tolerance * spos[n]]
                 else:
                     hit = [n for n in tkey.get(k, ()) if n in open_]
                 for name in hit:
-                    admitted |= check(name, ast, "enumerate", spent + en.programs, en.programs)
+                    if full_match(name, ast):
+                            admitted |= check(name, ast, "enumerate", spent + en.programs, en.programs)
                 if admitted and grow:
                     break
             spent += en.programs

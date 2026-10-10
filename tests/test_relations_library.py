@@ -205,3 +205,57 @@ def test_tolerance_finds_a_rule_behind_noisy_example_labels():
                         tolerance=0.1)
     assert "grand" not in exact.found
     assert L.show(soft.found["grand"].program) == "(E ∘ E)"
+
+
+def _sym(rng, n, p):
+    A = np.triu(rng.random((n, n)) < p, 1)
+    return {"E": A | A.T}
+
+
+def k4(w):
+    """(x, y) in a common 4-clique: four variables, outside what these programs express."""
+    import itertools
+    A = w["E"]
+    Y = np.zeros_like(A)
+    for q in itertools.combinations(range(len(A)), 4):
+        if all(A[a, b] for a, b in itertools.combinations(q, 2)):
+            for a, b in itertools.permutations(q, 2):
+                Y[a, b] = True
+    return Y
+
+
+def test_an_inexpressible_rule_is_never_admitted_and_where_soft_acceptance_would_admit_one():
+    """The main false-accept risk of support / precision acceptance: a rule the grammar cannot express. At density 0.3
+    and 0.5, exact and soft acceptance admit nothing. On dense worlds (0.7) almost every edge is in a 4-clique, so soft
+    acceptance with held-out worlds of the same density admits the edge relation itself — held-out worlds of another
+    density reject it. Hold out other families, not only other draws."""
+    for p in (0.3, 0.5):
+        rng = np.random.default_rng(15)
+        tr = [_sym(rng, int(rng.integers(8, 12)), p) for _ in range(24)]
+        ho = [_sym(rng, 16, p) for _ in range(6)]
+        for tol, exact in ((0.0, True), (0.2, False), (0.5, False)):
+            r = L.find_rules(tr, {"k4": k4}, base=["E"], size=7, budget=20_000, library=(),
+                             test=L.HeldOut(ho, {"k4": k4}, exact=exact), tolerance=tol)
+            assert not r.found, (p, tol)
+    rng = np.random.default_rng(15)
+    tr = [_sym(rng, int(rng.integers(8, 12)), 0.7) for _ in range(24)]
+    same = [_sym(rng, 16, 0.7) for _ in range(6)]
+    other = [_sym(rng, 16, 0.4) for _ in range(6)]
+    soft = dict(base=["E"], size=7, budget=20_000, library=(), tolerance=0.2)
+    admitted = L.find_rules(tr, {"k4": k4}, test=L.HeldOut(same, {"k4": k4}, exact=False), **soft)
+    assert L.show(admitted.found["k4"].program) == "E"                          # the false accept, measured
+    assert not L.find_rules(tr, {"k4": k4}, test=L.HeldOut(other, {"k4": k4}, exact=False), **soft).found
+    assert not L.find_rules(tr, {"k4": k4}, test=L.HeldOut(same, {"k4": k4}), **soft).found   # exact: rejected
+
+
+def test_search_on_a_subset_rechecks_on_every_example():
+    test = L.HeldOut(HELD, TARGETS)
+    full = L.find_rules(TRAIN, TARGETS, base=["E"], size=6, budget=20_000, library=(), test=test)
+    sub = L.find_rules(TRAIN, TARGETS, base=["E"], size=6, budget=20_000, library=(), test=test, search_on=4)
+    assert {k: L.show(v.program) for k, v in sub.found.items()} == {k: L.show(v.program) for k, v in full.found.items()}
+    # a subset that tells nothing apart (one world without edges): every program is one class there; the match is
+    # re-checked on all the examples, fails, and nothing wrong is admitted — the correct programs were merged away
+    blank = [{"E": np.zeros((8, 8), bool)}] + TRAIN
+    bad = L.find_rules(blank, TARGETS, base=["E"], size=6, budget=20_000, library=(), test=test, search_on=1)
+    assert not bad.found and sum(r.recheck_failed for r in bad.records.values()) >= 1
+    assert sum(r.rejected for r in bad.records.values()) == 0                      # the re-check stopped it first

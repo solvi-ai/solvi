@@ -356,7 +356,11 @@ level — a path tree's "denied if an ancestor directory is named secret and the
 search without the library found neither top rule in 100,000, with 0 false accepts on larger fresh worlds. A library
 also has a cost: every entry is a terminal, so a rule it does not help gets dearer (sibling took 4,176 programs after
 grandparent and great-grandparent were admitted, 487 without the library). The intermediate concepts were given as
-targets: the search found which one was within reach and the programs, not the concepts. **The caveat on step 4:**
+targets: the search found which one was within reach and the programs, not the concepts. **Hold out other families,
+not only other draws:** a rule the programs cannot express ("x and y share a 4-clique") was never admitted on graphs of
+density 0.3 or 0.5, exact or by precision; on dense graphs (0.7) almost every edge is in a 4-clique, and precision /
+recall acceptance with held-out graphs of the same density admitted the edge relation itself — held-out graphs of
+density 0.4, or exact acceptance, rejected it (`tests/test_relations_library.py`). **The caveat on step 4:**
 that one-step rules are learned by gradient is verified only on hand-picked rules over one relation; on random rules
 plain enumeration already finds every one-step rule in seconds, and rules of two steps or more did not hold when learned
 by gradient — no gradient learner ships with solvi. **On step 5:** a check on the logged rows is a few bit operations, so ranking pays only where each

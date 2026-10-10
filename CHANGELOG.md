@@ -72,7 +72,10 @@ calibration files and served by `solvi serve`), so a build from it is not mistak
   passes as a `Library(program, name, examples, test_record)` entry and enumerates again with it as a terminal; a
   program that only fits the examples is counted as rejected, never admitted. `budget` caps the enumerated programs over
   all rounds; `grow=False` is the flat control; `tolerance=` admits near-matches on noisy examples to the test;
-  `proposer=` is a fallback slot for a learned proposer (none ships), its programs checked the same way. Programs are
+  `proposer=` is a fallback slot for a learned proposer (none ships), its programs checked the same way; `search_on=k`
+  enumerates on the first k examples and re-checks a match on all of them before the test (`recheck_failed`). An
+  inexpressible-rule control ("x and y share a 4-clique") is never admitted at densities 0.3 / 0.5; at 0.7 precision
+  acceptance with same-density held-out graphs admits the edge relation, other-density held-out graphs reject it. Programs are
   nested tuples (base relations, the identity, library entries; converse, closure, "at least k successors",
   composition, ∩, ∪, ∖; no complement); `run(program, world, library=)` runs one on any world. The enumerator inside is
   a minimal one, to be replaced by the full relation enumerator. `benchmarks/relations_library_toy.py` (five seeds,
