@@ -88,10 +88,11 @@ the effect is this" from each wrong prediction, acceptance only by a held-out te
 most specific first, retirement when the held-out precision falls, a probe planner for live systems (`split`,
 `discriminate`: read-only before write) and export into the knowledge store (`LawSet.to_knowledge`). Since 1.1.
 
-- **Missing:** on a game simulator with written mechanics the laws closed 94% of the gap between a learned map and the written mechanics, but random candidates under the same test came within 1.1 points, so the mismatch is a compact proposal heuristic and the test does the work; on a real MCP filesystem server with a path policy, probes planned from mismatches took refusals from 6 to 0 in one session (random probes: 48 to 29); still missing: a grammar too large to enumerate, retirement of weak laws nothing contradicts, wiring into a System's decisions, and a script for the two stands (the toys: benchmarks/laws_toy.py).
+- **Missing:** on a game simulator with written mechanics the laws closed 94% of the gap between a learned map and the written mechanics, but random candidates under the same test came within 1.1 points, so the mismatch is a compact proposal heuristic and the test does the work; on a real MCP filesystem server with a path policy, probes planned from mismatches took refusals from 6 to 0 in one session (random probes: 48 to 29); still missing: a grammar too large to enumerate, retirement of weak laws nothing contradicts, wiring into a System's decisions, and a script for the two stands (the toys: benchmarks/laws_toy.py); a ranker of candidates for expensive checks (RankedProposer, a bag-of-atoms model trained on tasks drawn from the grammar) cut the checks to the true condition from 69.7 in the blind order to 2.1 on synthetic tasks of one grammar, in distribution only and never on a live system.
 - **Script:** `benchmarks/laws_toy.py` (two deterministic toys that reproduce both findings in miniature; `pytest -m
   slow tests/test_laws_toy.py`). **Deadline:** 1.2.
-- Guide: [Laws from an environment](best_practices.md#laws-from-an-environment-the-test-is-the-judge); API:
+- Guide: [Laws from an environment](best_practices.md#laws-from-an-environment-the-test-is-the-judge), [ranking
+  candidates](best_practices.md#rules-over-relations-enumerate-with-a-library-rank-only-where-a-check-is-expensive); API:
   [solvi.experimental.laws](api/laws.md).
 
 ## `relations`

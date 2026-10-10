@@ -55,7 +55,10 @@ STATUS: dict[str, dict] = {
              "the work; on a real MCP filesystem server with a path policy, probes planned from mismatches took "
              "refusals from 6 to 0 in one session (random probes: 48 to 29); still missing: a grammar too large to "
              "enumerate, retirement of weak laws nothing contradicts, wiring into a System's decisions, and a "
-             "script for the two stands (the toys: benchmarks/laws_toy.py)", "script": "benchmarks/laws_toy.py"},
+             "script for the two stands (the toys: benchmarks/laws_toy.py); a ranker of candidates for expensive checks "
+             "(RankedProposer, a bag-of-atoms model trained on tasks drawn from the grammar) cut the checks to the true "
+             "condition from 69.7 in the blind order to 2.1 on synthetic tasks of one grammar, in distribution only "
+             "and never on a live system", "script": "benchmarks/laws_toy.py"},
     "relations": {"since": "1.1", "what": "rules over relations (a path tree, a family forest): composites by "
                   "enumeration with a library — find_rules enumerates small programs bottom-up, admits only what passes "
                   "a held-out test, and builds the next rules on the admitted ones; a fallback slot for a learned "

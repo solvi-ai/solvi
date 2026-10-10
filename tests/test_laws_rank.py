@@ -82,9 +82,9 @@ def test_the_ranker_only_reorders_never_adds_or_drops(trained):
     inner = Enumerate()
     base = inner.propose(t.lawset, t.state, t.action, t.observed)
     ranked = RankedProposer(inner, trained, t.buffer).propose(t.lawset, t.state, t.action, t.observed)
-    assert Counter(map(id, base)) == Counter(map(id, ranked)) and len(base) == len(ranked)
+    assert Counter(base) == Counter(ranked) and len(base) == len(ranked)
     raw = RankedProposer(inner, FeatureRanker(), t.buffer).propose(t.lawset, t.state, t.action, t.observed)
-    assert Counter(map(id, base)) == Counter(map(id, raw))
+    assert Counter(base) == Counter(raw)
 
 
 def test_training_and_ranking_are_deterministic():
