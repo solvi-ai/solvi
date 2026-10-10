@@ -173,7 +173,7 @@ LOW_TIERS = {
     "guarantees": "core.guarantees",
     "records": "core.store core.response core.specialist",
     "system": "core.system",
-    "deliberate": "core.slow core.dispatch core.versions",          # versions: a module reads Fail (core.slow)
+    "deliberate": "core.slow core.dispatch core.versions core.explain",   # versions: Fail; explain: search's pinning
     "knowledge": "core.knowledge",
 }
 HIGH = "__init__ __main__ _command _mcp_proxy solutions check cli models serve show testing"
@@ -277,7 +277,7 @@ def test_stable_modules_name_an_experimental_module_only_where_allowed():
 
 # experimental modules that graduated: their old path re-exports the stable module for one release, with the experimental
 # warning, and has no STATUS entry
-GRADUATED = {"specialist", "mcp"}
+GRADUATED = {"specialist", "mcp", "counterfactual"}
 
 
 def test_experimental_modules_warn_on_import_and_say_their_status():
