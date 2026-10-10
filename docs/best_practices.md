@@ -250,7 +250,11 @@ accepted total failing its arithmetic, but 64% of the fields went to "needs revi
 39–60% of the first one's fields, and a sum can only vouch for a field that takes part in one (most item lines carry no unit
 price). Reading the second engine on the first one's word boxes (41% coverage on calibration) and dropping it for money fields
 with a passing sum (41%) moved coverage by a few points, not to the 70% we wanted. Budget for the review queue before promising
-coverage, and put the budget where the fields have no equation neighbours (names, dates).
+coverage, and put the budget where the fields have no equation neighbours (names, dates). With a second engine that
+reads camera photos (PP-OCRv4 instead of Tesseract, on receipts no run had seen), agreement between the engines rose from
+36–60% to 81–94% of fields and acceptance from 36% to 55% at 95.7% exact — and the misses left were the rule-based field
+proposer picking the wrong line (a pre-rounding total, a card row as cash) with both engines reading the same digits. Measure
+which of the two is your bottleneck before swapping readers: agreement between readers tells you.
 
 **Normalise numbers the same way on both sides before judging a transcript, and look at what the two readers agreed on.**
 Two speech models of different families (faster-whisper small, a Kaldi model) aligned in time gave 0 false words on 400
