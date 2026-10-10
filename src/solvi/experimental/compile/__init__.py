@@ -1439,7 +1439,7 @@ class Certificate:
         self.examples = [(dict(x), dict(w)) for x, w in self.examples]
         if (self.n is None) == (self.n_hypotheses is None):
             raise ValueError("Certificate needs exactly one of n_hypotheses= (a search's size) or n= (a chosen count)")
-        self.needed                                        # validates eps / delta / n_hypotheses
+        _ = self.needed                                    # validates eps / delta / n_hypotheses
 
     @property
     def needed(self) -> int:
