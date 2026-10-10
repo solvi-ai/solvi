@@ -52,6 +52,7 @@ graduates or is removed by 1.2 ([Experimental](experimental.md) lists what each 
 25. [solvi behind a coding agent's hooks](#solvi-behind-a-coding-agents-hooks)
 26. [A specification compiled into the catalog: solvi.experimental.compile](#a-specification-compiled-into-the-catalog-solviexperimentalcompile)
 27. [Verified charts: a specialist that checks every number](#verified-charts-a-specialist-that-checks-every-number)
+28. [The change pipeline: solvi.experimental.changes](#the-change-pipeline-solviexperimentalchanges)
 
 ## Quick start: solvi.build
 
@@ -1603,7 +1604,7 @@ unless `strict=False`); `save_calibration` writes it next to the calibration fil
 were before the first adapter. It is refused for a decider that is not a torch encoder (an ONNX one: load it with
 `backend="torch"`; an LLM or a rule has no weights to adapt), for checkpoints larger than solvi-base (use the GPU script)
 and for rank / number / span questions. **Experimental:** the API, the recipe and the file format may change; the first
-use warns (`solvi.experimental.learning.ExperimentalWarning`).
+use warns (`solvi.ExperimentalWarning`).
 
 ### "Other" as an abstain threshold
 
@@ -1891,9 +1892,10 @@ fit on all of them; with refits it catches up. The cost:
 - the kept examples: their fact rows, about 1 KB each for 14 plain facts (vector facts such as embeddings cost their
   length), up to `refit_until` examples (2000). Past that no refit is due, the rows are dropped and the head goes on with
   rank-one steps only;
-- a refit is a change like any update: `teach` makes it at once and it is not gated. The learning loop
-  (`solvi.experimental.learning.Learning`) manages decision parts, not fitted heads: while it is attached with `gate_teach=True`, `teach`
-  only stores the correction and the head (and its refit schedule) does not move. The head depends only on its first
+- a refit is a change like any update: `teach` makes it at once and it is not gated. An update target of the change
+  pipeline (`LearningTarget`, [below](#a-labelled-update-is-a-candidate-change)) manages decision parts, not fitted
+  heads: while it is attached with `gate_teach=True`, `teach` only stores the correction and the head (and its refit
+  schedule) does not move. The head depends only on its first
   fit and the sequence of corrections, so replaying them gives the same head (the same fingerprint); keep a
   `copy.deepcopy(head)` to go back.
 
@@ -1965,17 +1967,8 @@ schedule or after a drift flag (`System.guarantee(..., corrections=True)` — th
 source), refit (`fit` on `storage.corrections()`), or keep them as knowledge. Recalibrating on every outcome as it
 arrives is not in the stable path: measured, it broke the promises — the outcomes an agent sees are not a random sample
 of its decisions (a decision that abstained has none), and a threshold moved after every label is no longer the one the
-promise was calibrated for. The experimental `solvi.experimental.oncalib` does it, with that risk in its documentation:
-
-```python
-from solvi.experimental.oncalib import OnTheFly                          # ExperimentalWarning on import
-live = OnTheFly(system, "move", max_risk=0.05, every=50, window=500, min_labels=30)
-live.outcome(res, "west")          # stored as above; every 50 new labels: System.guarantee on the last 500
-live.drifted()                     # a drift flag: from now on only later labels count, recalibrated at once
-live.history                       # each recalibration: when, why, the label ids, the report
-```
-
-Use it to explore, never to make a promise you report.
+promise was calibrated for. The experimental module that did it was removed in 1.1 for that reason: recalibrate on a
+schedule (say, every 500 new outcomes) or when a drift monitor flags the stream.
 
 ### System 2's answers as labels: `label_source="verified"`
 
@@ -2027,66 +2020,11 @@ requests with new intents — System 2 = an LLM's recorded answers; the details 
 | a guarantee's calibration: `System.guarantee(..., corrections=store, sources=...)` | yes, when `sources` names it | fed every verified answer, System 1 answered more within its promise on two tasks of three |
 | a head (`fit` / `teach`) | no — `teach(label_source="verified")` only stores the label | gained on one task of three |
 | a memory of corrections | no — `UntrustedLabel` | broke System 1's promise on the contract task |
-| the learning loop (`solvi.experimental.learning.Learning`) | no — listed in `labels()["rejected"]` | its ladder is a head and a memory |
+| a labelled update (`LearningTarget` of `solvi.experimental.changes`) | no — listed in `labels()["rejected"]` | its ladder is a head and a memory |
 
 Feed the calibration **every** answer System 2 vouched for, not only the cases where it disagreed with System 1: a
 threshold calibrated on disagreements alone sees only System 1's mistakes, and the verified disagreements were too few
 to move anything. The report's `labels` lists the stored ids it read; calibrating again without them undoes it.
-
-### Learning from corrections with gates and rollback (experimental)
-
-`Learning(system, ...)` (from `solvi.experimental.learning`; until 1.0 `system.learning(...)`, which now raises an AttributeError
-naming it) turns the stored corrections into updates of the model decisions — only through gates, recorded,
-and reversible. It is off until you call it, and experimental (it warns `ExperimentalWarning`; its API and defaults may
-change):
-
-```python
-from solvi.experimental.learning import Learning
-
-loop = Learning(system, store, gates={"honesty": "tests/honesty/core_v1.json"})
-# ... the system runs; people correct escalations with system.teach(...) — now stored only, not learned at once
-rep = loop.run()                  # labels → a proposed update → gates → promoted or undone; recorded either way
-print(rep)                        # the rung per question and each gate's numbers
-loop.versions()                   # [{"version", "fp", "time", "action"}]
-loop.rollback(2)                  # any promoted version, in this process or another one on the same store
-```
-
-**Labels** come only from outside the model: the store's corrections from `"human"`, `"outcome"` and `"rule"` sources
-A correction from any other source is refused and listed (`loop.labels()["rejected"]`); the stored decisions — the
-system's own answers — are never read as labels, so self-training is impossible by construction. Each label goes, by a
-hash of its id, to `"train"`, `"calibration"` or `"holdout"` (50 / 20 / 30% by default): a held-out label is never trained
-on, in this update or any later one. While the loop is attached, `System.teach` only stores the correction
-(`gate_teach=False` keeps the instant update; `loop.detach()` ends it).
-
-**The ladder**, per question, by the number of training labels: under `fit_below` (50) — the decider's shift / scale
-(`fit`); under `memory_below` (1000) — `fit` plus a memory of the corrected cases (`part.memory`, mode `"check"` unless
-`ladder={"memory": {"mode": "answer"}}`); beyond — the `adapter` hook when you give one (`(part, [(text, answer)])` →
-a JSON-able description; an object with `state(part)` / `restore(part, state)` is rolled back too), else the memory.
-
-**The gates** — the update is promoted only if every one passes; otherwise it is dropped and recorded as rejected. The
-candidate is built and gated on a shadow of the system (copies of the decision parts, their thresholds and memory, and of
-the model's adaptations; the checkpoint is shared), so asks that run meanwhile see the state in force, never an un-gated
-candidate; the live parts change only when the update is promoted. An `adapter` hook runs on the shadow part and reaches
-the live one through its `state` / `restore`.
-
-| Gate | Passes when |
-|---|---|
-| `consistency` | at most `max_conflict` (20%) of the new training labels are contradicted by a memory of the labels already learned — a batch of wrong corrections hurts more than right ones help |
-| `heldout` | on the held-out labels, asked through the whole system, (right − wrong answered alone) / n improves by at least `min_gain` (0.01), with at least `min_holdout` (5) labels |
-| `honesty` | the honesty numbers (confident errors, coverage at `risk`, quote support) on the held-out labels — and on your own honesty set (`gates={"honesty": path or cases}`) — get no worse than `tolerance` (0.02) |
-| `act_guard` | a part calibrated with `act_guard` / `calibrate_for` is calibrated again, with the same risk, on at least `min_calibration` (30) calibration labels: an old threshold says nothing about a changed signal; conformal answer sets are recalibrated on them too, or dropped (and recorded) with fewer |
-| `size` | shadow run: the stored decisions whose input is held out for a learned question — the labels' split, per question (up to `shadow_limit`, 500) are asked with the current and the candidate state and compared (`solvi.core.store.diff.compare`); at most `max_change` (30%) may change |
-
-`max_change` is deliberately low: the first update of a badly biased decider can move far more than 30% of the decisions
-and is then rejected until you raise the limit for it (`gates={"max_change": 0.8}`) — a decision a person should take.
-
-**The record.** Every run that proposes an update writes a record of kind `"update"` to the changelog (by default the
-same store, hash-chained with the decisions; `changelog=` for another): the version it came from, the fingerprints before
-and after, the rung and label counts per question, the training label ids, every gate's numbers and — for a promoted
-state — the state itself (the adaptation with its examples, the thresholds and guarantee, the memory's cases). The first
-run records the state it started from as a baseline version. Each decision's trace names the part's fingerprint, and
-`loop.version_of(fp)` the version it belongs to. Limits: only questions answered by a single decision part (not a
-combination), and per-group `act_guard` thresholds are not recalibrated (such an update is rejected).
 
 ## Guarding an agent's tool calls
 
@@ -4604,8 +4542,9 @@ inputs, before any monitor flags it (see [the output](#the-output-probabilities-
 `SourceGate` (the source check) always runs first; `ConsistencyGate` refuses an item whose premises are missing,
 retracted or refuted, or that would refute its own premise. A fact or an episode a gate admits is present at once; a
 rule, a skill or an action (behaviour-changing kinds) is promoted with every gate's verdict in the journal, and one a
-later gate holds stays a hypothesis. The shadow gate — measure a behaviour-changing item on a shadow of the system
-before it is promoted — is experimental: `solvi.experimental.learning.ShadowGate`.
+later gate holds stays a hypothesis. A shadow measurement of a behaviour-changing item — its gain on held-out cases,
+the share of past decisions it would change — reaches every gate as `add(..., shadow=...)`; a gate that admits on it
+is yours to write (the experimental change pipeline measures candidates in its stages and passes the numbers that way).
 
 ### The action model: what the environment accepts
 
@@ -5464,3 +5403,67 @@ Nothing in it decides acceptance: the check accepts from `agreed` and turns `con
 the thresholds are the task's. On two stands this was the mechanism behind the measured gains: speech (two models'
 words aligned in time) gave 0 false words on 400 non-speech clips and caught 299 of 300 corruptions, receipts (two OCR
 engines' words aligned by box) went from 88% to 96.4% exact among accepted fields.
+
+## The change pipeline: solvi.experimental.changes
+
+> **Experimental** (since 1.1; what it is missing: [Experimental](experimental.md)). Measured as infrastructure — a
+> journal, impact analysis, approval levels and rollback — not as gates that admit fewer harmful changes.
+
+A document version, a person's correction, verified experience and a search proposal are each a `Change`; a
+`Pipeline` runs every candidate through the same pluggable stages (`Static`, `Consistency`, `Impact`, `Approval`, ...),
+journals each verdict in a hash-chained store (records of kind `"change"`), promotes an admitted change into what holds
+that kind of knowledge (a target: a knowledge store item, a catalog version, a labelled update) and rolls back by
+version. The module docstring of `solvi.experimental.changes` describes every stage; `benchmarks/changes_credit.py`
+runs a credit policy through it (two versions, twenty corrections).
+
+```python
+from solvi.experimental.changes import Change, Impact, Pipeline, Static
+
+pipe = Pipeline([Static(), Impact(measure)], "changes.jsonl", targets=[target], approval={("update", "person"): "gate"})
+res = pipe.propose(Change("person", artifact="update", proposer="ann", reason="the corrections of the week"))
+res.status, res.stage, res.verdicts          # "promoted" | "rejected" | "held", the stage that decided, every verdict
+pipe.versions(); pipe.rollback(0)            # each promotion is a version; a rollback goes through its target
+```
+
+### A labelled update is a candidate change
+
+The corrections people make (`System.teach`), known outcomes (`System.outcome`) and your rules' rejections can update
+the model decisions — only as a change: `LearningTarget(system, ...)` is the target of `Change(artifact="update")`.
+While it is attached, `System.teach` only stores a correction (`gate_teach=False` keeps the instant update;
+`target.detach()` ends it); a proposed update reads the stored labels, builds a candidate on a shadow of the system,
+and promotes it only when every gate passes:
+
+```python
+from solvi.experimental.changes import Change, LearningTarget, Pipeline
+
+target = LearningTarget(system, gates={"honesty": "tests/honesty/core_v1.json"})
+pipe = Pipeline([], system.storage, targets=[target], approval={"update": "gate"})   # one chain with the decisions
+res = pipe.propose(Change("person", artifact="update", proposer="ann"))
+[(v.stage, v.decision, v.reason) for v in res.verdicts]   # "update:ladder", "update:consistency", ... with numbers
+pipe.rollback(0)                                           # the state before the update comes back
+```
+
+**Labels** come only from outside the model: corrections from `"human"`, `"outcome"` and `"rule"` sources; any other
+source is refused and listed (`target.labels()["rejected"]`), and the stored decisions are never read as labels. Each
+label goes, by a hash of its content, to `"train"`, `"calibration"` or `"holdout"` (50 / 20 / 30%): a held-out label
+is never trained on.
+
+**The ladder**, per question, by the number of training labels: under `fit_below` (50) the decider's shift / scale
+(`fit`); under `memory_below` (1000) also a memory of the corrected cases; beyond, the `adapter` hook when you give one
+(`(part, [(text, answer)])`; with `state(part)` / `restore(part, state)` it is rolled back too). Only closed-list
+questions answered by a single decision part.
+
+**The gates** are the change's stages, `"update:<gate>"`, each with its numbers; the first that fails refuses it:
+
+| Gate | Passes when |
+|---|---|
+| `consistency` | at most `max_conflict` (20%) of the new training labels are contradicted by a memory of the labels already learned |
+| `heldout` | on the held-out labels, (right − wrong answered alone) / n improves by at least `min_gain` (0.01), with at least `min_holdout` (5) labels |
+| `honesty` | the honesty numbers on the held-out labels (and your honesty set, `gates={"honesty": ...}`) get no worse than `tolerance` (0.02) |
+| `act_guard` | a part calibrated with `act_guard` / `calibrate_for` is calibrated again on at least `min_calibration` (30) calibration labels; conformal answer sets are recalibrated, or dropped with fewer |
+| `size` | of the stored decisions whose input is held out (up to `shadow_limit`, 500), at most `max_change` (30%) change |
+
+Every update is recorded (kind `"update"`, in the labels' store) with its gates, the fingerprints before and after and
+the state to roll back to; `target.restore(version)` brings back any recorded version, also in another process.
+Measured: on streams of one kind of decision the loop these gates came from gave no measurable gain, which is why it
+is no longer a module of its own (the changelog, 1.1 "Removed").

@@ -1,72 +1,69 @@
-"""Learning from corrections, with gates and rollback (experimental): Learning(system, ...).
+"""The update ladder and its gates (private to solvi.experimental.changes): what LearningTarget runs for a
+Change(artifact="update"). Until 1.1 this was the public learning loop (`Learning`), removed in 1.1
+because on streams of one kind of decision it gave no measurable gain; what the change pipeline needs of it is here.
 
-    loop = Learning(system, store)             # nothing happens until you run it; System.teach now only stores
-    rep = loop.run()                           # labels → a proposed update → gates → promoted or rejected, recorded
-    print(rep)                                 # what changed, each gate's numbers
-    loop.versions()                            # every promoted state; loop.rollback(2) restores one
+    target = LearningTarget(system, storage)              # changes._targets: holds an Updates
+    pipe = Pipeline([], "changes.jsonl", targets=[target], approval={"update": "gate"})
+    res = pipe.propose(Change("person", artifact="update"))   # labels → the ladder → the gates → promoted or refused
+    res.verdicts                                          # "update:ladder", "update:consistency", ... with their numbers
+    pipe.rollback(0)                                      # through the target: the state before comes back
 
 Labels come only from outside the model, read from a TraceStorage: human corrections (System.teach, save_correction),
 known outcomes (source="outcome") and your rules' rejections (source="rule"). A correction from any other source is
 refused and listed in `labels()["rejected"]`; the stored decisions — the system's own answers — are never read as labels,
 so self-training is impossible by construction, not by a setting.
 
-Each label is put, by a hash of its stored id, into "train", "calibration" or "holdout" (default 50 / 20 / 30%): a
+Each label is put, by a hash of its content key, into "train", "calibration" or "holdout" (default 50 / 20 / 30%): a
 held-out label is never trained on, in this update or any later one.
 
 The ladder, per question, by the number of training labels: fewer than `fit_below` (50) — the shift / scale of the decider
-(DecisionPart.fit); up to `memory_below` (1000) — fit plus a memory of the corrected cases (solvi.core.knowledge.memory, mode "check" by
-default); beyond — the `adapter` hook when you give one (a callable (part, [(text, answer)]) → a JSON-able description; an
-object with state(part) / restore(part, state) is rolled back too), else the memory.
+(DecisionPart.fit); up to `memory_below` (1000) — fit plus a memory of the corrected cases (solvi.core.knowledge.memory,
+mode "check" by default); beyond — the `adapter` hook when you give one (a callable (part, [(text, answer)]) → a JSON-able
+description; an object with state(part) / restore(part, state) is rolled back too), else the memory.
 
-The gates (every one must pass, else the update is undone and recorded as rejected):
+The gates (every one must pass, else the candidate is undone and the change refused at that gate):
   consistency  the new training labels agree with a memory of the labels already learned: at most `max_conflict` (20%)
                of them may be contradicted by close, agreeing earlier corrections (B9: wrong corrections hurt more than
                right ones help);
   heldout      on the held-out labels, asked through the whole system: the share answered alone and right, minus the
                share answered alone and wrong, must improve by at least `min_gain` (0.01), with at least `min_holdout`
                (5) held-out labels;
-  honesty      the honesty numbers (solvi.testing.honesty: confident errors, coverage at `risk`, quote support) on the held-out
-               labels — and on your own honesty set when given (gates={"honesty": cases or a set file}) — must not get
-               worse by more than `tolerance` (0.02);
+  honesty      the honesty numbers (solvi.testing.honesty: confident errors, coverage at `risk`, quote support) on the
+               held-out labels — and on your own honesty set when given (gates={"honesty": cases or a set file}) — must
+               not get worse by more than `tolerance` (0.02);
   act_guard    a part calibrated with act_guard / calibrate_for is recalibrated on the calibration labels (at least
                `min_calibration`, 30), with the same risk: an old threshold says nothing about a changed signal; a
                part's conformal answer sets are recalibrated on them too (with fewer labels they are dropped, and the
                gate's record says so — they no longer hold for the changed probabilities);
   size         shadow run: the stored decisions whose input is held out for a learned question (the same split as the
                labels: per question, by content_key) — at most `shadow_limit`, 500 — are asked with the current and the
-               candidate state and compared (solvi.core.store.diff.compare) on those questions and the unlearned ones; at most
-               `max_change` (30%) of them may change — one update may not move more.
+               candidate state and compared (solvi.core.store.diff.compare) on those questions and the unlearned ones;
+               at most `max_change` (30%) of them may change — one update may not move more.
 
 The candidate is built and gated on a shadow of the system: copies of the decision parts (their thresholds, memory,
 and the model's adaptations; the checkpoint itself is shared) in a shallow copy of the catalog and the System. The live
-parts are not touched until the update is promoted, so asks that run meanwhile (another thread, the server) see the
-state in force, never an un-gated candidate. An `adapter` hook runs on the shadow part: its effect reaches the live part
-through its state(part) / restore(part, state); a hook without them only keeps what it changes in objects the shadow
-shares with the live part (the checkpoint), and such changes are not isolated. When a gated candidate cannot be carried
-over to the live parts (a hook without state / restore changed the shadow part itself, so the promoted fingerprint is
-not the candidate's), run() puts the live parts back as they were, records the update as not promoted (gate
-"promotion") and raises RuntimeError.
+parts are not touched until the update is promoted, so asks that run meanwhile see the state in force, never an
+un-gated candidate. An `adapter` hook runs on the shadow part: its effect reaches the live part through its
+state(part) / restore(part, state). When a gated candidate cannot be carried over to the live parts (a hook without
+state / restore changed the shadow part itself), run() puts the live parts back as they were and records the update as
+not promoted (gate "promotion"); only when they cannot be put back does it raise RuntimeError.
 
-A promoted update gets the next version number; every run that proposes an update is recorded in the changelog (a
-TraceStorage, by default the same store: kind "update", hash-chained with the decisions) with its gates' results, the
-fingerprints before and after, the labels it trained on and — for a promoted state — the state itself (adaptations,
-thresholds, memory), so `rollback(version)` restores any promoted version, in this process or another. Each decision
-records the fingerprint of the part that made it, which names the version (`loop.version_of(fp)`)."""
+Every run that proposes an update is recorded (a TraceStorage, by default the labels' store: kind "update",
+hash-chained with the decisions) with its gates' results, the fingerprints before and after, the labels it trained on
+and — for a promoted state — the state itself (adaptations, thresholds, memory), so `rollback(version)` restores any
+promoted version, in this process or another. Each decision records the fingerprint of the part that made it, which
+names the version (`version_of(fp)`)."""
 from __future__ import annotations
 
 import copy
 import hashlib
 import inspect
 import json
-import warnings
 from dataclasses import asdict, dataclass, field
 
-from ..core import catalog as core
-from ..core.store import FORMAT, TRUSTED_SOURCES, UntrustedLabel, check_source, plain
-from ..core.store import open_storage
-from . import mark, warn_on_import
-
-warn_on_import(__name__)
+from ...core.store import FORMAT, TRUSTED_SOURCES, UntrustedLabel, check_source, plain
+from ...core.store import open_storage
+from .. import mark
 
 LADDER = {"fit_below": 50, "memory_below": 1000, "adapter": None,
           "memory": {"k": 7, "radius": 0.15, "min_strength": 1.0, "min_agreement": 0.8, "mode": "check"}}
@@ -75,11 +72,11 @@ GATES = {"min_gain": 0.01, "min_holdout": 5, "tolerance": 0.02, "risk": 0.10, "m
 
 
 def _check_settings(ladder, gates, holdout, calibration):
-    """The learning loop's settings → ValueError naming the first that is wrong: an unknown ladder, memory or gate key
+    """The update's settings → ValueError naming the first that is wrong: an unknown ladder, memory or gate key
     (a typo would be ignored), a memory mode that does not exist, a gate rate outside [0, 1] (risk strictly inside),
     a negative count, or holdout / calibration shares that leave no label to train on."""
-    from ..core.calibration import check_rate
-    from ..core.knowledge.memory import _settings
+    from ...core.calibration import check_rate
+    from ...core.knowledge.memory import _settings
     unknown = set(ladder or ()) - set(LADDER)
     if unknown:
         raise ValueError(f"unknown ladder settings: {sorted(unknown)} (known: {sorted(LADDER)})")
@@ -112,16 +109,13 @@ def _check_settings(ladder, gates, holdout, calibration):
                          "be below 1")
 
 
-ExperimentalWarning = core.ExperimentalWarning          # defined in solvi.core since 0.8 (the same class)
-
-
 OPEN_KINDS = ("span", "rank", "number")        # answers not from a closed list: the loop leaves them alone
 
 
 def content_key(question, init):
     """What a label's split is decided by: the question and a hash of its input — never a stored id, whose hash covers
     measured timings and so differs from run to run."""
-    from ..core.runtime import vhash
+    from ...core.runtime import vhash
     return f"{question}|{vhash(dict(init or {}))}"
 
 
@@ -166,8 +160,8 @@ class UpdateReport:
         return asdict(self)
 
     def __str__(self):
-        head = {"none": "learning: nothing new to learn", "promoted": f"learning: update promoted as version {self.version}",
-                "rejected": "learning: update rejected by the gates; the current state is kept"}[self.action]
+        head = {"none": "update: nothing new to learn", "promoted": f"update: promoted as version {self.version}",
+                "rejected": "update: rejected by the gates; the current state is kept"}[self.action]
         lines = [head + (f" (version in force: {self.current})" if self.current is not None else "")]
         for q, x in self.questions.items():
             lines.append(f"  {q}: {x['rung']} on {x['train']} training label(s) ({x['new']} new), "
@@ -180,21 +174,17 @@ class UpdateReport:
         return "\n".join(lines)
 
 
-class Learning:
-    """The learning loop of a System (see the module docstring): Learning(system, storage=None, parts=None, ladder=None,
-    gates=None, ...) — until 1.0 made by System.learning(...), which is gone (a stable System does not import an
-    experimental module); experimental."""
-
-    experimental = True
+class Updates:
+    """The update ladder and gates of a System (see the module docstring): Updates(system, storage=None, parts=None,
+    ladder=None, gates=None, ...), held by changes.LearningTarget."""
 
     def __init__(self, system, storage=None, parts=None, ladder=None, gates=None, changelog=None, holdout=0.3,
                  calibration=0.2, gate_teach=True):
-        from ..core.deciders import DecisionPart, decision_of
-        warnings.warn("solvi.experimental.learning is experimental: its API and gates may change", ExperimentalWarning, stacklevel=2)
-        self.system = mark(system, "learning")
+        from ...core.deciders import DecisionPart, decision_of
+        self.system = mark(system, "changes")
         self.storage = open_storage(storage, system) if storage is not None else system.storage
         if self.storage is None:
-            raise ValueError("the learning loop reads labels from a TraceStorage: pass storage= or System(storage=...)")
+            raise ValueError("an update reads its labels from a TraceStorage: pass storage= or System(storage=...)")
         self.changelog = open_storage(changelog, system) if changelog is not None else self.storage
         if isinstance(parts, dict):
             chosen = dict(parts)
@@ -208,10 +198,10 @@ class Learning:
             if q not in system.questions:
                 raise ValueError(f"{q!r} is not a question of this system")
             if not isinstance(p, DecisionPart):
-                raise ValueError(f"question {q!r}: the learning loop updates a decision part (model.decision(...)); "
+                raise ValueError(f"question {q!r}: an update changes a decision part (model.decision(...)); "
                                  f"{p!r} is not one (combinations are not supported yet)")
             if p.spec.kind in OPEN_KINDS:
-                raise ValueError(f"question {q!r}: the learning loop learns closed-list questions (choice, multi-label, "
+                raise ValueError(f"question {q!r}: an update learns closed-list questions (choice, multi-label, "
                                  f"score, yes/no); a {p.spec.kind} question is not one — in a simulation on real "
                                  "streams learning did not help spans and a memory of corrections hurt them")
         if not chosen:
@@ -251,7 +241,7 @@ class Learning:
         return {"labels": out, "rejected": rejected}
 
     def _normalize(self, q, answer):
-        from ..core.catalog import NOT_STATED_KEY, Unknown
+        from ...core.catalog import NOT_STATED_KEY, Unknown
         at = self.system.questions[q].answer
         ans = Unknown if answer == NOT_STATED_KEY else at.normalize(answer)
         if ans is not Unknown:
@@ -270,11 +260,11 @@ class Learning:
 
     @staticmethod
     def _fingerprint_of(parts):
-        from ..core.provenance import digest
+        from ...core.provenance import digest
         return digest("learning", sorted((q, p.fingerprint()) for q, p in parts.items()))
 
     def _snapshot(self, parts=None):
-        from ..core.deciders import Adaptation
+        from ...core.deciders import Adaptation
         out = {}
         for q, p in (parts or self.parts).items():
             a = p.adaptation
@@ -302,8 +292,8 @@ class Learning:
         its own thresholds; the catalog and the System are shallow copies whose parts point at the copies."""
         import dataclasses
 
-        from ..core.catalog import group_func
-        from ..core.deciders import DecisionPart
+        from ...core.catalog import group_func
+        from ...core.deciders import DecisionPart
         models = {}
         for p in self.parts.values():
             if id(p.model) not in models:
@@ -353,8 +343,8 @@ class Learning:
                                "a part changed in a way the loop cannot carry over")
 
     def _restore(self, state, live=None):
-        from ..core.deciders import Adaptation
-        from ..core.knowledge.memory import CorrectionMemory
+        from ...core.deciders import Adaptation
+        from ...core.knowledge.memory import CorrectionMemory
         for q, p in self.parts.items():
             st = state.get(q)
             if st is None:
@@ -500,12 +490,11 @@ class Learning:
                 rec = self._record({"action": "update", "version": None, "promoted": False, "parent": cur,
                                     "fp_before": fp_before, "fp_after": fp_after, "questions": plan, "labels": train_ids,
                                     "gates": gates, "state": None})
-                raise RuntimeError(
-                    f"{e} — " + (f"the live parts were put back as they were (version {cur}) and the update is recorded "
-                                 f"as not promoted (#{rec['id']})" if same else
-                                 f"and the live parts could not be put back (now #{self.fingerprint()}, before "
-                                 f"#{fp_before}): restore them yourself; recorded as not promoted (#{rec['id']})")
-                ) from e
+                if same:                            # the live parts are as they were: a refusal, not a crash
+                    return UpdateReport("rejected", None, cur, plan, gates, fp_before, fp_after, got["rejected"],
+                                        rec["id"])
+                raise RuntimeError(f"{e} — and the live parts could not be put back (now #{self.fingerprint()}, before "
+                                   f"#{fp_before}): restore them yourself; recorded as not promoted (#{rec['id']})") from e
             version = self._next_version()
             self._states[version] = (self._snapshot(), self._live())
             rec = self._record({"action": "update", "version": version, "promoted": True, "parent": cur,
@@ -530,8 +519,8 @@ class Learning:
     def _apply(self, q, rung, train, part=None):
         """Apply one question's update to `part` (the shadow part of the candidate; default: the live part) → a JSON-able
         description."""
-        from ..core.catalog import Unknown
-        from ..core.knowledge.memory import CorrectionMemory, attach
+        from ...core.catalog import Unknown
+        from ...core.knowledge.memory import CorrectionMemory, attach
         part = self.parts[q] if part is None else part
         ex = self._examples(q, train)
         fit_ex = [(t, y) for t, y in ex if y is not Unknown]
@@ -551,7 +540,7 @@ class Learning:
 
     def _consistency(self, plan, by, trained):
         """New training labels against a memory of the labels already learned (B9)."""
-        from ..core.knowledge.memory import CorrectionMemory
+        from ...core.knowledge.memory import CorrectionMemory
         per, n_new, n_bad = {}, 0, 0
         for q in plan:
             old = [lab for lab in by[q]["train"] if lab.id in trained.get(q, set())]
@@ -645,13 +634,13 @@ class Learning:
             return None
         if isinstance(h, (list, tuple)):
             return list(h)
-        from ..testing.honesty import load_set
+        from ...testing.honesty import load_set
         return load_set(h)["cases"]
 
     def _evaluate(self, holdout, shadow, system=None):
         """The held-out labels, the honesty set and the shadow rows asked through `system` (the candidate's shadow; default:
         the live system)."""
-        from ..testing.honesty import run
+        from ...testing.honesty import run
         system = self.system if system is None else system
         cases = [{"name": lab.id, "state": dict(lab.init), "gold": {lab.question: plain(lab.answer)}} for lab in holdout]
         out = {"heldout": run(system, cases, store=False) if cases else []}
@@ -671,7 +660,7 @@ class Learning:
         return out
 
     def _gate_heldout(self, before, after, n):
-        from ..testing.honesty import metrics
+        from ...testing.honesty import metrics
         a, b = metrics(before["heldout"], self.gates["risk"]), metrics(after["heldout"], self.gates["risk"])
         if n < self.gates["min_holdout"]:
             return {"ok": False, "n": n, "why": f"{n} held-out label(s) < {self.gates['min_holdout']}: an improvement "
@@ -685,7 +674,7 @@ class Learning:
                        f"(gain {gain:+.3f}, needed {self.gates['min_gain']:+.3f})"}
 
     def _gate_honesty(self, before, after):
-        from ..testing.honesty import compare, metrics
+        from ...testing.honesty import compare, metrics
         tol, risk = self.gates["tolerance"], self.gates["risk"]
         out, regs = {}, []
         for name in ("heldout", "honesty_set"):
@@ -701,7 +690,7 @@ class Learning:
                 "why": "no honesty number got worse" if not regs else "; ".join(regs)}
 
     def _gate_size(self, before, after):
-        from ..core.store.diff import DiffReport, compare
+        from ...core.store.diff import DiffReport, compare
         rep = DiffReport()
         for sid, old in before["shadow"].items():
             new = after["shadow"].get(sid)
@@ -730,41 +719,4 @@ def _shadow_part(p, model):
     return sp
 
 
-class ShadowGate:
-    """A write gate of the knowledge store (solvi.core.knowledge.gates.WriteGate), experimental: a behaviour-changing
-    item (a rule, a skill, an action used as a check) is tried on a shadow of the system before it is promoted.
-
-        ks = KnowledgeStore(gates=[SourceGate(), ConsistencyGate(), ShadowGate(min_gain=0.0, max_changed=0.3)])
-        ks.add("rule", body, source="person", shadow=lambda store, item: {"gain": 0.02, "changed": 0.05, "honest": True})
-
-    `shadow` (given to add, or `measure` here): a function (store, item) → {"gain": the held-out gain, "changed": the
-    share of past decisions it would change, "honest": the honesty gates hold} — or that dict itself. Admitted when
-    gain ≥ min_gain, changed ≤ max_changed and honest is not False; the measurement is recorded with the verdict. A fact
-    or an episode is admitted without one: an observation is its own evidence. Experimental: no in-repo script measures
-    how many harmful updates it catches. Without a measurement a behaviour-changing item is held."""
-    name = "shadow"
-
-    def __init__(self, measure=None, *, min_gain=0.0, max_changed=None):
-        self.measure, self.min_gain, self.max_changed = measure, float(min_gain), max_changed
-
-    def admit(self, store, item, shadow=None):
-        from ..core.knowledge.gates import Verdict
-        if item.get("kind") not in ("rule", "skill", "action"):
-            return Verdict(True, "an observation is its own evidence", gate=self.name)
-        m = shadow if shadow is not None else self.measure
-        if callable(m):
-            m = m(store, item)
-        if not isinstance(m, dict):
-            return Verdict(False, "no shadow measurement for a behaviour-changing item", gate=self.name)
-        gain, changed = float(m.get("gain", 0.0)), m.get("changed")
-        why = []
-        if gain < self.min_gain:
-            why.append(f"gain {gain:g} < {self.min_gain:g}")
-        if self.max_changed is not None and changed is not None and float(changed) > float(self.max_changed):
-            why.append(f"changes {float(changed):g} > {float(self.max_changed):g} of past decisions")
-        if m.get("honest") is False:
-            why.append("the honesty gates do not hold")
-        return Verdict(not why, "; ".join(why), measured={k: m[k] for k in sorted(m)}, gate=self.name)
-
-
-__all__ = ["ExperimentalWarning", "Label", "Learning", "ShadowGate", "TRUSTED_SOURCES", "UpdateReport", "split_of"]
+__all__ = ["GATES", "LADDER", "Label", "UpdateReport", "Updates", "content_key", "split_of"]

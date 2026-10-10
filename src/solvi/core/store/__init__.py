@@ -10,7 +10,8 @@ Every stored decision is one record (a dict of plain JSON):
   kind "teach"    a correction (System.teach): {"teach": question, "init": ..., "answer": ...} and, when given, its
                   "source" ("outcome", "rule", "verified"; none: a human), "by" and "of" (the stored id of the decision it
                   corrects; for "verified", the System 2 decision the label is);
-  kind "update"   a learning update (solvi.experimental.learning.Learning): what changed, the gates' results, the state to roll back to;
+  kind "update"   a labelled update (solvi.experimental.changes, LearningTarget): what changed, the gates' results, the state
+                  to roll back to;
   every record    seq (0, 1, 2, ...), time (seconds since the epoch), meta (optional, yours; a decision made with
                   solvi.experimental pieces has meta["experimental"]: their names), prev and hash.
 
@@ -832,9 +833,9 @@ class TraceStorage(abc.ABC):
 
     def corrections(self):
         """The stored corrections → [{"id", "time", "question", "init", "answer", "source", "by", "of"}] (feed them to fit /
-        learn_rule, a CorrectionMemory or solvi.experimental.learning.Learning). source: "human" (also every record without one), "outcome",
+        learn_rule, a CorrectionMemory or an update target of solvi.experimental.changes). source: "human" (also every record without one), "outcome",
         "rule", "verified" — or, for a record written around save_correction, whatever it says (solvi.core.knowledge.memory and
-        solvi.experimental.learning.Learning refuse anything outside TRUSTED_SOURCES, "verified" included; System.guarantee takes "verified"
+        the update target of solvi.experimental.changes refuse anything outside TRUSTED_SOURCES, "verified" included; System.guarantee takes "verified"
         when told to)."""
         from ..schema import untag_floats                # stored tagged ({"$float": "inf"}), read back as the float
         return [{"id": s.id, "time": s.time, "question": s.data["teach"], "init": untag_floats(s.data["init"]),

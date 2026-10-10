@@ -14,7 +14,7 @@ VERIFIED_REFUSED = {
               "and wrong) 3.1% against 3%) and helped on one task of three",
     "head": "a head refitted on verified System 2 answers answered more within its promise on one task of three (contracts; "
             "not on product matching, where it already answered 90%) — feed it human or outcome labels",
-    "learning": "the learning loop's ladder (fit, memory, adapter) was not shown to gain from verified System 2 answers on "
+    "learning": "the update ladder (fit, memory, adapter) was not shown to gain from verified System 2 answers on "
                 "two tasks of three; it learns from human, outcome and rule labels",
 }
 

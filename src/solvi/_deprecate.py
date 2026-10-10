@@ -99,7 +99,6 @@ MOVED: dict[str, str] = {
     "solvi.experimental.charts.spec": "solvi.charts.spec",
     "solvi.experimental.compile": "solvi.compile",
     "solvi.experimental.hooks": "solvi.hooks",
-    "solvi.experimental.learning": "solvi.learning",
     "solvi.experimental.lora": "solvi.lora",
     "solvi.experimental.compile.sandbox": "solvi.sandbox",
     "solvi.experimental.specialist": "solvi.specialist",

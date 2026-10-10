@@ -19,8 +19,10 @@ Built in (stable):
                     another value on its own premise's key (it would refute its support). Contradictions between items
                     are not a refusal: the store resolves them (outcome > person > spec > verified; else a dispute).
 
-The shadow gate — measure a candidate on a shadow of the system (held-out gain, honesty, size of the change) before it
-changes System 1's behaviour — is experimental: solvi.experimental.learning.ShadowGate."""
+A shadow measurement — what a candidate does on a shadow of the system (held-out gain, honesty, size of the change)
+before it changes System 1's behaviour — is a gate you write (`add(..., shadow=...)` passes the measurement to every
+gate); the experimental change pipeline (solvi.experimental.changes) measures candidates in its stages and passes their
+numbers on that way."""
 from __future__ import annotations
 
 from dataclasses import dataclass

@@ -1066,8 +1066,9 @@ class System:
         from .guarantees.guarantee import guard_question
         return guard_question(self, question, examples, **kw)
 
-    learning = gone_in_1_0("learning()", "solvi.experimental.learning.Learning(system, storage, parts, ladder, gates, ...) — the "
-                           "learning loop is experimental (solvi.experimental.learning later)", "System")
+    learning = gone_in_1_0("learning()", "solvi.experimental.changes: a labelled update is a candidate change — "
+                           "Pipeline(stages, journal, targets=[LearningTarget(system, ...)]).propose(Change(source, "
+                           "artifact=\"update\")); the learning loop itself was removed in 1.1", "System")
 
     @_deprecate.removed_kwargs(source="label_source")
     def teach(self, question, init_state, correct, *, label_source="human", by=None, of=None):
@@ -1078,8 +1079,9 @@ class System:
         are stored with it (TraceStorage.save_correction). label_source="verified" (with of= the stored System 2 decision
         that answered alone under a guarantee — save_correction checks it): the label is only stored, for
         System.guarantee(..., corrections=, sources=); no head or decision learns from it (a head fed such labels gained
-        on one task of three), and a system without storage raises ValueError. With a learning loop (solvi.experimental.learning.Learning(system, ..., gate_teach=True))
-        nothing learns at once: the correction is only stored, and the loop's gates decide whether it is learned.
+        on one task of three), and a system without storage raises ValueError. With an update target attached (solvi.experimental.changes.LearningTarget(system, ...,
+        gate_teach=True)) nothing learns at once: the correction is only stored, and the update's gates decide whether it
+        is learned.
         An unknown question raises KeyError and an answer that is not one of the question's options ValueError, before
         anything is learned or stored; the answer is stored normalized (True → "yes"). When nothing learned at once and
         there is no storage, the correction is lost: a UserWarning says so."""
@@ -1102,7 +1104,7 @@ class System:
         loop = getattr(self, "_learning", None)
         if loop is not None and loop.gate_teach:
             if self.storage is None:
-                raise ValueError("a learning loop reads corrections from the storage: System(storage=...)")
+                raise ValueError("an update target reads corrections from the storage: System(storage=...)")
             self.storage.save_correction(question, init_state, correct, label_source=source, by=by, of=of)
             return None
         head = self.heads.get(question)
@@ -1141,8 +1143,8 @@ class System:
         a guarantee with it (`System.guarantee(question, examples, corrections=True)`, on a schedule or after a drift
         flag), refit (`fit` on `storage.corrections()`), or keep it as knowledge. Recalibrating on every outcome as it
         arrives is not done here: measured, it broke the promises (the outcomes seen are not a random sample of the
-        decisions, and a threshold moved after every label is no longer the calibrated one) — the experimental
-        solvi.experimental.oncalib does it, with that risk stated. A system without storage raises ValueError (the label has
+        decisions, and a threshold moved after every label is no longer the calibrated one), and the experimental module that
+        did it was removed in 1.1. A system without storage raises ValueError (the label has
         nowhere to go); an unknown question KeyError; an answer outside the options ValueError, before anything is
         stored."""
         from .store import view

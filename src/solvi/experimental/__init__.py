@@ -25,12 +25,9 @@ from __future__ import annotations
 DEADLINE = "1.2"
 
 STATUS: dict[str, dict] = {
-    "learning": {"since": "0.7", "what": "the learning loop: trusted labels → a ladder of updates → gates → promote or "
-                 "roll back", "missing": "a simulation on real data that decides the default gates; the gate's holdout "
-                 "must come from the audit, and a rollback during a drift flag must hold", "script": None},
     "lora": {"since": "0.7", "what": "a LoRA adapter on the decider for one question (adapt_lora)", "missing": "a "
-             "decision on real use, a benchmark script in the repo, and wiring as the learning loop's adapter step; "
-             "measured gains over fit come with overconfidence", "script": None},
+             "decision on real use, a benchmark script in the repo, and wiring as the adapter rung of an update "
+             "(solvi.experimental.changes); measured gains over fit come with overconfidence", "script": None},
     "compile": {"since": "0.9", "what": "a written specification compiled by an LLM into catalog parts, accepted when "
                 "two drafts agree and the specification's tests pass (with its sandbox)", "missing": "acceptance on "
                 "larger specifications and a benchmark script in benchmarks/", "script": None},
@@ -47,11 +44,9 @@ STATUS: dict[str, dict] = {
     "mcp": {"since": "0.9", "what": "an MCP stdio proxy that puts the agent guard in front of `tools/call` "
             "(`solvi serve --guard --upstream`)", "missing": "a measured run through the proxy against a real MCP "
             "server", "script": None},
-    "oncalib": {"since": "1.0", "what": "recalibrating a guarantee on the fly from outcomes", "missing": "a "
-                "recalibration that keeps the guarantee's promise (it does not: see its module docs)", "script": None},
     "changes": {"since": "1.1", "what": "one change pipeline for four sources (a document version, verified "
                 "experience, a person's correction, a search proposal): pluggable stages, a journal of kind \"change\", "
-                "promote into the knowledge store / compiled versions / learning, versions and rollback", "missing": "on a "
+                "promote into the knowledge store / compiled versions / a labelled update, versions and rollback", "missing": "on a "
                 "credit policy the pipeline carried a document version (144 of 144 changed decisions traced to their "
                 "clause), admitted 12 of 12 exact exceptions, held every widening one for a person and refused 8 of 8 "
                 "exceptions that touched other decisions, 0 extraneous changes, 14 versions replayed; on a bank-request "

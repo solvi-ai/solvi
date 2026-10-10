@@ -50,7 +50,7 @@ NOT_STATED = "not stated"                # how a remote model is asked for it: a
 
 
 class ExperimentalWarning(UserWarning):
-    """A feature whose API and behaviour may still change (solvi.experimental.learning, solvi.experimental.lora)."""
+    """A feature whose API and behaviour may still change (solvi.experimental: lora, changes, ...)."""
 
 
 def gone_in_1_0(old, new, owner=""):

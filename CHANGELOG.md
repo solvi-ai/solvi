@@ -21,7 +21,11 @@ calibration files and served by `solvi serve`), so a build from it is not mistak
   person's correction and a search proposal become candidates that pass the same pluggable stages (KnownFailures,
   Static, Consistency, Confirmation, CleanCases, Impact, FreshEnvironments, Approval, Canaries), are journaled in a
   hash-chained store (records of kind "change"), promoted into what holds that knowledge (a knowledge store item,
-  compiled versions, a learning update) and rolled back by version. `benchmarks/changes_credit.py` runs the credit
+  compiled versions, a labelled update) and rolled back by version. A labelled update is `Change(artifact="update")`
+  promoted by `LearningTarget(system, ...)`: the update ladder (fit, a memory of corrected cases, the adapter hook) and
+  the gates of the removed learning loop (consistency, held-out, honesty, act_guard, size), each gate's numbers a stage
+  verdict of the change (`"update:<gate>"`); a target's own gates reach the journal through `Promoted(ref, verdicts)`
+  and `Refused(reason, verdicts=, stage=)`. `benchmarks/changes_credit.py` runs the credit
   policy (two versions, 20 corrections, a rule that must be refused; the policy and corrections in
   `benchmarks/tasks/credit/`, the applications through `fetch.sh` / `prepare.py`) and exits 1 when a count differs.
   Measured on two stands: on a credit policy the pipeline carried a document version (144 of 144 changed decisions traced to their clause), admitted 12 of 12 exact exceptions, held every widening one for a person and refused 8 of 8 exceptions that touched other decisions, 0 extraneous changes, 14 versions replayed; on a bank-request stream with a person's labels every one of 22 candidates passed every stage (`nogate` = `gate`), so the stages added nothing there — the module is journal, impact analysis, approval levels and rollback; still missing: the narrows / widens classifier over rule conditions, a regression-scenario stage, and a script for the bank-request stream (the credit numbers: benchmarks/changes_credit.py).
@@ -97,6 +101,16 @@ calibration files and served by `solvi serve`), so a build from it is not mistak
   a minor version: readers of 2.0.0 may ignore the new values). Code that tested `guard is None` to find missing inputs
   for a hard check should test `guard == "no_data"`. Such a decision stored by solvi 1.0.1 or earlier (guard none,
   "cannot compute: cap") still replays ok.
+
+### Removed
+
+What leaves solvi in 1.1: experimental pieces that measured negative. Importing a removed module raises
+ModuleNotFoundError.
+
+| removed | why | use instead |
+|---|---|---|
+| `solvi.experimental.oncalib` (`OnTheFly`) | recalibrating a guarantee on the fly from outcomes broke the promise (measured 2026-09, "Tried and left out") | `System.guarantee(..., corrections=True)` on a schedule or after a drift flag |
+| `solvi.experimental.learning` (`Learning`, `ShadowGate`, `UpdateReport`, `split_of`) and its 0.9 path `solvi.learning` | on streams of one kind of decision the loop gave no measurable gain (2026-10, "Tried and left out"); its verified-labels channel has been in the core since 0.9 | `solvi.experimental.changes` (`Change(artifact="update")`, `LearningTarget`); for a shadow measurement in a knowledge store, a write gate of your own reading `add(..., shadow=)` |
 
 ### Fixed
 
@@ -285,7 +299,6 @@ building blocks they are made of, and `solvi.experimental` holds what may still 
 | `solvi.hooks` | `solvi.experimental.hooks` | experimental: may change; removed in 1.2 unless it graduates |
 | `solvi.i18n` | `solvi.core._i18n` | internal |
 | `solvi.inputs` | `solvi.core._inputs` | internal |
-| `solvi.learning` | `solvi.experimental.learning` | experimental: may change; removed in 1.2 unless it graduates |
 | `solvi.llm` | `solvi.core.deciders.llm` | low level: building blocks |
 | `solvi.loader` | `solvi._loader` | internal |
 | `solvi.longdoc` | `solvi.core.deciders.longdoc` | low level: building blocks |

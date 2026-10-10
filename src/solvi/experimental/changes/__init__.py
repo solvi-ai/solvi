@@ -13,13 +13,14 @@ into what already holds that kind of knowledge, and can be rolled back.
     pipe.rule(res.change_id, True, by="ann")    # a person's ruling for a held change (or a compile Ruling keep / drop)
     pipe.versions(); pipe.current; pipe.rollback(0); pipe.lineage(res.change_id); pipe.observe(res.change_id, {...})
 
-What it is: a generalisation of solvi.experimental.learning.Learning (a candidate, gates with recorded numbers, promote /
+What it is: a generalisation of the learning loop of 0.7–1.0 (a candidate, gates with recorded numbers, promote /
 rollback, versions, a changelog) from one source (labels) to four, with the stages as objects like the knowledge
-store's write gates. Nothing here stores knowledge: an admitted change goes into what already holds it (_targets.py) —
+store's write gates; the loop itself was removed in 1.1 and its ladder and gates are the "update" target's. Nothing here stores knowledge: an admitted change goes into what already holds it (_targets.py) —
 a KnowledgeStore item ("item": fact, rule, skill, action, with its sub-kind in body["kind"], e.g. "hazard", and the change
-type in body["change"]), a compiled catalog version ("compiled": solvi.experimental.compile.Versions), or a learning update
-("update": LearningTarget calls Learning.run() — decision: the loop's own gates (consistency, heldout, honesty,
-act_guard, size) are the stages for that artifact, and the pipeline does not re-implement them).
+type in body["change"]), a compiled catalog version ("compiled": solvi.experimental.compile.Versions), or a labelled update ("update":
+LearningTarget(system, ...) runs the update ladder — fit, a memory of the corrected cases, the adapter hook — and its
+gates (consistency, heldout, honesty, act_guard, size) on the stored labels; each gate's numbers are a stage verdict of
+the change, "update:<gate>", and the first that fails refuses it).
 
 The candidate. `Change(source, artifact="item", payload=...)`: source is "document", "outcome", "person" or "search";
 it maps onto the knowledge store's SOURCES as document → "spec", outcome → "outcome", person → "person", and search →
@@ -94,7 +95,7 @@ from ._paired import paired_bootstrap, run_episode
 from ._stages import (DEFAULT_APPROVAL, LEVELS, Approval, Canaries, CleanCases, catalog_of, Confirmation, Consistency, Context,
                      FreshEnvironments, Impact, KnownFailures, SOURCES, Stage, Static, StageVerdict, allowed, gate_of,
                      gates_of, hazard_body, hazard_gate)
-from ._targets import KnowledgeTarget, LearningTarget, Refused, VersionsTarget
+from ._targets import KnowledgeTarget, LearningTarget, Promoted, Refused, VersionsTarget
 
 warn_on_import(__name__)
 
@@ -107,7 +108,7 @@ CHANGE_TYPES = ("fact", "rule", "meaning")
 class Change:
     """A candidate change (see the module docstring). payload: for "item", {"kind", "body", and optionally "scope",
     "derived_from", "supersedes", "valid", "reconfirm_after"}; for "compiled", a solvi.experimental.compile.Compiled;
-    for "update", None (the learning loop reads its own labels) or the updated state, whose `fingerprint` (an attribute or
+    for "update", None (LearningTarget reads the stored labels itself) or the updated state, whose `fingerprint` (an attribute or
     a dict key) identifies the candidate (two updates to different states are different candidates)."""
     source: str
     artifact: str = "item"
@@ -306,11 +307,20 @@ class Pipeline:
         try:
             ref = target.promote(change, self._summary(ctx.verdicts))
         except Refused as e:
-            return self._reject(change, cid, "promote", str(e), ctx)
+            self._target_verdicts(cid, e.verdicts, ctx)
+            return self._reject(change, cid, e.stage or "promote", str(e), ctx)
+        if isinstance(ref, Promoted):                 # the target's own gates: journaled as the change's stages
+            self._target_verdicts(cid, ref.verdicts, ctx)
+            ref = ref.ref
         version = self._next_version()
         self.journal.write("promoted", change=cid, version=version, parent=parent, artifact=change.artifact, ref=ref,
                            expected=change.expected, level=self._level(change, ctx))
         return Result(cid, "promoted", version=version, verdicts=list(ctx.verdicts.values()), ref=ref)
+
+    def _target_verdicts(self, cid, verdicts, ctx):
+        for v in verdicts:
+            self.journal.write("verdict", change=cid, **v.to_dict(), advisory=False)
+            ctx.verdicts[v.stage] = v
 
     def _reject(self, change, cid, stage, reason, ctx):
         self.journal.write("rejected", change=cid, fingerprint=change.fingerprint(), stage=stage, reason=reason,
@@ -325,7 +335,8 @@ class Pipeline:
 
     @staticmethod
     def _summary(verdicts):
-        """What a target's own gates may read (a knowledge store's ShadowGate): gain, changed share, honest."""
+        """What a target's own gates may read (a knowledge store's write gate given `shadow=`): gain, changed share,
+        honest."""
         out = {}
         f = verdicts.get("fresh_environments")
         if f is not None and f.measured and "confirm" in f.measured:
@@ -412,5 +423,5 @@ __all__ = ["allowed", "Approval", "ARTIFACTS", "Canaries", "catalog_of", "Change
            "Confirmation", "Consistency", "Context", "DEFAULT_APPROVAL", "EvalLocked", "EvaluatorLock",
            "FreshEnvironments", "gate_of", "gates_of", "hazard_body", "hazard_gate", "Impact", "KnowledgeTarget",
            "KnownFailures",
-           "LearningTarget", "LEVELS", "paired_bootstrap", "Pipeline", "Refused", "Result", "run_episode", "SOURCES",
+           "LearningTarget", "LEVELS", "paired_bootstrap", "Pipeline", "Promoted", "Refused", "Result", "run_episode", "SOURCES",
            "Stage", "Static", "STORE_SOURCE", "StageVerdict", "VersionsTarget"]

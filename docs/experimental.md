@@ -26,24 +26,12 @@ is removed and the negative result published.
 Each section below gives the piece's `STATUS` entry: what it is, since when it exists, what it is missing to graduate,
 the script that measures it (one so far: `changes`) and where the guide describes it.
 
-## `learning`
-
-The learning loop: trusted labels → a ladder of updates → gates → promote or roll back
-(`solvi.experimental.learning.Learning(system, store)`; was `system.learning(...)` before 1.0). Since 0.7.
-
-- **Missing:** a simulation on real data that decides the default gates; the gate's holdout must come from the audit,
-  and a rollback during a drift flag must hold.
-- **Script:** none yet. **Deadline:** 1.2.
-- Guide: [Learning from corrections with gates and rollback](guide.md#learning-from-corrections-with-gates-and-rollback-experimental);
-  API: [solvi.experimental.learning](api/learning.md).
-
 ## `lora`
 
 A LoRA adapter on the decider for one question (`solvi.experimental.lora.adapt_lora(part, examples)`; was
 `part.adapt_lora(...)`; needs `solvi[lora]`). Since 0.7.
 
-- **Missing:** a decision on real use, a benchmark script in the repo, and wiring as the learning loop's adapter step;
-  measured gains over fit come with overconfidence.
+- **Missing:** a decision on real use, a benchmark script in the repo, and wiring as the adapter rung of an update (solvi.experimental.changes); measured gains over fit come with overconfidence.
 - **Script:** none yet. **Deadline:** 1.2.
 - Guide: [A LoRA adapter per question](guide.md#a-lora-adapter-per-question-adapt_lora-experimental);
   API: [solvi.experimental.lora](api/lora.md).
@@ -95,25 +83,18 @@ An MCP stdio proxy that puts the agent guard in front of `tools/call` (`solvi se
 - Guide: [An MCP proxy](guide.md#an-mcp-proxy); API: [solvi.solutions.guard](api/agents.md) (the proxy is rendered
   there).
 
-## `oncalib`
-
-Recalibrating a guarantee on the fly from outcomes, every N labels or after a drift flag. Since 1.0.
-
-- **Missing:** a recalibration that keeps the guarantee's promise (it does not: see its module docs).
-- **Script:** none yet. **Deadline:** 1.2.
-- Guide: [Outcomes as labels](guide.md#outcomes-as-labels-systemoutcome); API: [solvi.experimental.oncalib](api/oncalib.md).
-  The stable path recalibrates explicitly, on a schedule or after a drift flag.
-
 ## `changes`
 
 One change pipeline for four sources (a document version, verified experience, a person's correction, a search
-proposal): pluggable stages, a journal of kind "change", promote into the knowledge store / compiled versions /
-learning, versions and rollback (`solvi.experimental.changes.Pipeline(stages, storage, store=...)`). Since 1.1.
+proposal): pluggable stages, a journal of kind "change", promote into the knowledge store / compiled versions / a
+labelled update (`LearningTarget`: the update ladder and its gates, which were the learning loop's until 1.1), versions
+and rollback (`solvi.experimental.changes.Pipeline(stages, storage, store=...)`). Since 1.1.
 
 - **Missing:** on a credit policy the pipeline carried a document version (144 of 144 changed decisions traced to their clause), admitted 12 of 12 exact exceptions, held every widening one for a person and refused 8 of 8 exceptions that touched other decisions, 0 extraneous changes, 14 versions replayed; on a bank-request stream with a person's labels every one of 22 candidates passed every stage (`nogate` = `gate`), so the stages added nothing there — the module is journal, impact analysis, approval levels and rollback; still missing: the narrows / widens classifier over rule conditions, a regression-scenario stage, and a script for the bank-request stream (the credit numbers: benchmarks/changes_credit.py).
 - **Script:** `benchmarks/changes_credit.py` (the credit policy; needs the German Credit applications:
   `benchmarks/tasks/fetch.sh credit` and `prepare.py`). **Deadline:** 1.2.
-- Design and API: the module docstring of `solvi.experimental.changes`; the library pieces it uses are stable:
+- Guide: [The change pipeline](guide.md#the-change-pipeline-solviexperimentalchanges); design and API: the module
+  docstring of `solvi.experimental.changes`; the library pieces it uses are stable:
   sensitive fields and citations in [solvi check](guide.md#checking-a-catalog-solvi-check), `only=` in
   [solvi diff](guide.md#catalog-fingerprint-solvi-diff-and-shadow-mode).
 
@@ -126,6 +107,14 @@ The smallest change of a decision's inputs that changes its answer (adverse-acti
 - **Script:** none yet. **Deadline:** 1.2.
 - Guide: [Counterfactual explanations](guide.md#counterfactual-explanations-experimental-solviexperimentalcounterfactual);
   API: [solvi.experimental.counterfactual](api/counterfactual.md).
+
+## Removed
+
+- **1.1:** `oncalib` (recalibrating a guarantee on the fly from outcomes: it broke the promise — recalibrate explicitly,
+  `System.guarantee(..., corrections=True)`, on a schedule or after a drift flag) and `learning` (the learning loop: no
+  measurable gain on streams of one kind of decision; a labelled update is now a candidate change of
+  `solvi.experimental.changes`, `Change(artifact="update")` with `LearningTarget`). The changelog's 1.1 "Removed" table
+  says why and what to use instead.
 
 ## Tried and left out
 

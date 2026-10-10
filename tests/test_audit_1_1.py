@@ -260,7 +260,7 @@ def test_charts_and_the_planners_import_public_names():
     root = pathlib.Path(__file__).parents[1] / "src" / "solvi"
     charts = (root / "experimental" / "charts" / "check.py").read_text()
     assert "from ...core.textin import _" not in charts and "core.textin import NUMBER_WORDS" in charts
-    for f in ("core/plan/cost.py", "core/runtime.py", "experimental/counterfactual.py", "experimental/learning.py"):
+    for f in ("core/plan/cost.py", "core/runtime.py", "experimental/counterfactual.py", "experimental/changes/_updates.py"):
         assert "_group_func" not in (root / f).read_text(), f
     from solvi.core import textin
     from solvi.core.catalog import group_func  # noqa: F401
