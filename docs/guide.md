@@ -5440,3 +5440,25 @@ layout is conservative rather than exact. Charts are bar, line and pie, one unit
 dual-axis charts yet. Tables, slides and speech are the next specialists.
 
 See [examples/21_verified_chart.py](../examples/21_verified_chart.py).
+
+### Two readers: agreement on aligned spans
+
+A second, independent reader of the same source is the strongest check a specialist has. `align(a, b, overlap=...,
+min_overlap=0.5, same=None, min_a=0.0, min_b=0.0)` in `solvi.experimental.specialist` matches two readers' `Reading`s
+one-to-one by the overlap of their spans — greedy by descending overlap, ties by input order, so it is deterministic —
+and returns what both read (`agreed`, each with both spans and confidences), what they read differently on one span
+(`conflicts`) and what only one of them read (`only_a`, `only_b`). Time, boxes and character offsets are one function:
+
+```python
+from solvi.experimental.specialist import Reading, align, box_iou, interval_overlap
+
+words = align([Reading("1990", (0.96, 1.66), 0.86)], [Reading("1990", (0.95, 1.70), 1.0)],
+              overlap=interval_overlap)                     # two speech models' words by time
+boxes = align([Reading("TOTAL", (149, 461, 185, 479))], [Reading("TOTAL", (150, 464, 184, 477))],
+              overlap=box_iou, same=lambda x, y: x.strip() == y.strip())    # two OCR engines' words by box
+```
+
+Nothing in it decides acceptance: the check accepts from `agreed` and turns `conflicts` into a conflict or a review;
+the thresholds are the task's. On two stands this was the mechanism behind the measured gains: speech (two models'
+words aligned in time) gave 0 false words on 400 non-speech clips and caught 299 of 300 corruptions, receipts (two OCR
+engines' words aligned by box) went from 88% to 96.4% exact among accepted fields.

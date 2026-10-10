@@ -51,6 +51,12 @@ calibration files and served by `solvi serve`), so a build from it is not mistak
   whose `expected["only"]` is set and whose diff changes other decisions ("changes N decision(s) other than the
   allowed ones: [...]", the first ten ids) and records `extraneous` in its measurement.
 
+- **Two readers: `align` in `solvi.experimental.specialist`.** `align(a, b, overlap=interval_overlap,
+  min_overlap=0.5, same=None, min_a=0.0, min_b=0.0) → Alignment(agreed, only_a, only_b, conflicts)` matches two
+  readers' `Reading(value, span, confidence=None, raw=None)` one-to-one, greedily by descending overlap (ties by input
+  order: deterministic); `interval_overlap` (over the shorter span: seconds, characters) and `box_iou` are the
+  built-in overlaps; `same=` compares values (a normaliser), `min_a` / `min_b` drop low-confidence readings first. An
+  `Agreed` carries both readings for the provenance record. Nothing in it decides acceptance.
 - **Mutation tests for specialists: `solvi.testing.mutations`.** `mutate(specialist, records, mutators, *, n=300,
   seed=0, accepted=None)` corrupts recorded proposals (`(id, source, proposal)`), runs the specialist on each with
   `proposal=`, and reports `n`, `caught`, `rate`, `per_kind` and `rows`. Built-in mutators over the proposal's JSON

@@ -300,5 +300,104 @@ class Specialist:
         return Replay(not problems, problems)
 
 
-__all__ = ["BLOCKED", "canonical", "CHANGED", "Checked", "DROPPED", "Issue", "Replay", "Run", "Specialist", "Trace",
+# ───────────────────────────────────────────────────────────── two readers: alignment of two hypotheses
+@dataclass(frozen=True)
+class Reading:
+    """One reader's reading of a span of the source: its value, where it is (`span`: (start, end) for an interval —
+    seconds, characters — or (x0, y0, x1, y1) for a box), the reader's confidence (None: not given) and what it read
+    before any normalising (`raw`)."""
+    value: Any
+    span: tuple
+    confidence: float | None = None
+    raw: Any = None
+
+
+@dataclass(frozen=True)
+class Agreed:
+    """A value both readers gave on overlapping spans: the value (a's), both readings — with their spans and
+    confidences, for the provenance record ("quoted by two readers") — and the overlap."""
+    value: Any
+    a: Reading
+    b: Reading
+    overlap: float
+
+
+@dataclass
+class Alignment:
+    """align's result: `agreed` (the readings a check may accept), `only_a` / `only_b` (readings without a counterpart
+    at min_overlap or above), `conflicts` [(a, b, overlap)] (overlapping spans, different values: material for a
+    conflict or a review)."""
+    agreed: list = field(default_factory=list)
+    only_a: list = field(default_factory=list)
+    only_b: list = field(default_factory=list)
+    conflicts: list = field(default_factory=list)
+
+
+def interval_overlap(a, b) -> float:
+    """Two intervals (start, end) → the length they share over the shorter one's length, in [0, 1] (0 for an empty
+    span)."""
+    inter = min(a[1], b[1]) - max(a[0], b[0])
+    shorter = min(a[1] - a[0], b[1] - b[0])
+    if inter <= 0 or shorter <= 0:
+        return 0.0
+    return min(1.0, inter / shorter)
+
+
+def box_iou(a, b) -> float:
+    """Two boxes (x0, y0, x1, y1) → intersection over union, in [0, 1] (touching boxes: 0)."""
+    ix = min(a[2], b[2]) - max(a[0], b[0])
+    iy = min(a[3], b[3]) - max(a[1], b[1])
+    if ix <= 0 or iy <= 0:
+        return 0.0
+    inter = ix * iy
+    union = (a[2] - a[0]) * (a[3] - a[1]) + (b[2] - b[0]) * (b[3] - b[1]) - inter
+    return inter / union if union > 0 else 0.0
+
+
+def align(a, b, overlap=interval_overlap, min_overlap=0.5, same=None, min_a=0.0, min_b=0.0) -> Alignment:
+    """Two readers' readings of one source (two speech models' words with their times, two OCR engines' words with
+    their boxes, two extractors' quotes with their character offsets) → Alignment.
+
+    a, b: Readings. Readings whose confidence is below min_a / min_b are dropped before matching (None passes; a
+    dropped reading is in no list). Then pairs are matched one-to-one, greedily by descending `overlap(span_a, span_b)`
+    (interval_overlap, box_iou or your own, in [0, 1]), ties by (a's order, b's order); a pair below `min_overlap` is
+    not matched, and a reading matched once is not reused. A matched pair is `agreed` when `same(value_a, value_b)`
+    (default: equality — a normaliser goes here), else a conflict. agreed, conflicts and only_a come in a's order,
+    only_b in b's.
+
+    Nothing here decides acceptance: a specialist's check takes `agreed` as what it may accept and `conflicts` as its
+    conflict / review material; the thresholds are the task's (calibrated), not this function's."""
+    same = same or (lambda x, y: x == y)
+    ka = [r for r in a if r.confidence is None or r.confidence >= min_a]
+    kb = [r for r in b if r.confidence is None or r.confidence >= min_b]
+    pairs = []
+    for i, ra in enumerate(ka):
+        for j, rb in enumerate(kb):
+            o = float(overlap(ra.span, rb.span))
+            if o >= min_overlap and o > 0:
+                pairs.append((-o, i, j))
+    pairs.sort()
+    used_a, used_b, matched = set(), set(), {}
+    for o, i, j in pairs:
+        if i in used_a or j in used_b:
+            continue
+        used_a.add(i)
+        used_b.add(j)
+        matched[i] = (j, -o)
+    out = Alignment()
+    for i, ra in enumerate(ka):
+        if i not in matched:
+            out.only_a.append(ra)
+            continue
+        j, o = matched[i]
+        rb = kb[j]
+        if same(ra.value, rb.value):
+            out.agreed.append(Agreed(ra.value, ra, rb, o))
+        else:
+            out.conflicts.append((ra, rb, o))
+    out.only_b = [rb for j, rb in enumerate(kb) if j not in used_b]
+    return out
+
+
+__all__ = ["Agreed", "align", "Alignment", "BLOCKED", "box_iou", "canonical", "CHANGED", "Checked", "DROPPED", "interval_overlap", "Issue", "Reading", "Replay", "Run", "Specialist", "Trace",
            "WARNING"]

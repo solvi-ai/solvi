@@ -40,7 +40,8 @@ STATUS: dict[str, dict] = {
                    "that ships, with a script in benchmarks/: two model types were measured under the contract in "
                    "2026-10, with solvi.testing.mutations as the corruption test — receipt OCR (84% of corruptions "
                    "caught) and speech to text (99.7% caught) — and neither ships (36% of receipt fields accepted; "
-                   "90% / 86% of accepted spoken numbers exact); charts has no accuracy number yet", "script": None},
+                   "90% / 86% of accepted spoken numbers exact); both rest on two readers aligned by `align` (time, boxes); "
+                   "charts has no accuracy number yet", "script": None},
     "charts": {"since": "0.7", "what": "verified charts: every number quoted from the text, a deterministic SVG",
                "missing": "accuracy on real texts with the rule-based and the LLM proposer", "script": None},
     "mcp": {"since": "0.9", "what": "an MCP stdio proxy that puts the agent guard in front of `tools/call` "
