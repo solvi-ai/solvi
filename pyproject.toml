@@ -57,6 +57,7 @@ testpaths = ["tests"]
 markers = [
     "model: needs a real model checkpoint and its runtime (skipped when they are missing)",
     "stand: the task stand's scorers on tiny fixtures (benchmarks/tasks; run with -m stand)",
+    "slow: longer runs of a benchmark script (under a minute each; run with -m slow)",
 ]
 # solvi's own code, docs examples and tests use the 0.8 names: an old name is an error unless a test expects its warning
 filterwarnings = ["error::solvi.SolviDeprecationWarning"]   # an old name used in a test fails it, unless the test expects it

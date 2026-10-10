@@ -2,13 +2,15 @@ import pytest
 
 
 def pytest_collection_modifyitems(config, items):
-    """Tests marked `stand` run only when asked for: `pytest -m stand`."""
-    if "stand" in (config.getoption("-m") or ""):
-        return
-    skip = pytest.mark.skip(reason="the task stand runs with -m stand")
-    for item in items:
-        if item.get_closest_marker("stand"):
-            item.add_marker(skip)
+    """Tests marked `stand` or `slow` run only when asked for: `pytest -m stand`, `pytest -m slow`."""
+    asked = config.getoption("-m") or ""
+    for marker in ("stand", "slow"):
+        if marker in asked:
+            continue
+        skip = pytest.mark.skip(reason=f"runs with -m {marker}")
+        for item in items:
+            if item.get_closest_marker(marker):
+                item.add_marker(skip)
 
 
 @pytest.fixture(autouse=True)
