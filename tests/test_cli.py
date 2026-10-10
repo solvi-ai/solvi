@@ -825,3 +825,55 @@ def test_help_imports_nothing_experimental(argv):
     out = subprocess.run([sys.executable, "-c", code, *argv], capture_output=True, text=True, timeout=120)
     assert out.returncode == 0 and "Warning" not in out.stderr, out.stderr[-2000:]
     assert out.stdout.strip().endswith("experimental loaded: []"), out.stdout[-500:]
+
+
+# --- solvi check --spec / --require-cites
+POLICY_MD = """# Credit policy
+
+An application is scored in points; the points decide.
+
+- credit_amount_dm > 8000 → +2
+- Decision: points ≥ 2 → refuse; otherwise approve.
+"""
+CITED = '''
+from solvi import Answer, Catalog, Question, System
+
+cat = Catalog()
+
+@cat.fn(clause=CLAUSE, cite="credit_amount_dm > 8000 → +2")
+def amount_points(credit_amount_dm):
+    return 2 if credit_amount_dm > 8000 else 0
+
+@cat.fn
+def points(amount_points):
+    return amount_points
+
+@cat.rule("decision", clause="c3", cite="points ≥ 2 → refuse")
+def decision(points):
+    return "refuse" if points >= 2 else "approve"
+
+system = System(cat, [Question("decision", "Approve?", Answer.choice(["approve", "refuse"]))])
+'''
+
+
+def test_check_spec_and_require_cites(tmp_path, capsys):
+    """--spec FILE splits the text into clauses (Spec(text): c1, c2, ...) and checks each cite against its clause; it is
+    also the text unless --text is given; --require-cites warns on an uncited part (a failure with --strict)."""
+    (tmp_path / "POLICY.md").write_text(POLICY_MD)
+    (tmp_path / "OTHER.md").write_text("nothing of the policy here")
+    for i, clause in enumerate(("c2", "c3", "c9")):
+        (tmp_path / f"cited{i}.py").write_text(CITED.replace("CLAUSE", repr(clause)))
+    policy, other = str(tmp_path / "POLICY.md"), str(tmp_path / "OTHER.md")
+    code, out = run(capsys, "check", f"{tmp_path}/cited0.py:system", "--spec", policy)
+    assert code == 0 and "cite_" not in out and "clause_unknown" not in out
+    code, out = run(capsys, "check", f"{tmp_path}/cited1.py:system", "--spec", policy)
+    assert code == 1 and "cite_outside_clause" in out                       # the quote is c2's, not c3's
+    code, out = run(capsys, "check", f"{tmp_path}/cited2.py:system", "--spec", policy)
+    assert code == 1 and "clause_unknown" in out
+    code, out = run(capsys, "check", f"{tmp_path}/cited0.py:system", "--spec", policy, "--text", other)
+    assert code == 1 and "cite_not_found" in out                            # both given: the text is --text
+    code, out = run(capsys, "check", f"{tmp_path}/cited0.py:system", "--text", policy, "--require-cites")
+    assert code == 0 and "no_cite" in out and "points" in out
+    code, out = run(capsys, "check", f"{tmp_path}/cited0.py:system", "--text", policy, "--require-cites", "--strict")
+    assert code == 1
+    assert run(capsys, "check", f"{tmp_path}/cited0.py:system", "--require-cites")[0] == 2   # nothing to cite against
