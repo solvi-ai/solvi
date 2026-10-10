@@ -56,6 +56,17 @@ STATUS: dict[str, dict] = {
              "refusals from 6 to 0 in one session (random probes: 48 to 29); still missing: a grammar too large to "
              "enumerate, retirement of weak laws nothing contradicts, wiring into a System's decisions, and a "
              "script for the two stands (the toys: benchmarks/laws_toy.py)", "script": "benchmarks/laws_toy.py"},
+    "relations": {"since": "1.1", "what": "rules over relations (a path tree, a family forest): composites by "
+                  "enumeration with a library — find_rules enumerates small programs bottom-up, admits only what passes "
+                  "a held-out test, and builds the next rules on the admitted ones; a fallback slot for a learned "
+                  "proposer", "missing": "on two toys (a path tree with \"denied under a directory named secret at "
+                  "depth 3 or more\", three levels; kinship on forests, depth 1 to 6; five seeds each) the library "
+                  "found every level within 1,679 and 6,125 enumerated programs in all, where the same search without "
+                  "it found neither top rule in 100,000, with 0 false accepts on larger fresh worlds; still missing: the "
+                  "intermediate concepts are given as targets (the search finds the order and the programs, not the "
+                  "concepts), the full relation enumerator in place of the minimal one, a stand beyond the toys (a file "
+                  "server's path policy, the cells around a player), and a learned proposer for the fallback slot (none "
+                  "ships)", "script": "benchmarks/relations_library_toy.py"},
     "skills": {"since": "1.1", "what": "learning in a world described by code: System 2 plans on an exact model (a "
                "copy of the environment), only plans the code verified are compiled into System 1 skills with "
                "conditions over a grammar of atoms, each used alone only while its outcomes keep an anytime-valid "

@@ -24,7 +24,7 @@ keeps working for one release. **Removal**: a piece that has not graduated by it
 is removed and the negative result published.
 
 Each section below gives the piece's `STATUS` entry: what it is, since when it exists, what it is missing to graduate,
-the script that measures it (`changes`, `laws`, `skills`) and where the guide describes it.
+the script that measures it (`changes`, `laws`, `relations`, `skills`) and where the guide describes it.
 
 ## `lora`
 
@@ -93,6 +93,20 @@ most specific first, retirement when the held-out precision falls, a probe plann
   slow tests/test_laws_toy.py`). **Deadline:** 1.2.
 - Guide: [Laws from an environment](best_practices.md#laws-from-an-environment-the-test-is-the-judge); API:
   [solvi.experimental.laws](api/laws.md).
+
+## `relations`
+
+Rules over relations — a path tree, a family forest — found by enumeration and judged by a held-out test
+(`solvi.experimental.relations`). Composites by enumeration with a library: `find_rules` enumerates small programs over
+the base relations bottom-up (observational equivalence on the examples), admits a program only when it passes the
+held-out test on other worlds, and enumerates again with the admitted rules as new terminals, so a rule three levels
+deep is a small program over earlier finds; a learned proposer has a fallback slot (`proposer=`), none ships. Since 1.1.
+
+- **Missing:** on two toys (a path tree with "denied under a directory named secret at depth 3 or more", three levels; kinship on forests, depth 1 to 6; five seeds each) the library found every level within 1,679 and 6,125 enumerated programs in all, where the same search without it found neither top rule in 100,000, with 0 false accepts on larger fresh worlds; still missing: the intermediate concepts are given as targets (the search finds the order and the programs, not the concepts), the full relation enumerator in place of the minimal one, a stand beyond the toys (a file server's path policy, the cells around a player), and a learned proposer for the fallback slot (none ships).
+- **Script:** `benchmarks/relations_library_toy.py` (a path tree and kinship on forests, with and without the library;
+  `pytest -m slow tests/test_relations_library_toy.py`). **Deadline:** 1.2.
+- Guide: [Rules over relations](best_practices.md#rules-over-relations-enumerate-with-a-library-rank-only-where-a-check-is-expensive);
+  API: [solvi.experimental.relations](api/relations.md).
 
 ## `skills`
 

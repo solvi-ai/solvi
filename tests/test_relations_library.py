@@ -88,13 +88,20 @@ def test_find_rules_admits_found_rules_and_builds_composites_on_them():
     assert r.records["uncle"].programs > r.records["grand"].programs              # cumulative cost, in order found
 
 
+def cousin(w):
+    return mm(w["E"].T, uncle(w))
+
+
 def test_without_the_library_the_composite_costs_more_or_is_not_found():
-    test = L.HeldOut(HELD, TARGETS)
-    lib = L.find_rules(TRAIN, TARGETS, base=["E"], size=8, budget=20_000, library=(), test=test)
-    flat = L.find_rules(TRAIN, TARGETS, base=["E"], size=8, budget=20_000, library=(), test=test, grow=False)
+    tg = dict(TARGETS, cousin=cousin)
+    test = L.HeldOut(HELD, tg)
+    lib = L.find_rules(TRAIN, tg, base=["E"], size=10, budget=50_000, library=(), test=test)
+    flat = L.find_rules(TRAIN, tg, base=["E"], size=10, budget=50_000, library=(), test=test, grow=False)
     assert flat.library and all(L.size(e.program) == L.size(L.expand(e.program, flat.library)) for e in flat.library)
-    assert "uncle" not in flat.found or flat.records["uncle"].programs > 3 * lib.records["uncle"].programs
-    assert lib.programs <= flat.programs
+    assert "cousin" in lib.found and lib.found["cousin"].test_record["passed"] and "cousin" not in flat.found
+    rec = lib.records["cousin"]
+    assert rec.size <= 4 and rec.round_programs < rec.programs                     # its own round vs all rounds so far
+    assert sum(r.round_programs for r in lib.records.values()) <= lib.programs
 
 
 def test_the_held_out_test_rejects_a_program_that_only_fits_the_examples():
@@ -108,14 +115,14 @@ def test_the_held_out_test_rejects_a_program_that_only_fits_the_examples():
 
 def test_held_out_in_precision_mode_takes_noise():
     rng = np.random.default_rng(3)
-    noisy = {}
-    for i, w in enumerate(HELD):
+    seq = []
+    for w in HELD:                                       # labels with noise: 4% of true pairs lost, 2 false pairs added
         y = grand(w).copy()
-        flip = rng.random(y.shape) < 0.002
-        noisy[i] = y ^ flip
-    seq = [noisy[i] for i in range(len(HELD))]
+        y[y & (rng.random(y.shape) < 0.04)] = False
+        y[tuple(rng.integers(0, len(y), (2, 2)))] = True
+        seq.append(y)
     exact = L.HeldOut(HELD, {"grand": seq})
-    soft = L.HeldOut(HELD, {"grand": seq}, exact=False, min_precision=0.9, min_recall=0.9)
+    soft = L.HeldOut(HELD, {"grand": seq}, exact=False, min_precision=0.9, min_recall=0.8)
     prog = ("COMP", ("R", "E"), ("R", "E"))
     assert not exact("grand", prog, [])["passed"]
     rec = soft("grand", prog, [])
@@ -183,3 +190,18 @@ def _leaves(ast):
     if ast[0] in ("R", "L", "I"):
         return [ast]
     return [x for a in ast[1:] if isinstance(a, tuple) for x in _leaves(a)]
+
+
+def test_tolerance_finds_a_rule_behind_noisy_example_labels():
+    rng = np.random.default_rng(4)
+    noisy = []
+    for w in TRAIN:                                       # 5% of the true pairs lost in the examples' labels
+        y = grand(w).copy()
+        y[y & (rng.random(y.shape) < 0.05)] = False
+        noisy.append(y)
+    test = L.HeldOut(HELD, {"grand": grand})
+    exact = L.find_rules(TRAIN, {"grand": noisy}, base=["E"], size=4, budget=2_000, library=(), test=test)
+    soft = L.find_rules(TRAIN, {"grand": noisy}, base=["E"], size=4, budget=2_000, library=(), test=test,
+                        tolerance=0.1)
+    assert "grand" not in exact.found
+    assert L.show(soft.found["grand"].program) == "(E ∘ E)"
