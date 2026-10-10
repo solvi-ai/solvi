@@ -5614,11 +5614,19 @@ and promotes it only when every gate passes:
 from solvi.experimental.changes import Change, LearningTarget, Pipeline
 
 target = LearningTarget(system, gates={"honesty": "tests/honesty/core_v1.json"})
-pipe = Pipeline([], system.storage, targets=[target], approval={"update": "gate"})   # one chain with the decisions
+pipe = Pipeline([], system.storage, targets=[target], approval={"update": "gate"},   # one chain with the decisions
+                refusals=outside)        # inputs the system must refuse or hand over: the should-abstain set
 res = pipe.propose(Change("person", artifact="update", proposer="ann"))
-[(v.stage, v.decision, v.reason) for v in res.verdicts]   # "update:ladder", "update:consistency", ... with numbers
+[(v.stage, v.decision, v.reason) for v in res.verdicts]   # "refusal_regression", "update:ladder", ... with numbers
 pipe.rollback(0)                                           # the state before the update comes back
 ```
+
+**Refusal regression cannot be switched off.** A target that can answer (`LearningTarget`, `VersionsTarget`, a target
+with `answerer(change or None, ctx)`, or any change with `Pipeline(answer_of=...)`) gets the `RefusalRegression` stage
+on every change: the share refused on the should-abstain set before and after; a change that answers an input refused
+before is refused. Without a declared set (`refusals=` on the pipeline, on CleanCases / Confirmation, or on the stage)
+the change is held for a person: "no should-abstain set declared for a target that can answer". The set follows the
+policy version — a document version may rightly change what goes to a person.
 
 **Labels** come only from outside the model: corrections from `"human"`, `"outcome"` and `"rule"` sources; any other
 source is refused and listed (`target.labels()["rejected"]`), and the stored decisions are never read as labels. Each

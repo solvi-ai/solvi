@@ -48,7 +48,10 @@ target with `answerer(change or None, ctx)`: VersionsTarget, LearningTarget, a t
 threshold, a head, a gate) the pipeline runs RefusalRegression — inserted before Approval when it is not among the
 stages, a configured one of yours in its place — and journals its measurement; its refusal is final under every
 approval level. The held set is Pipeline(refusals=), the `refusals` other stages keep (CleanCases / Confirmation
-(refusals=)) and the stage's own; without any, the stage still runs and records that nothing was measured.
+(refusals=)) and the stage's own; without any, the change is held ("no should-abstain set declared for a target that
+can answer") until a person rules — so every pipeline whose target can answer declares a set. The set follows the
+policy version (a document version may rightly change what goes to a person). An item change (KnowledgeTarget) is
+checked only with answer_of=: an item answers nothing by itself.
 
 Decision on approval "person": the automated stages still run and are journaled, but their refusals are advisory
 (recorded with "advisory": true; the person decides) — except the static stage's, which stays final (a malformed
@@ -89,7 +92,7 @@ What is not done:
 - no narrows / widens classifier (Consistency takes it as a callback; Z3 over lawlang is planned);
 - no regression-scenario stage (`solvi test` cases.json);
 - the should-abstain set is declared by the caller: none is derived (stored abstentions are not one — a correction
-  may rightly make the system answer them), and an empty set is recorded as "nothing measured", not refused;
+  may rightly make the system answer them), and an empty set holds the change for a person;
 - no scope flag on a world change for rules from experience;
 - no validity periods in compile Versions (nor the change-type classifier in the compiler);
 - the research harness's untrusted-code process sandbox is not ported (Static uses the compiler's sandbox check);

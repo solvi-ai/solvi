@@ -18,7 +18,8 @@ widens: held for a person), Impact (v2: the stored history re-decided — decisi
 a correction: every decided application re-decided, `expected["only"]` = the corrected one), RefusalRegression (not
 switchable: the target here answers, so every change is checked; the held should-abstain set is the applications the
 policy in force hands to a person — decision "review" — under version 2, without the 20 corrected ones; declared once
-version 2 is in force, because a document version redefines what goes to a person), Approval (documents: gate +
+version 2 is in force, because the set follows the policy version — so the two document versions, proposed before any
+set is declared, are held by it for the person, who approves them), Approval (documents: gate +
 person; corrections: gate, a person for a widening one).
 
 The threshold change: the system's own tuning "points = 3 → approve" (the review band closed: fewer hand-overs). It
@@ -30,7 +31,8 @@ many trace to a clause; each correction's verdict against the one corrections.js
 admitted corrections; the `young` rule's refusal; replay of every version; the journal's verify. The exit status is 1
 when any count differs from the expected one (144 of 144 traced; 8 refused, 7 held → promoted, 5 admitted; 0
 extraneous; young refused by static; the threshold change refused by refusal_regression, answering all 137 of 137
-hand-overs; one refusal-regression record per proposal; 14 versions replay; the journal verifies). Without the applications it prints how
+hand-overs; v1 and v2 held by it (no set declared yet), then approved; a refusal-regression record for every
+proposal that reached it; 14 versions replay; the journal verifies). Without the applications it prints how
 to fetch them and exits 0."""
 from __future__ import annotations
 
@@ -329,7 +331,9 @@ def main():
         # version 1, then the history decided by it
         v1 = build(1, sensitive=sensitive)
         first, res = propose(v1, "v1", "document", "credit policy version 1")
-        print(f"v1: {first} → {res.status}")
+        held_rr = [d for d in pipe.history("held") if d["stage"] == "refusal_regression"]
+        print(f"v1: {first} → {res.status}" + (f" (held by refusal_regression: {held_rr[-1]['reason'][:62]})"
+                                                if held_rr else ""))
         if not res.promoted:
             problems.append(f"v1 not promoted: {res.stage}: {res.reason}")
             raise SystemExit
@@ -412,9 +416,10 @@ def main():
             print(f"  refused before {m['refused_before']} → after {m['refused_after']} of {m['n']} (lost {m['lost']})")
             expect("hand-overs it answers", f"{m['lost']} of {m['refused_before']}",
                    f"{EXPECTED['should_abstain']} of {EXPECTED['should_abstain']}")
-        n_rr = len([d for d in pipe.history("verdict") if d["stage"] == "refusal_regression"])
+        n_rr = len({d["change"] for d in pipe.history("verdict") if d["stage"] == "refusal_regression"})
         n_prop = len(pipe.history("propose"))
-        print(f"refusal-regression records: {n_rr} for {n_prop} proposals (the static stage refused young before it)")
+        print(f"changes with a refusal-regression record: {n_rr} of {n_prop} proposals (static refused young, impact "
+              f"8 corrections, before it)")
         expect("refusal-regression records for the proposals that reached it", n_rr, n_prop - 1 - EXPECTED["refused by impact"])
 
         # the decisions against the reference, and every version replayed

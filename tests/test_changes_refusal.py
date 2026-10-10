@@ -125,12 +125,17 @@ def test_examples_kept_by_other_stages_and_by_the_stage_join_the_set(tmp_path):
     assert p2.propose(move(0.05)).verdicts[-1].stage == "refusal_regression"
 
 
-def test_without_a_should_abstain_set_it_still_runs_and_says_nothing_was_measured(tmp_path):
-    pipe = pipe_of(tmp_path, Threshold(0.5))
+def test_without_a_should_abstain_set_the_change_is_held_with_the_reason(tmp_path):
+    target = Threshold(0.5)
+    pipe = pipe_of(tmp_path, target)
     res = pipe.propose(move(0.05))
-    assert res.promoted
+    assert res.status == "held" and res.stage == "refusal_regression"
+    assert res.reason.startswith("no should-abstain set declared for a target that can answer")
     rec = rr_records(pipe)
-    assert len(rec) == 1 and rec[0]["measured"]["n"] == 0 and "no should-abstain" in rec[0]["reason"]
+    assert len(rec) == 1 and rec[0]["decision"] == "hold" and rec[0]["measured"]["n"] == 0
+    assert target.t == 0.5 and pipe.held() == [res.change_id]
+    ok = pipe.rule(res.change_id, True, by="ann")                  # a person may still let it through, recorded
+    assert ok.promoted and target.t == 0.05
 
 
 def test_a_target_that_cannot_give_the_candidate_answerer_is_refused(tmp_path):

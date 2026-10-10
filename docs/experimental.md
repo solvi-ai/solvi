@@ -83,7 +83,10 @@ and rollback (`solvi.experimental.changes.Pipeline(stages, storage, store=...)`)
   Approval when it is not among the stages, journaled for every such change, final under every approval level, and
   there is no argument that removes it. On the credit policy a threshold change that closes the review band ("points =
   3 → approve") is refused by it: it answers 137 of 137 applications the policy hands to a person; the 12 admitted
-  corrections and both document versions pass. Without a declared set it still runs and records "nothing measured".
+  corrections and both document versions pass. Without a declared set the change is held for a person ("no should-abstain set declared for a target that can
+  answer"): every pipeline whose target can answer declares `refusals=` (directly, through CleanCases / Confirmation,
+  or on the stage). The set follows the policy version — the credit stand declares it once version 2 is in force. An
+  item change is checked only with `answer_of=`.
 - **Script:** `benchmarks/changes_credit.py` (the credit policy; needs the German Credit applications:
   `benchmarks/tasks/fetch.sh credit` and `prepare.py`). **Deadline:** 1.2.
 - Guide: [The change pipeline](guide.md#the-change-pipeline-solviexperimentalchanges); design and API: the module

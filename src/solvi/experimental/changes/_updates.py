@@ -3,7 +3,7 @@ Change(artifact="update"). Until 1.1 this was the public learning loop (`Learnin
 because on streams of one kind of decision it gave no measurable gain; what the change pipeline needs of it is here.
 
     target = LearningTarget(system, storage)              # changes._targets: holds an Updates
-    pipe = Pipeline([], "changes.jsonl", targets=[target], approval={"update": "gate"})
+    pipe = Pipeline([], "changes.jsonl", targets=[target], approval={"update": "gate"}, refusals=outside)
     res = pipe.propose(Change("person", artifact="update"))   # labels → the ladder → the gates → promoted or refused
     res.verdicts                                          # "update:ladder", "update:consistency", ... with their numbers
     pipe.rollback(0)                                      # through the target: the state before comes back

@@ -160,7 +160,8 @@ def test_an_update_through_the_change_pipeline_runs_on_duckdb(tmp_path):
         warnings.simplefilter("ignore")
         from solvi.experimental.changes import Change, LearningTarget, Pipeline
         target = LearningTarget(s, gates={"max_change": 0.9})
-    pipe = Pipeline([], store, targets=[target], approval={"update": "gate"})
+    from test_changes_updates import OUTSIDE
+    pipe = Pipeline([], store, targets=[target], approval={"update": "gate"}, refusals=OUTSIDE)
     stream(s, 10)
     assert pipe.propose(Change("person", artifact="update")).promoted
     assert [h["action"] for h in target.history()] == ["baseline", "update"]

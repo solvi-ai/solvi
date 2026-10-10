@@ -661,8 +661,11 @@ class RefusalRegression:
     lost > max(count_tolerance, floor(tolerance · n)); default tolerance 0.0 and count_tolerance 0: one input that was
     refused and is now answered refuses the change (raise count_tolerance — e.g. to 1 — for an answerer that flips a
     borderline input between runs). Refused too when the candidate's answerer cannot be had ("cannot measure"). With
-    nothing in force before (no answerer for None), nothing can regress: admitted, recorded. With an empty set:
-    admitted, and the record says nothing was measured — declare a set.
+    nothing in force before (no answerer for None), nothing can regress: admitted, recorded. With an empty set the
+    change is HELD ("no should-abstain set declared for a target that can answer") until a person rules: a check that
+    cannot be switched off must measure something, and a vacuous pass would be a switch in disguise — so every
+    pipeline whose target can answer declares a set. The set follows the policy version: a document version may
+    rightly change what goes to a person, so declare the set of the version in force.
 
     Not switchable: Pipeline inserts this stage (before Approval) for every change whose target can answer, when it
     is not among the stages; a stage of yours (other tolerances) is used in its place. Its refusal is final under every
@@ -701,15 +704,16 @@ class RefusalRegression:
         xs, sources = self.held_set(change, ctx)
         base = {"n": len(xs), "sources": sources, "tolerance": self.tolerance, "count_tolerance": self.count_tolerance}
         if not xs:
-            return StageVerdict.admit("no should-abstain examples declared: nothing measured (give Pipeline(refusals=))",
-                                      {**base, "measured": False})
+            return StageVerdict.hold("no should-abstain set declared for a target that can answer: nothing to measure "
+                                     "refusal on (declare Pipeline(refusals=), CleanCases / Confirmation(refusals=) or "
+                                     "RefusalRegression(refusals=)); a person decides", {**base, "measured": False})
         pipe = ctx.pipeline
         before, after = pipe.answerer(None, ctx, change), pipe.answerer(change, ctx, change)
+        if before is None:
+            return StageVerdict.admit("nothing in force before the change: no refusal to lose", {**base, "measured": False})
         if after is None:
             return StageVerdict.refuse("refusal regression cannot measure the change: no answerer for the candidate",
                                        {**base, "measured": False})
-        if before is None:
-            return StageVerdict.admit("nothing in force before the change: no refusal to lose", {**base, "measured": False})
         rb = [bool(self.refused(before(x))) for x in xs]
         ra = [bool(self.refused(after(x))) for x in xs]
         lost = [_example_id(x, i) for i, (b, a, x) in enumerate(zip(rb, ra, xs)) if b and not a]

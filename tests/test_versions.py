@@ -195,7 +195,8 @@ def test_a_change_pipeline_promotes_into_and_rolls_back_the_stable_versions(tmp_
     vs = Versions(tmp_path / "versions")
     vs.add(v1(), "v1")
     target = VersionsTarget(vs)
-    pipe = Pipeline([], str(tmp_path / "changes.jsonl"), targets=[target], approval={"compiled": "gate"})
+    pipe = Pipeline([], str(tmp_path / "changes.jsonl"), targets=[target], approval={"compiled": "gate"},
+                    refusals=[{}])                     # an empty application: refused (abstained) before and after
     res = pipe.propose(Change("document", artifact="compiled", payload=v2(), reason="v2 of the policy"))
     assert res.promoted and res.ref == {"version": 2, "before": 1} and vs.current == 2
     pipe.rollback(0)

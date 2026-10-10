@@ -159,7 +159,10 @@ calibration files and served by `solvi serve`), so a build from it is not mistak
   refused on a held should-abstain set (`Pipeline(refusals=...)`, `CleanCases(refusals=)`, `Confirmation(refusals=)`,
   the stage's own) before and after the change; refused when the change answers more inputs that were refused before
   than `max(count_tolerance, tolerance · n)` (default 0 and 0), with the set's sources and the counts in the reason;
-  journaled for every such change; its refusal is final under the "person" approval level. `is_refusal(answer,
+  journaled for every such change; its refusal is final under the "person" approval level. Without a declared set
+  the change is held for a person ("no should-abstain set declared for a target that can answer"): every pipeline
+  whose target can answer declares one; the set follows the policy version; an item change is checked only with
+  `answer_of=`. `is_refusal(answer,
   question=None)` reads None, an abstaining Response or result, an escalated Decision and words such as "abstain",
   "escalate", "hand over". `benchmarks/changes_credit.py` adds a threshold change that closes the review band: refused,
   answering 137 of 137 hand-overs; the other counts unchanged.

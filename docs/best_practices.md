@@ -348,10 +348,10 @@ reproduced here): each change looks fine on what it was meant to improve, and th
 hand over are answered a little more each time. In `solvi.experimental.changes` every
 change whose target can answer passes `RefusalRegression` — the share refused on a held should-abstain set before and
 after — and there is no flag to remove it. Declare the set (`Pipeline(refusals=...)`): outside or unknown inputs, the
-cases your policy hands to a person; without one the stage records "nothing measured", which is not a pass. Keep the
+cases your policy hands to a person; without one the change is held for a person — a vacuous pass would be a switch in disguise. Keep the
 default tolerance (0: one input answered that was refused before refuses the change) unless your answerer is
-nondeterministic. A document version may rightly redefine what goes to a person — declare the set per version of the
-policy, as `benchmarks/changes_credit.py` does: there a self-tuning threshold change that closed the review band
+nondeterministic. The set follows the policy version: a document version may rightly redefine what goes to a person, so
+declare the set of the version in force, as `benchmarks/changes_credit.py` does: there a self-tuning threshold change that closed the review band
 answered 137 of 137 hand-overs and was refused, while 12 exact corrections passed.
 
 ## Storage and audit
