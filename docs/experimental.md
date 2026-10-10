@@ -74,7 +74,7 @@ and rollback (`solvi.experimental.changes.Pipeline(stages, storage, store=...)`)
 
 - **Missing:** on a credit policy the pipeline carried a document version (144 of 144 changed decisions traced to their clause), admitted 12 of 12 exact exceptions, held every widening one for a person and refused 8 of 8 exceptions that touched other decisions, 0 extraneous changes, 14 versions replayed; on a bank-request stream with a person's labels every one of 22 candidates passed every stage (`nogate` = `gate`), so the stages added nothing there — the module is journal, impact analysis, approval levels and rollback; still missing: the narrows / widens classifier over rule conditions, a regression-scenario stage, and a script for the bank-request stream (the credit numbers: benchmarks/changes_credit.py).
 - **Refusal regression cannot be switched off.** Refusal is the first casualty of self-change (a chain of model merges
-  kept the skills and washed refusal out, 1.00 → 0.73), so for every change whose target can answer (a target with
+  has been reported to keep its skills and lose much of its refusal; not reproduced here), so for every change whose target can answer (a target with
   `answerer(change or None, ctx)` — `VersionsTarget`, `LearningTarget`, yours — or `Pipeline(answer_of=...)`) the
   pipeline runs `RefusalRegression`: the share refused on a held should-abstain set (`Pipeline(refusals=...)`, the
   `refusals=` kept by CleanCases / Confirmation, the stage's own) before and after; a change that answers an input

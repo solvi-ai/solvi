@@ -38,6 +38,14 @@ class ChartSpecialist(Specialist):
         super().__init__(proposer or RuleProposer(), storage=storage, store_source=store_source)
         self.checker = ChartChecker(decimal=decimal)
 
+    def parse(self, proposal):
+        """A proposer's output → ChartSpec; a model's text (LLMProposer returns it as it came, so the record keeps it and
+        replay parses it again) is read leniently: the JSON object in it, a ```json fence or words around it tolerated."""
+        if isinstance(proposal, (str, bytes)):
+            from ...core.deciders.llm import _json
+            proposal = _json(proposal.decode() if isinstance(proposal, bytes) else proposal)
+        return super().parse(proposal)
+
     def check(self, spec, source) -> Checked:
         return self.checker(spec, source)
 

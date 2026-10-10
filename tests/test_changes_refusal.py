@@ -1,8 +1,8 @@
-"""solvi.experimental.changes.RefusalRegression: refusal is the first casualty of self-change (a chain of merges kept the
-skills and washed refusal out, 1.00 → 0.73), so every change whose target can answer is checked on a held
-should-abstain set — the share refused before and after — and refused when it answers what was refused before. The
-stage is not switchable: the pipeline inserts it for such a change whether or not it is among the stages, and journals
-its measurement for every one."""
+"""solvi.experimental.changes.RefusalRegression: refusal is the first casualty of self-change (a chain of model
+merges has been reported to keep its skills and lose much of its refusal), so every change whose target can answer is
+checked on a held should-abstain set — the share refused before and after — and refused when it answers what was
+refused before. The stage is not switchable: the pipeline inserts it for such a change whether or not it is among the
+stages, and journals its measurement for every one."""
 from __future__ import annotations
 
 import inspect

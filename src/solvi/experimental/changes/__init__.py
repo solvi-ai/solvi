@@ -40,8 +40,8 @@ solvi.core.store.diff.diff), FreshEnvironments (ported: paired selection, determ
 bootstrap lower bound > 0, rules never crash, progress not lower), Approval (new: a table (kind, source) → "gate" |
 "gate+person" | "person"), Canaries (wraps solvi.testing.honesty; a suspiciously perfect score holds), RefusalRegression
 (new, not switchable: the share refused on a held should-abstain set before and after the change; a change that answers
-what was refused before is refused — refusal is the first casualty of self-change, measured 1.00 → 0.73 over a chain
-of model merges that kept the skills).
+what was refused before is refused — refusal is the first casualty of self-change: a chain of model merges has been
+reported to keep its skills and lose much of its refusal).
 
 Refusal regression cannot be switched off. For every change whose target can answer (Pipeline(answer_of=...), or a
 target with `answerer(change or None, ctx)`: VersionsTarget, LearningTarget, a target of yours — an answerer, a

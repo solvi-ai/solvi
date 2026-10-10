@@ -163,8 +163,25 @@ calibration files and served by `solvi serve`), so a build from it is not mistak
   question=None)` reads None, an abstaining Response or result, an escalated Decision and words such as "abstain",
   "escalate", "hand over". `benchmarks/changes_credit.py` adds a threshold change that closes the review band: refused,
   answering 137 of 137 hand-overs; the other counts unchanged.
+- **Specialist replay: the determinism contract — replay re-executes code and re-renders from recorded model outputs;
+  it does not re-call a model.** A run's record (stored, and `Run.to_dict()`) keeps `proposal_raw`, the proposer's
+  output when it was text (a model's reply, as it came); `Specialist.replay` parses it again (it must give the
+  recorded spec), re-checks and re-renders, and a recorded invalid output must still be invalid. Only a record with no
+  proposer output calls the proposer (`replay(..., proposer=)`, default the specialist's own): `Replay.from_record` is
+  then False and `Replay.note` says so; `Replay.output_sha256` is the re-rendered output's hash.
+  `solvi.testing.conformance.check_specialist` gains the check "replays from its record without calling the proposer"
+  (a tripwire proposer during every replay, and the same bytes) and `deterministic=False` to skip the two-run check for
+  a model proposer. On the charts stand's 50 texts with the LLM proposer (gpt-oss-120b, answers from the proxy's cache,
+  no new calls) every stored run replays byte for byte from its record, 50 of 50. The 0/50 of PREREG X3 was the
+  benchmark's: its "second run" used the rule proposer for every arm; `benchmarks/charts_real_texts.py` now checks
+  replay from the record (and a second run only for the rule arm) and has `--replay RUNS_JSONL`.
 
 ### Changed
+
+- **`solvi.experimental.charts.LLMProposer` returns the model's reply text as it came** (a dict before), and
+  `ChartSpecialist.parse` reads a text leniently (the JSON object in it, a fence tolerated): the record keeps the text
+  and replay parses it again. A reply that is not JSON is now an invalid proposal (`invalid_proposal`, its text
+  recorded) instead of a failed proposer (`proposer_failed`).
 
 - **`solvi.experimental.counterfactual` re-exports `solvi.core.explain` for one release**, as the same objects, with an
   `ExperimentalWarning`; it is removed in 1.2 and `STATUS["counterfactual"]` is gone. The 0.9 path

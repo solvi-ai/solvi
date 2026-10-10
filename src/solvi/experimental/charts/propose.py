@@ -211,7 +211,9 @@ class LLMProposer:
     """A ChartSpec from any OpenAI-compatible `POST {base_url}/chat/completions`, over the shared client of
     solvi.core.deciders._remote (retries with backoff; a wrong key, model or URL raises solvi.core.deciders.llm.LLMError; no answer raises
     solvi.core.deciders._remote.NoAnswer). The API key is sent in the Authorization header only, never recorded. opener: a replacement
-    for urllib's urlopen (tests)."""
+    for urllib's urlopen (tests). A call returns the model's reply text as it came (since 1.1; a dict before): the
+    specialist parses it (ChartSpecialist.parse) and its record keeps the text, so replay re-parses the recorded output
+    and never calls the model again — a model at temperature 0 does not repeat itself byte for byte."""
 
     def __init__(self, base_url, model, api_key=None, *, timeout=60.0, max_tokens=1500, json_mode=True, opener=None,
                  retries=2, backoff=1.0, sleep=None):
@@ -237,9 +239,8 @@ class LLMProposer:
         if self.json_mode:
             body["response_format"] = {"type": "json_object"}
         resp = self.client.send(body)
-        content = resp["choices"][0]["message"]["content"]
-        from ...core.deciders.llm import _json
-        return _json(content)
+        return resp["choices"][0]["message"]["content"]      # the model's text as it came: the run records it, replay
+                                                             # parses it again (ChartSpecialist.parse) and never re-asks
 
 
 def spec_json_schema():

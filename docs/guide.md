@@ -4950,11 +4950,21 @@ A proposer is any callable `(source, question) → spec | dict | JSON` (its `id`
 trusted and never replayed — its output is recorded and checked. A failing proposer or an invalid proposal blocks the
 run (a `blocked` issue, no output), recorded too.
 
+**Replay re-executes code and re-renders from recorded model outputs; it does not re-call a model.** A model proposer
+need not repeat itself — a remote LLM at temperature 0 returns other outputs across identical runs — so the record
+keeps the proposer's output (the parsed spec, and `proposal_raw`: the proposer's output when it was text — a model's
+reply as it came; the charts `LLMProposer` returns its text), and `replay` parses that output again
+(it must give the recorded spec), checks and renders it, and compares the bytes: a run with a nondeterministic proposer
+replays byte for byte. Only a record that holds no output at all makes `replay` call the proposer, and then
+`Replay.from_record` is False and `Replay.note` says so. Two runs of one source give the same bytes only with a
+deterministic proposer (`check_specialist(..., deterministic=False)` for a model one).
+
 **The record.** With `storage=`, every `run` appends one record of kind `"specialist"`: `specialist`, `version`,
 `question`, `source_sha256` and `source_chars` (the source itself is not stored — pass it to `replay` — unless
 `store_source=True`, which keeps the text in the record so `replay(stored_id)` is self-contained, at the cost of the
 text's size in every record and the text in the store), `proposer`,
-`proposal` (for a blocked run the raw proposal and `proposal_error`), the check's `issues`, `kept`, `verified` and
+`proposal` (for a blocked run the raw proposal and `proposal_error`), `proposal_raw` (the proposer's output when it was
+text — a model's reply), the check's `issues`, `kept`, `verified` and
 `meta`, `renderer`, `output_sha256`, `output_bytes`, `trace_head` (the head of the run's own chain) and `fingerprints`
 when the specialist reports them (`fingerprints()` → e.g. the model's and the renderer's). It is in the same hash chain
 as the decisions, so `store.verify()` catches an edited run, and `solvi report --overview` counts the runs per
