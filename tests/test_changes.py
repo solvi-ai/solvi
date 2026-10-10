@@ -420,11 +420,12 @@ def test_impact_refuses_an_exception_that_moves_other_decisions_and_admits_the_e
     broad = pipe.propose(Change("person", artifact="update", expected={"only": [sid["a1"]]},
                                 payload={"fingerprint": "broad", "system": _exception_system({"purpose": "car"})}))
     assert broad.status == "rejected" and broad.stage == "impact"
-    assert broad.reason == f"changes 1 decision(s) other than the allowed ones: {[sid['a3']]}"
-    assert broad.verdicts[-1].measured["extraneous"] == [sid["a3"]]
+    # a3 moves (refuse → approve); a4 keeps "approve" but is now forced by the exception: a changed decision too
+    assert broad.reason == f"changes 2 decision(s) other than the allowed ones: {[sid['a3'], sid['a4']]}"
+    assert broad.verdicts[-1].measured["extraneous"] == [sid["a3"], sid["a4"]]
     exact = pipe.propose(Change("person", artifact="update", expected={"only": [sid["a1"]]},
                                 payload={"fingerprint": "exact",
                                          "system": _exception_system({"purpose": "car", "points": 5})}))
     assert exact.promoted and t.state == "exact"
-    m = exact.verdicts[-1].measured
+    m = {v.stage: v for v in exact.verdicts}["impact"].measured           # (the approval stage ran after it)
     assert m["extraneous"] == [] and m["changed"] == 1 and m["ids"] == [sid["a1"]]

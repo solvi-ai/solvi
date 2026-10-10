@@ -3683,7 +3683,10 @@ changed, it is new or no longer runs, or nothing it reads differs); with several
 which of them alone would have changed the answer takes a `diff` against a system with only that change. The header
 lists the parts whose code changed since the decisions were stored and the parts that ran now and not then. The causes
 carry the cited clauses: a cause whose part cites what it implements (`clause=` / `cite=`, see [the
-catalog](#citing-the-clause-a-rule-implements)) has `"cites": [{"clause", "quote"}]`.
+catalog](#citing-the-clause-a-rule-implements)) has `"cites": [{"clause", "quote"}]`. An exception meant for one decision is checked
+with `diff(store, new_system, only={decision_id})`: `rep.extraneous` lists the ids of the other decisions it changes
+(answer, status or guard — a decision now forced by the exception counts) and `rep.exact` is True when there are none;
+`solvi.experimental.compile.decision_diff(..., only=)` does the same over the decisions whose answer moves.
 
 Each stored decision's recorded input is asked again for the same questions (`store=False`: the new system's own storage
 is not written) and compared with the stored response: answer, status, the guard that settled it, the safeguard events

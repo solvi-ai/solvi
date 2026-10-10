@@ -217,6 +217,9 @@ class DiffReport:
     changed: list = field(default_factory=list)   # [{"id", "seq", "time", "questions": {question: change}}]
     errors: list = field(default_factory=list)    # [{"id", "seq", "error"}] decisions that could not be re-run
     catalog: dict = field(default_factory=dict)   # {"new": fp, "stored": {fp: count}, "changed_parts", "added_parts"}
+    only: list | None = None                      # diff(only=): the decisions the change is allowed to change
+    extraneous: list = field(default_factory=list)   # ids of the changed decisions not in `only` (in `changed` order)
+    exact: bool = False                           # `only` given and nothing outside it changed
 
     @property
     def ok(self):
@@ -239,7 +242,7 @@ class DiffReport:
 
     def to_dict(self):
         return {"total": self.total, "changed": self.changed, "errors": self.errors, "catalog": self.catalog,
-                "by_question": self.by_question()}
+                "by_question": self.by_question(), "only": self.only, "extraneous": self.extraneous, "exact": self.exact}
 
     def __str__(self):
         n = len(self.changed)
@@ -250,6 +253,10 @@ class DiffReport:
         ap = self.catalog.get("added_parts")
         if ap:
             lines.append("  parts that ran now and not then: " + ", ".join(ap))
+        if self.only is not None:
+            lines.append("  exact: only the allowed decisions change" if self.exact else
+                         f"  {len(self.extraneous)} decision(s) changed outside the allowed ones: "
+                         + ", ".join(map(str, self.extraneous[:10])) + (" …" if len(self.extraneous) > 10 else ""))
         for q, s in sorted(self.by_question().items()):
             lines.append(f"  {q}: {s['changed']} changed (" + ", ".join(f"{k} {v}" for k, v in s["fields"].items()) + ")")
             for t, k in sorted(s["transitions"].items(), key=lambda kv: -kv[1]):
@@ -310,12 +317,15 @@ def _compact_change(s, system, confidence):
     return out
 
 
-def diff(storage, system, confidence=0.01, limit=None, **filters):
+def diff(storage, system, confidence=0.01, limit=None, only=None, **filters):
     """Re-run stored decisions with `system` (e.g. a new catalog or model) and report what changes → DiffReport.
     Each stored decision is loaded (typed values restored with `system`), its recorded input is asked again for the same
     questions (store=False: nothing is written to the system's own storage), and the two responses are compared (see
     compare). A stored decision whose input did not come back as it was (see solvi.core.schema: an untyped enum or object, an
     untyped date stored by solvi ≤ 0.7.1) is listed under `errors` — "could not be re-run" — not as a changed one. filters: TraceStorage.query filters (question=, since=, ...) to pick the decisions; limit: at most this many.
+    only: the ids of the stored decisions the change is meant to change (an exception for one corrected decision) —
+    `extraneous` lists the ids of the changed decisions outside it, `exact` is True when there are none (decisions that
+    could not be re-run are in `errors`, not judged).
     A cause whose part (in `system`) cites what it implements (`clause=` / `cite=` on its decorator) carries "cites":
     [{"clause", "quote"}] — the chain clause → part → decision.
     The system's learned parts may learn from these asks as from any other (System(learn=...))."""
@@ -362,6 +372,11 @@ def diff(storage, system, confidence=0.01, limit=None, **filters):
             rep.changed.append({"id": s.id, "seq": s.seq, "time": s.time, "questions": ch})
     rep.catalog["changed_parts"] = sorted(changed_parts)
     rep.catalog["added_parts"] = sorted(added_parts)
+    if only is not None:
+        allowed = set(only)
+        rep.only = list(only)
+        rep.extraneous = [i for i in dict.fromkeys(c["id"] for c in rep.changed) if i not in allowed]
+        rep.exact = not rep.extraneous
     return rep
 
 

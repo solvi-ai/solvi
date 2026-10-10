@@ -372,8 +372,12 @@ class CleanCases:
 class Impact:
     """The share of past decisions the change would change. measure(change, ctx) → {"changed", "total"} (or a
     DiffReport / DecisionDiff); refused when changed / total > max_share (None: only recorded), or when the measure's
-    dict says "ok": False (the caller's own rule, e.g. "only the corrected decision may change"; its "reason" is the
-    refusal's). Ready-made:
+    dict says "ok": False (the caller's own rule; its "reason" is the refusal's).
+
+    Exact exceptions: a change whose `expected["only"]` lists the decisions it may change (stored decision ids; with a
+    DecisionDiff over inputs, the inputs' ids) is refused when the diff moves any other — reason "changes N
+    decision(s) other than the allowed ones: [the first ten ids]" — and the measurement records `extraneous` (the ids
+    outside `only`). A dict measure gives the ids it changed as "ids" (or its own "extraneous"). Ready-made:
 
     Impact.of_system(storage, system_of)   solvi.core.store.diff.diff(storage, system_of(change, ctx)) — the stored
                                            decisions re-run with the candidate system;
@@ -387,14 +391,30 @@ class Impact:
     def run(self, change, ctx):
         r = self.measure(change, ctx)
         if hasattr(r, "moved") and hasattr(r, "total"):                 # DecisionDiff
-            m = {"changed": len(r.moved), "total": r.total, "ids": [x["id"] for x in r.moved][:20]}
+            ids = list(dict.fromkeys(x.get("input", x["id"]) for x in r.moved))
+            m = {"changed": len(r.moved), "total": r.total, "ids": ids[:20]}
         elif hasattr(r, "changed") and hasattr(r, "total"):             # DiffReport
-            m = {"changed": len(r.changed), "total": r.total, "ids": [x["id"] for x in r.changed][:20]}
+            ids = list(dict.fromkeys(x["id"] for x in r.changed))
+            m = {"changed": len(r.changed), "total": r.total, "ids": ids[:20]}
         else:
             m = dict(r)
+            ids = m.get("ids")
         own = (m.pop("ok", True), str(m.pop("reason", "")))
         share = m["changed"] / m["total"] if m.get("total") else 0.0
         m["share"] = share
+        only = (change.expected or {}).get("only") if isinstance(change.expected, dict) else None
+        if only is not None:
+            allowed = set(only)
+            if "extraneous" in m:
+                ext = list(m["extraneous"])
+            elif ids is not None:
+                ext = [i for i in dict.fromkeys(ids) if i not in allowed]
+            else:
+                return StageVerdict.refuse("expected['only'] is set, but the impact measure gives no decision ids to "
+                                           "compare with it", m)
+            m["extraneous"] = ext
+            if ext:
+                return StageVerdict.refuse(f"changes {len(ext)} decision(s) other than the allowed ones: {ext[:10]}", m)
         if not own[0]:
             return StageVerdict.refuse(own[1] or "the impact measure refused the change", m)
         if self.max_share is not None and share > self.max_share:
@@ -406,15 +426,19 @@ class Impact:
     def of_system(cls, storage, system_of: Callable, *, max_share=None, **filters):
         def measure(change, ctx):
             from ...core.store.diff import diff
-            return diff(storage, system_of(change, ctx), **filters)
+            return diff(storage, system_of(change, ctx), only=_only(change), **filters)
         return cls(measure, max_share=max_share)
 
     @classmethod
     def of_compiled(cls, storage, old_of: Callable, *, max_share=None, **filters):
         def measure(change, ctx):
             from ..compile import decision_diff
-            return decision_diff(old_of(ctx), change.payload, store=storage, **filters)
+            return decision_diff(old_of(ctx), change.payload, store=storage, only=_only(change), **filters)
         return cls(measure, max_share=max_share)
+
+
+def _only(change):
+    return (change.expected or {}).get("only") if isinstance(change.expected, dict) else None
 
 
 # ───────────────────────────────────────────────────────────── 6. fresh environments (ported)

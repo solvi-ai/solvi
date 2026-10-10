@@ -38,6 +38,14 @@ calibration files and served by `solvi serve`), so a build from it is not mistak
   causes get their `clauses` from the citations; the changes pipeline's `Static(text=..., spec=...)` refuses a
   candidate whose citations fail.
 
+- **Exact exceptions: `only=` in the diff.** `solvi.core.store.diff.diff(storage, system, ..., only=ids)` reports
+  `DiffReport.extraneous` (the ids of the changed decisions outside `only`) and `DiffReport.exact` (`only` given and
+  nothing outside it changed); `solvi.experimental.compile.decision_diff(old, new, ..., only=)` gives the same two
+  fields on `DecisionDiff`, over the decisions whose answer moves — with `inputs=` the ids are the inputs' `id` key,
+  else their positions, and each change carries `"input"`. The changes pipeline's `Impact` stage refuses a change
+  whose `expected["only"]` is set and whose diff changes other decisions ("changes N decision(s) other than the
+  allowed ones: [...]", the first ten ids) and records `extraneous` in its measurement.
+
 ### Changed
 
 - **Replay binds every field of a result to its trace, not only the answer and its status.** With the System,
