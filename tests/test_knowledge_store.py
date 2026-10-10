@@ -4,7 +4,6 @@ staleness is asked, a rollback during a pending flag restoring only a hint (the 
 TraceStorage backends, snapshots in decisions, and the re-decide list split into answer changes and justification
 only."""
 import random
-import warnings
 
 import pytest
 
@@ -187,9 +186,24 @@ def test_reconfirm_after_expires_on_the_clock_and_a_renewal_restores():
 
 
 def test_behaviour_changing_items_are_promoted_by_the_gates_or_held():
-    with warnings.catch_warnings():
-        warnings.simplefilter("ignore")
-        from solvi.experimental.learning import ShadowGate
+    from solvi.core.knowledge.gates import Verdict
+
+    class ShadowGate:                     # a write gate of your own: admits a behaviour-changing item on a measurement
+        name = "shadow"
+
+        def __init__(self, min_gain, max_changed):
+            self.min_gain, self.max_changed = min_gain, max_changed
+
+        def admit(self, store, item, shadow=None):
+            if item.get("kind") not in ("rule", "skill", "action"):
+                return Verdict(True, "an observation is its own evidence", gate=self.name)
+            m = shadow(store, item) if callable(shadow) else shadow
+            if not isinstance(m, dict):
+                return Verdict(False, "no shadow measurement for a behaviour-changing item", gate=self.name)
+            why = ([f"gain {m['gain']:g} < {self.min_gain:g}"] if m.get("gain", 0.0) < self.min_gain else []) + \
+                  ([f"changes {m['changed']:g} > {self.max_changed:g} of past decisions"]
+                   if m.get("changed", 0.0) > self.max_changed else [])
+            return Verdict(not why, "; ".join(why), measured=dict(m), gate=self.name)
     ks = KnowledgeStore()
     r = ks.add("rule", fact("refund", "original method", "only_to"), source="spec")
     assert ks.status(r) == "active" and any(e["op"] == "promote" for e in ks.journal)

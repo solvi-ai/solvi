@@ -148,20 +148,21 @@ def test_open_storage_by_path(tmp_path):
     assert len(again) == 4 and again.verify()["ok"]
 
 
-def test_the_learning_loop_runs_on_duckdb(tmp_path):
+def test_an_update_through_the_change_pipeline_runs_on_duckdb(tmp_path):
     pytest.importorskip("duckdb")
     import warnings
 
-    from test_learning import TEAMS, build as build_learning, stream
+    from test_changes_updates import TEAMS, build as build_learning, stream
     part, s, _ = build_learning(tmp_path)
     store = DuckDBStorage(tmp_path / "l.duckdb", system=s)
     s.storage = store
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
-        from solvi.experimental.learning import Learning
-        loop = Learning(s, gates={"max_change": 0.9})
+        from solvi.experimental.changes import Change, LearningTarget, Pipeline
+        target = LearningTarget(s, gates={"max_change": 0.9})
+    pipe = Pipeline([], store, targets=[target], approval={"update": "gate"})
     stream(s, 10)
-    rep = loop.run()
-    assert rep.promoted and [h["action"] for h in loop.history()] == ["baseline", "update"]
-    loop.rollback(0)
+    assert pipe.propose(Change("person", artifact="update")).promoted
+    assert [h["action"] for h in target.history()] == ["baseline", "update"]
+    pipe.rollback(0)
     assert part.adaptation is None and store.verify()["ok"] and len(TEAMS) == 3
