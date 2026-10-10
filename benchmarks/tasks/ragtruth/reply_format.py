@@ -51,7 +51,7 @@ def main():
                     response_format=fmt, extra_body={"reasoning": {"effort": "low"}})
         ds = model.decision("judge_a", TASK_A, "doc", bool).decide([doc_of(r) for r in rows])
         unthought = sum((d.extra.get("llm") or {}).get("reasoning") == "none" for d in ds)
-        out[f"solvi.core.deciders.llm, response_format={fmt}"] = {**prf([(g, bool(d.value)) for g, d in zip(gold, ds)]),
+        out[f"solvi.llm, response_format={fmt}"]      # a fixed label: the stand keys its numbers by it (results.json) = {**prf([(g, bool(d.value)) for g, d in zip(gold, ds)]),
                                                     "escalated": sum(bool(d.escalate) for d in ds), "no_reasoning": unthought}
     print(json.dumps(out, indent=1))
 

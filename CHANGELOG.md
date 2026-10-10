@@ -100,6 +100,11 @@ calibration files and served by `solvi serve`), so a build from it is not mistak
 
 ### Fixed
 
+- **The nine-task stand's RAGTruth keys.** `benchmarks/tasks/ragtruth/reply_format.py` printed its label after the module's
+  1.0 move (`solvi.core.deciders.llm, …`), and `stand.py check` keyed six published numbers by the old label — every
+  stand run since 2026-10-04 failed on those six keys with unchanged values. The label is fixed (`solvi.llm, …`, the
+  stable name) and `results.json` is untouched; a rerun on 2026-10-10 reproduced all 102 compared numbers.
+
 - **Fewer private names imported across modules.** `solvi.core.textin` exports its number vocabulary
   (`NUMBER_WORDS`, `NUMBER_SCALES`, `CURRENCY_AFTER`, `digits`), which `solvi.experimental.charts` imported under
   private names, and `solvi.core.catalog.group_func` (a group of alternative producers as one function) is public for
