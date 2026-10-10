@@ -804,11 +804,12 @@ def cmd_check(a):
             policy = Path(a.text).read_text(encoding="utf-8")
         except OSError as e:
             _fail(f"check --text {a.text}: {e}")
-        if hasattr(obj, "tools") and hasattr(obj, "system") and not hasattr(obj, "questions"):     # a solvi.Guard
-            for name in obj.tools:
-                if obj.tools[name].model is not None:
+        tools, tool_system = getattr(obj, "tools", None), getattr(obj, "system", None)
+        if tools is not None and callable(tool_system) and not hasattr(obj, "questions"):     # a solvi.Guard
+            for name, t in tools.items():
+                if t.model is not None:
                     rep.findings += [replace(f, where=f"{name}: {f.where}")
-                                     for f in citations(obj.system(name), policy).findings]
+                                     for f in citations(tool_system(name), policy).findings]
         else:
             rep.findings += citations(obj, policy).findings
     if a.json:

@@ -496,7 +496,7 @@ def check_specialist(specialist, sources, *, proposer=None):
     run with (default: the specialist's own). For each source: two runs give identical output bytes; the record
     (`run.to_dict()`) round-trips through JSON and replays (`specialist.replay(record, source)`: the same checks, the
     same bytes); an invalid proposal is blocked — a BLOCKED issue and no output. → what was checked."""
-    from ..experimental.specialist import BLOCKED
+    blocked_ = "blocked"                # solvi.experimental.specialist.BLOCKED (a stable module does not import it)
     sources = list(sources)
     _ok(sources, "check_specialist needs at least one source")
     replayed = blocked = 0
@@ -511,7 +511,7 @@ def check_specialist(specialist, sources, *, proposer=None):
         _ok(bool(r), f"a run replays from its record: {r.problems[:3]}")
         replayed += 1
         bad = specialist.run(src, proposal=INVALID_PROPOSAL)
-        _ok(bad.output is None and any(i.severity == BLOCKED for i in bad.issues),
+        _ok(bad.output is None and any(i.severity == blocked_ for i in bad.issues),
             "an invalid proposal is blocked: a BLOCKED issue and no output")
         _ok(bool(specialist.replay(bad.to_dict(), src)), "a blocked run replays from its record")
         blocked += 1

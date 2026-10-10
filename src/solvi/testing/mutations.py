@@ -38,8 +38,8 @@ What "caught" means:
     fewer.)
 
 The rate is that of the corruptions these mutators make, on these records: a check that holds relations between values
-catches omissions, one that only quotes each value does not. Measured with this harness's predecessors on two stands:
-receipt OCR 84% of corruptions caught, speech 99.7% (solvi.experimental.STATUS["specialist"])."""
+catches omissions, one that only quotes each value does not (see solvi.experimental.STATUS["specialist"] for the
+specialists measured this way)."""
 from __future__ import annotations
 
 import copy
